@@ -39,6 +39,7 @@ import {
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
 import { recordValidationTestWork } from "../validation-testing.js";
+import { expressionPlanChildren } from "../plan/expression-children.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
 export const RUNTIME_SNAPSHOT_VERSION = 20;
@@ -2368,64 +2369,13 @@ function requiredInstructionTemporaries(
 }
 
 function collectExpressionTemporaries(expression: ExpressionPlan, output: Set<number>): void {
-  switch (expression.kind) {
-    case "temporary":
-    case "preparedReference":
-      output.add(expression.temporaryId);
-      return;
-    case "literal":
-    case "identifier":
-      return;
-    case "list":
-    case "set":
-    case "object": {
-      const work: ExpressionPlan[] = [expression];
-      while (work.length > 0) {
-        const current: ExpressionPlan = work.pop()!;
-        if (current.kind === "list" || current.kind === "set" || current.kind === "object") {
-          const children =
-            current.kind === "object"
-              ? current.properties.map((property) => property.value)
-              : current.elements;
-          for (let index = children.length - 1; index >= 0; index -= 1) work.push(children[index]!);
-        } else collectExpressionTemporaries(current, output);
-      }
-      return;
-    }
-    case "group":
-      collectExpressionTemporaries(expression.expression, output);
-      return;
-    case "template":
-      expression.parts.forEach((part) => {
-        if (part.kind === "expression") {
-          collectExpressionTemporaries(part.expression, output);
-        }
-      });
-      return;
-    case "property":
-      collectExpressionTemporaries(expression.object, output);
-      return;
-    case "index":
-      collectExpressionTemporaries(expression.object, output);
-      collectExpressionTemporaries(expression.index, output);
-      return;
-    case "call":
-      collectExpressionTemporaries(expression.callee, output);
-      expression.arguments.forEach((argument) =>
-        collectExpressionTemporaries(argument.value, output),
-      );
-      return;
-    case "unary":
-      collectExpressionTemporaries(expression.operand, output);
-      return;
-    case "binary":
-      collectExpressionTemporaries(expression.left, output);
-      collectExpressionTemporaries(expression.right, output);
-      return;
-    case "range":
-      collectExpressionTemporaries(expression.start, output);
-      collectExpressionTemporaries(expression.end, output);
-      return;
+  const pending = [expression];
+  while (pending.length) {
+    const current = pending.pop()!;
+    if (current.kind === "temporary" || current.kind === "preparedReference")
+      output.add(current.temporaryId);
+    const children = expressionPlanChildren(current);
+    for (let i = children.length - 1; i >= 0; i--) pending.push(children[i]!);
   }
 }
 

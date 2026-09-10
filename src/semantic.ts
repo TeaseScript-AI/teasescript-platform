@@ -14,6 +14,8 @@ import {
   TEASESCRIPT_PROTECTED_NAMES,
 } from "./protected-names.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
+import { runCompileTask, compileChild, type CompileTask } from "./compiler/continuation.js";
+import { expressionChildren } from "./expression-children.js";
 
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
@@ -91,11 +93,17 @@ class SemanticScope {
 
 class SemanticValidator {
   readonly diagnostics: Diagnostic[] = [];
+
   readonly #builtins: ReadonlySet<string>;
+
   readonly #protectedNames: ReadonlySet<string>;
+
   readonly #root = new SemanticScope();
+
   readonly #functions = new Map<string, FunctionDeclaration>();
+
   readonly #invalidConfiguredNames: readonly string[];
+
   #functionDepth = 0;
 
   public constructor(options: SemanticValidationOptions) {
@@ -441,6 +449,14 @@ class SemanticValidator {
     scope: SemanticScope,
     contextualSpeaker: string | null,
   ): void {
+    return runCompileTask(this.#validateExpressionTask(expression, scope, contextualSpeaker));
+  }
+
+  *#validateExpressionTask(
+    expression: Expression,
+    scope: SemanticScope,
+    contextualSpeaker: string | null,
+  ): CompileTask<void> {
     while (expression.kind === "parenthesizedExpression" || expression.kind === "unaryExpression") {
       expression =
         expression.kind === "parenthesizedExpression" ? expression.expression : expression.operand;
@@ -453,16 +469,20 @@ class SemanticValidator {
       case "stringLiteral":
         for (const part of expression.parts) {
           if (part.kind === "stringInterpolation") {
-            this.#validateExpression(part.expression, scope, contextualSpeaker);
+            yield* compileChild(
+              this.#validateExpressionTask(part.expression, scope, contextualSpeaker),
+            );
           }
         }
         return;
       case "interactionExpression": {
         const contextualSpeaker = this.#interactionSpeaker(expression.speaker, scope);
         if (expression.interactionKind === "choice") {
-          this.#validateChoice(expression, scope, contextualSpeaker);
+          yield* compileChild(this.#validateChoiceTask(expression, scope, contextualSpeaker));
         } else if (expression.hint !== null) {
-          this.#validateExpression(expression.hint, scope, contextualSpeaker);
+          yield* compileChild(
+            this.#validateExpressionTask(expression.hint, scope, contextualSpeaker),
+          );
         }
         return;
       }
@@ -493,17 +513,27 @@ class SemanticValidator {
         return;
       case "listLiteral":
       case "setLiteral":
-        this.#validateCollectionExpression(expression, scope, contextualSpeaker);
+        yield* compileChild(
+          this.#validateCollectionExpressionTask(expression, scope, contextualSpeaker),
+        );
         return;
       case "objectLiteral":
-        this.#validateCollectionExpression(expression, scope, contextualSpeaker);
+        yield* compileChild(
+          this.#validateCollectionExpressionTask(expression, scope, contextualSpeaker),
+        );
         return;
       case "propertyAccessExpression":
-        this.#validateExpression(expression.object, scope, contextualSpeaker);
+        yield* compileChild(
+          this.#validateExpressionTask(expression.object, scope, contextualSpeaker),
+        );
         return;
       case "indexExpression":
-        this.#validateExpression(expression.object, scope, contextualSpeaker);
-        this.#validateExpression(expression.index, scope, contextualSpeaker);
+        yield* compileChild(
+          this.#validateExpressionTask(expression.object, scope, contextualSpeaker),
+        );
+        yield* compileChild(
+          this.#validateExpressionTask(expression.index, scope, contextualSpeaker),
+        );
         return;
       case "callExpression":
         if (expression.callee.kind === "identifier") {
@@ -528,10 +558,14 @@ class SemanticValidator {
             );
           }
         } else {
-          this.#validateExpression(expression.callee, scope, contextualSpeaker);
+          yield* compileChild(
+            this.#validateExpressionTask(expression.callee, scope, contextualSpeaker),
+          );
         }
         for (const argument of expression.arguments) {
-          this.#validateExpression(argument.value, scope, contextualSpeaker);
+          yield* compileChild(
+            this.#validateExpressionTask(argument.value, scope, contextualSpeaker),
+          );
         }
         if (
           expression.callee.kind === "identifier" &&
@@ -551,25 +585,19 @@ class SemanticValidator {
           }
         }
         return;
-      case "binaryExpression": {
-        const work: Expression[] = [expression.right, expression.left];
-        while (work.length > 0) {
-          let current = work.pop()!;
-          while (current.kind === "parenthesizedExpression" || current.kind === "unaryExpression") {
-            current =
-              current.kind === "parenthesizedExpression" ? current.expression : current.operand;
-          }
-          if (current.kind === "binaryExpression") {
-            work.push(current.right, current.left);
-          } else {
-            this.#validateExpression(current, scope, contextualSpeaker);
-          }
-        }
+      case "binaryExpression":
+        yield* compileChild(
+          this.#validateExpressionTask(expression.left, scope, contextualSpeaker),
+        );
+        yield* compileChild(
+          this.#validateExpressionTask(expression.right, scope, contextualSpeaker),
+        );
         return;
-      }
       case "rangeExpression":
-        this.#validateExpression(expression.start, scope, contextualSpeaker);
-        this.#validateExpression(expression.end, scope, contextualSpeaker);
+        yield* compileChild(
+          this.#validateExpressionTask(expression.start, scope, contextualSpeaker),
+        );
+        yield* compileChild(this.#validateExpressionTask(expression.end, scope, contextualSpeaker));
         if (
           expression.start.kind === "rangeExpression" ||
           expression.end.kind === "rangeExpression"
@@ -599,11 +627,11 @@ class SemanticValidator {
         : null;
   }
 
-  #validateChoice(
+  *#validateChoiceTask(
     expression: Extract<Expression, { kind: "interactionExpression" }>,
     scope: SemanticScope,
     contextualSpeaker: string | null,
-  ): void {
+  ): CompileTask<void> {
     if (expression.options.length === 0) {
       this.#report(
         semanticCode.invalidInteractionChoice,
@@ -633,7 +661,7 @@ class SemanticValidator {
     const labels = new Set<string>();
     const visible = new Map<string, SourceSpan>();
     for (const option of expression.options) {
-      this.#validateExpression(option.value, scope, contextualSpeaker);
+      yield* compileChild(this.#validateExpressionTask(option.value, scope, contextualSpeaker));
       if (option.label !== null) {
         const key =
           option.label.kind === "identifier"
@@ -663,24 +691,14 @@ class SemanticValidator {
     }
   }
 
-  #validateCollectionExpression(
+  *#validateCollectionExpressionTask(
     root: Extract<Expression, { kind: "listLiteral" | "setLiteral" | "objectLiteral" }>,
     scope: SemanticScope,
     contextualSpeaker: string | null,
-  ): void {
-    type Work =
-      | { readonly kind: "expression"; readonly expression: Expression }
-      | { readonly kind: "setElement"; readonly expression: Expression }
-      | {
-          readonly kind: "property";
-          readonly property: Extract<Expression, { kind: "objectLiteral" }>["properties"][number];
-          readonly names: Set<string>;
-        };
-    const work: Work[] = [{ kind: "expression", expression: root }];
-    while (work.length > 0) {
-      const current = work.pop()!;
-      if (current.kind === "property") {
-        const { property, names } = current;
+  ): CompileTask<void> {
+    if (root.kind === "objectLiteral") {
+      const names = new Set<string>();
+      for (const property of root.properties) {
         if (names.has(property.name.name))
           this.#report(
             semanticCode.duplicateProperty,
@@ -688,47 +706,18 @@ class SemanticValidator {
             property.name.span,
           );
         names.add(property.name.name);
-        work.push({ kind: "expression", expression: property.value });
-        continue;
+        yield* compileChild(this.#validateExpressionTask(property.value, scope, contextualSpeaker));
       }
-      if (current.kind === "setElement") {
-        if (isDefinitelyComposite(current.expression, scope)) {
-          this.#report(
-            semanticCode.invalidSetElement,
-            "Sets may contain only string, boolean, integer, number, or null values.",
-            current.expression.span,
-          );
-        }
-        continue;
-      }
-
-      let expression = current.expression;
-      while (
-        expression.kind === "parenthesizedExpression" ||
-        expression.kind === "unaryExpression"
-      ) {
-        expression =
-          expression.kind === "parenthesizedExpression"
-            ? expression.expression
-            : expression.operand;
-      }
-      if (expression.kind === "objectLiteral") {
-        const names = new Set<string>();
-        for (let index = expression.properties.length - 1; index >= 0; index -= 1)
-          work.push({ kind: "property", property: expression.properties[index]!, names });
-        continue;
-      }
-      if (expression.kind !== "listLiteral" && expression.kind !== "setLiteral") {
-        this.#validateExpression(current.expression, scope, contextualSpeaker);
-        continue;
-      }
-      for (let index = expression.elements.length - 1; index >= 0; index -= 1) {
-        const element = expression.elements[index]!;
-        if (expression.kind === "setLiteral") {
-          work.push({ kind: "setElement", expression: element });
-        }
-        work.push({ kind: "expression", expression: element });
-      }
+      return;
+    }
+    for (const element of root.elements) {
+      yield* compileChild(this.#validateExpressionTask(element, scope, contextualSpeaker));
+      if (root.kind === "setLiteral" && isDefinitelyComposite(element, scope))
+        this.#report(
+          semanticCode.invalidSetElement,
+          "Sets may contain only string, boolean, integer, number, or null values.",
+          element.span,
+        );
     }
   }
 
@@ -843,72 +832,12 @@ function isKnownInteger(expression: Expression): boolean {
 function findFirstInteraction(
   expression: Expression,
 ): Extract<Expression, { kind: "interactionExpression" }> | null {
-  while (expression.kind === "parenthesizedExpression" || expression.kind === "unaryExpression") {
-    expression =
-      expression.kind === "parenthesizedExpression" ? expression.expression : expression.operand;
-  }
-  if (expression.kind === "interactionExpression") return expression;
-  if (
-    expression.kind === "listLiteral" ||
-    expression.kind === "setLiteral" ||
-    expression.kind === "objectLiteral"
-  ) {
-    const work = [
-      ...(expression.kind === "objectLiteral"
-        ? expression.properties.map((property) => property.value)
-        : expression.elements),
-    ].reverse();
-    while (work.length > 0) {
-      let child = work.pop()!;
-      while (child.kind === "parenthesizedExpression" || child.kind === "unaryExpression") {
-        child = child.kind === "parenthesizedExpression" ? child.expression : child.operand;
-      }
-      if (child.kind === "interactionExpression") return child;
-      if (
-        child.kind === "listLiteral" ||
-        child.kind === "setLiteral" ||
-        child.kind === "objectLiteral"
-      ) {
-        const elements =
-          child.kind === "objectLiteral"
-            ? child.properties.map((property) => property.value)
-            : child.elements;
-        for (let index = elements.length - 1; index >= 0; index -= 1) {
-          work.push(elements[index]!);
-        }
-        continue;
-      }
-      const found = findFirstInteraction(child);
-      if (found !== null) return found;
-    }
-    return null;
-  }
-  const nested: readonly Expression[] = (() => {
-    switch (expression.kind) {
-      case "booleanLiteral":
-      case "nullLiteral":
-      case "numberLiteral":
-      case "identifier":
-        return [];
-      case "stringLiteral":
-        return expression.parts.flatMap((part) =>
-          part.kind === "stringInterpolation" ? [part.expression] : [],
-        );
-      case "propertyAccessExpression":
-        return [expression.object];
-      case "indexExpression":
-        return [expression.object, expression.index];
-      case "callExpression":
-        return [expression.callee, ...expression.arguments.map((argument) => argument.value)];
-      case "binaryExpression":
-        return [expression.left, expression.right];
-      case "rangeExpression":
-        return [expression.start, expression.end];
-    }
-  })();
-  for (const child of nested) {
-    const found = findFirstInteraction(child);
-    if (found !== null) return found;
+  const work = [expression];
+  while (work.length) {
+    const current = work.pop()!;
+    if (current.kind === "interactionExpression") return current;
+    const children = expressionChildren(current);
+    for (let i = children.length - 1; i >= 0; i--) work.push(children[i]!);
   }
   return null;
 }
@@ -964,86 +893,18 @@ function visitExpression(
   expression: Expression,
   visitor: (identifier: Extract<Expression, { kind: "identifier" }>) => void,
 ): void {
-  while (expression.kind === "parenthesizedExpression" || expression.kind === "unaryExpression") {
-    expression =
-      expression.kind === "parenthesizedExpression" ? expression.expression : expression.operand;
-  }
-  switch (expression.kind) {
-    case "identifier":
-      visitor(expression);
-      return;
-    case "booleanLiteral":
-    case "nullLiteral":
-    case "numberLiteral":
-      return;
-    case "stringLiteral":
-      expression.parts.forEach((part) => {
-        if (part.kind === "stringInterpolation") visitExpression(part.expression, visitor);
-      });
-      return;
-    case "listLiteral":
-    case "setLiteral":
-      visitCollectionExpressions(expression.elements, visitor);
-      return;
-    case "objectLiteral":
-      visitCollectionExpressions(
-        expression.properties.map((property) => property.value),
-        visitor,
-      );
-      return;
-    case "propertyAccessExpression":
-      visitExpression(expression.object, visitor);
-      return;
-    case "indexExpression":
-      visitExpression(expression.object, visitor);
-      visitExpression(expression.index, visitor);
-      return;
-    case "callExpression":
-      visitExpression(expression.callee, visitor);
-      expression.arguments.forEach((argument) => visitExpression(argument.value, visitor));
-      return;
-    case "binaryExpression":
-      visitExpression(expression.left, visitor);
-      visitExpression(expression.right, visitor);
-      return;
-    case "rangeExpression":
-      visitExpression(expression.start, visitor);
-      visitExpression(expression.end, visitor);
-      return;
-    case "interactionExpression":
-      if (expression.speaker !== null) visitor(expression.speaker);
-      if (expression.hint !== null) visitExpression(expression.hint, visitor);
-      expression.options.forEach((option) => visitExpression(option.value, visitor));
-      return;
-  }
-  expression satisfies never;
-}
-
-function visitCollectionExpressions(
-  elements: readonly Expression[],
-  visitor: (identifier: Extract<Expression, { kind: "identifier" }>) => void,
-): void {
-  const work = [...elements].reverse();
-  while (work.length > 0) {
-    let expression = work.pop()!;
-    while (expression.kind === "parenthesizedExpression" || expression.kind === "unaryExpression") {
-      expression =
-        expression.kind === "parenthesizedExpression" ? expression.expression : expression.operand;
-    }
-    if (
-      expression.kind === "listLiteral" ||
-      expression.kind === "setLiteral" ||
-      expression.kind === "objectLiteral"
-    ) {
-      const elements =
-        expression.kind === "objectLiteral"
-          ? expression.properties.map((property) => property.value)
-          : expression.elements;
-      for (let index = elements.length - 1; index >= 0; index -= 1) {
-        work.push(elements[index]!);
-      }
-    } else {
-      visitExpression(expression, visitor);
-    }
+  const work = [expression];
+  while (work.length) {
+    const current = work.pop()!;
+    if (current.kind === "identifier") visitor(current);
+    const children =
+      current.kind === "interactionExpression"
+        ? [
+            ...(current.speaker === null ? [] : [current.speaker]),
+            ...(current.hint === null ? [] : [current.hint]),
+            ...current.options.map((option) => option.value),
+          ]
+        : expressionChildren(current);
+    for (let i = children.length - 1; i >= 0; i--) work.push(children[i]!);
   }
 }

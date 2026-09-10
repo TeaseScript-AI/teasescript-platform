@@ -86,6 +86,8 @@ export class RuntimeExecutionContext {
 export class Evaluator {
   readonly #builtins: Record<string, RuntimeBuiltinFunction> = Object.create(null);
 
+  #referenceEpoch = 0;
+
   public constructor(
     private readonly snapshot: RuntimeSnapshot,
     private readonly capabilities: RuntimeCapabilities,
@@ -104,6 +106,15 @@ export class Evaluator {
   }
 
   public evaluate(expression: ExpressionPlan): SerializableRuntimeValue {
+    return this.#evaluateMachine(expression, false).value;
+  }
+
+  #evaluateLeaf(
+    expression: Extract<
+      ExpressionPlan,
+      { kind: "literal" | "identifier" | "temporary" | "preparedReference" }
+    >,
+  ): SerializableRuntimeValue {
     switch (expression.kind) {
       case "literal":
         return expression.value;
@@ -129,171 +140,380 @@ export class Evaluator {
           readTemporary(this.snapshot.temporaries, expression.temporaryId, expression.span),
           expression.span,
         );
-      case "list":
-      case "set":
-        return this.#evaluateCollection(expression);
-      case "object":
-        return this.#evaluateCollection(expression);
-      case "group":
-        return this.evaluate(expression.expression);
-      case "template": {
-        let text = "";
-        for (const part of expression.parts) {
-          text +=
-            part.kind === "text"
-              ? part.value
-              : this.visibleText(this.evaluate(part.expression), part.expression.span);
-        }
-        return text;
-      }
-      case "property":
-        return this.#getProperty(
-          this.evaluate(expression.object),
-          expression.name,
-          expression.span,
-        );
-      case "index": {
-        const object = this.evaluate(expression.object);
-        if (isSet(object)) throw fault("TSR004", "Sets are not indexable.", expression.span);
-        if (!isList(object)) {
-          throw fault("TSR008", "Only lists support numeric indexing.", expression.span);
-        }
-        const index = this.#index(this.evaluate(expression.index), expression.index.span);
-        this.#assertIndex(object, index, expression.index.span);
-        return object.items[index]!;
-      }
-      case "call":
-        return this.#call(expression);
-      case "unary": {
-        const operand = this.evaluate(expression.operand);
-        if (expression.operator === "not") {
-          if (typeof operand !== "boolean")
-            throw fault("TSR026", "Expected a boolean value.", expression.operand.span);
-          return !operand;
-        }
-        const number = this.#number(operand, expression.operand.span);
-        return this.#finite(expression.operator === "+" ? number : -number, expression.span);
-      }
-      case "binary":
-        return this.#binary(expression);
-      case "range": {
-        const start = this.#number(this.evaluate(expression.start), expression.start.span);
-        const end = this.#number(this.evaluate(expression.end), expression.end.span);
-        return { kind: "range", start, end, inclusive: expression.inclusive };
-      }
     }
   }
 
-  #evaluateCollection(
-    root: Extract<ExpressionPlan, { kind: "list" | "set" | "object" }>,
-  ): SerializableRuntimeValue {
-    interface EvaluatedValue {
-      readonly value: SerializableRuntimeValue;
-      readonly owned: boolean;
+  #evaluateMachine(root: ExpressionPlan, reference: boolean): EvaluatedExpression {
+    // Frames are consumed synchronously within one instruction; no continuation escapes
+    // into a checkpoint. Collection calls invalidate cached reference cursors.
+    this.#referenceEpoch = 0;
+    const pending: EvaluationFrame[] = [evaluationFrame(root, reference)];
+    let result: EvaluatedExpression = {
+      value: null,
+      owned: false,
+      descriptor: null,
+      epoch: this.#referenceEpoch,
+    };
+    while (pending.length) {
+      const frame = pending.at(-1)!;
+      const expression = frame.expression;
+      if (frame.reference) {
+        if (expression.kind === "group") {
+          if (frame.stage++ === 0) {
+            pending.push(evaluationFrame(expression.expression, true));
+            continue;
+          }
+          pending.pop();
+          continue;
+        }
+        if (expression.kind === "property" || expression.kind === "index") {
+          if (frame.stage === 0) {
+            frame.stage = 1;
+            pending.push(evaluationFrame(expression.object, true));
+            continue;
+          }
+          if (frame.stage === 1) {
+            // Reference children share one descriptor and a cursor. Rewalk from the
+            // root only after a collection call could have mutated an earlier step.
+            frame.descriptor = result.descriptor!;
+            frame.value =
+              result.epoch === this.#referenceEpoch
+                ? result.value
+                : this.#resolveDescriptor(frame.descriptor, expression.object.span);
+            if (expression.kind === "property") {
+              const base = frame.value;
+              if (
+                (isList(base) || isSet(base)) &&
+                ["first", "last", "random"].includes(expression.name)
+              ) {
+                if (base.items.length === 0)
+                  throw fault(
+                    expression.name === "random" ? "TSR019" : "TSR018",
+                    `Cannot read '.${expression.name}' from an empty collection.`,
+                    expression.span,
+                  );
+                const index =
+                  expression.name === "first"
+                    ? 0
+                    : expression.name === "last"
+                      ? base.items.length - 1
+                      : Math.floor(this.#findRandom(expression.span) * base.items.length);
+                frame.descriptor.path.push({ kind: "index", index });
+                frame.value = base.items[index]!;
+              } else {
+                frame.descriptor.path.push({ kind: "property", name: expression.name });
+                frame.value = this.#getProperty(base, expression.name, expression.span);
+              }
+              result = {
+                value: frame.value,
+                owned: false,
+                descriptor: frame.descriptor,
+                epoch: this.#referenceEpoch,
+              };
+              pending.pop();
+              continue;
+            }
+            if (isSet(frame.value))
+              throw fault("TSR004", "Sets are not indexable.", expression.span);
+            if (!isList(frame.value))
+              throw fault("TSR008", "Only lists support numeric indexing.", expression.span);
+            frame.epoch = this.#referenceEpoch;
+            frame.stage = 2;
+            pending.push(evaluationFrame(expression.index));
+            continue;
+          }
+          // EVIDENCE: invariant: index reference stage 1 validates and retains the list receiver.
+          const object = frame.value as SerializableRuntimeList;
+          if (expression.kind !== "index") throw new TypeError("Invalid reference continuation.");
+          const index = this.#index(result.value, expression.index.span);
+          this.#assertIndex(object, index, expression.index.span);
+          frame.descriptor!.path.push({ kind: "index", index });
+          result = {
+            value: object.items[index]!,
+            owned: false,
+            descriptor: frame.descriptor,
+            epoch: frame.epoch,
+          };
+          pending.pop();
+          continue;
+        }
+        if (expression.kind === "identifier") {
+          const location = findBindingLocation(this.snapshot, expression.name);
+          if (location === undefined)
+            throw fault("TSR006", `Unknown identifier '${expression.name}'.`, expression.span);
+          result = {
+            value: location.binding.value,
+            owned: false,
+            descriptor: {
+              rootFrameId: location.frame.id,
+              rootName: expression.name,
+              path: [],
+              capturedRoot: cloneCapturedSerializableValue(location.binding.value),
+              detached: false,
+            },
+            epoch: this.#referenceEpoch,
+          };
+          pending.pop();
+          continue;
+        }
+        if (expression.kind === "preparedReference") {
+          const descriptor = readPreparedReference(
+            readTemporary(this.snapshot.temporaries, expression.temporaryId, expression.span),
+            expression.span,
+          );
+          result = {
+            // A prepared-reference leaf only copies its descriptor. Its parent resolves
+            // it at the receiver span; a root prepareReference does not read it.
+            value: null,
+            owned: false,
+            descriptor,
+            epoch: -1,
+          };
+          pending.pop();
+          continue;
+        }
+        if (frame.stage++ === 0) {
+          pending.push(evaluationFrame(expression));
+          continue;
+        }
+        const capturedRoot = cloneCapturedSerializableValue(result.value);
+        result = {
+          value: capturedRoot,
+          owned: false,
+          descriptor: { rootFrameId: null, rootName: null, path: [], capturedRoot, detached: true },
+          epoch: this.#referenceEpoch,
+        };
+        pending.pop();
+        continue;
+      }
+      let value: SerializableRuntimeValue;
+      let owned = false;
+      switch (expression.kind) {
+        case "literal":
+        case "identifier":
+        case "temporary":
+        case "preparedReference":
+          value = this.#evaluateLeaf(expression);
+          break;
+        case "group":
+          if (frame.stage++ === 0) {
+            pending.push(evaluationFrame(expression.expression));
+            continue;
+          }
+          value = result.value;
+          break;
+        case "list":
+        case "object":
+        case "set": {
+          const childCount =
+            expression.kind === "object"
+              ? expression.properties.length
+              : expression.elements.length;
+          if (frame.stage === 0) {
+            if (expression.kind === "object") {
+              const names = new Set<string>();
+              for (const property of expression.properties) {
+                if (names.has(property.name))
+                  throw fault(
+                    "TSR007",
+                    `Duplicate object property '${property.name}'.`,
+                    property.span,
+                  );
+                names.add(property.name);
+              }
+            }
+            frame.stage = 1;
+          } else {
+            if (expression.kind === "set") {
+              try {
+                addSerializableSetValue(frame.set!, result.value, frame.membership!);
+              } catch (error) {
+                throw this.#translateValueError(error, expression.elements[frame.index - 1]!.span);
+              }
+            } else frame.results!.push(result);
+          }
+          if (frame.index < childCount) {
+            pending.push(
+              evaluationFrame(
+                expression.kind === "object"
+                  ? expression.properties[frame.index++]!.value
+                  : expression.elements[frame.index++]!,
+              ),
+            );
+            continue;
+          }
+          // Lists/objects capture borrowed children only after all siblings run.
+          // Fresh collection children transfer ownership without another deep copy.
+          owned = true;
+          if (expression.kind === "set") value = frame.set!;
+          else if (expression.kind === "list")
+            value = {
+              kind: "list",
+              items: frame.results!.map((item) =>
+                item.owned ? item.value : cloneCapturedSerializableValue(item.value),
+              ),
+            };
+          else
+            value = {
+              kind: "object",
+              properties: expression.properties.map((property, i) => ({
+                name: property.name,
+                value: frame.results![i]!.owned
+                  ? frame.results![i]!.value
+                  : cloneCapturedSerializableValue(frame.results![i]!.value),
+              })),
+            };
+          break;
+        }
+        case "template":
+          if (frame.stage === 1) {
+            const part = expression.parts[frame.index - 1]!;
+            if (part.kind === "expression")
+              frame.text += this.visibleText(result.value, part.expression.span);
+          }
+          while (
+            frame.index < expression.parts.length &&
+            expression.parts[frame.index]!.kind === "text"
+          ) {
+            const part = expression.parts[frame.index++]!;
+            if (part.kind === "text") frame.text += part.value;
+          }
+          if (frame.index < expression.parts.length) {
+            const part = expression.parts[frame.index++]!;
+            if (part.kind === "expression") {
+              frame.stage = 1;
+              pending.push(evaluationFrame(part.expression));
+              continue;
+            }
+          }
+          value = frame.text;
+          break;
+        case "property":
+          if (frame.stage++ === 0) {
+            pending.push(evaluationFrame(expression.object));
+            continue;
+          }
+          value = this.#getProperty(result.value, expression.name, expression.span);
+          break;
+        case "index":
+          if (frame.stage === 0) {
+            frame.stage = 1;
+            pending.push(evaluationFrame(expression.object));
+            continue;
+          }
+          if (frame.stage === 1) {
+            frame.value = result.value;
+            if (isSet(frame.value))
+              throw fault("TSR004", "Sets are not indexable.", expression.span);
+            if (!isList(frame.value))
+              throw fault("TSR008", "Only lists support numeric indexing.", expression.span);
+            frame.stage = 2;
+            pending.push(evaluationFrame(expression.index));
+            continue;
+          }
+          {
+            const index = this.#index(result.value, expression.index.span);
+            // EVIDENCE: invariant: stage 1 validates and retains the index receiver.
+            const object = frame.value as SerializableRuntimeList;
+            this.#assertIndex(object, index, expression.index.span);
+            value = object.items[index]!;
+          }
+          break;
+        case "unary":
+          if (frame.stage++ === 0) {
+            pending.push(evaluationFrame(expression.operand));
+            continue;
+          }
+          if (expression.operator === "not") {
+            if (typeof result.value !== "boolean")
+              throw fault("TSR026", "Expected a boolean value.", expression.operand.span);
+            value = !result.value;
+          } else {
+            const number = this.#number(result.value, expression.operand.span);
+            value = this.#finite(expression.operator === "+" ? number : -number, expression.span);
+          }
+          break;
+        case "binary":
+          if (frame.stage === 0) {
+            frame.stage = 1;
+            pending.push(evaluationFrame(expression.left));
+            continue;
+          }
+          if (frame.stage === 1) {
+            frame.value = result.value;
+            if (expression.operator === "and" || expression.operator === "or") {
+              if (typeof frame.value !== "boolean")
+                throw fault("TSR026", "Expected a boolean value.", expression.left.span);
+              if (expression.operator === "and" ? !frame.value : frame.value) {
+                value = frame.value;
+                break;
+              }
+            }
+            frame.stage = 2;
+            pending.push(evaluationFrame(expression.right));
+            continue;
+          }
+          value = this.#binary(expression, frame.value, result.value);
+          break;
+        case "range":
+          if (frame.stage === 0) {
+            frame.stage = 1;
+            pending.push(evaluationFrame(expression.start));
+            continue;
+          }
+          if (frame.stage === 1) {
+            frame.value = this.#number(result.value, expression.start.span);
+            frame.stage = 2;
+            pending.push(evaluationFrame(expression.end));
+            continue;
+          }
+          // EVIDENCE: invariant: range stage 1 validates the start before evaluating the end.
+          value = {
+            kind: "range",
+            // EVIDENCE: invariant: range stage 1 validates and retains the numeric start.
+            start: frame.value as number,
+            end: this.#number(result.value, expression.end.span),
+            inclusive: expression.inclusive,
+          };
+          break;
+        case "call":
+          if (frame.stage === 0) {
+            frame.stage = 1;
+            if (expression.callee.kind === "property") {
+              pending.push(evaluationFrame(expression.callee.object, true));
+              continue;
+            }
+          } else if (frame.stage === 1 && expression.callee.kind === "property")
+            frame.value =
+              result.epoch === this.#referenceEpoch
+                ? result.value
+                : this.#resolveDescriptor(result.descriptor!, expression.callee.object.span);
+          else if (frame.stage === 2) {
+            const argument = expression.arguments[frame.index - 1]!;
+            const captured = cloneCapturedSerializableValue(result.value);
+            if (argument.kind === "positional") frame.positional!.push(captured);
+            else {
+              if (Object.hasOwn(frame.named!, argument.name))
+                throw fault(
+                  "TSR010",
+                  `Duplicate named argument '${argument.name}'.`,
+                  argument.span,
+                );
+              frame.named![argument.name] = captured;
+            }
+          }
+          if (frame.index < expression.arguments.length) {
+            frame.stage = 2;
+            pending.push(evaluationFrame(expression.arguments[frame.index++]!.value));
+            continue;
+          }
+          value = this.#call(expression, frame.value, frame.positional!, frame.named!);
+          break;
+      }
+      result = { value, owned, descriptor: null, epoch: this.#referenceEpoch };
+      pending.pop();
     }
-    type Work =
-      | { readonly kind: "expression"; readonly expression: ExpressionPlan }
-      | {
-          readonly kind: "assembleList";
-          readonly expression: Extract<ExpressionPlan, { kind: "list" }>;
-        }
-      | {
-          readonly kind: "addSetElement";
-          readonly set: SerializableRuntimeSet;
-          readonly membership: Set<SerializableRuntimeScalar>;
-          readonly element: ExpressionPlan;
-        }
-      | {
-          readonly kind: "assembleObject";
-          readonly expression: Extract<ExpressionPlan, { kind: "object" }>;
-        }
-      | { readonly kind: "completeSet"; readonly set: SerializableRuntimeSet };
-    const work: Work[] = [{ kind: "expression", expression: root }];
-    const results: EvaluatedValue[] = [];
-    while (work.length > 0) {
-      const current = work.pop()!;
-      if (current.kind === "assembleObject") {
-        const evaluated = results.splice(results.length - current.expression.properties.length);
-        results.push({
-          value: {
-            kind: "object",
-            properties: current.expression.properties.map((property, index) => ({
-              name: property.name,
-              value: evaluated[index]!.owned
-                ? evaluated[index]!.value
-                : cloneCapturedSerializableValue(evaluated[index]!.value),
-            })),
-          },
-          owned: true,
-        });
-        continue;
-      }
-      if (current.kind === "assembleList") {
-        const evaluated = results.splice(results.length - current.expression.elements.length);
-        results.push({
-          value: {
-            kind: "list",
-            // Each list captures after all of its own elements have evaluated. Fresh nested
-            // collections can transfer ownership; other results still need an independent copy.
-            items: evaluated.map((item) =>
-              item.owned ? item.value : cloneCapturedSerializableValue(item.value),
-            ),
-          },
-          owned: true,
-        });
-        continue;
-      }
-      if (current.kind === "addSetElement") {
-        const evaluated = results.pop()!;
-        try {
-          addSerializableSetValue(current.set, evaluated.value, current.membership);
-        } catch (error) {
-          throw this.#translateValueError(error, current.element.span);
-        }
-        continue;
-      }
-      if (current.kind === "completeSet") {
-        results.push({ value: current.set, owned: true });
-        continue;
-      }
-
-      if (current.expression.kind === "object") {
-        const names = new Set<string>();
-        for (const property of current.expression.properties) {
-          if (names.has(property.name))
-            throw fault("TSR007", `Duplicate object property '${property.name}'.`, property.span);
-          names.add(property.name);
-        }
-        work.push({ kind: "assembleObject", expression: current.expression });
-        for (let index = current.expression.properties.length - 1; index >= 0; index -= 1)
-          work.push({
-            kind: "expression",
-            expression: current.expression.properties[index]!.value,
-          });
-        continue;
-      }
-      if (current.expression.kind !== "list" && current.expression.kind !== "set") {
-        results.push({ value: this.evaluate(current.expression), owned: false });
-        continue;
-      }
-      if (current.expression.kind === "list") {
-        work.push({ kind: "assembleList", expression: current.expression });
-        for (let index = current.expression.elements.length - 1; index >= 0; index -= 1) {
-          work.push({ kind: "expression", expression: current.expression.elements[index]! });
-        }
-        continue;
-      }
-
-      const set = createCapturedSerializableSet([]);
-      const membership = new Set<SerializableRuntimeScalar>();
-      work.push({ kind: "completeSet", set });
-      for (let index = current.expression.elements.length - 1; index >= 0; index -= 1) {
-        const element = current.expression.elements[index]!;
-        work.push({ kind: "addSetElement", set, membership, element });
-        work.push({ kind: "expression", expression: element });
-      }
-    }
-    return results[0]!.value;
+    return result;
   }
 
   public assign(target: AssignmentTargetPlan, value: SerializableRuntimeValue): void {
@@ -406,72 +626,7 @@ export class Evaluator {
   }
 
   #buildPreparedReference(expression: ExpressionPlan): PreparedReferenceDescriptor {
-    if (expression.kind === "group") {
-      return this.#buildPreparedReference(expression.expression);
-    }
-    if (expression.kind === "identifier") {
-      const location = findBindingLocation(this.snapshot, expression.name);
-      if (location === undefined) {
-        throw fault("TSR006", `Unknown identifier '${expression.name}'.`, expression.span);
-      }
-      return {
-        rootFrameId: location.frame.id,
-        rootName: expression.name,
-        path: [],
-        capturedRoot: cloneCapturedSerializableValue(location.binding.value),
-        detached: false,
-      };
-    }
-    if (expression.kind === "property") {
-      const descriptor = this.#buildPreparedReference(expression.object);
-      const base = this.#resolveDescriptor(descriptor, expression.object.span);
-      if ((isList(base) || isSet(base)) && ["first", "last", "random"].includes(expression.name)) {
-        if (base.items.length === 0) {
-          throw fault(
-            expression.name === "random" ? "TSR019" : "TSR018",
-            `Cannot read '.${expression.name}' from an empty collection.`,
-            expression.span,
-          );
-        }
-        const index =
-          expression.name === "first"
-            ? 0
-            : expression.name === "last"
-              ? base.items.length - 1
-              : Math.floor(this.#findRandom(expression.span) * base.items.length);
-        descriptor.path.push({ kind: "index", index });
-      } else {
-        descriptor.path.push({ kind: "property", name: expression.name });
-      }
-      this.#resolveDescriptor(descriptor, expression.span);
-      return descriptor;
-    }
-    if (expression.kind === "index") {
-      const descriptor = this.#buildPreparedReference(expression.object);
-      const object = this.#resolveDescriptor(descriptor, expression.object.span);
-      if (isSet(object)) throw fault("TSR004", "Sets are not indexable.", expression.span);
-      if (!isList(object)) {
-        throw fault("TSR008", "Only lists support numeric indexing.", expression.span);
-      }
-      const index = this.#index(this.evaluate(expression.index), expression.index.span);
-      this.#assertIndex(object, index, expression.index.span);
-      descriptor.path.push({ kind: "index", index });
-      return descriptor;
-    }
-    if (expression.kind === "preparedReference") {
-      return readPreparedReference(
-        readTemporary(this.snapshot.temporaries, expression.temporaryId, expression.span),
-        expression.span,
-      );
-    }
-    const value = this.evaluate(expression);
-    return {
-      rootFrameId: null,
-      rootName: null,
-      path: [],
-      capturedRoot: cloneCapturedSerializableValue(value),
-      detached: true,
-    };
+    return this.#evaluateMachine(expression, true).descriptor!;
   }
 
   #resolvePreparedReference(
@@ -613,27 +768,16 @@ export class Evaluator {
     throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
   }
 
-  #binary(expression: BinaryExpressionPlan): SerializableRuntimeValue {
-    const left = this.evaluate(expression.left);
-    if (expression.operator === "and") {
-      if (typeof left !== "boolean")
-        throw fault("TSR026", "Expected a boolean value.", expression.left.span);
-      if (!left) return false;
-      const right = this.evaluate(expression.right);
+  #binary(
+    expression: BinaryExpressionPlan,
+    left: SerializableRuntimeValue,
+    right: SerializableRuntimeValue,
+  ): SerializableRuntimeValue {
+    if (expression.operator === "and" || expression.operator === "or") {
       if (typeof right !== "boolean")
         throw fault("TSR026", "Expected a boolean value.", expression.right.span);
       return right;
     }
-    if (expression.operator === "or") {
-      if (typeof left !== "boolean")
-        throw fault("TSR026", "Expected a boolean value.", expression.left.span);
-      if (left) return true;
-      const right = this.evaluate(expression.right);
-      if (typeof right !== "boolean")
-        throw fault("TSR026", "Expected a boolean value.", expression.right.span);
-      return right;
-    }
-    const right = this.evaluate(expression.right);
     if (expression.operator === "==" || expression.operator === "!=") {
       try {
         const equal = serializableEquals(left, right);
@@ -677,26 +821,12 @@ export class Evaluator {
     }
   }
 
-  #call(expression: Extract<ExpressionPlan, { kind: "call" }>): SerializableRuntimeValue {
-    const propertyCallee = expression.callee.kind === "property" ? expression.callee : null;
-    const receiverDescriptor =
-      propertyCallee === null ? null : this.#buildPreparedReference(propertyCallee.object);
-    const receiver =
-      receiverDescriptor === null || propertyCallee === null
-        ? null
-        : this.#resolveDescriptor(receiverDescriptor, propertyCallee.object.span);
-    const positional: SerializableRuntimeValue[] = [];
-    const named: Record<string, SerializableRuntimeValue> = Object.create(null);
-    for (const argument of expression.arguments) {
-      const value = cloneCapturedSerializableValue(this.evaluate(argument.value));
-      if (argument.kind === "positional") positional.push(value);
-      else {
-        if (Object.hasOwn(named, argument.name)) {
-          throw fault("TSR010", `Duplicate named argument '${argument.name}'.`, argument.span);
-        }
-        named[argument.name] = value;
-      }
-    }
+  #call(
+    expression: Extract<ExpressionPlan, { kind: "call" }>,
+    receiver: SerializableRuntimeValue,
+    positional: SerializableRuntimeValue[],
+    named: Record<string, SerializableRuntimeValue>,
+  ): SerializableRuntimeValue {
     if (expression.callee.kind === "identifier") {
       const name = expression.callee.name;
       const coreBuiltin = name === "random" || name === "chance" || name === "randomInteger";
@@ -781,6 +911,7 @@ export class Evaluator {
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
   ): SerializableRuntimeValue {
+    this.#referenceEpoch++;
     if (!isList(receiver) && !isSet(receiver))
       throw fault("TSR016", `Unsupported method '${name}'.`, span);
     if (Object.keys(named).length !== 0)
@@ -1149,4 +1280,43 @@ function assertIntegerRange(range: SerializableRuntimeRange, span: SourceSpan): 
 
 function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
   return new RuntimeFault(code, message, copySpan(span));
+}
+
+interface EvaluatedExpression {
+  value: SerializableRuntimeValue;
+  owned: boolean;
+  descriptor: PreparedReferenceDescriptor | null;
+  epoch: number;
+}
+interface EvaluationFrame {
+  expression: ExpressionPlan;
+  reference: boolean;
+  stage: number;
+  index: number;
+  value: SerializableRuntimeValue;
+  results: EvaluatedExpression[] | null;
+  descriptor: PreparedReferenceDescriptor | null;
+  epoch: number;
+  text: string;
+  set: SerializableRuntimeSet | null;
+  membership: Set<SerializableRuntimeScalar> | null;
+  positional: SerializableRuntimeValue[] | null;
+  named: Record<string, SerializableRuntimeValue> | null;
+}
+function evaluationFrame(expression: ExpressionPlan, reference = false): EvaluationFrame {
+  return {
+    expression,
+    reference,
+    stage: 0,
+    index: 0,
+    value: null,
+    results: expression.kind === "list" || expression.kind === "object" ? [] : null,
+    descriptor: null,
+    epoch: 0,
+    text: "",
+    set: expression.kind === "set" ? createCapturedSerializableSet([]) : null,
+    membership: expression.kind === "set" ? new Set() : null,
+    positional: expression.kind === "call" ? [] : null,
+    named: expression.kind === "call" ? Object.create(null) : null,
+  };
 }
