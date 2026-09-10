@@ -61,8 +61,10 @@ function serializeJsonIterative(value: unknown): string {
     index?: number;
   }> = [{ value, state: "value" }];
   while (stack.length > 0) {
+    // EVIDENCE: stack is non-empty because the loop condition was checked immediately before pop.
     const frame = stack.pop()!;
     if (frame.state === "close") {
+      // EVIDENCE: close frames are created only with string delimiters by this serializer.
       out.push(frame.value as string);
       continue;
     }
@@ -82,12 +84,14 @@ function serializeJsonIterative(value: unknown): string {
       }
       continue;
     }
+    // EVIDENCE: validated checkpoint containers are plain JSON objects at this boundary.
     const keys = Object.keys(current as Record<string, unknown>);
     out.push("{");
     stack.push({ value: "}", state: "close" });
     for (let i = keys.length - 1; i >= 0; i--) {
       const key = keys[i]!;
       if (i < keys.length - 1) stack.push({ value: ",", state: "close" });
+      // EVIDENCE: key comes from Object.keys(current), so it is an own string property.
       stack.push({ value: (current as Record<string, unknown>)[key], state: "value" });
       stack.push({ value: ":", state: "close" });
       stack.push({ value: JSON.stringify(key), state: "close" });
