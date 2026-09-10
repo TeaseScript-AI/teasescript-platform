@@ -54,18 +54,14 @@ export function serializeCheckpoint(checkpoint: RuntimeCheckpoint): string {
 
 function serializeJsonIterative(value: unknown): string {
   const out: string[] = [];
-  const stack: Array<{
-    value: unknown;
-    state: "value" | "close";
-    keys?: string[];
-    index?: number;
-  }> = [{ value, state: "value" }];
+  const stack: Array<{ value: unknown; state: "value" } | { value: string; state: "close" }> = [
+    { value, state: "value" },
+  ];
   while (stack.length > 0) {
     // EVIDENCE: stack is non-empty because the loop condition was checked immediately before pop.
     const frame = stack.pop()!;
     if (frame.state === "close") {
-      // EVIDENCE: close frames are created only with string delimiters by this serializer.
-      out.push(frame.value as string);
+      out.push(frame.value);
       continue;
     }
     const current = frame.value;
