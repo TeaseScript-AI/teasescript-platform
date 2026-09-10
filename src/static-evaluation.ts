@@ -1,6 +1,20 @@
 import type { Expression } from "./ast.js";
+import { runCompileTask, compileChild, type CompileTask } from "./compiler/continuation.js";
 
 export function staticNumber(expression: Expression): number | undefined {
+  return runCompileTask(staticNumberTask(expression));
+}
+
+export function staticVisibleText(expression: Expression): string | undefined {
+  return runCompileTask(staticVisibleTextTask(expression));
+}
+
+function unwrapParentheses(expression: Expression): Expression {
+  while (expression.kind === "parenthesizedExpression") expression = expression.expression;
+  return expression;
+}
+
+function* staticNumberTask(expression: Expression): CompileTask<number | undefined> {
   let negate = false;
   while (true) {
     expression = unwrapParentheses(expression);
@@ -17,8 +31,8 @@ export function staticNumber(expression: Expression): number | undefined {
   if (expression.kind === "numberLiteral") {
     value = expression.value;
   } else if (expression.kind === "binaryExpression") {
-    const left = staticNumber(expression.left);
-    const right = staticNumber(expression.right);
+    const left = yield* compileChild(staticNumberTask(expression.left));
+    const right = yield* compileChild(staticNumberTask(expression.right));
     if (left === undefined || right === undefined) return undefined;
     switch (expression.operator) {
       case "+":
@@ -44,7 +58,7 @@ export function staticNumber(expression: Expression): number | undefined {
   return value === undefined || !negate ? value : -value;
 }
 
-export function staticVisibleText(expression: Expression): string | undefined {
+function* staticVisibleTextTask(expression: Expression): CompileTask<string | undefined> {
   expression = unwrapParentheses(expression);
   switch (expression.kind) {
     case "stringLiteral": {
@@ -54,7 +68,7 @@ export function staticVisibleText(expression: Expression): string | undefined {
           parts.push(part.value);
           continue;
         }
-        const value = staticVisibleText(part.expression);
+        const value = yield* compileChild(staticVisibleTextTask(part.expression));
         if (value === undefined) return undefined;
         parts.push(value);
       }
@@ -70,7 +84,7 @@ export function staticVisibleText(expression: Expression): string | undefined {
       return "null";
     case "unaryExpression":
     case "binaryExpression": {
-      const value = staticNumber(expression);
+      const value = yield* compileChild(staticNumberTask(expression));
       return value !== undefined && Number.isFinite(value)
         ? String(Object.is(value, -0) ? 0 : value)
         : undefined;
@@ -78,9 +92,4 @@ export function staticVisibleText(expression: Expression): string | undefined {
     default:
       return undefined;
   }
-}
-
-function unwrapParentheses(expression: Expression): Expression {
-  while (expression.kind === "parenthesizedExpression") expression = expression.expression;
-  return expression;
 }

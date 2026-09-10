@@ -20,10 +20,10 @@ test("classifies nested lowering subtrees once", () => {
   const binaryCounts = [32, 64, 128];
   const childReads = binaryCounts.map(compileCountedBinaryChain);
 
-  // Each child is read once during bottom-up classification and once during lowering.
+  // Each child is read during classification, general postorder traversal, and assembly.
   assert.deepEqual(
     childReads,
-    binaryCounts.map((binaryCount) => binaryCount * 4 - 2),
+    binaryCounts.map((binaryCount) => binaryCount * 6),
   );
 });
 

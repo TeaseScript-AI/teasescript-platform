@@ -861,7 +861,11 @@ function validateInteractionAccessibleName(
 type ExpressionValidationWork =
   | { value: unknown; path: string; assignmentTarget: boolean }
   | { kind: "property"; value: unknown; path: string }
-  | { kind: "span"; value: unknown; path: string };
+  | {
+      kind: "span" | "string" | "inclusive" | "parts" | "arguments" | "part" | "argument";
+      value: unknown;
+      path: string;
+    };
 
 function validateExpression(
   value: unknown,
@@ -876,9 +880,64 @@ function validateExpression(
     if (current === undefined) return;
     if ("kind" in current) {
       if (current.kind === "span") validateSpan(current.value, current.path, errors);
-      else if (!isRecord(current.value))
-        errors.push(planError("TSC002", "Property must be an object.", current.path));
-      else {
+      else if (current.kind === "string") requireString(current.value, current.path, errors);
+      else if (current.kind === "inclusive") {
+        if (typeof current.value !== "boolean")
+          errors.push(planError("TSC002", "Range inclusivity must be boolean.", current.path));
+      } else if (current.kind === "parts" || current.kind === "arguments") {
+        if (!Array.isArray(current.value))
+          errors.push(
+            planError(
+              "TSC002",
+              current.kind === "parts"
+                ? "Template parts must be an array."
+                : "Arguments must be an array.",
+              current.path,
+            ),
+          );
+        else
+          for (let i = current.value.length - 1; i >= 0; i--)
+            pending.push({
+              kind: current.kind === "parts" ? "part" : "argument",
+              value: current.value[i],
+              path: `${current.path}[${i}]`,
+            });
+      } else if (!isRecord(current.value)) {
+        errors.push(
+          planError(
+            "TSC002",
+            current.kind === "part"
+              ? "Template part must be an object."
+              : current.kind === "argument"
+                ? "Argument must be an object."
+                : "Property must be an object.",
+            current.path,
+          ),
+        );
+      } else if (current.kind === "part") {
+        validateSpan(current.value.span, `${current.path}.span`, errors);
+        if (current.value.kind === "text")
+          requireString(current.value.value, `${current.path}.value`, errors);
+        else if (current.value.kind === "expression")
+          pending.push({
+            value: current.value.expression,
+            path: `${current.path}.expression`,
+            assignmentTarget: false,
+          });
+        else
+          errors.push(planError("TSC002", "Unknown template part kind.", `${current.path}.kind`));
+      } else if (current.kind === "argument") {
+        validateSpan(current.value.span, `${current.path}.span`, errors);
+        if (current.value.kind === "named")
+          requireString(current.value.name, `${current.path}.name`, errors);
+        else if (current.value.kind !== "positional")
+          errors.push(planError("TSC002", "Unknown argument kind.", `${current.path}.kind`));
+        pending.push({
+          value: current.value.value,
+          path: `${current.path}.value`,
+          assignmentTarget: false,
+        });
+      } else {
         requireString(current.value.name, `${current.path}.name`, errors);
         pending.push({ kind: "span", value: current.value.span, path: `${current.path}.span` });
         pending.push({
@@ -959,28 +1018,33 @@ function validateExpressionNode(
           });
       return;
     case "group":
-      validateExpression(value.expression, `${path}.expression`, errors, false, temporaryCount);
+      pending.push({
+        value: value.expression,
+        path: `${path}.expression`,
+        assignmentTarget: false,
+      });
       return;
     case "template":
-      validateTemplateParts(value.parts, `${path}.parts`, errors, temporaryCount);
+      pending.push({ kind: "parts", value: value.parts, path: `${path}.parts` });
       return;
     case "property":
-      validateExpression(value.object, `${path}.object`, errors, false, temporaryCount);
-      requireString(value.name, `${path}.name`, errors);
+      pending.push({ kind: "string", value: value.name, path: `${path}.name` });
+      pending.push({ value: value.object, path: `${path}.object`, assignmentTarget: false });
+
       return;
     case "index":
-      validateExpression(value.object, `${path}.object`, errors, false, temporaryCount);
-      validateExpression(value.index, `${path}.index`, errors, false, temporaryCount);
+      pending.push({ value: value.index, path: `${path}.index`, assignmentTarget: false });
+      pending.push({ value: value.object, path: `${path}.object`, assignmentTarget: false });
       return;
     case "call":
-      validateExpression(value.callee, `${path}.callee`, errors, false, temporaryCount);
-      validateArguments(value.arguments, `${path}.arguments`, errors, temporaryCount);
+      pending.push({ kind: "arguments", value: value.arguments, path: `${path}.arguments` });
+      pending.push({ value: value.callee, path: `${path}.callee`, assignmentTarget: false });
       return;
     case "unary":
       if (!["+", "-", "not"].includes(String(value.operator))) {
         errors.push(planError("TSC002", "Invalid unary operator.", `${path}.operator`));
       }
-      validateExpression(value.operand, `${path}.operand`, errors, false, temporaryCount);
+      pending.push({ value: value.operand, path: `${path}.operand`, assignmentTarget: false });
       return;
     case "binary":
       if (!binaryOperators.has(String(value.operator))) {
@@ -992,11 +1056,9 @@ function validateExpressionNode(
       );
       return;
     case "range":
-      validateExpression(value.start, `${path}.start`, errors, false, temporaryCount);
-      validateExpression(value.end, `${path}.end`, errors, false, temporaryCount);
-      if (typeof value.inclusive !== "boolean") {
-        errors.push(planError("TSC002", "Range inclusivity must be boolean.", `${path}.inclusive`));
-      }
+      pending.push({ kind: "inclusive", value: value.inclusive, path: `${path}.inclusive` });
+      pending.push({ value: value.end, path: `${path}.end`, assignmentTarget: false });
+      pending.push({ value: value.start, path: `${path}.start`, assignmentTarget: false });
       return;
     default:
       errors.push(planError("TSC002", `Unknown expression kind '${value.kind}'.`, `${path}.kind`));
@@ -1065,57 +1127,6 @@ function validateProperties(
     validateExpression(property.value, `${propertyPath}.value`, errors, false, temporaryCount);
     validateSpan(property.span, `${propertyPath}.span`, errors);
   }
-}
-
-function validateTemplateParts(
-  value: unknown,
-  path: string,
-  errors: PlanValidationError[],
-  temporaryCount: number,
-): void {
-  if (!Array.isArray(value)) {
-    errors.push(planError("TSC002", "Template parts must be an array.", path));
-    return;
-  }
-  value.forEach((part, index) => {
-    const partPath = `${path}[${index}]`;
-    if (!isRecord(part)) {
-      errors.push(planError("TSC002", "Template part must be an object.", partPath));
-      return;
-    }
-    validateSpan(part.span, `${partPath}.span`, errors);
-    if (part.kind === "text") requireString(part.value, `${partPath}.value`, errors);
-    else if (part.kind === "expression") {
-      validateExpression(part.expression, `${partPath}.expression`, errors, false, temporaryCount);
-    } else {
-      errors.push(planError("TSC002", "Unknown template part kind.", `${partPath}.kind`));
-    }
-  });
-}
-
-function validateArguments(
-  value: unknown,
-  path: string,
-  errors: PlanValidationError[],
-  temporaryCount: number,
-): void {
-  if (!Array.isArray(value)) {
-    errors.push(planError("TSC002", "Arguments must be an array.", path));
-    return;
-  }
-  value.forEach((argument, index) => {
-    const argumentPath = `${path}[${index}]`;
-    if (!isRecord(argument)) {
-      errors.push(planError("TSC002", "Argument must be an object.", argumentPath));
-      return;
-    }
-    validateSpan(argument.span, `${argumentPath}.span`, errors);
-    if (argument.kind === "named") requireString(argument.name, `${argumentPath}.name`, errors);
-    else if (argument.kind !== "positional") {
-      errors.push(planError("TSC002", "Unknown argument kind.", `${argumentPath}.kind`));
-    }
-    validateExpression(argument.value, `${argumentPath}.value`, errors, false, temporaryCount);
-  });
 }
 
 function validateCallArguments(

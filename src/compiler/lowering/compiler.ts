@@ -1,6 +1,5 @@
 import type {
   Block,
-  CallArgument,
   Expression,
   FunctionDeclaration,
   ListLiteral,
@@ -13,7 +12,6 @@ import type {
 import type { SourceSpan } from "../../source.js";
 import { InstructionCompilationError } from "../errors.js";
 import type {
-  ArgumentPlan,
   AssignmentTargetPlan,
   CompiledFunctionDefinition,
   ExpressionPlan,
@@ -32,22 +30,31 @@ import type {
 } from "../../plan/model.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 import { staticVisibleText } from "../../static-evaluation.js";
+import { runCompileTask, compileChild, type CompileTask } from "../continuation.js";
+import { expressionChildren as instructionEmissionChildren } from "../../expression-children.js";
 
 export class InstructionCompiler {
   public readonly instructions: Instruction[] = [];
+
   public readonly functions: CompiledFunctionDefinition[] = [];
+
   readonly #loops: Array<{
     readonly loopId: number;
     readonly continueTarget: number;
     readonly breaks: number[];
   }> = [];
+
   readonly #functionByName: ReadonlyMap<
     string,
     { readonly id: number; readonly declaration: FunctionDeclaration }
   >;
+
   readonly #instructionEmissionByExpression = new WeakMap<Expression, boolean>();
+
   #nextLoopId = 1;
+
   #nextTemporaryId = 1;
+
   #contextualSpeakerTemporary: number | null = null;
 
   public constructor(private readonly declarations: readonly FunctionDeclaration[]) {
@@ -513,23 +520,29 @@ export class InstructionCompiler {
   }
 
   #lowerExpression(expression: Expression): LoweredExpression {
+    return runCompileTask(this.#lowerExpressionTask(expression));
+  }
+
+  *#lowerExpressionTask(expression: Expression): CompileTask<LoweredExpression> {
     expression = unwrapParentheses(expression);
+    if (this.#contextualSpeakerTemporary === null && !this.#containsUserCall(expression))
+      return { plan: compileExpression(expression), temporaryIds: [] };
     if (expression.kind === "interactionExpression") {
-      return this.#lowerInteraction(expression);
+      return yield* compileChild(this.#lowerInteractionTask(expression));
     }
     if (
       expression.kind === "callExpression" &&
       expression.callee.kind === "identifier" &&
       this.#functionByName.has(expression.callee.name)
     ) {
-      return this.#lowerUserFunctionCall(expression);
+      return yield* compileChild(this.#lowerUserFunctionCallTask(expression));
     }
     if (
       expression.kind === "binaryExpression" &&
       (expression.operator === "and" || expression.operator === "or") &&
       this.#containsUserCall(expression)
     ) {
-      return this.#lowerLogicalExpression(expression);
+      return yield* compileChild(this.#lowerLogicalExpressionTask(expression));
     }
     switch (expression.kind) {
       case "booleanLiteral":
@@ -544,7 +557,9 @@ export class InstructionCompiler {
           return { plan: compileExpression(expression), temporaryIds: [] };
         }
         const ids: number[] = [];
-        const loweredInterpolations = this.#lowerOrderedExpressions(interpolations);
+        const loweredInterpolations = yield* compileChild(
+          this.#lowerOrderedExpressionsTask(interpolations),
+        );
         let interpolationIndex = 0;
         const parts = expression.parts.flatMap((part): TemplatePartPlan[] => {
           if (part.kind === "stringText") {
@@ -574,14 +589,14 @@ export class InstructionCompiler {
         }
         return { plan: compileExpression(expression), temporaryIds: [] };
       case "parenthesizedExpression":
-        return this.#lowerExpression(expression.expression);
+        return yield* compileChild(this.#lowerExpressionTask(expression.expression));
       case "listLiteral":
       case "setLiteral":
-        return this.#lowerCollectionExpression(expression);
+        return yield* compileChild(this.#lowerCollectionExpressionTask(expression));
       case "objectLiteral":
-        return this.#lowerCollectionExpression(expression);
+        return yield* compileChild(this.#lowerCollectionExpressionTask(expression));
       case "propertyAccessExpression": {
-        const object = this.#lowerExpression(expression.object);
+        const object = yield* compileChild(this.#lowerExpressionTask(expression.object));
         return {
           plan: {
             kind: "property",
@@ -593,11 +608,11 @@ export class InstructionCompiler {
         };
       }
       case "indexExpression": {
-        let object = this.#lowerExpression(expression.object);
+        let object = yield* compileChild(this.#lowerExpressionTask(expression.object));
         if (this.#containsUserCall(expression.index)) {
           object = this.#prepareReferenceExpression(object, expression.object.span);
         }
-        const index = this.#lowerExpression(expression.index);
+        const index = yield* compileChild(this.#lowerExpressionTask(expression.index));
         return {
           plan: {
             kind: "index",
@@ -611,7 +626,7 @@ export class InstructionCompiler {
       case "callExpression": {
         let callee: LoweredExpression;
         if (expression.callee.kind === "propertyAccessExpression") {
-          let receiver = this.#lowerExpression(expression.callee.object);
+          let receiver = yield* compileChild(this.#lowerExpressionTask(expression.callee.object));
           if (expression.arguments.some((argument) => this.#containsUserCall(argument.value))) {
             receiver = this.#prepareReferenceExpression(receiver, expression.callee.object.span);
             this.instructions.push({
@@ -631,10 +646,10 @@ export class InstructionCompiler {
             temporaryIds: receiver.temporaryIds,
           };
         } else {
-          callee = this.#lowerExpression(expression.callee);
+          callee = yield* compileChild(this.#lowerExpressionTask(expression.callee));
         }
-        const loweredArguments = this.#lowerOrderedExpressions(
-          expression.arguments.map((argument) => argument.value),
+        const loweredArguments = yield* compileChild(
+          this.#lowerOrderedExpressionsTask(expression.arguments.map((argument) => argument.value)),
         );
         const argumentsList = expression.arguments.map((argument, index) => ({
           argument,
@@ -664,7 +679,7 @@ export class InstructionCompiler {
       }
       case "unaryExpression": {
         const normalized = normalizeUnaryExpression(expression);
-        const operand = this.#lowerExpression(normalized.operand);
+        const operand = yield* compileChild(this.#lowerExpressionTask(normalized.operand));
         let plan = operand.plan;
         for (let index = normalized.operators.length - 1; index >= 0; index -= 1) {
           plan = {
@@ -684,12 +699,11 @@ export class InstructionCompiler {
           !this.#containsUserCall(leftExpression) &&
           !this.#containsUserCall(rightExpression)
         ) {
-          return {
-            plan: compileBinaryExpression(expression, leftExpression, rightExpression),
-            temporaryIds: [],
-          };
+          return { plan: compileExpression(expression), temporaryIds: [] };
         }
-        const [left, right] = this.#lowerOrderedExpressions([leftExpression, rightExpression]);
+        const [left, right] = yield* compileChild(
+          this.#lowerOrderedExpressionsTask([leftExpression, rightExpression]),
+        );
         return {
           plan: {
             kind: "binary",
@@ -702,7 +716,9 @@ export class InstructionCompiler {
         };
       }
       case "rangeExpression": {
-        const [start, end] = this.#lowerOrderedExpressions([expression.start, expression.end]);
+        const [start, end] = yield* compileChild(
+          this.#lowerOrderedExpressionsTask([expression.start, expression.end]),
+        );
         return {
           plan: {
             kind: "range",
@@ -762,7 +778,7 @@ export class InstructionCompiler {
     this.#emitTemporaryCleanup([speakerTemporary, label.temporaryId], statement.span);
   }
 
-  #lowerInteraction(expression: InteractionExpression): LoweredExpression {
+  *#lowerInteractionTask(expression: InteractionExpression): CompileTask<LoweredExpression> {
     const values =
       expression.interactionKind === "choice"
         ? expression.options.map((option) => option.value)
@@ -804,7 +820,9 @@ export class InstructionCompiler {
         expression.hint === null
           ? null
           : this.#materializeDedicatedInteractionValue(
-              this.#lowerInteractionPayload(expression.hint, speakerTemporary),
+              yield* compileChild(
+                this.#lowerInteractionPayloadTask(expression.hint, speakerTemporary),
+              ),
               expression.hint.span,
             );
       if (hint !== null) preparedTemporaryIds.push(hint.temporaryId);
@@ -817,7 +835,9 @@ export class InstructionCompiler {
         },
       };
     } else {
-      const loweredValues = this.#lowerInteractionPayloads(values, speakerTemporary);
+      const loweredValues = yield* compileChild(
+        this.#lowerInteractionPayloadsTask(values, speakerTemporary),
+      );
       const optionsTemporary = this.#allocateTemporary();
       this.instructions.push({
         kind: "storeTemporary",
@@ -931,10 +951,17 @@ export class InstructionCompiler {
   }
 
   #lowerInteractionPayload(expression: Expression, speakerTemporary: number): LoweredExpression {
+    return runCompileTask(this.#lowerInteractionPayloadTask(expression, speakerTemporary));
+  }
+
+  *#lowerInteractionPayloadTask(
+    expression: Expression,
+    speakerTemporary: number,
+  ): CompileTask<LoweredExpression> {
     const previous = this.#contextualSpeakerTemporary;
     this.#contextualSpeakerTemporary = speakerTemporary;
     try {
-      return this.#lowerExpression(expression);
+      return yield* compileChild(this.#lowerExpressionTask(expression));
     } finally {
       this.#contextualSpeakerTemporary = previous;
     }
@@ -944,14 +971,14 @@ export class InstructionCompiler {
     return this.#lowerInteractionPayload(expression, speakerTemporary);
   }
 
-  #lowerInteractionPayloads(
+  *#lowerInteractionPayloadsTask(
     expressions: readonly Expression[],
     speakerTemporary: number,
-  ): LoweredExpression[] {
+  ): CompileTask<LoweredExpression[]> {
     const previous = this.#contextualSpeakerTemporary;
     this.#contextualSpeakerTemporary = speakerTemporary;
     try {
-      return this.#lowerOrderedExpressions(expressions);
+      return yield* compileChild(this.#lowerOrderedExpressionsTask(expressions));
     } finally {
       this.#contextualSpeakerTemporary = previous;
     }
@@ -1049,10 +1076,10 @@ export class InstructionCompiler {
     };
   }
 
-  #lowerOrderedExpressions(
+  *#lowerOrderedExpressionsTask(
     expressions: readonly Expression[],
     materializeInstructionEmitting = false,
-  ): LoweredExpression[] {
+  ): CompileTask<LoweredExpression[]> {
     const emitsInstructions = expressions.map((expression) => this.#containsUserCall(expression));
     const laterEmitsInstructions = new Array<boolean>(expressions.length);
     let suffixEmitsInstructions = false;
@@ -1064,7 +1091,7 @@ export class InstructionCompiler {
     const lowered: LoweredExpression[] = [];
     for (let index = 0; index < expressions.length; index += 1) {
       const expression = expressions[index]!;
-      let item = this.#lowerExpression(expression);
+      let item = yield* compileChild(this.#lowerExpressionTask(expression));
       if (
         laterEmitsInstructions[index] ||
         (materializeInstructionEmitting && emitsInstructions[index])
@@ -1079,106 +1106,48 @@ export class InstructionCompiler {
     return lowered;
   }
 
-  #lowerCollectionExpression(root: ListLiteral | SetLiteral | ObjectLiteral): LoweredExpression {
-    type Work =
-      | {
-          readonly kind: "expression";
-          readonly expression: Expression;
-          readonly materialize: boolean;
-        }
-      | {
-          readonly kind: "assemble";
-          readonly expression: ListLiteral | SetLiteral | ObjectLiteral;
-          readonly elementCount: number;
-          readonly materialize: boolean;
-          readonly materializationSpan: SourceSpan;
-        };
-    const work: Work[] = [{ kind: "expression", expression: root, materialize: false }];
-    const results: LoweredExpression[] = [];
-    while (work.length > 0) {
-      const current = work.pop()!;
-      if (current.kind === "assemble") {
-        const elements = results.splice(results.length - current.elementCount);
-        let lowered: LoweredExpression = {
-          plan:
-            current.expression.kind === "objectLiteral"
-              ? {
-                  kind: "object",
-                  properties: current.expression.properties.map((property, index) => ({
-                    name: property.name.name,
-                    value: elements[index]!.plan,
-                    span: copySpan(property.span),
-                  })),
-                  span: copySpan(current.expression.span),
-                }
-              : {
-                  kind: current.expression.kind === "listLiteral" ? "list" : "set",
-                  elements: elements.map((item) => item.plan),
-                  span: copySpan(current.expression.span),
-                },
-          temporaryIds: elements.flatMap((item) => item.temporaryIds),
-        };
-        if (current.materialize && lowered.plan.kind !== "temporary") {
-          lowered = this.#materializeExpression(lowered, current.materializationSpan);
-        }
-        results.push(lowered);
-        continue;
-      }
-
-      const expression = unwrapParentheses(current.expression);
-      if (
-        expression.kind !== "listLiteral" &&
-        expression.kind !== "setLiteral" &&
-        expression.kind !== "objectLiteral"
-      ) {
-        let lowered = this.#lowerExpression(current.expression);
-        if (current.materialize && lowered.plan.kind !== "temporary") {
-          lowered = this.#materializeExpression(lowered, current.expression.span);
-        }
-        results.push(lowered);
-        continue;
-      }
-
-      const children =
-        expression.kind === "objectLiteral"
-          ? expression.properties.map((property) => property.value)
-          : expression.elements;
-      const emitsInstructions = children.map((element) => this.#containsUserCall(element));
-      const laterEmitsInstructions = new Array<boolean>(children.length);
-      let suffixEmitsInstructions = false;
-      for (let index = children.length - 1; index >= 0; index -= 1) {
-        laterEmitsInstructions[index] = suffixEmitsInstructions;
-        if (emitsInstructions[index]) suffixEmitsInstructions = true;
-      }
-      work.push({
-        kind: "assemble",
-        expression,
-        elementCount: children.length,
-        materialize: current.materialize,
-        materializationSpan: current.expression.span,
-      });
-      for (let index = children.length - 1; index >= 0; index -= 1) {
-        work.push({
-          kind: "expression",
-          expression: children[index]!,
-          materialize: laterEmitsInstructions[index]!,
-        });
-      }
-    }
-    return results[0]!;
+  *#lowerCollectionExpressionTask(
+    root: ListLiteral | SetLiteral | ObjectLiteral,
+  ): CompileTask<LoweredExpression> {
+    const children =
+      root.kind === "objectLiteral"
+        ? root.properties.map((property) => property.value)
+        : root.elements;
+    const elements = yield* compileChild(this.#lowerOrderedExpressionsTask(children));
+    return {
+      plan:
+        root.kind === "objectLiteral"
+          ? {
+              kind: "object",
+              properties: root.properties.map((property, index) => ({
+                name: property.name.name,
+                value: elements[index]!.plan,
+                span: copySpan(property.span),
+              })),
+              span: copySpan(root.span),
+            }
+          : {
+              kind: root.kind === "listLiteral" ? "list" : "set",
+              elements: elements.map((item) => item.plan),
+              span: copySpan(root.span),
+            },
+      temporaryIds: elements.flatMap((item) => item.temporaryIds),
+    };
   }
 
-  #lowerUserFunctionCall(
+  *#lowerUserFunctionCallTask(
     expression: Extract<Expression, { kind: "callExpression" }>,
-  ): LoweredExpression {
+  ): CompileTask<LoweredExpression> {
     // EVIDENCE: invariant: the caller selects this path only for a registered identifier callee.
     const name = (expression.callee as Extract<Expression, { kind: "identifier" }>).name;
     const registered = this.#functionByName.get(name)!;
     const temporaryIds: number[] = [];
     const planned: CallArgumentPlan[] = [];
-    const loweredArguments = this.#lowerOrderedExpressions(
-      expression.arguments.map((argument) => argument.value),
-      true,
+    const loweredArguments = yield* compileChild(
+      this.#lowerOrderedExpressionsTask(
+        expression.arguments.map((argument) => argument.value),
+        true,
+      ),
     );
     expression.arguments.forEach((argument, index) => {
       const lowered = loweredArguments[index]!;
@@ -1226,10 +1195,10 @@ export class InstructionCompiler {
     };
   }
 
-  #lowerLogicalExpression(
+  *#lowerLogicalExpressionTask(
     expression: Extract<Expression, { kind: "binaryExpression" }>,
-  ): LoweredExpression {
-    const left = this.#lowerExpression(expression.left);
+  ): CompileTask<LoweredExpression> {
+    const left = yield* compileChild(this.#lowerExpressionTask(expression.left));
     const resultTemporary = this.#allocateTemporary();
     this.instructions.push({
       kind: "storeTemporary",
@@ -1252,7 +1221,7 @@ export class InstructionCompiler {
         span: copySpan(expression.span),
       };
       this.instructions.push(conditionalInstruction);
-      const right = this.#lowerExpression(expression.right);
+      const right = yield* compileChild(this.#lowerExpressionTask(expression.right));
       this.instructions.push({
         kind: "storeTemporary",
         temporaryId: resultTemporary,
@@ -1288,7 +1257,7 @@ export class InstructionCompiler {
       ...conditionalInstruction,
       target: this.instructions.length,
     };
-    const right = this.#lowerExpression(expression.right);
+    const right = yield* compileChild(this.#lowerExpressionTask(expression.right));
     this.instructions.push({
       kind: "storeTemporary",
       temporaryId: resultTemporary,
@@ -1367,41 +1336,6 @@ interface LoweredExpression {
   readonly temporaryIds: readonly number[];
 }
 
-function instructionEmissionChildren(expression: Expression): readonly Expression[] {
-  switch (expression.kind) {
-    case "booleanLiteral":
-    case "nullLiteral":
-    case "numberLiteral":
-      return [];
-    case "stringLiteral":
-      return expression.parts.flatMap((part) =>
-        part.kind === "stringInterpolation" ? [part.expression] : [],
-      );
-    case "identifier":
-    case "interactionExpression":
-      return [];
-    case "parenthesizedExpression":
-      return [expression.expression];
-    case "listLiteral":
-    case "setLiteral":
-      return expression.elements;
-    case "objectLiteral":
-      return expression.properties.map((property) => property.value);
-    case "propertyAccessExpression":
-      return [expression.object];
-    case "indexExpression":
-      return [expression.object, expression.index];
-    case "callExpression":
-      return [expression.callee, ...expression.arguments.map((argument) => argument.value)];
-    case "unaryExpression":
-      return [expression.operand];
-    case "binaryExpression":
-      return [expression.left, expression.right];
-    case "rangeExpression":
-      return [expression.start, expression.end];
-  }
-}
-
 function unwrapParentheses(expression: Expression): Expression {
   let current = expression;
   while (current.kind === "parenthesizedExpression") current = current.expression;
@@ -1439,225 +1373,28 @@ function normalizeUnaryExpression(expression: Extract<Expression, { kind: "unary
 }
 
 function compileExpression(expression: Expression): ExpressionPlan {
-  expression = unwrapParentheses(expression);
-  switch (expression.kind) {
-    case "booleanLiteral":
-    case "nullLiteral":
-    case "numberLiteral":
-      return { kind: "literal", value: expression.value, span: copySpan(expression.span) };
-    case "stringLiteral":
-      return expression.parts.some((part) => part.kind === "stringInterpolation")
-        ? {
-            kind: "template",
-            parts: expression.parts.flatMap((part): TemplatePartPlan[] =>
-              part.kind === "stringText"
-                ? part.value.length === 0
-                  ? []
-                  : [{ kind: "text", value: part.value, span: copySpan(part.span) }]
-                : [
-                    {
-                      kind: "expression",
-                      expression: compileExpression(part.expression),
-                      span: copySpan(part.span),
-                    },
-                  ],
-            ),
-            span: copySpan(expression.span),
-          }
-        : {
-            kind: "literal",
-            value: expression.parts
-              .map((part) => (part.kind === "stringText" ? part.value : ""))
-              .join(""),
-            span: copySpan(expression.span),
-          };
-    case "identifier":
-      return { kind: "identifier", name: expression.name, span: copySpan(expression.span) };
-    case "parenthesizedExpression":
-      return compileExpression(expression.expression);
-    case "listLiteral":
-      return compileCollectionExpression(expression);
-    case "objectLiteral":
-      return compileCollectionExpression(expression);
-    case "setLiteral":
-      return compileCollectionExpression(expression);
-    case "propertyAccessExpression":
-      return {
-        kind: "property",
-        object: compileExpression(expression.object),
-        name: expression.property.name,
-        span: copySpan(expression.span),
-      };
-    case "indexExpression":
-      return {
-        kind: "index",
-        object: compileExpression(expression.object),
-        index: compileExpression(expression.index),
-        span: copySpan(expression.span),
-      };
-    case "callExpression":
-      return {
-        kind: "call",
-        callee: compileExpression(expression.callee),
-        arguments: expression.arguments.map(compileArgument),
-        span: copySpan(expression.span),
-      };
-    case "unaryExpression": {
-      const normalized = normalizeUnaryExpression(expression);
-      let plan = compileExpression(normalized.operand);
-      for (let index = normalized.operators.length - 1; index >= 0; index -= 1) {
-        plan = {
-          kind: "unary",
-          operator: normalized.operators[index]!,
-          operand: plan,
-          span: copySpan(expression.span),
-        };
-      }
-      return plan;
-    }
-    case "binaryExpression":
-      return compileBinaryExpression(expression);
-    case "rangeExpression":
-      return {
-        kind: "range",
-        start: compileExpression(expression.start),
-        end: compileExpression(expression.end),
-        inclusive: expression.inclusive,
-        span: copySpan(expression.span),
-      };
-    case "interactionExpression":
-      throw new TypeError(
-        "Blocking interactions must be lowered before expression-plan compilation.",
-      );
-  }
-}
-
-function compileCollectionExpression(
-  root: ListLiteral | SetLiteral | ObjectLiteral,
-): ExpressionPlan {
-  type Work =
-    | { readonly kind: "expression"; readonly expression: Expression }
-    | {
-        readonly kind: "assemble";
-        readonly expression: ListLiteral | SetLiteral | ObjectLiteral;
-        readonly elementCount: number;
-      };
-  const work: Work[] = [{ kind: "expression", expression: root }];
-  const results: ExpressionPlan[] = [];
-  while (work.length > 0) {
-    const current = work.pop()!;
-    if (current.kind === "assemble") {
-      const elements = results.splice(results.length - current.elementCount);
-      results.push(
-        current.expression.kind === "objectLiteral"
-          ? {
-              kind: "object",
-              properties: current.expression.properties.map((property, index) => ({
-                name: property.name.name,
-                value: elements[index]!,
-                span: copySpan(property.span),
-              })),
-              span: copySpan(current.expression.span),
-            }
-          : {
-              kind: current.expression.kind === "listLiteral" ? "list" : "set",
-              elements,
-              span: copySpan(current.expression.span),
-            },
-      );
-      continue;
-    }
-
-    const expression = unwrapParentheses(current.expression);
-    if (
-      expression.kind !== "listLiteral" &&
-      expression.kind !== "setLiteral" &&
-      expression.kind !== "objectLiteral"
-    ) {
-      results.push(compileExpression(current.expression));
-      continue;
-    }
-    const children =
-      expression.kind === "objectLiteral"
-        ? expression.properties.map((property) => property.value)
-        : expression.elements;
-    work.push({ kind: "assemble", expression, elementCount: children.length });
-    for (let index = children.length - 1; index >= 0; index -= 1) {
-      work.push({ kind: "expression", expression: children[index]! });
-    }
-  }
-  return results[0]!;
-}
-
-function compileBinaryExpression(
-  expression: Extract<Expression, { kind: "binaryExpression" }>,
-  left: Expression = expression.left,
-  right: Expression = expression.right,
-): ExpressionPlan {
   const plans = new WeakMap<Expression, ExpressionPlan>();
-  const work: BinaryCompilationFrame[] = [{ expression, left, right, expanded: false }];
-  while (work.length > 0) {
-    const current = work.pop()!;
-    if (current.expanded) {
-      plans.set(current.expression, {
-        kind: "binary",
-        operator: current.expression.operator,
-        left: compiledBinaryChild(current.left, plans),
-        right: compiledBinaryChild(current.right, plans),
-        span: copySpan(current.expression.span),
-      });
+  const work: { expression: Expression; expanded: boolean }[] = [{ expression, expanded: false }];
+  while (work.length) {
+    const frame = work.pop()!;
+    const current = unwrapParentheses(frame.expression);
+    if (frame.expanded) {
+      plans.set(current, assembleExpression(current, child));
       continue;
     }
-
-    work.push({ ...current, expanded: true });
-    const rightExpression = unwrapParentheses(current.right);
-    if (rightExpression.kind === "binaryExpression") {
-      work.push(binaryCompilationFrame(rightExpression));
-    }
-    const leftExpression = unwrapParentheses(current.left);
-    if (leftExpression.kind === "binaryExpression") {
-      work.push(binaryCompilationFrame(leftExpression));
-    }
+    if (plans.has(current)) continue;
+    work.push({ expression: current, expanded: true });
+    const children =
+      current.kind === "unaryExpression"
+        ? [normalizeUnaryExpression(current).operand]
+        : instructionEmissionChildren(current);
+    for (let i = children.length - 1; i >= 0; i--)
+      work.push({ expression: children[i]!, expanded: false });
   }
-  return plans.get(expression)!;
-}
-
-interface BinaryCompilationFrame {
-  readonly expression: Extract<Expression, { kind: "binaryExpression" }>;
-  readonly left: Expression;
-  readonly right: Expression;
-  readonly expanded: boolean;
-}
-
-function binaryCompilationFrame(
-  expression: Extract<Expression, { kind: "binaryExpression" }>,
-): BinaryCompilationFrame {
-  return { expression, left: expression.left, right: expression.right, expanded: false };
-}
-
-function compiledBinaryChild(
-  expression: Expression,
-  plans: Readonly<WeakMap<Expression, ExpressionPlan>>,
-): ExpressionPlan {
-  expression = unwrapParentheses(expression);
-  return expression.kind === "binaryExpression"
-    ? plans.get(expression)!
-    : compileExpression(expression);
-}
-
-function compileArgument(argument: CallArgument): ArgumentPlan {
-  return argument.kind === "positionalArgument"
-    ? {
-        kind: "positional",
-        value: compileExpression(argument.value),
-        span: copySpan(argument.span),
-      }
-    : {
-        kind: "named",
-        name: argument.name.name,
-        value: compileExpression(argument.value),
-        span: copySpan(argument.span),
-      };
+  return child(expression);
+  function child(expression: Expression): ExpressionPlan {
+    return plans.get(unwrapParentheses(expression))!;
+  }
 }
 
 function interactionLabelType(expression: InteractionExpression): "none" | "identifier" | "number" {
@@ -1703,4 +1440,126 @@ function staticInteractionUi(
 
 function copySpan(span: SourceSpan): PlanSourceLocation {
   return sourceSpanToPlanLocation(span);
+}
+
+function assembleExpression(
+  expression: Expression,
+  child: (expression: Expression) => ExpressionPlan,
+): ExpressionPlan {
+  switch (expression.kind) {
+    case "booleanLiteral":
+    case "nullLiteral":
+    case "numberLiteral":
+      return { kind: "literal", value: expression.value, span: copySpan(expression.span) };
+    case "stringLiteral":
+      return expression.parts.some((part) => part.kind === "stringInterpolation")
+        ? {
+            kind: "template",
+            parts: expression.parts.flatMap((part): TemplatePartPlan[] =>
+              part.kind === "stringText"
+                ? part.value.length === 0
+                  ? []
+                  : [{ kind: "text", value: part.value, span: copySpan(part.span) }]
+                : [
+                    {
+                      kind: "expression",
+                      expression: child(part.expression),
+                      span: copySpan(part.span),
+                    },
+                  ],
+            ),
+            span: copySpan(expression.span),
+          }
+        : {
+            kind: "literal",
+            value: expression.parts
+              .map((part) => (part.kind === "stringText" ? part.value : ""))
+              .join(""),
+            span: copySpan(expression.span),
+          };
+    case "identifier":
+      return { kind: "identifier", name: expression.name, span: copySpan(expression.span) };
+    case "parenthesizedExpression":
+      return child(expression.expression);
+    case "listLiteral":
+    case "setLiteral":
+      return {
+        kind: expression.kind === "setLiteral" ? "set" : "list",
+        elements: expression.elements.map(child),
+        span: copySpan(expression.span),
+      };
+    case "objectLiteral":
+      return {
+        kind: "object",
+        properties: expression.properties.map((property) => ({
+          name: property.name.name,
+          value: child(property.value),
+          span: copySpan(property.span),
+        })),
+        span: copySpan(expression.span),
+      };
+    case "propertyAccessExpression":
+      return {
+        kind: "property",
+        object: child(expression.object),
+        name: expression.property.name,
+        span: copySpan(expression.span),
+      };
+    case "indexExpression":
+      return {
+        kind: "index",
+        object: child(expression.object),
+        index: child(expression.index),
+        span: copySpan(expression.span),
+      };
+    case "callExpression":
+      return {
+        kind: "call",
+        callee: child(expression.callee),
+        arguments: expression.arguments.map((argument) =>
+          argument.kind === "positionalArgument"
+            ? { kind: "positional", value: child(argument.value), span: copySpan(argument.span) }
+            : {
+                kind: "named",
+                name: argument.name.name,
+                value: child(argument.value),
+                span: copySpan(argument.span),
+              },
+        ),
+        span: copySpan(expression.span),
+      };
+    case "unaryExpression": {
+      const normalized = normalizeUnaryExpression(expression);
+      let plan = child(normalized.operand);
+      for (let index = normalized.operators.length - 1; index >= 0; index -= 1) {
+        plan = {
+          kind: "unary",
+          operator: normalized.operators[index]!,
+          operand: plan,
+          span: copySpan(expression.span),
+        };
+      }
+      return plan;
+    }
+    case "binaryExpression":
+      return {
+        kind: "binary",
+        operator: expression.operator,
+        left: child(expression.left),
+        right: child(expression.right),
+        span: copySpan(expression.span),
+      };
+    case "rangeExpression":
+      return {
+        kind: "range",
+        start: child(expression.start),
+        end: child(expression.end),
+        inclusive: expression.inclusive,
+        span: copySpan(expression.span),
+      };
+    case "interactionExpression":
+      throw new TypeError(
+        "Blocking interactions must be lowered before expression-plan compilation.",
+      );
+  }
 }

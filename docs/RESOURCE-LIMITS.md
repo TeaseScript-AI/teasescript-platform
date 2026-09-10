@@ -60,16 +60,17 @@ the result carries an empty program with the complete source span.
 
 This is failure containment at the normal compiler boundary, not an input preflight or rejection policy. The compiler
 does not count source depth, impose a numeric nesting limit, or promise that a particular source size will compile on
-every JavaScript host. Flat binary-chain semantic traversal, synchronous plan construction, prepared-reference scanning,
-and plan-expression validation avoid the native stack. General expression parsing and the nested string/interpolation
-lexer cycle use an explicit continuation stack, including repeated siblings, mixed objects/collections, parenthesized
-work, calls, indexing, and interaction expressions. These paths retain ordinary delimiter and diagnostic recovery
-without wrapper lookahead or subtree reparsing. Collection/object semantic, lowering, plan-validation, fresh-state,
-and runtime paths avoid recursive descent through consecutive collections and objects. Downstream expression work
-and nested statements may still reach a host-dependent native boundary; issues #412 and #411 track those remaining
-mechanisms. Constrained-stack regressions distinguish successful parsing from downstream compilation and execution,
-and retain compiler containment for residual statement nesting. Fixture depths exercise repaired and residual
-structures without becoming supported-capacity claims or language limits.
+every JavaScript host. General expression parsing and the nested string/interpolation lexer cycle use an explicit
+continuation stack, including repeated siblings, mixed objects/collections, parenthesized work, calls, indexing, and
+interaction expressions. These paths retain ordinary delimiter and diagnostic recovery without wrapper lookahead or
+subtree reparsing. Downstream expression semantics, static evaluation, and lowering use compile-time continuations;
+plan construction, validation, and fresh-state scans use worklists. Runtime expressions and prepared references use
+synchronous explicit frames, including binary, property/index, assignment, call, template, group, range, and mixed
+collection paths. Runtime frames finish within an instruction; persisted continuations remain ordinary plan and
+snapshot data. Constrained-stack regressions exercise each public stage and JSON checkpoint/resume equivalence.
+Nested statements retain a host-dependent native boundary tracked by #411, with compiler containment for residual
+statement nesting. Fixture depths exercise repaired and residual structures without becoming supported-capacity
+claims or language limits.
 
 Checkpoint capture, restore, and the public `serializeCheckpoint` path use iterative traversal for validated
 checkpoint data, preserving JSON wire ordering and scalar representation without introducing a depth rejection
