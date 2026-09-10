@@ -68,8 +68,11 @@ plan construction, validation, and fresh-state scans use worklists. Runtime expr
 synchronous explicit frames, including binary, property/index, assignment, call, template, group, range, and mixed
 collection paths. Runtime frames finish within an instruction; persisted continuations remain ordinary plan and
 snapshot data. Constrained-stack regressions exercise each public stage and JSON checkpoint/resume equivalence.
-Nested statements retain a host-dependent native boundary tracked by #411, with compiler containment for residual
-statement nesting. Fixture depths exercise repaired and residual structures without becoming supported-capacity
+Statement and block parsing, semantic traversal, and lowering also use compile-time continuations for nested
+branches, repeat/for/while bodies, and function bodies; semantic name lookup walks parent scopes iteratively.
+Constrained-stack regressions retain active scopes, loop and call frames through an innermost wait, public JSON
+checkpoint restore, time observation, and resumed execution. Compiler containment remains for recognized native
+stack exhaustion outside these repaired paths. Fixture depths are diagnostic evidence, not supported-capacity
 claims or language limits.
 
 Checkpoint capture, restore, and the public `serializeCheckpoint` path use iterative traversal for validated
