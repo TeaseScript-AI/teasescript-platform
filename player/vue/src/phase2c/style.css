@@ -48,7 +48,7 @@
   --player-reserve: calc(380px + 6rem + 4px);
   --sidebar-width: max(calc(var(--launcher-space) + 1px), min(
     calc(var(--launcher-space) + var(--tool-columns-width) + 1px),
-    calc(100dvw - var(--player-reserve))
+    calc(var(--usable-width) - var(--player-reserve))
   )) !important;
 }
 
@@ -123,3 +123,21 @@ body:has(> .tool-panel-dragging) [data-slot="tooltip-content"] { visibility: hid
 body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] { visibility: hidden; }
 /* Pointer resizing already owns the geometry; do not trail it with a dock transition. */
 .phase2c-sidebar[data-resizing="true"] [data-slot="sidebar"] > .fixed { transition: none; }
+
+/* The Sheet portal stays in the shell so menu width/preview tokens have one owner. */
+.phase2c-sidebar { height: var(--usable-height); min-height: 0; }
+.phase2c-sidebar[data-narrow="true"] {
+  --sidebar-width: min(calc(var(--launcher-space) + var(--tool-columns-width) + 1px), calc(var(--usable-width) * 0.9)) !important;
+}
+.phase2c-sidebar .tools-drawer {
+  left: var(--viewport-left); top: var(--viewport-top); bottom: auto;
+  height: var(--usable-height); width: var(--sidebar-width); max-width: none;
+  padding: 0; gap: 0; background: var(--sidebar); z-index: 40;
+  transition: none; animation-duration: 200ms;
+}
+.tools-drawer > button { display: none; }
+.phase2c-sidebar > [data-slot="sheet-overlay"] { z-index: 39; background: rgb(0 0 0 / 25%); }
+.phase2c-sidebar[data-narrow="true"] [data-sidebar="trigger"] { flex-shrink: 0; }
+.phase2c-sidebar[data-narrow="true"] > [data-sidebar="trigger"] { top: calc(var(--viewport-top) + 0.5rem); left: calc(var(--viewport-left) + 0.5rem); }
+.phase2c-sidebar[data-narrow="true"] [data-launcher] { max-width: min(24rem, calc(var(--usable-width) * 0.9)); }
+.phase2c-sidebar[data-narrow="true"][data-labels="labels"] [data-launcher] { max-width: none; }
