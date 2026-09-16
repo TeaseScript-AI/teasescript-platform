@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, provide, ref, watch, type ObjectDirective } from "vue";
+import { computed, nextTick, onBeforeUnmount, provide, ref, watch, type ObjectDirective } from "vue";
 import { onClickOutside, useStorage } from "@vueuse/core";
 import { FlaskConical, Settings, Pin, ScanLine, ChevronDown, Ellipsis, Activity, GripVertical, SlidersHorizontal } from "@lucide/vue";
 import Sortable from "sortablejs";
@@ -101,7 +101,8 @@ const pinnedTools = ref<Tool[]>([]);
 const temporaryTool = ref<Tool | null>(null);
 // Visual order is independent of which tools are pinned.
 const openTools = ref<Tool[]>([]);
-let closedOnClick: { tool: Tool; index: number } | null = null;
+let pendingToolClose: { tool: Tool; timer: ReturnType<typeof setTimeout> } | null = null;
+let lastClosedTool: { tool: Tool; index: number; pinned: boolean } | null = null;
 const toolStrip = ref<HTMLElement | null>(null);
 
 async function revealTool(tool: Tool) {
@@ -123,21 +124,40 @@ const toolColumnsWidth = computed(() => openTools.value.reduce(
   (width, tool) => width + toolPanelSizes[toolSizes.value[tool]], 0,
 ));
 
+function cancelPendingClose() {
+  if (pendingToolClose) clearTimeout(pendingToolClose.timer);
+  pendingToolClose = null;
+}
+
+onBeforeUnmount(cancelPendingClose);
+
+function closeTool(tool: Tool) {
+  lastClosedTool = { tool, index: openTools.value.indexOf(tool), pinned: pinnedTools.value.includes(tool) };
+  openTools.value = openTools.value.filter(item => item !== tool);
+  pinnedTools.value = pinnedTools.value.filter(item => item !== tool);
+  if (temporaryTool.value === tool) temporaryTool.value = null;
+}
+
 function clickTool(tool: Tool, event: MouseEvent) {
-  // The browser sends two clicks before dblclick; apply the single-click action only once.
   if (event.detail > 1) return;
-  closedOnClick = null;
-  if (pinnedTools.value.includes(tool)) {
-    void revealTool(tool);
+  lastClosedTool = null;
+  if (pendingToolClose) {
+    const previous = pendingToolClose.tool;
+    cancelPendingClose();
+    closeTool(previous);
+  }
+  if (openTools.value.includes(tool)) {
+    if (event.detail === 0) closeTool(tool);
+    else {
+      // Defer pointer closing so a double-click can toggle pin without unmounting the panel.
+      pendingToolClose = { tool, timer: setTimeout(() => {
+        pendingToolClose = null;
+        closeTool(tool);
+      }, 400) };
+    }
     return;
   }
   const index = temporaryTool.value ? openTools.value.indexOf(temporaryTool.value) : -1;
-  if (temporaryTool.value === tool) {
-    closedOnClick = { tool, index };
-    openTools.value.splice(index, 1);
-    temporaryTool.value = null;
-    return;
-  }
   if (index >= 0) openTools.value.splice(index, 1, tool);
   else openTools.value.push(tool);
   temporaryTool.value = tool;
@@ -145,6 +165,7 @@ function clickTool(tool: Tool, event: MouseEvent) {
 }
 
 function setPinned(tool: Tool, pinned: boolean) {
+  if (pendingToolClose?.tool === tool) cancelPendingClose();
   if (pinned) {
     if (!pinnedTools.value.includes(tool)) pinnedTools.value.push(tool);
     if (!openTools.value.includes(tool)) openTools.value.push(tool);
@@ -160,11 +181,14 @@ function setPinned(tool: Tool, pinned: boolean) {
 }
 
 function toggleToolPin(tool: Tool) {
-  // A double-click can follow the single-click that just closed this temporary panel.
-  if (!openTools.value.includes(tool) && closedOnClick?.tool === tool) {
-    openTools.value.splice(closedOnClick.index, 0, tool);
+  cancelPendingClose();
+  // Respect a browser-recognized double-click even when its interval exceeds our close delay.
+  if (!openTools.value.includes(tool) && lastClosedTool?.tool === tool) {
+    openTools.value.splice(lastClosedTool.index, 0, tool);
+    setPinned(tool, !lastClosedTool.pinned);
+    lastClosedTool = null;
+    return;
   }
-  closedOnClick = null;
   setPinned(tool, !pinnedTools.value.includes(tool));
 }
 
