@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
 import { onClickOutside } from "@vueuse/core";
-import { FlaskConical, PanelLeftOpen, PanelLeftClose, Pin, ScanLine } from "@lucide/vue";
+import { FlaskConical, Settings, Pin, ScanLine } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
@@ -16,12 +16,21 @@ import SidebarInset from "@/components/ui/sidebar/SidebarInset.vue";
 import SidebarProvider from "@/components/ui/sidebar/SidebarProvider.vue";
 import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
 
+import Dialog from "@/components/ui/dialog/Dialog.vue";
+import DialogTrigger from "@/components/ui/dialog/DialogTrigger.vue";
+import DialogContent from "@/components/ui/dialog/DialogContent.vue";
+import DialogHeader from "@/components/ui/dialog/DialogHeader.vue";
+import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
+import DialogDescription from "@/components/ui/dialog/DialogDescription.vue";
+
 const isDevelopment = import.meta.env.DEV;
 const sidebarVisible = ref(true);
 const showLabels = ref(false);
 const menuSidebar = ref<HTMLElement | null>(null);
 const clickPreview = ref<boolean | null>(null);
-onClickOutside(menuSidebar, () => { clickPreview.value = null; });
+onClickOutside(menuSidebar, () => { clickPreview.value = null; }, {
+  ignore: ['[data-slot="dialog-content"]', '[data-slot="dialog-overlay"]'],
+});
 
 function clickMenuSpace(event: MouseEvent) {
   if (showLabels.value || (event.target as Element).closest("button, a, input, select, textarea, [role=button]")) return;
@@ -80,7 +89,7 @@ async function toggleSidebarVisibility() {
           title="Hide sidebar"
         />
       </SidebarHeader>
-      <nav aria-label="Tools" class="mt-10 p-2">
+      <nav aria-label="Tools" class="p-2">
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton tooltip="Visual Lab" title="Visual Lab" aria-label="Visual Lab" :is-active="openTools.includes('Visual Lab')" @click="clickTool('Visual Lab', $event)" @dblclick="setPinned('Visual Lab', !pinnedTools.includes('Visual Lab'))">
@@ -94,6 +103,33 @@ async function toggleSidebarVisibility() {
           </SidebarMenuItem>
         </SidebarMenu>
       </nav>
+      <div class="mt-auto p-2">
+        <Dialog>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <DialogTrigger as-child>
+                <Button data-settings-trigger variant="ghost" aria-label="Settings" class="h-8 w-full justify-start gap-2 overflow-hidden px-2">
+                  <Settings class="size-4 shrink-0" /><span data-launcher-label>Settings</span>
+                </Button>
+              </DialogTrigger>
+            </TooltipTrigger>
+            <TooltipContent v-if="!showLabels" side="right">Settings</TooltipContent>
+          </Tooltip>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Player Settings</DialogTitle>
+              <DialogDescription>Preferences for the Player interface.</DialogDescription>
+            </DialogHeader>
+            <label class="flex flex-col gap-2 text-sm">
+              Menu Sidebar labels
+              <select v-model="showLabels" class="rounded-md border bg-background p-2">
+                <option :value="false">Icons only</option>
+                <option :value="true">Icons + labels</option>
+              </select>
+            </label>
+          </DialogContent>
+        </Dialog>
+      </div>
         </div>
         </div>
         <div v-if="sidebarVisible" class="flex min-w-0 flex-1">
@@ -114,21 +150,6 @@ async function toggleSidebarVisibility() {
     </section>
         </div>
       </div>
-      <Tooltip v-if="sidebarVisible">
-        <TooltipTrigger as-child>
-          <Button
-            variant="ghost"
-            size="icon"
-            class="absolute right-2 top-12 z-20 size-8"
-            :aria-label="showLabels ? 'Hide labels' : 'Show labels'"
-            @click="showLabels = !showLabels; clickPreview = null"
-          >
-            <PanelLeftClose v-if="showLabels" />
-            <PanelLeftOpen v-else />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="right">{{ showLabels ? 'Hide labels' : 'Show labels' }}</TooltipContent>
-      </Tooltip>
     </Sidebar>
     <SidebarTrigger
       v-if="!sidebarVisible"
