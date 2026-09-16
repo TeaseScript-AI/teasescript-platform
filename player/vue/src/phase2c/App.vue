@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { nextTick, ref } from "vue";
 import Sidebar from "@/components/ui/sidebar/Sidebar.vue";
+import SidebarHeader from "@/components/ui/sidebar/SidebarHeader.vue";
 import SidebarInset from "@/components/ui/sidebar/SidebarInset.vue";
 import SidebarProvider from "@/components/ui/sidebar/SidebarProvider.vue";
 import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
@@ -8,19 +9,33 @@ import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
 const isDevelopment = import.meta.env.DEV;
 const sidebarState = ref<"hidden" | "icon" | "expanded">("expanded");
 
-function cycleSidebar() {
+async function cycleSidebar() {
+  const keepTriggerFocus = document.activeElement?.matches("[data-sidebar=trigger]");
   sidebarState.value = sidebarState.value === "expanded" ? "icon"
     : sidebarState.value === "icon" ? "hidden" : "expanded";
+  if (keepTriggerFocus) {
+    await nextTick();
+    document.querySelector<HTMLButtonElement>("[data-sidebar=trigger]")?.focus();
+  }
 }
 </script>
 
 <template>
   <SidebarProvider class="h-dvh min-h-0 overflow-hidden" :open="sidebarState === 'expanded'" :responsive="false" @update:open="cycleSidebar">
-    <Sidebar variant="sidebar" :collapsible="sidebarState === 'hidden' ? 'offcanvas' : 'icon'" />
+    <Sidebar variant="sidebar" :collapsible="sidebarState === 'hidden' ? 'offcanvas' : 'icon'">
+      <SidebarHeader v-if="sidebarState !== 'hidden'">
+        <SidebarTrigger
+          class="size-8"
+          :aria-label="`Sidebar: ${sidebarState}. Switch to ${sidebarState === 'expanded' ? 'icon-only' : 'hidden'}`"
+          :title="`Sidebar: ${sidebarState} — click to cycle`"
+        />
+      </SidebarHeader>
+    </Sidebar>
     <SidebarTrigger
-      class="fixed left-1.5 top-1.5 z-40 size-9 bg-sidebar"
-      :aria-label="`Sidebar: ${sidebarState}. Switch to ${sidebarState === 'expanded' ? 'icon-only' : sidebarState === 'icon' ? 'hidden' : 'expanded'}`"
-      :title="`Sidebar: ${sidebarState} — click to cycle`"
+      v-if="sidebarState === 'hidden'"
+      class="fixed left-2 top-2 z-40 size-8 bg-sidebar"
+      aria-label="Show sidebar"
+      title="Show sidebar"
     />
     <SidebarInset class="min-h-0 min-w-0">
       <section
