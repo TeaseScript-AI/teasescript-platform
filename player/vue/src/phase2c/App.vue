@@ -256,17 +256,23 @@ async function toggleSidebarVisibility() {
             </TooltipTrigger>
             <TooltipContent>Panel settings</TooltipContent>
           </Tooltip>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <span class="inline-flex">
         <Toggle
           data-panel-pin
           :model-value="pinnedTools.includes(tool)"
           :aria-label="`Pin ${tool}`"
-          :title="pinnedTools.includes(tool) ? `Unpin ${tool}` : `Pin ${tool}`"
           size="sm"
           class="shrink-0 data-[state=on]:bg-neutral-300"
           @update:model-value="setPinned(tool, $event)"
         >
           <Pin />
         </Toggle>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{{ pinnedTools.includes(tool) ? "Unpin panel" : "Pin panel" }}</TooltipContent>
+        </Tooltip>
         </div>
       </header>
     </section>
