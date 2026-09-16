@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { DropdownMenuSubTriggerProps } from "reka-ui"
-import type { HTMLAttributes } from "vue"
+import { inject, ref, type HTMLAttributes } from "vue"
+import { submenuTriggerHoveredKey } from "./submenuInteraction"
 import { ChevronRight } from "@lucide/vue"
 import { reactiveOmit } from "@vueuse/core"
 import {
@@ -8,6 +9,8 @@ import {
   useForwardProps,
 } from "reka-ui"
 import { cn } from "@/lib/utils"
+
+const triggerHovered = inject(submenuTriggerHoveredKey, ref(false))
 
 const props = defineProps<DropdownMenuSubTriggerProps & { class?: HTMLAttributes["class"], inset?: boolean }>()
 
@@ -17,6 +20,9 @@ const forwardedProps = useForwardProps(delegatedProps)
 
 <template>
   <DropdownMenuSubTrigger
+    @keydown.capture="triggerHovered = false"
+    @pointerenter="event => { triggerHovered = event.pointerType === 'mouse' }"
+    @pointerleave="triggerHovered = false"
     data-slot="dropdown-menu-sub-trigger"
     v-bind="forwardedProps"
     :data-inset="inset ? '' : undefined"
