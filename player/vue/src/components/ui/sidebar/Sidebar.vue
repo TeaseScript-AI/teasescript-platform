@@ -59,6 +59,7 @@ const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
   >
     <!-- This is what handles the sidebar gap on desktop  -->
     <div
+      data-slot="sidebar-gap"
       :class="
         cn(
           'relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear',

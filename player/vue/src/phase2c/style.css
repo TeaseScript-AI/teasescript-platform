@@ -52,6 +52,9 @@
   )) !important;
 }
 
+/* Reserve the final Player layout immediately; only the visible sidebar transitions. */
+.phase2c-sidebar [data-slot="sidebar-gap"] { transition: none; }
+
 .phase2c-sidebar[data-labels-visible="true"] {
   --launcher-width: 12rem;
 }
