@@ -90,12 +90,13 @@
   }
 }
 
-.phase2c-tool-panel { container: tool-panel / inline-size; }
-.panel-settings-trigger { width: 2rem; }
-.panel-settings-expanded { display: none; }
+.panel-settings-trigger { position: relative; }
+.panel-settings-compact { display: none; }
 
-@container tool-panel (min-width: 20rem) {
-  .panel-settings-trigger { width: auto; }
-  .panel-settings-expanded { display: inline-flex; }
-  .panel-settings-compact { display: none; }
+[data-compact-settings="true"] .panel-settings-trigger { width: 2rem; }
+[data-compact-settings="true"] .panel-settings-expanded {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
 }
+[data-compact-settings="true"] .panel-settings-compact { display: block; }

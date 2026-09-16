@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from "vue";
+import { computed, nextTick, ref, type ObjectDirective } from "vue";
 import { onClickOutside } from "@vueuse/core";
-import { FlaskConical, Settings, Pin, ScanLine, ChevronDown, Ellipsis } from "@lucide/vue";
+import { FlaskConical, Settings, Pin, ScanLine, ChevronDown, Ellipsis, Activity } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
@@ -46,7 +46,7 @@ function clickMenuSpace(event: MouseEvent) {
   if (labelMode.value !== "preview" || (event.target as Element).closest("button, a, input, select, textarea, [role=button]")) return;
   clickPreview.value = clickPreview.value !== true;
 }
-type Tool = "Visual Lab" | "Layout Debug";
+type Tool = "Visual Lab" | "Layout Debug" | "Playback Diagnostics";
 const toolPanelSizes = {
   Small: 14,
   Medium: 18,
@@ -56,6 +56,7 @@ const toolPanelSizes = {
 const toolSizes = ref<Record<Tool, keyof typeof toolPanelSizes>>({
   "Visual Lab": "Medium",
   "Layout Debug": "Medium",
+  "Playback Diagnostics": "Medium",
 });
 const pinnedTools = ref<Tool[]>([]);
 const temporaryTool = ref<Tool | null>(null);
@@ -81,6 +82,42 @@ function setPinned(tool: Tool, pinned: boolean) {
     temporaryTool.value = tool;
   }
 }
+
+// Measure intrinsic content, never the current compact/expanded button width.
+const headerObservers = new WeakMap<HTMLElement, ResizeObserver>();
+const vFitPanelSettings: ObjectDirective<HTMLElement> = {
+  mounted(header) {
+    const title = header.querySelector<HTMLElement>("h2")!;
+    // A hidden intrinsic-width copy leaves the visible title's overflow behavior alone.
+    const naturalTitle = title.cloneNode(true) as HTMLElement;
+    naturalTitle.setAttribute("aria-hidden", "true");
+    naturalTitle.style.cssText = "position:absolute;visibility:hidden;white-space:nowrap;width:max-content;pointer-events:none";
+    header.append(naturalTitle);
+    const controls = header.querySelector<HTMLElement>("[data-panel-controls]")!;
+    const trigger = header.querySelector<HTMLElement>(".panel-settings-trigger")!;
+    const fullLabel = header.querySelector<HTMLElement>(".panel-settings-expanded")!;
+    const pin = header.querySelector<HTMLElement>("[data-panel-pin]")!;
+    const measure = () => {
+      const headerStyle = getComputedStyle(header);
+      const triggerStyle = getComputedStyle(trigger);
+      const required = naturalTitle.getBoundingClientRect().width
+        + fullLabel.getBoundingClientRect().width + pin.getBoundingClientRect().width
+        + parseFloat(triggerStyle.paddingLeft) + parseFloat(triggerStyle.paddingRight)
+        + parseFloat(triggerStyle.borderLeftWidth) + parseFloat(triggerStyle.borderRightWidth)
+        + parseFloat(getComputedStyle(controls).columnGap) + parseFloat(headerStyle.columnGap)
+        + parseFloat(headerStyle.paddingLeft) + parseFloat(headerStyle.paddingRight);
+      header.dataset.compactSettings = String(required > header.clientWidth);
+    };
+    const observer = new ResizeObserver(measure);
+    for (const element of [header, naturalTitle, fullLabel, pin]) observer.observe(element);
+    headerObservers.set(header, observer);
+    measure();
+  },
+  unmounted(header) {
+    headerObservers.get(header)?.disconnect();
+    headerObservers.delete(header);
+  },
+};
 
 async function toggleSidebarVisibility() {
   const keepTriggerFocus = document.activeElement?.matches("[data-sidebar=trigger]");
@@ -124,6 +161,11 @@ async function toggleSidebarVisibility() {
               <ScanLine /><span data-launcher-label>Layout Debug</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
+          <SidebarMenuItem v-if="isDevelopment">
+            <SidebarMenuButton tooltip="Playback Diagnostics" :tooltip-when-expanded="labelMode !== 'labels'" tooltip-content-class="phase2c-tool-tooltip" aria-label="Playback Diagnostics" :is-active="openTools.includes('Playback Diagnostics')" @click="clickTool('Playback Diagnostics', $event)" @dblclick="setPinned('Playback Diagnostics', !pinnedTools.includes('Playback Diagnostics'))">
+              <Activity /><span data-launcher-label>Playback Diagnostics</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
         </SidebarMenu>
       </nav>
       <div class="mt-auto p-2">
@@ -157,18 +199,20 @@ async function toggleSidebarVisibility() {
         </div>
         </div>
         <div v-if="sidebarVisible" class="flex min-w-0 flex-1">
-    <section v-for="tool in openTools" :key="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="phase2c-tool-panel flex shrink-0 flex-col border-r bg-neutral-50">
-      <header class="flex min-h-12 items-center justify-between gap-2 border-b p-2">
+    <section v-for="tool in openTools" :key="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="flex shrink-0 flex-col border-r bg-neutral-50">
+      <header v-fit-panel-settings class="flex min-h-12 items-center justify-between gap-2 border-b p-2">
         <h2 class="text-sm font-medium">{{ tool }}</h2>
-        <div class="flex shrink-0 items-center gap-1">
+        <div data-panel-controls class="flex shrink-0 items-center gap-1">
           <Tooltip>
             <TooltipTrigger as-child>
               <span class="inline-flex">
                 <DropdownMenu>
                   <DropdownMenuTrigger as-child>
                     <Button variant="ghost" size="sm" class="panel-settings-trigger group h-8 gap-1 px-2 hover:bg-neutral-200 active:bg-neutral-300 data-[state=open]:bg-neutral-200" aria-label="Panel settings">
-                      <span class="panel-settings-expanded">Panel settings</span>
-                      <ChevronDown class="panel-settings-expanded size-3 transition-transform group-data-[state=open]:rotate-180" />
+                      <span class="panel-settings-expanded inline-flex w-max shrink-0 items-center gap-1">
+                        Panel settings
+                        <ChevronDown class="size-3 transition-transform group-data-[state=open]:rotate-180" />
+                      </span>
                       <Ellipsis class="panel-settings-compact size-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -190,6 +234,7 @@ async function toggleSidebarVisibility() {
             <TooltipContent>Panel settings</TooltipContent>
           </Tooltip>
         <Toggle
+          data-panel-pin
           :model-value="pinnedTools.includes(tool)"
           :aria-label="`Pin ${tool}`"
           :title="pinnedTools.includes(tool) ? `Unpin ${tool}` : `Pin ${tool}`"
