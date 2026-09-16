@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
 import { onClickOutside } from "@vueuse/core";
-import { FlaskConical, Settings, Pin, ScanLine } from "@lucide/vue";
+import { FlaskConical, Settings, Pin, ScanLine, Columns2 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
@@ -23,6 +23,12 @@ import DialogHeader from "@/components/ui/dialog/DialogHeader.vue";
 import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
 import DialogDescription from "@/components/ui/dialog/DialogDescription.vue";
 
+import DropdownMenu from "@/components/ui/dropdown-menu/DropdownMenu.vue";
+import DropdownMenuTrigger from "@/components/ui/dropdown-menu/DropdownMenuTrigger.vue";
+import DropdownMenuContent from "@/components/ui/dropdown-menu/DropdownMenuContent.vue";
+import DropdownMenuRadioGroup from "@/components/ui/dropdown-menu/DropdownMenuRadioGroup.vue";
+import DropdownMenuRadioItem from "@/components/ui/dropdown-menu/DropdownMenuRadioItem.vue";
+
 const isDevelopment = import.meta.env.DEV;
 const sidebarVisible = ref(true);
 const labelMode = ref<"icons" | "preview" | "labels">("preview");
@@ -37,10 +43,19 @@ function clickMenuSpace(event: MouseEvent) {
   clickPreview.value = clickPreview.value !== true;
 }
 type Tool = "Visual Lab" | "Layout Debug";
+const toolPanelSizes = { Small: 18, Medium: 24, Large: 32 } as const;
+const toolSizes = ref<Record<Tool, keyof typeof toolPanelSizes>>({
+  "Visual Lab": "Medium",
+  "Layout Debug": "Medium",
+});
 const pinnedTools = ref<Tool[]>([]);
 const temporaryTool = ref<Tool | null>(null);
 const openTools = computed(() => temporaryTool.value
   ? [...pinnedTools.value, temporaryTool.value] : pinnedTools.value);
+
+const toolColumnsWidth = computed(() => openTools.value.reduce(
+  (width, tool) => width + toolPanelSizes[toolSizes.value[tool]], 0,
+));
 
 function clickTool(tool: Tool, event: MouseEvent) {
   // The browser sends two clicks before dblclick; apply the single-click action only once.
@@ -71,7 +86,7 @@ async function toggleSidebarVisibility() {
 
 <template>
   <SidebarProvider
-    :style="{ '--tool-columns-width': `${openTools.length * 16}rem` }"
+    :style="{ '--tool-columns-width': `${toolColumnsWidth}rem` }"
     :data-labels="labelMode"
     :data-click-preview="clickPreview"
     class="phase2c-sidebar h-dvh min-h-0 overflow-hidden"
@@ -133,9 +148,24 @@ async function toggleSidebarVisibility() {
         </div>
         </div>
         <div v-if="sidebarVisible" class="flex min-w-0 flex-1">
-    <section v-for="tool in openTools" :key="tool" :aria-label="`${tool} panel`" class="flex w-64 shrink-0 flex-col border-r bg-neutral-50">
+    <section v-for="tool in openTools" :key="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="flex shrink-0 flex-col border-r bg-neutral-50">
       <header class="flex min-h-12 items-center justify-between gap-2 border-b p-2">
         <h2 class="text-sm font-medium">{{ tool }}</h2>
+        <div class="flex shrink-0 items-center gap-1">
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button variant="ghost" size="icon" class="size-8" :aria-label="`Panel size for ${tool}`" title="Panel size">
+                <Columns2 class="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuRadioGroup v-model="toolSizes[tool]" aria-label="Panel size">
+                <DropdownMenuRadioItem v-for="(width, size) in toolPanelSizes" :key="size" :value="size">
+                  {{ size }} · {{ width }}rem
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
         <Toggle
           :model-value="pinnedTools.includes(tool)"
           :aria-label="`Pin ${tool}`"
@@ -146,6 +176,7 @@ async function toggleSidebarVisibility() {
         >
           <Pin />
         </Toggle>
+        </div>
       </header>
     </section>
         </div>
