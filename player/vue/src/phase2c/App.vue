@@ -84,9 +84,10 @@ function setPinned(tool: Tool, pinned: boolean) {
 }
 
 // Measure intrinsic content, never the current compact/expanded button width.
+const compactPanelSettings = ref<Partial<Record<Tool, boolean>>>({});
 const headerObservers = new WeakMap<HTMLElement, ResizeObserver>();
-const vFitPanelSettings: ObjectDirective<HTMLElement> = {
-  mounted(header) {
+const vFitPanelSettings: ObjectDirective<HTMLElement, Tool> = {
+  mounted(header, { value: tool }) {
     const title = header.querySelector<HTMLElement>("h2")!;
     // A hidden intrinsic-width copy leaves the visible title's overflow behavior alone.
     const naturalTitle = title.cloneNode(true) as HTMLElement;
@@ -106,7 +107,7 @@ const vFitPanelSettings: ObjectDirective<HTMLElement> = {
         + parseFloat(triggerStyle.borderLeftWidth) + parseFloat(triggerStyle.borderRightWidth)
         + parseFloat(getComputedStyle(controls).columnGap) + parseFloat(headerStyle.columnGap)
         + parseFloat(headerStyle.paddingLeft) + parseFloat(headerStyle.paddingRight);
-      header.dataset.compactSettings = String(required > header.clientWidth);
+      compactPanelSettings.value[tool] = required > header.clientWidth;
     };
     const observer = new ResizeObserver(measure);
     for (const element of [header, naturalTitle, fullLabel, pin]) observer.observe(element);
@@ -200,10 +201,10 @@ async function toggleSidebarVisibility() {
         </div>
         <div v-if="sidebarVisible" class="flex min-w-0 flex-1">
     <section v-for="tool in openTools" :key="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="flex shrink-0 flex-col border-r bg-neutral-50">
-      <header v-fit-panel-settings class="flex min-h-12 items-center justify-between gap-2 border-b p-2">
+      <header v-fit-panel-settings="tool" :data-compact-settings="compactPanelSettings[tool]" class="flex min-h-12 items-center justify-between gap-2 border-b p-2">
         <h2 class="text-sm font-medium">{{ tool }}</h2>
         <div data-panel-controls class="flex shrink-0 items-center gap-1">
-          <Tooltip>
+          <Tooltip :disabled="!compactPanelSettings[tool]">
             <TooltipTrigger as-child>
               <span class="inline-flex">
                 <DropdownMenu>
