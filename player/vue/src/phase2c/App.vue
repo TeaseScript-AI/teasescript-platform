@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, provide, ref, watch, type ObjectDirective } from "vue";
-import { onClickOutside, useResizeObserver, useStorage } from "@vueuse/core";
+import { onClickOutside, useEventListener, useResizeObserver, useStorage } from "@vueuse/core";
 import { FlaskConical, Settings, Pin, ScanLine, ChevronDown, Ellipsis, Activity, GripVertical, SlidersHorizontal } from "@lucide/vue";
 import Sortable from "sortablejs";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,10 @@ import { DropdownMenuItem } from "reka-ui";
 import SidebarMenu from "@/components/ui/sidebar/SidebarMenu.vue";
 import SidebarMenuItem from "@/components/ui/sidebar/SidebarMenuItem.vue";
 import MenuSidebarButton from "./MenuSidebarButton.vue";
+import Sheet from "@/components/ui/sheet/Sheet.vue";
+import SheetContent from "@/components/ui/sheet/SheetContent.vue";
+import SheetTitle from "@/components/ui/sheet/SheetTitle.vue";
+import SheetDescription from "@/components/ui/sheet/SheetDescription.vue";
 import Sidebar from "@/components/ui/sidebar/Sidebar.vue";
 import SidebarHeader from "@/components/ui/sidebar/SidebarHeader.vue";
 import SidebarInset from "@/components/ui/sidebar/SidebarInset.vue";
@@ -36,7 +40,6 @@ import DropdownMenuSubTrigger from "@/components/ui/dropdown-menu/DropdownMenuSu
 import DropdownMenuSubContent from "@/components/ui/dropdown-menu/DropdownMenuSubContent.vue";
 
 const isDevelopment = import.meta.env.DEV;
-const sidebarVisible = ref(true);
 type LabelMode = "icons" | "preview" | "labels";
 const labelMode = isDevelopment
   ? useStorage<LabelMode>("phase2c-menu-label-mode", "icons")
@@ -112,6 +115,59 @@ useResizeObserver(menuRuler, () => {
 });
 const permanentMenuWidth = computed(() => Math.max(menuBounds.value.min,
   Math.min(menuWidth.value ?? menuBounds.value.max, menuBounds.value.max)));
+// Use the usable viewport, including browser keyboard resizing, without guessing keyboard height.
+const viewport = ref({ width: window.innerWidth, height: window.innerHeight, left: 0, top: 0 });
+const remSize = ref(parseFloat(getComputedStyle(document.documentElement).fontSize));
+function updateViewport() {
+  const visual = window.visualViewport;
+  viewport.value = { width: visual?.width ?? window.innerWidth, height: visual?.height ?? window.innerHeight,
+    left: visual?.offsetLeft ?? 0, top: visual?.offsetTop ?? 0 };
+  remSize.value = parseFloat(getComputedStyle(document.documentElement).fontSize);
+}
+updateViewport();
+useEventListener(window, "resize", updateViewport);
+useEventListener(window.visualViewport, "resize", updateViewport);
+useEventListener(window.visualViewport, "scroll", updateViewport);
+const narrow = computed(() => viewport.value.width < 380 + 6 * remSize.value + 4
+  + (labelMode.value === "labels" ? permanentMenuWidth.value : 3 * remSize.value)
+  + toolPanelSizes.Small * remSize.value + 1);
+const sidebarVisible = ref(!narrow.value);
+let transitionFocusLabel: string | null = null;
+watch(narrow, (isNarrow) => {
+  const active = document.activeElement as HTMLElement | null;
+  const inside = !!active?.closest("[data-tools-surface], [data-slot=sheet-content], [data-tools-context]")
+    || !!document.querySelector(".tool-panel-strip[data-reordering]") || resizing.value !== null;
+  transitionFocusLabel = inside ? active?.getAttribute("aria-label") ?? null : null;
+  stopResize?.();
+  // Do not cover the Player on a layout change unless tools own the active interaction.
+  if (isNarrow && !inside) sidebarVisible.value = false;
+  if (!isNarrow && inside && sidebarVisible.value) void nextTick(focusToolsToggle);
+}, { flush: "pre" });
+function focusToolsToggle() {
+  document.querySelector<HTMLButtonElement>("[data-sidebar=trigger]")?.focus({ preventScroll: true });
+}
+function openDrawerFocus(event: Event) {
+  event.preventDefault();
+  const surface = document.querySelector("[data-slot=sheet-content]");
+  const target = transitionFocusLabel
+    ? Array.from(surface?.querySelectorAll<HTMLElement>("[aria-label]") ?? [])
+      .find(element => element.getAttribute("aria-label") === transitionFocusLabel)
+    : null;
+  // Focus the existing toggle, not a tool or input that could trigger a preview/keyboard.
+  (target ?? surface?.querySelector<HTMLElement>("[data-sidebar=trigger]"))?.focus({ preventScroll: true });
+  transitionFocusLabel = null;
+}
+async function closeDrawerFocus(event: Event) {
+  event.preventDefault();
+  await nextTick();
+  focusToolsToggle();
+}
+function setSidebarVisible(open: boolean) {
+  sidebarVisible.value = open;
+  clickPreview.value = null;
+  hoverPreview.value = false;
+  focusPreview.value = false;
+}
 type PanelSize = keyof typeof toolPanelSizes;
 const panelSizeNames = Object.keys(toolPanelSizes) as PanelSize[];
 const resizing = ref<"menu" | Tool | null>(null);
@@ -366,10 +422,7 @@ const vFitPanelSettings: ObjectDirective<HTMLElement, Tool> = {
 
 async function toggleSidebarVisibility() {
   const keepTriggerFocus = document.activeElement?.matches("[data-sidebar=trigger]");
-  sidebarVisible.value = !sidebarVisible.value;
-  clickPreview.value = null;
-  hoverPreview.value = false;
-  focusPreview.value = false;
+  setSidebarVisible(!sidebarVisible.value);
   if (keepTriggerFocus) {
     await nextTick();
     document.querySelector<HTMLButtonElement>("[data-sidebar=trigger]")?.focus();
@@ -379,7 +432,9 @@ async function toggleSidebarVisibility() {
 
 <template>
   <SidebarProvider
-    :style="{ '--tool-columns-width': `${toolColumnsWidth}rem`, '--permanent-menu-width': `${permanentMenuWidth}px` }"
+    id="phase2c-shell"
+    :data-narrow="narrow"
+    :style="{ '--tool-columns-width': `${toolColumnsWidth}rem`, '--permanent-menu-width': `${permanentMenuWidth}px`, '--usable-width': `${viewport.width}px`, '--usable-height': `${viewport.height}px`, '--viewport-left': `${viewport.left}px`, '--viewport-top': `${viewport.top}px` }"
     :data-resizing="resizing !== null"
     :data-labels="labelMode"
     :data-tools-open="openTools.length > 0"
@@ -391,8 +446,17 @@ async function toggleSidebarVisibility() {
       <span v-for="tool in launcherTools" :key="tool.name">{{ tool.name }}</span>
       <span>Settings</span>
     </div>
-    <Sidebar variant="sidebar" collapsible="offcanvas">
-      <div class="relative flex h-full min-h-0">
+    <!-- The local Sheet owns responsiveness; disable the provider’s independent mobile state. -->
+    <Sheet :open="narrow && sidebarVisible" @update:open="setSidebarVisible">
+    <component :is="narrow ? SheetContent : Sidebar" side="left" variant="sidebar" collapsible="offcanvas"
+      :portal-target="narrow ? '#phase2c-shell' : undefined"
+      :class="narrow ? 'tools-drawer' : undefined"
+      @open-auto-focus="openDrawerFocus" @close-auto-focus="closeDrawerFocus">
+      <template v-if="narrow">
+        <SheetTitle class="sr-only">Tools Sidebar</SheetTitle>
+        <SheetDescription class="sr-only">Open, arrange and resize Player tools.</SheetDescription>
+      </template>
+      <div data-tools-surface class="relative flex h-full min-h-0">
         <div v-if="sidebarVisible" data-launcher-space class="relative shrink-0">
         <div ref="menuSidebar" data-launcher @click="clickMenuSpace" @pointerenter="updateHoverPreview" @pointermove="updateHoverPreview" @pointerleave="leaveMenu" @focusin="updateFocusPreview" @focusout="updateFocusPreview" class="relative flex h-full flex-col border-r bg-sidebar">
       <SidebarHeader>
@@ -402,7 +466,7 @@ async function toggleSidebarVisibility() {
           title="Hide sidebar"
         />
       </SidebarHeader>
-      <nav aria-label="Tools" class="p-2">
+      <nav aria-label="Tools" class="min-h-0 overflow-y-auto p-2">
         <SidebarMenu>
           <SidebarMenuItem v-for="tool in launcherTools" :key="tool.name">
             <MenuSidebarButton :label="tool.name" :is-active="openTools.includes(tool.name)" @click="clickTool(tool.name, $event)" @dblclick="toggleToolPin(tool.name)">
@@ -418,7 +482,7 @@ async function toggleSidebarVisibility() {
               <Settings />
             </MenuSidebarButton>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent data-tools-context>
             <DialogHeader>
               <DialogTitle>Player Settings</DialogTitle>
               <DialogDescription>Preferences for the Player interface.</DialogDescription>
@@ -465,10 +529,10 @@ async function toggleSidebarVisibility() {
                       <Ellipsis class="panel-settings-compact size-4" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
+                  <DropdownMenuContent data-tools-context align="end">
                     <DropdownMenuSub>
                       <DropdownMenuSubTrigger>Width</DropdownMenuSubTrigger>
-                      <DropdownMenuSubContent>
+                      <DropdownMenuSubContent data-tools-context>
                         <DropdownMenuRadioGroup v-model="toolSizes[tool]" aria-label="Panel width">
                           <DropdownMenuRadioItem v-for="size in Object.keys(toolPanelSizes)" :key="size" :value="size">
                             {{ size }}
@@ -522,7 +586,8 @@ async function toggleSidebarVisibility() {
     </section>
         </div>
       </div>
-    </Sidebar>
+    </component>
+    </Sheet>
     <SidebarTrigger
       v-if="!sidebarVisible"
       class="fixed left-2 top-2 z-40 size-8 bg-sidebar"
