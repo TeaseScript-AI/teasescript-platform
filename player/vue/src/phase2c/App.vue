@@ -21,6 +21,7 @@ const openTools = computed(() => temporaryTool.value
   ? [...pinnedTools.value, temporaryTool.value] : pinnedTools.value);
 
 function openTool(tool: Tool) {
+  sidebarState.value = "expanded";
   if (!pinnedTools.value.includes(tool)) temporaryTool.value = tool;
 }
 
@@ -46,38 +47,35 @@ async function cycleSidebar() {
 </script>
 
 <template>
-  <SidebarProvider class="h-dvh min-h-0 overflow-hidden" :open="sidebarState === 'expanded'" :responsive="false" @update:open="cycleSidebar">
+  <SidebarProvider :style="{ '--sidebar-width': `calc(var(--sidebar-width-icon) + ${openTools.length} * 16rem + 1px)` }" class="h-dvh min-h-0 overflow-hidden" :open="sidebarState === 'expanded'" :responsive="false" @update:open="cycleSidebar">
     <Sidebar variant="sidebar" :collapsible="sidebarState === 'hidden' ? 'offcanvas' : 'icon'">
-      <SidebarHeader v-if="sidebarState !== 'hidden'">
+      <div class="flex h-full min-h-0 overflow-hidden">
+        <div v-if="sidebarState !== 'hidden'" class="flex w-(--sidebar-width-icon) shrink-0 flex-col border-r">
+      <SidebarHeader>
         <SidebarTrigger
           class="size-8"
           :aria-label="`Sidebar: ${sidebarState}. Switch to ${sidebarState === 'expanded' ? 'icon-only' : 'hidden'}`"
           :title="`Sidebar: ${sidebarState} — click to cycle`"
         />
       </SidebarHeader>
-      <nav v-if="sidebarState !== 'hidden'" aria-label="Tools" class="p-2">
+      <nav aria-label="Tools" class="p-2">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton tooltip="Visual Lab" aria-label="Visual Lab" :is-active="openTools.includes('Visual Lab')" @click="openTool('Visual Lab')">
-              <FlaskConical /><span>Visual Lab</span>
+            <SidebarMenuButton tooltip="Visual Lab" title="Visual Lab" aria-label="Visual Lab" :is-active="openTools.includes('Visual Lab')" @click="openTool('Visual Lab')">
+              <FlaskConical /><span class="sr-only">Visual Lab</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
-            <SidebarMenuButton tooltip="Layout Debug" aria-label="Layout Debug" :is-active="openTools.includes('Layout Debug')" @click="openTool('Layout Debug')">
-              <ScanLine /><span>Layout Debug</span>
+            <SidebarMenuButton tooltip="Layout Debug" title="Layout Debug" aria-label="Layout Debug" :is-active="openTools.includes('Layout Debug')" @click="openTool('Layout Debug')">
+              <ScanLine /><span class="sr-only">Layout Debug</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </nav>
-    </Sidebar>
-    <SidebarTrigger
-      v-if="sidebarState === 'hidden'"
-      class="fixed left-2 top-2 z-40 size-8 bg-sidebar"
-      aria-label="Show sidebar"
-      title="Show sidebar"
-    />
-    <section v-for="(tool, index) in openTools" :key="tool" :aria-label="`${tool} panel`" class="flex w-64 shrink-0 flex-col border-r bg-neutral-50">
-      <header class="flex min-h-12 items-center justify-between gap-2 border-b p-2" :class="{ 'pl-12': sidebarState === 'hidden' && index === 0 }">
+        </div>
+        <div v-if="sidebarState === 'expanded'" class="flex min-w-0 flex-1">
+    <section v-for="tool in openTools" :key="tool" :aria-label="`${tool} panel`" class="flex w-64 shrink-0 flex-col border-r bg-neutral-50">
+      <header class="flex min-h-12 items-center justify-between gap-2 border-b p-2">
         <h2 class="text-sm font-medium">{{ tool }}</h2>
         <Toggle
           :model-value="pinnedTools.includes(tool)"
@@ -91,6 +89,15 @@ async function cycleSidebar() {
         </Toggle>
       </header>
     </section>
+        </div>
+      </div>
+    </Sidebar>
+    <SidebarTrigger
+      v-if="sidebarState === 'hidden'"
+      class="fixed left-2 top-2 z-40 size-8 bg-sidebar"
+      aria-label="Show sidebar"
+      title="Show sidebar"
+    />
     <SidebarInset class="min-h-0 min-w-0">
       <section
         v-if="isDevelopment"
