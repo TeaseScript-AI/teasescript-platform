@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
 import { onClickOutside } from "@vueuse/core";
-import { FlaskConical, Settings, Pin, ScanLine, Columns2 } from "@lucide/vue";
+import { FlaskConical, Settings, Pin, ScanLine, PanelLeft, ChevronDown } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
@@ -43,7 +43,12 @@ function clickMenuSpace(event: MouseEvent) {
   clickPreview.value = clickPreview.value !== true;
 }
 type Tool = "Visual Lab" | "Layout Debug";
-const toolPanelSizes = { Small: 18, Medium: 24, Large: 32 } as const;
+const toolPanelSizes = {
+  Small: { width: 14, abbreviation: "S" },
+  Medium: { width: 18, abbreviation: "M" },
+  Large: { width: 24, abbreviation: "L" },
+  "Extra Large": { width: 32, abbreviation: "XL" },
+} as const;
 const toolSizes = ref<Record<Tool, keyof typeof toolPanelSizes>>({
   "Visual Lab": "Medium",
   "Layout Debug": "Medium",
@@ -54,7 +59,7 @@ const openTools = computed(() => temporaryTool.value
   ? [...pinnedTools.value, temporaryTool.value] : pinnedTools.value);
 
 const toolColumnsWidth = computed(() => openTools.value.reduce(
-  (width, tool) => width + toolPanelSizes[toolSizes.value[tool]], 0,
+  (width, tool) => width + toolPanelSizes[toolSizes.value[tool]].width, 0,
 ));
 
 function clickTool(tool: Tool, event: MouseEvent) {
@@ -106,12 +111,12 @@ async function toggleSidebarVisibility() {
       <nav aria-label="Tools" class="p-2">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton tooltip="Visual Lab" :tooltip-when-expanded="labelMode !== 'labels'" title="Visual Lab" aria-label="Visual Lab" :is-active="openTools.includes('Visual Lab')" @click="clickTool('Visual Lab', $event)" @dblclick="setPinned('Visual Lab', !pinnedTools.includes('Visual Lab'))">
+            <SidebarMenuButton tooltip="Visual Lab" :tooltip-when-expanded="labelMode !== 'labels'" tooltip-content-class="phase2c-tool-tooltip" aria-label="Visual Lab" :is-active="openTools.includes('Visual Lab')" @click="clickTool('Visual Lab', $event)" @dblclick="setPinned('Visual Lab', !pinnedTools.includes('Visual Lab'))">
               <FlaskConical /><span data-launcher-label>Visual Lab</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
-            <SidebarMenuButton tooltip="Layout Debug" :tooltip-when-expanded="labelMode !== 'labels'" title="Layout Debug" aria-label="Layout Debug" :is-active="openTools.includes('Layout Debug')" @click="clickTool('Layout Debug', $event)" @dblclick="setPinned('Layout Debug', !pinnedTools.includes('Layout Debug'))">
+            <SidebarMenuButton tooltip="Layout Debug" :tooltip-when-expanded="labelMode !== 'labels'" tooltip-content-class="phase2c-tool-tooltip" aria-label="Layout Debug" :is-active="openTools.includes('Layout Debug')" @click="clickTool('Layout Debug', $event)" @dblclick="setPinned('Layout Debug', !pinnedTools.includes('Layout Debug'))">
               <ScanLine /><span data-launcher-label>Layout Debug</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -148,24 +153,33 @@ async function toggleSidebarVisibility() {
         </div>
         </div>
         <div v-if="sidebarVisible" class="flex min-w-0 flex-1">
-    <section v-for="tool in openTools" :key="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="flex shrink-0 flex-col border-r bg-neutral-50">
+    <section v-for="tool in openTools" :key="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]].width}rem` }" class="flex shrink-0 flex-col border-r bg-neutral-50">
       <header class="flex min-h-12 items-center justify-between gap-2 border-b p-2">
         <h2 class="text-sm font-medium">{{ tool }}</h2>
         <div class="flex shrink-0 items-center gap-1">
-          <DropdownMenu>
-            <DropdownMenuTrigger as-child>
-              <Button variant="ghost" size="icon" class="size-8" :aria-label="`Panel size for ${tool}`" title="Panel size">
-                <Columns2 class="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuRadioGroup v-model="toolSizes[tool]" aria-label="Panel size">
-                <DropdownMenuRadioItem v-for="(width, size) in toolPanelSizes" :key="size" :value="size">
-                  {{ size }} · {{ width }}rem
-                </DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <span class="inline-flex">
+                <DropdownMenu>
+                  <DropdownMenuTrigger as-child>
+                    <Button variant="ghost" size="sm" class="h-8 gap-1 px-2" :aria-label="`Panel size for ${tool}: ${toolSizes[tool]}`">
+                      <PanelLeft class="size-4" />
+                      <span class="text-xs">{{ toolPanelSizes[toolSizes[tool]].abbreviation }}</span>
+                      <ChevronDown class="size-3" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuRadioGroup v-model="toolSizes[tool]" aria-label="Panel size">
+                      <DropdownMenuRadioItem v-for="(option, size) in toolPanelSizes" :key="size" :value="size">
+                        {{ size }} — {{ option.width }}rem
+                      </DropdownMenuRadioItem>
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>Panel size: {{ toolSizes[tool] }}</TooltipContent>
+          </Tooltip>
         <Toggle
           :model-value="pinnedTools.includes(tool)"
           :aria-label="`Pin ${tool}`"

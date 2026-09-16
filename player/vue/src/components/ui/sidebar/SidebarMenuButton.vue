@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Component } from "vue"
+import type { Component, HTMLAttributes } from "vue"
 import type { SidebarMenuButtonProps } from "./SidebarMenuButtonChild.vue"
 import { reactiveOmit } from "@vueuse/core"
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue"
@@ -15,6 +15,7 @@ defineOptions({
 const props = withDefaults(defineProps<SidebarMenuButtonProps & {
   tooltip?: string | Component
   tooltipWhenExpanded?: boolean
+  tooltipContentClass?: HTMLAttributes["class"]
 }>(), {
   as: "button",
   variant: "default",
@@ -23,7 +24,7 @@ const props = withDefaults(defineProps<SidebarMenuButtonProps & {
 
 const { isMobile, state } = useSidebar()
 
-const delegatedProps = reactiveOmit(props, "tooltip", "tooltipWhenExpanded")
+const delegatedProps = reactiveOmit(props, "tooltip", "tooltipWhenExpanded", "tooltipContentClass")
 </script>
 
 <template>
@@ -38,6 +39,7 @@ const delegatedProps = reactiveOmit(props, "tooltip", "tooltipWhenExpanded")
       </SidebarMenuButtonChild>
     </TooltipTrigger>
     <TooltipContent
+      :class="tooltipContentClass"
       side="right"
       align="center"
       :hidden="(!tooltipWhenExpanded && state !== 'collapsed') || isMobile"
