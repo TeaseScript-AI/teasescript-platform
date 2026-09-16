@@ -15,7 +15,9 @@
     "tools/local-agent/patch-publication-cleanup-comment.cjs",
     "tools/local-agent/patch-publication-request.cjs",
     "tools/local-agent/source-bundle-artifact-request.cjs",
-    "tools/local-agent/test-source-bundle-artifact-request.cjs"
+    "tools/local-agent/test-source-bundle-artifact-request.cjs",
+    "player/vue/phase2c/index.html",
+    "player/vue/src/phase2c/main.ts"
   ],
   "project": [
     "src/**/*.ts",
@@ -27,6 +29,15 @@
     "tools/oxlint/**/*.ts",
     "tools/local-agent/**/*.{cjs,mjs}"
   ],
-  "ignoreDependencies": ["@vue/tsconfig", "reka-ui", "shadcn-vue"],
-  "include": ["files", "exports", "dependencies", "unlisted", "unresolved"]
+  "ignoreDependencies": [
+    "@vue/tsconfig",
+    "shadcn-vue"
+  ],
+  "include": [
+    "files",
+    "exports",
+    "dependencies",
+    "unlisted",
+    "unresolved"
+  ]
 }
