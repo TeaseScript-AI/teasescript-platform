@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { nextTick, ref } from "vue";
-import { FlaskConical, ScanLine } from "@lucide/vue";
+import { computed, nextTick, ref } from "vue";
+import { FlaskConical, Pin, ScanLine } from "@lucide/vue";
+import { Toggle } from "@/components/ui/toggle";
 import SidebarMenu from "@/components/ui/sidebar/SidebarMenu.vue";
 import SidebarMenuItem from "@/components/ui/sidebar/SidebarMenuItem.vue";
 import SidebarMenuButton from "@/components/ui/sidebar/SidebarMenuButton.vue";
@@ -12,6 +13,26 @@ import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
 
 const isDevelopment = import.meta.env.DEV;
 const sidebarState = ref<"hidden" | "icon" | "expanded">("expanded");
+
+type Tool = "Visual Lab" | "Layout Debug";
+const pinnedTools = ref<Tool[]>([]);
+const temporaryTool = ref<Tool | null>(null);
+const openTools = computed(() => temporaryTool.value
+  ? [...pinnedTools.value, temporaryTool.value] : pinnedTools.value);
+
+function openTool(tool: Tool) {
+  if (!pinnedTools.value.includes(tool)) temporaryTool.value = tool;
+}
+
+function setPinned(tool: Tool, pinned: boolean) {
+  if (pinned) {
+    pinnedTools.value.push(tool);
+    if (temporaryTool.value === tool) temporaryTool.value = null;
+  } else {
+    pinnedTools.value = pinnedTools.value.filter(item => item !== tool);
+    temporaryTool.value = tool;
+  }
+}
 
 async function cycleSidebar() {
   const keepTriggerFocus = document.activeElement?.matches("[data-sidebar=trigger]");
@@ -37,12 +58,12 @@ async function cycleSidebar() {
       <nav v-if="sidebarState !== 'hidden'" aria-label="Tools" class="p-2">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton tooltip="Visual Lab" aria-label="Visual Lab">
+            <SidebarMenuButton tooltip="Visual Lab" aria-label="Visual Lab" :is-active="openTools.includes('Visual Lab')" @click="openTool('Visual Lab')">
               <FlaskConical /><span>Visual Lab</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
-            <SidebarMenuButton tooltip="Layout Debug" aria-label="Layout Debug">
+            <SidebarMenuButton tooltip="Layout Debug" aria-label="Layout Debug" :is-active="openTools.includes('Layout Debug')" @click="openTool('Layout Debug')">
               <ScanLine /><span>Layout Debug</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -55,6 +76,21 @@ async function cycleSidebar() {
       aria-label="Show sidebar"
       title="Show sidebar"
     />
+    <section v-for="(tool, index) in openTools" :key="tool" :aria-label="`${tool} panel`" class="flex w-64 shrink-0 flex-col border-r bg-neutral-50">
+      <header class="flex min-h-12 items-center justify-between gap-2 border-b p-2" :class="{ 'pl-12': sidebarState === 'hidden' && index === 0 }">
+        <h2 class="text-sm font-medium">{{ tool }}</h2>
+        <Toggle
+          :model-value="pinnedTools.includes(tool)"
+          :aria-label="`Pin ${tool}`"
+          :title="pinnedTools.includes(tool) ? `Unpin ${tool}` : `Pin ${tool}`"
+          size="sm"
+          class="shrink-0 data-[state=on]:bg-neutral-300"
+          @update:model-value="setPinned(tool, $event)"
+        >
+          <Pin />
+        </Toggle>
+      </header>
+    </section>
     <SidebarInset class="min-h-0 min-w-0">
       <section
         v-if="isDevelopment"
