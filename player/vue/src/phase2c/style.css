@@ -44,7 +44,12 @@
 .phase2c-sidebar {
   --launcher-width: var(--sidebar-width-icon);
   --launcher-space: var(--sidebar-width-icon);
-  --sidebar-width: calc(var(--launcher-space) + var(--tool-columns-width) + 1px) !important;
+  /* Protect 380px of transcript text plus this fixture's margins, padding and borders. */
+  --player-reserve: calc(380px + 6rem + 4px);
+  --sidebar-width: max(calc(var(--launcher-space) + 1px), min(
+    calc(var(--launcher-space) + var(--tool-columns-width) + 1px),
+    calc(100dvw - var(--player-reserve))
+  )) !important;
 }
 
 .phase2c-sidebar[data-labels-visible="true"] {
