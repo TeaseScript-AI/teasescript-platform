@@ -47,7 +47,7 @@
 
 .phase2c-sidebar[data-labels="expanded"],
 .phase2c-sidebar[data-click-preview="true"],
-.phase2c-sidebar:not([data-click-preview="false"]):has([data-launcher] :focus-visible) {
+.phase2c-sidebar:not([data-click-preview="false"]):has([data-launcher] :focus-visible:not([data-settings-trigger])) {
   --launcher-width: 12rem;
 }
 
@@ -62,7 +62,7 @@
 
 .phase2c-sidebar[data-labels="expanded"] [data-launcher-label],
 .phase2c-sidebar[data-click-preview="true"] [data-launcher-label],
-.phase2c-sidebar:not([data-click-preview="false"]):has([data-launcher] :focus-visible) [data-launcher-label] {
+.phase2c-sidebar:not([data-click-preview="false"]):has([data-launcher] :focus-visible:not([data-settings-trigger])) [data-launcher-label] {
   display: inline;
 }
 
