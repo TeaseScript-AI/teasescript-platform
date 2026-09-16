@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
 import { onClickOutside } from "@vueuse/core";
-import { FlaskConical, Settings, Pin, ScanLine, ChevronDown } from "@lucide/vue";
+import { FlaskConical, Settings, Pin, ScanLine, ChevronDown, Ellipsis } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
@@ -29,8 +29,6 @@ import DropdownMenuContent from "@/components/ui/dropdown-menu/DropdownMenuConte
 import DropdownMenuRadioGroup from "@/components/ui/dropdown-menu/DropdownMenuRadioGroup.vue";
 import DropdownMenuRadioItem from "@/components/ui/dropdown-menu/DropdownMenuRadioItem.vue";
 
-import DropdownMenuLabel from "@/components/ui/dropdown-menu/DropdownMenuLabel.vue";
-import DropdownMenuSeparator from "@/components/ui/dropdown-menu/DropdownMenuSeparator.vue";
 import DropdownMenuSub from "@/components/ui/dropdown-menu/DropdownMenuSub.vue";
 import DropdownMenuSubTrigger from "@/components/ui/dropdown-menu/DropdownMenuSubTrigger.vue";
 import DropdownMenuSubContent from "@/components/ui/dropdown-menu/DropdownMenuSubContent.vue";
@@ -159,31 +157,38 @@ async function toggleSidebarVisibility() {
         </div>
         </div>
         <div v-if="sidebarVisible" class="flex min-w-0 flex-1">
-    <section v-for="tool in openTools" :key="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="flex shrink-0 flex-col border-r bg-neutral-50">
+    <section v-for="tool in openTools" :key="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="phase2c-tool-panel flex shrink-0 flex-col border-r bg-neutral-50">
       <header class="flex min-h-12 items-center justify-between gap-2 border-b p-2">
         <h2 class="text-sm font-medium">{{ tool }}</h2>
         <div class="flex shrink-0 items-center gap-1">
-          <DropdownMenu>
-            <DropdownMenuTrigger as-child>
-              <Button variant="ghost" size="sm" class="h-8 gap-1 px-2" :aria-label="`Panel menu for ${tool}`">
-                Panel <ChevronDown class="size-3" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Panel</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>Width</DropdownMenuSubTrigger>
-                <DropdownMenuSubContent>
-                  <DropdownMenuRadioGroup v-model="toolSizes[tool]" aria-label="Panel width">
-                    <DropdownMenuRadioItem v-for="size in Object.keys(toolPanelSizes)" :key="size" :value="size">
-                      {{ size }}
-                    </DropdownMenuRadioItem>
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <span class="inline-flex">
+                <DropdownMenu>
+                  <DropdownMenuTrigger as-child>
+                    <Button variant="ghost" size="sm" class="panel-settings-trigger group h-8 gap-1 px-2 hover:bg-neutral-200 active:bg-neutral-300 data-[state=open]:bg-neutral-200" aria-label="Panel settings">
+                      <span class="panel-settings-expanded">Panel settings</span>
+                      <ChevronDown class="panel-settings-expanded size-3 transition-transform group-data-[state=open]:rotate-180" />
+                      <Ellipsis class="panel-settings-compact size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>Width</DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent>
+                        <DropdownMenuRadioGroup v-model="toolSizes[tool]" aria-label="Panel width">
+                          <DropdownMenuRadioItem v-for="size in Object.keys(toolPanelSizes)" :key="size" :value="size">
+                            {{ size }}
+                          </DropdownMenuRadioItem>
+                        </DropdownMenuRadioGroup>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>Panel settings</TooltipContent>
+          </Tooltip>
         <Toggle
           :model-value="pinnedTools.includes(tool)"
           :aria-label="`Pin ${tool}`"

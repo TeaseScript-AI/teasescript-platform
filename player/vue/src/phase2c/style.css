@@ -89,3 +89,13 @@
     display: none;
   }
 }
+
+.phase2c-tool-panel { container: tool-panel / inline-size; }
+.panel-settings-trigger { width: 2rem; }
+.panel-settings-expanded { display: none; }
+
+@container tool-panel (min-width: 20rem) {
+  .panel-settings-trigger { width: auto; }
+  .panel-settings-expanded { display: inline-flex; }
+  .panel-settings-compact { display: none; }
+}
