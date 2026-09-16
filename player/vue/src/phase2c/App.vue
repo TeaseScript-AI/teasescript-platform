@@ -1,0 +1,66 @@
+<script setup lang="ts">
+import { ref } from "vue";
+import Sidebar from "@/components/ui/sidebar/Sidebar.vue";
+import SidebarInset from "@/components/ui/sidebar/SidebarInset.vue";
+import SidebarProvider from "@/components/ui/sidebar/SidebarProvider.vue";
+import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
+
+const isDevelopment = import.meta.env.DEV;
+const sidebarState = ref<"hidden" | "icon" | "expanded">("expanded");
+
+function cycleSidebar() {
+  sidebarState.value = sidebarState.value === "expanded" ? "icon"
+    : sidebarState.value === "icon" ? "hidden" : "expanded";
+}
+</script>
+
+<template>
+  <SidebarProvider class="h-dvh min-h-0 overflow-hidden" :open="sidebarState === 'expanded'" :responsive="false" @update:open="cycleSidebar">
+    <Sidebar variant="sidebar" :collapsible="sidebarState === 'hidden' ? 'offcanvas' : 'icon'" />
+    <SidebarTrigger
+      class="fixed left-1.5 top-1.5 z-40 size-9 bg-sidebar"
+      :aria-label="`Sidebar: ${sidebarState}. Switch to ${sidebarState === 'expanded' ? 'icon-only' : sidebarState === 'icon' ? 'hidden' : 'expanded'}`"
+      :title="`Sidebar: ${sidebarState} — click to cycle`"
+    />
+    <SidebarInset class="min-h-0 min-w-0">
+      <section
+        v-if="isDevelopment"
+        aria-label="Sidebar development controls"
+        class="fixed right-4 top-4 z-40 flex max-w-[calc(100vw-5rem)] flex-wrap items-end gap-3 rounded-lg border bg-background/95 p-3 text-sm shadow-sm"
+      >
+        <div class="basis-full text-xs font-medium text-muted-foreground">
+          Phase 2C · Sidebar preview
+        </div>
+        <label class="flex min-w-0 flex-col gap-1">
+          Sidebar state
+          <select v-model="sidebarState" class="h-9 max-w-full rounded-md border bg-background px-2">
+            <option value="hidden">Hidden / off-canvas</option>
+            <option value="icon">Icon-only</option>
+            <option value="expanded">Expanded</option>
+          </select>
+        </label>
+      </section>
+      <div v-if="isDevelopment" class="m-4 flex min-h-0 flex-1 flex-col gap-4 border border-dashed border-neutral-400 p-4">
+        <section class="shrink-0">
+          <h2 class="mb-2 text-sm font-medium">Stage · 16:9 · max-height: 40% of viewport</h2>
+          <div class="mx-auto flex aspect-video w-[min(100%,71.111dvh)] items-center justify-center border-2 border-neutral-400 bg-neutral-100 text-sm text-neutral-500">
+            Media placeholder
+          </div>
+        </section>
+
+        <section class="mx-auto flex min-h-0 w-full max-w-[920px] flex-1 flex-col gap-3 border-x border-dashed border-neutral-400 px-4">
+          <h2 class="shrink-0 text-sm font-medium">Transcript · max-width: 920px</h2>
+          <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+          <p class="text-sm leading-relaxed"><strong>Mistress:</strong> Take a moment to look around. This is a simple test scene.</p>
+          <p class="ml-auto max-w-[75%] rounded-lg border border-neutral-300 bg-neutral-100 px-4 py-3 text-sm">I am ready. What happens next?</p>
+          <p class="text-sm leading-relaxed"><strong>Mistress:</strong> This deliberately longer message helps us see how the conversation wraps when the sidebar opens, closes, or changes its presentation, and how much room remains for the scene and your response.</p>
+          </div>
+          <div class="flex min-w-0 shrink-0 gap-2 pt-2">
+            <input aria-label="Test response" placeholder="Type your response..." class="min-w-0 flex-1 rounded border border-neutral-400 bg-white px-3 py-2 text-sm" />
+            <button type="button" class="shrink-0 rounded border border-neutral-400 bg-neutral-100 px-4 py-2 text-sm">Send</button>
+          </div>
+        </section>
+      </div>
+    </SidebarInset>
+  </SidebarProvider>
+</template>
