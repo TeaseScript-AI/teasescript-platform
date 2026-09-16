@@ -90,3 +90,8 @@
 
 .tool-panel-drag-placeholder { opacity: 0.35; }
 .tool-panel-dragging { opacity: 0.85; pointer-events: none; }
+
+/* Sortable's body-level drag copy lets the pointer hit underlying controls. */
+body:has(> .tool-panel-dragging),
+body:has(> .tool-panel-dragging) * { cursor: grabbing !important; }
+body:has(> .tool-panel-dragging) [data-slot="tooltip-content"] { visibility: hidden; }
