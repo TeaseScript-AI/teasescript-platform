@@ -303,6 +303,7 @@ async function toggleSidebarVisibility() {
   <SidebarProvider
     :style="{ '--tool-columns-width': `${toolColumnsWidth}rem` }"
     :data-labels="labelMode"
+    :data-tools-open="openTools.length > 0"
     :data-labels-visible="labelsVisible"
     class="phase2c-sidebar h-dvh min-h-0 overflow-hidden"
     :open="sidebarVisible" :responsive="false" @update:open="toggleSidebarVisibility"

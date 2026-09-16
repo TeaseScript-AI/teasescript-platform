@@ -55,7 +55,7 @@
 /* Reserve the final Player layout immediately; only the visible sidebar transitions. */
 .phase2c-sidebar [data-slot="sidebar-gap"] { transition: none; }
 
-.phase2c-sidebar [data-slot="sidebar"][data-state="expanded"] > .fixed {
+.phase2c-sidebar[data-tools-open="true"] [data-slot="sidebar"][data-state="expanded"] > .fixed {
   box-shadow: 6px 0 14px -6px rgb(0 0 0 / 18%);
 }
 
