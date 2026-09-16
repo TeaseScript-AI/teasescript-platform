@@ -84,3 +84,6 @@
   pointer-events: none;
 }
 [data-compact-settings="true"] .panel-settings-compact { display: block; }
+
+.tool-panel-drag-placeholder { opacity: 0.35; }
+.tool-panel-dragging { opacity: 0.85; pointer-events: none; }

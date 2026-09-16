@@ -40,6 +40,15 @@ mask colours remain separate presentation data.
 
 ## Demo-only behavior
 
+The isolated Phase 2C Tool Panel strip uses SortableJS directly for handle-based mouse/touch reordering and edge
+autoscroll. A local lifecycle binding restores Sortable's DOM move before updating Vue's authoritative visual-order
+list; pin membership and per-tool widths remain separate. A Vue wrapper would add another maintenance/version layer
+for little reduction in this single-list binding. Native HTML drag-and-drop has weaker touch support; a Pointer Events
+implementation would require custom sorting and autoscroll. Reka menu actions provide the keyboard/non-drag alternative.
+SortableJS adds shipped browser code and a normal dependency update/audit obligation; its development-only type package
+adds no runtime code. Both are locked in the package manifest/lockfile. The integration introduces no network service,
+runtime data access, or new host boundary. Keep sorting and scroll behavior covered when updating the dependency.
+
 The local playground server may select a supported image from `player/demo-media/` when the Player opens. Visual Lab,
 Layout Debug, Runtime Session, their fixture content, local tuning/inspection controls, and the demo-media endpoint are
 development-only presentation tools, not Standard Library, runtime, package, or host APIs.
