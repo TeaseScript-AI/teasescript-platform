@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, provide, ref, watch, type ObjectDirective } from "vue";
-import { onClickOutside, useStorage } from "@vueuse/core";
+import { onClickOutside, useResizeObserver, useStorage } from "@vueuse/core";
 import { FlaskConical, Settings, Pin, ScanLine, ChevronDown, Ellipsis, Activity, GripVertical, SlidersHorizontal } from "@lucide/vue";
 import Sortable from "sortablejs";
 import { Button } from "@/components/ui/button";
@@ -97,6 +97,82 @@ const toolSizes = ref<Record<Tool, keyof typeof toolPanelSizes>>({
   "Playback Diagnostics": "Medium",
   "Media Playback Configuration": "Medium",
 });
+// The ruler shares menu typography/chrome; bounds follow the actual labels.
+const menuRuler = ref<HTMLElement | null>(null);
+const menuWidth = ref<number | null>(null);
+const menuBounds = ref({ min: 112, max: 320 });
+useResizeObserver(menuRuler, () => {
+  const ruler = menuRuler.value;
+  if (!ruler) return;
+  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+  menuBounds.value = {
+    min: ruler.lastElementChild!.getBoundingClientRect().width,
+    max: Math.min(ruler.getBoundingClientRect().width, 24 * rem),
+  };
+});
+const permanentMenuWidth = computed(() => Math.max(menuBounds.value.min,
+  Math.min(menuWidth.value ?? menuBounds.value.max, menuBounds.value.max)));
+type PanelSize = keyof typeof toolPanelSizes;
+const panelSizeNames = Object.keys(toolPanelSizes) as PanelSize[];
+const resizing = ref<"menu" | Tool | null>(null);
+let stopResize: (() => void) | undefined;
+function startResize(event: PointerEvent, tool?: Tool) {
+  if (event.button !== 0 || !event.isPrimary) return;
+  event.preventDefault();
+  stopResize?.();
+  const edge = event.currentTarget as HTMLElement;
+  const startX = event.clientX;
+  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+  const initialSize = tool ? toolSizes.value[tool] : null;
+  const initialWidth = tool ? toolPanelSizes[toolSizes.value[tool]] * rem : permanentMenuWidth.value;
+  resizing.value = tool ?? "menu";
+  edge.setPointerCapture(event.pointerId);
+  const move = (moveEvent: PointerEvent) => {
+    if (moveEvent.pointerId !== event.pointerId) return;
+    const width = initialWidth + moveEvent.clientX - startX;
+    if (tool) {
+      toolSizes.value[tool] = panelSizeNames.reduce((nearest, size) =>
+        Math.abs(toolPanelSizes[size] * rem - width) < Math.abs(toolPanelSizes[nearest] * rem - width) ? size : nearest);
+    } else menuWidth.value = Math.max(menuBounds.value.min, Math.min(menuBounds.value.max, width));
+  };
+  const cancel = () => {
+    if (tool && initialSize) toolSizes.value[tool] = initialSize;
+    else menuWidth.value = initialWidth;
+    finish();
+  };
+  const key = (keyEvent: KeyboardEvent) => { if (keyEvent.key === "Escape") cancel(); };
+  const finish = () => {
+    edge.removeEventListener("pointermove", move);
+    edge.removeEventListener("pointerup", finish);
+    edge.removeEventListener("pointercancel", cancel);
+    edge.removeEventListener("lostpointercapture", finish);
+    document.removeEventListener("keydown", key);
+    if (edge.hasPointerCapture(event.pointerId)) edge.releasePointerCapture(event.pointerId);
+    resizing.value = null;
+    stopResize = undefined;
+  };
+  edge.addEventListener("pointermove", move);
+  edge.addEventListener("pointerup", finish);
+  edge.addEventListener("pointercancel", cancel);
+  edge.addEventListener("lostpointercapture", finish);
+  document.addEventListener("keydown", key);
+  stopResize = finish;
+}
+onBeforeUnmount(() => stopResize?.());
+function resizeMenuKey(event: KeyboardEvent) {
+  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  event.preventDefault();
+  menuWidth.value = event.key === "Home" ? menuBounds.value.min : event.key === "End" ? menuBounds.value.max
+    : Math.max(menuBounds.value.min, Math.min(menuBounds.value.max, permanentMenuWidth.value + (event.key === "ArrowRight" ? 16 : -16)));
+}
+function resizePanelKey(event: KeyboardEvent, tool: Tool) {
+  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  event.preventDefault();
+  const index = event.key === "Home" ? 0 : event.key === "End" ? panelSizeNames.length - 1
+    : panelSizeNames.indexOf(toolSizes.value[tool]) + (event.key === "ArrowRight" ? 1 : -1);
+  const size = panelSizeNames[index];
+  if (size) toolSizes.value[tool] = size;
+}
 const pinnedTools = ref<Tool[]>([]);
 const temporaryTool = ref<Tool | null>(null);
 // Visual order is independent of which tools are pinned.
@@ -230,8 +306,10 @@ watch(toolStrip, (strip, _, onCleanup) => {
     forceAutoScrollFallback: true,
     onStart(event) {
       originalNextSibling = event.item.nextSibling;
+      strip.dataset.reordering = "true";
     },
     onEnd(event) {
+      delete strip.dataset.reordering;
       // Undo Sortable's DOM move before Vue applies the authoritative keyed-list update.
       strip.insertBefore(event.item, originalNextSibling);
       if (event.oldIndex === undefined || event.newIndex === undefined) return;
@@ -301,13 +379,18 @@ async function toggleSidebarVisibility() {
 
 <template>
   <SidebarProvider
-    :style="{ '--tool-columns-width': `${toolColumnsWidth}rem` }"
+    :style="{ '--tool-columns-width': `${toolColumnsWidth}rem`, '--permanent-menu-width': `${permanentMenuWidth}px` }"
+    :data-resizing="resizing !== null"
     :data-labels="labelMode"
     :data-tools-open="openTools.length > 0"
     :data-labels-visible="labelsVisible"
-    class="phase2c-sidebar h-dvh min-h-0 overflow-hidden"
+    class="phase2c-sidebar relative h-dvh min-h-0 overflow-hidden"
     :open="sidebarVisible" :responsive="false" @update:open="toggleSidebarVisibility"
   >
+    <div ref="menuRuler" class="menu-width-ruler" aria-hidden="true">
+      <span v-for="tool in launcherTools" :key="tool.name">{{ tool.name }}</span>
+      <span>Settings</span>
+    </div>
     <Sidebar variant="sidebar" collapsible="offcanvas">
       <div class="relative flex h-full min-h-0">
         <div v-if="sidebarVisible" data-launcher-space class="relative shrink-0">
@@ -352,9 +435,12 @@ async function toggleSidebarVisibility() {
         </Dialog>
       </div>
         </div>
+        <div v-if="labelMode === 'labels'" class="resize-edge menu-resize-edge" role="separator" tabindex="0" aria-label="Menu Sidebar width" aria-orientation="vertical"
+          :aria-valuemin="Math.round(menuBounds.min)" :aria-valuemax="Math.round(menuBounds.max)" :aria-valuenow="Math.round(permanentMenuWidth)"
+          @pointerdown="startResize($event)" @keydown="resizeMenuKey" />
         </div>
         <div v-if="sidebarVisible" ref="toolStrip" role="region" aria-label="Tool Panels" :tabindex="openTools.length ? 0 : undefined" class="tool-panel-strip flex min-w-0 flex-1 overflow-x-auto overscroll-x-contain focus-visible:outline-2 focus-visible:-outline-offset-2">
-    <section v-for="tool in openTools" :key="tool" :data-tool="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="flex shrink-0 flex-col border-r bg-neutral-50">
+    <section v-for="tool in openTools" :key="tool" :data-tool="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="relative flex min-h-0 shrink-0 flex-col border-r bg-neutral-50">
       <header v-fit-panel-settings="tool" :data-compact-settings="compactPanelSettings[tool]" class="flex min-h-12 items-center justify-between gap-2 border-b p-2">
         <span data-panel-drag class="inline-flex shrink-0 cursor-grab touch-none select-none items-center self-stretch rounded-sm px-0.5 hover:bg-neutral-200 active:cursor-grabbing" aria-hidden="true" title="Drag to reorder">
           <GripVertical class="size-4" />
@@ -427,6 +513,12 @@ async function toggleSidebarVisibility() {
         </Tooltip>
         </div>
       </header>
+      <div data-tool-body class="min-h-0 flex-1 overflow-y-auto" />
+      <div class="resize-edge" :data-panel-resize="tool" role="separator" tabindex="0" aria-orientation="vertical" :aria-label="`${tool} width`"
+        :aria-valuemin="toolPanelSizes.Small" :aria-valuemax="toolPanelSizes['Extra Large']" :aria-valuenow="toolPanelSizes[toolSizes[tool]]" :aria-valuetext="toolSizes[tool]"
+        @pointerdown="startResize($event, tool)" @keydown="resizePanelKey($event, tool)">
+        <span v-if="resizing === tool" class="resize-size-label">{{ toolSizes[tool] }}</span>
+      </div>
     </section>
         </div>
       </div>
