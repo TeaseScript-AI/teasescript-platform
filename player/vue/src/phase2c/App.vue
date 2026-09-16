@@ -75,7 +75,13 @@ function clickMenuSpace(event: MouseEvent) {
   if (labelMode.value !== "preview" || (event.target as Element).closest("button, a, input, select, textarea, [role=button]")) return;
   clickPreview.value = clickPreview.value !== true;
 }
-type Tool = "Visual Lab" | "Layout Debug" | "Playback Diagnostics";
+const tools = [
+  { name: "Visual Lab", icon: FlaskConical },
+  { name: "Layout Debug", icon: ScanLine },
+  { name: "Playback Diagnostics", icon: Activity },
+] as const;
+type Tool = typeof tools[number]["name"];
+const launcherTools = tools.filter(tool => isDevelopment || tool.name !== "Playback Diagnostics");
 const toolPanelSizes = {
   Small: 14,
   Medium: 18,
@@ -173,7 +179,7 @@ async function toggleSidebarVisibility() {
     <Sidebar variant="sidebar" collapsible="offcanvas">
       <div class="relative flex h-full min-h-0">
         <div v-if="sidebarVisible" data-launcher-space class="relative shrink-0">
-        <div v-if="sidebarVisible" ref="menuSidebar" data-launcher @click="clickMenuSpace" @pointerenter="updateHoverPreview" @pointermove="updateHoverPreview" @pointerleave="leaveMenu" @focusin="updateFocusPreview" @focusout="updateFocusPreview" class="relative flex h-full flex-col border-r bg-sidebar">
+        <div ref="menuSidebar" data-launcher @click="clickMenuSpace" @pointerenter="updateHoverPreview" @pointermove="updateHoverPreview" @pointerleave="leaveMenu" @focusin="updateFocusPreview" @focusout="updateFocusPreview" class="relative flex h-full flex-col border-r bg-sidebar">
       <SidebarHeader>
         <SidebarTrigger
           class="size-8"
@@ -183,19 +189,9 @@ async function toggleSidebarVisibility() {
       </SidebarHeader>
       <nav aria-label="Tools" class="p-2">
         <SidebarMenu>
-          <SidebarMenuItem>
-            <MenuSidebarButton label="Visual Lab" :is-active="openTools.includes('Visual Lab')" @click="clickTool('Visual Lab', $event)" @dblclick="setPinned('Visual Lab', !pinnedTools.includes('Visual Lab'))">
-              <FlaskConical />
-            </MenuSidebarButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <MenuSidebarButton label="Layout Debug" :is-active="openTools.includes('Layout Debug')" @click="clickTool('Layout Debug', $event)" @dblclick="setPinned('Layout Debug', !pinnedTools.includes('Layout Debug'))">
-              <ScanLine />
-            </MenuSidebarButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem v-if="isDevelopment">
-            <MenuSidebarButton label="Playback Diagnostics" :is-active="openTools.includes('Playback Diagnostics')" @click="clickTool('Playback Diagnostics', $event)" @dblclick="setPinned('Playback Diagnostics', !pinnedTools.includes('Playback Diagnostics'))">
-              <Activity />
+          <SidebarMenuItem v-for="tool in launcherTools" :key="tool.name">
+            <MenuSidebarButton :label="tool.name" :is-active="openTools.includes(tool.name)" @click="clickTool(tool.name, $event)" @dblclick="setPinned(tool.name, !pinnedTools.includes(tool.name))">
+              <component :is="tool.icon" />
             </MenuSidebarButton>
           </SidebarMenuItem>
         </SidebarMenu>
