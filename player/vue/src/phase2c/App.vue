@@ -131,6 +131,9 @@ useEventListener(window.visualViewport, "scroll", updateViewport);
 const narrow = computed(() => viewport.value.width < 380 + 6 * remSize.value + 4
   + (labelMode.value === "labels" ? permanentMenuWidth.value : 3 * remSize.value)
   + toolPanelSizes.Small * remSize.value + 1);
+// Keep room for one Small panel when possible, without narrowing the menu below its Settings row.
+const narrowMenuWidth = computed(() => Math.min(permanentMenuWidth.value,
+  Math.max(menuBounds.value.min, viewport.value.width * 0.9 - toolPanelSizes.Small * remSize.value - 1)));
 const sidebarVisible = ref(!narrow.value);
 let transitionFocusLabel: string | null = null;
 watch(narrow, (isNarrow) => {
@@ -434,7 +437,7 @@ async function toggleSidebarVisibility() {
   <SidebarProvider
     id="phase2c-shell"
     :data-narrow="narrow"
-    :style="{ '--tool-columns-width': `${toolColumnsWidth}rem`, '--permanent-menu-width': `${permanentMenuWidth}px`, '--usable-width': `${viewport.width}px`, '--usable-height': `${viewport.height}px`, '--viewport-left': `${viewport.left}px`, '--viewport-top': `${viewport.top}px` }"
+    :style="{ '--tool-columns-width': `${toolColumnsWidth}rem`, '--permanent-menu-width': `${permanentMenuWidth}px`, '--narrow-menu-width': `${narrowMenuWidth}px`, '--usable-width': `${viewport.width}px`, '--usable-height': `${viewport.height}px`, '--viewport-left': `${viewport.left}px`, '--viewport-top': `${viewport.top}px` }"
     :data-resizing="resizing !== null"
     :data-labels="labelMode"
     :data-tools-open="openTools.length > 0"
@@ -499,7 +502,7 @@ async function toggleSidebarVisibility() {
         </Dialog>
       </div>
         </div>
-        <div v-if="labelMode === 'labels'" class="resize-edge menu-resize-edge" role="separator" tabindex="0" aria-label="Menu Sidebar width" aria-orientation="vertical"
+        <div v-if="labelMode === 'labels' && !narrow" class="resize-edge menu-resize-edge" role="separator" tabindex="0" aria-label="Menu Sidebar width" aria-orientation="vertical"
           :aria-valuemin="Math.round(menuBounds.min)" :aria-valuemax="Math.round(menuBounds.max)" :aria-valuenow="Math.round(permanentMenuWidth)"
           @pointerdown="startResize($event)" @keydown="resizeMenuKey" />
         </div>

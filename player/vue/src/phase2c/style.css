@@ -140,4 +140,8 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
 .phase2c-sidebar[data-narrow="true"] [data-sidebar="trigger"] { flex-shrink: 0; }
 .phase2c-sidebar[data-narrow="true"] > [data-sidebar="trigger"] { top: calc(var(--viewport-top) + 0.5rem); left: calc(var(--viewport-left) + 0.5rem); }
 .phase2c-sidebar[data-narrow="true"] [data-launcher] { max-width: min(24rem, calc(var(--usable-width) * 0.9)); }
-.phase2c-sidebar[data-narrow="true"][data-labels="labels"] [data-launcher] { max-width: none; }
+/* Narrow only caps presentation; the user-selected wide width remains untouched. */
+.phase2c-sidebar[data-narrow="true"][data-labels="labels"] {
+  --launcher-width: var(--narrow-menu-width);
+  --launcher-space: var(--narrow-menu-width);
+}
