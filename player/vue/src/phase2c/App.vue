@@ -19,24 +19,11 @@ const isDevelopment = import.meta.env.DEV;
 const sidebarVisible = ref(true);
 const showLabels = ref(true);
 const labelMode = ref<"explicit" | "preview">("explicit");
-const launcherHovered = ref(false);
-const launcherFocused = ref(false);
-const labelsRevealed = computed(() => showLabels.value || (
-  isDevelopment && labelMode.value === "preview" && (launcherHovered.value || launcherFocused.value)
-));
-
-function onLauncherFocusOut(event: FocusEvent) {
-  launcherFocused.value = (event.currentTarget as HTMLElement).contains(event.relatedTarget as Node | null);
-}
-
 type Tool = "Visual Lab" | "Layout Debug";
 const pinnedTools = ref<Tool[]>([]);
 const temporaryTool = ref<Tool | null>(null);
 const openTools = computed(() => temporaryTool.value
   ? [...pinnedTools.value, temporaryTool.value] : pinnedTools.value);
-
-const reserveLabels = computed(() => showLabels.value || (openTools.value.length === 0 && labelsRevealed.value));
-const overlayLabels = computed(() => !showLabels.value && openTools.value.length > 0 && labelsRevealed.value);
 
 function clickTool(tool: Tool, event: MouseEvent) {
   // The browser sends two clicks before dblclick; apply the single-click action only once.
@@ -57,8 +44,6 @@ function setPinned(tool: Tool, pinned: boolean) {
 async function toggleSidebarVisibility() {
   const keepTriggerFocus = document.activeElement?.matches("[data-sidebar=trigger]");
   sidebarVisible.value = !sidebarVisible.value;
-  launcherHovered.value = false;
-  launcherFocused.value = false;
   if (keepTriggerFocus) {
     await nextTick();
     document.querySelector<HTMLButtonElement>("[data-sidebar=trigger]")?.focus();
@@ -67,13 +52,18 @@ async function toggleSidebarVisibility() {
 </script>
 
 <template>
-  <SidebarProvider :style="{ '--sidebar-width': `calc(${reserveLabels ? '12rem' : 'var(--sidebar-width-icon)'} + ${openTools.length} * 16rem + 1px)` }" class="h-dvh min-h-0 overflow-hidden" :open="sidebarVisible" :responsive="false" @update:open="toggleSidebarVisibility">
+  <SidebarProvider
+    :style="{ '--tool-columns-width': `${openTools.length * 16}rem` }"
+    :data-labels="showLabels ? 'expanded' : 'compact'"
+    :data-preview="isDevelopment && labelMode === 'preview'"
+    :data-has-tools="openTools.length > 0"
+    class="phase2c-sidebar h-dvh min-h-0 overflow-hidden"
+    :open="sidebarVisible" :responsive="false" @update:open="toggleSidebarVisibility"
+  >
     <Sidebar variant="sidebar" collapsible="offcanvas">
       <div class="relative flex h-full min-h-0 overflow-hidden">
-        <div v-if="sidebarVisible" class="relative shrink-0" :class="reserveLabels ? 'w-48' : 'w-(--sidebar-width-icon)'">
-        <div v-if="sidebarVisible" data-launcher class="relative flex h-full flex-col border-r bg-sidebar" :class="[labelsRevealed ? 'w-48' : 'w-(--sidebar-width-icon)', { 'z-30 shadow-md': overlayLabels }]"
-          @mouseenter="launcherHovered = true" @mouseleave="launcherHovered = false"
-          @focusin="launcherFocused = true" @focusout="onLauncherFocusOut">
+        <div v-if="sidebarVisible" data-launcher-space class="relative shrink-0">
+        <div v-if="sidebarVisible" data-launcher class="relative flex h-full flex-col border-r bg-sidebar">
       <SidebarHeader>
         <SidebarTrigger
           class="size-8"
@@ -85,12 +75,12 @@ async function toggleSidebarVisibility() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton tooltip="Visual Lab" title="Visual Lab" aria-label="Visual Lab" :is-active="openTools.includes('Visual Lab')" @click="clickTool('Visual Lab', $event)" @dblclick="setPinned('Visual Lab', !pinnedTools.includes('Visual Lab'))">
-              <FlaskConical /><span :class="{ 'sr-only': !labelsRevealed }">Visual Lab</span>
+              <FlaskConical /><span data-launcher-label>Visual Lab</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton tooltip="Layout Debug" title="Layout Debug" aria-label="Layout Debug" :is-active="openTools.includes('Layout Debug')" @click="clickTool('Layout Debug', $event)" @dblclick="setPinned('Layout Debug', !pinnedTools.includes('Layout Debug'))">
-              <ScanLine /><span :class="{ 'sr-only': !labelsRevealed }">Layout Debug</span>
+              <ScanLine /><span data-launcher-label>Layout Debug</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
