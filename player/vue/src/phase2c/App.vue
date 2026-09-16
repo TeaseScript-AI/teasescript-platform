@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
-import { FlaskConical, Pin, ScanLine } from "@lucide/vue";
+import { FlaskConical, PanelLeftOpen, PanelLeftClose, Pin, ScanLine } from "@lucide/vue";
+import { Button } from "@/components/ui/button";
+import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
+import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
+import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 import { Toggle } from "@/components/ui/toggle";
 import SidebarMenu from "@/components/ui/sidebar/SidebarMenu.vue";
 import SidebarMenuItem from "@/components/ui/sidebar/SidebarMenuItem.vue";
@@ -12,7 +16,8 @@ import SidebarProvider from "@/components/ui/sidebar/SidebarProvider.vue";
 import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
 
 const isDevelopment = import.meta.env.DEV;
-const sidebarState = ref<"hidden" | "icon" | "expanded">("expanded");
+const sidebarVisible = ref(true);
+const showLabels = ref(true);
 
 type Tool = "Visual Lab" | "Layout Debug";
 const pinnedTools = ref<Tool[]>([]);
@@ -21,7 +26,6 @@ const openTools = computed(() => temporaryTool.value
   ? [...pinnedTools.value, temporaryTool.value] : pinnedTools.value);
 
 function openTool(tool: Tool) {
-  sidebarState.value = "expanded";
   if (!pinnedTools.value.includes(tool)) temporaryTool.value = tool;
 }
 
@@ -35,10 +39,9 @@ function setPinned(tool: Tool, pinned: boolean) {
   }
 }
 
-async function cycleSidebar() {
+async function toggleSidebarVisibility() {
   const keepTriggerFocus = document.activeElement?.matches("[data-sidebar=trigger]");
-  sidebarState.value = sidebarState.value === "expanded" ? "icon"
-    : sidebarState.value === "icon" ? "hidden" : "expanded";
+  sidebarVisible.value = !sidebarVisible.value;
   if (keepTriggerFocus) {
     await nextTick();
     document.querySelector<HTMLButtonElement>("[data-sidebar=trigger]")?.focus();
@@ -47,33 +50,33 @@ async function cycleSidebar() {
 </script>
 
 <template>
-  <SidebarProvider :style="{ '--sidebar-width': `calc(var(--sidebar-width-icon) + ${openTools.length} * 16rem + 1px)` }" class="h-dvh min-h-0 overflow-hidden" :open="sidebarState === 'expanded'" :responsive="false" @update:open="cycleSidebar">
-    <Sidebar variant="sidebar" :collapsible="sidebarState === 'hidden' ? 'offcanvas' : 'icon'">
+  <SidebarProvider :style="{ '--sidebar-width': `calc(12rem + ${openTools.length} * 16rem + 1px)` }" class="h-dvh min-h-0 overflow-hidden" :open="sidebarVisible && showLabels" :responsive="false" @update:open="toggleSidebarVisibility">
+    <Sidebar variant="sidebar" :collapsible="!sidebarVisible ? 'offcanvas' : 'icon'">
       <div class="flex h-full min-h-0 overflow-hidden">
-        <div v-if="sidebarState !== 'hidden'" class="flex w-(--sidebar-width-icon) shrink-0 flex-col border-r">
+        <div v-if="sidebarVisible" class="flex shrink-0 flex-col border-r" :class="showLabels ? 'w-48' : 'w-(--sidebar-width-icon)'">
       <SidebarHeader>
         <SidebarTrigger
           class="size-8"
-          :aria-label="`Sidebar: ${sidebarState}. Switch to ${sidebarState === 'expanded' ? 'icon-only' : 'hidden'}`"
-          :title="`Sidebar: ${sidebarState} — click to cycle`"
+          aria-label="Hide sidebar"
+          title="Hide sidebar"
         />
       </SidebarHeader>
-      <nav aria-label="Tools" class="p-2">
+      <nav aria-label="Tools" class="mt-10 p-2">
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton tooltip="Visual Lab" title="Visual Lab" aria-label="Visual Lab" :is-active="openTools.includes('Visual Lab')" @click="openTool('Visual Lab')">
-              <FlaskConical /><span class="sr-only">Visual Lab</span>
+              <FlaskConical /><span :class="{ 'sr-only': !showLabels }">Visual Lab</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton tooltip="Layout Debug" title="Layout Debug" aria-label="Layout Debug" :is-active="openTools.includes('Layout Debug')" @click="openTool('Layout Debug')">
-              <ScanLine /><span class="sr-only">Layout Debug</span>
+              <ScanLine /><span :class="{ 'sr-only': !showLabels }">Layout Debug</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </nav>
         </div>
-        <div v-if="sidebarState === 'expanded'" class="flex min-w-0 flex-1">
+        <div v-if="sidebarVisible && showLabels" class="flex min-w-0 flex-1">
     <section v-for="tool in openTools" :key="tool" :aria-label="`${tool} panel`" class="flex w-64 shrink-0 flex-col border-r bg-neutral-50">
       <header class="flex min-h-12 items-center justify-between gap-2 border-b p-2">
         <h2 class="text-sm font-medium">{{ tool }}</h2>
@@ -91,9 +94,24 @@ async function cycleSidebar() {
     </section>
         </div>
       </div>
+      <Tooltip v-if="sidebarVisible">
+        <TooltipTrigger as-child>
+          <Button
+            variant="ghost"
+            size="icon"
+            class="absolute right-2 top-12 z-20 size-8"
+            :aria-label="showLabels ? 'Hide labels' : 'Show labels'"
+            @click="showLabels = !showLabels"
+          >
+            <PanelLeftClose v-if="showLabels" />
+            <PanelLeftOpen v-else />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="right">{{ showLabels ? 'Hide labels' : 'Show labels' }}</TooltipContent>
+      </Tooltip>
     </Sidebar>
     <SidebarTrigger
-      v-if="sidebarState === 'hidden'"
+      v-if="!sidebarVisible"
       class="fixed left-2 top-2 z-40 size-8 bg-sidebar"
       aria-label="Show sidebar"
       title="Show sidebar"
@@ -108,11 +126,17 @@ async function cycleSidebar() {
           Phase 2C · Sidebar preview
         </div>
         <label class="flex min-w-0 flex-col gap-1">
-          Sidebar state
-          <select v-model="sidebarState" class="h-9 max-w-full rounded-md border bg-background px-2">
-            <option value="hidden">Hidden / off-canvas</option>
-            <option value="icon">Icon-only</option>
-            <option value="expanded">Expanded</option>
+          Visibility
+          <select v-model="sidebarVisible" class="h-9 rounded-md border bg-background px-2">
+            <option :value="true">Visible</option>
+            <option :value="false">Hidden</option>
+          </select>
+        </label>
+        <label class="flex min-w-0 flex-col gap-1">
+          Labels
+          <select v-model="showLabels" class="h-9 rounded-md border bg-background px-2">
+            <option :value="true">Shown</option>
+            <option :value="false">Icons only</option>
           </select>
         </label>
       </section>
