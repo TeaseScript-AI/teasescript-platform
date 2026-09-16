@@ -104,10 +104,19 @@ const openTools = ref<Tool[]>([]);
 let pendingToolClose: { tool: Tool; timer: ReturnType<typeof setTimeout> } | null = null;
 let lastClosedTool: { tool: Tool; index: number; pinned: boolean } | null = null;
 const toolStrip = ref<HTMLElement | null>(null);
+let revealRequest = 0;
 
 async function revealTool(tool: Tool) {
+  const request = ++revealRequest;
   await nextTick();
   const strip = toolStrip.value;
+  if (!strip) return;
+  // Measure actual overflow after the dock finishes growing, not its intermediate width.
+  const dock = strip.closest('[data-sidebar="sidebar"]')?.parentElement;
+  const widthTransitions = dock?.getAnimations().filter(animation =>
+    animation instanceof CSSTransition && animation.transitionProperty === "width") ?? [];
+  await Promise.allSettled(widthTransitions.map(animation => animation.finished));
+  if (request !== revealRequest || strip !== toolStrip.value) return;
   const panel = strip?.querySelector<HTMLElement>(`[data-tool="${tool}"]`);
   if (!strip || !panel) return;
   const viewport = strip.getBoundingClientRect();
@@ -153,7 +162,7 @@ function clickTool(tool: Tool, event: MouseEvent) {
       pendingToolClose = { tool, timer: setTimeout(() => {
         pendingToolClose = null;
         closeTool(tool);
-      }, 400) };
+      }, 200) };
     }
     return;
   }
