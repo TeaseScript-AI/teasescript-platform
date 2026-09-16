@@ -7,6 +7,7 @@ import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
 import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 import { Toggle } from "@/components/ui/toggle";
+import { DropdownMenuItem } from "reka-ui";
 import SidebarMenu from "@/components/ui/sidebar/SidebarMenu.vue";
 import SidebarMenuItem from "@/components/ui/sidebar/SidebarMenuItem.vue";
 import MenuSidebarButton from "./MenuSidebarButton.vue";
@@ -97,6 +98,22 @@ const pinnedTools = ref<Tool[]>([]);
 const temporaryTool = ref<Tool | null>(null);
 const openTools = computed(() => temporaryTool.value
   ? [...pinnedTools.value, temporaryTool.value] : pinnedTools.value);
+const toolStrip = ref<HTMLElement | null>(null);
+
+async function revealTool(tool: Tool) {
+  await nextTick();
+  const strip = toolStrip.value;
+  const panel = strip?.querySelector<HTMLElement>(`[data-tool="${tool}"]`);
+  if (!strip || !panel) return;
+  const viewport = strip.getBoundingClientRect();
+  const bounds = panel.getBoundingClientRect();
+  // Like native nearest scrolling: leave an already visible (or viewport-spanning) panel alone.
+  if (bounds.left >= viewport.left && bounds.right <= viewport.right
+    || bounds.left <= viewport.left && bounds.right >= viewport.right) return;
+  const offset = bounds.width > strip.clientWidth || bounds.left < viewport.left
+    ? bounds.left - viewport.left : bounds.right - viewport.right;
+  strip.scrollBy({ left: offset, behavior: "instant" });
+}
 
 const toolColumnsWidth = computed(() => openTools.value.reduce(
   (width, tool) => width + toolPanelSizes[toolSizes.value[tool]], 0,
@@ -104,8 +121,13 @@ const toolColumnsWidth = computed(() => openTools.value.reduce(
 
 function clickTool(tool: Tool, event: MouseEvent) {
   // The browser sends two clicks before dblclick; apply the single-click action only once.
-  if (event.detail > 1 || pinnedTools.value.includes(tool)) return;
+  if (event.detail > 1) return;
+  if (pinnedTools.value.includes(tool)) {
+    void revealTool(tool);
+    return;
+  }
   temporaryTool.value = temporaryTool.value === tool ? null : tool;
+  if (temporaryTool.value) void revealTool(tool);
 }
 
 function setPinned(tool: Tool, pinned: boolean) {
@@ -116,6 +138,18 @@ function setPinned(tool: Tool, pinned: boolean) {
     pinnedTools.value = pinnedTools.value.filter(item => item !== tool);
     temporaryTool.value = tool;
   }
+  void revealTool(tool);
+}
+
+function movePinned(tool: Tool, direction: -1 | 1) {
+  const index = pinnedTools.value.indexOf(tool);
+  const destination = index + direction;
+  if (index < 0 || destination < 0 || destination >= pinnedTools.value.length) return;
+  const reordered = [...pinnedTools.value];
+  reordered.splice(index, 1);
+  reordered.splice(destination, 0, tool);
+  pinnedTools.value = reordered;
+  void revealTool(tool);
 }
 
 // Measure intrinsic content, never the current compact/expanded button width.
@@ -221,8 +255,8 @@ async function toggleSidebarVisibility() {
       </div>
         </div>
         </div>
-        <div v-if="sidebarVisible" class="flex min-w-0 flex-1">
-    <section v-for="tool in openTools" :key="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="flex shrink-0 flex-col border-r bg-neutral-50">
+        <div v-if="sidebarVisible" ref="toolStrip" role="region" aria-label="Tool Panels" :tabindex="openTools.length ? 0 : undefined" class="tool-panel-strip flex min-w-0 flex-1 overflow-x-auto overscroll-x-contain focus-visible:outline-2 focus-visible:-outline-offset-2">
+    <section v-for="tool in openTools" :key="tool" :data-tool="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="flex shrink-0 flex-col border-r bg-neutral-50">
       <header v-fit-panel-settings="tool" :data-compact-settings="compactPanelSettings[tool]" class="flex min-h-12 items-center justify-between gap-2 border-b p-2">
         <h2 class="text-sm font-medium">{{ tool }}</h2>
         <div data-panel-controls class="flex shrink-0 items-center gap-1">
@@ -250,6 +284,18 @@ async function toggleSidebarVisibility() {
                         </DropdownMenuRadioGroup>
                       </DropdownMenuSubContent>
                     </DropdownMenuSub>
+                    <template v-if="pinnedTools.includes(tool)">
+                      <DropdownMenuItem
+                        :disabled="pinnedTools.indexOf(tool) === 0"
+                        class="relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+                        @select="movePinned(tool, -1)"
+                      >Move left</DropdownMenuItem>
+                      <DropdownMenuItem
+                        :disabled="pinnedTools.indexOf(tool) === pinnedTools.length - 1"
+                        class="relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+                        @select="movePinned(tool, 1)"
+                      >Move right</DropdownMenuItem>
+                    </template>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </span>
