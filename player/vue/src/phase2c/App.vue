@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, provide, ref, type ObjectDirective } from "vue";
+import { computed, nextTick, provide, ref, watch, type ObjectDirective } from "vue";
 import { onClickOutside, useStorage } from "@vueuse/core";
-import { FlaskConical, Settings, Pin, ScanLine, ChevronDown, Ellipsis, Activity } from "@lucide/vue";
+import { FlaskConical, Settings, Pin, ScanLine, ChevronDown, Ellipsis, Activity, GripVertical } from "@lucide/vue";
+import Sortable from "sortablejs";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
@@ -96,8 +97,9 @@ const toolSizes = ref<Record<Tool, keyof typeof toolPanelSizes>>({
 });
 const pinnedTools = ref<Tool[]>([]);
 const temporaryTool = ref<Tool | null>(null);
-const openTools = computed(() => temporaryTool.value
-  ? [...pinnedTools.value, temporaryTool.value] : pinnedTools.value);
+// Visual order is independent of which tools are pinned.
+const openTools = ref<Tool[]>([]);
+let closedOnClick: { tool: Tool; index: number } | null = null;
 const toolStrip = ref<HTMLElement | null>(null);
 
 async function revealTool(tool: Tool) {
@@ -122,35 +124,92 @@ const toolColumnsWidth = computed(() => openTools.value.reduce(
 function clickTool(tool: Tool, event: MouseEvent) {
   // The browser sends two clicks before dblclick; apply the single-click action only once.
   if (event.detail > 1) return;
+  closedOnClick = null;
   if (pinnedTools.value.includes(tool)) {
     void revealTool(tool);
     return;
   }
-  temporaryTool.value = temporaryTool.value === tool ? null : tool;
-  if (temporaryTool.value) void revealTool(tool);
+  const index = temporaryTool.value ? openTools.value.indexOf(temporaryTool.value) : -1;
+  if (temporaryTool.value === tool) {
+    closedOnClick = { tool, index };
+    openTools.value.splice(index, 1);
+    temporaryTool.value = null;
+    return;
+  }
+  if (index >= 0) openTools.value.splice(index, 1, tool);
+  else openTools.value.push(tool);
+  temporaryTool.value = tool;
+  void revealTool(tool);
 }
 
 function setPinned(tool: Tool, pinned: boolean) {
   if (pinned) {
-    pinnedTools.value.push(tool);
+    if (!pinnedTools.value.includes(tool)) pinnedTools.value.push(tool);
+    if (!openTools.value.includes(tool)) openTools.value.push(tool);
     if (temporaryTool.value === tool) temporaryTool.value = null;
   } else {
+    if (temporaryTool.value && temporaryTool.value !== tool) {
+      openTools.value = openTools.value.filter(item => item !== temporaryTool.value);
+    }
     pinnedTools.value = pinnedTools.value.filter(item => item !== tool);
     temporaryTool.value = tool;
   }
   void revealTool(tool);
 }
 
-function movePinned(tool: Tool, direction: -1 | 1) {
-  const index = pinnedTools.value.indexOf(tool);
+function toggleToolPin(tool: Tool) {
+  // A double-click can follow the single-click that just closed this temporary panel.
+  if (!openTools.value.includes(tool) && closedOnClick?.tool === tool) {
+    openTools.value.splice(closedOnClick.index, 0, tool);
+  }
+  closedOnClick = null;
+  setPinned(tool, !pinnedTools.value.includes(tool));
+}
+
+function moveTool(tool: Tool, direction: -1 | 1) {
+  const index = openTools.value.indexOf(tool);
   const destination = index + direction;
-  if (index < 0 || destination < 0 || destination >= pinnedTools.value.length) return;
-  const reordered = [...pinnedTools.value];
+  if (index < 0 || destination < 0 || destination >= openTools.value.length) return;
+  const reordered = [...openTools.value];
   reordered.splice(index, 1);
   reordered.splice(destination, 0, tool);
-  pinnedTools.value = reordered;
+  openTools.value = reordered;
   void revealTool(tool);
 }
+
+watch(toolStrip, (strip, _, onCleanup) => {
+  if (!strip) return;
+  let originalNextSibling: ChildNode | null = null;
+  const sortable = new Sortable(strip, {
+    draggable: "[data-tool]",
+    handle: "[data-panel-drag]",
+    direction: "horizontal",
+    animation: 150,
+    forceFallback: true,
+    fallbackOnBody: true,
+    fallbackTolerance: 5,
+    ghostClass: "tool-panel-drag-placeholder",
+    fallbackClass: "tool-panel-dragging",
+    scroll: strip,
+    bubbleScroll: false,
+    forceAutoScrollFallback: true,
+    onStart(event) {
+      originalNextSibling = event.item.nextSibling;
+    },
+    onEnd(event) {
+      // Undo Sortable's DOM move before Vue applies the authoritative keyed-list update.
+      strip.insertBefore(event.item, originalNextSibling);
+      if (event.oldIndex === undefined || event.newIndex === undefined) return;
+      const reordered = [...openTools.value];
+      const [tool] = reordered.splice(event.oldIndex, 1);
+      if (!tool) return;
+      reordered.splice(event.newIndex, 0, tool);
+      openTools.value = reordered;
+      void revealTool(tool);
+    },
+  });
+  onCleanup(() => sortable.destroy());
+}, { flush: "post" });
 
 // Measure intrinsic content, never the current compact/expanded button width.
 const compactPanelSettings = ref<Partial<Record<Tool, boolean>>>({});
@@ -167,19 +226,20 @@ const vFitPanelSettings: ObjectDirective<HTMLElement, Tool> = {
     const trigger = header.querySelector<HTMLElement>(".panel-settings-trigger")!;
     const fullLabel = header.querySelector<HTMLElement>(".panel-settings-expanded")!;
     const pin = header.querySelector<HTMLElement>("[data-panel-pin]")!;
+    const grip = header.querySelector<HTMLElement>("[data-panel-drag]")!;
     const measure = () => {
       const headerStyle = getComputedStyle(header);
       const triggerStyle = getComputedStyle(trigger);
       const required = naturalTitle.getBoundingClientRect().width
-        + fullLabel.getBoundingClientRect().width + pin.getBoundingClientRect().width
+        + fullLabel.getBoundingClientRect().width + pin.getBoundingClientRect().width + grip.getBoundingClientRect().width
         + parseFloat(triggerStyle.paddingLeft) + parseFloat(triggerStyle.paddingRight)
         + parseFloat(triggerStyle.borderLeftWidth) + parseFloat(triggerStyle.borderRightWidth)
-        + parseFloat(getComputedStyle(controls).columnGap) + parseFloat(headerStyle.columnGap)
+        + parseFloat(getComputedStyle(controls).columnGap) + 2 * parseFloat(headerStyle.columnGap)
         + parseFloat(headerStyle.paddingLeft) + parseFloat(headerStyle.paddingRight);
       compactPanelSettings.value[tool] = required > header.clientWidth;
     };
     const observer = new ResizeObserver(measure);
-    for (const element of [header, naturalTitle, fullLabel, pin]) observer.observe(element);
+    for (const element of [header, naturalTitle, fullLabel, pin, grip]) observer.observe(element);
     headerObservers.set(header, observer);
     measure();
   },
@@ -224,7 +284,7 @@ async function toggleSidebarVisibility() {
       <nav aria-label="Tools" class="p-2">
         <SidebarMenu>
           <SidebarMenuItem v-for="tool in launcherTools" :key="tool.name">
-            <MenuSidebarButton :label="tool.name" :is-active="openTools.includes(tool.name)" @click="clickTool(tool.name, $event)" @dblclick="setPinned(tool.name, !pinnedTools.includes(tool.name))">
+            <MenuSidebarButton :label="tool.name" :is-active="openTools.includes(tool.name)" @click="clickTool(tool.name, $event)" @dblclick="toggleToolPin(tool.name)">
               <component :is="tool.icon" />
             </MenuSidebarButton>
           </SidebarMenuItem>
@@ -258,7 +318,10 @@ async function toggleSidebarVisibility() {
         <div v-if="sidebarVisible" ref="toolStrip" role="region" aria-label="Tool Panels" :tabindex="openTools.length ? 0 : undefined" class="tool-panel-strip flex min-w-0 flex-1 overflow-x-auto overscroll-x-contain focus-visible:outline-2 focus-visible:-outline-offset-2">
     <section v-for="tool in openTools" :key="tool" :data-tool="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="flex shrink-0 flex-col border-r bg-neutral-50">
       <header v-fit-panel-settings="tool" :data-compact-settings="compactPanelSettings[tool]" class="flex min-h-12 items-center justify-between gap-2 border-b p-2">
-        <h2 class="text-sm font-medium">{{ tool }}</h2>
+        <span data-panel-drag class="inline-flex shrink-0 cursor-grab touch-none select-none items-center self-stretch rounded-sm px-0.5 hover:bg-neutral-200 active:cursor-grabbing" aria-hidden="true" title="Drag to reorder">
+          <GripVertical class="size-4" />
+        </span>
+        <h2 class="mr-auto text-sm font-medium">{{ tool }}</h2>
         <div data-panel-controls class="flex shrink-0 items-center gap-1">
           <Tooltip :disabled="!compactPanelSettings[tool]">
             <TooltipTrigger as-child>
@@ -284,16 +347,16 @@ async function toggleSidebarVisibility() {
                         </DropdownMenuRadioGroup>
                       </DropdownMenuSubContent>
                     </DropdownMenuSub>
-                    <template v-if="pinnedTools.includes(tool)">
+                    <template v-if="openTools.length > 1">
                       <DropdownMenuItem
-                        :disabled="pinnedTools.indexOf(tool) === 0"
+                        :disabled="openTools.indexOf(tool) === 0"
                         class="relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
-                        @select="movePinned(tool, -1)"
+                        @select="moveTool(tool, -1)"
                       >Move left</DropdownMenuItem>
                       <DropdownMenuItem
-                        :disabled="pinnedTools.indexOf(tool) === pinnedTools.length - 1"
+                        :disabled="openTools.indexOf(tool) === openTools.length - 1"
                         class="relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
-                        @select="movePinned(tool, 1)"
+                        @select="moveTool(tool, 1)"
                       >Move right</DropdownMenuItem>
                     </template>
                   </DropdownMenuContent>
