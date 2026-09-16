@@ -7,6 +7,9 @@
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--foreground);
   --color-sidebar-border: var(--border);
+  --color-sidebar-accent: #d4d4d4;
+  --color-sidebar-accent-foreground: var(--foreground);
+  --color-sidebar-ring: #737373;
   --color-muted-foreground: #737373;
   --color-accent: #f5f5f5;
   --color-accent-foreground: var(--foreground);
