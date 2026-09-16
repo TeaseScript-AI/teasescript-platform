@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
 import { onClickOutside } from "@vueuse/core";
-import { FlaskConical, Settings, Pin, ScanLine, PanelLeft, ChevronDown } from "@lucide/vue";
+import { FlaskConical, Settings, Pin, ScanLine, ChevronDown } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
@@ -29,6 +29,12 @@ import DropdownMenuContent from "@/components/ui/dropdown-menu/DropdownMenuConte
 import DropdownMenuRadioGroup from "@/components/ui/dropdown-menu/DropdownMenuRadioGroup.vue";
 import DropdownMenuRadioItem from "@/components/ui/dropdown-menu/DropdownMenuRadioItem.vue";
 
+import DropdownMenuLabel from "@/components/ui/dropdown-menu/DropdownMenuLabel.vue";
+import DropdownMenuSeparator from "@/components/ui/dropdown-menu/DropdownMenuSeparator.vue";
+import DropdownMenuSub from "@/components/ui/dropdown-menu/DropdownMenuSub.vue";
+import DropdownMenuSubTrigger from "@/components/ui/dropdown-menu/DropdownMenuSubTrigger.vue";
+import DropdownMenuSubContent from "@/components/ui/dropdown-menu/DropdownMenuSubContent.vue";
+
 const isDevelopment = import.meta.env.DEV;
 const sidebarVisible = ref(true);
 const labelMode = ref<"icons" | "preview" | "labels">("preview");
@@ -44,10 +50,10 @@ function clickMenuSpace(event: MouseEvent) {
 }
 type Tool = "Visual Lab" | "Layout Debug";
 const toolPanelSizes = {
-  Small: { width: 14, abbreviation: "S" },
-  Medium: { width: 18, abbreviation: "M" },
-  Large: { width: 24, abbreviation: "L" },
-  "Extra Large": { width: 32, abbreviation: "XL" },
+  Small: 14,
+  Medium: 18,
+  Large: 24,
+  "Extra Large": 32,
 } as const;
 const toolSizes = ref<Record<Tool, keyof typeof toolPanelSizes>>({
   "Visual Lab": "Medium",
@@ -59,7 +65,7 @@ const openTools = computed(() => temporaryTool.value
   ? [...pinnedTools.value, temporaryTool.value] : pinnedTools.value);
 
 const toolColumnsWidth = computed(() => openTools.value.reduce(
-  (width, tool) => width + toolPanelSizes[toolSizes.value[tool]].width, 0,
+  (width, tool) => width + toolPanelSizes[toolSizes.value[tool]], 0,
 ));
 
 function clickTool(tool: Tool, event: MouseEvent) {
@@ -153,33 +159,31 @@ async function toggleSidebarVisibility() {
         </div>
         </div>
         <div v-if="sidebarVisible" class="flex min-w-0 flex-1">
-    <section v-for="tool in openTools" :key="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]].width}rem` }" class="flex shrink-0 flex-col border-r bg-neutral-50">
+    <section v-for="tool in openTools" :key="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="flex shrink-0 flex-col border-r bg-neutral-50">
       <header class="flex min-h-12 items-center justify-between gap-2 border-b p-2">
         <h2 class="text-sm font-medium">{{ tool }}</h2>
         <div class="flex shrink-0 items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <span class="inline-flex">
-                <DropdownMenu>
-                  <DropdownMenuTrigger as-child>
-                    <Button variant="ghost" size="sm" class="h-8 gap-1 px-2" :aria-label="`Panel size for ${tool}: ${toolSizes[tool]}`">
-                      <PanelLeft class="size-4" />
-                      <span class="text-xs">{{ toolPanelSizes[toolSizes[tool]].abbreviation }}</span>
-                      <ChevronDown class="size-3" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuRadioGroup v-model="toolSizes[tool]" aria-label="Panel size">
-                      <DropdownMenuRadioItem v-for="(option, size) in toolPanelSizes" :key="size" :value="size">
-                        {{ size }} — {{ option.width }}rem
-                      </DropdownMenuRadioItem>
-                    </DropdownMenuRadioGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>Panel size: {{ toolSizes[tool] }}</TooltipContent>
-          </Tooltip>
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button variant="ghost" size="sm" class="h-8 gap-1 px-2" :aria-label="`Panel menu for ${tool}`">
+                Panel <ChevronDown class="size-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>Panel</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>Width</DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuRadioGroup v-model="toolSizes[tool]" aria-label="Panel width">
+                    <DropdownMenuRadioItem v-for="size in Object.keys(toolPanelSizes)" :key="size" :value="size">
+                      {{ size }}
+                    </DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            </DropdownMenuContent>
+          </DropdownMenu>
         <Toggle
           :model-value="pinnedTools.includes(tool)"
           :aria-label="`Pin ${tool}`"
