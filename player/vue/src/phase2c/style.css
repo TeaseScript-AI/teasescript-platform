@@ -46,7 +46,7 @@
 }
 
 .phase2c-sidebar[data-labels="expanded"],
-.phase2c-sidebar[data-preview="true"]:has([data-launcher]:hover, [data-launcher] :focus-visible) {
+.phase2c-sidebar:has([data-launcher]:hover, [data-launcher] :focus-visible) {
   --launcher-width: 12rem;
 }
 
@@ -60,6 +60,6 @@
 [data-launcher-label] { display: none; }
 
 .phase2c-sidebar[data-labels="expanded"] [data-launcher-label],
-.phase2c-sidebar[data-preview="true"]:has([data-launcher]:hover, [data-launcher] :focus-visible) [data-launcher-label] {
+.phase2c-sidebar:has([data-launcher]:hover, [data-launcher] :focus-visible) [data-launcher-label] {
   display: inline;
 }

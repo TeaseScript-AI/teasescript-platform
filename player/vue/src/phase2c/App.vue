@@ -18,7 +18,6 @@ import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
 const isDevelopment = import.meta.env.DEV;
 const sidebarVisible = ref(true);
 const showLabels = ref(true);
-const labelMode = ref<"explicit" | "preview">("explicit");
 type Tool = "Visual Lab" | "Layout Debug";
 const pinnedTools = ref<Tool[]>([]);
 const temporaryTool = ref<Tool | null>(null);
@@ -55,7 +54,6 @@ async function toggleSidebarVisibility() {
   <SidebarProvider
     :style="{ '--tool-columns-width': `${openTools.length * 16}rem` }"
     :data-labels="showLabels ? 'expanded' : 'compact'"
-    :data-preview="isDevelopment && labelMode === 'preview'"
     :data-has-tools="openTools.length > 0"
     class="phase2c-sidebar h-dvh min-h-0 overflow-hidden"
     :open="sidebarVisible" :responsive="false" @update:open="toggleSidebarVisibility"
@@ -102,13 +100,6 @@ async function toggleSidebarVisibility() {
           <Pin />
         </Toggle>
       </header>
-      <label v-if="isDevelopment && tool === 'Visual Lab'" class="flex flex-col gap-2 p-3 text-sm">
-        Sidebar label behavior
-        <select v-model="labelMode" class="w-full rounded-md border bg-white p-2">
-          <option value="explicit">A — Explicit only</option>
-          <option value="preview">B — Explicit + preview</option>
-        </select>
-      </label>
     </section>
         </div>
       </div>
