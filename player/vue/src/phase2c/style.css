@@ -60,17 +60,19 @@
 }
 
 .phase2c-sidebar[data-labels-visible="true"] {
-  --launcher-width: 12rem;
+  --launcher-width: max-content;
 }
 
 .phase2c-sidebar[data-labels="labels"] {
-  --launcher-space: var(--launcher-width);
+  --launcher-width: var(--permanent-menu-width);
+  --launcher-space: var(--permanent-menu-width);
 }
 
 [data-launcher-space] { width: var(--launcher-space); }
-[data-launcher] { width: var(--launcher-width); z-index: 30; }
-[data-launcher-label] { display: none; }
-.phase2c-sidebar[data-labels-visible="true"] [data-launcher-label] { display: inline; }
+[data-launcher] { width: var(--launcher-width); max-width: min(24rem, 40dvw); z-index: 30; }
+.phase2c-sidebar[data-labels="labels"] [data-launcher] { max-width: none; }
+[data-launcher-label] { display: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phase2c-sidebar[data-labels-visible="true"] [data-launcher-label] { display: block; }
 
 /* Keep open tools distinguishable from a transient pointer hover. */
 [data-launcher] [data-sidebar="menu-button"][data-active="true"] {
@@ -99,3 +101,25 @@
 body:has(> .tool-panel-dragging),
 body:has(> .tool-panel-dragging) * { cursor: grabbing !important; }
 body:has(> .tool-panel-dragging) [data-slot="tooltip-content"] { visibility: hidden; }
+
+/* Match the menu's 14px text, icon, gap, padding and border without reserving space. */
+.menu-width-ruler {
+  position: absolute; visibility: hidden; pointer-events: none; width: max-content;
+  font-size: 0.875rem; font-weight: 500;
+}
+.menu-width-ruler span { display: block; width: max-content; padding-inline: calc(1.75rem + 0.5px); }
+.tool-panel-strip { scroll-snap-type: x proximity; }
+.tool-panel-strip > [data-tool] { scroll-snap-align: start; isolation: isolate; }
+.tool-panel-strip[data-reordering], .phase2c-sidebar[data-resizing="true"] .tool-panel-strip { scroll-snap-type: none; }
+.resize-edge {
+  position: absolute; right: 0; top: 0; bottom: 0; width: 6px; z-index: 35;
+  cursor: col-resize; touch-action: none;
+}
+.resize-edge::after { content: ""; position: absolute; right: 0; top: 0; bottom: 0; width: 2px; background: #a3a3a3; opacity: 0.35; }
+.resize-edge:hover::after, .resize-edge:focus-visible::after { opacity: 1; }
+.resize-edge:focus-visible { outline: 2px solid #737373; outline-offset: -2px; }
+.resize-size-label { position: absolute; right: 8px; top: 3.5rem; white-space: nowrap; border: 1px solid var(--border); border-radius: 4px; background: var(--background); padding: 2px 6px; font-size: 0.75rem; }
+.phase2c-sidebar[data-resizing="true"], .phase2c-sidebar[data-resizing="true"] * { cursor: col-resize !important; user-select: none; }
+body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] { visibility: hidden; }
+/* Pointer resizing already owns the geometry; do not trail it with a dock transition. */
+.phase2c-sidebar[data-resizing="true"] [data-slot="sidebar"] > .fixed { transition: none; }
