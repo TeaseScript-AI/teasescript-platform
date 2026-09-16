@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, provide, ref, watch, type ObjectDirective } from "vue";
 import { onClickOutside, useStorage } from "@vueuse/core";
-import { FlaskConical, Settings, Pin, ScanLine, ChevronDown, Ellipsis, Activity, GripVertical } from "@lucide/vue";
+import { FlaskConical, Settings, Pin, ScanLine, ChevronDown, Ellipsis, Activity, GripVertical, SlidersHorizontal } from "@lucide/vue";
 import Sortable from "sortablejs";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
@@ -78,12 +78,13 @@ function clickMenuSpace(event: MouseEvent) {
   clickPreview.value = clickPreview.value !== true;
 }
 const tools = [
-  { name: "Visual Lab", icon: FlaskConical },
-  { name: "Layout Debug", icon: ScanLine },
-  { name: "Playback Diagnostics", icon: Activity },
+  { name: "Visual Lab", icon: FlaskConical, developmentOnly: false },
+  { name: "Layout Debug", icon: ScanLine, developmentOnly: false },
+  { name: "Playback Diagnostics", icon: Activity, developmentOnly: true },
+  { name: "Media Playback Configuration", icon: SlidersHorizontal, developmentOnly: true },
 ] as const;
 type Tool = typeof tools[number]["name"];
-const launcherTools = tools.filter(tool => isDevelopment || tool.name !== "Playback Diagnostics");
+const launcherTools = tools.filter(tool => isDevelopment || !tool.developmentOnly);
 const toolPanelSizes = {
   Small: 14,
   Medium: 18,
@@ -94,6 +95,7 @@ const toolSizes = ref<Record<Tool, keyof typeof toolPanelSizes>>({
   "Visual Lab": "Medium",
   "Layout Debug": "Medium",
   "Playback Diagnostics": "Medium",
+  "Media Playback Configuration": "Medium",
 });
 const pinnedTools = ref<Tool[]>([]);
 const temporaryTool = ref<Tool | null>(null);
@@ -213,11 +215,12 @@ watch(toolStrip, (strip, _, onCleanup) => {
 
 // Measure intrinsic content, never the current compact/expanded button width.
 const compactPanelSettings = ref<Partial<Record<Tool, boolean>>>({});
+const truncatedTitles = ref<Partial<Record<Tool, boolean>>>({});
 const headerObservers = new WeakMap<HTMLElement, ResizeObserver>();
 const vFitPanelSettings: ObjectDirective<HTMLElement, Tool> = {
   mounted(header, { value: tool }) {
     const title = header.querySelector<HTMLElement>("h2")!;
-    // A hidden intrinsic-width copy leaves the visible title's overflow behavior alone.
+    // Measure the full title independently of its visible truncation and trigger presentation.
     const naturalTitle = title.cloneNode(true) as HTMLElement;
     naturalTitle.setAttribute("aria-hidden", "true");
     naturalTitle.style.cssText = "position:absolute;visibility:hidden;white-space:nowrap;width:max-content;pointer-events:none";
@@ -237,9 +240,10 @@ const vFitPanelSettings: ObjectDirective<HTMLElement, Tool> = {
         + parseFloat(getComputedStyle(controls).columnGap) + 2 * parseFloat(headerStyle.columnGap)
         + parseFloat(headerStyle.paddingLeft) + parseFloat(headerStyle.paddingRight);
       compactPanelSettings.value[tool] = required > header.clientWidth;
+      truncatedTitles.value[tool] = title.scrollWidth > title.clientWidth;
     };
     const observer = new ResizeObserver(measure);
-    for (const element of [header, naturalTitle, fullLabel, pin, grip]) observer.observe(element);
+    for (const element of [header, title, naturalTitle, fullLabel, pin, grip]) observer.observe(element);
     headerObservers.set(header, observer);
     measure();
   },
@@ -321,7 +325,12 @@ async function toggleSidebarVisibility() {
         <span data-panel-drag class="inline-flex shrink-0 cursor-grab touch-none select-none items-center self-stretch rounded-sm px-0.5 hover:bg-neutral-200 active:cursor-grabbing" aria-hidden="true" title="Drag to reorder">
           <GripVertical class="size-4" />
         </span>
-        <h2 class="mr-auto text-sm font-medium">{{ tool }}</h2>
+        <Tooltip :disabled="!truncatedTitles[tool]">
+          <TooltipTrigger as-child>
+            <h2 :tabindex="truncatedTitles[tool] ? 0 : undefined" class="mr-auto min-w-0 truncate rounded-sm text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2">{{ tool }}</h2>
+          </TooltipTrigger>
+          <TooltipContent>{{ tool }}</TooltipContent>
+        </Tooltip>
         <div data-panel-controls class="flex shrink-0 items-center gap-1">
           <Tooltip :disabled="!compactPanelSettings[tool]">
             <TooltipTrigger as-child>
