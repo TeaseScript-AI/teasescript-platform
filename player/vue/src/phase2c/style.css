@@ -38,3 +38,28 @@
     margin: 0;
   }
 }
+
+.phase2c-sidebar {
+  --launcher-width: var(--sidebar-width-icon);
+  --launcher-space: var(--sidebar-width-icon);
+  --sidebar-width: calc(var(--launcher-space) + var(--tool-columns-width) + 1px) !important;
+}
+
+.phase2c-sidebar[data-labels="expanded"],
+.phase2c-sidebar[data-preview="true"]:has([data-launcher]:hover, [data-launcher] :focus-visible) {
+  --launcher-width: 12rem;
+}
+
+.phase2c-sidebar[data-labels="expanded"],
+.phase2c-sidebar[data-has-tools="false"] {
+  --launcher-space: var(--launcher-width);
+}
+
+[data-launcher-space] { width: var(--launcher-space); }
+[data-launcher] { width: var(--launcher-width); z-index: 30; }
+[data-launcher-label] { display: none; }
+
+.phase2c-sidebar[data-labels="expanded"] [data-launcher-label],
+.phase2c-sidebar[data-preview="true"]:has([data-launcher]:hover, [data-launcher] :focus-visible) [data-launcher-label] {
+  display: inline;
+}
