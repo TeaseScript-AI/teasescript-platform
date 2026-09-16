@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, type ObjectDirective } from "vue";
-import { onClickOutside } from "@vueuse/core";
+import { computed, nextTick, provide, ref, type ObjectDirective } from "vue";
+import { onClickOutside, useStorage } from "@vueuse/core";
 import { FlaskConical, Settings, Pin, ScanLine, ChevronDown, Ellipsis, Activity } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
@@ -9,7 +9,7 @@ import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 import { Toggle } from "@/components/ui/toggle";
 import SidebarMenu from "@/components/ui/sidebar/SidebarMenu.vue";
 import SidebarMenuItem from "@/components/ui/sidebar/SidebarMenuItem.vue";
-import SidebarMenuButton from "@/components/ui/sidebar/SidebarMenuButton.vue";
+import MenuSidebarButton from "./MenuSidebarButton.vue";
 import Sidebar from "@/components/ui/sidebar/Sidebar.vue";
 import SidebarHeader from "@/components/ui/sidebar/SidebarHeader.vue";
 import SidebarInset from "@/components/ui/sidebar/SidebarInset.vue";
@@ -35,9 +35,38 @@ import DropdownMenuSubContent from "@/components/ui/dropdown-menu/DropdownMenuSu
 
 const isDevelopment = import.meta.env.DEV;
 const sidebarVisible = ref(true);
-const labelMode = ref<"icons" | "preview" | "labels">("preview");
+type LabelMode = "icons" | "preview" | "labels";
+const labelMode = isDevelopment
+  ? useStorage<LabelMode>("phase2c-menu-label-mode", "icons")
+  : ref<LabelMode>("icons");
+if (!["icons", "preview", "labels"].includes(labelMode.value)) labelMode.value = "icons";
+const hoverPreview = ref(false);
+const focusPreview = ref(false);
 const menuSidebar = ref<HTMLElement | null>(null);
 const clickPreview = ref<boolean | null>(null);
+const labelsVisible = computed(() => labelMode.value === "labels"
+  || (labelMode.value === "preview" && (clickPreview.value === true
+    || (clickPreview.value !== false && (hoverPreview.value || focusPreview.value)))));
+provide("phase2c-menu-labels-visible", labelsVisible);
+
+function updateHoverPreview(event: PointerEvent) {
+  const strip = menuSidebar.value?.parentElement?.getBoundingClientRect();
+  hoverPreview.value = event.pointerType === "mouse"
+    && matchMedia("(hover: hover) and (pointer: fine)").matches
+    && !!strip && event.clientX >= strip.left && event.clientX < strip.right;
+  if (!hoverPreview.value && clickPreview.value === false) clickPreview.value = null;
+}
+
+function leaveMenu() {
+  hoverPreview.value = false;
+  if (clickPreview.value === false) clickPreview.value = null;
+}
+
+async function updateFocusPreview() {
+  await nextTick();
+  focusPreview.value = !!menuSidebar.value?.querySelector(":focus-visible:not([data-settings-trigger])");
+}
+
 onClickOutside(menuSidebar, () => { clickPreview.value = null; }, {
   ignore: ['[data-slot="dialog-content"]', '[data-slot="dialog-overlay"]'],
 });
@@ -124,6 +153,8 @@ async function toggleSidebarVisibility() {
   const keepTriggerFocus = document.activeElement?.matches("[data-sidebar=trigger]");
   sidebarVisible.value = !sidebarVisible.value;
   clickPreview.value = null;
+  hoverPreview.value = false;
+  focusPreview.value = false;
   if (keepTriggerFocus) {
     await nextTick();
     document.querySelector<HTMLButtonElement>("[data-sidebar=trigger]")?.focus();
@@ -135,14 +166,14 @@ async function toggleSidebarVisibility() {
   <SidebarProvider
     :style="{ '--tool-columns-width': `${toolColumnsWidth}rem` }"
     :data-labels="labelMode"
-    :data-click-preview="clickPreview"
+    :data-labels-visible="labelsVisible"
     class="phase2c-sidebar h-dvh min-h-0 overflow-hidden"
     :open="sidebarVisible" :responsive="false" @update:open="toggleSidebarVisibility"
   >
     <Sidebar variant="sidebar" collapsible="offcanvas">
       <div class="relative flex h-full min-h-0">
         <div v-if="sidebarVisible" data-launcher-space class="relative shrink-0">
-        <div v-if="sidebarVisible" ref="menuSidebar" data-launcher @click="clickMenuSpace" @mouseleave="clickPreview === false && (clickPreview = null)" class="relative flex h-full flex-col border-r bg-sidebar">
+        <div v-if="sidebarVisible" ref="menuSidebar" data-launcher @click="clickMenuSpace" @pointerenter="updateHoverPreview" @pointermove="updateHoverPreview" @pointerleave="leaveMenu" @focusin="updateFocusPreview" @focusout="updateFocusPreview" class="relative flex h-full flex-col border-r bg-sidebar">
       <SidebarHeader>
         <SidebarTrigger
           class="size-8"
@@ -153,34 +184,29 @@ async function toggleSidebarVisibility() {
       <nav aria-label="Tools" class="p-2">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton tooltip="Visual Lab" :tooltip-when-expanded="labelMode !== 'labels'" tooltip-content-class="phase2c-tool-tooltip" aria-label="Visual Lab" :is-active="openTools.includes('Visual Lab')" @click="clickTool('Visual Lab', $event)" @dblclick="setPinned('Visual Lab', !pinnedTools.includes('Visual Lab'))">
-              <FlaskConical /><span data-launcher-label>Visual Lab</span>
-            </SidebarMenuButton>
+            <MenuSidebarButton label="Visual Lab" :is-active="openTools.includes('Visual Lab')" @click="clickTool('Visual Lab', $event)" @dblclick="setPinned('Visual Lab', !pinnedTools.includes('Visual Lab'))">
+              <FlaskConical />
+            </MenuSidebarButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
-            <SidebarMenuButton tooltip="Layout Debug" :tooltip-when-expanded="labelMode !== 'labels'" tooltip-content-class="phase2c-tool-tooltip" aria-label="Layout Debug" :is-active="openTools.includes('Layout Debug')" @click="clickTool('Layout Debug', $event)" @dblclick="setPinned('Layout Debug', !pinnedTools.includes('Layout Debug'))">
-              <ScanLine /><span data-launcher-label>Layout Debug</span>
-            </SidebarMenuButton>
+            <MenuSidebarButton label="Layout Debug" :is-active="openTools.includes('Layout Debug')" @click="clickTool('Layout Debug', $event)" @dblclick="setPinned('Layout Debug', !pinnedTools.includes('Layout Debug'))">
+              <ScanLine />
+            </MenuSidebarButton>
           </SidebarMenuItem>
           <SidebarMenuItem v-if="isDevelopment">
-            <SidebarMenuButton tooltip="Playback Diagnostics" :tooltip-when-expanded="labelMode !== 'labels'" tooltip-content-class="phase2c-tool-tooltip" aria-label="Playback Diagnostics" :is-active="openTools.includes('Playback Diagnostics')" @click="clickTool('Playback Diagnostics', $event)" @dblclick="setPinned('Playback Diagnostics', !pinnedTools.includes('Playback Diagnostics'))">
-              <Activity /><span data-launcher-label>Playback Diagnostics</span>
-            </SidebarMenuButton>
+            <MenuSidebarButton label="Playback Diagnostics" :is-active="openTools.includes('Playback Diagnostics')" @click="clickTool('Playback Diagnostics', $event)" @dblclick="setPinned('Playback Diagnostics', !pinnedTools.includes('Playback Diagnostics'))">
+              <Activity />
+            </MenuSidebarButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </nav>
       <div class="mt-auto p-2">
         <Dialog>
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <DialogTrigger as-child>
-                <Button data-settings-trigger variant="ghost" aria-label="Settings" class="h-8 w-full justify-start gap-2 overflow-hidden px-2">
-                  <Settings class="size-4 shrink-0" /><span data-launcher-label>Settings</span>
-                </Button>
-              </DialogTrigger>
-            </TooltipTrigger>
-            <TooltipContent v-if="labelMode !== 'labels'" side="right">Settings</TooltipContent>
-          </Tooltip>
+          <DialogTrigger as-child>
+            <MenuSidebarButton label="Settings" data-settings-trigger>
+              <Settings />
+            </MenuSidebarButton>
+          </DialogTrigger>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Player Settings</DialogTitle>

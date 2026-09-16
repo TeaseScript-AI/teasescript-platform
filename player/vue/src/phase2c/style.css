@@ -47,9 +47,7 @@
   --sidebar-width: calc(var(--launcher-space) + var(--tool-columns-width) + 1px) !important;
 }
 
-.phase2c-sidebar[data-labels="labels"],
-.phase2c-sidebar[data-labels="preview"][data-click-preview="true"],
-.phase2c-sidebar[data-labels="preview"]:not([data-click-preview="false"]):has([data-launcher] :focus-visible:not([data-settings-trigger])) {
+.phase2c-sidebar[data-labels-visible="true"] {
   --launcher-width: 12rem;
 }
 
@@ -60,34 +58,15 @@
 [data-launcher-space] { width: var(--launcher-space); }
 [data-launcher] { width: var(--launcher-width); z-index: 30; }
 [data-launcher-label] { display: none; }
+.phase2c-sidebar[data-labels-visible="true"] [data-launcher-label] { display: inline; }
 
-.phase2c-sidebar[data-labels="labels"] [data-launcher-label],
-.phase2c-sidebar[data-labels="preview"][data-click-preview="true"] [data-launcher-label],
-.phase2c-sidebar[data-labels="preview"]:not([data-click-preview="false"]):has([data-launcher] :focus-visible:not([data-settings-trigger])) [data-launcher-label] {
-  display: inline;
+/* Keep open tools distinguishable from a transient pointer hover. */
+[data-launcher] [data-sidebar="menu-button"][data-active="true"] {
+  background: #c4c4c4;
+  box-shadow: inset 3px 0 #525252;
 }
-
-@media (hover: hover) and (pointer: fine) {
-  .phase2c-sidebar[data-labels="preview"]:not([data-click-preview="false"]):has([data-launcher]:hover) {
-    --launcher-width: 12rem;
-  }
-
-  .phase2c-sidebar[data-labels="preview"]:not([data-click-preview="false"]):has([data-launcher]:hover) [data-launcher-label] {
-    display: inline;
-  }
-}
-
-/* Tooltip content is portaled outside the Sidebar; mirror label visibility. */
-:root:has(.phase2c-sidebar[data-labels="labels"]) .phase2c-tool-tooltip,
-:root:has(.phase2c-sidebar[data-labels="preview"][data-click-preview="true"]) .phase2c-tool-tooltip,
-:root:has(.phase2c-sidebar[data-labels="preview"]:not([data-click-preview="false"]) [data-launcher] :focus-visible:not([data-settings-trigger])) .phase2c-tool-tooltip {
-  display: none;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  :root:has(.phase2c-sidebar[data-labels="preview"]:not([data-click-preview="false"]) [data-launcher]:hover) .phase2c-tool-tooltip {
-    display: none;
-  }
+[data-launcher] [data-sidebar="menu-button"][data-active="true"]:hover {
+  background: #b8b8b8;
 }
 
 .panel-settings-trigger { position: relative; }
