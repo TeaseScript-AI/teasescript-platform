@@ -35,8 +35,10 @@ const temporaryTool = ref<Tool | null>(null);
 const openTools = computed(() => temporaryTool.value
   ? [...pinnedTools.value, temporaryTool.value] : pinnedTools.value);
 
-function openTool(tool: Tool) {
-  if (!pinnedTools.value.includes(tool)) temporaryTool.value = tool;
+function clickTool(tool: Tool, event: MouseEvent) {
+  // The browser sends two clicks before dblclick; apply the single-click action only once.
+  if (event.detail > 1 || pinnedTools.value.includes(tool)) return;
+  temporaryTool.value = temporaryTool.value === tool ? null : tool;
 }
 
 function setPinned(tool: Tool, pinned: boolean) {
@@ -78,12 +80,12 @@ async function toggleSidebarVisibility() {
       <nav aria-label="Tools" class="mt-10 p-2">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton tooltip="Visual Lab" title="Visual Lab" aria-label="Visual Lab" :is-active="openTools.includes('Visual Lab')" @click="openTool('Visual Lab')">
+            <SidebarMenuButton tooltip="Visual Lab" title="Visual Lab" aria-label="Visual Lab" :is-active="openTools.includes('Visual Lab')" @click="clickTool('Visual Lab', $event)" @dblclick="setPinned('Visual Lab', !pinnedTools.includes('Visual Lab'))">
               <FlaskConical /><span :class="{ 'sr-only': !labelsRevealed }">Visual Lab</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
-            <SidebarMenuButton tooltip="Layout Debug" title="Layout Debug" aria-label="Layout Debug" :is-active="openTools.includes('Layout Debug')" @click="openTool('Layout Debug')">
+            <SidebarMenuButton tooltip="Layout Debug" title="Layout Debug" aria-label="Layout Debug" :is-active="openTools.includes('Layout Debug')" @click="clickTool('Layout Debug', $event)" @dblclick="setPinned('Layout Debug', !pinnedTools.includes('Layout Debug'))">
               <ScanLine /><span :class="{ 'sr-only': !labelsRevealed }">Layout Debug</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
