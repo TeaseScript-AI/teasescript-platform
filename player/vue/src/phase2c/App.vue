@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { nextTick, ref } from "vue";
+import { FlaskConical, ScanLine } from "@lucide/vue";
+import SidebarMenu from "@/components/ui/sidebar/SidebarMenu.vue";
+import SidebarMenuItem from "@/components/ui/sidebar/SidebarMenuItem.vue";
+import SidebarMenuButton from "@/components/ui/sidebar/SidebarMenuButton.vue";
 import Sidebar from "@/components/ui/sidebar/Sidebar.vue";
 import SidebarHeader from "@/components/ui/sidebar/SidebarHeader.vue";
 import SidebarInset from "@/components/ui/sidebar/SidebarInset.vue";
@@ -30,6 +34,20 @@ async function cycleSidebar() {
           :title="`Sidebar: ${sidebarState} — click to cycle`"
         />
       </SidebarHeader>
+      <nav v-if="sidebarState !== 'hidden'" aria-label="Tools" class="p-2">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton tooltip="Visual Lab" aria-label="Visual Lab">
+              <FlaskConical /><span>Visual Lab</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton tooltip="Layout Debug" aria-label="Layout Debug">
+              <ScanLine /><span>Layout Debug</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </nav>
     </Sidebar>
     <SidebarTrigger
       v-if="sidebarState === 'hidden'"
