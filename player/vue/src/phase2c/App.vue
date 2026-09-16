@@ -17,7 +17,7 @@ import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
 
 const isDevelopment = import.meta.env.DEV;
 const sidebarVisible = ref(true);
-const showLabels = ref(true);
+const showLabels = ref(false);
 type Tool = "Visual Lab" | "Layout Debug";
 const pinnedTools = ref<Tool[]>([]);
 const temporaryTool = ref<Tool | null>(null);
