@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
+import { onClickOutside } from "@vueuse/core";
 import { FlaskConical, PanelLeftOpen, PanelLeftClose, Pin, ScanLine } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
@@ -18,6 +19,14 @@ import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
 const isDevelopment = import.meta.env.DEV;
 const sidebarVisible = ref(true);
 const showLabels = ref(false);
+const menuSidebar = ref<HTMLElement | null>(null);
+const clickPreview = ref<boolean | null>(null);
+onClickOutside(menuSidebar, () => { clickPreview.value = null; });
+
+function clickMenuSpace(event: MouseEvent) {
+  if (showLabels.value || (event.target as Element).closest("button, a, input, select, textarea, [role=button]")) return;
+  clickPreview.value = clickPreview.value !== true;
+}
 type Tool = "Visual Lab" | "Layout Debug";
 const pinnedTools = ref<Tool[]>([]);
 const temporaryTool = ref<Tool | null>(null);
@@ -43,6 +52,7 @@ function setPinned(tool: Tool, pinned: boolean) {
 async function toggleSidebarVisibility() {
   const keepTriggerFocus = document.activeElement?.matches("[data-sidebar=trigger]");
   sidebarVisible.value = !sidebarVisible.value;
+  clickPreview.value = null;
   if (keepTriggerFocus) {
     await nextTick();
     document.querySelector<HTMLButtonElement>("[data-sidebar=trigger]")?.focus();
@@ -55,13 +65,14 @@ async function toggleSidebarVisibility() {
     :style="{ '--tool-columns-width': `${openTools.length * 16}rem` }"
     :data-labels="showLabels ? 'expanded' : 'compact'"
     :data-has-tools="openTools.length > 0"
+    :data-click-preview="clickPreview"
     class="phase2c-sidebar h-dvh min-h-0 overflow-hidden"
     :open="sidebarVisible" :responsive="false" @update:open="toggleSidebarVisibility"
   >
     <Sidebar variant="sidebar" collapsible="offcanvas">
       <div class="relative flex h-full min-h-0 overflow-hidden">
         <div v-if="sidebarVisible" data-launcher-space class="relative shrink-0">
-        <div v-if="sidebarVisible" data-launcher class="relative flex h-full flex-col border-r bg-sidebar">
+        <div v-if="sidebarVisible" ref="menuSidebar" data-launcher @click="clickMenuSpace" @mouseleave="clickPreview === false && (clickPreview = null)" class="relative flex h-full flex-col border-r bg-sidebar">
       <SidebarHeader>
         <SidebarTrigger
           class="size-8"
@@ -110,7 +121,7 @@ async function toggleSidebarVisibility() {
             size="icon"
             class="absolute right-2 top-12 z-20 size-8"
             :aria-label="showLabels ? 'Hide labels' : 'Show labels'"
-            @click="showLabels = !showLabels"
+            @click="showLabels = !showLabels; clickPreview = null"
           >
             <PanelLeftClose v-if="showLabels" />
             <PanelLeftOpen v-else />
