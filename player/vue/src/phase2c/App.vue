@@ -25,7 +25,7 @@ import DialogDescription from "@/components/ui/dialog/DialogDescription.vue";
 
 const isDevelopment = import.meta.env.DEV;
 const sidebarVisible = ref(true);
-const showLabels = ref(false);
+const labelMode = ref<"icons" | "preview" | "labels">("preview");
 const menuSidebar = ref<HTMLElement | null>(null);
 const clickPreview = ref<boolean | null>(null);
 onClickOutside(menuSidebar, () => { clickPreview.value = null; }, {
@@ -33,7 +33,7 @@ onClickOutside(menuSidebar, () => { clickPreview.value = null; }, {
 });
 
 function clickMenuSpace(event: MouseEvent) {
-  if (showLabels.value || (event.target as Element).closest("button, a, input, select, textarea, [role=button]")) return;
+  if (labelMode.value !== "preview" || (event.target as Element).closest("button, a, input, select, textarea, [role=button]")) return;
   clickPreview.value = clickPreview.value !== true;
 }
 type Tool = "Visual Lab" | "Layout Debug";
@@ -72,14 +72,13 @@ async function toggleSidebarVisibility() {
 <template>
   <SidebarProvider
     :style="{ '--tool-columns-width': `${openTools.length * 16}rem` }"
-    :data-labels="showLabels ? 'expanded' : 'compact'"
-    :data-has-tools="openTools.length > 0"
+    :data-labels="labelMode"
     :data-click-preview="clickPreview"
     class="phase2c-sidebar h-dvh min-h-0 overflow-hidden"
     :open="sidebarVisible" :responsive="false" @update:open="toggleSidebarVisibility"
   >
     <Sidebar variant="sidebar" collapsible="offcanvas">
-      <div class="relative flex h-full min-h-0 overflow-hidden">
+      <div class="relative flex h-full min-h-0">
         <div v-if="sidebarVisible" data-launcher-space class="relative shrink-0">
         <div v-if="sidebarVisible" ref="menuSidebar" data-launcher @click="clickMenuSpace" @mouseleave="clickPreview === false && (clickPreview = null)" class="relative flex h-full flex-col border-r bg-sidebar">
       <SidebarHeader>
@@ -92,12 +91,12 @@ async function toggleSidebarVisibility() {
       <nav aria-label="Tools" class="p-2">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton tooltip="Visual Lab" title="Visual Lab" aria-label="Visual Lab" :is-active="openTools.includes('Visual Lab')" @click="clickTool('Visual Lab', $event)" @dblclick="setPinned('Visual Lab', !pinnedTools.includes('Visual Lab'))">
+            <SidebarMenuButton tooltip="Visual Lab" :tooltip-when-expanded="labelMode !== 'labels'" title="Visual Lab" aria-label="Visual Lab" :is-active="openTools.includes('Visual Lab')" @click="clickTool('Visual Lab', $event)" @dblclick="setPinned('Visual Lab', !pinnedTools.includes('Visual Lab'))">
               <FlaskConical /><span data-launcher-label>Visual Lab</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
-            <SidebarMenuButton tooltip="Layout Debug" title="Layout Debug" aria-label="Layout Debug" :is-active="openTools.includes('Layout Debug')" @click="clickTool('Layout Debug', $event)" @dblclick="setPinned('Layout Debug', !pinnedTools.includes('Layout Debug'))">
+            <SidebarMenuButton tooltip="Layout Debug" :tooltip-when-expanded="labelMode !== 'labels'" title="Layout Debug" aria-label="Layout Debug" :is-active="openTools.includes('Layout Debug')" @click="clickTool('Layout Debug', $event)" @dblclick="setPinned('Layout Debug', !pinnedTools.includes('Layout Debug'))">
               <ScanLine /><span data-launcher-label>Layout Debug</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -113,7 +112,7 @@ async function toggleSidebarVisibility() {
                 </Button>
               </DialogTrigger>
             </TooltipTrigger>
-            <TooltipContent v-if="!showLabels" side="right">Settings</TooltipContent>
+            <TooltipContent v-if="labelMode !== 'labels'" side="right">Settings</TooltipContent>
           </Tooltip>
           <DialogContent>
             <DialogHeader>
@@ -122,9 +121,10 @@ async function toggleSidebarVisibility() {
             </DialogHeader>
             <label class="flex flex-col gap-2 text-sm">
               Menu Sidebar labels
-              <select v-model="showLabels" class="rounded-md border bg-background p-2">
-                <option :value="false">Icons only</option>
-                <option :value="true">Icons + labels</option>
+              <select v-model="labelMode" class="rounded-md border bg-background p-2">
+                <option value="icons">Icons only</option>
+                <option value="preview">Icons + preview</option>
+                <option value="labels">Icons + labels</option>
               </select>
             </label>
           </DialogContent>

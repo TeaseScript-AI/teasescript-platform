@@ -45,14 +45,13 @@
   --sidebar-width: calc(var(--launcher-space) + var(--tool-columns-width) + 1px) !important;
 }
 
-.phase2c-sidebar[data-labels="expanded"],
-.phase2c-sidebar[data-click-preview="true"],
-.phase2c-sidebar:not([data-click-preview="false"]):has([data-launcher] :focus-visible:not([data-settings-trigger])) {
+.phase2c-sidebar[data-labels="labels"],
+.phase2c-sidebar[data-labels="preview"][data-click-preview="true"],
+.phase2c-sidebar[data-labels="preview"]:not([data-click-preview="false"]):has([data-launcher] :focus-visible:not([data-settings-trigger])) {
   --launcher-width: 12rem;
 }
 
-.phase2c-sidebar[data-labels="expanded"],
-.phase2c-sidebar[data-has-tools="false"] {
+.phase2c-sidebar[data-labels="labels"] {
   --launcher-space: var(--launcher-width);
 }
 
@@ -60,18 +59,18 @@
 [data-launcher] { width: var(--launcher-width); z-index: 30; }
 [data-launcher-label] { display: none; }
 
-.phase2c-sidebar[data-labels="expanded"] [data-launcher-label],
-.phase2c-sidebar[data-click-preview="true"] [data-launcher-label],
-.phase2c-sidebar:not([data-click-preview="false"]):has([data-launcher] :focus-visible:not([data-settings-trigger])) [data-launcher-label] {
+.phase2c-sidebar[data-labels="labels"] [data-launcher-label],
+.phase2c-sidebar[data-labels="preview"][data-click-preview="true"] [data-launcher-label],
+.phase2c-sidebar[data-labels="preview"]:not([data-click-preview="false"]):has([data-launcher] :focus-visible:not([data-settings-trigger])) [data-launcher-label] {
   display: inline;
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .phase2c-sidebar:not([data-click-preview="false"]):has([data-launcher]:hover) {
+  .phase2c-sidebar[data-labels="preview"]:not([data-click-preview="false"]):has([data-launcher]:hover) {
     --launcher-width: 12rem;
   }
 
-  .phase2c-sidebar:not([data-click-preview="false"]):has([data-launcher]:hover) [data-launcher-label] {
+  .phase2c-sidebar[data-labels="preview"]:not([data-click-preview="false"]):has([data-launcher]:hover) [data-launcher-label] {
     display: inline;
   }
 }
