@@ -76,3 +76,16 @@
     display: inline;
   }
 }
+
+/* Tooltip content is portaled outside the Sidebar; mirror label visibility. */
+:root:has(.phase2c-sidebar[data-labels="labels"]) .phase2c-tool-tooltip,
+:root:has(.phase2c-sidebar[data-labels="preview"][data-click-preview="true"]) .phase2c-tool-tooltip,
+:root:has(.phase2c-sidebar[data-labels="preview"]:not([data-click-preview="false"]) [data-launcher] :focus-visible:not([data-settings-trigger])) .phase2c-tool-tooltip {
+  display: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :root:has(.phase2c-sidebar[data-labels="preview"]:not([data-click-preview="false"]) [data-launcher]:hover) .phase2c-tool-tooltip {
+    display: none;
+  }
+}
