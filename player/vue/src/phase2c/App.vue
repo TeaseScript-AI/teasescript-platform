@@ -18,6 +18,16 @@ import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
 const isDevelopment = import.meta.env.DEV;
 const sidebarVisible = ref(true);
 const showLabels = ref(true);
+const labelMode = ref<"explicit" | "preview">("explicit");
+const launcherHovered = ref(false);
+const launcherFocused = ref(false);
+const labelsRevealed = computed(() => showLabels.value || (
+  isDevelopment && labelMode.value === "preview" && (launcherHovered.value || launcherFocused.value)
+));
+
+function onLauncherFocusOut(event: FocusEvent) {
+  launcherFocused.value = (event.currentTarget as HTMLElement).contains(event.relatedTarget as Node | null);
+}
 
 type Tool = "Visual Lab" | "Layout Debug";
 const pinnedTools = ref<Tool[]>([]);
@@ -42,6 +52,8 @@ function setPinned(tool: Tool, pinned: boolean) {
 async function toggleSidebarVisibility() {
   const keepTriggerFocus = document.activeElement?.matches("[data-sidebar=trigger]");
   sidebarVisible.value = !sidebarVisible.value;
+  launcherHovered.value = false;
+  launcherFocused.value = false;
   if (keepTriggerFocus) {
     await nextTick();
     document.querySelector<HTMLButtonElement>("[data-sidebar=trigger]")?.focus();
@@ -50,10 +62,12 @@ async function toggleSidebarVisibility() {
 </script>
 
 <template>
-  <SidebarProvider :style="{ '--sidebar-width': `calc(12rem + ${openTools.length} * 16rem + 1px)` }" class="h-dvh min-h-0 overflow-hidden" :open="sidebarVisible && showLabels" :responsive="false" @update:open="toggleSidebarVisibility">
-    <Sidebar variant="sidebar" :collapsible="!sidebarVisible ? 'offcanvas' : 'icon'">
+  <SidebarProvider :style="{ '--sidebar-width': `calc(${labelsRevealed ? '12rem' : 'var(--sidebar-width-icon)'} + ${openTools.length} * 16rem + 1px)` }" class="h-dvh min-h-0 overflow-hidden" :open="sidebarVisible" :responsive="false" @update:open="toggleSidebarVisibility">
+    <Sidebar variant="sidebar" collapsible="offcanvas">
       <div class="flex h-full min-h-0 overflow-hidden">
-        <div v-if="sidebarVisible" class="flex shrink-0 flex-col border-r" :class="showLabels ? 'w-48' : 'w-(--sidebar-width-icon)'">
+        <div v-if="sidebarVisible" data-launcher class="flex shrink-0 flex-col border-r" :class="labelsRevealed ? 'w-48' : 'w-(--sidebar-width-icon)'"
+          @mouseenter="launcherHovered = true" @mouseleave="launcherHovered = false"
+          @focusin="launcherFocused = true" @focusout="onLauncherFocusOut">
       <SidebarHeader>
         <SidebarTrigger
           class="size-8"
@@ -65,18 +79,18 @@ async function toggleSidebarVisibility() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton tooltip="Visual Lab" title="Visual Lab" aria-label="Visual Lab" :is-active="openTools.includes('Visual Lab')" @click="openTool('Visual Lab')">
-              <FlaskConical /><span :class="{ 'sr-only': !showLabels }">Visual Lab</span>
+              <FlaskConical /><span :class="{ 'sr-only': !labelsRevealed }">Visual Lab</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton tooltip="Layout Debug" title="Layout Debug" aria-label="Layout Debug" :is-active="openTools.includes('Layout Debug')" @click="openTool('Layout Debug')">
-              <ScanLine /><span :class="{ 'sr-only': !showLabels }">Layout Debug</span>
+              <ScanLine /><span :class="{ 'sr-only': !labelsRevealed }">Layout Debug</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </nav>
         </div>
-        <div v-if="sidebarVisible && showLabels" class="flex min-w-0 flex-1">
+        <div v-if="sidebarVisible" class="flex min-w-0 flex-1">
     <section v-for="tool in openTools" :key="tool" :aria-label="`${tool} panel`" class="flex w-64 shrink-0 flex-col border-r bg-neutral-50">
       <header class="flex min-h-12 items-center justify-between gap-2 border-b p-2">
         <h2 class="text-sm font-medium">{{ tool }}</h2>
@@ -91,6 +105,13 @@ async function toggleSidebarVisibility() {
           <Pin />
         </Toggle>
       </header>
+      <label v-if="isDevelopment && tool === 'Visual Lab'" class="flex flex-col gap-2 p-3 text-sm">
+        Sidebar label behavior
+        <select v-model="labelMode" class="w-full rounded-md border bg-white p-2">
+          <option value="explicit">A — Explicit only</option>
+          <option value="preview">B — Explicit + preview</option>
+        </select>
+      </label>
     </section>
         </div>
       </div>
@@ -117,29 +138,6 @@ async function toggleSidebarVisibility() {
       title="Show sidebar"
     />
     <SidebarInset class="min-h-0 min-w-0">
-      <section
-        v-if="isDevelopment"
-        aria-label="Sidebar development controls"
-        class="fixed right-4 top-4 z-40 flex max-w-[calc(100vw-5rem)] flex-wrap items-end gap-3 rounded-lg border bg-background/95 p-3 text-sm shadow-sm"
-      >
-        <div class="basis-full text-xs font-medium text-muted-foreground">
-          Phase 2C · Sidebar preview
-        </div>
-        <label class="flex min-w-0 flex-col gap-1">
-          Visibility
-          <select v-model="sidebarVisible" class="h-9 rounded-md border bg-background px-2">
-            <option :value="true">Visible</option>
-            <option :value="false">Hidden</option>
-          </select>
-        </label>
-        <label class="flex min-w-0 flex-col gap-1">
-          Labels
-          <select v-model="showLabels" class="h-9 rounded-md border bg-background px-2">
-            <option :value="true">Shown</option>
-            <option :value="false">Icons only</option>
-          </select>
-        </label>
-      </section>
       <div v-if="isDevelopment" class="m-4 flex min-h-0 flex-1 flex-col gap-4 border border-dashed border-neutral-400 p-4">
         <section class="shrink-0">
           <h2 class="mb-2 text-sm font-medium">Stage · 16:9 · max-height: 40% of viewport</h2>
