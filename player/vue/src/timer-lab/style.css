@@ -1,0 +1,89 @@
+@import "tailwindcss";
+
+:root {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+}
+
+/*
+ * Shared timer vocabulary. Candidates differ in shape and arc treatment only;
+ * type scale, label treatment and surface opacity stay common so a side-by-side
+ * comparison shows the design idea rather than accidental sizing differences.
+ */
+.tl-timer {
+  --tl-size: 84px;
+
+  /*
+   * The quiet arc keeps the accent's own hue and only loses chroma. Blending an
+   * accent toward a neutral instead is what turns a clean rose into mud, so the
+   * ambient and urgent ends of the ramp are two points on one hue.
+   */
+  --tl-arc-quiet: oklch(
+    from var(--tl-accent)
+    calc(l + var(--tl-quiet-lift))
+    calc(c * var(--tl-quiet-chroma))
+    h
+  );
+  --tl-arc: var(--tl-arc-quiet);
+  /*
+   * Structural marks and area fills are expressed through one strength per
+   * environment. A percentage of currentColor that reads fine on a flat canvas
+   * simply disappears over a photograph, so the environment sets the floor.
+   */
+  --tl-track: color-mix(in oklab, currentColor var(--tl-mark), transparent);
+  --tl-surface: color-mix(in oklab, var(--tl-surface-base) 62%, transparent);
+
+  position: relative;
+  flex: 0 0 auto;
+  color: var(--tl-fg);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.tl-time {
+  text-shadow: var(--tl-glyph);
+  font-size: calc(var(--tl-size) * 0.215);
+  font-weight: 560;
+  line-height: 1;
+  letter-spacing: -0.015em;
+}
+
+.tl-label {
+  text-shadow: var(--tl-glyph);
+  max-inline-size: calc(var(--tl-size) * 0.74);
+  color: var(--tl-fg-muted);
+  font-size: calc(var(--tl-size) * 0.1);
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+/* Arrival and departure are a fade plus a barely perceptible scale. */
+.tl-enter-active,
+.tl-leave-active {
+  transition: opacity 260ms ease, scale 260ms ease;
+}
+
+.tl-enter-from,
+.tl-leave-to {
+  opacity: 0;
+  scale: 0.96;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tl-enter-active,
+  .tl-leave-active {
+    transition: opacity 160ms linear;
+  }
+
+  .tl-enter-from,
+  .tl-leave-to {
+    scale: 1;
+  }
+}

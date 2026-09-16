@@ -13,6 +13,13 @@ For local inspection, `npm run playground` serves the maintained Vue Player at `
 server. This development route is not a public Player/host protocol and owns the development-only Visual Lab, Layout
 Debug, and Runtime Session tools.
 
+`npm run dev:player:timer-lab` serves an isolated timer design lab at `/timer-lab/`. It renders every timer direction
+under discussion side by side against the current Player ring, in four environments including a photographic backdrop,
+and exists only so a direction can be chosen before anything is integrated. It reuses `presentation.ts` for time
+formatting and otherwise shares no component with the maintained Player; its `--tl-*` variables are lab-local and are
+not Player theme roles. `vue/src/timer-lab/catalogue.ts` is the single list every candidate is registered in. Query
+parameters address a specific state for review or screenshots, for example `?bg=media&veil=light&only=bezel&progress=85`.
+
 ## Implementation seams
 
 - `runtime-adapter.ts` contains the framework-independent runtime-to-Player translation and shared action helpers used
