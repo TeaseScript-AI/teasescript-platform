@@ -35,6 +35,9 @@ const temporaryTool = ref<Tool | null>(null);
 const openTools = computed(() => temporaryTool.value
   ? [...pinnedTools.value, temporaryTool.value] : pinnedTools.value);
 
+const reserveLabels = computed(() => showLabels.value || (openTools.value.length === 0 && labelsRevealed.value));
+const overlayLabels = computed(() => !showLabels.value && openTools.value.length > 0 && labelsRevealed.value);
+
 function clickTool(tool: Tool, event: MouseEvent) {
   // The browser sends two clicks before dblclick; apply the single-click action only once.
   if (event.detail > 1 || pinnedTools.value.includes(tool)) return;
@@ -64,10 +67,11 @@ async function toggleSidebarVisibility() {
 </script>
 
 <template>
-  <SidebarProvider :style="{ '--sidebar-width': `calc(${labelsRevealed ? '12rem' : 'var(--sidebar-width-icon)'} + ${openTools.length} * 16rem + 1px)` }" class="h-dvh min-h-0 overflow-hidden" :open="sidebarVisible" :responsive="false" @update:open="toggleSidebarVisibility">
+  <SidebarProvider :style="{ '--sidebar-width': `calc(${reserveLabels ? '12rem' : 'var(--sidebar-width-icon)'} + ${openTools.length} * 16rem + 1px)` }" class="h-dvh min-h-0 overflow-hidden" :open="sidebarVisible" :responsive="false" @update:open="toggleSidebarVisibility">
     <Sidebar variant="sidebar" collapsible="offcanvas">
-      <div class="flex h-full min-h-0 overflow-hidden">
-        <div v-if="sidebarVisible" data-launcher class="flex shrink-0 flex-col border-r" :class="labelsRevealed ? 'w-48' : 'w-(--sidebar-width-icon)'"
+      <div class="relative flex h-full min-h-0 overflow-hidden">
+        <div v-if="sidebarVisible" class="relative shrink-0" :class="reserveLabels ? 'w-48' : 'w-(--sidebar-width-icon)'">
+        <div v-if="sidebarVisible" data-launcher class="relative flex h-full flex-col border-r bg-sidebar" :class="[labelsRevealed ? 'w-48' : 'w-(--sidebar-width-icon)', { 'z-30 shadow-md': overlayLabels }]"
           @mouseenter="launcherHovered = true" @mouseleave="launcherHovered = false"
           @focusin="launcherFocused = true" @focusout="onLauncherFocusOut">
       <SidebarHeader>
@@ -91,6 +95,7 @@ async function toggleSidebarVisibility() {
           </SidebarMenuItem>
         </SidebarMenu>
       </nav>
+        </div>
         </div>
         <div v-if="sidebarVisible" class="flex min-w-0 flex-1">
     <section v-for="tool in openTools" :key="tool" :aria-label="`${tool} panel`" class="flex w-64 shrink-0 flex-col border-r bg-neutral-50">
