@@ -161,6 +161,8 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
 /* The stage owns a stable track independent of asset ratio and chrome visibility.
    Keep a usable conversation/composer remainder, including in short windows. */
 .player-composition {
+  /* One background spans stage and conversation; only the backdrop fades, not media. */
+  background: linear-gradient(to bottom, #e5e7e7 45%, var(--background) 90%);
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 3fr) minmax(6rem, 2fr);
