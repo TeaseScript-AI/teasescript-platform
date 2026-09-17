@@ -687,7 +687,7 @@ async function toggleSidebarVisibility() {
           @toggle-fullscreen="toggleFullscreen"
         />
 
-        <section class="mx-auto flex min-h-0 w-full max-w-[920px] flex-1 flex-col gap-3 border-x border-dashed border-neutral-400 px-4">
+        <section class="player-conversation mx-auto flex min-h-0 w-full max-w-[920px] flex-1 flex-col gap-3 border-x border-dashed border-neutral-400 px-4">
           <h2 class="shrink-0 text-sm font-medium">Transcript · max-width: 920px</h2>
           <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
           <p class="text-sm leading-relaxed"><strong>Mistress:</strong> Take a moment to look around. This is a simple test scene.</p>
