@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, provide, ref, watch, type ObjectDirective } from "vue";
+import { computed, nextTick, onBeforeUnmount, provide, ref, watch } from "vue";
 import { onClickOutside, useEventListener, useResizeObserver, useStorage } from "@vueuse/core";
-import { FlaskConical, Settings, Pin, ScanLine, ChevronDown, Ellipsis, Activity, GripVertical, SlidersHorizontal, PanelLeftOpen, PanelRightOpen } from "@lucide/vue";
+import { FlaskConical, Settings, ScanLine, Activity, SlidersHorizontal, PanelLeftOpen, PanelRightOpen } from "@lucide/vue";
 import Sortable from "sortablejs";
+import ToolPanelHeader from "./ToolPanelHeader.vue";
+import { toolPanelSizes } from "./toolPanelSizes";
 import Stage from "./Stage.vue";
 import { stageFixtures } from "./stageFixtures";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
 import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
-import { Toggle } from "@/components/ui/toggle";
-import { DropdownMenuItem } from "reka-ui";
 import SidebarMenu from "@/components/ui/sidebar/SidebarMenu.vue";
 import SidebarMenuItem from "@/components/ui/sidebar/SidebarMenuItem.vue";
 import MenuSidebarButton from "./MenuSidebarButton.vue";
@@ -30,16 +30,6 @@ import DialogContent from "@/components/ui/dialog/DialogContent.vue";
 import DialogHeader from "@/components/ui/dialog/DialogHeader.vue";
 import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
 import DialogDescription from "@/components/ui/dialog/DialogDescription.vue";
-
-import DropdownMenu from "@/components/ui/dropdown-menu/DropdownMenu.vue";
-import DropdownMenuTrigger from "@/components/ui/dropdown-menu/DropdownMenuTrigger.vue";
-import DropdownMenuContent from "@/components/ui/dropdown-menu/DropdownMenuContent.vue";
-import DropdownMenuRadioGroup from "@/components/ui/dropdown-menu/DropdownMenuRadioGroup.vue";
-import DropdownMenuRadioItem from "@/components/ui/dropdown-menu/DropdownMenuRadioItem.vue";
-
-import DropdownMenuSub from "@/components/ui/dropdown-menu/DropdownMenuSub.vue";
-import DropdownMenuSubTrigger from "@/components/ui/dropdown-menu/DropdownMenuSubTrigger.vue";
-import DropdownMenuSubContent from "@/components/ui/dropdown-menu/DropdownMenuSubContent.vue";
 
 const isDevelopment = import.meta.env.DEV;
 const mediaFixture = ref<keyof typeof stageFixtures>("Landscape");
@@ -74,6 +64,8 @@ if (!["icons", "preview", "labels"].includes(labelMode.value)) labelMode.value =
 const hoverPreview = ref(false);
 const focusPreview = ref(false);
 const menuSidebar = ref<HTMLElement | null>(null);
+const shellElement = computed(() => menuRuler.value?.parentElement);
+const toolsSurface = ref<HTMLElement | null>(null);
 const clickPreview = ref<boolean | null>(null);
 const labelsVisible = computed(() => labelMode.value === "labels"
   || (labelMode.value === "preview" && (clickPreview.value === true
@@ -114,12 +106,6 @@ const tools = [
 ] as const;
 type Tool = typeof tools[number]["name"];
 const launcherTools = tools.filter(tool => isDevelopment || !tool.developmentOnly);
-const toolPanelSizes = {
-  Small: 14,
-  Medium: 18,
-  Large: 24,
-  "Extra Large": 32,
-} as const;
 const toolSizes = ref<Record<Tool, keyof typeof toolPanelSizes>>({
   "Visual Lab": "Medium",
   "Layout Debug": "Medium",
@@ -154,16 +140,18 @@ updateViewport();
 useEventListener(window, "resize", updateViewport);
 useEventListener(window.visualViewport, "resize", updateViewport);
 useEventListener(window.visualViewport, "scroll", updateViewport);
-const narrow = computed(() => viewport.value.width < 380 + 6 * remSize.value + 4
+// Existing provisional conversation width plus fixture margins/borders.
+const protectedPlayerWidth = computed(() => 380 + 6 * remSize.value + 4);
+const narrow = computed(() => viewport.value.width < protectedPlayerWidth.value
   + (labelMode.value === "labels" ? permanentMenuWidth.value : 3 * remSize.value)
   + toolPanelSizes.Small * remSize.value + 1);
 const sidebarVisible = ref(!narrow.value);
-let transitionFocusLabel: string | null = null;
+let transitionFocusKey: string | null = null;
 watch(narrow, (isNarrow) => {
   const active = document.activeElement as HTMLElement | null;
   const inside = !!active?.closest("[data-tools-surface], [data-slot=sheet-content], [data-tools-context]")
-    || !!document.querySelector(".tool-panel-strip[data-reordering]") || resizing.value !== null;
-  transitionFocusLabel = inside ? active?.getAttribute("aria-label") ?? null : null;
+    || toolStrip.value?.dataset.reordering === "true" || resizing.value !== null;
+  transitionFocusKey = inside ? active?.getAttribute("data-tools-focus") ?? null : null;
   stopResize?.();
   // Do not cover the Player on a layout change unless tools own the active interaction.
   if (isNarrow) narrowMenuVisible.value = true;
@@ -171,18 +159,18 @@ watch(narrow, (isNarrow) => {
   if (!isNarrow && inside && sidebarVisible.value) void nextTick(focusToolsToggle);
 }, { flush: "pre" });
 function focusToolsToggle() {
-  document.querySelector<HTMLButtonElement>("[data-sidebar=trigger]")?.focus({ preventScroll: true });
+  shellElement.value?.querySelector<HTMLButtonElement>("[data-sidebar=trigger]")?.focus({ preventScroll: true });
 }
 function openDrawerFocus(event: Event) {
   event.preventDefault();
-  const surface = document.querySelector("[data-slot=sheet-content]");
-  const target = transitionFocusLabel
-    ? Array.from(surface?.querySelectorAll<HTMLElement>("[aria-label]") ?? [])
-      .find(element => element.getAttribute("aria-label") === transitionFocusLabel)
+  const surface = toolsSurface.value;
+  const target = transitionFocusKey
+    ? Array.from(surface?.querySelectorAll<HTMLElement>("[data-tools-focus]") ?? [])
+      .find(element => element.getAttribute("data-tools-focus") === transitionFocusKey)
     : null;
   // Focus the existing toggle, not a tool or input that could trigger a preview/keyboard.
   (target ?? surface?.querySelector<HTMLElement>("[data-sidebar=trigger]"))?.focus({ preventScroll: true });
-  transitionFocusLabel = null;
+  transitionFocusKey = null;
 }
 async function closeDrawerFocus(event: Event) {
   event.preventDefault();
@@ -286,7 +274,7 @@ async function revealTool(tool: Tool) {
     narrowTool.value = tool;
     narrowMenuVisible.value = false;
     await nextTick();
-    if (focusFromMenu) document.querySelector<HTMLButtonElement>("[data-show-tools]")?.focus({ preventScroll: true });
+    if (focusFromMenu) toolsSurface.value?.querySelector<HTMLButtonElement>("[data-show-tools]")?.focus({ preventScroll: true });
     return;
   }
   await nextTick();
@@ -437,52 +425,12 @@ watch(toolStrip, (strip, _, onCleanup) => {
   onCleanup(() => sortable.destroy());
 }, { flush: "post" });
 
-// Measure intrinsic content, never the current compact/expanded button width.
-const compactPanelSettings = ref<Partial<Record<Tool, boolean>>>({});
-const truncatedTitles = ref<Partial<Record<Tool, boolean>>>({});
-const headerObservers = new WeakMap<HTMLElement, ResizeObserver>();
-const vFitPanelSettings: ObjectDirective<HTMLElement, Tool> = {
-  mounted(header, { value: tool }) {
-    const title = header.querySelector<HTMLElement>("h2")!;
-    // Measure the full title independently of its visible truncation and trigger presentation.
-    const naturalTitle = title.cloneNode(true) as HTMLElement;
-    naturalTitle.setAttribute("aria-hidden", "true");
-    naturalTitle.style.cssText = "position:absolute;visibility:hidden;white-space:nowrap;width:max-content;pointer-events:none";
-    header.append(naturalTitle);
-    const controls = header.querySelector<HTMLElement>("[data-panel-controls]")!;
-    const trigger = header.querySelector<HTMLElement>(".panel-settings-trigger")!;
-    const fullLabel = header.querySelector<HTMLElement>(".panel-settings-expanded")!;
-    const pin = header.querySelector<HTMLElement>("[data-panel-pin]")!;
-    const grip = header.querySelector<HTMLElement>("[data-panel-drag]")!;
-    const measure = () => {
-      const headerStyle = getComputedStyle(header);
-      const triggerStyle = getComputedStyle(trigger);
-      const required = naturalTitle.getBoundingClientRect().width
-        + fullLabel.getBoundingClientRect().width + pin.getBoundingClientRect().width + grip.getBoundingClientRect().width
-        + parseFloat(triggerStyle.paddingLeft) + parseFloat(triggerStyle.paddingRight)
-        + parseFloat(triggerStyle.borderLeftWidth) + parseFloat(triggerStyle.borderRightWidth)
-        + parseFloat(getComputedStyle(controls).columnGap) + 2 * parseFloat(headerStyle.columnGap)
-        + parseFloat(headerStyle.paddingLeft) + parseFloat(headerStyle.paddingRight);
-      compactPanelSettings.value[tool] = required > header.clientWidth;
-      truncatedTitles.value[tool] = title.scrollWidth > title.clientWidth;
-    };
-    const observer = new ResizeObserver(measure);
-    for (const element of [header, title, naturalTitle, fullLabel, pin, grip]) observer.observe(element);
-    headerObservers.set(header, observer);
-    measure();
-  },
-  unmounted(header) {
-    headerObservers.get(header)?.disconnect();
-    headerObservers.delete(header);
-  },
-};
-
-async function toggleSidebarVisibility() {
-  const keepTriggerFocus = document.activeElement?.matches("[data-sidebar=trigger]");
-  setSidebarVisible(!sidebarVisible.value);
+async function updateSidebarVisibility(open: boolean) {
+  const keepTriggerFocus = shellElement.value?.querySelector("[data-sidebar=trigger]") === document.activeElement;
+  setSidebarVisible(open);
   if (keepTriggerFocus) {
     await nextTick();
-    document.querySelector<HTMLButtonElement>("[data-sidebar=trigger]")?.focus();
+    shellElement.value?.querySelector<HTMLButtonElement>("[data-sidebar=trigger]")?.focus();
   }
 }
 </script>
@@ -492,13 +440,13 @@ async function toggleSidebarVisibility() {
     id="phase2c-shell"
     :data-narrow="narrow"
     :data-menu-visible="narrowMenuVisible"
-    :style="{ '--tool-columns-width': `${toolColumnsWidth}rem`, '--permanent-menu-width': `${permanentMenuWidth}px`, '--usable-width': `${viewport.width}px`, '--usable-height': `${viewport.height}px`, '--viewport-left': `${viewport.left}px`, '--viewport-top': `${viewport.top}px` }"
+    :style="{ '--player-reserve': `${protectedPlayerWidth}px`, '--tool-columns-width': `${toolColumnsWidth}rem`, '--permanent-menu-width': `${permanentMenuWidth}px`, '--usable-width': `${viewport.width}px`, '--usable-height': `${viewport.height}px`, '--viewport-left': `${viewport.left}px`, '--viewport-top': `${viewport.top}px` }"
     :data-resizing="resizing !== null"
     :data-labels="labelMode"
     :data-tools-open="openTools.length > 0"
     :data-labels-visible="labelsVisible"
     class="phase2c-sidebar relative h-dvh min-h-0 overflow-hidden"
-    :open="sidebarVisible" :responsive="false" @update:open="toggleSidebarVisibility"
+    :open="sidebarVisible" :responsive="false" @update:open="updateSidebarVisibility"
   >
     <div ref="menuRuler" class="menu-width-ruler" aria-hidden="true">
       <span v-for="tool in launcherTools" :key="tool.name">{{ tool.name }}</span>
@@ -514,10 +462,10 @@ async function toggleSidebarVisibility() {
         <SheetTitle class="sr-only">Tools Sidebar</SheetTitle>
         <SheetDescription class="sr-only">Open, arrange and resize Player tools.</SheetDescription>
       </template>
-      <div data-tools-surface class="relative flex h-full min-h-0" :class="{ 'flex-col': narrow }">
+      <div ref="toolsSurface" data-tools-surface class="relative flex h-full min-h-0" :class="{ 'flex-col': narrow }">
         <div v-if="narrow" class="flex h-12 shrink-0 items-center gap-2 border-b px-2">
-          <SidebarTrigger class="size-8" aria-label="Hide sidebar" title="Hide sidebar" />
-          <Button v-if="!narrowMenuVisible" data-show-tools variant="ghost" size="sm" @click="showToolMenu">
+          <SidebarTrigger data-tools-focus="toggle" class="size-8" aria-label="Hide sidebar" title="Hide sidebar" />
+          <Button v-if="!narrowMenuVisible" data-show-tools data-tools-focus="show-menu" variant="ghost" size="sm" @click="showToolMenu">
             <PanelLeftOpen class="size-4" /> Tools
           </Button>
         </div>
@@ -526,6 +474,7 @@ async function toggleSidebarVisibility() {
       <SidebarHeader v-if="!narrow">
         <SidebarTrigger
           class="size-8"
+          data-tools-focus="toggle"
           aria-label="Hide sidebar"
           title="Hide sidebar"
         />
@@ -533,7 +482,7 @@ async function toggleSidebarVisibility() {
       <div v-if="narrow && narrowTool && openTools.includes(narrowTool)" class="px-2 pt-2">
         <Tooltip>
           <TooltipTrigger as-child>
-            <Button variant="ghost" size="icon" class="size-8" aria-label="Back to active tool" @click="revealTool(narrowTool)">
+            <Button variant="ghost" size="icon" class="size-8" data-tools-focus="back-to-tool" aria-label="Back to active tool" @click="revealTool(narrowTool)">
               <PanelRightOpen class="size-4" />
             </Button>
           </TooltipTrigger>
@@ -543,7 +492,7 @@ async function toggleSidebarVisibility() {
       <nav aria-label="Tools" class="min-h-0 overflow-y-auto p-2">
         <SidebarMenu>
           <SidebarMenuItem v-for="tool in launcherTools" :key="tool.name">
-            <MenuSidebarButton :label="tool.name" :is-active="narrow ? narrowTool === tool.name : openTools.includes(tool.name)" :aria-current="narrow && narrowTool === tool.name ? 'true' : undefined" @click="clickTool(tool.name, $event)" @dblclick="toggleToolPin(tool.name)">
+            <MenuSidebarButton :label="tool.name" :data-tools-focus="`launcher:${tool.name}`" :is-active="narrow ? narrowTool === tool.name : openTools.includes(tool.name)" :aria-current="narrow && narrowTool === tool.name ? 'true' : undefined" @click="clickTool(tool.name, $event)" @dblclick="toggleToolPin(tool.name)">
               <component :is="tool.icon" />
             </MenuSidebarButton>
           </SidebarMenuItem>
@@ -552,7 +501,7 @@ async function toggleSidebarVisibility() {
       <div class="mt-auto p-2">
         <Dialog>
           <DialogTrigger as-child>
-            <MenuSidebarButton label="Settings" data-settings-trigger>
+            <MenuSidebarButton label="Settings" data-tools-focus="player-settings" data-settings-trigger>
               <Settings />
             </MenuSidebarButton>
           </DialogTrigger>
@@ -563,7 +512,7 @@ async function toggleSidebarVisibility() {
             </DialogHeader>
             <label class="flex flex-col gap-2 text-sm">
               Menu Sidebar labels
-              <select v-model="labelMode" class="rounded-md border bg-background p-2">
+              <select data-tools-focus="label-mode" v-model="labelMode" class="rounded-md border bg-background p-2">
                 <option value="icons">Icons only</option>
                 <option value="preview">Icons + preview</option>
                 <option value="labels">Icons + labels</option>
@@ -579,78 +528,9 @@ async function toggleSidebarVisibility() {
         </div>
         <div v-if="sidebarVisible" v-show="!narrow || !narrowMenuVisible" ref="toolStrip" role="region" aria-label="Tool Panels" :tabindex="openTools.length ? 0 : undefined" class="tool-panel-strip flex min-w-0 flex-1 overflow-x-auto overscroll-x-contain focus-visible:outline-2 focus-visible:-outline-offset-2">
     <section v-for="tool in openTools" :key="tool" v-show="!narrow || tool === narrowTool" :data-tool="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="relative flex min-h-0 shrink-0 flex-col border-r bg-[var(--surface-component)]">
-      <header v-fit-panel-settings="tool" :data-compact-settings="compactPanelSettings[tool]" class="flex min-h-12 items-center justify-between gap-2 border-b p-2">
-        <span data-panel-drag class="inline-flex shrink-0 cursor-grab touch-none select-none items-center self-stretch rounded-sm px-0.5 hover:bg-accent active:cursor-grabbing" aria-hidden="true" title="Drag to reorder">
-          <GripVertical class="size-4" />
-        </span>
-        <Tooltip :disabled="!truncatedTitles[tool]">
-          <TooltipTrigger as-child>
-            <h2 :tabindex="truncatedTitles[tool] ? 0 : undefined" class="mr-auto min-w-0 truncate rounded-sm text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2">{{ tool }}</h2>
-          </TooltipTrigger>
-          <TooltipContent>{{ tool }}</TooltipContent>
-        </Tooltip>
-        <div data-panel-controls class="flex shrink-0 items-center gap-1">
-          <Tooltip :disabled="!compactPanelSettings[tool]">
-            <TooltipTrigger as-child>
-              <span class="inline-flex">
-                <DropdownMenu>
-                  <DropdownMenuTrigger as-child>
-                    <Button variant="ghost" size="sm" class="panel-settings-trigger group h-8 gap-1 px-2 hover:bg-accent active:bg-[var(--component-pressed)] data-[state=open]:bg-accent" aria-label="Panel settings">
-                      <span class="panel-settings-expanded inline-flex w-max shrink-0 items-center gap-1">
-                        Panel settings
-                        <ChevronDown class="size-3 transition-transform group-data-[state=open]:rotate-180" />
-                      </span>
-                      <Ellipsis class="panel-settings-compact size-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent data-tools-context align="end">
-                    <DropdownMenuSub>
-                      <DropdownMenuSubTrigger>{{ narrow ? "Wide layout width" : "Width" }}</DropdownMenuSubTrigger>
-                      <DropdownMenuSubContent data-tools-context>
-                        <DropdownMenuRadioGroup v-model="toolSizes[tool]" aria-label="Panel width">
-                          <DropdownMenuRadioItem v-for="size in Object.keys(toolPanelSizes)" :key="size" :value="size">
-                            {{ size }}
-                          </DropdownMenuRadioItem>
-                        </DropdownMenuRadioGroup>
-                      </DropdownMenuSubContent>
-                    </DropdownMenuSub>
-                    <template v-if="openTools.length > 1">
-                      <DropdownMenuItem
-                        :disabled="openTools.indexOf(tool) === 0"
-                        class="relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
-                        @select="moveTool(tool, -1)"
-                      >Move left</DropdownMenuItem>
-                      <DropdownMenuItem
-                        :disabled="openTools.indexOf(tool) === openTools.length - 1"
-                        class="relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
-                        @select="moveTool(tool, 1)"
-                      >Move right</DropdownMenuItem>
-                    </template>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>Panel settings</TooltipContent>
-          </Tooltip>
-        <Tooltip>
-          <TooltipTrigger as-child>
-            <span class="inline-flex">
-        <Toggle
-          data-panel-pin
-          :model-value="pinnedTools.includes(tool)"
-          :aria-label="`Pin ${tool}`"
-          size="sm"
-          class="shrink-0 data-[state=on]:bg-[var(--component-pressed)]"
-          @update:model-value="setPinned(tool, $event)"
-        >
-          <Pin />
-        </Toggle>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{{ pinnedTools.includes(tool) ? "Unpin panel" : "Pin panel" }}</TooltipContent>
-        </Tooltip>
-        </div>
-      </header>
+      <ToolPanelHeader :tool="tool" :narrow="narrow" :size="toolSizes[tool]" :pinned="pinnedTools.includes(tool)"
+        :can-move-left="openTools.indexOf(tool) > 0" :can-move-right="openTools.indexOf(tool) < openTools.length - 1"
+        @resize="toolSizes[tool] = $event" @pin="setPinned(tool, $event)" @move="moveTool(tool, $event)" />
       <div data-tool-body class="min-h-0 flex-1 overflow-y-auto">
         <div v-if="isDevelopment && tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
           <label class="grid gap-2">

@@ -53,8 +53,6 @@
 .phase2c-sidebar {
   --launcher-width: var(--sidebar-width-icon);
   --launcher-space: var(--sidebar-width-icon);
-  /* Protect 380px of transcript text plus this fixture's margins, padding and borders. */
-  --player-reserve: calc(380px + 6rem + 4px);
   --sidebar-width: max(calc(var(--launcher-space) + 1px), min(
     calc(var(--launcher-space) + var(--tool-columns-width) + 1px),
     calc(var(--usable-width) - var(--player-reserve))

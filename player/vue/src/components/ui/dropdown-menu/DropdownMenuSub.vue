@@ -5,13 +5,12 @@ import { useVModel } from "@vueuse/core"
 import { provide, ref } from "vue"
 import { submenuTriggerHoveredKey } from "./submenuInteraction"
 
-const props = withDefaults(defineProps<DropdownMenuSubProps>(), { open: undefined })
+const props = withDefaults(defineProps<Omit<DropdownMenuSubProps, "open"> & { open?: boolean | undefined }>(), { open: undefined })
 const emits = defineEmits<DropdownMenuSubEmits>()
 
-const open = useVModel(props, "open", emits, {
-  passive: props.open === undefined,
-  defaultValue: props.defaultOpen ?? false,
-})
+const open = props.open === undefined
+  ? useVModel(props, "open", emits, { passive: true, defaultValue: props.defaultOpen ?? false })
+  : useVModel(props, "open", emits, { passive: false, defaultValue: props.defaultOpen ?? false })
 const triggerHovered = ref(false)
 provide(submenuTriggerHoveredKey, triggerHovered)
 
@@ -23,7 +22,7 @@ function updateOpen(value: boolean) {
 </script>
 
 <template>
-  <DropdownMenuSub v-slot="slotProps" data-slot="dropdown-menu-sub" :open="open" @update:open="updateOpen">
+  <DropdownMenuSub v-slot="slotProps" data-slot="dropdown-menu-sub" :open="open ?? false" @update:open="updateOpen">
     <slot v-bind="slotProps" />
   </DropdownMenuSub>
 </template>

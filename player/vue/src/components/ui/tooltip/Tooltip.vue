@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { definedProps } from "@/lib/definedProps";
 import type { TooltipRootEmits, TooltipRootProps } from "reka-ui"
 import { TooltipRoot, useForwardPropsEmits } from "reka-ui"
 
@@ -12,7 +13,7 @@ const forwarded = useForwardPropsEmits(props, emits)
   <TooltipRoot
     v-slot="slotProps"
     data-slot="tooltip"
-    v-bind="forwarded"
+    v-bind="definedProps(forwarded)"
   >
     <slot v-bind="slotProps" />
   </TooltipRoot>
