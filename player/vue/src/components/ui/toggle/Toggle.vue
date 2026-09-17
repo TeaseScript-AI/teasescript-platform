@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { definedProps } from "@/lib/definedProps";
 import type { ToggleEmits, ToggleProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
 import type { ToggleVariants } from "."
@@ -27,7 +28,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
   <Toggle
     v-slot="slotProps"
     data-slot="toggle"
-    v-bind="forwarded"
+    v-bind="definedProps(forwarded)"
     :class="cn(toggleVariants({ variant, size }), props.class)"
   >
     <slot v-bind="slotProps" />
