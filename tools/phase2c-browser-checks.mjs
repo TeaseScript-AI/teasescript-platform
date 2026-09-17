@@ -305,8 +305,8 @@ async function menuWidthChecks(page) {
     () => document.querySelector("[data-launcher]").getBoundingClientRect().width === 400,
   );
   check(
-    (await edge.getAttribute("aria-valuemin")) === "260",
-    "Minimum must follow the root font size",
+    (await edge.getAttribute("aria-valuemax")) === "480",
+    "Resize bounds must follow the root font size",
   );
   await page.evaluate(() => {
     document.documentElement.style.removeProperty("font-size");
@@ -320,6 +320,105 @@ async function menuWidthChecks(page) {
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "icons"));
   return "PASS menu preview bounds and permanent rem sizing";
+}
+
+async function menuCollapseChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "labels"));
+  await page.reload();
+  const shell = page.locator("#phase2c-shell");
+  const edge = page.getByRole("separator", { name: "Menu Sidebar width", exact: true });
+  const menu = page.locator("[data-launcher]");
+  const width = async () => (await menu.boundingBox()).width;
+  const mode = async () => shell.getAttribute("data-labels");
+  const settledMode = async () => {
+    check(
+      await page
+        .locator('[data-slot="sidebar"] > .fixed')
+        .evaluate(
+          (el) =>
+            !el
+              .getAnimations()
+              .some(
+                (animation) =>
+                  animation instanceof CSSTransition && animation.transitionProperty === "width",
+              ) &&
+            Math.abs(
+              el.getBoundingClientRect().width -
+                document.querySelector("[data-launcher]").getBoundingClientRect().width -
+                1,
+            ) < 1,
+        ),
+      "Label mode change must not animate the dock background separately",
+    );
+  };
+  const drag = async (x) => {
+    const bounds = await edge.boundingBox();
+    await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(x, bounds.y + bounds.height / 2, { steps: 8 });
+  };
+  // Choose a non-default width to prove collapse preserves the existing preference.
+  await edge.focus();
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  check((await width()) === 288, "Initial test width must be 18rem");
+  await drag(96);
+  await page.getByRole("status").filter({ hasText: "Icons only" }).waitFor();
+  check((await mode()) === "labels", "Crossing the collapse threshold must wait for release");
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
+  check(
+    (await mode()) === "labels" && (await width()) === 288,
+    "Escape must restore the starting width/mode",
+  );
+  await drag(96);
+  await page.mouse.up();
+  check((await mode()) === "icons" && (await width()) === 48, "Inward drag must collapse to icons");
+  await settledMode();
+  await drag(80);
+  await page.mouse.up();
+  check((await mode()) === "icons", "Small outward drag must not expand");
+  await drag(160);
+  await page.getByRole("status").filter({ hasText: "Show labels" }).waitFor();
+  check((await mode()) === "icons", "Expansion must wait for release");
+  await page.mouse.up();
+  check(
+    (await mode()) === "labels" && (await width()) === 288,
+    "Outward drag must restore the saved label width",
+  );
+  await settledMode();
+  // The actual minimum remains usable and does not implicitly collapse.
+  await edge.focus();
+  await page.keyboard.press("Home");
+  check(
+    (await width()) === 208 && (await mode()) === "labels",
+    "Minimum labels width must remain selectable",
+  );
+  await page.keyboard.press("Enter");
+  check((await mode()) === "icons", "Enter must collapse without a drag");
+  await page.keyboard.press("Enter");
+  check(
+    (await mode()) === "labels" && (await width()) === 208,
+    "Enter must restore labels and focus",
+  );
+  check(
+    await edge.evaluate((el) => el === document.activeElement),
+    "Mode switch lost resize-edge focus",
+  );
+  // Pointer cancellation must not commit a pending collapse.
+  await drag(96);
+  await edge.dispatchEvent("pointercancel", { pointerId: 1, pointerType: "mouse" });
+  await page.mouse.up();
+  check(
+    (await mode()) === "labels" && (await width()) === 208,
+    "Pointer cancellation must restore the label width",
+  );
+  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "icons"));
+  return "PASS menu drag collapse, expansion and cancellation";
 }
 
 async function toolContentChecks(page) {
@@ -994,6 +1093,10 @@ try {
   if (!widthOutput.includes("PASS menu preview bounds and permanent rem sizing"))
     throw new Error(widthOutput);
   console.log("phase2c-browser-checks: PASS menu preview bounds and permanent rem sizing");
+  const collapseOutput = cli("run-code", menuCollapseChecks.toString());
+  if (!collapseOutput.includes("PASS menu drag collapse, expansion and cancellation"))
+    throw new Error(collapseOutput);
+  console.log("phase2c-browser-checks: PASS menu drag collapse, expansion and cancellation");
   const contentOutput = cli("run-code", toolContentChecks.toString());
   if (!contentOutput.includes("PASS tool content lifetime preservation and disposal"))
     throw new Error(contentOutput);
