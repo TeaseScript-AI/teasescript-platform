@@ -45,7 +45,6 @@ defineEmits<{ toggleFullscreen: [] }>();
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: #e5e7e7;
 }
 .stage-media { display: block; width: 100%; height: 100%; object-fit: contain; }
 .stage-title {
