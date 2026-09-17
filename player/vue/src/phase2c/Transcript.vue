@@ -1,16 +1,24 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref, shallowReactive } from "vue";
 import { elementScroll, observeElementRect, useVirtualizer } from "@tanstack/vue-virtual";
 import { ArrowDown } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import type { TranscriptEntry } from "./transcriptEntries";
+import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } from "../../../model.js";
+import TranscriptMarkup from "./TranscriptMarkup.vue";
 
-const props = defineProps<{ entries: readonly TranscriptEntry[] }>();
+const props = defineProps<{
+  entries: readonly PlayerTranscriptEntryPresentation[];
+  speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
+  revision?: number;
+}>();
+// Reader state survives virtual row unmounts; it is not canonical transcript data.
+const revealedSpoilers = shallowReactive(new Set<string>());
 const scrollElement = ref<HTMLDivElement | null>(null);
 const touching = ref(false);
 const latestThreshold = 24;
 const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(computed(() => {
-  // Capture this array: the previous options must retain their previous key mapping on prepend.
+  // Capture the supplied list so replacing fixtures retains the previous key mapping on prepend.
+  void props.revision; // The canonical adapter appends in place and publishes a revision.
   const entries = props.entries;
   return {
     count: entries.length,
@@ -86,11 +94,11 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
       <div class="transcript-history" role="list" :style="{ height: `${virtualizer.getTotalSize()}px` }">
         <article v-for="{ item, entry } in rows" :key="entry.id"
           :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
-          :data-index="item.index" :data-message-id="entry.id"
+          :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
           role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
           class="transcript-entry" :style="{ transform: `translateY(${item.start}px)` }">
-          <div class="message" :data-author="entry.author">
-            <p class="message-copy"><strong v-if="entry.author === 'speaker'">{{ entry.name }}: </strong>{{ entry.text }}</p>
+          <div class="message" :data-author="entry.kind === 'session-event' ? 'session-event' : entry.speakerId === 'user' ? 'player' : 'speaker'">
+            <div class="message-copy"><strong v-if="entry.kind === 'message' && entry.speakerId !== 'user'">{{ speakers[entry.speakerId]?.name ?? entry.speakerId }}: </strong><TranscriptMarkup v-if="entry.kind === 'message' && entry.speakerId !== 'user' && entry.content" :content="entry.content" :entry-id="entry.id" :revealed="revealedSpoilers" @reveal="revealedSpoilers.add($event)" /><template v-else>{{ entry.text }}</template></div>
           </div>
         </article>
       </div>

@@ -208,7 +208,9 @@ async function transcriptChecks(page) {
 
   await scroll.hover();
   await page.mouse.wheel(0, -800);
-  await latest.waitFor();
+  await latest.waitFor().catch(() => {
+    throw new Error("wheel away from latest");
+  });
   const reading = await anchor();
   await append.click();
   await expectAnchor(reading);
@@ -241,7 +243,9 @@ async function transcriptChecks(page) {
   await atEnd("append after keyboard End");
   await scroll.hover();
   await page.mouse.wheel(0, -500);
-  await latest.waitFor();
+  await latest.waitFor().catch(() => {
+    throw new Error("second wheel away from latest");
+  });
   await page.mouse.wheel(0, 10000);
   await atEnd("native wheel reaches latest");
   await latest.waitFor({ state: "hidden" });
@@ -254,20 +258,36 @@ async function transcriptChecks(page) {
   await atEnd("narrow resize");
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+  await settleLayout();
   const box = await scroll.boundingBox();
   const x = box.x + box.width / 2;
-  const y = box.y + 30;
+  const y = box.y + 10;
+  await page.waitForFunction(
+    ({ x, y }) =>
+      document.querySelector(".transcript-scroll").contains(document.elementFromPoint(x, y)),
+    { x, y },
+  );
+  const beforeTouch = await scroll.evaluate((el) => el.scrollTop);
   await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
   for (let step = 1; step <= 6; step++) {
     await cdp.send("Input.dispatchTouchEvent", {
       type: "touchMove",
-      touchPoints: [{ x, y: y + step * 25 }],
+      touchPoints: [{ x, y: y + (step * (box.height - 20)) / 6 }],
     });
     await page.evaluate(() => new Promise(requestAnimationFrame));
   }
   check((await latest.count()) === 0, "Do not put return control under an active finger");
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  await latest.waitFor();
+  await latest.waitFor().catch(async () => {
+    throw new Error(
+      "touch release and settlement: " +
+        (await scroll.evaluate((el) =>
+          JSON.stringify({ top: el.scrollTop, height: el.scrollHeight, view: el.clientHeight }),
+        )) +
+        "; before=" +
+        beforeTouch,
+    );
+  });
   await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
   await cdp.detach();
   const narrowAnchor = await anchor();
@@ -340,6 +360,130 @@ async function transcriptChecks(page) {
   return "PASS transcript virtualization, measurement, follow, prepend, resize and touch";
 }
 
+async function runtimeTranscriptChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  const errors = [];
+  const onError = (error) => errors.push(error.message);
+  page.on("pageerror", onError);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
+  await page.getByRole("button", { name: "Start runtime scenario", exact: true }).click();
+  const transcript = page.locator(".transcript");
+  const rows = transcript.locator("[data-message-id]");
+  await transcript.getByRole("link", { name: "Map", exact: true }).waitFor();
+  check(
+    (await rows.first().getAttribute("data-speaker-id")).startsWith("runtime-speaker-"),
+    "Speaker provenance lost",
+  );
+  check((await rows.first().innerText()).includes("Coastal Guide:"), "Runtime speaker name lost");
+  const link = transcript.getByRole("link", { name: "Map", exact: true });
+  check(
+    (await link.getAttribute("href")) === "https://example.com/coast",
+    "Canonical link target lost",
+  );
+  check(
+    (await link.getAttribute("target")) === "_blank" &&
+      (await link.getAttribute("rel")).includes("noopener"),
+    "External link must isolate opener",
+  );
+  check(
+    (await transcript.locator(".markup-bold").evaluate((el) => getComputedStyle(el).fontWeight)) ===
+      "700",
+    "Authored bold not rendered",
+  );
+  const spoiler = transcript.getByRole("button", { name: "Reveal spoiler", exact: true });
+  check(
+    (await spoiler.locator("span").getAttribute("aria-hidden")) === "true",
+    "Concealed content must not be announced",
+  );
+  check(
+    (await spoiler.evaluate((el) => getComputedStyle(el).color)) === "rgba(0, 0, 0, 0)",
+    "Spoiler is visibly exposed",
+  );
+  check(
+    (await spoiler.evaluate((el) => getComputedStyle(el).backgroundColor)) !== "rgba(0, 0, 0, 0)",
+    "Concealed spoiler needs a visible reveal affordance",
+  );
+  await spoiler.focus();
+  await page.keyboard.press("Enter");
+  await spoiler.waitFor({ state: "hidden" });
+  const answer = page.getByRole("textbox", { name: "Runtime test answer", exact: true });
+  await answer.fill("   ");
+  await page.getByRole("button", { name: "Submit runtime answer", exact: true }).click();
+  check((await rows.count()) === 1, "Rejected completion must not append");
+  const reply = "**literal answer**\n<b>still text</b>";
+  await answer.fill(reply);
+  await page.getByRole("button", { name: "Submit runtime answer", exact: true }).click();
+  await transcript.locator('[aria-setsize="3"]').first().waitFor();
+  const user = transcript.locator('[data-speaker-id="user"]').first();
+  check((await user.innerText()) === reply, "Player answer must remain exact plain text");
+  check(
+    (await user.locator(".markup-bold, b, a").count()) === 0,
+    "Player-authored text was parsed",
+  );
+  await transcript.getByRole("heading", { name: "Along the shore", level: 1 }).waitFor();
+  check(
+    (await transcript.locator("blockquote").innerText()).includes("Take your time."),
+    "Quote structure lost",
+  );
+  check(
+    (await transcript.locator("ul li").count()) === 2 &&
+      (await transcript.locator("ol li").getAttribute("value")) === "3",
+    "List structure/ordinal lost",
+  );
+  check((await transcript.locator(".markup-code").innerText()) === "code", "Inline code lost");
+  check((await transcript.locator(".markup-size-large").count()) === 1, "Size span lost");
+  check(
+    (await transcript
+      .getByText("blue", { exact: true })
+      .evaluate((el) => getComputedStyle(el).color)) === "rgb(69, 103, 137)",
+    "Authored color lost",
+  );
+  const snapshot = () =>
+    rows.evaluateAll((elements) =>
+      elements.map((el) => ({
+        id: el.dataset.messageId,
+        speaker: el.dataset.speakerId,
+        text: el.innerText,
+      })),
+    );
+  const before = await snapshot();
+  await page.getByRole("button", { name: "Capture runtime checkpoint", exact: true }).click();
+  await page.getByRole("button", { name: "Activate runtime button", exact: true }).click();
+  await transcript.locator('[aria-setsize="5"]').first().waitFor();
+  check(
+    (await transcript.getByText("Continue **literally**", { exact: true }).count()) === 1,
+    "Canonical button transcript text changed",
+  );
+  check(
+    (await transcript.locator('[data-speaker-id="narrator"]').innerText()) ===
+      "Narrator: The walk continues. <b>This is literal text.</b>",
+    "Narrator/raw HTML semantics changed",
+  );
+  check((await transcript.locator("b").count()) === 0, "Authored HTML was interpreted");
+  const uninterrupted = await snapshot();
+  await page.getByRole("button", { name: "Restore runtime checkpoint", exact: true }).click();
+  await transcript.locator('[aria-setsize="3"]').first().waitFor();
+  check(
+    JSON.stringify(await snapshot()) === JSON.stringify(before),
+    "Checkpoint reconstruction changed IDs, provenance or visible text",
+  );
+  await page.getByRole("button", { name: "Activate runtime button", exact: true }).click();
+  await transcript.locator('[aria-setsize="5"]').first().waitFor();
+  check(
+    JSON.stringify(await snapshot()) === JSON.stringify(uninterrupted),
+    "Restored continuation differs from uninterrupted execution",
+  );
+  await page.getByRole("button", { name: "Start runtime scenario", exact: true }).click();
+  await spoiler.waitFor();
+  check(errors.length === 0, `Runtime page errors: ${errors.join("; ")}`);
+  page.off("pageerror", onError);
+  return "PASS runtime transcript provenance, markup, plain answers and restore";
+}
+
 try {
   const config = join(scratch, "browser.json");
   writeFileSync(
@@ -351,6 +495,14 @@ try {
   if (!output.includes("PASS lifecycle/order/width and dock/drawer composition"))
     throw new Error(output);
   console.log("phase2c-browser-checks: PASS lifecycle/order/width and dock/drawer composition");
+  const runtimeOutput = cli("run-code", runtimeTranscriptChecks.toString());
+  if (
+    !runtimeOutput.includes("PASS runtime transcript provenance, markup, plain answers and restore")
+  )
+    throw new Error(runtimeOutput);
+  console.log(
+    "phase2c-browser-checks: PASS runtime transcript provenance, markup, plain answers and restore",
+  );
   const transcriptOutput = cli("run-code", transcriptChecks.toString());
   if (
     !transcriptOutput.includes(
