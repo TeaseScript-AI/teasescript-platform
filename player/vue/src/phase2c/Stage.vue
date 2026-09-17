@@ -55,17 +55,20 @@ defineEmits<{ toggleFullscreen: [] }>();
   padding: 0.25rem 0.5rem;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 0.875rem; font-weight: 500;
-  color: white; background: rgb(0 0 0 / 65%); border-radius: 0.375rem;
+  color: var(--foreground); background: var(--sidebar); border-radius: 0.375rem;
   pointer-events: none;
 }
 .stage-fullscreen {
   position: absolute; top: 0.5rem; right: 0.5rem;
   width: 2.75rem; height: 2.75rem;
-  color: white; background: rgb(0 0 0 / 65%);
+  border: 1px solid var(--border);
+  color: var(--foreground); background: var(--surface-component);
+  box-shadow: none;
 }
-.stage-fullscreen:hover, .stage-fullscreen:focus-visible { color: white; background: rgb(0 0 0 / 85%); }
+.stage-fullscreen:hover { background: var(--component-hover); border-color: var(--border-hover); }
+.stage-fullscreen:active { background: var(--component-pressed); border-color: var(--border-strong); }
 .stage-fullscreen-error {
   position: absolute; bottom: 0.5rem; inset-inline: 0.5rem;
-  padding: 0.5rem; font-size: 0.75rem; color: white; background: #262626;
+  padding: 0.5rem; font-size: 0.75rem; color: var(--foreground); background: var(--surface-component);
 }
 </style>
