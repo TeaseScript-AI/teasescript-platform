@@ -2,21 +2,21 @@
 @import "tw-animate-css";
 
 @theme inline {
-  --color-popover: var(--background);
+  --color-popover: var(--surface-component);
   --color-popover-foreground: var(--foreground);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--foreground);
   --color-sidebar-border: var(--border);
-  --color-sidebar-accent: #d4d4d4;
+  --color-sidebar-accent: var(--component-hover);
   --color-sidebar-accent-foreground: var(--foreground);
-  --color-sidebar-ring: #737373;
-  --color-muted-foreground: #737373;
-  --color-accent: #f5f5f5;
+  --color-sidebar-ring: var(--border-strong);
+  --color-muted-foreground: var(--text-muted);
+  --color-accent: var(--component-hover);
   --color-accent-foreground: var(--foreground);
   --color-border: var(--border);
-  --color-ring: #737373;
+  --color-ring: var(--border-strong);
   --radius-md: 0.375rem;
   --radius-lg: 0.5rem;
   --radius-xl: 0.75rem;
@@ -24,10 +24,19 @@
 
 :root {
   font-family: ui-sans-serif, system-ui, sans-serif;
-  --background: #ffffff;
-  --foreground: #171717;
-  --sidebar: #e8e8e8;
-  --border: #e5e5e5;
+  /* Existing Player light palette: player/styles/layout.css. */
+  --background: oklch(95.839% 0.01306 71.33);
+  --foreground: oklch(30.838% 0.01712 35.72);
+  --sidebar: oklch(97.586% 0.01130 71.90);
+  --surface-component: oklch(99.199% 0.00734 80.72);
+  --component-hover: oklch(95.449% 0.01618 64.67);
+  --component-pressed: oklch(92.481% 0.02213 58.77);
+  --border: oklch(84.246% 0.02905 65.71);
+  --border-hover: oklch(78.050% 0.03740 56.32);
+  --border-strong: oklch(68.851% 0.04826 51.55);
+  --text-muted: oklch(52.649% 0.02679 41.27);
+  /* Existing demo ambience (#f7cdaf), expressed in OKLCH. */
+  --scene-ambient: oklch(87.69778% 0.062244 57.33796);
   color: var(--foreground);
   background: var(--background);
 }
@@ -76,11 +85,11 @@
 
 /* Keep open tools distinguishable from a transient pointer hover. */
 [data-launcher] [data-sidebar="menu-button"][data-active="true"] {
-  background: #c4c4c4;
-  box-shadow: inset 3px 0 #525252;
+  background: var(--component-pressed);
+  box-shadow: inset 3px 0 var(--border-strong);
 }
 [data-launcher] [data-sidebar="menu-button"][data-active="true"]:hover {
-  background: #b8b8b8;
+  background: var(--component-hover);
 }
 
 .panel-settings-trigger { position: relative; }
@@ -161,8 +170,14 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
 /* The stage owns a stable track independent of asset ratio and chrome visibility.
    Keep a usable conversation/composer remainder, including in short windows. */
 .player-composition {
-  /* One background spans stage and conversation; only the backdrop fades, not media. */
-  background: linear-gradient(to bottom, #e5e7e7 45%, var(--background) 90%);
+  /* Same ambient wash as player/styles/effects.css; no legacy layout rules. */
+  background:
+    radial-gradient(ellipse 90% 55% at 68% 0%,
+      color-mix(in srgb, var(--scene-ambient) 34%, transparent), transparent 72%),
+    linear-gradient(to bottom,
+      color-mix(in srgb, var(--scene-ambient) 26%, transparent) 0 var(--stage-height),
+      transparent calc(var(--stage-height) + 200px)),
+    var(--background);
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 3fr) minmax(6rem, 2fr);

@@ -44,6 +44,10 @@ import DropdownMenuSubContent from "@/components/ui/dropdown-menu/DropdownMenuSu
 const isDevelopment = import.meta.env.DEV;
 const mediaFixture = ref<keyof typeof stageFixtures>("Landscape");
 const longTitle = ref(false);
+const stage = ref<InstanceType<typeof Stage> | null>(null);
+const stageHeight = ref(0);
+// Measurement only positions the ambient fade; it never controls layout geometry.
+useResizeObserver(computed(() => stage.value?.$el as HTMLElement | undefined), ([entry]) => { if (entry) stageHeight.value = entry.contentRect.height; });
 const fullscreen = ref(document.fullscreenElement === document.documentElement);
 const fullscreenSupported = document.fullscreenEnabled;
 const fullscreenError = ref("");
@@ -574,9 +578,9 @@ async function toggleSidebarVisibility() {
           @pointerdown="startResize($event)" @keydown="resizeMenuKey" />
         </div>
         <div v-if="sidebarVisible" v-show="!narrow || !narrowMenuVisible" ref="toolStrip" role="region" aria-label="Tool Panels" :tabindex="openTools.length ? 0 : undefined" class="tool-panel-strip flex min-w-0 flex-1 overflow-x-auto overscroll-x-contain focus-visible:outline-2 focus-visible:-outline-offset-2">
-    <section v-for="tool in openTools" :key="tool" v-show="!narrow || tool === narrowTool" :data-tool="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="relative flex min-h-0 shrink-0 flex-col border-r bg-neutral-50">
+    <section v-for="tool in openTools" :key="tool" v-show="!narrow || tool === narrowTool" :data-tool="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="relative flex min-h-0 shrink-0 flex-col border-r bg-[var(--surface-component)]">
       <header v-fit-panel-settings="tool" :data-compact-settings="compactPanelSettings[tool]" class="flex min-h-12 items-center justify-between gap-2 border-b p-2">
-        <span data-panel-drag class="inline-flex shrink-0 cursor-grab touch-none select-none items-center self-stretch rounded-sm px-0.5 hover:bg-neutral-200 active:cursor-grabbing" aria-hidden="true" title="Drag to reorder">
+        <span data-panel-drag class="inline-flex shrink-0 cursor-grab touch-none select-none items-center self-stretch rounded-sm px-0.5 hover:bg-accent active:cursor-grabbing" aria-hidden="true" title="Drag to reorder">
           <GripVertical class="size-4" />
         </span>
         <Tooltip :disabled="!truncatedTitles[tool]">
@@ -591,7 +595,7 @@ async function toggleSidebarVisibility() {
               <span class="inline-flex">
                 <DropdownMenu>
                   <DropdownMenuTrigger as-child>
-                    <Button variant="ghost" size="sm" class="panel-settings-trigger group h-8 gap-1 px-2 hover:bg-neutral-200 active:bg-neutral-300 data-[state=open]:bg-neutral-200" aria-label="Panel settings">
+                    <Button variant="ghost" size="sm" class="panel-settings-trigger group h-8 gap-1 px-2 hover:bg-accent active:bg-[var(--component-pressed)] data-[state=open]:bg-accent" aria-label="Panel settings">
                       <span class="panel-settings-expanded inline-flex w-max shrink-0 items-center gap-1">
                         Panel settings
                         <ChevronDown class="size-3 transition-transform group-data-[state=open]:rotate-180" />
@@ -636,7 +640,7 @@ async function toggleSidebarVisibility() {
           :model-value="pinnedTools.includes(tool)"
           :aria-label="`Pin ${tool}`"
           size="sm"
-          class="shrink-0 data-[state=on]:bg-neutral-300"
+          class="shrink-0 data-[state=on]:bg-[var(--component-pressed)]"
           @update:model-value="setPinned(tool, $event)"
         >
           <Pin />
@@ -651,7 +655,7 @@ async function toggleSidebarVisibility() {
         <div v-if="isDevelopment && tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
           <label class="grid gap-2">
             Stage media fixture
-            <select v-model="mediaFixture" class="min-w-0 rounded border bg-white p-2">
+            <select v-model="mediaFixture" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
               <option v-for="(_, name) in stageFixtures" :key="name">{{ name }}</option>
             </select>
           </label>
@@ -677,8 +681,8 @@ async function toggleSidebarVisibility() {
       title="Show sidebar"
     />
     <SidebarInset class="min-h-0 min-w-0">
-      <div class="player-composition">
-        <Stage
+      <div class="player-composition" :style="{ '--stage-height': `${stageHeight}px` }">
+        <Stage ref="stage"
           :title="longTitle ? 'An evening by the coast — a quiet moment before the journey begins' : 'Evening by the coast'"
           :media="stageFixtures[mediaFixture]"
           :fullscreen="fullscreen"
@@ -687,16 +691,16 @@ async function toggleSidebarVisibility() {
           @toggle-fullscreen="toggleFullscreen"
         />
 
-        <section class="player-conversation mx-auto flex min-h-0 w-full max-w-[920px] flex-1 flex-col gap-3 border-x border-dashed border-neutral-400 px-4">
+        <section class="player-conversation mx-auto flex min-h-0 w-full max-w-[920px] flex-1 flex-col gap-3 border-x border-dashed border-border px-4">
           <h2 class="shrink-0 text-sm font-medium">Transcript · max-width: 920px</h2>
           <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
           <p class="text-sm leading-relaxed"><strong>Mistress:</strong> Take a moment to look around. This is a simple test scene.</p>
-          <p class="ml-auto max-w-[75%] rounded-lg border border-neutral-300 bg-neutral-100 px-4 py-3 text-sm">I am ready. What happens next?</p>
+          <p class="ml-auto max-w-[75%] rounded-lg border border-border bg-[var(--surface-component)] px-4 py-3 text-sm">I am ready. What happens next?</p>
           <p class="text-sm leading-relaxed"><strong>Mistress:</strong> This deliberately longer message helps us see how the conversation wraps when the sidebar opens, closes, or changes its presentation, and how much room remains for the scene and your response.</p>
           </div>
           <div class="flex min-w-0 shrink-0 gap-2 pt-2">
-            <input aria-label="Test response" placeholder="Type your response..." class="min-w-0 flex-1 rounded border border-neutral-400 bg-white px-3 py-2 text-sm" />
-            <button type="button" class="shrink-0 rounded border border-neutral-400 bg-neutral-100 px-4 py-2 text-sm">Send</button>
+            <input aria-label="Test response" placeholder="Type your response..." class="min-w-0 flex-1 rounded border border-border bg-[var(--surface-component)] px-3 py-2 text-sm" />
+            <button type="button" class="shrink-0 rounded border border-border bg-[var(--surface-component)] px-4 py-2 text-sm">Send</button>
           </div>
         </section>
       </div>
