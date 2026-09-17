@@ -138,6 +138,7 @@ async function menuPreviewChecks(page) {
     );
   const menu = page.locator("[data-launcher]");
   const bounds = await menu.boundingBox();
+  const stageBeforePreview = await page.locator(".player-stage").boundingBox();
   const x = bounds.x + 24;
   const y = bounds.y + 330;
   // Deterministic clock: incidental hover cancels, movement does not restart the delay.
@@ -157,6 +158,21 @@ async function menuPreviewChecks(page) {
   await page.clock.runFor(1);
   await labels(true);
   await page.clock.resume();
+  await menu.click({ trial: true, position: { x: 24, y: 330 } });
+  const expanded = await menu.boundingBox();
+  if (expanded.width <= bounds.width) throw new Error("Preview did not expand");
+  if (
+    JSON.stringify(await page.locator(".player-stage").boundingBox()) !==
+    JSON.stringify(stageBeforePreview)
+  )
+    throw new Error("Preview changed Stage geometry");
+  // The extended label area is part of the hover target, not only the reserved icon strip.
+  await page.mouse.move(expanded.x + expanded.width - 10, y);
+  await labels(true);
+  await page.mouse.move(expanded.x + expanded.width + 10, y);
+  await labels(false);
+  await page.mouse.move(x, y);
+  await labels(true);
   await page.mouse.click(x, y);
   await page.mouse.move(1100, 400);
   await labels(false);
@@ -212,6 +228,98 @@ async function menuPreviewChecks(page) {
   await page.reload();
   await labels(false);
   return "PASS menu preview mouse, touch and keyboard ownership";
+}
+
+async function menuWidthChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "labels"));
+  await page.reload();
+  const menu = page.locator("[data-launcher]");
+  const edge = page.getByRole("separator", { name: "Menu Sidebar width", exact: true });
+  const width = async () => (await menu.boundingBox()).width;
+  const mode = async (value) => {
+    await page.locator("[data-settings-trigger]").click();
+    await page.locator('[data-tools-focus="label-mode"]').selectOption(value);
+    await page.keyboard.press("Escape");
+  };
+  check((await width()) === 256, "Permanent labels must start at 16rem");
+  await edge.focus();
+  await page.keyboard.press("Home");
+  check((await width()) === 208, "Permanent labels minimum must be 13rem");
+  await page
+    .locator("[data-launcher] button")
+    .filter({ hasText: "Media Playback Configuration" })
+    .hover();
+  await page
+    .locator('[data-slot="tooltip-content"]')
+    .filter({ hasText: "Media Playback Configuration" })
+    .waitFor();
+  await edge.focus();
+  await page.keyboard.press("End");
+  check((await width()) === 384, "Permanent labels maximum must be 24rem");
+  const box = await edge.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 - 64, box.y + box.height / 2, { steps: 8 });
+  await page.mouse.up();
+  check((await width()) === 320, "Dragging must select the permanent label width");
+  await mode("icons");
+  check((await width()) === 48, "Icons must remain compact");
+  await mode("preview");
+  await page.mouse.move(24, 330);
+  await page.waitForFunction(
+    () => document.querySelector("#phase2c-shell").dataset.labelsVisible === "true",
+  );
+  await menu.click({ trial: true, position: { x: 24, y: 330 } });
+  check(
+    (await width()) >= 208 && (await width()) <= 256,
+    "Preview must fit content within 13–16rem independently of permanent width",
+  );
+  // Exercise the content-measurement bounds without adding pathological product labels.
+  const ruler = page.locator(".menu-width-ruler");
+  const rulerContents = await ruler.innerHTML();
+  await ruler.evaluate((el) => {
+    el.textContent = "An excessively long tool label that must never create an oversized preview";
+  });
+  await page.waitForFunction(
+    () => document.querySelector("[data-launcher]").getBoundingClientRect().width === 256,
+  );
+  await ruler.evaluate((el) => {
+    el.textContent = "Short";
+  });
+  await page.waitForFunction(
+    () => document.querySelector("[data-launcher]").getBoundingClientRect().width === 208,
+  );
+  await ruler.evaluate((el, html) => {
+    el.innerHTML = html;
+  }, rulerContents);
+  await mode("labels");
+  check((await width()) === 320, "Returning to permanent labels must restore the selected width");
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = "20px";
+  });
+  await page.waitForFunction(
+    () => document.querySelector("[data-launcher]").getBoundingClientRect().width === 400,
+  );
+  check(
+    (await edge.getAttribute("aria-valuemin")) === "260",
+    "Minimum must follow the root font size",
+  );
+  await page.evaluate(() => {
+    document.documentElement.style.removeProperty("font-size");
+  });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await mode("preview");
+  check(
+    (await menu.evaluate((el) => getComputedStyle(el).transitionDuration)) === "0s",
+    "Reduced motion must disable preview animation",
+  );
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "icons"));
+  return "PASS menu preview bounds and permanent rem sizing";
 }
 
 async function toolContentChecks(page) {
@@ -882,6 +990,10 @@ try {
   if (!previewOutput.includes("PASS menu preview mouse, touch and keyboard ownership"))
     throw new Error(previewOutput);
   console.log("phase2c-browser-checks: PASS menu preview mouse, touch and keyboard ownership");
+  const widthOutput = cli("run-code", menuWidthChecks.toString());
+  if (!widthOutput.includes("PASS menu preview bounds and permanent rem sizing"))
+    throw new Error(widthOutput);
+  console.log("phase2c-browser-checks: PASS menu preview bounds and permanent rem sizing");
   const contentOutput = cli("run-code", toolContentChecks.toString());
   if (!contentOutput.includes("PASS tool content lifetime preservation and disposal"))
     throw new Error(contentOutput);

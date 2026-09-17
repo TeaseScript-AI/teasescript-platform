@@ -67,7 +67,7 @@
 }
 
 .phase2c-sidebar[data-labels-visible="true"] {
-  --launcher-width: max-content;
+  --launcher-width: clamp(13rem, var(--measured-menu-width), 16rem);
 }
 
 .phase2c-sidebar[data-labels="labels"] {
@@ -80,6 +80,20 @@
 .phase2c-sidebar[data-labels="labels"] [data-launcher] { max-width: none; }
 [data-launcher-label] { display: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .phase2c-sidebar[data-labels-visible="true"] [data-launcher-label] { display: block; }
+
+/* Animate only the preview overlay; its reserved icon-strip width stays fixed. */
+.phase2c-sidebar[data-labels="preview"] [data-launcher] {
+  overflow: hidden;
+  transition: width 200ms ease-out;
+}
+.phase2c-sidebar[data-labels="preview"] [data-launcher-label] {
+  display: block;
+  opacity: 0;
+}
+.phase2c-sidebar[data-labels="preview"][data-labels-visible="true"] [data-launcher-label] { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .phase2c-sidebar[data-labels="preview"] [data-launcher] { transition: none; }
+}
 
 /* Keep open tools distinguishable from a transient pointer hover. */
 [data-launcher] [data-sidebar="menu-button"][data-active="true"] {

@@ -111,7 +111,7 @@ provide("phase2c-menu-labels-visible", labelsVisible);
 
 let hoverPreviewTimer: ReturnType<typeof setTimeout> | undefined;
 function updateHoverPreview(event: PointerEvent) {
-  const strip = menuSidebar.value?.parentElement?.getBoundingClientRect();
+  const strip = menuSidebar.value?.getBoundingClientRect();
   // Follow the current pointer, including a mouse attached to a touch-first device.
   if (event.pointerType === "mouse") clickPreview.value = null;
   const overMenu = event.pointerType === "mouse"
@@ -168,24 +168,21 @@ const toolSizes = ref<Record<Tool, keyof typeof toolPanelSizes>>({
   "Playback Diagnostics": "Medium",
   "Media Playback Configuration": "Medium",
 });
-// The ruler shares menu typography/chrome; bounds follow the actual labels.
+// Preview measures content; the permanent label width is a session-only rem choice.
 const menuRuler = ref<HTMLElement | null>(null);
-const menuWidth = ref<number | null>(null);
-const menuBounds = ref({ min: 112, max: 320 });
+const measuredMenuWidth = ref(0);
+const menuWidthRem = ref(16);
+const remSize = ref(parseFloat(getComputedStyle(document.documentElement).fontSize));
+const menuBounds = computed(() => ({ min: 13 * remSize.value, max: 24 * remSize.value }));
 useResizeObserver(menuRuler, () => {
   const ruler = menuRuler.value;
   if (!ruler) return;
-  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
-  menuBounds.value = {
-    min: ruler.lastElementChild!.getBoundingClientRect().width,
-    max: Math.min(ruler.getBoundingClientRect().width, 24 * rem),
-  };
+  measuredMenuWidth.value = ruler.getBoundingClientRect().width;
+  remSize.value = parseFloat(getComputedStyle(document.documentElement).fontSize);
 });
-const permanentMenuWidth = computed(() => Math.max(menuBounds.value.min,
-  Math.min(menuWidth.value ?? menuBounds.value.max, menuBounds.value.max)));
+const permanentMenuWidth = computed(() => menuWidthRem.value * remSize.value);
 // Use the usable viewport, including browser keyboard resizing, without guessing keyboard height.
 const viewport = ref({ width: window.innerWidth, height: window.innerHeight, left: 0, top: 0 });
-const remSize = ref(parseFloat(getComputedStyle(document.documentElement).fontSize));
 function updateViewport() {
   const visual = window.visualViewport;
   viewport.value = { width: visual?.width ?? window.innerWidth, height: visual?.height ?? window.innerHeight,
@@ -261,11 +258,11 @@ function startResize(event: PointerEvent, tool?: Tool) {
     if (tool) {
       toolSizes.value[tool] = panelSizeNames.reduce((nearest, size) =>
         Math.abs(toolPanelSizes[size] * rem - width) < Math.abs(toolPanelSizes[nearest] * rem - width) ? size : nearest);
-    } else menuWidth.value = Math.max(menuBounds.value.min, Math.min(menuBounds.value.max, width));
+    } else menuWidthRem.value = Math.max(13, Math.min(24, width / rem));
   };
   const cancel = () => {
     if (tool && initialSize) toolSizes.value[tool] = initialSize;
-    else menuWidth.value = initialWidth;
+    else menuWidthRem.value = initialWidth / rem;
     finish();
   };
   const key = (keyEvent: KeyboardEvent) => { if (keyEvent.key === "Escape") cancel(); };
@@ -290,8 +287,8 @@ onBeforeUnmount(() => stopResize?.());
 function resizeMenuKey(event: KeyboardEvent) {
   if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
   event.preventDefault();
-  menuWidth.value = event.key === "Home" ? menuBounds.value.min : event.key === "End" ? menuBounds.value.max
-    : Math.max(menuBounds.value.min, Math.min(menuBounds.value.max, permanentMenuWidth.value + (event.key === "ArrowRight" ? 16 : -16)));
+  menuWidthRem.value = event.key === "Home" ? 13 : event.key === "End" ? 24
+    : Math.max(13, Math.min(24, menuWidthRem.value + (event.key === "ArrowRight" ? 1 : -1)));
 }
 function resizePanelKey(event: KeyboardEvent, tool: Tool) {
   if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
@@ -504,7 +501,7 @@ async function updateSidebarVisibility(open: boolean) {
     id="phase2c-shell"
     :data-narrow="narrow"
     :data-menu-visible="narrowMenuVisible"
-    :style="{ '--player-reserve': `${protectedPlayerWidth}px`, '--tool-columns-width': `${toolColumnsWidth}rem`, '--permanent-menu-width': `${permanentMenuWidth}px`, '--usable-width': `${viewport.width}px`, '--usable-height': `${viewport.height}px`, '--viewport-left': `${viewport.left}px`, '--viewport-top': `${viewport.top}px` }"
+    :style="{ '--player-reserve': `${protectedPlayerWidth}px`, '--tool-columns-width': `${toolColumnsWidth}rem`, '--permanent-menu-width': `${menuWidthRem}rem`, '--measured-menu-width': `${measuredMenuWidth}px`, '--usable-width': `${viewport.width}px`, '--usable-height': `${viewport.height}px`, '--viewport-left': `${viewport.left}px`, '--viewport-top': `${viewport.top}px` }"
     :data-resizing="resizing !== null"
     :data-labels="labelMode"
     :data-tools-open="openTools.length > 0"
