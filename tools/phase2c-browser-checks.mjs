@@ -126,6 +126,79 @@ async function checks(page) {
   return "PASS lifecycle/order/width and dock/drawer composition";
 }
 
+async function menuPreviewChecks(page) {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "preview"));
+  await page.reload();
+  const labels = async (visible) =>
+    page.waitForFunction(
+      (visible) =>
+        document.querySelector("#phase2c-shell").dataset.labelsVisible === String(visible),
+      visible,
+    );
+  const menu = page.locator("[data-launcher]");
+  const bounds = await menu.boundingBox();
+  const x = bounds.x + 24;
+  const y = bounds.y + 330;
+  await page.mouse.move(x, y);
+  await labels(true);
+  await page.mouse.click(x, y);
+  await page.mouse.move(1100, 400);
+  await labels(false);
+  // Clicking a tool still opens it, without latching mouse preview.
+  await page.locator("[data-launcher] button").filter({ hasText: "Layout Debug" }).click();
+  await page.locator('[data-tool="Layout Debug"]').waitFor();
+  await page.mouse.move(1100, 400);
+  await labels(false);
+  // Keyboard focus previews labels and leaving the menu clears them.
+  await page.getByRole("button", { name: "Hide sidebar", exact: true }).focus();
+  await page.keyboard.press("Tab");
+  await labels(true);
+  await page.locator("[data-fullscreen-control]").focus();
+  await labels(false);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+  const tap = async (tx, ty) => {
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x: tx, y: ty }],
+    });
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  };
+  // Touch activation is independent of viewport size, including hybrid desktops.
+  await tap(x, y);
+  await labels(true);
+  await tap(x, y);
+  await labels(false);
+  await tap(x, y);
+  await labels(true);
+  // A mouse can take over even while the primary device reports touch capability.
+  await page.mouse.move(x, y);
+  await page.mouse.move(1100, 400);
+  await labels(false);
+  await tap(x, y);
+  await labels(true);
+  await tap(1100, 400);
+  await labels(false);
+  await page.setViewportSize({ width: 390, height: 700 });
+  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
+  await menu.click({ trial: true, position: { x: 24, y: 330 } });
+  const narrowMenu = await menu.boundingBox();
+  await tap(narrowMenu.x + 24, narrowMenu.y + 330);
+  await labels(true);
+  await tap(narrowMenu.x + 24, narrowMenu.y + 330);
+  await labels(false);
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+  await cdp.detach();
+  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "labels"));
+  await page.reload();
+  await labels(true);
+  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "icons"));
+  await page.reload();
+  await labels(false);
+  return "PASS menu preview mouse, touch and keyboard ownership";
+}
+
 async function toolContentChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -790,6 +863,10 @@ try {
   if (!output.includes("PASS lifecycle/order/width and dock/drawer composition"))
     throw new Error(output);
   console.log("phase2c-browser-checks: PASS lifecycle/order/width and dock/drawer composition");
+  const previewOutput = cli("run-code", menuPreviewChecks.toString());
+  if (!previewOutput.includes("PASS menu preview mouse, touch and keyboard ownership"))
+    throw new Error(previewOutput);
+  console.log("phase2c-browser-checks: PASS menu preview mouse, touch and keyboard ownership");
   const contentOutput = cli("run-code", toolContentChecks.toString());
   if (!contentOutput.includes("PASS tool content lifetime preservation and disposal"))
     throw new Error(contentOutput);

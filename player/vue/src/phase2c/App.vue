@@ -111,8 +111,9 @@ provide("phase2c-menu-labels-visible", labelsVisible);
 
 function updateHoverPreview(event: PointerEvent) {
   const strip = menuSidebar.value?.parentElement?.getBoundingClientRect();
+  // Follow the current pointer, including a mouse attached to a touch-first device.
+  if (event.pointerType === "mouse") clickPreview.value = null;
   hoverPreview.value = event.pointerType === "mouse"
-    && matchMedia("(hover: hover) and (pointer: fine)").matches
     && !!strip && event.clientX >= strip.left && event.clientX < strip.right;
   if (!hoverPreview.value && clickPreview.value === false) clickPreview.value = null;
 }
@@ -125,6 +126,7 @@ function leaveMenu() {
 async function updateFocusPreview() {
   await nextTick();
   focusPreview.value = !!menuSidebar.value?.querySelector(":focus-visible:not([data-settings-trigger])");
+  if (focusPreview.value) clickPreview.value = null;
 }
 
 onClickOutside(menuSidebar, () => { clickPreview.value = null; }, {
@@ -132,6 +134,9 @@ onClickOutside(menuSidebar, () => { clickPreview.value = null; }, {
 });
 
 function clickMenuSpace(event: MouseEvent) {
+  // Only direct touch/pen activation latches labels; mouse and keyboard already
+  // have hover/focus preview. Ignore synthetic/keyboard clicks without a pointer.
+  if (!(event instanceof PointerEvent) || !["touch", "pen"].includes(event.pointerType)) return;
   if (labelMode.value !== "preview" || (event.target as Element).closest("button, a, input, select, textarea, [role=button]")) return;
   clickPreview.value = clickPreview.value !== true;
 }
