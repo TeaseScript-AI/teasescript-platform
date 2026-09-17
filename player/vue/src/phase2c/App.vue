@@ -3,6 +3,8 @@ import { computed, nextTick, onBeforeUnmount, provide, ref, watch, type ObjectDi
 import { onClickOutside, useEventListener, useResizeObserver, useStorage } from "@vueuse/core";
 import { FlaskConical, Settings, Pin, ScanLine, ChevronDown, Ellipsis, Activity, GripVertical, SlidersHorizontal, PanelLeftOpen, PanelRightOpen } from "@lucide/vue";
 import Sortable from "sortablejs";
+import Stage from "./Stage.vue";
+import { stageFixtures } from "./stageFixtures";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
@@ -40,6 +42,26 @@ import DropdownMenuSubTrigger from "@/components/ui/dropdown-menu/DropdownMenuSu
 import DropdownMenuSubContent from "@/components/ui/dropdown-menu/DropdownMenuSubContent.vue";
 
 const isDevelopment = import.meta.env.DEV;
+const mediaFixture = ref<keyof typeof stageFixtures>("Landscape");
+const longTitle = ref(false);
+const fullscreen = ref(document.fullscreenElement === document.documentElement);
+const fullscreenSupported = document.fullscreenEnabled;
+const fullscreenError = ref("");
+useEventListener(document, "fullscreenchange", () => {
+  fullscreen.value = document.fullscreenElement === document.documentElement;
+});
+async function toggleFullscreen() {
+  fullscreenError.value = "";
+  try {
+    // Full-document preview keeps body-portaled Reka surfaces in fullscreen too.
+    // The production iframe must separately be granted fullscreen by its host.
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else await document.documentElement.requestFullscreen();
+    document.querySelector<HTMLButtonElement>("[data-fullscreen-control]")?.focus({ preventScroll: true });
+  } catch {
+    fullscreenError.value = "Fullscreen could not be changed. Please try again.";
+  }
+}
 type LabelMode = "icons" | "preview" | "labels";
 const labelMode = isDevelopment
   ? useStorage<LabelMode>("phase2c-menu-label-mode", "icons")
@@ -625,7 +647,19 @@ async function toggleSidebarVisibility() {
         </Tooltip>
         </div>
       </header>
-      <div data-tool-body class="min-h-0 flex-1 overflow-y-auto" />
+      <div data-tool-body class="min-h-0 flex-1 overflow-y-auto">
+        <div v-if="isDevelopment && tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
+          <label class="grid gap-2">
+            Stage media fixture
+            <select v-model="mediaFixture" class="min-w-0 rounded border bg-white p-2">
+              <option v-for="(_, name) in stageFixtures" :key="name">{{ name }}</option>
+            </select>
+          </label>
+          <label class="flex items-center gap-2">
+            <input v-model="longTitle" type="checkbox" /> Long stage title
+          </label>
+        </div>
+      </div>
       <div class="resize-edge" :data-panel-resize="tool" role="separator" tabindex="0" aria-orientation="vertical" :aria-label="`${tool} width`"
         :aria-valuemin="toolPanelSizes.Small" :aria-valuemax="toolPanelSizes['Extra Large']" :aria-valuenow="toolPanelSizes[toolSizes[tool]]" :aria-valuetext="toolSizes[tool]"
         @pointerdown="startResize($event, tool)" @keydown="resizePanelKey($event, tool)">
@@ -643,13 +677,15 @@ async function toggleSidebarVisibility() {
       title="Show sidebar"
     />
     <SidebarInset class="min-h-0 min-w-0">
-      <div v-if="isDevelopment" class="m-4 flex min-h-0 flex-1 flex-col gap-4 border border-dashed border-neutral-400 p-4">
-        <section class="shrink-0">
-          <h2 class="mb-2 text-sm font-medium">Stage · 16:9 · max-height: 40% of viewport</h2>
-          <div class="mx-auto flex aspect-video w-[min(100%,71.111dvh)] items-center justify-center border-2 border-neutral-400 bg-neutral-100 text-sm text-neutral-500">
-            Media placeholder
-          </div>
-        </section>
+      <div class="player-composition">
+        <Stage
+          :title="longTitle ? 'An evening by the coast — a quiet moment before the journey begins' : 'Evening by the coast'"
+          :media="stageFixtures[mediaFixture]"
+          :fullscreen="fullscreen"
+          :fullscreen-supported="fullscreenSupported"
+          :fullscreen-error="fullscreenError"
+          @toggle-fullscreen="toggleFullscreen"
+        />
 
         <section class="mx-auto flex min-h-0 w-full max-w-[920px] flex-1 flex-col gap-3 border-x border-dashed border-neutral-400 px-4">
           <h2 class="shrink-0 text-sm font-medium">Transcript · max-width: 920px</h2>
