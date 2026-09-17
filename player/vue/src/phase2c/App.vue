@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, provide, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, provide, ref, shallowReactive, shallowRef, watch, type ComponentPublicInstance } from "vue";
 import { onClickOutside, useEventListener, useResizeObserver, useStorage } from "@vueuse/core";
 import { FlaskConical, Settings, ScanLine, Activity, SlidersHorizontal, PanelLeftOpen, PanelRightOpen } from "@lucide/vue";
 import Sortable from "sortablejs";
+import ToolLifetimeFixture from "./ToolLifetimeFixture.vue";
 import ToolPanelHeader from "./ToolPanelHeader.vue";
 import { toolPanelSizes } from "./toolPanelSizes";
 import Stage from "./Stage.vue";
@@ -285,6 +286,14 @@ const pinnedTools = ref<Tool[]>([]);
 const temporaryTool = ref<Tool | null>(null);
 // Visual order is independent of which tools are pinned.
 const openTools = ref<Tool[]>([]);
+// Content belongs to the logical open tool, not the replaceable Sidebar/Sheet shell.
+// Closed shells park it invisibly; removing an openTools key disposes it normally.
+const toolContentParking = ref<HTMLElement | null>(null);
+const toolContentTargets = shallowReactive<Partial<Record<Tool, HTMLElement>>>({});
+function setToolContentTarget(tool: Tool, element: Element | ComponentPublicInstance | null) {
+  if (element instanceof HTMLElement) toolContentTargets[tool] = element;
+  else delete toolContentTargets[tool];
+}
 // Narrow presentation selects from the same open tools; it does not own their lifetime.
 const narrowTool = ref<Tool | null>(null);
 const narrowMenuVisible = ref(true);
@@ -488,6 +497,41 @@ async function updateSidebarVisibility(open: boolean) {
       <span v-for="tool in launcherTools" :key="tool.name">{{ tool.name }}</span>
       <span>Settings</span>
     </div>
+    <div ref="toolContentParking" hidden inert />
+    <template v-if="toolContentParking">
+      <Teleport v-for="tool in openTools" :key="tool" :to="toolContentTargets[tool] ?? toolContentParking">
+        <div data-tool-body class="min-h-0 flex-1 overflow-y-auto">
+          <ToolLifetimeFixture v-if="isDevelopment && tool === 'Layout Debug'" />
+          <div v-if="isDevelopment && tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
+            <label class="grid gap-2">
+              Stage media fixture
+              <select v-model="mediaFixture" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
+                <option v-for="(_, name) in stageFixtures" :key="name">{{ name }}</option>
+              </select>
+            </label>
+            <label class="flex items-center gap-2">
+              <input v-model="longTitle" type="checkbox" /> Long stage title
+            </label>
+            <fieldset class="grid gap-2">
+              <legend class="mb-2">Transcript fixtures</legend>
+              <Button variant="outline" :disabled="!!runtimeSession" @click="appendTranscript">Append message</Button>
+              <Button variant="outline" :disabled="!!runtimeSession" @click="prependTranscript">Prepend 50 messages</Button>
+              <Button variant="outline" @click="loadTranscript(0)">Empty history</Button>
+              <Button variant="outline" @click="loadTranscript(10000)">Load 10,000 messages</Button>
+            </fieldset>
+            <fieldset class="grid gap-2">
+              <legend class="mb-2">Runtime transcript scenario</legend>
+              <Button variant="outline" @click="startRuntime()">Start runtime scenario</Button>
+              <Button variant="outline" @click="startRuntime(interactionScenario)">Start interaction scenario</Button>
+              <template v-if="runtimeSession">
+                <Button variant="outline" @click="runtimeRestore = createPlayerRuntimeRestorePoint(runtimeSession)">Capture runtime checkpoint</Button>
+                <Button variant="outline" :disabled="!runtimeRestore" @click="restoreRuntime">Restore runtime checkpoint</Button>
+              </template>
+            </fieldset>
+          </div>
+        </div>
+      </Teleport>
+    </template>
     <!-- The local Sheet owns responsiveness; disable the provider’s independent mobile state. -->
     <Sheet :open="narrow && sidebarVisible" @update:open="setSidebarVisible">
     <component :is="narrow ? SheetContent : Sidebar" side="left" variant="sidebar" collapsible="offcanvas"
@@ -567,35 +611,7 @@ async function updateSidebarVisibility(open: boolean) {
       <ToolPanelHeader :tool="tool" :narrow="narrow" :size="toolSizes[tool]" :pinned="pinnedTools.includes(tool)"
         :can-move-left="openTools.indexOf(tool) > 0" :can-move-right="openTools.indexOf(tool) < openTools.length - 1"
         @resize="toolSizes[tool] = $event" @pin="setPinned(tool, $event)" @move="moveTool(tool, $event)" />
-      <div data-tool-body class="min-h-0 flex-1 overflow-y-auto">
-        <div v-if="isDevelopment && tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
-          <label class="grid gap-2">
-            Stage media fixture
-            <select v-model="mediaFixture" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
-              <option v-for="(_, name) in stageFixtures" :key="name">{{ name }}</option>
-            </select>
-          </label>
-          <label class="flex items-center gap-2">
-            <input v-model="longTitle" type="checkbox" /> Long stage title
-          </label>
-          <fieldset class="grid gap-2">
-            <legend class="mb-2">Transcript fixtures</legend>
-            <Button variant="outline" :disabled="!!runtimeSession" @click="appendTranscript">Append message</Button>
-            <Button variant="outline" :disabled="!!runtimeSession" @click="prependTranscript">Prepend 50 messages</Button>
-            <Button variant="outline" @click="loadTranscript(0)">Empty history</Button>
-            <Button variant="outline" @click="loadTranscript(10000)">Load 10,000 messages</Button>
-          </fieldset>
-          <fieldset class="grid gap-2">
-            <legend class="mb-2">Runtime transcript scenario</legend>
-            <Button variant="outline" @click="startRuntime()">Start runtime scenario</Button>
-            <Button variant="outline" @click="startRuntime(interactionScenario)">Start interaction scenario</Button>
-            <template v-if="runtimeSession">
-              <Button variant="outline" @click="runtimeRestore = createPlayerRuntimeRestorePoint(runtimeSession)">Capture runtime checkpoint</Button>
-              <Button variant="outline" :disabled="!runtimeRestore" @click="restoreRuntime">Restore runtime checkpoint</Button>
-            </template>
-          </fieldset>
-        </div>
-      </div>
+      <div :ref="element => setToolContentTarget(tool, element)" class="contents" />
       <div class="resize-edge" :data-panel-resize="tool" role="separator" tabindex="0" aria-orientation="vertical" :aria-label="`${tool} width`"
         :aria-valuemin="toolPanelSizes.Small" :aria-valuemax="toolPanelSizes['Extra Large']" :aria-valuenow="toolPanelSizes[toolSizes[tool]]" :aria-valuetext="toolSizes[tool]"
         @pointerdown="startResize($event, tool)" @keydown="resizePanelKey($event, tool)">

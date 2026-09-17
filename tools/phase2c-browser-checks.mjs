@@ -126,6 +126,122 @@ async function checks(page) {
   return "PASS lifecycle/order/width and dock/drawer composition";
 }
 
+async function toolContentChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  const launcher = (name) => page.locator("[data-launcher] button").filter({ hasText: name });
+  const panel = page.locator('[data-tool="Layout Debug"]');
+  const draft = () => page.getByRole("textbox", { name: "Local draft" });
+  const count = () => page.getByRole("button", { name: "Local count: 1", exact: true });
+  const preserved = async () => {
+    check((await draft().inputValue()) === "Keep this local draft", "Tool-local draft was reset");
+    check((await count().count()) === 1, "Tool-local counter was reset or duplicated");
+  };
+  await launcher("Layout Debug").click();
+  await draft().fill("Keep this local draft");
+  await page.getByRole("button", { name: "Local count: 0", exact: true }).click();
+  const original = await draft().elementHandle();
+  await panel.locator("[data-panel-pin]").click();
+  await launcher("Playback Diagnostics").click();
+  await panel.getByRole("button", { name: "Panel settings", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Move right", exact: true }).click();
+  await preserved();
+  const grip = await panel.locator("[data-panel-drag]").boundingBox();
+  const neighbor = await page.locator('[data-tool="Playback Diagnostics"]').boundingBox();
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(neighbor.x + 20, grip.y + grip.height / 2, { steps: 15 });
+  await page.mouse.up();
+  await page.waitForFunction(
+    () =>
+      document.querySelector(".tool-panel-strip > [data-tool]")?.getAttribute("data-tool") ===
+      "Layout Debug",
+  );
+  await preserved();
+  const edge = await panel.locator("[data-panel-resize]").boundingBox();
+  await page.mouse.move(edge.x + edge.width / 2, edge.y + edge.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(edge.x + 120, edge.y + edge.height / 2, { steps: 8 });
+  await page.mouse.up();
+  check(
+    await panel.evaluate((el) => el.style.width === "24rem"),
+    "Edge drag did not select the next width preset",
+  );
+  await preserved();
+  await panel.locator("[data-panel-resize]").focus();
+  await page.keyboard.press("End");
+  await preserved();
+  // Unpin and pin do not end this tool's lifetime, even when another temp closes.
+  await panel.locator("[data-panel-pin]").click();
+  await panel.locator("[data-panel-pin]").click();
+  await preserved();
+  await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
+  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
+  await preserved();
+  await launcher("Playback Diagnostics").click();
+  await draft().focus();
+  await page.setViewportSize({ width: 390, height: 700 });
+  await page.getByRole("button", { name: "Hide sidebar", exact: true }).waitFor();
+  await launcher("Layout Debug").click();
+  await preserved();
+  await page.getByRole("button", { name: "Tools", exact: true }).click();
+  await page.getByRole("button", { name: "Back to active tool", exact: true }).click();
+  await preserved();
+  await page.getByRole("button", { name: "Tools", exact: true }).click();
+  await launcher("Playback Diagnostics").click();
+  await page.getByRole("button", { name: "Tools", exact: true }).click();
+  await launcher("Layout Debug").click();
+  await preserved();
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Show sidebar", exact: true }).waitFor();
+  // Let Sheet finish its exit and dispose its presentation subtree.
+  await page.locator('[data-slot="sheet-content"]').waitFor({ state: "detached" });
+  check(
+    await page
+      .getByRole("button", { name: "Show sidebar", exact: true })
+      .evaluate((el) => el === document.activeElement),
+    "Drawer dismissal lost toggle focus",
+  );
+  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
+  await page.getByRole("button", { name: "Back to active tool", exact: true }).click();
+  await preserved();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await preserved();
+  check(
+    await original.evaluate(
+      (el) => el === document.querySelector("[data-tool-lifetime-fixture] input"),
+    ),
+    "Content DOM identity changed across shells",
+  );
+  // A real close disposes the content. Reopening starts fresh.
+  await launcher("Layout Debug").click();
+  await panel.waitFor({ state: "detached" });
+  check(await original.evaluate((el) => !el.isConnected), "Closed tool content remained mounted");
+  check(
+    (await page.locator("[data-tool-lifetime-fixture]").count()) === 0,
+    "Closed tool retained hidden content",
+  );
+  await launcher("Layout Debug").click();
+  check((await draft().inputValue()) === "", "Closed tool draft survived reopening");
+  await draft().fill("Replace this temporary tool");
+  await page.getByRole("button", { name: "Local count: 0", exact: true }).click();
+  await launcher("Playback Diagnostics").click();
+  check(
+    (await page.locator("[data-tool-lifetime-fixture]").count()) === 0,
+    "Replaced tool retained hidden content",
+  );
+  await launcher("Layout Debug").click();
+  check((await draft().inputValue()) === "", "Replaced tool draft survived reopening");
+  check(
+    (await page.getByRole("button", { name: "Local count: 0", exact: true }).count()) === 1,
+    "Replaced tool counter survived",
+  );
+  return "PASS tool content lifetime preservation and disposal";
+}
+
 async function transcriptChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -674,6 +790,10 @@ try {
   if (!output.includes("PASS lifecycle/order/width and dock/drawer composition"))
     throw new Error(output);
   console.log("phase2c-browser-checks: PASS lifecycle/order/width and dock/drawer composition");
+  const contentOutput = cli("run-code", toolContentChecks.toString());
+  if (!contentOutput.includes("PASS tool content lifetime preservation and disposal"))
+    throw new Error(contentOutput);
+  console.log("phase2c-browser-checks: PASS tool content lifetime preservation and disposal");
   const runtimeOutput = cli("run-code", runtimeTranscriptChecks.toString());
   if (
     !runtimeOutput.includes("PASS runtime transcript provenance, markup, plain answers and restore")
