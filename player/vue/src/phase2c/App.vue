@@ -6,6 +6,8 @@ import Sortable from "sortablejs";
 import ToolPanelHeader from "./ToolPanelHeader.vue";
 import { toolPanelSizes } from "./toolPanelSizes";
 import Stage from "./Stage.vue";
+import Transcript from "./Transcript.vue";
+import { transcriptFixtures } from "./transcriptFixtures";
 import { stageFixtures } from "./stageFixtures";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
@@ -34,6 +36,21 @@ import DialogDescription from "@/components/ui/dialog/DialogDescription.vue";
 const isDevelopment = import.meta.env.DEV;
 const mediaFixture = ref<keyof typeof stageFixtures>("Landscape");
 const longTitle = ref(false);
+const transcriptEntries = ref(transcriptFixtures(0, 2000));
+let nextMessage = 2000;
+let firstMessage = 0;
+function loadTranscript(count: number) {
+  firstMessage = 0;
+  nextMessage = count;
+  transcriptEntries.value = transcriptFixtures(0, count);
+}
+function appendTranscript() {
+  transcriptEntries.value = [...transcriptEntries.value, ...transcriptFixtures(nextMessage++, 1)];
+}
+function prependTranscript() {
+  firstMessage -= 50;
+  transcriptEntries.value = [...transcriptFixtures(firstMessage, 50), ...transcriptEntries.value];
+}
 const stage = ref<InstanceType<typeof Stage> | null>(null);
 const stageHeight = ref(0);
 // Measurement only positions the ambient fade; it never controls layout geometry.
@@ -542,6 +559,13 @@ async function updateSidebarVisibility(open: boolean) {
           <label class="flex items-center gap-2">
             <input v-model="longTitle" type="checkbox" /> Long stage title
           </label>
+          <fieldset class="grid gap-2">
+            <legend class="mb-2">Transcript fixtures</legend>
+            <Button variant="outline" @click="appendTranscript">Append message</Button>
+            <Button variant="outline" @click="prependTranscript">Prepend 50 messages</Button>
+            <Button variant="outline" @click="loadTranscript(0)">Empty history</Button>
+            <Button variant="outline" @click="loadTranscript(10000)">Load 10,000 messages</Button>
+          </fieldset>
         </div>
       </div>
       <div class="resize-edge" :data-panel-resize="tool" role="separator" tabindex="0" aria-orientation="vertical" :aria-label="`${tool} width`"
@@ -571,13 +595,8 @@ async function updateSidebarVisibility(open: boolean) {
           @toggle-fullscreen="toggleFullscreen"
         />
 
-        <section class="player-conversation mx-auto flex min-h-0 w-full max-w-[920px] flex-1 flex-col gap-3 border-x border-dashed border-border px-4">
-          <h2 class="shrink-0 text-sm font-medium">Transcript · max-width: 920px</h2>
-          <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
-          <p class="text-sm leading-relaxed"><strong>Mistress:</strong> Take a moment to look around. This is a simple test scene.</p>
-          <p class="ml-auto max-w-[75%] rounded-lg border border-border bg-[var(--surface-component)] px-4 py-3 text-sm">I am ready. What happens next?</p>
-          <p class="text-sm leading-relaxed"><strong>Mistress:</strong> This deliberately longer message helps us see how the conversation wraps when the sidebar opens, closes, or changes its presentation, and how much room remains for the scene and your response.</p>
-          </div>
+        <section class="player-conversation mx-auto flex min-h-0 w-full max-w-[920px] flex-1 flex-col gap-3 px-4">
+          <Transcript :entries="transcriptEntries" />
           <div class="flex min-w-0 shrink-0 gap-2 pt-2">
             <input aria-label="Test response" placeholder="Type your response..." class="min-w-0 flex-1 rounded border border-border bg-[var(--surface-component)] px-3 py-2 text-sm" />
             <button type="button" class="shrink-0 rounded border border-border bg-[var(--surface-component)] px-4 py-2 text-sm">Send</button>
