@@ -410,13 +410,13 @@ async function runtimeTranscriptChecks(page) {
   await spoiler.focus();
   await page.keyboard.press("Enter");
   await spoiler.waitFor({ state: "hidden" });
-  const answer = page.getByRole("textbox", { name: "Runtime test answer", exact: true });
+  const answer = page.getByRole("textbox", { name: "Answer", exact: true });
   await answer.fill("   ");
-  await page.getByRole("button", { name: "Submit runtime answer", exact: true }).click();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
   check((await rows.count()) === 1, "Rejected completion must not append");
   const reply = "**literal answer**\n<b>still text</b>";
   await answer.fill(reply);
-  await page.getByRole("button", { name: "Submit runtime answer", exact: true }).click();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
   await transcript.locator('[aria-setsize="3"]').first().waitFor();
   const user = transcript.locator('[data-speaker-id="user"]').first();
   check((await user.innerText()) === reply, "Player answer must remain exact plain text");
@@ -452,7 +452,7 @@ async function runtimeTranscriptChecks(page) {
     );
   const before = await snapshot();
   await page.getByRole("button", { name: "Capture runtime checkpoint", exact: true }).click();
-  await page.getByRole("button", { name: "Activate runtime button", exact: true }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await transcript.locator('[aria-setsize="5"]').first().waitFor();
   check(
     (await transcript.getByText("Continue **literally**", { exact: true }).count()) === 1,
@@ -471,7 +471,7 @@ async function runtimeTranscriptChecks(page) {
     JSON.stringify(await snapshot()) === JSON.stringify(before),
     "Checkpoint reconstruction changed IDs, provenance or visible text",
   );
-  await page.getByRole("button", { name: "Activate runtime button", exact: true }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await transcript.locator('[aria-setsize="5"]').first().waitFor();
   check(
     JSON.stringify(await snapshot()) === JSON.stringify(uninterrupted),
@@ -482,6 +482,185 @@ async function runtimeTranscriptChecks(page) {
   check(errors.length === 0, `Runtime page errors: ${errors.join("; ")}`);
   page.off("pageerror", onError);
   return "PASS runtime transcript provenance, markup, plain answers and restore";
+}
+
+async function interactionChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
+  await page.getByRole("button", { name: "Start interaction scenario", exact: true }).click();
+  check(
+    await page
+      .getByRole("button", { name: "Start interaction scenario", exact: true })
+      .evaluate((el) => el === document.activeElement),
+    "Starting from Tools stole focus",
+  );
+  const surface = page.locator("[data-runtime-interaction]");
+  const input = surface.locator("textarea");
+  const rows = page.locator(".transcript [data-message-id]");
+  const capture = () =>
+    page.getByRole("button", { name: "Capture runtime checkpoint", exact: true }).click();
+  const restore = () =>
+    page.getByRole("button", { name: "Restore runtime checkpoint", exact: true }).click();
+  const snapshot = () =>
+    rows.evaluateAll((elements) =>
+      elements.map((el) => ({
+        id: el.dataset.messageId,
+        speaker: el.dataset.speakerId,
+        text: el.innerText,
+      })),
+    );
+  const submit = async (text) => {
+    await input.fill(text);
+    await input.press("Enter");
+  };
+  const reject = async (text) => {
+    const before = await snapshot();
+    await submit(text);
+    check(
+      JSON.stringify(await snapshot()) === JSON.stringify(before),
+      "Rejected input changed transcript",
+    );
+    check((await input.inputValue()) === text, "Rejected input lost draft");
+    check(
+      await input.evaluate((el) => el === document.activeElement),
+      "Rejection lost composer focus",
+    );
+    await surface.getByRole("status").waitFor();
+  };
+  await capture();
+  await reject("   ");
+  await input.fill("First");
+  await input.press("Shift+Enter");
+  await input.press("x");
+  check((await input.inputValue()) === "First\nx", "Shift+Enter must insert a newline");
+  await input.dispatchEvent("keydown", { key: "Enter", isComposing: true });
+  check((await rows.count()) === 1, "IME Enter advanced interaction");
+  await input.press("Enter");
+  check(
+    await input.evaluate((el) => el === document.activeElement),
+    "Progression lost composer focus",
+  );
+  const textResult = await snapshot();
+  await restore();
+  check((await input.inputValue()) === "", "Restore must discard stale presentation draft");
+  await submit("First\nx");
+  check(JSON.stringify(await snapshot()) === JSON.stringify(textResult), "Text restore differs");
+  await capture();
+  await reject("Infinity");
+  await reject("12oops");
+  await submit("  -0e2  ");
+  const numberResult = await snapshot();
+  check((await rows.last().innerText()) === "-0e2", "Number transcript normalization changed");
+  await restore();
+  await submit("  -0e2  ");
+  check(
+    JSON.stringify(await snapshot()) === JSON.stringify(numberResult),
+    "Number restore differs",
+  );
+  await capture();
+  await reject("left");
+  await reject(" Left");
+  await submit("Left");
+  const choiceResult = await snapshot();
+  await restore();
+  await surface.getByRole("button", { name: "Left", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  check(
+    JSON.stringify(await snapshot()) === JSON.stringify(choiceResult),
+    "Typed/rendered choice or restore differs",
+  );
+  await reject("Same");
+  await surface.getByRole("button", { name: "Same", exact: true }).nth(1).click();
+  await capture();
+  const beforeButton = await snapshot();
+  await submit("Finish");
+  check(
+    JSON.stringify(await snapshot()) === JSON.stringify(beforeButton),
+    "Composer activated showButton",
+  );
+  await input.fill("");
+  await input.press("Space");
+  check(
+    JSON.stringify(await snapshot()) === JSON.stringify(beforeButton),
+    "Space activated showButton",
+  );
+  await page.locator(".player-stage").click({ position: { x: 150, y: 100 } });
+  check(
+    JSON.stringify(await snapshot()) === JSON.stringify(beforeButton),
+    "Background activated showButton",
+  );
+  await surface.getByRole("button", { name: "Continue", exact: true }).focus();
+  await page.keyboard.press("Space");
+  await page.waitForFunction(
+    () => document.querySelector("[data-runtime-interaction] textarea")?.disabled,
+  );
+  const final = await snapshot();
+  check(
+    final.at(-1).text.includes("First\nx / 0 / left / second"),
+    "Canonical typed results were lost",
+  );
+  await restore();
+  await surface.getByRole("button", { name: "Continue", exact: true }).evaluate((el) => {
+    el.click();
+    el.click();
+  });
+  check(
+    JSON.stringify(await snapshot()) === JSON.stringify(final),
+    "Repeated activation or restored continuation differs",
+  );
+
+  await page.getByRole("button", { name: "Start interaction scenario", exact: true }).click();
+  await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
+  await page.setViewportSize({ width: 320, height: 700 });
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+  const tap = async (locator) => {
+    const box = await locator.boundingBox();
+    check(
+      !!box && box.x >= 0 && box.x + box.width <= 320 && box.y + box.height <= 700,
+      "Touch control outside narrow viewport",
+    );
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }],
+    });
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  };
+  await input.fill("Touch answer");
+  await tap(surface.getByRole("button", { name: "Send", exact: true }));
+  await page.waitForFunction(
+    () =>
+      document.querySelector("[data-runtime-interaction] textarea")?.getAttribute("aria-label") ===
+      "Number",
+  );
+  await input.fill("1e2");
+  await tap(surface.getByRole("button", { name: "Send", exact: true }));
+  await surface.getByRole("button", { name: "Right", exact: true }).waitFor();
+  await tap(surface.getByRole("button", { name: "Right", exact: true }));
+  await surface.getByRole("button", { name: "Same", exact: true }).first().waitFor();
+  await tap(surface.getByRole("button", { name: "Same", exact: true }).first());
+  await surface.getByRole("button", { name: "Continue", exact: true }).waitFor();
+  check(
+    await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth <= innerWidth &&
+        document.documentElement.scrollHeight <= innerHeight,
+    ),
+    "Narrow interaction causes outer scrolling",
+  );
+  await page.setViewportSize({ width: 390, height: 700 });
+  await surface.getByRole("button", { name: "Continue", exact: true }).click();
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+  await cdp.detach();
+  check(
+    (await rows.last().innerText()).includes("Touch answer / 100 / right / first"),
+    "Touch flow lost canonical values",
+  );
+  return "PASS normal foreground input, validation, keyboard and restore";
 }
 
 try {
@@ -502,6 +681,12 @@ try {
     throw new Error(runtimeOutput);
   console.log(
     "phase2c-browser-checks: PASS runtime transcript provenance, markup, plain answers and restore",
+  );
+  const interactionOutput = cli("run-code", interactionChecks.toString());
+  if (!interactionOutput.includes("PASS normal foreground input, validation, keyboard and restore"))
+    throw new Error(interactionOutput);
+  console.log(
+    "phase2c-browser-checks: PASS normal foreground input, validation, keyboard and restore",
   );
   const transcriptOutput = cli("run-code", transcriptChecks.toString());
   if (

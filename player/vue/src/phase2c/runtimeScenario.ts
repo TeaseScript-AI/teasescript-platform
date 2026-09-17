@@ -10,3 +10,18 @@ showButton as guide "Continue **literally**"
 say "The walk continues. <b>This is literal text.</b>", instant
 exit
 `;
+
+// Exercises all foreground kinds without adding completion controls to Visual Lab.
+export const interactionScenario = `
+speaker guide {
+  title: "Coastal Guide"
+}
+say as guide "Try the foreground interactions.", instant
+let answer = askText as guide "Your reply"
+let amount = askNumber as guide "Your number"
+let direction = choose as guide left: "Left", right: "Right"
+let duplicate = choose as guide first: "Same", second: "Same"
+showButton as guide "Finish"
+say as guide "${"${answer}"} / ${"${amount}"} / ${"${direction}"} / ${"${duplicate}"}", instant
+exit
+`;

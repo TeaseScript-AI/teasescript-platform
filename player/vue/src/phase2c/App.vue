@@ -7,9 +7,10 @@ import ToolPanelHeader from "./ToolPanelHeader.vue";
 import { toolPanelSizes } from "./toolPanelSizes";
 import Stage from "./Stage.vue";
 import Transcript from "./Transcript.vue";
+import RuntimeInteraction from "./RuntimeInteraction.vue";
 import { transcriptFixtures, transcriptFixtureSpeakers } from "./transcriptFixtures";
-import { createPlayerRuntimeSession, createPlayerRuntimeRestorePoint, restorePlayerRuntimeSession, submitPlayerRuntimeComposer, activatePlayerRuntimeButton, type PlayerRuntimeSession, type PlayerRuntimeRestorePoint } from "../../../runtime-adapter.js";
-import { runtimeScenario } from "./runtimeScenario";
+import { createPlayerRuntimeSession, createPlayerRuntimeRestorePoint, restorePlayerRuntimeSession, type PlayerRuntimeSession, type PlayerRuntimeRestorePoint } from "../../../runtime-adapter.js";
+import { runtimeScenario, interactionScenario } from "./runtimeScenario";
 import { stageFixtures } from "./stageFixtures";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
@@ -42,17 +43,17 @@ const transcriptEntries = ref(transcriptFixtures(0, 2000));
 const runtimeSession = shallowRef<PlayerRuntimeSession | null>(null);
 const runtimeRestore = shallowRef<PlayerRuntimeRestorePoint | null>(null);
 const runtimeGeneration = ref(0);
-const runtimeAnswer = ref("**This stays plain text**\nI am ready.");
-function startRuntime() {
+const interactionReset = ref(0);
+function startRuntime(source = runtimeScenario) {
   runtimeGeneration.value++;
-  runtimeSession.value = createPlayerRuntimeSession(runtimeScenario);
+  interactionReset.value++;
+  runtimeSession.value = createPlayerRuntimeSession(source);
   runtimeRestore.value = createPlayerRuntimeRestorePoint(runtimeSession.value);
 }
-function answerRuntime() {
-  if (runtimeSession.value) runtimeSession.value = submitPlayerRuntimeComposer(runtimeSession.value, runtimeAnswer.value)?.session ?? runtimeSession.value;
-}
-function continueRuntime() {
-  if (runtimeSession.value) runtimeSession.value = activatePlayerRuntimeButton(runtimeSession.value)?.session ?? runtimeSession.value;
+function restoreRuntime() {
+  if (!runtimeRestore.value) return;
+  interactionReset.value++;
+  runtimeSession.value = restorePlayerRuntimeSession(runtimeRestore.value);
 }
 let nextMessage = 2000;
 let firstMessage = 0;
@@ -586,13 +587,11 @@ async function updateSidebarVisibility(open: boolean) {
           </fieldset>
           <fieldset class="grid gap-2">
             <legend class="mb-2">Runtime transcript scenario</legend>
-            <Button variant="outline" @click="startRuntime">Start runtime scenario</Button>
+            <Button variant="outline" @click="startRuntime()">Start runtime scenario</Button>
+            <Button variant="outline" @click="startRuntime(interactionScenario)">Start interaction scenario</Button>
             <template v-if="runtimeSession">
-              <textarea v-model="runtimeAnswer" aria-label="Runtime test answer" class="w-full rounded border p-2" />
-              <Button variant="outline" @click="answerRuntime">Submit runtime answer</Button>
-              <Button variant="outline" @click="continueRuntime">Activate runtime button</Button>
               <Button variant="outline" @click="runtimeRestore = createPlayerRuntimeRestorePoint(runtimeSession)">Capture runtime checkpoint</Button>
-              <Button variant="outline" :disabled="!runtimeRestore" @click="runtimeSession = runtimeRestore ? restorePlayerRuntimeSession(runtimeRestore) : runtimeSession">Restore runtime checkpoint</Button>
+              <Button variant="outline" :disabled="!runtimeRestore" @click="restoreRuntime">Restore runtime checkpoint</Button>
             </template>
           </fieldset>
         </div>
@@ -626,10 +625,7 @@ async function updateSidebarVisibility(open: boolean) {
 
         <section class="player-conversation mx-auto flex min-h-0 w-full max-w-[920px] flex-1 flex-col gap-3 px-4">
           <Transcript :key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'" :entries="runtimeSession?.transcriptEntries ?? transcriptEntries" :speakers="runtimeSession?.speakers ?? transcriptFixtureSpeakers" :revision="runtimeSession?.transcriptRevision ?? 0" />
-          <div class="flex min-w-0 shrink-0 gap-2 pt-2">
-            <input aria-label="Test response" placeholder="Type your response..." class="min-w-0 flex-1 rounded border border-border bg-[var(--surface-component)] px-3 py-2 text-sm" />
-            <button type="button" class="shrink-0 rounded border border-border bg-[var(--surface-component)] px-4 py-2 text-sm">Send</button>
-          </div>
+          <RuntimeInteraction v-model:session="runtimeSession" :reset="interactionReset" />
         </section>
       </div>
     </SidebarInset>
