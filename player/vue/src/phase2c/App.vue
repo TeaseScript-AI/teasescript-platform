@@ -122,7 +122,7 @@ function updateHoverPreview(event: PointerEvent) {
     hoverPreviewTimer = setTimeout(() => {
       hoverPreviewTimer = undefined;
       hoverPreview.value = true;
-    }, 150);
+    }, 200);
   }
 }
 
