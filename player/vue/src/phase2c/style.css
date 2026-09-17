@@ -157,3 +157,21 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
 .phase2c-sidebar[data-narrow="true"] [data-panel-drag],
 .phase2c-sidebar[data-narrow="true"] [data-panel-resize] { display: none; }
 .phase2c-sidebar[data-narrow="true"] [data-tool-body] { overflow-wrap: anywhere; }
+
+/* The stage owns a stable track independent of asset ratio and chrome visibility.
+   Keep a usable conversation/composer remainder, including in short windows. */
+.player-composition {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 3fr) minmax(6rem, 2fr);
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  gap: 1rem;
+  margin: 1rem;
+  padding: 1rem;
+}
+@media (max-width: 600px), (max-height: 450px) {
+  .player-composition { margin: 0.5rem; padding: 0.5rem; gap: 0.5rem; }
+}
+html:fullscreen { background: var(--background); }
