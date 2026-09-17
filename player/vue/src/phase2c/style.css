@@ -129,6 +129,10 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
 .phase2c-sidebar[data-narrow="true"] {
   --sidebar-width: calc(var(--usable-width) * 0.9) !important;
 }
+/* Reserve the broad drawer only for a tool, not empty space beside its launcher. */
+.phase2c-sidebar[data-narrow="true"][data-menu-visible="true"] {
+  --sidebar-width: min(calc(var(--launcher-space) + 1px), calc(var(--usable-width) * 0.9)) !important;
+}
 .phase2c-sidebar .tools-drawer {
   left: var(--viewport-left); top: var(--viewport-top); bottom: auto;
   height: var(--usable-height); width: var(--sidebar-width); max-width: none;
@@ -142,7 +146,7 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
 .phase2c-sidebar[data-narrow="true"] [data-launcher] { max-width: min(24rem, calc(var(--usable-width) * 0.9)); }
 /* Narrow only caps presentation; the user-selected wide width remains untouched. */
 .phase2c-sidebar[data-narrow="true"][data-labels="labels"] {
-  --launcher-width: min(var(--permanent-menu-width), var(--sidebar-width));
+  --launcher-width: min(var(--permanent-menu-width), calc(var(--usable-width) * 0.9));
   --launcher-space: var(--launcher-width);
 }
 

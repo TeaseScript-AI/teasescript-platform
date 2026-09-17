@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, provide, ref, watch, type ObjectDirective } from "vue";
 import { onClickOutside, useEventListener, useResizeObserver, useStorage } from "@vueuse/core";
-import { FlaskConical, Settings, Pin, ScanLine, ChevronDown, Ellipsis, Activity, GripVertical, SlidersHorizontal, PanelLeftOpen } from "@lucide/vue";
+import { FlaskConical, Settings, Pin, ScanLine, ChevronDown, Ellipsis, Activity, GripVertical, SlidersHorizontal, PanelLeftOpen, PanelRightOpen } from "@lucide/vue";
 import Sortable from "sortablejs";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
@@ -238,10 +238,15 @@ const openTools = ref<Tool[]>([]);
 // Narrow presentation selects from the same open tools; it does not own their lifetime.
 const narrowTool = ref<Tool | null>(null);
 const narrowMenuVisible = ref(true);
-async function showToolMenu() {
+async function showToolMenu(event: MouseEvent) {
   narrowMenuVisible.value = true;
   await nextTick();
-  menuSidebar.value?.querySelector<HTMLButtonElement>("[data-sidebar=menu-button]")?.focus({ preventScroll: true });
+  // Touch must not synthesize a focused tool's tooltip/label preview on menu return.
+  if (event.detail === 0) {
+    const menu = menuSidebar.value;
+    (menu?.querySelector<HTMLButtonElement>('[aria-current="true"]')
+      ?? menu?.querySelector<HTMLButtonElement>("[data-sidebar=menu-button]"))?.focus({ preventScroll: true });
+  } else focusToolsToggle();
 }
 let pendingToolClose: { tool: Tool; timer: ReturnType<typeof setTimeout> } | null = null;
 let lastClosedTool: { tool: Tool; index: number; pinned: boolean } | null = null;
@@ -460,6 +465,7 @@ async function toggleSidebarVisibility() {
   <SidebarProvider
     id="phase2c-shell"
     :data-narrow="narrow"
+    :data-menu-visible="narrowMenuVisible"
     :style="{ '--tool-columns-width': `${toolColumnsWidth}rem`, '--permanent-menu-width': `${permanentMenuWidth}px`, '--usable-width': `${viewport.width}px`, '--usable-height': `${viewport.height}px`, '--viewport-left': `${viewport.left}px`, '--viewport-top': `${viewport.top}px` }"
     :data-resizing="resizing !== null"
     :data-labels="labelMode"
@@ -498,6 +504,16 @@ async function toggleSidebarVisibility() {
           title="Hide sidebar"
         />
       </SidebarHeader>
+      <div v-if="narrow && narrowTool && openTools.includes(narrowTool)" class="px-2 pt-2">
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button variant="ghost" size="icon" class="size-8" aria-label="Back to active tool" @click="revealTool(narrowTool)">
+              <PanelRightOpen class="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">Back to active tool</TooltipContent>
+        </Tooltip>
+      </div>
       <nav aria-label="Tools" class="min-h-0 overflow-y-auto p-2">
         <SidebarMenu>
           <SidebarMenuItem v-for="tool in launcherTools" :key="tool.name">
@@ -563,7 +579,7 @@ async function toggleSidebarVisibility() {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent data-tools-context align="end">
                     <DropdownMenuSub>
-                      <DropdownMenuSubTrigger>Width</DropdownMenuSubTrigger>
+                      <DropdownMenuSubTrigger>{{ narrow ? "Wide layout width" : "Width" }}</DropdownMenuSubTrigger>
                       <DropdownMenuSubContent data-tools-context>
                         <DropdownMenuRadioGroup v-model="toolSizes[tool]" aria-label="Panel width">
                           <DropdownMenuRadioItem v-for="size in Object.keys(toolPanelSizes)" :key="size" :value="size">
