@@ -144,7 +144,7 @@ async function menuPreviewChecks(page) {
   await page.clock.install();
   await page.clock.pauseAt(new Date());
   await page.mouse.move(x, y);
-  await page.clock.runFor(149);
+  await page.clock.runFor(199);
   await labels(false);
   await page.mouse.move(1100, 400);
   await page.clock.runFor(200);
@@ -152,7 +152,7 @@ async function menuPreviewChecks(page) {
   await page.mouse.move(x, y);
   await page.clock.runFor(100);
   await page.mouse.move(x + 1, y);
-  await page.clock.runFor(49);
+  await page.clock.runFor(99);
   await labels(false);
   await page.clock.runFor(1);
   await labels(true);
