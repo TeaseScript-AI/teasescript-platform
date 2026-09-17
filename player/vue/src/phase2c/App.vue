@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, provide, ref, shallowReactive, shallowRef, watch, type ComponentPublicInstance } from "vue";
 import { onClickOutside, useEventListener, useResizeObserver, useStorage } from "@vueuse/core";
-import { FlaskConical, Settings, ScanLine, Activity, SlidersHorizontal, PanelLeftOpen, PanelRightOpen } from "@lucide/vue";
+import { FlaskConical, Settings, ScanLine, Activity, SlidersHorizontal, PanelLeftOpen, PanelRightOpen, GripVertical } from "@lucide/vue";
 import Sortable from "sortablejs";
 import ToolLifetimeFixture from "./ToolLifetimeFixture.vue";
 import ToolPanelHeader from "./ToolPanelHeader.vue";
@@ -653,7 +653,9 @@ async function updateSidebarVisibility(open: boolean) {
           :aria-valuemin="menuWidths.icons * remSize" :aria-valuemax="Math.round(menuBounds.max)" :aria-valuenow="labelMode === 'icons' ? menuWidths.icons * remSize : Math.round(permanentMenuWidth)"
           :aria-valuetext="labelMode === 'icons' ? 'Icons only' : `${menuWidthRem}rem, icons and labels`"
           aria-label="Menu Sidebar width" aria-description="Drag to resize or switch between icons and labels. Press Enter to toggle labels."
-          @pointerdown="startResize($event)" @keydown="resizeMenuKey" />
+          @pointerdown="startResize($event)" @keydown="resizeMenuKey">
+          <GripVertical class="menu-resize-grip" aria-hidden="true" />
+        </div>
         </div>
         <div v-if="sidebarVisible" v-show="!narrow || !narrowMenuVisible" ref="toolStrip" role="region" aria-label="Tool Panels" :tabindex="openTools.length ? 0 : undefined" class="tool-panel-strip flex min-w-0 flex-1 overflow-x-auto overscroll-x-contain focus-visible:outline-2 focus-visible:-outline-offset-2">
     <section v-for="tool in openTools" :key="tool" v-show="!narrow || tool === narrowTool" :data-tool="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="relative flex min-h-0 shrink-0 flex-col border-r bg-[var(--surface-component)]">
