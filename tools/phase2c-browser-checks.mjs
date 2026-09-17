@@ -140,8 +140,23 @@ async function menuPreviewChecks(page) {
   const bounds = await menu.boundingBox();
   const x = bounds.x + 24;
   const y = bounds.y + 330;
+  // Deterministic clock: incidental hover cancels, movement does not restart the delay.
+  await page.clock.install();
+  await page.clock.pauseAt(new Date());
   await page.mouse.move(x, y);
+  await page.clock.runFor(149);
+  await labels(false);
+  await page.mouse.move(1100, 400);
+  await page.clock.runFor(200);
+  await labels(false);
+  await page.mouse.move(x, y);
+  await page.clock.runFor(100);
+  await page.mouse.move(x + 1, y);
+  await page.clock.runFor(49);
+  await labels(false);
+  await page.clock.runFor(1);
   await labels(true);
+  await page.clock.resume();
   await page.mouse.click(x, y);
   await page.mouse.move(1100, 400);
   await labels(false);

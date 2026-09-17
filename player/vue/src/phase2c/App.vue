@@ -109,19 +109,33 @@ const labelsVisible = computed(() => labelMode.value === "labels"
     || (clickPreview.value !== false && (hoverPreview.value || focusPreview.value)))));
 provide("phase2c-menu-labels-visible", labelsVisible);
 
+let hoverPreviewTimer: ReturnType<typeof setTimeout> | undefined;
 function updateHoverPreview(event: PointerEvent) {
   const strip = menuSidebar.value?.parentElement?.getBoundingClientRect();
   // Follow the current pointer, including a mouse attached to a touch-first device.
   if (event.pointerType === "mouse") clickPreview.value = null;
-  hoverPreview.value = event.pointerType === "mouse"
+  const overMenu = event.pointerType === "mouse"
     && !!strip && event.clientX >= strip.left && event.clientX < strip.right;
-  if (!hoverPreview.value && clickPreview.value === false) clickPreview.value = null;
+  if (!overMenu || labelMode.value !== "preview") {
+    leaveMenu();
+  } else if (!hoverPreview.value && hoverPreviewTimer === undefined) {
+    hoverPreviewTimer = setTimeout(() => {
+      hoverPreviewTimer = undefined;
+      hoverPreview.value = true;
+    }, 150);
+  }
 }
 
 function leaveMenu() {
+  clearTimeout(hoverPreviewTimer);
+  hoverPreviewTimer = undefined;
   hoverPreview.value = false;
   if (clickPreview.value === false) clickPreview.value = null;
 }
+
+// Cancel pending hover when the launcher shell disappears or its mode changes.
+watch([menuSidebar, labelMode], leaveMenu);
+onBeforeUnmount(leaveMenu);
 
 async function updateFocusPreview() {
   await nextTick();
