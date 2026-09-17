@@ -103,6 +103,15 @@ const focusPreview = ref(false);
 const menuSidebar = ref<HTMLElement | null>(null);
 const shellElement = computed(() => menuRuler.value?.parentElement);
 const toolsSurface = ref<HTMLElement | null>(null);
+// Label modes change the menu and its reservation together. Do not let the
+// shared Sidebar's width transition leave its background trailing the menu.
+// Keep ordinary dock transitions and the preview's own animation intact.
+watch(labelMode, () => {
+  const dock = toolsSurface.value?.closest('[data-slot="sidebar"] > .fixed');
+  for (const animation of dock?.getAnimations() ?? []) {
+    if (animation instanceof CSSTransition && animation.transitionProperty === "width") animation.cancel();
+  }
+}, { flush: "post" });
 const clickPreview = ref<boolean | null>(null);
 const labelsVisible = computed(() => labelMode.value === "labels"
   || (labelMode.value === "preview" && (clickPreview.value === true
@@ -171,9 +180,10 @@ const toolSizes = ref<Record<Tool, keyof typeof toolPanelSizes>>({
 // Preview measures content; the permanent label width is a session-only rem choice.
 const menuRuler = ref<HTMLElement | null>(null);
 const measuredMenuWidth = ref(0);
-const menuWidthRem = ref(16);
+const menuWidths = { icons: 3, min: 13, default: 16, max: 24 };
+const menuWidthRem = ref(menuWidths.default);
 const remSize = ref(parseFloat(getComputedStyle(document.documentElement).fontSize));
-const menuBounds = computed(() => ({ min: 13 * remSize.value, max: 24 * remSize.value }));
+const menuBounds = computed(() => ({ min: menuWidths.min * remSize.value, max: menuWidths.max * remSize.value }));
 useResizeObserver(menuRuler, () => {
   const ruler = menuRuler.value;
   if (!ruler) return;
@@ -240,6 +250,7 @@ function setSidebarVisible(open: boolean) {
 type PanelSize = keyof typeof toolPanelSizes;
 const panelSizeNames = Object.keys(toolPanelSizes) as PanelSize[];
 const resizing = ref<"menu" | Tool | null>(null);
+const menuResizeIntent = ref<"icons" | "labels" | null>(null);
 let stopResize: (() => void) | undefined;
 function startResize(event: PointerEvent, tool?: Tool) {
   if (event.button !== 0 || !event.isPrimary) return;
@@ -249,7 +260,12 @@ function startResize(event: PointerEvent, tool?: Tool) {
   const startX = event.clientX;
   const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
   const initialSize = tool ? toolSizes.value[tool] : null;
-  const initialWidth = tool ? toolPanelSizes[toolSizes.value[tool]] * rem : permanentMenuWidth.value;
+  const initialMenuMode = labelMode.value;
+  const initialMenuWidth = menuWidthRem.value;
+  const initialWidth = tool ? toolPanelSizes[toolSizes.value[tool]] * rem
+    : (initialMenuMode === "icons" ? menuWidths.icons : initialMenuWidth) * rem;
+  // Halfway across the unused gap keeps the minimum label width easy to select.
+  const menuSnapWidth = (menuWidths.icons + menuWidths.min) / 2;
   resizing.value = tool ?? "menu";
   edge.setPointerCapture(event.pointerId);
   const move = (moveEvent: PointerEvent) => {
@@ -258,26 +274,38 @@ function startResize(event: PointerEvent, tool?: Tool) {
     if (tool) {
       toolSizes.value[tool] = panelSizeNames.reduce((nearest, size) =>
         Math.abs(toolPanelSizes[size] * rem - width) < Math.abs(toolPanelSizes[nearest] * rem - width) ? size : nearest);
-    } else menuWidthRem.value = Math.max(13, Math.min(24, width / rem));
+    } else if (initialMenuMode === "icons") {
+      menuResizeIntent.value = width / rem >= menuSnapWidth ? "labels" : null;
+    } else {
+      menuResizeIntent.value = width / rem < menuSnapWidth ? "icons" : null;
+      menuWidthRem.value = Math.max(menuWidths.min, Math.min(menuWidths.max, width / rem));
+    }
   };
   const cancel = () => {
     if (tool && initialSize) toolSizes.value[tool] = initialSize;
-    else menuWidthRem.value = initialWidth / rem;
+    else menuWidthRem.value = initialMenuWidth;
     finish();
   };
   const key = (keyEvent: KeyboardEvent) => { if (keyEvent.key === "Escape") cancel(); };
+  const commit = () => {
+    if (!tool && menuResizeIntent.value) labelMode.value = menuResizeIntent.value;
+    finish();
+  };
   const finish = () => {
     edge.removeEventListener("pointermove", move);
-    edge.removeEventListener("pointerup", finish);
+    edge.removeEventListener("pointerup", commit);
     edge.removeEventListener("pointercancel", cancel);
     edge.removeEventListener("lostpointercapture", finish);
     document.removeEventListener("keydown", key);
     if (edge.hasPointerCapture(event.pointerId)) edge.releasePointerCapture(event.pointerId);
+    // A mode switch preserves the width from before this gesture for reopening.
+    if (!tool && menuResizeIntent.value) menuWidthRem.value = initialMenuWidth;
+    menuResizeIntent.value = null;
     resizing.value = null;
     stopResize = undefined;
   };
   edge.addEventListener("pointermove", move);
-  edge.addEventListener("pointerup", finish);
+  edge.addEventListener("pointerup", commit);
   edge.addEventListener("pointercancel", cancel);
   edge.addEventListener("lostpointercapture", finish);
   document.addEventListener("keydown", key);
@@ -285,10 +313,16 @@ function startResize(event: PointerEvent, tool?: Tool) {
 }
 onBeforeUnmount(() => stopResize?.());
 function resizeMenuKey(event: KeyboardEvent) {
-  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  if (!["ArrowLeft", "ArrowRight", "Home", "End", "Enter"].includes(event.key)) return;
   event.preventDefault();
-  menuWidthRem.value = event.key === "Home" ? 13 : event.key === "End" ? 24
-    : Math.max(13, Math.min(24, menuWidthRem.value + (event.key === "ArrowRight" ? 1 : -1)));
+  if (event.key === "Enter") {
+    labelMode.value = labelMode.value === "icons" ? "labels" : "icons";
+  } else if (labelMode.value === "icons") {
+    if (event.key === "ArrowRight" || event.key === "End") labelMode.value = "labels";
+  } else {
+    menuWidthRem.value = event.key === "Home" ? menuWidths.min : event.key === "End" ? menuWidths.max
+      : Math.max(menuWidths.min, Math.min(menuWidths.max, menuWidthRem.value + (event.key === "ArrowRight" ? 1 : -1)));
+  }
 }
 function resizePanelKey(event: KeyboardEvent, tool: Tool) {
   if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
@@ -618,9 +652,13 @@ async function updateSidebarVisibility(open: boolean) {
         </Dialog>
       </div>
         </div>
-        <div v-if="labelMode === 'labels' && !narrow" class="resize-edge menu-resize-edge" role="separator" tabindex="0" aria-label="Menu Sidebar width" aria-orientation="vertical"
-          :aria-valuemin="Math.round(menuBounds.min)" :aria-valuemax="Math.round(menuBounds.max)" :aria-valuenow="Math.round(permanentMenuWidth)"
-          @pointerdown="startResize($event)" @keydown="resizeMenuKey" />
+        <div v-if="labelMode !== 'preview' && !narrow" class="resize-edge menu-resize-edge" role="separator" tabindex="0" aria-orientation="vertical"
+          :aria-valuemin="menuWidths.icons * remSize" :aria-valuemax="Math.round(menuBounds.max)" :aria-valuenow="labelMode === 'icons' ? menuWidths.icons * remSize : Math.round(permanentMenuWidth)"
+          :aria-valuetext="labelMode === 'icons' ? 'Icons only' : `${menuWidthRem}rem, icons and labels`"
+          aria-label="Menu Sidebar width" aria-description="Drag to resize or switch between icons and labels. Press Enter to toggle labels."
+          @pointerdown="startResize($event)" @keydown="resizeMenuKey">
+          <span v-if="menuResizeIntent" class="resize-size-label whitespace-nowrap" role="status">{{ menuResizeIntent === 'icons' ? 'Icons only' : 'Show labels' }}</span>
+        </div>
         </div>
         <div v-if="sidebarVisible" v-show="!narrow || !narrowMenuVisible" ref="toolStrip" role="region" aria-label="Tool Panels" :tabindex="openTools.length ? 0 : undefined" class="tool-panel-strip flex min-w-0 flex-1 overflow-x-auto overscroll-x-contain focus-visible:outline-2 focus-visible:-outline-offset-2">
     <section v-for="tool in openTools" :key="tool" v-show="!narrow || tool === narrowTool" :data-tool="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="relative flex min-h-0 shrink-0 flex-col border-r bg-[var(--surface-component)]">
