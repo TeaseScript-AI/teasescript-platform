@@ -1,4 +1,12 @@
-import type { TranscriptEntry } from "./transcriptEntries";
+import type {
+  PlayerTranscriptEntryPresentation,
+  PlayerSpeakerPresentation,
+} from "../../../model.js";
+
+export const transcriptFixtureSpeakers: Readonly<Record<string, PlayerSpeakerPresentation>> = {
+  guide: { name: "Guide", accent: "inherit", avatar: "G", fontFamily: "inherit" },
+  user: { name: "You", accent: "inherit", avatar: "Y", fontFamily: "inherit" },
+};
 
 const messages = [
   "Take a moment to look around. The path follows the coast from here.",
@@ -9,15 +17,18 @@ const messages = [
   "Yes, let's continue.",
 ];
 
-export function transcriptFixtures(start: number, count: number): TranscriptEntry[] {
+export function transcriptFixtures(
+  start: number,
+  count: number,
+): PlayerTranscriptEntryPresentation[] {
   return Array.from({ length: count }, (_, index) => {
     const sequence = start + index;
     const variant = ((sequence % messages.length) + messages.length) % messages.length;
     const player = variant % 2 === 1;
     return {
       id: `message-${sequence}`,
-      author: player ? "player" : "speaker",
-      name: player ? "You" : "Guide",
+      kind: "message",
+      speakerId: player ? "user" : "guide",
       text: messages[variant]!,
     };
   });
