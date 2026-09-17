@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, provide, ref, watch, type ObjectDirective } from "vue";
 import { onClickOutside, useEventListener, useResizeObserver, useStorage } from "@vueuse/core";
-import { FlaskConical, Settings, Pin, ScanLine, ChevronDown, Ellipsis, Activity, GripVertical, SlidersHorizontal } from "@lucide/vue";
+import { FlaskConical, Settings, Pin, ScanLine, ChevronDown, Ellipsis, Activity, GripVertical, SlidersHorizontal, PanelLeftOpen } from "@lucide/vue";
 import Sortable from "sortablejs";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
@@ -131,9 +131,6 @@ useEventListener(window.visualViewport, "scroll", updateViewport);
 const narrow = computed(() => viewport.value.width < 380 + 6 * remSize.value + 4
   + (labelMode.value === "labels" ? permanentMenuWidth.value : 3 * remSize.value)
   + toolPanelSizes.Small * remSize.value + 1);
-// Keep room for one Small panel when possible, without narrowing the menu below its Settings row.
-const narrowMenuWidth = computed(() => Math.min(permanentMenuWidth.value,
-  Math.max(menuBounds.value.min, viewport.value.width * 0.9 - toolPanelSizes.Small * remSize.value - 1)));
 const sidebarVisible = ref(!narrow.value);
 let transitionFocusLabel: string | null = null;
 watch(narrow, (isNarrow) => {
@@ -143,6 +140,7 @@ watch(narrow, (isNarrow) => {
   transitionFocusLabel = inside ? active?.getAttribute("aria-label") ?? null : null;
   stopResize?.();
   // Do not cover the Player on a layout change unless tools own the active interaction.
+  if (isNarrow) narrowMenuVisible.value = true;
   if (isNarrow && !inside) sidebarVisible.value = false;
   if (!isNarrow && inside && sidebarVisible.value) void nextTick(focusToolsToggle);
 }, { flush: "pre" });
@@ -167,6 +165,7 @@ async function closeDrawerFocus(event: Event) {
 }
 function setSidebarVisible(open: boolean) {
   sidebarVisible.value = open;
+  if (open && narrow.value) narrowMenuVisible.value = true;
   clickPreview.value = null;
   hoverPreview.value = false;
   focusPreview.value = false;
@@ -236,6 +235,14 @@ const pinnedTools = ref<Tool[]>([]);
 const temporaryTool = ref<Tool | null>(null);
 // Visual order is independent of which tools are pinned.
 const openTools = ref<Tool[]>([]);
+// Narrow presentation selects from the same open tools; it does not own their lifetime.
+const narrowTool = ref<Tool | null>(null);
+const narrowMenuVisible = ref(true);
+async function showToolMenu() {
+  narrowMenuVisible.value = true;
+  await nextTick();
+  menuSidebar.value?.querySelector<HTMLButtonElement>("[data-sidebar=menu-button]")?.focus({ preventScroll: true });
+}
 let pendingToolClose: { tool: Tool; timer: ReturnType<typeof setTimeout> } | null = null;
 let lastClosedTool: { tool: Tool; index: number; pinned: boolean } | null = null;
 const toolStrip = ref<HTMLElement | null>(null);
@@ -243,6 +250,14 @@ let revealRequest = 0;
 
 async function revealTool(tool: Tool) {
   const request = ++revealRequest;
+  if (narrow.value) {
+    const focusFromMenu = narrowMenuVisible.value;
+    narrowTool.value = tool;
+    narrowMenuVisible.value = false;
+    await nextTick();
+    if (focusFromMenu) document.querySelector<HTMLButtonElement>("[data-show-tools]")?.focus({ preventScroll: true });
+    return;
+  }
   await nextTick();
   const strip = toolStrip.value;
   if (!strip) return;
@@ -276,6 +291,10 @@ function cancelPendingClose() {
 onBeforeUnmount(cancelPendingClose);
 
 function closeTool(tool: Tool) {
+  if (narrowTool.value === tool) {
+    narrowTool.value = null;
+    narrowMenuVisible.value = true;
+  }
   lastClosedTool = { tool, index: openTools.value.indexOf(tool), pinned: pinnedTools.value.includes(tool) };
   openTools.value = openTools.value.filter(item => item !== tool);
   pinnedTools.value = pinnedTools.value.filter(item => item !== tool);
@@ -289,6 +308,10 @@ function clickTool(tool: Tool, event: MouseEvent) {
     const previous = pendingToolClose.tool;
     cancelPendingClose();
     closeTool(previous);
+  }
+  if (narrow.value && openTools.value.includes(tool) && narrowTool.value !== tool) {
+    void revealTool(tool);
+    return;
   }
   if (openTools.value.includes(tool)) {
     if (event.detail === 0) closeTool(tool);
@@ -348,7 +371,7 @@ function moveTool(tool: Tool, direction: -1 | 1) {
 }
 
 watch(toolStrip, (strip, _, onCleanup) => {
-  if (!strip) return;
+  if (!strip || narrow.value) return;
   let originalNextSibling: ChildNode | null = null;
   const sortable = new Sortable(strip, {
     draggable: "[data-tool]",
@@ -437,7 +460,7 @@ async function toggleSidebarVisibility() {
   <SidebarProvider
     id="phase2c-shell"
     :data-narrow="narrow"
-    :style="{ '--tool-columns-width': `${toolColumnsWidth}rem`, '--permanent-menu-width': `${permanentMenuWidth}px`, '--narrow-menu-width': `${narrowMenuWidth}px`, '--usable-width': `${viewport.width}px`, '--usable-height': `${viewport.height}px`, '--viewport-left': `${viewport.left}px`, '--viewport-top': `${viewport.top}px` }"
+    :style="{ '--tool-columns-width': `${toolColumnsWidth}rem`, '--permanent-menu-width': `${permanentMenuWidth}px`, '--usable-width': `${viewport.width}px`, '--usable-height': `${viewport.height}px`, '--viewport-left': `${viewport.left}px`, '--viewport-top': `${viewport.top}px` }"
     :data-resizing="resizing !== null"
     :data-labels="labelMode"
     :data-tools-open="openTools.length > 0"
@@ -459,10 +482,16 @@ async function toggleSidebarVisibility() {
         <SheetTitle class="sr-only">Tools Sidebar</SheetTitle>
         <SheetDescription class="sr-only">Open, arrange and resize Player tools.</SheetDescription>
       </template>
-      <div data-tools-surface class="relative flex h-full min-h-0">
-        <div v-if="sidebarVisible" data-launcher-space class="relative shrink-0">
+      <div data-tools-surface class="relative flex h-full min-h-0" :class="{ 'flex-col': narrow }">
+        <div v-if="narrow" class="flex h-12 shrink-0 items-center gap-2 border-b px-2">
+          <SidebarTrigger class="size-8" aria-label="Hide sidebar" title="Hide sidebar" />
+          <Button v-if="!narrowMenuVisible" data-show-tools variant="ghost" size="sm" @click="showToolMenu">
+            <PanelLeftOpen class="size-4" /> Tools
+          </Button>
+        </div>
+        <div v-if="sidebarVisible" v-show="!narrow || narrowMenuVisible" data-launcher-space class="relative shrink-0">
         <div ref="menuSidebar" data-launcher @click="clickMenuSpace" @pointerenter="updateHoverPreview" @pointermove="updateHoverPreview" @pointerleave="leaveMenu" @focusin="updateFocusPreview" @focusout="updateFocusPreview" class="relative flex h-full flex-col border-r bg-sidebar">
-      <SidebarHeader>
+      <SidebarHeader v-if="!narrow">
         <SidebarTrigger
           class="size-8"
           aria-label="Hide sidebar"
@@ -472,7 +501,7 @@ async function toggleSidebarVisibility() {
       <nav aria-label="Tools" class="min-h-0 overflow-y-auto p-2">
         <SidebarMenu>
           <SidebarMenuItem v-for="tool in launcherTools" :key="tool.name">
-            <MenuSidebarButton :label="tool.name" :is-active="openTools.includes(tool.name)" @click="clickTool(tool.name, $event)" @dblclick="toggleToolPin(tool.name)">
+            <MenuSidebarButton :label="tool.name" :is-active="narrow ? narrowTool === tool.name : openTools.includes(tool.name)" :aria-current="narrow && narrowTool === tool.name ? 'true' : undefined" @click="clickTool(tool.name, $event)" @dblclick="toggleToolPin(tool.name)">
               <component :is="tool.icon" />
             </MenuSidebarButton>
           </SidebarMenuItem>
@@ -506,8 +535,8 @@ async function toggleSidebarVisibility() {
           :aria-valuemin="Math.round(menuBounds.min)" :aria-valuemax="Math.round(menuBounds.max)" :aria-valuenow="Math.round(permanentMenuWidth)"
           @pointerdown="startResize($event)" @keydown="resizeMenuKey" />
         </div>
-        <div v-if="sidebarVisible" ref="toolStrip" role="region" aria-label="Tool Panels" :tabindex="openTools.length ? 0 : undefined" class="tool-panel-strip flex min-w-0 flex-1 overflow-x-auto overscroll-x-contain focus-visible:outline-2 focus-visible:-outline-offset-2">
-    <section v-for="tool in openTools" :key="tool" :data-tool="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="relative flex min-h-0 shrink-0 flex-col border-r bg-neutral-50">
+        <div v-if="sidebarVisible" v-show="!narrow || !narrowMenuVisible" ref="toolStrip" role="region" aria-label="Tool Panels" :tabindex="openTools.length ? 0 : undefined" class="tool-panel-strip flex min-w-0 flex-1 overflow-x-auto overscroll-x-contain focus-visible:outline-2 focus-visible:-outline-offset-2">
+    <section v-for="tool in openTools" :key="tool" v-show="!narrow || tool === narrowTool" :data-tool="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="relative flex min-h-0 shrink-0 flex-col border-r bg-neutral-50">
       <header v-fit-panel-settings="tool" :data-compact-settings="compactPanelSettings[tool]" class="flex min-h-12 items-center justify-between gap-2 border-b p-2">
         <span data-panel-drag class="inline-flex shrink-0 cursor-grab touch-none select-none items-center self-stretch rounded-sm px-0.5 hover:bg-neutral-200 active:cursor-grabbing" aria-hidden="true" title="Drag to reorder">
           <GripVertical class="size-4" />

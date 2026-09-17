@@ -127,7 +127,7 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
 /* The Sheet portal stays in the shell so menu width/preview tokens have one owner. */
 .phase2c-sidebar { height: var(--usable-height); min-height: 0; }
 .phase2c-sidebar[data-narrow="true"] {
-  --sidebar-width: min(calc(var(--launcher-space) + var(--tool-columns-width) + 1px), calc(var(--usable-width) * 0.9)) !important;
+  --sidebar-width: calc(var(--usable-width) * 0.9) !important;
 }
 .phase2c-sidebar .tools-drawer {
   left: var(--viewport-left); top: var(--viewport-top); bottom: auto;
@@ -142,6 +142,14 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
 .phase2c-sidebar[data-narrow="true"] [data-launcher] { max-width: min(24rem, calc(var(--usable-width) * 0.9)); }
 /* Narrow only caps presentation; the user-selected wide width remains untouched. */
 .phase2c-sidebar[data-narrow="true"][data-labels="labels"] {
-  --launcher-width: var(--narrow-menu-width);
-  --launcher-space: var(--narrow-menu-width);
+  --launcher-width: min(var(--permanent-menu-width), var(--sidebar-width));
+  --launcher-space: var(--launcher-width);
 }
+
+/* Narrow tools use one full-width view; desktop presets remain in state. */
+.phase2c-sidebar[data-narrow="true"] [data-launcher-space] { flex: 1; min-height: 0; }
+.phase2c-sidebar[data-narrow="true"] .tool-panel-strip { min-height: 0; overflow-x: hidden; scroll-snap-type: none; }
+.phase2c-sidebar[data-narrow="true"] .tool-panel-strip > [data-tool] { width: 100% !important; min-width: 0; }
+.phase2c-sidebar[data-narrow="true"] [data-panel-drag],
+.phase2c-sidebar[data-narrow="true"] [data-panel-resize] { display: none; }
+.phase2c-sidebar[data-narrow="true"] [data-tool-body] { overflow-wrap: anywhere; }
