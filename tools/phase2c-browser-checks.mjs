@@ -367,8 +367,15 @@ async function menuCollapseChecks(page) {
   await page.keyboard.press("ArrowRight");
   check((await width()) === 288, "Initial test width must be 18rem");
   await drag(96);
-  await page.getByRole("status").filter({ hasText: "Icons only" }).waitFor();
-  check((await mode()) === "labels", "Crossing the collapse threshold must wait for release");
+  check(
+    (await mode()) === "icons" && (await width()) === 48,
+    "Collapse must be visible while the pointer is still held",
+  );
+  await settledMode();
+  await page.mouse.move(160, 450, { steps: 8 });
+  check((await mode()) === "labels", "Reversing an inward drag must reopen before release");
+  await page.mouse.move(96, 450, { steps: 8 });
+  check((await mode()) === "icons", "Dragging inward again must collapse immediately");
   await page.keyboard.press("Escape");
   await page.mouse.up();
   check(
@@ -383,8 +390,14 @@ async function menuCollapseChecks(page) {
   await page.mouse.up();
   check((await mode()) === "icons", "Small outward drag must not expand");
   await drag(160);
-  await page.getByRole("status").filter({ hasText: "Show labels" }).waitFor();
-  check((await mode()) === "icons", "Expansion must wait for release");
+  check(
+    (await mode()) === "labels" && (await width()) === 288,
+    "Expansion must restore the saved width while the pointer is held",
+  );
+  await settledMode();
+  await page.mouse.move(80, 450, { steps: 8 });
+  check((await mode()) === "icons", "Reversing an outward drag must collapse before release");
+  await page.mouse.move(160, 450, { steps: 8 });
   await page.mouse.up();
   check(
     (await mode()) === "labels" && (await width()) === 288,
@@ -409,7 +422,7 @@ async function menuCollapseChecks(page) {
     await edge.evaluate((el) => el === document.activeElement),
     "Mode switch lost resize-edge focus",
   );
-  // Pointer cancellation must not commit a pending collapse.
+  // Pointer cancellation restores the starting mode even after a visible collapse.
   await drag(96);
   await edge.dispatchEvent("pointercancel", { pointerId: 1, pointerType: "mouse" });
   await page.mouse.up();

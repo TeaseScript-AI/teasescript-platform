@@ -250,7 +250,6 @@ function setSidebarVisible(open: boolean) {
 type PanelSize = keyof typeof toolPanelSizes;
 const panelSizeNames = Object.keys(toolPanelSizes) as PanelSize[];
 const resizing = ref<"menu" | Tool | null>(null);
-const menuResizeIntent = ref<"icons" | "labels" | null>(null);
 let stopResize: (() => void) | undefined;
 function startResize(event: PointerEvent, tool?: Tool) {
   if (event.button !== 0 || !event.isPrimary) return;
@@ -274,38 +273,36 @@ function startResize(event: PointerEvent, tool?: Tool) {
     if (tool) {
       toolSizes.value[tool] = panelSizeNames.reduce((nearest, size) =>
         Math.abs(toolPanelSizes[size] * rem - width) < Math.abs(toolPanelSizes[nearest] * rem - width) ? size : nearest);
-    } else if (initialMenuMode === "icons") {
-      menuResizeIntent.value = width / rem >= menuSnapWidth ? "labels" : null;
     } else {
-      menuResizeIntent.value = width / rem < menuSnapWidth ? "icons" : null;
-      menuWidthRem.value = Math.max(menuWidths.min, Math.min(menuWidths.max, width / rem));
+      labelMode.value = width / rem < menuSnapWidth ? "icons" : "labels";
+      // Collapsing preserves the prior width. An outward drag restores it;
+      // ordinary resizing from labels continues to follow the pointer.
+      menuWidthRem.value = labelMode.value === "icons" || initialMenuMode === "icons"
+        ? initialMenuWidth
+        : Math.max(menuWidths.min, Math.min(menuWidths.max, width / rem));
     }
   };
   const cancel = () => {
     if (tool && initialSize) toolSizes.value[tool] = initialSize;
-    else menuWidthRem.value = initialMenuWidth;
+    else {
+      menuWidthRem.value = initialMenuWidth;
+      labelMode.value = initialMenuMode;
+    }
     finish();
   };
   const key = (keyEvent: KeyboardEvent) => { if (keyEvent.key === "Escape") cancel(); };
-  const commit = () => {
-    if (!tool && menuResizeIntent.value) labelMode.value = menuResizeIntent.value;
-    finish();
-  };
   const finish = () => {
     edge.removeEventListener("pointermove", move);
-    edge.removeEventListener("pointerup", commit);
+    edge.removeEventListener("pointerup", finish);
     edge.removeEventListener("pointercancel", cancel);
     edge.removeEventListener("lostpointercapture", finish);
     document.removeEventListener("keydown", key);
     if (edge.hasPointerCapture(event.pointerId)) edge.releasePointerCapture(event.pointerId);
-    // A mode switch preserves the width from before this gesture for reopening.
-    if (!tool && menuResizeIntent.value) menuWidthRem.value = initialMenuWidth;
-    menuResizeIntent.value = null;
     resizing.value = null;
     stopResize = undefined;
   };
   edge.addEventListener("pointermove", move);
-  edge.addEventListener("pointerup", commit);
+  edge.addEventListener("pointerup", finish);
   edge.addEventListener("pointercancel", cancel);
   edge.addEventListener("lostpointercapture", finish);
   document.addEventListener("keydown", key);
@@ -656,9 +653,7 @@ async function updateSidebarVisibility(open: boolean) {
           :aria-valuemin="menuWidths.icons * remSize" :aria-valuemax="Math.round(menuBounds.max)" :aria-valuenow="labelMode === 'icons' ? menuWidths.icons * remSize : Math.round(permanentMenuWidth)"
           :aria-valuetext="labelMode === 'icons' ? 'Icons only' : `${menuWidthRem}rem, icons and labels`"
           aria-label="Menu Sidebar width" aria-description="Drag to resize or switch between icons and labels. Press Enter to toggle labels."
-          @pointerdown="startResize($event)" @keydown="resizeMenuKey">
-          <span v-if="menuResizeIntent" class="resize-size-label whitespace-nowrap" role="status">{{ menuResizeIntent === 'icons' ? 'Icons only' : 'Show labels' }}</span>
-        </div>
+          @pointerdown="startResize($event)" @keydown="resizeMenuKey" />
         </div>
         <div v-if="sidebarVisible" v-show="!narrow || !narrowMenuVisible" ref="toolStrip" role="region" aria-label="Tool Panels" :tabindex="openTools.length ? 0 : undefined" class="tool-panel-strip flex min-w-0 flex-1 overflow-x-auto overscroll-x-contain focus-visible:outline-2 focus-visible:-outline-offset-2">
     <section v-for="tool in openTools" :key="tool" v-show="!narrow || tool === narrowTool" :data-tool="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="relative flex min-h-0 shrink-0 flex-col border-r bg-[var(--surface-component)]">
