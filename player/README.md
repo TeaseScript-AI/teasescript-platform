@@ -45,24 +45,27 @@ The generated-theme switch applies to the actual Player: shell/Stage ambience, T
 controls, Timer and body-portaled overlays. There is no separate component sample card. Switching off restores the
 existing baseline, including Timer materials and any pre-existing inline theme values. The App owns application and
 cleanup on the standalone document root so portaled UI shares the same resolved roles; the generator remains pure.
-The native picker acquires a literal accent seed; separate surface hue and 0–100% tint controls express intent.
+The native picker pins the literal accent colour; separate surface hue and 0–100% tint controls express intent.
 Zero tint is achromatic in light and dark modes. Polarity and standard/high contrast remain independent. State is session-local and is not persisted. UI ambience follows the surface family without
-replacing content-owned scene/media colors or the accent seed. Theme generation does not own Timer sizing or layout.
+replacing content-owned scene/media colors or the accent colour. Theme generation does not own Timer sizing or layout.
 
 `theme/palette.ts` resolves Player roles, `theme/material.ts` isolates MCU's public root API, and `theme/color.ts`
-isolates Color.js conversion, CSS gamut mapping and contrast. MCU 0.4.0 explicitly selects Tonal Spot / 2025 / phone;
-standard/high use contrast levels 0/0.5. Surface tint re-realizes MCU's resolved neutral-role tones with hue and a
-normalized fraction of `min(24, available HCT chroma)` at each tone. That mapping and local state overlays remain
-experimental, not accepted palette or accessibility policy. Diagnostics expose measured opaque-color ratios and failures;
-they do not certify translucent media overlays or perceptual state distinction.
+isolates Color.js conversion, CSS gamut mapping and contrast. MCU solves tonal palettes; a temporary Player-owned
+role-tone table compares a Material-oriented hierarchy with lighter raised light surfaces and a less black dark
+candidate. The full tint slider maps onto the selected HCT chroma maximum (5, 8.5 or 12); monochrome is independent
+of accent. Text and borders are neutral. High contrast increases tone separation, not saturation. Accent state
+colours preserve readable black/white labels; the Timer uses a separate translucent dark overlay family with light
+text and an accent ring. These mappings remain experimental, not accepted palette or accessibility policy.
+Diagnostics expose measured opaque-colour ratios and failures; they do not certify translucent media overlays
+or perceptual state distinction.
 
 The generator accepts already-resolved platform intent. User/package precedence, authored theme registration and
 missing-variant fallback remain governed by [the theme boundary](../docs/ui/PLAYER-UI.md#theme-and-customization-boundary)
 and are not implemented here. It does not convert authored custom themes, accept scene/speaker/control colors, or
 produce interaction families from arbitrary content colors. Final production adoption, persistence, dark values and
 policy thresholds remain Owner choices. The exact dependencies are MCU 0.4.0 (Apache-2.0) and Color.js 0.7.1 (MIT),
-both with no runtime dependencies. They replace local color-science/role-tone code; hand-maintained math or Culori
-would retain more theme policy here. The cost is bundled code and dependency-update review; no network service or
+both with no runtime dependencies. They replace local colour-science code; product role-tone choices remain explicit
+and provisional. The cost is bundled code and dependency-update review; no network service or
 new data access is introduced. MCU 0.4.0 ships extensionless internal ESM imports: this experiment uses Vite's bundler;
 direct Node ESM execution of the MCU adapter currently fails. No package patch or custom loader is introduced.
 

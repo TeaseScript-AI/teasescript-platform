@@ -42,6 +42,46 @@
   background: var(--background);
 }
 
+/* data-button survives composed triggers replacing shadcn data-slot.
+   Composer material remains owned by ConversationSurface and its mapping below. */
+:where([data-button]:not([data-variant="destructive"], [data-variant="link"], [data-runtime-composer] > button)) {
+  --button-rest: transparent;
+  --button-hover: var(--component-hover);
+  --button-pressed: var(--component-pressed);
+  --button-text: var(--foreground);
+  --button-hover-border: var(--border-hover);
+  --button-pressed-border: var(--border-strong);
+  background-color: var(--button-rest);
+  color: var(--button-text);
+}
+[data-button]:is([data-variant="outline"], [data-variant="secondary"]) {
+  --button-rest: var(--surface-component);
+}
+[data-button]:is([data-variant="outline"], [data-variant="ghost"], [data-variant="secondary"])[data-state="open"] {
+  --button-rest: var(--theme-surface-selected, var(--component-pressed));
+}
+[data-button]:is([data-variant="default"], :not([data-variant])) {
+  --button-rest: var(--theme-accent-solid, var(--package-accent));
+  --button-hover: var(--theme-accent-hover, oklch(56.375% 0.18326 11.66));
+  --button-pressed: var(--theme-accent-pressed, oklch(52.588% 0.17301 12.20));
+  --button-text: var(--theme-text-on-accent, white);
+  --button-hover-border: var(--button-hover);
+  --button-pressed-border: var(--button-pressed);
+}
+@media (any-hover: hover) {
+  :where([data-button]:not([data-variant="destructive"], [data-variant="link"], [data-runtime-composer] > button)):enabled:hover {
+    background-color: var(--button-hover);
+    color: var(--button-text);
+    border-color: var(--button-hover-border);
+  }
+}
+:where([data-button]:not([data-variant="destructive"], [data-variant="link"], [data-runtime-composer] > button)):enabled:active {
+  background-color: var(--button-pressed);
+  transition-duration: 0s;
+  color: var(--button-text);
+  border-color: var(--button-pressed-border);
+}
+
 /* The development Theme Lab resolves canonical roles; this adapter lets the
    standalone Player and its body-portaled controls act as the live preview. */
 :root[data-phase2c-theme] {
@@ -58,7 +98,7 @@
   --popover: var(--theme-surface-floating);
   --focus-ring: var(--theme-accent-focus);
   /* UI ambience follows the surface family; exact scene/media color remains content-owned. */
-  --player-ambient: var(--theme-surface-chrome);
+  --player-ambient: var(--theme-ambient-wash);
   accent-color: var(--theme-accent-solid);
 }
 :root[data-phase2c-theme="light"] { color-scheme: light; }
