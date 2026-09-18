@@ -232,6 +232,11 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
    a change of speaker gets the full separation. */
 .transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: 1rem 0; }
 .transcript-entry[data-continues="true"] { padding-block-start: 0.125rem; }
+/* The avatar sits beside the bubble, not beside the name above it: offset it by
+   the header's own line height plus the content gap. */
+.transcript-entry:has([data-slot="message-header"]) :deep([data-slot="message-avatar"]) {
+  margin-block-start: calc(1rem + 0.625rem);
+}
 .session-event { margin: 0; font-size: 0.8125rem; color: var(--text-muted); }
 .transcript-empty { padding: 1rem; font-size: 0.875rem; color: var(--muted-foreground); }
 .return-to-latest {
