@@ -221,16 +221,15 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  gap: 1rem;
 }
 .player-conversation {
   --conversation-width: min(var(--conversation-max-width), calc(var(--content-width) - var(--conversation-gutter)));
   width: var(--conversation-width);
-  margin: 0 0 2rem calc(var(--content-offset) + (var(--content-width) - var(--conversation-width)) / 2);
+  padding-top: 0.5rem;
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+  margin: 0 0 0 calc(var(--content-offset) + (var(--content-width) - var(--conversation-width)) / 2);
 }
 @media (max-width: 600px), (max-height: 450px) {
   .phase2c-sidebar { --conversation-gutter: 2rem; }
-  .player-composition { gap: 0.5rem; }
-  .player-conversation { margin-bottom: 1rem; }
 }
 html:fullscreen { background: var(--background); }
