@@ -4,17 +4,26 @@ import { useResizeObserver } from "@vueuse/core";
 
 const overlay = ref<HTMLElement | null>(null);
 const bottomInset = ref(0);
+const glass = ref<HTMLElement | null>(null);
+const composerEdges = ref({ top: 0, bottom: 0 });
 // Measure the complete overlay, including its safe-area spacing and foreground controls.
 useResizeObserver(overlay, () => {
-  bottomInset.value = overlay.value?.getBoundingClientRect().height ?? 0;
+  const bounds = overlay.value?.getBoundingClientRect();
+  const surface = glass.value?.getBoundingClientRect();
+  bottomInset.value = bounds?.height ?? 0;
+  if (bounds && surface) composerEdges.value = {
+    top: bounds.bottom - surface.top,
+    bottom: bounds.bottom - surface.bottom,
+  };
 });
 </script>
 
 <template>
-  <section class="player-conversation conversation-surface">
+  <section class="player-conversation conversation-surface"
+    :style="{ '--composer-top-from-bottom': `${composerEdges.top}px`, '--composer-bottom-from-bottom': `${composerEdges.bottom}px` }">
     <slot :bottom-inset="bottomInset" />
     <div ref="overlay" class="conversation-overlay" data-conversation-overlay>
-      <div class="conversation-glass"><slot name="interaction" /></div>
+      <div ref="glass" class="conversation-glass"><slot name="interaction" /></div>
     </div>
   </section>
 </template>
