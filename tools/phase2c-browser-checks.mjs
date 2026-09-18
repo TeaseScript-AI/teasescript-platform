@@ -474,6 +474,70 @@ async function menuCollapseChecks(page) {
   return "PASS menu drag collapse, expansion and cancellation";
 }
 
+async function panelResizeChecks(page) {
+  // Reduced CSS viewport models the space left by browser zoom, without device detection.
+  for (const [width, mode, multiple] of [
+    [800, "icons", false],
+    [1020, "labels", false],
+    [1440, "icons", true],
+  ]) {
+    await page.setViewportSize({ width, height: 650 });
+    await page.evaluate((mode) => localStorage.setItem("phase2c-menu-label-mode", mode), mode);
+    await page.reload();
+    const launcher = (name) => page.locator("[data-launcher] button").filter({ hasText: name });
+    if (multiple) {
+      await launcher("Layout Debug").click();
+      await page.locator('[data-tool="Layout Debug"] [data-panel-pin]').click();
+    }
+    await launcher("Visual Lab").click();
+    const edge = page.locator('[data-panel-resize="Visual Lab"]');
+    await edge.focus();
+    await page.keyboard.press("Home");
+    const settle = async () => {
+      await page.evaluate(async () => {
+        await Promise.allSettled(document.getAnimations().map((animation) => animation.finished));
+      });
+    };
+    await settle();
+    const reachable = async () => {
+      await page.waitForFunction(() => {
+        const edge = document.querySelector('[data-panel-resize="Visual Lab"]');
+        const bounds = edge.getBoundingClientRect();
+        return document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + 120) === edge;
+      });
+    };
+    const drag = async (delta, expected, cancel = false) => {
+      await reachable();
+      const bounds = await edge.boundingBox();
+      await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 120);
+      await page.mouse.down();
+      await page.mouse.move(bounds.x + bounds.width / 2 + delta, bounds.y + 120, { steps: 12 });
+      if (cancel) await page.keyboard.press("Escape");
+      await page.mouse.up();
+      await settle();
+      await page.waitForFunction(
+        (expected) => document.querySelector('[data-tool="Visual Lab"]').style.width === expected,
+        expected,
+      );
+      await reachable();
+    };
+    // Reachability is tested through hit testing, then a new physical drag, not DOM presence.
+    await drag(70, "18rem");
+    await drag(100, "24rem");
+    await drag(130, "32rem");
+    await drag(-130, "24rem");
+    await drag(-100, "18rem");
+    await drag(-70, "14rem");
+    await drag(130, "14rem", true);
+    await edge.focus();
+    await page.keyboard.press("End");
+    await settle();
+    await reachable();
+  }
+  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "icons"));
+  return "PASS panel resize overflow reachability and cancellation";
+}
+
 async function toolContentChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -1182,6 +1246,10 @@ try {
   if (!collapseOutput.includes("PASS menu drag collapse, expansion and cancellation"))
     throw new Error(collapseOutput);
   console.log("phase2c-browser-checks: PASS menu drag collapse, expansion and cancellation");
+  const resizeOutput = cli("run-code", panelResizeChecks.toString());
+  if (!resizeOutput.includes("PASS panel resize overflow reachability and cancellation"))
+    throw new Error(resizeOutput);
+  console.log("phase2c-browser-checks: PASS panel resize overflow reachability and cancellation");
   const contentOutput = cli("run-code", toolContentChecks.toString());
   if (!contentOutput.includes("PASS tool content and scroll preservation across hiding and replacement"))
     throw new Error(contentOutput);
