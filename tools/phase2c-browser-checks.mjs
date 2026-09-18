@@ -817,6 +817,10 @@ async function transcriptChecks(page) {
   };
   await atEnd("initial history");
   const glass = page.locator(".conversation-glass");
+  check(await scroll.evaluate((el) => {
+    const fade = getComputedStyle(el, "::after");
+    return fade.content === '""' && fade.height === "56px" && fade.pointerEvents === "none";
+  }), "Transcript needs a non-interactive bottom fade");
   const readableLatest = () => page.waitForFunction(() => {
     const rows = document.querySelectorAll(".transcript-entry");
     const last = rows[rows.length - 1]?.getBoundingClientRect();

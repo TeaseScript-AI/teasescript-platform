@@ -127,6 +127,16 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
   overflow-anchor: none; scrollbar-gutter: stable;
 }
 .transcript-scroll:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+/* Let history pass visually behind the floating composer instead of ending at a hard edge. */
+.transcript-scroll::after {
+  content: ""; position: absolute; z-index: 1; inset-inline: 0;
+  bottom: var(--transcript-bottom-inset, 0px); height: 3.5rem;
+  pointer-events: none;
+  background: linear-gradient(to bottom,
+    transparent 0%,
+    color-mix(in srgb, var(--background) 42%, transparent) 52%,
+    color-mix(in srgb, var(--background) 92%, transparent) 100%);
+}
 .transcript-scroll[data-scrolled="true"] { mask-image: linear-gradient(to bottom, transparent, black 1rem); }
 .transcript-history { position: relative; width: 100%; }
 .transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: 0.5rem 1rem; }
