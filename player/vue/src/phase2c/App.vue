@@ -7,6 +7,7 @@ import ToolLifetimeFixture from "./ToolLifetimeFixture.vue";
 import ToolPanelHeader from "./ToolPanelHeader.vue";
 import ToolPanelBody from "./ToolPanelBody.vue";
 import LayoutDebug from "./LayoutDebug.vue";
+import ThemeLab from "./ThemeLab.vue";
 import { toolPanelSizes } from "./toolPanelSizes";
 import Stage from "./Stage.vue";
 import PlayerTopBar from "./PlayerTopBar.vue";
@@ -572,6 +573,7 @@ async function updateSidebarVisibility(open: boolean) {
           <ToolLifetimeFixture v-if="toolStateFixture && tool === 'Layout Debug'" />
           <LayoutDebug v-else-if="isDevelopment && tool === 'Layout Debug' && shellElement" :player="shellElement" />
           <div v-if="isDevelopment && tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
+            <ThemeLab />
             <label class="grid gap-2">
               Stage media fixture
               <select v-model="mediaFixture" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
