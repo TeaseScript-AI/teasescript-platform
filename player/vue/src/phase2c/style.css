@@ -2,7 +2,7 @@
 @import "tw-animate-css";
 
 @theme inline {
-  --color-popover: var(--surface-component);
+  --color-popover: var(--popover, var(--surface-component));
   --color-popover-foreground: var(--foreground);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -16,7 +16,7 @@
   --color-accent: var(--component-hover);
   --color-accent-foreground: var(--foreground);
   --color-border: var(--border);
-  --color-ring: var(--border-strong);
+  --color-ring: var(--focus-ring, var(--border-strong));
   --radius-md: 0.375rem;
   --radius-lg: 0.5rem;
   --radius-xl: 0.75rem;
@@ -40,6 +40,61 @@
   --scene-ambient: oklch(87.69778% 0.062244 57.33796);
   color: var(--foreground);
   background: var(--background);
+}
+
+/* The development Theme Lab resolves canonical roles; this adapter lets the
+   standalone Player and its body-portaled controls act as the live preview. */
+:root[data-phase2c-theme] {
+  --background: var(--theme-surface-canvas);
+  --foreground: var(--theme-text-primary);
+  --sidebar: var(--theme-surface-chrome);
+  --surface-component: var(--theme-surface-raised);
+  --component-hover: var(--theme-surface-hover);
+  --component-pressed: var(--theme-surface-pressed);
+  --border: var(--theme-border-subtle);
+  --border-hover: var(--theme-border-default);
+  --border-strong: var(--theme-border-strong);
+  --text-muted: var(--theme-text-secondary);
+  --popover: var(--theme-surface-floating);
+  --focus-ring: var(--theme-accent-focus);
+  /* UI ambience follows the surface family; exact scene/media color remains content-owned. */
+  --player-ambient: var(--theme-surface-chrome);
+  accent-color: var(--theme-accent-solid);
+}
+:root[data-phase2c-theme="light"] { color-scheme: light; }
+:root[data-phase2c-theme="dark"] { color-scheme: dark; }
+/* Keep the top overlay transparent while separating its text from arbitrary media. */
+:root[data-phase2c-theme] .player-top-bar-title {
+  text-shadow: 0 1px 2px var(--theme-surface-floating), 0 0 4px var(--theme-surface-floating);
+}
+
+:root[data-phase2c-theme] :is([data-slot="dialog-content"], [data-slot="sheet-content"]) {
+  color: var(--theme-text-primary);
+  background: var(--theme-surface-floating);
+  border-color: var(--theme-border-default);
+}
+:root[data-phase2c-theme] :is([data-slot="dialog-overlay"], [data-slot="sheet-overlay"]) {
+  background: var(--theme-structural-scrim);
+}
+:root[data-phase2c-theme] :is([data-slot="dialog-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"]) {
+  box-shadow: 0 6px 18px var(--theme-structural-shadow);
+}
+:root[data-phase2c-theme] [data-runtime-interaction] button[type="submit"]:enabled {
+  background: var(--theme-accent-solid);
+  color: var(--theme-text-on-accent);
+}
+:root[data-phase2c-theme] [data-runtime-interaction] button[type="submit"]:enabled:hover { background: var(--theme-accent-hover); }
+:root[data-phase2c-theme] [data-runtime-interaction] button[type="submit"]:enabled:active { background: var(--theme-accent-pressed); }
+:root[data-phase2c-theme] :is(button, textarea, input, select):disabled {
+  color: var(--theme-text-disabled);
+  background: var(--theme-surface-disabled);
+  border-color: var(--theme-border-disabled);
+  opacity: 1;
+}
+:root[data-phase2c-theme] :is(textarea, input)::placeholder { color: var(--theme-text-secondary); }
+:root[data-phase2c-theme] :is(button, textarea, input, select):focus-visible {
+  outline: 2px solid var(--theme-accent-focus);
+  outline-offset: 2px;
 }
 
 @layer base {
@@ -68,9 +123,9 @@
   /* Same ambient wash as player/styles/effects.css; no legacy layout rules. */
   background:
     radial-gradient(ellipse 90% 55% at 68% 0%,
-      color-mix(in srgb, var(--scene-ambient) 34%, transparent), transparent 72%),
+      color-mix(in srgb, var(--player-ambient, var(--scene-ambient)) 34%, transparent), transparent 72%),
     linear-gradient(to bottom,
-      color-mix(in srgb, var(--scene-ambient) 26%, transparent) 0 var(--stage-height),
+      color-mix(in srgb, var(--player-ambient, var(--scene-ambient)) 26%, transparent) 0 var(--stage-height),
       transparent calc(var(--stage-height) + 200px)),
     var(--background);
   --launcher-width: var(--sidebar-width-icon);
@@ -92,7 +147,7 @@
 .phase2c-sidebar [data-sidebar="sidebar"] { background: transparent; }
 
 .phase2c-sidebar[data-tools-open="true"] [data-slot="sidebar"][data-state="expanded"] > .fixed {
-  box-shadow: 6px 0 14px -6px rgb(0 0 0 / 18%);
+  box-shadow: 6px 0 14px -6px var(--theme-structural-shadow, rgb(0 0 0 / 18%));
 }
 
 .phase2c-sidebar[data-labels-visible="true"] {
@@ -167,7 +222,7 @@ body:has(> .tool-panel-dragging) [data-slot="tooltip-content"] { visibility: hid
   position: absolute; right: 0; top: 0; bottom: 0; width: 6px; z-index: 35;
   cursor: col-resize; touch-action: none;
 }
-.resize-edge:focus-visible { outline: 2px solid #737373; outline-offset: -2px; }
+.resize-edge:focus-visible { outline: 2px solid var(--theme-accent-focus, #737373); outline-offset: -2px; }
 /* Reuse the panel reorder grip on the menu's full-height resize edge. */
 .menu-resize-grip {
   position: absolute; top: 50%; left: 50%; width: 1rem; height: 1rem;
@@ -196,7 +251,7 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
   transition: none; animation-duration: 200ms;
 }
 .tools-drawer > button { display: none; }
-.phase2c-sidebar > [data-slot="sheet-overlay"] { z-index: 39; background: rgb(0 0 0 / 25%); }
+.phase2c-sidebar > [data-slot="sheet-overlay"] { z-index: 39; background: var(--theme-structural-scrim, rgb(0 0 0 / 25%)); }
 .phase2c-sidebar[data-narrow="true"] [data-sidebar="trigger"] { flex-shrink: 0; }
 .phase2c-sidebar[data-narrow="true"] > [data-sidebar="trigger"] { top: calc(var(--viewport-top) + 0.5rem); left: calc(var(--viewport-left) + 0.5rem); }
 .phase2c-sidebar[data-narrow="true"] [data-launcher] { max-width: min(24rem, calc(var(--usable-width) * 0.9)); }

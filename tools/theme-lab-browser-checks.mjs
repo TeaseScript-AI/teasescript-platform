@@ -22,30 +22,145 @@ async function checks(page) {
   const check = (condition, message) => {
     if (!condition) throw new Error(message);
   };
-  await page.setViewportSize({ width: 1440, height: 1000 });
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  await page.setViewportSize({ width: 1920, height: 1080 });
   await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
   const lab = page.getByRole("region", { name: "Experimental Theme Lab" });
-  const preview = lab.locator(".theme-preview");
+  check(
+    (await lab.locator(".theme-preview, .preview-raised").count()) === 0,
+    "Player itself must be the preview",
+  );
+  const root = page.locator("html");
   const role = (name) =>
-    preview.evaluate(
-      (element, name) => getComputedStyle(element).getPropertyValue(`--theme-${name}`),
+    root.evaluate(
+      (element, name) => getComputedStyle(element).getPropertyValue(`--theme-${name}`).trim(),
       name,
     );
-  const rootBefore = await page
-    .locator("#phase2c-shell")
-    .evaluate((element) => getComputedStyle(element).backgroundImage);
-  const baseline = await role("surface-canvas");
-  check(
-    (await preview.getAttribute("data-generated-theme")) === "false",
-    "Lab must start with baseline",
+  const color = (selector, property = "backgroundColor") =>
+    page
+      .locator(selector)
+      .first()
+      .evaluate((element, property) => getComputedStyle(element)[property], property);
+  const readPlayer = () =>
+    page.evaluate(() => {
+      const style = (selector) => getComputedStyle(document.querySelector(selector));
+      return {
+        canvas: style("#phase2c-shell").backgroundColor,
+        wash: style("#phase2c-shell").backgroundImage,
+        panel: style('[data-tool="Visual Lab"]').backgroundColor,
+        sidebar: style("[data-launcher]").backgroundColor,
+        text: style(".transcript").color,
+        composer: style(".conversation-glass").backgroundColor,
+        title: style(".player-top-bar-title").color,
+        titleShadow: style(".player-top-bar-title").textShadow,
+        timerText: style(".timer-label").color,
+        timerSurface: getComputedStyle(document.querySelector(".timer-display"), "::before")
+          .backgroundImage,
+        timerArc: style(".timer-arc").stroke,
+        timerShadow: style(".timer-time").textShadow,
+        disabled: style('[data-runtime-interaction] button[type="submit"]').backgroundColor,
+      };
+    });
+  const baseline = await readPlayer();
+  const timerSize = await color(".timer-display", "width");
+  const media = await page.locator(".stage-media").getAttribute("src");
+  const packageAccent = await root.evaluate((element) =>
+    getComputedStyle(element).getPropertyValue("--package-accent"),
   );
+  const scene = await root.evaluate((element) =>
+    getComputedStyle(element).getPropertyValue("--scene-ambient"),
+  );
+  // Existing root inline values are restored rather than deleted by the application adapter.
+  await root.evaluate((element) =>
+    element.style.setProperty("--theme-surface-canvas", "oklch(0.91 0.01 70)", "important"),
+  );
+  const originalInline = await root.getAttribute("style");
   await lab.getByLabel("Generated dynamic theme").check();
-  const generatedLight = await role("surface-canvas");
-  check(generatedLight !== baseline, "Generated switch must resolve new roles");
   await lab.getByLabel("Theme mode", { exact: true }).selectOption("dark");
-  check((await role("surface-canvas")) !== generatedLight, "Dark mode must change polarity");
+  await page.waitForTimeout(250);
+  const dark = await readPlayer();
+  for (const key of [
+    "canvas",
+    "wash",
+    "panel",
+    "sidebar",
+    "text",
+    "composer",
+    "title",
+    "titleShadow",
+    "timerText",
+    "timerSurface",
+    "timerArc",
+    "timerShadow",
+    "disabled",
+  ]) {
+    check(dark[key] !== baseline[key], `${key} must follow the live Player theme`);
+  }
+  check(
+    (await color(".timer-display", "width")) === timerSize,
+    "Theme must preserve Timer presentation mode",
+  );
+  check(
+    (await page.locator(".stage-media").getAttribute("src")) === media,
+    "Theme must preserve exact media",
+  );
+  check(
+    (await root.evaluate((element) =>
+      getComputedStyle(element).getPropertyValue("--scene-ambient"),
+    )) === scene,
+    "Theme must not replace content-owned scene color",
+  );
+  check(
+    (await root.evaluate((element) =>
+      getComputedStyle(element).getPropertyValue("--package-accent"),
+    )) === packageAccent,
+    "Theme must not replace arbitrary package content accent",
+  );
+  const assertRole = async (selector, property, name) => {
+    const expected = await page.evaluate(
+      ({ name, property }) => {
+        const probe = document.createElement("span");
+        probe.style[property] = `var(--theme-${name})`;
+        document.body.append(probe);
+        const value = getComputedStyle(probe)[property];
+        probe.remove();
+        return value;
+      },
+      { name, property },
+    );
+    check(
+      (await color(selector, property)) === expected,
+      `${selector} ${property} must consume ${name}`,
+    );
+  };
+  await assertRole(".timer-label", "color", "text-primary");
+  await assertRole(".timer-arc", "stroke", "accent-solid");
+  // Body-portaled menus and dialogs must inherit the same root theme.
+  await page
+    .locator('[data-tool="Visual Lab"]')
+    .getByRole("button", { name: "Panel settings", exact: true })
+    .click();
+  await assertRole('[data-slot="dropdown-menu-content"]', "backgroundColor", "surface-floating");
+  check(
+    await page
+      .locator('[data-slot="dropdown-menu-content"]')
+      .evaluate((element) => !element.closest("#phase2c-shell")),
+    "Exercise a body-portaled surface",
+  );
+  await page.keyboard.press("Escape");
+  await page.locator("[data-settings-trigger]").click();
+  await assertRole('[data-slot="dialog-content"]', "backgroundColor", "surface-floating");
+  await assertRole('[data-slot="dialog-overlay"]', "backgroundColor", "structural-scrim");
+  await page.keyboard.press("Escape");
+  await lab.getByLabel("Theme mode", { exact: true }).selectOption("light");
+  await page.waitForTimeout(250);
+  const light = await readPlayer();
+  check(
+    light.canvas !== dark.canvas && light.timerSurface !== dark.timerSurface,
+    "Light polarity must update Player and Timer",
+  );
+  await assertRole(".timer-label", "color", "text-primary");
   await lab.getByLabel("Theme contrast", { exact: true }).selectOption("high");
   const beforePicker = await role("accent-solid");
   await lab.getByLabel("accentSeed color picker").evaluate((element) => {
@@ -60,53 +175,13 @@ async function checks(page) {
     element.value = "240";
     element.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  await page.waitForFunction(() =>
-    document
-      .querySelector(".theme-preview")
-      .style.getPropertyValue("--theme-accent-solid")
-      .includes("240"),
-  );
   const accent = await role("accent-solid");
   await lab.getByRole("slider", { name: "surfaceSeed Hue", exact: true }).evaluate((element) => {
     element.value = "160";
     element.dispatchEvent(new Event("input", { bubbles: true }));
   });
   check((await role("accent-solid")) === accent, "Surface changes must preserve accent family");
-  const sceneBefore = await lab
-    .getByLabel("Exact scene sample")
-    .evaluate((element) => getComputedStyle(element).backgroundColor);
-  await lab.getByLabel("Exact scene color (independent)").selectOption("oklch(0.35 0.09 250)");
-  check((await role("accent-solid")) === accent, "Scene changes must preserve accent family");
-  check(
-    (await lab
-      .getByLabel("Exact scene sample")
-      .evaluate((element) => getComputedStyle(element).backgroundColor)) !== sceneBefore,
-    "Scene must change independently",
-  );
-  const action = lab.getByRole("button", { name: "Accent action", exact: true });
-  const color = (locator) =>
-    locator.evaluate((element) => getComputedStyle(element).backgroundColor);
-  const solid = await color(action);
-  await action.hover();
-  await page.waitForTimeout(200);
-  check((await color(action)) !== solid, "Real action hover must change color");
-  await page.keyboard.press("Tab");
-  await action.focus();
-  check(
-    (await action.evaluate((element) => getComputedStyle(element).outlineStyle)) !== "none",
-    "Keyboard focus must be visible",
-  );
-  await lab.getByRole("button", { name: "Select option" }).click();
-  check(
-    (await lab
-      .getByRole("button", { name: "Selected", exact: true })
-      .getAttribute("aria-pressed")) === "true",
-    "Selection must update",
-  );
-  check(
-    await lab.getByRole("button", { name: "Disabled action" }).isDisabled(),
-    "Disabled sample must use native semantics",
-  );
+  await assertRole(".timer-arc", "stroke", "accent-solid");
   await lab.getByText(/^Generated semantic roles/).click();
   check((await lab.locator("li code").count()) >= 20, "Resolved roles must be inspectable");
   await lab.getByText(/^Generated contrast diagnostics/).click();
@@ -115,32 +190,55 @@ async function checks(page) {
     "Measured contrast must be inspectable",
   );
   await lab.getByLabel("Generated dynamic theme").uncheck();
-  check((await role("surface-canvas")) === baseline, "Switching off must restore baseline");
+  await page.waitForTimeout(250);
   check(
-    (await page
-      .locator("#phase2c-shell")
-      .evaluate((element) => getComputedStyle(element).backgroundImage)) === rootBefore,
-    "Lab must not recolor Player",
+    JSON.stringify(await readPlayer()) === JSON.stringify(baseline),
+    "Off must restore exact Player and Timer baseline",
   );
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
+  check(
+    (await root.getAttribute("style")) === originalInline,
+    "Off must restore pre-existing inline values and priority",
+  );
+  check(
+    (await root.getAttribute("data-phase2c-theme")) === null,
+    "Off must clear the application mode",
+  );
+  await page.getByRole("button", { name: "Start interaction scenario", exact: true }).click();
   await lab.getByLabel("Generated dynamic theme").check();
-  await preview.scrollIntoViewIfNeeded();
+  const send = '[data-runtime-interaction] button[type="submit"]';
+  await page.waitForTimeout(250);
+  await assertRole(send, "backgroundColor", "accent-solid");
+  await page.locator(send).hover();
+  await page.waitForTimeout(250);
+  await assertRole(send, "backgroundColor", "accent-hover");
+  await page.keyboard.press("Tab");
+  await page.locator("[data-runtime-interaction] textarea").focus();
+  await assertRole("[data-runtime-interaction] textarea", "outlineColor", "accent-focus");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(
+    () => document.querySelector("#phase2c-shell").dataset.narrow === "true",
+  );
+  const showSidebar = page.getByRole("button", { name: "Show sidebar", exact: true });
+  if (await showSidebar.isVisible()) await showSidebar.click();
+  if (!(await lab.isVisible())) {
+    await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
+  }
+  await lab.getByLabel("Theme mode", { exact: true }).selectOption("dark");
+  await assertRole(".timer-arc", "stroke", "accent-solid");
   check(
-    await preview.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
-    "Narrow preview must not overflow",
+    await lab.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    "Narrow Lab must not overflow",
   );
+  await lab.getByLabel("Generated dynamic theme").uncheck();
   check(errors.length === 0, `Unexpected browser errors: ${errors.join("; ")}`);
-  console.log(
-    "PASS theme controls, ownership, states, diagnostics, baseline restore, narrow layout",
-  );
+  return "PASS live Player themes, Timer colors, portals, controls and exact baseline restore";
 }
 try {
   cli("open", url);
   const result = cli("run-code", checks.toString());
-  if (!result.includes("PASS theme controls")) throw new Error(result);
+  if (!result.includes("PASS live Player themes")) throw new Error(result);
   console.log(
-    "theme-lab-browser-checks: PASS theme controls, ownership, states, diagnostics, baseline restore, narrow layout",
+    "theme-lab-browser-checks: PASS live Player themes, Timer colors, portals, controls and exact baseline restore",
   );
 } finally {
   try {
