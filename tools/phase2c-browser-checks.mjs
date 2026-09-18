@@ -478,6 +478,7 @@ async function panelResizeChecks(page) {
   // Reduced CSS viewport models the space left by browser zoom, without device detection.
   for (const [width, mode, multiple] of [
     [800, "icons", false],
+    [800, "icons", true],
     [1020, "labels", false],
     [1440, "icons", true],
   ]) {
@@ -551,6 +552,63 @@ async function panelResizeChecks(page) {
   }
   await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "icons"));
   return "PASS panel width cap, resize, restoration and cancellation";
+}
+
+async function carouselChecks(page) {
+  await page.setViewportSize({ width: 800, height: 420 });
+  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "icons"));
+  await page.reload();
+  for (const name of ["Layout Debug", "Visual Lab"]) {
+    await page.locator("[data-launcher] button").filter({ hasText: name }).click();
+    const panel = page.locator(`[data-tool="${name}"]`);
+    await panel.locator("[data-panel-resize]").focus();
+    await page.keyboard.press("End");
+    await panel.locator("[data-panel-pin]").click();
+  }
+  const strip = page.locator(".tool-panel-strip");
+  await page.waitForFunction(() => {
+    const s = document.querySelector(".tool-panel-strip");
+    return s.scrollWidth > s.clientWidth;
+  });
+  const state = await strip.evaluate((s) => ({
+    width: s.clientWidth,
+    total: s.scrollWidth,
+    panels: [...s.children].map((p) => p.getBoundingClientRect().width),
+  }));
+  if (state.panels.some((w) => w > state.width + 1)) throw Error("Oversized panel");
+  await strip.evaluate((s) => s.scrollTo({ left: 0, behavior: "instant" }));
+  await page.waitForFunction(() => document.querySelector(".tool-panel-strip").scrollLeft === 0);
+  const box = await strip.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + 180);
+  await page.mouse.wheel(state.width * 0.9, 0);
+  await page.waitForFunction(() => {
+    const s = document.querySelector(".tool-panel-strip");
+    return Math.abs(s.scrollLeft - s.clientWidth) < 2;
+  });
+  const body = page.locator('[data-tool="Visual Lab"] [data-tool-body]');
+  await body.hover();
+  await page.mouse.wheel(0, 220);
+  await page.waitForFunction(
+    () => document.querySelector('[data-tool="Visual Lab"] [data-tool-body]').scrollTop > 0,
+  );
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+    const x = box.x + 20,
+      y = 180;
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+    for (let i = 1; i <= 10; i++)
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x: x + i * 22, y }],
+      });
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await page.waitForFunction(() => document.querySelector(".tool-panel-strip").scrollLeft < 2);
+  } finally {
+    await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+    await cdp.detach();
+  }
+  return "PASS bounded carousel, wheel snapping, vertical body scroll and touch swipe";
 }
 
 async function toolContentChecks(page) {
@@ -1265,6 +1323,10 @@ try {
   if (!resizeOutput.includes("PASS panel width cap, resize, restoration and cancellation"))
     throw new Error(resizeOutput);
   console.log("phase2c-browser-checks: PASS panel width cap, resize, restoration and cancellation");
+  const carouselOutput = cli("run-code", carouselChecks.toString());
+  if (!carouselOutput.includes("PASS bounded carousel, wheel snapping, vertical body scroll and touch swipe"))
+    throw new Error(carouselOutput);
+  console.log("phase2c-browser-checks: PASS bounded carousel, wheel snapping, vertical body scroll and touch swipe");
   const contentOutput = cli("run-code", toolContentChecks.toString());
   if (!contentOutput.includes("PASS tool content and scroll preservation across hiding and replacement"))
     throw new Error(contentOutput);

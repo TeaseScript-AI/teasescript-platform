@@ -16,7 +16,7 @@ watch(() => [props.target, props.visible], async () => {
 
 <template>
   <Teleport :to="target">
-    <div ref="body" data-tool-body class="min-h-0 flex-1 overflow-y-auto" @scroll="rememberScroll">
+    <div ref="body" data-tool-body class="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-y-contain [overflow-wrap:anywhere]" @scroll="rememberScroll">
       <slot />
     </div>
   </Teleport>
