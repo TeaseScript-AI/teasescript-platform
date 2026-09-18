@@ -127,17 +127,17 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
   overflow-anchor: none; scrollbar-gutter: stable;
 }
 .transcript-scroll:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-/* Let history pass visually behind the floating composer instead of ending at a hard edge. */
-.transcript-scroll::after {
-  content: ""; position: absolute; z-index: 1; inset-inline: 0;
-  bottom: calc(var(--transcript-bottom-inset, 0px) - 0.75rem); height: 4.5rem;
-  pointer-events: none;
-  background: linear-gradient(to bottom,
-    transparent 0%,
-    color-mix(in srgb, var(--background) 28%, transparent) 48%,
-    color-mix(in srgb, var(--background) 78%, transparent) 100%);
+/* Fade the content itself, revealing the shared Player background. Once hidden,
+   it stays hidden through the composer and the bottom/safe-area margin. */
+.transcript-scroll {
+  --transcript-top-fade: 0px;
+  mask-image: linear-gradient(to bottom,
+    transparent 0, black var(--transcript-top-fade),
+    black max(var(--transcript-top-fade), calc(100% - var(--transcript-bottom-inset, 0px))),
+    transparent calc(100% - var(--transcript-bottom-inset, 0px) + 3rem),
+    transparent 100%);
 }
-.transcript-scroll[data-scrolled="true"] { mask-image: linear-gradient(to bottom, transparent, black 1rem); }
+.transcript-scroll[data-scrolled="true"] { --transcript-top-fade: 1rem; }
 .transcript-history { position: relative; width: 100%; }
 .transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: 0.5rem 1rem; }
 .message { max-width: 90%; }
