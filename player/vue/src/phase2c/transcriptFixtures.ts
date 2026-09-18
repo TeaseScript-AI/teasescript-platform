@@ -24,7 +24,8 @@ export function transcriptFixtures(
   return Array.from({ length: count }, (_, index) => {
     const sequence = start + index;
     const variant = ((sequence % messages.length) + messages.length) % messages.length;
-    const player = variant % 2 === 1;
+    // Runs of consecutive speaker messages, so grouping is visible in the fixtures.
+    const player = variant === 3 || variant === 5;
     return {
       id: `message-${sequence}`,
       kind: "message",

@@ -6,7 +6,6 @@ import { ArrowDown } from "@lucide/vue";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
-import { Marker, MarkerContent } from "@/components/ui/marker";
 import {
   Message,
   MessageAvatar,
@@ -143,9 +142,8 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
           :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
           role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
           class="transcript-entry" :style="{ transform: `translateY(${item.start}px)` }">
-          <Marker v-if="entry.kind === 'session-event'" variant="separator">
-            <MarkerContent>{{ entry.text }}</MarkerContent>
-          </Marker>
+          <!-- Session events carry no authored story text and receive no designed treatment. -->
+          <p v-if="entry.kind === 'session-event'" class="session-event">{{ entry.text }}</p>
           <Message v-else :align="entry.speakerId === 'user' ? 'end' : 'start'">
             <MessageAvatar v-if="entry.speakerId !== 'user'" :class="startsGroup(item.index) ? '' : 'invisible'">
               <Avatar>
@@ -206,6 +204,7 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
 :deep(.transcript-scroll[data-scrolled="true"]) { --transcript-top-fade: 1rem; }
 .transcript-history { position: relative; width: 100%; }
 .transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: 0.25rem; }
+.session-event { margin: 0; font-size: 0.8125rem; color: var(--text-muted); }
 .transcript-empty { padding: 1rem; font-size: 0.875rem; color: var(--muted-foreground); }
 .return-to-latest {
   position: absolute; bottom: calc(var(--transcript-bottom-inset, 0px) + 0.5rem); right: 0.25rem; width: 2.75rem; height: 2.75rem;
