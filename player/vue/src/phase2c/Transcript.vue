@@ -134,8 +134,8 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
   mask-image: linear-gradient(to bottom,
     transparent 0, black var(--transcript-top-fade),
     black max(var(--transcript-top-fade), calc(100% - (var(--composer-top-from-bottom, 0px) + var(--composer-bottom-from-bottom, 0px)) / 2)),
-    rgb(0 0 0 / 10%) calc(100% - var(--composer-bottom-from-bottom, 0px)),
-    rgb(0 0 0 / 10%) 100%);
+    rgb(0 0 0 / 20%) calc(100% - var(--composer-bottom-from-bottom, 0px)),
+    rgb(0 0 0 / 20%) 100%);
 }
 .transcript-scroll[data-scrolled="true"] { --transcript-top-fade: 1rem; }
 .transcript-history { position: relative; width: 100%; }
