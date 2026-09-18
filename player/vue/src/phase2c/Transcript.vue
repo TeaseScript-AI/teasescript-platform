@@ -176,11 +176,13 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
               </Avatar>
             </MessageAvatar>
             <MessageContent>
-              <!-- Narrower than the component's own cap, in line with WhatsApp and iMessage. -->
-              <Bubble class="max-w-[75%]"
+              <!-- Two caps, whichever binds first: three quarters of the column keeps a bubble
+                   off the edge on a narrow window, and 65ch keeps the line readable on a wide one. -->
+              <Bubble class="max-w-[min(75%,65ch)]"
                 :variant="entry.speakerId === 'user' ? design.playerFill : design.speakerFill"
                 :align="entry.speakerId === 'user' ? 'end' : 'start'">
-                <BubbleContent :class="cornerClass(item.index, entry.speakerId === 'user')">
+                <BubbleContent class="text-base/normal"
+                  :class="cornerClass(item.index, entry.speakerId === 'user')">
                   <MessageHeader v-if="showsName(item.index, entry.speakerId === 'user')"
                     class="px-0 pb-0.5">
                     {{ speakers[entry.speakerId]?.name ?? entry.speakerId }}
