@@ -9,7 +9,7 @@ const labels = { regions: "Region bounds", reserves: "Reserved tools space", gri
 const selectors = {
   Player: ":scope", Tools: "[data-tools-surface]", Stage: ".player-stage",
   Conversation: ".player-conversation", Transcript: ".transcript-scroll",
-  Composer: "[data-runtime-interaction] form", Content: ".player-composition",
+  Composer: "[data-runtime-interaction] form", Content: ".stage-media-frame",
 };
 type Region = keyof typeof selectors;
 const snapshot = shallowRef<{
@@ -41,7 +41,6 @@ function measure() {
     media = captureRect(new DOMRect(box.left + (box.width - width) / 2, box.top + (box.height - height) / 2, width, height));
   }
   const style = getComputedStyle(root);
-  const conversation = root.querySelector<HTMLElement>(".player-conversation");
   snapshot.value = {
     regions, media,
     reserve: root.dataset.narrow === "true" ? 0 : root.querySelector('[data-slot="sidebar-gap"]')?.getBoundingClientRect().width ?? 0,
@@ -49,7 +48,7 @@ function measure() {
     constraints: [
       `Mode: ${root.dataset.narrow === "true" ? "overlay" : "docked"}`,
       `Protected Player width: ${style.getPropertyValue("--player-reserve").trim()} (provisional)`,
-      `Conversation max: ${conversation ? getComputedStyle(conversation).maxWidth : "—"}`,
+      `Conversation max: ${style.getPropertyValue("--conversation-max-width").trim()}`,
       `Stage / conversation tracks: ${contentStyle?.gridTemplateRows ?? "—"}`,
       `Usable viewport: ${style.getPropertyValue("--usable-width").trim()} × ${style.getPropertyValue("--usable-height").trim()}`,
     ],

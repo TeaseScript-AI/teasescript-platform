@@ -51,6 +51,17 @@
 }
 
 .phase2c-sidebar {
+  --conversation-max-width: 920px;
+  --conversation-gutter: 4rem;
+  --content-reserve: 0px;
+  /* Keep the natural contained image and existing conversation width. Only
+     content moves; the Stage and its floating controls keep their own geometry. */
+  --content-ideal-width: min(var(--usable-width), max(
+    calc(var(--conversation-max-width) + var(--conversation-gutter)),
+    calc(var(--stage-height) * var(--media-aspect))
+  ));
+  --content-width: min(var(--content-ideal-width), calc(var(--usable-width) - var(--content-reserve)));
+  --content-offset: max(0px, calc((var(--usable-width) - var(--content-ideal-width)) / 2 - var(--content-reserve)));
   /* One continuous canvas beneath the dock reservation and Player content.
      Layout-only children stay transparent; tools paint their own surfaces. */
   /* Same ambient wash as player/styles/effects.css; no legacy layout rules. */
@@ -67,6 +78,10 @@
     calc(var(--launcher-space) + var(--tool-columns-width) + 1px),
     calc(var(--usable-width) - var(--player-reserve))
   )) !important;
+}
+
+.phase2c-sidebar[data-narrow="false"][data-sidebar-visible="true"] {
+  --content-reserve: var(--sidebar-width);
 }
 
 /* Reserve the final Player layout immediately; only the visible sidebar transitions. */
@@ -212,9 +227,14 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
   min-height: 0;
   gap: 1rem;
 }
-.player-conversation { width: calc(100% - 4rem); margin: 0 auto 2rem; }
+.player-conversation {
+  --conversation-width: min(var(--conversation-max-width), calc(var(--content-width) - var(--conversation-gutter)));
+  width: var(--conversation-width);
+  margin: 0 0 2rem calc(var(--content-offset) + (var(--content-width) - var(--conversation-width)) / 2);
+}
 @media (max-width: 600px), (max-height: 450px) {
+  .phase2c-sidebar { --conversation-gutter: 2rem; }
   .player-composition { gap: 0.5rem; }
-  .player-conversation { width: calc(100% - 2rem); margin-bottom: 1rem; }
+  .player-conversation { margin-bottom: 1rem; }
 }
 html:fullscreen { background: var(--background); }
