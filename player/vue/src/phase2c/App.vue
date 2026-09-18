@@ -53,6 +53,7 @@ const longTitle = ref(false);
 const timerKind = ref<PlayerTimerKind>("visible");
 const timerCount = ref(1);
 const timerReset = ref(0);
+const timerPaused = ref(true);
 // The standalone Player owns root tokens so body-portaled Reka surfaces share the theme.
 // Retain previous inline values so switching off/unmounting restores the exact baseline.
 const previousThemeProperties = new Map<string, { value: string; priority: string }>();
@@ -634,6 +635,9 @@ async function updateSidebarVisibility(open: boolean) {
                   <option :value="3">Three</option>
                 </select>
               </label>
+              <label class="flex items-center gap-2">
+                <input v-model="timerPaused" type="checkbox" /> Pause timer fixtures
+              </label>
               <Button variant="outline" @click="timerReset++">Reset timers</Button>
             </fieldset>
             <fieldset class="grid gap-2">
@@ -769,7 +773,7 @@ async function updateSidebarVisibility(open: boolean) {
           <template #right-rail>
             <StageRightRail v-if="isDevelopment">
               <template #timers>
-                <TimerFixtureRegion :kind="timerKind" :count="timerCount" :reset="timerReset" />
+                <TimerFixtureRegion :kind="timerKind" :count="timerCount" :reset="timerReset" :paused="timerPaused" />
               </template>
             </StageRightRail>
           </template>

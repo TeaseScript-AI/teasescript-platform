@@ -52,20 +52,4 @@
   overscroll-behavior: contain;
 }
 
-@container player-stage (max-width: 76rem) or (max-height: 24.5rem) {
-  .stage-right-rail {
-    top: 3.75rem;
-    right: 0.5rem;
-    left: 0.5rem;
-    bottom: auto;
-    display: flex;
-    inline-size: auto;
-    max-block-size: none;
-    flex-direction: row;
-    justify-content: flex-end;
-    padding-block: 0;
-    transform: none;
-  }
-  .stage-right-rail-timers { max-inline-size: 100%; }
-}
 </style>
