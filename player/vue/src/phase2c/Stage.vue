@@ -27,6 +27,7 @@ function mediaLoaded(event: Event) {
     <div class="stage-media-frame">
       <img v-if="media" :src="media.src" :alt="media.alt" class="stage-media" @load="mediaLoaded" />
     </div>
+    <slot name="right-rail" />
     <h1 class="stage-title">{{ title }}</h1>
     <Tooltip>
       <TooltipTrigger as-child>
@@ -54,6 +55,7 @@ function mediaLoaded(event: Event) {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  container: player-stage / size;
 }
 .stage-media-frame {
   position: absolute; top: 0; bottom: 0;
@@ -62,6 +64,7 @@ function mediaLoaded(event: Event) {
 .stage-media { display: block; width: 100%; height: 100%; object-fit: contain; }
 .stage-title {
   position: absolute;
+  z-index: 20;
   /* Leave the existing global Tools toggle clear even when it floats over the Player. */
   top: 0.75rem; left: 2.75rem;
   max-width: min(28rem, calc(100% - 6.5rem));
@@ -72,7 +75,7 @@ function mediaLoaded(event: Event) {
   pointer-events: none;
 }
 .stage-fullscreen {
-  position: absolute; top: 0.5rem; right: 0.5rem;
+  position: absolute; z-index: 20; top: 0.5rem; right: 0.5rem;
   width: 2.75rem; height: 2.75rem;
   border: 1px solid var(--border);
   color: var(--foreground); background: var(--surface-component);
@@ -81,7 +84,7 @@ function mediaLoaded(event: Event) {
 .stage-fullscreen:hover { background: var(--component-hover); border-color: var(--border-hover); }
 .stage-fullscreen:active { background: var(--component-pressed); border-color: var(--border-strong); }
 .stage-fullscreen-error {
-  position: absolute; bottom: 0.5rem; inset-inline: 0.5rem;
+  position: absolute; z-index: 20; bottom: 0.5rem; inset-inline: 0.5rem;
   padding: 0.5rem; font-size: 0.75rem; color: var(--foreground); background: var(--surface-component);
 }
 </style>

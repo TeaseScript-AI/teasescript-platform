@@ -1339,6 +1339,174 @@ async function interactionChecks(page) {
   return "PASS normal foreground input, validation, keyboard and restore";
 }
 
+async function timerChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+
+  const stage = page.locator(".player-stage");
+  const firstTimer = page.locator(".timer-display").first();
+  await firstTimer.waitFor();
+  const normalBox = await firstTimer.boundingBox();
+  check(
+    Math.abs(normalBox.width - 132) < 1 && Math.abs(normalBox.height - 132) < 1,
+    "Wide Stage must use the selected 132px timer presentation",
+  );
+  const wideStageStart = await stage.boundingBox();
+  check(
+    normalBox.y - wideStageStart.y < 100,
+    "Wide timer must begin at the top of the shared right rail",
+  );
+  const showSidebar = page.getByRole("button", { name: "Show sidebar", exact: true });
+  if (await showSidebar.isVisible()) await showSidebar.click();
+  await page.locator('[data-launcher] button[aria-label="Visual Lab"]').click();
+  const kind = page.locator("[data-timer-fixture-kind]");
+  const count = page.locator("[data-timer-fixture-count]");
+  await firstTimer.evaluate((element) => {
+    element.dataset.identityProbe = "retained";
+  });
+  await count.selectOption("3");
+  check(
+    (await page.locator(".timer-display").count()) === 3,
+    "Multiple timer fixtures did not render",
+  );
+  check(
+    (await page.locator(".timer-label").filter({ hasText: "Timer 2" }).count()) === 1,
+    "Unlabelled timers need generic visible-order labels when several are shown",
+  );
+  await kind.selectOption("mystery");
+  const mysterySizing = await page
+    .locator(".timer-display")
+    .evaluateAll((timers) => ({
+      longTimeMarkers: timers.map((timer) => timer.hasAttribute("data-long-time")),
+      fontSizes: timers.map(
+        (timer) => getComputedStyle(timer.querySelector(".timer-time")).fontSize,
+      ),
+    }));
+  check(
+    mysterySizing.longTimeMarkers.every((marked) => !marked) &&
+      new Set(mysterySizing.fontSizes).size === 1,
+    "Mystery timers must not reveal a duration category through their typography",
+  );
+  await count.selectOption("1");
+  check(
+    (await firstTimer.getAttribute("data-identity-probe")) === "retained",
+    "Stable timer identity was replaced while sibling timers changed",
+  );
+
+  check(
+    (await firstTimer.locator(".timer-time").innerText()) === "?",
+    "Mystery timer reveals its time",
+  );
+  check(
+    !(await firstTimer.getAttribute("aria-label")).match(/\d/u),
+    "Mystery timer accessible text reveals its time",
+  );
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  check(
+    await firstTimer
+      .locator(".timer-rotor")
+      .evaluate((element) => getComputedStyle(element).animationName === "none"),
+    "Mystery timer motion must stop when reduced motion is requested",
+  );
+  await kind.selectOption("hidden");
+  await page.locator(".timer-display").waitFor({ state: "detached" });
+  check(
+    (await page.locator(".timer-region").count()) === 0,
+    "Hidden timers must not leave Stage geometry",
+  );
+
+  await kind.selectOption("visible");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.setViewportSize({ width: 1440, height: 500 });
+  const shortStageBox = await stage.boundingBox();
+  const shortTimerBox = await firstTimer.boundingBox();
+  check(
+    shortTimerBox.height < 64 &&
+      shortTimerBox.y >= shortStageBox.y &&
+      shortTimerBox.y + shortTimerBox.height <= shortStageBox.y + shortStageBox.height,
+    "A short wide Stage must keep its timer complete",
+  );
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const wideStage = await stage.boundingBox();
+  await count.selectOption("3");
+  const hideSidebar = page.getByRole("button", { name: "Hide sidebar", exact: true });
+  if (await hideSidebar.isVisible()) await hideSidebar.click();
+  await page.setViewportSize({ width: 320, height: 700 });
+  await page.waitForFunction(
+    () => document.querySelector("#phase2c-shell").dataset.narrow === "true",
+  );
+  const compactOverflow = await page.locator(".timer-region").evaluate((region) => {
+    const timers = [...region.querySelectorAll(".timer-display")];
+    const regionBox = region.getBoundingClientRect();
+    const firstBox = timers[0].getBoundingClientRect();
+    region.scrollLeft = region.scrollWidth;
+    const lastBox = timers.at(-1).getBoundingClientRect();
+    return {
+      overflows: region.scrollWidth > region.clientWidth,
+      firstReachable: firstBox.left >= regionBox.left - 1,
+      lastReachable: lastBox.right <= regionBox.right + 1,
+    };
+  });
+  check(
+    compactOverflow.overflows && compactOverflow.firstReachable && compactOverflow.lastReachable,
+    "All compact timers must remain reachable through horizontal scrolling",
+  );
+  await page.setViewportSize({ width: 390, height: 700 });
+  const narrowStage = await stage.boundingBox();
+  const compactBox = await firstTimer.boundingBox();
+  check(
+    compactBox.width < 132 && compactBox.height < 64,
+    "Constrained Stage did not use compact timer",
+  );
+  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
+  check(
+    JSON.stringify(await stage.boundingBox()) === JSON.stringify(narrowStage),
+    "Opening the Tools drawer changed Stage geometry with a timer present",
+  );
+  check(
+    wideStage.width > narrowStage.width,
+    "Timer check did not exercise responsive Stage geometry",
+  );
+  return "PASS timer design, semantics, identity, motion and Stage integration";
+}
+
+async function conversationWidthChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  const hideSidebar = page.getByRole("button", { name: "Hide sidebar", exact: true });
+  if (await hideSidebar.isVisible()) await hideSidebar.click();
+  const geometry = await page.evaluate(() => {
+    const conversation = document.querySelector(".player-conversation").getBoundingClientRect();
+    const transcript = document.querySelector(".transcript-scroll");
+    return {
+      conversationWidth: conversation.width,
+      transcriptWidth: transcript.clientWidth,
+      rootRem: parseFloat(getComputedStyle(document.documentElement).fontSize),
+      scrollbarWidth: getComputedStyle(transcript).scrollbarWidth,
+    };
+  });
+  check(
+    Math.abs(geometry.transcriptWidth - 864) < 1,
+    "Wide transcript content width must be 864px",
+  );
+  check(
+    Math.abs(geometry.conversationWidth - geometry.transcriptWidth - 2 * geometry.rootRem) < 1,
+    "Conversation insets must sit outside the 864px content width",
+  );
+  check(
+    geometry.scrollbarWidth === "none",
+    "Transcript must not reserve a visible platform scrollbar gutter",
+  );
+  return "PASS conversation content width and hidden scrollbar ownership";
+}
+
 try {
   const config = join(scratch, "browser.json");
   writeFileSync(
@@ -1391,6 +1559,22 @@ try {
     throw new Error(interactionOutput);
   console.log(
     "phase2c-browser-checks: PASS normal foreground input, validation, keyboard and restore",
+  );
+  const conversationWidthOutput = cli("run-code", conversationWidthChecks.toString());
+  if (
+    !conversationWidthOutput.includes(
+      "PASS conversation content width and hidden scrollbar ownership",
+    )
+  )
+    throw new Error(conversationWidthOutput);
+  console.log(
+    "phase2c-browser-checks: PASS conversation content width and hidden scrollbar ownership",
+  );
+  const timerOutput = cli("run-code", timerChecks.toString());
+  if (!timerOutput.includes("PASS timer design, semantics, identity, motion and Stage integration"))
+    throw new Error(timerOutput);
+  console.log(
+    "phase2c-browser-checks: PASS timer design, semantics, identity, motion and Stage integration",
   );
   const transcriptOutput = cli("run-code", transcriptChecks.toString());
   if (

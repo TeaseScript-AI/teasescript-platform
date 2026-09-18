@@ -13,6 +13,7 @@ import {
   orderRightControls,
   readableControlText,
   timerProgressPercent,
+  timerProgressRatio,
 } from "../player/presentation.js";
 import { addToolColumn, closeToolColumn, selectToolColumn } from "../player/tool-columns.js";
 import { allocateRightRailPaneHeights } from "../player/right-rail-layout.js";
@@ -33,6 +34,7 @@ test("Player panel toggles preserve the current auto/manual semantics", () => {
 
 test("Player presentation helpers remain deterministic and framework-independent", () => {
   assert.equal(timerProgressPercent(161, 300), 46);
+  assert.ok(Math.abs(timerProgressRatio(161, 300) - 139 / 300) < 1e-12);
   assert.equal(timerProgressPercent(0, 300), 100);
   assert.equal(timerProgressPercent(999, 300), 0);
   assert.equal(timerProgressPercent(1, 0), 0);
