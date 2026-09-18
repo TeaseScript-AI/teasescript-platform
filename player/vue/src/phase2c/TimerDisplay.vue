@@ -63,9 +63,6 @@ const accessibleName = computed(() => {
   --timer-foreground: var(--theme-text-primary, oklch(100% 0 0));
   --timer-surface: var(--theme-surface-floating, oklch(16.52% 0 0));
   --timer-accent: var(--theme-accent-solid, var(--package-accent));
-  --timer-number-shadow:
-    0 1px 2px var(--theme-structural-shadow, oklch(0% 0 0 / 70%)),
-    0 2px 5px var(--theme-structural-shadow, oklch(0% 0 0 / 38%));
   position: relative;
   display: grid;
   flex: 0 0 auto;
@@ -166,75 +163,6 @@ const accessibleName = computed(() => {
 
 @keyframes timer-mystery-drift {
   to { transform: rotate(360deg); }
-}
-
-@container player-stage (max-width: 76rem) or (max-height: 24.5rem) {
-  .timer-display {
-    --timer-size: 26px;
-    display: flex;
-    inline-size: auto;
-    block-size: auto;
-    align-items: center;
-    gap: 8px;
-    padding: 7px 12px 7px 9px;
-    border-radius: 999px;
-    box-shadow: 0 0 10px color-mix(in oklab, var(--timer-surface) 10%, transparent);
-  }
-
-  .timer-display::before {
-    border-radius: inherit;
-    background: radial-gradient(
-      ellipse at 64% 50%,
-      color-mix(in oklab, var(--timer-surface) 40%, transparent) 0%,
-      color-mix(in oklab, var(--timer-surface) 26%, transparent) 52%,
-      color-mix(in oklab, var(--timer-surface) 12%, transparent) 100%
-    );
-    box-shadow: none;
-    filter: none;
-  }
-
-  .timer-ring {
-    position: relative;
-    inset: auto;
-    flex: 0 0 auto;
-    inline-size: var(--timer-size);
-    block-size: var(--timer-size);
-  }
-
-  .timer-ring-svg {
-    position: absolute;
-    inset: -4px;
-    inline-size: calc(100% + 8px);
-    block-size: calc(100% + 8px);
-  }
-
-  .timer-track,
-  .timer-arc { stroke-width: 9; }
-
-  .timer-copy {
-    align-items: flex-start;
-    gap: 1px;
-    padding: 0;
-  }
-
-  .timer-time,
-  .timer-display[data-long-time] .timer-time {
-    color: color-mix(in oklab, var(--timer-foreground) 72%, var(--timer-accent));
-    font-size: 16px;
-    font-weight: 600;
-    line-height: 1.1;
-    text-shadow: var(--timer-number-shadow);
-  }
-
-  .timer-label {
-    max-inline-size: 11ch;
-    overflow: hidden;
-    font-size: 11px;
-    line-height: 1.2;
-    text-align: start;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

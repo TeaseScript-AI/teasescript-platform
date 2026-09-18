@@ -62,18 +62,6 @@ function timerLabel(timer: PlayerTimerPresentation, index: number): string | nul
   scale: 0.96;
 }
 
-@container player-stage (max-width: 76rem) or (max-height: 24.5rem) {
-  .timer-region {
-    max-inline-size: 100%;
-    max-block-size: none;
-    flex-direction: row;
-    justify-content: safe flex-end;
-    overflow-x: auto;
-    overflow-y: visible;
-    padding: 0.375rem;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .stage-timer-enter-active,
   .stage-timer-leave-active { transition: opacity 160ms linear; }

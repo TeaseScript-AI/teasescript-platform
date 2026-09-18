@@ -8,6 +8,7 @@ const props = defineProps<{
   kind: PlayerTimerKind;
   count: number;
   reset: number;
+  paused: boolean;
 }>();
 
 const seeds = [
@@ -15,24 +16,30 @@ const seeds = [
   { id: "hold-position", remainingSeconds: 3664, totalSeconds: 4000 },
   { id: "recovery", remainingSeconds: 58, totalSeconds: 90 },
 ] as const;
-const startedAt = ref(performance.now());
-const now = ref(startedAt.value);
+const elapsedSeconds = ref(0);
+let lastObservation = performance.now();
 
-// Match the future presentation boundary: publish one authoritative observation
-// per second and let CSS interpolate the determinate ring between observations.
+function observe() {
+  const now = performance.now();
+  elapsedSeconds.value += Math.max(0, (now - lastObservation) / 1000);
+  lastObservation = now;
+}
+
+// Only the development fixture can pause; runtime timer ownership is unchanged.
 useIntervalFn(() => {
-  if (props.kind !== "hidden") now.value = performance.now();
+  if (!props.paused) observe();
 }, 1000);
-watch(() => props.kind, (kind) => {
-  if (kind !== "hidden") now.value = performance.now();
+watch(() => props.paused, (paused) => {
+  if (paused) observe();
+  else lastObservation = performance.now();
 });
 watch(() => props.reset, () => {
-  startedAt.value = performance.now();
-  now.value = startedAt.value;
+  elapsedSeconds.value = 0;
+  lastObservation = performance.now();
 });
 
 const timers = computed<readonly PlayerTimerPresentation[]>(() => {
-  const elapsed = Math.max(0, (now.value - startedAt.value) / 1000);
+  const elapsed = elapsedSeconds.value;
   return seeds.slice(0, props.count).map((timer) => ({
     id: timer.id,
     ...("name" in timer ? { name: timer.name } : {}),
