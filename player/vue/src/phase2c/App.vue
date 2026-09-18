@@ -532,7 +532,7 @@ async function updateSidebarVisibility(open: boolean) {
     id="phase2c-shell"
     :data-narrow="narrow"
     :data-menu-visible="narrowMenuVisible"
-    :style="{ '--player-reserve': `${protectedPlayerWidth}px`, '--tool-columns-width': `${toolColumnsWidth}rem`, '--permanent-menu-width': `${menuWidthRem}rem`, '--measured-menu-width': `${measuredMenuWidth}px`, '--usable-width': `${viewport.width}px`, '--usable-height': `${viewport.height}px`, '--viewport-left': `${viewport.left}px`, '--viewport-top': `${viewport.top}px` }"
+    :style="{ '--stage-height': `${stageHeight}px`, '--player-reserve': `${protectedPlayerWidth}px`, '--tool-columns-width': `${toolColumnsWidth}rem`, '--permanent-menu-width': `${menuWidthRem}rem`, '--measured-menu-width': `${measuredMenuWidth}px`, '--usable-width': `${viewport.width}px`, '--usable-height': `${viewport.height}px`, '--viewport-left': `${viewport.left}px`, '--viewport-top': `${viewport.top}px` }"
     :data-resizing="resizing !== null"
     :data-labels="labelMode"
     :data-tools-open="openTools.length > 0"
@@ -679,8 +679,8 @@ async function updateSidebarVisibility(open: boolean) {
       aria-label="Show sidebar"
       title="Show sidebar"
     />
-    <SidebarInset class="min-h-0 min-w-0">
-      <div class="player-composition" :style="{ '--stage-height': `${stageHeight}px` }">
+    <SidebarInset class="min-h-0 min-w-0 bg-transparent">
+      <div class="player-composition">
         <Stage ref="stage"
           :title="longTitle ? 'An evening by the coast — a quiet moment before the journey begins' : 'Evening by the coast'"
           :media="stageFixtures[mediaFixture]"
