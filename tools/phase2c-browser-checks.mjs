@@ -819,7 +819,7 @@ async function transcriptChecks(page) {
   const glass = page.locator(".conversation-glass");
   check(await scroll.evaluate((el) => {
     const fade = getComputedStyle(el, "::after");
-    return fade.content === '""' && fade.height === "56px" && fade.pointerEvents === "none";
+    return fade.content === '""' && fade.height === "72px" && fade.pointerEvents === "none";
   }), "Transcript needs a non-interactive bottom fade");
   const readableLatest = () => page.waitForFunction(() => {
     const rows = document.querySelectorAll(".transcript-entry");
