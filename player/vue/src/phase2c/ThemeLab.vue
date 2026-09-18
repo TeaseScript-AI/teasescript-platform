@@ -16,10 +16,14 @@ const intent = reactive<{
   contrast: PlayerThemeIntent["contrast"];
   surfaceHue: number;
   surfaceTint: number;
+  surfaceMaxChroma: PlayerThemeIntent["surfaceMaxChroma"];
+  surfaceLadder: PlayerThemeIntent["surfaceLadder"];
+  monochrome: boolean;
   accentSeed: { l: number; c: number; h: number };
 }>({
   mode: "light", contrast: "standard",
-  surfaceHue: 70, surfaceTint: 0,
+  surfaceHue: 70, surfaceTint: 0.5,
+  surfaceMaxChroma: 8.5, surfaceLadder: "teasescript", monochrome: false,
   accentSeed: { l: 0.59208, c: 0.19138, h: 11.08 },
 });
 const theme = computed(() => generatePlayerTheme(intent));
@@ -49,19 +53,26 @@ function displayColor(color: OklchColor) {
     </label>
     <fieldset class="grid gap-2">
       <legend>Surface tint intent</legend>
+      <label class="grid gap-1">Surface ladder
+        <select v-model="intent.surfaceLadder" aria-label="Surface ladder"><option value="teasescript">TeaseScript · raised lighter</option><option value="material">Material-oriented comparison</option></select>
+      </label>
+      <label class="grid gap-1">Maximum surface chroma
+        <select v-model.number="intent.surfaceMaxChroma" aria-label="Maximum surface chroma"><option :value="5">5 · quiet</option><option :value="8.5">8.5</option><option :value="12">12 · stronger</option></select>
+      </label>
+      <label class="flex items-center gap-2"><input v-model="intent.monochrome" type="checkbox" /> Monochrome surfaces</label>
       <label class="grid gap-1">Surface hue · {{ intent.surfaceHue }}°
-        <input v-model.number="intent.surfaceHue" aria-label="Surface hue" type="range" min="0" max="360" step="1" />
+        <input v-model.number="intent.surfaceHue" :disabled="intent.monochrome" aria-label="Surface hue" type="range" min="0" max="360" step="1" />
       </label>
       <label class="grid gap-1">Tint intensity · {{ Math.round(intent.surfaceTint * 100) }}%
-        <input v-model.number="intent.surfaceTint" aria-label="Tint intensity" type="range" min="0" max="1" step="0.01" />
+        <input v-model.number="intent.surfaceTint" :disabled="intent.monochrome" aria-label="Tint intensity" type="range" min="0" max="1" step="0.01" />
       </label>
-      <p>{{ intent.surfaceTint === 0 ? 'Achromatic surfaces. Hue is inactive until tint is added.' : 'Explicit surface tint; independent of accent and light/dark mode.' }}</p>
+      <p>{{ intent.monochrome || intent.surfaceTint === 0 ? 'Achromatic surfaces. Hue is inactive until tint is added.' : 'Explicit surface tint; independent of accent and light/dark mode.' }}</p>
     </fieldset>
-    <label class="flex items-center gap-2">Accent seed
-      <input type="color" aria-label="Accent seed" :value="oklchToPickerHex(intent.accentSeed)" @input="pickAccent" />
+    <label class="flex items-center gap-2">Accent color
+      <input type="color" aria-label="Accent color" :value="oklchToPickerHex(intent.accentSeed)" @input="pickAccent" />
     </label>
     <output class="font-mono text-xs">{{ displayColor(intent.accentSeed) }}</output>
-    <p>The picker acquires a literal accent seed. Surface hue/intensity are separate intent; they are not hidden inside a white color swatch.</p>
+    <p>The picker acquires a literal accent color, retained as accent-solid. Surface hue/intensity are separate intent; they are not hidden inside a white color swatch.</p>
     <p>{{ enabled ? 'Generated palette is active on the Player.' : 'The Player is using its current baseline palette.' }}</p>
     <details>
       <summary>Generated semantic roles ({{ Object.keys(theme.roles).length }})</summary>
