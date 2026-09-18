@@ -89,8 +89,8 @@ function showsName(index: number, player: boolean) {
   if (player || props.design.speakerName === "none") return false;
   return props.design.speakerName === "always" || startsGroup(index);
 }
-function showsAvatar(index: number, player: boolean) {
-  if (player || props.design.avatar === "none") return false;
+function showsAvatar(index: number) {
+  if (props.design.avatar === "none") return false;
   return props.design.avatar === "first" ? startsGroup(index) : endsGroup(index);
 }
 // Flattening the touching corners makes a run read as one block instead of separate cards.
@@ -168,8 +168,8 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
           <!-- Session events carry no authored story text and receive no designed treatment. -->
           <p v-if="entry.kind === 'session-event'" class="session-event">{{ entry.text }}</p>
           <Message v-else :align="entry.speakerId === 'user' ? 'end' : 'start'">
-            <MessageAvatar v-if="entry.speakerId !== 'user' && design.avatar !== 'none'"
-              :class="showsAvatar(item.index, false) ? '' : 'invisible'">
+            <MessageAvatar v-if="design.avatar !== 'none'"
+              :class="showsAvatar(item.index) ? '' : 'invisible'">
               <Avatar>
                 <AvatarFallback class="text-xs font-semibold">{{ speakers[entry.speakerId]?.avatar }}</AvatarFallback>
               </Avatar>
