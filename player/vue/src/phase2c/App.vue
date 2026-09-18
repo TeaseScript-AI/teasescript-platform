@@ -5,6 +5,7 @@ import { FlaskConical, Settings, ScanLine, Activity, SlidersHorizontal, PanelLef
 import Sortable from "sortablejs";
 import ToolLifetimeFixture from "./ToolLifetimeFixture.vue";
 import ToolPanelHeader from "./ToolPanelHeader.vue";
+import ToolPanelBody from "./ToolPanelBody.vue";
 import { toolPanelSizes } from "./toolPanelSizes";
 import Stage from "./Stage.vue";
 import Transcript from "./Transcript.vue";
@@ -333,8 +334,12 @@ const pinnedTools = ref<Tool[]>([]);
 const temporaryTool = ref<Tool | null>(null);
 // Visual order is independent of which tools are pinned.
 const openTools = ref<Tool[]>([]);
-// Content belongs to the logical open tool, not the replaceable Sidebar/Sheet shell.
-// Closed shells park it invisibly; removing an openTools key disposes it normally.
+// Visible order is separate from content lifetime. Mount lazily, then retain each
+// visited tool until this Player unmounts; hiding/replacing a panel never resets it.
+const visitedTools = ref<Tool[]>([]);
+watch(() => [...openTools.value], tools => {
+  for (const tool of tools) if (!visitedTools.value.includes(tool)) visitedTools.value.push(tool);
+});
 const toolContentParking = ref<HTMLElement | null>(null);
 const toolContentTargets = shallowReactive<Partial<Record<Tool, HTMLElement>>>({});
 function setToolContentTarget(tool: Tool, element: Element | ComponentPublicInstance | null) {
@@ -546,8 +551,9 @@ async function updateSidebarVisibility(open: boolean) {
     </div>
     <div ref="toolContentParking" hidden inert />
     <template v-if="toolContentParking">
-      <Teleport v-for="tool in openTools" :key="tool" :to="toolContentTargets[tool] ?? toolContentParking">
-        <div data-tool-body class="min-h-0 flex-1 overflow-y-auto">
+      <ToolPanelBody v-for="tool in visitedTools" :key="tool"
+        :target="toolContentTargets[tool] ?? toolContentParking"
+        :visible="sidebarVisible && openTools.includes(tool) && (!narrow || (!narrowMenuVisible && narrowTool === tool))">
           <ToolLifetimeFixture v-if="isDevelopment && tool === 'Layout Debug'" />
           <div v-if="isDevelopment && tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
             <label class="grid gap-2">
@@ -576,8 +582,7 @@ async function updateSidebarVisibility(open: boolean) {
               </template>
             </fieldset>
           </div>
-        </div>
-      </Teleport>
+      </ToolPanelBody>
     </template>
     <!-- The local Sheet owns responsiveness; disable the provider’s independent mobile state. -->
     <Sheet :open="narrow && sidebarVisible" @update:open="setSidebarVisible">
