@@ -211,7 +211,6 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
 .phase2c-sidebar[data-narrow="true"] .tool-panel-strip > [data-tool] { width: 100% !important; max-width: 100%; min-width: 0; }
 .phase2c-sidebar[data-narrow="true"] [data-panel-drag],
 .phase2c-sidebar[data-narrow="true"] [data-panel-resize] { display: none; }
-.phase2c-sidebar[data-narrow="true"] [data-tool-body] { overflow-wrap: anywhere; }
 
 /* The stage owns a stable track independent of asset ratio and chrome visibility.
    Keep a usable conversation/composer remainder, including in short windows. */
