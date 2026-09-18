@@ -139,6 +139,33 @@ async function checks(page) {
   return "PASS lifecycle/order/width and dock/drawer composition";
 }
 
+async function drawerWidthChecks(page) {
+  await page.setViewportSize({ width: 700, height: 900 });
+  await page.reload();
+  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
+  await page.locator('[data-launcher] button[aria-label="Visual Lab"]').click();
+  const panel = page.locator('[data-tool="Visual Lab"]');
+  for (const [size, rem] of [["Small", 14], ["Medium", 18], ["Large", 24], ["Extra Large", 32]]) {
+    await panel.getByRole("button", { name: "Panel settings", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Width", exact: true }).hover();
+    await page.getByRole("menuitemradio", { name: size, exact: true }).click();
+    for (const width of [320, 390, 700]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.waitForFunction(({ rem }) => {
+        const drawer = document.querySelector('.tools-drawer');
+        const rootRem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+        return Math.abs(drawer.getBoundingClientRect().width - Math.min(rem * rootRem, visualViewport.width * .9)) < 1;
+      }, { rem });
+      if (await panel.evaluate(el => el.scrollWidth > el.clientWidth + 1))
+        throw new Error(`${size} tool content overflows at ${width}px`);
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole("button", { name: "Hide sidebar", exact: true }).waitFor();
+  await page.waitForFunction(() => document.querySelector('[data-tool="Visual Lab"]').getBoundingClientRect().width === 512);
+  return "PASS drawer preset width constrained by available space";
+}
+
 async function menuPreviewChecks(page) {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "preview"));
@@ -1111,6 +1138,10 @@ try {
   if (!output.includes("PASS lifecycle/order/width and dock/drawer composition"))
     throw new Error(output);
   console.log("phase2c-browser-checks: PASS lifecycle/order/width and dock/drawer composition");
+  const drawerWidthOutput = cli("run-code", drawerWidthChecks.toString());
+  if (!drawerWidthOutput.includes("PASS drawer preset width constrained by available space"))
+    throw new Error(drawerWidthOutput);
+  console.log("phase2c-browser-checks: PASS drawer preset width constrained by available space");
   const previewOutput = cli("run-code", menuPreviewChecks.toString());
   if (!previewOutput.includes("PASS menu preview mouse, touch and keyboard ownership"))
     throw new Error(previewOutput);

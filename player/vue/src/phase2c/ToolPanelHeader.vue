@@ -19,7 +19,6 @@ import DropdownMenuSubContent from "@/components/ui/dropdown-menu/DropdownMenuSu
 
 defineProps<{
   tool: string;
-  narrow: boolean;
   size: ToolPanelSize;
   pinned: boolean;
   canMoveLeft: boolean;
@@ -135,9 +134,7 @@ onBeforeUnmount(() => observer?.disconnect());
               </DropdownMenuTrigger>
               <DropdownMenuContent data-tools-context align="end">
                 <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>{{
-                    narrow ? "Wide layout width" : "Width"
-                  }}</DropdownMenuSubTrigger>
+                  <DropdownMenuSubTrigger>Width</DropdownMenuSubTrigger>
                   <DropdownMenuSubContent data-tools-context>
                     <DropdownMenuRadioGroup
                       :model-value="size"
