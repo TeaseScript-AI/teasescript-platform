@@ -9,6 +9,7 @@ import ToolPanelBody from "./ToolPanelBody.vue";
 import LayoutDebug from "./LayoutDebug.vue";
 import { toolPanelSizes } from "./toolPanelSizes";
 import Stage from "./Stage.vue";
+import PlayerTopBar from "./PlayerTopBar.vue";
 import Transcript from "./Transcript.vue";
 import ConversationSurface from "./ConversationSurface.vue";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
@@ -712,21 +713,21 @@ async function updateSidebarVisibility(open: boolean) {
       </div>
     </component>
     </Sheet>
-    <SidebarTrigger
-      v-if="!sidebarVisible"
-      class="fixed left-2 top-2 z-40 size-8 bg-sidebar"
-      aria-label="Show sidebar"
-      title="Show sidebar"
-    />
     <SidebarInset class="min-h-0 min-w-0 bg-transparent">
-      <div class="player-composition">
-        <Stage ref="stage"
+      <div class="player-composition relative">
+        <PlayerTopBar
           :title="longTitle ? 'An evening by the coast — a quiet moment before the journey begins' : 'Evening by the coast'"
-          :media="stageFixtures[mediaFixture]"
           :fullscreen="fullscreen"
           :fullscreen-supported="fullscreenSupported"
           :fullscreen-error="fullscreenError"
           @toggle-fullscreen="toggleFullscreen"
+        >
+          <template v-if="!sidebarVisible" #tools>
+            <SidebarTrigger class="size-8" aria-label="Show sidebar" title="Show sidebar" />
+          </template>
+        </PlayerTopBar>
+        <Stage ref="stage"
+          :media="stageFixtures[mediaFixture]"
           @media-aspect="mediaAspect = $event"
         >
           <template #right-rail>

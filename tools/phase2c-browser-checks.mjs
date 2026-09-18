@@ -1507,6 +1507,132 @@ async function conversationWidthChecks(page) {
   return "PASS conversation content width and hidden scrollbar ownership";
 }
 
+async function topBarChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  const hide = page.getByRole("button", { name: "Hide sidebar", exact: true });
+  const show = page.getByRole("button", { name: "Show sidebar", exact: true });
+  const fullscreen = page.locator("[data-fullscreen-control]");
+  const aligned = async (tools, titleVisible = true) => {
+    const boxes = await Promise.all([
+      tools.boundingBox(),
+      fullscreen.boundingBox(),
+      page.locator(".player-top-bar-title").boundingBox(),
+    ]);
+    check(boxes.every(Boolean), "Top controls and title must remain visible");
+    const [left, right, title] = boxes;
+    check(
+      Math.abs(left.y + left.height / 2 - right.y - right.height / 2) < 1,
+      "Tools and fullscreen must share a center line",
+    );
+    check(
+      Math.abs(title.y + title.height / 2 - right.y - right.height / 2) < 1,
+      "Title must align with the top controls",
+    );
+    check(
+      !titleVisible || (title.x >= left.x + left.width && title.x + title.width <= right.x),
+      "Title must not collide with controls",
+    );
+    check(
+      left.width === right.width && left.height === right.height,
+      "Top controls must have consistent sizing",
+    );
+  };
+  await aligned(hide);
+  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
+  await page.getByLabel("Long stage title").check();
+  await hide.click();
+  for (const width of [1440, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await aligned(show);
+    const result = await page.evaluate(() => {
+      const bar = document.querySelector(".player-top-bar");
+      const title = document.querySelector(".player-top-bar-title");
+      const rects = () =>
+        [".player-stage", ".stage-media-frame", ".player-conversation"].map((selector) => {
+          const r = document.querySelector(selector).getBoundingClientRect();
+          return [r.x, r.y, r.width, r.height];
+        });
+      const before = rects();
+      bar.style.display = "none";
+      const after = rects();
+      bar.style.removeProperty("display");
+      const r = title.getBoundingClientRect();
+      return {
+        before,
+        after,
+        transparent:
+          getComputedStyle(bar).backgroundColor === "rgba(0, 0, 0, 0)" &&
+          getComputedStyle(title).backgroundColor === "rgba(0, 0, 0, 0)",
+        truncates:
+          title.scrollWidth > title.clientWidth &&
+          getComputedStyle(title).textOverflow === "ellipsis",
+        passesThrough: !bar.contains(
+          document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2),
+        ),
+        outerScroll: document.documentElement.scrollWidth > innerWidth,
+      };
+    });
+    check(
+      JSON.stringify(result.before) === JSON.stringify(result.after),
+      "Top bar must not reserve Stage/media/conversation space",
+    );
+    check(
+      result.transparent && result.passesThrough,
+      "Transparent title/bar must pass input through to Stage",
+    );
+    check(!result.outerScroll, "Top bar must not introduce document overflow");
+    if (width <= 390) check(result.truncates, "Long title must truncate at narrow widths");
+  }
+  await show.click();
+  await aligned(hide, false);
+  await page.keyboard.press("Escape");
+  await show.waitFor();
+  check(
+    await show.evaluate((element) => document.activeElement === element),
+    "Drawer dismissal must return focus to the top-bar opener",
+  );
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await fullscreen.click();
+  await page.waitForFunction(() => document.fullscreenElement === document.documentElement);
+  await page.getByRole("button", { name: "Exit fullscreen", exact: true }).waitFor();
+  check(
+    await fullscreen.evaluate((element) => document.activeElement === element),
+    "Entering fullscreen must restore control focus",
+  );
+  await fullscreen.click();
+  await page.waitForFunction(() => !document.fullscreenElement);
+  await page.getByRole("button", { name: "Enter fullscreen", exact: true }).waitFor();
+  check(
+    await fullscreen.evaluate((element) => document.activeElement === element),
+    "Leaving fullscreen must restore control focus",
+  );
+  await page.evaluate(() => {
+    document.documentElement.requestFullscreen = () => Promise.reject(new Error("test rejection"));
+  });
+  await fullscreen.click();
+  await page.getByRole("alert").filter({ hasText: "Fullscreen could not be changed" }).waitFor();
+  await page.reload();
+  await page.mouse.move(500, 500);
+  await fullscreen.hover();
+  await page.locator("[data-slot=tooltip-content]").filter({ hasText: "Enter fullscreen" }).waitFor();
+  const unsupported = await page.context().newPage();
+  await unsupported.addInitScript(() =>
+    Object.defineProperty(document, "fullscreenEnabled", { get: () => false }),
+  );
+  await unsupported.goto(page.url());
+  await unsupported.locator("[data-fullscreen-control]").waitFor();
+  check(
+    await unsupported.locator("[data-fullscreen-control]").isDisabled(),
+    "Unsupported fullscreen must remain disabled",
+  );
+  await unsupported.close();
+  return "PASS transparent top bar alignment, truncation, input, geometry and fullscreen";
+}
+
 try {
   const config = join(scratch, "browser.json");
   writeFileSync(
@@ -1514,6 +1640,16 @@ try {
     JSON.stringify({ browser: { contextOptions: { ignoreHTTPSErrors: true } } }),
   );
   cli("open", url, "--config", config);
+  const topBarOutput = cli("run-code", topBarChecks.toString());
+  if (
+    !topBarOutput.includes(
+      "PASS transparent top bar alignment, truncation, input, geometry and fullscreen",
+    )
+  )
+    throw new Error(topBarOutput);
+  console.log(
+    "phase2c-browser-checks: PASS transparent top bar alignment, truncation, input, geometry and fullscreen",
+  );
   const output = cli("run-code", checks.toString());
   if (!output.includes("PASS lifecycle/order/width and dock/drawer composition"))
     throw new Error(output);
