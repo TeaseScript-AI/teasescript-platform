@@ -816,6 +816,30 @@ async function transcriptChecks(page) {
     check(actual.id === expected.id, `Reading anchor changed: ${expected.id} -> ${actual.id}`);
   };
   await atEnd("initial history");
+  const glass = page.locator(".conversation-glass");
+  const readableLatest = () => page.waitForFunction(() => {
+    const rows = document.querySelectorAll(".transcript-entry");
+    const last = rows[rows.length - 1]?.getBoundingClientRect();
+    const composer = document.querySelector(".conversation-glass").getBoundingClientRect();
+    return last && last.bottom <= composer.top + 1;
+  });
+  await readableLatest();
+  // Composer growth changes TanStack's end clearance, not the transcript viewport.
+  const viewportBefore = await scroll.boundingBox();
+  await glass.evaluate(el => el.style.minHeight = "140px");
+  await page.waitForFunction(() => parseFloat(getComputedStyle(document.querySelector(".transcript")).getPropertyValue("--transcript-bottom-inset")) >= 156);
+  await atEnd("composer growth while following");
+  await readableLatest();
+  check(JSON.stringify(await scroll.boundingBox()) === JSON.stringify(viewportBefore), "Composer growth resized the transcript viewport");
+  await scroll.focus();
+  await page.keyboard.press("Home");
+  await page.waitForFunction(() => document.querySelector(".transcript-scroll").scrollTop === 0);
+  const beforeShrink = await anchor();
+  await glass.evaluate(el => el.style.minHeight = "");
+  await page.waitForFunction(() => parseFloat(getComputedStyle(document.querySelector(".transcript")).getPropertyValue("--transcript-bottom-inset")) < 156);
+  await expectAnchor(beforeShrink);
+  await page.keyboard.press("End");
+  await atEnd("composer shrink and return");
   check(
     (await page.locator("[data-message-id]").count()) < 40,
     "Large history must have bounded DOM",
@@ -824,10 +848,9 @@ async function transcriptChecks(page) {
     (await page.locator('[aria-setsize="2000"]').count()) > 0,
     "Exercise the full 2,000-entry history",
   );
-  const heights = await page
-    .locator("[data-message-id]")
-    .evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
-  check(new Set(heights).size >= 3, "Rows must be measured at variable heights");
+  await page.waitForFunction(() => new Set(
+    [...document.querySelectorAll("[data-message-id]")].map(row => row.getBoundingClientRect().height),
+  ).size >= 3);
   await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
   await atEnd("open dock");
   await append.click();
@@ -1245,13 +1268,17 @@ async function interactionChecks(page) {
   await page.getByRole("button", { name: "Start interaction scenario", exact: true }).click();
   await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
   await page.setViewportSize({ width: 320, height: 700 });
+  await page.waitForFunction(() => {
+    const composer = document.querySelector("[data-runtime-interaction]").getBoundingClientRect();
+    return composer.left >= 0 && composer.right <= 320 && composer.bottom <= 700;
+  });
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
   const tap = async (locator) => {
     const box = await locator.boundingBox();
     check(
       !!box && box.x >= 0 && box.x + box.width <= 320 && box.y + box.height <= 700,
-      "Touch control outside narrow viewport",
+      `Touch control outside narrow viewport: ${await locator.innerText()} ${JSON.stringify(box)}`,
     );
     await cdp.send("Input.dispatchTouchEvent", {
       type: "touchStart",

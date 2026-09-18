@@ -48,6 +48,8 @@ function measure() {
     const value = (px: number) => `${formatPixels(px)} (${Number((px / rem).toFixed(2))}rem)`;
     for (const [owner, selector] of [
       ["Conversation", ".player-conversation"],
+      ["Composer overlay", "[data-conversation-overlay]"],
+      ["Composer surface", ".conversation-glass"],
       ["Interaction area", "[data-runtime-interaction]"],
     ] as const) {
       const element = root.querySelector<HTMLElement>(selector);
@@ -84,6 +86,7 @@ function measure() {
     reserve: root.dataset.narrow === "true" ? 0 : root.querySelector('[data-slot="sidebar-gap"]')?.getBoundingClientRect().width ?? 0,
     tracks: contentStyle ? parseGridTracks(contentStyle.gridTemplateRows, parseFloat(contentStyle.rowGap)).map(track => track.offset + track.size) : [],
     constraints: [
+      `Composer overlay: ${formatPixels(root.querySelector("[data-conversation-overlay]")?.getBoundingClientRect().height ?? 0)} (scroll-end clearance, not a layout gap)`,
       `Mode: ${root.dataset.narrow === "true" ? "overlay" : "docked"}`,
       `Protected Player width: ${style.getPropertyValue("--player-reserve").trim()} (provisional)`,
       `Conversation max: ${style.getPropertyValue("--conversation-max-width").trim()}`,

@@ -87,9 +87,9 @@ function keydown(event: KeyboardEvent) {
         :placeholder="foreground && 'hint' in foreground ? foreground.hint : 'Type your response...'"
         :disabled="!foreground" :aria-invalid="feedback ? true : undefined"
         :aria-describedby="feedback ? feedbackId : undefined"
-        class="min-w-0 flex-1 resize-none rounded border border-border bg-[var(--surface-component)] px-3 py-2 text-sm"
+        class="min-w-0 flex-1 resize-none rounded border-0 bg-transparent px-3 py-2 text-sm"
         @keydown="keydown" />
-      <Button type="submit" variant="outline" :disabled="!foreground || submitting" class="h-auto shrink-0 px-4">Send</Button>
+      <Button type="submit" variant="ghost" :disabled="!foreground || submitting" class="h-auto shrink-0 bg-transparent px-4">Send</Button>
     </form>
     <p v-if="feedback" :id="feedbackId" role="status" class="mt-1 text-sm">{{ feedback }}</p>
   </div>
