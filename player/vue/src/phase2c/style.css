@@ -170,7 +170,7 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
 /* The Sheet portal stays in the shell so menu width/preview tokens have one owner. */
 .phase2c-sidebar { height: var(--usable-height); min-height: 0; }
 .phase2c-sidebar[data-narrow="true"] {
-  --sidebar-width: calc(var(--usable-width) * 0.9) !important;
+  --sidebar-width: min(var(--active-tool-width), calc(var(--usable-width) * 0.9)) !important;
 }
 /* Reserve the broad drawer only for a tool, not empty space beside its launcher. */
 .phase2c-sidebar[data-narrow="true"][data-menu-visible="true"] {
@@ -193,7 +193,7 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
   --launcher-space: var(--launcher-width);
 }
 
-/* Narrow tools use one full-width view; desktop presets remain in state. */
+/* The active tool fills the drawer; its selected preset is capped by available space. */
 .phase2c-sidebar[data-narrow="true"] [data-launcher-space] { flex: 1; min-height: 0; }
 .phase2c-sidebar[data-narrow="true"] .tool-panel-strip { min-height: 0; overflow-x: hidden; scroll-snap-type: none; }
 .phase2c-sidebar[data-narrow="true"] .tool-panel-strip > [data-tool] { width: 100% !important; min-width: 0; }

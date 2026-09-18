@@ -532,7 +532,7 @@ async function updateSidebarVisibility(open: boolean) {
     id="phase2c-shell"
     :data-narrow="narrow"
     :data-menu-visible="narrowMenuVisible"
-    :style="{ '--stage-height': `${stageHeight}px`, '--player-reserve': `${protectedPlayerWidth}px`, '--tool-columns-width': `${toolColumnsWidth}rem`, '--permanent-menu-width': `${menuWidthRem}rem`, '--measured-menu-width': `${measuredMenuWidth}px`, '--usable-width': `${viewport.width}px`, '--usable-height': `${viewport.height}px`, '--viewport-left': `${viewport.left}px`, '--viewport-top': `${viewport.top}px` }"
+    :style="{ '--stage-height': `${stageHeight}px`, '--active-tool-width': `${toolPanelSizes[narrowTool ? toolSizes[narrowTool] : 'Medium']}rem`, '--player-reserve': `${protectedPlayerWidth}px`, '--tool-columns-width': `${toolColumnsWidth}rem`, '--permanent-menu-width': `${menuWidthRem}rem`, '--measured-menu-width': `${measuredMenuWidth}px`, '--usable-width': `${viewport.width}px`, '--usable-height': `${viewport.height}px`, '--viewport-left': `${viewport.left}px`, '--viewport-top': `${viewport.top}px` }"
     :data-resizing="resizing !== null"
     :data-labels="labelMode"
     :data-tools-open="openTools.length > 0"
@@ -659,7 +659,7 @@ async function updateSidebarVisibility(open: boolean) {
         </div>
         <div v-if="sidebarVisible" v-show="!narrow || !narrowMenuVisible" ref="toolStrip" role="region" aria-label="Tool Panels" :tabindex="openTools.length ? 0 : undefined" class="tool-panel-strip flex min-w-0 flex-1 overflow-x-auto overscroll-x-contain focus-visible:outline-2 focus-visible:-outline-offset-2">
     <section v-for="tool in openTools" :key="tool" v-show="!narrow || tool === narrowTool" :data-tool="tool" :aria-label="`${tool} panel`" :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }" class="relative flex min-h-0 shrink-0 flex-col border-r bg-[var(--surface-component)]">
-      <ToolPanelHeader :tool="tool" :narrow="narrow" :size="toolSizes[tool]" :pinned="pinnedTools.includes(tool)"
+      <ToolPanelHeader :tool="tool" :size="toolSizes[tool]" :pinned="pinnedTools.includes(tool)"
         :can-move-left="openTools.indexOf(tool) > 0" :can-move-right="openTools.indexOf(tool) < openTools.length - 1"
         @resize="toolSizes[tool] = $event" @pin="setPinned(tool, $event)" @move="moveTool(tool, $event)" />
       <div :ref="element => setToolContentTarget(tool, element)" class="contents" />
