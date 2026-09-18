@@ -38,6 +38,31 @@ source. Those values are also maintained as observable Player contract in `docs/
 consume semantic roles rather than raw application-palette primitives. Speaker, package-accent, media, and technical
 mask colours remain separate presentation data.
 
+## Experimental dynamic theme evaluation
+
+Run `npm run dev:player:phase2c -- --host 0.0.0.0` and open `/phase2c/`, then Visual Lab → Theme Lab.
+The generated-theme switch scopes changes to its component preview; it never recolors the Player. The off state uses
+current light-theme aliases (new roles share the nearest existing role). Native pickers adapt sRGB input into canonical
+OKLCH; sliders edit independent surface/accent seeds, with light/dark and standard/high controls. State is session-local and is not persisted. Exact scene samples
+remain separate and changing them does not replace the accent seed. Native inputs and the existing Button primitive
+provide real focus, hover, pressed, selected, and disabled states; forced hover/pressed samples aid comparison.
+
+`theme/palette.ts` is a pure, DOM/Vue-independent generator. `theme/color.ts` validates finite OKLCH inputs, normalizes
+hue, reduces chroma into sRGB while preserving lightness/hue, and measures opaque sRGB luminance contrast. The Lab
+exposes resolved semantic roles and measured pair diagnostics, including failures. Its tonal anchors, bounded lightness
+search, chroma caps, shadow/scrim alpha and evaluation targets are provisional implementation choices, not approved
+platform dark values or accessibility policy. Standard/high currently evaluate text at 4.5/7 and focus/strong borders
+at 3/4.5; accent boundaries use 3, while disabled text is informational. Ratios do not establish full accessibility,
+translucent compositing, state distinguishability, or color-vision suitability.
+
+The generator accepts already-resolved platform intent. User/package precedence, authored theme registration and
+missing-variant fallback remain governed by [the theme boundary](../docs/ui/PLAYER-UI.md#theme-and-customization-boundary)
+and are not implemented here. It does not convert authored custom themes, accept scene/speaker/control colors, or
+produce interaction families from arbitrary content colors. Production integration, persistence, final dark values and
+policy thresholds remain Owner choices. No dependency is added; local color math keeps this small experimental module
+portable, with reference-vector and bounded matrix tests covering its maintenance-sensitive conversion path. Run
+`node tools/theme-lab-browser-checks.mjs <development-URL>/phase2c/` for the focused browser check.
+
 ## Demo-only behavior
 
 The isolated Phase 2C Tool Panel strip uses SortableJS directly for handle-based mouse/touch reordering and edge
