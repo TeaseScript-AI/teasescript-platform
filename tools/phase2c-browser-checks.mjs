@@ -543,6 +543,9 @@ async function toolContentChecks(page) {
   await page.getByRole("button", { name: "Tools", exact: true }).click();
   await launcher("Layout Debug").click();
   await preserved();
+  await page.locator(".tools-drawer").evaluate(async (el) => {
+    await Promise.allSettled(el.getAnimations().map((animation) => animation.finished));
+  });
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Show sidebar", exact: true }).waitFor();
   // Let Sheet finish its exit and dispose its presentation subtree.
@@ -564,30 +567,44 @@ async function toolContentChecks(page) {
     ),
     "Content DOM identity changed across shells",
   );
-  // A real close disposes the content. Reopening starts fresh.
+  // Hiding and temporary replacement preserve the same content, including scroll.
+  const body = panel.locator("[data-tool-body]");
+  await body.evaluate((el) => {
+    el.scrollTop = 350;
+    el.dispatchEvent(new Event("scroll"));
+  });
   await launcher("Layout Debug").click();
   await panel.waitFor({ state: "detached" });
-  check(await original.evaluate((el) => !el.isConnected), "Closed tool content remained mounted");
-  check(
-    (await page.locator("[data-tool-lifetime-fixture]").count()) === 0,
-    "Closed tool retained hidden content",
-  );
+  check(await original.evaluate((el) => el.isConnected), "Hidden tool content was disposed");
   await launcher("Layout Debug").click();
-  check((await draft().inputValue()) === "", "Closed tool draft survived reopening");
-  await draft().fill("Replace this temporary tool");
-  await page.getByRole("button", { name: "Local count: 0", exact: true }).click();
+  await preserved();
+  check(await body.evaluate((el) => el.scrollTop === 350), "Hide/reopen lost scroll position");
   await launcher("Playback Diagnostics").click();
-  check(
-    (await page.locator("[data-tool-lifetime-fixture]").count()) === 0,
-    "Replaced tool retained hidden content",
-  );
+  await panel.waitFor({ state: "detached" });
   await launcher("Layout Debug").click();
-  check((await draft().inputValue()) === "", "Replaced tool draft survived reopening");
+  await preserved();
   check(
-    (await page.getByRole("button", { name: "Local count: 0", exact: true }).count()) === 1,
-    "Replaced tool counter survived",
+    await body.evaluate((el) => el.scrollTop === 350),
+    "Temporary replacement lost scroll position",
   );
-  return "PASS tool content lifetime preservation and disposal";
+  await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
+  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
+  check(await body.evaluate((el) => el.scrollTop === 350), "Shell hide lost scroll position");
+  check(
+    await original.evaluate(
+      (el) => el === document.querySelector("[data-tool-lifetime-fixture] input"),
+    ),
+    "Hiding/replacement changed tool DOM identity",
+  );
+  await panel.locator("[data-panel-pin]").focus();
+  await page.setViewportSize({ width: 390, height: 700 });
+  await launcher("Layout Debug").click();
+  check(await body.evaluate((el) => el.scrollTop === 350), "Wide/narrow lost scroll position");
+  await page.getByRole("button", { name: "Tools", exact: true }).click();
+  await page.getByRole("button", { name: "Back to active tool", exact: true }).click();
+  check(await body.evaluate((el) => el.scrollTop === 350), "Menu/back lost scroll position");
+  await preserved();
+  return "PASS tool content and scroll preservation across hiding and replacement";
 }
 
 async function transcriptChecks(page) {
@@ -1155,9 +1172,9 @@ try {
     throw new Error(collapseOutput);
   console.log("phase2c-browser-checks: PASS menu drag collapse, expansion and cancellation");
   const contentOutput = cli("run-code", toolContentChecks.toString());
-  if (!contentOutput.includes("PASS tool content lifetime preservation and disposal"))
+  if (!contentOutput.includes("PASS tool content and scroll preservation across hiding and replacement"))
     throw new Error(contentOutput);
-  console.log("phase2c-browser-checks: PASS tool content lifetime preservation and disposal");
+  console.log("phase2c-browser-checks: PASS tool content and scroll preservation across hiding and replacement");
   const runtimeOutput = cli("run-code", runtimeTranscriptChecks.toString());
   if (
     !runtimeOutput.includes("PASS runtime transcript provenance, markup, plain answers and restore")
