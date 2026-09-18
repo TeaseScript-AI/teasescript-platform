@@ -79,17 +79,29 @@
 :root[data-phase2c-theme] :is([data-slot="dialog-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"]) {
   box-shadow: 0 6px 18px var(--theme-structural-shadow);
 }
-:root[data-phase2c-theme] [data-runtime-interaction] button[type="submit"]:enabled {
-  background: var(--theme-accent-solid);
-  color: var(--theme-text-on-accent);
-}
-:root[data-phase2c-theme] [data-runtime-interaction] button[type="submit"]:enabled:hover { background: var(--theme-accent-hover); }
-:root[data-phase2c-theme] [data-runtime-interaction] button[type="submit"]:enabled:active { background: var(--theme-accent-pressed); }
 :root[data-phase2c-theme] :is(button, textarea, input, select):disabled {
   color: var(--theme-text-disabled);
   background: var(--theme-surface-disabled);
   border-color: var(--theme-border-disabled);
   opacity: 1;
+}
+/* ConversationSurface owns the Composer material, including disabled controls.
+   Foreground choice/button controls retain the ordinary control surfaces above. */
+:root[data-phase2c-theme] [data-runtime-composer] > :is(textarea, button) {
+  color: var(--theme-text-primary);
+  background: transparent;
+  border-color: transparent;
+}
+:root[data-phase2c-theme] [data-runtime-composer] > :disabled {
+  color: var(--theme-text-disabled);
+}
+@media (any-hover: hover) {
+  :root[data-phase2c-theme] [data-runtime-composer] > button:enabled:hover {
+    background: var(--theme-surface-hover);
+  }
+}
+:root[data-phase2c-theme] [data-runtime-composer] > button:enabled:active {
+  background: var(--theme-surface-pressed);
 }
 :root[data-phase2c-theme] :is(textarea, input)::placeholder { color: var(--theme-text-secondary); }
 :root[data-phase2c-theme] :is(button, textarea, input, select):focus-visible {

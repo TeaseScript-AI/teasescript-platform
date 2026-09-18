@@ -14,11 +14,12 @@ const enabled = ref(false);
 const intent = reactive<{
   mode: PlayerThemeIntent["mode"];
   contrast: PlayerThemeIntent["contrast"];
-  surfaceSeed: { l: number; c: number; h: number };
+  surfaceHue: number;
+  surfaceTint: number;
   accentSeed: { l: number; c: number; h: number };
 }>({
   mode: "light", contrast: "standard",
-  surfaceSeed: { l: 0.95839, c: 0.01306, h: 71.33 },
+  surfaceHue: 70, surfaceTint: 0,
   accentSeed: { l: 0.59208, c: 0.19138, h: 11.08 },
 });
 const theme = computed(() => generatePlayerTheme(intent));
@@ -27,14 +28,8 @@ watchEffect(() => emit("themeChange", {
   mode: intent.mode,
   variables: enabled.value ? themeCssVariables(theme.value) : {},
 }));
-const seeds = ["surfaceSeed", "accentSeed"] as const;
-const channels = [
-  { key: "l", label: "Lightness", max: 1, step: 0.001 },
-  { key: "c", label: "Chroma", max: 0.4, step: 0.001 },
-  { key: "h", label: "Hue", max: 360, step: 1 },
-] as const;
-function pickSeed(seed: typeof seeds[number], event: Event) {
-  if (event.target instanceof HTMLInputElement) Object.assign(intent[seed], pickerHexToOklch(event.target.value));
+function pickAccent(event: Event) {
+  if (event.target instanceof HTMLInputElement) Object.assign(intent.accentSeed, pickerHexToOklch(event.target.value));
 }
 function displayColor(color: OklchColor) {
   return `oklch(${(color.l * 100).toFixed(2)}% ${color.c.toFixed(4)} ${color.h.toFixed(2)})`;
@@ -52,16 +47,21 @@ function displayColor(color: OklchColor) {
     <label class="grid gap-1">Theme contrast
       <select v-model="intent.contrast" aria-label="Theme contrast"><option value="standard">Standard</option><option value="high">High</option></select>
     </label>
-    <p>Pickers show an sRGB approximation. Sliders retain OKLCH intent; resolved colors may reduce chroma to fit sRGB.</p>
-    <fieldset v-for="seed in seeds" :key="seed" class="grid min-w-0 gap-2">
-      <legend>{{ seed === 'accentSeed' ? 'Accent seed' : 'Surface seed' }}</legend>
-      <label class="flex items-center gap-2">Color picker<input type="color" :aria-label="`${seed} color picker`" :value="oklchToPickerHex(intent[seed])" @input="pickSeed(seed, $event)" /></label>
-      <label v-for="channel in channels" :key="channel.key" class="grid gap-1">
-        {{ channel.label }}
-        <input v-model.number="intent[seed][channel.key]" :aria-label="`${seed} ${channel.label}`" type="range" min="0" :max="channel.max" :step="channel.step" />
+    <fieldset class="grid gap-2">
+      <legend>Surface tint intent</legend>
+      <label class="grid gap-1">Surface hue · {{ intent.surfaceHue }}°
+        <input v-model.number="intent.surfaceHue" aria-label="Surface hue" type="range" min="0" max="360" step="1" />
       </label>
-      <output class="font-mono text-xs">{{ displayColor(intent[seed]) }}</output>
+      <label class="grid gap-1">Tint intensity · {{ Math.round(intent.surfaceTint * 100) }}%
+        <input v-model.number="intent.surfaceTint" aria-label="Tint intensity" type="range" min="0" max="1" step="0.01" />
+      </label>
+      <p>{{ intent.surfaceTint === 0 ? 'Achromatic surfaces. Hue is inactive until tint is added.' : 'Explicit surface tint; independent of accent and light/dark mode.' }}</p>
     </fieldset>
+    <label class="flex items-center gap-2">Accent seed
+      <input type="color" aria-label="Accent seed" :value="oklchToPickerHex(intent.accentSeed)" @input="pickAccent" />
+    </label>
+    <output class="font-mono text-xs">{{ displayColor(intent.accentSeed) }}</output>
+    <p>The picker acquires a literal accent seed. Surface hue/intensity are separate intent; they are not hidden inside a white color swatch.</p>
     <p>{{ enabled ? 'Generated palette is active on the Player.' : 'The Player is using its current baseline palette.' }}</p>
     <details>
       <summary>Generated semantic roles ({{ Object.keys(theme.roles).length }})</summary>

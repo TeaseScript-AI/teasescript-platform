@@ -22,6 +22,7 @@
   "project": [
     "src/**/*.ts",
     "playground/**/*.ts",
+    "player/theme/**/*.ts",
     "player/vue/**/*.{css,ts,vue}",
     "editor/**/*.{css,ts,vue}",
     "tests/**/*.ts",
