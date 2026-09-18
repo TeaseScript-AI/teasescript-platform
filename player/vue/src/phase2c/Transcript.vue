@@ -130,12 +130,12 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
 /* Let history pass visually behind the floating composer instead of ending at a hard edge. */
 .transcript-scroll::after {
   content: ""; position: absolute; z-index: 1; inset-inline: 0;
-  bottom: var(--transcript-bottom-inset, 0px); height: 3.5rem;
+  bottom: calc(var(--transcript-bottom-inset, 0px) - 0.75rem); height: 4.5rem;
   pointer-events: none;
   background: linear-gradient(to bottom,
     transparent 0%,
-    color-mix(in srgb, var(--background) 42%, transparent) 52%,
-    color-mix(in srgb, var(--background) 92%, transparent) 100%);
+    color-mix(in srgb, var(--background) 28%, transparent) 48%,
+    color-mix(in srgb, var(--background) 78%, transparent) 100%);
 }
 .transcript-scroll[data-scrolled="true"] { mask-image: linear-gradient(to bottom, transparent, black 1rem); }
 .transcript-history { position: relative; width: 100%; }
