@@ -39,6 +39,8 @@ import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
 import DialogDescription from "@/components/ui/dialog/DialogDescription.vue";
 
 const isDevelopment = import.meta.env.DEV;
+// Opt-in browser-test content; never populate the normal settings surface with fixtures.
+const toolStateFixture = isDevelopment && new URLSearchParams(window.location.search).has("tool-state-fixture");
 const mediaFixture = ref<keyof typeof stageFixtures>("Landscape");
 const longTitle = ref(false);
 const transcriptEntries = ref(transcriptFixtures(0, 2000));
@@ -554,7 +556,7 @@ async function updateSidebarVisibility(open: boolean) {
       <ToolPanelBody v-for="tool in visitedTools" :key="tool"
         :target="toolContentTargets[tool] ?? toolContentParking"
         :visible="sidebarVisible && openTools.includes(tool) && (!narrow || (!narrowMenuVisible && narrowTool === tool))">
-          <ToolLifetimeFixture v-if="isDevelopment && tool === 'Layout Debug'" />
+          <ToolLifetimeFixture v-if="toolStateFixture && tool === 'Layout Debug'" />
           <div v-if="isDevelopment && tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
             <label class="grid gap-2">
               Stage media fixture

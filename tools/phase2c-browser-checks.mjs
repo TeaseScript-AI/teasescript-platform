@@ -480,6 +480,16 @@ async function toolContentChecks(page) {
   };
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload();
+  const normalUrl = page.url();
+  await page.locator('[data-launcher] button[aria-label="Layout Debug"]').click();
+  check(await page.locator("[data-tool-lifetime-fixture]").count() === 0,
+    "Normal Layout Debug must not contain test fixtures");
+  const fixtureUrl = await page.evaluate(() => {
+    const url = new URL(location.href);
+    url.searchParams.set("tool-state-fixture", "");
+    return url.href;
+  });
+  await page.goto(fixtureUrl);
   const launcher = (name) => page.locator("[data-launcher] button").filter({ hasText: name });
   const panel = page.locator('[data-tool="Layout Debug"]');
   const draft = () => page.getByRole("textbox", { name: "Local draft" });
@@ -604,6 +614,7 @@ async function toolContentChecks(page) {
   await page.getByRole("button", { name: "Back to active tool", exact: true }).click();
   check(await body.evaluate((el) => el.scrollTop === 350), "Menu/back lost scroll position");
   await preserved();
+  await page.goto(normalUrl);
   return "PASS tool content and scroll preservation across hiding and replacement";
 }
 
