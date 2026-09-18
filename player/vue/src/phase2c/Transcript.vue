@@ -3,7 +3,16 @@ import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { elementScroll, observeElementRect, useVirtualizer } from "@tanstack/vue-virtual";
 import { ArrowDown } from "@lucide/vue";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
+import { Marker, MarkerContent } from "@/components/ui/marker";
+import {
+  Message,
+  MessageAvatar,
+  MessageContent,
+  MessageHeader,
+} from "@/components/ui/message";
 import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } from "../../../model.js";
 import TranscriptMarkup from "./TranscriptMarkup.vue";
 
@@ -62,6 +71,13 @@ const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => ({
 const showLatest = computed(() => !touching.value && !virtualizer.value.isScrolling &&
   virtualizer.value.getDistanceFromEnd() > Math.max(80, (virtualizer.value.scrollRect?.height ?? 0) / 2));
 const scrolled = computed(() => (virtualizer.value.scrollOffset ?? 0) > 1);
+// Virtual rows are independent, so grouping is decided per row from its predecessor.
+function startsGroup(index: number) {
+  const entry = props.entries[index];
+  const previous = props.entries[index - 1];
+  if (entry?.kind !== "message") return false;
+  return previous?.kind !== "message" || previous.speakerId !== entry.speakerId;
+}
 function interruptFollow() {
   // Replace an in-flight measured end target before native user scrolling starts.
   virtualizer.value.scrollToOffset(scrollElement.value?.scrollTop ?? 0);
@@ -127,9 +143,29 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
           :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
           role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
           class="transcript-entry" :style="{ transform: `translateY(${item.start}px)` }">
-          <div class="message" :data-author="entry.kind === 'session-event' ? 'session-event' : entry.speakerId === 'user' ? 'player' : 'speaker'">
-            <div class="message-copy"><strong v-if="entry.kind === 'message' && entry.speakerId !== 'user'">{{ speakers[entry.speakerId]?.name ?? entry.speakerId }}: </strong><TranscriptMarkup v-if="entry.kind === 'message' && entry.speakerId !== 'user' && entry.content" :content="entry.content" /><template v-else>{{ entry.text }}</template></div>
-          </div>
+          <Marker v-if="entry.kind === 'session-event'" variant="separator">
+            <MarkerContent>{{ entry.text }}</MarkerContent>
+          </Marker>
+          <Message v-else :align="entry.speakerId === 'user' ? 'end' : 'start'">
+            <MessageAvatar v-if="entry.speakerId !== 'user'" :class="startsGroup(item.index) ? '' : 'invisible'">
+              <Avatar>
+                <AvatarFallback class="text-xs font-semibold">{{ speakers[entry.speakerId]?.avatar }}</AvatarFallback>
+              </Avatar>
+            </MessageAvatar>
+            <MessageContent>
+              <MessageHeader v-if="entry.speakerId !== 'user' && startsGroup(item.index)">
+                {{ speakers[entry.speakerId]?.name ?? entry.speakerId }}
+              </MessageHeader>
+              <Bubble :variant="entry.speakerId === 'user' ? 'default' : 'secondary'"
+                :align="entry.speakerId === 'user' ? 'end' : 'start'">
+                <BubbleContent>
+                  <TranscriptMarkup v-if="entry.speakerId !== 'user' && entry.content" :content="entry.content"
+                    :entry-id="entry.id" :revealed="revealedSpoilers" @reveal="revealedSpoilers.add($event)" />
+                  <template v-else>{{ entry.text }}</template>
+                </BubbleContent>
+              </Bubble>
+            </MessageContent>
+          </Message>
         </article>
       </div>
       <p v-if="!entries.length" class="transcript-empty">No messages yet.</p>
@@ -169,18 +205,8 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
 }
 :deep(.transcript-scroll[data-scrolled="true"]) { --transcript-top-fade: 1rem; }
 .transcript-history { position: relative; width: 100%; }
-.transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: 0.5rem 1rem; }
-.message { max-width: 90%; }
-.message-copy {
-  margin: 0; max-width: 65ch; white-space: pre-wrap; overflow-wrap: anywhere;
-  font-size: 0.875rem; line-height: 1.5;
-}
-.message[data-author="player"] {
-  width: fit-content; margin-left: auto; padding: 0.75rem 1rem;
-  border: 1px solid var(--border); border-radius: 0.75rem;
-  background: var(--surface-component);
-}
-.transcript-empty { padding: 1rem; font-size: 0.875rem; color: var(--text-muted); }
+.transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: 0.25rem; }
+.transcript-empty { padding: 1rem; font-size: 0.875rem; color: var(--muted-foreground); }
 .return-to-latest {
   position: absolute; bottom: calc(var(--transcript-bottom-inset, 0px) + 0.5rem); right: 0.25rem; width: 2.75rem; height: 2.75rem;
   border: 1px solid var(--border); border-radius: 50%;

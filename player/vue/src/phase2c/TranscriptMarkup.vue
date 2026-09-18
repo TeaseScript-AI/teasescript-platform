@@ -41,10 +41,11 @@ const blocks = computed(() => preparePlayerMessageMarkup(props.content));
 
 <style scoped>
 .transcript-markup {
-  display: inline;
-}
-.markup-paragraph:first-child {
-  display: inline;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .markup-heading {
   font-weight: 700;

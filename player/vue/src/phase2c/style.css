@@ -15,6 +15,13 @@
   --color-sidebar-accent-foreground: var(--foreground);
   --color-sidebar-ring: var(--focus-ring, var(--border-strong));
   --color-muted-foreground: var(--text-muted);
+  /* The shadcn message/bubble parts style themselves through these names. */
+  --color-card: var(--surface-component);
+  --color-muted: var(--sidebar);
+  --color-secondary: var(--surface-component);
+  --color-secondary-foreground: var(--foreground);
+  --color-primary: var(--accent-solid);
+  --color-primary-foreground: var(--surface-component);
   --color-accent: var(--component-hover);
   --color-accent-foreground: var(--foreground);
   --color-border: var(--border);
