@@ -29,9 +29,9 @@ useResizeObserver(overlay, () => {
 </template>
 
 <style scoped>
-.conversation-surface { position: relative; display: flex; min-height: 0; padding-inline: 1rem; }
+.conversation-surface { position: relative; display: flex; min-height: 0; padding-inline: var(--conversation-inline-inset); }
 .conversation-overlay {
-  position: absolute; inset: auto 1rem 0; z-index: 2; pointer-events: none;
+  position: absolute; inset: auto var(--conversation-inline-inset) 0; z-index: 2; pointer-events: none;
   padding-top: 0.5rem; padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
 }
 .conversation-glass {

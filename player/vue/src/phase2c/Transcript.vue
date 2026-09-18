@@ -124,8 +124,9 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
 .transcript-scroll {
   height: 100%; overflow-y: auto; overflow-x: hidden; overscroll-behavior-y: contain;
   /* Browser scroll anchoring would compete with TanStack's keyed corrections. */
-  overflow-anchor: none; scrollbar-gutter: stable;
+  overflow-anchor: none; scrollbar-width: none;
 }
+.transcript-scroll::-webkit-scrollbar { display: none; }
 .transcript-scroll:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 /* Keep transcript contrast intact above the composer, then reduce it across
    the complete composer height while retaining a faint trace to the bottom. */

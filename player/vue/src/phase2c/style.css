@@ -35,6 +35,7 @@
   --border-hover: oklch(78.050% 0.03740 56.32);
   --border-strong: oklch(68.851% 0.04826 51.55);
   --text-muted: oklch(52.649% 0.02679 41.27);
+  --package-accent: oklch(59.208% 0.19138 11.08);
   /* Existing demo ambience (#f7cdaf), expressed in OKLCH. */
   --scene-ambient: oklch(87.69778% 0.062244 57.33796);
   color: var(--foreground);
@@ -51,12 +52,13 @@
 }
 
 .phase2c-sidebar {
-  --conversation-max-width: 864px;
+  --conversation-content-max-width: 864px;
+  --conversation-inline-inset: 1rem;
   --content-reserve: 0px;
   /* Keep the natural contained image and selected conversation width. Only
      content moves; the Stage and its floating controls keep their own geometry. */
   --content-ideal-width: min(var(--usable-width), max(
-    var(--conversation-max-width),
+    calc(var(--conversation-content-max-width) + 2 * var(--conversation-inline-inset)),
     calc(var(--stage-height) * var(--media-aspect))
   ));
   --content-width: min(var(--content-ideal-width), calc(var(--usable-width) - var(--content-reserve)));
@@ -222,7 +224,10 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
   min-height: 0;
 }
 .player-conversation {
-  --conversation-width: min(var(--conversation-max-width), var(--content-width));
+  --conversation-width: min(
+    calc(var(--conversation-content-max-width) + 2 * var(--conversation-inline-inset)),
+    var(--content-width)
+  );
   width: var(--conversation-width);
   margin: 0 0 0 calc(var(--content-offset) + (var(--content-width) - var(--conversation-width)) / 2);
 }

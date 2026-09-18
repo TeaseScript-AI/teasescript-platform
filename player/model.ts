@@ -29,6 +29,8 @@ export interface PlayerMediaPresentation {
 }
 
 export interface PlayerTimerPresentation {
+  /** Stable presentation identity. It is never shown as the timer label. */
+  readonly id: string;
   readonly name?: string;
   readonly remainingSeconds: number;
   readonly totalSeconds: number;

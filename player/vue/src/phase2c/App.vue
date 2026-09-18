@@ -16,6 +16,9 @@ import { transcriptFixtures, transcriptFixtureSpeakers } from "./transcriptFixtu
 import { createPlayerRuntimeSession, createPlayerRuntimeRestorePoint, restorePlayerRuntimeSession, type PlayerRuntimeSession, type PlayerRuntimeRestorePoint } from "../../../runtime-adapter.js";
 import { runtimeScenario, interactionScenario } from "./runtimeScenario";
 import { stageFixtures } from "./stageFixtures";
+import type { PlayerTimerKind } from "../../../model.js";
+import TimerFixtureRegion from "./TimerFixtureRegion.vue";
+import StageRightRail from "./StageRightRail.vue";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
@@ -45,6 +48,9 @@ const isDevelopment = import.meta.env.DEV;
 const toolStateFixture = isDevelopment && new URLSearchParams(window.location.search).has("tool-state-fixture");
 const mediaFixture = ref<keyof typeof stageFixtures>("Landscape");
 const longTitle = ref(false);
+const timerKind = ref<PlayerTimerKind>("visible");
+const timerCount = ref(1);
+const timerReset = ref(0);
 const transcriptEntries = ref(transcriptFixtures(0, 2000));
 const runtimeSession = shallowRef<PlayerRuntimeSession | null>(null);
 const runtimeRestore = shallowRef<PlayerRuntimeRestorePoint | null>(null);
@@ -575,6 +581,25 @@ async function updateSidebarVisibility(open: boolean) {
               <input v-model="longTitle" type="checkbox" /> Long stage title
             </label>
             <fieldset class="grid gap-2">
+              <legend class="mb-2">Timer fixtures</legend>
+              <label class="grid gap-2">
+                Presentation
+                <select v-model="timerKind" data-timer-fixture-kind class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
+                  <option value="visible">Visible</option>
+                  <option value="mystery">Mystery</option>
+                  <option value="hidden">Hidden</option>
+                </select>
+              </label>
+              <label class="grid gap-2">
+                Timers
+                <select v-model.number="timerCount" data-timer-fixture-count class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
+                  <option :value="1">One</option>
+                  <option :value="3">Three</option>
+                </select>
+              </label>
+              <Button variant="outline" @click="timerReset++">Reset timers</Button>
+            </fieldset>
+            <fieldset class="grid gap-2">
               <legend class="mb-2">Transcript fixtures</legend>
               <Button variant="outline" :disabled="!!runtimeSession" @click="appendTranscript">Append message</Button>
               <Button variant="outline" :disabled="!!runtimeSession" @click="prependTranscript">Prepend 50 messages</Button>
@@ -703,7 +728,15 @@ async function updateSidebarVisibility(open: boolean) {
           :fullscreen-error="fullscreenError"
           @toggle-fullscreen="toggleFullscreen"
           @media-aspect="mediaAspect = $event"
-        />
+        >
+          <template #right-rail>
+            <StageRightRail v-if="isDevelopment">
+              <template #timers>
+                <TimerFixtureRegion :kind="timerKind" :count="timerCount" :reset="timerReset" />
+              </template>
+            </StageRightRail>
+          </template>
+        </Stage>
 
         <ConversationSurface>
           <template #default="{ bottomInset }">
