@@ -166,11 +166,8 @@ body:has(> .tool-panel-dragging) [data-slot="tooltip-content"] { visibility: hid
   position: absolute; right: 0; top: 0; bottom: 0; width: 6px; z-index: 35;
   cursor: col-resize; touch-action: none;
 }
-.resize-edge::after { content: ""; position: absolute; right: 0; top: 0; bottom: 0; width: 2px; background: #a3a3a3; opacity: 0.35; }
-.resize-edge:hover::after, .resize-edge:focus-visible::after { opacity: 1; }
 .resize-edge:focus-visible { outline: 2px solid #737373; outline-offset: -2px; }
 /* Reuse the panel reorder grip on the menu's full-height resize edge. */
-.menu-resize-edge::after { content: none; }
 .menu-resize-grip {
   position: absolute; top: 50%; left: 50%; width: 1rem; height: 1rem;
   transform: translate(-50%, -50%); pointer-events: none;
