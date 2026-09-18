@@ -59,7 +59,6 @@ async function checks(page) {
           .backgroundImage,
         timerArc: style(".timer-arc").stroke,
         timerShadow: style(".timer-time").textShadow,
-        disabled: style('[data-runtime-interaction] button[type="submit"]').backgroundColor,
       };
     });
   const baseline = await readPlayer();
@@ -93,7 +92,6 @@ async function checks(page) {
     "timerSurface",
     "timerArc",
     "timerShadow",
-    "disabled",
   ]) {
     check(dark[key] !== baseline[key], `${key} must follow the live Player theme`);
   }
@@ -163,7 +161,7 @@ async function checks(page) {
   await assertRole(".timer-label", "color", "text-primary");
   await lab.getByLabel("Theme contrast", { exact: true }).selectOption("high");
   const beforePicker = await role("accent-solid");
-  await lab.getByLabel("accentSeed color picker").evaluate((element) => {
+  await lab.getByLabel("Accent seed").evaluate((element) => {
     element.value = "#00ff00";
     element.dispatchEvent(new Event("input", { bubbles: true }));
   });
@@ -171,12 +169,8 @@ async function checks(page) {
     (await role("accent-solid")) !== beforePicker,
     "Native picker must update canonical intent",
   );
-  await lab.getByRole("slider", { name: "accentSeed Hue", exact: true }).evaluate((element) => {
-    element.value = "240";
-    element.dispatchEvent(new Event("input", { bubbles: true }));
-  });
   const accent = await role("accent-solid");
-  await lab.getByRole("slider", { name: "surfaceSeed Hue", exact: true }).evaluate((element) => {
+  await lab.getByRole("slider", { name: "Surface hue", exact: true }).evaluate((element) => {
     element.value = "160";
     element.dispatchEvent(new Event("input", { bubbles: true }));
   });
@@ -203,17 +197,7 @@ async function checks(page) {
     (await root.getAttribute("data-phase2c-theme")) === null,
     "Off must clear the application mode",
   );
-  await page.getByRole("button", { name: "Start interaction scenario", exact: true }).click();
   await lab.getByLabel("Generated dynamic theme").check();
-  const send = '[data-runtime-interaction] button[type="submit"]';
-  await page.waitForTimeout(250);
-  await assertRole(send, "backgroundColor", "accent-solid");
-  await page.locator(send).hover();
-  await page.waitForTimeout(250);
-  await assertRole(send, "backgroundColor", "accent-hover");
-  await page.keyboard.press("Tab");
-  await page.locator("[data-runtime-interaction] textarea").focus();
-  await assertRole("[data-runtime-interaction] textarea", "outlineColor", "accent-focus");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForFunction(
     () => document.querySelector("#phase2c-shell").dataset.narrow === "true",

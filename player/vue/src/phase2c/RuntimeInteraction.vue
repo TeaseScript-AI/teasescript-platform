@@ -81,7 +81,7 @@ function keydown(event: KeyboardEvent) {
         :aria-label="foreground.accessibleName" :disabled="submitting"
         @click="complete(activatePlayerRuntimeButton)">{{ foreground.label }}</Button>
     </div>
-    <form class="flex min-w-0 gap-2" @submit.prevent="submit">
+    <form data-runtime-composer class="flex min-w-0 gap-2" @submit.prevent="submit">
       <textarea ref="input" v-model="draft" rows="1"
         :aria-label="foreground?.accessibleName ?? 'Response'"
         :placeholder="foreground && 'hint' in foreground ? foreground.hint : 'Type your response...'"
