@@ -127,16 +127,16 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
   overflow-anchor: none; scrollbar-gutter: stable;
 }
 .transcript-scroll:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-/* Reduce contrast as history passes behind the composer. Keep a faint text
-   silhouette through the bottom margin; never restart at full opacity. */
+/* Reference-tuned contrast: gentle approach to the visible composer edge,
+   stronger reduction toward its midpoint, then a faint trace to the bottom. */
 .transcript-scroll {
   --transcript-top-fade: 0px;
   mask-image: linear-gradient(to bottom,
     transparent 0, black var(--transcript-top-fade),
-    black max(var(--transcript-top-fade), calc(100% - var(--transcript-bottom-inset, 0px) - 3rem)),
-    rgb(0 0 0 / 45%) calc(100% - var(--transcript-bottom-inset, 0px)),
-    rgb(0 0 0 / 12%) calc(100% - var(--transcript-bottom-inset, 0px) + 2rem),
-    rgb(0 0 0 / 12%) 100%);
+    black max(var(--transcript-top-fade), calc(100% - var(--composer-top-from-bottom, 0px) - 1.5rem)),
+    rgb(0 0 0 / 60%) calc(100% - var(--composer-top-from-bottom, 0px)),
+    rgb(0 0 0 / 10%) calc(100% - (var(--composer-top-from-bottom, 0px) + var(--composer-bottom-from-bottom, 0px)) / 2),
+    rgb(0 0 0 / 10%) 100%);
 }
 .transcript-scroll[data-scrolled="true"] { --transcript-top-fade: 1rem; }
 .transcript-history { position: relative; width: 100%; }
