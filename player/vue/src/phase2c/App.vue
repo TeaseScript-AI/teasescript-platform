@@ -77,7 +77,9 @@ function prependTranscript() {
 }
 const stage = ref<InstanceType<typeof Stage> | null>(null);
 const stageHeight = ref(0);
-// Measurement only positions the ambient fade; it never controls layout geometry.
+const mediaAspect = ref(0);
+// The grid owns Stage height. Its measurement positions the ambient fade and
+// determines the contained image width; neither feeds back into the Stage track.
 useResizeObserver(computed(() => stage.value?.$el as HTMLElement | undefined), ([entry]) => { if (entry) stageHeight.value = entry.contentRect.height; });
 const fullscreen = ref(document.fullscreenElement === document.documentElement);
 const fullscreenSupported = document.fullscreenEnabled;
@@ -539,8 +541,9 @@ async function updateSidebarVisibility(open: boolean) {
   <SidebarProvider
     id="phase2c-shell"
     :data-narrow="narrow"
+    :data-sidebar-visible="sidebarVisible"
     :data-menu-visible="narrowMenuVisible"
-    :style="{ '--stage-height': `${stageHeight}px`, '--active-tool-width': `${toolPanelSizes[narrowTool ? toolSizes[narrowTool] : 'Medium']}rem`, '--player-reserve': `${protectedPlayerWidth}px`, '--tool-columns-width': `${toolColumnsWidth}rem`, '--permanent-menu-width': `${menuWidthRem}rem`, '--measured-menu-width': `${measuredMenuWidth}px`, '--usable-width': `${viewport.width}px`, '--usable-height': `${viewport.height}px`, '--viewport-left': `${viewport.left}px`, '--viewport-top': `${viewport.top}px` }"
+    :style="{ '--stage-height': `${stageHeight}px`, '--media-aspect': mediaAspect, '--active-tool-width': `${toolPanelSizes[narrowTool ? toolSizes[narrowTool] : 'Medium']}rem`, '--player-reserve': `${protectedPlayerWidth}px`, '--tool-columns-width': `${toolColumnsWidth}rem`, '--permanent-menu-width': `${menuWidthRem}rem`, '--measured-menu-width': `${measuredMenuWidth}px`, '--usable-width': `${viewport.width}px`, '--usable-height': `${viewport.height}px`, '--viewport-left': `${viewport.left}px`, '--viewport-top': `${viewport.top}px` }"
     :data-resizing="resizing !== null"
     :data-labels="labelMode"
     :data-tools-open="openTools.length > 0"
@@ -697,9 +700,10 @@ async function updateSidebarVisibility(open: boolean) {
           :fullscreen-supported="fullscreenSupported"
           :fullscreen-error="fullscreenError"
           @toggle-fullscreen="toggleFullscreen"
+          @media-aspect="mediaAspect = $event"
         />
 
-        <section class="player-conversation mx-auto flex min-h-0 w-full max-w-[920px] flex-1 flex-col gap-3 px-4">
+        <section class="player-conversation mx-auto flex min-h-0 w-full flex-1 flex-col gap-3 px-4">
           <Transcript :key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'" :entries="runtimeSession?.transcriptEntries ?? transcriptEntries" :speakers="runtimeSession?.speakers ?? transcriptFixtureSpeakers" :revision="runtimeSession?.transcriptRevision ?? 0" />
           <RuntimeInteraction v-model:session="runtimeSession" :reset="interactionReset" />
         </section>

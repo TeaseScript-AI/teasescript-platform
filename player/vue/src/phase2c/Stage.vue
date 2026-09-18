@@ -1,23 +1,32 @@
 <script setup lang="ts">
+import { watch } from "vue";
 import { Maximize, Minimize } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
 
-defineProps<{
+const props = defineProps<{
   title: string;
   media: { src: string; alt: string } | undefined;
   fullscreen: boolean;
   fullscreenSupported: boolean;
   fullscreenError: string;
 }>();
-defineEmits<{ toggleFullscreen: [] }>();
+const emit = defineEmits<{ toggleFullscreen: []; mediaAspect: [ratio: number] }>();
+watch(() => props.media, () => emit("mediaAspect", 0));
+function mediaLoaded(event: Event) {
+  const image = event.currentTarget;
+  if (image instanceof HTMLImageElement && image.naturalHeight)
+    emit("mediaAspect", image.naturalWidth / image.naturalHeight);
+}
 </script>
 
 <template>
   <section class="player-stage" aria-label="Primary stage">
-    <img v-if="media" :src="media.src" :alt="media.alt" class="stage-media" />
+    <div class="stage-media-frame">
+      <img v-if="media" :src="media.src" :alt="media.alt" class="stage-media" @load="mediaLoaded" />
+    </div>
     <h1 class="stage-title">{{ title }}</h1>
     <Tooltip>
       <TooltipTrigger as-child>
@@ -45,6 +54,10 @@ defineEmits<{ toggleFullscreen: [] }>();
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+.stage-media-frame {
+  position: absolute; top: 0; bottom: 0;
+  left: var(--content-offset); width: var(--content-width);
 }
 .stage-media { display: block; width: 100%; height: 100%; object-fit: contain; }
 .stage-title {
