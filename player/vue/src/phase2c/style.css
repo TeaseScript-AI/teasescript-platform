@@ -225,7 +225,7 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
 .player-conversation {
   --conversation-width: min(var(--conversation-max-width), calc(var(--content-width) - var(--conversation-gutter)));
   width: var(--conversation-width);
-  padding-top: 0.5rem;
+  padding-top: 0;
   padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
   margin: 0 0 0 calc(var(--content-offset) + (var(--content-width) - var(--conversation-width)) / 2);
 }
