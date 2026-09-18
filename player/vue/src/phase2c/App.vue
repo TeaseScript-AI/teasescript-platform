@@ -10,6 +10,7 @@ import LayoutDebug from "./LayoutDebug.vue";
 import { toolPanelSizes } from "./toolPanelSizes";
 import Stage from "./Stage.vue";
 import Transcript from "./Transcript.vue";
+import ConversationSurface from "./ConversationSurface.vue";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
 import { transcriptFixtures, transcriptFixtureSpeakers } from "./transcriptFixtures";
 import { createPlayerRuntimeSession, createPlayerRuntimeRestorePoint, restorePlayerRuntimeSession, type PlayerRuntimeSession, type PlayerRuntimeRestorePoint } from "../../../runtime-adapter.js";
@@ -704,10 +705,12 @@ async function updateSidebarVisibility(open: boolean) {
           @media-aspect="mediaAspect = $event"
         />
 
-        <section class="player-conversation mx-auto flex min-h-0 w-full flex-1 flex-col gap-3 px-4">
-          <Transcript :key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'" :entries="runtimeSession?.transcriptEntries ?? transcriptEntries" :speakers="runtimeSession?.speakers ?? transcriptFixtureSpeakers" :revision="runtimeSession?.transcriptRevision ?? 0" />
-          <RuntimeInteraction v-model:session="runtimeSession" :reset="interactionReset" />
-        </section>
+        <ConversationSurface>
+          <template #default="{ bottomInset }">
+            <Transcript :bottom-inset="bottomInset" :key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'" :entries="runtimeSession?.transcriptEntries ?? transcriptEntries" :speakers="runtimeSession?.speakers ?? transcriptFixtureSpeakers" :revision="runtimeSession?.transcriptRevision ?? 0" />
+          </template>
+          <template #interaction><RuntimeInteraction v-model:session="runtimeSession" :reset="interactionReset" /></template>
+        </ConversationSurface>
       </div>
     </SidebarInset>
   </SidebarProvider>

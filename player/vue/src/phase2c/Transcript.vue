@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, shallowReactive } from "vue";
+import { computed, nextTick, onMounted, ref, shallowReactive, watch } from "vue";
 import { elementScroll, observeElementRect, useVirtualizer } from "@tanstack/vue-virtual";
 import { ArrowDown } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ const props = defineProps<{
   entries: readonly PlayerTranscriptEntryPresentation[];
   speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
   revision?: number;
+  bottomInset?: number;
 }>();
 // Reader state survives virtual row unmounts; it is not canonical transcript data.
 const revealedSpoilers = shallowReactive(new Set<string>());
@@ -26,6 +27,7 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(computed(() => {
     getItemKey: (index: number) => entries[index]!.id,
     estimateSize: () => 140,
     overscan: 5,
+    paddingEnd: props.bottomInset ?? 0,
     anchorTo: "end" as const,
     followOnAppend: true,
     scrollEndThreshold: latestThreshold,
@@ -47,6 +49,14 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(computed(() => {
     }),
   };
 }));
+watch(() => props.bottomInset ?? 0, (inset, previous) => {
+  const instance = virtualizer.value;
+  // Recover distance using the previous inset regardless of Vue's options-update order.
+  const previousDistance = instance.getTotalSize() - instance.options.paddingEnd + previous
+    - (instance.scrollOffset ?? 0) - (instance.scrollRect?.height ?? 0);
+  if (inset !== previous && previousDistance <= latestThreshold && !touching.value)
+    void nextTick(() => instance.scrollToEnd());
+});
 const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => ({
   item, entry: props.entries[item.index]!,
 })));
@@ -86,7 +96,7 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
 </script>
 
 <template>
-  <section class="transcript" aria-label="Conversation">
+  <section class="transcript" aria-label="Conversation" :style="{ '--transcript-bottom-inset': `${bottomInset ?? 0}px` }">
     <div ref="scrollElement" class="transcript-scroll" :data-scrolled="scrolled"
       role="region" aria-label="Transcript" tabindex="0" @keydown="onScrollKeydown"
       @wheel.passive="onWheel"
@@ -132,7 +142,7 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
 }
 .transcript-empty { padding: 1rem; font-size: 0.875rem; color: var(--muted-foreground); }
 .return-to-latest {
-  position: absolute; bottom: 0.5rem; right: 0.25rem; width: 2.75rem; height: 2.75rem;
+  position: absolute; bottom: calc(var(--transcript-bottom-inset, 0px) + 0.5rem); right: 0.25rem; width: 2.75rem; height: 2.75rem;
   border: 1px solid var(--border); border-radius: 50%;
   background: color-mix(in srgb, var(--surface-component) 80%, transparent); backdrop-filter: blur(4px);
 }
