@@ -521,21 +521,36 @@ async function panelResizeChecks(page) {
       );
       await reachable();
     };
-    // Reachability is tested through hit testing, then a new physical drag, not DOM presence.
-    await drag(70, "18rem");
-    await drag(100, "24rem");
-    await drag(130, "32rem");
-    await drag(-130, "24rem");
-    await drag(-100, "18rem");
-    await drag(-70, "14rem");
-    await drag(130, "14rem", true);
+    // A capped XL must shrink from its rendered edge, not its offscreen preset width.
+    await drag(400, "32rem");
+    const rendered = await page.locator('[data-tool="Visual Lab"]').boundingBox();
+    await drag(-70, rendered.width < 300 ? "14rem" : "24rem");
     await edge.focus();
-    await page.keyboard.press("End");
+    await page.keyboard.press("Home");
     await settle();
-    await reachable();
+    await drag(400, "14rem", true);
+    for (const key of ["Home", "ArrowRight", "ArrowRight", "End"]) {
+      await edge.focus();
+      await page.keyboard.press(key);
+      await settle();
+      await reachable();
+      const fits = await page.locator('[data-tool="Visual Lab"]').evaluate((panel) => {
+        const strip = panel.parentElement;
+        return (
+          panel.getBoundingClientRect().width <= strip.clientWidth + 1 &&
+          panel.scrollWidth <= panel.clientWidth + 1
+        );
+      });
+      if (!fits) throw new Error("Panel must fit available tool space without content overflow");
+    }
+    await page.setViewportSize({ width: 1920, height: 900 });
+    await settle();
+    await page.waitForFunction(() =>
+      document.querySelector('[data-tool="Visual Lab"]').getBoundingClientRect().width === 512,
+    );
   }
   await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "icons"));
-  return "PASS panel resize overflow reachability and cancellation";
+  return "PASS panel width cap, resize, restoration and cancellation";
 }
 
 async function toolContentChecks(page) {
@@ -1247,9 +1262,9 @@ try {
     throw new Error(collapseOutput);
   console.log("phase2c-browser-checks: PASS menu drag collapse, expansion and cancellation");
   const resizeOutput = cli("run-code", panelResizeChecks.toString());
-  if (!resizeOutput.includes("PASS panel resize overflow reachability and cancellation"))
+  if (!resizeOutput.includes("PASS panel width cap, resize, restoration and cancellation"))
     throw new Error(resizeOutput);
-  console.log("phase2c-browser-checks: PASS panel resize overflow reachability and cancellation");
+  console.log("phase2c-browser-checks: PASS panel width cap, resize, restoration and cancellation");
   const contentOutput = cli("run-code", toolContentChecks.toString());
   if (!contentOutput.includes("PASS tool content and scroll preservation across hiding and replacement"))
     throw new Error(contentOutput);
