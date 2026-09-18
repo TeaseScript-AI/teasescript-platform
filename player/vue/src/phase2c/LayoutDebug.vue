@@ -4,18 +4,20 @@ import { captureRect, formatPixels, formatRect, parseGridTracks, type LayoutRect
 
 const props = defineProps<{ player: HTMLElement }>();
 const enabled = ref(false);
-const layers = ref({ regions: true, reserves: true, grid: false, centers: true, media: true });
-const labels = { regions: "Region bounds", reserves: "Reserved tools space", grid: "Grid tracks", centers: "Center lines", media: "Actual media bounds" };
+const layers = ref({ regions: true, reserves: false, spacing: false, grid: false, centers: true, media: true });
+const labels = { regions: "Region bounds", reserves: "Reserved tools space", spacing: "Spacing", grid: "Grid tracks", centers: "Center lines", media: "Actual media bounds" };
 const selectors = {
   Player: ":scope", Tools: "[data-tools-surface]", Stage: ".player-stage",
   Conversation: ".player-conversation", Transcript: ".transcript-scroll",
   Composer: "[data-runtime-interaction] form", Content: ".stage-media-frame",
 };
 type Region = keyof typeof selectors;
+type Spacing = { owner: string; kind: "padding" | "gap" | "margin"; values: string; areas: LayoutRect[] };
 const snapshot = shallowRef<{
   regions: Partial<Record<Region, LayoutRect>>;
   media: LayoutRect | null;
   reserve: number;
+  spacing: Spacing[];
   tracks: number[];
   constraints: string[];
 } | null>(null);
@@ -40,9 +42,45 @@ function measure() {
     const width = image.naturalWidth * scale, height = image.naturalHeight * scale;
     media = captureRect(new DOMRect(box.left + (box.width - width) / 2, box.top + (box.height - height) / 2, width, height));
   }
+  const spacing: Spacing[] = [];
+  if (layers.value.spacing) {
+    const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    const value = (px: number) => `${formatPixels(px)} (${Number((px / rem).toFixed(2))}rem)`;
+    for (const [owner, selector] of [
+      ["Conversation", ".player-conversation"],
+      ["Interaction area", "[data-runtime-interaction]"],
+    ] as const) {
+      const element = root.querySelector<HTMLElement>(selector);
+      if (!element?.getClientRects().length) continue;
+      const rect = element.getBoundingClientRect(), css = getComputedStyle(element);
+      const top = parseFloat(css.paddingTop), right = parseFloat(css.paddingRight);
+      const bottom = parseFloat(css.paddingBottom), left = parseFloat(css.paddingLeft);
+      const areas = [
+        new DOMRect(rect.left, rect.top, rect.width, top),
+        new DOMRect(rect.right - right, rect.top + top, right, rect.height - top - bottom),
+        new DOMRect(rect.left, rect.bottom - bottom, rect.width, bottom),
+        new DOMRect(rect.left, rect.top + top, left, rect.height - top - bottom),
+      ].filter(area => area.width > 0 && area.height > 0).map(captureRect);
+      spacing.push({ owner, kind: "padding", values: `Top ${value(top)} · right ${value(right)} · bottom ${value(bottom)} · left ${value(left)}`, areas });
+      const margin = parseFloat(css.marginBottom);
+      if (margin > 0) spacing.push({ owner, kind: "margin", values: `Bottom ${value(margin)}`, areas: [captureRect(new DOMRect(rect.left, rect.bottom, rect.width, margin))] });
+    }
+    for (const [owner, parent, before, after] of [
+      ["Player composition", ".player-composition", ".player-stage", ".player-conversation"],
+      ["Conversation", ".player-conversation", ".transcript", "[data-runtime-interaction]"],
+    ] as const) {
+      const element = root.querySelector<HTMLElement>(parent);
+      const start = element?.querySelector(before)?.getBoundingClientRect();
+      const end = element?.querySelector(after)?.getBoundingClientRect();
+      if (!element || !start || !end) continue;
+      const gap = parseFloat(getComputedStyle(element).rowGap) || 0;
+      spacing.push({ owner, kind: "gap", values: `${before === ".player-stage" ? "Stage → Conversation" : "Transcript → Interaction"}: ${value(gap)}`,
+        areas: gap ? [captureRect(new DOMRect(end.left, start.bottom, end.width, gap))] : [] });
+    }
+  }
   const style = getComputedStyle(root);
   snapshot.value = {
-    regions, media,
+    regions, media, spacing,
     reserve: root.dataset.narrow === "true" ? 0 : root.querySelector('[data-slot="sidebar-gap"]')?.getBoundingClientRect().width ?? 0,
     tracks: contentStyle ? parseGridTracks(contentStyle.gridTemplateRows, parseFloat(contentStyle.rowGap)).map(track => track.offset + track.size) : [],
     constraints: [
@@ -79,6 +117,12 @@ function center(rect: LayoutRect) {
       <legend class="mb-2">Overlay layers</legend>
       <label v-for="(label, key) in labels" :key="key" class="flex items-center justify-between gap-2"><span>{{ label }}</span><input v-model="layers[key]" type="checkbox" /></label>
     </fieldset>
+    <section v-if="snapshot && layers.spacing" class="space-y-2 text-xs" aria-label="Layout spacing">
+      <p>Green: padding inside its owner. Purple: gap between children. Orange: outer margin. Message styling is not measured.</p>
+      <div v-for="item in snapshot.spacing" :key="`${item.owner}-${item.kind}`" :class="`spacing-key spacing-key-${item.kind}`">
+        <p class="font-medium">{{ item.owner }} · {{ item.kind }}</p><p>{{ item.values }}</p>
+      </div>
+    </section>
     <template v-if="snapshot">
       <dl class="grid gap-1 text-xs">
         <template v-for="(rect, name) in snapshot.regions" :key="name"><dt class="font-medium">{{ name }}</dt><dd>{{ formatRect(rect) }}</dd></template>
@@ -93,6 +137,11 @@ function center(rect: LayoutRect) {
     <!-- Paint-only overlay: never a grid/flex item or pointer target. Based on the main Player debug overlay. -->
     <div v-if="enabled && snapshot" class="layout-debug-overlay" data-layout-debug-overlay aria-hidden="true">
       <div v-if="layers.reserves && snapshot.reserve" class="debug-reserve" :style="{ width: `${snapshot.reserve}px` }"><span>Tools reservation</span></div>
+      <template v-if="layers.spacing">
+        <template v-for="item in snapshot.spacing" :key="`${item.owner}-${item.kind}`">
+          <div v-for="(area, index) in item.areas" :key="index" :class="`debug-spacing debug-spacing-${item.kind}`" :data-spacing-owner="item.owner" :data-spacing-kind="item.kind" :style="box(area)" />
+        </template>
+      </template>
       <template v-if="layers.regions">
         <div v-for="(rect, name) in snapshot.regions" :key="name" class="debug-box" :data-region="name" :style="box(rect)"><span>{{ name }}</span></div>
       </template>
@@ -112,6 +161,13 @@ function center(rect: LayoutRect) {
 .debug-controls dd { margin: 0 0 0.5rem; font-family: monospace; overflow-wrap: anywhere; }
 .layout-debug-overlay { position: absolute; inset: 0; z-index: 90; overflow: hidden; pointer-events: none; }
 .layout-debug-overlay > div { position: absolute; pointer-events: none; box-sizing: border-box; }
+.debug-spacing-padding { background: rgb(22 163 74 / 14%); border: 1px dotted rgb(22 163 74 / 55%); }
+.debug-spacing-gap { background: rgb(147 51 234 / 12%); border: 1px dotted rgb(147 51 234 / 55%); }
+.debug-spacing-margin { background: rgb(217 119 6 / 12%); border: 1px dotted rgb(217 119 6 / 55%); }
+.spacing-key { border-left: 3px solid; padding-left: 0.5rem; }
+.spacing-key-padding { border-color: #16a34a; }
+.spacing-key-gap { border-color: #9333ea; }
+.spacing-key-margin { border-color: #d97706; }
 .debug-box { border: 1px dashed #2563eb; }
 .debug-box[data-region="Tools"] > span { margin-top: 16px; }
 .debug-box[data-region="Stage"] > span { margin-top: 16px; }
