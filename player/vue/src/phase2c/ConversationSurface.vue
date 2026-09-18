@@ -35,7 +35,7 @@ useResizeObserver(overlay, () => {
   padding-top: 0.5rem; padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
 }
 .conversation-glass {
-  pointer-events: auto; border-radius: 0.75rem; padding: 0.5rem;
+  pointer-events: auto; border-radius: 1.5rem; padding: 0.5rem;
   background: var(--surface-component);
 }
 @supports (backdrop-filter: blur(1px)) {
