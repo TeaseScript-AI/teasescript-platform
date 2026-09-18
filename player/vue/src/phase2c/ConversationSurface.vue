@@ -31,8 +31,8 @@ useResizeObserver(overlay, () => {
 }
 @supports (backdrop-filter: blur(1px)) {
   .conversation-glass {
-    background: color-mix(in srgb, var(--surface-component) 72%, transparent);
-    backdrop-filter: blur(12px);
+    background: color-mix(in srgb, var(--surface-component) 45%, transparent);
+    backdrop-filter: blur(4px);
   }
 }
 </style>

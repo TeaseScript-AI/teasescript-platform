@@ -127,14 +127,13 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
   overflow-anchor: none; scrollbar-gutter: stable;
 }
 .transcript-scroll:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-/* Fade the content itself, revealing the shared Player background. Once hidden,
-   it stays hidden through the composer and the bottom/safe-area margin. */
+/* Fade across the full overlay depth. Keep content visible while it passes
+   behind the glass, reaching zero only at the viewport bottom. */
 .transcript-scroll {
   --transcript-top-fade: 0px;
   mask-image: linear-gradient(to bottom,
     transparent 0, black var(--transcript-top-fade),
-    black max(var(--transcript-top-fade), calc(100% - var(--transcript-bottom-inset, 0px))),
-    transparent calc(100% - var(--transcript-bottom-inset, 0px) + 3rem),
+    black max(var(--transcript-top-fade), calc(100% - var(--transcript-bottom-inset, 0px) - 1rem)),
     transparent 100%);
 }
 .transcript-scroll[data-scrolled="true"] { --transcript-top-fade: 1rem; }
