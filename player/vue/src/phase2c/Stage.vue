@@ -1,19 +1,9 @@
 <script setup lang="ts">
 import { watch } from "vue";
-import { Maximize, Minimize } from "@lucide/vue";
-import { Button } from "@/components/ui/button";
-import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
-import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
-import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
-
 const props = defineProps<{
-  title: string;
   media: { src: string; alt: string } | undefined;
-  fullscreen: boolean;
-  fullscreenSupported: boolean;
-  fullscreenError: string;
 }>();
-const emit = defineEmits<{ toggleFullscreen: []; mediaAspect: [ratio: number] }>();
+const emit = defineEmits<{ mediaAspect: [ratio: number] }>();
 watch(() => props.media, () => emit("mediaAspect", 0));
 function mediaLoaded(event: Event) {
   const image = event.currentTarget;
@@ -28,24 +18,6 @@ function mediaLoaded(event: Event) {
       <img v-if="media" :src="media.src" :alt="media.alt" class="stage-media" @load="mediaLoaded" />
     </div>
     <slot name="right-rail" />
-    <h1 class="stage-title">{{ title }}</h1>
-    <Tooltip>
-      <TooltipTrigger as-child>
-        <Button
-          data-fullscreen-control
-          variant="ghost"
-          class="stage-fullscreen"
-          :disabled="!fullscreenSupported"
-          :aria-label="fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'"
-          @click="$emit('toggleFullscreen')"
-        >
-          <Minimize v-if="fullscreen" class="size-4" />
-          <Maximize v-else class="size-4" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{{ fullscreenSupported ? (fullscreen ? 'Exit fullscreen' : 'Enter fullscreen') : 'Fullscreen unavailable in this browser' }}</TooltipContent>
-    </Tooltip>
-    <p v-if="fullscreenError" role="alert" class="stage-fullscreen-error">{{ fullscreenError }}</p>
   </section>
 </template>
 
@@ -62,29 +34,4 @@ function mediaLoaded(event: Event) {
   left: var(--content-offset); width: var(--content-width);
 }
 .stage-media { display: block; width: 100%; height: 100%; object-fit: contain; }
-.stage-title {
-  position: absolute;
-  z-index: 20;
-  /* Leave the existing global Tools toggle clear even when it floats over the Player. */
-  top: 0.75rem; left: 2.75rem;
-  max-width: min(28rem, calc(100% - 6.5rem));
-  padding: 0.25rem 0.5rem;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 0.875rem; font-weight: 500;
-  color: var(--foreground); background: var(--sidebar); border-radius: 0.375rem;
-  pointer-events: none;
-}
-.stage-fullscreen {
-  position: absolute; z-index: 20; top: 0.5rem; right: 0.5rem;
-  width: 2.75rem; height: 2.75rem;
-  border: 1px solid var(--border);
-  color: var(--foreground); background: var(--surface-component);
-  box-shadow: none;
-}
-.stage-fullscreen:hover { background: var(--component-hover); border-color: var(--border-hover); }
-.stage-fullscreen:active { background: var(--component-pressed); border-color: var(--border-strong); }
-.stage-fullscreen-error {
-  position: absolute; z-index: 20; bottom: 0.5rem; inset-inline: 0.5rem;
-  padding: 0.5rem; font-size: 0.75rem; color: var(--foreground); background: var(--surface-component);
-}
 </style>
