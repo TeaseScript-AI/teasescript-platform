@@ -257,19 +257,6 @@ type PanelSize = keyof typeof toolPanelSizes;
 const panelSizeNames = Object.keys(toolPanelSizes) as PanelSize[];
 const resizing = ref<"menu" | Tool | null>(null);
 let stopResize: (() => void) | undefined;
-async function revealResizeEdge(edge: HTMLElement) {
-  await nextTick();
-  const strip = toolStrip.value;
-  if (narrow.value || !strip?.contains(edge)) return;
-  const viewport = strip.getBoundingClientRect();
-  const bounds = edge.getBoundingClientRect();
-  // Scroll only the strip, never the Player/document. Keep the actual handle
-  // reachable even when a preset is wider than the available dock space.
-  const offset = bounds.right > viewport.left + strip.clientWidth
-    ? bounds.right - viewport.left - strip.clientWidth
-    : Math.min(0, bounds.left - viewport.left);
-  if (offset) strip.scrollBy({ left: offset, behavior: "instant" });
-}
 function startResize(event: PointerEvent, tool?: Tool) {
   if (event.button !== 0 || !event.isPrimary) return;
   event.preventDefault();
@@ -280,7 +267,8 @@ function startResize(event: PointerEvent, tool?: Tool) {
   const initialSize = tool ? toolSizes.value[tool] : null;
   const initialMenuMode = labelMode.value;
   const initialMenuWidth = menuWidthRem.value;
-  const initialWidth = tool ? toolPanelSizes[toolSizes.value[tool]] * rem
+  // A capped preset must shrink from its visible edge, not the stored preset width.
+  const initialWidth = tool ? edge.parentElement!.getBoundingClientRect().width
     : (initialMenuMode === "icons" ? menuWidths.icons : initialMenuWidth) * rem;
   // Halfway across the unused gap keeps the minimum label width easy to select.
   const menuSnapWidth = (menuWidths.icons + menuWidths.min) / 2;
@@ -292,7 +280,6 @@ function startResize(event: PointerEvent, tool?: Tool) {
     if (tool) {
       toolSizes.value[tool] = panelSizeNames.reduce((nearest, size) =>
         Math.abs(toolPanelSizes[size] * rem - width) < Math.abs(toolPanelSizes[nearest] * rem - width) ? size : nearest);
-      void revealResizeEdge(edge);
     } else {
       labelMode.value = width / rem < menuSnapWidth ? "icons" : "labels";
       // Collapsing preserves the prior width. An outward drag restores it;
@@ -319,7 +306,6 @@ function startResize(event: PointerEvent, tool?: Tool) {
     document.removeEventListener("keydown", key);
     if (edge.hasPointerCapture(event.pointerId)) edge.releasePointerCapture(event.pointerId);
     resizing.value = null;
-    if (tool) void revealResizeEdge(edge);
     stopResize = undefined;
   };
   edge.addEventListener("pointermove", move);
@@ -348,10 +334,7 @@ function resizePanelKey(event: KeyboardEvent, tool: Tool) {
   const index = event.key === "Home" ? 0 : event.key === "End" ? panelSizeNames.length - 1
     : panelSizeNames.indexOf(toolSizes.value[tool]) + (event.key === "ArrowRight" ? 1 : -1);
   const size = panelSizeNames[index];
-  if (size) {
-    toolSizes.value[tool] = size;
-    void revealResizeEdge(event.currentTarget as HTMLElement);
-  }
+  if (size) toolSizes.value[tool] = size;
 }
 const pinnedTools = ref<Tool[]>([]);
 const temporaryTool = ref<Tool | null>(null);

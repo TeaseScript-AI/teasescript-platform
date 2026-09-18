@@ -74,10 +74,8 @@
     var(--background);
   --launcher-width: var(--sidebar-width-icon);
   --launcher-space: var(--sidebar-width-icon);
-  --sidebar-width: max(calc(var(--launcher-space) + 1px), min(
-    calc(var(--launcher-space) + var(--tool-columns-width) + 1px),
-    calc(var(--usable-width) - var(--player-reserve))
-  )) !important;
+  --tool-space-limit: max(0px, calc(var(--usable-width) - var(--player-reserve) - var(--launcher-space) - 1px));
+  --sidebar-width: calc(var(--launcher-space) + min(var(--tool-columns-width), var(--tool-space-limit)) + 1px) !important;
 }
 
 .phase2c-sidebar[data-narrow="false"][data-sidebar-visible="true"] {
@@ -160,7 +158,9 @@ body:has(> .tool-panel-dragging) [data-slot="tooltip-content"] { visibility: hid
 }
 .menu-width-ruler span { display: block; width: max-content; padding-inline: calc(1.75rem + 0.5px); }
 .tool-panel-strip { scroll-snap-type: x proximity; }
-.tool-panel-strip > [data-tool] { scroll-snap-align: start; isolation: isolate; }
+/* Use final dock capacity, not its animated width: hiding must not reflow tool bodies.
+   Multiple panels still scroll and snap horizontally. */
+.tool-panel-strip > [data-tool] { max-width: var(--tool-space-limit); min-width: 0; scroll-snap-align: start; isolation: isolate; }
 .tool-panel-strip[data-reordering], .phase2c-sidebar[data-resizing="true"] .tool-panel-strip { scroll-snap-type: none; }
 .resize-edge {
   position: absolute; right: 0; top: 0; bottom: 0; width: 6px; z-index: 35;
@@ -208,7 +208,7 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
 /* The active tool fills the drawer; its selected preset is capped by available space. */
 .phase2c-sidebar[data-narrow="true"] [data-launcher-space] { flex: 1; min-height: 0; }
 .phase2c-sidebar[data-narrow="true"] .tool-panel-strip { min-height: 0; overflow-x: hidden; scroll-snap-type: none; }
-.phase2c-sidebar[data-narrow="true"] .tool-panel-strip > [data-tool] { width: 100% !important; min-width: 0; }
+.phase2c-sidebar[data-narrow="true"] .tool-panel-strip > [data-tool] { width: 100% !important; max-width: 100%; min-width: 0; }
 .phase2c-sidebar[data-narrow="true"] [data-panel-drag],
 .phase2c-sidebar[data-narrow="true"] [data-panel-resize] { display: none; }
 .phase2c-sidebar[data-narrow="true"] [data-tool-body] { overflow-wrap: anywhere; }
