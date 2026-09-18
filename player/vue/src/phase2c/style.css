@@ -62,6 +62,11 @@
 /* Reserve the final Player layout immediately; only the visible sidebar transitions. */
 .phase2c-sidebar [data-slot="sidebar-gap"] { transition: none; }
 
+/* The shared Sidebar owns positioning and the layout reservation.  Phase 2C's
+   menu and panels own the visible surfaces, so the shell itself must not paint
+   a second full-width background while the dock changes size. */
+.phase2c-sidebar [data-sidebar="sidebar"] { background: transparent; }
+
 .phase2c-sidebar[data-tools-open="true"] [data-slot="sidebar"][data-state="expanded"] > .fixed {
   box-shadow: 6px 0 14px -6px rgb(0 0 0 / 18%);
 }
