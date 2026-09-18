@@ -44,11 +44,12 @@ defineEmits<{ toggleFullscreen: [] }>();
 .player-top-bar {
   position: absolute;
   z-index: 20;
-  inset: 0.5rem 0.5rem auto;
+  inset: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 0.5rem;
   min-width: 0;
+  padding: 0.5rem;
   pointer-events: none;
 }
 .player-top-bar-tools { display: contents; }
