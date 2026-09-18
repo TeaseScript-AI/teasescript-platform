@@ -85,27 +85,18 @@ function startsGroup(index: number) {
 function endsGroup(index: number) {
   return !sameSpeaker(index, index + 1);
 }
+// A run is introduced once; the bubbles below it continue the same speaker.
 function showsName(index: number, player: boolean) {
-  if (player || props.design.speakerName === "none") return false;
-  return props.design.speakerName === "always" || startsGroup(index);
-}
-function showsAvatar(index: number) {
-  if (props.design.avatar === "none") return false;
-  return props.design.avatar === "first" ? startsGroup(index) : endsGroup(index);
+  return !player && startsGroup(index);
 }
 // Flattening the touching corners makes a run read as one block instead of separate cards.
+// Only the speaker's own side is flattened: bubbles all start there, so they truly meet,
+// while the free side ends wherever the text happens to wrap.
 // Tailwind scans for literal class names, so every corner is spelled out.
 function cornerClass(index: number, player: boolean) {
-  if (!props.design.groupedCorners) return "";
-  const top = !startsGroup(index);
-  const bottom = !endsGroup(index);
   const classes: string[] = [];
-  if (top) classes.push(player ? "rounded-tr-sm" : "rounded-tl-sm");
-  if (bottom) classes.push(player ? "rounded-br-sm" : "rounded-bl-sm");
-  if (props.design.freeSideCorners) {
-    if (top) classes.push(player ? "rounded-tl-sm" : "rounded-tr-sm");
-    if (bottom) classes.push(player ? "rounded-bl-sm" : "rounded-br-sm");
-  }
+  if (!startsGroup(index)) classes.push(player ? "rounded-tr-sm" : "rounded-tl-sm");
+  if (!endsGroup(index)) classes.push(player ? "rounded-br-sm" : "rounded-bl-sm");
   return classes.join(" ");
 }
 function interruptFollow() {
@@ -177,20 +168,18 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
           <!-- Session events carry no authored story text and receive no designed treatment. -->
           <p v-if="entry.kind === 'session-event'" class="session-event">{{ entry.text }}</p>
           <Message v-else :align="entry.speakerId === 'user' ? 'end' : 'start'">
-            <MessageAvatar v-if="entry.speakerId !== 'user' && design.avatar !== 'none'"
-              class="self-start" :class="showsAvatar(item.index) ? '' : 'invisible'">
+            <!-- The avatar keeps its place through the run so the bubbles stay on one line. -->
+            <MessageAvatar v-if="entry.speakerId !== 'user'"
+              class="self-start" :class="startsGroup(item.index) ? '' : 'invisible'">
               <Avatar>
                 <AvatarFallback class="text-xs font-semibold">{{ speakers[entry.speakerId]?.avatar }}</AvatarFallback>
               </Avatar>
             </MessageAvatar>
             <MessageContent>
-              <MessageHeader v-if="showsName(item.index, entry.speakerId === 'user') && !design.nameInBubble">
-                {{ speakers[entry.speakerId]?.name ?? entry.speakerId }}
-              </MessageHeader>
               <Bubble :variant="entry.speakerId === 'user' ? design.playerFill : design.speakerFill"
                 :align="entry.speakerId === 'user' ? 'end' : 'start'">
                 <BubbleContent :class="cornerClass(item.index, entry.speakerId === 'user')">
-                  <MessageHeader v-if="showsName(item.index, entry.speakerId === 'user') && design.nameInBubble"
+                  <MessageHeader v-if="showsName(item.index, entry.speakerId === 'user')"
                     class="px-0 pb-0.5">
                     {{ speakers[entry.speakerId]?.name ?? entry.speakerId }}
                   </MessageHeader>
@@ -244,11 +233,6 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
    a change of speaker gets the full separation. */
 .transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: 1rem 0; }
 .transcript-entry[data-continues="true"] { padding-block-start: 0.125rem; }
-/* The avatar sits beside the bubble, not beside the name above it: offset it by
-   the header's own line height plus the content gap. */
-.transcript-entry:has([data-slot="message-content"] > [data-slot="message-header"]) :deep([data-slot="message-avatar"]) {
-  margin-block-start: calc(1rem + 0.625rem);
-}
 .session-event { margin: 0; font-size: 0.8125rem; color: var(--text-muted); }
 .transcript-empty { padding: 1rem; font-size: 0.875rem; color: var(--muted-foreground); }
 .return-to-latest {

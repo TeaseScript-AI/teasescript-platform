@@ -8,7 +8,7 @@ import Stage from "./Stage.vue";
 import PlayerTopBar from "./PlayerTopBar.vue";
 import Transcript from "./Transcript.vue";
 import ConversationSurface from "./ConversationSurface.vue";
-import { avatarOptions, bubbleFills, speakerNameOptions, transcriptDesignDefaults } from "./transcriptDesign";
+import { bubbleFills, transcriptDesignDefaults } from "./transcriptDesign";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
 import { transcriptFixtures, transcriptFixtureSpeakers } from "./transcriptFixtures";
 import { createPlayerRuntimeSession, createPlayerRuntimeRestorePoint, restorePlayerRuntimeSession, type PlayerRuntimeSession, type PlayerRuntimeRestorePoint } from "../../../runtime-adapter.js";
@@ -144,28 +144,6 @@ async function toggleFullscreen() {
                 <select v-model="transcriptDesign.playerFill" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
                   <option v-for="fill in bubbleFills" :key="fill" :value="fill">{{ fill }}</option>
                 </select>
-              </label>
-              <label class="grid gap-2">
-                Speaker name
-                <select v-model="transcriptDesign.speakerName" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
-                  <option v-for="option in speakerNameOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-                </select>
-              </label>
-              <label class="grid gap-2">
-                Avatar
-                <select v-model="transcriptDesign.avatar" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
-                  <option v-for="option in avatarOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-                </select>
-              </label>
-              <label class="flex items-center gap-2">
-                <input v-model="transcriptDesign.nameInBubble" type="checkbox" /> Name inside the bubble
-              </label>
-              <label class="flex items-center gap-2">
-                <input v-model="transcriptDesign.groupedCorners" type="checkbox" /> Flatten touching corners in a run
-              </label>
-              <label class="flex items-center gap-2">
-                <input v-model="transcriptDesign.freeSideCorners" type="checkbox" :disabled="!transcriptDesign.groupedCorners" />
-                Flatten the free side as well
               </label>
             </fieldset>
             <fieldset class="grid min-w-0 gap-2">
