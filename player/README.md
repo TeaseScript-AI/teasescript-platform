@@ -41,11 +41,13 @@ mask colours remain separate presentation data.
 ## Experimental dynamic theme evaluation
 
 Run `npm run dev:player:phase2c -- --host 0.0.0.0` and open `/phase2c/`, then Visual Lab → Theme Lab.
-The generated-theme switch scopes changes to its component preview; it never recolors the Player. The off state uses
-current light-theme aliases (new roles share the nearest existing role). Native pickers adapt sRGB input into canonical
-OKLCH; sliders edit independent surface/accent seeds, with light/dark and standard/high controls. State is session-local and is not persisted. Exact scene samples
-remain separate and changing them does not replace the accent seed. Native inputs and the existing Button primitive
-provide real focus, hover, pressed, selected, and disabled states; forced hover/pressed samples aid comparison.
+The generated-theme switch applies to the actual Player: shell/Stage ambience, Tools, transcript/composer, top bar,
+controls, Timer and body-portaled overlays. There is no separate component sample card. Switching off restores the
+existing baseline, including Timer materials and any pre-existing inline theme values. The App owns application and
+cleanup on the standalone document root so portaled UI shares the same resolved roles; the generator remains pure.
+Native pickers adapt sRGB input into canonical OKLCH; sliders edit independent surface/accent seeds, with light/dark and
+standard/high controls. State is session-local and is not persisted. UI ambience follows the surface family without
+replacing content-owned scene/media colors or the accent seed. Timer sizing and full/compact selection are unchanged.
 
 `theme/palette.ts` is a pure, DOM/Vue-independent generator. `theme/color.ts` validates finite OKLCH inputs, normalizes
 hue, reduces chroma into sRGB while preserving lightness/hue, and measures opaque sRGB luminance contrast. The Lab
@@ -58,7 +60,7 @@ translucent compositing, state distinguishability, or color-vision suitability.
 The generator accepts already-resolved platform intent. User/package precedence, authored theme registration and
 missing-variant fallback remain governed by [the theme boundary](../docs/ui/PLAYER-UI.md#theme-and-customization-boundary)
 and are not implemented here. It does not convert authored custom themes, accept scene/speaker/control colors, or
-produce interaction families from arbitrary content colors. Production integration, persistence, final dark values and
+produce interaction families from arbitrary content colors. Final production adoption, persistence, dark values and
 policy thresholds remain Owner choices. No dependency is added; local color math keeps this small experimental module
 portable, with reference-vector and bounded matrix tests covering its maintenance-sensitive conversion path. Run
 `node tools/theme-lab-browser-checks.mjs <development-URL>/phase2c/` for the focused browser check.

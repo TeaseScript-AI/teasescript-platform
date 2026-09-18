@@ -53,6 +53,40 @@ const longTitle = ref(false);
 const timerKind = ref<PlayerTimerKind>("visible");
 const timerCount = ref(1);
 const timerReset = ref(0);
+// The standalone Player owns root tokens so body-portaled Reka surfaces share the theme.
+// Retain previous inline values so switching off/unmounting restores the exact baseline.
+const previousThemeProperties = new Map<string, { value: string; priority: string }>();
+let previousThemeMode: string | null = null;
+let themeApplied = false;
+function clearThemeLab() {
+  if (!themeApplied) return;
+  const root = document.documentElement;
+  for (const [property, previous] of previousThemeProperties) {
+    if (previous.value) root.style.setProperty(property, previous.value, previous.priority);
+    else root.style.removeProperty(property);
+  }
+  previousThemeProperties.clear();
+  if (previousThemeMode === null) root.removeAttribute("data-phase2c-theme");
+  else root.setAttribute("data-phase2c-theme", previousThemeMode);
+  themeApplied = false;
+}
+function applyThemeLab(update: { enabled: boolean; mode: "light" | "dark"; variables: Record<string, string> }) {
+  if (!isDevelopment) return;
+  if (!update.enabled) { clearThemeLab(); return; }
+  const root = document.documentElement;
+  if (!themeApplied) {
+    previousThemeMode = root.getAttribute("data-phase2c-theme");
+    themeApplied = true;
+  }
+  for (const [property, value] of Object.entries(update.variables)) {
+    if (!previousThemeProperties.has(property)) previousThemeProperties.set(property, {
+      value: root.style.getPropertyValue(property), priority: root.style.getPropertyPriority(property),
+    });
+    root.style.setProperty(property, value);
+  }
+  root.dataset.phase2cTheme = update.mode;
+}
+onBeforeUnmount(clearThemeLab);
 const transcriptEntries = ref(transcriptFixtures(0, 2000));
 const runtimeSession = shallowRef<PlayerRuntimeSession | null>(null);
 const runtimeRestore = shallowRef<PlayerRuntimeRestorePoint | null>(null);
@@ -573,7 +607,7 @@ async function updateSidebarVisibility(open: boolean) {
           <ToolLifetimeFixture v-if="toolStateFixture && tool === 'Layout Debug'" />
           <LayoutDebug v-else-if="isDevelopment && tool === 'Layout Debug' && shellElement" :player="shellElement" />
           <div v-if="isDevelopment && tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
-            <ThemeLab />
+            <ThemeLab @theme-change="applyThemeLab" />
             <label class="grid gap-2">
               Stage media fixture
               <select v-model="mediaFixture" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">

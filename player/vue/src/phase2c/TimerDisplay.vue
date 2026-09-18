@@ -60,12 +60,12 @@ const accessibleName = computed(() => {
 <style scoped>
 .timer-display {
   --timer-size: 132px;
-  --timer-foreground: oklch(100% 0 0);
-  --timer-surface: oklch(16.52% 0 0);
-  --timer-accent: var(--package-accent);
+  --timer-foreground: var(--theme-text-primary, oklch(100% 0 0));
+  --timer-surface: var(--theme-surface-floating, oklch(16.52% 0 0));
+  --timer-accent: var(--theme-accent-solid, var(--package-accent));
   --timer-number-shadow:
-    0 1px 2px oklch(0% 0 0 / 70%),
-    0 2px 5px oklch(0% 0 0 / 38%);
+    0 1px 2px var(--theme-structural-shadow, oklch(0% 0 0 / 70%)),
+    0 2px 5px var(--theme-structural-shadow, oklch(0% 0 0 / 38%));
   position: relative;
   display: grid;
   flex: 0 0 auto;
@@ -145,7 +145,7 @@ const accessibleName = computed(() => {
   font-weight: 350;
   line-height: 1;
   letter-spacing: -0.025em;
-  text-shadow: 0 1px 2px oklch(0% 0 0 / 48%);
+  text-shadow: 0 1px 2px var(--theme-structural-shadow, oklch(0% 0 0 / 48%));
 }
 
 .timer-display[data-long-time] .timer-time {
@@ -161,7 +161,7 @@ const accessibleName = computed(() => {
   line-height: 1.2;
   letter-spacing: 0.02em;
   text-align: center;
-  text-shadow: 0 1px 2px oklch(0% 0 0 / 48%);
+  text-shadow: 0 1px 2px var(--theme-structural-shadow, oklch(0% 0 0 / 48%));
 }
 
 @keyframes timer-mystery-drift {
