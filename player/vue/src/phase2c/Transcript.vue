@@ -164,7 +164,8 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
           :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
           :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
           role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
-          class="transcript-entry" :style="{ transform: `translateY(${item.start}px)` }">
+          class="transcript-entry" :data-continues="!startsGroup(item.index)"
+          :style="{ transform: `translateY(${item.start}px)` }">
           <!-- Session events carry no authored story text and receive no designed treatment. -->
           <p v-if="entry.kind === 'session-event'" class="session-event">{{ entry.text }}</p>
           <Message v-else :align="entry.speakerId === 'user' ? 'end' : 'start'">
@@ -227,7 +228,10 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
 }
 :deep(.transcript-scroll[data-scrolled="true"]) { --transcript-top-fade: 1rem; }
 .transcript-history { position: relative; width: 100%; }
-.transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: 0.25rem; }
+/* The gap above a row separates it from the previous one: a run stays tight,
+   a change of speaker gets the full separation. */
+.transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: 0.625rem 0; }
+.transcript-entry[data-continues="true"] { padding-block-start: 0.125rem; }
 .session-event { margin: 0; font-size: 0.8125rem; color: var(--text-muted); }
 .transcript-empty { padding: 1rem; font-size: 0.875rem; color: var(--muted-foreground); }
 .return-to-latest {
