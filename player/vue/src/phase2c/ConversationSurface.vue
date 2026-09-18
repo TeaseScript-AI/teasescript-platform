@@ -32,7 +32,7 @@ useResizeObserver(overlay, () => {
 .conversation-surface { position: relative; display: flex; min-height: 0; padding-inline: 1rem; }
 .conversation-overlay {
   position: absolute; inset: auto 1rem 0; z-index: 2; pointer-events: none;
-  padding-top: 0.5rem; padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+  padding-top: 0.5rem; padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
 }
 .conversation-glass {
   pointer-events: auto; border-radius: 0.75rem; padding: 0.5rem;
