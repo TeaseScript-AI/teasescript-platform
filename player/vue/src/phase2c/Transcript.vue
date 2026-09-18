@@ -169,8 +169,8 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
           <!-- Session events carry no authored story text and receive no designed treatment. -->
           <p v-if="entry.kind === 'session-event'" class="session-event">{{ entry.text }}</p>
           <Message v-else :align="entry.speakerId === 'user' ? 'end' : 'start'">
-            <MessageAvatar v-if="design.avatar !== 'none'"
-              :class="showsAvatar(item.index) ? '' : 'invisible'">
+            <MessageAvatar v-if="entry.speakerId !== 'user' && design.avatar !== 'none'"
+              class="self-start" :class="showsAvatar(item.index) ? '' : 'invisible'">
               <Avatar>
                 <AvatarFallback class="text-xs font-semibold">{{ speakers[entry.speakerId]?.avatar }}</AvatarFallback>
               </Avatar>
@@ -230,7 +230,7 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
 .transcript-history { position: relative; width: 100%; }
 /* The gap above a row separates it from the previous one: a run stays tight,
    a change of speaker gets the full separation. */
-.transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: 0.625rem 0; }
+.transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: 1rem 0; }
 .transcript-entry[data-continues="true"] { padding-block-start: 0.125rem; }
 .session-event { margin: 0; font-size: 0.8125rem; color: var(--text-muted); }
 .transcript-empty { padding: 1rem; font-size: 0.875rem; color: var(--muted-foreground); }
