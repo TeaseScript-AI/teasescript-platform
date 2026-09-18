@@ -1507,6 +1507,76 @@ async function conversationWidthChecks(page) {
   return "PASS conversation content width and hidden scrollbar ownership";
 }
 
+async function topBarDebugChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  await page.locator('[data-launcher] button[aria-label="Layout Debug"]').click();
+  const controls = page.getByRole("region", { name: "Layout Debug controls" });
+  const enabled = controls.getByRole("checkbox", { name: "Layout Debug", exact: true });
+  const regions = controls.getByRole("checkbox", { name: "Region bounds", exact: true });
+  const outline = page.locator('[data-layout-debug-overlay] [data-region="Top bar"]');
+  const bounds = () =>
+    page.evaluate(() =>
+      ["[data-player-top-bar]", ".player-stage"].map((selector) => {
+        const r = document
+          .querySelector("#phase2c-shell")
+          .querySelector(selector)
+          .getBoundingClientRect();
+        return [r.x, r.y, r.width, r.height];
+      }),
+    );
+  const before = await bounds();
+  check(
+    (await outline.count()) === 0,
+    "Top-bar debug outline must be absent while debug is disabled",
+  );
+  await enabled.check();
+  await outline.waitFor();
+  check(
+    (await outline.innerText()) === "Top bar",
+    "Top-bar debug outline must have a readable identity",
+  );
+  check(
+    JSON.stringify(before) === JSON.stringify(await bounds()),
+    "Enabling Layout Debug must preserve top-bar and Stage geometry",
+  );
+  await page.waitForFunction(() => {
+    const root = document.querySelector("#phase2c-shell");
+    const actual = root.querySelector("[data-player-top-bar]").getBoundingClientRect();
+    const outline = root.querySelector('[data-region="Top bar"]').getBoundingClientRect();
+    return ["x", "y", "width", "height"].every((key) => Math.abs(actual[key] - outline[key]) < 1);
+  });
+  check(
+    (await controls
+      .getByText(
+        /Top bar: absolute overlay \(outside grid tracks\); height .*Stage overlap .*insets top/,
+      )
+      .count()) === 1,
+    "Debug report must identify absolute overlay geometry and Stage overlap",
+  );
+  check(
+    await outline.evaluate((element) => getComputedStyle(element).pointerEvents === "none"),
+    "Debug outline must not intercept Player input",
+  );
+  await regions.uncheck();
+  check(
+    (await outline.count()) === 0,
+    "Top-bar outline and label must follow the Region bounds layer",
+  );
+  await regions.check();
+  await outline.waitFor();
+  await enabled.uncheck();
+  check((await outline.count()) === 0, "Disabling debug must remove the top-bar outline and label");
+  check(
+    JSON.stringify(before) === JSON.stringify(await bounds()),
+    "Debug layer toggles must preserve top-bar and Stage geometry",
+  );
+  return "PASS top-bar Layout Debug measurement, layer visibility and geometry";
+}
+
 async function topBarChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -1640,6 +1710,14 @@ try {
     JSON.stringify({ browser: { contextOptions: { ignoreHTTPSErrors: true } } }),
   );
   cli("open", url, "--config", config);
+  const topBarDebugOutput = cli("run-code", topBarDebugChecks.toString());
+  if (
+    !topBarDebugOutput.includes("PASS top-bar Layout Debug measurement, layer visibility and geometry")
+  )
+    throw new Error(topBarDebugOutput);
+  console.log(
+    "phase2c-browser-checks: PASS top-bar Layout Debug measurement, layer visibility and geometry",
+  );
   const topBarOutput = cli("run-code", topBarChecks.toString());
   if (
     !topBarOutput.includes(

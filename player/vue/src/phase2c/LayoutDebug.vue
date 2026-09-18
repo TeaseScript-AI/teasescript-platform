@@ -8,6 +8,7 @@ const layers = ref({ regions: true, reserves: false, spacing: false, grid: false
 const labels = { regions: "Region bounds", reserves: "Reserved tools space", spacing: "Spacing", grid: "Grid tracks", centers: "Center lines", media: "Actual media bounds" };
 const selectors = {
   Player: ":scope", Tools: "[data-tools-surface]", Stage: ".player-stage",
+  "Top bar": "[data-player-top-bar]",
   Conversation: ".player-conversation", Transcript: ".transcript-scroll",
   Composer: "[data-runtime-interaction] form", Content: ".stage-media-frame",
 };
@@ -80,12 +81,21 @@ function measure() {
         areas: gap ? [captureRect(new DOMRect(end.left, start.bottom, end.width, gap))] : [] });
     }
   }
+  const topBar = root.querySelector<HTMLElement>(selectors["Top bar"]);
+  const topBarStyle = topBar ? getComputedStyle(topBar) : null;
+  const topBarRect = regions["Top bar"], stageRect = regions.Stage;
+  const stageOverlap = topBarRect && stageRect
+    ? Math.max(0, Math.min(topBarRect.bottom, stageRect.bottom) - Math.max(topBarRect.top, stageRect.top))
+    : 0;
   const style = getComputedStyle(root);
   snapshot.value = {
     regions, media, spacing,
     reserve: root.dataset.narrow === "true" ? 0 : root.querySelector('[data-slot="sidebar-gap"]')?.getBoundingClientRect().width ?? 0,
     tracks: contentStyle ? parseGridTracks(contentStyle.gridTemplateRows, parseFloat(contentStyle.rowGap)).map(track => track.offset + track.size) : [],
     constraints: [
+      ...(topBarStyle && topBarRect ? [
+        `Top bar: ${topBarStyle.position} overlay (outside grid tracks); height ${formatPixels(topBarRect.height)}; Stage overlap ${formatPixels(stageOverlap)}; insets top ${topBarStyle.top}, right ${topBarStyle.right}, left ${topBarStyle.left}`,
+      ] : []),
       `Composer overlay: ${formatPixels(root.querySelector("[data-conversation-overlay]")?.getBoundingClientRect().height ?? 0)} (scroll-end clearance, not a layout gap)`,
       `Mode: ${root.dataset.narrow === "true" ? "overlay" : "docked"}`,
       `Protected Player width: ${style.getPropertyValue("--player-reserve").trim()} (provisional)`,
@@ -175,6 +185,8 @@ function center(rect: LayoutRect) {
 .debug-box[data-region="Tools"] > span { margin-top: 16px; }
 .debug-box[data-region="Stage"] > span { margin-top: 16px; }
 .debug-box[data-region="Content"] > span { margin-top: 32px; }
+.debug-box[data-region="Top bar"] { border-style: solid; }
+.debug-box[data-region="Top bar"] > span { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); }
 .debug-box[data-region="Transcript"] > span { margin-top: 16px; }
 .debug-media { border: 2px solid #b98900; }
 .debug-reserve { inset: 0 auto 0 0; border: 1px solid #d97706; background: rgb(217 119 6 / 10%); }
