@@ -176,7 +176,9 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
               </Avatar>
             </MessageAvatar>
             <MessageContent>
-              <Bubble :variant="entry.speakerId === 'user' ? design.playerFill : design.speakerFill"
+              <!-- Narrower than the component's own cap, in line with WhatsApp and iMessage. -->
+              <Bubble class="max-w-[75%]"
+                :variant="entry.speakerId === 'user' ? design.playerFill : design.speakerFill"
                 :align="entry.speakerId === 'user' ? 'end' : 'start'">
                 <BubbleContent :class="cornerClass(item.index, entry.speakerId === 'user')">
                   <MessageHeader v-if="showsName(item.index, entry.speakerId === 'user')"
