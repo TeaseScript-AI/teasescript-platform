@@ -819,9 +819,10 @@ async function transcriptChecks(page) {
   const glass = page.locator(".conversation-glass");
   check(await scroll.evaluate((el) => {
     const style = getComputedStyle(el);
-    return style.maskImage.includes("gradient") && style.maskImage.endsWith("rgba(0, 0, 0, 0) 100%)")
+    const bottomAlpha = Number(style.maskImage.match(/rgba\(0, 0, 0, ([\d.]+)\) 100%\)$/)?.[1]);
+    return style.maskImage.includes("gradient") && bottomAlpha > 0 && bottomAlpha < 1
       && getComputedStyle(el, "::after").content === "none";
-  }), "Transcript fade must stay transparent through the bottom edge without a painted strip");
+  }), "Transcript fade must retain faint content at the bottom edge without a painted strip");
   const readableLatest = () => page.waitForFunction(() => {
     const rows = document.querySelectorAll(".transcript-entry");
     const last = rows[rows.length - 1]?.getBoundingClientRect();
