@@ -51,6 +51,16 @@
 }
 
 .phase2c-sidebar {
+  /* One continuous canvas beneath the dock reservation and Player content.
+     Layout-only children stay transparent; tools paint their own surfaces. */
+  /* Same ambient wash as player/styles/effects.css; no legacy layout rules. */
+  background:
+    radial-gradient(ellipse 90% 55% at 68% 0%,
+      color-mix(in srgb, var(--scene-ambient) 34%, transparent), transparent 72%),
+    linear-gradient(to bottom,
+      color-mix(in srgb, var(--scene-ambient) 26%, transparent) 0 var(--stage-height),
+      transparent calc(var(--stage-height) + 200px)),
+    var(--background);
   --launcher-width: var(--sidebar-width-icon);
   --launcher-space: var(--sidebar-width-icon);
   --sidebar-width: max(calc(var(--launcher-space) + 1px), min(
@@ -86,13 +96,6 @@
 [data-launcher-label] { display: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .phase2c-sidebar[data-labels-visible="true"] [data-launcher-label] { display: block; }
 
-/* Keep an existing panel's surface in step with the shared Sidebar's native
-   200ms width transition. Without this, the panel background reaches its new
-   width immediately while the dock is still catching up. */
-.phase2c-sidebar:not([data-narrow="true"]) .tool-panel-strip > [data-tool] {
-  transition: width 200ms linear;
-}
-
 /* Animate only the preview overlay; its reserved icon-strip width stays fixed. */
 .phase2c-sidebar[data-labels="preview"] [data-launcher] {
   overflow: hidden;
@@ -105,7 +108,6 @@
 .phase2c-sidebar[data-labels="preview"][data-labels-visible="true"] [data-launcher-label] { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
   .phase2c-sidebar[data-labels="preview"] [data-launcher] { transition: none; }
-  .phase2c-sidebar:not([data-narrow="true"]) .tool-panel-strip > [data-tool] { transition: none; }
 }
 
 /* Keep open tools distinguishable from a transient pointer hover. */
@@ -202,14 +204,6 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
 /* The stage owns a stable track independent of asset ratio and chrome visibility.
    Keep a usable conversation/composer remainder, including in short windows. */
 .player-composition {
-  /* Same ambient wash as player/styles/effects.css; no legacy layout rules. */
-  background:
-    radial-gradient(ellipse 90% 55% at 68% 0%,
-      color-mix(in srgb, var(--scene-ambient) 34%, transparent), transparent 72%),
-    linear-gradient(to bottom,
-      color-mix(in srgb, var(--scene-ambient) 26%, transparent) 0 var(--stage-height),
-      transparent calc(var(--stage-height) + 200px)),
-    var(--background);
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 3fr) minmax(6rem, 2fr);

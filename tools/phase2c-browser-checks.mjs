@@ -61,6 +61,19 @@ async function checks(page) {
     }, expected);
   }
 
+  // Reservation and content reveal the same shell-owned canvas during dock animation.
+  const continuousCanvas = await page.evaluate(() => {
+    const shell = getComputedStyle(document.querySelector("#phase2c-shell"));
+    return shell.backgroundImage !== "none" && [
+      '[data-slot="sidebar-gap"]', '[data-slot="sidebar-inset"]',
+      '[data-sidebar="sidebar"]', '.player-composition',
+    ].every(selector => {
+      const style = getComputedStyle(document.querySelector(selector));
+      return style.backgroundColor === "rgba(0, 0, 0, 0)" && style.backgroundImage === "none";
+    });
+  });
+  check(continuousCanvas, "Dock reservation and Player content must share one background canvas");
+
   // Lifecycle/order: replacement keeps its slot, pinning does not reorder, widths belong to tools.
   await launcher("Visual Lab").click();
   await width("Visual Lab", "Small");
