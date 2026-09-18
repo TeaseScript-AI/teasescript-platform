@@ -6,6 +6,7 @@ import Sortable from "sortablejs";
 import ToolLifetimeFixture from "./ToolLifetimeFixture.vue";
 import ToolPanelHeader from "./ToolPanelHeader.vue";
 import ToolPanelBody from "./ToolPanelBody.vue";
+import LayoutDebug from "./LayoutDebug.vue";
 import { toolPanelSizes } from "./toolPanelSizes";
 import Stage from "./Stage.vue";
 import Transcript from "./Transcript.vue";
@@ -557,6 +558,7 @@ async function updateSidebarVisibility(open: boolean) {
         :target="toolContentTargets[tool] ?? toolContentParking"
         :visible="sidebarVisible && openTools.includes(tool) && (!narrow || (!narrowMenuVisible && narrowTool === tool))">
           <ToolLifetimeFixture v-if="toolStateFixture && tool === 'Layout Debug'" />
+          <LayoutDebug v-else-if="isDevelopment && tool === 'Layout Debug' && shellElement" :player="shellElement" />
           <div v-if="isDevelopment && tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
             <label class="grid gap-2">
               Stage media fixture
