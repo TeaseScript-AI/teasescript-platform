@@ -86,6 +86,13 @@
 [data-launcher-label] { display: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .phase2c-sidebar[data-labels-visible="true"] [data-launcher-label] { display: block; }
 
+/* Keep an existing panel's surface in step with the shared Sidebar's native
+   200ms width transition. Without this, the panel background reaches its new
+   width immediately while the dock is still catching up. */
+.phase2c-sidebar:not([data-narrow="true"]) .tool-panel-strip > [data-tool] {
+  transition: width 200ms linear;
+}
+
 /* Animate only the preview overlay; its reserved icon-strip width stays fixed. */
 .phase2c-sidebar[data-labels="preview"] [data-launcher] {
   overflow: hidden;
@@ -98,6 +105,7 @@
 .phase2c-sidebar[data-labels="preview"][data-labels-visible="true"] [data-launcher-label] { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
   .phase2c-sidebar[data-labels="preview"] [data-launcher] { transition: none; }
+  .phase2c-sidebar:not([data-narrow="true"]) .tool-panel-strip > [data-tool] { transition: none; }
 }
 
 /* Keep open tools distinguishable from a transient pointer hover. */
