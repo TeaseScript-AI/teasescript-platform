@@ -15,7 +15,7 @@ defineEmits<{ toggleFullscreen: [] }>();
 </script>
 
 <template>
-  <header class="player-top-bar">
+  <header data-player-top-bar class="player-top-bar">
     <div v-if="$slots.tools" class="player-top-bar-tools"><slot name="tools" /></div>
     <h1 class="player-top-bar-title">{{ title }}</h1>
     <Tooltip>
