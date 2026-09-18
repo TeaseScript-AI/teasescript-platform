@@ -51,13 +51,12 @@
 }
 
 .phase2c-sidebar {
-  --conversation-max-width: 920px;
-  --conversation-gutter: 4rem;
+  --conversation-max-width: 864px;
   --content-reserve: 0px;
-  /* Keep the natural contained image and existing conversation width. Only
+  /* Keep the natural contained image and selected conversation width. Only
      content moves; the Stage and its floating controls keep their own geometry. */
   --content-ideal-width: min(var(--usable-width), max(
-    calc(var(--conversation-max-width) + var(--conversation-gutter)),
+    var(--conversation-max-width),
     calc(var(--stage-height) * var(--media-aspect))
   ));
   --content-width: min(var(--content-ideal-width), calc(var(--usable-width) - var(--content-reserve)));
@@ -223,11 +222,8 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
   min-height: 0;
 }
 .player-conversation {
-  --conversation-width: min(var(--conversation-max-width), calc(var(--content-width) - var(--conversation-gutter)));
+  --conversation-width: min(var(--conversation-max-width), var(--content-width));
   width: var(--conversation-width);
   margin: 0 0 0 calc(var(--content-offset) + (var(--content-width) - var(--conversation-width)) / 2);
-}
-@media (max-width: 600px), (max-height: 450px) {
-  .phase2c-sidebar { --conversation-gutter: 2rem; }
 }
 html:fullscreen { background: var(--background); }

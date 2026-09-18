@@ -114,6 +114,20 @@ async function checks(page) {
     () => document.querySelector("#phase2c-shell").dataset.narrow === "true",
   );
   const closedNarrow = await page.locator(".player-stage").boundingBox();
+  const narrowConversation = await page.locator(".player-conversation").boundingBox();
+  const narrowComposer = await page.locator(".conversation-glass").boundingBox();
+  const rootRem = await page.evaluate(() =>
+    parseFloat(getComputedStyle(document.documentElement).fontSize),
+  );
+  check(
+    Math.abs(narrowConversation.width - closedNarrow.width) < 1,
+    "Narrow conversation must use the complete available Player width",
+  );
+  check(
+    Math.abs(narrowComposer.x - narrowConversation.x - rootRem) < 1 &&
+      Math.abs(narrowConversation.x + narrowConversation.width - narrowComposer.x - narrowComposer.width - rootRem) < 1,
+    "Narrow conversation must have only its explicit inner padding",
+  );
   await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
   await expectState(expected);
   check(
