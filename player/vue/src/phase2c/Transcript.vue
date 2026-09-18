@@ -127,13 +127,13 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
   overflow-anchor: none; scrollbar-gutter: stable;
 }
 .transcript-scroll:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-/* Keep transcript contrast intact through the composer's upper half, then
-   reduce it below the midpoint while retaining a faint trace to the bottom. */
+/* Keep transcript contrast intact above the composer, then reduce it across
+   the complete composer height while retaining a faint trace to the bottom. */
 .transcript-scroll {
   --transcript-top-fade: 0px;
   mask-image: linear-gradient(to bottom,
     transparent 0, black var(--transcript-top-fade),
-    black max(var(--transcript-top-fade), calc(100% - (var(--composer-top-from-bottom, 0px) + var(--composer-bottom-from-bottom, 0px)) / 2)),
+    black max(var(--transcript-top-fade), calc(100% - var(--composer-top-from-bottom, 0px))),
     rgb(0 0 0 / 20%) calc(100% - var(--composer-bottom-from-bottom, 0px)),
     rgb(0 0 0 / 20%) 100%);
 }
