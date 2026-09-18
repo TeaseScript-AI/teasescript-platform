@@ -14,12 +14,14 @@ import {
 } from "@/components/ui/message";
 import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } from "../../../model.js";
 import TranscriptMarkup from "./TranscriptMarkup.vue";
+import type { TranscriptDesign } from "./transcriptDesign";
 
 const props = defineProps<{
   entries: readonly PlayerTranscriptEntryPresentation[];
   speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
   revision?: number;
   bottomInset?: number;
+  design: TranscriptDesign;
 }>();
 const scrollElement = ref<HTMLDivElement | null>(null);
 const touching = ref(false);
@@ -70,12 +72,33 @@ const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => ({
 const showLatest = computed(() => !touching.value && !virtualizer.value.isScrolling &&
   virtualizer.value.getDistanceFromEnd() > Math.max(80, (virtualizer.value.scrollRect?.height ?? 0) / 2));
 const scrolled = computed(() => (virtualizer.value.scrollOffset ?? 0) > 1);
-// Virtual rows are independent, so grouping is decided per row from its predecessor.
-function startsGroup(index: number) {
+// Virtual rows are independent, so grouping is decided per row from its neighbours.
+function sameSpeaker(index: number, other: number) {
   const entry = props.entries[index];
-  const previous = props.entries[index - 1];
-  if (entry?.kind !== "message") return false;
-  return previous?.kind !== "message" || previous.speakerId !== entry.speakerId;
+  const neighbour = props.entries[other];
+  return entry?.kind === "message" && neighbour?.kind === "message" &&
+    neighbour.speakerId === entry.speakerId;
+}
+function startsGroup(index: number) {
+  return !sameSpeaker(index, index - 1);
+}
+function endsGroup(index: number) {
+  return !sameSpeaker(index, index + 1);
+}
+function showsName(index: number, player: boolean) {
+  if (player || props.design.speakerName === "none") return false;
+  return props.design.speakerName === "always" || startsGroup(index);
+}
+function showsAvatar(index: number, player: boolean) {
+  if (player || props.design.avatar === "none") return false;
+  return props.design.avatar === "first" ? startsGroup(index) : endsGroup(index);
+}
+// Flattening the touching corners makes a run read as one block instead of separate cards.
+function cornerClass(index: number, player: boolean) {
+  if (!props.design.groupedCorners) return "";
+  const top = startsGroup(index) ? "" : player ? "rounded-tr-sm" : "rounded-tl-sm";
+  const bottom = endsGroup(index) ? "" : player ? "rounded-br-sm" : "rounded-bl-sm";
+  return `${top} ${bottom}`;
 }
 function interruptFollow() {
   // Replace an in-flight measured end target before native user scrolling starts.
@@ -145,18 +168,19 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
           <!-- Session events carry no authored story text and receive no designed treatment. -->
           <p v-if="entry.kind === 'session-event'" class="session-event">{{ entry.text }}</p>
           <Message v-else :align="entry.speakerId === 'user' ? 'end' : 'start'">
-            <MessageAvatar v-if="entry.speakerId !== 'user'" :class="startsGroup(item.index) ? '' : 'invisible'">
+            <MessageAvatar v-if="entry.speakerId !== 'user' && design.avatar !== 'none'"
+              :class="showsAvatar(item.index, false) ? '' : 'invisible'">
               <Avatar>
                 <AvatarFallback class="text-xs font-semibold">{{ speakers[entry.speakerId]?.avatar }}</AvatarFallback>
               </Avatar>
             </MessageAvatar>
             <MessageContent>
-              <MessageHeader v-if="entry.speakerId !== 'user' && startsGroup(item.index)">
+              <MessageHeader v-if="showsName(item.index, entry.speakerId === 'user')">
                 {{ speakers[entry.speakerId]?.name ?? entry.speakerId }}
               </MessageHeader>
-              <Bubble :variant="entry.speakerId === 'user' ? 'default' : 'secondary'"
+              <Bubble :variant="entry.speakerId === 'user' ? design.playerFill : design.speakerFill"
                 :align="entry.speakerId === 'user' ? 'end' : 'start'">
-                <BubbleContent>
+                <BubbleContent :class="cornerClass(item.index, entry.speakerId === 'user')">
                   <TranscriptMarkup v-if="entry.speakerId !== 'user' && entry.content" :content="entry.content"
                     :entry-id="entry.id" :revealed="revealedSpoilers" @reveal="revealedSpoilers.add($event)" />
                   <template v-else>{{ entry.text }}</template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef } from "vue";
+import { computed, reactive, ref, shallowRef } from "vue";
 import { useEventListener, useResizeObserver } from "@vueuse/core";
 import ToolLifetimeFixture from "./ToolLifetimeFixture.vue";
 import LayoutDebug from "./LayoutDebug.vue";
@@ -8,6 +8,7 @@ import Stage from "./Stage.vue";
 import PlayerTopBar from "./PlayerTopBar.vue";
 import Transcript from "./Transcript.vue";
 import ConversationSurface from "./ConversationSurface.vue";
+import { avatarOptions, bubbleFills, speakerNameOptions, transcriptDesignDefaults } from "./transcriptDesign";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
 import { transcriptFixtures, transcriptFixtureSpeakers } from "./transcriptFixtures";
 import { createPlayerRuntimeSession, createPlayerRuntimeRestorePoint, restorePlayerRuntimeSession, type PlayerRuntimeSession, type PlayerRuntimeRestorePoint } from "../../../runtime-adapter.js";
@@ -65,6 +66,9 @@ function restoreRuntime() {
 }
 let nextMessage = 2000;
 let firstMessage = 0;
+// Reviewable message presentation choices for issue #421.
+const transcriptDesign = reactive({ ...transcriptDesignDefaults });
+
 function loadTranscript(count: number) {
   runtimeSession.value = null;
   firstMessage = 0;
@@ -127,6 +131,36 @@ async function toggleFullscreen() {
             <label class="flex items-center gap-2">
               <input v-model="longTitle" type="checkbox" /> Long stage title
             </label>
+            <fieldset class="grid gap-3">
+              <legend class="mb-2">Message design</legend>
+              <label class="grid gap-2">
+                Speaker bubble
+                <select v-model="transcriptDesign.speakerFill" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
+                  <option v-for="fill in bubbleFills" :key="fill" :value="fill">{{ fill }}</option>
+                </select>
+              </label>
+              <label class="grid gap-2">
+                Player bubble
+                <select v-model="transcriptDesign.playerFill" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
+                  <option v-for="fill in bubbleFills" :key="fill" :value="fill">{{ fill }}</option>
+                </select>
+              </label>
+              <label class="grid gap-2">
+                Speaker name
+                <select v-model="transcriptDesign.speakerName" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
+                  <option v-for="option in speakerNameOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                </select>
+              </label>
+              <label class="grid gap-2">
+                Avatar
+                <select v-model="transcriptDesign.avatar" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
+                  <option v-for="option in avatarOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                </select>
+              </label>
+              <label class="flex items-center gap-2">
+                <input v-model="transcriptDesign.groupedCorners" type="checkbox" /> Flatten touching corners in a run
+              </label>
+            </fieldset>
             <fieldset class="grid min-w-0 gap-2">
               <legend class="mb-2">Timer fixtures</legend>
               <label class="grid gap-2">
@@ -197,7 +231,7 @@ async function toggleFullscreen() {
 
         <ConversationSurface @margin-wheel="transcript?.scrollFromMargin($event)">
           <template #default="{ bottomInset }">
-            <Transcript ref="transcript" :bottom-inset="bottomInset" :key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'" :entries="runtimeSession?.transcriptEntries ?? transcriptEntries" :speakers="runtimeSession?.speakers ?? transcriptFixtureSpeakers" :revision="runtimeSession?.transcriptRevision ?? 0" />
+            <Transcript ref="transcript" :bottom-inset="bottomInset" :key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'" :entries="runtimeSession?.transcriptEntries ?? transcriptEntries" :speakers="runtimeSession?.speakers ?? transcriptFixtureSpeakers" :revision="runtimeSession?.transcriptRevision ?? 0" :design="transcriptDesign" />
           </template>
           <template #interaction><RuntimeInteraction v-model:session="runtimeSession" :reset="interactionReset" :preview="isDevelopment" @preview-submit="appendPreviewResponse" /></template>
         </ConversationSurface>
