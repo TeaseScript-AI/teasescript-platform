@@ -5,16 +5,20 @@ export interface TranscriptDesign {
   speakerFill: NonNullable<BubbleVariants["variant"]>;
   playerFill: NonNullable<BubbleVariants["variant"]>;
   speakerName: "none" | "group" | "always";
+  nameInBubble: boolean;
   avatar: "none" | "first" | "last";
   groupedCorners: boolean;
+  freeSideCorners: boolean;
 }
 
 export const transcriptDesignDefaults: TranscriptDesign = {
   speakerFill: "secondary",
   playerFill: "default",
   speakerName: "group",
+  nameInBubble: false,
   avatar: "first",
-  groupedCorners: false,
+  groupedCorners: true,
+  freeSideCorners: false,
 };
 
 export const bubbleFills = [

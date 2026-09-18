@@ -94,11 +94,19 @@ function showsAvatar(index: number) {
   return props.design.avatar === "first" ? startsGroup(index) : endsGroup(index);
 }
 // Flattening the touching corners makes a run read as one block instead of separate cards.
+// Tailwind scans for literal class names, so every corner is spelled out.
 function cornerClass(index: number, player: boolean) {
   if (!props.design.groupedCorners) return "";
-  const top = startsGroup(index) ? "" : player ? "rounded-tr-sm" : "rounded-tl-sm";
-  const bottom = endsGroup(index) ? "" : player ? "rounded-br-sm" : "rounded-bl-sm";
-  return `${top} ${bottom}`;
+  const top = !startsGroup(index);
+  const bottom = !endsGroup(index);
+  const classes: string[] = [];
+  if (top) classes.push(player ? "rounded-tr-sm" : "rounded-tl-sm");
+  if (bottom) classes.push(player ? "rounded-br-sm" : "rounded-bl-sm");
+  if (props.design.freeSideCorners) {
+    if (top) classes.push(player ? "rounded-tl-sm" : "rounded-tr-sm");
+    if (bottom) classes.push(player ? "rounded-bl-sm" : "rounded-br-sm");
+  }
+  return classes.join(" ");
 }
 function interruptFollow() {
   // Replace an in-flight measured end target before native user scrolling starts.
@@ -176,12 +184,16 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
               </Avatar>
             </MessageAvatar>
             <MessageContent>
-              <MessageHeader v-if="showsName(item.index, entry.speakerId === 'user')">
+              <MessageHeader v-if="showsName(item.index, entry.speakerId === 'user') && !design.nameInBubble">
                 {{ speakers[entry.speakerId]?.name ?? entry.speakerId }}
               </MessageHeader>
               <Bubble :variant="entry.speakerId === 'user' ? design.playerFill : design.speakerFill"
                 :align="entry.speakerId === 'user' ? 'end' : 'start'">
                 <BubbleContent :class="cornerClass(item.index, entry.speakerId === 'user')">
+                  <MessageHeader v-if="showsName(item.index, entry.speakerId === 'user') && design.nameInBubble"
+                    class="px-0 pb-0.5">
+                    {{ speakers[entry.speakerId]?.name ?? entry.speakerId }}
+                  </MessageHeader>
                   <TranscriptMarkup v-if="entry.speakerId !== 'user' && entry.content" :content="entry.content"
                     :entry-id="entry.id" :revealed="revealedSpoilers" @reveal="revealedSpoilers.add($event)" />
                   <template v-else>{{ entry.text }}</template>
@@ -234,7 +246,7 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
 .transcript-entry[data-continues="true"] { padding-block-start: 0.125rem; }
 /* The avatar sits beside the bubble, not beside the name above it: offset it by
    the header's own line height plus the content gap. */
-.transcript-entry:has([data-slot="message-header"]) :deep([data-slot="message-avatar"]) {
+.transcript-entry:has([data-slot="message-content"] > [data-slot="message-header"]) :deep([data-slot="message-avatar"]) {
   margin-block-start: calc(1rem + 0.625rem);
 }
 .session-event { margin: 0; font-size: 0.8125rem; color: var(--text-muted); }

@@ -158,7 +158,14 @@ async function toggleFullscreen() {
                 </select>
               </label>
               <label class="flex items-center gap-2">
+                <input v-model="transcriptDesign.nameInBubble" type="checkbox" /> Name inside the bubble
+              </label>
+              <label class="flex items-center gap-2">
                 <input v-model="transcriptDesign.groupedCorners" type="checkbox" /> Flatten touching corners in a run
+              </label>
+              <label class="flex items-center gap-2">
+                <input v-model="transcriptDesign.freeSideCorners" type="checkbox" :disabled="!transcriptDesign.groupedCorners" />
+                Flatten the free side as well
               </label>
             </fieldset>
             <fieldset class="grid min-w-0 gap-2">
