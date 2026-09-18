@@ -68,7 +68,7 @@ function keydown(event: KeyboardEvent) {
 </script>
 
 <template>
-  <div ref="root" data-runtime-interaction class="min-w-0 shrink-0 pt-2">
+  <div ref="root" data-runtime-interaction class="min-w-0 shrink-0">
     <div v-if="foreground?.kind === 'choose' || foreground?.kind === 'show-button'"
       :key="actionId" role="group" :aria-label="foreground.accessibleName"
       class="mb-2 flex min-w-0 gap-2 overflow-x-auto pb-1">
