@@ -27,7 +27,10 @@ const markupSources: readonly (readonly [speaker: string, source: string])[] = [
   ["guide", "> The sea is calm tonight.\n> The tide is full, the moon lies fair."],
   ["guide", "Watch for:\n- loose sand past the second dune\n- the marker posts\n- the light itself"],
   ["guide", "In order:\n1. follow the posts\n2. cross the dune\n3. wait for the beam"],
-  ["guide", "Authored colours: [color=#ffe066]pale yellow[/color], [color=#1a1a2e]near black[/color], and [color=#c2185b]deep pink[/color]."],
+  // The mid grey is the hard case: it falls on the light side of the divide and a dark
+  // bubble on the dark side, so classifying each of them would call the pair safe, yet
+  // measuring it gives about three to one.
+  ["guide", "Authored colours: [color=#ffe066]pale yellow[/color], [color=#1a1a2e]near black[/color], [color=#8a8a8a]mid grey[/color], and [color=#c2185b]deep pink[/color]."],
   ["user", "Understood. I will follow the posts."],
 ];
 

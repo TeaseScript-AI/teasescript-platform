@@ -15,6 +15,7 @@ import {
 import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } from "../../../model.js";
 import TranscriptMarkup from "./TranscriptMarkup.vue";
 import type { TranscriptDesign } from "./transcriptDesign";
+import { realizeBubble } from "./messageContrast";
 
 const props = defineProps<{
   entries: readonly PlayerTranscriptEntryPresentation[];
@@ -22,6 +23,7 @@ const props = defineProps<{
   revision?: number;
   bottomInset?: number;
   design: TranscriptDesign;
+  mode: "light" | "dark";
 }>();
 const scrollElement = ref<HTMLDivElement | null>(null);
 const touching = ref(false);
@@ -66,19 +68,44 @@ watch(() => props.bottomInset ?? 0, (inset, previous) => {
   if (inset !== previous && previousDistance <= latestThreshold && !touching.value)
     void nextTick(() => instance.scrollToEnd());
 });
+// The theme's own colours, resolved once rather than modelled: an authored colour has to
+// be weighed against the bubble it will really land on, and that bubble comes from a
+// palette this component does not own.
+const palette = ref({ surface: "#ffffff", accent: "#000000" });
+function readPalette() {
+  const element = scrollElement.value;
+  if (element === null) return;
+  const style = getComputedStyle(element);
+  const read = (name: string) => style.getPropertyValue(name).trim();
+  palette.value = {
+    surface: read("--surface-component") || "#ffffff",
+    accent: read("--theme-accent-solid") || read("--package-accent") || "#000000",
+  };
+}
+watch(() => [props.mode, props.design.lightTone, props.design.darkTone],
+  () => void nextTick(readPalette));
 // An authored accent names a hue, never a lightness; "inherit" means the speaker has none.
 // The player's own side falls back to the theme accent, so both sides are realized the
-// same way and the tone each mode can carry is chosen once, in CSS.
+// same way and the tone each mode can carry is applied to both.
 function tintOf(entry: PlayerTranscriptEntryPresentation) {
   if (entry.kind !== "message") return null;
+  // The player is not a character an author dresses: their side is the theme's accent,
+  // whatever colour a runtime source may have filled in on their behalf.
+  if (entry.speakerId === "user") return palette.value.accent;
   const accent = props.speakers[entry.speakerId]?.accent;
-  if (accent !== undefined && accent !== "inherit") return accent;
-  return entry.speakerId === "user" ? "var(--color-primary)" : null;
+  return accent !== undefined && accent !== "inherit" ? accent : null;
 }
-const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => {
-  const entry = props.entries[item.index]!;
-  return { item, entry, tint: tintOf(entry) };
-}));
+const rows = computed(() => {
+  const tone = (props.mode === "dark" ? props.design.darkTone : props.design.lightTone) / 100;
+  return virtualizer.value.getVirtualItems().map((item) => {
+    const entry = props.entries[item.index]!;
+    const tint = tintOf(entry);
+    return {
+      item, entry, tint,
+      backdrop: tint === null ? palette.value.surface : realizeBubble(tint, tone),
+    };
+  });
+});
 const showLatest = computed(() => !touching.value && !virtualizer.value.isScrolling &&
   virtualizer.value.getDistanceFromEnd() > Math.max(80, (virtualizer.value.scrollRect?.height ?? 0) / 2));
 const scrolled = computed(() => (virtualizer.value.scrollOffset ?? 0) > 1);
@@ -156,7 +183,7 @@ function returnToLatest() {
   virtualizer.value.scrollToEnd();
   scrollElement.value?.focus({ preventScroll: true });
 }
-onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
+onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollToEnd(); }); });
 </script>
 
 <template>
@@ -173,7 +200,7 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
         onTouchstart: onTouchStart, onTouchend: () => touching = false,
         onTouchcancel: () => touching = false }">
       <div class="transcript-history" role="list" :style="{ height: `${virtualizer.getTotalSize()}px` }">
-        <article v-for="{ item, entry, tint } in rows" :key="entry.id"
+        <article v-for="{ item, entry, tint, backdrop } in rows" :key="entry.id"
           :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
           :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
           role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
@@ -203,7 +230,8 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
                     {{ speakers[entry.speakerId]?.name ?? entry.speakerId }}
                   </MessageHeader>
                   <TranscriptMarkup v-if="entry.speakerId !== 'user' && entry.content" :content="entry.content"
-                    :entry-id="entry.id" :revealed="revealedSpoilers" @reveal="revealedSpoilers.add($event)" />
+                    :entry-id="entry.id" :backdrop="backdrop" :revealed="revealedSpoilers"
+                    @reveal="revealedSpoilers.add($event)" />
                   <template v-else>{{ entry.text }}</template>
                 </BubbleContent>
               </Bubble>
@@ -219,10 +247,7 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
 </template>
 
 <style scoped>
-/* An untinted bubble follows the theme: light in light mode, dark in dark. A tinted one
-   overrides this with the ink its own realized tone asks for. */
-.transcript { position: relative; flex: 1; min-height: 0; min-width: 0; --message-ink: 1; }
-:root[data-phase2c-theme="dark"] .transcript { --message-ink: 0; }
+.transcript { position: relative; flex: 1; min-height: 0; min-width: 0; }
 /* Keep clipping and the scrollbar in the existing conversation padding, outside
    the reading column. This also preserves borders at fractional pixel positions. */
 .transcript-scroll-area {

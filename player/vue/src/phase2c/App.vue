@@ -249,7 +249,7 @@ async function toggleFullscreen() {
 
         <ConversationSurface @margin-wheel="transcript?.scrollFromMargin($event)">
           <template #default="{ bottomInset }">
-            <Transcript ref="transcript" :bottom-inset="bottomInset" :key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'" :entries="runtimeSession?.transcriptEntries ?? transcriptEntries" :speakers="transcriptSpeakers" :revision="runtimeSession?.transcriptRevision ?? 0" :design="transcriptDesign" />
+            <Transcript ref="transcript" :bottom-inset="bottomInset" :key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'" :entries="runtimeSession?.transcriptEntries ?? transcriptEntries" :speakers="transcriptSpeakers" :revision="runtimeSession?.transcriptRevision ?? 0" :design="transcriptDesign" :mode="effectiveThemeMode" />
           </template>
           <template #interaction><RuntimeInteraction v-model:session="runtimeSession" :reset="interactionReset" :preview="isDevelopment" @preview-submit="appendPreviewResponse" /></template>
         </ConversationSurface>
