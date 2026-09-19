@@ -66,9 +66,19 @@ watch(() => props.bottomInset ?? 0, (inset, previous) => {
   if (inset !== previous && previousDistance <= latestThreshold && !touching.value)
     void nextTick(() => instance.scrollToEnd());
 });
-const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => ({
-  item, entry: props.entries[item.index]!,
-})));
+// An authored accent names a hue, never a lightness; "inherit" means the speaker has none.
+// The player's own side falls back to the theme accent, so both sides are realized the
+// same way and the tone each mode can carry is chosen once, in CSS.
+function tintOf(entry: PlayerTranscriptEntryPresentation) {
+  if (entry.kind !== "message") return null;
+  const accent = props.speakers[entry.speakerId]?.accent;
+  if (accent !== undefined && accent !== "inherit") return accent;
+  return entry.speakerId === "user" ? "var(--color-primary)" : null;
+}
+const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => {
+  const entry = props.entries[item.index]!;
+  return { item, entry, tint: tintOf(entry) };
+}));
 const showLatest = computed(() => !touching.value && !virtualizer.value.isScrolling &&
   virtualizer.value.getDistanceFromEnd() > Math.max(80, (virtualizer.value.scrollRect?.height ?? 0) / 2));
 const scrolled = computed(() => (virtualizer.value.scrollOffset ?? 0) > 1);
@@ -150,7 +160,11 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
 </script>
 
 <template>
-  <section class="transcript" aria-label="Conversation" :style="{ '--transcript-bottom-inset': `${bottomInset ?? 0}px` }">
+  <section class="transcript" aria-label="Conversation" :style="{
+    '--transcript-bottom-inset': `${bottomInset ?? 0}px`,
+    '--message-light-tone': design.lightTone / 100,
+    '--message-dark-tone': design.darkTone / 100,
+  }">
     <ScrollArea type="scroll" class="transcript-scroll-area" viewport-class="transcript-scroll"
       content-class="transcript-scroll-content"
       @viewport="scrollElement = $event"
@@ -159,7 +173,7 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
         onTouchstart: onTouchStart, onTouchend: () => touching = false,
         onTouchcancel: () => touching = false }">
       <div class="transcript-history" role="list" :style="{ height: `${virtualizer.getTotalSize()}px` }">
-        <article v-for="{ item, entry } in rows" :key="entry.id"
+        <article v-for="{ item, entry, tint } in rows" :key="entry.id"
           :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
           :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
           role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
@@ -182,7 +196,8 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
                 :variant="entry.speakerId === 'user' ? design.playerFill : design.speakerFill"
                 :align="entry.speakerId === 'user' ? 'end' : 'start'">
                 <BubbleContent class="text-base/normal"
-                  :class="cornerClass(item.index, entry.speakerId === 'user')">
+                  :class="[cornerClass(item.index, entry.speakerId === 'user'), tint ? 'message-tinted' : '']"
+                  :style="tint ? { '--message-tint': tint } : undefined">
                   <MessageHeader v-if="showsName(item.index, entry.speakerId === 'user')"
                     class="px-0 pb-0.5">
                     {{ speakers[entry.speakerId]?.name ?? entry.speakerId }}
@@ -237,6 +252,21 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
    a change of speaker gets the full separation. */
 .transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: 1rem 0; }
 .transcript-entry[data-continues="true"] { padding-block-start: 0.125rem; }
+/* An authored colour is a hue, not a finished bubble. Each mode realizes it at the tone
+   it can carry — dark under light text, light under dark text — so a single authored
+   colour stays readable in both without the author supplying one for each. */
+.message-tinted {
+  --message-tone: var(--message-light-tone);
+  /* Ink follows the realized tone rather than the mode, so moving a tone past the
+     crossover flips the text with it instead of leaving it stranded. */
+  --message-ink: clamp(0, (var(--message-tone) - 0.6) * 1000, 1);
+  background: oklch(from var(--message-tint) var(--message-tone) c h);
+  color: oklch(calc(1 - var(--message-ink)) 0 0);
+}
+:root[data-phase2c-theme="dark"] .message-tinted { --message-tone: var(--message-dark-tone); }
+/* The name is muted against the page, not against a coloured bubble. Inside one it
+   steps back from the bubble's own text colour instead, which follows the mode. */
+.message-tinted :deep([data-slot="message-header"]) { color: inherit; opacity: 0.72; }
 .session-event { margin: 0; font-size: 0.8125rem; color: var(--text-muted); }
 .transcript-empty { padding: 1rem; font-size: 0.875rem; color: var(--muted-foreground); }
 .return-to-latest {

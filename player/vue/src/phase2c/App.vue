@@ -68,6 +68,15 @@ let nextMessage = 2000;
 let firstMessage = 0;
 // Reviewable message presentation choices for issue #421.
 const transcriptDesign = reactive({ ...transcriptDesignDefaults });
+// The authored accent is a per-speaker value the fixtures leave unset; the lab supplies
+// one so a single colour can be judged against both theme modes.
+const transcriptSpeakers = computed(() => {
+  const source = runtimeSession.value?.speakers ?? transcriptFixtureSpeakers;
+  if (transcriptDesign.authoredAccent === "inherit") return source;
+  return Object.fromEntries(Object.entries(source).map(([id, speaker]) => [
+    id, id === "user" ? speaker : { ...speaker, accent: transcriptDesign.authoredAccent },
+  ]));
+});
 
 function loadTranscript(count: number) {
   runtimeSession.value = null;
@@ -145,6 +154,23 @@ async function toggleFullscreen() {
                   <option v-for="fill in bubbleFills" :key="fill" :value="fill">{{ fill }}</option>
                 </select>
               </label>
+              <label class="flex items-center gap-2">
+                <input type="checkbox" :checked="transcriptDesign.authoredAccent !== 'inherit'"
+                  @change="transcriptDesign.authoredAccent = transcriptDesign.authoredAccent === 'inherit' ? '#8b3fa8' : 'inherit'" />
+                Speaker sets a colour
+              </label>
+              <label v-if="transcriptDesign.authoredAccent !== 'inherit'" class="flex items-center gap-2">
+                Authored colour
+                <input v-model="transcriptDesign.authoredAccent" type="color" />
+              </label>
+              <label class="grid gap-1">
+                Light mode tone · {{ transcriptDesign.lightTone }}%
+                <input v-model.number="transcriptDesign.lightTone" type="range" min="20" max="95" />
+              </label>
+              <label class="grid gap-1">
+                Dark mode tone · {{ transcriptDesign.darkTone }}%
+                <input v-model.number="transcriptDesign.darkTone" type="range" min="20" max="95" />
+              </label>
             </fieldset>
             <fieldset class="grid min-w-0 gap-2">
               <legend class="mb-2">Timer fixtures</legend>
@@ -216,7 +242,7 @@ async function toggleFullscreen() {
 
         <ConversationSurface @margin-wheel="transcript?.scrollFromMargin($event)">
           <template #default="{ bottomInset }">
-            <Transcript ref="transcript" :bottom-inset="bottomInset" :key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'" :entries="runtimeSession?.transcriptEntries ?? transcriptEntries" :speakers="runtimeSession?.speakers ?? transcriptFixtureSpeakers" :revision="runtimeSession?.transcriptRevision ?? 0" :design="transcriptDesign" />
+            <Transcript ref="transcript" :bottom-inset="bottomInset" :key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'" :entries="runtimeSession?.transcriptEntries ?? transcriptEntries" :speakers="transcriptSpeakers" :revision="runtimeSession?.transcriptRevision ?? 0" :design="transcriptDesign" />
           </template>
           <template #interaction><RuntimeInteraction v-model:session="runtimeSession" :reset="interactionReset" :preview="isDevelopment" @preview-submit="appendPreviewResponse" /></template>
         </ConversationSurface>
