@@ -219,7 +219,10 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
 </template>
 
 <style scoped>
-.transcript { position: relative; flex: 1; min-height: 0; min-width: 0; }
+/* An untinted bubble follows the theme: light in light mode, dark in dark. A tinted one
+   overrides this with the ink its own realized tone asks for. */
+.transcript { position: relative; flex: 1; min-height: 0; min-width: 0; --message-ink: 1; }
+:root[data-phase2c-theme="dark"] .transcript { --message-ink: 0; }
 /* Keep clipping and the scrollbar in the existing conversation padding, outside
    the reading column. This also preserves borders at fractional pixel positions. */
 .transcript-scroll-area {

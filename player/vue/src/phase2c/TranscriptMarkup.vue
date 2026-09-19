@@ -83,6 +83,18 @@ blockquote {
 :deep(.markup-code) {
   font-family: monospace;
 }
+/* The author chose the colour, the reader chose the theme, and they meet here. Where both
+   land on the same side of the light/dark divide the words would disappear, so a scrim
+   behind them restores the contrast and leaves the authored colour exactly as written.
+   --message-ink is 1 on a light bubble and 0 on a dark one; the clash term is 1 only when
+   the two sides agree, which fades the scrim out entirely everywhere else. */
+:deep(.markup-scrim) {
+  --scrim-clash: calc(1 - (var(--author-light) + var(--message-ink, 1)
+    - 2 * var(--author-light) * var(--message-ink, 1)));
+  background: oklch(calc(1 - var(--author-light)) 0 0 / calc(var(--scrim-clash) * var(--scrim-alpha)));
+  border-radius: 0.2em;
+  padding-inline: 0.12em;
+}
 :deep(.markup-size-small) {
   font-size: 0.85em;
 }

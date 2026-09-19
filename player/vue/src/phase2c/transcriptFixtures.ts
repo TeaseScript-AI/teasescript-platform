@@ -2,6 +2,7 @@ import type {
   PlayerTranscriptEntryPresentation,
   PlayerSpeakerPresentation,
 } from "../../../model.js";
+import { parseMessageMarkup } from "../../../../src/message-markup.js";
 
 export const transcriptFixtureSpeakers: Readonly<Record<string, PlayerSpeakerPresentation>> = {
   guide: { name: "Guide", accent: "inherit", avatar: "G", fontFamily: "inherit" },
@@ -16,6 +17,27 @@ const messages = [
   "Of course. Listen to the sea for a moment, and watch how the light changes as the clouds pass over the water. The tide is turning now, so the sound will shift while we stand here. When you are ready, we can continue along the path.",
   "Yes, let's continue.",
 ];
+
+// Authored source rather than hand-built structures, so the presentation is judged
+// against what the real parser produces. The colours are deliberately mixed: one that
+// only survives on a dark bubble, one that only survives on a light one.
+const markupSources: readonly (readonly [speaker: string, source: string])[] = [
+  ["guide", "# The lighthouse\nThe path splits here. *Take your time* — the **tide** is still going out."],
+  ["guide", "Keep to the `seaward` side. The full route is on [the harbour map](https://example.com/map)."],
+  ["guide", "> The sea is calm tonight.\n> The tide is full, the moon lies fair."],
+  ["guide", "Watch for:\n- loose sand past the second dune\n- the marker posts\n- the light itself"],
+  ["guide", "In order:\n1. follow the posts\n2. cross the dune\n3. wait for the beam"],
+  ["guide", "Authored colours: [color=#ffe066]pale yellow[/color], [color=#1a1a2e]near black[/color], and [color=#c2185b]deep pink[/color]."],
+  ["user", "Understood. I will follow the posts."],
+];
+
+/** One message per markup kind, for judging the presentation of authored content. */
+export function transcriptMarkupFixtures(): PlayerTranscriptEntryPresentation[] {
+  return markupSources.map(([speakerId, source], index) => {
+    const content = parseMessageMarkup(source);
+    return { id: `markup-${index}`, kind: "message", speakerId: speakerId!, text: content.visibleText, content };
+  });
+}
 
 export function transcriptFixtures(
   start: number,

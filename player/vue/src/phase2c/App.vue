@@ -10,7 +10,7 @@ import Transcript from "./Transcript.vue";
 import ConversationSurface from "./ConversationSurface.vue";
 import { bubbleFills, transcriptDesignDefaults } from "./transcriptDesign";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
-import { transcriptFixtures, transcriptFixtureSpeakers } from "./transcriptFixtures";
+import { transcriptFixtures, transcriptFixtureSpeakers, transcriptMarkupFixtures } from "./transcriptFixtures";
 import { createPlayerRuntimeSession, createPlayerRuntimeRestorePoint, restorePlayerRuntimeSession, type PlayerRuntimeSession, type PlayerRuntimeRestorePoint } from "../../../runtime-adapter.js";
 import { runtimeScenario, interactionScenario } from "./runtimeScenario";
 import { stageFixtures } from "./stageFixtures";
@@ -83,6 +83,12 @@ function loadTranscript(count: number) {
   firstMessage = 0;
   nextMessage = count;
   transcriptEntries.value = transcriptFixtures(0, count);
+}
+function loadMarkupSample() {
+  runtimeSession.value = null;
+  firstMessage = 0;
+  transcriptEntries.value = transcriptMarkupFixtures();
+  nextMessage = transcriptEntries.value.length;
 }
 function appendTranscript() {
   transcriptEntries.value = [...transcriptEntries.value, ...transcriptFixtures(nextMessage++, 1)];
@@ -200,6 +206,7 @@ async function toggleFullscreen() {
               <Button class="min-w-0" variant="outline" :disabled="!!runtimeSession" @click="prependTranscript">Prepend 50 messages</Button>
               <Button class="min-w-0" variant="outline" @click="loadTranscript(0)">Empty history</Button>
               <Button class="min-w-0" variant="outline" @click="loadTranscript(10000)">Load 10,000 messages</Button>
+              <Button class="min-w-0" variant="outline" @click="loadMarkupSample">Markup sample</Button>
             </fieldset>
             <fieldset class="grid min-w-0 gap-2">
               <legend class="mb-2">Runtime transcript scenario</legend>
