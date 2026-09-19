@@ -17,7 +17,7 @@ defineEmits<{ toggleFullscreen: [] }>();
 <template>
   <header data-player-top-bar class="player-top-bar">
     <div v-if="$slots.tools" class="player-top-bar-tools"><slot name="tools" /></div>
-    <h1 class="player-top-bar-title">{{ title }}</h1>
+    <h1 class="player-top-bar-title"><span>{{ title }}</span></h1>
     <Tooltip>
       <TooltipTrigger as-child>
         <Button
@@ -65,7 +65,11 @@ defineEmits<{ toggleFullscreen: [] }>();
   white-space: nowrap;
   font-size: 0.875rem;
   font-weight: 500;
-  color: var(--foreground);
+  padding-block: 0.25rem;
+}
+.player-top-bar-title > span {
+  padding: 0.25rem 0.375rem;
+  border-radius: 0.375rem;
 }
 .player-top-bar-error {
   position: absolute;

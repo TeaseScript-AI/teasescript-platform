@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Button } from "@/components/ui/button";
 import { computed, reactive, ref, watchEffect } from "vue";
 import { oklchCss, oklchToPickerHex, pickerHexToOklch, type OklchColor } from "../../../theme/color.js";
 import { generatePlayerTheme, themeCssVariables, type PlayerThemeIntent } from "../../../theme/palette.js";
@@ -35,6 +36,13 @@ watchEffect(() => emit("themeChange", {
 function pickAccent(event: Event) {
   if (event.target instanceof HTMLInputElement) Object.assign(intent.accentSeed, pickerHexToOklch(event.target.value));
 }
+function comparePair(pair: "warm" | "cool") {
+  intent.surfaceHue = pair === "warm" ? 70 : 240;
+  intent.surfaceTint = 0.5;
+  intent.surfaceMaxChroma = 8.5;
+  intent.monochrome = false;
+  Object.assign(intent.accentSeed, pickerHexToOklch(pair === "warm" ? "#d63b61" : "#2255ee"));
+}
 function displayColor(color: OklchColor) {
   return `oklch(${(color.l * 100).toFixed(2)}% ${color.c.toFixed(4)} ${color.h.toFixed(2)})`;
 }
@@ -45,6 +53,13 @@ function displayColor(color: OklchColor) {
     <h2 class="font-semibold">Theme Lab · experimental</h2>
     <p>Applies live to this Phase 2C Player. Palette values and contrast targets are provisional, not an accessibility certification.</p>
     <label class="flex items-center gap-2"><input v-model="enabled" type="checkbox" /> Generated dynamic theme</label>
+    <fieldset class="grid gap-1">
+      <legend>Development colour pairs</legend>
+      <div class="flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" @click="comparePair('warm')">Warm · rose</Button>
+        <Button variant="outline" size="sm" @click="comparePair('cool')">Cool · blue</Button>
+      </div>
+    </fieldset>
     <label class="grid gap-1">Theme mode
       <select v-model="intent.mode" aria-label="Theme mode"><option value="light">Light</option><option value="dark">Dark</option></select>
     </label>
@@ -100,7 +115,7 @@ function displayColor(color: OklchColor) {
 </template>
 
 <style scoped>
-.theme-lab select { min-width: 0; border: 1px solid var(--border); border-radius: .375rem; padding: .4rem; background: var(--surface-component); }
+.theme-lab select { min-width: 0; border: 1px solid var(--border); border-radius: .375rem; padding: .4rem; background: var(--control-surface, var(--surface-component)); }
 .theme-lab output, .theme-lab code { overflow-wrap: anywhere; }
 .theme-lab input[type=range] { width: 100%; }
 .swatch { display: inline-block; width: 1.5rem; height: 1.5rem; flex-shrink: 0; border: 1px solid var(--border); }

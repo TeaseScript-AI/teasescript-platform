@@ -50,14 +50,25 @@ Zero tint is achromatic in light and dark modes. Polarity and standard/high cont
 replacing content-owned scene/media colors or the accent colour. Theme generation does not own Timer sizing or layout.
 
 `theme/palette.ts` resolves Player roles, `theme/material.ts` isolates MCU's public root API, and `theme/color.ts`
-isolates Color.js conversion, CSS gamut mapping and contrast. MCU solves tonal palettes; a temporary Player-owned
-role-tone table compares a Material-oriented hierarchy with lighter raised light surfaces and a less black dark
-candidate. The full tint slider maps onto the selected HCT chroma maximum (5, 8.5 or 12); monochrome is independent
-of accent. Text and borders are neutral. High contrast increases tone separation, not saturation. Accent state
-colours preserve readable black/white labels; the Timer uses a separate translucent dark overlay family with light
-text and an accent ring. These mappings remain experimental, not accepted palette or accessibility policy.
-Diagnostics expose measured opaque-colour ratios and failures; they do not certify translucent media overlays
-or perceptual state distinction.
+isolates Color.js conversion, CSS gamut mapping and contrast. MCU realizes tonal palettes; a provisional Player-owned
+role-tone table compares darker Material-oriented light containers with lighter TeaseScript light containers and
+separate dark ladders. Controls and floating surfaces have explicit roles; floating borders/shadows provide elevation.
+Hover, pressed and selected roles account for their actual panel, control or floating backdrop. Pin toggles and tool
+launchers share the neutral progression; persistent selection stays separate from transient hover/press feedback.
+The full tint slider maps onto the selected HCT chroma maximum (5, 8.5 or 12), with less tint in nested surfaces so
+light themes retain their hierarchy at the upper end. Monochrome remains independent of accent. Text and borders
+remain neutral; ordinary open/selected states use the surface family. Accent owns primary actions, focus and progress.
+Send is a compact primary action within the single Composer material, while the textarea and disabled controls stay transparent.
+High contrast increases tone separation, not saturation. Development colour-pair buttons reset surface/accent inputs
+without changing ladder, polarity or contrast; they are comparison aids, not registered themes.
+
+The single canvas retains its radial/vertical wash geometry and derives the wash from the selected surface family.
+Title and top-media controls share a local translucent material derived from surface hue/tint, with readable text
+and interaction states over either media polarity; the surrounding top bar stays transparent. The Timer keeps its
+40% → 26% → 12% translucent halo, with stronger backdrop blur for busy media and a translucent white remaining-time
+track without a dark contour. Overlay text/ring separation is independent of Player polarity and panel elevation.
+These mappings remain experimental, not accepted palette or accessibility policy. Diagnostics expose measured
+opaque-colour ratios and failures; they do not certify translucent media overlays or perceptual state distinction.
 
 The generator accepts already-resolved platform intent. User/package precedence, authored theme registration and
 missing-variant fallback remain governed by [the theme boundary](../docs/ui/PLAYER-UI.md#theme-and-customization-boundary)

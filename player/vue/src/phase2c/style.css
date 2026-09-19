@@ -4,6 +4,8 @@
 @theme inline {
   --color-popover: var(--popover, var(--surface-component));
   --color-popover-foreground: var(--foreground);
+  --color-primary: var(--theme-accent-solid, var(--package-accent));
+  --color-primary-foreground: var(--theme-text-on-accent, white);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-sidebar: var(--sidebar);
@@ -11,7 +13,7 @@
   --color-sidebar-border: var(--border);
   --color-sidebar-accent: var(--component-hover);
   --color-sidebar-accent-foreground: var(--foreground);
-  --color-sidebar-ring: var(--border-strong);
+  --color-sidebar-ring: var(--focus-ring, var(--border-strong));
   --color-muted-foreground: var(--text-muted);
   --color-accent: var(--component-hover);
   --color-accent-foreground: var(--foreground);
@@ -44,7 +46,7 @@
 
 /* data-button survives composed triggers replacing shadcn data-slot.
    Composer material remains owned by ConversationSurface and its mapping below. */
-:where([data-button]:not([data-variant="destructive"], [data-variant="link"], [data-runtime-composer] > button)) {
+:where([data-button]:not([data-variant="destructive"], [data-variant="link"], [data-runtime-composer] > button), [data-panel-pin], [data-slot="dialog-close"], [data-launcher] [data-sidebar="menu-button"]) {
   --button-rest: transparent;
   --button-hover: var(--component-hover);
   --button-pressed: var(--component-pressed);
@@ -55,8 +57,12 @@
   color: var(--button-text);
 }
 [data-button]:is([data-variant="outline"], [data-variant="secondary"]) {
-  --button-rest: var(--surface-component);
+  --button-rest: var(--control-surface, var(--surface-component));
+  --button-hover: var(--theme-control-hover, var(--component-hover));
+  --button-pressed: var(--theme-control-pressed, var(--component-pressed));
 }
+[data-panel-pin][data-state="on"],
+[data-settings-trigger][aria-expanded="true"],
 [data-button]:is([data-variant="outline"], [data-variant="ghost"], [data-variant="secondary"])[data-state="open"] {
   --button-rest: var(--theme-surface-selected, var(--component-pressed));
 }
@@ -69,13 +75,13 @@
   --button-pressed-border: var(--button-pressed);
 }
 @media (any-hover: hover) {
-  :where([data-button]:not([data-variant="destructive"], [data-variant="link"], [data-runtime-composer] > button)):enabled:hover {
+  :where([data-button]:not([data-variant="destructive"], [data-variant="link"], [data-runtime-composer] > button), [data-panel-pin], [data-slot="dialog-close"], [data-launcher] [data-sidebar="menu-button"]):enabled:hover {
     background-color: var(--button-hover);
     color: var(--button-text);
     border-color: var(--button-hover-border);
   }
 }
-:where([data-button]:not([data-variant="destructive"], [data-variant="link"], [data-runtime-composer] > button)):enabled:active {
+:where([data-button]:not([data-variant="destructive"], [data-variant="link"], [data-runtime-composer] > button), [data-panel-pin], [data-slot="dialog-close"], [data-launcher] [data-sidebar="menu-button"]):enabled:active {
   background-color: var(--button-pressed);
   transition-duration: 0s;
   color: var(--button-text);
@@ -89,6 +95,7 @@
   --foreground: var(--theme-text-primary);
   --sidebar: var(--theme-surface-chrome);
   --surface-component: var(--theme-surface-raised);
+  --control-surface: var(--theme-surface-control);
   --component-hover: var(--theme-surface-hover);
   --component-pressed: var(--theme-surface-pressed);
   --border: var(--theme-border-subtle);
@@ -103,21 +110,16 @@
 }
 :root[data-phase2c-theme="light"] { color-scheme: light; }
 :root[data-phase2c-theme="dark"] { color-scheme: dark; }
-/* Keep the top overlay transparent while separating its text from arbitrary media. */
-:root[data-phase2c-theme] .player-top-bar-title {
-  text-shadow: 0 1px 2px var(--theme-surface-floating), 0 0 4px var(--theme-surface-floating);
-}
-
-:root[data-phase2c-theme] :is([data-slot="dialog-content"], [data-slot="sheet-content"]) {
+:root[data-phase2c-theme] :is([data-slot="dialog-content"], [data-slot="sheet-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="popover-content"]) {
+  --component-hover: var(--theme-floating-hover);
+  --component-pressed: var(--theme-floating-pressed);
   color: var(--theme-text-primary);
   background: var(--theme-surface-floating);
-  border-color: var(--theme-border-default);
+  border-color: var(--theme-border-floating);
+  box-shadow: 0 12px 28px -6px var(--theme-floating-shadow), 0 2px 6px -2px var(--theme-floating-shadow);
 }
 :root[data-phase2c-theme] :is([data-slot="dialog-overlay"], [data-slot="sheet-overlay"]) {
   background: var(--theme-structural-scrim);
-}
-:root[data-phase2c-theme] :is([data-slot="dialog-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"]) {
-  box-shadow: 0 6px 18px var(--theme-structural-shadow);
 }
 :root[data-phase2c-theme] :is(button, textarea, input, select):disabled {
   color: var(--theme-text-disabled);
@@ -125,26 +127,79 @@
   border-color: var(--theme-border-disabled);
   opacity: 1;
 }
-/* ConversationSurface owns the Composer material, including disabled controls.
-   Foreground choice/button controls retain the ordinary control surfaces above. */
+/* The tools Sheet is relocated chrome, not a floating menu surface. */
+:root[data-phase2c-theme] .tools-drawer {
+  --component-hover: var(--theme-surface-hover);
+  --component-pressed: var(--theme-surface-pressed);
+  background: var(--theme-surface-chrome);
+}
+:root[data-phase2c-theme] .tool-panel-strip:focus-visible {
+  outline-color: var(--theme-accent-focus);
+}
+
+/* Native controls and Reka menu items share the same semantic states. */
+:root[data-phase2c-theme] select { background: var(--theme-surface-control); }
+@media (any-hover: hover) {
+  :root[data-phase2c-theme] :is(select, textarea, input):enabled:hover { border-color: var(--theme-border-default); }
+}
+:root[data-phase2c-theme] [role^="menuitem"]:active:not([data-disabled]) { background: var(--component-pressed); }
+:root[data-phase2c-theme] [role^="menuitem"][data-disabled] { color: var(--theme-text-disabled); opacity: 1; }
+
+/* Title and all top-media controls share a local theme material. The surrounding
+   top bar stays transparent; media colour is independent of Player polarity. */
+[data-player-top-bar] {
+  --media-surface: var(--theme-media-surface, color-mix(in srgb, var(--sidebar) 90%, transparent));
+  --media-text: var(--theme-media-text, var(--foreground));
+  --media-shadow: var(--theme-media-shadow, rgb(0 0 0 / 22%));
+}
+[data-player-top-bar] button {
+  --button-rest: var(--media-surface);
+  --button-hover: var(--theme-media-hover, var(--component-hover));
+  --button-pressed: var(--theme-media-pressed, var(--component-pressed));
+  --button-text: var(--media-text);
+  backdrop-filter: blur(4px);
+}
+[data-player-top-bar] :is(button, .player-top-bar-title > span) {
+  box-shadow: 0 1px 3px var(--media-shadow);
+}
+/* Back the accent outline with the same material, including over opposite-polarity media. */
+[data-player-top-bar] button:focus-visible {
+  box-shadow: 0 0 0 4px var(--media-surface), 0 1px 3px var(--media-shadow);
+}
+[data-player-top-bar] .player-top-bar-title > span {
+  background: var(--media-surface);
+  color: var(--media-text);
+}
+:root[data-phase2c-theme] [data-player-top-bar] button:disabled {
+  background: var(--media-surface);
+  color: var(--theme-media-text-disabled);
+}
+
+/* ConversationSurface owns one Composer material. The small enabled Send action
+   uses the primary family; the textarea and disabled controls stay transparent. */
 :root[data-phase2c-theme] [data-runtime-composer] > :is(textarea, button) {
   color: var(--theme-text-primary);
   background: transparent;
   border-color: transparent;
+}
+:root[data-phase2c-theme] [data-runtime-composer] > button:enabled {
+  background: var(--theme-accent-solid);
+  color: var(--theme-text-on-accent);
 }
 :root[data-phase2c-theme] [data-runtime-composer] > :disabled {
   color: var(--theme-text-disabled);
 }
 @media (any-hover: hover) {
   :root[data-phase2c-theme] [data-runtime-composer] > button:enabled:hover {
-    background: var(--theme-surface-hover);
+    background: var(--theme-accent-hover);
   }
 }
 :root[data-phase2c-theme] [data-runtime-composer] > button:enabled:active {
-  background: var(--theme-surface-pressed);
+  background: var(--theme-accent-pressed);
+  transition-duration: 0s;
 }
 :root[data-phase2c-theme] :is(textarea, input)::placeholder { color: var(--theme-text-secondary); }
-:root[data-phase2c-theme] :is(button, textarea, input, select):focus-visible {
+:root[data-phase2c-theme] :is(button, textarea, input, select, summary, a[href], [data-tools-focus^="title:"]):focus-visible {
   outline: 2px solid var(--theme-accent-focus);
   outline-offset: 2px;
 }
@@ -231,13 +286,12 @@
   .phase2c-sidebar[data-labels="preview"] [data-launcher] { transition: none; }
 }
 
+[data-panel-drag]:active { background: var(--component-pressed); }
+
 /* Keep open tools distinguishable from a transient pointer hover. */
 [data-launcher] [data-sidebar="menu-button"][data-active="true"] {
-  background: var(--component-pressed);
+  --button-rest: var(--theme-surface-selected, var(--component-pressed));
   box-shadow: inset 3px 0 var(--border-strong);
-}
-[data-launcher] [data-sidebar="menu-button"][data-active="true"]:hover {
-  background: var(--component-hover);
 }
 
 .panel-settings-trigger { position: relative; }
@@ -274,7 +328,7 @@ body:has(> .tool-panel-dragging) [data-slot="tooltip-content"] { visibility: hid
   position: absolute; right: 0; top: 0; bottom: 0; width: 6px; z-index: 35;
   cursor: col-resize; touch-action: none;
 }
-.resize-edge:focus-visible { outline: 2px solid var(--theme-accent-focus, #737373); outline-offset: -2px; }
+.resize-edge:focus-visible { outline: 2px solid var(--focus-ring, var(--border-strong)); outline-offset: -2px; }
 /* Reuse the panel reorder grip on the menu's full-height resize edge. */
 .menu-resize-grip {
   position: absolute; top: 50%; left: 50%; width: 1rem; height: 1rem;

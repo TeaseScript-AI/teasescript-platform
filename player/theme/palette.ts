@@ -39,39 +39,56 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
   const dark = intent.mode === "dark";
   const high = intent.contrast === "high";
   const textTarget = high ? 7 : 4.5;
-  // Temporary role-tone comparisons, not accepted theme policy. The Material-oriented
-  // reference preserves the previous hierarchy without accent-dependent scheme tones.
-  // TeaseScript's light candidate rises toward white; dark starts above near-black.
+  // Provisional product policy: Material-oriented light containers descend in tone;
+  // TeaseScript containers rise. Floating surfaces and controls have their own depth.
   const ladders = {
-    material: { light: [98, 96, 94, 92, 90], dark: [4, 6, 9, 12, 15] },
+    material: {
+      light: { canvas: 98, chrome: 95, raised: 92, floating: 99, control: 96 },
+      dark: { canvas: 8, chrome: 12, raised: 18, floating: 26, control: 22 },
+    },
     teasescript: {
-      light: high ? [92, 97, 100, 100, 86] : [95, 97, 99, 100, 91],
-      dark: high ? [8, 15, 23, 28, 32] : [14, 18, 23, 28, 32],
+      light: { canvas: high ? 92 : 94, chrome: 97, raised: 99, floating: 100, control: 96 },
+      dark: { canvas: high ? 10 : 14, chrome: 19, raised: 24, floating: 32, control: 27 },
     },
   } as const;
   const tones = ladders[intent.surfaceLadder][intent.mode];
   const hue = ((intent.surfaceHue % 360) + 360) % 360;
   const chroma = intent.monochrome ? 0 : intent.surfaceTint * intent.surfaceMaxChroma;
-  // The ambient wash is translucent, so it needs a wider but still bounded tint range
-  // to remain perceptible after compositing over the canvas.
+  // Tint lives principally in the canvas. Less chroma in nested surfaces keeps the
+  // high end of light tint usable without turning every layer into the same wash.
+  const surface = (tone: number, tint = 1) =>
+    tonalColor(chroma === 0 ? 0 : hue, chroma * tint, tone);
+  // Keep the established translucent wash strength as the canvas tone changes.
   const ambientChroma = Math.min(24, chroma * 4);
-  const ambientTone = dark ? Math.min(tones[4], tones[0] + 11) : 86;
-  const surface = (tone: number) => tonalColor(chroma === 0 ? 0 : hue, chroma, tone);
+  const ambientTone = dark ? tones.canvas + 11 : tones.canvas - 9;
   const neutral = (tone: number) => tonalColor(0, 0, tone);
   const black = neutral(0);
   const white = neutral(100);
   const accent = mapToSrgb(intent.accentSeed);
-  const onAccent = contrastRatio(white, accent) >= contrastRatio(black, accent) ? white : black;
+  // Prefer the established white primary label when it meets the experimental
+  // normal-text target; lighter literal accents use black instead.
+  const onAccent = contrastRatio(white, accent) >= 4.5 ? white : black;
   // Move enabled accent states away from their label, preserving readable text.
   const accentStateTarget = onAccent === white ? black : white;
+  // Ghost controls live on both chrome and raised panels. Their states must clear
+  // both backdrops; floating menus have a separate, lighter dark-mode backdrop.
+  const panelTone = dark
+    ? Math.max(tones.chrome, tones.raised)
+    : Math.min(tones.chrome, tones.raised);
+  const stateTone = (rest: number, lightOffset: number, darkOffset: number) =>
+    surface(rest + (dark ? darkOffset : -lightOffset), 0.6);
+  const mediaSurface = surface(dark ? 24 : 94);
+  const mediaText = neutral(dark ? 100 : 15);
   const base = {
-    "surface-canvas": surface(tones[0]),
-    "surface-chrome": surface(tones[1]),
-    "surface-raised": surface(tones[2]),
-    "surface-floating": surface(tones[3]),
-    "surface-selected": surface(tones[4]),
+    "surface-canvas": surface(tones.canvas),
+    "surface-chrome": surface(tones.chrome, dark ? 0.85 : 0.75),
+    "surface-raised": surface(tones.raised, dark ? 0.75 : 0.45),
+    "surface-floating": surface(tones.floating, dark ? 0.6 : 0.2),
+    "surface-control": surface(tones.control, dark ? 0.7 : 0.6),
+    "surface-selected": stateTone(panelTone, 11, 12),
     "ambient-wash": tonalColor(ambientChroma === 0 ? 0 : hue, ambientChroma, ambientTone),
     "border-subtle": neutral(dark ? (high ? 60 : 38) : high ? 50 : 80),
+    "border-floating": neutral(dark ? (high ? 72 : 48) : high ? 45 : 72),
     "border-default": neutral(dark ? (high ? 75 : 52) : high ? 35 : 65),
     "border-strong": neutral(dark ? (high ? 90 : 70) : high ? 20 : 45),
     "text-primary": neutral(dark ? (high ? 100 : 96) : high ? 0 : 18),
@@ -82,13 +99,18 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
     "accent-focus": accentTone(accent, dark ? (high ? 90 : 80) : high ? 25 : 40),
     "overlay-surface": black,
     "overlay-text": white,
+    "media-text": mediaText,
+    "media-text-disabled": mixColors(mediaSurface, mediaText, 0.55),
   };
-  const state = (amount: number) => mixColors(base["surface-raised"], base["text-primary"], amount);
   const roles = {
     ...base,
-    "surface-hover": state(0.08),
-    "surface-pressed": state(0.16),
-    "surface-disabled": state(0.12),
+    "surface-hover": stateTone(panelTone, 7, 8),
+    "surface-pressed": stateTone(panelTone, 15, 17),
+    "control-hover": stateTone(tones.control, 7, 7),
+    "control-pressed": stateTone(tones.control, 13, 13),
+    "floating-hover": stateTone(tones.floating, 8, 9),
+    "floating-pressed": stateTone(tones.floating, 14, 15),
+    "surface-disabled": mixColors(base["surface-control"], base["surface-raised"], 0.5),
     "border-disabled": mixColors(base["surface-raised"], base["border-default"], 0.38),
     "text-disabled": mixColors(base["surface-raised"], base["text-primary"], 0.38),
     "accent-hover": mixColors(accent, accentStateTarget, 0.08),
@@ -114,9 +136,14 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
     "surface-chrome",
     "surface-raised",
     "surface-floating",
+    "surface-control",
     "surface-hover",
     "surface-pressed",
     "surface-selected",
+    "control-hover",
+    "control-pressed",
+    "floating-hover",
+    "floating-pressed",
     "accent-soft",
   ] as const) {
     inspect("text-primary", background, textTarget);
@@ -130,7 +157,15 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
   }
   inspect("text-disabled", "surface-disabled", null);
   const effects = {
-    "overlay-shadow": { color: black, alpha: 0.48 },
+    "overlay-shadow": { color: black, alpha: 0.65 },
+    "overlay-track": { color: white, alpha: 0.82 },
+    // Local media materials retain the surface hue/tint but do not assume media
+    // polarity. High coverage keeps their own text readable over either extreme.
+    "media-surface": { color: mediaSurface, alpha: 0.9 },
+    "media-hover": { color: surface(dark ? 34 : 86), alpha: 0.94 },
+    "media-pressed": { color: surface(dark ? 42 : 78), alpha: 0.96 },
+    "media-shadow": { color: black, alpha: 0.22 },
+    "floating-shadow": { color: black, alpha: dark ? 0.55 : 0.18 },
     "structural-shadow": { color: black, alpha: dark ? 0.35 : 0.08 },
     "structural-scrim": { color: black, alpha: dark ? 0.55 : 0.18 },
   };
