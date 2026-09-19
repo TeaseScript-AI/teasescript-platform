@@ -1588,6 +1588,7 @@ async function topBarChecks(page) {
     const result = await page.evaluate(() => {
       const bar = document.querySelector(".player-top-bar");
       const title = document.querySelector(".player-top-bar-title");
+      const titleText = document.querySelector(".player-top-bar-title-text");
       const rects = () =>
         [".player-stage", ".stage-media-frame", ".player-conversation"].map((selector) => {
           const r = document.querySelector(selector).getBoundingClientRect();
@@ -1605,8 +1606,8 @@ async function topBarChecks(page) {
           getComputedStyle(bar).backgroundColor === "rgba(0, 0, 0, 0)" &&
           getComputedStyle(title).backgroundColor === "rgba(0, 0, 0, 0)",
         truncates:
-          title.scrollWidth > title.clientWidth &&
-          getComputedStyle(title).textOverflow === "ellipsis",
+          titleText.scrollWidth > titleText.clientWidth &&
+          getComputedStyle(titleText).textOverflow === "ellipsis",
         passesThrough: !bar.contains(
           document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2),
         ),

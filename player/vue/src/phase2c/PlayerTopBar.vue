@@ -18,7 +18,9 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
 <template>
   <header data-player-top-bar class="player-top-bar">
     <div v-if="$slots.tools" class="player-top-bar-tools"><slot name="tools" /></div>
-    <h1 class="player-top-bar-title"><span>{{ title }}</span></h1>
+    <h1 class="player-top-bar-title">
+      <span><span class="player-top-bar-title-text">{{ title }}</span></span>
+    </h1>
     <div class="player-top-bar-actions" role="group" aria-label="Player display controls">
       <Tooltip>
         <TooltipTrigger as-child>
@@ -104,9 +106,6 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
   block-size: var(--top-bar-control-size);
   display: flex;
   align-items: center;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 0.875rem;
   font-weight: 500;
 }
@@ -114,9 +113,17 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
   display: inline-flex;
   align-items: center;
   box-sizing: border-box;
+  min-inline-size: 0;
+  max-inline-size: 100%;
   block-size: var(--top-bar-control-size);
   padding-inline: 0.375rem;
   border-radius: 0.375rem;
+}
+.player-top-bar-title-text {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .player-top-bar-error {
   position: absolute;
