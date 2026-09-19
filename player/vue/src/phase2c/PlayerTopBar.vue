@@ -23,10 +23,26 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
       <Tooltip>
         <TooltipTrigger as-child>
           <Button
+            data-theme-mode-control
+            variant="ghost"
+            size="icon"
+            class="player-top-bar-theme"
+            :aria-label="themeMode === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
+            @click="$emit('toggleThemeMode')"
+          >
+            <Sun v-if="themeMode === 'dark'" class="size-4" />
+            <Moon v-else class="size-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{{ themeMode === 'dark' ? 'Light theme' : 'Dark theme' }}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger as-child>
+          <Button
             data-fullscreen-control
             variant="ghost"
             size="icon"
-            class="player-top-bar-fullscreen size-8"
+            class="player-top-bar-fullscreen"
             :disabled="!fullscreenSupported"
             :aria-label="fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'"
             @click="$emit('toggleFullscreen')"
@@ -37,22 +53,6 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
         </TooltipTrigger>
         <TooltipContent>{{ fullscreenSupported ? (fullscreen ? 'Exit fullscreen' : 'Enter fullscreen') : 'Fullscreen unavailable in this browser' }}</TooltipContent>
       </Tooltip>
-      <Tooltip>
-        <TooltipTrigger as-child>
-          <Button
-            data-theme-mode-control
-            variant="ghost"
-            size="icon"
-            class="player-top-bar-theme size-8"
-            :aria-label="themeMode === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
-            @click="$emit('toggleThemeMode')"
-          >
-            <Sun v-if="themeMode === 'dark'" class="size-4" />
-            <Moon v-else class="size-4" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{{ themeMode === 'dark' ? 'Light theme' : 'Dark theme' }}</TooltipContent>
-      </Tooltip>
     </div>
     <p v-if="fullscreenError" role="alert" class="player-top-bar-error">{{ fullscreenError }}</p>
   </header>
@@ -61,6 +61,8 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
 <style scoped>
 /* Overlay only: the composition's Stage and conversation tracks retain all space. */
 .player-top-bar {
+  --top-bar-control-size: calc(1rem + 16px);
+  --top-bar-edge-padding: 8px;
   position: absolute;
   z-index: 20;
   inset: 0 0 auto;
@@ -68,7 +70,7 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
   align-items: center;
   gap: 0.5rem;
   min-width: 0;
-  padding: 0.5rem;
+  padding: var(--top-bar-edge-padding);
   pointer-events: none;
 }
 .player-top-bar-tools { display: contents; }
@@ -76,30 +78,44 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
   flex-shrink: 0;
   pointer-events: auto;
 }
+.player-top-bar-tools :deep(button) {
+  inline-size: var(--top-bar-control-size);
+  block-size: var(--top-bar-control-size);
+}
 .player-top-bar-actions {
   display: flex;
   align-items: center;
   gap: 0.125rem;
-  padding: 0.125rem;
-  margin-block: -0.1875rem;
+  box-sizing: border-box;
+  block-size: var(--top-bar-control-size);
   border: 1px solid var(--media-border);
   border-radius: 0.75rem;
   background: var(--media-surface);
   box-shadow: 0 1px 3px var(--media-shadow);
   backdrop-filter: blur(3px);
 }
+.player-top-bar-actions :deep(button) {
+  inline-size: var(--top-bar-control-size);
+  block-size: calc(var(--top-bar-control-size) - 2px);
+}
 .player-top-bar-title {
   flex: 1;
   min-width: 0;
+  block-size: var(--top-bar-control-size);
+  display: flex;
+  align-items: center;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.875rem;
   font-weight: 500;
-  padding-block: 0.25rem;
 }
 .player-top-bar-title > span {
-  padding: 0.25rem 0.375rem;
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  block-size: var(--top-bar-control-size);
+  padding-inline: 0.375rem;
   border-radius: 0.375rem;
 }
 .player-top-bar-error {

@@ -1552,10 +1552,11 @@ async function topBarChecks(page) {
   const hide = page.getByRole("button", { name: "Hide sidebar", exact: true });
   const show = page.getByRole("button", { name: "Show sidebar", exact: true });
   const fullscreen = page.locator("[data-fullscreen-control]");
+  const actions = page.locator(".player-top-bar-actions");
   const aligned = async (tools, titleVisible = true) => {
     const boxes = await Promise.all([
       tools.boundingBox(),
-      fullscreen.boundingBox(),
+      actions.boundingBox(),
       page.locator(".player-top-bar-title").boundingBox(),
     ]);
     check(boxes.every(Boolean), "Top controls and title must remain visible");
@@ -1573,8 +1574,8 @@ async function topBarChecks(page) {
       "Title must not collide with controls",
     );
     check(
-      left.width === right.width && left.height === right.height,
-      "Top controls must have consistent sizing",
+      left.height === right.height && left.height === title.height,
+      "Top-level controls and title must have consistent heights",
     );
   };
   await aligned(hide);
