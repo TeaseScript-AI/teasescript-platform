@@ -43,6 +43,15 @@ export function realizeBubble(colour: string, tone: number) {
 }
 
 /**
+ * The ink a realized bubble can carry. A tone near the crossover reads as light to one
+ * hue and dark to another, so the pair is measured rather than classified.
+ */
+export function inkFor(backdrop: string) {
+  const behind = luminance(paint(backdrop));
+  return 1.05 / (behind + 0.05) >= (behind + 0.05) / 0.05 ? "#ffffff" : "#000000";
+}
+
+/**
  * The least cover an authored colour needs to stay readable on this backdrop, or null
  * when it needs none. Cover runs toward whichever pole the colour is furthest from, so
  * more of it always helps and the smallest sufficient amount can be narrowed down.

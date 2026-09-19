@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { elementScroll, observeElementRect, useVirtualizer } from "@tanstack/vue-virtual";
 import { ArrowDown } from "@lucide/vue";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -15,7 +15,7 @@ import {
 import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } from "../../../model.js";
 import TranscriptMarkup from "./TranscriptMarkup.vue";
 import type { TranscriptDesign } from "./transcriptDesign";
-import { realizeBubble } from "./messageContrast";
+import { inkFor, realizeBubble } from "./messageContrast";
 
 const props = defineProps<{
   entries: readonly PlayerTranscriptEntryPresentation[];
@@ -82,8 +82,17 @@ function readPalette() {
     accent: read("--theme-accent-solid") || read("--package-accent") || "#000000",
   };
 }
-watch(() => [props.mode, props.design.lightTone, props.design.darkTone],
-  () => void nextTick(readPalette));
+// The palette is applied to the document by whoever owns the theme, so watching our own
+// props would miss a change of accent. Follow the document instead.
+let paletteObserver: MutationObserver | null = null;
+onMounted(() => {
+  paletteObserver = new MutationObserver(readPalette);
+  paletteObserver.observe(document.documentElement, {
+    attributes: true, attributeFilter: ["style", "class", "data-phase2c-theme"],
+  });
+});
+onBeforeUnmount(() => { paletteObserver?.disconnect(); });
+watch(() => [props.design.lightTone, props.design.darkTone], () => void nextTick(readPalette));
 // An authored accent names a hue, never a lightness; "inherit" means the speaker has none.
 // The player's own side falls back to the theme accent, so both sides are realized the
 // same way and the tone each mode can carry is applied to both.
@@ -100,10 +109,8 @@ const rows = computed(() => {
   return virtualizer.value.getVirtualItems().map((item) => {
     const entry = props.entries[item.index]!;
     const tint = tintOf(entry);
-    return {
-      item, entry, tint,
-      backdrop: tint === null ? palette.value.surface : realizeBubble(tint, tone),
-    };
+    const backdrop = tint === null ? palette.value.surface : realizeBubble(tint, tone);
+    return { item, entry, backdrop, ink: tint === null ? null : inkFor(backdrop) };
   });
 });
 const showLatest = computed(() => !touching.value && !virtualizer.value.isScrolling &&
@@ -187,11 +194,8 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
 </script>
 
 <template>
-  <section class="transcript" aria-label="Conversation" :style="{
-    '--transcript-bottom-inset': `${bottomInset ?? 0}px`,
-    '--message-light-tone': design.lightTone / 100,
-    '--message-dark-tone': design.darkTone / 100,
-  }">
+  <section class="transcript" aria-label="Conversation"
+    :style="{ '--transcript-bottom-inset': `${bottomInset ?? 0}px` }">
     <ScrollArea type="scroll" class="transcript-scroll-area" viewport-class="transcript-scroll"
       content-class="transcript-scroll-content"
       @viewport="scrollElement = $event"
@@ -200,7 +204,7 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
         onTouchstart: onTouchStart, onTouchend: () => touching = false,
         onTouchcancel: () => touching = false }">
       <div class="transcript-history" role="list" :style="{ height: `${virtualizer.getTotalSize()}px` }">
-        <article v-for="{ item, entry, tint, backdrop } in rows" :key="entry.id"
+        <article v-for="{ item, entry, ink, backdrop } in rows" :key="entry.id"
           :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
           :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
           role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
@@ -223,8 +227,8 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
                 :variant="entry.speakerId === 'user' ? design.playerFill : design.speakerFill"
                 :align="entry.speakerId === 'user' ? 'end' : 'start'">
                 <BubbleContent class="text-base/normal"
-                  :class="[cornerClass(item.index, entry.speakerId === 'user'), tint ? 'message-tinted' : '']"
-                  :style="tint ? { '--message-tint': tint } : undefined">
+                  :class="[cornerClass(item.index, entry.speakerId === 'user'), ink ? 'message-tinted' : '']"
+                  :style="ink ? { background: backdrop, color: ink } : undefined">
                   <MessageHeader v-if="showsName(item.index, entry.speakerId === 'user')"
                     class="px-0 pb-0.5">
                     {{ speakers[entry.speakerId]?.name ?? entry.speakerId }}
@@ -283,15 +287,6 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
 /* An authored colour is a hue, not a finished bubble. Each mode realizes it at the tone
    it can carry — dark under light text, light under dark text — so a single authored
    colour stays readable in both without the author supplying one for each. */
-.message-tinted {
-  --message-tone: var(--message-light-tone);
-  /* Ink follows the realized tone rather than the mode, so moving a tone past the
-     crossover flips the text with it instead of leaving it stranded. */
-  --message-ink: clamp(0, (var(--message-tone) - 0.6) * 1000, 1);
-  background: oklch(from var(--message-tint) var(--message-tone) c h);
-  color: oklch(calc(1 - var(--message-ink)) 0 0);
-}
-:root[data-phase2c-theme="dark"] .message-tinted { --message-tone: var(--message-dark-tone); }
 /* The name is muted against the page, not against a coloured bubble. Inside one it
    steps back from the bubble's own text colour instead, which follows the mode. */
 .message-tinted :deep([data-slot="message-header"]) { color: inherit; opacity: 0.72; }
