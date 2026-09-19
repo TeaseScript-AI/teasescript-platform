@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, provide, ref, shallowReactive, shallowRef, watch, type ComponentPublicInstance } from "vue";
+import { computed, nextTick, onBeforeUnmount, provide, ref, shallowReactive, shallowRef, watch, watchEffect, type ComponentPublicInstance } from "vue";
 import { onClickOutside, useEventListener, useResizeObserver, useStorage } from "@vueuse/core";
 import { FlaskConical, Settings, ScanLine, Activity, SlidersHorizontal, PanelLeftOpen, PanelRightOpen, GripVertical } from "@lucide/vue";
 import Sortable from "sortablejs";
@@ -37,6 +37,7 @@ import SidebarHeader from "@/components/ui/sidebar/SidebarHeader.vue";
 import SidebarInset from "@/components/ui/sidebar/SidebarInset.vue";
 import SidebarProvider from "@/components/ui/sidebar/SidebarProvider.vue";
 import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
+import { generatePlayerTheme, themeCssVariables, type PlayerThemeIntent } from "../../../theme/palette.js";
 
 import Dialog from "@/components/ui/dialog/Dialog.vue";
 import DialogTrigger from "@/components/ui/dialog/DialogTrigger.vue";
@@ -54,12 +55,19 @@ const timerKind = ref<PlayerTimerKind>("visible");
 const timerCount = ref(1);
 const timerReset = ref(0);
 const timerPaused = ref(true);
+const themeEnabled = ref(false);
+const themeIntent = ref<PlayerThemeIntent>({
+  mode: "light", contrast: "standard",
+  surfaceHue: 70, surfaceTint: 0.5,
+  surfaceMaxChroma: 8.5, surfaceLadder: "teasescript", monochrome: false,
+  accentSeed: { l: 0.59208, c: 0.19138, h: 11.08 },
+});
 // The standalone Player owns root tokens so body-portaled Reka surfaces share the theme.
 // Retain previous inline values so switching off/unmounting restores the exact baseline.
 const previousThemeProperties = new Map<string, { value: string; priority: string }>();
 let previousThemeMode: string | null = null;
 let themeApplied = false;
-function clearThemeLab() {
+function clearGeneratedTheme() {
   if (!themeApplied) return;
   const root = document.documentElement;
   for (const [property, previous] of previousThemeProperties) {
@@ -71,9 +79,8 @@ function clearThemeLab() {
   else root.setAttribute("data-phase2c-theme", previousThemeMode);
   themeApplied = false;
 }
-function applyThemeLab(update: { enabled: boolean; mode: "light" | "dark"; variables: Record<string, string> }) {
-  if (!isDevelopment) return;
-  if (!update.enabled) { clearThemeLab(); return; }
+function applyGeneratedTheme(update: { enabled: boolean; mode: "light" | "dark"; variables: Record<string, string> }) {
+  if (!update.enabled) { clearGeneratedTheme(); return; }
   const root = document.documentElement;
   if (!themeApplied) {
     previousThemeMode = root.getAttribute("data-phase2c-theme");
@@ -87,7 +94,19 @@ function applyThemeLab(update: { enabled: boolean; mode: "light" | "dark"; varia
   }
   root.dataset.phase2cTheme = update.mode;
 }
-onBeforeUnmount(clearThemeLab);
+watchEffect(() => {
+  const theme = generatePlayerTheme(themeIntent.value);
+  applyGeneratedTheme({
+    enabled: themeEnabled.value,
+    mode: themeIntent.value.mode,
+    variables: themeEnabled.value ? themeCssVariables(theme) : {},
+  });
+});
+function toggleThemeMode() {
+  themeIntent.value = { ...themeIntent.value, mode: themeIntent.value.mode === "dark" ? "light" : "dark" };
+  themeEnabled.value = true;
+}
+onBeforeUnmount(clearGeneratedTheme);
 const transcriptEntries = ref(transcriptFixtures(0, 2000));
 const runtimeSession = shallowRef<PlayerRuntimeSession | null>(null);
 const runtimeRestore = shallowRef<PlayerRuntimeRestorePoint | null>(null);
@@ -608,7 +627,7 @@ async function updateSidebarVisibility(open: boolean) {
           <ToolLifetimeFixture v-if="toolStateFixture && tool === 'Layout Debug'" />
           <LayoutDebug v-else-if="isDevelopment && tool === 'Layout Debug' && shellElement" :player="shellElement" />
           <div v-if="isDevelopment && tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
-            <ThemeLab @theme-change="applyThemeLab" />
+            <ThemeLab v-model:enabled="themeEnabled" v-model:intent="themeIntent" />
             <label class="grid gap-2">
               Stage media fixture
               <select v-model="mediaFixture" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
@@ -760,7 +779,9 @@ async function updateSidebarVisibility(open: boolean) {
           :fullscreen="fullscreen"
           :fullscreen-supported="fullscreenSupported"
           :fullscreen-error="fullscreenError"
+          :theme-mode="themeIntent.mode"
           @toggle-fullscreen="toggleFullscreen"
+          @toggle-theme-mode="toggleThemeMode"
         >
           <template v-if="!sidebarVisible" #tools>
             <SidebarTrigger class="size-8" aria-label="Show sidebar" title="Show sidebar" />

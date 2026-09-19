@@ -1,47 +1,65 @@
 <script setup lang="ts">
 import { Button } from "@/components/ui/button";
-import { computed, reactive, ref, watchEffect } from "vue";
+import { computed } from "vue";
 import { oklchCss, oklchToPickerHex, pickerHexToOklch, type OklchColor } from "../../../theme/color.js";
-import { generatePlayerTheme, themeCssVariables, type PlayerThemeIntent } from "../../../theme/palette.js";
+import { generatePlayerTheme, type PlayerThemeIntent } from "../../../theme/palette.js";
 
+const props = defineProps<{ enabled: boolean; intent: PlayerThemeIntent }>();
 const emit = defineEmits<{
-  themeChange: [update: {
-    enabled: boolean;
-    mode: PlayerThemeIntent["mode"];
-    variables: Record<string, string>;
-  }];
+  "update:enabled": [enabled: boolean];
+  "update:intent": [intent: PlayerThemeIntent];
 }>();
-const enabled = ref(false);
-const intent = reactive<{
-  mode: PlayerThemeIntent["mode"];
-  contrast: PlayerThemeIntent["contrast"];
-  surfaceHue: number;
-  surfaceTint: number;
-  surfaceMaxChroma: PlayerThemeIntent["surfaceMaxChroma"];
-  surfaceLadder: PlayerThemeIntent["surfaceLadder"];
-  monochrome: boolean;
-  accentSeed: { l: number; c: number; h: number };
-}>({
-  mode: "light", contrast: "standard",
-  surfaceHue: 70, surfaceTint: 0.5,
-  surfaceMaxChroma: 8.5, surfaceLadder: "teasescript", monochrome: false,
-  accentSeed: { l: 0.59208, c: 0.19138, h: 11.08 },
-});
-const theme = computed(() => generatePlayerTheme(intent));
-watchEffect(() => emit("themeChange", {
-  enabled: enabled.value,
-  mode: intent.mode,
-  variables: enabled.value ? themeCssVariables(theme.value) : {},
-}));
+const theme = computed(() => generatePlayerTheme(props.intent));
+const intent = computed(() => props.intent);
+const enabled = computed(() => props.enabled);
+function patchIntent(patch: Partial<PlayerThemeIntent>) {
+  emit("update:intent", { ...props.intent, ...patch });
+}
+function selectValue(event: Event) {
+  return event.target instanceof HTMLSelectElement ? event.target.value : "";
+}
+function inputValue(event: Event) {
+  return event.target instanceof HTMLInputElement ? event.target.value : "";
+}
+function setEnabled(event: Event) {
+  if (event.target instanceof HTMLInputElement) emit("update:enabled", event.target.checked);
+}
+function setMode(event: Event) {
+  const mode = selectValue(event);
+  if (mode === "light" || mode === "dark") patchIntent({ mode });
+}
+function setContrast(event: Event) {
+  const contrast = selectValue(event);
+  if (contrast === "standard" || contrast === "high") patchIntent({ contrast });
+}
+function setSurfaceLadder(event: Event) {
+  const surfaceLadder = selectValue(event);
+  if (surfaceLadder === "material" || surfaceLadder === "teasescript") patchIntent({ surfaceLadder });
+}
+function setSurfaceMaxChroma(event: Event) {
+  const surfaceMaxChroma = Number(selectValue(event));
+  if (surfaceMaxChroma === 5 || surfaceMaxChroma === 8.5 || surfaceMaxChroma === 12) patchIntent({ surfaceMaxChroma });
+}
+function setMonochrome(event: Event) {
+  if (event.target instanceof HTMLInputElement) patchIntent({ monochrome: event.target.checked });
+}
+function setSurfaceHue(event: Event) {
+  patchIntent({ surfaceHue: Number(inputValue(event)) });
+}
+function setSurfaceTint(event: Event) {
+  patchIntent({ surfaceTint: Number(inputValue(event)) });
+}
 function pickAccent(event: Event) {
-  if (event.target instanceof HTMLInputElement) Object.assign(intent.accentSeed, pickerHexToOklch(event.target.value));
+  if (event.target instanceof HTMLInputElement) patchIntent({ accentSeed: pickerHexToOklch(event.target.value) });
 }
 function comparePair(pair: "warm" | "cool") {
-  intent.surfaceHue = pair === "warm" ? 70 : 240;
-  intent.surfaceTint = 0.5;
-  intent.surfaceMaxChroma = 8.5;
-  intent.monochrome = false;
-  Object.assign(intent.accentSeed, pickerHexToOklch(pair === "warm" ? "#d63b61" : "#2255ee"));
+  patchIntent({
+    surfaceHue: pair === "warm" ? 70 : 240,
+    surfaceTint: 0.5,
+    surfaceMaxChroma: 8.5,
+    monochrome: false,
+    accentSeed: pickerHexToOklch(pair === "warm" ? "#d63b61" : "#2255ee"),
+  });
 }
 function displayColor(color: OklchColor) {
   return `oklch(${(color.l * 100).toFixed(2)}% ${color.c.toFixed(4)} ${color.h.toFixed(2)})`;
@@ -52,7 +70,7 @@ function displayColor(color: OklchColor) {
   <section class="theme-lab grid gap-3" aria-label="Experimental Theme Lab">
     <h2 class="font-semibold">Theme Lab · experimental</h2>
     <p>Applies live to this Phase 2C Player. Palette values and contrast targets are provisional, not an accessibility certification.</p>
-    <label class="flex items-center gap-2"><input v-model="enabled" type="checkbox" /> Generated dynamic theme</label>
+    <label class="flex items-center gap-2"><input :checked="enabled" type="checkbox" @change="setEnabled" /> Generated dynamic theme</label>
     <fieldset class="grid gap-1">
       <legend>Development colour pairs</legend>
       <div class="flex flex-wrap gap-2">
@@ -61,25 +79,25 @@ function displayColor(color: OklchColor) {
       </div>
     </fieldset>
     <label class="grid gap-1">Theme mode
-      <select v-model="intent.mode" aria-label="Theme mode"><option value="light">Light</option><option value="dark">Dark</option></select>
+      <select :value="intent.mode" aria-label="Theme mode" @change="setMode"><option value="light">Light</option><option value="dark">Dark</option></select>
     </label>
     <label class="grid gap-1">Theme contrast
-      <select v-model="intent.contrast" aria-label="Theme contrast"><option value="standard">Standard</option><option value="high">High</option></select>
+      <select :value="intent.contrast" aria-label="Theme contrast" @change="setContrast"><option value="standard">Standard</option><option value="high">High</option></select>
     </label>
     <fieldset class="grid gap-2">
       <legend>Surface tint intent</legend>
       <label class="grid gap-1">Surface ladder
-        <select v-model="intent.surfaceLadder" aria-label="Surface ladder"><option value="teasescript">TeaseScript · raised lighter</option><option value="material">Material-oriented comparison</option></select>
+        <select :value="intent.surfaceLadder" aria-label="Surface ladder" @change="setSurfaceLadder"><option value="teasescript">TeaseScript · raised lighter</option><option value="material">Material-oriented comparison</option></select>
       </label>
       <label class="grid gap-1">Maximum surface chroma
-        <select v-model.number="intent.surfaceMaxChroma" aria-label="Maximum surface chroma"><option :value="5">5 · quiet</option><option :value="8.5">8.5</option><option :value="12">12 · stronger</option></select>
+        <select :value="intent.surfaceMaxChroma" aria-label="Maximum surface chroma" @change="setSurfaceMaxChroma"><option :value="5">5 · quiet</option><option :value="8.5">8.5</option><option :value="12">12 · stronger</option></select>
       </label>
-      <label class="flex items-center gap-2"><input v-model="intent.monochrome" type="checkbox" /> Monochrome surfaces</label>
+      <label class="flex items-center gap-2"><input :checked="intent.monochrome" type="checkbox" @change="setMonochrome" /> Monochrome surfaces</label>
       <label class="grid gap-1">Surface hue · {{ intent.surfaceHue }}°
-        <input v-model.number="intent.surfaceHue" :disabled="intent.monochrome" aria-label="Surface hue" type="range" min="0" max="360" step="1" />
+        <input :value="intent.surfaceHue" :disabled="intent.monochrome" aria-label="Surface hue" type="range" min="0" max="360" step="1" @input="setSurfaceHue" />
       </label>
       <label class="grid gap-1">Tint intensity · {{ Math.round(intent.surfaceTint * 100) }}%
-        <input v-model.number="intent.surfaceTint" :disabled="intent.monochrome" aria-label="Tint intensity" type="range" min="0" max="1" step="0.01" />
+        <input :value="intent.surfaceTint" :disabled="intent.monochrome" aria-label="Tint intensity" type="range" min="0" max="1" step="0.01" @input="setSurfaceTint" />
       </label>
       <p>{{ intent.monochrome || intent.surfaceTint === 0 ? 'Achromatic surfaces. Hue is inactive until tint is added.' : 'Explicit surface tint; independent of accent and light/dark mode.' }}</p>
     </fieldset>

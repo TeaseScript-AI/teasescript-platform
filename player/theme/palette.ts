@@ -77,6 +77,8 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
     : Math.min(tones.chrome, tones.raised);
   const stateTone = (rest: number, lightOffset: number, darkOffset: number) =>
     surface(rest + (dark ? darkOffset : -lightOffset), 0.6);
+  // Media chrome follows the Player polarity while retaining enough translucency
+  // for the underlying image to remain part of the composition.
   const mediaSurface = surface(dark ? 24 : 94);
   const mediaText = neutral(dark ? 100 : 15);
   const base = {
@@ -159,11 +161,12 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
   const effects = {
     "overlay-shadow": { color: black, alpha: 0.65 },
     "overlay-track": { color: white, alpha: 0.82 },
-    // Local media materials retain the surface hue/tint but do not assume media
-    // polarity. High coverage keeps their own text readable over either extreme.
-    "media-surface": { color: mediaSurface, alpha: 0.9 },
-    "media-hover": { color: surface(dark ? 34 : 86), alpha: 0.94 },
-    "media-pressed": { color: surface(dark ? 42 : 78), alpha: 0.96 },
+    // Opposite-polarity media remains possible, so each material retains enough
+    // coverage for its glyphs while leaving the image visibly present.
+    "media-surface": { color: mediaSurface, alpha: dark ? 0.62 : 0.58 },
+    "media-hover": { color: surface(dark ? 34 : 86), alpha: dark ? 0.72 : 0.68 },
+    "media-pressed": { color: surface(dark ? 42 : 78), alpha: dark ? 0.82 : 0.78 },
+    "media-border": { color: mediaText, alpha: dark ? 0.3 : 0.22 },
     "media-shadow": { color: black, alpha: 0.22 },
     "floating-shadow": { color: black, alpha: dark ? 0.55 : 0.18 },
     "structural-shadow": { color: black, alpha: dark ? 0.35 : 0.08 },
