@@ -20,8 +20,6 @@
   --color-muted: var(--sidebar);
   --color-secondary: var(--surface-component);
   --color-secondary-foreground: var(--foreground);
-  --color-primary: var(--accent-solid);
-  --color-primary-foreground: var(--surface-component);
   --color-accent: var(--component-hover);
   --color-accent-foreground: var(--foreground);
   --color-border: var(--border);
