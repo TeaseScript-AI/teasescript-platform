@@ -89,7 +89,7 @@ function keydown(event: KeyboardEvent) {
         :aria-describedby="feedback ? feedbackId : undefined"
         class="min-w-0 flex-1 resize-none rounded border-0 bg-transparent px-3 py-2 text-sm"
         @keydown="keydown" />
-      <Button type="submit" variant="ghost" :disabled="!foreground || submitting" class="h-auto shrink-0 bg-transparent px-4">Send</Button>
+      <Button type="submit" variant="default" :disabled="!foreground || submitting" class="h-auto shrink-0 px-4 disabled:bg-transparent disabled:text-muted-foreground">Send</Button>
     </form>
     <p v-if="feedback" :id="feedbackId" role="status" class="mt-1 text-sm">{{ feedback }}</p>
   </div>

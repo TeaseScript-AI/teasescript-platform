@@ -127,7 +127,7 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
   overflow-anchor: none; scrollbar-width: none;
 }
 .transcript-scroll::-webkit-scrollbar { display: none; }
-.transcript-scroll:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.transcript-scroll:focus-visible { outline: 2px solid var(--focus-ring, var(--border-strong)); outline-offset: -2px; }
 /* Keep transcript contrast intact above the composer, then reduce it across
    the complete composer height while retaining a faint trace to the bottom. */
 .transcript-scroll {
@@ -151,10 +151,11 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
   border: 1px solid var(--border); border-radius: 0.75rem;
   background: var(--surface-component);
 }
-.transcript-empty { padding: 1rem; font-size: 0.875rem; color: var(--muted-foreground); }
+.transcript-empty { padding: 1rem; font-size: 0.875rem; color: var(--text-muted); }
 .return-to-latest {
   position: absolute; bottom: calc(var(--transcript-bottom-inset, 0px) + 0.5rem); right: 0.25rem; width: 2.75rem; height: 2.75rem;
   border: 1px solid var(--border); border-radius: 50%;
-  background: color-mix(in srgb, var(--surface-component) 80%, transparent); backdrop-filter: blur(4px);
+  --button-rest: color-mix(in srgb, var(--surface-component) 80%, transparent);
+  backdrop-filter: blur(4px);
 }
 </style>

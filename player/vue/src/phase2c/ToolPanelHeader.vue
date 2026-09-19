@@ -117,7 +117,7 @@ onBeforeUnmount(() => observer?.disconnect());
                 <Button
                   variant="ghost"
                   size="sm"
-                  class="panel-settings-trigger group h-8 gap-1 px-2 hover:bg-accent active:bg-[var(--component-pressed)] data-[state=open]:bg-accent"
+                  class="panel-settings-trigger group h-8 gap-1 px-2"
                   aria-label="Panel settings"
                   :data-tools-focus="`settings:${tool}`"
                 >
@@ -180,7 +180,7 @@ onBeforeUnmount(() => observer?.disconnect());
               :model-value="pinned"
               :aria-label="`Pin ${tool}`"
               size="sm"
-              class="shrink-0 data-[state=on]:bg-[var(--component-pressed)]"
+              class="shrink-0"
               @update:model-value="emit('pin', $event)"
             >
               <Pin />

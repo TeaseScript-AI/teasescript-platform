@@ -15,6 +15,7 @@ function scene(width: number, height: number, dark = false) {
 }
 export const stageFixtures = {
   Landscape: scene(1600, 900),
+  Dusk: scene(1600, 900, true),
   Portrait: scene(800, 1200, true),
   Square: scene(1000, 1000),
   Empty: undefined,

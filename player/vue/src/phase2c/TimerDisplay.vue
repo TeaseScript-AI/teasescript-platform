@@ -85,7 +85,7 @@ const accessibleName = computed(() => {
     color-mix(in oklab, var(--timer-surface) 12%, transparent) 100%
   );
   box-shadow: 0 0 12px color-mix(in oklab, var(--timer-surface) 12%, transparent);
-  backdrop-filter: blur(3px);
+  backdrop-filter: blur(6px);
   filter: blur(0.75px);
   content: "";
 }
@@ -110,7 +110,7 @@ const accessibleName = computed(() => {
 }
 
 .timer-track {
-  stroke: color-mix(in oklab, var(--timer-foreground) 56%, transparent);
+  stroke: var(--theme-overlay-track, color-mix(in oklab, var(--timer-foreground) 56%, transparent));
 }
 
 .timer-arc {
