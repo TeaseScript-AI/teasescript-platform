@@ -81,6 +81,7 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
   align-items: center;
   gap: 0.125rem;
   padding: 0.125rem;
+  margin-block: -0.1875rem;
   border: 1px solid var(--media-border);
   border-radius: 0.75rem;
   background: var(--media-surface);

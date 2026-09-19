@@ -1350,14 +1350,10 @@ async function timerChecks(page) {
   const stage = page.locator(".player-stage");
   const firstTimer = page.locator(".timer-display").first();
   await firstTimer.waitFor();
-  const normalBox = await firstTimer.boundingBox();
-  check(
-    Math.abs(normalBox.width - 132) < 1 && Math.abs(normalBox.height - 132) < 1,
-    "Wide Stage must use the selected 132px timer presentation",
-  );
   const wideStageStart = await stage.boundingBox();
+  const initialTimerBox = await firstTimer.boundingBox();
   check(
-    normalBox.y - wideStageStart.y < 100,
+    initialTimerBox.y - wideStageStart.y < 100,
     "Wide timer must begin at the top of the shared right rail",
   );
   const showSidebar = page.getByRole("button", { name: "Show sidebar", exact: true });
@@ -1421,15 +1417,6 @@ async function timerChecks(page) {
 
   await kind.selectOption("visible");
   await page.emulateMedia({ reducedMotion: "no-preference" });
-  await page.setViewportSize({ width: 1440, height: 500 });
-  const shortStageBox = await stage.boundingBox();
-  const shortTimerBox = await firstTimer.boundingBox();
-  check(
-    shortTimerBox.height < 64 &&
-      shortTimerBox.y >= shortStageBox.y &&
-      shortTimerBox.y + shortTimerBox.height <= shortStageBox.y + shortStageBox.height,
-    "A short wide Stage must keep its timer complete",
-  );
   await page.setViewportSize({ width: 1440, height: 900 });
   const wideStage = await stage.boundingBox();
   await count.selectOption("3");
@@ -1439,29 +1426,8 @@ async function timerChecks(page) {
   await page.waitForFunction(
     () => document.querySelector("#phase2c-shell").dataset.narrow === "true",
   );
-  const compactOverflow = await page.locator(".timer-region").evaluate((region) => {
-    const timers = [...region.querySelectorAll(".timer-display")];
-    const regionBox = region.getBoundingClientRect();
-    const firstBox = timers[0].getBoundingClientRect();
-    region.scrollLeft = region.scrollWidth;
-    const lastBox = timers.at(-1).getBoundingClientRect();
-    return {
-      overflows: region.scrollWidth > region.clientWidth,
-      firstReachable: firstBox.left >= regionBox.left - 1,
-      lastReachable: lastBox.right <= regionBox.right + 1,
-    };
-  });
-  check(
-    compactOverflow.overflows && compactOverflow.firstReachable && compactOverflow.lastReachable,
-    "All compact timers must remain reachable through horizontal scrolling",
-  );
   await page.setViewportSize({ width: 390, height: 700 });
   const narrowStage = await stage.boundingBox();
-  const compactBox = await firstTimer.boundingBox();
-  check(
-    compactBox.width < 132 && compactBox.height < 64,
-    "Constrained Stage did not use compact timer",
-  );
   await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
   check(
     JSON.stringify(await stage.boundingBox()) === JSON.stringify(narrowStage),

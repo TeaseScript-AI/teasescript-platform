@@ -62,6 +62,7 @@ const themeIntent = ref<PlayerThemeIntent>({
   surfaceMaxChroma: 8.5, surfaceLadder: "teasescript", monochrome: false,
   accentSeed: { l: 0.59208, c: 0.19138, h: 11.08 },
 });
+const effectiveThemeMode = computed(() => themeEnabled.value ? themeIntent.value.mode : "light");
 // The standalone Player owns root tokens so body-portaled Reka surfaces share the theme.
 // Retain previous inline values so switching off/unmounting restores the exact baseline.
 const previousThemeProperties = new Map<string, { value: string; priority: string }>();
@@ -103,8 +104,14 @@ watchEffect(() => {
   });
 });
 function toggleThemeMode() {
-  themeIntent.value = { ...themeIntent.value, mode: themeIntent.value.mode === "dark" ? "light" : "dark" };
+  themeIntent.value = { ...themeIntent.value, mode: effectiveThemeMode.value === "dark" ? "light" : "dark" };
   themeEnabled.value = true;
+}
+function setThemeEnabled(enabled: boolean) {
+  themeEnabled.value = enabled;
+}
+function setThemeIntent(intent: PlayerThemeIntent) {
+  themeIntent.value = intent;
 }
 onBeforeUnmount(clearGeneratedTheme);
 const transcriptEntries = ref(transcriptFixtures(0, 2000));
@@ -627,7 +634,8 @@ async function updateSidebarVisibility(open: boolean) {
           <ToolLifetimeFixture v-if="toolStateFixture && tool === 'Layout Debug'" />
           <LayoutDebug v-else-if="isDevelopment && tool === 'Layout Debug' && shellElement" :player="shellElement" />
           <div v-if="isDevelopment && tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
-            <ThemeLab v-model:enabled="themeEnabled" v-model:intent="themeIntent" />
+            <ThemeLab :enabled="themeEnabled" :intent="themeIntent"
+              @update:enabled="setThemeEnabled" @update:intent="setThemeIntent" />
             <label class="grid gap-2">
               Stage media fixture
               <select v-model="mediaFixture" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
@@ -779,7 +787,7 @@ async function updateSidebarVisibility(open: boolean) {
           :fullscreen="fullscreen"
           :fullscreen-supported="fullscreenSupported"
           :fullscreen-error="fullscreenError"
-          :theme-mode="themeIntent.mode"
+          :theme-mode="effectiveThemeMode"
           @toggle-fullscreen="toggleFullscreen"
           @toggle-theme-mode="toggleThemeMode"
         >
