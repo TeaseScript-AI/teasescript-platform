@@ -38,7 +38,58 @@ source. Those values are also maintained as observable Player contract in `docs/
 consume semantic roles rather than raw application-palette primitives. Speaker, package-accent, media, and technical
 mask colours remain separate presentation data.
 
+## Experimental dynamic theme evaluation
+
+Run `npm run dev:player:phase2c -- --host 0.0.0.0` and open `/phase2c/`, then Visual Lab → Theme Lab.
+The generated-theme switch applies to the actual Player: shell/Stage ambience, Tools, transcript/composer, top bar,
+controls, Timer and body-portaled overlays. There is no separate component sample card. Switching off restores the
+existing baseline, including Timer materials and any pre-existing inline theme values. The App owns application and
+cleanup on the standalone document root so portaled UI shares the same resolved roles; the generator remains pure.
+The native picker pins the literal accent colour; separate surface hue and 0–100% tint controls express intent.
+Zero tint is achromatic in light and dark modes. Polarity and standard/high contrast remain independent. State is session-local and is not persisted. UI ambience follows the surface family without
+replacing content-owned scene/media colors or the accent colour. Theme generation does not own Timer sizing or layout.
+
+`theme/palette.ts` resolves Player roles, `theme/material.ts` isolates MCU's public root API, and `theme/color.ts`
+isolates Color.js conversion, CSS gamut mapping and contrast. MCU realizes tonal palettes; a provisional Player-owned
+role-tone table compares darker Material-oriented light containers with lighter TeaseScript light containers and
+separate dark ladders. Controls and floating surfaces have explicit roles; floating borders/shadows provide elevation.
+Hover, pressed and selected roles account for their actual panel, control or floating backdrop. Pin toggles and tool
+launchers share the neutral progression; persistent selection stays separate from transient hover/press feedback.
+The full tint slider maps onto the selected HCT chroma maximum (5, 8.5 or 12), with less tint in nested surfaces so
+light themes retain their hierarchy at the upper end. Monochrome remains independent of accent. Text and borders
+remain neutral; ordinary open/selected states use the surface family. Accent owns primary actions, focus and progress.
+Send is a compact primary action within the single Composer material, while the textarea and disabled controls stay transparent.
+High contrast increases tone separation, not saturation. Development colour-pair buttons reset surface/accent inputs
+without changing ladder, polarity or contrast; they are comparison aids, not registered themes.
+
+The single canvas retains its radial/vertical wash geometry and derives the wash from the selected surface family.
+Title and top-media controls share a local translucent material derived from surface hue/tint, with readable text
+and interaction states over either media polarity; the surrounding top bar stays transparent. The Timer keeps its
+40% → 26% → 12% translucent halo, with stronger backdrop blur for busy media and a translucent white remaining-time
+track without a dark contour. Overlay text/ring separation is independent of Player polarity and panel elevation.
+These mappings remain experimental, not accepted palette or accessibility policy. Diagnostics expose measured
+opaque-colour ratios and failures; they do not certify translucent media overlays or perceptual state distinction.
+
+The generator accepts already-resolved platform intent. User/package precedence, authored theme registration and
+missing-variant fallback remain governed by [the theme boundary](../docs/ui/PLAYER-UI.md#theme-and-customization-boundary)
+and are not implemented here. It does not convert authored custom themes, accept scene/speaker/control colors, or
+produce interaction families from arbitrary content colors. Final production adoption, persistence, dark values and
+policy thresholds remain Owner choices. The exact dependencies are MCU 0.4.0 (Apache-2.0) and Color.js 0.7.1 (MIT),
+both with no runtime dependencies. They replace local colour-science code; product role-tone choices remain explicit
+and provisional. The cost is bundled code and dependency-update review; no network service or
+new data access is introduced. MCU 0.4.0 ships extensionless internal ESM imports: this experiment uses Vite's bundler;
+direct Node ESM execution of the MCU adapter currently fails. No package patch or custom loader is introduced.
+
 ## Demo-only behavior
+
+The isolated Phase 2C Tool Panel strip uses SortableJS directly for handle-based mouse/touch reordering and edge
+autoscroll. A local lifecycle binding restores Sortable's DOM move before updating Vue's authoritative visual-order
+list; pin membership and per-tool widths remain separate. A Vue wrapper would add another maintenance/version layer
+for little reduction in this single-list binding. Native HTML drag-and-drop has weaker touch support; a Pointer Events
+implementation would require custom sorting and autoscroll. Reka menu actions provide the keyboard/non-drag alternative.
+SortableJS adds shipped browser code and a normal dependency update/audit obligation; its development-only type package
+adds no runtime code. Both are locked in the package manifest/lockfile. The integration introduces no network service,
+runtime data access, or new host boundary. Keep sorting and scroll behavior covered when updating the dependency.
 
 The local playground server may select a supported image from `player/demo-media/` when the Player opens. Visual Lab,
 Layout Debug, Runtime Session, their fixture content, local tuning/inspection controls, and the demo-media endpoint are
