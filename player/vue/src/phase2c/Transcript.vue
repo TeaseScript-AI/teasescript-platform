@@ -333,17 +333,11 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
 .message-authored :deep([data-slot="message-header"]) { color: inherit; opacity: 0.72; }
 /* Prose is read, not overheard, so it asks for the room a paragraph needs: air above and
    below to separate it from speech, and a looser line than a bubble would carry. */
-/* A speaker's words start past the avatar, the gap beside it and the bubble's own padding;
-   the player's start one padding in from the far edge. Prose meets the conversation at
-   those two lines, and it is the row that holds them: every position then moves the block
-   inside one box, so centre always lands between left and right instead of measuring from
-   an edge the other two never see. It also reserves the far gutter before the measure is
-   honoured, without which prose runs to the edge on a phone while the bubbles beside it
-   keep their margin. */
-.transcript-entry[data-prose] {
-  padding-block: 1.75rem 0.75rem;
-  padding-inline: calc(2rem + 0.5rem + 0.75rem) 0.75rem;
-}
+/* Prose carries no avatar, so it indents for none: left meets the line the avatars stand
+   on and right meets the one the player's bubbles end at, which are the two edges the
+   column already has. Every position therefore moves the block inside the same box, and
+   centre lands between the other two rather than measuring from an edge they never see. */
+.transcript-entry[data-prose] { padding-block: 1.75rem 0.75rem; }
 .prose {
   /* Shrink-to-fit is what makes the block's own position visible: a short passage sits
      where it was put, a long one fills the measure and only its text alignment shows. */
