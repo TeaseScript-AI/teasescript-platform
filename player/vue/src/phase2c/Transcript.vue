@@ -333,31 +333,30 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
 .message-authored :deep([data-slot="message-header"]) { color: inherit; opacity: 0.72; }
 /* Prose is read, not overheard, so it asks for the room a paragraph needs: air above and
    below to separate it from speech, and a looser line than a bubble would carry. */
-.transcript-entry[data-prose] { padding-block: 1.75rem 0.75rem; }
+/* A speaker's words start past the avatar, the gap beside it and the bubble's own padding;
+   the player's start one padding in from the far edge. Prose meets the conversation at
+   those two lines, and it is the row that holds them: every position then moves the block
+   inside one box, so centre always lands between left and right instead of measuring from
+   an edge the other two never see. It also reserves the far gutter before the measure is
+   honoured, without which prose runs to the edge on a phone while the bubbles beside it
+   keep their margin. */
+.transcript-entry[data-prose] {
+  padding-block: 1.75rem 0.75rem;
+  padding-inline: calc(2rem + 0.5rem + 0.75rem) 0.75rem;
+}
 .prose {
-  /* A speaker's words start past the avatar, the gap beside it and the bubble's own
-     padding; the player's start one padding in from the far edge. Prose meets the
-     conversation at those two lines, so a passage never looks shifted against it. */
-  --prose-lead: calc(2rem + 0.5rem + 0.75rem);
-  --prose-trail: 0.75rem;
   /* Shrink-to-fit is what makes the block's own position visible: a short passage sits
      where it was put, a long one fills the measure and only its text alignment shows. */
   width: fit-content;
-  /* The measure is in characters and a narrow window has fewer of them than a wide one, so
-     the far gutter is reserved before the measure is honoured. Without it prose runs to the
-     edge on a phone while every bubble beside it still keeps its margin. */
-  max-width: min(
-    var(--prose-measure, 65ch),
-    calc(100% - var(--prose-lead) - var(--prose-trail))
-  );
+  max-width: min(var(--prose-measure, 65ch), 100%);
   font-size: 1rem;
   line-height: 1.7;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.prose[data-align="left"] { margin-inline: var(--prose-lead) auto; }
+.prose[data-align="left"] { margin-inline: 0 auto; }
 .prose[data-align="center"] { margin-inline: auto; }
-.prose[data-align="right"] { margin-inline: auto var(--prose-trail); }
+.prose[data-align="right"] { margin-inline: auto 0; }
 .prose[data-text="left"] { text-align: left; }
 .prose[data-text="center"] { text-align: center; }
 .prose[data-text="right"] { text-align: right; }
