@@ -232,8 +232,7 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
               {{ nameOf(entry) }}
             </p>
             <TranscriptMarkup v-if="entry.content" :content="entry.content"
-              :entry-id="entry.id" :backdrop="backdrop" :revealed="revealedSpoilers"
-              @reveal="revealedSpoilers.add($event)" />
+              :backdrop="backdrop" />
             <template v-else>{{ entry.text }}</template>
           </div>
           <Message v-else :align="entry.speakerId === 'user' ? 'end' : 'start'">
@@ -260,8 +259,7 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
                     {{ nameOf(entry) }}
                   </MessageHeader>
                   <TranscriptMarkup v-if="entry.speakerId !== 'user' && entry.content" :content="entry.content"
-                    :entry-id="entry.id" :backdrop="backdrop" :revealed="revealedSpoilers"
-                    @reveal="revealedSpoilers.add($event)" />
+                    :backdrop="backdrop" />
                   <template v-else>{{ entry.text }}</template>
                 </BubbleContent>
               </Bubble>
