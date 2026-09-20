@@ -78,34 +78,40 @@ export function transcriptMarkupFixtures(): PlayerTranscriptEntryPresentation[] 
 // Prose has to be judged in company, not on its own: what matters is whether the two
 // readings can follow each other without the transcript looking like two interfaces.
 // Narration, an overheard letter and ordinary dialogue are interleaved for that reason.
-const proseSources: readonly (readonly [speaker: string, source: string])[] = [
+// Which of them is prose is the author's decision, carried on the message itself; these
+// leave position and alignment unchosen, which is the case the player has to answer.
+const proseSources: readonly (readonly [speaker: string, source: string, prose?: true])[] = [
   ["guide", "There is something I want you to see before the light goes."],
   ["user", "Lead the way."],
   [
     "narrator",
     "The path leaves the harbour behind and climbs between the dunes. Marram grass leans all one way, combed flat by a wind that has not stopped since morning, and the sand underfoot gives a little at every step.\n\nBelow, the tide is going out. It uncovers a long grey shelf of rock that was not there an hour ago, and the water draining off it catches what is left of the sun.",
+    true,
   ],
   ["guide", "Careful here. The second dune is looser than it looks."],
   [
     "narrator",
     "At the top the lighthouse stands closer than it seemed from the harbour, white against a sky that has begun to go green at the edges. Its lamp has not been lit yet.",
+    true,
   ],
   [
     "keeper",
     "*My dear,*\n\nIf you are reading this you have walked further than I ever managed. The keeper's house is open; the key is where it has always been, under the third stone from the door.\n\nDo not wait for the lamp. It comes on when it comes on, and the waiting is the worst of it.\n\n**— H.**",
+    true,
   ],
   ["user", "Who wrote that?"],
   ["guide", "Someone who knew the walk. Come on — the beam will start any moment."],
   [
     "system",
     "**Pacing** is now set to *slow*. Messages arrive with a pause between them, and the composer stays available while you wait.",
+    true,
   ],
   ["guide", "Take your time, then."],
 ];
 
 /** A mixed history for judging how prose and dialogue sit together. */
 export function transcriptProseFixtures(): PlayerTranscriptEntryPresentation[] {
-  return proseSources.map(([speakerId, source], index) => {
+  return proseSources.map(([speakerId, source, prose], index) => {
     const content = parseMessageMarkup(source);
     return {
       id: `prose-${index}`,
@@ -113,6 +119,14 @@ export function transcriptProseFixtures(): PlayerTranscriptEntryPresentation[] {
       speakerId: speakerId!,
       text: content.visibleText,
       content,
+      presentation: {
+        kind: prose === undefined ? "bubble" : "prose",
+        position: null,
+        align: null,
+        color: null,
+        background: null,
+        font: null,
+      },
     };
   });
 }

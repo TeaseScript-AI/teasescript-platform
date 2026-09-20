@@ -8,7 +8,7 @@ import Stage from "./Stage.vue";
 import PlayerTopBar from "./PlayerTopBar.vue";
 import Transcript from "./Transcript.vue";
 import ConversationSurface from "./ConversationSurface.vue";
-import { placements, proseKinds, transcriptDesignDefaults } from "./transcriptDesign";
+import { placements, transcriptDesignDefaults } from "./transcriptDesign";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
 import { transcriptFixtures, transcriptFixtureSpeakers, transcriptMarkupFixtures, transcriptProseFixtures } from "./transcriptFixtures";
 import { createPlayerRuntimeSession, createPlayerRuntimeRestorePoint, restorePlayerRuntimeSession, type PlayerRuntimeSession, type PlayerRuntimeRestorePoint } from "../../../runtime-adapter.js";
@@ -163,19 +163,16 @@ async function toggleFullscreen() {
                 Authored colour
                 <input v-model="transcriptDesign.authoredAccent" type="color" />
               </label>
-              <!-- Prose is not one thing, so each reading is placed on its own. -->
-              <div v-for="kind in proseKinds" :key="kind" class="grid gap-1">
-                <span class="capitalize opacity-70">{{ kind }}</span>
-                <div class="flex gap-2">
-                  <select v-model="transcriptDesign.prose[kind].position" :aria-label="`${kind} block`"
-                    class="min-w-0 flex-1 rounded border bg-[var(--surface-component)] p-2">
-                    <option v-for="place in placements" :key="place" :value="place">block {{ place }}</option>
-                  </select>
-                  <select v-model="transcriptDesign.prose[kind].text" :aria-label="`${kind} text`"
-                    class="min-w-0 flex-1 rounded border bg-[var(--surface-component)] p-2">
-                    <option v-for="place in placements" :key="place" :value="place">text {{ place }}</option>
-                  </select>
-                </div>
+              <!-- What prose is given when the author chose nothing. -->
+              <div class="flex gap-2">
+                <select v-model="transcriptDesign.prosePosition" aria-label="prose block"
+                  class="min-w-0 flex-1 rounded border bg-[var(--surface-component)] p-2">
+                  <option v-for="place in placements" :key="place" :value="place">block {{ place }}</option>
+                </select>
+                <select v-model="transcriptDesign.proseAlign" aria-label="prose text"
+                  class="min-w-0 flex-1 rounded border bg-[var(--surface-component)] p-2">
+                  <option v-for="place in placements" :key="place" :value="place">text {{ place }}</option>
+                </select>
               </div>
               <label class="grid gap-2">
                 Reading measure

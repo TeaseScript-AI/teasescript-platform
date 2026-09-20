@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/message";
 import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } from "../../../model.js";
 import TranscriptMarkup from "./TranscriptMarkup.vue";
-import type { ProseKind, TranscriptDesign } from "./transcriptDesign";
+import type { TranscriptDesign } from "./transcriptDesign";
 import { inkFor } from "./messageContrast";
 
 const props = defineProps<{
@@ -98,27 +98,25 @@ function authoredFill(entry: PlayerTranscriptEntryPresentation) {
   const accent = props.speakers[entry.speakerId]?.accent;
   return accent !== undefined && accent !== "inherit" ? accent : null;
 }
-// Some entries are meant to be read rather than heard, and they are not all the same
-// reading: a letter, a passage of context and a note about the interface each want their
-// own placement. What marks an entry as one of them is a content question this component
-// does not answer; the fixture speakers stand in for it while that is decided.
-const proseSpeakers: Readonly<Record<string, ProseKind>> = {
-  keeper: "letter",
-  narrator: "context",
-  system: "system",
-};
-function proseKindOf(entry: PlayerTranscriptEntryPresentation) {
-  return entry.kind === "message" ? (proseSpeakers[entry.speakerId] ?? null) : null;
+// Some entries are meant to be read rather than heard. The author says which, and the
+// runtime carries that decision; a letter and a note about the interface differ because
+// he gave their speakers different presentation, not because the player sorts them.
+function proseOf(entry: PlayerTranscriptEntryPresentation) {
+  const presentation = entry.kind === "message" ? entry.presentation : undefined;
+  return presentation?.kind === "prose" ? presentation : null;
 }
 const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => {
   const entry = props.entries[item.index]!;
-  const prose = proseKindOf(entry);
+  const prose = proseOf(entry);
   // Prose has no bubble to fill, so an authored colour has nothing to land on here.
   const fill = prose === null ? authoredFill(entry) : null;
   return {
-    item, entry, fill, prose,
-    // The runtime sends null when the author chose nothing; this is what fills it in.
-    placement: prose === null ? null : props.design.prose[prose],
+    item, entry, fill,
+    // An unchosen placement arrives as null, and this is what fills it in.
+    placement: prose === null ? null : {
+      position: prose.position ?? props.design.prosePosition,
+      text: prose.align ?? props.design.proseAlign,
+    },
     // Whatever an authored colour turns out to be, the words on it are measured against it.
     ink: fill === null ? null : inkFor(fill),
     backdrop: fill ?? palette.value.surface,
@@ -220,19 +218,19 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
         onTouchstart: onTouchStart, onTouchend: () => touching = false,
         onTouchcancel: () => touching = false }">
       <div class="transcript-history" role="list" :style="{ height: `${virtualizer.getTotalSize()}px` }">
-        <article v-for="{ item, entry, fill, prose, placement, ink, backdrop } in rows" :key="entry.id"
+        <article v-for="{ item, entry, fill, placement, ink, backdrop } in rows" :key="entry.id"
           :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
           :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
           role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
           class="transcript-entry" :data-continues="!startsGroup(item.index)"
-          :data-prose="prose ?? undefined"
+          :data-prose="placement !== null || undefined"
           :style="{ transform: `translateY(${item.start}px)` }">
           <!-- Session events carry no authored story text and receive no designed treatment. -->
           <p v-if="entry.kind === 'session-event'" class="session-event">{{ entry.text }}</p>
           <!-- Prose carries no bubble and no avatar. Where the block sits and how its text is
                set are two separate choices: a block can stand on the right while its lines
                still read from the left, which is how a signature sits under a letter. -->
-          <div v-else-if="placement" class="prose" :data-prose-kind="prose"
+          <div v-else-if="placement" class="prose"
             :data-align="placement.position" :data-text="placement.text"
             :style="{ '--prose-measure': `${design.proseMeasure}ch` }">
             <p v-if="showsName(item.index, false)" class="prose-attribution">
