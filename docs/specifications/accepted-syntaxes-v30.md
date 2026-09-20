@@ -2685,8 +2685,8 @@ The runtime does not supply a default for either field; the Player selects their
 remain distinguishable from omission. `position` places the whole block; `align` sets the text within it. Both accept
 `"left"`, `"center"`, or `"right"`. Bubble backgrounds and unspecified text/font use Player theme
 roles; the runtime represents these theme selections with `null`. Prose has no background default: a prose message
-whose background was never chosen reports `null`, and the Player decides whether it draws a panel at all. Prose retains speaker provenance but has no avatar by default; visible name treatment
-belongs to the Player presentation design. These defaults do not introduce a new avatar/name visibility syntax.
+whose background was never chosen reports `null`. Prose retains speaker provenance; avatar and visible name treatment
+belong to the Player presentation design. These defaults do not introduce a new avatar/name visibility syntax.
 
 Option expressions evaluate once in written order before the text and pacing expressions, under the selected speaker
 context. Effective style defaults are resolved when the runtime prepares the output, using that speaker's current
