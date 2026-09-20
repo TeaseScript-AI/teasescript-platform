@@ -28,6 +28,8 @@ Keep experimental fixtures separate from the components that own settled behavio
   control row consumes the shared Player control size with fixed outer spacing. Fullscreen is the
   rightmost action. The title truncates inside its capsule without clipping the
   outer shadow.
+  The title is pill-shaped. The Sidebar trigger and display-control group share
+  `--player-top-control-radius`; the group keeps its existing rounded corners.
 - `ConversationSurface.vue` owns the conversation overlay placement and measured
   bottom inset. Transcript consumes that inset so its final content remains
   reachable. The transcript scrollport extends into the existing conversation

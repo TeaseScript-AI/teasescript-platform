@@ -28,6 +28,7 @@
   /* Player edge layout is fixed; controls grow only with their icon/text size. */
   --player-edge-space: 8px;
   --player-control-padding: 8px;
+  --player-top-control-radius: 0.75rem;
   --player-control-size: calc(1rem + 2 * var(--player-control-padding));
   --player-header-size: calc(var(--player-control-size) + 2 * var(--player-edge-space));
   --player-resize-rail-size: 5px;
@@ -217,6 +218,7 @@
    menu and panels own the visible surfaces, so the shell itself must not paint
    a second full-width background while the dock changes size. */
 .phase2c-sidebar [data-sidebar="sidebar"] { background: transparent; }
+.phase2c-sidebar [data-sidebar="trigger"] { border-radius: var(--player-top-control-radius); }
 
 .phase2c-sidebar[data-tools-open="true"] [data-slot="sidebar"][data-state="expanded"] > .fixed {
   box-shadow: 6px 0 14px -6px var(--theme-structural-shadow, rgb(0 0 0 / 18%));

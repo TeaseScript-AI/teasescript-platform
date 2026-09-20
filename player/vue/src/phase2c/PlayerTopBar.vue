@@ -83,7 +83,7 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
   block-size: var(--player-control-size);
 }
 .player-top-bar-actions {
-  --action-group-radius: 0.75rem;
+  --action-group-radius: var(--player-top-control-radius);
   display: flex;
   align-items: center;
   gap: 0.125rem;
@@ -125,8 +125,8 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
   min-inline-size: 0;
   max-inline-size: 100%;
   block-size: var(--player-control-size);
-  padding-inline: 0.375rem;
-  border-radius: 0.375rem;
+  padding-inline: 12px;
+  border-radius: 9999px;
 }
 .player-top-bar-title-text {
   min-inline-size: 0;
