@@ -187,9 +187,6 @@ async function toggleFullscreen() {
                   <option :value="80">80 characters</option>
                 </select>
               </label>
-              <label class="flex items-center gap-2">
-                <input v-model="transcriptDesign.proseName" type="checkbox" /> Name above prose
-              </label>
             </fieldset>
             <fieldset class="grid min-w-0 gap-2">
               <legend class="mb-2">Timer fixtures</legend>

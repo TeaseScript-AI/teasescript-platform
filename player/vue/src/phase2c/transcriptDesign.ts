@@ -8,8 +8,6 @@ export interface TranscriptDesign {
   proseText: "start" | "center" | "end";
   /** The reading measure, in characters. */
   proseMeasure: number;
-  /** Whether a prose block carries an attribution label. */
-  proseName: boolean;
 }
 
 export const transcriptDesignDefaults: TranscriptDesign = {
@@ -17,5 +15,4 @@ export const transcriptDesignDefaults: TranscriptDesign = {
   proseAlign: "start",
   proseText: "start",
   proseMeasure: 65,
-  proseName: false,
 };

@@ -102,7 +102,8 @@ function authoredFill(entry: PlayerTranscriptEntryPresentation) {
 // What marks one is a content question this component does not answer; the narrator stands
 // in for it here so the reading itself can be judged.
 function isProse(entry: PlayerTranscriptEntryPresentation) {
-  return entry.kind === "message" && entry.speakerId === "narrator";
+  return entry.kind === "message" &&
+    (entry.speakerId === "narrator" || entry.speakerId === "keeper");
 }
 const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => {
   const entry = props.entries[item.index]!;
@@ -132,9 +133,14 @@ function startsGroup(index: number) {
 function endsGroup(index: number) {
   return !sameSpeaker(index, index + 1);
 }
+// The name is the author's to give. A speaker who was given none shows none, and the space
+// it would have taken goes with it; nothing here supplies a stand-in.
+function nameOf(entry: PlayerTranscriptEntryPresentation) {
+  return entry.kind === "message" ? (props.speakers[entry.speakerId]?.name ?? "").trim() : "";
+}
 // A run is introduced once; the bubbles below it continue the same speaker.
 function showsName(index: number, player: boolean) {
-  return !player && startsGroup(index);
+  return !player && startsGroup(index) && nameOf(props.entries[index]!) !== "";
 }
 // Flattening the touching corners makes a run read as one block instead of separate cards.
 // Only the speaker's own side is flattened: bubbles all start there, so they truly meet,
@@ -222,8 +228,8 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
           <div v-else-if="prose" class="prose"
             :data-align="design.proseAlign" :data-text="design.proseText"
             :style="{ '--prose-measure': `${design.proseMeasure}ch` }">
-            <p v-if="design.proseName && startsGroup(item.index)" class="prose-attribution">
-              {{ speakers[entry.speakerId]?.name ?? entry.speakerId }}
+            <p v-if="showsName(item.index, false)" class="prose-attribution">
+              {{ nameOf(entry) }}
             </p>
             <TranscriptMarkup v-if="entry.content" :content="entry.content"
               :entry-id="entry.id" :backdrop="backdrop" :revealed="revealedSpoilers"
@@ -251,7 +257,7 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
                   :style="fill ? { '--message-authored-fill': fill, color: ink } : undefined">
                   <MessageHeader v-if="showsName(item.index, entry.speakerId === 'user')"
                     class="px-0 pb-0.5">
-                    {{ speakers[entry.speakerId]?.name ?? entry.speakerId }}
+                    {{ nameOf(entry) }}
                   </MessageHeader>
                   <TranscriptMarkup v-if="entry.speakerId !== 'user' && entry.content" :content="entry.content"
                     :entry-id="entry.id" :backdrop="backdrop" :revealed="revealedSpoilers"
