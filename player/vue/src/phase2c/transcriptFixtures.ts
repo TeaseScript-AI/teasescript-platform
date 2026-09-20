@@ -39,11 +39,15 @@ const markupSources: readonly (readonly [speaker: string, source: string])[] = [
   // bubble on the dark side, so classifying each of them would call the pair safe, yet
   // measuring it gives about three to one.
   ["guide", "Authored colours: [color=#ffe066]pale yellow[/color], [color=#1a1a2e]near black[/color], [color=#8a8a8a]mid grey[/color], and [color=#c2185b]deep pink[/color]."],
-  // An author is free to set the words and what is behind them, and free to set them to
-  // nearly the same thing. Nobody chose that on purpose, so the pair still has to be
-  // measured as painted; the last one is partly see-through on both sides, where reading
-  // the colours as written would report a contrast the reader never gets.
-  ["guide", "[bg=#2b3a8f][color=#3344aa]Blue on blue[/color][/bg], [bg=#f2e9c9][color=#efe4c0]cream on cream[/color][/bg], and [bg=rgb(0 0 0 / 0.15)][color=rgb(40 40 40 / 0.45)]a faint grey on a faint shade[/color][/bg]."],
+  // Both colours written around the same words, in one place, and barely apart. The
+  // author was looking straight at this pairing, so it stands as written; catching it
+  // belongs where it can still be reconsidered rather than here.
+  ["guide", "Chosen together: [bg=#2b3a8f][color=#3344aa]blue on blue[/color][/bg] and [bg=#f2e9c9][color=#efe4c0]cream on cream[/color][/bg]."],
+  // Partly see-through, where the colour as written says one thing and the colour the
+  // reader receives says another. Both of these read as safe dark greys on paper; the
+  // first can still be helped along, the second has given away too much to be rescued by
+  // anything put behind it.
+  ["guide", "Partly see-through: [color=rgb(58 58 58 / 0.6)]still worth covering[/color], and [color=rgb(90 90 90 / 0.35)]past saving[/color]."],
   ["user", "Understood. I will follow the posts."],
 ];
 

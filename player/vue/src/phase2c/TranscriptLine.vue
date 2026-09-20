@@ -8,16 +8,17 @@ const props = defineProps<{
   /** Every layer already under these words, outermost first. */
   backdrop: readonly string[];
 }>();
-// An authored colour lands on a surface the author never saw, and an author who sets both
-// the words and what is behind them can still put one on top of the other. Rather than
-// alter either colour, the pair is measured as painted and covered by however much this
-// pairing needs; a reader who cannot read the line is not served by anyone's intent.
+// A bubble colour is settled once and then met by every message that follows, so this
+// pairing is one no author ever looked at and the words are covered by however much it
+// takes. A background written around the words themselves is the opposite case: both
+// colours were chosen in one breath, in one place, and a colour that barely shows can be
+// the point — a character who cannot see straight, something the reader has to work for.
+// Nothing here can tell that from carelessness, so carelessness is answered where it is
+// still a question being asked, and this leaves the author's own pairing alone.
 function authoredScrim(piece: { style: Readonly<Record<string, string>> }) {
   const colour = piece.style["color"];
-  if (colour === undefined) return null;
-  const background = piece.style["backgroundColor"];
-  return scrimFor(colour, background === undefined
-    ? props.backdrop : [...props.backdrop, background]);
+  if (colour === undefined || piece.style["backgroundColor"] !== undefined) return null;
+  return scrimFor(colour, props.backdrop);
 }
 // The canonical preparation helper supplies validated text/style/link pieces, never HTML.
 function renderLine() {
@@ -27,10 +28,7 @@ function renderLine() {
       piece.href === null ? "span" : "a",
       {
         class: scrim === null ? piece.classes : [...piece.classes, "markup-scrim"],
-        // The cover is its own layer above an authored background, so that background
-        // survives as written and the two never compete for one declaration.
-        style: scrim === null ? piece.style
-          : { ...piece.style, backgroundImage: `linear-gradient(${scrim}, ${scrim})` },
+        style: scrim === null ? piece.style : { ...piece.style, backgroundColor: scrim },
         ...(piece.href === null
           ? {}
           : { href: piece.href, target: "_blank", rel: "noopener noreferrer" }),

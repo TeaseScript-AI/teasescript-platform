@@ -51,22 +51,25 @@ export function inkFor(...backdrop: readonly string[]) {
 
 /**
  * The least cover an authored colour needs to stay readable on the layers beneath it, or
- * null when it needs none. Which way to cover is measured rather than reasoned about:
- * words that are themselves partly see-through move along with whatever is put behind
- * them, so both poles are tried and the one that gains ground is the one narrowed down.
- * When even full cover falls short this returns it anyway, because the alternative is to
- * leave the words as they were.
+ * null when it needs none — and null again when no cover would earn its place. Which way
+ * to cover is measured rather than reasoned about: words that are themselves partly
+ * see-through move along with whatever is put behind them, gaining almost nothing from
+ * either pole, so both are tried and the one that gains ground is the one narrowed down.
+ * Where the best on offer still leaves the words below the floor a reader can work with,
+ * a patch behind them buys nothing and costs the line its shape, so it is not drawn.
  */
 export function scrimFor(colour: string, backdrop: readonly string[], target = 4.6) {
   if (contrast(backdrop, colour) >= target) return null;
+  const cast = (pole: string, cover: number) =>
+    contrast([...backdrop, `rgb(${pole} / ${cover})`], colour);
   const poles = ["0 0 0", "255 255 255"] as const;
-  const pole = contrast([...backdrop, `rgb(${poles[0]})`], colour) >=
-    contrast([...backdrop, `rgb(${poles[1]})`], colour) ? poles[0] : poles[1];
+  const pole = cast(poles[0], 1) >= cast(poles[1], 1) ? poles[0] : poles[1];
+  if (cast(pole, 1) < 3) return null;
   let insufficient = 0;
   let sufficient = 1;
   for (let step = 0; step < 12; step += 1) {
     const cover = (insufficient + sufficient) / 2;
-    if (contrast([...backdrop, `rgb(${pole} / ${cover})`], colour) >= target) sufficient = cover;
+    if (cast(pole, cover) >= target) sufficient = cover;
     else insufficient = cover;
   }
   return `rgb(${pole} / ${sufficient.toFixed(3)})`;
