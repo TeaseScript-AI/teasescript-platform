@@ -248,6 +248,9 @@
 
 /* Reserve the final Player layout immediately; only the visible sidebar transitions. */
 .phase2c-sidebar [data-slot="sidebar-gap"] { transition: none; }
+/* A width transition creates temporary carousel overflow around full-width panels.
+   Apply dock capacity immediately; retain the sidebar's slide in/out motion. */
+.phase2c-sidebar [data-slot="sidebar"] > .fixed { transition-property: left, right; }
 
 /* The shared Sidebar owns positioning and the layout reservation.  Phase 2C's
    menu and panels own the visible surfaces, so the shell itself must not paint
