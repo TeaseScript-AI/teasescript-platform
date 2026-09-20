@@ -233,3 +233,99 @@ test("null options inherit, and malformed external resolved values are rejected"
   assert.equal(isMessagePresentation({ ...output?.presentation, align: ["center"] }), false);
   assert.equal(isMessagePresentation({ ...output?.presentation, background: "url(x)" }), false);
 });
+
+test("parenthesized null presentation options retain ordinary inheritance semantics", () => {
+  const result = assertRuntimeResumeEquivalent(
+    `
+speaker vera {
+  presentation: (null)
+  color: ((null))
+  bubble: ({ color: "red", position: "right", align: "left" })
+}
+speaker vera
+say bubble(color: ((null)), background: (null), position: (null), align: ((null)), font: (null)) "inherited"
+`,
+    { scenarioName: "parenthesized null presentation inheritance" },
+  );
+  assert.deepEqual(result.events.find((event) => event.kind === "say")?.presentation, {
+    kind: "bubble",
+    color: normalizeColor("red"),
+    background: null,
+    position: "right",
+    align: "left",
+    font: null,
+  });
+  assert.equal(compileSource('say prose(color: ("null")) "invalid"').plan, null);
+  assert.equal(compileSource('speaker vera { bubble: ({ color: "invalid" }) }').plan, null);
+});
+
+test("CSS colour channel clamping and grammar agree for static and dynamic source", () => {
+  const equivalent = [
+    ["rgb(300 -20 0)", "red"],
+    ["rgba(120%, -10%, 0%, 200%)", "red"],
+    ["hsl(0 200% 50%)", "red"],
+    ["hsl(0 100 50)", "red"],
+    ["hwb(0 -20 0)", "red"],
+    ["rgb(100% 0 0)", "red"],
+    ["HSL(0TURN 100% 50%)", "red"],
+    ["lab(150% 200% -200%)", "lab(100 250 -250)"],
+    ["oklab(-10% .1 -.1)", "oklab(0 .1 -.1)"],
+    ["lch(50% -10 30)", "lch(50 0 30)"],
+    ["oklch(50% -.1 30)", "oklch(.5 0 30)"],
+    ["hwb(400 -10% 200%)", "black"],
+  ];
+  for (const [input, expected] of equivalent) {
+    const plan = compileValidPlan(`let dynamic = "${input}"
+say prose(color: "${input}") "static", instant
+say prose(color: dynamic) "dynamic", instant`);
+    const result = run(plan, createFreshRuntimeSnapshot(plan));
+    assert.equal(result.snapshot.status, "halted");
+    for (const event of result.events) {
+      if (event.kind === "say")
+        assert.equal(event.presentation.color, normalizeColor(expected), input);
+    }
+  }
+  for (const input of [
+    "rgb(1 2 3 .5)",
+    "rgb(1,2,3 / .5)",
+    "rgb(100%,0,0)",
+    "hsl(0,100,50)",
+    "hwb(0,0%,0%)",
+    "lab(50%,0,0)",
+    "rgb(1;2;3)",
+    "rgb(1 2 3 / .5 / .2)",
+    "rgb(1deg 2 3)",
+    "oklch(.5 .1 20 .5)",
+  ]) {
+    assert.equal(normalizeColor(input), null, input);
+    assert.equal(compileSource(`say prose(color: "${input}") "invalid"`).plan, null, input);
+  }
+});
+
+test("colours convert once across literals, variables, speaker updates and checkpoints", () => {
+  for (const input of ["white", "lab(100 250 -250)"]) {
+    const result = assertRuntimeResumeEquivalent(
+      `
+speaker vera { color: "${input}" }
+say as vera "declaration"
+let dynamic = "${input}"
+say prose(color: "${input}") "literal"
+say prose(color: dynamic) "variable"
+vera.color = dynamic
+say as vera "updated speaker"
+say "[color=${input}]markup[/color]"
+`,
+      { scenarioName: `single colour conversion: ${input}` },
+    );
+    const messages = result.events.filter((event) => event.kind === "say");
+    const expected = normalizeColor(input);
+    for (const message of messages.slice(0, 4)) assert.equal(message.presentation.color, expected);
+    assert.equal(messages[0]!.speaker?.color, expected);
+    assert.equal(messages[3]!.speaker?.color, expected);
+    const block = messages[4]!.content.blocks[0];
+    if (block?.kind !== "paragraph") throw new Error("Expected paragraph.");
+    const span = block.lines[0]!.spans[0];
+    if (span?.kind !== "color") throw new Error("Expected colour span.");
+    assert.equal(span.value, expected);
+  }
+});

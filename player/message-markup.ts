@@ -66,6 +66,9 @@ function prepareLine(line: MessageMarkupLine): PlayerMarkupLine {
   boundaryAt(boundaries, line.text.length);
   for (const span of line.spans) {
     if (span.start === span.end) continue;
+    // Invalid colours contribute no override; retain the enclosing authored style.
+    if ((span.kind === "color" || span.kind === "backgroundColor") && span.value === "inherit")
+      continue;
     boundaryAt(boundaries, span.start).starting.push(span);
     boundaryAt(boundaries, span.end).ending.push(span);
   }

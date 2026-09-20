@@ -1,3 +1,4 @@
+import { preparePlayerMessageMarkup } from "../player/message-markup.js";
 import { normalizeColor } from "../src/color.js";
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -272,4 +273,21 @@ test("runtime development scenarios compile through the real Player adapter", as
       assert.equal(action.skippable, skippable, `${fileName} skip policy`);
     }
   }
+});
+
+test("invalid dynamic markup colours preserve enclosing colours in delivered pieces", () => {
+  const session = createPlayerRuntimeSession(`
+let bad = "invalid"
+say "[color=red][bg=ivory]outer [color=\${bad}][bg=\${bad}]inner **bold**[/bg][/color] outer[/bg][/color] [color=\${bad}][bg=\${bad}]plain[/bg][/color]", instant
+`);
+  const entry = session.transcriptEntries[0];
+  if (entry?.kind !== "message" || entry.content === undefined) throw new Error("Expected markup.");
+  const block = preparePlayerMessageMarkup(entry.content)[0];
+  if (block?.kind !== "paragraph") throw new Error("Expected paragraph.");
+  const pieces = block.lines[0]!.pieces;
+  for (const piece of pieces.filter((piece) => /outer|inner|bold/u.test(piece.text))) {
+    assert.equal(piece.style.color, normalizeColor("red"));
+    assert.equal(piece.style.backgroundColor, normalizeColor("ivory"));
+  }
+  assert.deepEqual(pieces.at(-1)?.style, {});
 });

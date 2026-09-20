@@ -1,7 +1,3 @@
-import {
-  normalizePresentationOptions,
-  normalizeSpeakerProperty,
-} from "../../authored-presentation.js";
 import type {
   Block,
   Expression,
@@ -99,9 +95,7 @@ export class InstructionCompiler {
             span: copySpan(statement.span),
           });
           for (const property of statement.properties) {
-            const lowered = this.#lowerExpression(
-              normalizeSpeakerProperty(property.name.name, property.value),
-            );
+            const lowered = this.#lowerExpression(property.value);
             this.instructions.push({
               kind: "setDeclaredSpeakerProperty",
               speaker: statement.name.name,
@@ -118,7 +112,7 @@ export class InstructionCompiler {
           name: statement.name.name,
           properties: statement.properties.map((property) => ({
             name: property.name.name,
-            value: compileExpression(normalizeSpeakerProperty(property.name.name, property.value)),
+            value: compileExpression(property.value),
             span: copySpan(property.span),
           })),
           span: copySpan(statement.span),
@@ -182,10 +176,7 @@ export class InstructionCompiler {
           statement.presentation === null
             ? null
             : this.#materializeExpression(
-                this.#lowerSayPayload(
-                  normalizePresentationOptions(statement.presentation),
-                  contextualSpeakerTemporary,
-                ),
+                this.#lowerSayPayload(statement.presentation, contextualSpeakerTemporary),
                 statement.presentation.span,
               );
         const lowered = this.#lowerSayPayload(statement.value, contextualSpeakerTemporary);

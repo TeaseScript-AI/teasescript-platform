@@ -1,37 +1,14 @@
-import type { Expression, ObjectLiteral } from "./ast.js";
+import type { Expression } from "./ast.js";
 import { normalizeColor } from "./color.js";
 import { staticVisibleText } from "./static-evaluation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { parseMessageMarkup } from "./message-markup.js";
 
-export function normalizePresentationOptions(expression: ObjectLiteral): ObjectLiteral {
-  return {
-    ...expression,
-    properties: expression.properties.map((property) => ({
-      ...property,
-      value: normalizeSpeakerProperty(property.name.name, property.value),
-    })),
-  };
-}
-
-export function normalizeSpeakerProperty(name: string, expression: Expression): Expression {
-  if ((name === "bubble" || name === "prose") && expression.kind === "objectLiteral")
-    return normalizePresentationOptions(expression);
-  if (name !== "color" && name !== "background") return expression;
-  const normalized = normalizeColor(staticVisibleText(expression));
-  if (normalized === null) return expression;
-  return {
-    kind: "stringLiteral",
-    form: "singleLine",
-    span: expression.span,
-    parts: [{ kind: "stringText", raw: normalized, value: normalized, span: expression.span }],
-  };
-}
-
 export function presentationPropertyDiagnostics(
   name: string,
   expression: Expression,
 ): readonly Diagnostic[] {
+  while (expression.kind === "parenthesizedExpression") expression = expression.expression;
   if ((name === "bubble" || name === "prose") && expression.kind === "objectLiteral") {
     return expression.properties.flatMap((property) =>
       ["position", "align", "color", "background", "font"].includes(property.name.name)

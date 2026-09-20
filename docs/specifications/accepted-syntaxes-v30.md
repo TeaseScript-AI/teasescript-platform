@@ -2701,9 +2701,10 @@ Concrete colour values accept CSS colour names (including `transparent`), 3/4/6/
 `hsl()`/`hsla()`, `hwb()`, `lab()`, `lch()`, `oklab()`, and `oklch()`, including their alpha forms. Hex and RGB use standard
 sRGB. Host-dependent values such as `var()` and `currentColor`, relative colours, and explicit linear RGB are excluded.
 
-Constant speaker-declaration and message-option colours normalize to OKLCH with alpha during compilation. Dynamic
-colours normalize through the same conversion at runtime. Message markup follows its existing complete-string parse
-after interpolation. Invalid statically known colours in these authored positions produce source-associated compiler
+The compiler validates constant speaker-declaration and message-option colours while retaining their authored values.
+The runtime normalizes both constant and dynamic colours to OKLCH with alpha when preparing output. Converted values
+are not parsed again as authored input: CSS input-channel clamping must not alter previously converted coordinates.
+Message markup follows its existing complete-string parse after interpolation. Invalid statically known colours in these authored positions produce source-associated compiler
 errors. Valid out-of-gamut coordinates are retained without a gamut warning or silent gamut mapping; display mapping
 belongs to the browser. CSS colour parsing rules still govern the input notation's channels and alpha.
 
