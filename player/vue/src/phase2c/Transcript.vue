@@ -106,7 +106,7 @@ function isProse(entry: PlayerTranscriptEntryPresentation) {
 }
 const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => {
   const entry = props.entries[item.index]!;
-  const prose = props.design.prose !== "bubble" && isProse(entry);
+  const prose = isProse(entry);
   // Prose has no bubble to fill, so an authored colour has nothing to land on here.
   const fill = prose ? null : authoredFill(entry);
   return {
@@ -212,14 +212,17 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
           :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
           role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
           class="transcript-entry" :data-continues="!startsGroup(item.index)"
-          :data-prose="prose ? design.prose : undefined"
+          :data-prose="prose ? '' : undefined"
           :style="{ transform: `translateY(${item.start}px)` }">
           <!-- Session events carry no authored story text and receive no designed treatment. -->
           <p v-if="entry.kind === 'session-event'" class="session-event">{{ entry.text }}</p>
-          <!-- A reading column leaves the conversation's alignment behind entirely: no side,
-               no avatar, a measure of its own and the attribution set above the text. -->
-          <div v-else-if="prose && design.prose === 'column'" class="prose-column">
-            <p v-if="startsGroup(item.index)" class="prose-attribution">
+          <!-- Prose carries no bubble and no avatar. Where the block sits and how its text is
+               set are two separate choices: a block can stand on the right while its lines
+               still read from the left, which is how a signature sits under a letter. -->
+          <div v-else-if="prose" class="prose"
+            :data-align="design.proseAlign" :data-text="design.proseText"
+            :style="{ '--prose-measure': `${design.proseMeasure}ch` }">
+            <p v-if="design.proseName && startsGroup(item.index)" class="prose-attribution">
               {{ speakers[entry.speakerId]?.name ?? entry.speakerId }}
             </p>
             <TranscriptMarkup v-if="entry.content" :content="entry.content"
@@ -230,7 +233,7 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
           <Message v-else :align="entry.speakerId === 'user' ? 'end' : 'start'">
             <!-- The avatar keeps its place through the run so the bubbles stay on one line. -->
             <MessageAvatar v-if="entry.speakerId !== 'user'"
-              class="self-start" :class="startsGroup(item.index) && !prose ? '' : 'invisible'">
+              class="self-start" :class="startsGroup(item.index) ? '' : 'invisible'">
               <Avatar>
                 <AvatarFallback class="text-xs font-semibold">{{ speakers[entry.speakerId]?.avatar }}</AvatarFallback>
               </Avatar>
@@ -239,14 +242,12 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
               <!-- Two caps, whichever binds first: three quarters of the column keeps a bubble
                    off the edge on a narrow window, and 65ch keeps the line readable on a wide one. -->
               <!-- The player's side is theme-owned and keeps the accent roles as they are. -->
-              <!-- Quiet prose keeps the conversation's own column and simply takes off the
-                   bubble's skin, so a passage can follow a line of dialogue without moving. -->
-              <Bubble :class="prose ? 'max-w-[65ch]' : 'max-w-[min(75%,65ch)]'"
+              <Bubble class="max-w-[min(75%,65ch)]"
                 :variant="entry.speakerId === 'user' ? 'default' : 'secondary'"
                 :align="entry.speakerId === 'user' ? 'end' : 'start'">
                 <BubbleContent class="text-base/normal"
-                  :class="[prose ? 'prose-quiet' : cornerClass(item.index, entry.speakerId === 'user'),
-                    entry.speakerId === 'user' || prose ? '' : 'message-speaker', fill ? 'message-authored' : '']"
+                  :class="[cornerClass(item.index, entry.speakerId === 'user'),
+                    entry.speakerId === 'user' ? '' : 'message-speaker', fill ? 'message-authored' : '']"
                   :style="fill ? { '--message-authored-fill': fill, color: ink } : undefined">
                   <MessageHeader v-if="showsName(item.index, entry.speakerId === 'user')"
                     class="px-0 pb-0.5">
@@ -324,22 +325,27 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
 /* Prose is read, not overheard, so it asks for the room a paragraph needs: air above and
    below to separate it from speech, and a looser line than a bubble would carry. */
 .transcript-entry[data-prose] { padding-block: 1.75rem 0.75rem; }
-.prose-quiet {
-  background: none;
-  border-color: transparent;
-  padding-inline: 0;
-  padding-block: 0;
+.prose {
+  /* A speaker's words start past the avatar, the gap beside it and the bubble's own
+     padding; the player's start one padding in from the far edge. Prose meets the
+     conversation at those two lines, so a passage never looks shifted against it. */
+  --prose-lead: calc(2rem + 0.5rem + 0.75rem);
+  --prose-trail: 0.75rem;
+  /* Shrink-to-fit is what makes the block's own position visible: a short passage sits
+     where it was put, a long one fills the measure and only its text alignment shows. */
+  width: fit-content;
+  max-width: var(--prose-measure, 65ch);
+  font-size: 1rem;
   line-height: 1.7;
-}
-.prose-column {
-  max-width: 68ch;
-  margin-inline: auto;
-  padding-inline: 1rem;
-  font-size: 1.0625rem;
-  line-height: 1.75;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.prose[data-align="start"] { margin-inline: var(--prose-lead) auto; }
+.prose[data-align="center"] { margin-inline: auto; }
+.prose[data-align="end"] { margin-inline: auto var(--prose-trail); }
+.prose[data-text="start"] { text-align: start; }
+.prose[data-text="center"] { text-align: center; }
+.prose[data-text="end"] { text-align: end; }
 /* Attribution for prose is a label on the passage, not a speaker in a conversation. */
 .prose-attribution {
   margin: 0 0 0.5rem;

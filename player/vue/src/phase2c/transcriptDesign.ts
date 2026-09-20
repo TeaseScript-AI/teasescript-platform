@@ -2,11 +2,20 @@
 export interface TranscriptDesign {
   /** Stands in for a speaker's authored colour; "inherit" means the speaker sets none. */
   authoredAccent: string;
-  /** How an entry meant to be read rather than heard is set apart from the dialogue. */
-  prose: "bubble" | "quiet" | "column";
+  /** Where a prose block sits across the transcript. Stands in for an authored choice. */
+  proseAlign: "start" | "center" | "end";
+  /** How the text is set inside that block. Stands in for an authored choice. */
+  proseText: "start" | "center" | "end";
+  /** The reading measure, in characters. */
+  proseMeasure: number;
+  /** Whether a prose block carries an attribution label. */
+  proseName: boolean;
 }
 
 export const transcriptDesignDefaults: TranscriptDesign = {
   authoredAccent: "inherit",
-  prose: "quiet",
+  proseAlign: "start",
+  proseText: "start",
+  proseMeasure: 65,
+  proseName: false,
 };

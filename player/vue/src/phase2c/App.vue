@@ -164,12 +164,31 @@ async function toggleFullscreen() {
                 <input v-model="transcriptDesign.authoredAccent" type="color" />
               </label>
               <label class="grid gap-2">
-                Prose entries
-                <select v-model="transcriptDesign.prose" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
-                  <option value="bubble">As a bubble</option>
-                  <option value="quiet">Quiet, same column</option>
-                  <option value="column">Own reading column</option>
+                Prose block sits
+                <select v-model="transcriptDesign.proseAlign" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
+                  <option value="start">On the speaker's line</option>
+                  <option value="center">Centred</option>
+                  <option value="end">On the player's line</option>
                 </select>
+              </label>
+              <label class="grid gap-2">
+                Prose text set
+                <select v-model="transcriptDesign.proseText" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
+                  <option value="start">From the left</option>
+                  <option value="center">Centred</option>
+                  <option value="end">From the right</option>
+                </select>
+              </label>
+              <label class="grid gap-2">
+                Reading measure
+                <select v-model.number="transcriptDesign.proseMeasure" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
+                  <option :value="55">55 characters</option>
+                  <option :value="65">65 characters</option>
+                  <option :value="80">80 characters</option>
+                </select>
+              </label>
+              <label class="flex items-center gap-2">
+                <input v-model="transcriptDesign.proseName" type="checkbox" /> Name above prose
               </label>
             </fieldset>
             <fieldset class="grid min-w-0 gap-2">
