@@ -265,7 +265,7 @@ function appendRuntimeEvents(
   for (const event of events) retainedEvents.push(event);
   for (const event of events) {
     if (event.kind === "say") {
-      const speakerId = event.speaker === null ? "narrator" : `runtime-speaker-${event.sequence}`;
+      const speakerId = event.speaker === null ? "narrator" : speakerKey(event.speaker);
       if (event.speaker !== null) speakers[speakerId] = speakerPresentation(event.speaker);
       transcriptEntries.push(
         Object.freeze({
@@ -313,6 +313,24 @@ function interactionAccessibleName(value: InteractionAccessibleName): string {
     chooseOption: "Choose an option",
     continue: "Continue",
   }[value.key];
+}
+
+/**
+ * The speaker a message is filed under. A line records who was speaking as they were at
+ * the time, so a character introduced as a stranger and named later leaves the earlier
+ * messages alone. Consecutive lines still have to read as one turn, though, and a
+ * sequence number can never say that two of them came from the same character: the
+ * identifier does, and the rest only parts a run where the speaker really changed.
+ */
+function speakerKey(speaker: {
+  readonly identifier: string;
+  readonly displayName: string;
+  readonly color: string | null;
+  readonly font: string | null;
+  readonly avatar: string | null;
+}): string {
+  const shape = [speaker.identifier, speaker.displayName, speaker.color, speaker.font, speaker.avatar];
+  return `runtime-speaker-${JSON.stringify(shape)}`;
 }
 
 function speakerPresentation(speaker: {
