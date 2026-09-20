@@ -426,8 +426,16 @@ and speaker-coloured rule remain the POC visual baseline. Speaker identity colou
 are content presentation, not application palette roles.
 
 The runtime adapter supplies resolved message presentation according to the
-[language contract](../specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides).
-Rendering that contract, including prose without an avatar or an unauthored background panel, is deferred to #421.
+[language contract](../specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides). Where that
+contract reports no authored choice, the Player supplies one. Prose carries no avatar. Prose placement, reading measure,
+and whether prose without an authored background is given a panel remain open in #421.
+
+An authored colour is carried through exactly as written. The Player defends legibility only where the pairing is one no
+author chose: text meeting a bubble or theme surface is measured as it will be painted and covered by the least amount
+that restores it, because that surface is settled once and then met by every message after it. Where an author sets a
+text colour and a background around the same words, the result stands as written even when it reads poorly; that pairing
+was chosen in one place and a colour that barely shows can be deliberate. Catching a careless one belongs at compile
+time, which is separate work in #434.
 
 Authored Standard-chat `say` messages carry the typed structure defined by the
 [message-markup specification](../specifications/message-markup.md). The Player renders only those controlled blocks,
