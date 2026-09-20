@@ -341,11 +341,11 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
 .prose {
   /* Shrink-to-fit is what makes the block's own position visible: a short passage sits
      where it was put. A long one would fill whatever it is given, so it is never given
-     everything: keeping the block to seven tenths of the column leaves three tenths of
-     slack for its position to spend, and on a phone, where the measure has no room to
-     show itself, that slack is the only thing left saying which side was meant. */
+     everything: the slack left over is what its position spends, and on a phone, where the
+     measure has no room to show itself, that slack is the only thing left saying which
+     side was meant. The share matches a bubble's, so the two readings reach equally far. */
   width: fit-content;
-  max-width: min(var(--prose-measure, 65ch), 70%);
+  max-width: min(var(--prose-measure, 65ch), 75%);
   font-size: 1rem;
   line-height: 1.7;
   white-space: pre-wrap;
