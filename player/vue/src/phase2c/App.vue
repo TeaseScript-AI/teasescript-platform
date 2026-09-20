@@ -83,6 +83,7 @@ function prependTranscript() {
   firstMessage -= 50;
   transcriptEntries.value = [...transcriptFixtures(firstMessage, 50), ...transcriptEntries.value];
 }
+const transcript = ref<InstanceType<typeof Transcript> | null>(null);
 const stage = ref<InstanceType<typeof Stage> | null>(null);
 const stageHeight = ref(0);
 const mediaAspect = ref(0);
@@ -194,9 +195,9 @@ async function toggleFullscreen() {
           </template>
         </Stage>
 
-        <ConversationSurface>
+        <ConversationSurface @margin-wheel="transcript?.scrollFromMargin($event)">
           <template #default="{ bottomInset }">
-            <Transcript :bottom-inset="bottomInset" :key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'" :entries="runtimeSession?.transcriptEntries ?? transcriptEntries" :speakers="runtimeSession?.speakers ?? transcriptFixtureSpeakers" :revision="runtimeSession?.transcriptRevision ?? 0" />
+            <Transcript ref="transcript" :bottom-inset="bottomInset" :key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'" :entries="runtimeSession?.transcriptEntries ?? transcriptEntries" :speakers="runtimeSession?.speakers ?? transcriptFixtureSpeakers" :revision="runtimeSession?.transcriptRevision ?? 0" />
           </template>
           <template #interaction><RuntimeInteraction v-model:session="runtimeSession" :reset="interactionReset" :preview="isDevelopment" @preview-submit="appendPreviewResponse" /></template>
         </ConversationSurface>

@@ -69,6 +69,24 @@ function interruptFollow() {
 function onWheel(event: WheelEvent) {
   if (event.deltaY < 0) interruptFollow();
 }
+function scrollFromMargin(event: WheelEvent) {
+  const viewport = scrollElement.value;
+  if (!viewport || event.ctrlKey || event.defaultPrevented ||
+      Math.abs(event.deltaX) > Math.abs(event.deltaY) || !event.deltaY ||
+      viewport.scrollHeight <= viewport.clientHeight) return;
+  // Wheel deltas can be pixels, text lines or pages depending on the input device.
+  const style = getComputedStyle(viewport);
+  const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2;
+  const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? lineHeight
+    : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? viewport.clientHeight : 1;
+  event.preventDefault();
+  onWheel(event);
+  const delta = event.deltaY * unit;
+  // interruptFollow schedules its scroll write after Vue's DOM commit; apply
+  // this wheel movement after that cancellation, just like a native wheel.
+  void nextTick(() => viewport.scrollBy({ top: delta, behavior: "instant" }));
+}
+defineExpose({ scrollFromMargin });
 function onTouchStart() {
   touching.value = true;
   interruptFollow();

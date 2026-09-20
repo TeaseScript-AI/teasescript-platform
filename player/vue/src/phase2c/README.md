@@ -31,6 +31,10 @@ Keep experimental fixtures separate from the components that own settled behavio
   The title is pill-shaped. The Sidebar trigger and display-control group share
   `--player-top-control-radius`; the group keeps its existing rounded corners.
 - `ConversationSurface.vue` owns the conversation overlay placement and measured
+  bottom-region wheel surface: empty left/right margins forward vertical wheel
+  input to the existing Transcript scroll owner without changing reading width.
+  Nested tools, composer input, horizontal gestures and browser zoom retain their own behavior.
+  It supplies the measured
   bottom inset. Transcript consumes that inset so its final content remains
   reachable. The transcript scrollport extends into the existing conversation
   padding so bubble borders stay inside its clipping boundary; its scrollbar uses
