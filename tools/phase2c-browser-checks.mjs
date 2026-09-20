@@ -1060,6 +1060,7 @@ async function transcriptChecks(page) {
   // Larger retained history, top-of-history prepend, empty -> populated, and rapid appends.
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
+  await atEnd("resize before replacing history");
   await page.getByRole("button", { name: "Load 10,000 messages", exact: true }).click();
   await page.locator('[aria-setsize="10000"]').first().waitFor();
   await atEnd("10,000-entry history");
@@ -1070,6 +1071,12 @@ async function transcriptChecks(page) {
   await scroll.focus();
   await page.keyboard.press("Home");
   await page.waitForFunction(() => document.querySelector(".transcript-scroll").scrollTop === 0);
+  // Home now exposes the intentional leading blank viewport. Start reading
+  // at the first message before checking preservation across a prepend.
+  await scroll.evaluate((el) => {
+    const first = el.querySelector("[data-message-id]");
+    el.scrollTop += first.getBoundingClientRect().top - el.getBoundingClientRect().top;
+  });
   const oldest = await anchor();
   await page.getByRole("button", { name: "Prepend 50 messages", exact: true }).click();
   await page.locator('[aria-setsize="10050"]').first().waitFor();

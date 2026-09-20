@@ -35,6 +35,8 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(computed(() => {
     getItemKey: (index: number) => entries[index]!.id,
     estimateSize: () => 140,
     overscan: 5,
+    // A viewport of leading space keeps even a single message scrollable.
+    paddingStart: viewportHeight.value,
     paddingEnd: endInset.value,
     anchorTo: "end" as const,
     followOnAppend: true,
@@ -44,36 +46,31 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(computed(() => {
     scrollToFn: (offset, options, instance) => {
       void nextTick(() => elementScroll(offset, options, instance));
     },
-    // TanStack observes both viewport and row sizes. Only a viewport-height change needs
-    // an explicit follow request; keyed reading-anchor corrections stay with the virtualizer.
+    // Preserve follow/reading intent before changing the viewport and leading space.
     observeElementRect: (instance, callback) => observeElementRect(instance, (rect) => {
       const previous = instance.scrollRect;
-      const following = previous !== null &&
-        instance.getTotalSize() - (instance.scrollOffset ?? 0) - previous.height <= latestThreshold;
-      // A resize need not change the virtual item range, so TanStack may not
-      // emit onChange. Publish its measured height for the bottom alignment.
+      const offset = instance.scrollOffset ?? 0;
+      // On growth the browser may already have clamped scrollTop to the new end.
+      const following = previous === null || previous.height === 0 ||
+        instance.getTotalSize() - offset - Math.max(previous.height, rect.height) <= latestThreshold;
       viewportHeight.value = rect.height;
       callback(rect);
-      if (following && !touching.value && previous?.height !== rect.height) {
-        void nextTick(() => instance.scrollToEnd());
+      if (previous?.height !== rect.height) {
+        void nextTick(() => {
+          if (following && !touching.value) instance.scrollToEnd();
+          else instance.scrollToOffset(offset + rect.height - (previous?.height ?? 0));
+        });
       }
     }),
   };
 }));
 watch(endInset, (inset, previous) => {
   const instance = virtualizer.value;
-  // Recover distance using the previous inset regardless of Vue's options-update order.
   const previousDistance = instance.getTotalSize() - instance.options.paddingEnd + previous
     - (instance.scrollOffset ?? 0) - (instance.scrollRect?.height ?? 0);
   if (inset !== previous && previousDistance <= latestThreshold && !touching.value)
     void nextTick(() => instance.scrollToEnd());
 });
-// Short histories use the free space above the messages. Once content overflows,
-// this offset is zero and TanStack retains its normal scroll coordinates.
-const historyHeight = computed(() => Math.max(
-  virtualizer.value.getTotalSize(), viewportHeight.value,
-));
-const historyOffset = computed(() => historyHeight.value - virtualizer.value.getTotalSize());
 const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => ({
   item, entry: props.entries[item.index]!,
 })));
@@ -139,23 +136,21 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
         tabindex: 0, onKeydown: onScrollKeydown, onWheel: onWheel,
         onTouchstart: onTouchStart, onTouchend: () => touching = false,
         onTouchcancel: () => touching = false }">
-      <div :style="{ height: `${historyHeight}px` }">
-        <div class="transcript-history" :style="{ height: `${virtualizer.getTotalSize()}px`, transform: `translateY(${historyOffset}px)` }">
-          <div role="list">
-            <article v-for="{ item, entry } in rows" :key="entry.id"
-              :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
-              :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
-              role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
-              class="transcript-entry" :style="{ transform: `translateY(${item.start}px)` }">
-              <div class="message" :data-author="entry.kind === 'session-event' ? 'session-event' : entry.speakerId === 'user' ? 'player' : 'speaker'">
-                <div class="message-copy"><strong v-if="entry.kind === 'message' && entry.speakerId !== 'user'">{{ speakers[entry.speakerId]?.name ?? entry.speakerId }}: </strong><TranscriptMarkup v-if="entry.kind === 'message' && entry.speakerId !== 'user' && entry.content" :content="entry.content" /><template v-else>{{ entry.text }}</template></div>
-              </div>
-            </article>
-          </div>
-          <div ref="foregroundElement" class="transcript-foreground"
-            :style="{ top: `${virtualizer.getTotalSize() - endInset}px` }">
-            <slot name="foreground" />
-          </div>
+      <div class="transcript-history" :style="{ height: `${virtualizer.getTotalSize()}px` }">
+        <div role="list">
+          <article v-for="{ item, entry } in rows" :key="entry.id"
+            :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
+            :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
+            role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
+            class="transcript-entry" :style="{ transform: `translateY(${item.start}px)` }">
+            <div class="message" :data-author="entry.kind === 'session-event' ? 'session-event' : entry.speakerId === 'user' ? 'player' : 'speaker'">
+              <div class="message-copy"><strong v-if="entry.kind === 'message' && entry.speakerId !== 'user'">{{ speakers[entry.speakerId]?.name ?? entry.speakerId }}: </strong><TranscriptMarkup v-if="entry.kind === 'message' && entry.speakerId !== 'user' && entry.content" :content="entry.content" /><template v-else>{{ entry.text }}</template></div>
+            </div>
+          </article>
+        </div>
+        <div ref="foregroundElement" class="transcript-foreground"
+          :style="{ top: `${virtualizer.getTotalSize() - endInset}px` }">
+          <slot name="foreground" />
         </div>
       </div>
       <p v-if="!entries.length" class="transcript-empty">No messages yet.</p>

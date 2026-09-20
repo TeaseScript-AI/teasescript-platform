@@ -387,7 +387,8 @@ The transcript:
 - uses the canvas surface, continuous with the stage background above it;
 - is centered within the actual middle content region rather than the full viewport;
 - keeps the maintained ultrawide readability cap pending visual retuning;
-- aligns short histories to the bottom above the active controls and composer; new messages grow the conversation upward;
+- places one viewport of empty scroll space before the messages, so even a single message can be scrolled; at the latest
+  position, messages and active controls sit above the composer and new messages grow the conversation upward;
 - owns vertical scrolling and contains overscroll;
 - uses the maintained soft top fade beneath the stage instead of a hard cut only while the transcript is actually
   scrolled away from its top; at the top of history, the first visible content remains fully opaque;
@@ -531,8 +532,8 @@ A `showButton` is the one-option presentation of the same Standard foreground-co
 transcript's reading width, grow with their labels, and allow long labels to wrap. The group centers its buttons and
 wraps onto additional rows rather than scrolling horizontally. The current visual trial uses 12px between buttons and
 rows, retaining the shared button component's internal padding. Controls scroll away with the transcript; there is no
-separate button scroller. When the history is shorter than the viewport, spare space stays above the messages, keeping the transcript and controls
-together just above the composer. After completion, the active controls disappear and the existing runtime transcript records
+separate button scroller. The transcript’s leading scroll space keeps messages and controls together above the composer
+when following the latest content. After completion, the active controls disappear and the existing runtime transcript records
 the response. Authored foreground buttons use their solid authored colour because media never sits behind this lane;
 authored right-rail actions retain the translucent floating-control treatment described below.
 
