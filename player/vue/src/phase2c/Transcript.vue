@@ -334,7 +334,13 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
   /* Shrink-to-fit is what makes the block's own position visible: a short passage sits
      where it was put, a long one fills the measure and only its text alignment shows. */
   width: fit-content;
-  max-width: var(--prose-measure, 65ch);
+  /* The measure is in characters and a narrow window has fewer of them than a wide one, so
+     the far gutter is reserved before the measure is honoured. Without it prose runs to the
+     edge on a phone while every bubble beside it still keeps its margin. */
+  max-width: min(
+    var(--prose-measure, 65ch),
+    calc(100% - var(--prose-lead) - var(--prose-trail))
+  );
   font-size: 1rem;
   line-height: 1.7;
   white-space: pre-wrap;
