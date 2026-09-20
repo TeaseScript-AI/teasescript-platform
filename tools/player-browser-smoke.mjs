@@ -56,6 +56,7 @@ async function main() {
       await selectPlayerExample(cdp);
       await narrowScenario(cdp);
       await vueRuntimeScenario(cdp, origin);
+      await vueMessagePresentationScenario(cdp, origin);
       await vueDevelopmentToolsScenario(cdp, origin);
       await vueTranscriptScenario(cdp, origin);
       console.log(
@@ -628,6 +629,56 @@ async function narrowScenario(cdp) {
     `const select=document.querySelector('.choice-select'); select.value='1'; select.dispatchEvent(new Event('change', {bubbles:true}))`,
   );
   await waitFor(cdp, `document.querySelector('#runtime-status')?.textContent === 'halted'`);
+}
+
+async function vueMessagePresentationScenario(cdp, origin) {
+  for (const [width, height] of [
+    [1440, 900],
+    [390, 844],
+  ]) {
+    await setViewport(cdp, width, height);
+    await navigate(cdp, `${origin}/player/?fixture=runtime-message-presentation`);
+    await waitFor(cdp, `document.querySelectorAll('.message.authored').length === 3`);
+    assertEqual(
+      await value(cdp, `document.querySelectorAll('.message.prose .speaker-avatar').length`),
+      0,
+      "prose does not render avatars",
+    );
+    assertEqual(
+      await value(cdp, `getComputedStyle(document.querySelector('.message.prose')).textAlign`),
+      "left",
+      "prose inherits its speaker alignment",
+    );
+    assertEqual(
+      await value(
+        cdp,
+        `getComputedStyle(document.querySelector('.message.prose .message-copy')).fontFamily`,
+      ),
+      "Georgia",
+      "prose inherits the speaker font",
+    );
+    assertEqual(
+      await value(
+        cdp,
+        `(() => { const entries = [...document.querySelectorAll('.message-body')]; return getComputedStyle(entries[1]).backgroundColor !== getComputedStyle(entries[2]).backgroundColor; })()`,
+      ),
+      true,
+      "paper override is separate from transparent prose default",
+    );
+    assertEqual(
+      await value(
+        cdp,
+        `(() => { const entries = [...document.querySelectorAll('.message-body')]; return getComputedStyle(entries[0]).color === getComputedStyle(entries[2]).color; })()`,
+      ),
+      true,
+      "invalid runtime colour falls back to the inherited text colour",
+    );
+    assertEqual(
+      await value(cdp, `document.documentElement.scrollWidth <= innerWidth`),
+      true,
+      "authored presentation fits the viewport",
+    );
+  }
 }
 
 async function vueRuntimeScenario(cdp, origin) {

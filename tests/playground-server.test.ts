@@ -40,6 +40,15 @@ test("serves the root playground page", async () => {
   assert.match(response.body, /TeaseScript Playground/u);
 });
 
+test("serves only the explicit colour module needed by unbundled playground imports", async () => {
+  const response = await get("/vendor/color.js");
+  assert.equal(response.status, 200);
+  assert.match(response.contentType, /^text\/javascript/u);
+  assert.match(response.body, /export \{ Color as default \}/u);
+  assert.equal((await get("/vendor/package.json")).status, 404);
+  assert.equal((await get("/node_modules/colorjs.io/package.json")).status, 404);
+});
+
 test("serves the Vue Player at its maintained route and keeps its build separate", async () => {
   const html = await get("/player/");
 

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { isMessagePresentation } from "../src/message-presentation.js";
 import { compileSource } from "../src/compiler.js";
 import { normalizeColor, isNormalizedColor } from "../src/color.js";
 import { run } from "../src/runtime/engine.js";
@@ -194,14 +195,21 @@ test("removed spoiler tags are ordinary visible text", () => {
 });
 
 test("a user-provided colour survives an input checkpoint and invalid input uses the default", () => {
-  const plan = compileValidPlan('say prose(color: askText "Colour") "The story continues.", instant');
+  const plan = compileValidPlan(
+    'say prose(color: askText "Colour") "The story continues.", instant',
+  );
   const waiting = run(plan, createFreshRuntimeSnapshot(plan));
   const action = waiting.snapshot.foregroundAction;
   if (action?.kind !== "interaction") throw new Error("Expected colour input.");
-  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, waiting.snapshot)));
+  const restored = deserializeCheckpoint(
+    serializeCheckpoint(createCheckpoint(plan, waiting.snapshot)),
+  );
   for (const text of ["red", "not a colour"]) {
     const completed = completeAction(restored.plan, restored.snapshot, {
-      actionKind: "interaction", actionId: action.actionId, payload: { kind: "text", value: text },
+      actionKind: "interaction",
+      interactionKind: "text",
+      actionId: action.actionId,
+      payload: { kind: "submittedText", submittedText: text },
     });
     const result = run(restored.plan, completed.snapshot);
     assert.equal(result.snapshot.status, "halted");
@@ -217,4 +225,6 @@ test("null options inherit, and malformed external resolved values are rejected"
   const output = result.events.find((event) => event.kind === "say");
   assert.equal(output?.presentation.color, null);
   assert.equal(output?.presentation.align, "center");
+  assert.equal(isMessagePresentation({ ...output?.presentation, align: ["center"] }), false);
+  assert.equal(isMessagePresentation({ ...output?.presentation, background: "url(x)" }), false);
 });

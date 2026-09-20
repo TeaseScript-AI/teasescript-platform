@@ -385,6 +385,10 @@ interface StaticTarget {
 }
 
 function resolveTarget(pathname: string, roots: StaticRoots): StaticTarget | null {
+  if (pathname === "/vendor/color.js") {
+    const root = resolve(roots.projectRoot, "node_modules/colorjs.io/dist");
+    return { root, path: resolve(root, "color.js") };
+  }
   if (pathname === "/") {
     return { root: roots.playgroundRoot, path: resolve(roots.playgroundRoot, "index.html") };
   }

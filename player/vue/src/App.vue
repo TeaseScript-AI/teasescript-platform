@@ -198,6 +198,22 @@ async function loadRuntimeSource(): Promise<string | null> {
   if (fixture === "runtime-skippable-long") {
     return 'say "Long pacing", 60\nsay "After", 60\nshowButton "Continue"';
   }
+  if (fixture === "runtime-message-presentation") {
+    return [
+      'speaker vera {',
+      ' displayName: "Vera"',
+      ' color: "#334455"',
+      ' font: "Georgia"',
+      ' bubble: { background: "hsl(210 30% 90%)", align: "left" }',
+      ' prose: { align: "left" }',
+      '}',
+      'speaker vera',
+      'say "A message using the speaker defaults.", instant',
+      'say prose(background: "ivory", position: "center") "Dear reader,\\nThis letter has its own paper colour and keeps the speaker font.", instant',
+      'let invalid = "not a colour"',
+      'say prose(color: invalid) "The story continues with the inherited colour.", instant',
+    ].join("\n");
+  }
   if (fixture === "runtime-message-markup") {
     return 'say "# Heading\\n- **Bold** Keyboard Pointer [Docs](https://example.com) <img src=x onerror=alert(1)>\\n1. Ordered", instant';
   }
