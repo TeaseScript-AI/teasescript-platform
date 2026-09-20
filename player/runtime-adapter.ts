@@ -323,7 +323,9 @@ function speakerPresentation(speaker: {
 }): PlayerSpeakerPresentation {
   return Object.freeze({
     name: speaker.displayName,
-    accent: speaker.color ?? "#9a867d",
+    // A speaker who was given no colour has to arrive without one: the presentation decides
+    // what an absent colour looks like, and inventing one here makes that choice unreachable.
+    accent: speaker.color ?? "inherit",
     avatar: speaker.avatar ?? (speaker.displayName.trim().charAt(0).toUpperCase() || "?"),
     fontFamily: speaker.font ?? "inherit",
   });
