@@ -373,6 +373,8 @@ class Parser {
       speaker = this.#identifier(this.#advance());
     }
 
+    const presentation = this.#parseSayPresentation();
+
     let skipPolicy: SayStatement["skipPolicy"] = null;
     if (this.#check(TokenKind.Identifier) && !this.#canParseCompleteSayValue()) {
       const policy = this.#peek().lexeme;
@@ -415,12 +417,86 @@ class Parser {
     }
     return Object.freeze({
       kind: "sayStatement",
+      presentation,
       speaker,
       skipPolicy,
       value,
       pacing,
       span: spanFrom(keyword.span, endSpan),
     });
+  }
+
+  #parseSayPresentation(): ObjectLiteral | null {
+    if (
+      !this.#check(TokenKind.Identifier) ||
+      !["bubble", "prose"].includes(this.#peek().lexeme) ||
+      this.#canParseCompleteSayValue()
+    )
+      return null;
+    const mode = this.#advance();
+    const properties: ObjectProperty[] = [
+      {
+        kind: "objectProperty",
+        name: { kind: "identifier", name: "kind", span: mode.span },
+        value: {
+          kind: "stringLiteral",
+          form: "singleLine",
+          span: mode.span,
+          parts: [{ kind: "stringText", raw: mode.lexeme, value: mode.lexeme, span: mode.span }],
+        },
+        span: mode.span,
+      },
+    ];
+    let endSpan = mode.span;
+    if (this.#match(TokenKind.LeftParenthesis)) {
+      this.#skipNewlines();
+      while (!this.#check(TokenKind.RightParenthesis) && !this.#check(TokenKind.EndOfFile)) {
+        if (!isPropertyName(this.#peek())) {
+          this.#reportInsertion(
+            parserDiagnosticCode.expectedPropertyName,
+            "Expected a named presentation option.",
+          );
+          break;
+        }
+        const name = this.#identifier(this.#advance());
+        if (!["position", "align", "color", "background", "font"].includes(name.name))
+          this.#reportInsertion(
+            parserDiagnosticCode.expectedPropertyName,
+            `Unknown presentation option '${name.name}'.`,
+          );
+        if (properties.some((property) => property.name.name === name.name))
+          this.#reportInsertion(
+            parserDiagnosticCode.expectedPropertyName,
+            `Duplicate presentation option '${name.name}'.`,
+          );
+        if (!this.#match(TokenKind.Colon)) {
+          this.#reportInsertion(
+            parserDiagnosticCode.expectedColon,
+            "Expected ':' after presentation option.",
+          );
+          break;
+        }
+        this.#skipContinuationNewlines();
+        const value = this.#parseExpression();
+        if (value === null) break;
+        properties.push({
+          kind: "objectProperty",
+          name,
+          value,
+          span: spanFrom(name.span, value.span),
+        });
+        this.#skipNewlines();
+        if (!this.#match(TokenKind.Comma)) break;
+        this.#skipNewlines();
+      }
+      if (this.#match(TokenKind.RightParenthesis)) endSpan = this.#previous().span;
+      else
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedExpression,
+          "Expected ')' after presentation options.",
+        );
+    }
+    return { kind: "objectLiteral", properties, span: spanFrom(mode.span, endSpan) };
   }
 
   /**

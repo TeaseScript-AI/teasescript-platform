@@ -855,6 +855,7 @@ test("PR194 matrix: every reachable canonical handoff form consumes exactly once
       makePlan: (injected) =>
         replaceHandoffInstruction(injected, {
           kind: "say",
+          presentation: null,
           speaker: null,
           value: {
             kind: "temporary",
@@ -2190,6 +2191,7 @@ test("PR194 matrix: failed canonical continuations retain the handoff atomically
       makePlan: (injected) =>
         replaceHandoffInstruction(injected, {
           kind: "say",
+          presentation: null,
           speaker: "missing",
           value: temporaryExpression(injected.destinationTemporary, injected.plan.sourceSpan),
           skipPolicy: null,
@@ -2669,6 +2671,7 @@ test("PR194 matrix: invalid local handoff shapes reject without mutating plans",
         mutate: (plan) => {
           externalInstructions(plan)[injected.clearInstruction] = {
             kind: "say",
+            presentation: null,
             speaker: null,
             value: { kind: "literal", value: "x", span },
             span,

@@ -1,3 +1,7 @@
+import {
+  presentationPropertyDiagnostics,
+  messageColorDiagnostics,
+} from "./authored-presentation.js";
 import type {
   AssignmentTarget,
   Block,
@@ -198,6 +202,10 @@ class SemanticValidator {
             );
           }
           names.add(property.name.name);
+          if (["presentation", "color", "bubble", "prose"].includes(property.name.name))
+            this.diagnostics.push(
+              ...presentationPropertyDiagnostics(property.name.name, property.value),
+            );
           this.#validateExpression(property.value, scope, declared ? statement.name.name : null);
         }
         return;
@@ -212,6 +220,14 @@ class SemanticValidator {
             : this.#validateSpeakerReference(statement.speaker.name, statement.speaker.span, scope)
               ? statement.speaker.name
               : null;
+        if (statement.presentation !== null) {
+          this.#validateExpression(statement.presentation, scope, contextualSpeaker);
+          for (const property of statement.presentation.properties)
+            this.diagnostics.push(
+              ...presentationPropertyDiagnostics(property.name.name, property.value),
+            );
+        }
+        this.diagnostics.push(...messageColorDiagnostics(statement.value));
         this.#validateExpression(statement.value, scope, contextualSpeaker);
         if (statement.pacing !== null && statement.pacing !== "instant") {
           this.#validateExpression(statement.pacing, scope, contextualSpeaker);

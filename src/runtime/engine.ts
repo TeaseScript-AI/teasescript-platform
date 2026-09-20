@@ -1,3 +1,5 @@
+import { resolveMessagePresentation } from "./message-presentation.js";
+import type { MessagePresentation } from "../message-presentation.js";
 import type {
   Instruction,
   InstructionPlan,
@@ -1413,7 +1415,15 @@ function executeSay(
   if (prepared !== null && prepared.owningInstruction === snapshot.nextInstruction) {
     validatePacingCreation(snapshot, instruction.span, prepared.durationMs);
     snapshot.preparedSayOutput = null;
-    emitSay(snapshot, events, instruction.span, prepared.speaker, prepared.content, prepared.text);
+    emitSay(
+      snapshot,
+      events,
+      instruction.span,
+      prepared.speaker,
+      prepared.content,
+      prepared.text,
+      prepared.presentation,
+    );
     establishPacingAfterSay(
       snapshot,
       events,
@@ -1447,6 +1457,11 @@ function executeSay(
     preparedSpeaker.speakerId === null
       ? null
       : evaluator.speakerById(preparedSpeaker.speakerId, instruction.span);
+  const presentation = resolveMessagePresentation(
+    instruction.presentation === null ? null : evaluator.evaluate(instruction.presentation),
+    speaker,
+    copySpan(instruction.span),
+  );
   const authoredText =
     instruction.textTemporary === undefined
       ? evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span)
@@ -1466,7 +1481,7 @@ function executeSay(
     if (durationMs === 0) {
       assertEventSequenceCapacity(snapshot, 2, instruction.span);
       settleBackgroundPacingGate(plan, snapshot, activeGate, "supersededByInstantOutput", events);
-      emitSay(snapshot, events, instruction.span, output, content, text);
+      emitSay(snapshot, events, instruction.span, output, content, text, presentation);
       advance(snapshot);
       return;
     }
@@ -1476,6 +1491,7 @@ function executeSay(
       speaker: output === null ? null : { ...output },
       content,
       text,
+      presentation,
       durationMs,
       skippable,
     });
@@ -1486,7 +1502,7 @@ function executeSay(
     return;
   }
   if (durationMs > 0) validatePacingCreation(snapshot, instruction.span, durationMs);
-  emitSay(snapshot, events, instruction.span, output, content, text);
+  emitSay(snapshot, events, instruction.span, output, content, text, presentation);
   if (durationMs > 0)
     establishPacingAfterSay(snapshot, events, instruction.span, durationMs, skippable);
   advance(snapshot);
@@ -1575,10 +1591,12 @@ function emitSay(
   speaker: OutputSpeaker | null,
   content: MessageMarkup,
   text: string,
+  presentation: MessagePresentation,
 ): void {
   events.push(
     Object.freeze({
       kind: "say",
+      presentation,
       sequence: takeSequence(snapshot),
       speaker,
       content,

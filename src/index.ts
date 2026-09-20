@@ -261,3 +261,4 @@ export type {
   UnaryExpression,
   WhileStatement,
 } from "./ast.js";
+export type { MessagePresentation } from "./message-presentation.js";

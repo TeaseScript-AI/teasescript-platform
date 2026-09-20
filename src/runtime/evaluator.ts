@@ -1,3 +1,4 @@
+import { normalizeColor } from "../color.js";
 import type {
   AssignmentTargetPlan,
   BinaryExpressionPlan,
@@ -738,7 +739,9 @@ export class Evaluator {
     return Object.freeze({
       identifier: speaker.identifier,
       displayName,
-      color: optionalSpeakerString(speaker, "color", span),
+      color: normalizeColor(
+        speaker.properties.find((property) => property.name === "color")?.value,
+      ),
       font: optionalSpeakerString(speaker, "font", span),
       avatar: optionalSpeakerString(speaker, "avatar", span),
     });

@@ -1,3 +1,4 @@
+import type { MessagePresentation } from "../src/message-presentation.js";
 import type { MessageMarkup } from "../src/message-markup.js";
 
 export type MediaFit = "contain" | "cover";
@@ -47,6 +48,7 @@ export interface PlayerMessagePresentation {
   readonly text: string;
   /** Present only for authored runtime output; player-authored entries remain plain text. */
   readonly content?: MessageMarkup;
+  readonly presentation?: MessagePresentation;
 }
 
 export interface PlayerSessionEventPresentation {

@@ -215,7 +215,7 @@ test("Vue transcript uses TanStack's single virtual scroll and anchor owner", as
   assert.match(transcript, /lostpointercapture/u);
   assert.match(transcript, /role="log"/u);
   assert.match(transcript, /<PlayerMessageMarkup/u);
-  assert.match(markupLine, /aria-label="Reveal spoiler"/u);
+  assert.doesNotMatch(markupLine, /spoiler/u);
   assert.match(markupLine, /target="_blank"/u);
   assert.match(markupLine, /rel="noopener noreferrer"/u);
   assert.doesNotMatch(`${transcript}\n${markupLine}\n${markupMessage}`, /innerHTML|v-html/u);

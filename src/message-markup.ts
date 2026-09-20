@@ -1,3 +1,5 @@
+import { normalizeColor, isNormalizedColor } from "./color.js";
+
 export type MessageMarkupLineEnding = "" | "\n" | "\r\n";
 
 interface MessageMarkupSpanBase {
@@ -7,7 +9,7 @@ interface MessageMarkupSpanBase {
 }
 
 export interface MessageMarkupPlainSpan extends MessageMarkupSpanBase {
-  readonly kind: "italic" | "bold" | "strikethrough" | "code" | "underline" | "spoiler";
+  readonly kind: "italic" | "bold" | "strikethrough" | "code" | "underline";
 }
 
 export interface MessageMarkupColorSpan extends MessageMarkupSpanBase {
@@ -191,7 +193,6 @@ const EXTENSION_CLOSING_KINDS = new Map<string, ExtensionOpening["kind"]>([
   ["[/bg]", "backgroundColor"],
   ["[/weight]", "weight"],
   ["[/size]", "size"],
-  ["[/spoiler]", "spoiler"],
 ]);
 const URL_BOUNDARY_CHARACTER = /[\p{L}\p{M}\p{N}_]/u;
 const URL_STOP_CHARACTER = /[\s\u0000-\u001f\u007f<>"'`*~\[\]]/u;
@@ -404,7 +405,7 @@ function validMessageMarkupSpan(value: unknown, textLength: number): value is Me
     value.depth < 0
   )
     return false;
-  if (["italic", "bold", "strikethrough", "code", "underline", "spoiler"].includes(value.kind))
+  if (["italic", "bold", "strikethrough", "code", "underline"].includes(value.kind))
     return hasExactKeys(value, ["kind", "start", "end", "depth"]);
   if (!hasExactKeys(value, ["kind", "value", "start", "end", "depth"])) {
     if (
@@ -417,7 +418,7 @@ function validMessageMarkupSpan(value: unknown, textLength: number): value is Me
   }
   if (typeof value.value !== "string") return false;
   if (value.kind === "color" || value.kind === "backgroundColor")
-    return /^#[0-9a-f]{6}$/u.test(value.value);
+    return value.value === "inherit" || isNormalizedColor(value.value);
   if (value.kind === "weight") return WEIGHTS.has(value.value);
   if (value.kind === "size") return SIZES.has(value.value);
   return false;
@@ -787,12 +788,16 @@ function extensionOpeningAt(
   const text = shortBracketToken(units, index, end);
   if (text === null || text.startsWith("[/")) return null;
   if (text === "[u]") return extension("underline", text, null);
-  if (text === "[spoiler]") return extension("spoiler", text, null);
 
-  const color = /^\[color=(#[0-9a-fA-F]{6})\]$/u.exec(text);
-  if (color !== null) return extension("color", text, color[1]!.toLowerCase());
-  const background = /^\[bg=(#[0-9a-fA-F]{6})\]$/u.exec(text);
-  if (background !== null) return extension("backgroundColor", text, background[1]!.toLowerCase());
+  const color = /^\[(color|bg)=([^\]]*)\]$/u.exec(text);
+  if (color !== null) {
+    const normalized = normalizeColor(color[2]);
+    return extension(
+      color[1] === "color" ? "color" : "backgroundColor",
+      text,
+      normalized ?? "inherit",
+    );
+  }
   const weight = /^\[weight=([a-z]+)\]$/u.exec(text);
   if (weight !== null && WEIGHTS.has(weight[1]!)) return extension("weight", text, weight[1]!);
   const size = /^\[size=([a-z-]+)\]$/u.exec(text);
@@ -820,11 +825,12 @@ function extensionClosingAt(
 }
 
 function shortBracketToken(units: readonly InputUnit[], index: number, end: number): string | null {
-  const maximumEnd = Math.min(end, index + 48);
+  if (!unitIs(units[index], "[")) return null;
+  const maximumEnd = end;
   const characters: string[] = [];
   for (let cursor = index; cursor < maximumEnd; cursor += 1) {
     const unit = units[cursor]!;
-    if (unit.escaped) return null;
+    if (unit.escaped || (cursor > index && unit.character === "[")) return null;
     characters.push(unit.character);
     if (unit.character === "]") return characters.join("");
   }
@@ -1054,7 +1060,6 @@ function freezeSpan(span: MutableSpan): MessageMarkupSpan {
     case "strikethrough":
     case "code":
     case "underline":
-    case "spoiler":
       return Object.freeze({ kind: span.kind, ...base });
     case "color":
     case "backgroundColor":

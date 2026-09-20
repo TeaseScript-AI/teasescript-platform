@@ -19,9 +19,15 @@ Rejected forms remain rejected, including `set score = 20`, `procedure`, and `ca
 
 ## Language design intent
 
-TeaseScript should make the common authoring path readable and require as little boilerplate as practical. A script author who is not a professional developer should be able to use compact official syntax and deterministic platform defaults without first understanding the engine, imports, pending-action state, or UI implementation details.
+TeaseScript serves the [creator audience](PRODUCT.md), including people who have
+never programmed. The common authoring path should be readable and require as little boilerplate as practical. Creators
+should be able to use compact official syntax and documented platform defaults without first understanding the engine,
+imports, pending-action state, or UI implementation details. Ordinary authoring should not require repeated settings
+where a suitable default can express the intended behavior.
 
-The same language must still permit advanced authors to opt into explicit parameters, ordinary function calls, TypeScript libraries, custom UI, and lower-level capabilities where supported. Advanced control should extend the simple path rather than making every basic script spell out the advanced machinery.
+The same language must still permit advanced authors to opt into explicit parameters, ordinary function calls,
+TypeScript libraries, custom UI, and lower-level capabilities where supported. Advanced control should extend the simple
+path rather than making every basic script spell out the advanced machinery.
 
 When syntax is designed or reviewed, prefer:
 
@@ -124,10 +130,12 @@ Choice presentation is a Player application decision, not TeaseScript syntax or 
 
 ### `say` pacing and skip modifiers
 
+The [message presentation contract](specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides)
+defines optional mode/style overrides and speaker inheritance. Parentheses may be omitted when no options are needed.
 The accepted compact order is:
 
 ```text
-say [as speaker] [skippable | unskippable] text [, pacing]
+say [as speaker] [bubble(options) | prose(options)] [skippable | unskippable] text [, pacing]
 ```
 
 Examples:
@@ -202,11 +210,21 @@ The current function subset includes:
 
 Complete static typing and the wider V30 Standard Library/runtime APIs are not implemented. Typed signatures may be parsed for diagnostics while unsupported execution/type semantics remain rejected.
 
-The current source/compiler implements the ADR 0018 `say` pacing and skip forms while preserving existing `say`/
+The current source/compiler implements authored presentation options and the ADR 0018 `say` pacing and skip forms while
+preserving existing `say`/
 `say as` spans, diagnostics, visible output, speaker identity, deterministic RNG use, and checkpoint behavior.
 `skippable` and `unskippable` act as modifiers only where the existing value grammar cannot consume them as the complete
 `say` value. Bare `instant` is the zero-duration alias only when it fills the complete pacing slot; larger pacing
 expressions beginning with an identifier named `instant` remain ordinary expressions.
+
+Concrete colour parsing/conversion uses exact `colorjs.io@0.7.1` (MIT, no runtime dependencies) through `src/color.ts`.
+It supplies colour-space conversion behind the shared supported-notation grammar and CSS input-channel validation.
+The compiler validates constants; runtime output preparation converts authored colours without recompiling converted values. Hand-written
+conversion would duplicate specialised parsing/math; separate per-layer parsers would risk different accepted values.
+The unbundled playground uses an import map and one explicit local module route; the Vue builds bundle the dependency.
+The dependency adds browser bundle weight and requires reviewing upstream parser/conversion changes on upgrades. Its
+input is restricted to concrete colour forms; it does not execute CSS, fetch resources or access the DOM. Dependency
+updates remain explicit and the accepted colour contract stays repository-owned.
 
 ## Diagnostics
 

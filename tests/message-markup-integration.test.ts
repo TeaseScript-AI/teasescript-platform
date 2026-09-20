@@ -46,7 +46,7 @@ test("runs escapeMarkup through the protected Platform Standard Library prelude"
 });
 
 test("paces, prepares, checkpoints, and emits one parsed authored message", () => {
-  const compiled = compileValidPlan('say "first"\nsay "[spoiler]**second**[/spoiler]"');
+  const compiled = compileValidPlan('say "first"\nsay "[u]**second**[/u]"');
   const promoted = run(compiled, createFreshRuntimeSnapshot(compiled));
   const gate = promoted.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
@@ -58,7 +58,7 @@ test("paces, prepares, checkpoints, and emits one parsed authored message", () =
     gate.preparedOutput.content.blocks[0]?.kind === "paragraph"
       ? gate.preparedOutput.content.blocks[0].lines[0]?.spans.map((span) => span.kind)
       : [],
-    ["spoiler", "bold"],
+    ["underline", "bold"],
   );
 
   const restored = deserializeCheckpoint(

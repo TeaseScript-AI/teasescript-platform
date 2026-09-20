@@ -126,7 +126,8 @@ export class InstructionCompiler {
         });
         return;
       case "sayStatement": {
-        const textCanSuspend = this.#containsUserCall(statement.value);
+        const textCanSuspend =
+          statement.presentation !== null || this.#containsUserCall(statement.value);
         const pacingCanSuspend =
           statement.pacing !== null &&
           statement.pacing !== "instant" &&
@@ -139,6 +140,7 @@ export class InstructionCompiler {
               : this.#lowerExpression(statement.pacing);
           this.instructions.push({
             kind: "say",
+            presentation: null,
             speaker: statement.speaker?.name ?? null,
             value: lowered.plan,
             skipPolicy: statement.skipPolicy,
@@ -170,6 +172,13 @@ export class InstructionCompiler {
           destinationTemporary: contextualSpeakerTemporary,
           span: copySpan(statement.span),
         });
+        const loweredPresentation =
+          statement.presentation === null
+            ? null
+            : this.#materializeExpression(
+                this.#lowerSayPayload(statement.presentation, contextualSpeakerTemporary),
+                statement.presentation.span,
+              );
         const lowered = this.#lowerSayPayload(statement.value, contextualSpeakerTemporary);
         if (!pacingCanSuspend) {
           const loweredPacing =
@@ -178,6 +187,7 @@ export class InstructionCompiler {
               : this.#lowerSayPayload(statement.pacing, contextualSpeakerTemporary);
           this.instructions.push({
             kind: "say",
+            presentation: loweredPresentation?.plan ?? null,
             speaker: statement.speaker?.name ?? null,
             value: lowered.plan,
             speakerTemporary,
@@ -195,6 +205,7 @@ export class InstructionCompiler {
             [
               speakerTemporary,
               contextualSpeakerTemporary,
+              ...(loweredPresentation?.temporaryIds ?? []),
               ...lowered.temporaryIds,
               ...(loweredPacing?.temporaryIds ?? []),
             ],
@@ -217,6 +228,7 @@ export class InstructionCompiler {
         const pacing = loweredPacing.plan;
         this.instructions.push({
           kind: "say",
+          presentation: loweredPresentation?.plan ?? null,
           speaker: statement.speaker?.name ?? null,
           value: lowered.plan,
           speakerTemporary,
@@ -231,6 +243,7 @@ export class InstructionCompiler {
             speakerTemporary,
             contextualSpeakerTemporary,
             textTemporary,
+            ...(loweredPresentation?.temporaryIds ?? []),
             ...(loweredPacing?.temporaryIds ?? []),
           ],
           statement.span,

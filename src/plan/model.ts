@@ -1,5 +1,5 @@
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 19;
+export const INSTRUCTION_PLAN_VERSION = 20;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -289,6 +289,7 @@ export interface ReturnVoidInstruction extends InstructionBase {
 }
 
 export interface SayInstruction extends InstructionBase {
+  readonly presentation: ExpressionPlan | null;
   readonly kind: "say";
   readonly speaker: string | null;
   readonly value: ExpressionPlan;

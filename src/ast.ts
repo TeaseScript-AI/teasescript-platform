@@ -52,6 +52,7 @@ export interface SpeakerSetterStatement {
 }
 
 export interface SayStatement {
+  readonly presentation: ObjectLiteral | null;
   readonly kind: "sayStatement";
   readonly speaker: Identifier | null;
   readonly skipPolicy: "skippable" | "unskippable" | null;

@@ -64,6 +64,7 @@ test("parses say, say as, and exit statements", () => {
   assert.deepEqual(result.program.statements, [
     {
       kind: "sayStatement",
+      presentation: null,
       speaker: null,
       skipPolicy: null,
       value: stringNode(source, 4, 12, "Kneel."),
@@ -72,6 +73,7 @@ test("parses say, say as, and exit statements", () => {
     },
     {
       kind: "sayStatement",
+      presentation: null,
       speaker: { kind: "identifier", name: "cashier", span: sourceSpan(source, 20, 27) },
       skipPolicy: null,
       value: stringNode(source, 28, 55, "Your total is five euros."),
@@ -177,6 +179,7 @@ test("preserves template text and identifier interpolation", () => {
   assert.deepEqual(result.diagnostics, []);
   assert.deepEqual(result.program.statements[0], {
     kind: "sayStatement",
+    presentation: null,
     speaker: null,
     skipPolicy: null,
     value: {

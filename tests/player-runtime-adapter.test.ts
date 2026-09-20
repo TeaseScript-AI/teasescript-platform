@@ -1,3 +1,5 @@
+import { preparePlayerMessageMarkup } from "../player/message-markup.js";
+import { normalizeColor } from "../src/color.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
@@ -17,6 +19,50 @@ import {
   skipPlayerRuntimePacing,
   submitPlayerRuntimeComposer,
 } from "../player/runtime-adapter.js";
+
+test("runtime adapter delivers resolved authored presentation and preserves it on restore", () => {
+  const session = createPlayerRuntimeSession(`
+speaker guide {
+  font: "Georgia"
+  color: "red"
+  prose: { align: "left" }
+}
+say as guide prose(position: "right", background: "ivory") "A letter", instant
+showButton "Continue"
+`);
+  const entry = session.transcriptEntries[0];
+  if (entry?.kind !== "message") throw new Error("Expected a runtime message.");
+  assert.deepEqual(entry.presentation, {
+    kind: "prose",
+    position: "right",
+    align: "left",
+    font: "Georgia",
+    color: normalizeColor("red"),
+    background: normalizeColor("ivory"),
+  });
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
+  assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
+});
+
+test("runtime adapter preserves omitted alignment separately from explicit center through restore", () => {
+  const session = createPlayerRuntimeSession(`
+say "Default bubble", instant
+say prose "Default prose", instant
+say prose(position: "center", align: "center") "Explicit center", instant
+showButton "Continue"
+`);
+  const positions = session.transcriptEntries.map((entry) => {
+    if (entry.kind !== "message") throw new Error("Expected a runtime message.");
+    return [entry.presentation?.position, entry.presentation?.align];
+  });
+  assert.deepEqual(positions, [
+    [null, null],
+    [null, null],
+    ["center", "center"],
+  ]);
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
+  assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
+});
 
 test("runtime adapter delegates interaction normalization, transcript, and continuation to the engine", () => {
   let session = createPlayerRuntimeSession(`
@@ -39,7 +85,12 @@ exit
   const firstEntry = session.transcriptEntries[0];
   if (firstEntry?.kind !== "message") throw new Error("Expected a runtime message.");
   const guide = session.speakers[firstEntry.speakerId];
-  assert.deepEqual(guide, { name: "Guide", accent: "#b784ff", avatar: "G", fontFamily: "inherit" });
+  assert.deepEqual(guide, {
+    name: "Guide",
+    accent: normalizeColor("#b784ff"),
+    avatar: "G",
+    fontFamily: "inherit",
+  });
   assert.equal(firstEntry.content?.visibleText, "Ready?");
   assert.deepEqual(
     firstEntry.content?.blocks[0]?.kind === "paragraph"
@@ -222,4 +273,21 @@ test("runtime development scenarios compile through the real Player adapter", as
       assert.equal(action.skippable, skippable, `${fileName} skip policy`);
     }
   }
+});
+
+test("invalid dynamic markup colours preserve enclosing colours in delivered pieces", () => {
+  const session = createPlayerRuntimeSession(`
+let bad = "invalid"
+say "[color=red][bg=ivory]outer [color=\${bad}][bg=\${bad}]inner **bold**[/bg][/color] outer[/bg][/color] [color=\${bad}][bg=\${bad}]plain[/bg][/color]", instant
+`);
+  const entry = session.transcriptEntries[0];
+  if (entry?.kind !== "message" || entry.content === undefined) throw new Error("Expected markup.");
+  const block = preparePlayerMessageMarkup(entry.content)[0];
+  if (block?.kind !== "paragraph") throw new Error("Expected paragraph.");
+  const pieces = block.lines[0]!.pieces;
+  for (const piece of pieces.filter((piece) => /outer|inner|bold/u.test(piece.text))) {
+    assert.equal(piece.style.color, normalizeColor("red"));
+    assert.equal(piece.style.backgroundColor, normalizeColor("ivory"));
+  }
+  assert.deepEqual(pieces.at(-1)?.style, {});
 });

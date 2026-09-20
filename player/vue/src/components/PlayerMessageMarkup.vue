@@ -13,7 +13,7 @@ const blocks = computed(() => preparePlayerMessageMarkup(props.content));
     <template v-for="(block, blockIndex) in blocks" :key="blockIndex">
       <p v-if="block.kind === 'paragraph'" class="markup-paragraph">
         <template v-for="(line, lineIndex) in block.lines" :key="lineIndex">
-          <PlayerMarkupLine :groups="line.groups" /><br v-if="line.ending !== ''" />
+          <PlayerMarkupLine :pieces="line.pieces" /><br v-if="line.ending !== ''" />
         </template>
       </p>
       <div
@@ -23,21 +23,25 @@ const blocks = computed(() => preparePlayerMessageMarkup(props.content));
         role="heading"
         :aria-level="block.level"
       >
-        <PlayerMarkupLine :groups="block.line.groups" />
+        <PlayerMarkupLine :pieces="block.line.pieces" />
       </div>
       <blockquote v-else-if="block.kind === 'quote'" class="markup-quote">
         <template v-for="(line, lineIndex) in block.lines" :key="lineIndex">
-          <PlayerMarkupLine :groups="line.groups" /><br v-if="line.ending !== ''" />
+          <PlayerMarkupLine :pieces="line.pieces" /><br v-if="line.ending !== ''" />
         </template>
       </blockquote>
       <ol v-else-if="block.ordered" class="markup-list">
-        <li v-for="(item, itemIndex) in block.items" :key="itemIndex" :value="item.ordinal ?? undefined">
-          <PlayerMarkupLine :groups="item.line.groups" />
+        <li
+          v-for="(item, itemIndex) in block.items"
+          :key="itemIndex"
+          :value="item.ordinal ?? undefined"
+        >
+          <PlayerMarkupLine :pieces="item.line.pieces" />
         </li>
       </ol>
       <ul v-else class="markup-list">
         <li v-for="(item, itemIndex) in block.items" :key="itemIndex">
-          <PlayerMarkupLine :groups="item.line.groups" />
+          <PlayerMarkupLine :pieces="item.line.pieces" />
         </li>
       </ul>
     </template>

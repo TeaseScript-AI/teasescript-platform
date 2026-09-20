@@ -1,3 +1,4 @@
+import { normalizeColor } from "../src/color.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -10,32 +11,30 @@ test("prepares constrained Player runs without input-depth recursion", () => {
   const blocks = preparePlayerMessageMarkup(content);
   assert.equal(blocks[0]?.kind, "paragraph");
   if (blocks[0]?.kind !== "paragraph") throw new Error("Expected paragraph markup.");
-  assert.deepEqual(blocks[0].lines[0]?.groups, [
-    {
-      spoilerId: null,
-      pieces: [{ text: "x", classes: ["markup-underline"], style: {}, href: null }],
-    },
+  assert.deepEqual(blocks[0].lines[0]?.pieces, [
+    { text: "x", classes: ["markup-underline"], style: {}, href: null },
   ]);
   assert.doesNotThrow(() => JSON.stringify(blocks));
 });
 
-test("combines nested style precedence, spoiler groups, and safe link targets", () => {
+test("combines nested style precedence, safe link targets", () => {
   const content = parseMessageMarkup(
-    "[color=#112233]outer [color=#aabbcc][spoiler][label](https://example.com)[/spoiler][/color][/color]",
+    "[color=#112233]outer [color=#aabbcc][label](https://example.com)[/color][/color]",
   );
   const blocks = preparePlayerMessageMarkup(content);
   assert.equal(blocks[0]?.kind, "paragraph");
   if (blocks[0]?.kind !== "paragraph") throw new Error("Expected paragraph markup.");
-  const groups = blocks[0].lines[0]?.groups;
+  const groups = blocks[0].lines[0]?.pieces;
   assert.equal(groups?.length, 2);
-  assert.deepEqual(groups?.[0], {
-    spoilerId: null,
-    pieces: [{ text: "outer ", classes: [], style: { color: "#112233" }, href: null }],
-  });
-  assert.deepEqual(groups?.[1]?.pieces, [
-    { text: "label", classes: [], style: { color: "#aabbcc" }, href: "https://example.com/" },
+  assert.deepEqual(groups, [
+    { text: "outer ", classes: [], style: { color: normalizeColor("#112233") }, href: null },
+    {
+      text: "label",
+      classes: [],
+      style: { color: normalizeColor("#aabbcc") },
+      href: "https://example.com/",
+    },
   ]);
-  assert.notEqual(groups?.[1]?.spoilerId, null);
 });
 
 test("ends each inline style before adjacent plain text and honors nested weight depth", () => {
@@ -46,7 +45,7 @@ test("ends each inline style before adjacent plain text and honors nested weight
   );
   assert.equal(blocks[0]?.kind, "paragraph");
   if (blocks[0]?.kind !== "paragraph") throw new Error("Expected paragraph markup.");
-  const pieces = blocks[0].lines[0]?.groups.flatMap((group) => group.pieces) ?? [];
+  const pieces = blocks[0].lines[0]?.pieces ?? [];
   const byText = (text: string) => pieces.filter((piece) => piece.text.trim() === text);
   assert.equal(byText("bold")[0]?.style.fontWeight, "700");
   assert.equal(byText("light")[0]?.style.fontWeight, "300");
