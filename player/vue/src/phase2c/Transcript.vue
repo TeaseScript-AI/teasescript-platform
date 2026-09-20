@@ -357,12 +357,12 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.prose[data-align="start"] { margin-inline: var(--prose-lead) auto; }
+.prose[data-align="left"] { margin-inline: var(--prose-lead) auto; }
 .prose[data-align="center"] { margin-inline: auto; }
-.prose[data-align="end"] { margin-inline: auto var(--prose-trail); }
-.prose[data-text="start"] { text-align: start; }
+.prose[data-align="right"] { margin-inline: auto var(--prose-trail); }
+.prose[data-text="left"] { text-align: left; }
 .prose[data-text="center"] { text-align: center; }
-.prose[data-text="end"] { text-align: end; }
+.prose[data-text="right"] { text-align: right; }
 /* Attribution for prose is a label on the passage, not a speaker in a conversation. */
 .prose-attribution {
   margin: 0 0 0.5rem;
