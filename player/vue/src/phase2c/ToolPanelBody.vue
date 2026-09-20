@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
 import { nextTick, ref, watch } from "vue";
 
 const props = defineProps<{ target: HTMLElement; visible: boolean }>();
@@ -16,8 +17,9 @@ watch(() => [props.target, props.visible], async () => {
 
 <template>
   <Teleport :to="target">
-    <div ref="body" data-tool-body class="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-y-contain [overflow-wrap:anywhere]" @scroll="rememberScroll">
+    <ScrollArea class="flex-1" viewport-class="overscroll-y-contain [overflow-wrap:anywhere]"
+      :viewport-attrs="{ 'data-tool-body': '', onScroll: rememberScroll }" @viewport="body = $event">
       <slot />
-    </div>
+    </ScrollArea>
   </Teleport>
 </template>

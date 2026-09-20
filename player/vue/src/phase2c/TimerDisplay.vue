@@ -59,7 +59,7 @@ const accessibleName = computed(() => {
 
 <style scoped>
 .timer-display {
-  --timer-size: 132px;
+  --timer-size: var(--player-timer-size);
   --timer-foreground: var(--theme-overlay-text, oklch(100% 0 0));
   --timer-surface: var(--theme-overlay-surface, oklch(16.52% 0 0));
   --timer-accent: var(--theme-accent-solid, var(--package-accent));

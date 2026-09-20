@@ -86,7 +86,7 @@ onBeforeUnmount(() => observer?.disconnect());
   <header
     ref="header"
     :data-compact-settings="compactSettings"
-    class="flex min-h-12 items-center justify-between gap-2 border-b p-2"
+    class="tool-panel-header flex items-center justify-between gap-2 border-b"
   >
     <span
       data-panel-drag
@@ -117,7 +117,7 @@ onBeforeUnmount(() => observer?.disconnect());
                 <Button
                   variant="ghost"
                   size="sm"
-                  class="panel-settings-trigger group h-8 gap-1 px-2"
+                  class="panel-settings-trigger group gap-1 px-2"
                   aria-label="Panel settings"
                   :data-tools-focus="`settings:${tool}`"
                 >

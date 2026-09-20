@@ -63,8 +63,6 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
 <style scoped>
 /* Overlay only: the composition's Stage and conversation tracks retain all space. */
 .player-top-bar {
-  --top-bar-control-size: calc(1rem + 16px);
-  --top-bar-edge-padding: 8px;
   position: absolute;
   z-index: 20;
   inset: 0 0 auto;
@@ -72,7 +70,7 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
   align-items: center;
   gap: 0.5rem;
   min-width: 0;
-  padding: var(--top-bar-edge-padding);
+  padding: var(--player-edge-space);
   pointer-events: none;
 }
 .player-top-bar-tools { display: contents; }
@@ -81,29 +79,40 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
   pointer-events: auto;
 }
 .player-top-bar-tools :deep(button) {
-  inline-size: var(--top-bar-control-size);
-  block-size: var(--top-bar-control-size);
+  inline-size: var(--player-control-size);
+  block-size: var(--player-control-size);
 }
 .player-top-bar-actions {
+  --action-group-radius: 0.75rem;
   display: flex;
   align-items: center;
   gap: 0.125rem;
   box-sizing: border-box;
-  block-size: var(--top-bar-control-size);
+  block-size: var(--player-control-size);
   border: 1px solid var(--media-border);
-  border-radius: 0.75rem;
+  border-radius: var(--action-group-radius);
   background: var(--media-surface);
   box-shadow: 0 1px 3px var(--media-shadow);
   backdrop-filter: blur(3px);
 }
 .player-top-bar-actions :deep(button) {
-  inline-size: var(--top-bar-control-size);
-  block-size: calc(var(--top-bar-control-size) - 2px);
+  inline-size: var(--player-control-size);
+  block-size: calc(var(--player-control-size) - 2px);
+  border-radius: 0;
+}
+/* Match the shared shell without clipping the buttons' keyboard focus rings. */
+.player-top-bar-actions :deep(button:first-of-type) {
+  border-start-start-radius: calc(var(--action-group-radius) - 1px);
+  border-end-start-radius: calc(var(--action-group-radius) - 1px);
+}
+.player-top-bar-actions :deep(button:last-of-type) {
+  border-start-end-radius: calc(var(--action-group-radius) - 1px);
+  border-end-end-radius: calc(var(--action-group-radius) - 1px);
 }
 .player-top-bar-title {
   flex: 1;
   min-width: 0;
-  block-size: var(--top-bar-control-size);
+  block-size: var(--player-control-size);
   display: flex;
   align-items: center;
   font-size: 0.875rem;
@@ -115,7 +124,7 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
   box-sizing: border-box;
   min-inline-size: 0;
   max-inline-size: 100%;
-  block-size: var(--top-bar-control-size);
+  block-size: var(--player-control-size);
   padding-inline: 0.375rem;
   border-radius: 0.375rem;
 }

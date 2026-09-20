@@ -35,7 +35,7 @@ async function checks(page) {
     panel(name).getByRole("button", { name: "Panel settings", exact: true }).click();
   const state = () =>
     page
-      .locator(".tool-panel-strip > [data-tool]")
+      .locator(".tool-panel-content > [data-tool]")
       .evaluateAll((elements) =>
         elements.map((element) => ({
           name: element.getAttribute("data-tool"),
@@ -50,7 +50,7 @@ async function checks(page) {
   }
   async function expectState(expected) {
     await page.waitForFunction((expected) => {
-      const actual = Array.from(document.querySelectorAll(".tool-panel-strip > [data-tool]")).map(
+      const actual = Array.from(document.querySelectorAll(".tool-panel-content > [data-tool]")).map(
         (element) => ({
           name: element.getAttribute("data-tool"),
           width: element.style.width,
@@ -293,7 +293,12 @@ async function menuWidthChecks(page) {
   await page.reload();
   const menu = page.locator("[data-launcher]");
   const edge = page.getByRole("separator", { name: "Menu Sidebar width", exact: true });
-  const width = async () => (await menu.boundingBox()).width;
+  const width = async () => menu.evaluate(element => {
+    const shell = element.closest("#phase2c-shell");
+    // Include the separate resize rail in the selected menu width.
+    return (shell.dataset.labels === "preview" ? element : element.parentElement)
+      .getBoundingClientRect().width;
+  });
   const mode = async (value) => {
     await page.locator("[data-settings-trigger]").click();
     await page.locator('[data-tools-focus="label-mode"]').selectOption(value);
@@ -356,7 +361,7 @@ async function menuWidthChecks(page) {
     document.documentElement.style.fontSize = "20px";
   });
   await page.waitForFunction(
-    () => document.querySelector("[data-launcher]").getBoundingClientRect().width === 400,
+    () => document.querySelector("[data-launcher-space]").getBoundingClientRect().width === 400,
   );
   check(
     (await edge.getAttribute("aria-valuemax")) === "480",
@@ -386,7 +391,12 @@ async function menuCollapseChecks(page) {
   const shell = page.locator("#phase2c-shell");
   const edge = page.getByRole("separator", { name: "Menu Sidebar width", exact: true });
   const menu = page.locator("[data-launcher]");
-  const width = async () => (await menu.boundingBox()).width;
+  const width = async () => menu.evaluate(element => {
+    const shell = element.closest("#phase2c-shell");
+    // Include the separate resize rail in the selected menu width.
+    return (shell.dataset.labels === "preview" ? element : element.parentElement)
+      .getBoundingClientRect().width;
+  });
   const mode = async () => shell.getAttribute("data-labels");
   const settledMode = async () => {
     check(
@@ -402,7 +412,7 @@ async function menuCollapseChecks(page) {
               ) &&
             Math.abs(
               el.getBoundingClientRect().width -
-                document.querySelector("[data-launcher]").getBoundingClientRect().width -
+                document.querySelector("[data-launcher-space]").getBoundingClientRect().width -
                 1,
             ) < 1,
         ),
@@ -587,7 +597,7 @@ async function carouselChecks(page) {
   const state = await strip.evaluate((s) => ({
     width: s.clientWidth,
     total: s.scrollWidth,
-    panels: [...s.children].map((p) => p.getBoundingClientRect().width),
+    panels: [...s.querySelectorAll(".tool-panel-content > [data-tool]")].map((p) => p.getBoundingClientRect().width),
   }));
   if (state.panels.some((w) => w > state.width + 1)) throw Error("Oversized panel");
   await strip.evaluate((s) => s.scrollTo({ left: 0, behavior: "instant" }));
@@ -666,7 +676,7 @@ async function toolContentChecks(page) {
   await page.mouse.up();
   await page.waitForFunction(
     () =>
-      document.querySelector(".tool-panel-strip > [data-tool]")?.getAttribute("data-tool") ===
+      document.querySelector(".tool-panel-content > [data-tool]")?.getAttribute("data-tool") ===
       "Layout Debug",
   );
   await preserved();
@@ -1450,7 +1460,7 @@ async function conversationWidthChecks(page) {
     const transcript = document.querySelector(".transcript-scroll");
     return {
       conversationWidth: conversation.width,
-      transcriptWidth: transcript.clientWidth,
+      transcriptWidth: document.querySelector(".transcript-history").getBoundingClientRect().width,
       rootRem: parseFloat(getComputedStyle(document.documentElement).fontSize),
       scrollbarWidth: getComputedStyle(transcript).scrollbarWidth,
     };

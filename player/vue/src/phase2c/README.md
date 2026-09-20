@@ -10,14 +10,27 @@ Keep experimental fixtures separate from the components that own settled behavio
   content lifetime, focus and dock/drawer presentation. Its tool slot supplies
   content; its default slot supplies the Player. Closing a panel does not destroy
   its visited content. Tool bodies scroll vertically; the outer carousel handles
-  horizontal overflow between panels.
+  horizontal overflow between panels. Player scroll regions share the shadcn-vue/Reka
+  ScrollArea composition in `components/ui/scroll-area`: theme-colored overlay
+  thumbs appear on hover or scrolling, without reserving layout width. The chat
+  transcript and foreground action row currently appear on scrolling or hovering
+  the narrow scrollbar track, not the content. This remains a visual trial; the
+  shared component accepts a per-location visibility type. Native
+  textarea scrollbars retain browser editing behavior with matching theme colors.
+  `ResizeHandle.vue` provides one shared
+  separator rail, line marker and tooltip for menu and panel width controls. The
+  panel rail sits outside vertically scrolling content; the menu resize target
+  overlays its existing right padding without adding width; dotted grips remain reserved for moving complete panels.
 - `PlayerTopBar.vue` owns top-control placement and translucent material. The
-  control row is `calc(1rem + 16px)` with 8px outer padding. Fullscreen is the
+  control row consumes the shared Player control size with fixed outer spacing. Fullscreen is the
   rightmost action. The title truncates inside its capsule without clipping the
   outer shadow.
 - `ConversationSurface.vue` owns the composer overlay, its material and measured
   bottom inset. Transcript consumes that inset so its final content remains
-  reachable. Input interaction remains in `RuntimeInteraction.vue`.
+  reachable. The transcript scrollport extends into the existing conversation
+  padding so bubble borders stay inside its clipping boundary; its scrollbar uses
+  that side space and ends above the measured composer overlay. Input interaction
+  remains in `RuntimeInteraction.vue`.
 - `usePlayerTheme.ts` applies and restores document theme variables, including
   body-portaled menus. The framework-independent `player/theme` module calculates
   colors; Theme Lab only edits intent. Material is the sole surface hierarchy,
@@ -25,6 +38,15 @@ Keep experimental fixtures separate from the components that own settled behavio
 - `StageRightRail.vue` owns the rail; `TimerRegion.vue` owns the timer collection;
   `TimerDisplay.vue` renders an individual timer. Multiple-timer space allocation
   and future rail controls remain experimental.
+
+Shared chrome geometry lives in `style.css`: `--player-edge-space` is the fixed
+8px outer inset; `--player-control-padding` is fixed 8px internal control space;
+`--player-control-size` adds that space to a 1rem icon/text allowance. The top bar,
+menu and tool headers consume those values. Compact menu width contains the control and outer padding only; its resize target
+shares the right padding. JavaScript measures a CSS ruler instead of duplicating
+the width formula. The right rail uses the same outer inset and derives its top
+clearance from header height. The fixed 132px timer and its 12px halo clearance
+also determine rail width, independently of root font size.
 
 Component-specific presentation belongs with its component. Shared theme-token
 mapping and overall composition remain in `style.css`. Do not change settled

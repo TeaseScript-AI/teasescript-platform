@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
 import { computed, nextTick, ref, useId, watch } from "vue";
 import { Button } from "@/components/ui/button";
 import {
@@ -69,9 +70,9 @@ function keydown(event: KeyboardEvent) {
 
 <template>
   <div ref="root" data-runtime-interaction class="min-w-0 shrink-0">
-    <div v-if="foreground?.kind === 'choose' || foreground?.kind === 'show-button'"
-      :key="actionId" role="group" :aria-label="foreground.accessibleName"
-      class="mb-2 flex min-w-0 gap-2 overflow-x-auto pb-1">
+    <ScrollArea type="scroll" orientation="horizontal" v-if="foreground?.kind === 'choose' || foreground?.kind === 'show-button'"
+      :key="actionId ?? 0" role="group" :aria-label="foreground.accessibleName"
+      class="mb-2" content-class="flex min-w-0 gap-2 pb-2">
       <template v-if="foreground.kind === 'choose'">
         <Button v-for="option in foreground.options" :key="option.id" variant="outline"
           class="h-auto min-h-9 max-w-full shrink-0 whitespace-normal break-words"
@@ -80,7 +81,7 @@ function keydown(event: KeyboardEvent) {
       <Button v-else variant="outline" class="h-auto min-h-9 max-w-full shrink-0 whitespace-normal break-words"
         :aria-label="foreground.accessibleName" :disabled="submitting"
         @click="complete(activatePlayerRuntimeButton)">{{ foreground.label }}</Button>
-    </div>
+    </ScrollArea>
     <form data-runtime-composer class="flex min-w-0 gap-2" @submit.prevent="submit">
       <textarea ref="input" v-model="draft" rows="1"
         :aria-label="foreground?.accessibleName ?? 'Response'"

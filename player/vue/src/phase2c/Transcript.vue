@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { elementScroll, observeElementRect, useVirtualizer } from "@tanstack/vue-virtual";
 import { ArrowDown } from "@lucide/vue";
@@ -95,10 +96,13 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
 
 <template>
   <section class="transcript" aria-label="Conversation" :style="{ '--transcript-bottom-inset': `${bottomInset ?? 0}px` }">
-    <div ref="scrollElement" class="transcript-scroll" :data-scrolled="scrolled"
-      role="region" aria-label="Transcript" tabindex="0" @keydown="onScrollKeydown"
-      @wheel.passive="onWheel"
-      @touchstart.passive="onTouchStart" @touchend.passive="touching = false" @touchcancel.passive="touching = false">
+    <ScrollArea type="scroll" class="transcript-scroll-area" viewport-class="transcript-scroll"
+      content-class="transcript-scroll-content"
+      @viewport="scrollElement = $event"
+      :viewport-attrs="{ 'data-scrolled': scrolled, role: 'region', 'aria-label': 'Transcript',
+        tabindex: 0, onKeydown: onScrollKeydown, onWheel: onWheel,
+        onTouchstart: onTouchStart, onTouchend: () => touching = false,
+        onTouchcancel: () => touching = false }">
       <div class="transcript-history" role="list" :style="{ height: `${virtualizer.getTotalSize()}px` }">
         <article v-for="{ item, entry } in rows" :key="entry.id"
           :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
@@ -111,7 +115,7 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
         </article>
       </div>
       <p v-if="!entries.length" class="transcript-empty">No messages yet.</p>
-    </div>
+    </ScrollArea>
     <Button v-if="showLatest" variant="ghost" size="icon" class="return-to-latest"
       aria-label="Return to latest" @click="returnToLatest"><ArrowDown class="size-4" /></Button>
   </section>
@@ -119,16 +123,25 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
 
 <style scoped>
 .transcript { position: relative; flex: 1; min-height: 0; min-width: 0; }
-.transcript-scroll {
+/* Keep clipping and the scrollbar in the existing conversation padding, outside
+   the reading column. This also preserves borders at fractional pixel positions. */
+.transcript-scroll-area {
+  height: 100%;
+  width: calc(100% + 2 * var(--conversation-inline-inset));
+  margin-inline: calc(-1 * var(--conversation-inline-inset));
+  --scroll-area-bottom-inset: var(--transcript-bottom-inset);
+}
+:deep(.transcript-scroll-content) { padding-inline: var(--conversation-inline-inset); }
+:deep(.transcript-scroll) {
   height: 100%; overflow-y: auto; overflow-x: hidden; overscroll-behavior-y: contain;
   /* Browser scroll anchoring would compete with TanStack's keyed corrections. */
   overflow-anchor: none; scrollbar-width: none;
 }
-.transcript-scroll::-webkit-scrollbar { display: none; }
-.transcript-scroll:focus-visible { outline: 2px solid var(--focus-ring, var(--border-strong)); outline-offset: -2px; }
+
+:deep(.transcript-scroll:focus-visible) { outline: 2px solid var(--focus-ring, var(--border-strong)); outline-offset: -2px; }
 /* Keep transcript contrast intact above the composer, then reduce it across
    the complete composer height while retaining a faint trace to the bottom. */
-.transcript-scroll {
+:deep(.transcript-scroll) {
   --transcript-top-fade: 0px;
   mask-image: linear-gradient(to bottom,
     transparent 0, black var(--transcript-top-fade),
@@ -136,7 +149,7 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
     rgb(0 0 0 / 20%) calc(100% - var(--composer-bottom-from-bottom, 0px)),
     rgb(0 0 0 / 20%) 100%);
 }
-.transcript-scroll[data-scrolled="true"] { --transcript-top-fade: 1rem; }
+:deep(.transcript-scroll[data-scrolled="true"]) { --transcript-top-fade: 1rem; }
 .transcript-history { position: relative; width: 100%; }
 .transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: 0.5rem 1rem; }
 .message { max-width: 90%; }

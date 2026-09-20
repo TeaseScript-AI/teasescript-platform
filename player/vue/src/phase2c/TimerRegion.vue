@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
 import { computed } from "vue";
 import type { PlayerTimerKind, PlayerTimerPresentation } from "../../../model.js";
 import TimerDisplay from "./TimerDisplay.vue";
@@ -24,15 +25,17 @@ function timerLabel(timer: PlayerTimerPresentation, index: number): string | nul
 </script>
 
 <template>
-  <TransitionGroup v-if="activeTimers.length" name="stage-timer" tag="div" class="timer-region">
-    <TimerDisplay
-      v-for="(timer, index) in activeTimers"
-      :key="timer.id"
-      :timer="timer"
-      :kind="renderedKind"
-      :label="timerLabel(timer, index)"
-    />
-  </TransitionGroup>
+  <ScrollArea v-if="activeTimers.length" class="max-h-full w-full" viewport-class="overscroll-y-contain">
+    <TransitionGroup name="stage-timer" tag="div" class="timer-region">
+      <TimerDisplay
+        v-for="(timer, index) in activeTimers"
+        :key="timer.id"
+        :timer="timer"
+        :kind="renderedKind"
+        :label="timerLabel(timer, index)"
+      />
+    </TransitionGroup>
+  </ScrollArea>
 </template>
 
 <style scoped>
@@ -43,13 +46,9 @@ function timerLabel(timer: PlayerTimerPresentation, index: number): string | nul
   flex-direction: column;
   align-items: center;
   gap: 1rem;
-  overflow-y: auto;
-  padding: 0.75rem;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
+  padding: var(--player-timer-halo-space);
 }
 
-.timer-region::-webkit-scrollbar { display: none; }
 
 .stage-timer-enter-active,
 .stage-timer-leave-active {

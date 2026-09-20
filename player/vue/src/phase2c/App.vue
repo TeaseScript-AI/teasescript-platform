@@ -118,7 +118,7 @@ async function toggleFullscreen() {
             <label class="flex items-center gap-2">
               <input v-model="longTitle" type="checkbox" /> Long stage title
             </label>
-            <fieldset class="grid gap-2">
+            <fieldset class="grid min-w-0 gap-2">
               <legend class="mb-2">Timer fixtures</legend>
               <label class="grid gap-2">
                 Presentation
@@ -138,22 +138,22 @@ async function toggleFullscreen() {
               <label class="flex items-center gap-2">
                 <input v-model="timerPaused" type="checkbox" /> Pause timer fixtures
               </label>
-              <Button variant="outline" @click="timerReset++">Reset timers</Button>
+              <Button class="min-w-0" variant="outline" @click="timerReset++">Reset timers</Button>
             </fieldset>
-            <fieldset class="grid gap-2">
+            <fieldset class="grid min-w-0 gap-2">
               <legend class="mb-2">Transcript fixtures</legend>
-              <Button variant="outline" :disabled="!!runtimeSession" @click="appendTranscript">Append message</Button>
-              <Button variant="outline" :disabled="!!runtimeSession" @click="prependTranscript">Prepend 50 messages</Button>
-              <Button variant="outline" @click="loadTranscript(0)">Empty history</Button>
-              <Button variant="outline" @click="loadTranscript(10000)">Load 10,000 messages</Button>
+              <Button class="min-w-0" variant="outline" :disabled="!!runtimeSession" @click="appendTranscript">Append message</Button>
+              <Button class="min-w-0" variant="outline" :disabled="!!runtimeSession" @click="prependTranscript">Prepend 50 messages</Button>
+              <Button class="min-w-0" variant="outline" @click="loadTranscript(0)">Empty history</Button>
+              <Button class="min-w-0" variant="outline" @click="loadTranscript(10000)">Load 10,000 messages</Button>
             </fieldset>
-            <fieldset class="grid gap-2">
+            <fieldset class="grid min-w-0 gap-2">
               <legend class="mb-2">Runtime transcript scenario</legend>
-              <Button variant="outline" @click="startRuntime()">Start runtime scenario</Button>
-              <Button variant="outline" @click="startRuntime(interactionScenario)">Start interaction scenario</Button>
+              <Button class="min-w-0" variant="outline" @click="startRuntime()">Start runtime scenario</Button>
+              <Button class="min-w-0" variant="outline" @click="startRuntime(interactionScenario)">Start interaction scenario</Button>
               <template v-if="runtimeSession">
-                <Button variant="outline" @click="runtimeRestore = createPlayerRuntimeRestorePoint(runtimeSession)">Capture runtime checkpoint</Button>
-                <Button variant="outline" :disabled="!runtimeRestore" @click="restoreRuntime">Restore runtime checkpoint</Button>
+                <Button class="min-w-0" variant="outline" @click="runtimeRestore = createPlayerRuntimeRestorePoint(runtimeSession)">Capture runtime checkpoint</Button>
+                <Button class="min-w-0" variant="outline" :disabled="!runtimeRestore" @click="restoreRuntime">Restore runtime checkpoint</Button>
               </template>
             </fieldset>
           </div>

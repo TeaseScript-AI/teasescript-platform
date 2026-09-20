@@ -156,7 +156,9 @@ content. Major numerical values below are POC reconstruction/tuning baselines un
 | Item | POC baseline / intended rule |
 | --- | --- |
 | Player viewport | full viewport width and currently usable visual-viewport height; `100dvh` is the CSS baseline and the outer document is not the normal scroll owner |
-| normal title bar | `52px` plus top safe-area inset; visually retestable |
+| Player chrome outer spacing | fixed `8px` for top controls, menu edges and right rail; independent of root font size |
+| Player chrome control size | `calc(1rem + 16px)`; a 1rem icon/text allowance plus fixed 8px internal space on each side |
+| title bar row | derived control size plus 8px outer padding above and below; do not separately hardcode the height |
 | normal stage row | current `55dvh` baseline; expose as a development tuning value and visually re-evaluate |
 | overlay-chrome stage row | current `64dvh` baseline; visually re-evaluate with low-height and fullscreen cases |
 | tool column | fixed `300px` default; individual columns do not shrink to hide their content |
@@ -670,6 +672,11 @@ not compiler/source semantics. The calculation is an implementation detail provi
 and does not repaint unrelated Player chrome, speaker identity, or theme accent.
 
 ### Input capability and motion
+
+Player scroll regions use theme-colored overlay scrollbars that hide when inactive. Visibility may be configured per region;
+the exact hover-versus-scroll choice remains under visual evaluation.
+They do not reserve extra content width or introduce another panel border. Native text-editing fields retain their
+browser scroll behavior with matching scrollbar colors.
 
 - hover styling applies whenever the actual browser/input capability supports hover; do not infer it from desktop versus
   phone. A phone/tablet with a mouse or hover-capable pen may legitimately receive hover feedback;

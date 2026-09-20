@@ -1,3 +1,7 @@
+<script setup lang="ts">
+import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
+</script>
+
 <template>
   <div
     v-if="$slots.timers || $slots.controls"
@@ -7,9 +11,9 @@
     <div v-if="$slots.timers" class="stage-right-rail-timers">
       <slot name="timers" />
     </div>
-    <div v-if="$slots.controls" class="stage-right-rail-controls" role="group" aria-label="Background controls and status">
+    <ScrollArea v-if="$slots.controls" class="stage-right-rail-controls" viewport-class="overscroll-y-contain" role="group" aria-label="Background controls and status">
       <slot name="controls" />
-    </div>
+    </ScrollArea>
   </div>
 </template>
 
@@ -18,13 +22,13 @@
   position: absolute;
   z-index: 10;
   top: 0;
-  right: 1rem;
+  right: var(--player-edge-space);
   bottom: 0;
   display: grid;
-  inline-size: 11rem;
+  inline-size: calc(var(--player-timer-size) + 2 * var(--player-timer-halo-space));
   min-block-size: 0;
   grid-template-rows: minmax(0, 1fr);
-  padding-block: 4rem 1rem;
+  padding-block: calc(var(--player-header-size) + 2 * var(--player-edge-space)) var(--player-edge-space);
 }
 
 .stage-right-rail[data-has-controls] {
@@ -48,8 +52,6 @@
 
 .stage-right-rail-controls {
   grid-row: 2;
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
 
 </style>

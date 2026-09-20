@@ -25,6 +25,15 @@
 }
 
 :root {
+  /* Player edge layout is fixed; controls grow only with their icon/text size. */
+  --player-edge-space: 8px;
+  --player-control-padding: 8px;
+  --player-control-size: calc(1rem + 2 * var(--player-control-padding));
+  --player-header-size: calc(var(--player-control-size) + 2 * var(--player-edge-space));
+  --player-resize-rail-size: 5px;
+  --player-timer-size: 132px;
+  --player-timer-halo-space: 12px;
+  --player-menu-compact-width: calc(var(--player-control-size) + 2 * var(--player-edge-space));
   font-family: ui-sans-serif, system-ui, sans-serif;
   /* Existing Player light palette: player/styles/layout.css. */
   --background: oklch(95.839% 0.01306 71.33);
@@ -182,8 +191,8 @@
       color-mix(in srgb, var(--player-ambient, var(--scene-ambient)) 26%, transparent) 0 var(--stage-height),
       transparent calc(var(--stage-height) + 200px)),
     var(--background);
-  --launcher-width: var(--sidebar-width-icon);
-  --launcher-space: var(--sidebar-width-icon);
+  --launcher-width: var(--player-menu-compact-width);
+  --launcher-space: var(--player-menu-compact-width);
   --tool-space-limit: max(0px, calc(var(--usable-width) - var(--player-reserve) - var(--launcher-space) - 1px));
   --sidebar-width: calc(var(--launcher-space) + min(var(--tool-columns-width), var(--tool-space-limit)) + 1px) !important;
 }
@@ -224,6 +233,7 @@
 
 /* Animate only the preview overlay; its reserved icon-strip width stays fixed. */
 .phase2c-sidebar[data-labels="preview"] [data-launcher] {
+  flex-shrink: 0;
   overflow: hidden;
   transition: width 200ms ease-out;
 }
@@ -268,23 +278,12 @@ body:has(> .tool-panel-dragging) [data-slot="tooltip-content"] { visibility: hid
   position: absolute; visibility: hidden; pointer-events: none; width: max-content;
   font-size: 0.875rem; font-weight: 500;
 }
-.menu-width-ruler span { display: block; width: max-content; padding-inline: calc(1.75rem + 0.5px); }
+.menu-width-ruler span { display: block; width: max-content; padding-inline: calc(0.75rem + var(--player-edge-space) + var(--player-control-padding)); }
 .tool-panel-strip { scroll-snap-type: x proximity; }
 /* Use final dock capacity, not its animated width: hiding must not reflow tool bodies.
    Multiple panels still scroll and snap horizontally. */
-.tool-panel-strip > [data-tool] { max-width: var(--tool-space-limit); min-width: 0; scroll-snap-align: start; isolation: isolate; }
+.tool-panel-content > [data-tool] { max-width: var(--tool-space-limit); min-width: 0; scroll-snap-align: start; isolation: isolate; }
 .tool-panel-strip[data-reordering], .phase2c-sidebar[data-resizing="true"] .tool-panel-strip { scroll-snap-type: none; }
-.resize-edge {
-  position: absolute; right: 0; top: 0; bottom: 0; width: 6px; z-index: 35;
-  cursor: col-resize; touch-action: none;
-}
-.resize-edge:focus-visible { outline: 2px solid var(--focus-ring, var(--border-strong)); outline-offset: -2px; }
-/* Reuse the panel reorder grip on the menu's full-height resize edge. */
-.menu-resize-grip {
-  position: absolute; top: 50%; left: 50%; width: 1rem; height: 1rem;
-  transform: translate(-50%, -50%); pointer-events: none;
-  color: var(--foreground);
-}
 .resize-size-label { position: absolute; right: 8px; top: 3.5rem; white-space: nowrap; border: 1px solid var(--border); border-radius: 4px; background: var(--background); padding: 2px 6px; font-size: 0.75rem; }
 .phase2c-sidebar[data-resizing="true"], .phase2c-sidebar[data-resizing="true"] * { cursor: col-resize !important; user-select: none; }
 body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] { visibility: hidden; }
@@ -320,7 +319,7 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
 /* The active tool fills the drawer; its selected preset is capped by available space. */
 .phase2c-sidebar[data-narrow="true"] [data-launcher-space] { flex: 1; min-height: 0; }
 .phase2c-sidebar[data-narrow="true"] .tool-panel-strip { min-height: 0; overflow-x: hidden; scroll-snap-type: none; }
-.phase2c-sidebar[data-narrow="true"] .tool-panel-strip > [data-tool] { width: 100% !important; max-width: 100%; min-width: 0; }
+.phase2c-sidebar[data-narrow="true"] .tool-panel-content > [data-tool] { width: 100% !important; max-width: 100%; min-width: 0; }
 .phase2c-sidebar[data-narrow="true"] [data-panel-drag],
 .phase2c-sidebar[data-narrow="true"] [data-panel-resize] { display: none; }
 
@@ -343,3 +342,42 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
   margin: 0 0 0 calc(var(--content-offset) + (var(--content-width) - var(--conversation-width)) / 2);
 }
 html:fullscreen { background: var(--background); }
+
+/* Native text editing keeps its browser scrollport; match the overlay thumb. */
+.phase2c-sidebar textarea { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+
+
+/* Shared Player chrome geometry; content panels keep their own content spacing. */
+.player-edge-padding { padding: var(--player-edge-space); }
+.player-control-square {
+  width: var(--player-control-size);
+  height: var(--player-control-size);
+}
+.player-menu-compact-ruler {
+  position: absolute; visibility: hidden; pointer-events: none;
+  width: var(--player-menu-compact-width); height: 0;
+}
+[data-launcher] [data-sidebar="menu-button"] {
+  height: var(--player-control-size);
+  padding: var(--player-control-padding);
+}
+.player-drawer-header {
+  min-height: var(--player-header-size);
+  padding-inline: var(--player-edge-space);
+}
+.tool-panel-header {
+  padding: var(--player-edge-space);
+  min-height: var(--player-header-size);
+}
+.tool-panel-header :is(.panel-settings-trigger, [data-panel-pin]) {
+  height: var(--player-control-size);
+}
+.tool-panel-header [data-panel-pin] { width: var(--player-control-size); min-width: var(--player-control-size); }
+
+
+/* The menu resize target shares the existing edge padding, not layout width. */
+.phase2c-sidebar [data-launcher-space] > .menu-resize-edge {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: var(--player-resize-rail-size);
+}
