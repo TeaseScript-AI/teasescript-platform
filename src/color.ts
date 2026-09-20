@@ -119,3 +119,19 @@ export function isNormalizedColor(value: unknown): value is string {
   const numbers = match.slice(1).map(Number);
   return numbers.every(Number.isFinite) && numbers[3]! >= 0 && numbers[3]! <= 1;
 }
+
+/**
+ * A colour that lets nothing through. Words are thin strokes over whatever lies beneath
+ * them, so a see-through one hands the reader a colour nobody picked and one no amount of
+ * cover behind the line can bring back: the letters simply move with it. A surface is a
+ * different matter, which is why this is asked of text and not of everything.
+ */
+export function isOpaqueColor(value: unknown): value is string {
+  return isNormalizedColor(value) && Number(NORMALIZED_COLOR.exec(value)![4]) === 1;
+}
+
+/** As normalizeColor, for a colour that words are going to be set in. */
+export function normalizeOpaqueColor(value: unknown): string | null {
+  const color = normalizeColor(value);
+  return color !== null && isOpaqueColor(color) ? color : null;
+}

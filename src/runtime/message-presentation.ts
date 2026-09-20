@@ -1,4 +1,4 @@
-import { normalizeColor } from "../color.js";
+import { normalizeColor, normalizeOpaqueColor } from "../color.js";
 import type { MessagePresentation } from "../message-presentation.js";
 import type { SourceSpan } from "../source.js";
 import type { RuntimeSpeakerSnapshot } from "./state.js";
@@ -33,7 +33,10 @@ export function resolveMessagePresentation(
     throw invalid("align", span);
   const font = options.get("font") ?? defaults.get("font") ?? property("font");
   if (font !== null && typeof font !== "string") throw invalid("font", span);
-  const defaultColor = normalizeColor(defaults.get("color")) ?? normalizeColor(property("color"));
+  // Whatever a speaker's colour is used for elsewhere, the text set in it has to be
+  // readable on its own, so only an opaque one arrives here.
+  const defaultColor =
+    normalizeOpaqueColor(defaults.get("color")) ?? normalizeOpaqueColor(property("color"));
   const defaultBackground =
     normalizeColor(defaults.get("background")) ??
     (mode === "prose" ? normalizeColor("transparent") : null);
@@ -42,7 +45,7 @@ export function resolveMessagePresentation(
     position,
     align,
     font,
-    color: normalizeColor(options.get("color")) ?? defaultColor,
+    color: normalizeOpaqueColor(options.get("color")) ?? defaultColor,
     background: normalizeColor(options.get("background")) ?? defaultBackground,
   });
 }

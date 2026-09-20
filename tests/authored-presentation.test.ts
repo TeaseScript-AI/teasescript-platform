@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { isMessagePresentation } from "../src/message-presentation.js";
 import { compileSource } from "../src/compiler.js";
-import { normalizeColor, isNormalizedColor } from "../src/color.js";
+import {
+  normalizeColor,
+  isNormalizedColor,
+  isOpaqueColor,
+  normalizeOpaqueColor,
+} from "../src/color.js";
 import { run } from "../src/runtime/engine.js";
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import {
@@ -328,4 +333,70 @@ say "[color=${input}]markup[/color]"
     if (span?.kind !== "color") throw new Error("Expected colour span.");
     assert.equal(span.value, expected);
   }
+});
+
+test("text colours must be opaque while the surfaces behind them need not be", () => {
+  assert.ok(isOpaqueColor(normalizeColor("red")));
+  for (const color of ["rgb(255 0 0 / .5)", "#ff000080", "transparent"]) {
+    assert.ok(isNormalizedColor(normalizeColor(color)), color);
+    assert.equal(isOpaqueColor(normalizeColor(color)), false, color);
+    assert.equal(normalizeOpaqueColor(color), null, color);
+  }
+  for (const source of [
+    'say bubble(color: "rgb(255 0 0 / .5)") "x"',
+    'speaker vera { color: "#ff000080" }',
+    'speaker vera { prose: { color: "transparent" } }',
+    'say "[color=rgb(255 0 0 / .5)]x[/color]"',
+  ]) {
+    const result = compileSource(source);
+    assert.equal(result.plan, null, source);
+    assert.ok(
+      result.diagnostics.some((diagnostic) => diagnostic.code === "TSC008"),
+      source,
+    );
+  }
+  // The same colour is unremarkable behind the words rather than in them.
+  for (const source of [
+    'say bubble(background: "rgb(255 0 0 / .5)") "x"',
+    'speaker vera { bubble: { background: "#ff000080" } }',
+    'say "[bg=rgb(255 0 0 / .5)]x[/bg]"',
+  ])
+    assert.notEqual(compileSource(source).plan, null, source);
+  assert.equal(
+    isMessagePresentation({
+      kind: "bubble",
+      position: null,
+      align: null,
+      font: null,
+      color: normalizeColor("rgb(255 0 0 / .5)"),
+      background: null,
+    }),
+    false,
+  );
+});
+
+test("a computed see-through text colour falls through to what was inherited", () => {
+  const plan = compileValidPlan(`
+let faded = "rgb(255 0 0 / .5)"
+speaker vera {
+  displayName: "Vera"
+  color: "blue"
+}
+speaker vera
+say bubble(color: faded, background: faded) "first", instant
+say "[color=\${faded}]second[/color]", instant
+`);
+  const result = run(plan, createFreshRuntimeSnapshot(plan));
+  const messages = result.events.filter((event) => event.kind === "say");
+  assert.equal(messages[0]!.presentation.color, normalizeColor("blue"));
+  // Only the words are held to it; what sits behind them keeps the colour as given.
+  assert.equal(messages[0]!.presentation.background, normalizeColor("rgb(255 0 0 / .5)"));
+  const block = messages[1]!.content.blocks[0];
+  if (block?.kind !== "paragraph") throw new Error("Expected paragraph.");
+  // Markup marks a colour it cannot use as inherited, exactly as it does a malformed one.
+  assert.deepEqual(
+    block.lines[0]!.spans.map((span) => [span.kind, "value" in span ? span.value : null]),
+    [["color", "inherit"]],
+  );
+  assert.equal(messages[1]!.text, "second");
 });

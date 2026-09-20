@@ -30,24 +30,41 @@ const messages = [
 // against what the real parser produces. The colours are deliberately mixed: one that
 // only survives on a dark bubble, one that only survives on a light one.
 const markupSources: readonly (readonly [speaker: string, source: string])[] = [
-  ["guide", "# The lighthouse\nThe path splits here. *Take your time* — the **tide** is still going out."],
-  ["guide", "Keep to the `seaward` side. The full route is on [the harbour map](https://example.com/map)."],
+  [
+    "guide",
+    "# The lighthouse\nThe path splits here. *Take your time* — the **tide** is still going out.",
+  ],
+  [
+    "guide",
+    "Keep to the `seaward` side. The full route is on [the harbour map](https://example.com/map).",
+  ],
   ["guide", "> The sea is calm tonight.\n> The tide is full, the moon lies fair."],
-  ["guide", "Watch for:\n- loose sand past the second dune\n- the marker posts\n- the light itself"],
+  [
+    "guide",
+    "Watch for:\n- loose sand past the second dune\n- the marker posts\n- the light itself",
+  ],
   ["guide", "In order:\n1. follow the posts\n2. cross the dune\n3. wait for the beam"],
   // The mid grey is the hard case: it falls on the light side of the divide and a dark
   // bubble on the dark side, so classifying each of them would call the pair safe, yet
   // measuring it gives about three to one.
-  ["guide", "Authored colours: [color=#ffe066]pale yellow[/color], [color=#1a1a2e]near black[/color], [color=#8a8a8a]mid grey[/color], and [color=#c2185b]deep pink[/color]."],
+  [
+    "guide",
+    "Authored colours: [color=#ffe066]pale yellow[/color], [color=#1a1a2e]near black[/color], [color=#8a8a8a]mid grey[/color], and [color=#c2185b]deep pink[/color].",
+  ],
   // Both colours written around the same words, in one place, and barely apart. The
   // author was looking straight at this pairing, so it stands as written; catching it
   // belongs where it can still be reconsidered rather than here.
-  ["guide", "Chosen together: [bg=#2b3a8f][color=#3344aa]blue on blue[/color][/bg] and [bg=#f2e9c9][color=#efe4c0]cream on cream[/color][/bg]."],
-  // Partly see-through, where the colour as written says one thing and the colour the
-  // reader receives says another. Both of these read as safe dark greys on paper; the
-  // first can still be helped along, the second has given away too much to be rescued by
-  // anything put behind it.
-  ["guide", "Partly see-through: [color=rgb(58 58 58 / 0.6)]still worth covering[/color], and [color=rgb(90 90 90 / 0.35)]past saving[/color]."],
+  [
+    "guide",
+    "Chosen together: [bg=#2b3a8f][color=#3344aa]blue on blue[/color][/bg] and [bg=#f2e9c9][color=#efe4c0]cream on cream[/color][/bg].",
+  ],
+  // What sits behind the words may let the bubble through, so it belongs to the speaker
+  // as much as to the message. The words themselves may not: a colour the reader looks
+  // through is one nobody picked, and no cover behind the line brings it back.
+  [
+    "guide",
+    "Behind the words: [bg=rgb(0 0 0 / 0.12)]a wash that keeps the bubble[/bg], and [bg=rgb(120 40 160 / 0.35)]a tint that takes its hue from it[/bg].",
+  ],
   ["user", "Understood. I will follow the posts."],
 ];
 
@@ -55,7 +72,13 @@ const markupSources: readonly (readonly [speaker: string, source: string])[] = [
 export function transcriptMarkupFixtures(): PlayerTranscriptEntryPresentation[] {
   return markupSources.map(([speakerId, source], index) => {
     const content = parseMessageMarkup(source);
-    return { id: `markup-${index}`, kind: "message", speakerId: speakerId!, text: content.visibleText, content };
+    return {
+      id: `markup-${index}`,
+      kind: "message",
+      speakerId: speakerId!,
+      text: content.visibleText,
+      content,
+    };
   });
 }
 
@@ -65,13 +88,25 @@ export function transcriptMarkupFixtures(): PlayerTranscriptEntryPresentation[] 
 const proseSources: readonly (readonly [speaker: string, source: string])[] = [
   ["guide", "There is something I want you to see before the light goes."],
   ["user", "Lead the way."],
-  ["narrator", "The path leaves the harbour behind and climbs between the dunes. Marram grass leans all one way, combed flat by a wind that has not stopped since morning, and the sand underfoot gives a little at every step.\n\nBelow, the tide is going out. It uncovers a long grey shelf of rock that was not there an hour ago, and the water draining off it catches what is left of the sun."],
+  [
+    "narrator",
+    "The path leaves the harbour behind and climbs between the dunes. Marram grass leans all one way, combed flat by a wind that has not stopped since morning, and the sand underfoot gives a little at every step.\n\nBelow, the tide is going out. It uncovers a long grey shelf of rock that was not there an hour ago, and the water draining off it catches what is left of the sun.",
+  ],
   ["guide", "Careful here. The second dune is looser than it looks."],
-  ["narrator", "At the top the lighthouse stands closer than it seemed from the harbour, white against a sky that has begun to go green at the edges. Its lamp has not been lit yet."],
-  ["keeper", "*My dear,*\n\nIf you are reading this you have walked further than I ever managed. The keeper's house is open; the key is where it has always been, under the third stone from the door.\n\nDo not wait for the lamp. It comes on when it comes on, and the waiting is the worst of it.\n\n**— H.**"],
+  [
+    "narrator",
+    "At the top the lighthouse stands closer than it seemed from the harbour, white against a sky that has begun to go green at the edges. Its lamp has not been lit yet.",
+  ],
+  [
+    "keeper",
+    "*My dear,*\n\nIf you are reading this you have walked further than I ever managed. The keeper's house is open; the key is where it has always been, under the third stone from the door.\n\nDo not wait for the lamp. It comes on when it comes on, and the waiting is the worst of it.\n\n**— H.**",
+  ],
   ["user", "Who wrote that?"],
   ["guide", "Someone who knew the walk. Come on — the beam will start any moment."],
-  ["system", "**Pacing** is now set to *slow*. Messages arrive with a pause between them, and the composer stays available while you wait."],
+  [
+    "system",
+    "**Pacing** is now set to *slow*. Messages arrive with a pause between them, and the composer stays available while you wait.",
+  ],
   ["guide", "Take your time, then."],
 ];
 
@@ -79,7 +114,13 @@ const proseSources: readonly (readonly [speaker: string, source: string])[] = [
 export function transcriptProseFixtures(): PlayerTranscriptEntryPresentation[] {
   return proseSources.map(([speakerId, source], index) => {
     const content = parseMessageMarkup(source);
-    return { id: `prose-${index}`, kind: "message", speakerId: speakerId!, text: content.visibleText, content };
+    return {
+      id: `prose-${index}`,
+      kind: "message",
+      speakerId: speakerId!,
+      text: content.visibleText,
+      content,
+    };
   });
 }
 
