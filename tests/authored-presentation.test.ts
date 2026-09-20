@@ -39,6 +39,9 @@ test("accepts concrete CSS colour notations and preserves alpha and out-of-gamut
   ])
     assert.ok(isNormalizedColor(normalizeColor(color)), color);
   assert.equal(normalizeColor("oklch(.5 .8 20 / .3)"), "oklch(0.5 0.8 20 / 0.3)");
+  const smallChroma = normalizeColor("oklch(.5 1e-14 20)");
+  assert.equal(smallChroma, "oklch(0.5 1e-14 20 / 1)");
+  assert.equal(isNormalizedColor(smallChroma), true);
   for (const color of [
     "oops",
     "currentColor",

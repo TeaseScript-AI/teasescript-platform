@@ -220,6 +220,7 @@ expressions beginning with an identifier named `instant` remain ordinary express
 Concrete colour parsing/conversion uses exact `colorjs.io@0.7.1` (MIT, no runtime dependencies) through `src/color.ts`.
 It supplies the supported CSS notations and colour-space conversions shared by compiler, runtime and Player. Hand-written
 conversion would duplicate specialised parsing/math; separate per-layer parsers would risk different accepted values.
+The unbundled playground uses an import map and one explicit local module route; the Vue builds bundle the dependency.
 The dependency adds browser bundle weight and requires reviewing upstream parser/conversion changes on upgrades. Its
 input is restricted to concrete colour forms; it does not execute CSS, fetch resources or access the DOM. Dependency
 updates remain explicit and the accepted colour contract stays repository-owned.
