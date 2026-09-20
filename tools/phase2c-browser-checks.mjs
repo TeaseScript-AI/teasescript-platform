@@ -1066,22 +1066,14 @@ async function runtimeTranscriptChecks(page) {
       "700",
     "Authored bold not rendered",
   );
-  const spoiler = transcript.getByRole("button", { name: "Reveal spoiler", exact: true });
   check(
-    (await spoiler.locator("span").getAttribute("aria-hidden")) === "true",
-    "Concealed content must not be announced",
+    (await rows.first().innerText()).includes("[spoiler]The lighthouse is open.[/spoiler]"),
+    "Removed spoiler tags must remain literal text",
   );
   check(
-    (await spoiler.evaluate((el) => getComputedStyle(el).color)) === "rgba(0, 0, 0, 0)",
-    "Spoiler is visibly exposed",
+    (await transcript.getByRole("button", { name: "Reveal spoiler", exact: true }).count()) === 0,
+    "Removed spoiler tags must not create reveal controls",
   );
-  check(
-    (await spoiler.evaluate((el) => getComputedStyle(el).backgroundColor)) !== "rgba(0, 0, 0, 0)",
-    "Concealed spoiler needs a visible reveal affordance",
-  );
-  await spoiler.focus();
-  await page.keyboard.press("Enter");
-  await spoiler.waitFor({ state: "hidden" });
   const answer = page.getByRole("textbox", { name: "Answer", exact: true });
   await answer.fill("   ");
   await page.getByRole("button", { name: "Send", exact: true }).click();
@@ -1111,7 +1103,12 @@ async function runtimeTranscriptChecks(page) {
   check(
     (await transcript
       .getByText("blue", { exact: true })
-      .evaluate((el) => getComputedStyle(el).color)) === "rgb(69, 103, 137)",
+      .evaluate((el) => {
+        const context = document.createElement("canvas").getContext("2d");
+        context.fillStyle = getComputedStyle(el).color;
+        context.fillRect(0, 0, 1, 1);
+        return Array.from(context.getImageData(0, 0, 1, 1).data).join(",");
+      })) === "69,103,137,255",
     "Authored color lost",
   );
   const snapshot = () =>
@@ -1150,7 +1147,7 @@ async function runtimeTranscriptChecks(page) {
     "Restored continuation differs from uninterrupted execution",
   );
   await page.getByRole("button", { name: "Start runtime scenario", exact: true }).click();
-  await spoiler.waitFor();
+  await transcript.getByRole("link", { name: "Map", exact: true }).waitFor();
   check(errors.length === 0, `Runtime page errors: ${errors.join("; ")}`);
   page.off("pageerror", onError);
   return "PASS runtime transcript provenance, markup, plain answers and restore";

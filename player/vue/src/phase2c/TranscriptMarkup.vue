@@ -6,10 +6,7 @@ import TranscriptLine from "./TranscriptLine.vue";
 
 const props = defineProps<{
   content: MessageMarkup;
-  entryId: string;
-  revealed: ReadonlySet<string>;
 }>();
-const emit = defineEmits<{ reveal: [key: string] }>();
 const blocks = computed(() => preparePlayerMessageMarkup(props.content));
 </script>
 
@@ -22,12 +19,7 @@ const blocks = computed(() => preparePlayerMessageMarkup(props.content));
         :aria-level="block.level"
         class="markup-heading"
       >
-        <TranscriptLine
-          :groups="block.line.groups"
-          :line-key="`${entryId}:${bi}:0`"
-          :revealed="revealed"
-          @reveal="emit('reveal', $event)"
-        />
+        <TranscriptLine :pieces="block.line.pieces" />
       </div>
       <component
         :is="block.kind === 'quote' ? 'blockquote' : 'div'"
@@ -35,21 +27,12 @@ const blocks = computed(() => preparePlayerMessageMarkup(props.content));
         :class="{ 'markup-paragraph': block.kind === 'paragraph' }"
       >
         <template v-for="(line, li) in block.lines" :key="li"
-          ><TranscriptLine
-            :groups="line.groups"
-            :line-key="`${entryId}:${bi}:${li}`"
-            :revealed="revealed"
-            @reveal="emit('reveal', $event)" /><br v-if="line.ending"
+          ><TranscriptLine :pieces="line.pieces" /><br v-if="line.ending"
         /></template>
       </component>
       <component :is="block.ordered ? 'ol' : 'ul'" v-else>
         <li v-for="(item, li) in block.items" :key="li" :value="item.ordinal ?? undefined">
-          <TranscriptLine
-            :groups="item.line.groups"
-            :line-key="`${entryId}:${bi}:${li}`"
-            :revealed="revealed"
-            @reveal="emit('reveal', $event)"
-          />
+          <TranscriptLine :pieces="item.line.pieces" />
         </li>
       </component>
     </template>
@@ -110,15 +93,5 @@ blockquote {
 }
 :deep(.markup-size-x-large) {
   font-size: 1.3em;
-}
-:deep(.transcript-spoiler) {
-  color: transparent;
-  background: var(--text-muted);
-  border-radius: 0.2em;
-  cursor: pointer;
-}
-:deep(.transcript-spoiler:focus-visible) {
-  outline: 2px solid var(--border-strong);
-  outline-offset: 2px;
 }
 </style>
