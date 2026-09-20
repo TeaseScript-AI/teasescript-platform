@@ -770,24 +770,9 @@ async function vueRuntimeScenario(cdp, origin) {
     "unordered and ordered message lists must retain controlled markers after CSS reset",
   );
   assertEqual(
-    await value(
-      cdp,
-      `(() => { const background = getComputedStyle(document.querySelector('.markup-spoiler')).backgroundColor; return background !== 'transparent' && background !== 'rgba(0, 0, 0, 0)'; })()`,
-    ),
-    true,
-    "an unrevealed spoiler must retain a visible controlled background",
-  );
-  await evaluate(cdp, `document.querySelector('.markup-spoiler').focus()`);
-  await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space" });
-  await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space" });
-  await waitFor(
-    cdp,
-    `document.querySelector('.markup-spoiler-revealed')?.textContent === 'Keyboard'`,
-  );
-  await physicalClick(cdp, ".markup-spoiler");
-  await waitFor(
-    cdp,
-    `document.querySelectorAll('.markup-spoiler-revealed')[1]?.textContent === 'Pointer'`,
+    await value(cdp, `document.querySelectorAll('.markup-spoiler').length`),
+    0,
+    "message markup has no spoiler controls",
   );
 
   await navigate(cdp, `${origin}/player/`);

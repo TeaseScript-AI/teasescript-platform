@@ -17,7 +17,8 @@ text. An author uses `escapeMarkup()` when interpolated text must remain literal
 
 The markup layer applies only to authored Standard-chat `say` output. Player-authored transcript entries remain plain
 text. Markup is presentation syntax rather than TeaseScript program syntax, so malformed markup in a dynamically
-produced string does not cause a compilation or runtime failure.
+produced string does not cause a runtime failure. Invalid statically known colour values in recognized colour spans are
+compiler errors; invalid dynamic colour values use the enclosing presentation colour.
 
 The first surface contains only the forms defined below. It does not include raw HTML, arbitrary CSS, author classes or
 selectors, images, tables, fenced code blocks, scriptable content, event handlers, iframes, or general BBCode aliases.
@@ -73,7 +74,6 @@ The following inline constructs are recognized within one logical line:
 | `[bg=#ffee88]text[/bg]` | background highlight |
 | `[weight=light]text[/weight]` | font weight |
 | `[size=large]text[/size]` | relative text size |
-| `[spoiler]text[/spoiler]` | concealed text that the reader can reveal |
 
 The valid recursive shapes are:
 
@@ -111,25 +111,26 @@ content, including Unicode content, is preserved exactly.
 
 ## Bracket extensions and values
 
-Bracket tag names and named values are ASCII lowercase and case-sensitive. No whitespace is allowed inside a tag. The
+Bracket tag names and weight/size names are ASCII lowercase and case-sensitive. Colour values follow the accepted
+[colour contract](accepted-syntaxes-v30.md#authored-colours), including spaces inside colour functions. Other tags do not
+allow internal whitespace. The
 complete set of valid opening and closing spellings is:
 
 ```text
 [u] [/u]
-[color=#RRGGBB] [/color]
-[bg=#RRGGBB] [/bg]
+[color=<colour>] [/color]
+[bg=<colour>] [/bg]
 [weight=thin|light|normal|medium|semibold|bold|black] [/weight]
 [size=small|normal|large|x-large] [/size]
-[spoiler] [/spoiler]
 ```
 
-`RRGGBB` means exactly six ASCII hexadecimal digits; digit letters may be uppercase or lowercase. The representation
-normalizes a valid color to lowercase. These values are constrained data. A parser never accepts a CSS declaration,
-function, property name, class, selector, or additional attribute through these tags. Player themes own the exact visual
-mapping of the accepted weight and size names.
+Colour spans normalize to OKLCH with alpha through the shared colour parser. Their values remain constrained data;
+CSS declarations, host variables, classes, selectors, and additional attributes are not accepted. Invalid runtime colours
+use `inherit` in the prepared span so enclosing text/background presentation remains effective. Player themes own the
+exact visual mapping of accepted weight and size names.
 
 A recognized valid opening tag formats content only when a matching closer can complete a properly nested span on the
-same line. An empty extension span is valid. An unknown tag, invalid value, extra attribute, mismatched closing tag, or
+same line. An empty extension span is valid. An unknown tag, invalid non-colour value, extra attribute, mismatched closing tag, or
 unmatched tag remains literal text. A literal malformed tag does not suppress otherwise valid inline markup around or
 inside it. In crossed input, a closing tag that does not match the currently open extension is literal; later matching
 closers may still complete their spans.
@@ -138,10 +139,10 @@ Examples:
 
 | Input | Result |
 | --- | --- |
-| `[color=red]x[/color]` | the complete text remains literal |
+| `[color=red]x[/color]` | `x` has the normalized red foreground colour |
 | `[b]x[/b]` | the complete text remains literal |
 | `[u]x` | `[u]` is literal and `x` is ordinary text |
-| `[u][spoiler]x[/u][/spoiler]` | `[u]` and `[/u]` are literal; the spoiler span is valid |
+| `[spoiler]x[/spoiler]` | the complete text remains literal; spoiler markup has been removed |
 
 ## Links
 
@@ -242,7 +243,6 @@ Flattened visible text is obtained by concatenating textual leaf content and ori
 
 - recognized block markers, inline delimiters, extension tags, and escape backslashes contribute no characters;
 - inline-code and style-span content contributes its text;
-- spoiler content contributes its concealed text;
 - a labeled link contributes only its visible label, while a bare link contributes its displayed URL;
 - list ordinals and bullet markers are structural and contribute no characters;
 - literal unknown, malformed, unmatched, excluded, or raw-HTML-like text contributes all of its characters.

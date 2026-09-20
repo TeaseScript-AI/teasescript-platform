@@ -1,3 +1,4 @@
+import { isMessagePresentation } from "../message-presentation.js";
 import type { Instruction, InstructionPlan, InteractionUiPayload } from "../plan/model.js";
 import {
   boundedInteractionUtf8ByteLength,
@@ -599,6 +600,7 @@ function isPreparedSayOutputShape(value: unknown): value is Record<string, unkno
     hasExactKeys(value, [
       "owningInstruction",
       "continuationInstruction",
+      "presentation",
       "speaker",
       "content",
       "text",
@@ -614,6 +616,7 @@ function validPreparedSayOutputDomain(value: Record<string, unknown>): boolean {
     nonNegativeSafeInteger(value.continuationInstruction) &&
     value.continuationInstruction === value.owningInstruction + 1 &&
     isMessageMarkup(value.content) &&
+    isMessagePresentation(value.presentation) &&
     typeof value.text === "string" &&
     value.content.visibleText === value.text &&
     validPreparedSayDuration(value.durationMs) &&

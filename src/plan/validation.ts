@@ -355,6 +355,14 @@ function validateInstruction(
     case "returnVoid":
       return;
     case "say":
+      if (value.presentation !== null)
+        validateExpression(
+          value.presentation,
+          `${path}.presentation`,
+          errors,
+          false,
+          temporaryCount,
+        );
       if (value.speaker !== null) requireString(value.speaker, `${path}.speaker`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
       if (value.speakerTemporary !== undefined)

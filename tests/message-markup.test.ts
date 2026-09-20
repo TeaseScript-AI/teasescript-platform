@@ -1,3 +1,4 @@
+import { normalizeColor } from "../src/color.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -78,9 +79,8 @@ test("parses inline styles, recursive nesting, and triple asterisk runs determin
     "strikethrough",
     "bold",
     "italic",
-    "spoiler",
   ]);
-  assert.equal(markup.visibleText, "italic bold under strike both secret");
+  assert.equal(markup.visibleText, "italic bold under strike both [spoiler]secret[/spoiler]");
   assert.deepEqual(allSpans(markup).slice(4, 6), [
     { kind: "bold", start: 25, end: 29, depth: 0 },
     { kind: "italic", start: 25, end: 29, depth: 1 },
@@ -114,28 +114,27 @@ test("accepts every constrained extension value and normalizes hex colors", () =
   assert.equal(spans.filter((span) => span.kind === "weight").length, 7);
   assert.equal(spans.filter((span) => span.kind === "size").length, 4);
   assert.equal(spans.filter((span) => span.kind === "underline").length, 2);
-  assert.equal(spans.filter((span) => span.kind === "spoiler").length, 1);
   assert.deepEqual(
     spans.flatMap((span) =>
       span.kind === "color" || span.kind === "backgroundColor" ? [span.value] : [],
     ),
-    ["#aa00ff", "#123456"],
+    [normalizeColor("#aa00ff"), normalizeColor("#123456")],
   );
 });
 
 test("recovers invalid, unknown, unmatched, and crossed extensions literally", () => {
   const invalid = parseMessageMarkup(
-    "[color=red]**x**[/color] [weight=heavy]y[/weight] [b]z[/b] [u]open",
+    "[unknown=red]**x**[/unknown] [weight=heavy]y[/weight] [b]z[/b] [u]open",
   );
   assert.equal(
     invalid.visibleText,
-    "[color=red]x[/color] [weight=heavy]y[/weight] [b]z[/b] [u]open",
+    "[unknown=red]x[/unknown] [weight=heavy]y[/weight] [b]z[/b] [u]open",
   );
   assert.deepEqual(spanKinds(invalid), ["bold"]);
 
   const crossed = parseMessageMarkup("[u][spoiler]x[/u][/spoiler]");
-  assert.equal(crossed.visibleText, "[u]x[/u]");
-  assert.deepEqual(spanKinds(crossed), ["spoiler"]);
+  assert.equal(crossed.visibleText, "[spoiler]x[/spoiler]");
+  assert.deepEqual(spanKinds(crossed), ["underline"]);
 });
 
 test("keeps unmatched delimiters literal while retaining complete nested spans", () => {
@@ -410,10 +409,10 @@ test("returns frozen flat JSON-safe data and handles input-sized nesting iterati
 });
 
 test("uses UTF-16 ranges and depth to distinguish nested and adjacent empty spans", () => {
-  const empty = parseMessageMarkup("[u][spoiler][/spoiler][/u][u][/u]");
+  const empty = parseMessageMarkup("[u][u][/u][/u][u][/u]");
   assert.deepEqual(allSpans(empty), [
     { kind: "underline", start: 0, end: 0, depth: 0 },
-    { kind: "spoiler", start: 0, end: 0, depth: 1 },
+    { kind: "underline", start: 0, end: 0, depth: 1 },
     { kind: "underline", start: 0, end: 0, depth: 0 },
   ]);
 

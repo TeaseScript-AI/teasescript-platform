@@ -676,11 +676,16 @@ function preparedSayPayloadMayReferenceTemporary(
     case "prepareReference":
       expression = instruction.expression;
       break;
+    case "say":
+      return (
+        expressionMayReferenceTemporary(instruction.presentation, temporaryId) ||
+        expressionMayReferenceTemporary(instruction.value, temporaryId) ||
+        expressionMayReferenceTemporary(instruction.pacing, temporaryId)
+      );
     case "declareBinding":
     case "assign":
     case "storeTemporary":
     case "prepareSayText":
-    case "say":
     case "setDeclaredSpeakerProperty":
     case "returnValue":
       expression = instruction.value;
@@ -1024,11 +1029,16 @@ function canonicalHandoffConsumesTemporary(
     case "prepareReference":
       expression = instruction.expression;
       break;
+    case "say":
+      return (
+        expressionGuaranteesTemporaryEvaluation(instruction.presentation, temporaryId) ||
+        expressionGuaranteesTemporaryEvaluation(instruction.value, temporaryId) ||
+        expressionGuaranteesTemporaryEvaluation(instruction.pacing, temporaryId)
+      );
     case "declareBinding":
     case "assign":
     case "storeTemporary":
     case "prepareSayText":
-    case "say":
     case "setDeclaredSpeakerProperty":
     case "returnValue":
       expression = instruction.value;

@@ -417,16 +417,21 @@ uses restrained backdrop blur where supported. Its exact threshold remains a tun
 
 ### Message presentation and provenance
 
-Speaker/package output aligns to the normal reading side; player-authored output aligns to the opposite side. A message
+Authored runtime output uses its resolved block position and text alignment; player-authored output aligns to the
+opposite reading side. A message
 row may use at most `90%` of the conversation width, while its readable copy is capped at `65ch`; this preserves an
 opposite-side margin on narrow layouts without forcing short wrapping on wider ones. The current avatar, speaker-name,
-and speaker-coloured rule remain the POC visual baseline. Speaker identity colour/font and per-message rich-text styling
+and speaker-coloured rule remain the bubble POC visual baseline. Prose uses an unbubbled reading surface with no avatar;
+its speaker provenance is retained. Final name/avatar treatment and visual refinement remain with #421. Resolved
+message colour, background and font override theme presentation, with separate prose and bubble defaults as defined by
+the [language contract](../specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides).
+Speaker identity colour/font and per-message rich-text styling
 are content presentation, not application palette roles.
 
 Authored Standard-chat `say` messages carry the typed structure defined by the
 [message-markup specification](../specifications/message-markup.md). The Player renders only those controlled blocks,
 spans, values, and validated HTTP(S) links; it does not interpret authored HTML or use a raw-HTML rendering path. Links
-open a new browsing context with opener isolation, and concealed spans expose a reader-operated reveal control.
+open a new browsing context with opener isolation. Spoiler markup and reveal controls are removed.
 Player-authored transcript messages remain plain text and do not enter the markup parser.
 
 ADR 0018 owns canonical transcript effects of foreground completion: valid text/number answers and choice/button

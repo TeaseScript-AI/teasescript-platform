@@ -92,7 +92,8 @@ const HELP = Object.freeze({
     command: "say" as const,
     summary:
       "Emits visible chat text. Current pacing supports smart pacing by default, an exact non-negative seconds expression including 0, or instant; skip policy may be skippable or unskippable.",
-    syntax: "say [as speaker] [skippable|unskippable] text [, pacing|instant]",
+    syntax:
+      "say [as speaker] [bubble(options)|prose(options)] [skippable|unskippable] text [, pacing|instant]",
   }),
 });
 
@@ -520,6 +521,7 @@ function visitStatement(statement: Statement, visitor: Visitor): void {
       return;
     case "sayStatement":
       visitor.say(statement);
+      if (statement.presentation !== null) visitExpression(statement.presentation, visitor);
       visitExpression(statement.value, visitor);
       if (statement.pacing !== null && statement.pacing !== "instant")
         visitExpression(statement.pacing, visitor);

@@ -294,6 +294,12 @@ Player-authored messages do not create gates. No compiler lookahead across branc
 
 ### Skippable gate completion
 
+Message presentation follows the accepted [speaker inheritance and override contract](specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides).
+The runtime resolves mode/style into `MessagePresentation` while preparing output, preserves that data through pacing
+promotion and checkpoints, and emits it with the canonical `say` event. The Player applies the resolved values, using
+its theme roles only where the resolved colour/font is `null`. Invalid colour values fall back without a new warning
+policy; general diagnostic/recovery design is tracked separately in #427.
+
 Effective skip policy comes from explicit `skippable`/`unskippable`, then the effective speaker's `defaultSaySkippable`, then platform default `true`.
 
 A skippable gate may complete through:
@@ -614,9 +620,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 19 | Plan-owned source provenance is the compact self-contained `PlanSourceLocation` record `{so,sl,sc,eo,el,ec}`. Compiler/parser diagnostics and public runtime events, faults, warnings, built-in calls, and snapshot-owned spans retain rich `SourceSpan` values; the runtime converts plan locations at those boundaries. |
-| Runtime snapshot | 20 | Prepared `say` output retains validated structured message markup together with its canonical visible text so pacing promotion and restore do not reparse or reevaluate authored content. |
-| Checkpoint | 28 | Updated the self-contained bundle for runtime-snapshot revision 20. |
+| Instruction plan | 20 | `say` carries an explicit nullable presentation expression; option expressions lower through the existing resumable evaluation path. |
+| Runtime snapshot | 21 | Prepared `say` output also captures validated resolved presentation; spoiler spans are no longer accepted. |
+| Checkpoint | 29 | Updated the self-contained bundle for presentation-aware plans and runtime snapshots. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 

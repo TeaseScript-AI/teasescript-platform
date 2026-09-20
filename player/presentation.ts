@@ -1,3 +1,5 @@
+import Color from "colorjs.io";
+import { normalizeColor } from "../src/color.js";
 import type { PlayerRightControlPresentation } from "./model.js";
 
 export function timerProgressPercent(remainingSeconds: number, totalSeconds: number): number {
@@ -39,15 +41,8 @@ export function orderRightControls(
 }
 
 export function readableControlText(fill: string): "#000000" | "#ffffff" {
-  const match = /^#(?<red>[0-9a-f]{2})(?<green>[0-9a-f]{2})(?<blue>[0-9a-f]{2})$/iu.exec(fill);
-  if (match?.groups === undefined) throw new Error(`Unsupported authored control fill: ${fill}`);
-
-  const channels = [match.groups.red, match.groups.green, match.groups.blue].map((channel) => {
-    const encoded = Number.parseInt(channel ?? "00", 16) / 255;
-    return encoded <= 0.04045 ? encoded / 12.92 : ((encoded + 0.055) / 1.055) ** 2.4;
-  });
-  const luminance =
-    (channels[0] ?? 0) * 0.2126 + (channels[1] ?? 0) * 0.7152 + (channels[2] ?? 0) * 0.0722;
+  const normalized = normalizeColor(fill);
+  const luminance = normalized === null ? 0 : new Color(normalized).luminance;
   const blackContrast = (luminance + 0.05) / 0.05;
   const whiteContrast = 1.05 / (luminance + 0.05);
   return blackContrast >= whiteContrast ? "#000000" : "#ffffff";

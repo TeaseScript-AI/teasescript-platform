@@ -274,6 +274,7 @@ function appendRuntimeEvents(
           speakerId,
           text: event.text,
           content: event.content,
+          presentation: event.presentation,
         }),
       );
     } else if (event.kind === "playerTranscript") {

@@ -2640,8 +2640,74 @@ Meanings:
 - When `displayName` is absent, the engine joins the non-empty `title`, `firstName`, and `lastName` fields in that order, without adding spaces for missing fields.
 - `alias` is an arbitrary string. It is not restricted to pet names.
 - `gender` selects a default term set but does not permanently lock pronouns, anatomy, or terminology.
-- `color` and `font` control that character's text presentation.
+- `color` and `font` provide that character's general text-presentation defaults. Per-mode and per-message options below
+  can override them.
 - `avatar` is an optional image reference shown beside that character's chat messages.
+
+### Message presentation defaults and overrides
+
+**Status:** Accepted (Owner-approved extension for #422 and #426).
+
+The compact `say` form extends the ADR 0018 pacing syntax:
+
+```text
+say [as speaker] [bubble(options) | prose(options)] [skippable | unskippable] text [, pacing]
+```
+
+Brackets denote optional parts. `bubble` and `prose` may appear without parentheses; parentheses contain ordinary
+comma-separated named arguments. Supported options are `position`, `align`, `color`, `background`, and `font`.
+Each value is an ordinary expression, including variables and function calls. Unknown or repeated options are errors.
+The mode words remain usable as ordinary identifiers when the complete `say` value parses without a modifier.
+
+Speakers use `presentation: "bubble" | "prose"` for their preferred mode and separate `bubble` and `prose` option objects:
+
+```text
+speaker vera {
+    displayName: "Vera"
+    presentation: "bubble"
+    color: "white"
+    font: "Georgia"
+    bubble: { background: "#334455", position: "right", align: "left" }
+    prose: { align: "left" }
+}
+speaker vera
+say "Uses Vera's defaults."
+say prose(background: "ivory", color: "#302820") "A letter."
+```
+
+The compiler retains omitted message options as inheritance, not as frozen effective values. The runtime selects the
+explicit mode, then the speaker's mode, then `bubble`. Each option resolves from the message, then the selected
+speaker-mode object, then the platform default. `color` and `font` additionally fall back to the general speaker fields.
+Overrides affect only that message. Explicit `null` behaves as omission; an explicit transparent colour overrides an
+inherited background.
+
+Both platform `position` and `align` defaults are `"center"`. `position` places the whole block; `align` sets the text
+within it. Both accept `"left"`, `"center"`, or `"right"`. Bubble backgrounds and unspecified text/font use Player theme
+roles; the runtime represents these theme selections with `null`. Prose background defaults to transparent, independently
+of the speaker's bubble background. Prose retains speaker provenance but has no avatar by default; visible name treatment
+belongs to the Player presentation design. These defaults do not introduce a new avatar/name visibility syntax.
+
+Option expressions evaluate once in written order before the text and pacing expressions, under the selected speaker
+context. Effective style defaults are resolved when the runtime prepares the output, using that speaker's current
+properties. The resulting presentation is captured with the message across pacing waits and checkpoint restore.
+
+### Authored colours
+
+**Status:** Accepted (Owner-approved extension for #422).
+
+Concrete colour values accept CSS colour names (including `transparent`), 3/4/6/8-digit hex, `rgb()`/`rgba()`,
+`hsl()`/`hsla()`, `hwb()`, `lab()`, `lch()`, `oklab()`, and `oklch()`, including their alpha forms. Hex and RGB use standard
+sRGB. Host-dependent values such as `var()` and `currentColor`, relative colours, and explicit linear RGB are excluded.
+
+Constant speaker-declaration and message-option colours normalize to OKLCH with alpha during compilation. Dynamic
+colours normalize through the same conversion at runtime. Message markup follows its existing complete-string parse
+after interpolation. Invalid statically known colours in these authored positions produce source-associated compiler
+errors. Valid out-of-gamut coordinates are retained without a gamut warning or silent gamut mapping; display mapping
+belongs to the browser. CSS colour parsing rules still govern the input notation's channels and alpha.
+
+An invalid runtime colour falls back to the next applicable default without aborting the story. General warning,
+logging, and recovery policy is separate work in #427. This fallback does not suppress failures evaluating the expression
+itself or turn unrelated runtime errors into recoverable colour errors.
 
 Examples:
 

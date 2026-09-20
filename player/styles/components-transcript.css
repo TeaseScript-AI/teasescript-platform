@@ -9,6 +9,16 @@
         --speaker-font: inherit;
       }
 
+      .message.authored .message-body {
+        color: var(--message-color);
+        background: var(--message-background);
+      }
+
+      .message.prose .message-row { grid-template-columns: minmax(0, 1fr); }
+      .message.prose .message-body { border: 0; padding: 0; line-height: 1.5; }
+      .message.prose .speaker-name { display: none; }
+      .message.authored .message-copy { width: 100%; margin-inline: auto; }
+
       .message.user {
         align-self: flex-end;
         margin-inline-start: auto;
@@ -180,27 +190,8 @@
         font-size: 1.32em;
       }
 
-      .markup-spoiler {
-        appearance: none;
-        padding: 0 0.2em;
-        border: 0;
-        border-radius: 0.2em;
-        background: color-mix(in srgb, var(--speaker-accent) 42%, transparent);
-        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--speaker-accent) 65%, transparent);
-        color: transparent;
-        cursor: pointer;
-        font: inherit;
-      }
 
-      .markup-spoiler:focus-visible {
-        outline: 2px solid var(--speaker-accent);
-        outline-offset: 2px;
-      }
 
-      .markup-spoiler-revealed {
-        border-radius: 0.2em;
-        background: color-mix(in srgb, currentColor 8%, transparent);
-      }
 
       .message-markup a {
         color: inherit;

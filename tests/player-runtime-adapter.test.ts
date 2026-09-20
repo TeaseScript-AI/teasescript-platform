@@ -1,3 +1,4 @@
+import { normalizeColor } from "../src/color.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
@@ -39,7 +40,12 @@ exit
   const firstEntry = session.transcriptEntries[0];
   if (firstEntry?.kind !== "message") throw new Error("Expected a runtime message.");
   const guide = session.speakers[firstEntry.speakerId];
-  assert.deepEqual(guide, { name: "Guide", accent: "#b784ff", avatar: "G", fontFamily: "inherit" });
+  assert.deepEqual(guide, {
+    name: "Guide",
+    accent: normalizeColor("#b784ff"),
+    avatar: "G",
+    fontFamily: "inherit",
+  });
   assert.equal(firstEntry.content?.visibleText, "Ready?");
   assert.deepEqual(
     firstEntry.content?.blocks[0]?.kind === "paragraph"

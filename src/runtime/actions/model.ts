@@ -1,3 +1,4 @@
+import type { MessagePresentation } from "../../message-presentation.js";
 import type { InteractionResultDomain, InteractionUiPayload } from "../../plan/model.js";
 import type { MessageMarkup } from "../../message-markup.js";
 
@@ -34,6 +35,7 @@ export interface RuntimeInteractionActionSnapshot {
 }
 
 export interface RuntimePreparedSayOutputSnapshot {
+  readonly presentation: MessagePresentation;
   readonly owningInstruction: number;
   readonly continuationInstruction: number;
   readonly speaker: import("../events.js").OutputSpeaker | null;

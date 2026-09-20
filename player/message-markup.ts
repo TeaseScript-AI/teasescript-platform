@@ -12,13 +12,8 @@ export interface PlayerMarkupPiece {
   readonly href: string | null;
 }
 
-export interface PlayerMarkupGroup {
-  readonly spoilerId: string | null;
-  readonly pieces: readonly PlayerMarkupPiece[];
-}
-
 export interface PlayerMarkupLine {
-  readonly groups: readonly PlayerMarkupGroup[];
+  readonly pieces: readonly PlayerMarkupPiece[];
   readonly ending: MessageMarkupLine["ending"];
 }
 
@@ -77,7 +72,7 @@ function prepareLine(line: MessageMarkupLine): PlayerMarkupLine {
 
   const positions = [...boundaries.keys()].sort((left, right) => left - right);
   const active = new Map<MessageMarkupSpan["kind"], MessageMarkupSpan[]>();
-  const groups: Array<{ spoilerId: string | null; pieces: PlayerMarkupPiece[] }> = [];
+  const pieces: PlayerMarkupPiece[] = [];
   for (let index = 0; index < positions.length - 1; index += 1) {
     const position = positions[index]!;
     const boundary = boundaries.get(position)!;
@@ -97,22 +92,10 @@ function prepareLine(line: MessageMarkupLine): PlayerMarkupLine {
     const next = positions[index + 1]!;
     if (next === position) continue;
     const piece = pieceFor(line.text.slice(position, next), active);
-    const spoiler = active.get("spoiler")?.[0];
-    const spoilerId =
-      spoiler === undefined ? null : `${spoiler.start}:${spoiler.end}:${spoiler.depth}`;
-    const previous = groups.at(-1);
-    if (previous?.spoilerId === spoilerId) previous.pieces.push(piece);
-    else groups.push({ spoilerId, pieces: [piece] });
+    pieces.push(piece);
   }
 
-  return Object.freeze({
-    groups: Object.freeze(
-      groups.map((group) =>
-        Object.freeze({ spoilerId: group.spoilerId, pieces: Object.freeze(group.pieces) }),
-      ),
-    ),
-    ending: line.ending,
-  });
+  return Object.freeze({ pieces: Object.freeze(pieces), ending: line.ending });
 }
 
 function boundaryAt(

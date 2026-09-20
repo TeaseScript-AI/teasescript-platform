@@ -1,3 +1,4 @@
+import type { MessagePresentation } from "../message-presentation.js";
 import type { SourceSpan } from "../source.js";
 import type { MessageMarkup } from "../message-markup.js";
 import type {
@@ -14,6 +15,7 @@ export interface OutputSpeaker {
 }
 
 export interface SayEvent {
+  readonly presentation: MessagePresentation;
   readonly kind: "say";
   readonly sequence: number;
   readonly speaker: OutputSpeaker | null;

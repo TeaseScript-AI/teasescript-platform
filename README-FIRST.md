@@ -56,6 +56,8 @@ milestone, gate, integration-status, or current-capability work.
 - `docs/chatgpt-project/SYSTEM-PROMPT.txt`: repository-maintained ChatGPT Project Settings prompt candidate; read only
   for prompt maintenance or deliberate owner-approved synchronization. It does not prove the live Project Settings state.
 - `docs/README.md`: documentation map.
+- `docs/PRODUCT.md`: creator audience and product intent. For language or authoring-tool design, also read
+  `docs/TEASESCRIPT.md#language-design-intent` for simplicity, defaults, and advanced control.
 - `docs/CODE-EDITOR.md`: browser code editor and tooling integration.
 - `docs/DEBUGGER.md`: runtime inspection, simulation, and debug execution.
 - `docs/ui/PLAYER-UI.md`: normative Standard Player UI. While `Upstream contract integration` is non-empty, Player work

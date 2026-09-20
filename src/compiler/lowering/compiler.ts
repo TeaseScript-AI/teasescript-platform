@@ -1,3 +1,7 @@
+import {
+  normalizePresentationOptions,
+  normalizeSpeakerProperty,
+} from "../../authored-presentation.js";
 import type {
   Block,
   Expression,
@@ -95,7 +99,9 @@ export class InstructionCompiler {
             span: copySpan(statement.span),
           });
           for (const property of statement.properties) {
-            const lowered = this.#lowerExpression(property.value);
+            const lowered = this.#lowerExpression(
+              normalizeSpeakerProperty(property.name.name, property.value),
+            );
             this.instructions.push({
               kind: "setDeclaredSpeakerProperty",
               speaker: statement.name.name,
@@ -112,7 +118,7 @@ export class InstructionCompiler {
           name: statement.name.name,
           properties: statement.properties.map((property) => ({
             name: property.name.name,
-            value: compileExpression(property.value),
+            value: compileExpression(normalizeSpeakerProperty(property.name.name, property.value)),
             span: copySpan(property.span),
           })),
           span: copySpan(statement.span),
@@ -126,7 +132,8 @@ export class InstructionCompiler {
         });
         return;
       case "sayStatement": {
-        const textCanSuspend = this.#containsUserCall(statement.value);
+        const textCanSuspend =
+          statement.presentation !== null || this.#containsUserCall(statement.value);
         const pacingCanSuspend =
           statement.pacing !== null &&
           statement.pacing !== "instant" &&
@@ -139,6 +146,7 @@ export class InstructionCompiler {
               : this.#lowerExpression(statement.pacing);
           this.instructions.push({
             kind: "say",
+            presentation: null,
             speaker: statement.speaker?.name ?? null,
             value: lowered.plan,
             skipPolicy: statement.skipPolicy,
@@ -170,6 +178,16 @@ export class InstructionCompiler {
           destinationTemporary: contextualSpeakerTemporary,
           span: copySpan(statement.span),
         });
+        const loweredPresentation =
+          statement.presentation === null
+            ? null
+            : this.#materializeExpression(
+                this.#lowerSayPayload(
+                  normalizePresentationOptions(statement.presentation),
+                  contextualSpeakerTemporary,
+                ),
+                statement.presentation.span,
+              );
         const lowered = this.#lowerSayPayload(statement.value, contextualSpeakerTemporary);
         if (!pacingCanSuspend) {
           const loweredPacing =
@@ -178,6 +196,7 @@ export class InstructionCompiler {
               : this.#lowerSayPayload(statement.pacing, contextualSpeakerTemporary);
           this.instructions.push({
             kind: "say",
+            presentation: loweredPresentation?.plan ?? null,
             speaker: statement.speaker?.name ?? null,
             value: lowered.plan,
             speakerTemporary,
@@ -195,6 +214,7 @@ export class InstructionCompiler {
             [
               speakerTemporary,
               contextualSpeakerTemporary,
+              ...(loweredPresentation?.temporaryIds ?? []),
               ...lowered.temporaryIds,
               ...(loweredPacing?.temporaryIds ?? []),
             ],
@@ -217,6 +237,7 @@ export class InstructionCompiler {
         const pacing = loweredPacing.plan;
         this.instructions.push({
           kind: "say",
+          presentation: loweredPresentation?.plan ?? null,
           speaker: statement.speaker?.name ?? null,
           value: lowered.plan,
           speakerTemporary,
@@ -231,6 +252,7 @@ export class InstructionCompiler {
             speakerTemporary,
             contextualSpeakerTemporary,
             textTemporary,
+            ...(loweredPresentation?.temporaryIds ?? []),
             ...(loweredPacing?.temporaryIds ?? []),
           ],
           statement.span,
