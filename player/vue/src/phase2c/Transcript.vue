@@ -15,7 +15,7 @@ import {
 import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } from "../../../model.js";
 import TranscriptMarkup from "./TranscriptMarkup.vue";
 import type { TranscriptDesign } from "./transcriptDesign";
-import { inkFor, realizeBubble } from "./messageContrast";
+import { inkFor } from "./messageContrast";
 
 const props = defineProps<{
   entries: readonly PlayerTranscriptEntryPresentation[];
@@ -23,7 +23,6 @@ const props = defineProps<{
   revision?: number;
   bottomInset?: number;
   design: TranscriptDesign;
-  mode: "light" | "dark";
 }>();
 const scrollElement = ref<HTMLDivElement | null>(null);
 const touching = ref(false);
@@ -71,19 +70,18 @@ watch(() => props.bottomInset ?? 0, (inset, previous) => {
 // The theme's own colours, resolved once rather than modelled: an authored colour has to
 // be weighed against the bubble it will really land on, and that bubble comes from a
 // palette this component does not own.
-const palette = ref({ surface: "#ffffff", accent: "#000000" });
+const palette = ref({
+  surface: "#ffffff",
+});
 function readPalette() {
   const element = scrollElement.value;
   if (element === null) return;
-  const style = getComputedStyle(element);
-  const read = (name: string) => style.getPropertyValue(name).trim();
   palette.value = {
-    surface: read("--surface-component") || "#ffffff",
-    accent: read("--theme-accent-solid") || read("--package-accent") || "#000000",
+    surface: getComputedStyle(element).getPropertyValue("--message-surface").trim() || "#ffffff",
   };
 }
 // The palette is applied to the document by whoever owns the theme, so watching our own
-// props would miss a change of accent. Follow the document instead.
+// props would miss a change of theme. Follow the document instead.
 let paletteObserver: MutationObserver | null = null;
 onMounted(() => {
   paletteObserver = new MutationObserver(readPalette);
@@ -92,27 +90,24 @@ onMounted(() => {
   });
 });
 onBeforeUnmount(() => { paletteObserver?.disconnect(); });
-watch(() => [props.design.lightTone, props.design.darkTone], () => void nextTick(readPalette));
-// An authored accent names a hue, never a lightness; "inherit" means the speaker has none.
-// The player's own side falls back to the theme accent, so both sides are realized the
-// same way and the tone each mode can carry is applied to both.
-function tintOf(entry: PlayerTranscriptEntryPresentation) {
-  if (entry.kind !== "message") return null;
-  // The player is not a character an author dresses: their side is the theme's accent,
-  // whatever colour a runtime source may have filled in on their behalf.
-  if (entry.speakerId === "user") return palette.value.accent;
+// An authored colour is content, so it is carried through exactly as written; "inherit"
+// means the speaker sets none. The player's side is not authored at all and keeps the
+// theme's own accent roles.
+function authoredFill(entry: PlayerTranscriptEntryPresentation) {
+  if (entry.kind !== "message" || entry.speakerId === "user") return null;
   const accent = props.speakers[entry.speakerId]?.accent;
   return accent !== undefined && accent !== "inherit" ? accent : null;
 }
-const rows = computed(() => {
-  const tone = (props.mode === "dark" ? props.design.darkTone : props.design.lightTone) / 100;
-  return virtualizer.value.getVirtualItems().map((item) => {
-    const entry = props.entries[item.index]!;
-    const tint = tintOf(entry);
-    const backdrop = tint === null ? palette.value.surface : realizeBubble(tint, tone);
-    return { item, entry, backdrop, ink: tint === null ? null : inkFor(backdrop) };
-  });
-});
+const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => {
+  const entry = props.entries[item.index]!;
+  const fill = authoredFill(entry);
+  return {
+    item, entry, fill,
+    // Whatever an authored colour turns out to be, the words on it are measured against it.
+    ink: fill === null ? null : inkFor(fill),
+    backdrop: fill ?? palette.value.surface,
+  };
+}));
 const showLatest = computed(() => !touching.value && !virtualizer.value.isScrolling &&
   virtualizer.value.getDistanceFromEnd() > Math.max(80, (virtualizer.value.scrollRect?.height ?? 0) / 2));
 const scrolled = computed(() => (virtualizer.value.scrollOffset ?? 0) > 1);
@@ -204,7 +199,7 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
         onTouchstart: onTouchStart, onTouchend: () => touching = false,
         onTouchcancel: () => touching = false }">
       <div class="transcript-history" role="list" :style="{ height: `${virtualizer.getTotalSize()}px` }">
-        <article v-for="{ item, entry, ink, backdrop } in rows" :key="entry.id"
+        <article v-for="{ item, entry, fill, ink, backdrop } in rows" :key="entry.id"
           :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
           :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
           role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
@@ -223,12 +218,14 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
             <MessageContent>
               <!-- Two caps, whichever binds first: three quarters of the column keeps a bubble
                    off the edge on a narrow window, and 65ch keeps the line readable on a wide one. -->
+              <!-- The player's side is theme-owned and keeps the accent roles as they are. -->
               <Bubble class="max-w-[min(75%,65ch)]"
-                :variant="entry.speakerId === 'user' ? design.playerFill : design.speakerFill"
+                :variant="entry.speakerId === 'user' ? 'default' : 'secondary'"
                 :align="entry.speakerId === 'user' ? 'end' : 'start'">
                 <BubbleContent class="text-base/normal"
-                  :class="[cornerClass(item.index, entry.speakerId === 'user'), ink ? 'message-tinted' : '']"
-                  :style="ink ? { background: backdrop, color: ink } : undefined">
+                  :class="[cornerClass(item.index, entry.speakerId === 'user'),
+                    entry.speakerId === 'user' ? '' : 'message-speaker', fill ? 'message-authored' : '']"
+                  :style="fill ? { '--message-authored-fill': fill, color: ink } : undefined">
                   <MessageHeader v-if="showsName(item.index, entry.speakerId === 'user')"
                     class="px-0 pb-0.5">
                     {{ speakers[entry.speakerId]?.name ?? entry.speakerId }}
@@ -251,7 +248,14 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
 </template>
 
 <style scoped>
-.transcript { position: relative; flex: 1; min-height: 0; min-width: 0; }
+/* A message is not a panel. It carries authored content, it repeats down a column, and it
+   has to read as its own shape. Naming its surfaces here keeps them free to move without
+   disturbing anything else that happens to share a token today. */
+.transcript {
+  position: relative; flex: 1; min-height: 0; min-width: 0;
+  --message-surface: var(--surface-component);
+  --message-separator: var(--border);
+}
 /* Keep clipping and the scrollbar in the existing conversation padding, outside
    the reading column. This also preserves borders at fractional pixel positions. */
 .transcript-scroll-area {
@@ -284,12 +288,17 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
    a change of speaker gets the full separation. */
 .transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: 1rem 0; }
 .transcript-entry[data-continues="true"] { padding-block-start: 0.125rem; }
-/* An authored colour is a hue, not a finished bubble. Each mode realizes it at the tone
-   it can carry — dark under light text, light under dark text — so a single authored
-   colour stays readable in both without the author supplying one for each. */
+/* A message is its own shape before it is a colour, and a bubble can sit close enough to
+   the canvas that only its edge tells them apart. The faint line does that work, so an
+   authored fill is never altered merely to be seen. */
+.message-speaker {
+  background: var(--message-surface);
+  border-color: var(--message-separator);
+}
+.message-speaker.message-authored { background: var(--message-authored-fill); }
 /* The name is muted against the page, not against a coloured bubble. Inside one it
    steps back from the bubble's own text colour instead, which follows the mode. */
-.message-tinted :deep([data-slot="message-header"]) { color: inherit; opacity: 0.72; }
+.message-authored :deep([data-slot="message-header"]) { color: inherit; opacity: 0.72; }
 .session-event { margin: 0; font-size: 0.8125rem; color: var(--text-muted); }
 .transcript-empty { padding: 1rem; font-size: 0.875rem; color: var(--muted-foreground); }
 .return-to-latest {

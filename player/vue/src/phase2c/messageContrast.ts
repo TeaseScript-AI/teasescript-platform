@@ -1,5 +1,3 @@
-import { oklchCss, pickerHexToOklch } from "../../../theme/color.js";
-
 /**
  * Contrast work for an authored colour meeting a bubble the author never saw.
  *
@@ -31,15 +29,6 @@ function luminance(channels: readonly [number, number, number]) {
 
 function ratio(first: number, second: number) {
   return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
-}
-
-function hexOf(colour: string) {
-  return `#${paint(colour).map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
-}
-
-/** An authored colour names a hue; this is the bubble a given tone realizes from it. */
-export function realizeBubble(colour: string, tone: number) {
-  return oklchCss({ ...pickerHexToOklch(hexOf(colour)), l: tone });
 }
 
 /**

@@ -8,7 +8,7 @@ import Stage from "./Stage.vue";
 import PlayerTopBar from "./PlayerTopBar.vue";
 import Transcript from "./Transcript.vue";
 import ConversationSurface from "./ConversationSurface.vue";
-import { bubbleFills, transcriptDesignDefaults } from "./transcriptDesign";
+import { transcriptDesignDefaults } from "./transcriptDesign";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
 import { transcriptFixtures, transcriptFixtureSpeakers, transcriptMarkupFixtures } from "./transcriptFixtures";
 import { createPlayerRuntimeSession, createPlayerRuntimeRestorePoint, restorePlayerRuntimeSession, type PlayerRuntimeSession, type PlayerRuntimeRestorePoint } from "../../../runtime-adapter.js";
@@ -148,18 +148,6 @@ async function toggleFullscreen() {
             </label>
             <fieldset class="grid gap-3">
               <legend class="mb-2">Message design</legend>
-              <label class="grid gap-2">
-                Speaker bubble
-                <select v-model="transcriptDesign.speakerFill" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
-                  <option v-for="fill in bubbleFills" :key="fill" :value="fill">{{ fill }}</option>
-                </select>
-              </label>
-              <label class="grid gap-2">
-                Player bubble
-                <select v-model="transcriptDesign.playerFill" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
-                  <option v-for="fill in bubbleFills" :key="fill" :value="fill">{{ fill }}</option>
-                </select>
-              </label>
               <label class="flex items-center gap-2">
                 <input type="checkbox" :checked="transcriptDesign.authoredAccent !== 'inherit'"
                   @change="transcriptDesign.authoredAccent = transcriptDesign.authoredAccent === 'inherit' ? '#8b3fa8' : 'inherit'" />
@@ -168,14 +156,6 @@ async function toggleFullscreen() {
               <label v-if="transcriptDesign.authoredAccent !== 'inherit'" class="flex items-center gap-2">
                 Authored colour
                 <input v-model="transcriptDesign.authoredAccent" type="color" />
-              </label>
-              <label class="grid gap-1">
-                Light mode tone · {{ transcriptDesign.lightTone }}%
-                <input v-model.number="transcriptDesign.lightTone" type="range" min="20" max="95" />
-              </label>
-              <label class="grid gap-1">
-                Dark mode tone · {{ transcriptDesign.darkTone }}%
-                <input v-model.number="transcriptDesign.darkTone" type="range" min="20" max="95" />
               </label>
             </fieldset>
             <fieldset class="grid min-w-0 gap-2">
@@ -249,7 +229,7 @@ async function toggleFullscreen() {
 
         <ConversationSurface @margin-wheel="transcript?.scrollFromMargin($event)">
           <template #default="{ bottomInset }">
-            <Transcript ref="transcript" :bottom-inset="bottomInset" :key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'" :entries="runtimeSession?.transcriptEntries ?? transcriptEntries" :speakers="transcriptSpeakers" :revision="runtimeSession?.transcriptRevision ?? 0" :design="transcriptDesign" :mode="effectiveThemeMode" />
+            <Transcript ref="transcript" :bottom-inset="bottomInset" :key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'" :entries="runtimeSession?.transcriptEntries ?? transcriptEntries" :speakers="transcriptSpeakers" :revision="runtimeSession?.transcriptRevision ?? 0" :design="transcriptDesign" />
           </template>
           <template #interaction><RuntimeInteraction v-model:session="runtimeSession" :reset="interactionReset" :preview="isDevelopment" @preview-submit="appendPreviewResponse" /></template>
         </ConversationSurface>
