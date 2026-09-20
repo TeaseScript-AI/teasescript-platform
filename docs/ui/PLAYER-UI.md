@@ -354,6 +354,10 @@ The stage is a dedicated structural surface above the transcript in the main con
 when no media is active. An empty stage shows its normal background/ambience rather than collapsing and expanding the
 transcript into that space.
 
+The Greenfield preview currently tries a 70% stage / 30% conversation split. A keyboard-accessible horizontal handle
+lets the user adjust that division; the composer grows inside the conversation allocation. The chosen split survives
+viewport resizing for the current mount. The starting ratio and 20% minimum per panel remain visual trials.
+
 Standard image/video-like presentation:
 
 - defaults to `contain`, keeping the complete media visible within the allocated stage;

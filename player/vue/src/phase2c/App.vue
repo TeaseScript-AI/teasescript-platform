@@ -5,6 +5,7 @@ import ToolLifetimeFixture from "./ToolLifetimeFixture.vue";
 import LayoutDebug from "./LayoutDebug.vue";
 import ThemeLab from "./ThemeLab.vue";
 import Stage from "./Stage.vue";
+import PlayerComposition from "./PlayerComposition.vue";
 import PlayerTopBar from "./PlayerTopBar.vue";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
 import { transcriptFixtures, transcriptFixtureSpeakers } from "./transcriptFixtures";
@@ -84,7 +85,7 @@ function prependTranscript() {
 const stage = ref<InstanceType<typeof Stage> | null>(null);
 const stageHeight = ref(0);
 const mediaAspect = ref(0);
-// The grid owns Stage height. Its measurement positions the ambient fade and
+// PlayerComposition owns Stage height. Its measurement positions the ambient fade and
 // determines the contained image width; neither feeds back into the Stage track.
 useResizeObserver(computed(() => stage.value?.$el as HTMLElement | undefined), ([entry]) => { if (entry) stageHeight.value = entry.contentRect.height; });
 const fullscreen = ref(document.fullscreenElement === document.documentElement);
@@ -165,32 +166,36 @@ async function toggleFullscreen() {
           </div>
     </template>
     <template #default="{ sidebarVisible }">
-      <div class="player-composition relative">
-        <PlayerTopBar
-          :title="longTitle ? 'An evening by the coast — a quiet moment before the journey begins' : 'Evening by the coast'"
-          :fullscreen="fullscreen"
-          :fullscreen-supported="fullscreenSupported"
-          :fullscreen-error="fullscreenError"
-          :theme-mode="themeIntent.mode"
-          @toggle-fullscreen="toggleFullscreen"
-          @toggle-theme-mode="toggleThemeMode"
-        >
-          <template v-if="!sidebarVisible" #tools>
-            <SidebarTrigger class="size-8" aria-label="Show sidebar" title="Show sidebar" />
-          </template>
-        </PlayerTopBar>
-        <Stage ref="stage"
-          :media="stageFixtures[mediaFixture]"
-          @media-aspect="mediaAspect = $event"
-        >
-          <template #right-rail>
-            <StageRightRail v-if="isDevelopment">
-              <template #timers>
-                <TimerFixtureRegion :kind="timerKind" :count="timerCount" :reset="timerReset" :paused="timerPaused" />
-              </template>
-            </StageRightRail>
-          </template>
-        </Stage>
+      <PlayerComposition>
+        <template #topbar>
+          <PlayerTopBar
+            :title="longTitle ? 'An evening by the coast — a quiet moment before the journey begins' : 'Evening by the coast'"
+            :fullscreen="fullscreen"
+            :fullscreen-supported="fullscreenSupported"
+            :fullscreen-error="fullscreenError"
+            :theme-mode="themeIntent.mode"
+            @toggle-fullscreen="toggleFullscreen"
+            @toggle-theme-mode="toggleThemeMode"
+          >
+            <template v-if="!sidebarVisible" #tools>
+              <SidebarTrigger class="size-8" aria-label="Show sidebar" title="Show sidebar" />
+            </template>
+          </PlayerTopBar>
+        </template>
+        <template #stage>
+          <Stage ref="stage"
+            :media="stageFixtures[mediaFixture]"
+            @media-aspect="mediaAspect = $event"
+          >
+            <template #right-rail>
+              <StageRightRail v-if="isDevelopment">
+                <template #timers>
+                  <TimerFixtureRegion :kind="timerKind" :count="timerCount" :reset="timerReset" :paused="timerPaused" />
+                </template>
+              </StageRightRail>
+            </template>
+          </Stage>
+        </template>
 
         <RuntimeInteraction v-model:session="runtimeSession" :reset="interactionReset" :preview="isDevelopment"
           :transcript-key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'"
@@ -198,7 +203,7 @@ async function toggleFullscreen() {
           :speakers="runtimeSession?.speakers ?? transcriptFixtureSpeakers"
           :revision="runtimeSession?.transcriptRevision ?? 0"
           @preview-submit="appendPreviewResponse" />
-      </div>
+      </PlayerComposition>
     </template>
   </PlayerToolsShell>
 </template>

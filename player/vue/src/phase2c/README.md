@@ -30,6 +30,9 @@ Keep experimental fixtures separate from the components that own settled behavio
   outer shadow.
   The title is pill-shaped. The Sidebar trigger and display-control group share
   `--player-top-control-radius`; the group keeps its existing rounded corners.
+- `PlayerComposition.vue` owns the adjustable stage/conversation allocation through Reka Splitter,
+  the primitive underlying shadcn-vue Resizable. The initial 70/30 split and minimum sizes are visual trials;
+  dragging and keyboard resizing use the primitive without a custom pointer controller.
 - `ConversationSurface.vue` owns the conversation overlay placement and measured
   bottom-region wheel surface: empty left/right margins forward vertical wheel
   input to the existing Transcript scroll owner without changing reading width.

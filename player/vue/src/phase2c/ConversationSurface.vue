@@ -38,7 +38,7 @@ useResizeObserver(overlay, () => {
 </template>
 
 <style scoped>
-.conversation-region { display: flex; min-width: 0; min-height: 0; }
+.conversation-region { flex: 1; display: flex; min-width: 0; min-height: 0; }
 .conversation-surface { position: relative; display: flex; min-height: 0; padding-inline: var(--conversation-inline-inset); }
 .conversation-overlay {
   position: absolute; inset: auto var(--conversation-inline-inset) 0; z-index: 2; pointer-events: none;

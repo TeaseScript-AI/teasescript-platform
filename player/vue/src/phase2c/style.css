@@ -331,16 +331,6 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
 .phase2c-sidebar[data-narrow="true"] [data-panel-drag],
 .phase2c-sidebar[data-narrow="true"] [data-panel-resize] { display: none; }
 
-/* The stage owns a stable track independent of asset ratio and chrome visibility.
-   Keep a usable conversation/composer remainder, including in short windows. */
-.player-composition {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: minmax(0, 3fr) minmax(6rem, 2fr);
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-}
 .player-conversation {
   --conversation-width: min(
     calc(var(--conversation-content-max-width) + 2 * var(--conversation-inline-inset)),
