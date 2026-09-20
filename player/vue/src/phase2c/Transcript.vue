@@ -129,7 +129,7 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
         tabindex: 0, onKeydown: onScrollKeydown, onWheel: onWheel,
         onTouchstart: onTouchStart, onTouchend: () => touching = false,
         onTouchcancel: () => touching = false }">
-      <div class="transcript-history" :style="{ height: `${virtualizer.getTotalSize()}px` }">
+      <div class="transcript-history" :style="{ height: `${Math.max(virtualizer.getTotalSize(), virtualizer.scrollRect?.height ?? 0)}px` }">
         <div role="list">
           <article v-for="{ item, entry } in rows" :key="entry.id"
             :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
@@ -142,7 +142,7 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
           </article>
         </div>
         <div ref="foregroundElement" class="transcript-foreground"
-          :style="{ top: `${virtualizer.getTotalSize() - endInset}px` }">
+          :style="{ bottom: `${bottomInset ?? 0}px` }">
           <slot name="foreground" />
         </div>
       </div>
@@ -182,6 +182,8 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
     rgb(0 0 0 / 20%) 100%);
 }
 :deep(.transcript-scroll[data-scrolled="true"]) { --transcript-top-fade: 1rem; }
+/* Fill a short transcript to the viewport so controls rest above the composer;
+   overflowing history still carries them in the same scrollable content. */
 .transcript-foreground { position: absolute; left: 0; width: 100%; }
 .transcript-history { position: relative; width: 100%; }
 .transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: 0.5rem 1rem; }
