@@ -11,6 +11,9 @@ export const transcriptFixtureSpeakers: Readonly<Record<string, PlayerSpeakerPre
   // fixture rather than from a switch, because the author decides this per speaker.
   narrator: { name: "", accent: "inherit", avatar: "", fontFamily: "inherit" },
   keeper: { name: "Hanna", accent: "inherit", avatar: "H", fontFamily: "inherit" },
+  // A note about the interface rather than about the story. It stands outside the fiction,
+  // so whether it can sit on a speaker's line at all is part of what is being judged.
+  system: { name: "", accent: "inherit", avatar: "", fontFamily: "inherit" },
   user: { name: "You", accent: "inherit", avatar: "Y", fontFamily: "inherit" },
 };
 
@@ -59,6 +62,8 @@ const proseSources: readonly (readonly [speaker: string, source: string])[] = [
   ["keeper", "*My dear,*\n\nIf you are reading this you have walked further than I ever managed. The keeper's house is open; the key is where it has always been, under the third stone from the door.\n\nDo not wait for the lamp. It comes on when it comes on, and the waiting is the worst of it.\n\n**— H.**"],
   ["user", "Who wrote that?"],
   ["guide", "Someone who knew the walk. Come on — the beam will start any moment."],
+  ["system", "**Pacing** is now set to *slow*. Messages arrive with a pause between them, and the composer stays available while you wait."],
+  ["guide", "Take your time, then."],
 ];
 
 /** A mixed history for judging how prose and dialogue sit together. */
