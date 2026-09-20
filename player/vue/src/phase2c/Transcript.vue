@@ -64,6 +64,12 @@ watch(endInset, (inset, previous) => {
   if (inset !== previous && previousDistance <= latestThreshold && !touching.value)
     void nextTick(() => instance.scrollToEnd());
 });
+// Short histories use the free space above the messages. Once content overflows,
+// this offset is zero and TanStack retains its normal scroll coordinates.
+const historyHeight = computed(() => Math.max(
+  virtualizer.value.getTotalSize(), virtualizer.value.scrollRect?.height ?? 0,
+));
+const historyOffset = computed(() => historyHeight.value - virtualizer.value.getTotalSize());
 const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => ({
   item, entry: props.entries[item.index]!,
 })));
@@ -129,21 +135,23 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
         tabindex: 0, onKeydown: onScrollKeydown, onWheel: onWheel,
         onTouchstart: onTouchStart, onTouchend: () => touching = false,
         onTouchcancel: () => touching = false }">
-      <div class="transcript-history" :style="{ height: `${Math.max(virtualizer.getTotalSize(), virtualizer.scrollRect?.height ?? 0)}px` }">
-        <div role="list">
-          <article v-for="{ item, entry } in rows" :key="entry.id"
-            :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
-            :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
-            role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
-            class="transcript-entry" :style="{ transform: `translateY(${item.start}px)` }">
-            <div class="message" :data-author="entry.kind === 'session-event' ? 'session-event' : entry.speakerId === 'user' ? 'player' : 'speaker'">
-              <div class="message-copy"><strong v-if="entry.kind === 'message' && entry.speakerId !== 'user'">{{ speakers[entry.speakerId]?.name ?? entry.speakerId }}: </strong><TranscriptMarkup v-if="entry.kind === 'message' && entry.speakerId !== 'user' && entry.content" :content="entry.content" /><template v-else>{{ entry.text }}</template></div>
-            </div>
-          </article>
-        </div>
-        <div ref="foregroundElement" class="transcript-foreground"
-          :style="{ bottom: `${bottomInset ?? 0}px` }">
-          <slot name="foreground" />
+      <div :style="{ height: `${historyHeight}px` }">
+        <div class="transcript-history" :style="{ height: `${virtualizer.getTotalSize()}px`, transform: `translateY(${historyOffset}px)` }">
+          <div role="list">
+            <article v-for="{ item, entry } in rows" :key="entry.id"
+              :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
+              :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
+              role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
+              class="transcript-entry" :style="{ transform: `translateY(${item.start}px)` }">
+              <div class="message" :data-author="entry.kind === 'session-event' ? 'session-event' : entry.speakerId === 'user' ? 'player' : 'speaker'">
+                <div class="message-copy"><strong v-if="entry.kind === 'message' && entry.speakerId !== 'user'">{{ speakers[entry.speakerId]?.name ?? entry.speakerId }}: </strong><TranscriptMarkup v-if="entry.kind === 'message' && entry.speakerId !== 'user' && entry.content" :content="entry.content" /><template v-else>{{ entry.text }}</template></div>
+              </div>
+            </article>
+          </div>
+          <div ref="foregroundElement" class="transcript-foreground"
+            :style="{ top: `${virtualizer.getTotalSize() - endInset}px` }">
+            <slot name="foreground" />
+          </div>
         </div>
       </div>
       <p v-if="!entries.length" class="transcript-empty">No messages yet.</p>
@@ -182,8 +190,6 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
     rgb(0 0 0 / 20%) 100%);
 }
 :deep(.transcript-scroll[data-scrolled="true"]) { --transcript-top-fade: 1rem; }
-/* Fill a short transcript to the viewport so controls rest above the composer;
-   overflowing history still carries them in the same scrollable content. */
 .transcript-foreground { position: absolute; left: 0; width: 100%; }
 .transcript-history { position: relative; width: 100%; }
 .transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: 0.5rem 1rem; }
