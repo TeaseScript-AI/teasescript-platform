@@ -79,7 +79,7 @@ say "paper"
   const messages = result.events.filter((event) => event.kind === "say");
   assert.deepEqual(messages[0]!.presentation, {
     kind: "prose",
-    position: "center",
+    position: null,
     align: "left",
     font: "Georgia",
     color: normalizeColor("red"),
@@ -227,7 +227,9 @@ test("null options inherit, and malformed external resolved values are rejected"
   const result = run(plan, createFreshRuntimeSnapshot(plan));
   const output = result.events.find((event) => event.kind === "say");
   assert.equal(output?.presentation.color, null);
-  assert.equal(output?.presentation.align, "center");
+  assert.equal(output?.presentation.align, null);
+  assert.equal(output?.presentation.position, null);
+  assert.equal(isMessagePresentation(output?.presentation), true);
   assert.equal(isMessagePresentation({ ...output?.presentation, align: ["center"] }), false);
   assert.equal(isMessagePresentation({ ...output?.presentation, background: "url(x)" }), false);
 });

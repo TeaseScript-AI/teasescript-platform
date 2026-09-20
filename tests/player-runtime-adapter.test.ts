@@ -43,6 +43,26 @@ showButton "Continue"
   assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
 });
 
+test("runtime adapter preserves omitted alignment separately from explicit center through restore", () => {
+  const session = createPlayerRuntimeSession(`
+say "Default bubble", instant
+say prose "Default prose", instant
+say prose(position: "center", align: "center") "Explicit center", instant
+showButton "Continue"
+`);
+  const positions = session.transcriptEntries.map((entry) => {
+    if (entry.kind !== "message") throw new Error("Expected a runtime message.");
+    return [entry.presentation?.position, entry.presentation?.align];
+  });
+  assert.deepEqual(positions, [
+    [null, null],
+    [null, null],
+    ["center", "center"],
+  ]);
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
+  assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
+});
+
 test("runtime adapter delegates interaction normalization, transcript, and continuation to the engine", () => {
   let session = createPlayerRuntimeSession(`
 speaker guide {

@@ -25,11 +25,12 @@ export function resolveMessagePresentation(
     if (!["kind", "position", "align", "color", "background", "font"].includes(name))
       throw invalid(name, span);
   }
-  const position = options.get("position") ?? defaults.get("position") ?? "center";
-  const align = options.get("align") ?? defaults.get("align") ?? "center";
-  if (position !== "left" && position !== "center" && position !== "right")
+  const position = options.get("position") ?? defaults.get("position") ?? null;
+  const align = options.get("align") ?? defaults.get("align") ?? null;
+  if (position !== null && position !== "left" && position !== "center" && position !== "right")
     throw invalid("position", span);
-  if (align !== "left" && align !== "center" && align !== "right") throw invalid("align", span);
+  if (align !== null && align !== "left" && align !== "center" && align !== "right")
+    throw invalid("align", span);
   const font = options.get("font") ?? defaults.get("font") ?? property("font");
   if (font !== null && typeof font !== "string") throw invalid("font", span);
   const defaultColor = normalizeColor(defaults.get("color")) ?? normalizeColor(property("color"));
