@@ -64,13 +64,18 @@ async function checks(page) {
   // Reservation and content reveal the same shell-owned canvas during dock animation.
   const continuousCanvas = await page.evaluate(() => {
     const shell = getComputedStyle(document.querySelector("#phase2c-shell"));
-    return shell.backgroundImage !== "none" && [
-      '[data-slot="sidebar-gap"]', '[data-slot="sidebar-inset"]',
-      '[data-sidebar="sidebar"]', '.player-composition',
-    ].every(selector => {
-      const style = getComputedStyle(document.querySelector(selector));
-      return style.backgroundColor === "rgba(0, 0, 0, 0)" && style.backgroundImage === "none";
-    });
+    return (
+      shell.backgroundImage !== "none" &&
+      [
+        '[data-slot="sidebar-gap"]',
+        '[data-slot="sidebar-inset"]',
+        '[data-sidebar="sidebar"]',
+        ".player-composition",
+      ].every((selector) => {
+        const style = getComputedStyle(document.querySelector(selector));
+        return style.backgroundColor === "rgba(0, 0, 0, 0)" && style.backgroundImage === "none";
+      })
+    );
   });
   check(continuousCanvas, "Dock reservation and Player content must share one background canvas");
 
@@ -125,7 +130,13 @@ async function checks(page) {
   );
   check(
     Math.abs(narrowComposer.x - narrowConversation.x - rootRem) < 1 &&
-      Math.abs(narrowConversation.x + narrowConversation.width - narrowComposer.x - narrowComposer.width - rootRem) < 1,
+      Math.abs(
+        narrowConversation.x +
+          narrowConversation.width -
+          narrowComposer.x -
+          narrowComposer.width -
+          rootRem,
+      ) < 1,
     "Narrow conversation must have only its explicit inner padding",
   );
   await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
@@ -159,24 +170,39 @@ async function drawerWidthChecks(page) {
   await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
   await page.locator('[data-launcher] button[aria-label="Visual Lab"]').click();
   const panel = page.locator('[data-tool="Visual Lab"]');
-  for (const [size, rem] of [["Small", 14], ["Medium", 18], ["Large", 24], ["Extra Large", 32]]) {
+  for (const [size, rem] of [
+    ["Small", 14],
+    ["Medium", 18],
+    ["Large", 24],
+    ["Extra Large", 32],
+  ]) {
     await panel.getByRole("button", { name: "Panel settings", exact: true }).click();
     await page.getByRole("menuitem", { name: "Width", exact: true }).hover();
     await page.getByRole("menuitemradio", { name: size, exact: true }).click();
     for (const width of [320, 390, 700]) {
       await page.setViewportSize({ width, height: 900 });
-      await page.waitForFunction(({ rem }) => {
-        const drawer = document.querySelector('.tools-drawer');
-        const rootRem = parseFloat(getComputedStyle(document.documentElement).fontSize);
-        return Math.abs(drawer.getBoundingClientRect().width - Math.min(rem * rootRem, visualViewport.width * .9)) < 1;
-      }, { rem });
-      if (await panel.evaluate(el => el.scrollWidth > el.clientWidth + 1))
+      await page.waitForFunction(
+        ({ rem }) => {
+          const drawer = document.querySelector(".tools-drawer");
+          const rootRem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+          return (
+            Math.abs(
+              drawer.getBoundingClientRect().width -
+                Math.min(rem * rootRem, visualViewport.width * 0.9),
+            ) < 1
+          );
+        },
+        { rem },
+      );
+      if (await panel.evaluate((el) => el.scrollWidth > el.clientWidth + 1))
         throw new Error(`${size} tool content overflows at ${width}px`);
     }
   }
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole("button", { name: "Hide sidebar", exact: true }).waitFor();
-  await page.waitForFunction(() => document.querySelector('[data-tool="Visual Lab"]').getBoundingClientRect().width === 512);
+  await page.waitForFunction(
+    () => document.querySelector('[data-tool="Visual Lab"]').getBoundingClientRect().width === 512,
+  );
   return "PASS drawer preset width constrained by available space";
 }
 
@@ -293,12 +319,14 @@ async function menuWidthChecks(page) {
   await page.reload();
   const menu = page.locator("[data-launcher]");
   const edge = page.getByRole("separator", { name: "Menu Sidebar width", exact: true });
-  const width = async () => menu.evaluate(element => {
-    const shell = element.closest("#phase2c-shell");
-    // Include the separate resize rail in the selected menu width.
-    return (shell.dataset.labels === "preview" ? element : element.parentElement)
-      .getBoundingClientRect().width;
-  });
+  const width = async () =>
+    menu.evaluate((element) => {
+      const shell = element.closest("#phase2c-shell");
+      // Include the separate resize rail in the selected menu width.
+      return (
+        shell.dataset.labels === "preview" ? element : element.parentElement
+      ).getBoundingClientRect().width;
+    });
   const mode = async (value) => {
     await page.locator("[data-settings-trigger]").click();
     await page.locator('[data-tools-focus="label-mode"]').selectOption(value);
@@ -391,12 +419,14 @@ async function menuCollapseChecks(page) {
   const shell = page.locator("#phase2c-shell");
   const edge = page.getByRole("separator", { name: "Menu Sidebar width", exact: true });
   const menu = page.locator("[data-launcher]");
-  const width = async () => menu.evaluate(element => {
-    const shell = element.closest("#phase2c-shell");
-    // Include the separate resize rail in the selected menu width.
-    return (shell.dataset.labels === "preview" ? element : element.parentElement)
-      .getBoundingClientRect().width;
-  });
+  const width = async () =>
+    menu.evaluate((element) => {
+      const shell = element.closest("#phase2c-shell");
+      // Include the separate resize rail in the selected menu width.
+      return (
+        shell.dataset.labels === "preview" ? element : element.parentElement
+      ).getBoundingClientRect().width;
+    });
   const mode = async () => shell.getAttribute("data-labels");
   const settledMode = async () => {
     check(
@@ -570,8 +600,9 @@ async function panelResizeChecks(page) {
     }
     await page.setViewportSize({ width: 1920, height: 900 });
     await settle();
-    await page.waitForFunction(() =>
-      document.querySelector('[data-tool="Visual Lab"]').getBoundingClientRect().width === 512,
+    await page.waitForFunction(
+      () =>
+        document.querySelector('[data-tool="Visual Lab"]').getBoundingClientRect().width === 512,
     );
   }
   await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "icons"));
@@ -597,7 +628,9 @@ async function carouselChecks(page) {
   const state = await strip.evaluate((s) => ({
     width: s.clientWidth,
     total: s.scrollWidth,
-    panels: [...s.querySelectorAll(".tool-panel-content > [data-tool]")].map((p) => p.getBoundingClientRect().width),
+    panels: [...s.querySelectorAll(".tool-panel-content > [data-tool]")].map(
+      (p) => p.getBoundingClientRect().width,
+    ),
   }));
   if (state.panels.some((w) => w > state.width + 1)) throw Error("Oversized panel");
   await strip.evaluate((s) => s.scrollTo({ left: 0, behavior: "instant" }));
@@ -643,8 +676,10 @@ async function toolContentChecks(page) {
   await page.reload();
   const normalUrl = page.url();
   await page.locator('[data-launcher] button[aria-label="Layout Debug"]').click();
-  check(await page.locator("[data-tool-lifetime-fixture]").count() === 0,
-    "Normal Layout Debug must not contain test fixtures");
+  check(
+    (await page.locator("[data-tool-lifetime-fixture]").count()) === 0,
+    "Normal Layout Debug must not contain test fixtures",
+  );
   const fixtureUrl = await page.evaluate(() => {
     const url = new URL(location.href);
     url.searchParams.set("tool-state-fixture", "");
@@ -841,32 +876,57 @@ async function transcriptChecks(page) {
   };
   await atEnd("initial history");
   const glass = page.locator(".conversation-glass");
-  check(await scroll.evaluate((el) => {
-    const style = getComputedStyle(el);
-    const bottomAlpha = Number(style.maskImage.match(/rgba\(0, 0, 0, ([\d.]+)\) 100%\)$/)?.[1]);
-    return style.maskImage.includes("gradient") && bottomAlpha > 0 && bottomAlpha < 1
-      && getComputedStyle(el, "::after").content === "none";
-  }), "Transcript fade must retain faint content at the bottom edge without a painted strip");
-  const readableLatest = () => page.waitForFunction(() => {
-    const rows = document.querySelectorAll(".transcript-entry");
-    const last = rows[rows.length - 1]?.getBoundingClientRect();
-    const composer = document.querySelector(".conversation-glass").getBoundingClientRect();
-    return last && last.bottom <= composer.top + 1;
-  });
+  check(
+    await scroll.evaluate((el) => {
+      const style = getComputedStyle(el);
+      const bottomAlpha = Number(style.maskImage.match(/rgba\(0, 0, 0, ([\d.]+)\) 100%\)$/)?.[1]);
+      return (
+        style.maskImage.includes("gradient") &&
+        bottomAlpha > 0 &&
+        bottomAlpha < 1 &&
+        getComputedStyle(el, "::after").content === "none"
+      );
+    }),
+    "Transcript fade must retain faint content at the bottom edge without a painted strip",
+  );
+  const readableLatest = () =>
+    page.waitForFunction(() => {
+      const rows = document.querySelectorAll(".transcript-entry");
+      const last = rows[rows.length - 1]?.getBoundingClientRect();
+      const composer = document.querySelector(".conversation-glass").getBoundingClientRect();
+      return last && last.bottom <= composer.top + 1;
+    });
   await readableLatest();
   // Composer growth changes TanStack's end clearance, not the transcript viewport.
   const viewportBefore = await scroll.boundingBox();
-  await glass.evaluate(el => el.style.minHeight = "140px");
-  await page.waitForFunction(() => parseFloat(getComputedStyle(document.querySelector(".transcript")).getPropertyValue("--transcript-bottom-inset")) >= 156);
+  await glass.evaluate((el) => (el.style.minHeight = "140px"));
+  await page.waitForFunction(
+    () =>
+      parseFloat(
+        getComputedStyle(document.querySelector(".transcript")).getPropertyValue(
+          "--transcript-bottom-inset",
+        ),
+      ) >= 156,
+  );
   await atEnd("composer growth while following");
   await readableLatest();
-  check(JSON.stringify(await scroll.boundingBox()) === JSON.stringify(viewportBefore), "Composer growth resized the transcript viewport");
+  check(
+    JSON.stringify(await scroll.boundingBox()) === JSON.stringify(viewportBefore),
+    "Composer growth resized the transcript viewport",
+  );
   await scroll.focus();
   await page.keyboard.press("Home");
   await page.waitForFunction(() => document.querySelector(".transcript-scroll").scrollTop === 0);
   const beforeShrink = await anchor();
-  await glass.evaluate(el => el.style.minHeight = "");
-  await page.waitForFunction(() => parseFloat(getComputedStyle(document.querySelector(".transcript")).getPropertyValue("--transcript-bottom-inset")) < 156);
+  await glass.evaluate((el) => (el.style.minHeight = ""));
+  await page.waitForFunction(
+    () =>
+      parseFloat(
+        getComputedStyle(document.querySelector(".transcript")).getPropertyValue(
+          "--transcript-bottom-inset",
+        ),
+      ) < 156,
+  );
   await expectAnchor(beforeShrink);
   await page.keyboard.press("End");
   await atEnd("composer shrink and return");
@@ -878,9 +938,14 @@ async function transcriptChecks(page) {
     (await page.locator('[aria-setsize="2000"]').count()) > 0,
     "Exercise the full 2,000-entry history",
   );
-  await page.waitForFunction(() => new Set(
-    [...document.querySelectorAll("[data-message-id]")].map(row => row.getBoundingClientRect().height),
-  ).size >= 3);
+  await page.waitForFunction(
+    () =>
+      new Set(
+        [...document.querySelectorAll("[data-message-id]")].map(
+          (row) => row.getBoundingClientRect().height,
+        ),
+      ).size >= 3,
+  );
   await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
   await atEnd("open dock");
   await append.click();
@@ -1111,14 +1176,12 @@ async function runtimeTranscriptChecks(page) {
   check((await transcript.locator(".markup-code").innerText()) === "code", "Inline code lost");
   check((await transcript.locator(".markup-size-large").count()) === 1, "Size span lost");
   check(
-    (await transcript
-      .getByText("blue", { exact: true })
-      .evaluate((el) => {
-        const context = document.createElement("canvas").getContext("2d");
-        context.fillStyle = getComputedStyle(el).color;
-        context.fillRect(0, 0, 1, 1);
-        return Array.from(context.getImageData(0, 0, 1, 1).data).join(",");
-      })) === "69,103,137,255",
+    (await transcript.getByText("blue", { exact: true }).evaluate((el) => {
+      const context = document.createElement("canvas").getContext("2d");
+      context.fillStyle = getComputedStyle(el).color;
+      context.fillRect(0, 0, 1, 1);
+      return Array.from(context.getImageData(0, 0, 1, 1).data).join(",");
+    })) === "69,103,137,255",
     "Authored color lost",
   );
   const snapshot = () =>
@@ -1663,7 +1726,10 @@ async function topBarChecks(page) {
   await page.reload();
   await page.mouse.move(500, 500);
   await fullscreen.hover();
-  await page.locator("[data-slot=tooltip-content]").filter({ hasText: "Enter fullscreen" }).waitFor();
+  await page
+    .locator("[data-slot=tooltip-content]")
+    .filter({ hasText: "Enter fullscreen" })
+    .waitFor();
   const unsupported = await page.context().newPage();
   await unsupported.addInitScript(() =>
     Object.defineProperty(document, "fullscreenEnabled", { get: () => false }),
@@ -1687,7 +1753,9 @@ try {
   cli("open", url, "--config", config);
   const topBarDebugOutput = cli("run-code", topBarDebugChecks.toString());
   if (
-    !topBarDebugOutput.includes("PASS top-bar Layout Debug measurement, layer visibility and geometry")
+    !topBarDebugOutput.includes(
+      "PASS top-bar Layout Debug measurement, layer visibility and geometry",
+    )
   )
     throw new Error(topBarDebugOutput);
   console.log(
@@ -1728,13 +1796,25 @@ try {
     throw new Error(resizeOutput);
   console.log("phase2c-browser-checks: PASS panel width cap, resize, restoration and cancellation");
   const carouselOutput = cli("run-code", carouselChecks.toString());
-  if (!carouselOutput.includes("PASS bounded carousel, wheel snapping, vertical body scroll and touch swipe"))
+  if (
+    !carouselOutput.includes(
+      "PASS bounded carousel, wheel snapping, vertical body scroll and touch swipe",
+    )
+  )
     throw new Error(carouselOutput);
-  console.log("phase2c-browser-checks: PASS bounded carousel, wheel snapping, vertical body scroll and touch swipe");
+  console.log(
+    "phase2c-browser-checks: PASS bounded carousel, wheel snapping, vertical body scroll and touch swipe",
+  );
   const contentOutput = cli("run-code", toolContentChecks.toString());
-  if (!contentOutput.includes("PASS tool content and scroll preservation across hiding and replacement"))
+  if (
+    !contentOutput.includes(
+      "PASS tool content and scroll preservation across hiding and replacement",
+    )
+  )
     throw new Error(contentOutput);
-  console.log("phase2c-browser-checks: PASS tool content and scroll preservation across hiding and replacement");
+  console.log(
+    "phase2c-browser-checks: PASS tool content and scroll preservation across hiding and replacement",
+  );
   const runtimeOutput = cli("run-code", runtimeTranscriptChecks.toString());
   if (
     !runtimeOutput.includes("PASS runtime transcript provenance, markup, plain answers and restore")

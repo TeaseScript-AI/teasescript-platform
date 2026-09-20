@@ -23,11 +23,8 @@ export const sidebarMenuButtonVariants = cva(
         lg: "h-12 text-sm group-data-[collapsible=icon]:p-0!",
       },
     },
-    defaultVariants: {
-      variant: "default",
-      size: "default",
-    },
+    defaultVariants: { variant: "default", size: "default" },
   },
-)
+);
 
-export type SidebarMenuButtonVariants = VariantProps<typeof sidebarMenuButtonVariants>
+export type SidebarMenuButtonVariants = VariantProps<typeof sidebarMenuButtonVariants>;
