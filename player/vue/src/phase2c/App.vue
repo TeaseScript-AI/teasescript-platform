@@ -21,6 +21,9 @@ import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
 import type { PlayerThemeIntent } from "../../../theme/palette.js";
 import PlayerToolsShell from "./PlayerToolsShell.vue";
 import { usePlayerTheme } from "./usePlayerTheme";
+import { usePlayerKeyboardFocus } from "./usePlayerKeyboardFocus";
+
+usePlayerKeyboardFocus();
 
 const isDevelopment = import.meta.env.DEV;
 // Opt-in browser-test content; never populate the normal settings surface with fixtures.

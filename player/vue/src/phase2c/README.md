@@ -6,6 +6,9 @@ Keep experimental fixtures separate from the components that own settled behavio
 ## Responsibility boundaries
 
 - `App.vue` composes the Player and supplies development scenarios and tool contents.
+  It installs `usePlayerKeyboardFocus.ts` once for Player and body-portaled controls.
+  Pointer input hides focus rings; navigation keys reveal them without treating text
+  editing as navigation. Composer input marks its shell; Send retains its own focus target.
 - `PlayerToolsShell.vue` owns tool selection, pinning, ordering, resizing, retained
   content lifetime, focus and dock/drawer presentation. Its tool slot supplies
   content; its default slot supplies the Player. Closing a panel does not destroy

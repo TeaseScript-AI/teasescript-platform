@@ -159,6 +159,12 @@
   outline: 2px solid var(--theme-accent-focus);
   outline-offset: 2px;
 }
+/* Native :focus-visible includes mouse-focused text inputs. App's shared
+   navigation modality keeps editing quiet, including body-portaled controls. */
+:root[data-player-keyboard-focus="false"] :is(button, input, textarea, select, summary, a[href], [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: none;
+}
 
 @layer base {
   * {

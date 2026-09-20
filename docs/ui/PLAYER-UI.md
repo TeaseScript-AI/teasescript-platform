@@ -490,7 +490,15 @@ height instead of being capped again by a potentially stale dynamic-viewport uni
 usable bottom edge includes its reported top offset rather than treating its height alone as a document coordinate.
 
 The composer receives focus by default. Non-interactive Player clicks should not arbitrarily steal typing focus; an
-explicitly focused tool/input/control naturally owns keyboard input while it is active. Standard keyboard behavior is:
+explicitly focused tool/input/control naturally owns keyboard input while it is active.
+
+Focus indication distinguishes navigation from text editing. Clicking or touching the composer and then typing does
+not add a focus outline. Keyboard navigation into its input marks the integrated composer shell; Tab to Send removes
+that shell outline and marks only Send. Shift+Tab back marks the shell again. Send remains a separate keyboard focus
+target and invokes the same submission as Enter in the input. Ordinary editing keys do not switch pointer-origin focus
+to keyboard navigation. Player controls and body-portaled tool controls share this input-modality policy.
+
+Standard keyboard behavior is:
 
 - `Enter` submits;
 - `Shift+Enter` inserts a newline;
