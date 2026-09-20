@@ -98,11 +98,19 @@ function authoredFill(entry: PlayerTranscriptEntryPresentation) {
   const accent = props.speakers[entry.speakerId]?.accent;
   return accent !== undefined && accent !== "inherit" ? accent : null;
 }
+// Some entries are meant to be read rather than heard: narration, a description, a letter.
+// What marks one is a content question this component does not answer; the narrator stands
+// in for it here so the reading itself can be judged.
+function isProse(entry: PlayerTranscriptEntryPresentation) {
+  return entry.kind === "message" && entry.speakerId === "narrator";
+}
 const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => {
   const entry = props.entries[item.index]!;
-  const fill = authoredFill(entry);
+  const prose = props.design.prose !== "bubble" && isProse(entry);
+  // Prose has no bubble to fill, so an authored colour has nothing to land on here.
+  const fill = prose ? null : authoredFill(entry);
   return {
-    item, entry, fill,
+    item, entry, fill, prose,
     // Whatever an authored colour turns out to be, the words on it are measured against it.
     ink: fill === null ? null : inkFor(fill),
     backdrop: fill ?? palette.value.surface,
@@ -199,18 +207,30 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
         onTouchstart: onTouchStart, onTouchend: () => touching = false,
         onTouchcancel: () => touching = false }">
       <div class="transcript-history" role="list" :style="{ height: `${virtualizer.getTotalSize()}px` }">
-        <article v-for="{ item, entry, fill, ink, backdrop } in rows" :key="entry.id"
+        <article v-for="{ item, entry, fill, prose, ink, backdrop } in rows" :key="entry.id"
           :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
           :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
           role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
           class="transcript-entry" :data-continues="!startsGroup(item.index)"
+          :data-prose="prose ? design.prose : undefined"
           :style="{ transform: `translateY(${item.start}px)` }">
           <!-- Session events carry no authored story text and receive no designed treatment. -->
           <p v-if="entry.kind === 'session-event'" class="session-event">{{ entry.text }}</p>
+          <!-- A reading column leaves the conversation's alignment behind entirely: no side,
+               no avatar, a measure of its own and the attribution set above the text. -->
+          <div v-else-if="prose && design.prose === 'column'" class="prose-column">
+            <p v-if="startsGroup(item.index)" class="prose-attribution">
+              {{ speakers[entry.speakerId]?.name ?? entry.speakerId }}
+            </p>
+            <TranscriptMarkup v-if="entry.content" :content="entry.content"
+              :entry-id="entry.id" :backdrop="backdrop" :revealed="revealedSpoilers"
+              @reveal="revealedSpoilers.add($event)" />
+            <template v-else>{{ entry.text }}</template>
+          </div>
           <Message v-else :align="entry.speakerId === 'user' ? 'end' : 'start'">
             <!-- The avatar keeps its place through the run so the bubbles stay on one line. -->
             <MessageAvatar v-if="entry.speakerId !== 'user'"
-              class="self-start" :class="startsGroup(item.index) ? '' : 'invisible'">
+              class="self-start" :class="startsGroup(item.index) && !prose ? '' : 'invisible'">
               <Avatar>
                 <AvatarFallback class="text-xs font-semibold">{{ speakers[entry.speakerId]?.avatar }}</AvatarFallback>
               </Avatar>
@@ -219,12 +239,14 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
               <!-- Two caps, whichever binds first: three quarters of the column keeps a bubble
                    off the edge on a narrow window, and 65ch keeps the line readable on a wide one. -->
               <!-- The player's side is theme-owned and keeps the accent roles as they are. -->
-              <Bubble class="max-w-[min(75%,65ch)]"
+              <!-- Quiet prose keeps the conversation's own column and simply takes off the
+                   bubble's skin, so a passage can follow a line of dialogue without moving. -->
+              <Bubble :class="prose ? 'max-w-[65ch]' : 'max-w-[min(75%,65ch)]'"
                 :variant="entry.speakerId === 'user' ? 'default' : 'secondary'"
                 :align="entry.speakerId === 'user' ? 'end' : 'start'">
                 <BubbleContent class="text-base/normal"
-                  :class="[cornerClass(item.index, entry.speakerId === 'user'),
-                    entry.speakerId === 'user' ? '' : 'message-speaker', fill ? 'message-authored' : '']"
+                  :class="[prose ? 'prose-quiet' : cornerClass(item.index, entry.speakerId === 'user'),
+                    entry.speakerId === 'user' || prose ? '' : 'message-speaker', fill ? 'message-authored' : '']"
                   :style="fill ? { '--message-authored-fill': fill, color: ink } : undefined">
                   <MessageHeader v-if="showsName(item.index, entry.speakerId === 'user')"
                     class="px-0 pb-0.5">
@@ -299,6 +321,33 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
 /* The name is muted against the page, not against a coloured bubble. Inside one it
    steps back from the bubble's own text colour instead, which follows the mode. */
 .message-authored :deep([data-slot="message-header"]) { color: inherit; opacity: 0.72; }
+/* Prose is read, not overheard, so it asks for the room a paragraph needs: air above and
+   below to separate it from speech, and a looser line than a bubble would carry. */
+.transcript-entry[data-prose] { padding-block: 1.75rem 0.75rem; }
+.prose-quiet {
+  background: none;
+  border-color: transparent;
+  padding-inline: 0;
+  padding-block: 0;
+  line-height: 1.7;
+}
+.prose-column {
+  max-width: 68ch;
+  margin-inline: auto;
+  padding-inline: 1rem;
+  font-size: 1.0625rem;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* Attribution for prose is a label on the passage, not a speaker in a conversation. */
+.prose-attribution {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
 .session-event { margin: 0; font-size: 0.8125rem; color: var(--text-muted); }
 .transcript-empty { padding: 1rem; font-size: 0.875rem; color: var(--muted-foreground); }
 .return-to-latest {

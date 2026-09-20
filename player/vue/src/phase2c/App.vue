@@ -10,7 +10,7 @@ import Transcript from "./Transcript.vue";
 import ConversationSurface from "./ConversationSurface.vue";
 import { transcriptDesignDefaults } from "./transcriptDesign";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
-import { transcriptFixtures, transcriptFixtureSpeakers, transcriptMarkupFixtures } from "./transcriptFixtures";
+import { transcriptFixtures, transcriptFixtureSpeakers, transcriptMarkupFixtures, transcriptProseFixtures } from "./transcriptFixtures";
 import { createPlayerRuntimeSession, createPlayerRuntimeRestorePoint, restorePlayerRuntimeSession, type PlayerRuntimeSession, type PlayerRuntimeRestorePoint } from "../../../runtime-adapter.js";
 import { runtimeScenario, interactionScenario } from "./runtimeScenario";
 import { stageFixtures } from "./stageFixtures";
@@ -90,6 +90,12 @@ function loadMarkupSample() {
   transcriptEntries.value = transcriptMarkupFixtures();
   nextMessage = transcriptEntries.value.length;
 }
+function loadProseSample() {
+  runtimeSession.value = null;
+  firstMessage = 0;
+  transcriptEntries.value = transcriptProseFixtures();
+  nextMessage = transcriptEntries.value.length;
+}
 function appendTranscript() {
   transcriptEntries.value = [...transcriptEntries.value, ...transcriptFixtures(nextMessage++, 1)];
 }
@@ -157,6 +163,14 @@ async function toggleFullscreen() {
                 Authored colour
                 <input v-model="transcriptDesign.authoredAccent" type="color" />
               </label>
+              <label class="grid gap-2">
+                Prose entries
+                <select v-model="transcriptDesign.prose" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
+                  <option value="bubble">As a bubble</option>
+                  <option value="quiet">Quiet, same column</option>
+                  <option value="column">Own reading column</option>
+                </select>
+              </label>
             </fieldset>
             <fieldset class="grid min-w-0 gap-2">
               <legend class="mb-2">Timer fixtures</legend>
@@ -187,6 +201,7 @@ async function toggleFullscreen() {
               <Button class="min-w-0" variant="outline" @click="loadTranscript(0)">Empty history</Button>
               <Button class="min-w-0" variant="outline" @click="loadTranscript(10000)">Load 10,000 messages</Button>
               <Button class="min-w-0" variant="outline" @click="loadMarkupSample">Markup sample</Button>
+              <Button class="min-w-0" variant="outline" @click="loadProseSample">Prose sample</Button>
             </fieldset>
             <fieldset class="grid min-w-0 gap-2">
               <legend class="mb-2">Runtime transcript scenario</legend>

@@ -6,6 +6,7 @@ import { parseMessageMarkup } from "../../../../src/message-markup.js";
 
 export const transcriptFixtureSpeakers: Readonly<Record<string, PlayerSpeakerPresentation>> = {
   guide: { name: "Guide", accent: "inherit", avatar: "G", fontFamily: "inherit" },
+  narrator: { name: "Narrator", accent: "inherit", avatar: "N", fontFamily: "inherit" },
   user: { name: "You", accent: "inherit", avatar: "Y", fontFamily: "inherit" },
 };
 
@@ -39,6 +40,28 @@ export function transcriptMarkupFixtures(): PlayerTranscriptEntryPresentation[] 
   return markupSources.map(([speakerId, source], index) => {
     const content = parseMessageMarkup(source);
     return { id: `markup-${index}`, kind: "message", speakerId: speakerId!, text: content.visibleText, content };
+  });
+}
+
+// Prose has to be judged in company, not on its own: what matters is whether the two
+// readings can follow each other without the transcript looking like two interfaces.
+// Narration, an overheard letter and ordinary dialogue are interleaved for that reason.
+const proseSources: readonly (readonly [speaker: string, source: string])[] = [
+  ["guide", "There is something I want you to see before the light goes."],
+  ["user", "Lead the way."],
+  ["narrator", "The path leaves the harbour behind and climbs between the dunes. Marram grass leans all one way, combed flat by a wind that has not stopped since morning, and the sand underfoot gives a little at every step.\n\nBelow, the tide is going out. It uncovers a long grey shelf of rock that was not there an hour ago, and the water draining off it catches what is left of the sun."],
+  ["guide", "Careful here. The second dune is looser than it looks."],
+  ["narrator", "At the top the lighthouse stands closer than it seemed from the harbour, white against a sky that has begun to go green at the edges. Its lamp has not been lit yet."],
+  ["narrator", "*My dear,*\n\nIf you are reading this you have walked further than I ever managed. The keeper's house is open; the key is where it has always been, under the third stone from the door.\n\nDo not wait for the lamp. It comes on when it comes on, and the waiting is the worst of it.\n\n**— H.**"],
+  ["user", "Who wrote that?"],
+  ["guide", "Someone who knew the walk. Come on — the beam will start any moment."],
+];
+
+/** A mixed history for judging how prose and dialogue sit together. */
+export function transcriptProseFixtures(): PlayerTranscriptEntryPresentation[] {
+  return proseSources.map(([speakerId, source], index) => {
+    const content = parseMessageMarkup(source);
+    return { id: `prose-${index}`, kind: "message", speakerId: speakerId!, text: content.visibleText, content };
   });
 }
 
