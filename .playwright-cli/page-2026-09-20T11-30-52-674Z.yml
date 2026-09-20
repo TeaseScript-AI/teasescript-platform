@@ -1,0 +1,49 @@
+- main [ref=f4e4]:
+  - generic [ref=f4e5]:
+    - generic:
+      - button "Show sidebar" [ref=f4e6]:
+        - generic [ref=f4e7]: Toggle Sidebar
+      - heading "Evening by the coast" [level=1]
+      - group "Player display controls" [ref=f4e8]:
+        - button "Switch to dark theme" [ref=f4e9]
+        - button "Enter fullscreen" [ref=f4e10]
+    - region "Primary stage" [ref=f4e11]:
+      - img "Daylight coastal landscape, development illustration" [ref=f4e13]
+      - timer "Warm-up, 1:35 remaining" [ref=f4e17]:
+        - generic [ref=f4e23]:
+          - generic [ref=f4e24]: 1:35
+          - generic [ref=f4e25]: Warm-up
+    - generic [ref=f4e26]:
+      - region "Conversation" [ref=f4e27]:
+        - region "Transcript" [ref=f4e28]:
+          - list [ref=f4e29]:
+            - listitem [ref=f4e30]:
+              - generic [ref=f4e31]: Yes, let's continue.
+            - listitem [ref=f4e33]:
+              - generic [ref=f4e35]:
+                - strong [ref=f4e36]: "Guide:"
+                - text: Take a moment to look around. The path follows the coast from here.
+            - listitem [ref=f4e37]:
+              - generic [ref=f4e38]: I am ready. Where do we go next?
+            - listitem [ref=f4e40]:
+              - generic [ref=f4e42]:
+                - strong [ref=f4e43]: "Guide:"
+                - text: Beyond the harbour, a narrow path winds between the dunes. You can hear the waves before you see them, and the evening light turns the water silver. There is no need to hurry; we have time to notice the small things along the way.
+            - listitem [ref=f4e44]:
+              - generic [ref=f4e45]: I would like to stop by the water first. Then we can follow the path toward the lighthouse. Does that sound good?
+            - listitem [ref=f4e47]:
+              - generic [ref=f4e49]:
+                - strong [ref=f4e50]: "Guide:"
+                - text: Of course. Listen to the sea for a moment. Watch how the light changes as the clouds pass. When you are ready, we can continue.
+            - listitem [ref=f4e51]:
+              - generic [ref=f4e52]: Yes, let's continue.
+            - listitem [ref=f4e54]:
+              - generic [ref=f4e56]:
+                - strong [ref=f4e57]: "Guide:"
+                - text: Take a moment to look around. The path follows the coast from here.
+            - listitem [ref=f4e58]:
+              - generic [ref=f4e59]: I am ready. Where do we go next?
+      - generic [ref=f4e63]:
+        - textbox "Response" [disabled] [ref=f4e64]:
+          - /placeholder: Type your response...
+        - button "Send" [disabled]

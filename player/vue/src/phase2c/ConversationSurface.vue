@@ -32,6 +32,7 @@ useResizeObserver(overlay, () => {
 .conversation-surface { position: relative; display: flex; min-height: 0; padding-inline: var(--conversation-inline-inset); }
 .conversation-overlay {
   position: absolute; inset: auto var(--conversation-inline-inset) 0; z-index: 2; pointer-events: none;
+  max-inline-size: calc(var(--conversation-content-max-width) - 64px); margin-inline: auto;
   padding-top: 0.5rem; padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
 }
 .conversation-glass {
@@ -43,5 +44,34 @@ useResizeObserver(overlay, () => {
     background: color-mix(in srgb, var(--surface-component) 96%, transparent);
     backdrop-filter: blur(4px);
   }
+}
+</style>
+
+<!-- Selectors are rooted at this component; slotted controls keep the same material. -->
+<style>
+/* ConversationSurface owns one Composer material. The small enabled Send action
+   uses the primary family; the textarea and disabled controls stay transparent. */
+:root[data-phase2c-theme] [data-runtime-composer] > :is(textarea, button) {
+  color: var(--theme-text-primary);
+  background: transparent;
+  border-color: transparent;
+}
+:root[data-phase2c-theme] [data-runtime-composer] > button:enabled {
+  background: var(--theme-accent-solid);
+  color: var(--theme-text-on-accent);
+}
+:root[data-phase2c-theme] [data-runtime-composer] > :disabled {
+  color: var(--theme-text-disabled);
+  background: transparent;
+  border-color: transparent;
+}
+@media (any-hover: hover) {
+  :root[data-phase2c-theme] [data-runtime-composer] > button:enabled:hover {
+    background: var(--theme-accent-hover);
+  }
+}
+:root[data-phase2c-theme] [data-runtime-composer] > button:enabled:active {
+  background: var(--theme-accent-pressed);
+  transition-duration: 0s;
 }
 </style>

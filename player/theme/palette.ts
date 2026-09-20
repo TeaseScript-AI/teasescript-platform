@@ -7,7 +7,6 @@ export interface PlayerThemeIntent {
   readonly surfaceHue: number;
   readonly surfaceTint: number;
   readonly surfaceMaxChroma: 5 | 8.5 | 12;
-  readonly surfaceLadder: "material" | "teasescript";
   readonly monochrome: boolean;
   readonly accentSeed: OklchColor;
   readonly contrast: "standard" | "high";
@@ -27,7 +26,6 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
     !["light", "dark"].includes(intent.mode) ||
     !["standard", "high"].includes(intent.contrast) ||
     ![5, 8.5, 12].includes(intent.surfaceMaxChroma) ||
-    !["material", "teasescript"].includes(intent.surfaceLadder) ||
     typeof intent.monochrome !== "boolean" ||
     !Number.isFinite(intent.surfaceHue) ||
     !Number.isFinite(intent.surfaceTint) ||
@@ -39,19 +37,11 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
   const dark = intent.mode === "dark";
   const high = intent.contrast === "high";
   const textTarget = high ? 7 : 4.5;
-  // Provisional product policy: Material-oriented light containers descend in tone;
-  // TeaseScript containers rise. Floating surfaces and controls have their own depth.
-  const ladders = {
-    material: {
-      light: { canvas: 98, chrome: 95, raised: 92, floating: 99, control: 96 },
-      dark: { canvas: 8, chrome: 12, raised: 18, floating: 26, control: 22 },
-    },
-    teasescript: {
-      light: { canvas: high ? 92 : 94, chrome: 97, raised: 99, floating: 100, control: 96 },
-      dark: { canvas: high ? 10 : 14, chrome: 19, raised: 24, floating: 32, control: 27 },
-    },
-  } as const;
-  const tones = ladders[intent.surfaceLadder][intent.mode];
+  // Material-oriented surface hierarchy; tuning remains provisional.
+  const tones = {
+    light: { canvas: 98, chrome: 95, raised: 92, floating: 99, control: 96 },
+    dark: { canvas: 8, chrome: 12, raised: 18, floating: 26, control: 22 },
+  }[intent.mode];
   const hue = ((intent.surfaceHue % 360) + 360) % 360;
   const chroma = intent.monochrome ? 0 : intent.surfaceTint * intent.surfaceMaxChroma;
   // Tint lives principally in the canvas. Less chroma in nested surfaces keeps the

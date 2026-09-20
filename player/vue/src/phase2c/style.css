@@ -145,60 +145,6 @@
 :root[data-phase2c-theme] [role^="menuitem"]:active:not([data-disabled]) { background: var(--component-pressed); }
 :root[data-phase2c-theme] [role^="menuitem"][data-disabled] { color: var(--theme-text-disabled); opacity: 1; }
 
-/* Title and all top-media controls share one polarity-aware translucent material.
-   The surrounding top bar stays transparent so Stage content remains visible. */
-[data-player-top-bar] {
-  --media-surface: var(--theme-media-surface, oklch(96% 0.01 70 / 58%));
-  --media-text: var(--theme-media-text, oklch(15% 0 0));
-  --media-border: var(--theme-media-border, oklch(15% 0 0 / 22%));
-  --media-shadow: var(--theme-media-shadow, rgb(0 0 0 / 22%));
-}
-[data-player-top-bar] button {
-  --button-rest: transparent;
-  --button-hover: var(--theme-media-hover, oklch(86% 0.01 70 / 68%));
-  --button-pressed: var(--theme-media-pressed, oklch(78% 0.01 70 / 78%));
-  --button-text: var(--media-text);
-}
-[data-player-top-bar] :is(.player-top-bar-tools button, .player-top-bar-title > span) {
-  border: 1px solid var(--media-border);
-  box-shadow: 0 1px 3px var(--media-shadow);
-  backdrop-filter: blur(3px);
-}
-[data-player-top-bar] .player-top-bar-tools button {
-  --button-rest: var(--media-surface);
-}
-[data-player-top-bar] .player-top-bar-title > span {
-  background: var(--media-surface);
-  color: var(--media-text);
-}
-:root[data-phase2c-theme] [data-player-top-bar] button:disabled {
-  background: transparent;
-  color: var(--theme-media-text-disabled);
-}
-
-/* ConversationSurface owns one Composer material. The small enabled Send action
-   uses the primary family; the textarea and disabled controls stay transparent. */
-:root[data-phase2c-theme] [data-runtime-composer] > :is(textarea, button) {
-  color: var(--theme-text-primary);
-  background: transparent;
-  border-color: transparent;
-}
-:root[data-phase2c-theme] [data-runtime-composer] > button:enabled {
-  background: var(--theme-accent-solid);
-  color: var(--theme-text-on-accent);
-}
-:root[data-phase2c-theme] [data-runtime-composer] > :disabled {
-  color: var(--theme-text-disabled);
-}
-@media (any-hover: hover) {
-  :root[data-phase2c-theme] [data-runtime-composer] > button:enabled:hover {
-    background: var(--theme-accent-hover);
-  }
-}
-:root[data-phase2c-theme] [data-runtime-composer] > button:enabled:active {
-  background: var(--theme-accent-pressed);
-  transition-duration: 0s;
-}
 :root[data-phase2c-theme] :is(textarea, input)::placeholder { color: var(--theme-text-secondary); }
 :root[data-phase2c-theme] :is(button, textarea, input, select, summary, a[href], [data-tools-focus^="title:"]):focus-visible {
   outline: 2px solid var(--theme-accent-focus);

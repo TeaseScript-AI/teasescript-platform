@@ -4,14 +4,12 @@ import { computed } from "vue";
 import { oklchCss, oklchToPickerHex, pickerHexToOklch, type OklchColor } from "../../../theme/color.js";
 import { generatePlayerTheme, type PlayerThemeIntent } from "../../../theme/palette.js";
 
-const props = defineProps<{ enabled: boolean; intent: PlayerThemeIntent }>();
+const props = defineProps<{ intent: PlayerThemeIntent }>();
 const emit = defineEmits<{
-  "update:enabled": [enabled: boolean];
   "update:intent": [intent: PlayerThemeIntent];
 }>();
 const theme = computed(() => generatePlayerTheme(props.intent));
 const intent = computed(() => props.intent);
-const enabled = computed(() => props.enabled);
 function patchIntent(patch: Partial<PlayerThemeIntent>) {
   emit("update:intent", { ...props.intent, ...patch });
 }
@@ -21,9 +19,6 @@ function selectValue(event: Event) {
 function inputValue(event: Event) {
   return event.target instanceof HTMLInputElement ? event.target.value : "";
 }
-function setEnabled(event: Event) {
-  if (event.target instanceof HTMLInputElement) emit("update:enabled", event.target.checked);
-}
 function setMode(event: Event) {
   const mode = selectValue(event);
   if (mode === "light" || mode === "dark") patchIntent({ mode });
@@ -31,10 +26,6 @@ function setMode(event: Event) {
 function setContrast(event: Event) {
   const contrast = selectValue(event);
   if (contrast === "standard" || contrast === "high") patchIntent({ contrast });
-}
-function setSurfaceLadder(event: Event) {
-  const surfaceLadder = selectValue(event);
-  if (surfaceLadder === "material" || surfaceLadder === "teasescript") patchIntent({ surfaceLadder });
 }
 function setSurfaceMaxChroma(event: Event) {
   const surfaceMaxChroma = Number(selectValue(event));
@@ -70,7 +61,7 @@ function displayColor(color: OklchColor) {
   <section class="theme-lab grid gap-3" aria-label="Experimental Theme Lab">
     <h2 class="font-semibold">Theme Lab · experimental</h2>
     <p>Applies live to this Phase 2C Player. Palette values and contrast targets are provisional, not an accessibility certification.</p>
-    <label class="flex items-center gap-2"><input :checked="enabled" type="checkbox" @change="setEnabled" /> Generated dynamic theme</label>
+    <p>Material palette · light and dark</p>
     <fieldset class="grid gap-1">
       <legend>Development colour pairs</legend>
       <div class="flex flex-wrap gap-2">
@@ -86,9 +77,6 @@ function displayColor(color: OklchColor) {
     </label>
     <fieldset class="grid gap-2">
       <legend>Surface tint intent</legend>
-      <label class="grid gap-1">Surface ladder
-        <select :value="intent.surfaceLadder" aria-label="Surface ladder" @change="setSurfaceLadder"><option value="teasescript">TeaseScript · raised lighter</option><option value="material">Material-oriented comparison</option></select>
-      </label>
       <label class="grid gap-1">Maximum surface chroma
         <select :value="intent.surfaceMaxChroma" aria-label="Maximum surface chroma" @change="setSurfaceMaxChroma"><option :value="5">5 · quiet</option><option :value="8.5">8.5</option><option :value="12">12 · stronger</option></select>
       </label>
@@ -106,7 +94,7 @@ function displayColor(color: OklchColor) {
     </label>
     <output class="font-mono text-xs">{{ displayColor(intent.accentSeed) }}</output>
     <p>The picker acquires a literal accent color, retained as accent-solid. Surface hue/intensity are separate intent; they are not hidden inside a white color swatch.</p>
-    <p>{{ enabled ? 'Generated palette is active on the Player.' : 'The Player is using its current baseline palette.' }}</p>
+    <p>The palette applies live to the Player.</p>
     <details>
       <summary>Generated semantic roles ({{ Object.keys(theme.roles).length }})</summary>
       <ul class="grid gap-2 py-2">

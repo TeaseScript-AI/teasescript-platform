@@ -135,3 +135,38 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
   background: var(--surface-component);
 }
 </style>
+
+<!-- Selectors are rooted at this component; slotted controls keep the same material. -->
+<style>
+/* Title and all top-media controls share one polarity-aware translucent material.
+   The surrounding top bar stays transparent so Stage content remains visible. */
+[data-player-top-bar] {
+  --media-surface: var(--theme-media-surface, oklch(96% 0.01 70 / 58%));
+  --media-text: var(--theme-media-text, oklch(15% 0 0));
+  --media-border: var(--theme-media-border, oklch(15% 0 0 / 22%));
+  --media-shadow: var(--theme-media-shadow, rgb(0 0 0 / 22%));
+}
+[data-player-top-bar] button {
+  --button-rest: transparent;
+  --button-hover: var(--theme-media-hover, oklch(86% 0.01 70 / 68%));
+  --button-pressed: var(--theme-media-pressed, oklch(78% 0.01 70 / 78%));
+  --button-text: var(--media-text);
+}
+[data-player-top-bar] :is(.player-top-bar-tools button, .player-top-bar-title > span) {
+  border: 1px solid var(--media-border);
+  box-shadow: 0 1px 3px var(--media-shadow);
+  backdrop-filter: blur(3px);
+}
+[data-player-top-bar] .player-top-bar-tools button {
+  --button-rest: var(--media-surface);
+}
+[data-player-top-bar] .player-top-bar-title > span {
+  background: var(--media-surface);
+  color: var(--media-text);
+}
+:root[data-phase2c-theme] [data-player-top-bar] button:disabled {
+  background: transparent;
+  color: var(--theme-media-text-disabled);
+}
+
+</style>

@@ -70,29 +70,10 @@ async function checks(page) {
   const scene = await root.evaluate((element) =>
     getComputedStyle(element).getPropertyValue("--scene-ambient"),
   );
-  // Existing root inline values are restored rather than deleted by the application adapter.
-  await root.evaluate((element) =>
-    element.style.setProperty("--theme-surface-canvas", "oklch(0.91 0.01 70)", "important"),
-  );
-  const originalInline = await root.getAttribute("style");
-  await lab.getByLabel("Generated dynamic theme").check();
   await lab.getByLabel("Theme mode", { exact: true }).selectOption("dark");
   await page.waitForTimeout(250);
   const dark = await readPlayer();
-  for (const key of [
-    "canvas",
-    "wash",
-    "panel",
-    "sidebar",
-    "text",
-    "composer",
-    "title",
-    "titleShadow",
-    "timerText",
-    "timerSurface",
-    "timerArc",
-    "timerShadow",
-  ]) {
+  for (const key of ["canvas", "wash", "panel", "sidebar", "text", "composer", "title"]) {
     check(dark[key] !== baseline[key], `${key} must follow the live Player theme`);
   }
   check(
@@ -132,7 +113,7 @@ async function checks(page) {
       `${selector} ${property} must consume ${name}`,
     );
   };
-  await assertRole(".timer-label", "color", "text-primary");
+  await assertRole(".timer-label", "color", "overlay-text");
   await assertRole(".timer-arc", "stroke", "accent-solid");
   // Body-portaled menus and dialogs must inherit the same root theme.
   await page
@@ -155,13 +136,13 @@ async function checks(page) {
   await page.waitForTimeout(250);
   const light = await readPlayer();
   check(
-    light.canvas !== dark.canvas && light.timerSurface !== dark.timerSurface,
-    "Light polarity must update Player and Timer",
+    light.canvas !== dark.canvas && light.timerSurface === dark.timerSurface,
+    "Light polarity updates the canvas while preserving the Timer overlay",
   );
-  await assertRole(".timer-label", "color", "text-primary");
+  await assertRole(".timer-label", "color", "overlay-text");
   await lab.getByLabel("Theme contrast", { exact: true }).selectOption("high");
   const beforePicker = await role("accent-solid");
-  await lab.getByLabel("Accent seed").evaluate((element) => {
+  await lab.getByLabel("Accent color").evaluate((element) => {
     element.value = "#00ff00";
     element.dispatchEvent(new Event("input", { bubbles: true }));
   });
@@ -183,21 +164,6 @@ async function checks(page) {
     (await lab.getByText(/text-on-accent \/ accent-solid:/).count()) === 1,
     "Measured contrast must be inspectable",
   );
-  await lab.getByLabel("Generated dynamic theme").uncheck();
-  await page.waitForTimeout(250);
-  check(
-    JSON.stringify(await readPlayer()) === JSON.stringify(baseline),
-    "Off must restore exact Player and Timer baseline",
-  );
-  check(
-    (await root.getAttribute("style")) === originalInline,
-    "Off must restore pre-existing inline values and priority",
-  );
-  check(
-    (await root.getAttribute("data-phase2c-theme")) === null,
-    "Off must clear the application mode",
-  );
-  await lab.getByLabel("Generated dynamic theme").check();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForFunction(
     () => document.querySelector("#phase2c-shell").dataset.narrow === "true",
@@ -213,17 +179,14 @@ async function checks(page) {
     await lab.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
     "Narrow Lab must not overflow",
   );
-  await lab.getByLabel("Generated dynamic theme").uncheck();
   check(errors.length === 0, `Unexpected browser errors: ${errors.join("; ")}`);
-  return "PASS live Player themes, Timer colors, portals, controls and exact baseline restore";
+  return "PASS live Player themes, Timer colors, portals, controls";
 }
 try {
   cli("open", url);
   const result = cli("run-code", checks.toString());
   if (!result.includes("PASS live Player themes")) throw new Error(result);
-  console.log(
-    "theme-lab-browser-checks: PASS live Player themes, Timer colors, portals, controls and exact baseline restore",
-  );
+  console.log("theme-lab-browser-checks: PASS live Player themes, Timer colors, portals, controls");
 } finally {
   try {
     cli("close");

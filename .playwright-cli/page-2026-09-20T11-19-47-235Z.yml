@@ -1,0 +1,66 @@
+- generic [ref=e3]:
+  - generic [ref=e7]:
+    - generic [ref=e8]:
+      - generic [ref=e9]:
+        - button "Hide sidebar" [ref=e11]:
+          - generic [ref=e12]: Toggle Sidebar
+        - navigation "Tools" [ref=e13]:
+          - list [ref=e14]:
+            - listitem [ref=e15]:
+              - button "Visual Lab" [ref=e16]
+            - listitem [ref=e19]:
+              - button "Layout Debug" [ref=e20]
+            - listitem [ref=e26]:
+              - button "Playback Diagnostics" [ref=e27]
+            - listitem [ref=e30]:
+              - button "Media Playback Configuration" [ref=e31]
+        - button "Settings" [ref=e34]
+      - separator "Menu Sidebar width" [ref=e38]
+    - region "Tool Panels"
+  - main [ref=e39]:
+    - generic [ref=e40]:
+      - generic:
+        - heading "Evening by the coast" [level=1]
+        - group "Player display controls" [ref=e41]:
+          - button "Switch to dark theme" [ref=e42]
+          - button "Enter fullscreen" [ref=e43]
+      - region "Primary stage" [ref=e44]:
+        - img "Daylight coastal landscape, development illustration" [ref=e46]
+        - timer "Warm-up, 1:35 remaining" [ref=e50]:
+          - generic [ref=e56]:
+            - generic [ref=e57]: 1:35
+            - generic [ref=e58]: Warm-up
+      - generic [ref=e59]:
+        - region "Conversation" [ref=e60]:
+          - region "Transcript" [ref=e61]:
+            - list [ref=e62]:
+              - listitem [ref=e63]:
+                - generic [ref=e64]: Yes, let's continue.
+              - listitem [ref=e66]:
+                - generic [ref=e68]:
+                  - strong [ref=e69]: "Guide:"
+                  - text: Take a moment to look around. The path follows the coast from here.
+              - listitem [ref=e70]:
+                - generic [ref=e71]: I am ready. Where do we go next?
+              - listitem [ref=e73]:
+                - generic [ref=e75]:
+                  - strong [ref=e76]: "Guide:"
+                  - text: Beyond the harbour, a narrow path winds between the dunes. You can hear the waves before you see them, and the evening light turns the water silver. There is no need to hurry; we have time to notice the small things along the way.
+              - listitem [ref=e77]:
+                - generic [ref=e78]: I would like to stop by the water first. Then we can follow the path toward the lighthouse. Does that sound good?
+              - listitem [ref=e80]:
+                - generic [ref=e82]:
+                  - strong [ref=e83]: "Guide:"
+                  - text: Of course. Listen to the sea for a moment. Watch how the light changes as the clouds pass. When you are ready, we can continue.
+              - listitem [ref=e84]:
+                - generic [ref=e85]: Yes, let's continue.
+              - listitem [ref=e87]:
+                - generic [ref=e89]:
+                  - strong [ref=e90]: "Guide:"
+                  - text: Take a moment to look around. The path follows the coast from here.
+              - listitem [ref=e91]:
+                - generic [ref=e92]: I am ready. Where do we go next?
+        - generic [ref=e96]:
+          - textbox "Response" [disabled] [ref=e97]:
+            - /placeholder: Type your response...
+          - button "Send" [disabled]
