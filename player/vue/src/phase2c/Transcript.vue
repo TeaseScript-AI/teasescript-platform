@@ -119,9 +119,11 @@ const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => {
     item, entry, fill, prose,
     // The runtime sends null when the author chose nothing; this is what fills it in.
     placement: prose === null ? null : props.design.prose[prose],
-    // Whatever an authored colour turns out to be, the words on it are measured against it.
-    ink: fill === null ? null : inkFor(fill),
-    backdrop: fill ?? palette.value.surface,
+    // Whatever an authored colour turns out to be, the words on it are measured against
+    // it. The theme's own surface stays underneath: a fill the author left partly
+    // see-through is not the colour the reader ends up looking at.
+    ink: fill === null ? null : inkFor(palette.value.surface, fill),
+    backdrop: fill === null ? [palette.value.surface] : [palette.value.surface, fill],
   };
 }));
 const showLatest = computed(() => !touching.value && !virtualizer.value.isScrolling &&

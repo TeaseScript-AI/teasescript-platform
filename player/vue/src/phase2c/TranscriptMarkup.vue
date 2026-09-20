@@ -6,8 +6,8 @@ import TranscriptLine from "./TranscriptLine.vue";
 
 const props = defineProps<{
   content: MessageMarkup;
-  /** The realized bubble colour an authored text colour has to survive against. */
-  backdrop: string;
+  /** The layers an authored text colour has to survive against, outermost first. */
+  backdrop: readonly string[];
 }>();
 const blocks = computed(() => preparePlayerMessageMarkup(props.content));
 </script>
@@ -85,15 +85,10 @@ blockquote {
 :deep(.markup-code) {
   font-family: monospace;
 }
-/* The author chose the colour, the reader chose the theme, and they meet here. Where both
-   land on the same side of the light/dark divide the words would disappear, so a scrim
-   behind them restores the contrast and leaves the authored colour exactly as written.
-   --message-ink is 1 on a light bubble and 0 on a dark one; the clash term is 1 only when
-   the two sides agree, which fades the scrim out entirely everywhere else. */
+/* The author chose the colour, the reader chose the theme, and they meet here. Where the
+   pair would leave the words unreadable a cover is painted behind them, measured per
+   message and supplied as a background layer; only its shape belongs here. */
 :deep(.markup-scrim) {
-  --scrim-clash: calc(1 - (var(--author-light) + var(--message-ink, 1)
-    - 2 * var(--author-light) * var(--message-ink, 1)));
-  background: oklch(calc(1 - var(--author-light)) 0 0 / calc(var(--scrim-clash) * var(--scrim-alpha)));
   border-radius: 0.2em;
   padding-inline: 0.12em;
 }

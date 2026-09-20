@@ -39,6 +39,11 @@ const markupSources: readonly (readonly [speaker: string, source: string])[] = [
   // bubble on the dark side, so classifying each of them would call the pair safe, yet
   // measuring it gives about three to one.
   ["guide", "Authored colours: [color=#ffe066]pale yellow[/color], [color=#1a1a2e]near black[/color], [color=#8a8a8a]mid grey[/color], and [color=#c2185b]deep pink[/color]."],
+  // An author is free to set the words and what is behind them, and free to set them to
+  // nearly the same thing. Nobody chose that on purpose, so the pair still has to be
+  // measured as painted; the last one is partly see-through on both sides, where reading
+  // the colours as written would report a contrast the reader never gets.
+  ["guide", "[bg=#2b3a8f][color=#3344aa]Blue on blue[/color][/bg], [bg=#f2e9c9][color=#efe4c0]cream on cream[/color][/bg], and [bg=rgb(0 0 0 / 0.15)][color=rgb(40 40 40 / 0.45)]a faint grey on a faint shade[/color][/bg]."],
   ["user", "Understood. I will follow the posts."],
 ];
 

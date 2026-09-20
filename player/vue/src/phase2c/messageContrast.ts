@@ -32,30 +32,41 @@ function ratio(first: number, second: number) {
 }
 
 /**
+ * What a colour is worth once every layer under it has had its say. A colour may be
+ * partly see-through, and then the visible result is not the colour but the stack, so
+ * both the words and the surface they sit on are read off the same painted stack.
+ */
+function contrast(backdrop: readonly string[], colour: string) {
+  return ratio(luminance(paint(...backdrop, colour)), luminance(paint(...backdrop)));
+}
+
+/**
  * The ink a realized bubble can carry. A tone near the crossover reads as light to one
  * hue and dark to another, so the pair is measured rather than classified.
  */
-export function inkFor(backdrop: string) {
-  const behind = luminance(paint(backdrop));
+export function inkFor(...backdrop: readonly string[]) {
+  const behind = luminance(paint(...backdrop));
   return 1.05 / (behind + 0.05) >= (behind + 0.05) / 0.05 ? "#ffffff" : "#000000";
 }
 
 /**
- * The least cover an authored colour needs to stay readable on this backdrop, or null
- * when it needs none. Cover runs toward whichever pole the colour is furthest from, so
- * more of it always helps and the smallest sufficient amount can be narrowed down.
+ * The least cover an authored colour needs to stay readable on the layers beneath it, or
+ * null when it needs none. Which way to cover is measured rather than reasoned about:
+ * words that are themselves partly see-through move along with whatever is put behind
+ * them, so both poles are tried and the one that gains ground is the one narrowed down.
+ * When even full cover falls short this returns it anyway, because the alternative is to
+ * leave the words as they were.
  */
-export function scrimFor(colour: string, backdrop: string, target = 4.6) {
-  const text = luminance(paint(colour));
-  const behind = luminance(paint(backdrop));
-  if (ratio(text, behind) >= target) return null;
-  const pole = text > 0.179 ? "0 0 0" : "255 255 255";
+export function scrimFor(colour: string, backdrop: readonly string[], target = 4.6) {
+  if (contrast(backdrop, colour) >= target) return null;
+  const poles = ["0 0 0", "255 255 255"] as const;
+  const pole = contrast([...backdrop, `rgb(${poles[0]})`], colour) >=
+    contrast([...backdrop, `rgb(${poles[1]})`], colour) ? poles[0] : poles[1];
   let insufficient = 0;
   let sufficient = 1;
   for (let step = 0; step < 12; step += 1) {
     const cover = (insufficient + sufficient) / 2;
-    const candidate = luminance(paint(backdrop, `rgb(${pole} / ${cover})`));
-    if (ratio(text, candidate) >= target) sufficient = cover;
+    if (contrast([...backdrop, `rgb(${pole} / ${cover})`], colour) >= target) sufficient = cover;
     else insufficient = cover;
   }
   return `rgb(${pole} / ${sufficient.toFixed(3)})`;
