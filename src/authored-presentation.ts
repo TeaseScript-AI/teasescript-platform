@@ -1,5 +1,5 @@
 import type { Expression } from "./ast.js";
-import { normalizeColor, normalizeOpaqueColor } from "./color.js";
+import { normalizeColor } from "./color.js";
 import { staticVisibleText } from "./static-evaluation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { parseMessageMarkup } from "./message-markup.js";
@@ -26,12 +26,8 @@ export function presentationPropertyDiagnostics(
   const text = staticVisibleText(expression);
   if (text === undefined || expression.kind === "nullLiteral") return [];
   let message: string | null = null;
-  if (name === "color" || name === "background") {
-    // A see-through colour is a valid colour; it is only text that cannot be set in one.
-    if (normalizeColor(text) === null) message = "Invalid authored colour.";
-    else if (name === "color" && normalizeOpaqueColor(text) === null)
-      message = "A text colour must be opaque.";
-  }
+  if ((name === "color" || name === "background") && normalizeColor(text) === null)
+    message = "Invalid authored colour.";
   if ((name === "position" || name === "align") && !["left", "center", "right"].includes(text))
     message = `Invalid ${name}; expected left, center or right.`;
   if ((name === "presentation" || name === "kind") && text !== "bubble" && text !== "prose")

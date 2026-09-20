@@ -6,8 +6,8 @@ import TranscriptLine from "./TranscriptLine.vue";
 
 const props = defineProps<{
   content: MessageMarkup;
-  /** The layers an authored text colour has to survive against, outermost first. */
-  backdrop: readonly string[];
+  /** The realized bubble colour an authored text colour has to survive against. */
+  backdrop: string;
 }>();
 const blocks = computed(() => preparePlayerMessageMarkup(props.content));
 </script>

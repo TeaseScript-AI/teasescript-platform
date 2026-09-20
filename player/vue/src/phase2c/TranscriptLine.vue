@@ -5,8 +5,8 @@ import { scrimFor } from "./messageContrast";
 
 const props = defineProps<{
   pieces: readonly PlayerMarkupPiece[];
-  /** Every layer already under these words, outermost first. */
-  backdrop: readonly string[];
+  /** The realized surface already under these words. */
+  backdrop: string;
 }>();
 // A bubble colour is settled once and then met by every message that follows, so this
 // pairing is one no author ever looked at and the words are covered by however much it

@@ -1,4 +1,4 @@
-import { isNormalizedColor, isOpaqueColor } from "./color.js";
+import { isNormalizedColor } from "./color.js";
 
 export interface MessagePresentation {
   readonly kind: "bubble" | "prose";
@@ -23,7 +23,7 @@ export function isMessagePresentation(value: unknown): value is MessagePresentat
         ["left", "center", "right"].includes(record.position))) &&
     (record.align === null ||
       (typeof record.align === "string" && ["left", "center", "right"].includes(record.align))) &&
-    (record.color === null || isOpaqueColor(record.color)) &&
+    (record.color === null || isNormalizedColor(record.color)) &&
     (record.background === null || isNormalizedColor(record.background)) &&
     (record.font === null || typeof record.font === "string")
   );

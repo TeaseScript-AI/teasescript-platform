@@ -2,7 +2,7 @@ import Color from "colorjs.io";
 
 const NORMALIZED_NUMBER = "(-?\\d+(?:\\.\\d+)?(?:e[+-]?\\d+)?)";
 const NORMALIZED_COLOR = new RegExp(
-  `^oklch\\(${NORMALIZED_NUMBER} ${NORMALIZED_NUMBER} ${NORMALIZED_NUMBER} / ${NORMALIZED_NUMBER}\\)$`,
+  `^oklch\\(${NORMALIZED_NUMBER} ${NORMALIZED_NUMBER} ${NORMALIZED_NUMBER}\\)$`,
   "u",
 );
 
@@ -85,7 +85,15 @@ function clampInputChannels(color: Color): void {
   }
 }
 
-/** Concrete CSS colours only; no host variables, relative colours or executable CSS. */
+/**
+ * Concrete opaque CSS colours only; no host variables, relative colours or executable CSS.
+ *
+ * A colour that lets what is behind it through is not a colour a story can hand over: the
+ * surface beneath it belongs to the Player and changes with the reader's theme, so the
+ * result would be something nobody chose. Every colour arriving from a story passes here,
+ * which is why the rule lives here and needs no exception anywhere downstream. The
+ * Player's own interface is not bound by it.
+ */
 export function normalizeColor(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const source = value.trim().toLowerCase();
@@ -101,12 +109,13 @@ export function normalizeColor(value: unknown): string | null {
       )
     )
       return null;
+    if (parsed.alpha !== 1) return null;
     clampInputChannels(parsed);
     const color = parsed.to("oklch");
     const coordinates = color.coords.map((coordinate) => coordinate ?? 0);
-    if (![...coordinates, color.alpha].every(Number.isFinite)) return null;
+    if (!coordinates.every(Number.isFinite)) return null;
     const [lightness, chroma, hue] = coordinates;
-    return `oklch(${lightness} ${chroma} ${hue} / ${color.alpha})`;
+    return `oklch(${lightness} ${chroma} ${hue})`;
   } catch {
     return null;
   }
@@ -115,23 +124,5 @@ export function normalizeColor(value: unknown): string | null {
 export function isNormalizedColor(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const match = NORMALIZED_COLOR.exec(value);
-  if (match === null) return false;
-  const numbers = match.slice(1).map(Number);
-  return numbers.every(Number.isFinite) && numbers[3]! >= 0 && numbers[3]! <= 1;
-}
-
-/**
- * A colour that lets nothing through. Words are thin strokes over whatever lies beneath
- * them, so a see-through one hands the reader a colour nobody picked and one no amount of
- * cover behind the line can bring back: the letters simply move with it. A surface is a
- * different matter, which is why this is asked of text and not of everything.
- */
-export function isOpaqueColor(value: unknown): value is string {
-  return isNormalizedColor(value) && Number(NORMALIZED_COLOR.exec(value)![4]) === 1;
-}
-
-/** As normalizeColor, for a colour that words are going to be set in. */
-export function normalizeOpaqueColor(value: unknown): string | null {
-  const color = normalizeColor(value);
-  return color !== null && isOpaqueColor(color) ? color : null;
+  return match !== null && match.slice(1).map(Number).every(Number.isFinite);
 }

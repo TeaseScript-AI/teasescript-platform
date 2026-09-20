@@ -2678,15 +2678,14 @@ say prose(background: "ivory", color: "#302820") "A letter."
 The compiler retains omitted message options as inheritance, not as frozen effective values. The runtime selects the
 explicit mode, then the speaker's mode, then `bubble`. Each option resolves from the message, then the selected
 speaker-mode object, then the platform default. `color` and `font` additionally fall back to the general speaker fields.
-Overrides affect only that message. Explicit `null` behaves as omission; an explicit transparent colour overrides an
-inherited background.
+Overrides affect only that message. Explicit `null` behaves as omission.
 
 After message and speaker inheritance, an unchosen `position` or `align` remains `null` in the emitted presentation.
 The runtime does not supply a default for either field; the Player selects their defaults in #421. Explicit choices
 remain distinguishable from omission. `position` places the whole block; `align` sets the text within it. Both accept
 `"left"`, `"center"`, or `"right"`. Bubble backgrounds and unspecified text/font use Player theme
-roles; the runtime represents these theme selections with `null`. Prose background defaults to transparent, independently
-of the speaker's bubble background. Prose retains speaker provenance but has no avatar by default; visible name treatment
+roles; the runtime represents these theme selections with `null`. Prose has no background default: a prose message
+whose background was never chosen reports `null`, and the Player decides whether it draws a panel at all. Prose retains speaker provenance but has no avatar by default; visible name treatment
 belongs to the Player presentation design. These defaults do not introduce a new avatar/name visibility syntax.
 
 Option expressions evaluate once in written order before the text and pacing expressions, under the selected speaker
@@ -2697,16 +2696,23 @@ properties. The resulting presentation is captured with the message across pacin
 
 **Status:** Accepted (Owner-approved extension for #422).
 
-Concrete colour values accept CSS colour names (including `transparent`), 3/4/6/8-digit hex, `rgb()`/`rgba()`,
-`hsl()`/`hsla()`, `hwb()`, `lab()`, `lch()`, `oklab()`, and `oklch()`, including their alpha forms. Hex and RGB use standard
-sRGB. Host-dependent values such as `var()` and `currentColor`, relative colours, and explicit linear RGB are excluded.
+Authored colours are always opaque. Concrete colour values accept CSS colour names, 3/4/6/8-digit hex,
+`rgb()`/`rgba()`, `hsl()`/`hsla()`, `hwb()`, `lab()`, `lch()`, `oklab()`, and `oklch()`. Hex and RGB use standard sRGB.
+Host-dependent values such as `var()` and `currentColor`, relative colours, and explicit linear RGB are excluded.
+
+An alpha channel below full opacity is not a valid authored colour, and neither is `transparent`. The surface beneath
+an authored colour belongs to the Player and moves with the reader's theme, so a colour that shows it through produces
+a result the author never chose. The alpha notations remain accepted spellings at full opacity: `#ff0000ff` and
+`rgb(255 0 0 / 1)` are ordinary red. This applies equally to text and to backgrounds, to speaker properties and to
+message options, and to statically written and dynamically computed colours alike. It is a rule about colours a story
+supplies; the Player's own interface uses transparency freely.
 
 The compiler validates constant speaker-declaration and message-option colours while retaining their authored values.
-The runtime normalizes both constant and dynamic colours to OKLCH with alpha when preparing output. Converted values
+The runtime normalizes both constant and dynamic colours to OKLCH when preparing output. Converted values
 are not parsed again as authored input: CSS input-channel clamping must not alter previously converted coordinates.
 Message markup follows its existing complete-string parse after interpolation. Invalid statically known colours in these authored positions produce source-associated compiler
 errors. Valid out-of-gamut coordinates are retained without a gamut warning or silent gamut mapping; display mapping
-belongs to the browser. CSS colour parsing rules still govern the input notation's channels and alpha.
+belongs to the browser. CSS colour parsing rules still govern the input notation's channels.
 
 An invalid runtime colour falls back to the next applicable default without aborting the story. General warning,
 logging, and recovery policy is separate work in #427. This fallback does not suppress failures evaluating the expression

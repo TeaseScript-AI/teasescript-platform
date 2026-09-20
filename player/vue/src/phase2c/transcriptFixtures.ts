@@ -58,13 +58,6 @@ const markupSources: readonly (readonly [speaker: string, source: string])[] = [
     "guide",
     "Chosen together: [bg=#2b3a8f][color=#3344aa]blue on blue[/color][/bg] and [bg=#f2e9c9][color=#efe4c0]cream on cream[/color][/bg].",
   ],
-  // What sits behind the words may let the bubble through, so it belongs to the speaker
-  // as much as to the message. The words themselves may not: a colour the reader looks
-  // through is one nobody picked, and no cover behind the line brings it back.
-  [
-    "guide",
-    "Behind the words: [bg=rgb(0 0 0 / 0.12)]a wash that keeps the bubble[/bg], and [bg=rgb(120 40 160 / 0.35)]a tint that takes its hue from it[/bg].",
-  ],
   ["user", "Understood. I will follow the posts."],
 ];
 

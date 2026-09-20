@@ -1,4 +1,4 @@
-import { normalizeColor, normalizeOpaqueColor, isNormalizedColor, isOpaqueColor } from "./color.js";
+import { normalizeColor, isNormalizedColor } from "./color.js";
 
 export type MessageMarkupLineEnding = "" | "\n" | "\r\n";
 
@@ -417,8 +417,7 @@ function validMessageMarkupSpan(value: unknown, textLength: number): value is Me
     return validUrl(value.target) === value.target;
   }
   if (typeof value.value !== "string") return false;
-  if (value.kind === "color") return value.value === "inherit" || isOpaqueColor(value.value);
-  if (value.kind === "backgroundColor")
+  if (value.kind === "color" || value.kind === "backgroundColor")
     return value.value === "inherit" || isNormalizedColor(value.value);
   if (value.kind === "weight") return WEIGHTS.has(value.value);
   if (value.kind === "size") return SIZES.has(value.value);
@@ -792,9 +791,7 @@ function extensionOpeningAt(
 
   const color = /^\[(color|bg)=([^\]]*)\]$/u.exec(text);
   if (color !== null) {
-    // What sits behind the words may let the surface through; the words themselves may not.
-    const normalized =
-      color[1] === "color" ? normalizeOpaqueColor(color[2]) : normalizeColor(color[2]);
+    const normalized = normalizeColor(color[2]);
     return extension(
       color[1] === "color" ? "color" : "backgroundColor",
       text,
