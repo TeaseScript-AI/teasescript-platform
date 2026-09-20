@@ -16,6 +16,7 @@ const props = defineProps<{
 }>();
 const scrollElement = ref<HTMLDivElement | null>(null);
 const touching = ref(false);
+const viewportHeight = ref(0);
 const foregroundElement = ref<HTMLElement | null>(null);
 const foregroundHeight = ref(0);
 useResizeObserver(foregroundElement, () => {
@@ -49,6 +50,9 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(computed(() => {
       const previous = instance.scrollRect;
       const following = previous !== null &&
         instance.getTotalSize() - (instance.scrollOffset ?? 0) - previous.height <= latestThreshold;
+      // A resize need not change the virtual item range, so TanStack may not
+      // emit onChange. Publish its measured height for the bottom alignment.
+      viewportHeight.value = rect.height;
       callback(rect);
       if (following && !touching.value && previous?.height !== rect.height) {
         void nextTick(() => instance.scrollToEnd());
@@ -67,7 +71,7 @@ watch(endInset, (inset, previous) => {
 // Short histories use the free space above the messages. Once content overflows,
 // this offset is zero and TanStack retains its normal scroll coordinates.
 const historyHeight = computed(() => Math.max(
-  virtualizer.value.getTotalSize(), virtualizer.value.scrollRect?.height ?? 0,
+  virtualizer.value.getTotalSize(), viewportHeight.value,
 ));
 const historyOffset = computed(() => historyHeight.value - virtualizer.value.getTotalSize());
 const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => ({
