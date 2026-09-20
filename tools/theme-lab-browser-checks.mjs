@@ -70,7 +70,7 @@ async function checks(page) {
   const scene = await root.evaluate((element) =>
     getComputedStyle(element).getPropertyValue("--scene-ambient"),
   );
-  await lab.getByLabel("Theme mode", { exact: true }).selectOption("dark");
+  await page.getByRole("button", { name: "Switch to dark theme", exact: true }).click();
   await page.waitForTimeout(250);
   const dark = await readPlayer();
   for (const key of ["canvas", "wash", "panel", "sidebar", "text", "composer", "title"]) {
@@ -132,7 +132,7 @@ async function checks(page) {
   await assertRole('[data-slot="dialog-content"]', "backgroundColor", "surface-floating");
   await assertRole('[data-slot="dialog-overlay"]', "backgroundColor", "structural-scrim");
   await page.keyboard.press("Escape");
-  await lab.getByLabel("Theme mode", { exact: true }).selectOption("light");
+  await page.getByRole("button", { name: "Switch to light theme", exact: true }).click();
   await page.waitForTimeout(250);
   const light = await readPlayer();
   check(
@@ -173,7 +173,7 @@ async function checks(page) {
   if (!(await lab.isVisible())) {
     await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
   }
-  await lab.getByLabel("Theme mode", { exact: true }).selectOption("dark");
+  await page.getByRole("button", { name: "Switch to dark theme", exact: true }).click();
   await assertRole(".timer-arc", "stroke", "accent-solid");
   check(
     await lab.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),

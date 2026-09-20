@@ -19,10 +19,6 @@ function selectValue(event: Event) {
 function inputValue(event: Event) {
   return event.target instanceof HTMLInputElement ? event.target.value : "";
 }
-function setMode(event: Event) {
-  const mode = selectValue(event);
-  if (mode === "light" || mode === "dark") patchIntent({ mode });
-}
 function setContrast(event: Event) {
   const contrast = selectValue(event);
   if (contrast === "standard" || contrast === "high") patchIntent({ contrast });
@@ -69,9 +65,6 @@ function displayColor(color: OklchColor) {
         <Button variant="outline" size="sm" @click="comparePair('cool')">Cool · blue</Button>
       </div>
     </fieldset>
-    <label class="grid gap-1">Theme mode
-      <select :value="intent.mode" aria-label="Theme mode" @change="setMode"><option value="light">Light</option><option value="dark">Dark</option></select>
-    </label>
     <label class="grid gap-1">Theme contrast
       <select :value="intent.contrast" aria-label="Theme contrast" @change="setContrast"><option value="standard">Standard</option><option value="high">High</option></select>
     </label>
