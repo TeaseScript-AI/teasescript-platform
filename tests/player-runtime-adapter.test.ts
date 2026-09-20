@@ -19,6 +19,30 @@ import {
   submitPlayerRuntimeComposer,
 } from "../player/runtime-adapter.js";
 
+test("runtime adapter delivers resolved authored presentation and preserves it on restore", () => {
+  const session = createPlayerRuntimeSession(`
+speaker guide {
+  font: "Georgia"
+  color: "red"
+  prose: { align: "left" }
+}
+say as guide prose(position: "right", background: "ivory") "A letter", instant
+showButton "Continue"
+`);
+  const entry = session.transcriptEntries[0];
+  if (entry?.kind !== "message") throw new Error("Expected a runtime message.");
+  assert.deepEqual(entry.presentation, {
+    kind: "prose",
+    position: "right",
+    align: "left",
+    font: "Georgia",
+    color: normalizeColor("red"),
+    background: normalizeColor("ivory"),
+  });
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
+  assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
+});
+
 test("runtime adapter delegates interaction normalization, transcript, and continuation to the engine", () => {
   let session = createPlayerRuntimeSession(`
 speaker guide {

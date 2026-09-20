@@ -292,13 +292,13 @@ the actual separation is the longer of the remaining `say` gate and the explicit
 
 Player-authored messages do not create gates. No compiler lookahead across branches, calls, or loops is used.
 
-### Skippable gate completion
-
 Message presentation follows the accepted [speaker inheritance and override contract](specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides).
 The runtime resolves mode/style into `MessagePresentation` while preparing output, preserves that data through pacing
-promotion and checkpoints, and emits it with the canonical `say` event. The Player applies the resolved values, using
-its theme roles only where the resolved colour/font is `null`. Invalid colour values fall back without a new warning
-policy; general diagnostic/recovery design is tracked separately in #427.
+promotion and checkpoints, and emits it with the canonical `say` event. The Player adapter forwards these values;
+rendering integration belongs to #421. Invalid colour values fall back without a new warning policy; general
+diagnostic/recovery design is tracked separately in #427.
+
+### Skippable gate completion
 
 Effective skip policy comes from explicit `skippable`/`unskippable`, then the effective speaker's `defaultSaySkippable`, then platform default `true`.
 

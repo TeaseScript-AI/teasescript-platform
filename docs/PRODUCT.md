@@ -2,8 +2,8 @@
 
 TeaseScript is a browser-first community platform and deterministic scripting system for interactive teases, BDSM scenes,
 persistent personalities, roleplay adventures, and community-created packages. Its language and editor serve creators
-who want to turn an idea into an interactive story, including people who have never programmed. Prior software-development
-or frontend-design experience is not assumed. Players are the people who experience those stories.
+who want to turn an idea into an interactive story, including people who have never programmed. Prior software development
+or frontend design experience is not assumed. Players are the people who experience those stories.
 
 The product direction includes accounts, forum, catalog, editor, player, package publishing, moderation, persistent state,
 media, optional integrations, and deterministic LLM-assisted dialogue. These are staged capabilities, not all current

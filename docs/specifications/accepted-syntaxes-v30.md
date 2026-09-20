@@ -2681,7 +2681,8 @@ speaker-mode object, then the platform default. `color` and `font` additionally 
 Overrides affect only that message. Explicit `null` behaves as omission; an explicit transparent colour overrides an
 inherited background.
 
-Both platform `position` and `align` defaults are `"center"`. `position` places the whole block; `align` sets the text
+Both platform `position` and `align` defaults are provisionally `"center"`, pending the Owner's presentation decision
+in #421. These are runtime defaults, not values frozen into compiled scripts. `position` places the whole block; `align` sets the text
 within it. Both accept `"left"`, `"center"`, or `"right"`. Bubble backgrounds and unspecified text/font use Player theme
 roles; the runtime represents these theme selections with `null`. Prose background defaults to transparent, independently
 of the speaker's bubble background. Prose retains speaker provenance but has no avatar by default; visible name treatment

@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { normalizeColor } from "../../../../src/color.js";
 import { nextTick, onBeforeUnmount, onMounted, ref, watch, type CSSProperties } from "vue";
 import type {
   PlayerForegroundOptionPresentation,
@@ -45,9 +44,6 @@ function observeScroller(): void {
 
 function authoredStyle(fill: string | undefined): CSSProperties | undefined {
   if (fill === undefined) return undefined;
-  const normalized = normalizeColor(fill);
-  if (normalized === null) return undefined;
-  fill = normalized;
   return {
     "--authored-control-fill": fill,
     "--authored-control-hover": `color-mix(in oklab, ${fill} 88%, black)`,
@@ -76,7 +72,7 @@ function optionStyle(option: PlayerForegroundOptionPresentation): CSSProperties 
         class="foreground-button"
         type="button"
         data-foreground-button
-        :data-authored-fill="normalizeColor(foreground.authoredFill) === null ? undefined : ''"
+        :data-authored-fill="foreground.authoredFill === undefined ? undefined : ''"
         :aria-label="foreground.accessibleName"
         :style="authoredStyle(foreground.authoredFill)"
         @click="$emit('activate', null)"
@@ -96,7 +92,7 @@ function optionStyle(option: PlayerForegroundOptionPresentation): CSSProperties 
           <button
             class="foreground-button"
             type="button"
-            :data-authored-fill="normalizeColor(option.authoredFill) === null ? undefined : ''"
+            :data-authored-fill="option.authoredFill === undefined ? undefined : ''"
             :style="optionStyle(option)"
             @click="$emit('activate', option.id)"
           >

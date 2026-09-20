@@ -114,20 +114,9 @@ function isSessionEvent(index: number): boolean {
 
 function messageStyle(entry: PlayerTranscriptEntryPresentation): Record<string, string> {
   const speaker = speakerFor(entry);
-  const style: Record<string, string> = speaker === null ? {} : {
-    "--speaker-accent": speaker.accent, "--speaker-font": speaker.fontFamily,
-  };
-  if (entry.kind === "message" && entry.presentation !== undefined) {
-    const presentation = entry.presentation;
-    style.width = "fit-content";
-    style.textAlign = presentation.align;
-    style.marginInlineStart = presentation.position === "left" ? "0" : "auto";
-    style.marginInlineEnd = presentation.position === "right" ? "0" : "auto";
-    style["--message-color"] = presentation.color ?? "var(--color-text-primary)";
-    style["--message-background"] = presentation.background ?? "var(--color-surface-component)";
-    style["--speaker-font"] = presentation.font ?? "inherit";
-  }
-  return style;
+  return speaker === null
+    ? {}
+    : { "--speaker-accent": speaker.accent, "--speaker-font": speaker.fontFamily };
 }
 
 function virtualItemStyle(start: number): CSSProperties {
@@ -266,12 +255,12 @@ function scrollToLatest(behavior: ScrollBehavior): void {
         <article
           v-if="messageFor(virtualItem.index) !== null"
           class="message"
-          :class="{ user: isUserMessage(virtualItem.index), prose: messageFor(virtualItem.index)?.presentation?.kind === 'prose', authored: messageFor(virtualItem.index)?.presentation !== undefined }"
+          :class="{ user: isUserMessage(virtualItem.index) }"
           :data-transcript-entry-id="entryId(virtualItem.index)"
           :style="messageStyleFor(virtualItem.index)"
         >
           <div class="message-row">
-            <div v-if="!isUserMessage(virtualItem.index) && messageFor(virtualItem.index)?.presentation?.kind !== 'prose'" class="speaker-avatar" aria-hidden="true">
+            <div v-if="!isUserMessage(virtualItem.index)" class="speaker-avatar" aria-hidden="true">
               {{ speakerForIndex(virtualItem.index)?.avatar }}
             </div>
             <div class="message-copy">

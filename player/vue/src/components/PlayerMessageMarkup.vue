@@ -31,7 +31,11 @@ const blocks = computed(() => preparePlayerMessageMarkup(props.content));
         </template>
       </blockquote>
       <ol v-else-if="block.ordered" class="markup-list">
-        <li v-for="(item, itemIndex) in block.items" :key="itemIndex" :value="item.ordinal ?? undefined">
+        <li
+          v-for="(item, itemIndex) in block.items"
+          :key="itemIndex"
+          :value="item.ordinal ?? undefined"
+        >
           <PlayerMarkupLine :pieces="item.line.pieces" />
         </li>
       </ol>

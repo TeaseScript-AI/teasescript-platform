@@ -113,8 +113,7 @@ content, including Unicode content, is preserved exactly.
 
 Bracket tag names and weight/size names are ASCII lowercase and case-sensitive. Colour values follow the accepted
 [colour contract](accepted-syntaxes-v30.md#authored-colours), including spaces inside colour functions. Other tags do not
-allow internal whitespace. The
-complete set of valid opening and closing spellings is:
+allow internal whitespace. The complete set of valid opening and closing spellings is:
 
 ```text
 [u] [/u]
@@ -130,8 +129,8 @@ use `inherit` in the prepared span so enclosing text/background presentation rem
 exact visual mapping of accepted weight and size names.
 
 A recognized valid opening tag formats content only when a matching closer can complete a properly nested span on the
-same line. An empty extension span is valid. An unknown tag, invalid non-colour value, extra attribute, mismatched closing tag, or
-unmatched tag remains literal text. A literal malformed tag does not suppress otherwise valid inline markup around or
+same line. An empty extension span is valid. An unknown tag, invalid non-colour value, extra attribute, mismatched closing
+tag, or unmatched tag remains literal text. A literal malformed tag does not suppress otherwise valid inline markup around or
 inside it. In crossed input, a closing tag that does not match the currently open extension is literal; later matching
 closers may still complete their spans.
 

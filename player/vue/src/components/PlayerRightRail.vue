@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { normalizeColor } from "../../../../src/color.js";
 import {
   computed,
   nextTick,
@@ -77,9 +76,6 @@ function observePaneElements(): void {
 
 function authoredStyle(fill: string | undefined): CSSProperties | undefined {
   if (fill === undefined) return undefined;
-  const normalized = normalizeColor(fill);
-  if (normalized === null) return undefined;
-  fill = normalized;
   return {
     "--authored-control-fill": fill,
     "--authored-control-hover": `color-mix(in oklab, ${fill} 88%, black)`,
@@ -172,7 +168,7 @@ function scriptUpdateMarker(controlId: string): "highlight" | undefined {
           class="action-button right-control"
           type="button"
           :data-action-id="control.id"
-          :data-authored-fill="normalizeColor(control.authoredFill) === null ? undefined : ''"
+          :data-authored-fill="control.authoredFill === undefined ? undefined : ''"
           :data-busy-style="busy('action') ? busyStyle : undefined"
           :data-script-update-feedback="scriptUpdateMarker(control.id)"
           :aria-busy="busy('action') || undefined"
