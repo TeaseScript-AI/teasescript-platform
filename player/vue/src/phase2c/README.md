@@ -25,12 +25,20 @@ Keep experimental fixtures separate from the components that own settled behavio
   control row consumes the shared Player control size with fixed outer spacing. Fullscreen is the
   rightmost action. The title truncates inside its capsule without clipping the
   outer shadow.
-- `ConversationSurface.vue` owns the composer overlay, its material and measured
+- `ConversationSurface.vue` owns the conversation overlay placement and measured
   bottom inset. Transcript consumes that inset so its final content remains
   reachable. The transcript scrollport extends into the existing conversation
   padding so bubble borders stay inside its clipping boundary; its scrollbar uses
   that side space and ends above the measured composer overlay. Input interaction
-  remains in `RuntimeInteraction.vue`.
+  remains in `RuntimeInteraction.vue`, which alone submits canonical runtime actions.
+  `Composer.vue` owns the integrated surface, shadcn-vue Textarea/Button, VueUse
+  autosizing, feedback association and Enter/Shift+Enter behavior. `ForegroundControls.vue`
+  renders the separate shadcn button row above it using the existing ScrollArea.
+  The standalone development preview appends local plain-text replies through App;
+  starting a runtime scenario switches submission to the existing adapter. Composer
+  dimensions and the input height cap remain visual trials; no new visual assertions
+  freeze them. The Textarea comes from the shadcn-vue new-york registry and uses the
+  existing VueUse dependency (no package added).
 - `usePlayerTheme.ts` applies and restores document theme variables, including
   body-portaled menus. The framework-independent `player/theme` module calculates
   colors; Theme Lab only edits intent. Material is the sole surface hierarchy,

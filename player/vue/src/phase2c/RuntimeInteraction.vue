@@ -1,26 +1,38 @@
 <script setup lang="ts">
-import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
-import { computed, nextTick, ref, useId, watch } from "vue";
-import { Button } from "@/components/ui/button";
+import ForegroundControls from "./ForegroundControls.vue";
+import { computed, nextTick, ref, watch } from "vue";
 import {
-  activePlayerRuntimeInteraction, activatePlayerRuntimeButton, playerRuntimeForeground,
-  selectPlayerRuntimeChoice, submitPlayerRuntimeComposer,
-  type PlayerRuntimeControlResult, type PlayerRuntimeSession,
+  activePlayerRuntimeInteraction,
+  activatePlayerRuntimeButton,
+  playerRuntimeForeground,
+  selectPlayerRuntimeChoice,
+  submitPlayerRuntimeComposer,
+  type PlayerRuntimeControlResult,
+  type PlayerRuntimeSession,
 } from "../../../runtime-adapter.js";
+import Composer from "./Composer.vue";
 
-const props = defineProps<{ session: PlayerRuntimeSession | null; reset: number }>();
-const emit = defineEmits<{ "update:session": [session: PlayerRuntimeSession] }>();
-const foreground = computed(() => props.session ? playerRuntimeForeground(props.session) : null);
-const actionId = computed(() => props.session ? activePlayerRuntimeInteraction(props.session.snapshot)?.actionId : undefined);
+const props = defineProps<{
+  session: PlayerRuntimeSession | null;
+  reset: number;
+  preview?: boolean;
+}>();
+const emit = defineEmits<{
+  "update:session": [session: PlayerRuntimeSession];
+  "preview-submit": [text: string];
+}>();
+const foreground = computed(() => (props.session ? playerRuntimeForeground(props.session) : null));
+const actionId = computed(() =>
+  props.session ? activePlayerRuntimeInteraction(props.session.snapshot)?.actionId : undefined,
+);
 const root = ref<HTMLElement | null>(null);
-const input = ref<HTMLTextAreaElement | null>(null);
+const composer = ref<InstanceType<typeof Composer> | null>(null);
 const draft = ref("");
 const feedback = ref("");
-const feedbackId = useId();
 const submitting = ref(false);
 
 function focusInput() {
-  input.value?.focus({ preventScroll: true });
+  composer.value?.focusInput();
 }
 
 watch([actionId, () => props.reset], async () => {
@@ -33,13 +45,16 @@ watch([actionId, () => props.reset], async () => {
   if (ownedFocus && foreground.value) focusInput();
 });
 
-async function complete(operation: (session: PlayerRuntimeSession) => PlayerRuntimeControlResult | null) {
+async function complete(
+  operation: (session: PlayerRuntimeSession) => PlayerRuntimeControlResult | null,
+) {
   if (!props.session || submitting.value) return;
   submitting.value = true;
   try {
     const result = operation(props.session);
     if (!result) {
-      feedback.value = foreground.value?.kind === "show-button" ? "Activate the button above to continue." : "";
+      feedback.value =
+        foreground.value?.kind === "show-button" ? "Activate the button above to continue." : "";
       focusInput();
       return;
     }
@@ -48,7 +63,10 @@ async function complete(operation: (session: PlayerRuntimeSession) => PlayerRunt
       draft.value = "";
       feedback.value = "";
     } else {
-      feedback.value = result.outcome.kind === "invalidPayload" ? result.outcome.message : "This interaction is no longer available.";
+      feedback.value =
+        result.outcome.kind === "invalidPayload"
+          ? result.outcome.message
+          : "This interaction is no longer available.";
       focusInput();
     }
     // Hold the guard until the parent has published the new canonical session.
@@ -58,40 +76,47 @@ async function complete(operation: (session: PlayerRuntimeSession) => PlayerRunt
   }
 }
 function submit() {
-  void complete(session => submitPlayerRuntimeComposer(session, draft.value));
-}
-function keydown(event: KeyboardEvent) {
-  if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
-    event.preventDefault();
-    submit();
+  if (!props.session && props.preview) {
+    if (!draft.value.trim()) {
+      feedback.value = "Enter a response before sending.";
+      focusInput();
+      return;
+    }
+    emit("preview-submit", draft.value);
+    draft.value = "";
+    feedback.value = "";
+    focusInput();
+    return;
   }
+  void complete((session) => submitPlayerRuntimeComposer(session, draft.value));
 }
 </script>
 
 <template>
   <div ref="root" data-runtime-interaction class="min-w-0 shrink-0">
-    <ScrollArea type="scroll" orientation="horizontal" v-if="foreground?.kind === 'choose' || foreground?.kind === 'show-button'"
-      :key="actionId ?? 0" role="group" :aria-label="foreground.accessibleName"
-      class="mb-2" content-class="flex min-w-0 gap-2 pb-2">
-      <template v-if="foreground.kind === 'choose'">
-        <Button v-for="option in foreground.options" :key="option.id" variant="outline"
-          class="h-auto min-h-9 max-w-full shrink-0 whitespace-normal break-words"
-          :disabled="submitting" @click="complete(session => selectPlayerRuntimeChoice(session, option.id))">{{ option.label }}</Button>
-      </template>
-      <Button v-else variant="outline" class="h-auto min-h-9 max-w-full shrink-0 whitespace-normal break-words"
-        :aria-label="foreground.accessibleName" :disabled="submitting"
-        @click="complete(activatePlayerRuntimeButton)">{{ foreground.label }}</Button>
-    </ScrollArea>
-    <form data-runtime-composer class="flex min-w-0 gap-2" @submit.prevent="submit">
-      <textarea ref="input" v-model="draft" rows="1"
-        :aria-label="foreground?.accessibleName ?? 'Response'"
-        :placeholder="foreground && 'hint' in foreground ? foreground.hint : 'Type your response...'"
-        :disabled="!foreground" :aria-invalid="feedback ? true : undefined"
-        :aria-describedby="feedback ? feedbackId : undefined"
-        class="min-w-0 flex-1 resize-none rounded border-0 bg-transparent px-3 py-2 text-sm"
-        @keydown="keydown" />
-      <Button type="submit" variant="default" :disabled="!foreground || submitting" class="h-auto shrink-0 px-4 disabled:bg-transparent disabled:text-muted-foreground">Send</Button>
-    </form>
-    <p v-if="feedback" :id="feedbackId" role="status" class="mt-1 text-sm">{{ feedback }}</p>
+    <ForegroundControls
+      :key="actionId ?? 0"
+      :foreground="foreground"
+      :disabled="submitting"
+      @activate="
+        (optionId) =>
+          complete((session) =>
+            optionId === null
+              ? activatePlayerRuntimeButton(session)
+              : selectPlayerRuntimeChoice(session, optionId),
+          )
+      "
+    />
+    <Composer
+      ref="composer"
+      v-model="draft"
+      :disabled="!foreground && !(preview && !session)"
+      :submitting="submitting"
+      :placeholder="foreground && 'hint' in foreground ? foreground.hint : 'Type your response…'"
+      :accessible-name="foreground?.accessibleName ?? 'Response'"
+      :input-mode="foreground?.kind === 'ask-number' ? 'decimal' : 'text'"
+      :feedback="feedback"
+      @submit="submit"
+    />
   </div>
 </template>

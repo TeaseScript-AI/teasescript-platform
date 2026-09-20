@@ -71,6 +71,11 @@ function loadTranscript(count: number) {
 function appendTranscript() {
   transcriptEntries.value = [...transcriptEntries.value, ...transcriptFixtures(nextMessage++, 1)];
 }
+function appendPreviewResponse(text: string) {
+  transcriptEntries.value = [...transcriptEntries.value, {
+    id: `message-${nextMessage++}`, kind: "message", speakerId: "user", text,
+  }];
+}
 function prependTranscript() {
   firstMessage -= 50;
   transcriptEntries.value = [...transcriptFixtures(firstMessage, 50), ...transcriptEntries.value];
@@ -190,7 +195,7 @@ async function toggleFullscreen() {
           <template #default="{ bottomInset }">
             <Transcript :bottom-inset="bottomInset" :key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'" :entries="runtimeSession?.transcriptEntries ?? transcriptEntries" :speakers="runtimeSession?.speakers ?? transcriptFixtureSpeakers" :revision="runtimeSession?.transcriptRevision ?? 0" />
           </template>
-          <template #interaction><RuntimeInteraction v-model:session="runtimeSession" :reset="interactionReset" /></template>
+          <template #interaction><RuntimeInteraction v-model:session="runtimeSession" :reset="interactionReset" :preview="isDevelopment" @preview-submit="appendPreviewResponse" /></template>
         </ConversationSurface>
       </div>
     </template>

@@ -54,8 +54,8 @@
 }
 
 /* data-button survives composed triggers replacing shadcn data-slot.
-   Composer material remains owned by ConversationSurface and its mapping below. */
-:where([data-button]:not([data-variant="destructive"], [data-variant="link"], [data-runtime-composer] > button), [data-panel-pin], [data-slot="dialog-close"], [data-launcher] [data-sidebar="menu-button"]) {
+   Composer owns its material; Send uses the shared primary button family. */
+:where([data-button]:not([data-variant="destructive"], [data-variant="link"]), [data-panel-pin], [data-slot="dialog-close"], [data-launcher] [data-sidebar="menu-button"]) {
   --button-rest: transparent;
   --button-hover: var(--component-hover);
   --button-pressed: var(--component-pressed);
@@ -84,13 +84,13 @@
   --button-pressed-border: var(--button-pressed);
 }
 @media (any-hover: hover) {
-  :where([data-button]:not([data-variant="destructive"], [data-variant="link"], [data-runtime-composer] > button), [data-panel-pin], [data-slot="dialog-close"], [data-launcher] [data-sidebar="menu-button"]):enabled:hover {
+  :where([data-button]:not([data-variant="destructive"], [data-variant="link"]), [data-panel-pin], [data-slot="dialog-close"], [data-launcher] [data-sidebar="menu-button"]):enabled:hover {
     background-color: var(--button-hover);
     color: var(--button-text);
     border-color: var(--button-hover-border);
   }
 }
-:where([data-button]:not([data-variant="destructive"], [data-variant="link"], [data-runtime-composer] > button), [data-panel-pin], [data-slot="dialog-close"], [data-launcher] [data-sidebar="menu-button"]):enabled:active {
+:where([data-button]:not([data-variant="destructive"], [data-variant="link"]), [data-panel-pin], [data-slot="dialog-close"], [data-launcher] [data-sidebar="menu-button"]):enabled:active {
   background-color: var(--button-pressed);
   transition-duration: 0s;
   color: var(--button-text);
@@ -155,7 +155,7 @@
 :root[data-phase2c-theme] [role^="menuitem"][data-disabled] { color: var(--theme-text-disabled); opacity: 1; }
 
 :root[data-phase2c-theme] :is(textarea, input)::placeholder { color: var(--theme-text-secondary); }
-:root[data-phase2c-theme] :is(button, textarea, input, select, summary, a[href], [data-tools-focus^="title:"]):focus-visible {
+:root[data-phase2c-theme] :is(button, textarea:not([data-composer-input]), input, select, summary, a[href], [data-tools-focus^="title:"]):focus-visible {
   outline: 2px solid var(--theme-accent-focus);
   outline-offset: 2px;
 }
