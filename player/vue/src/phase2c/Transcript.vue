@@ -340,9 +340,12 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
 .transcript-entry[data-prose] { padding-block: 1.75rem 0.75rem; }
 .prose {
   /* Shrink-to-fit is what makes the block's own position visible: a short passage sits
-     where it was put, a long one fills the measure and only its text alignment shows. */
+     where it was put. A long one would fill whatever it is given, so it is never given
+     everything: keeping the block to seven tenths of the column leaves three tenths of
+     slack for its position to spend, and on a phone, where the measure has no room to
+     show itself, that slack is the only thing left saying which side was meant. */
   width: fit-content;
-  max-width: min(var(--prose-measure, 65ch), 100%);
+  max-width: min(var(--prose-measure, 65ch), 70%);
   font-size: 1rem;
   line-height: 1.7;
   white-space: pre-wrap;
