@@ -420,15 +420,21 @@ uses restrained backdrop blur where supported. Its exact threshold remains a tun
 ### Message presentation and provenance
 
 Speaker/package output aligns to the normal reading side; player-authored output aligns to the opposite side. A message
-row may use at most `90%` of the conversation width, while its readable copy is capped at `65ch`; this preserves an
+occupies at most `75%` of the conversation width and at most `65ch`, whichever is narrower; this preserves an
 opposite-side margin on narrow layouts without forcing short wrapping on wider ones. The current avatar, speaker-name,
 and speaker-coloured rule remain the POC visual baseline. Speaker identity colour/font and per-message rich-text styling
 are content presentation, not application palette roles.
 
 The runtime adapter supplies resolved message presentation according to the
 [language contract](../specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides). Where that
-contract reports no authored choice, the Player supplies one. Prose carries no avatar. Prose placement, reading measure,
-and whether prose without an authored background is given a panel remain open in #421.
+contract reports no authored choice, the Player supplies one. Prose carries no avatar.
+
+Prose is centred, both the block and the text within it, when the author chose neither. A passage set apart from the
+column of bubbles reads as the different thing it is, and draws attention for the same reason. Prose takes the same
+share of the width as a message, so the two reach equally far, and the quarter left over is what its position spends:
+all of it trailing when placed left, split evenly when centred, all of it leading when placed right. That remaining
+space is what still shows which side was meant on a narrow layout, where the reading measure has no room to. Whether
+prose without an authored background is given a panel remains open in #421.
 
 An authored colour is carried through exactly as written. The Player defends legibility only where the pairing is one no
 author chose: text meeting a bubble or theme surface is measured as it will be painted and covered by the least amount

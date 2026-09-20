@@ -112,10 +112,12 @@ const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => {
   const fill = prose === null ? authoredFill(entry) : null;
   return {
     item, entry, fill,
-    // An unchosen placement arrives as null, and this is what fills it in.
+    // An unchosen placement arrives as null. Centred is what fills it in: a passage set
+    // apart from the column of bubbles reads as the different thing it is, and draws the
+    // eye for the same reason.
     placement: prose === null ? null : {
-      position: prose.position ?? props.design.prosePosition,
-      text: prose.align ?? props.design.proseAlign,
+      position: prose.position ?? "center",
+      text: prose.align ?? "center",
     },
     // Whatever an authored colour turns out to be, the words on it are measured against it.
     ink: fill === null ? null : inkFor(fill),
@@ -231,8 +233,7 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
                set are two separate choices: a block can stand on the right while its lines
                still read from the left, which is how a signature sits under a letter. -->
           <div v-else-if="placement" class="prose"
-            :data-align="placement.position" :data-text="placement.text"
-            :style="{ '--prose-measure': `${design.proseMeasure}ch` }">
+            :data-align="placement.position" :data-text="placement.text">
             <p v-if="showsName(item.index, false)" class="prose-attribution">
               {{ nameOf(entry) }}
             </p>
@@ -345,7 +346,7 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
      measure has no room to show itself, that slack is the only thing left saying which
      side was meant. The share matches a bubble's, so the two readings reach equally far. */
   width: fit-content;
-  max-width: min(var(--prose-measure, 65ch), 75%);
+  max-width: min(65ch, 75%);
   font-size: 1rem;
   line-height: 1.7;
   white-space: pre-wrap;
