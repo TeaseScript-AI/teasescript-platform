@@ -50,6 +50,11 @@ outside the repository.
 - Validate external, checkpoint, host, package, and future integration data at runtime.
 - Do not add a dependency without documenting its need, alternatives, maintenance impact, and security impact.
 - Do not weaken tests to hide failures.
+- Record a design choice in documentation only once the owner settles it; while it is still
+  being tried out, test only behaviour that holds whichever way the choice goes.
+- When a choice is settled, tell the owner which documents it changes and ask before
+  editing them. `docs/specifications/accepted-syntaxes-v30.md` must stay a current and
+  complete record of accepted syntax.
 
 ## Requirements, simplicity, and review
 
