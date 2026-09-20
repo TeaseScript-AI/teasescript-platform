@@ -6,8 +6,6 @@ import LayoutDebug from "./LayoutDebug.vue";
 import ThemeLab from "./ThemeLab.vue";
 import Stage from "./Stage.vue";
 import PlayerTopBar from "./PlayerTopBar.vue";
-import Transcript from "./Transcript.vue";
-import ConversationSurface from "./ConversationSurface.vue";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
 import { transcriptFixtures, transcriptFixtureSpeakers } from "./transcriptFixtures";
 import { createPlayerRuntimeSession, createPlayerRuntimeRestorePoint, restorePlayerRuntimeSession, type PlayerRuntimeSession, type PlayerRuntimeRestorePoint } from "../../../runtime-adapter.js";
@@ -83,7 +81,6 @@ function prependTranscript() {
   firstMessage -= 50;
   transcriptEntries.value = [...transcriptFixtures(firstMessage, 50), ...transcriptEntries.value];
 }
-const transcript = ref<InstanceType<typeof Transcript> | null>(null);
 const stage = ref<InstanceType<typeof Stage> | null>(null);
 const stageHeight = ref(0);
 const mediaAspect = ref(0);
@@ -195,12 +192,12 @@ async function toggleFullscreen() {
           </template>
         </Stage>
 
-        <ConversationSurface @margin-wheel="transcript?.scrollFromMargin($event)">
-          <template #default="{ bottomInset }">
-            <Transcript ref="transcript" :bottom-inset="bottomInset" :key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'" :entries="runtimeSession?.transcriptEntries ?? transcriptEntries" :speakers="runtimeSession?.speakers ?? transcriptFixtureSpeakers" :revision="runtimeSession?.transcriptRevision ?? 0" />
-          </template>
-          <template #interaction><RuntimeInteraction v-model:session="runtimeSession" :reset="interactionReset" :preview="isDevelopment" @preview-submit="appendPreviewResponse" /></template>
-        </ConversationSurface>
+        <RuntimeInteraction v-model:session="runtimeSession" :reset="interactionReset" :preview="isDevelopment"
+          :transcript-key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'"
+          :entries="runtimeSession?.transcriptEntries ?? transcriptEntries"
+          :speakers="runtimeSession?.speakers ?? transcriptFixtureSpeakers"
+          :revision="runtimeSession?.transcriptRevision ?? 0"
+          @preview-submit="appendPreviewResponse" />
       </div>
     </template>
   </PlayerToolsShell>

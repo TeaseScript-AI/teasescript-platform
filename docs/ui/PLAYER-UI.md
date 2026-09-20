@@ -448,8 +448,8 @@ The POC's letter-glyph avatars remain fixtures; accepted V30 speaker avatar refe
 ## Composer and foreground interactions
 
 The Standard Player uses one persistent composer at the bottom of the conversation area. It is the normal chat input and
-the answer field for `askText` and `askNumber`; `choose` and `showButton` controls appear immediately above it within the
-same central conversation width.
+the answer field for `askText` and `askNumber`; `choose` and `showButton` controls appear after the latest message inside the
+same vertically scrolling transcript. The composer stays at the bottom.
 
 ### Wide presentation
 
@@ -526,18 +526,13 @@ This is distinct from a skippable `say` pacing gate: when no foreground interact
 click/tap on Player background/unused space or Space with the empty focused composer may settle that gate under ADR 0018.
 Actual interactive controls always take precedence and must not also fire the viewport-wide pacing shortcut.
 
-A `showButton` is the one-option presentation of the same Standard foreground-control vocabulary. Its width is bounded by
-the available foreground-control lane, has a practical touch/click minimum, and otherwise grows with its label rather
-than becoming arbitrarily full-width. Long labels may wrap. The foreground-control lane spans the available middle
-region between an open tools strip and reserved right rail; unlike prose, it is not capped by the `900px` reading width.
-Buttons are centered while they fit. When they overflow they remain individually authored buttons in a native
-horizontal scroll/snap carousel, preserving authored colour and semantics rather than changing into a dropdown.
-Enhanced CSS arrows/markers appear only during real overflow and are navigation only; selecting a marker reveals a
-button but never activates it. The arrows sit at the left and right edges beside the button row; only a compact marker
-strip sits beneath the buttons, so carousel chrome does not claim another control-height row. Browsers without those
-enhanced controls keep the usable native horizontal scroller. Carousel position is Player UI state, not canonical
-runtime or checkpoint state. Authored foreground buttons use their solid authored colour because media never sits behind
-this lane; authored right-rail actions retain the translucent floating-control treatment described below.
+A `showButton` is the one-option presentation of the same Standard foreground-control vocabulary. Controls share the
+transcript's reading width, grow with their labels, and allow long labels to wrap. The group centers its buttons and
+wraps onto additional rows rather than scrolling horizontally. The current visual trial uses 12px between buttons and
+rows, retaining the shared button component's internal padding. Controls scroll away with the transcript; there is no
+separate button scroller. After completion, the active controls disappear and the existing runtime transcript records
+the response. Authored foreground buttons use their solid authored colour because media never sits behind this lane;
+authored right-rail actions retain the translucent floating-control treatment described below.
 
 Validation content and retry semantics come from the controlling interaction/runtime contract. The Player must not
 invent a competing inline-error semantic merely because the current POC lacks the richer accepted V30 `invalidMessage`

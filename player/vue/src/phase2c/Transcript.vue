@@ -2,6 +2,7 @@
 import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { elementScroll, observeElementRect, useVirtualizer } from "@tanstack/vue-virtual";
+import { useResizeObserver } from "@vueuse/core";
 import { ArrowDown } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } from "../../../model.js";
@@ -15,6 +16,13 @@ const props = defineProps<{
 }>();
 const scrollElement = ref<HTMLDivElement | null>(null);
 const touching = ref(false);
+const foregroundElement = ref<HTMLElement | null>(null);
+const foregroundHeight = ref(0);
+useResizeObserver(foregroundElement, () => {
+  foregroundHeight.value = foregroundElement.value?.getBoundingClientRect().height ?? 0;
+});
+// Include the live controls in the same measured scroll extent and follow target.
+const endInset = computed(() => (props.bottomInset ?? 0) + foregroundHeight.value);
 const latestThreshold = 24;
 const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(computed(() => {
   // Capture the supplied list so replacing fixtures retains the previous key mapping on prepend.
@@ -26,7 +34,7 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(computed(() => {
     getItemKey: (index: number) => entries[index]!.id,
     estimateSize: () => 140,
     overscan: 5,
-    paddingEnd: props.bottomInset ?? 0,
+    paddingEnd: endInset.value,
     anchorTo: "end" as const,
     followOnAppend: true,
     scrollEndThreshold: latestThreshold,
@@ -48,7 +56,7 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(computed(() => {
     }),
   };
 }));
-watch(() => props.bottomInset ?? 0, (inset, previous) => {
+watch(endInset, (inset, previous) => {
   const instance = virtualizer.value;
   // Recover distance using the previous inset regardless of Vue's options-update order.
   const previousDistance = instance.getTotalSize() - instance.options.paddingEnd + previous
@@ -121,16 +129,22 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
         tabindex: 0, onKeydown: onScrollKeydown, onWheel: onWheel,
         onTouchstart: onTouchStart, onTouchend: () => touching = false,
         onTouchcancel: () => touching = false }">
-      <div class="transcript-history" role="list" :style="{ height: `${virtualizer.getTotalSize()}px` }">
-        <article v-for="{ item, entry } in rows" :key="entry.id"
-          :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
-          :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
-          role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
-          class="transcript-entry" :style="{ transform: `translateY(${item.start}px)` }">
-          <div class="message" :data-author="entry.kind === 'session-event' ? 'session-event' : entry.speakerId === 'user' ? 'player' : 'speaker'">
-            <div class="message-copy"><strong v-if="entry.kind === 'message' && entry.speakerId !== 'user'">{{ speakers[entry.speakerId]?.name ?? entry.speakerId }}: </strong><TranscriptMarkup v-if="entry.kind === 'message' && entry.speakerId !== 'user' && entry.content" :content="entry.content" /><template v-else>{{ entry.text }}</template></div>
-          </div>
-        </article>
+      <div class="transcript-history" :style="{ height: `${virtualizer.getTotalSize()}px` }">
+        <div role="list">
+          <article v-for="{ item, entry } in rows" :key="entry.id"
+            :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
+            :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
+            role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
+            class="transcript-entry" :style="{ transform: `translateY(${item.start}px)` }">
+            <div class="message" :data-author="entry.kind === 'session-event' ? 'session-event' : entry.speakerId === 'user' ? 'player' : 'speaker'">
+              <div class="message-copy"><strong v-if="entry.kind === 'message' && entry.speakerId !== 'user'">{{ speakers[entry.speakerId]?.name ?? entry.speakerId }}: </strong><TranscriptMarkup v-if="entry.kind === 'message' && entry.speakerId !== 'user' && entry.content" :content="entry.content" /><template v-else>{{ entry.text }}</template></div>
+            </div>
+          </article>
+        </div>
+        <div ref="foregroundElement" class="transcript-foreground"
+          :style="{ top: `${virtualizer.getTotalSize() - endInset}px` }">
+          <slot name="foreground" />
+        </div>
       </div>
       <p v-if="!entries.length" class="transcript-empty">No messages yet.</p>
     </ScrollArea>
@@ -168,6 +182,7 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
     rgb(0 0 0 / 20%) 100%);
 }
 :deep(.transcript-scroll[data-scrolled="true"]) { --transcript-top-fade: 1rem; }
+.transcript-foreground { position: absolute; left: 0; width: 100%; }
 .transcript-history { position: relative; width: 100%; }
 .transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: 0.5rem 1rem; }
 .message { max-width: 90%; }

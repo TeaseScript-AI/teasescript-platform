@@ -16,7 +16,7 @@ Keep experimental fixtures separate from the components that own settled behavio
   horizontal overflow between panels. Player scroll regions share the shadcn-vue/Reka
   ScrollArea composition in `components/ui/scroll-area`: theme-colored overlay
   thumbs appear on hover or scrolling, without reserving layout width. The chat
-  transcript and foreground action row currently appear on scrolling or hovering
+  transcript scrollbar currently appears on scrolling or hovering
   the narrow scrollbar track, not the content. This remains a visual trial; the
   shared component accepts a per-location visibility type. Native
   textarea scrollbars retain browser editing behavior with matching theme colors.
@@ -42,7 +42,10 @@ Keep experimental fixtures separate from the components that own settled behavio
   remains in `RuntimeInteraction.vue`, which alone submits canonical runtime actions.
   `Composer.vue` owns the integrated surface, shadcn-vue Textarea/Button, VueUse
   autosizing, feedback association and Enter/Shift+Enter behavior. `ForegroundControls.vue`
-  renders the separate shadcn button row above it using the existing ScrollArea.
+  renders wrapping shadcn buttons in Transcript’s measured trailing slot. They share
+  the transcript scrollport and disappear on completion; its end inset includes
+  their measured height plus the composer overlay. RuntimeInteraction composes
+  those surfaces and retains the shared submission guard and focus handling.
   The standalone development preview appends local plain-text replies through App;
   starting a runtime scenario switches submission to the existing adapter. Composer
   dimensions and the input height cap remain visual trials; no new visual assertions
