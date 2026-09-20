@@ -157,6 +157,16 @@ subsystems may still have different maturity levels.
     [ADR 0019](../decisions/0019-resource-limit-governance.md), [`CURRENT-DESIGN.md`](../../CURRENT-DESIGN.md),
     [`RUNTIME.md`](../RUNTIME.md), [`TESTING.md`](../TESTING.md), and [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md).
 
+- [ ] **Establish Player bundle and startup performance baseline**
+  - **Outcome:** Measure the production Player's cold and warm startup, compressed bundle sizes, module contribution,
+    cache reuse, and normal-playback dependency graph. Use that evidence to remove accidental dependencies and choose
+    appropriate code-splitting, lazy-loading, caching and versioning boundaries, including whether compiler code belongs
+    on the ordinary Player playback path.
+  - **Trigger:** Start once the representative Player and host path are sufficiently complete to measure realistically;
+    move earlier if Alpha testing shows material download or startup cost.
+  - **Reference:** [`CURRENT-DESIGN.md`](../../CURRENT-DESIGN.md), [`DATA-AND-API.md`](../DATA-AND-API.md),
+    [`PLAYER-UI.md`](../ui/PLAYER-UI.md), and [`TESTING.md`](../TESTING.md).
+
 - [ ] **Evaluate editor usability warnings for interaction content**
   - **Outcome:** Use representative authoring, Player, accessibility, and usability evidence to decide whether non-blocking
     editor warnings are useful for unusually long interaction labels or unusually large choice sets. If warnings are
