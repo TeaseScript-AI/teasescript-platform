@@ -1125,7 +1125,13 @@ async function runtimeTranscriptChecks(page) {
     (await rows.first().getAttribute("data-speaker-id")).startsWith("runtime-speaker-"),
     "Speaker provenance lost",
   );
-  check((await rows.first().innerText()).includes("Coastal Guide:"), "Runtime speaker name lost");
+  // The title the author gave the speaker, not the `guide` the script addresses it by. It
+  // introduces the run from its own line inside the bubble, the way a name does anywhere
+  // people talk to each other, so nothing follows it on that line.
+  check(
+    (await rows.first().innerText()).includes("Coastal Guide\n"),
+    "Runtime speaker name lost",
+  );
   const link = transcript.getByRole("link", { name: "Map", exact: true });
   check(
     (await link.getAttribute("href")) === "https://example.com/coast",
@@ -1200,9 +1206,13 @@ async function runtimeTranscriptChecks(page) {
     (await transcript.getByText("Continue **literally**", { exact: true }).count()) === 1,
     "Canonical button transcript text changed",
   );
+  // The row opens with the avatar's letter, so the name and the line it introduces are
+  // matched at the end. Tags the author typed are part of the sentence and stay readable
+  // as typed, which is what the following check confirms was never parsed.
   check(
-    (await transcript.locator('[data-speaker-id="narrator"]').innerText()) ===
-      "Narrator: The walk continues. <b>This is literal text.</b>",
+    (await transcript.locator('[data-speaker-id="narrator"]').innerText()).endsWith(
+      "Narrator\nThe walk continues. <b>This is literal text.</b>",
+    ),
     "Narrator/raw HTML semantics changed",
   );
   check((await transcript.locator("b").count()) === 0, "Authored HTML was interpreted");
