@@ -333,6 +333,13 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
   border-color: var(--message-separator);
 }
 .message-speaker.message-authored { background: var(--message-authored-fill); }
+/* Where an author's text was broken is part of what was written, and where a player's own
+   answer was broken is part of what they said. Marked-up text keeps its own breaks; plain
+   text has only this, and without it a typed reply of three lines arrives as one. */
+:deep([data-slot="bubble-content"]) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 /* The name is muted against the page, not against a coloured bubble. Inside one it
    steps back from the bubble's own text colour instead, which follows the mode. */
 .message-authored :deep([data-slot="message-header"]) { color: inherit; opacity: 0.72; }
