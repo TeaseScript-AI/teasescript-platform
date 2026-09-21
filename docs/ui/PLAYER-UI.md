@@ -425,7 +425,8 @@ uses restrained backdrop blur where supported. Its exact threshold remains a tun
 
 ### Message presentation and provenance
 
-Speaker/package output aligns to the normal reading side; player-authored output aligns to the opposite side. A message
+Received bubbles align left and player-authored bubbles align right. The Player owns bubble placement and text
+alignment; authors can set `position` and `align` only for prose, as defined by the language contract below. A message
 row may use at most `90%` of the conversation width, while its readable copy is capped at `65ch`; this preserves an
 opposite-side margin on narrow layouts without forcing short wrapping on wider ones. The current avatar, speaker-name,
 and speaker-coloured rule remain the POC visual baseline. Speaker identity colour/font and per-message rich-text styling

@@ -2655,7 +2655,12 @@ say [as speaker] [bubble(options) | prose(options)] [skippable | unskippable] te
 ```
 
 Brackets denote optional parts. `bubble` and `prose` may appear without parentheses; parentheses contain ordinary
-comma-separated named arguments. Supported options are `position`, `align`, `color`, `background`, and `font`.
+comma-separated named arguments. Both modes accept `color`, `background`, and `font`; only `prose` accepts
+`position` and `align`. Bubble placement and text alignment belong to the Player: received messages appear on the left
+and player-authored replies on the right. Bubble options cannot override them, including through speaker defaults or
+explicit `null` values. Direct `say` options and literal speaker-declaration defaults are checked at compile time.
+Speaker option objects supplied or reassigned at runtime are validated when used to prepare a message and fail with
+`TSR050` if they contain unsupported options.
 Each value is an ordinary expression, including variables and function calls. Unknown or repeated options are errors.
 The mode words remain usable as ordinary identifiers when the complete `say` value parses without a modifier.
 
@@ -2667,7 +2672,7 @@ speaker vera {
     presentation: "bubble"
     color: "white"
     font: "Georgia"
-    bubble: { background: "#334455", position: "right", align: "left" }
+    bubble: { background: "#334455" }
     prose: { align: "left" }
 }
 speaker vera
@@ -2681,9 +2686,10 @@ speaker-mode object, then the platform default. `color` and `font` additionally 
 Overrides affect only that message. Explicit `null` behaves as omission; an explicit transparent colour overrides an
 inherited background.
 
-After message and speaker inheritance, an unchosen `position` or `align` remains `null` in the emitted presentation.
-The runtime does not supply a default for either field; the Player selects their defaults in #421. Explicit choices
-remain distinguishable from omission. `position` places the whole block; `align` sets the text within it. Both accept
+For prose, after message and speaker inheritance, an unchosen `position` or `align` remains `null` in the emitted
+presentation. The Player selects their defaults. Explicit choices remain distinguishable from omission. For bubbles,
+both resolved fields are always `null` and only the Player determines placement. For prose, `position` places the whole
+block; `align` sets the text within it. Both accept
 `"left"`, `"center"`, or `"right"`. Bubble backgrounds and unspecified text/font use Player theme
 roles; the runtime represents these theme selections with `null`. Prose background defaults to transparent, independently
 of the speaker's bubble background. Prose retains speaker provenance but has no avatar by default; visible name treatment

@@ -63,7 +63,7 @@ speaker vera {
   presentation: "prose"
   color: "red"
   font: "Georgia"
-  bubble: { background: "blue", position: "right" }
+  bubble: { background: "blue" }
   prose: { align: "left" }
 }
 speaker vera
@@ -86,7 +86,8 @@ say "paper"
     background: normalizeColor("transparent"),
   });
   assert.equal(messages[1]!.presentation.kind, "bubble");
-  assert.equal(messages[1]!.presentation.position, "right");
+  assert.equal(messages[1]!.presentation.position, null);
+  assert.equal(messages[1]!.presentation.align, null);
   assert.equal(messages[1]!.presentation.background, normalizeColor("blue"));
   assert.equal(messages[1]!.presentation.color, normalizeColor("white"));
   assert.equal(messages[1]!.presentation.font, "serif");
@@ -240,10 +241,10 @@ test("parenthesized null presentation options retain ordinary inheritance semant
 speaker vera {
   presentation: (null)
   color: ((null))
-  bubble: ({ color: "red", position: "right", align: "left" })
+  bubble: ({ color: "red" })
 }
 speaker vera
-say bubble(color: ((null)), background: (null), position: (null), align: ((null)), font: (null)) "inherited"
+say bubble(color: ((null)), background: (null), font: (null)) "inherited"
 `,
     { scenarioName: "parenthesized null presentation inheritance" },
   );
@@ -251,8 +252,8 @@ say bubble(color: ((null)), background: (null), position: (null), align: ((null)
     kind: "bubble",
     color: normalizeColor("red"),
     background: null,
-    position: "right",
-    align: "left",
+    position: null,
+    align: null,
     font: null,
   });
   assert.equal(compileSource('say prose(color: ("null")) "invalid"').plan, null);
@@ -327,5 +328,112 @@ say "[color=${input}]markup[/color]"
     const span = block.lines[0]!.spans[0];
     if (span?.kind !== "color") throw new Error("Expected colour span.");
     assert.equal(span.value, expected);
+  }
+});
+
+test("bubble syntax and speaker defaults reject authored placement, including null", () => {
+  for (const option of ["position", "align"]) {
+    for (const value of ['"left"', '"center"', '"right"', "null"]) {
+      for (const source of [
+        `say bubble(${option}: ${value}) "message"`,
+        `speaker vera { bubble: ({ ${option}: ${value} }) }`,
+      ]) {
+        const compiled = compileSource(source);
+        assert.equal(compiled.plan, null, source);
+        assert.ok(
+          compiled.diagnostics.some((item) => item.message.includes(option)),
+          source,
+        );
+      }
+    }
+  }
+});
+
+test("prose retains placement inheritance and overrides across instruction checkpoints", () => {
+  const result = assertRuntimeResumeEquivalent(`
+speaker vera {
+  presentation: "prose"
+  prose: { position: "right", align: "left" }
+  bubble: { background: "gold" }
+}
+speaker vera
+say "inherited"
+say prose(position: "center", align: "right") "override"
+say prose(position: "left", align: "center") "other side"
+say "inherited again"
+say bubble "Player-owned placement"
+`);
+  const presentations = result.events
+    .filter((event) => event.kind === "say")
+    .map((event) => [
+      event.presentation.kind,
+      event.presentation.position,
+      event.presentation.align,
+    ]);
+  assert.deepEqual(presentations, [
+    ["prose", "right", "left"],
+    ["prose", "center", "right"],
+    ["prose", "left", "center"],
+    ["prose", "right", "left"],
+    ["bubble", null, null],
+  ]);
+});
+
+test("computed bubble defaults cannot bypass placement validation after input restore", () => {
+  for (const option of ["position", "align"]) {
+    const plan = compileValidPlan(`
+speaker vera { displayName: "Vera" }
+speaker vera
+let side = askText "Side"
+vera.bubble = { ${option}: side }
+say "must not be emitted", instant
+`);
+    const waiting = run(plan, createFreshRuntimeSnapshot(plan));
+    const action = waiting.snapshot.foregroundAction;
+    if (action?.kind !== "interaction") throw new Error("Expected side input.");
+    const restored = deserializeCheckpoint(
+      serializeCheckpoint(createCheckpoint(plan, waiting.snapshot)),
+    );
+    for (const snapshot of [waiting.snapshot, restored.snapshot]) {
+      const completed = completeAction(plan, snapshot, {
+        actionKind: "interaction",
+        interactionKind: "text",
+        actionId: action.actionId,
+        payload: { kind: "submittedText", submittedText: "right" },
+      });
+      const result = run(plan, completed.snapshot);
+      assert.equal(result.snapshot.status, "failed");
+      assert.equal(result.snapshot.failure?.code, "TSR050");
+      assert.equal(
+        result.events.some((event) => event.kind === "say"),
+        false,
+      );
+    }
+    const nullPlan = compileValidPlan(`
+let options = { ${option}: null }
+speaker vera { bubble: options }
+speaker vera
+say "must not be emitted", instant
+`);
+    const invalid = run(nullPlan, createFreshRuntimeSnapshot(nullPlan));
+    assert.equal(invalid.snapshot.status, "failed");
+    assert.equal(invalid.snapshot.failure?.code, "TSR050");
+  }
+});
+
+test("checkpoint validation rejects authored placement on prepared bubble output", () => {
+  const plan = compileValidPlan('say "first"\nsay bubble "second"');
+  const waiting = run(plan, createFreshRuntimeSnapshot(plan));
+  const checkpointJson = serializeCheckpoint(createCheckpoint(plan, waiting.snapshot));
+  assert.doesNotThrow(() => deserializeCheckpoint(checkpointJson));
+  for (const option of ["position", "align"]) {
+    const malformed = JSON.parse(checkpointJson);
+    const presentation = malformed.snapshot.foregroundAction.preparedOutput.presentation;
+    assert.equal(presentation.kind, "bubble");
+    assert.equal(presentation[option], null);
+    presentation[option] = "right";
+    assert.equal(isMessagePresentation(presentation), false);
+    assert.equal(validateRuntimeSnapshot(malformed.snapshot, plan).valid, false);
+    assert.throws(() => deserializeCheckpoint(JSON.stringify(malformed)));
   }
 });

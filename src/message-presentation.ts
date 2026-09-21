@@ -2,13 +2,23 @@ import { isNormalizedColor } from "./color.js";
 
 export interface MessagePresentation {
   readonly kind: "bubble" | "prose";
-  /** Null leaves the default position/alignment to the Player after speaker inheritance. */
+  /** Bubble placement is Player-owned; prose nulls select Player defaults after inheritance. */
   readonly position: "left" | "center" | "right" | null;
   readonly align: "left" | "center" | "right" | null;
   /** Null selects the Player theme role, rather than an authored colour. */
   readonly color: string | null;
   readonly background: string | null;
   readonly font: string | null;
+}
+
+export function isMessagePresentationOption(
+  kind: MessagePresentation["kind"],
+  name: string,
+): boolean {
+  return (
+    ["color", "background", "font"].includes(name) ||
+    (kind === "prose" && ["position", "align"].includes(name))
+  );
 }
 
 export function isMessagePresentation(value: unknown): value is MessagePresentation {
@@ -18,6 +28,7 @@ export function isMessagePresentation(value: unknown): value is MessagePresentat
   return (
     Object.keys(record).length === 6 &&
     (record.kind === "bubble" || record.kind === "prose") &&
+    (record.kind !== "bubble" || (record.position === null && record.align === null)) &&
     (record.position === null ||
       (typeof record.position === "string" &&
         ["left", "center", "right"].includes(record.position))) &&

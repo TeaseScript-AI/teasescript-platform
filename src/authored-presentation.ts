@@ -1,3 +1,4 @@
+import { isMessagePresentationOption } from "./message-presentation.js";
 import type { Expression } from "./ast.js";
 import { normalizeColor } from "./color.js";
 import { staticVisibleText } from "./static-evaluation.js";
@@ -11,13 +12,13 @@ export function presentationPropertyDiagnostics(
   while (expression.kind === "parenthesizedExpression") expression = expression.expression;
   if ((name === "bubble" || name === "prose") && expression.kind === "objectLiteral") {
     return expression.properties.flatMap((property) =>
-      ["position", "align", "color", "background", "font"].includes(property.name.name)
+      isMessagePresentationOption(name, property.name.name)
         ? presentationPropertyDiagnostics(property.name.name, property.value)
         : [
             createDiagnostic(
               DiagnosticSeverity.Error,
               "TSC008",
-              `Unknown presentation option '${property.name.name}'.`,
+              `Unknown ${name} presentation option '${property.name.name}'.`,
               property.name.span,
             ),
           ],

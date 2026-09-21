@@ -1,5 +1,5 @@
 import { normalizeColor } from "../color.js";
-import type { MessagePresentation } from "../message-presentation.js";
+import { isMessagePresentationOption, type MessagePresentation } from "../message-presentation.js";
 import type { SourceSpan } from "../source.js";
 import type { RuntimeSpeakerSnapshot } from "./state.js";
 import type { SerializableRuntimeValue } from "./serializable-values.js";
@@ -18,12 +18,10 @@ export function resolveMessagePresentation(
   if (mode !== "bubble" && mode !== "prose") throw invalid("presentation", span);
   const defaults = fields(property(mode), span);
   for (const name of defaults.keys()) {
-    if (!["position", "align", "color", "background", "font"].includes(name))
-      throw invalid(name, span);
+    if (!isMessagePresentationOption(mode, name)) throw invalid(name, span);
   }
   for (const name of options.keys()) {
-    if (!["kind", "position", "align", "color", "background", "font"].includes(name))
-      throw invalid(name, span);
+    if (name !== "kind" && !isMessagePresentationOption(mode, name)) throw invalid(name, span);
   }
   const position = options.get("position") ?? defaults.get("position") ?? null;
   const align = options.get("align") ?? defaults.get("align") ?? null;

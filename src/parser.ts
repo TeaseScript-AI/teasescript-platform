@@ -1,3 +1,4 @@
+import { isMessagePresentationOption } from "./message-presentation.js";
 import { parseChild, runParse, type ParseTask } from "./parse-continuation.js";
 import type {
   AssignmentStatement,
@@ -484,10 +485,10 @@ class Parser {
           break;
         }
         const name = this.#identifier(this.#advance());
-        if (!["position", "align", "color", "background", "font"].includes(name.name))
+        if (!isMessagePresentationOption(mode.lexeme === "prose" ? "prose" : "bubble", name.name))
           this.#reportInsertion(
             parserDiagnosticCode.expectedPropertyName,
-            `Unknown presentation option '${name.name}'.`,
+            `Unknown ${mode.lexeme} presentation option '${name.name}'.`,
           );
         if (properties.some((property) => property.name.name === name.name))
           this.#reportInsertion(

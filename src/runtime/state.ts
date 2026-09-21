@@ -42,7 +42,7 @@ import { recordValidationTestWork } from "../validation-testing.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 22;
+export const RUNTIME_SNAPSHOT_VERSION = 23;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
