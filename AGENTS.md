@@ -50,6 +50,9 @@ outside the repository.
 - Validate external, checkpoint, host, package, and future integration data at runtime.
 - Do not add a dependency without documenting its need, alternatives, maintenance impact, and security impact.
 - Do not weaken tests to hide failures.
+- Do not record an experiment or inferred preference as accepted syntax or design. New syntax requires explicit Owner
+  acceptance; after acceptance, synchronize the implementation and its canonical specification in the same change.
+- Do not use tests to turn unsettled behavior into an implicit requirement.
 
 ## Requirements, simplicity, and review
 

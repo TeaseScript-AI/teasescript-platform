@@ -8,7 +8,7 @@ import Stage from "./Stage.vue";
 import PlayerComposition from "./PlayerComposition.vue";
 import PlayerTopBar from "./PlayerTopBar.vue";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
-import { transcriptFixtures, transcriptFixtureSpeakers } from "./transcriptFixtures";
+import { transcriptAuthoredFixtures, transcriptFixtures, transcriptFixtureSpeakers, transcriptMarkupFixtures, transcriptProseFixtures } from "./transcriptFixtures";
 import { createPlayerRuntimeSession, createPlayerRuntimeRestorePoint, restorePlayerRuntimeSession, type PlayerRuntimeSession, type PlayerRuntimeRestorePoint } from "../../../runtime-adapter.js";
 import { runtimeScenario, interactionScenario, buttonScenario } from "./runtimeScenario";
 import { stageFixtures } from "./stageFixtures";
@@ -65,11 +65,30 @@ function restoreRuntime() {
 }
 let nextMessage = 2000;
 let firstMessage = 0;
+
 function loadTranscript(count: number) {
   runtimeSession.value = null;
   firstMessage = 0;
   nextMessage = count;
   transcriptEntries.value = transcriptFixtures(0, count);
+}
+function loadMarkupSample() {
+  runtimeSession.value = null;
+  firstMessage = 0;
+  transcriptEntries.value = transcriptMarkupFixtures();
+  nextMessage = transcriptEntries.value.length;
+}
+function loadProseSample() {
+  runtimeSession.value = null;
+  firstMessage = 0;
+  transcriptEntries.value = transcriptProseFixtures();
+  nextMessage = transcriptEntries.value.length;
+}
+function loadAuthoredSample() {
+  runtimeSession.value = null;
+  firstMessage = 0;
+  transcriptEntries.value = transcriptAuthoredFixtures();
+  nextMessage = transcriptEntries.value.length;
 }
 function appendTranscript() {
   transcriptEntries.value = [...transcriptEntries.value, ...transcriptFixtures(nextMessage++, 1)];
@@ -155,6 +174,9 @@ async function toggleFullscreen() {
               <Button class="min-w-0" variant="outline" @click="loadTranscript(0)">Empty history</Button>
               <Button class="min-w-0" variant="outline" @click="loadTranscript(2000)">Load 2,000 messages</Button>
               <Button class="min-w-0" variant="outline" @click="loadTranscript(10000)">Load 10,000 messages</Button>
+              <Button class="min-w-0" variant="outline" @click="loadMarkupSample">Markup sample</Button>
+              <Button class="min-w-0" variant="outline" @click="loadProseSample">Prose sample</Button>
+              <Button class="min-w-0" variant="outline" @click="loadAuthoredSample">Authored colour sample</Button>
             </fieldset>
             <fieldset class="grid min-w-0 gap-2">
               <legend class="mb-2">Runtime transcript scenario</legend>

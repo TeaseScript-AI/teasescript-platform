@@ -1,0 +1,74 @@
+import type {
+  PlayerSpeakerPresentation,
+  PlayerTranscriptEntryPresentation,
+} from "../../../model.js";
+import { inkFor, scrimFor } from "./messageContrast";
+
+export interface TranscriptPalette {
+  readonly surface: string;
+  readonly canvas: string;
+  readonly link: string;
+}
+
+function authoredOn(entry: PlayerTranscriptEntryPresentation) {
+  return entry.kind === "message" ? (entry.presentation ?? null) : null;
+}
+
+function presentationOf(entry: PlayerTranscriptEntryPresentation | undefined) {
+  if (entry === undefined || entry.kind !== "message") return null;
+  return authoredOn(entry)?.kind === "prose" ? "prose" : "bubble";
+}
+
+export function adjoins(
+  entries: readonly PlayerTranscriptEntryPresentation[],
+  index: number,
+  other: number,
+) {
+  const entry = entries[index];
+  const neighbour = entries[other];
+  if (entry?.kind !== "message" || neighbour?.kind !== "message") return false;
+  return (
+    neighbour.speakerId === entry.speakerId && presentationOf(neighbour) === presentationOf(entry)
+  );
+}
+
+export function nameOf(
+  speakers: Readonly<Record<string, PlayerSpeakerPresentation>>,
+  entry: PlayerTranscriptEntryPresentation,
+) {
+  return entry.kind === "message" ? (speakers[entry.speakerId]?.name ?? "").trim() : "";
+}
+
+// Keep literal classes so Tailwind can discover every grouping variant.
+export function cornerClass(continues: boolean, continued: boolean, player: boolean) {
+  const classes: string[] = [];
+  if (continues) classes.push(player ? "rounded-tr-sm" : "rounded-tl-sm");
+  if (continued) classes.push(player ? "rounded-br-sm" : "rounded-bl-sm");
+  return classes.join(" ");
+}
+
+export function resolveAppearance(
+  entry: PlayerTranscriptEntryPresentation,
+  palette: TranscriptPalette,
+) {
+  const authored = authoredOn(entry);
+  const authoredText = authored?.color ?? null;
+  const authoredBackground = authored?.background ?? null;
+  const backdrop =
+    authoredBackground ?? (authored?.kind === "prose" ? palette.canvas : palette.surface);
+  return {
+    panel: authoredBackground,
+    cover:
+      authoredBackground === null && authoredText !== null
+        ? scrimFor(authoredText, backdrop)
+        : null,
+    placement:
+      authored?.kind !== "prose"
+        ? null
+        : { position: authored.position ?? "center", text: authored.align ?? "center" },
+    ink: authoredText ?? (authoredBackground === null ? null : inkFor(authoredBackground)),
+    backdrop,
+    link: authoredBackground === null ? palette.link : (authoredText ?? inkFor(authoredBackground)),
+    typeface: authored?.font == null ? null : `${authored.font}, var(--transcript-typeface)`,
+  };
+}

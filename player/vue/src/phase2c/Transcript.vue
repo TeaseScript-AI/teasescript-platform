@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { elementScroll, observeElementRect, useVirtualizer } from "@tanstack/vue-virtual";
 import { useResizeObserver } from "@vueuse/core";
 import { ArrowDown } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } from "../../../model.js";
-import TranscriptMarkup from "./TranscriptMarkup.vue";
+import TranscriptMessage from "./TranscriptMessage.vue";
+import { backdropBehind, resolveColour } from "./messageContrast";
+import { adjoins, resolveAppearance } from "./transcriptPresentation";
 
 const props = defineProps<{
   entries: readonly PlayerTranscriptEntryPresentation[];
@@ -71,13 +73,75 @@ watch(endInset, (inset, previous) => {
   if (inset !== previous && previousDistance <= latestThreshold && !touching.value)
     void nextTick(() => instance.scrollToEnd());
 });
-const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => ({
-  item, entry: props.entries[item.index]!,
-})));
+const palette = ref({
+  surface: "#ffffff",
+  canvas: "#ffffff",
+  link: "#0000ee",
+});
+function readPalette() {
+  const element = scrollElement.value;
+  if (element === null) return;
+  palette.value = {
+    surface: resolveColour(element, "var(--message-surface)", "#ffffff"),
+    canvas: backdropBehind(element),
+    link: resolveColour(element, "var(--markup-link)", "#0000ee"),
+  };
+}
+// Theme changes update the document, not this component's props.
+let paletteObserver: MutationObserver | null = null;
+onMounted(() => {
+  paletteObserver = new MutationObserver(readPalette);
+  paletteObserver.observe(document.documentElement, {
+    attributes: true, attributeFilter: ["style", "class", "data-phase2c-theme"],
+  });
+});
+onBeforeUnmount(() => { paletteObserver?.disconnect(); });
+const rows = computed(() =>
+  virtualizer.value.getVirtualItems().map((item) => {
+    const entry = props.entries[item.index]!;
+    return { item, entry, appearance: resolveAppearance(entry, palette.value) };
+  }));
 const showLatest = computed(() => !touching.value && !virtualizer.value.isScrolling &&
   virtualizer.value.getDistanceFromEnd() > Math.max(80, (virtualizer.value.scrollRect?.height ?? 0) / 2));
 const scrolled = computed(() => (virtualizer.value.scrollOffset ?? 0) > 1);
+function continues(index: number) {
+  return adjoins(props.entries, index, index - 1);
+}
+function continued(index: number) {
+  return adjoins(props.entries, index, index + 1);
+}
+const following = ref(true);
+// Read the DOM: the virtualizer may already reflect rows Vue has not rendered.
+function readingLatest() {
+  const viewport = scrollElement.value;
+  return viewport === null ||
+    viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= latestThreshold;
+}
+function rememberFollow() {
+  if (!touching.value) following.value = readingLatest();
+}
+// Shrinking row measurements can mimic reaching the end; do not resume follow here.
+function releaseFollow() {
+  if (!touching.value && !readingLatest()) following.value = false;
+}
+// Capture intent before rendering; revision also covers in-place adapter updates.
+watch([() => props.entries, () => props.revision, () => props.entries.length],
+  rememberFollow, { flush: "pre" });
+let measuredTotal = 0;
+let measuredInset = 0;
+watch(() => [virtualizer.value.getTotalSize(), endInset.value] as const, ([total, inset]) => {
+  // Exclude composer/control clearance changes from message remeasurement.
+  const messagesGrew = total - measuredTotal !== inset - measuredInset;
+  measuredTotal = total;
+  measuredInset = inset;
+  if (!messagesGrew || !following.value || touching.value || props.entries.length === 0) return;
+  const instance = virtualizer.value;
+  void nextTick(() =>
+    instance.scrollToOffset(
+      Math.max(instance.getTotalSize() - (instance.scrollRect?.height ?? 0), 0)));
+});
 function interruptFollow() {
+  following.value = false;
   // Replace an in-flight measured end target before native user scrolling starts.
   virtualizer.value.scrollToOffset(scrollElement.value?.scrollTop ?? 0);
 }
@@ -112,40 +176,45 @@ function onScrollKeydown(event: KeyboardEvent) {
   // follow-latest, and let Home replace any in-flight end reconciliation.
   if (event.key === "Home") {
     event.preventDefault();
+    following.value = false;
     virtualizer.value.scrollToOffset(0);
   } else if (event.key === "ArrowUp" || event.key === "PageUp") {
     interruptFollow();
   } else if (event.key === "End") {
     event.preventDefault();
+    following.value = true;
     virtualizer.value.scrollToEnd();
   }
 }
 function returnToLatest() {
+  following.value = true;
   virtualizer.value.scrollToEnd();
   scrollElement.value?.focus({ preventScroll: true });
 }
-onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
+onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollToEnd(); }); });
 </script>
 
 <template>
-  <section class="transcript" aria-label="Conversation" :style="{ '--transcript-bottom-inset': `${bottomInset ?? 0}px` }">
+  <section class="transcript" aria-label="Conversation"
+    :style="{ '--transcript-bottom-inset': `${bottomInset ?? 0}px` }">
     <ScrollArea type="scroll" class="transcript-scroll-area" viewport-class="transcript-scroll"
       content-class="transcript-scroll-content"
       @viewport="scrollElement = $event"
       :viewport-attrs="{ 'data-scrolled': scrolled, role: 'region', 'aria-label': 'Transcript',
-        tabindex: 0, onKeydown: onScrollKeydown, onWheel: onWheel,
+        tabindex: 0, onKeydown: onScrollKeydown, onWheel: onWheel, onScroll: releaseFollow,
         onTouchstart: onTouchStart, onTouchend: () => touching = false,
         onTouchcancel: () => touching = false }">
       <div class="transcript-history" :style="{ height: `${virtualizer.getTotalSize()}px` }">
         <div role="list">
-          <article v-for="{ item, entry } in rows" :key="entry.id"
+          <article v-for="{ item, entry, appearance } in rows" :key="entry.id"
             :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
             :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
             role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
-            class="transcript-entry" :style="{ transform: `translateY(${item.start}px)` }">
-            <div class="message" :data-author="entry.kind === 'session-event' ? 'session-event' : entry.speakerId === 'user' ? 'player' : 'speaker'">
-              <div class="message-copy"><strong v-if="entry.kind === 'message' && entry.speakerId !== 'user'">{{ speakers[entry.speakerId]?.name ?? entry.speakerId }}: </strong><TranscriptMarkup v-if="entry.kind === 'message' && entry.speakerId !== 'user' && entry.content" :content="entry.content" /><template v-else><span v-if="entry.kind === 'message' && entry.responseKind" class="choice-marker" aria-hidden="true">› </span><span v-if="entry.kind === 'message' && entry.responseKind" class="sr-only">Selected option: </span>{{ entry.text }}</template></div>
-            </div>
+            class="transcript-entry" :data-continues="continues(item.index)"
+            :data-prose="appearance.placement !== null || undefined"
+            :style="{ transform: `translateY(${item.start}px)` }">
+            <TranscriptMessage :entry="entry" :speakers="speakers" :appearance="appearance"
+              :continues="continues(item.index)" :continued="continued(item.index)" />
           </article>
         </div>
         <div ref="foregroundElement" class="transcript-foreground"
@@ -161,7 +230,13 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
 </template>
 
 <style scoped>
-.transcript { position: relative; flex: 1; min-height: 0; min-width: 0; }
+.transcript {
+  position: relative; flex: 1; min-height: 0; min-width: 0;
+  --message-surface: var(--surface-component);
+  --message-separator: var(--border);
+  --markup-link: light-dark(oklch(50% 0.17 254), oklch(79% 0.12 240));
+  --transcript-typeface: ui-sans-serif, system-ui, sans-serif;
+}
 /* Keep clipping and the scrollbar in the existing conversation padding, outside
    the reading column. This also preserves borders at fractional pixel positions. */
 .transcript-scroll-area {
@@ -191,18 +266,10 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
 :deep(.transcript-scroll[data-scrolled="true"]) { --transcript-top-fade: 1rem; }
 .transcript-foreground { position: absolute; left: 0; width: 100%; }
 .transcript-history { position: relative; width: 100%; }
-.transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: 0.5rem 1rem; }
-.message { max-width: 90%; }
-.message-copy {
-  margin: 0; max-width: 65ch; white-space: pre-wrap; overflow-wrap: anywhere;
-  font-size: 0.875rem; line-height: 1.5;
-}
-.message[data-author="player"] {
-  width: fit-content; margin-left: auto; padding: 0.75rem 1rem;
-  border: 1px solid var(--border); border-radius: 0.75rem;
-  background: var(--surface-component);
-}
-.transcript-empty { padding: 1rem; font-size: 0.875rem; color: var(--text-muted); }
+.transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: 1rem 0; }
+.transcript-entry[data-continues="true"] { padding-block-start: 0.125rem; }
+.transcript-entry[data-prose] { padding-block: 1.75rem 0.75rem; }
+.transcript-empty { padding: 1rem; font-size: 0.875rem; color: var(--muted-foreground); }
 .return-to-latest {
   position: absolute; bottom: calc(var(--transcript-bottom-inset, 0px) + 0.5rem); right: 0.25rem; width: 2.75rem; height: 2.75rem;
   border: 1px solid var(--border); border-radius: 50%;

@@ -285,7 +285,7 @@ function appendRuntimeEvents(
   }
   for (const event of events) {
     if (event.kind === "say") {
-      const speakerId = event.speaker === null ? "narrator" : `runtime-speaker-${event.sequence}`;
+      const speakerId = event.speaker === null ? "narrator" : speakerKey(event.speaker);
       if (event.speaker !== null) speakers[speakerId] = speakerPresentation(event.speaker);
       transcriptEntries.push(
         Object.freeze({
@@ -338,6 +338,24 @@ function interactionAccessibleName(value: InteractionAccessibleName): string {
   }[value.key];
 }
 
+// Include presentation state so later speaker changes do not restyle earlier messages.
+function speakerKey(speaker: {
+  readonly identifier: string;
+  readonly displayName: string;
+  readonly color: string | null;
+  readonly font: string | null;
+  readonly avatar: string | null;
+}): string {
+  const shape = [
+    speaker.identifier,
+    speaker.displayName,
+    speaker.color,
+    speaker.font,
+    speaker.avatar,
+  ];
+  return `runtime-speaker-${JSON.stringify(shape)}`;
+}
+
 function speakerPresentation(speaker: {
   readonly displayName: string;
   readonly color: string | null;
@@ -346,7 +364,7 @@ function speakerPresentation(speaker: {
 }): PlayerSpeakerPresentation {
   return Object.freeze({
     name: speaker.displayName,
-    accent: speaker.color ?? "#9a867d",
+    accent: speaker.color ?? "inherit",
     avatar: speaker.avatar ?? (speaker.displayName.trim().charAt(0).toUpperCase() || "?"),
     fontFamily: speaker.font ?? "inherit",
   });

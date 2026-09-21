@@ -426,15 +426,23 @@ uses restrained backdrop blur where supported. Its exact threshold remains a tun
 ### Message presentation and provenance
 
 Received bubbles align left and player-authored bubbles align right. The Player owns bubble placement and text
-alignment; authors can set `position` and `align` only for prose, as defined by the language contract below. A message
-row may use at most `90%` of the conversation width, while its readable copy is capped at `65ch`; this preserves an
-opposite-side margin on narrow layouts without forcing short wrapping on wider ones. The current avatar, speaker-name,
-and speaker-coloured rule remain the POC visual baseline. Speaker identity colour/font and per-message rich-text styling
-are content presentation, not application palette roles.
+alignment; authors can set `position` and `align` only for prose, as defined by the language contract below. Messages
+occupy at most `75%` of the conversation width and `65ch`. Consecutive messages group only while both the speaker and
+presentation kind remain the same. The first received bubble in a group shows its avatar and name. Player-authored
+messages do not. Speaker identity colour/font and per-message rich-text styling are content presentation, not
+application palette roles.
 
 The runtime adapter supplies resolved message presentation according to the
-[language contract](../specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides).
-Rendering that contract, including prose without an avatar or an unauthored background panel, is deferred to #421.
+[language contract](../specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides). Where that
+contract reports no authored choice, the Player supplies one. Prose has no avatar, defaults its block and text alignment
+to centre, uses the same width limits as bubbles, and has no panel unless the author supplies a background.
+
+Authored colours are preserved. When authored text meets a Player-owned surface, the Player measures the painted pair
+and adds the smallest scrim that restores readable contrast. A foreground/background pair authored together remains
+unchanged; compile-time feedback for a poorly contrasting authored pair is tracked in #434.
+
+An authored typeface uses the theme font stack as its fallback. Font bundling is tracked in
+[`RELEASE-ROADMAP.md`](../planning/RELEASE-ROADMAP.md).
 
 Authored Standard-chat `say` messages carry the typed structure defined by the
 [message-markup specification](../specifications/message-markup.md). The Player renders only those controlled blocks,

@@ -32,9 +32,7 @@ export function resolveMessagePresentation(
   const font = options.get("font") ?? defaults.get("font") ?? property("font");
   if (font !== null && typeof font !== "string") throw invalid("font", span);
   const defaultColor = normalizeColor(defaults.get("color")) ?? normalizeColor(property("color"));
-  const defaultBackground =
-    normalizeColor(defaults.get("background")) ??
-    (mode === "prose" ? normalizeColor("transparent") : null);
+  const defaultBackground = normalizeColor(defaults.get("background"));
   return Object.freeze({
     kind: mode,
     position,

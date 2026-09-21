@@ -15,7 +15,7 @@ import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { parseMessageMarkup } from "../src/message-markup.js";
 
-test("accepts concrete CSS colour notations and preserves alpha and out-of-gamut coordinates", () => {
+test("accepts concrete CSS colour notations and preserves out-of-gamut coordinates", () => {
   for (const color of [
     "red",
     "#f00",
@@ -26,21 +26,11 @@ test("accepts concrete CSS colour notations and preserves alpha and out-of-gamut
     "hwb(0 0% 0%)",
   ])
     assert.equal(normalizeColor(color), normalizeColor("red"), color);
-  for (const color of [
-    "lab(50% 20 30)",
-    "lch(50% 40 30)",
-    "oklab(50% .1 .1)",
-    "oklch(.5 .1 30)",
-    "#1234",
-    "#11223344",
-    "rgba(1,2,3,.5)",
-    "hsla(0,100%,50%,.5)",
-    "transparent",
-  ])
+  for (const color of ["lab(50% 20 30)", "lch(50% 40 30)", "oklab(50% .1 .1)", "oklch(.5 .1 30)"])
     assert.ok(isNormalizedColor(normalizeColor(color)), color);
-  assert.equal(normalizeColor("oklch(.5 .8 20 / .3)"), "oklch(0.5 0.8 20 / 0.3)");
+  assert.equal(normalizeColor("oklch(.5 .8 20)"), "oklch(0.5 0.8 20)");
   const smallChroma = normalizeColor("oklch(.5 1e-14 20)");
-  assert.equal(smallChroma, "oklch(0.5 1e-14 20 / 1)");
+  assert.equal(smallChroma, "oklch(0.5 1e-14 20)");
   assert.equal(isNormalizedColor(smallChroma), true);
   for (const color of [
     "oops",
@@ -71,7 +61,7 @@ say "inherited"
 say bubble(color: "white", font: "serif") "override"
 say "inherited again"
 vera.prose = { background: "ivory", align: "right" }
-say prose(background: "transparent") "transparent override"
+say prose(background: "linen") "background override"
 say "paper"
 `,
     { scenarioName: "speaker and message presentation inheritance" },
@@ -83,7 +73,7 @@ say "paper"
     align: "left",
     font: "Georgia",
     color: normalizeColor("red"),
-    background: normalizeColor("transparent"),
+    background: null,
   });
   assert.equal(messages[1]!.presentation.kind, "bubble");
   assert.equal(messages[1]!.presentation.position, null);
@@ -92,7 +82,7 @@ say "paper"
   assert.equal(messages[1]!.presentation.color, normalizeColor("white"));
   assert.equal(messages[1]!.presentation.font, "serif");
   assert.deepEqual(messages[2]!.presentation, messages[0]!.presentation);
-  assert.equal(messages[3]!.presentation.background, normalizeColor("transparent"));
+  assert.equal(messages[3]!.presentation.background, normalizeColor("linen"));
   assert.equal(messages[4]!.presentation.background, normalizeColor("ivory"));
 });
 
@@ -329,6 +319,67 @@ say "[color=${input}]markup[/color]"
     if (span?.kind !== "color") throw new Error("Expected colour span.");
     assert.equal(span.value, expected);
   }
+});
+
+test("an authored colour that shows what is behind it is no colour at all", () => {
+  for (const color of ["rgb(255 0 0 / .5)", "#ff000080", "oklch(.5 .1 30 / .2)", "transparent"]) {
+    assert.equal(normalizeColor(color), null, color);
+    assert.equal(isNormalizedColor(color), false, color);
+  }
+  for (const color of ["rgb(255 0 0 / 1)", "#ff0000ff", "rgba(255,0,0,100%)"])
+    assert.equal(normalizeColor(color), normalizeColor("red"), color);
+  for (const source of [
+    'say bubble(color: "rgb(255 0 0 / .5)") "x"',
+    'say bubble(background: "rgb(255 0 0 / .5)") "x"',
+    'speaker vera { color: "#ff000080" }',
+    'speaker vera { bubble: { background: "#ff000080" } }',
+    'speaker vera { prose: { color: "transparent" } }',
+  ]) {
+    const result = compileSource(source);
+    assert.equal(result.plan, null, source);
+    assert.ok(
+      result.diagnostics.some((diagnostic) => diagnostic.code === "TSC008"),
+      source,
+    );
+  }
+  assert.equal(
+    isMessagePresentation({
+      kind: "bubble",
+      position: null,
+      align: null,
+      font: null,
+      color: "oklch(0.5 0.1 30 / 0.5)",
+      background: null,
+    }),
+    false,
+  );
+});
+
+test("prose without a background leaves the panel to the Player", () => {
+  const plan = compileValidPlan(`
+let faded = "rgb(255 0 0 / .5)"
+speaker vera {
+  displayName: "Vera"
+  color: "blue"
+}
+speaker vera
+say prose "letter", instant
+say bubble(color: faded, background: faded) "second", instant
+say "[color=\${faded}]third[/color]", instant
+`);
+  const result = run(plan, createFreshRuntimeSnapshot(plan));
+  const messages = result.events.filter((event) => event.kind === "say");
+  assert.equal(messages[0]!.presentation.kind, "prose");
+  assert.equal(messages[0]!.presentation.background, null);
+  assert.equal(messages[1]!.presentation.color, normalizeColor("blue"));
+  assert.equal(messages[1]!.presentation.background, null);
+  const block = messages[2]!.content.blocks[0];
+  if (block?.kind !== "paragraph") throw new Error("Expected paragraph.");
+  assert.deepEqual(
+    block.lines[0]!.spans.map((span) => [span.kind, "value" in span ? span.value : null]),
+    [["color", "inherit"]],
+  );
+  assert.equal(messages[2]!.text, "third");
 });
 
 test("bubble syntax and speaker defaults reject authored placement, including null", () => {

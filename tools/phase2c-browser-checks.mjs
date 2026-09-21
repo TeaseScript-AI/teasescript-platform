@@ -1133,7 +1133,7 @@ async function runtimeTranscriptChecks(page) {
     (await rows.first().getAttribute("data-speaker-id")).startsWith("runtime-speaker-"),
     "Speaker provenance lost",
   );
-  check((await rows.first().innerText()).includes("Coastal Guide:"), "Runtime speaker name lost");
+  check((await rows.first().innerText()).includes("Coastal Guide\n"), "Runtime speaker name lost");
   const link = transcript.getByRole("link", { name: "Map", exact: true });
   check(
     (await link.getAttribute("href")) === "https://example.com/coast",
@@ -1205,7 +1205,7 @@ async function runtimeTranscriptChecks(page) {
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await transcript.locator('[aria-setsize="5"]').first().waitFor();
   const selectedButton = transcript
-    .locator('[data-speaker-id="user"] .message-copy')
+    .locator('[data-speaker-id="user"] [data-slot="bubble-content"]')
     .filter({ hasText: "Continue **literally**" });
   check(
     (await selectedButton.count()) === 1 &&
@@ -1222,8 +1222,9 @@ async function runtimeTranscriptChecks(page) {
     "Canonical button transcript text or selected-option marker changed",
   );
   check(
-    (await transcript.locator('[data-speaker-id="narrator"]').innerText()) ===
-      "Narrator: The walk continues. <b>This is literal text.</b>",
+    (await transcript.locator('[data-speaker-id="narrator"]').innerText()).endsWith(
+      "Narrator\nThe walk continues. <b>This is literal text.</b>",
+    ),
     "Narrator/raw HTML semantics changed",
   );
   check((await transcript.locator("b").count()) === 0, "Authored HTML was interpreted");
@@ -1552,6 +1553,89 @@ async function timerChecks(page) {
   return "PASS timer design, semantics, identity, motion and Stage integration";
 }
 
+async function authoredPresentationChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
+  await page.getByRole("button", { name: "Authored colour sample", exact: true }).click();
+  const painted = (selector) =>
+    page.evaluate((selector) => {
+      const element = document.querySelector(selector);
+      if (element === null) return null;
+      const context = document.createElement("canvas").getContext("2d");
+      const flatten = (layers) => {
+        context.clearRect(0, 0, 1, 1);
+        for (const layer of layers) {
+          context.fillStyle = layer;
+          context.fillRect(0, 0, 1, 1);
+        }
+        const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
+        return [red, green, blue];
+      };
+      const luminance = (channels) => {
+        const [red, green, blue] = channels.map((channel) => {
+          const value = channel / 255;
+          return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+      };
+      const layers = ["#ffffff"];
+      for (let node = element; node !== null; node = node.parentElement) {
+        const colour = getComputedStyle(node).backgroundColor;
+        if (colour === "" || colour === "transparent" || colour === "rgba(0, 0, 0, 0)") continue;
+        layers.splice(1, 0, colour);
+        if (!colour.startsWith("rgba(")) break;
+      }
+      const text = luminance(flatten([getComputedStyle(element).color]));
+      const behind = luminance(flatten(layers));
+      return (Math.max(text, behind) + 0.05) / (Math.min(text, behind) + 0.05);
+    }, selector);
+  const link = '.transcript-entry a[href^="https://example.com"]';
+  const prose = '.transcript-entry .prose:not([data-panel])[style*="color"] .markup-paragraph span';
+  for (const mode of ["light", "dark"]) {
+    const toggle = page.getByRole("button", { name: `Switch to ${mode} theme`, exact: true });
+    if (await toggle.isVisible()) await toggle.click();
+    await page.waitForTimeout(150);
+    const linkRatio = await painted(link);
+    check(linkRatio !== null, `Authored link sample missing in ${mode} mode`);
+    check(
+      linkRatio >= 4.5,
+      `Link inside an authored message is unreadable in ${mode} mode: ${linkRatio}:1`,
+    );
+    const proseRatio = await painted(prose);
+    check(proseRatio !== null, `Unpanelled prose sample missing in ${mode} mode`);
+    check(
+      proseRatio >= 4.5,
+      `Prose without a panel is unreadable in ${mode} mode: ${proseRatio}:1`,
+    );
+  }
+  const grouping = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll(".transcript-entry")];
+    const spoken = rows.filter((row) => row.dataset.speakerId === "keeper");
+    const last = spoken[spoken.length - 1];
+    return {
+      run: spoken.map((row) => [row.dataset.continues, row.dataset.prose ?? "bubble"]),
+      reintroduced: last?.querySelector('[data-slot="message-header"]')?.textContent?.trim(),
+      avatarHidden: last
+        ?.querySelector('[data-slot="message-avatar"]')
+        ?.classList.contains("invisible"),
+    };
+  });
+  check(
+    grouping.run.at(-1)?.[0] === "false",
+    `A bubble after a passage must open its own run: ${JSON.stringify(grouping.run)}`,
+  );
+  check(
+    (grouping.reintroduced ?? "") !== "",
+    "A bubble after a passage must name its speaker again",
+  );
+  check(grouping.avatarHidden === false, "A bubble after a passage must show its avatar");
+  return "PASS authored contrast and grouping across a prose boundary";
+}
+
 async function conversationWidthChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -1802,6 +1886,7 @@ const groups = [
   conversationWidthChecks,
   timerChecks,
   transcriptChecks,
+  authoredPresentationChecks,
 ];
 
 async function runGroup(browserPage, run, url, artifacts) {
