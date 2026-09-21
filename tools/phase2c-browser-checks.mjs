@@ -512,8 +512,14 @@ async function panelResizeChecks(page) {
     }
     await page.setViewportSize({ width: 1920, height: 900 });
     await settle();
-    if (await panel.evaluate((el, maximum) => el.style.width !== maximum, maximum))
-      throw new Error("Viewport resize discarded the selected panel width");
+    await page.waitForFunction((maximum) => {
+      const panel = document.querySelector('[data-tool="Visual Lab"]');
+      const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+      return (
+        panel.style.width === maximum &&
+        Math.abs(panel.getBoundingClientRect().width - parseFloat(maximum) * rem) < 1
+      );
+    }, maximum);
   }
   await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "icons"));
   return "PASS panel width cap, resize, restoration and cancellation";
