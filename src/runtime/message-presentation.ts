@@ -32,8 +32,6 @@ export function resolveMessagePresentation(
   const font = options.get("font") ?? defaults.get("font") ?? property("font");
   if (font !== null && typeof font !== "string") throw invalid("font", span);
   const defaultColor = normalizeColor(defaults.get("color")) ?? normalizeColor(property("color"));
-  // Prose without a background is prose the author gave none, not prose painted in a
-  // colour that happens to show nothing: the Player decides whether it draws a panel.
   const defaultBackground = normalizeColor(defaults.get("background"));
   return Object.freeze({
     kind: mode,

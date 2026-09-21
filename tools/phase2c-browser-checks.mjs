@@ -1133,9 +1133,6 @@ async function runtimeTranscriptChecks(page) {
     (await rows.first().getAttribute("data-speaker-id")).startsWith("runtime-speaker-"),
     "Speaker provenance lost",
   );
-  // The title the author gave the speaker, not the `guide` the script addresses it by. It
-  // introduces the run from its own line inside the bubble, the way a name does anywhere
-  // people talk to each other, so nothing follows it on that line.
   check((await rows.first().innerText()).includes("Coastal Guide\n"), "Runtime speaker name lost");
   const link = transcript.getByRole("link", { name: "Map", exact: true });
   check(
@@ -1207,8 +1204,6 @@ async function runtimeTranscriptChecks(page) {
   await page.getByRole("button", { name: "Capture runtime checkpoint", exact: true }).click();
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await transcript.locator('[aria-setsize="5"]').first().waitFor();
-  // The player's own words now sit in a bubble, so the copy is looked for where it is
-  // written rather than in the flat line the transcript used to be.
   const selectedButton = transcript
     .locator('[data-speaker-id="user"] [data-slot="bubble-content"]')
     .filter({ hasText: "Continue **literally**" });
@@ -1226,9 +1221,6 @@ async function runtimeTranscriptChecks(page) {
       ).trim() === "Continue **literally**",
     "Canonical button transcript text or selected-option marker changed",
   );
-  // The row opens with the avatar's letter, so the name and the line it introduces are
-  // matched at the end. Tags the author typed are part of the sentence and stay readable
-  // as typed, which is what the following check confirms was never parsed.
   check(
     (await transcript.locator('[data-speaker-id="narrator"]').innerText()).endsWith(
       "Narrator\nThe walk continues. <b>This is literal text.</b>",
@@ -1561,8 +1553,6 @@ async function timerChecks(page) {
   return "PASS timer design, semantics, identity, motion and Stage integration";
 }
 
-// A cover is chosen from a colour and a surface, and is only worth anything if those are
-// the ones the browser really paints. These read the painted result back out.
 async function authoredPresentationChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -1604,7 +1594,6 @@ async function authoredPresentationChecks(page) {
       return (Math.max(text, behind) + 0.05) / (Math.min(text, behind) + 0.05);
     }, selector);
   const link = '.transcript-entry a[href^="https://example.com"]';
-  // The cover is painted on the piece that carries the words, so that is what is read.
   const prose = '.transcript-entry .prose:not([data-panel])[style*="color"] .markup-paragraph span';
   for (const mode of ["light", "dark"]) {
     const toggle = page.getByRole("button", { name: `Switch to ${mode} theme`, exact: true });
@@ -1623,8 +1612,6 @@ async function authoredPresentationChecks(page) {
       `Prose without a panel is unreadable in ${mode} mode: ${proseRatio}:1`,
     );
   }
-  // A passage set apart is not part of the run of bubbles around it, so the bubble that
-  // follows one has to reintroduce its speaker rather than continue across the gap.
   const grouping = await page.evaluate(() => {
     const rows = [...document.querySelectorAll(".transcript-entry")];
     const spoken = rows.filter((row) => row.dataset.speakerId === "keeper");

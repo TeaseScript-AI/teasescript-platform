@@ -8,10 +8,8 @@ import { normalizeColor } from "../../../../src/color.js";
 
 export const transcriptFixtureSpeakers: Readonly<Record<string, PlayerSpeakerPresentation>> = {
   guide: { name: "Guide", accent: "inherit", avatar: "G", fontFamily: "inherit" },
-  // Unnamed and named speakers both have to be shown; the author decides this per speaker.
   narrator: { name: "", accent: "inherit", avatar: "", fontFamily: "inherit" },
   keeper: { name: "Hanna", accent: "inherit", avatar: "H", fontFamily: "inherit" },
-  // A note about the interface rather than about the story.
   system: { name: "", accent: "inherit", avatar: "", fontFamily: "inherit" },
   user: { name: "You", accent: "inherit", avatar: "Y", fontFamily: "inherit" },
 };
@@ -25,10 +23,7 @@ const messages = [
   "Yes, let's continue.",
 ];
 
-// Authored source rather than hand-built structures, so the presentation is judged
-// against what the real parser produces.
 const markupSources: readonly (readonly [speaker: string, source: string])[] = [
-  // All three heading levels with text between them: a level only shows against its neighbours.
   [
     "guide",
     "# The lighthouse\nThe path splits here. *Take your time* — the **tide** is still going out.\n## The keeper's stair\nSixty steps, and a rail on the seaward side.\n### Before you climb\nCheck that the beam is turning.",
@@ -43,12 +38,10 @@ const markupSources: readonly (readonly [speaker: string, source: string])[] = [
     "Watch for:\n- loose sand past the second dune\n- the marker posts\n- the light itself",
   ],
   ["guide", "In order:\n1. follow the posts\n2. cross the dune\n3. wait for the beam"],
-  // Mid grey is the hard case: classifying each side calls the pair safe, measuring gives 3:1.
   [
     "guide",
     "Authored colours: [color=#ffe066]pale yellow[/color], [color=#1a1a2e]near black[/color], [color=#8a8a8a]mid grey[/color], and [color=#c2185b]deep pink[/color].",
   ],
-  // Both colours written together and barely apart: the pair the Player leaves alone.
   [
     "guide",
     "Chosen together: [bg=#2b3a8f][color=#3344aa]blue on blue[/color][/bg] and [bg=#f2e9c9][color=#efe4c0]cream on cream[/color][/bg].",
@@ -56,7 +49,6 @@ const markupSources: readonly (readonly [speaker: string, source: string])[] = [
   ["user", "Understood. I will follow the posts."],
 ];
 
-/** One message per markup kind, for judging the presentation of authored content. */
 export function transcriptMarkupFixtures(): PlayerTranscriptEntryPresentation[] {
   return markupSources.map(([speakerId, source], index) => {
     const content = parseMessageMarkup(source);
@@ -70,8 +62,6 @@ export function transcriptMarkupFixtures(): PlayerTranscriptEntryPresentation[] 
   });
 }
 
-// Prose has to be judged in company: narration, a letter and dialogue interleaved, all
-// leaving position and alignment unchosen, which is the case the Player has to answer.
 const proseSources: readonly (readonly [speaker: string, source: string, prose?: true])[] = [
   ["guide", "There is something I want you to see before the light goes."],
   ["user", "Lead the way."],
@@ -101,7 +91,6 @@ const proseSources: readonly (readonly [speaker: string, source: string, prose?:
   ["guide", "Take your time, then."],
 ];
 
-/** A mixed history for judging how prose and dialogue sit together. */
 export function transcriptProseFixtures(): PlayerTranscriptEntryPresentation[] {
   return proseSources.map(([speakerId, source, prose], index) => {
     const content = parseMessageMarkup(source);
@@ -123,8 +112,6 @@ export function transcriptProseFixtures(): PlayerTranscriptEntryPresentation[] {
   });
 }
 
-// The colours are written the way an author writes them and normalized the way the
-// compiler would, so the transcript is handed exactly what the runtime would hand it.
 function authored(
   kind: "bubble" | "prose",
   color: string | null,
@@ -141,8 +128,6 @@ function authored(
   };
 }
 
-// The four cases the resolved presentation can produce, in the order they have to be
-// judged: a colour behind the words, a colour on them, both at once, and neither.
 const authoredSources: readonly (readonly [
   speaker: string,
   source: string,
@@ -158,8 +143,6 @@ const authoredSources: readonly (readonly [
     "A colour behind the words. What the words themselves become is measured against it, because the author never said.",
     authored("bubble", null, "#4a2d6b"),
   ],
-  // A pale colour on a light theme and a dark one on a dark theme: in each mode one of
-  // these is unreadable on the player's own bubble, which is the case it has to answer.
   [
     "guide",
     "A colour on the words and none behind them. The bubble is the player's, so the player owes it.",
@@ -171,7 +154,6 @@ const authoredSources: readonly (readonly [
     authored("bubble", "#cbb9e8", "#4a2d6b"),
   ],
   ["user", "And my own lines are authored by nobody, so they keep the theme's accent."],
-  // A generic family: the only kind every device can answer.
   [
     "keeper",
     "*My dear,*\n\nThis one was given a surface of its own to sit on, so it reads as a page rather than as something said out loud.\n\n**— H.**",
@@ -182,28 +164,21 @@ const authoredSources: readonly (readonly [
     "And this passage was given nothing, so it sits straight on the page.",
     authored("prose", null, null),
   ],
-  // A link inside a coloured message. The page paints links its own blue, so the colour
-  // the author gave the message is not the colour this reader has to read.
   [
     "guide",
     "A colour on the words, and a [link](https://example.com) the page paints its own way.",
     authored("bubble", "#ffffff", null),
   ],
-  // A passage with no panel is read against the page, which in one mode is nowhere near
-  // the surface a bubble would have given it.
   [
     "narrator",
     "And this one was given a colour but nothing to sit on.",
     authored("prose", "#444444", null),
   ],
-  // One speaker saying something, setting a passage apart, then speaking again. The
-  // passage is not part of the run, so the bubble after it opens a new one.
   ["keeper", "Something said out loud.", authored("bubble", null, null)],
   ["keeper", "Then a passage that stands on its own.", authored("prose", null, null)],
   ["keeper", "And speaking again afterwards.", authored("bubble", null, null)],
 ];
 
-/** Every combination of authored colours a resolved message presentation can carry. */
 export function transcriptAuthoredFixtures(): PlayerTranscriptEntryPresentation[] {
   return authoredSources.map(([speakerId, source, presentation], index) => {
     const content = parseMessageMarkup(source);
@@ -225,7 +200,6 @@ export function transcriptFixtures(
   return Array.from({ length: count }, (_, index) => {
     const sequence = start + index;
     const variant = ((sequence % messages.length) + messages.length) % messages.length;
-    // Runs of consecutive speaker messages, so grouping is visible in the fixtures.
     const player = variant === 3 || variant === 5;
     return {
       id: `message-${sequence}`,

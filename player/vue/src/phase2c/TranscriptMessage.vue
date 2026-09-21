@@ -10,21 +10,15 @@ const props = defineProps<{
   entry: PlayerTranscriptEntryPresentation;
   speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
   appearance: ReturnType<typeof resolveAppearance>;
-  /** Whether the entry above and below belong to the same visual group. */
   continues: boolean;
   continued: boolean;
 }>();
 const player = props.entry.kind === "message" && props.entry.speakerId === "user";
-// A run is introduced once; the bubbles below it continue the same speaker.
 const name = !player && !props.continues ? nameOf(props.speakers, props.entry) : "";
 </script>
 
 <template>
-  <!-- Session events carry no authored story text and receive no designed treatment. -->
   <p v-if="entry.kind === 'session-event'" class="session-event">{{ entry.text }}</p>
-  <!-- Where a passage sits and how its text is set are two separate choices: a block can
-       stand on the right while its lines still read from the left, which is how a
-       signature sits under a letter. -->
   <div
     v-else-if="appearance.placement"
     class="prose"
@@ -48,7 +42,6 @@ const name = !player && !props.continues ? nameOf(props.speakers, props.entry) :
     <template v-else>{{ entry.text }}</template>
   </div>
   <Message v-else :align="player ? 'end' : 'start'">
-    <!-- The avatar keeps its place through the run so the bubbles stay on one line. -->
     <MessageAvatar v-if="!player" class="self-start" :class="continues ? 'invisible' : ''">
       <Avatar>
         <AvatarFallback class="text-xs font-semibold">
@@ -57,9 +50,6 @@ const name = !player && !props.continues ? nameOf(props.speakers, props.entry) :
       </Avatar>
     </MessageAvatar>
     <MessageContent>
-      <!-- Two caps, whichever binds first: three quarters of the column keeps a bubble off
-           the edge on a narrow window, and 65ch keeps the line readable on a wide one.
-           The player's side is theme-owned and keeps the accent roles as they are. -->
       <Bubble
         class="max-w-[min(75%,65ch)]"
         :variant="player ? 'default' : 'secondary'"
@@ -86,8 +76,6 @@ const name = !player && !props.continues ? nameOf(props.speakers, props.entry) :
             :cover="appearance.cover"
             :link="appearance.link"
           />
-          <!-- A reply that was chosen rather than typed says so: the mark is decorative and
-               the label carries it to a reader who hears the transcript instead. -->
           <template v-else
             ><span
               v-if="entry.kind === 'message' && entry.responseKind"
@@ -105,9 +93,6 @@ const name = !player && !props.continues ? nameOf(props.speakers, props.entry) :
 </template>
 
 <style scoped>
-/* A message is its own shape before it is a colour, and a bubble can sit close enough to
-   the canvas that only its edge tells them apart. The faint line does that work, so an
-   authored fill is never altered merely to be seen. */
 .message-speaker {
   background: var(--message-surface);
   border-color: var(--message-separator);
@@ -115,29 +100,19 @@ const name = !player && !props.continues ? nameOf(props.speakers, props.entry) :
 .message-speaker.message-authored {
   background: var(--message-authored-fill);
 }
-/* The page's link blue belongs to the player's own surfaces. Where the author painted the
-   message, the one colour known to work against it is the one the message is already set
-   in; a link keeps its underline and says the rest that way. */
 .message-authored,
 .prose[data-panel] {
   --markup-link: currentColor;
 }
-/* Where an author's text was broken is part of what was written, and the same goes for a
-   player's own answer. Marked-up text keeps its own breaks; plain text has only this. */
 :deep([data-slot="bubble-content"]) {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-/* The name is muted against the page, not against a coloured bubble. Inside one it steps
-   back from the bubble's own text colour instead, which follows the mode. */
 .message-authored :deep([data-slot="message-header"]) {
   color: inherit;
   opacity: 0.72;
 }
 .prose {
-  /* Shrink-to-fit is what makes the block's own position visible: a short passage sits
-     where it was put. A long one is never given everything, so the slack left over is what
-     its position spends — on a phone, the only thing left saying which side was meant. */
   width: fit-content;
   max-width: min(65ch, 75%);
   font-size: 1rem;
@@ -145,9 +120,6 @@ const name = !player && !props.continues ? nameOf(props.speakers, props.entry) :
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-/* A passage given a surface holds its words off the edge of it, the same distance a bubble
-   does, or the colour reads as a stain rather than as a panel. Prose given none insets for
-   nothing: a panel drawn under it anyway would be a colour nobody chose. */
 .prose[data-panel] {
   padding: 0.5rem 0.75rem;
   border-radius: 0.5rem;
@@ -174,7 +146,6 @@ const name = !player && !props.continues ? nameOf(props.speakers, props.entry) :
 .prose[data-text="right"] {
   text-align: right;
 }
-/* Attribution for prose is a label on the passage, not a speaker in a conversation. */
 .prose-attribution {
   margin: 0 0 0.5rem;
   font-size: 0.75rem;

@@ -6,11 +6,8 @@ import TranscriptLine from "./TranscriptLine.vue";
 
 const props = defineProps<{
   content: MessageMarkup;
-  /** The realized bubble colour an authored text colour has to survive against. */
   backdrop: string;
-  /** Cover the whole message needs, for pieces the author left uncoloured. */
   cover: string | null;
-  /** The colour a link is really painted in here, which is not always the message's. */
   link: string;
 }>();
 const blocks = computed(() => preparePlayerMessageMarkup(props.content));
@@ -53,10 +50,6 @@ const blocks = computed(() => preparePlayerMessageMarkup(props.content));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-/* Three levels have to be told apart where they stand, without a second one to compare
-   against, so each step is a real change of size rather than another shade of weight. The
-   third stops at the body's own size: a heading smaller than the lines it introduces would
-   be announcing itself downward. */
 .markup-heading {
   font-weight: 700;
   line-height: 1.25;
@@ -82,7 +75,6 @@ blockquote {
   border-inline-start: 2px solid var(--border);
   padding-inline-start: 0.75em;
 }
-/* Underlined as well as coloured: colour alone is not something every reader can see. */
 :deep(a) {
   color: var(--markup-link);
   text-decoration: underline;
@@ -102,9 +94,6 @@ blockquote {
 :deep(.markup-strikethrough.markup-underline) {
   text-decoration: line-through underline;
 }
-/* The surface is mixed out of the colour the words are already set in, so it follows
-   whatever the message is painted without being chosen twice. The monospace face runs
-   large beside a reading face, and the reduction brings it back level. */
 :deep(.markup-code) {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.9em;
@@ -115,9 +104,6 @@ blockquote {
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
-/* The cover itself is measured per message and supplied as a background layer; only its
-   shape belongs here. Cloning is what makes a cover that wraps read as one thing wrapped
-   rather than two things abutting: without it the turn is cut square. */
 :deep(.markup-scrim) {
   border-radius: 0.2em;
   padding-inline: 0.12em;

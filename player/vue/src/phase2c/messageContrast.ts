@@ -1,10 +1,3 @@
-/**
- * Contrast work for an authored colour meeting a bubble the author never saw.
- *
- * Compositing is not linear in luminance and a bubble is rarely a neutral grey, so
- * nothing here models the blend: the same engine that will paint the page is asked
- * what a candidate actually produces.
- */
 let context: CanvasRenderingContext2D | null = null;
 
 function paint(...layers: readonly string[]) {
@@ -19,11 +12,6 @@ function paint(...layers: readonly string[]) {
   return [red!, green!, blue!] as const;
 }
 
-/**
- * A theme colour as a colour rather than as the recipe for one. Custom properties are
- * carried around unresolved, so a token like light-dark() only becomes a colour once it
- * is used as one. Using it is therefore how it is read.
- */
 export function resolveColour(element: Element, value: string, fallback: string) {
   const probe = document.createElement("span");
   probe.style.display = "none";
@@ -34,12 +22,6 @@ export function resolveColour(element: Element, value: string, fallback: string)
   return resolved === "" ? fallback : resolved;
 }
 
-/**
- * What is actually painted behind an element. A message names its own surface, but a
- * passage that has none is read against whatever the page puts there, which may be
- * several partly transparent layers deep. They are composited rather than guessed at,
- * bottom layer first, by the same engine that resolves everything else here.
- */
 export function backdropBehind(element: Element | null) {
   const layers: string[] = [];
   for (let node = element; node !== null; node = node.parentElement) {
@@ -64,20 +46,12 @@ function ratio(first: number, second: number) {
   return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
 }
 
-/**
- * The ink a realized bubble can carry. A tone near the crossover reads as light to one
- * hue and dark to another, so the pair is measured rather than classified.
- */
 export function inkFor(backdrop: string) {
   const behind = luminance(paint(backdrop));
   return 1.05 / (behind + 0.05) >= (behind + 0.05) / 0.05 ? "#ffffff" : "#000000";
 }
 
-/**
- * The least cover an authored colour needs to stay readable on this backdrop, or null
- * when it needs none. Cover runs toward whichever pole the colour is furthest from, so
- * more of it always helps and the smallest sufficient amount can be narrowed down.
- */
+// Binary search the smallest black or white cover that reaches the contrast target.
 export function scrimFor(colour: string, backdrop: string, target = 4.6) {
   const text = luminance(paint(colour));
   const behind = luminance(paint(backdrop));

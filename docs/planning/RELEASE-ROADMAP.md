@@ -181,16 +181,10 @@ subsystems may still have different maturity levels.
   - **Reference:** Issues #288 and #304, PR #293, [ADR 0019](../decisions/0019-resource-limit-governance.md),
     `docs/RESOURCE-LIMITS.md`, and **Establish a runtime performance baseline and optimization plan**.
 
-- [ ] **Decide what a typeface an author names is worth**
-  - **Outcome:** A named typeface is a request the reader's device may not be able to answer, so the same script can
-    look different to two readers; the current contract is in [`PLAYER-UI.md`](../ui/PLAYER-UI.md). Decide whether that
-    is acceptable for a platform where the author chooses the presentation, or whether the product should carry a small
-    set of typefaces of its own so a named face means one thing. Shipping faces is the only way to make a name
-    reliable, and costs a decision about which faces and what each adds to the download.
-  - **Trigger:** Reconsider when authored presentation is exercised on more than one operating system, or when an author
-    asks why their script reads differently on someone else's device.
-  - **Reference:** Issue #421, [`accepted-syntaxes-v30.md`](../specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides),
-    and [`PLAYER-UI.md`](../ui/PLAYER-UI.md).
+- [ ] **Bundle supported author fonts**
+  - **Outcome:** Provide a product-carried font set so supported authored font choices render consistently across
+    devices.
+  - **Reference:** Issue #421 and [`PLAYER-UI.md`](../ui/PLAYER-UI.md).
 
 ## Release Candidate
 

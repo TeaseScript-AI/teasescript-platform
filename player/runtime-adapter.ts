@@ -338,13 +338,7 @@ function interactionAccessibleName(value: InteractionAccessibleName): string {
   }[value.key];
 }
 
-/**
- * The speaker a message is filed under. A line records who was speaking as they were at
- * the time, so a character introduced as a stranger and named later leaves the earlier
- * messages alone. Consecutive lines still have to read as one turn, though, and a
- * sequence number can never say that two of them came from the same character: the
- * identifier does, and the rest only parts a run where the speaker really changed.
- */
+// Include presentation state so later speaker changes do not restyle earlier messages.
 function speakerKey(speaker: {
   readonly identifier: string;
   readonly displayName: string;
@@ -370,8 +364,6 @@ function speakerPresentation(speaker: {
 }): PlayerSpeakerPresentation {
   return Object.freeze({
     name: speaker.displayName,
-    // A speaker who was given no colour has to arrive without one: the presentation decides
-    // what an absent colour looks like, and inventing one here makes that choice unreachable.
     accent: speaker.color ?? "inherit",
     avatar: speaker.avatar ?? (speaker.displayName.trim().charAt(0).toUpperCase() || "?"),
     fontFamily: speaker.font ?? "inherit",

@@ -326,7 +326,6 @@ test("an authored colour that shows what is behind it is no colour at all", () =
     assert.equal(normalizeColor(color), null, color);
     assert.equal(isNormalizedColor(color), false, color);
   }
-  // Full opacity written out is simply the colour, whichever notation carries it.
   for (const color of ["rgb(255 0 0 / 1)", "#ff0000ff", "rgba(255,0,0,100%)"])
     assert.equal(normalizeColor(color), normalizeColor("red"), color);
   for (const source of [
@@ -370,10 +369,8 @@ say "[color=\${faded}]third[/color]", instant
 `);
   const result = run(plan, createFreshRuntimeSnapshot(plan));
   const messages = result.events.filter((event) => event.kind === "say");
-  // Nothing was chosen, so nothing is reported; the Player decides what that looks like.
   assert.equal(messages[0]!.presentation.kind, "prose");
   assert.equal(messages[0]!.presentation.background, null);
-  // A colour computed as see-through is unusable, and falls back like any other.
   assert.equal(messages[1]!.presentation.color, normalizeColor("blue"));
   assert.equal(messages[1]!.presentation.background, null);
   const block = messages[2]!.content.blocks[0];

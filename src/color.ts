@@ -85,15 +85,7 @@ function clampInputChannels(color: Color): void {
   }
 }
 
-/**
- * Concrete opaque CSS colours only; no host variables, relative colours or executable CSS.
- *
- * A colour that lets what is behind it through is not a colour a story can hand over: the
- * surface beneath it belongs to the Player and changes with the reader's theme, so the
- * result would be something nobody chose. Every colour arriving from a story passes here,
- * which is why the rule lives here and needs no exception anywhere downstream. The
- * Player's own interface is not bound by it.
- */
+/** Concrete opaque CSS colours only; no host variables, relative colours or executable CSS. */
 export function normalizeColor(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const source = value.trim().toLowerCase();

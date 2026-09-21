@@ -426,35 +426,23 @@ uses restrained backdrop blur where supported. Its exact threshold remains a tun
 ### Message presentation and provenance
 
 Received bubbles align left and player-authored bubbles align right. The Player owns bubble placement and text
-alignment; authors can set `position` and `align` only for prose, as defined by the language contract below. A message
-occupies at most `75%` of the conversation width and at most `65ch`, whichever is narrower; this preserves an
-opposite-side margin on narrow layouts without forcing short wrapping on wider ones. A run of messages from one
-speaker is introduced once, by avatar and name; a change of speaker or a change between bubble and prose ends that run.
-Speaker identity colour/font and per-message rich-text styling are content presentation, not application palette roles.
+alignment; authors can set `position` and `align` only for prose, as defined by the language contract below. Messages
+occupy at most `75%` of the conversation width and `65ch`. Consecutive messages group only while both the speaker and
+presentation kind remain the same. The first received bubble in a group shows its avatar and name. Player-authored
+messages do not. Speaker identity colour/font and per-message rich-text styling are content presentation, not
+application palette roles.
 
 The runtime adapter supplies resolved message presentation according to the
 [language contract](../specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides). Where that
-contract reports no authored choice, the Player supplies one. Prose carries no avatar.
+contract reports no authored choice, the Player supplies one. Prose has no avatar, defaults its block and text alignment
+to centre, uses the same width limits as bubbles, and has no panel unless the author supplies a background.
 
-Prose is centred, both the block and the text within it, when the author chose neither. A passage set apart from the
-column of bubbles reads as the different thing it is, and draws attention for the same reason. Prose takes the same
-share of the width as a message, so the two reach equally far, and the quarter left over is what its position spends:
-all of it trailing when placed left, split evenly when centred, all of it leading when placed right. That remaining
-space is what still shows which side was meant on a narrow layout, where the reading measure has no room to. Prose the
-author gave no background is given no panel: it sits directly on the theme's own canvas, and a panel drawn under it
-would read as a colour nobody chose.
+Authored colours are preserved. When authored text meets a Player-owned surface, the Player measures the painted pair
+and adds the smallest scrim that restores readable contrast. A foreground/background pair authored together remains
+unchanged; compile-time feedback for a poorly contrasting authored pair is tracked in #434.
 
-An authored colour is carried through exactly as written. The Player defends legibility only where the pairing is one no
-author chose: text meeting a bubble or theme surface is measured as it will be painted and covered by the least amount
-that restores it, because that surface is settled once and then met by every message after it. Where an author sets a
-text colour and a background around the same words, the result stands as written even when it reads poorly; that pairing
-was chosen in one place and a colour that barely shows can be deliberate. Catching a careless one belongs at compile
-time, which is separate work in #434.
-
-A typeface the author named is passed to the reader's device with the theme's own stack behind it, so a face that is not
-installed falls back to the theme rather than to the browser's default. No named face is present on every operating
-system; only the generic families answer identically everywhere. Whether the product should carry typefaces of its own
-is a Beta question recorded in [`RELEASE-ROADMAP.md`](../planning/RELEASE-ROADMAP.md).
+An authored typeface uses the theme font stack as its fallback. A product-carried font set for consistent rendering
+across devices is tracked for Beta in [`RELEASE-ROADMAP.md`](../planning/RELEASE-ROADMAP.md).
 
 Authored Standard-chat `say` messages carry the typed structure defined by the
 [message-markup specification](../specifications/message-markup.md). The Player renders only those controlled blocks,
