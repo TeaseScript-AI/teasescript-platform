@@ -292,6 +292,10 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
   position: relative; flex: 1; min-height: 0; min-width: 0;
   --message-surface: var(--surface-component);
   --message-separator: var(--border);
+  /* A link has been blue for as long as there have been links, and a reader recognises one
+     before reading a word of it. The two tones are the same blue seen in each mode, dark
+     enough to read on the page and light enough to read on a dark one. */
+  --markup-link: light-dark(oklch(50% 0.17 254), oklch(79% 0.12 240));
 }
 /* Keep clipping and the scrollbar in the existing conversation padding, outside
    the reading column. This also preserves borders at fractional pixel positions. */
@@ -333,6 +337,13 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
   border-color: var(--message-separator);
 }
 .message-speaker.message-authored { background: var(--message-authored-fill); }
+/* That blue belongs to the player's own surfaces. Where the author painted the message he
+   chose what would be read there, and the one colour known to work against it is the one
+   the message is already set in; a link keeps its underline and says the rest that way. */
+.message-authored,
+.prose[data-panel] {
+  --markup-link: currentColor;
+}
 /* Where an author's text was broken is part of what was written, and where a player's own
    answer was broken is part of what they said. Marked-up text keeps its own breaks; plain
    text has only this, and without it a typed reply of three lines arrives as one. */
@@ -365,8 +376,8 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
 }
 /* A passage given a surface has to hold its words off the edge of it, the same distance a
    bubble does, or the colour reads as a stain rather than as a panel. Prose given none
-   sits straight on the page and insets for nothing. Whether prose the author gave no
-   background is drawn a panel regardless is still open in #421. */
+   sits straight on the theme's own canvas and insets for nothing: a panel drawn under it
+   anyway would be a colour nobody chose. */
 .prose[data-panel] { padding: 0.5rem 0.75rem; border-radius: 0.5rem; }
 /* The label is muted against the page; on a panel it steps back from the panel's own
    text colour instead, which is the only one known to read there. */

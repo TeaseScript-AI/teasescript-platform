@@ -32,9 +32,11 @@ const messages = [
 // against what the real parser produces. The colours are deliberately mixed: one that
 // only survives on a dark bubble, one that only survives on a light one.
 const markupSources: readonly (readonly [speaker: string, source: string])[] = [
+  // All three heading levels with their own text between them: a level is judged against
+  // the lines it introduces and against the level above it, and neither shows in isolation.
   [
     "guide",
-    "# The lighthouse\nThe path splits here. *Take your time* — the **tide** is still going out.",
+    "# The lighthouse\nThe path splits here. *Take your time* — the **tide** is still going out.\n## The keeper's stair\nSixty steps, and a rail on the seaward side.\n### Before you climb\nCheck that the beam is turning.",
   ],
   [
     "guide",

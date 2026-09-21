@@ -51,8 +51,22 @@ const blocks = computed(() => preparePlayerMessageMarkup(props.content));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* Three levels have to be told apart where they stand, without a second one to compare
+   against, so each step is a real change of size rather than another shade of weight. The
+   third stops at the body's own size: a heading smaller than the lines it introduces would
+   be announcing itself downward. */
 .markup-heading {
   font-weight: 700;
+  line-height: 1.25;
+}
+.markup-heading[aria-level="1"] {
+  font-size: 1.45em;
+}
+.markup-heading[aria-level="2"] {
+  font-size: 1.2em;
+}
+.markup-heading[aria-level="3"] {
+  font-size: 1em;
 }
 ol {
   list-style: decimal;
@@ -66,7 +80,10 @@ blockquote {
   border-inline-start: 2px solid var(--border);
   padding-inline-start: 0.75em;
 }
+/* Underlined as well as coloured: colour alone is not something every reader can see, and
+   it is the underline that survives being printed, screenshotted or read in greyscale. */
 :deep(a) {
+  color: var(--markup-link);
   text-decoration: underline;
 }
 :deep(.markup-bold) {
@@ -84,8 +101,21 @@ blockquote {
 :deep(.markup-strikethrough.markup-underline) {
   text-decoration: line-through underline;
 }
+/* Code is quoted from a machine, so it is set in a machine's letters and stood on a surface
+   of its own; the letters alone are too quiet to mark where the quotation starts and stops.
+   That surface is mixed out of the colour the words are already set in, so it stays a faint
+   step away from whatever the message is painted and never has to be chosen twice. The
+   monospace face runs large beside a reading face, and the reduction brings it back level.
+   A fragment that wraps keeps its shape for the same reason a cover does. */
 :deep(.markup-code) {
-  font-family: monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  background: color-mix(in oklab, currentColor 8%, transparent);
+  border: 1px solid color-mix(in oklab, currentColor 18%, transparent);
+  border-radius: 0.3em;
+  padding-inline: 0.3em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 /* The author chose the colour, the reader chose the theme, and they meet here. Where the
    pair would leave the words unreadable a cover is painted behind them, measured per
