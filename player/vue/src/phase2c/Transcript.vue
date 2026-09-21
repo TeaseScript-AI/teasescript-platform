@@ -182,7 +182,52 @@ function cornerClass(index: number, player: boolean) {
   if (!endsGroup(index)) classes.push(player ? "rounded-br-sm" : "rounded-bl-sm");
   return classes.join(" ");
 }
+// Following the latest is a reading position, not a scroll offset. A bubble is placed
+// from an estimate and only then measured, so the list can still grow under a reader
+// who was already at the newest message; left alone that reader ends up a fraction of
+// a message short, with the last words behind the controls. Remember the intent while
+// the reader is the one moving, and restore it whenever the measured list changes.
+const following = ref(true);
+// Asked at the moment a list changes, the virtualizer has already moved its own offset to
+// compensate for rows the page has not been given yet, so it would answer for a scroll
+// position nobody is looking at. What the reader can see is on the page: ask that.
+function readingLatest() {
+  const viewport = scrollElement.value;
+  return viewport === null ||
+    viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= latestThreshold;
+}
+function rememberFollow() {
+  if (!touching.value) following.value = readingLatest();
+}
+// Scrolling can only be a reader leaving the latest, never rejoining it: while rows are
+// still being measured the list shortens under the scroll, and a moment that merely looks
+// like the end would otherwise pull the reader straight back to it. Returning is
+// deliberate — the control, the End key, or a new message arriving while already there.
+function releaseFollow() {
+  if (!touching.value && !readingLatest()) following.value = false;
+}
+// A scroll event arrives too late to say where the reader was when the list changed, so
+// the intent is read off the list still on screen, before this change is rendered.
+// The canonical adapter appends in place and publishes a revision, so the list itself
+// is not always a new one; watch what actually announces a change.
+watch([() => props.entries, () => props.revision, () => props.entries.length],
+  rememberFollow, { flush: "pre" });
+// Room reserved for the controls also changes the total, and a composer that grows or
+// shrinks is not the list saying anything new; that case is reconciled on its own below.
+let measuredTotal = 0;
+let measuredInset = 0;
+watch(() => [virtualizer.value.getTotalSize(), endInset.value] as const, ([total, inset]) => {
+  const messagesGrew = total - measuredTotal !== inset - measuredInset;
+  measuredTotal = total;
+  measuredInset = inset;
+  if (!messagesGrew || !following.value || touching.value || props.entries.length === 0) return;
+  const instance = virtualizer.value;
+  void nextTick(() =>
+    instance.scrollToOffset(
+      Math.max(instance.getTotalSize() - (instance.scrollRect?.height ?? 0), 0)));
+});
 function interruptFollow() {
+  following.value = false;
   // Replace an in-flight measured end target before native user scrolling starts.
   virtualizer.value.scrollToOffset(scrollElement.value?.scrollTop ?? 0);
 }
@@ -217,15 +262,18 @@ function onScrollKeydown(event: KeyboardEvent) {
   // follow-latest, and let Home replace any in-flight end reconciliation.
   if (event.key === "Home") {
     event.preventDefault();
+    following.value = false;
     virtualizer.value.scrollToOffset(0);
   } else if (event.key === "ArrowUp" || event.key === "PageUp") {
     interruptFollow();
   } else if (event.key === "End") {
     event.preventDefault();
+    following.value = true;
     virtualizer.value.scrollToEnd();
   }
 }
 function returnToLatest() {
+  following.value = true;
   virtualizer.value.scrollToEnd();
   scrollElement.value?.focus({ preventScroll: true });
 }
@@ -239,7 +287,7 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
       content-class="transcript-scroll-content"
       @viewport="scrollElement = $event"
       :viewport-attrs="{ 'data-scrolled': scrolled, role: 'region', 'aria-label': 'Transcript',
-        tabindex: 0, onKeydown: onScrollKeydown, onWheel: onWheel,
+        tabindex: 0, onKeydown: onScrollKeydown, onWheel: onWheel, onScroll: releaseFollow,
         onTouchstart: onTouchStart, onTouchend: () => touching = false,
         onTouchcancel: () => touching = false }">
       <div class="transcript-history" :style="{ height: `${virtualizer.getTotalSize()}px` }">
