@@ -43,10 +43,6 @@ prose, headings, routing wording, lifecycle wording, or equivalent Markdown
 content as required string assertions. Documentation correctness and ownership
 remain implementation, review, and explicitly assigned audit responsibilities.
 
-Use the smallest representative bounded fixture that proves the invariant,
-and reserve maximum-size or worst-form fixtures for cases where size or form is
-itself under test.
-
 The ChatGPT project-settings prompt has an owner-confirmed hard acceptance limit
 of 8,000 characters. CI may enforce that quantitative external interface
 boundary for `docs/chatgpt-project/SYSTEM-PROMPT.txt`; it must not assert prompt
@@ -71,6 +67,27 @@ build/tests, while strict documentation-only changes retain exact candidate
 identity verification without executing Node. The normal pull-request CI starts
 again after publication and still runs the complete canonical command on the
 published commit.
+
+## Test admission and consolidation
+
+Give each maintained test family a distinct evidence obligation: accepted behavior, a real public/trusted boundary,
+confirmed regression, deterministic invariant, or material browser-only risk. Choose the cheapest layer that proves it;
+keep representative source-to-runtime integration where isolated tests cannot prove the connection. Browser tests own
+rendering, focus, input, scrolling and accessibility semantics, not repeated runtime normalization/checkpoint matrices.
+
+Use the smallest representative fixture; retain large inputs when scale itself caused the defect. Separate expensive
+setup from the boundary under test when a small integration case plus direct boundary evidence proves both obligations.
+Measure changed suites and record revision, environment, command and timings in the issue/PR rather than imposing local
+measurements as permanent limits.
+
+Before removing or consolidating a family, record its obligation and remaining evidence in the issue/PR. Delete checks
+that only freeze provisional geometry, development-fixture content or private implementation details; preserve genuine
+regressions and browser risks exercised *through* fixtures. Replace numeric tuning assertions with observable behavior
+where possible. A POC check needs reassessment when its experiment changes or ends, not automatic repair to preserve an
+obsolete expectation. Repeated input/viewport cases need distinct failure modes, not merely different values.
+
+Tests do not establish product policy. A numeric oracle tied to a current algorithm may detect regression without making
+that number a project-wide accessibility or performance requirement; identify that scope explicitly.
 
 ## Test layers
 

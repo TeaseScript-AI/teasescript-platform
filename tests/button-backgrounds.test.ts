@@ -18,22 +18,7 @@ import {
   submitPlayerRuntimeComposer,
 } from "../player/runtime-adapter.js";
 
-const colours = [
-  "red",
-  "gold",
-  "yellow",
-  "blue",
-  "#0a7",
-  "#123456ff",
-  "rgb(10 120 180)",
-  "rgba(10, 120, 180, 1)",
-  "hsl(280 60% 40%)",
-  "hwb(120 20% 30%)",
-  "lab(50% 20 30)",
-  "lch(60% 40 120)",
-  "oklab(0.6 0.1 -0.1)",
-  "oklch(0.7 0.18 45)",
-];
+const colours = ["gold", "oklch(0.7 0.18 45)"];
 
 test("authored CSS backgrounds cross source, runtime, adapter, material and checkpoint for both button kinds", () => {
   for (const colour of colours) {

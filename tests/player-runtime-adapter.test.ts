@@ -5,7 +5,14 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { deserializeCheckpoint } from "../src/index.js";
+import {
+  compileSource,
+  createFreshRuntimeSnapshot,
+  run,
+  createCheckpoint,
+  serializeCheckpoint,
+  deserializeCheckpoint,
+} from "../src/index.js";
 
 import {
   activatePlayerRuntimeButton,
@@ -230,20 +237,35 @@ test("runtime checkpoint restore reconstructs presentation without replay or com
   assert.equal(restored.events.length, restorePoint.events.length);
 });
 
-test("runtime checkpoint restore handles retained event histories above the native spread limit", () => {
-  let session = createPlayerRuntimeSession('repeat 42002 { say "x" }');
-  for (let skipCount = 0; skipCount < 41_999; skipCount += 1) {
-    const skipped = skipPlayerRuntimePacing(session);
-    assert.equal(skipped?.outcome.kind, "completed");
-    session = skipped!.session;
-  }
+test("runtime checkpoint restore preserves a paced history and its continuation", () => {
+  let session = createPlayerRuntimeSession('repeat 4 { say "x" }');
+  for (let index = 0; index < 2; index++) session = skipPlayerRuntimePacing(session)!.session;
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
+  assert.deepEqual(restored.events, session.events);
+  assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
+  const resumed = skipPlayerRuntimePacing(restored)!.session;
+  const direct = skipPlayerRuntimePacing(session)!.session;
+  assert.deepEqual(resumed.snapshot, direct.snapshot);
+  assert.deepEqual(resumed.transcriptEntries, direct.transcriptEntries);
+});
 
-  const restorePoint = createPlayerRuntimeRestorePoint(session);
-  assert.equal(restorePoint.events.length, 125_999);
-  const restored = restorePlayerRuntimeSession(restorePoint);
-  assert.equal(restored.events.length, restorePoint.events.length);
-  assert.equal(restored.transcriptEntries.length, session.transcriptEntries.length);
-  assert.deepEqual(restored.snapshot, session.snapshot);
+test("runtime checkpoint restore handles retained event histories above the native spread limit", () => {
+  // Size is the regression input: spreading this many arguments exceeded the supported Node stack.
+  const count = 150_000;
+  const { plan } = compileSource(`repeat ${count} { say "x", instant }`);
+  assert.ok(plan);
+  const result = run(plan, createFreshRuntimeSnapshot(plan), {}, { instructionBudget: count * 20 });
+  assert.equal(result.snapshot.status, "halted");
+  const restored = restorePlayerRuntimeSession({
+    checkpointJson: serializeCheckpoint(createCheckpoint(plan, result.snapshot)),
+    events: result.events,
+  });
+  assert.deepEqual(restored.events, result.events);
+  assert.equal(restored.transcriptEntries.length, count);
+  assert.equal(new Set(restored.transcriptEntries.map((entry) => entry.id)).size, count);
+  assert.equal(restored.transcriptEntries[0]?.text, "x");
+  assert.equal(restored.transcriptEntries.at(-1)?.text, "x");
+  assert.deepEqual(restored.snapshot, result.snapshot);
 });
 
 test("runtime development scenarios compile through the real Player adapter", async () => {
