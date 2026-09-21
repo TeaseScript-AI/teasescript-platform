@@ -67,6 +67,7 @@ export interface ShowButtonStatement {
   readonly asSpan: SourceSpan | null;
   readonly speaker: Identifier | null;
   readonly label: Expression;
+  readonly background: Expression | null;
   readonly span: SourceSpan;
 }
 

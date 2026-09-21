@@ -91,7 +91,12 @@ export function playerRuntimeForeground(
   const accessibleName = interactionAccessibleName(action.ui.accessibleName);
   switch (action.ui.kind) {
     case "button":
-      return Object.freeze({ kind: "show-button", accessibleName, label: action.ui.buttonLabel });
+      return Object.freeze({
+        kind: "show-button",
+        accessibleName,
+        label: action.ui.buttonLabel,
+        ...(action.ui.background === undefined ? {} : { authoredFill: action.ui.background }),
+      });
     case "text":
       return Object.freeze({
         kind: "ask-text",
@@ -110,7 +115,11 @@ export function playerRuntimeForeground(
         accessibleName,
         options: Object.freeze(
           action.ui.options.map((option, index) =>
-            Object.freeze({ id: choiceOptionId(action.actionId, index), label: option.text }),
+            Object.freeze({
+              id: choiceOptionId(action.actionId, index),
+              label: option.text,
+              ...(option.background === undefined ? {} : { authoredFill: option.background }),
+            }),
           ),
         ),
       });

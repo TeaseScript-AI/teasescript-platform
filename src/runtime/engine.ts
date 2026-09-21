@@ -84,6 +84,7 @@ import {
   secondsToPacingMilliseconds,
 } from "./actions/pacing.js";
 import { settleBackgroundPacingGate } from "./operations/pacing-gate.js";
+import { normalizeOpaqueColor } from "../color.js";
 import { isList, isObject, isRange, isSet, isSpeakerReference } from "./value-predicates.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
@@ -766,11 +767,21 @@ function materializeInteractionUi(
     return text;
   };
 
+  const backgroundColor = (value: SerializableRuntimeValue): string => {
+    const normalized = normalizeOpaqueColor(value);
+    if (normalized === null)
+      throw fault("TSR052", "Expected an opaque CSS button background colour.", span);
+    return normalized;
+  };
+
   let ui: InteractionUiPayload;
   if (prepared.kind === "button") {
     ui = {
       kind: "button",
       buttonLabel: readText(prepared.buttonLabelTemporary),
+      ...(prepared.backgroundTemporary === undefined
+        ? {}
+        : { background: backgroundColor(read(prepared.backgroundTemporary).value) }),
       accessibleName: prepared.accessibleName,
     };
   } else if (prepared.kind === "text" || prepared.kind === "number") {
@@ -788,11 +799,28 @@ function materializeInteractionUi(
         span,
       );
     }
-    const texts = source.value.items.map((value) =>
-      evaluator.visibleTextWithRng(value, span, stagedRng),
-    );
+    const presentations = source.value.items.map((value) => {
+      if (!isObject(value)) return { text: evaluator.visibleTextWithRng(value, span, stagedRng) };
+      if (
+        value.properties.some(
+          (property) => property.name !== "text" && property.name !== "background",
+        )
+      )
+        throw fault("TSR052", "Choice options support text and background only.", span);
+      const textValue = getSerializableProperty(value, "text");
+      if (textValue === undefined) throw fault("TSR052", "A choice object requires text.", span);
+      const text = evaluator.visibleTextWithRng(textValue, span, stagedRng);
+      const background = getSerializableProperty(value, "background");
+      return {
+        text,
+        ...(background === undefined ? {} : { background: backgroundColor(background) }),
+      };
+    });
     const labels = prepared.labelType === "none" ? null : prepared.labels;
-    if (prepared.labelType !== "none" && (labels === null || labels.length !== texts.length)) {
+    if (
+      prepared.labelType !== "none" &&
+      (labels === null || labels.length !== presentations.length)
+    ) {
       throw fault(
         "TSR052",
         "Prepared choice labels do not match the canonical option count.",
@@ -802,10 +830,25 @@ function materializeInteractionUi(
     ui = {
       kind: "choice",
       labelType: prepared.labelType,
-      options: texts.map((text, index) => ({ text, label: labels?.[index] ?? null })),
+      options: presentations.map((presentation, index) => ({
+        ...presentation,
+        label: labels?.[index] ?? null,
+      })),
       accessibleName: prepared.accessibleName,
     };
-    stagedWrites.push({ temporaryId: source.id, value: createCapturedSerializableList(texts) });
+    stagedWrites.push({
+      temporaryId: source.id,
+      value: createCapturedSerializableList(
+        presentations.map((presentation) =>
+          presentation.background === undefined
+            ? presentation.text
+            : createCapturedSerializableObject([
+                { name: "text", value: presentation.text },
+                { name: "background", value: presentation.background },
+              ]),
+        ),
+      ),
+    });
   }
 
   assertInteractionUiLimits(ui, span);
@@ -1308,10 +1351,20 @@ function cloneInteractionUi(
       ? { kind: "text" as const, text: ui.accessibleName.text }
       : { kind: "localizedDefault" as const, key: ui.accessibleName.key };
   if (ui.kind === "choice") {
-    const options = ui.options.map((option) => ({ text: option.text, label: option.label }));
+    const options = ui.options.map((option) => ({
+      text: option.text,
+      label: option.label,
+      ...(option.background === undefined ? {} : { background: option.background }),
+    }));
     return { kind: "choice", labelType: ui.labelType, options, accessibleName };
   }
-  if (ui.kind === "button") return { kind: "button", buttonLabel: ui.buttonLabel, accessibleName };
+  if (ui.kind === "button")
+    return {
+      kind: "button",
+      buttonLabel: ui.buttonLabel,
+      ...(ui.background === undefined ? {} : { background: ui.background }),
+      accessibleName,
+    };
   return { kind: ui.kind, hint: ui.hint, accessibleName };
 }
 

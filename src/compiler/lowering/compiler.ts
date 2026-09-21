@@ -758,7 +758,7 @@ export class InstructionCompiler {
 
   #compileShowButton(statement: ShowButtonStatement): void {
     const staticLabel = staticVisibleText(statement.label);
-    if (staticLabel !== undefined) {
+    if (staticLabel !== undefined && statement.background === null) {
       this.instructions.push({
         kind: "interaction",
         interactionKind: "button",
@@ -784,6 +784,13 @@ export class InstructionCompiler {
       this.#lowerInteractionPayload(statement.label, speakerTemporary),
       statement.label.span,
     );
+    const background =
+      statement.background === null
+        ? null
+        : this.#materializeDedicatedInteractionValue(
+            this.#lowerInteractionPayload(statement.background, speakerTemporary),
+            statement.background.span,
+          );
     this.instructions.push({
       kind: "interaction",
       interactionKind: "button",
@@ -794,11 +801,19 @@ export class InstructionCompiler {
       preparedUi: {
         kind: "button",
         buttonLabelTemporary: label.temporaryId,
+        ...(background === null ? {} : { backgroundTemporary: background.temporaryId }),
         accessibleName: { kind: "localizedDefault", key: "continue" },
       },
       span: copySpan(statement.span),
     });
-    this.#emitTemporaryCleanup([speakerTemporary, label.temporaryId], statement.span);
+    this.#emitTemporaryCleanup(
+      [
+        speakerTemporary,
+        label.temporaryId,
+        ...(background === null ? [] : [background.temporaryId]),
+      ],
+      statement.span,
+    );
   }
 
   *#lowerInteractionTask(expression: InteractionExpression): CompileTask<LoweredExpression> {

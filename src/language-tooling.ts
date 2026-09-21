@@ -518,6 +518,7 @@ function visitStatement(statement: Statement, visitor: Visitor): void {
     case "showButtonStatement":
       visitor.showButton(statement);
       visitExpression(statement.label, visitor);
+      if (statement.background !== null) visitExpression(statement.background, visitor);
       return;
     case "sayStatement":
       visitor.say(statement);

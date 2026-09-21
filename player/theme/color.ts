@@ -1,4 +1,5 @@
 import Color from "colorjs.io";
+import { normalizeOpaqueColor } from "../../src/color.js";
 
 /** Our plain, opaque color value; dependency objects stay inside this adapter. */
 export interface OklchColor {
@@ -76,4 +77,10 @@ export function oklchToPickerHex(color: OklchColor): string {
     .to("srgb")
     .toGamut({ method: "css" })
     .toString({ format: "hex", collapse: false });
+}
+
+export function authoredColorToOklch(value: string): OklchColor {
+  const normalized = normalizeOpaqueColor(value);
+  if (normalized === null) throw new RangeError("Expected an opaque authored CSS colour");
+  return plain(new Color(normalized));
 }

@@ -231,6 +231,30 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
+    let background: Expression | null = null;
+    if (this.#match(TokenKind.Comma)) {
+      const separatorSpan = this.#previous().span;
+      this.#skipContinuationNewlines();
+      if (!this.#checkIdentifier("background") || this.#peek(1).kind !== TokenKind.Colon) {
+        this.#reportSpan(
+          parserDiagnosticCode.unsupportedInteractionForm,
+          "Expected background: colour after the button text.",
+          separatorSpan,
+        );
+        this.#synchronizeStatement();
+        return null;
+      }
+      this.#advance();
+      this.#advance();
+      background = this.#parseExpression();
+      if (background === null) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedInteractionText,
+          "Expected a button background colour.",
+        );
+        return null;
+      }
+    }
     if (this.#check(TokenKind.KeywordAs)) {
       this.#reportSpan(
         parserDiagnosticCode.unsupportedInteractionForm,
@@ -252,7 +276,8 @@ class Parser {
       asSpan,
       speaker,
       label,
-      span: spanFrom(command.span, label.span),
+      background,
+      span: spanFrom(command.span, background?.span ?? label.span),
     });
   }
 

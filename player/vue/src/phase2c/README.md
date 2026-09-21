@@ -47,8 +47,8 @@ Keep experimental fixtures separate from the components that own settled behavio
   autosizing, feedback association and Enter/Shift+Enter behavior. `ForegroundControls.vue`
   renders wrapping `components/PlayerActionButton.vue` buttons over shadcn Button in Transcript’s measured trailing slot.
   The material comes from `player/theme/story-choice.ts` for both theme and `authoredFill` colours.
-  The component accepts authored fills, but `playerRuntimeForeground` currently supplies only labels/IDs
-  from runtime actions: script-to-foreground authored colour is not integrated yet. They share
+  `playerRuntimeForeground` carries normalized authored backgrounds from `choose` and `showButton`
+  runtime actions, including restored sessions; see ADR 0018 for author syntax. They share
   the transcript scrollport and disappear on completion; its end inset includes
   their measured height plus the composer overlay. RuntimeInteraction composes
   those surfaces and retains the shared submission guard and focus handling.

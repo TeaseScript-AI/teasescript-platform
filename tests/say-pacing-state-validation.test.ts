@@ -448,21 +448,21 @@ test("current pacing serialization versions accept only their exact schemas", ()
   const compiled = plan('say "first"');
   const snapshot = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
   const checkpoint = JSON.parse(serializeCheckpoint(createCheckpoint(compiled, snapshot)));
-  assert.equal(compiled.version, 20);
-  assert.equal(snapshot.version, 21);
-  assert.equal(checkpoint.version, 29);
+  assert.equal(compiled.version, 21);
+  assert.equal(snapshot.version, 22);
+  assert.equal(checkpoint.version, 30);
   assert.doesNotThrow(() => deserializeCheckpoint(JSON.stringify(checkpoint)));
 
   const oldSnapshot = structuredClone(snapshot);
   // EVIDENCE: fixture changes only the snapshot version to the immediately preceding unsupported schema.
-  (oldSnapshot as { version: number }).version = 18;
+  (oldSnapshot as { version: number }).version = 21;
   assert.equal(validateRuntimeSnapshot(oldSnapshot, compiled).valid, false);
   const oldPlan = structuredClone(compiled);
   // EVIDENCE: fixture changes only the plan version to the immediately preceding unsupported schema.
-  (oldPlan as { version: number }).version = 18;
+  (oldPlan as { version: number }).version = 20;
   assert.equal(validateInstructionPlan(oldPlan).valid, false);
   const oldCheckpoint = structuredClone(checkpoint);
-  oldCheckpoint.version = 26;
+  oldCheckpoint.version = 29;
   assert.throws(() => deserializeCheckpoint(JSON.stringify(oldCheckpoint)));
 });
 

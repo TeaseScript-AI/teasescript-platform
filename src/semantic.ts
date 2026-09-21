@@ -1,3 +1,4 @@
+import { normalizeOpaqueColor } from "./color.js";
 import {
   presentationPropertyDiagnostics,
   messageColorDiagnostics,
@@ -245,6 +246,10 @@ class SemanticValidator {
       case "showButtonStatement": {
         const contextualSpeaker = this.#interactionSpeaker(statement.speaker, scope);
         this.#validateExpression(statement.label, scope, contextualSpeaker);
+        if (statement.background !== null) {
+          this.#validateExpression(statement.background, scope, contextualSpeaker);
+          this.#validateButtonBackground(statement.background);
+        }
         return;
       }
       case "waitStatement": {
@@ -657,6 +662,16 @@ class SemanticValidator {
         : null;
   }
 
+  #validateButtonBackground(expression: Expression): void {
+    const text = staticVisibleText(expression);
+    if (text !== undefined && normalizeOpaqueColor(text) === null)
+      this.#report(
+        semanticCode.invalidInteractionChoice,
+        "Expected an opaque CSS button background colour.",
+        expression.span,
+      );
+  }
+
   *#validateChoiceTask(
     expression: Extract<Expression, { kind: "interactionExpression" }>,
     scope: SemanticScope,
@@ -692,6 +707,25 @@ class SemanticValidator {
     const visible = new Map<string, SourceSpan>();
     for (const option of expression.options) {
       yield* compileChild(this.#validateExpressionTask(option.value, scope, contextualSpeaker));
+      let value = option.value;
+      while (value.kind === "parenthesizedExpression") value = value.expression;
+      if (value.kind === "objectLiteral") {
+        if (!value.properties.some((property) => property.name.name === "text"))
+          this.#report(
+            semanticCode.invalidInteractionChoice,
+            "A choice object requires text.",
+            value.span,
+          );
+        for (const property of value.properties) {
+          if (property.name.name === "background") this.#validateButtonBackground(property.value);
+          else if (property.name.name !== "text")
+            this.#report(
+              semanticCode.invalidInteractionChoice,
+              "Choice options support text and background only.",
+              property.name.span,
+            );
+        }
+      }
       if (option.label !== null) {
         const key =
           option.label.kind === "identifier"
@@ -706,7 +740,11 @@ class SemanticValidator {
         }
         labels.add(key);
       } else {
-        const text = staticVisibleText(option.value);
+        const textExpression =
+          value.kind === "objectLiteral"
+            ? value.properties.find((property) => property.name.name === "text")?.value
+            : value;
+        const text = textExpression === undefined ? undefined : staticVisibleText(textExpression);
         if (text !== undefined) {
           if (visible.has(text)) {
             this.#report(

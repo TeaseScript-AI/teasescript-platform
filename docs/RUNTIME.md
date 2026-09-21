@@ -620,9 +620,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 20 | `say` carries an explicit nullable presentation expression; option expressions lower through the existing resumable evaluation path. |
-| Runtime snapshot | 21 | Prepared `say` output also captures validated resolved presentation; spoiler spans are no longer accepted. |
-| Checkpoint | 29 | Updated the self-contained bundle for presentation-aware plans and runtime snapshots. |
+| Instruction plan | 21 | Foreground buttons and choice options carry optional authored backgrounds; prepared buttons reference a background temporary. |
+| Runtime snapshot | 22 | Active interactions and prepared choice values capture normalized opaque button backgrounds with validated result lineage. |
+| Checkpoint | 30 | Updated the self-contained bundle for authored button backgrounds in plans and runtime snapshots. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 

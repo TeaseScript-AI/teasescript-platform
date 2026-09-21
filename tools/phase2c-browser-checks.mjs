@@ -1203,9 +1203,22 @@ async function runtimeTranscriptChecks(page) {
   await page.getByRole("button", { name: "Capture runtime checkpoint", exact: true }).click();
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await transcript.locator('[aria-setsize="5"]').first().waitFor();
+  const selectedButton = transcript
+    .locator('[data-speaker-id="user"] .message-copy')
+    .filter({ hasText: "Continue **literally**" });
   check(
-    (await transcript.getByText("Continue **literally**", { exact: true }).count()) === 1,
-    "Canonical button transcript text changed",
+    (await selectedButton.count()) === 1 &&
+      (await selectedButton.locator('.choice-marker[aria-hidden="true"]').textContent()).trim() ===
+        "›" &&
+      (
+        await selectedButton.evaluate((element) =>
+          Array.from(element.childNodes)
+            .filter((node) => node.nodeType === Node.TEXT_NODE)
+            .map((node) => node.textContent)
+            .join(""),
+        )
+      ).trim() === "Continue **literally**",
+    "Canonical button transcript text or selected-option marker changed",
   );
   check(
     (await transcript.locator('[data-speaker-id="narrator"]').innerText()) ===

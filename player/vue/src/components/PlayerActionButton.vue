@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Button } from "@/components/ui/button";
-import { pickerHexToOklch } from "../../../theme/color.js";
+import { authoredColorToOklch } from "../../../theme/color.js";
 import { storyChoiceVariables } from "../../../theme/story-choice.js";
 
 const props = defineProps<{ authoredFill?: string | undefined; disabled?: boolean }>();
 const material = computed(() =>
   props.authoredFill === undefined
     ? undefined
-    : storyChoiceVariables(pickerHexToOklch(props.authoredFill)),
+    : storyChoiceVariables(authoredColorToOklch(props.authoredFill)),
 );
 </script>
 
