@@ -89,10 +89,16 @@ blockquote {
 }
 /* The author chose the colour, the reader chose the theme, and they meet here. Where the
    pair would leave the words unreadable a cover is painted behind them, measured per
-   message and supplied as a background layer; only its shape belongs here. */
+   message and supplied as a background layer; only its shape belongs here.
+   Words that reach the end of a line carry on underneath the next one, and by default the
+   cover is cut straight through at the turn: a square edge and no inset where the reader
+   can plainly see the sentence continues. Cloned, every piece of it is shaped like the
+   whole, so the cover reads as one thing wrapped rather than two things abutting. */
 :deep(.markup-scrim) {
   border-radius: 0.2em;
   padding-inline: 0.12em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 :deep(.markup-size-small) {
   font-size: 0.85em;
