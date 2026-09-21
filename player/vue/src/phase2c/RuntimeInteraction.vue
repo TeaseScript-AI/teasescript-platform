@@ -38,6 +38,7 @@ const composer = ref<InstanceType<typeof Composer> | null>(null);
 const draft = ref("");
 const feedback = ref("");
 const submitting = ref(false);
+let restoreChoiceFocus = false;
 
 function focusInput() {
   composer.value?.focusInput();
@@ -45,18 +46,29 @@ function focusInput() {
 
 watch([actionId, () => props.reset], async () => {
   const active = document.activeElement;
-  const ownedFocus = active === document.body || !!(active && root.value?.contains(active));
+  const ownedFocus = !!active && !!root.value?.contains(active);
+  const wasEditing = active instanceof HTMLTextAreaElement;
+  const returnToChoice = restoreChoiceFocus;
+  restoreChoiceFocus = false;
+  const keyboardNavigation = document.documentElement.dataset.playerKeyboardFocus === "true";
   draft.value = "";
   feedback.value = "";
   await nextTick();
+  // Completion releases the disabled guard after publishing the session.
+  await nextTick();
   // Progression may restore composer focus, but must not steal it from Tools/dialogs.
-  if (ownedFocus && foreground.value) focusInput();
+  if ((ownedFocus || returnToChoice) && foreground.value) {
+    if (wasEditing) focusInput();
+    else if (keyboardNavigation) root.value?.querySelector<HTMLButtonElement>("[data-foreground-controls] button")?.focus({ preventScroll: true });
+  }
 });
 
 async function complete(
   operation: (session: PlayerRuntimeSession) => PlayerRuntimeControlResult | null,
 ) {
   if (!props.session || submitting.value) return;
+  restoreChoiceFocus = document.documentElement.dataset.playerKeyboardFocus === "true" &&
+    !!document.activeElement?.closest("[data-foreground-controls]");
   submitting.value = true;
   try {
     const result = operation(props.session);

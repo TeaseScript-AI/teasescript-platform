@@ -355,7 +355,7 @@ when no media is active. An empty stage shows its normal background/ambience rat
 transcript into that space.
 
 The Greenfield preview currently tries a 70% stage / 30% conversation split. A keyboard-accessible horizontal handle
-lets the user adjust that division; the composer grows inside the conversation allocation. The chosen split survives
+lets the user adjust that division; only the compact centered grip starts a drag, not the full-width boundary. The composer grows inside the conversation allocation. The chosen split survives
 viewport resizing for the current mount. The starting ratio and 20% minimum per panel remain visual trials.
 
 Standard image/video-like presentation:
@@ -540,10 +540,13 @@ rounding, a lighter top, darker lower edge, and a small depth shadow. Hover chan
 the label; pressing reduces the depth. Controls scroll away with the transcript; there is no separate button
 scroller. The transcript’s leading scroll space keeps messages and controls together above the composer when
 following the latest content. After completion, the active controls disappear and the existing runtime
-transcript records the response. Authored foreground buttons retain their opaque authored colour as the material
-base because media never sits behind this lane. Without an authored fill, the theme accent supplies that base.
-Black or white labels and contrast-limited lighting keep the material readable across normal, hover, and pressed
-states; authored right-rail actions retain the translucent floating-control treatment described below.
+transcript records the response. Completed choices and buttons carry a visible `›` marker in the transcript,
+distinct from typed text/number answers. Pointer or touch activation does not focus the composer or summon a
+software keyboard; keyboard activation can move focus to the next choice. Authored foreground buttons retain
+their opaque authored colour as the material base because media never sits behind this lane. Without an authored
+fill, the theme accent supplies that base. Black or white labels and contrast-limited lighting keep the material
+readable across normal, hover, and pressed states; authored right-rail actions retain the translucent
+floating-control treatment described below.
 
 Validation content and retry semantics come from the controlling interaction/runtime contract. The Player must not
 invent a competing inline-error semantic merely because the current POC lacks the richer accepted V30 `invalidMessage`

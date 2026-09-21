@@ -10,7 +10,7 @@ import PlayerTopBar from "./PlayerTopBar.vue";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
 import { transcriptFixtures, transcriptFixtureSpeakers } from "./transcriptFixtures";
 import { createPlayerRuntimeSession, createPlayerRuntimeRestorePoint, restorePlayerRuntimeSession, type PlayerRuntimeSession, type PlayerRuntimeRestorePoint } from "../../../runtime-adapter.js";
-import { runtimeScenario, interactionScenario } from "./runtimeScenario";
+import { runtimeScenario, interactionScenario, buttonScenario } from "./runtimeScenario";
 import { stageFixtures } from "./stageFixtures";
 import type { PlayerTimerKind } from "../../../model.js";
 import TimerFixtureRegion from "./TimerFixtureRegion.vue";
@@ -57,6 +57,7 @@ function startRuntime(source = runtimeScenario) {
   runtimeSession.value = createPlayerRuntimeSession(source);
   runtimeRestore.value = createPlayerRuntimeRestorePoint(runtimeSession.value);
 }
+if (isDevelopment) startRuntime(buttonScenario);
 function restoreRuntime() {
   if (!runtimeRestore.value) return;
   interactionReset.value++;
@@ -157,6 +158,7 @@ async function toggleFullscreen() {
             <fieldset class="grid min-w-0 gap-2">
               <legend class="mb-2">Runtime transcript scenario</legend>
               <Button class="min-w-0" variant="outline" @click="startRuntime()">Start runtime scenario</Button>
+              <Button class="min-w-0" variant="outline" @click="startRuntime(buttonScenario)">Start button demo</Button>
               <Button class="min-w-0" variant="outline" @click="startRuntime(interactionScenario)">Start interaction scenario</Button>
               <template v-if="runtimeSession">
                 <Button class="min-w-0" variant="outline" @click="runtimeRestore = createPlayerRuntimeRestorePoint(runtimeSession)">Capture runtime checkpoint</Button>

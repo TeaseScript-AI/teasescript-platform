@@ -25,3 +25,14 @@ showButton as guide "Finish"
 say as guide "${"${answer}"} / ${"${amount}"} / ${"${direction}"} / ${"${duplicate}"}", instant
 exit
 `;
+
+// Direct visual entry point; the all-interactions fixture remains available separately.
+export const buttonScenario = `
+speaker guide { title: "Coastal Guide" }
+say as guide "Where would you like to go?", instant
+let answer = choose as guide coast: "Stay by the water", lights: "Follow the lights", harbour: "Explore the old harbour", sunset: "Wait for sunset", long: "Take the longer path along the water so we can finish our conversation before reaching the lighthouse."
+showButton as guide "Continue"
+let next = choose as guide stay: "Stay a little longer", walk: "Walk together"
+showButton as guide "Finish"
+exit
+`;

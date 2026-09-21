@@ -263,6 +263,17 @@ function appendRuntimeEvents(
   // EVIDENCE: emptySession creates an unfrozen adapter-owned transcript accumulator for every session.
   const transcriptEntries = session.transcriptEntries as PlayerTranscriptEntryPresentation[];
   for (const event of events) retainedEvents.push(event);
+  const responseKinds = new Map<number, "choice" | "button">();
+  for (const event of events) {
+    if (
+      event.kind === "actionCompleted" &&
+      event.settlement.actionKind === "interaction" &&
+      (event.settlement.interactionKind === "choice" ||
+        event.settlement.interactionKind === "button")
+    ) {
+      responseKinds.set(event.settlement.transcriptEventSequence, event.settlement.interactionKind);
+    }
+  }
   for (const event of events) {
     if (event.kind === "say") {
       const speakerId = event.speaker === null ? "narrator" : `runtime-speaker-${event.sequence}`;
@@ -284,6 +295,9 @@ function appendRuntimeEvents(
           id: `runtime-event-${event.sequence}`,
           speakerId: "user",
           text: event.text,
+          ...(responseKinds.has(event.sequence)
+            ? { responseKind: responseKinds.get(event.sequence)! }
+            : {}),
         }),
       );
     }

@@ -291,3 +291,24 @@ say "[color=red][bg=ivory]outer [color=\${bad}][bg=\${bad}]inner **bold**[/bg][/
   }
   assert.deepEqual(pieces.at(-1)?.style, {});
 });
+
+test("response presentation distinguishes choices and buttons from typed answers after restore", () => {
+  let session = createPlayerRuntimeSession(`
+let reply = askText "Reply"
+let answer = choose left: "Left", right: "Right"
+showButton "Continue"
+exit
+`);
+  session = submitPlayerRuntimeComposer(session, "Hello")!.session;
+  session = submitPlayerRuntimeComposer(session, "Left")!.session;
+  session = activatePlayerRuntimeButton(session)!.session;
+  const kinds = (value: typeof session) =>
+    value.transcriptEntries.map((entry) =>
+      entry.kind === "message" ? entry.responseKind : undefined,
+    );
+  assert.deepEqual(kinds(session), [undefined, "choice", "button"]);
+  assert.deepEqual(
+    kinds(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session))),
+    kinds(session),
+  );
+});

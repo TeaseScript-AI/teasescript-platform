@@ -50,6 +50,8 @@ export interface PlayerMessagePresentation {
   readonly text: string;
   /** Present only for authored runtime output; player-authored entries remain plain text. */
   readonly content?: MessageMarkup;
+  /** Completed choice/button, distinct from a free-text or numeric response. */
+  readonly responseKind?: "choice" | "button";
   readonly presentation?: MessagePresentation;
 }
 

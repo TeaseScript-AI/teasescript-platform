@@ -144,7 +144,7 @@ onMounted(() => { void nextTick(() => virtualizer.value.scrollToEnd()); });
             role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
             class="transcript-entry" :style="{ transform: `translateY(${item.start}px)` }">
             <div class="message" :data-author="entry.kind === 'session-event' ? 'session-event' : entry.speakerId === 'user' ? 'player' : 'speaker'">
-              <div class="message-copy"><strong v-if="entry.kind === 'message' && entry.speakerId !== 'user'">{{ speakers[entry.speakerId]?.name ?? entry.speakerId }}: </strong><TranscriptMarkup v-if="entry.kind === 'message' && entry.speakerId !== 'user' && entry.content" :content="entry.content" /><template v-else>{{ entry.text }}</template></div>
+              <div class="message-copy"><strong v-if="entry.kind === 'message' && entry.speakerId !== 'user'">{{ speakers[entry.speakerId]?.name ?? entry.speakerId }}: </strong><TranscriptMarkup v-if="entry.kind === 'message' && entry.speakerId !== 'user' && entry.content" :content="entry.content" /><template v-else><span v-if="entry.kind === 'message' && entry.responseKind" class="choice-marker" aria-hidden="true">› </span><span v-if="entry.kind === 'message' && entry.responseKind" class="sr-only">Selected option: </span>{{ entry.text }}</template></div>
             </div>
           </article>
         </div>

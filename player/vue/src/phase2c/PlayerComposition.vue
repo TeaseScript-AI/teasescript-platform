@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { SplitterGroup, SplitterPanel, SplitterResizeHandle } from "reka-ui";
 
-const hitAreaMargins = { fine: 6, coarse: 12 };
+const hitAreaMargins = { fine: 0, coarse: 0 };
 </script>
 
 <template>
@@ -24,9 +24,9 @@ const hitAreaMargins = { fine: 6, coarse: 12 };
 </template>
 
 <style scoped>
-.conversation-resize { position: relative; flex: 0 0 0px; z-index: 3; }
+.conversation-resize { position: relative; flex: 0 0 24px; width: 56px; height: 24px; margin-block: -12px; align-self: center; z-index: 3; }
 .conversation-resize > span {
-  position: absolute; width: 32px; height: 2px; left: 50%; top: -1px;
+  position: absolute; width: 32px; height: 2px; left: 50%; top: 11px;
   transform: translateX(-50%); border-radius: 999px;
   background: var(--border-strong); opacity: 0.45; pointer-events: none;
 }
