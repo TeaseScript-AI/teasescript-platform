@@ -41,16 +41,6 @@ export function inkFor(backdrop: string) {
 }
 
 /**
- * A backdrop with cover already on it, as a colour rather than a stack of layers. What
- * sits under a bubble is not painted again behind its words, so the words have to be
- * given the one colour the bubble ended up being.
- */
-export function blend(backdrop: string, cover: string) {
-  const [red, green, blue] = paint(backdrop, cover);
-  return `rgb(${red} ${green} ${blue})`;
-}
-
-/**
  * The least cover an authored colour needs to stay readable on this backdrop, or null
  * when it needs none. Cover runs toward whichever pole the colour is furthest from, so
  * more of it always helps and the smallest sufficient amount can be narrowed down.

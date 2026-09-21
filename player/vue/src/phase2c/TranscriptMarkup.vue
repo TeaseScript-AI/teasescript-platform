@@ -8,6 +8,8 @@ const props = defineProps<{
   content: MessageMarkup;
   /** The realized bubble colour an authored text colour has to survive against. */
   backdrop: string;
+  /** Cover the whole message needs, for pieces the author left uncoloured. */
+  cover: string | null;
 }>();
 const blocks = computed(() => preparePlayerMessageMarkup(props.content));
 </script>
@@ -21,7 +23,7 @@ const blocks = computed(() => preparePlayerMessageMarkup(props.content));
         :aria-level="block.level"
         class="markup-heading"
       >
-        <TranscriptLine :pieces="block.line.pieces" :backdrop="backdrop" />
+        <TranscriptLine :pieces="block.line.pieces" :backdrop="backdrop" :cover="cover" />
       </div>
       <component
         :is="block.kind === 'quote' ? 'blockquote' : 'div'"
@@ -29,12 +31,12 @@ const blocks = computed(() => preparePlayerMessageMarkup(props.content));
         :class="{ 'markup-paragraph': block.kind === 'paragraph' }"
       >
         <template v-for="(line, li) in block.lines" :key="li"
-          ><TranscriptLine :pieces="line.pieces" :backdrop="backdrop" /><br v-if="line.ending"
+          ><TranscriptLine :pieces="line.pieces" :backdrop="backdrop" :cover="cover" /><br v-if="line.ending"
         /></template>
       </component>
       <component :is="block.ordered ? 'ol' : 'ul'" v-else>
         <li v-for="(item, li) in block.items" :key="li" :value="item.ordinal ?? undefined">
-          <TranscriptLine :pieces="item.line.pieces" :backdrop="backdrop" />
+          <TranscriptLine :pieces="item.line.pieces" :backdrop="backdrop" :cover="cover" />
         </li>
       </component>
     </template>

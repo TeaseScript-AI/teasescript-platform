@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/message";
 import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } from "../../../model.js";
 import TranscriptMarkup from "./TranscriptMarkup.vue";
-import { blend, inkFor, scrimFor } from "./messageContrast";
+import { inkFor, scrimFor } from "./messageContrast";
 
 const props = defineProps<{
   entries: readonly PlayerTranscriptEntryPresentation[];
@@ -106,12 +106,13 @@ const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => {
   const surface = written ?? palette.value.surface;
   // Where both colours are the author's, he wrote them in one breath and was looking
   // straight at the pairing, so it stands as written. Where only the words are his, what
-  // they land on is the player's own surface, and covering that until they can be read is
-  // the player correcting itself rather than overruling him.
+  // they land on is the player's own surface, and covering it until they can be read is
+  // the player correcting itself rather than overruling him. The cover goes behind the
+  // words and no further: a bubble repainted whole would announce a decision the author
+  // never made, while a cover the width of the text reads as what it is.
   const cover = written === null && words !== null ? scrimFor(words, surface) : null;
-  const panel = cover === null ? written : blend(surface, cover);
   return {
-    item, entry, panel,
+    item, entry, cover, panel: written,
     // An unchosen placement arrives as null. Centred is what fills it in: a passage set
     // apart from the column of bubbles reads as the different thing it is, and draws the
     // eye for the same reason.
@@ -119,10 +120,10 @@ const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => {
       position: authored.position ?? "center",
       text: authored.align ?? "center",
     },
-    // Words the author left uncoloured are measured against whatever the panel became;
-    // a panel nobody wrote words for is still a panel somebody has to read off.
-    ink: words ?? (panel === null ? null : inkFor(panel)),
-    backdrop: panel ?? palette.value.surface,
+    // Words the author left uncoloured are measured against the surface he chose for
+    // them; a colour written behind words is still a colour somebody has to read off.
+    ink: words ?? (written === null ? null : inkFor(written)),
+    backdrop: surface,
   };
 }));
 const showLatest = computed(() => !touching.value && !virtualizer.value.isScrolling &&
@@ -221,7 +222,7 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
         onTouchstart: onTouchStart, onTouchend: () => touching = false,
         onTouchcancel: () => touching = false }">
       <div class="transcript-history" role="list" :style="{ height: `${virtualizer.getTotalSize()}px` }">
-        <article v-for="{ item, entry, panel, placement, ink, backdrop } in rows" :key="entry.id"
+        <article v-for="{ item, entry, panel, cover, placement, ink, backdrop } in rows" :key="entry.id"
           :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
           :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
           role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
@@ -241,7 +242,7 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
               {{ nameOf(entry) }}
             </p>
             <TranscriptMarkup v-if="entry.content" :content="entry.content"
-              :backdrop="backdrop" />
+              :backdrop="backdrop" :cover="cover" />
             <template v-else>{{ entry.text }}</template>
           </div>
           <Message v-else :align="entry.speakerId === 'user' ? 'end' : 'start'">
@@ -268,7 +269,7 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
                     {{ nameOf(entry) }}
                   </MessageHeader>
                   <TranscriptMarkup v-if="entry.speakerId !== 'user' && entry.content" :content="entry.content"
-                    :backdrop="backdrop" />
+                    :backdrop="backdrop" :cover="cover" />
                   <template v-else>{{ entry.text }}</template>
                 </BubbleContent>
               </Bubble>

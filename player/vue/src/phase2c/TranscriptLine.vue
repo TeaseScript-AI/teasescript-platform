@@ -7,6 +7,8 @@ const props = defineProps<{
   pieces: readonly PlayerMarkupPiece[];
   /** The realized surface already under these words. */
   backdrop: string;
+  /** Cover the whole message needs, for pieces the author left uncoloured. */
+  cover: string | null;
 }>();
 // A bubble colour is settled once and then met by every message that follows, so this
 // pairing is one no author ever looked at and the words are covered by however much it
@@ -16,8 +18,12 @@ const props = defineProps<{
 // Nothing here can tell that from carelessness, so carelessness is answered where it is
 // still a question being asked, and this leaves the author's own pairing alone.
 function authoredScrim(piece: { style: Readonly<Record<string, string>> }) {
+  if (piece.style["backgroundColor"] !== undefined) return null;
   const colour = piece.style["color"];
-  if (colour === undefined || piece.style["backgroundColor"] !== undefined) return null;
+  // A piece the author left uncoloured takes the colour the message gives it, so it also
+  // takes the cover that colour needed; the cover was measured once, against this same
+  // surface, and re-measuring per piece would only arrive at the same answer.
+  if (colour === undefined) return props.cover;
   return scrimFor(colour, props.backdrop);
 }
 // The canonical preparation helper supplies validated text/style/link pieces, never HTML.
