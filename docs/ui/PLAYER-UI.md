@@ -433,8 +433,9 @@ Prose is centred, both the block and the text within it, when the author chose n
 column of bubbles reads as the different thing it is, and draws attention for the same reason. Prose takes the same
 share of the width as a message, so the two reach equally far, and the quarter left over is what its position spends:
 all of it trailing when placed left, split evenly when centred, all of it leading when placed right. That remaining
-space is what still shows which side was meant on a narrow layout, where the reading measure has no room to. Whether
-prose without an authored background is given a panel remains open in #421.
+space is what still shows which side was meant on a narrow layout, where the reading measure has no room to. Prose the
+author gave no background is given no panel: it sits directly on the theme's own canvas, and a panel drawn under it
+would read as a colour nobody chose.
 
 An authored colour is carried through exactly as written. The Player defends legibility only where the pairing is one no
 author chose: text meeting a bubble or theme surface is measured as it will be painted and covered by the least amount
