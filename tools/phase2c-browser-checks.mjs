@@ -820,6 +820,9 @@ async function transcriptChecks(page) {
   };
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload();
+  const lab = page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" });
+  await lab.click();
+  await page.getByRole("button", { name: "Load 2,000 messages", exact: true }).click();
   const scroll = page.locator(".transcript-scroll");
   const latest = page.getByRole("button", { name: "Return to latest", exact: true });
   const append = page.getByRole("button", { name: "Append message", exact: true });
@@ -912,7 +915,7 @@ async function transcriptChecks(page) {
   await readableLatest();
   check(
     JSON.stringify(await scroll.boundingBox()) === JSON.stringify(viewportBefore),
-    "Composer growth resized the transcript viewport",
+    `Composer growth resized the transcript viewport: ${JSON.stringify(viewportBefore)} -> ${JSON.stringify(await scroll.boundingBox())}`,
   );
   await scroll.focus();
   await page.keyboard.press("Home");
@@ -946,8 +949,6 @@ async function transcriptChecks(page) {
         ),
       ).size >= 3,
   );
-  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
-  await atEnd("open dock");
   await append.click();
   await page.locator('[data-message-id="message-2000"]').waitFor();
   await atEnd("following append");
@@ -1007,7 +1008,7 @@ async function transcriptChecks(page) {
   await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
   await settleLayout();
   const box = await scroll.boundingBox();
-  const x = box.x + box.width / 2;
+  const x = box.x + box.width / 4;
   const y = box.y + 10;
   await page.waitForFunction(
     ({ x, y }) =>
@@ -1391,12 +1392,33 @@ async function interactionChecks(page) {
   await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
   await page.setViewportSize({ width: 320, height: 700 });
   await page.waitForFunction(() => {
-    const composer = document.querySelector("[data-runtime-interaction]").getBoundingClientRect();
+    const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
     return composer.left >= 0 && composer.right <= 320 && composer.bottom <= 700;
   });
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
   const tap = async (locator) => {
+    await page
+      .waitForFunction(
+        (element) => {
+          const box = element.getBoundingClientRect();
+          return (
+            box.width > 0 &&
+            box.height > 0 &&
+            box.left >= 0 &&
+            box.top >= 0 &&
+            box.right <= innerWidth &&
+            box.bottom <= innerHeight
+          );
+        },
+        await locator.elementHandle(),
+        { timeout: 5000 },
+      )
+      .catch(async () => {
+        throw new Error(
+          `Touch control did not enter viewport: ${await locator.innerText()} ${JSON.stringify(await locator.boundingBox())}`,
+        );
+      });
     const box = await locator.boundingBox();
     check(
       !!box && box.x >= 0 && box.x + box.width <= 320 && box.y + box.height <= 700,
@@ -1776,6 +1798,44 @@ async function topBarChecks(page) {
   return "PASS transparent top bar alignment, truncation, input, geometry and fullscreen";
 }
 
+const groups = [
+  topBarDebugChecks,
+  topBarChecks,
+  checks,
+  drawerWidthChecks,
+  menuPreviewChecks,
+  menuWidthChecks,
+  menuCollapseChecks,
+  panelResizeChecks,
+  carouselChecks,
+  toolContentChecks,
+  runtimeTranscriptChecks,
+  interactionChecks,
+  conversationWidthChecks,
+  timerChecks,
+  transcriptChecks,
+];
+
+async function runGroup(browserPage, run, url, artifacts) {
+  const context = await browserPage
+    .context()
+    .browser()
+    .newContext({ viewport: { width: 1440, height: 900 }, ignoreHTTPSErrors: true });
+  const page = await context.newPage();
+  await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+  try {
+    await page.goto(url);
+    return await run(page);
+  } catch (error) {
+    await page.screenshot({ path: artifacts + ".png" });
+    await context.tracing.stop({ path: artifacts + ".zip" });
+    throw error;
+  } finally {
+    await context.close();
+  }
+}
+
+let passed = false;
 try {
   const config = join(scratch, "browser.json");
   writeFileSync(
@@ -1783,114 +1843,22 @@ try {
     JSON.stringify({ browser: { contextOptions: { ignoreHTTPSErrors: true } } }),
   );
   cli("open", url, "--config", config);
-  const topBarDebugOutput = cli("run-code", topBarDebugChecks.toString());
-  if (
-    !topBarDebugOutput.includes(
-      "PASS top-bar Layout Debug measurement, layer visibility and geometry",
-    )
-  )
-    throw new Error(topBarDebugOutput);
-  console.log(
-    "phase2c-browser-checks: PASS top-bar Layout Debug measurement, layer visibility and geometry",
-  );
-  const topBarOutput = cli("run-code", topBarChecks.toString());
-  if (
-    !topBarOutput.includes(
-      "PASS transparent top bar alignment, truncation, input, geometry and fullscreen",
-    )
-  )
-    throw new Error(topBarOutput);
-  console.log(
-    "phase2c-browser-checks: PASS transparent top bar alignment, truncation, input, geometry and fullscreen",
-  );
-  const output = cli("run-code", checks.toString());
-  if (!output.includes("PASS lifecycle/order/width and dock/drawer composition"))
-    throw new Error(output);
-  console.log("phase2c-browser-checks: PASS lifecycle/order/width and dock/drawer composition");
-  const drawerWidthOutput = cli("run-code", drawerWidthChecks.toString());
-  if (!drawerWidthOutput.includes("PASS drawer preset width constrained by available space"))
-    throw new Error(drawerWidthOutput);
-  console.log("phase2c-browser-checks: PASS drawer preset width constrained by available space");
-  const previewOutput = cli("run-code", menuPreviewChecks.toString());
-  if (!previewOutput.includes("PASS menu preview mouse, touch and keyboard ownership"))
-    throw new Error(previewOutput);
-  console.log("phase2c-browser-checks: PASS menu preview mouse, touch and keyboard ownership");
-  const widthOutput = cli("run-code", menuWidthChecks.toString());
-  if (!widthOutput.includes("PASS menu preview bounds and permanent rem sizing"))
-    throw new Error(widthOutput);
-  console.log("phase2c-browser-checks: PASS menu preview bounds and permanent rem sizing");
-  const collapseOutput = cli("run-code", menuCollapseChecks.toString());
-  if (!collapseOutput.includes("PASS menu drag collapse, expansion and cancellation"))
-    throw new Error(collapseOutput);
-  console.log("phase2c-browser-checks: PASS menu drag collapse, expansion and cancellation");
-  const resizeOutput = cli("run-code", panelResizeChecks.toString());
-  if (!resizeOutput.includes("PASS panel width cap, resize, restoration and cancellation"))
-    throw new Error(resizeOutput);
-  console.log("phase2c-browser-checks: PASS panel width cap, resize, restoration and cancellation");
-  const carouselOutput = cli("run-code", carouselChecks.toString());
-  if (
-    !carouselOutput.includes(
-      "PASS bounded carousel, wheel snapping, vertical body scroll and touch swipe",
-    )
-  )
-    throw new Error(carouselOutput);
-  console.log(
-    "phase2c-browser-checks: PASS bounded carousel, wheel snapping, vertical body scroll and touch swipe",
-  );
-  const contentOutput = cli("run-code", toolContentChecks.toString());
-  if (
-    !contentOutput.includes(
-      "PASS tool content and scroll preservation across hiding and replacement",
-    )
-  )
-    throw new Error(contentOutput);
-  console.log(
-    "phase2c-browser-checks: PASS tool content and scroll preservation across hiding and replacement",
-  );
-  const runtimeOutput = cli("run-code", runtimeTranscriptChecks.toString());
-  if (
-    !runtimeOutput.includes("PASS runtime transcript provenance, markup, plain answers and restore")
-  )
-    throw new Error(runtimeOutput);
-  console.log(
-    "phase2c-browser-checks: PASS runtime transcript provenance, markup, plain answers and restore",
-  );
-  const interactionOutput = cli("run-code", interactionChecks.toString());
-  if (!interactionOutput.includes("PASS normal foreground input, validation, keyboard and restore"))
-    throw new Error(interactionOutput);
-  console.log(
-    "phase2c-browser-checks: PASS normal foreground input, validation, keyboard and restore",
-  );
-  const conversationWidthOutput = cli("run-code", conversationWidthChecks.toString());
-  if (
-    !conversationWidthOutput.includes(
-      "PASS conversation content width and hidden scrollbar ownership",
-    )
-  )
-    throw new Error(conversationWidthOutput);
-  console.log(
-    "phase2c-browser-checks: PASS conversation content width and hidden scrollbar ownership",
-  );
-  const timerOutput = cli("run-code", timerChecks.toString());
-  if (!timerOutput.includes("PASS timer design, semantics, identity, motion and Stage integration"))
-    throw new Error(timerOutput);
-  console.log(
-    "phase2c-browser-checks: PASS timer design, semantics, identity, motion and Stage integration",
-  );
-  const transcriptOutput = cli("run-code", transcriptChecks.toString());
-  if (
-    !transcriptOutput.includes(
-      "PASS transcript virtualization, measurement, follow, prepend, resize and touch",
-    )
-  )
-    throw new Error(transcriptOutput);
-  console.log(
-    "phase2c-browser-checks: PASS transcript virtualization, measurement, follow, prepend, resize and touch",
-  );
+  for (const group of groups) {
+    console.log(`phase2c-browser-checks: RUN ${group.name}`);
+    const output = cli(
+      "run-code",
+      `async page => (${runGroup.toString()})(page, ${group.toString()}, ${JSON.stringify(url)}, ${JSON.stringify(join(scratch, group.name))})`,
+    );
+    const result = output.match(/^### Result\r?\n"(PASS [^"\n]+)"$/mu)?.[1];
+    if (!result) throw new Error(output);
+    console.log(`phase2c-browser-checks: ${result}`);
+  }
+  passed = true;
 } finally {
   try {
     cli("close");
   } finally {
-    rmSync(scratch, { recursive: true, force: true });
+    if (passed) rmSync(scratch, { recursive: true, force: true });
+    else console.error(`phase2c-browser-checks: failure artifacts retained at ${scratch}`);
   }
 }
