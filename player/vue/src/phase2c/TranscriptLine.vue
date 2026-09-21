@@ -12,22 +12,16 @@ const props = defineProps<{
   /** The colour a link is really painted in here, which is not always the message's. */
   link: string;
 }>();
-// A bubble colour is settled once and then met by every message that follows, so this
-// pairing is one no author ever looked at and the words are covered by however much it
-// takes. A background written around the words themselves is the opposite case: both
-// colours were chosen in one breath, in one place, and a colour that barely shows can be
-// the point — a character who cannot see straight, something the reader has to work for.
-// Nothing here can tell that from carelessness, so carelessness is answered where it is
-// still a question being asked, and this leaves the author's own pairing alone.
+// A pair the author wrote together stands as written; a pair he never saw is covered
+// until it can be read. See docs/ui/PLAYER-UI.md for the rule this follows.
 function authoredScrim(piece: { style: Readonly<Record<string, string>>; href: string | null }) {
   if (piece.style["backgroundColor"] !== undefined) return null;
   // A link the author did not colour himself is not painted in the message's colour at
   // all: the page gives it its own. Handing it the message's cover would protect a colour
   // that is nowhere on the screen, and leave the one that is there sitting on it.
   const colour = piece.style["color"] ?? (piece.href === null ? undefined : props.link);
-  // A piece the author left uncoloured takes the colour the message gives it, so it also
-  // takes the cover that colour needed; the cover was measured once, against this same
-  // surface, and re-measuring per piece would only arrive at the same answer.
+  // An uncoloured piece takes the message's colour, so it takes the cover that colour
+  // needed; re-measuring per piece would only arrive at the same answer.
   if (colour === undefined) return props.cover;
   return scrimFor(colour, props.backdrop);
 }

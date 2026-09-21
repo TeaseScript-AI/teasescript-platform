@@ -8,13 +8,10 @@ import { normalizeColor } from "../../../../src/color.js";
 
 export const transcriptFixtureSpeakers: Readonly<Record<string, PlayerSpeakerPresentation>> = {
   guide: { name: "Guide", accent: "inherit", avatar: "G", fontFamily: "inherit" },
-  // Narration is given no name, so the transcript has to show a passage with nothing above
-  // it; the keeper is named, so it has to show one with a name. Both cases come from the
-  // fixture rather than from a switch, because the author decides this per speaker.
+  // Unnamed and named speakers both have to be shown; the author decides this per speaker.
   narrator: { name: "", accent: "inherit", avatar: "", fontFamily: "inherit" },
   keeper: { name: "Hanna", accent: "inherit", avatar: "H", fontFamily: "inherit" },
-  // A note about the interface rather than about the story. It stands outside the fiction,
-  // so whether it can sit on a speaker's line at all is part of what is being judged.
+  // A note about the interface rather than about the story.
   system: { name: "", accent: "inherit", avatar: "", fontFamily: "inherit" },
   user: { name: "You", accent: "inherit", avatar: "Y", fontFamily: "inherit" },
 };
@@ -29,11 +26,9 @@ const messages = [
 ];
 
 // Authored source rather than hand-built structures, so the presentation is judged
-// against what the real parser produces. The colours are deliberately mixed: one that
-// only survives on a dark bubble, one that only survives on a light one.
+// against what the real parser produces.
 const markupSources: readonly (readonly [speaker: string, source: string])[] = [
-  // All three heading levels with their own text between them: a level is judged against
-  // the lines it introduces and against the level above it, and neither shows in isolation.
+  // All three heading levels with text between them: a level only shows against its neighbours.
   [
     "guide",
     "# The lighthouse\nThe path splits here. *Take your time* — the **tide** is still going out.\n## The keeper's stair\nSixty steps, and a rail on the seaward side.\n### Before you climb\nCheck that the beam is turning.",
@@ -48,16 +43,12 @@ const markupSources: readonly (readonly [speaker: string, source: string])[] = [
     "Watch for:\n- loose sand past the second dune\n- the marker posts\n- the light itself",
   ],
   ["guide", "In order:\n1. follow the posts\n2. cross the dune\n3. wait for the beam"],
-  // The mid grey is the hard case: it falls on the light side of the divide and a dark
-  // bubble on the dark side, so classifying each of them would call the pair safe, yet
-  // measuring it gives about three to one.
+  // Mid grey is the hard case: classifying each side calls the pair safe, measuring gives 3:1.
   [
     "guide",
     "Authored colours: [color=#ffe066]pale yellow[/color], [color=#1a1a2e]near black[/color], [color=#8a8a8a]mid grey[/color], and [color=#c2185b]deep pink[/color].",
   ],
-  // Both colours written around the same words, in one place, and barely apart. The
-  // author was looking straight at this pairing, so it stands as written; catching it
-  // belongs where it can still be reconsidered rather than here.
+  // Both colours written together and barely apart: the pair the Player leaves alone.
   [
     "guide",
     "Chosen together: [bg=#2b3a8f][color=#3344aa]blue on blue[/color][/bg] and [bg=#f2e9c9][color=#efe4c0]cream on cream[/color][/bg].",
@@ -79,11 +70,8 @@ export function transcriptMarkupFixtures(): PlayerTranscriptEntryPresentation[] 
   });
 }
 
-// Prose has to be judged in company, not on its own: what matters is whether the two
-// readings can follow each other without the transcript looking like two interfaces.
-// Narration, an overheard letter and ordinary dialogue are interleaved for that reason.
-// Which of them is prose is the author's decision, carried on the message itself; these
-// leave position and alignment unchosen, which is the case the player has to answer.
+// Prose has to be judged in company: narration, a letter and dialogue interleaved, all
+// leaving position and alignment unchosen, which is the case the Player has to answer.
 const proseSources: readonly (readonly [speaker: string, source: string, prose?: true])[] = [
   ["guide", "There is something I want you to see before the light goes."],
   ["user", "Lead the way."],
@@ -183,8 +171,7 @@ const authoredSources: readonly (readonly [
     authored("bubble", "#cbb9e8", "#4a2d6b"),
   ],
   ["user", "And my own lines are authored by nobody, so they keep the theme's accent."],
-  // A generic family rather than a named typeface: it is the only kind every device can
-  // answer, so it is what an author can rely on until the platform carries faces of its own.
+  // A generic family: the only kind every device can answer.
   [
     "keeper",
     "*My dear,*\n\nThis one was given a surface of its own to sit on, so it reads as a page rather than as something said out loud.\n\n**— H.**",

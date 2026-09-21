@@ -82,8 +82,7 @@ blockquote {
   border-inline-start: 2px solid var(--border);
   padding-inline-start: 0.75em;
 }
-/* Underlined as well as coloured: colour alone is not something every reader can see, and
-   it is the underline that survives being printed, screenshotted or read in greyscale. */
+/* Underlined as well as coloured: colour alone is not something every reader can see. */
 :deep(a) {
   color: var(--markup-link);
   text-decoration: underline;
@@ -103,12 +102,9 @@ blockquote {
 :deep(.markup-strikethrough.markup-underline) {
   text-decoration: line-through underline;
 }
-/* Code is quoted from a machine, so it is set in a machine's letters and stood on a surface
-   of its own; the letters alone are too quiet to mark where the quotation starts and stops.
-   That surface is mixed out of the colour the words are already set in, so it stays a faint
-   step away from whatever the message is painted and never has to be chosen twice. The
-   monospace face runs large beside a reading face, and the reduction brings it back level.
-   A fragment that wraps keeps its shape for the same reason a cover does. */
+/* The surface is mixed out of the colour the words are already set in, so it follows
+   whatever the message is painted without being chosen twice. The monospace face runs
+   large beside a reading face, and the reduction brings it back level. */
 :deep(.markup-code) {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.9em;
@@ -119,13 +115,9 @@ blockquote {
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
-/* The author chose the colour, the reader chose the theme, and they meet here. Where the
-   pair would leave the words unreadable a cover is painted behind them, measured per
-   message and supplied as a background layer; only its shape belongs here.
-   Words that reach the end of a line carry on underneath the next one, and by default the
-   cover is cut straight through at the turn: a square edge and no inset where the reader
-   can plainly see the sentence continues. Cloned, every piece of it is shaped like the
-   whole, so the cover reads as one thing wrapped rather than two things abutting. */
+/* The cover itself is measured per message and supplied as a background layer; only its
+   shape belongs here. Cloning is what makes a cover that wraps read as one thing wrapped
+   rather than two things abutting: without it the turn is cut square. */
 :deep(.markup-scrim) {
   border-radius: 0.2em;
   padding-inline: 0.12em;
