@@ -209,10 +209,8 @@ let result = choose coast: { text: "Stay by the water", background: "seagreen" }
 showButton "Continue", background: "hsl(155 55% 35%)"
 ```
 
-`background` uses the shared [authored CSS colour parser](../specifications/accepted-syntaxes-v30.md#authored-colours):
-English CSS names such as `red`, `gold`, `yellow` and `blue`, hexadecimal, RGB/HSL/HWB and Lab/LCH/OKLab/OKLCH notation.
-Button backgrounds must be opaque; `transparent` and alpha values other than one are errors. Invalid statically known
-colours fail compilation; invalid computed colours fail the interaction before it is published. Omission uses the
+`background` accepts the shared [opaque authored CSS colours](../specifications/accepted-syntaxes-v30.md#authored-colours).
+Invalid statically known colours fail compilation; invalid computed colours fail the interaction before it is published. Omission uses the
 Player theme. The Player derives readable text and the approved button material from this base colour; this extension
 adds no authored text-colour or disabled syntax. The normalized background is captured with the active interaction
 and survives checkpoint save/restore without re-evaluating author expressions.

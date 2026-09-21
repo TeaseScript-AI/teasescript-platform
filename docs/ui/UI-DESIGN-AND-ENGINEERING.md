@@ -151,8 +151,6 @@ toolbars, or every button in the product. The observable contract remains in
 weight. A supplied colour does not automatically make an answer recommended, dangerous, or secondary. When no colour
 is supplied, the Player theme provides the base. Do not silently replace an awkward authored colour with a curated one.
 
-The accepted visual ingredients work together rather than acting as independent decoration:
-
 | Ingredient | Purpose |
 | --- | --- |
 | Slightly lighter top and darker bottom | Suggest one restrained light source and surface volume. |
@@ -160,10 +158,6 @@ The accepted visual ingredients work together rather than acting as independent 
 | Small lower shadow | Separate the button from its background without making it a floating panel. |
 | Moderate rounding, stronger label weight, balanced padding | Make a short or wrapped answer feel like a deliberate, usable control. |
 | Paint-only hover; reduced depth when pressed | Make the surface respond without moving labels or neighbouring choices. |
-
-Earlier experiments with tinted outlines and text-only choices did not provide the requested filled, tactile character.
-The Milovana reference helped identify the material direction; its authors' colour combinations were not adopted as a
-Player palette. The approved result is subtle relief, not arbitrary gradients, decorative tails, or universal glow.
 
 Derive lighting from the base colour while keeping its hue recognizable. Near a text-contrast boundary, reduce the
 lighting variation instead of sacrificing legibility for relief. Choose readable black or white text against the
@@ -177,8 +171,9 @@ extreme and uncurated colours, and actual hover/press/focus. A curated palette o
 establish that the design works. This is a critique method, not a new global numeric or geometry requirement.
 
 Keep accepted appearance in a shared component over shadcn Button; keep colour derivation in the colour layer. The
-current implementation references are `components/PlayerActionButton.vue` and `player/theme/story-choice.ts`; executable values live there
-rather than in a second CSS recipe in this guide. Spacing may still be refined independently of the accepted material.
+implementation lives in `player/vue/src/components/PlayerActionButton.vue` and `player/theme/story-choice.ts`;
+keep executable values there rather than duplicating the CSS recipe here. Spacing may still be refined independently
+of the accepted material.
 
 ### Match interaction feedback to input capability
 
