@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Button } from "@/components/ui/button";
+import StoryChoice from "./StoryChoice.vue";
 import type { PlayerForegroundPresentation } from "../../../model.js";
 defineProps<{ foreground: PlayerForegroundPresentation | null; disabled: boolean }>();
 const emit = defineEmits<{ activate: [optionId: string | null] }>();
@@ -13,24 +13,22 @@ const emit = defineEmits<{ activate: [optionId: string | null] }>();
     class="flex min-w-0 flex-wrap justify-center gap-[12px] px-1 py-3"
   >
     <template v-if="foreground.kind === 'choose'">
-      <Button
+      <StoryChoice
         v-for="option in foreground.options"
         :key="option.id"
-        variant="outline"
-        class="h-auto min-h-9 max-w-full min-w-0 whitespace-normal [overflow-wrap:anywhere]"
+        :authored-fill="option.authoredFill"
         :disabled="disabled"
         @click="emit('activate', option.id)"
-        >{{ option.label }}</Button
+        >{{ option.label }}</StoryChoice
       >
     </template>
-    <Button
+    <StoryChoice
       v-else
-      variant="outline"
-      class="h-auto min-h-9 max-w-full min-w-0 whitespace-normal [overflow-wrap:anywhere]"
+      :authored-fill="foreground.authoredFill"
       :aria-label="foreground.accessibleName"
       :disabled="disabled"
       @click="emit('activate', null)"
-      >{{ foreground.label }}</Button
+      >{{ foreground.label }}</StoryChoice
     >
   </div>
 </template>

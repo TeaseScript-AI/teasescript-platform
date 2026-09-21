@@ -532,14 +532,18 @@ This is distinct from a skippable `say` pacing gate: when no foreground interact
 click/tap on Player background/unused space or Space with the empty focused composer may settle that gate under ADR 0018.
 Actual interactive controls always take precedence and must not also fire the viewport-wide pacing shortcut.
 
-A `showButton` is the one-option presentation of the same Standard foreground-control vocabulary. Controls share the
-transcript's reading width, grow with their labels, and allow long labels to wrap. The group centers its buttons and
-wraps onto additional rows rather than scrolling horizontally. The current visual trial uses 12px between buttons and
-rows, retaining the shared button component's internal padding. Controls scroll away with the transcript; there is no
-separate button scroller. The transcript’s leading scroll space keeps messages and controls together above the composer
-when following the latest content. After completion, the active controls disappear and the existing runtime transcript records
-the response. Authored foreground buttons use their solid authored colour because media never sits behind this lane;
-authored right-rail actions retain the translucent floating-control treatment described below.
+A `showButton` is the one-option presentation of the same Standard foreground-control vocabulary. Controls share
+the transcript's reading width, grow with their labels, and allow long labels to wrap. The group centers its
+buttons and wraps onto additional rows rather than scrolling horizontally. The current visual trial uses 12px
+between buttons and rows. Story buttons use the shared shadcn Button with a soft-bevel presentation: modest
+rounding, a lighter top, darker lower edge, and a small depth shadow. Hover changes the lighting without moving
+the label; pressing reduces the depth. Controls scroll away with the transcript; there is no separate button
+scroller. The transcript’s leading scroll space keeps messages and controls together above the composer when
+following the latest content. After completion, the active controls disappear and the existing runtime
+transcript records the response. Authored foreground buttons retain their opaque authored colour as the material
+base because media never sits behind this lane. Without an authored fill, the theme accent supplies that base.
+Black or white labels and contrast-limited lighting keep the material readable across normal, hover, and pressed
+states; authored right-rail actions retain the translucent floating-control treatment described below.
 
 Validation content and retry semantics come from the controlling interaction/runtime contract. The Player must not
 invent a competing inline-error semantic merely because the current POC lacks the richer accepted V30 `invalidMessage`
