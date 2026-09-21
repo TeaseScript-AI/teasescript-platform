@@ -444,6 +444,11 @@ text colour and a background around the same words, the result stands as written
 was chosen in one place and a colour that barely shows can be deliberate. Catching a careless one belongs at compile
 time, which is separate work in #434.
 
+A typeface the author named is passed to the reader's device with the theme's own stack behind it, so a face that is not
+installed falls back to the theme rather than to the browser's default. No named face is present on every operating
+system; only the generic families answer identically everywhere. Whether the product should carry typefaces of its own
+is a Beta question recorded in [`RELEASE-ROADMAP.md`](../planning/RELEASE-ROADMAP.md).
+
 Authored Standard-chat `say` messages carry the typed structure defined by the
 [message-markup specification](../specifications/message-markup.md). The Player renders only those controlled blocks,
 spans, values, and validated HTTP(S) links; it does not interpret authored HTML or use a raw-HTML rendering path. Links
