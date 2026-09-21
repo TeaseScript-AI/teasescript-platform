@@ -207,6 +207,8 @@ async function menuPreviewChecks(page) {
       touchPoints: [{ x: tx, y: ty }],
     });
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    // VueUse deduplicates clicks until the next task; finish one gesture before starting another.
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
   };
   // Touch activation is independent of viewport size, including hybrid desktops.
   await tap(x, y);
