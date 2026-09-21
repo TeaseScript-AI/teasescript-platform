@@ -428,9 +428,9 @@ uses restrained backdrop blur where supported. Its exact threshold remains a tun
 Received bubbles align left and player-authored bubbles align right. The Player owns bubble placement and text
 alignment; authors can set `position` and `align` only for prose, as defined by the language contract below. A message
 occupies at most `75%` of the conversation width and at most `65ch`, whichever is narrower; this preserves an
-opposite-side margin on narrow layouts without forcing short wrapping on wider ones. The current avatar, speaker-name,
-and speaker-coloured rule remain the POC visual baseline. Speaker identity colour/font and per-message rich-text styling
-are content presentation, not application palette roles.
+opposite-side margin on narrow layouts without forcing short wrapping on wider ones. A run of messages from one
+speaker is introduced once, by avatar and name; a change of speaker or a change between bubble and prose ends that run.
+Speaker identity colour/font and per-message rich-text styling are content presentation, not application palette roles.
 
 The runtime adapter supplies resolved message presentation according to the
 [language contract](../specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides). Where that
