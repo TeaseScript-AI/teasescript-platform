@@ -2706,12 +2706,10 @@ Authored colours are always opaque. Concrete colour values accept CSS colour nam
 `rgb()`/`rgba()`, `hsl()`/`hsla()`, `hwb()`, `lab()`, `lch()`, `oklab()`, and `oklch()`. Hex and RGB use standard sRGB.
 Host-dependent values such as `var()` and `currentColor`, relative colours, and explicit linear RGB are excluded.
 
-An alpha channel below full opacity is not a valid authored colour, and neither is `transparent`. The surface beneath
-an authored colour belongs to the Player and moves with the reader's theme, so a colour that shows it through produces
-a result the author never chose. The alpha notations remain accepted spellings at full opacity: `#ff0000ff` and
-`rgb(255 0 0 / 1)` are ordinary red. This applies equally to text and to backgrounds, to speaker properties and to
-message options, and to statically written and dynamically computed colours alike. It is a rule about colours a story
-supplies; the Player's own interface uses transparency freely.
+`transparent` and alpha below full opacity are invalid; full-opacity forms such as `#ff0000ff` and
+`rgb(255 0 0 / 1)` are accepted. This keeps authored colours independent of the Player's underlying theme surface.
+The restriction covers static and dynamic text/background colours in speaker properties and message options,
+not Player interface transparency.
 
 The compiler validates constant speaker-declaration and message-option colours while retaining their authored values.
 The runtime normalizes both constant and dynamic colours to OKLCH when preparing output. Converted values

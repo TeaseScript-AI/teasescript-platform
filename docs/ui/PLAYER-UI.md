@@ -441,8 +441,8 @@ Authored colours are preserved. When authored text meets a Player-owned surface,
 and adds the smallest scrim that restores readable contrast. A foreground/background pair authored together remains
 unchanged; compile-time feedback for a poorly contrasting authored pair is tracked in #434.
 
-An authored typeface uses the theme font stack as its fallback. A product-carried font set for consistent rendering
-across devices is tracked for Beta in [`RELEASE-ROADMAP.md`](../planning/RELEASE-ROADMAP.md).
+An authored typeface uses the theme font stack as its fallback. Font bundling is tracked in
+[`RELEASE-ROADMAP.md`](../planning/RELEASE-ROADMAP.md).
 
 Authored Standard-chat `say` messages carry the typed structure defined by the
 [message-markup specification](../specifications/message-markup.md). The Player renders only those controlled blocks,
