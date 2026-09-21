@@ -124,6 +124,12 @@ const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => {
     // them; a colour written behind words is still a colour somebody has to read off.
     ink: words ?? (written === null ? null : inkFor(written)),
     backdrop: surface,
+    // A named typeface is only ever a request: it is used where the reader's device happens
+    // to have it and quietly ignored everywhere else, so the theme's own stack is left
+    // standing behind it to catch that. The families every device does have — serif,
+    // sans-serif, monospace, system-ui — are the ones that answer the same way everywhere,
+    // and are what an author can rely on until the platform carries typefaces of its own.
+    typeface: authored?.font == null ? null : `${authored.font}, var(--transcript-typeface)`,
   };
 }));
 const showLatest = computed(() => !touching.value && !virtualizer.value.isScrolling &&
@@ -222,7 +228,7 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
         onTouchstart: onTouchStart, onTouchend: () => touching = false,
         onTouchcancel: () => touching = false }">
       <div class="transcript-history" role="list" :style="{ height: `${virtualizer.getTotalSize()}px` }">
-        <article v-for="{ item, entry, panel, cover, placement, ink, backdrop } in rows" :key="entry.id"
+        <article v-for="{ item, entry, panel, cover, placement, ink, backdrop, typeface } in rows" :key="entry.id"
           :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
           :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
           role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
@@ -237,7 +243,7 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
           <div v-else-if="placement" class="prose"
             :data-align="placement.position" :data-text="placement.text"
             :data-panel="panel !== null || undefined"
-            :style="{ background: panel ?? undefined, color: ink ?? undefined }">
+            :style="{ background: panel ?? undefined, color: ink ?? undefined, fontFamily: typeface ?? undefined }">
             <p v-if="showsName(item.index, false)" class="prose-attribution">
               {{ nameOf(entry) }}
             </p>
@@ -263,7 +269,8 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
                 <BubbleContent class="text-base/normal"
                   :class="[cornerClass(item.index, entry.speakerId === 'user'),
                     entry.speakerId === 'user' ? '' : 'message-speaker', panel ? 'message-authored' : '']"
-                  :style="{ '--message-authored-fill': panel ?? undefined, color: ink ?? undefined }">
+                  :style="{ '--message-authored-fill': panel ?? undefined, color: ink ?? undefined,
+                    fontFamily: typeface ?? undefined }">
                   <MessageHeader v-if="showsName(item.index, entry.speakerId === 'user')"
                     class="px-0 pb-0.5">
                     {{ nameOf(entry) }}
@@ -296,6 +303,9 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
      before reading a word of it. The two tones are the same blue seen in each mode, dark
      enough to read on the page and light enough to read on a dark one. */
   --markup-link: light-dark(oklch(50% 0.17 254), oklch(79% 0.12 240));
+  /* What a message falls back to when the typeface its author named is not on this device.
+     Without it the browser would drop to its own default instead of the theme's. */
+  --transcript-typeface: ui-sans-serif, system-ui, sans-serif;
 }
 /* Keep clipping and the scrollbar in the existing conversation padding, outside
    the reading column. This also preserves borders at fractional pixel positions. */

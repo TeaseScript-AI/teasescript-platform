@@ -181,6 +181,19 @@ subsystems may still have different maturity levels.
   - **Reference:** Issues #288 and #304, PR #293, [ADR 0019](../decisions/0019-resource-limit-governance.md),
     `docs/RESOURCE-LIMITS.md`, and **Establish a runtime performance baseline and optimization plan**.
 
+- [ ] **Decide what a typeface an author names is worth**
+  - **Outcome:** An author can name a typeface on a speaker or a message today, and the Player passes it to the reader's
+    device with the theme's own stack behind it. No named face is present on Windows, macOS, Android and Linux alike, so
+    only the generic families — `serif`, `sans-serif`, `monospace`, `system-ui` — answer the same way everywhere, and the
+    same script can look different to two readers. Decide whether that is acceptable for a platform where the author
+    chooses the presentation, or whether the product should carry a small set of typefaces of its own so a named face
+    means one thing. Shipping faces is the only way to make a name reliable; it costs a decision about which faces and
+    roughly 30 kB each.
+  - **Trigger:** Reconsider when authored presentation is exercised on more than one operating system, or when an author
+    asks why their script reads differently on someone else's device.
+  - **Reference:** Issue #421, [`accepted-syntaxes-v30.md`](../specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides),
+    and [`PLAYER-UI.md`](../ui/PLAYER-UI.md).
+
 ## Release Candidate
 
 **Goal:** Validate a specific candidate containing the scope selected for the first stable release.

@@ -141,6 +141,7 @@ function authored(
   kind: "bubble" | "prose",
   color: string | null,
   background: string | null,
+  font: string | null = null,
 ): MessagePresentation {
   return {
     kind,
@@ -148,7 +149,7 @@ function authored(
     align: null,
     color: color === null ? null : normalizeColor(color),
     background: background === null ? null : normalizeColor(background),
-    font: null,
+    font,
   };
 }
 
@@ -182,10 +183,12 @@ const authoredSources: readonly (readonly [
     authored("bubble", "#cbb9e8", "#4a2d6b"),
   ],
   ["user", "And my own lines are authored by nobody, so they keep the theme's accent."],
+  // A generic family rather than a named typeface: it is the only kind every device can
+  // answer, so it is what an author can rely on until the platform carries faces of its own.
   [
     "keeper",
     "*My dear,*\n\nThis one was given a surface of its own to sit on, so it reads as a page rather than as something said out loud.\n\n**— H.**",
-    authored("prose", "#3b2f2a", "#efe4c8"),
+    authored("prose", "#3b2f2a", "#efe4c8", "serif"),
   ],
   [
     "narrator",
