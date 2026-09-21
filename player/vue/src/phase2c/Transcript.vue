@@ -2,6 +2,7 @@
 import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { elementScroll, observeElementRect, useVirtualizer } from "@tanstack/vue-virtual";
+import { useResizeObserver } from "@vueuse/core";
 import { ArrowDown } from "@lucide/vue";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -24,6 +25,14 @@ const props = defineProps<{
 }>();
 const scrollElement = ref<HTMLDivElement | null>(null);
 const touching = ref(false);
+const viewportHeight = ref(0);
+const foregroundElement = ref<HTMLElement | null>(null);
+const foregroundHeight = ref(0);
+useResizeObserver(foregroundElement, () => {
+  foregroundHeight.value = foregroundElement.value?.getBoundingClientRect().height ?? 0;
+});
+// Include the live controls in the same measured scroll extent and follow target.
+const endInset = computed(() => (props.bottomInset ?? 0) + foregroundHeight.value);
 const latestThreshold = 24;
 const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(computed(() => {
   // Capture the supplied list so replacing fixtures retains the previous key mapping on prepend.
@@ -35,7 +44,9 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(computed(() => {
     getItemKey: (index: number) => entries[index]!.id,
     estimateSize: () => 140,
     overscan: 5,
-    paddingEnd: props.bottomInset ?? 0,
+    // A viewport of leading space keeps even a single message scrollable.
+    paddingStart: viewportHeight.value,
+    paddingEnd: endInset.value,
     anchorTo: "end" as const,
     followOnAppend: true,
     scrollEndThreshold: latestThreshold,
@@ -44,22 +55,26 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(computed(() => {
     scrollToFn: (offset, options, instance) => {
       void nextTick(() => elementScroll(offset, options, instance));
     },
-    // TanStack observes both viewport and row sizes. Only a viewport-height change needs
-    // an explicit follow request; keyed reading-anchor corrections stay with the virtualizer.
+    // Preserve follow/reading intent before changing the viewport and leading space.
     observeElementRect: (instance, callback) => observeElementRect(instance, (rect) => {
       const previous = instance.scrollRect;
-      const following = previous !== null &&
-        instance.getTotalSize() - (instance.scrollOffset ?? 0) - previous.height <= latestThreshold;
+      const offset = instance.scrollOffset ?? 0;
+      // On growth the browser may already have clamped scrollTop to the new end.
+      const following = previous === null || previous.height === 0 ||
+        instance.getTotalSize() - offset - Math.max(previous.height, rect.height) <= latestThreshold;
+      viewportHeight.value = rect.height;
       callback(rect);
-      if (following && !touching.value && previous?.height !== rect.height) {
-        void nextTick(() => instance.scrollToEnd());
+      if (previous?.height !== rect.height) {
+        void nextTick(() => {
+          if (following && !touching.value) instance.scrollToEnd();
+          else instance.scrollToOffset(offset + rect.height - (previous?.height ?? 0));
+        });
       }
     }),
   };
 }));
-watch(() => props.bottomInset ?? 0, (inset, previous) => {
+watch(endInset, (inset, previous) => {
   const instance = virtualizer.value;
-  // Recover distance using the previous inset regardless of Vue's options-update order.
   const previousDistance = instance.getTotalSize() - instance.options.paddingEnd + previous
     - (instance.scrollOffset ?? 0) - (instance.scrollRect?.height ?? 0);
   if (inset !== previous && previousDistance <= latestThreshold && !touching.value)
@@ -227,62 +242,70 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
         tabindex: 0, onKeydown: onScrollKeydown, onWheel: onWheel,
         onTouchstart: onTouchStart, onTouchend: () => touching = false,
         onTouchcancel: () => touching = false }">
-      <div class="transcript-history" role="list" :style="{ height: `${virtualizer.getTotalSize()}px` }">
-        <article v-for="{ item, entry, panel, cover, placement, ink, backdrop, typeface } in rows" :key="entry.id"
-          :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
-          :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
-          role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
-          class="transcript-entry" :data-continues="!startsGroup(item.index)"
-          :data-prose="placement !== null || undefined"
-          :style="{ transform: `translateY(${item.start}px)` }">
-          <!-- Session events carry no authored story text and receive no designed treatment. -->
-          <p v-if="entry.kind === 'session-event'" class="session-event">{{ entry.text }}</p>
-          <!-- Prose carries no bubble and no avatar. Where the block sits and how its text is
-               set are two separate choices: a block can stand on the right while its lines
-               still read from the left, which is how a signature sits under a letter. -->
-          <div v-else-if="placement" class="prose"
-            :data-align="placement.position" :data-text="placement.text"
-            :data-panel="panel !== null || undefined"
-            :style="{ background: panel ?? undefined, color: ink ?? undefined, fontFamily: typeface ?? undefined }">
-            <p v-if="showsName(item.index, false)" class="prose-attribution">
-              {{ nameOf(entry) }}
-            </p>
-            <TranscriptMarkup v-if="entry.content" :content="entry.content"
-              :backdrop="backdrop" :cover="cover" />
-            <template v-else>{{ entry.text }}</template>
-          </div>
-          <Message v-else :align="entry.speakerId === 'user' ? 'end' : 'start'">
-            <!-- The avatar keeps its place through the run so the bubbles stay on one line. -->
-            <MessageAvatar v-if="entry.speakerId !== 'user'"
-              class="self-start" :class="startsGroup(item.index) ? '' : 'invisible'">
-              <Avatar>
-                <AvatarFallback class="text-xs font-semibold">{{ speakers[entry.speakerId]?.avatar }}</AvatarFallback>
-              </Avatar>
-            </MessageAvatar>
-            <MessageContent>
-              <!-- Two caps, whichever binds first: three quarters of the column keeps a bubble
-                   off the edge on a narrow window, and 65ch keeps the line readable on a wide one. -->
-              <!-- The player's side is theme-owned and keeps the accent roles as they are. -->
-              <Bubble class="max-w-[min(75%,65ch)]"
-                :variant="entry.speakerId === 'user' ? 'default' : 'secondary'"
-                :align="entry.speakerId === 'user' ? 'end' : 'start'">
-                <BubbleContent class="text-base/normal"
-                  :class="[cornerClass(item.index, entry.speakerId === 'user'),
-                    entry.speakerId === 'user' ? '' : 'message-speaker', panel ? 'message-authored' : '']"
-                  :style="{ '--message-authored-fill': panel ?? undefined, color: ink ?? undefined,
-                    fontFamily: typeface ?? undefined }">
-                  <MessageHeader v-if="showsName(item.index, entry.speakerId === 'user')"
-                    class="px-0 pb-0.5">
-                    {{ nameOf(entry) }}
-                  </MessageHeader>
-                  <TranscriptMarkup v-if="entry.speakerId !== 'user' && entry.content" :content="entry.content"
-                    :backdrop="backdrop" :cover="cover" />
-                  <template v-else>{{ entry.text }}</template>
-                </BubbleContent>
-              </Bubble>
-            </MessageContent>
-          </Message>
-        </article>
+      <div class="transcript-history" :style="{ height: `${virtualizer.getTotalSize()}px` }">
+        <div role="list">
+          <article v-for="{ item, entry, panel, cover, placement, ink, backdrop, typeface } in rows" :key="entry.id"
+            :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
+            :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
+            role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
+            class="transcript-entry" :data-continues="!startsGroup(item.index)"
+            :data-prose="placement !== null || undefined"
+            :style="{ transform: `translateY(${item.start}px)` }">
+            <!-- Session events carry no authored story text and receive no designed treatment. -->
+            <p v-if="entry.kind === 'session-event'" class="session-event">{{ entry.text }}</p>
+            <!-- Prose carries no bubble and no avatar. Where the block sits and how its text is
+                 set are two separate choices: a block can stand on the right while its lines
+                 still read from the left, which is how a signature sits under a letter. -->
+            <div v-else-if="placement" class="prose"
+              :data-align="placement.position" :data-text="placement.text"
+              :data-panel="panel !== null || undefined"
+              :style="{ background: panel ?? undefined, color: ink ?? undefined, fontFamily: typeface ?? undefined }">
+              <p v-if="showsName(item.index, false)" class="prose-attribution">
+                {{ nameOf(entry) }}
+              </p>
+              <TranscriptMarkup v-if="entry.content" :content="entry.content"
+                :backdrop="backdrop" :cover="cover" />
+              <template v-else>{{ entry.text }}</template>
+            </div>
+            <Message v-else :align="entry.speakerId === 'user' ? 'end' : 'start'">
+              <!-- The avatar keeps its place through the run so the bubbles stay on one line. -->
+              <MessageAvatar v-if="entry.speakerId !== 'user'"
+                class="self-start" :class="startsGroup(item.index) ? '' : 'invisible'">
+                <Avatar>
+                  <AvatarFallback class="text-xs font-semibold">{{ speakers[entry.speakerId]?.avatar }}</AvatarFallback>
+                </Avatar>
+              </MessageAvatar>
+              <MessageContent>
+                <!-- Two caps, whichever binds first: three quarters of the column keeps a bubble
+                     off the edge on a narrow window, and 65ch keeps the line readable on a wide one. -->
+                <!-- The player's side is theme-owned and keeps the accent roles as they are. -->
+                <Bubble class="max-w-[min(75%,65ch)]"
+                  :variant="entry.speakerId === 'user' ? 'default' : 'secondary'"
+                  :align="entry.speakerId === 'user' ? 'end' : 'start'">
+                  <BubbleContent class="text-base/normal"
+                    :class="[cornerClass(item.index, entry.speakerId === 'user'),
+                      entry.speakerId === 'user' ? '' : 'message-speaker', panel ? 'message-authored' : '']"
+                    :style="{ '--message-authored-fill': panel ?? undefined, color: ink ?? undefined,
+                      fontFamily: typeface ?? undefined }">
+                    <MessageHeader v-if="showsName(item.index, entry.speakerId === 'user')"
+                      class="px-0 pb-0.5">
+                      {{ nameOf(entry) }}
+                    </MessageHeader>
+                    <TranscriptMarkup v-if="entry.speakerId !== 'user' && entry.content" :content="entry.content"
+                      :backdrop="backdrop" :cover="cover" />
+                    <!-- A reply that was chosen rather than typed says so: the mark is decorative
+                         and the label carries it to a reader who hears the transcript instead. -->
+                    <template v-else><span v-if="entry.kind === 'message' && entry.responseKind" class="choice-marker" aria-hidden="true">› </span><span v-if="entry.kind === 'message' && entry.responseKind" class="sr-only">Selected option: </span>{{ entry.text }}</template>
+                  </BubbleContent>
+                </Bubble>
+              </MessageContent>
+            </Message>
+          </article>
+        </div>
+        <div ref="foregroundElement" class="transcript-foreground"
+          :style="{ top: `${virtualizer.getTotalSize() - endInset}px` }">
+          <slot name="foreground" />
+        </div>
       </div>
       <p v-if="!entries.length" class="transcript-empty">No messages yet.</p>
     </ScrollArea>
@@ -334,6 +357,7 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
     rgb(0 0 0 / 20%) 100%);
 }
 :deep(.transcript-scroll[data-scrolled="true"]) { --transcript-top-fade: 1rem; }
+.transcript-foreground { position: absolute; left: 0; width: 100%; }
 .transcript-history { position: relative; width: 100%; }
 /* The gap above a row separates it from the previous one: a run stays tight,
    a change of speaker gets the full separation. */

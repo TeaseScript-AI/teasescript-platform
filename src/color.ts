@@ -126,3 +126,13 @@ export function isNormalizedColor(value: unknown): value is string {
   const match = NORMALIZED_COLOR.exec(value);
   return match !== null && match.slice(1).map(Number).every(Number.isFinite);
 }
+
+/** Opaque authored surfaces share the CSS parser without accepting theme-dependent transparency. */
+export function normalizeOpaqueColor(value: unknown): string | null {
+  const color = normalizeColor(value);
+  return color !== null && new Color(color).alpha === 1 ? color : null;
+}
+
+export function isNormalizedOpaqueColor(value: unknown): value is string {
+  return isNormalizedColor(value) && new Color(value).alpha === 1;
+}

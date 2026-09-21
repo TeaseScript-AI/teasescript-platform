@@ -13,7 +13,7 @@ const container = ref<HTMLElement | null>(null);
 const availableHeight = ref(0);
 useResizeObserver(container, ([entry]) => { availableHeight.value = entry?.contentRect.height ?? 0; });
 const composerEdges = ref({ top: 0, bottom: 0 });
-// Measure the complete overlay, including its safe-area spacing and foreground controls.
+// Measure the complete overlay, including its safe-area spacing.
 useResizeObserver(overlay, () => {
   const bounds = overlay.value?.getBoundingClientRect();
   const surface = overlay.value?.querySelector("[data-composer-shell]")?.getBoundingClientRect();
@@ -38,7 +38,7 @@ useResizeObserver(overlay, () => {
 </template>
 
 <style scoped>
-.conversation-region { display: flex; min-width: 0; min-height: 0; }
+.conversation-region { flex: 1; display: flex; min-width: 0; min-height: 0; }
 .conversation-surface { position: relative; display: flex; min-height: 0; padding-inline: var(--conversation-inline-inset); }
 .conversation-overlay {
   position: absolute; inset: auto var(--conversation-inline-inset) 0; z-index: 2; pointer-events: none;

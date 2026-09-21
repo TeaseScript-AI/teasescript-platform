@@ -354,6 +354,10 @@ The stage is a dedicated structural surface above the transcript in the main con
 when no media is active. An empty stage shows its normal background/ambience rather than collapsing and expanding the
 transcript into that space.
 
+The Greenfield preview currently tries a 70% stage / 30% conversation split. A keyboard-accessible horizontal handle
+lets the user adjust that division; only the compact centered grip starts a drag, not the full-width boundary. The composer grows inside the conversation allocation. The chosen split survives
+viewport resizing for the current mount. The starting ratio and 20% minimum per panel remain visual trials.
+
 Standard image/video-like presentation:
 
 - defaults to `contain`, keeping the complete media visible within the allocated stage;
@@ -387,6 +391,8 @@ The transcript:
 - uses the canvas surface, continuous with the stage background above it;
 - is centered within the actual middle content region rather than the full viewport;
 - keeps the maintained ultrawide readability cap pending visual retuning;
+- places one viewport of empty scroll space before the messages, so even a single message can be scrolled; at the latest
+  position, messages and active controls sit above the composer and new messages grow the conversation upward;
 - owns vertical scrolling and contains overscroll;
 - uses the maintained soft top fade beneath the stage instead of a hard cut only while the transcript is actually
   scrolled away from its top; at the top of history, the first visible content remains fully opaque;
@@ -419,7 +425,8 @@ uses restrained backdrop blur where supported. Its exact threshold remains a tun
 
 ### Message presentation and provenance
 
-Speaker/package output aligns to the normal reading side; player-authored output aligns to the opposite side. A message
+Received bubbles align left and player-authored bubbles align right. The Player owns bubble placement and text
+alignment; authors can set `position` and `align` only for prose, as defined by the language contract below. A message
 occupies at most `75%` of the conversation width and at most `65ch`, whichever is narrower; this preserves an
 opposite-side margin on narrow layouts without forcing short wrapping on wider ones. The current avatar, speaker-name,
 and speaker-coloured rule remain the POC visual baseline. Speaker identity colour/font and per-message rich-text styling
@@ -468,8 +475,8 @@ The POC's letter-glyph avatars remain fixtures; accepted V30 speaker avatar refe
 ## Composer and foreground interactions
 
 The Standard Player uses one persistent composer at the bottom of the conversation area. It is the normal chat input and
-the answer field for `askText` and `askNumber`; `choose` and `showButton` controls appear immediately above it within the
-same central conversation width.
+the answer field for `askText` and `askNumber`; `choose` and `showButton` controls appear after the latest message inside the
+same vertically scrolling transcript. The composer stays at the bottom.
 
 ### Wide presentation
 
@@ -546,18 +553,24 @@ This is distinct from a skippable `say` pacing gate: when no foreground interact
 click/tap on Player background/unused space or Space with the empty focused composer may settle that gate under ADR 0018.
 Actual interactive controls always take precedence and must not also fire the viewport-wide pacing shortcut.
 
-A `showButton` is the one-option presentation of the same Standard foreground-control vocabulary. Its width is bounded by
-the available foreground-control lane, has a practical touch/click minimum, and otherwise grows with its label rather
-than becoming arbitrarily full-width. Long labels may wrap. The foreground-control lane spans the available middle
-region between an open tools strip and reserved right rail; unlike prose, it is not capped by the `900px` reading width.
-Buttons are centered while they fit. When they overflow they remain individually authored buttons in a native
-horizontal scroll/snap carousel, preserving authored colour and semantics rather than changing into a dropdown.
-Enhanced CSS arrows/markers appear only during real overflow and are navigation only; selecting a marker reveals a
-button but never activates it. The arrows sit at the left and right edges beside the button row; only a compact marker
-strip sits beneath the buttons, so carousel chrome does not claim another control-height row. Browsers without those
-enhanced controls keep the usable native horizontal scroller. Carousel position is Player UI state, not canonical
-runtime or checkpoint state. Authored foreground buttons use their solid authored colour because media never sits behind
-this lane; authored right-rail actions retain the translucent floating-control treatment described below.
+A `showButton` is the one-option presentation of the same Standard foreground-control vocabulary. Controls share
+the transcript's reading width, grow with their labels, and allow long labels to wrap. The group centers its
+buttons and wraps onto additional rows rather than scrolling horizontally. The current visual trial uses 12px
+between buttons and rows. Story buttons use the shared shadcn Button with a soft-bevel presentation: modest
+rounding, a lighter top, darker lower edge, and a small depth shadow. Hover changes the lighting without moving
+the label; pressing reduces the depth. Controls scroll away with the transcript; there is no separate button
+scroller. The transcript’s leading scroll space keeps messages and controls together above the composer when
+following the latest content. After completion, the active controls disappear and the existing runtime
+transcript records the response. Completed choices and buttons carry a visible `›` marker in the transcript,
+distinct from typed text/number answers. Pointer or touch activation does not focus the composer or summon a
+software keyboard; keyboard activation can move focus to the next choice. Authored foreground buttons retain
+their opaque authored colour as the material base because media never sits behind this lane. Without an authored
+fill, the theme accent supplies that base. Black or white labels and contrast-limited lighting keep the material
+readable across normal, hover, and pressed states. Unavailable action buttons use the shared disabled surface, text and border roles, without relief or hover/pressed feedback. They retain native disabled semantics and cannot activate. Authored right-rail actions retain the translucent
+floating-control treatment described below.
+
+The [story-button design rationale](UI-DESIGN-AND-ENGINEERING.md#player-story-button-design-rationale) explains the
+material choice and its reuse boundaries.
 
 Validation content and retry semantics come from the controlling interaction/runtime contract. The Player must not
 invent a competing inline-error semantic merely because the current POC lacks the richer accepted V30 `invalidMessage`

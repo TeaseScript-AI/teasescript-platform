@@ -620,9 +620,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 20 | `say` carries an explicit nullable presentation expression; option expressions lower through the existing resumable evaluation path. |
-| Runtime snapshot | 21 | Prepared `say` output also captures validated resolved presentation; spoiler spans are no longer accepted. |
-| Checkpoint | 29 | Updated the self-contained bundle for presentation-aware plans and runtime snapshots. |
+| Instruction plan | 22 | Message preparation accepts authored position and alignment only for prose. |
+| Runtime snapshot | 23 | Captured bubble presentations require null position and alignment; placement is Player-owned. |
+| Checkpoint | 31 | Updated the self-contained bundle for prose-only authored placement and bubble presentation validation. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 

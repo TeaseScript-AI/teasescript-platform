@@ -24,7 +24,8 @@ task crosses categories or the relevant ownership is unclear.
 - **Palette, themes, control visual states, focus, hover, or press feedback:**
   [Keep defaults and visual roles explicit](#keep-defaults-and-visual-roles-explicit),
   [Build colour systems from semantic roles](#build-colour-systems-from-semantic-roles),
-  [Shared control baseline](#shared-control-baseline), and
+  [Shared control baseline](#shared-control-baseline),
+  [Player story-button design rationale](#player-story-button-design-rationale), and
   [Match interaction feedback to input capability](#match-interaction-feedback-to-input-capability).
 - **Demo/content independence, media decoration, or effect containment:**
   [Keep content independent from demo markup and decorative
@@ -138,6 +139,46 @@ button styles per page. Treat this as the default baseline, not a requirement to
 Individual product surfaces may compose the shared roles differently where their content and hierarchy require it. Exact
 product-surface widths, heights, spacing, layout geometry, and palette values remain owned by the maintained
 specification for that surface unless this shared baseline deliberately adopts them.
+
+### Player story-button design rationale
+
+The accepted Standard Player story-button direction is **soft bevel**: a filled, modestly raised surface for actions
+that belong to the story. This is a deliberate exception to flat ordinary controls, not a new default for settings,
+toolbars, or every button in the product. The observable contract remains in
+[Composer and foreground interactions](PLAYER-UI.md#composer-and-foreground-interactions).
+
+**Author colour is content; material and shape are Player identity.** Equal narrative alternatives have equal visual
+weight. A supplied colour does not automatically make an answer recommended, dangerous, or secondary. When no colour
+is supplied, the Player theme provides the base. Do not silently replace an awkward authored colour with a curated one.
+
+The accepted visual ingredients work together rather than acting as independent decoration:
+
+| Ingredient | Purpose |
+| --- | --- |
+| Slightly lighter top and darker bottom | Suggest one restrained light source and surface volume. |
+| Fine top highlight and darker edge | Define the shape without a glossy stripe or heavy outline. |
+| Small lower shadow | Separate the button from its background without making it a floating panel. |
+| Moderate rounding, stronger label weight, balanced padding | Make a short or wrapped answer feel like a deliberate, usable control. |
+| Paint-only hover; reduced depth when pressed | Make the surface respond without moving labels or neighbouring choices. |
+
+Earlier experiments with tinted outlines and text-only choices did not provide the requested filled, tactile character.
+The Milovana reference helped identify the material direction; its authors' colour combinations were not adopted as a
+Player palette. The approved result is subtle relief, not arbitrary gradients, decorative tails, or universal glow.
+
+Derive lighting from the base colour while keeping its hue recognizable. Near a text-contrast boundary, reduce the
+lighting variation instead of sacrificing legibility for relief. Choose readable black or white text against the
+rendered fill states, accounting for gamut mapping. A gradient and its hover/pressed variants need checking, not just
+one nominal base colour. Focus remains a separate visible keyboard indication. Very dark fills can show less relief;
+neon or clashing colours can remain aesthetically loud even when the controls are readable and coherent.
+
+For another Player button family, reuse this material only if the interaction calls for the same tactile character.
+Evaluate it in the surrounding Player, with short and wrapped labels, few and many choices, light/dark backgrounds,
+extreme and uncurated colours, and actual hover/press/focus. A curated palette or isolated screenshot alone does not
+establish that the design works. This is a critique method, not a new global numeric or geometry requirement.
+
+Keep accepted appearance in a shared component over shadcn Button; keep colour derivation in the colour layer. The
+current implementation references are `components/PlayerActionButton.vue` and `player/theme/story-choice.ts`; executable values live there
+rather than in a second CSS recipe in this guide. Spacing may still be refined independently of the accepted material.
 
 ### Match interaction feedback to input capability
 

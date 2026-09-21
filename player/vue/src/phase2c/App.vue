@@ -5,13 +5,12 @@ import ToolLifetimeFixture from "./ToolLifetimeFixture.vue";
 import LayoutDebug from "./LayoutDebug.vue";
 import ThemeLab from "./ThemeLab.vue";
 import Stage from "./Stage.vue";
+import PlayerComposition from "./PlayerComposition.vue";
 import PlayerTopBar from "./PlayerTopBar.vue";
-import Transcript from "./Transcript.vue";
-import ConversationSurface from "./ConversationSurface.vue";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
 import { transcriptAuthoredFixtures, transcriptFixtures, transcriptFixtureSpeakers, transcriptMarkupFixtures, transcriptProseFixtures } from "./transcriptFixtures";
 import { createPlayerRuntimeSession, createPlayerRuntimeRestorePoint, restorePlayerRuntimeSession, type PlayerRuntimeSession, type PlayerRuntimeRestorePoint } from "../../../runtime-adapter.js";
-import { runtimeScenario, interactionScenario } from "./runtimeScenario";
+import { runtimeScenario, interactionScenario, buttonScenario } from "./runtimeScenario";
 import { stageFixtures } from "./stageFixtures";
 import type { PlayerTimerKind } from "../../../model.js";
 import TimerFixtureRegion from "./TimerFixtureRegion.vue";
@@ -58,6 +57,7 @@ function startRuntime(source = runtimeScenario) {
   runtimeSession.value = createPlayerRuntimeSession(source);
   runtimeRestore.value = createPlayerRuntimeRestorePoint(runtimeSession.value);
 }
+if (isDevelopment) startRuntime(buttonScenario);
 function restoreRuntime() {
   if (!runtimeRestore.value) return;
   interactionReset.value++;
@@ -65,7 +65,6 @@ function restoreRuntime() {
 }
 let nextMessage = 2000;
 let firstMessage = 0;
-const transcriptSpeakers = computed(() => runtimeSession.value?.speakers ?? transcriptFixtureSpeakers);
 
 function loadTranscript(count: number) {
   runtimeSession.value = null;
@@ -103,11 +102,10 @@ function prependTranscript() {
   firstMessage -= 50;
   transcriptEntries.value = [...transcriptFixtures(firstMessage, 50), ...transcriptEntries.value];
 }
-const transcript = ref<InstanceType<typeof Transcript> | null>(null);
 const stage = ref<InstanceType<typeof Stage> | null>(null);
 const stageHeight = ref(0);
 const mediaAspect = ref(0);
-// The grid owns Stage height. Its measurement positions the ambient fade and
+// PlayerComposition owns Stage height. Its measurement positions the ambient fade and
 // determines the contained image width; neither feeds back into the Stage track.
 useResizeObserver(computed(() => stage.value?.$el as HTMLElement | undefined), ([entry]) => { if (entry) stageHeight.value = entry.contentRect.height; });
 const fullscreen = ref(document.fullscreenElement === document.documentElement);
@@ -182,6 +180,7 @@ async function toggleFullscreen() {
             <fieldset class="grid min-w-0 gap-2">
               <legend class="mb-2">Runtime transcript scenario</legend>
               <Button class="min-w-0" variant="outline" @click="startRuntime()">Start runtime scenario</Button>
+              <Button class="min-w-0" variant="outline" @click="startRuntime(buttonScenario)">Start button demo</Button>
               <Button class="min-w-0" variant="outline" @click="startRuntime(interactionScenario)">Start interaction scenario</Button>
               <template v-if="runtimeSession">
                 <Button class="min-w-0" variant="outline" @click="runtimeRestore = createPlayerRuntimeRestorePoint(runtimeSession)">Capture runtime checkpoint</Button>
@@ -191,40 +190,44 @@ async function toggleFullscreen() {
           </div>
     </template>
     <template #default="{ sidebarVisible }">
-      <div class="player-composition relative">
-        <PlayerTopBar
-          :title="longTitle ? 'An evening by the coast — a quiet moment before the journey begins' : 'Evening by the coast'"
-          :fullscreen="fullscreen"
-          :fullscreen-supported="fullscreenSupported"
-          :fullscreen-error="fullscreenError"
-          :theme-mode="themeIntent.mode"
-          @toggle-fullscreen="toggleFullscreen"
-          @toggle-theme-mode="toggleThemeMode"
-        >
-          <template v-if="!sidebarVisible" #tools>
-            <SidebarTrigger class="size-8" aria-label="Show sidebar" title="Show sidebar" />
-          </template>
-        </PlayerTopBar>
-        <Stage ref="stage"
-          :media="stageFixtures[mediaFixture]"
-          @media-aspect="mediaAspect = $event"
-        >
-          <template #right-rail>
-            <StageRightRail v-if="isDevelopment">
-              <template #timers>
-                <TimerFixtureRegion :kind="timerKind" :count="timerCount" :reset="timerReset" :paused="timerPaused" />
-              </template>
-            </StageRightRail>
-          </template>
-        </Stage>
+      <PlayerComposition>
+        <template #topbar>
+          <PlayerTopBar
+            :title="longTitle ? 'An evening by the coast — a quiet moment before the journey begins' : 'Evening by the coast'"
+            :fullscreen="fullscreen"
+            :fullscreen-supported="fullscreenSupported"
+            :fullscreen-error="fullscreenError"
+            :theme-mode="themeIntent.mode"
+            @toggle-fullscreen="toggleFullscreen"
+            @toggle-theme-mode="toggleThemeMode"
+          >
+            <template v-if="!sidebarVisible" #tools>
+              <SidebarTrigger class="size-8" aria-label="Show sidebar" title="Show sidebar" />
+            </template>
+          </PlayerTopBar>
+        </template>
+        <template #stage>
+          <Stage ref="stage"
+            :media="stageFixtures[mediaFixture]"
+            @media-aspect="mediaAspect = $event"
+          >
+            <template #right-rail>
+              <StageRightRail v-if="isDevelopment">
+                <template #timers>
+                  <TimerFixtureRegion :kind="timerKind" :count="timerCount" :reset="timerReset" :paused="timerPaused" />
+                </template>
+              </StageRightRail>
+            </template>
+          </Stage>
+        </template>
 
-        <ConversationSurface @margin-wheel="transcript?.scrollFromMargin($event)">
-          <template #default="{ bottomInset }">
-            <Transcript ref="transcript" :bottom-inset="bottomInset" :key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'" :entries="runtimeSession?.transcriptEntries ?? transcriptEntries" :speakers="transcriptSpeakers" :revision="runtimeSession?.transcriptRevision ?? 0" />
-          </template>
-          <template #interaction><RuntimeInteraction v-model:session="runtimeSession" :reset="interactionReset" :preview="isDevelopment" @preview-submit="appendPreviewResponse" /></template>
-        </ConversationSurface>
-      </div>
+        <RuntimeInteraction v-model:session="runtimeSession" :reset="interactionReset" :preview="isDevelopment"
+          :transcript-key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'"
+          :entries="runtimeSession?.transcriptEntries ?? transcriptEntries"
+          :speakers="runtimeSession?.speakers ?? transcriptFixtureSpeakers"
+          :revision="runtimeSession?.transcriptRevision ?? 0"
+          @preview-submit="appendPreviewResponse" />
+      </PlayerComposition>
     </template>
   </PlayerToolsShell>
 </template>

@@ -23,6 +23,7 @@ function mediaLoaded(event: Event) {
 
 <style scoped>
 .player-stage {
+  flex: 1;
   position: relative;
   min-width: 0;
   min-height: 0;

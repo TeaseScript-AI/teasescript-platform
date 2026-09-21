@@ -1,3 +1,4 @@
+import { storyChoiceVariables } from "../../../theme/story-choice.js";
 import { onBeforeUnmount, watchEffect, type Ref } from "vue";
 import {
   generatePlayerTheme,
@@ -44,7 +45,10 @@ export function usePlayerTheme(intent: Ref<PlayerThemeIntent>) {
   }
   watchEffect(() => {
     const theme = generatePlayerTheme(intent.value);
-    applyGeneratedTheme({ mode: intent.value.mode, variables: themeCssVariables(theme) });
+    applyGeneratedTheme({
+      mode: intent.value.mode,
+      variables: { ...themeCssVariables(theme), ...storyChoiceVariables(intent.value.accentSeed) },
+    });
   });
   onBeforeUnmount(clearGeneratedTheme);
 }

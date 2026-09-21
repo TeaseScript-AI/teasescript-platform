@@ -91,7 +91,12 @@ export function playerRuntimeForeground(
   const accessibleName = interactionAccessibleName(action.ui.accessibleName);
   switch (action.ui.kind) {
     case "button":
-      return Object.freeze({ kind: "show-button", accessibleName, label: action.ui.buttonLabel });
+      return Object.freeze({
+        kind: "show-button",
+        accessibleName,
+        label: action.ui.buttonLabel,
+        ...(action.ui.background === undefined ? {} : { authoredFill: action.ui.background }),
+      });
     case "text":
       return Object.freeze({
         kind: "ask-text",
@@ -110,7 +115,11 @@ export function playerRuntimeForeground(
         accessibleName,
         options: Object.freeze(
           action.ui.options.map((option, index) =>
-            Object.freeze({ id: choiceOptionId(action.actionId, index), label: option.text }),
+            Object.freeze({
+              id: choiceOptionId(action.actionId, index),
+              label: option.text,
+              ...(option.background === undefined ? {} : { authoredFill: option.background }),
+            }),
           ),
         ),
       });
@@ -263,6 +272,17 @@ function appendRuntimeEvents(
   // EVIDENCE: emptySession creates an unfrozen adapter-owned transcript accumulator for every session.
   const transcriptEntries = session.transcriptEntries as PlayerTranscriptEntryPresentation[];
   for (const event of events) retainedEvents.push(event);
+  const responseKinds = new Map<number, "choice" | "button">();
+  for (const event of events) {
+    if (
+      event.kind === "actionCompleted" &&
+      event.settlement.actionKind === "interaction" &&
+      (event.settlement.interactionKind === "choice" ||
+        event.settlement.interactionKind === "button")
+    ) {
+      responseKinds.set(event.settlement.transcriptEventSequence, event.settlement.interactionKind);
+    }
+  }
   for (const event of events) {
     if (event.kind === "say") {
       const speakerId = event.speaker === null ? "narrator" : speakerKey(event.speaker);
@@ -284,6 +304,9 @@ function appendRuntimeEvents(
           id: `runtime-event-${event.sequence}`,
           speakerId: "user",
           text: event.text,
+          ...(responseKinds.has(event.sequence)
+            ? { responseKind: responseKinds.get(event.sequence)! }
+            : {}),
         }),
       );
     }

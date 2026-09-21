@@ -1060,6 +1060,7 @@ async function transcriptChecks(page) {
   // Larger retained history, top-of-history prepend, empty -> populated, and rapid appends.
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
+  await atEnd("resize before replacing history");
   await page.getByRole("button", { name: "Load 10,000 messages", exact: true }).click();
   await page.locator('[aria-setsize="10000"]').first().waitFor();
   await atEnd("10,000-entry history");
@@ -1070,6 +1071,12 @@ async function transcriptChecks(page) {
   await scroll.focus();
   await page.keyboard.press("Home");
   await page.waitForFunction(() => document.querySelector(".transcript-scroll").scrollTop === 0);
+  // Home now exposes the intentional leading blank viewport. Start reading
+  // at the first message before checking preservation across a prepend.
+  await scroll.evaluate((el) => {
+    const first = el.querySelector("[data-message-id]");
+    el.scrollTop += first.getBoundingClientRect().top - el.getBoundingClientRect().top;
+  });
   const oldest = await anchor();
   await page.getByRole("button", { name: "Prepend 50 messages", exact: true }).click();
   await page.locator('[aria-setsize="10050"]').first().waitFor();
@@ -1202,9 +1209,24 @@ async function runtimeTranscriptChecks(page) {
   await page.getByRole("button", { name: "Capture runtime checkpoint", exact: true }).click();
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await transcript.locator('[aria-setsize="5"]').first().waitFor();
+  // The player's own words now sit in a bubble, so the copy is looked for where it is
+  // written rather than in the flat line the transcript used to be.
+  const selectedButton = transcript
+    .locator('[data-speaker-id="user"] [data-slot="bubble-content"]')
+    .filter({ hasText: "Continue **literally**" });
   check(
-    (await transcript.getByText("Continue **literally**", { exact: true }).count()) === 1,
-    "Canonical button transcript text changed",
+    (await selectedButton.count()) === 1 &&
+      (await selectedButton.locator('.choice-marker[aria-hidden="true"]').textContent()).trim() ===
+        "›" &&
+      (
+        await selectedButton.evaluate((element) =>
+          Array.from(element.childNodes)
+            .filter((node) => node.nodeType === Node.TEXT_NODE)
+            .map((node) => node.textContent)
+            .join(""),
+        )
+      ).trim() === "Continue **literally**",
+    "Canonical button transcript text or selected-option marker changed",
   );
   // The row opens with the avatar's letter, so the name and the line it introduces are
   // matched at the end. Tags the author typed are part of the sentence and stay readable

@@ -51,7 +51,7 @@ function measure() {
       ["Conversation", ".player-conversation"],
       ["Composer overlay", "[data-conversation-overlay]"],
       ["Composer surface", ".conversation-glass"],
-      ["Interaction area", "[data-runtime-interaction]"],
+      ["Foreground controls", "[data-foreground-controls]"],
     ] as const) {
       const element = root.querySelector<HTMLElement>(selector);
       if (!element?.getClientRects().length) continue;
@@ -70,7 +70,7 @@ function measure() {
     }
     for (const [owner, parent, before, after] of [
       ["Player composition", ".player-composition", ".player-stage", ".player-conversation"],
-      ["Conversation", ".player-conversation", ".transcript", "[data-runtime-interaction]"],
+      ["Conversation", ".player-conversation", ".transcript", "[data-conversation-overlay]"],
     ] as const) {
       const element = root.querySelector<HTMLElement>(parent);
       const start = element?.querySelector(before)?.getBoundingClientRect();

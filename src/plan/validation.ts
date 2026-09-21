@@ -1,3 +1,4 @@
+import { isNormalizedOpaqueColor } from "../color.js";
 import {
   boundedInteractionUtf8ByteLength,
   interactionStringHasNonWhitespace,
@@ -519,7 +520,7 @@ function validateStaticInteractionUi(
   }
   const uiKeys =
     kind === "button"
-      ? ["kind", "buttonLabel", "accessibleName"]
+      ? ["kind", "buttonLabel", "accessibleName", ...("background" in ui ? ["background"] : [])]
       : kind === "text" || kind === "number"
         ? ["kind", "hint", "accessibleName"]
         : ["kind", "labelType", "options", "accessibleName"];
@@ -573,7 +574,11 @@ function validateStaticInteractionUi(
     measurementExhausted,
     errors,
   );
-  if (kind === "button") countString(ui.buttonLabel, `${path}.buttonLabel`);
+  if (kind === "button") {
+    countString(ui.buttonLabel, `${path}.buttonLabel`);
+    if ("background" in ui && !isNormalizedOpaqueColor(ui.background))
+      errors.push(planError("TSC002", "Invalid opaque button background.", `${path}.background`));
+  }
   if (kind === "text" || kind === "number") {
     if (ui.hint !== null) countString(ui.hint, `${path}.hint`);
   }
@@ -604,11 +609,21 @@ function validateStaticInteractionUi(
           errors.push(planError("TSC002", "Choice option must be an object.", optionPath));
           continue;
         }
-        if (!hasExactKeys(option, ["text", "label"])) {
+        if (
+          !hasExactKeys(option, [
+            "text",
+            "label",
+            ...("background" in option ? ["background"] : []),
+          ])
+        ) {
           errors.push(
             planError("TSC002", "Choice option contains unsupported fields.", optionPath),
           );
         }
+        if ("background" in option && !isNormalizedOpaqueColor(option.background))
+          errors.push(
+            planError("TSC002", "Invalid opaque choice background.", `${optionPath}.background`),
+          );
         const textValid = countString(option.text, `${optionPath}.text`);
         const label = option.label;
         const validLabel =
@@ -672,7 +687,12 @@ function validatePreparedInteractionUi(
   }
   const keys =
     kind === "button"
-      ? ["kind", "buttonLabelTemporary", "accessibleName"]
+      ? [
+          "kind",
+          "buttonLabelTemporary",
+          "accessibleName",
+          ...("backgroundTemporary" in ui ? ["backgroundTemporary"] : []),
+        ]
       : kind === "text" || kind === "number"
         ? ["kind", "hintTemporary", "accessibleName"]
         : ["kind", "labelType", "optionsTemporary", "optionCount", "labels", "accessibleName"];
@@ -746,6 +766,8 @@ function validatePreparedInteractionUi(
   };
   if (kind === "button") {
     addTemporary(ui.buttonLabelTemporary, `${path}.buttonLabelTemporary`);
+    if ("backgroundTemporary" in ui)
+      addTemporary(ui.backgroundTemporary, `${path}.backgroundTemporary`);
     return;
   }
   if (kind === "text" || kind === "number") {

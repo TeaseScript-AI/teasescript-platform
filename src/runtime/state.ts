@@ -42,7 +42,7 @@ import { recordValidationTestWork } from "../validation-testing.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 21;
+export const RUNTIME_SNAPSHOT_VERSION = 23;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -538,10 +538,20 @@ function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPayload {
     return {
       kind: "choice",
       labelType: ui.labelType,
-      options: ui.options.map((option) => ({ text: option.text, label: option.label })),
+      options: ui.options.map((option) => ({
+        text: option.text,
+        label: option.label,
+        ...(option.background === undefined ? {} : { background: option.background }),
+      })),
       accessibleName,
     };
-  if (ui.kind === "button") return { kind: "button", buttonLabel: ui.buttonLabel, accessibleName };
+  if (ui.kind === "button")
+    return {
+      kind: "button",
+      buttonLabel: ui.buttonLabel,
+      ...(ui.background === undefined ? {} : { background: ui.background }),
+      accessibleName,
+    };
   return { kind: ui.kind, hint: ui.hint, accessibleName };
 }
 
@@ -2354,9 +2364,11 @@ function requiredInstructionTemporaries(
     case "interaction":
       if ("preparedUi" in instruction) {
         output.add(instruction.speakerTemporary);
-        if (instruction.preparedUi.kind === "button")
+        if (instruction.preparedUi.kind === "button") {
           output.add(instruction.preparedUi.buttonLabelTemporary);
-        else if (
+          if (instruction.preparedUi.backgroundTemporary !== undefined)
+            output.add(instruction.preparedUi.backgroundTemporary);
+        } else if (
           instruction.preparedUi.kind === "text" ||
           instruction.preparedUi.kind === "number"
         ) {
