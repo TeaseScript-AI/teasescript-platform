@@ -548,6 +548,9 @@ fill, the theme accent supplies that base. Black or white labels and contrast-li
 readable across normal, hover, and pressed states; authored right-rail actions retain the translucent
 floating-control treatment described below.
 
+The [story-button design rationale](UI-DESIGN-AND-ENGINEERING.md#player-story-button-design-rationale) explains the
+material choice and its reuse boundaries.
+
 Validation content and retry semantics come from the controlling interaction/runtime contract. The Player must not
 invent a competing inline-error semantic merely because the current POC lacks the richer accepted V30 `invalidMessage`
 /`invalidLlmInstruction` compatibility path.

@@ -45,12 +45,15 @@ Keep experimental fixtures separate from the components that own settled behavio
   remains in `RuntimeInteraction.vue`, which alone submits canonical runtime actions.
   `Composer.vue` owns the integrated surface, shadcn-vue Textarea/Button, VueUse
   autosizing, feedback association and Enter/Shift+Enter behavior. `ForegroundControls.vue`
-  renders wrapping shadcn buttons in Transcript’s measured trailing slot. They share
+  renders wrapping `StoryChoice.vue` buttons over shadcn Button in Transcript’s measured trailing slot.
+  The material comes from `player/theme/story-choice.ts` for both theme and `authoredFill` colours.
+  The component accepts authored fills, but `playerRuntimeForeground` currently supplies only labels/IDs
+  from runtime actions: script-to-foreground authored colour is not integrated yet. They share
   the transcript scrollport and disappear on completion; its end inset includes
   their measured height plus the composer overlay. RuntimeInteraction composes
   those surfaces and retains the shared submission guard and focus handling.
-  The standalone development preview appends local plain-text replies through App;
-  starting a runtime scenario switches submission to the existing adapter. Composer
+  Development starts directly in the button scenario; Visual Lab can restart it or select the full
+  text/number/choice scenario. Transcript fixtures switch back to local preview replies through App. Composer
   dimensions and the input height cap remain visual trials; no new visual assertions
   freeze them. The Textarea comes from the shadcn-vue new-york registry and uses the
   existing VueUse dependency (no package added).
