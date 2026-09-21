@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, shallowRef } from "vue";
+import { computed, ref, shallowRef } from "vue";
 import { useEventListener, useResizeObserver } from "@vueuse/core";
 import ToolLifetimeFixture from "./ToolLifetimeFixture.vue";
 import LayoutDebug from "./LayoutDebug.vue";
@@ -8,9 +8,8 @@ import Stage from "./Stage.vue";
 import PlayerTopBar from "./PlayerTopBar.vue";
 import Transcript from "./Transcript.vue";
 import ConversationSurface from "./ConversationSurface.vue";
-import { transcriptDesignDefaults } from "./transcriptDesign";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
-import { transcriptFixtures, transcriptFixtureSpeakers, transcriptMarkupFixtures, transcriptProseFixtures } from "./transcriptFixtures";
+import { transcriptAuthoredFixtures, transcriptFixtures, transcriptFixtureSpeakers, transcriptMarkupFixtures, transcriptProseFixtures } from "./transcriptFixtures";
 import { createPlayerRuntimeSession, createPlayerRuntimeRestorePoint, restorePlayerRuntimeSession, type PlayerRuntimeSession, type PlayerRuntimeRestorePoint } from "../../../runtime-adapter.js";
 import { runtimeScenario, interactionScenario } from "./runtimeScenario";
 import { stageFixtures } from "./stageFixtures";
@@ -66,17 +65,7 @@ function restoreRuntime() {
 }
 let nextMessage = 2000;
 let firstMessage = 0;
-// Reviewable message presentation choices for issue #421.
-const transcriptDesign = reactive({ ...transcriptDesignDefaults });
-// The authored accent is a per-speaker value the fixtures leave unset; the lab supplies
-// one so a single colour can be judged against both theme modes.
-const transcriptSpeakers = computed(() => {
-  const source = runtimeSession.value?.speakers ?? transcriptFixtureSpeakers;
-  if (transcriptDesign.authoredAccent === "inherit") return source;
-  return Object.fromEntries(Object.entries(source).map(([id, speaker]) => [
-    id, id === "user" ? speaker : { ...speaker, accent: transcriptDesign.authoredAccent },
-  ]));
-});
+const transcriptSpeakers = computed(() => runtimeSession.value?.speakers ?? transcriptFixtureSpeakers);
 
 function loadTranscript(count: number) {
   runtimeSession.value = null;
@@ -94,6 +83,12 @@ function loadProseSample() {
   runtimeSession.value = null;
   firstMessage = 0;
   transcriptEntries.value = transcriptProseFixtures();
+  nextMessage = transcriptEntries.value.length;
+}
+function loadAuthoredSample() {
+  runtimeSession.value = null;
+  firstMessage = 0;
+  transcriptEntries.value = transcriptAuthoredFixtures();
   nextMessage = transcriptEntries.value.length;
 }
 function appendTranscript() {
@@ -152,18 +147,6 @@ async function toggleFullscreen() {
             <label class="flex items-center gap-2">
               <input v-model="longTitle" type="checkbox" /> Long stage title
             </label>
-            <fieldset class="grid gap-3">
-              <legend class="mb-2">Message design</legend>
-              <label class="flex items-center gap-2">
-                <input type="checkbox" :checked="transcriptDesign.authoredAccent !== 'inherit'"
-                  @change="transcriptDesign.authoredAccent = transcriptDesign.authoredAccent === 'inherit' ? '#8b3fa8' : 'inherit'" />
-                Speaker sets a colour
-              </label>
-              <label v-if="transcriptDesign.authoredAccent !== 'inherit'" class="flex items-center gap-2">
-                Authored colour
-                <input v-model="transcriptDesign.authoredAccent" type="color" />
-              </label>
-            </fieldset>
             <fieldset class="grid min-w-0 gap-2">
               <legend class="mb-2">Timer fixtures</legend>
               <label class="grid gap-2">
@@ -194,6 +177,7 @@ async function toggleFullscreen() {
               <Button class="min-w-0" variant="outline" @click="loadTranscript(10000)">Load 10,000 messages</Button>
               <Button class="min-w-0" variant="outline" @click="loadMarkupSample">Markup sample</Button>
               <Button class="min-w-0" variant="outline" @click="loadProseSample">Prose sample</Button>
+              <Button class="min-w-0" variant="outline" @click="loadAuthoredSample">Authored colour sample</Button>
             </fieldset>
             <fieldset class="grid min-w-0 gap-2">
               <legend class="mb-2">Runtime transcript scenario</legend>
@@ -236,7 +220,7 @@ async function toggleFullscreen() {
 
         <ConversationSurface @margin-wheel="transcript?.scrollFromMargin($event)">
           <template #default="{ bottomInset }">
-            <Transcript ref="transcript" :bottom-inset="bottomInset" :key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'" :entries="runtimeSession?.transcriptEntries ?? transcriptEntries" :speakers="transcriptSpeakers" :revision="runtimeSession?.transcriptRevision ?? 0" :design="transcriptDesign" />
+            <Transcript ref="transcript" :bottom-inset="bottomInset" :key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'" :entries="runtimeSession?.transcriptEntries ?? transcriptEntries" :speakers="transcriptSpeakers" :revision="runtimeSession?.transcriptRevision ?? 0" />
           </template>
           <template #interaction><RuntimeInteraction v-model:session="runtimeSession" :reset="interactionReset" :preview="isDevelopment" @preview-submit="appendPreviewResponse" /></template>
         </ConversationSurface>

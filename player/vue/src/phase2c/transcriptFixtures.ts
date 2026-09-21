@@ -2,7 +2,9 @@ import type {
   PlayerTranscriptEntryPresentation,
   PlayerSpeakerPresentation,
 } from "../../../model.js";
+import type { MessagePresentation } from "../../../../src/message-presentation.js";
 import { parseMessageMarkup } from "../../../../src/message-markup.js";
+import { normalizeColor } from "../../../../src/color.js";
 
 export const transcriptFixtureSpeakers: Readonly<Record<string, PlayerSpeakerPresentation>> = {
   guide: { name: "Guide", accent: "inherit", avatar: "G", fontFamily: "inherit" },
@@ -127,6 +129,80 @@ export function transcriptProseFixtures(): PlayerTranscriptEntryPresentation[] {
         background: null,
         font: null,
       },
+    };
+  });
+}
+
+// The colours are written the way an author writes them and normalized the way the
+// compiler would, so the transcript is handed exactly what the runtime would hand it.
+function authored(
+  kind: "bubble" | "prose",
+  color: string | null,
+  background: string | null,
+): MessagePresentation {
+  return {
+    kind,
+    position: null,
+    align: null,
+    color: color === null ? null : normalizeColor(color),
+    background: background === null ? null : normalizeColor(background),
+    font: null,
+  };
+}
+
+// The four cases the resolved presentation can produce, in the order they have to be
+// judged: a colour behind the words, a colour on them, both at once, and neither.
+const authoredSources: readonly (readonly [
+  speaker: string,
+  source: string,
+  presentation?: MessagePresentation,
+])[] = [
+  [
+    "guide",
+    "No colour was chosen for this one, so it keeps the theme's own bubble.",
+    authored("bubble", null, null),
+  ],
+  [
+    "guide",
+    "A colour behind the words. What the words themselves become is measured against it, because the author never said.",
+    authored("bubble", null, "#4a2d6b"),
+  ],
+  // A pale colour on a light theme and a dark one on a dark theme: in each mode one of
+  // these is unreadable on the player's own bubble, which is the case it has to answer.
+  [
+    "guide",
+    "A colour on the words and none behind them. The bubble is the player's, so the player owes it.",
+    authored("bubble", "#ffe066", null),
+  ],
+  [
+    "guide",
+    "Both colours written together. The author was looking straight at this pairing, so it stands exactly as written.",
+    authored("bubble", "#cbb9e8", "#4a2d6b"),
+  ],
+  ["user", "And my own lines are authored by nobody, so they keep the theme's accent."],
+  [
+    "keeper",
+    "*My dear,*\n\nThis one was given a surface of its own to sit on, so it reads as a page rather than as something said out loud.\n\n**— H.**",
+    authored("prose", "#3b2f2a", "#efe4c8"),
+  ],
+  [
+    "narrator",
+    "And this passage was given nothing, so it sits straight on the page.",
+    authored("prose", null, null),
+  ],
+];
+
+/** Every combination of authored colours a resolved message presentation can carry. */
+export function transcriptAuthoredFixtures(): PlayerTranscriptEntryPresentation[] {
+  return authoredSources.map(([speakerId, source, presentation], index) => {
+    const content = parseMessageMarkup(source);
+    return {
+      id: `authored-${index}`,
+      kind: "message",
+      speakerId: speakerId!,
+      text: content.visibleText,
+      content,
+      ...(presentation === undefined ? {} : { presentation }),
     };
   });
 }

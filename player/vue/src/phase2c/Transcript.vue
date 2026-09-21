@@ -14,15 +14,13 @@ import {
 } from "@/components/ui/message";
 import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } from "../../../model.js";
 import TranscriptMarkup from "./TranscriptMarkup.vue";
-import type { TranscriptDesign } from "./transcriptDesign";
-import { inkFor } from "./messageContrast";
+import { blend, inkFor, scrimFor } from "./messageContrast";
 
 const props = defineProps<{
   entries: readonly PlayerTranscriptEntryPresentation[];
   speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
   revision?: number;
   bottomInset?: number;
-  design: TranscriptDesign;
 }>();
 const scrollElement = ref<HTMLDivElement | null>(null);
 const touching = ref(false);
@@ -90,38 +88,41 @@ onMounted(() => {
   });
 });
 onBeforeUnmount(() => { paletteObserver?.disconnect(); });
-// An authored colour is content, so it is carried through exactly as written; "inherit"
-// means the speaker sets none. The player's side is not authored at all and keeps the
-// theme's own accent roles.
-function authoredFill(entry: PlayerTranscriptEntryPresentation) {
-  if (entry.kind !== "message" || entry.speakerId === "user") return null;
-  const accent = props.speakers[entry.speakerId]?.accent;
-  return accent !== undefined && accent !== "inherit" ? accent : null;
-}
-// Some entries are meant to be read rather than heard. The author says which, and the
-// runtime carries that decision; a letter and a note about the interface differ because
-// he gave their speakers different presentation, not because the player sorts them.
-function proseOf(entry: PlayerTranscriptEntryPresentation) {
-  const presentation = entry.kind === "message" ? entry.presentation : undefined;
-  return presentation?.kind === "prose" ? presentation : null;
+// What the author painted on this one message, already resolved: a speaker's colour is a
+// colour for words, and what it means for a given message is the runtime's to work out,
+// not something to be read back off the speaker and guessed at here. The player's own
+// lines are authored by nobody, arrive with no presentation, and stay theme-owned.
+// Some entries are also meant to be read rather than heard, and the same resolved
+// presentation is what says which: a letter and a note about the interface differ
+// because the author gave them different presentation, not because the player sorts them.
+function authoredOn(entry: PlayerTranscriptEntryPresentation) {
+  return entry.kind === "message" ? entry.presentation ?? null : null;
 }
 const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => {
   const entry = props.entries[item.index]!;
-  const prose = proseOf(entry);
-  // Prose has no bubble to fill, so an authored colour has nothing to land on here.
-  const fill = prose === null ? authoredFill(entry) : null;
+  const authored = authoredOn(entry);
+  const words = authored?.color ?? null;
+  const written = authored?.background ?? null;
+  const surface = written ?? palette.value.surface;
+  // Where both colours are the author's, he wrote them in one breath and was looking
+  // straight at the pairing, so it stands as written. Where only the words are his, what
+  // they land on is the player's own surface, and covering that until they can be read is
+  // the player correcting itself rather than overruling him.
+  const cover = written === null && words !== null ? scrimFor(words, surface) : null;
+  const panel = cover === null ? written : blend(surface, cover);
   return {
-    item, entry, fill,
+    item, entry, panel,
     // An unchosen placement arrives as null. Centred is what fills it in: a passage set
     // apart from the column of bubbles reads as the different thing it is, and draws the
     // eye for the same reason.
-    placement: prose === null ? null : {
-      position: prose.position ?? "center",
-      text: prose.align ?? "center",
+    placement: authored?.kind !== "prose" ? null : {
+      position: authored.position ?? "center",
+      text: authored.align ?? "center",
     },
-    // Whatever an authored colour turns out to be, the words on it are measured against it.
-    ink: fill === null ? null : inkFor(fill),
-    backdrop: fill ?? palette.value.surface,
+    // Words the author left uncoloured are measured against whatever the panel became;
+    // a panel nobody wrote words for is still a panel somebody has to read off.
+    ink: words ?? (panel === null ? null : inkFor(panel)),
+    backdrop: panel ?? palette.value.surface,
   };
 }));
 const showLatest = computed(() => !touching.value && !virtualizer.value.isScrolling &&
@@ -220,7 +221,7 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
         onTouchstart: onTouchStart, onTouchend: () => touching = false,
         onTouchcancel: () => touching = false }">
       <div class="transcript-history" role="list" :style="{ height: `${virtualizer.getTotalSize()}px` }">
-        <article v-for="{ item, entry, fill, placement, ink, backdrop } in rows" :key="entry.id"
+        <article v-for="{ item, entry, panel, placement, ink, backdrop } in rows" :key="entry.id"
           :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
           :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
           role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
@@ -233,7 +234,9 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
                set are two separate choices: a block can stand on the right while its lines
                still read from the left, which is how a signature sits under a letter. -->
           <div v-else-if="placement" class="prose"
-            :data-align="placement.position" :data-text="placement.text">
+            :data-align="placement.position" :data-text="placement.text"
+            :data-panel="panel !== null || undefined"
+            :style="{ background: panel ?? undefined, color: ink ?? undefined }">
             <p v-if="showsName(item.index, false)" class="prose-attribution">
               {{ nameOf(entry) }}
             </p>
@@ -258,8 +261,8 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
                 :align="entry.speakerId === 'user' ? 'end' : 'start'">
                 <BubbleContent class="text-base/normal"
                   :class="[cornerClass(item.index, entry.speakerId === 'user'),
-                    entry.speakerId === 'user' ? '' : 'message-speaker', fill ? 'message-authored' : '']"
-                  :style="fill ? { '--message-authored-fill': fill, color: ink } : undefined">
+                    entry.speakerId === 'user' ? '' : 'message-speaker', panel ? 'message-authored' : '']"
+                  :style="{ '--message-authored-fill': panel ?? undefined, color: ink ?? undefined }">
                   <MessageHeader v-if="showsName(item.index, entry.speakerId === 'user')"
                     class="px-0 pb-0.5">
                     {{ nameOf(entry) }}
@@ -352,6 +355,14 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* A passage given a surface has to hold its words off the edge of it, the same distance a
+   bubble does, or the colour reads as a stain rather than as a panel. Prose given none
+   sits straight on the page and insets for nothing. Whether prose the author gave no
+   background is drawn a panel regardless is still open in #421. */
+.prose[data-panel] { padding: 0.5rem 0.75rem; border-radius: 0.5rem; }
+/* The label is muted against the page; on a panel it steps back from the panel's own
+   text colour instead, which is the only one known to read there. */
+.prose[data-panel] .prose-attribution { color: inherit; opacity: 0.72; }
 .prose[data-align="left"] { margin-inline: 0 auto; }
 .prose[data-align="center"] { margin-inline: auto; }
 .prose[data-align="right"] { margin-inline: auto 0; }
