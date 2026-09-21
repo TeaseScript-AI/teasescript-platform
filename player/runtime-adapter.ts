@@ -352,7 +352,13 @@ function speakerKey(speaker: {
   readonly font: string | null;
   readonly avatar: string | null;
 }): string {
-  const shape = [speaker.identifier, speaker.displayName, speaker.color, speaker.font, speaker.avatar];
+  const shape = [
+    speaker.identifier,
+    speaker.displayName,
+    speaker.color,
+    speaker.font,
+    speaker.avatar,
+  ];
   return `runtime-speaker-${JSON.stringify(shape)}`;
 }
 

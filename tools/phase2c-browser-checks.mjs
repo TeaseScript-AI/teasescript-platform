@@ -1136,10 +1136,7 @@ async function runtimeTranscriptChecks(page) {
   // The title the author gave the speaker, not the `guide` the script addresses it by. It
   // introduces the run from its own line inside the bubble, the way a name does anywhere
   // people talk to each other, so nothing follows it on that line.
-  check(
-    (await rows.first().innerText()).includes("Coastal Guide\n"),
-    "Runtime speaker name lost",
-  );
+  check((await rows.first().innerText()).includes("Coastal Guide\n"), "Runtime speaker name lost");
   const link = transcript.getByRole("link", { name: "Map", exact: true });
   check(
     (await link.getAttribute("href")) === "https://example.com/coast",
