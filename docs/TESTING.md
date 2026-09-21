@@ -104,7 +104,10 @@ End-to-end testing does not replace focused unit, validator, and invariant tests
 Use focused unit tests for deterministic presentation logic and the repository's local Chromium smoke route for changed
 browser behavior, including layout, focus, input, scrolling, overlays, and accessibility state. The current smoke route
 is a dependency-free development check outside `npm run check`; it is not a final cross-browser or production-host E2E
-suite.
+suite. For the Phase 2C development preview, run
+`npm run test:player:phase2c-browser -- <preview-url>`. Each group uses a fresh browser context;
+history checks explicitly load their fixtures through Visual Lab instead of depending on the opening demo.
+On failure the runner reports a retained scratch directory with a screenshot and Playwright trace for the failing group.
 
 After every visible UI change, the implementer must also open the affected flow with interactive browser tooling
 (computer use where available) and inspect the changed state plus its immediate responsive/interaction neighbors. This

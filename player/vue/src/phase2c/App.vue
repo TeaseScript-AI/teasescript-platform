@@ -153,6 +153,7 @@ async function toggleFullscreen() {
               <Button class="min-w-0" variant="outline" :disabled="!!runtimeSession" @click="appendTranscript">Append message</Button>
               <Button class="min-w-0" variant="outline" :disabled="!!runtimeSession" @click="prependTranscript">Prepend 50 messages</Button>
               <Button class="min-w-0" variant="outline" @click="loadTranscript(0)">Empty history</Button>
+              <Button class="min-w-0" variant="outline" @click="loadTranscript(2000)">Load 2,000 messages</Button>
               <Button class="min-w-0" variant="outline" @click="loadTranscript(10000)">Load 10,000 messages</Button>
             </fieldset>
             <fieldset class="grid min-w-0 gap-2">
