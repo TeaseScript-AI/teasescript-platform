@@ -545,7 +545,7 @@ distinct from typed text/number answers. Pointer or touch activation does not fo
 software keyboard; keyboard activation can move focus to the next choice. Authored foreground buttons retain
 their opaque authored colour as the material base because media never sits behind this lane. Without an authored
 fill, the theme accent supplies that base. Black or white labels and contrast-limited lighting keep the material
-readable across normal, hover, and pressed states; authored right-rail actions retain the translucent
+readable across normal, hover, and pressed states. Unavailable action buttons use the shared disabled surface, text and border roles, without relief or hover/pressed feedback. They retain native disabled semantics and cannot activate. Authored right-rail actions retain the translucent
 floating-control treatment described below.
 
 The [story-button design rationale](UI-DESIGN-AND-ENGINEERING.md#player-story-button-design-rationale) explains the

@@ -45,7 +45,7 @@ Keep experimental fixtures separate from the components that own settled behavio
   remains in `RuntimeInteraction.vue`, which alone submits canonical runtime actions.
   `Composer.vue` owns the integrated surface, shadcn-vue Textarea/Button, VueUse
   autosizing, feedback association and Enter/Shift+Enter behavior. `ForegroundControls.vue`
-  renders wrapping `StoryChoice.vue` buttons over shadcn Button in Transcript’s measured trailing slot.
+  renders wrapping `components/PlayerActionButton.vue` buttons over shadcn Button in Transcript’s measured trailing slot.
   The material comes from `player/theme/story-choice.ts` for both theme and `authoredFill` colours.
   The component accepts authored fills, but `playerRuntimeForeground` currently supplies only labels/IDs
   from runtime actions: script-to-foreground authored colour is not integrated yet. They share

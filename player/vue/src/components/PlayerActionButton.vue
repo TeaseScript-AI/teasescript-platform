@@ -16,14 +16,14 @@ const material = computed(() =>
   <Button
     type="button"
     variant="ghost"
-    class="story-choice"
+    class="player-action-button"
     :style="material"
     :disabled="disabled"
   ><slot /></Button>
 </template>
 
 <style scoped>
-.story-choice {
+.player-action-button {
   height: auto;
   min-height: 43px;
   min-width: 0;
@@ -42,19 +42,28 @@ const material = computed(() =>
   box-shadow: inset 0 1px 0 #ffffff24, 0 1px 0 var(--story-choice-depth), 0 2px 3px #00000020;
   transition: box-shadow 100ms;
 }
-.story-choice:hover:not(:disabled) {
+.player-action-button:hover:not(:disabled) {
   background: linear-gradient(var(--story-choice-hover-top), var(--story-choice-hover-bottom));
   box-shadow: inset 0 1px 0 #ffffff35, 0 1px 0 var(--story-choice-depth), 0 3px 5px #00000024;
 }
-.story-choice:active:not(:disabled) {
+.player-action-button:active:not(:disabled) {
   background: var(--story-choice-pressed);
   box-shadow: inset 0 1px 2px #00000022;
 }
-.story-choice:focus-visible {
+/* Disabled actions use the shared theme roles, not opacity over an arbitrary background. */
+.player-action-button:disabled {
+  opacity: 1;
+  color: var(--theme-text-disabled);
+  background: var(--theme-surface-disabled);
+  border-color: var(--theme-border-disabled);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+.player-action-button:focus-visible {
   outline: 2px solid var(--theme-accent-focus);
   outline-offset: 3px;
 }
 @media (prefers-reduced-motion: reduce) {
-  .story-choice { transition: none; }
+  .player-action-button { transition: none; }
 }
 </style>

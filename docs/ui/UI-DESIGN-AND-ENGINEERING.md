@@ -177,7 +177,7 @@ extreme and uncurated colours, and actual hover/press/focus. A curated palette o
 establish that the design works. This is a critique method, not a new global numeric or geometry requirement.
 
 Keep accepted appearance in a shared component over shadcn Button; keep colour derivation in the colour layer. The
-current implementation references are `StoryChoice.vue` and `player/theme/story-choice.ts`; executable values live there
+current implementation references are `components/PlayerActionButton.vue` and `player/theme/story-choice.ts`; executable values live there
 rather than in a second CSS recipe in this guide. Spacing may still be refined independently of the accepted material.
 
 ### Match interaction feedback to input capability
