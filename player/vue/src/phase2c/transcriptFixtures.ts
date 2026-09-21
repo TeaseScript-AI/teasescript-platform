@@ -209,6 +209,11 @@ const authoredSources: readonly (readonly [
     "And this one was given a colour but nothing to sit on.",
     authored("prose", "#444444", null),
   ],
+  // One speaker saying something, setting a passage apart, then speaking again. The
+  // passage is not part of the run, so the bubble after it opens a new one.
+  ["keeper", "Something said out loud.", authored("bubble", null, null)],
+  ["keeper", "Then a passage that stands on its own.", authored("prose", null, null)],
+  ["keeper", "And speaking again afterwards.", authored("bubble", null, null)],
 ];
 
 /** Every combination of authored colours a resolved message presentation can carry. */

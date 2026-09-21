@@ -165,17 +165,26 @@ const showLatest = computed(() => !touching.value && !virtualizer.value.isScroll
   virtualizer.value.getDistanceFromEnd() > Math.max(80, (virtualizer.value.scrollRect?.height ?? 0) / 2));
 const scrolled = computed(() => (virtualizer.value.scrollOffset ?? 0) > 1);
 // Virtual rows are independent, so grouping is decided per row from its neighbours.
-function sameSpeaker(index: number, other: number) {
+// One speaker can both say something and set a passage apart, and those are not the same
+// kind of thing on the page: a run is a run of one, and a change of kind ends it as
+// plainly as a change of speaker would. Without that, a bubble following a passage joins
+// the bubble above it across the gap and loses the name that should reintroduce it.
+function presentationOf(entry: PlayerTranscriptEntryPresentation | undefined) {
+  return entry === undefined || entry.kind !== "message" ? null
+    : authoredOn(entry)?.kind === "prose" ? "prose" : "bubble";
+}
+function adjoins(index: number, other: number) {
   const entry = props.entries[index];
   const neighbour = props.entries[other];
-  return entry?.kind === "message" && neighbour?.kind === "message" &&
-    neighbour.speakerId === entry.speakerId;
+  if (entry?.kind !== "message" || neighbour?.kind !== "message") return false;
+  return neighbour.speakerId === entry.speakerId &&
+    presentationOf(neighbour) === presentationOf(entry);
 }
 function startsGroup(index: number) {
-  return !sameSpeaker(index, index - 1);
+  return !adjoins(index, index - 1);
 }
 function endsGroup(index: number) {
-  return !sameSpeaker(index, index + 1);
+  return !adjoins(index, index + 1);
 }
 // The name is the author's to give. A speaker who was given none shows none, and the space
 // it would have taken goes with it; nothing here supplies a stand-in.

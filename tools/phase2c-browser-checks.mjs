@@ -1563,7 +1563,7 @@ async function timerChecks(page) {
 
 // A cover is chosen from a colour and a surface, and is only worth anything if those are
 // the ones the browser really paints. These read the painted result back out.
-async function authoredContrastChecks(page) {
+async function authoredPresentationChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
   };
@@ -1623,7 +1623,30 @@ async function authoredContrastChecks(page) {
       `Prose without a panel is unreadable in ${mode} mode: ${proseRatio}:1`,
     );
   }
-  return "PASS authored contrast measured on the painted link and unpanelled prose";
+  // A passage set apart is not part of the run of bubbles around it, so the bubble that
+  // follows one has to reintroduce its speaker rather than continue across the gap.
+  const grouping = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll(".transcript-entry")];
+    const spoken = rows.filter((row) => row.dataset.speakerId === "keeper");
+    const last = spoken[spoken.length - 1];
+    return {
+      run: spoken.map((row) => [row.dataset.continues, row.dataset.prose ?? "bubble"]),
+      reintroduced: last?.querySelector('[data-slot="message-header"]')?.textContent?.trim(),
+      avatarHidden: last
+        ?.querySelector('[data-slot="message-avatar"]')
+        ?.classList.contains("invisible"),
+    };
+  });
+  check(
+    grouping.run.at(-1)?.[0] === "false",
+    `A bubble after a passage must open its own run: ${JSON.stringify(grouping.run)}`,
+  );
+  check(
+    (grouping.reintroduced ?? "") !== "",
+    "A bubble after a passage must name its speaker again",
+  );
+  check(grouping.avatarHidden === false, "A bubble after a passage must show its avatar");
+  return "PASS authored contrast and grouping across a prose boundary";
 }
 
 async function conversationWidthChecks(page) {
@@ -1876,7 +1899,7 @@ const groups = [
   conversationWidthChecks,
   timerChecks,
   transcriptChecks,
-  authoredContrastChecks,
+  authoredPresentationChecks,
 ];
 
 async function runGroup(browserPage, run, url, artifacts) {
