@@ -73,9 +73,6 @@ watch(endInset, (inset, previous) => {
   if (inset !== previous && previousDistance <= latestThreshold && !touching.value)
     void nextTick(() => instance.scrollToEnd());
 });
-// The theme's own colours, resolved once rather than modelled: an authored colour has to
-// be weighed against the bubble it will really land on, and that bubble comes from a
-// palette this component does not own.
 const palette = ref({
   surface: "#ffffff",
   canvas: "#ffffff",
@@ -86,14 +83,11 @@ function readPalette() {
   if (element === null) return;
   palette.value = {
     surface: resolveColour(element, "var(--message-surface)", "#ffffff"),
-    // A passage with no panel of its own is read against the page, not against the
-    // surface a bubble would have given it.
     canvas: backdropBehind(element),
     link: resolveColour(element, "var(--markup-link)", "#0000ee"),
   };
 }
-// The palette is applied to the document by whoever owns the theme, so watching our own
-// props would miss a change of theme. Follow the document instead.
+// Theme changes update the document, not this component's props.
 let paletteObserver: MutationObserver | null = null;
 onMounted(() => {
   paletteObserver = new MutationObserver(readPalette);
@@ -110,7 +104,6 @@ const rows = computed(() =>
 const showLatest = computed(() => !touching.value && !virtualizer.value.isScrolling &&
   virtualizer.value.getDistanceFromEnd() > Math.max(80, (virtualizer.value.scrollRect?.height ?? 0) / 2));
 const scrolled = computed(() => (virtualizer.value.scrollOffset ?? 0) > 1);
-// Virtual rows are independent, so grouping is decided per row from its neighbours.
 function continues(index: number) {
   return adjoins(props.entries, index, index - 1);
 }
@@ -118,9 +111,7 @@ function continued(index: number) {
   return adjoins(props.entries, index, index + 1);
 }
 const following = ref(true);
-// Asked at the moment a list changes, the virtualizer has already moved its own offset to
-// compensate for rows the page has not been given yet, so it would answer for a scroll
-// position nobody is looking at. What the reader can see is on the page: ask that.
+// Read the DOM: the virtualizer may already reflect rows Vue has not rendered.
 function readingLatest() {
   const viewport = scrollElement.value;
   return viewport === null ||
@@ -129,24 +120,17 @@ function readingLatest() {
 function rememberFollow() {
   if (!touching.value) following.value = readingLatest();
 }
-// Scrolling can only be a reader leaving the latest, never rejoining it: while rows are
-// still being measured the list shortens under the scroll, and a moment that merely looks
-// like the end would otherwise pull the reader straight back to it. Returning is
-// deliberate — the control, the End key, or a new message arriving while already there.
+// Shrinking row measurements can mimic reaching the end; do not resume follow here.
 function releaseFollow() {
   if (!touching.value && !readingLatest()) following.value = false;
 }
-// A scroll event arrives too late to say where the reader was when the list changed, so
-// the intent is read off the list still on screen, before this change is rendered.
-// The canonical adapter appends in place and publishes a revision, so the list itself
-// is not always a new one; watch what actually announces a change.
+// Capture intent before rendering; revision also covers in-place adapter updates.
 watch([() => props.entries, () => props.revision, () => props.entries.length],
   rememberFollow, { flush: "pre" });
-// Room reserved for the controls also changes the total, and a composer that grows or
-// shrinks is not the list saying anything new; that case is reconciled on its own below.
 let measuredTotal = 0;
 let measuredInset = 0;
 watch(() => [virtualizer.value.getTotalSize(), endInset.value] as const, ([total, inset]) => {
+  // Exclude composer/control clearance changes from message remeasurement.
   const messagesGrew = total - measuredTotal !== inset - measuredInset;
   measuredTotal = total;
   measuredInset = inset;
@@ -246,19 +230,11 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
 </template>
 
 <style scoped>
-/* A message is not a panel. It carries authored content, it repeats down a column, and it
-   has to read as its own shape. Naming its surfaces here keeps them free to move without
-   disturbing anything else that happens to share a token today. */
 .transcript {
   position: relative; flex: 1; min-height: 0; min-width: 0;
   --message-surface: var(--surface-component);
   --message-separator: var(--border);
-  /* A link has been blue for as long as there have been links, and a reader recognises one
-     before reading a word of it. The two tones are the same blue seen in each mode, dark
-     enough to read on the page and light enough to read on a dark one. */
   --markup-link: light-dark(oklch(50% 0.17 254), oklch(79% 0.12 240));
-  /* What a message falls back to when the typeface its author named is not on this device.
-     Without it the browser would drop to its own default instead of the theme's. */
   --transcript-typeface: ui-sans-serif, system-ui, sans-serif;
 }
 /* Keep clipping and the scrollbar in the existing conversation padding, outside
@@ -290,12 +266,8 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
 :deep(.transcript-scroll[data-scrolled="true"]) { --transcript-top-fade: 1rem; }
 .transcript-foreground { position: absolute; left: 0; width: 100%; }
 .transcript-history { position: relative; width: 100%; }
-/* The gap above a row separates it from the previous one: a run stays tight,
-   a change of speaker gets the full separation. */
 .transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: 1rem 0; }
 .transcript-entry[data-continues="true"] { padding-block-start: 0.125rem; }
-/* Prose is read, not overheard, so it asks for the room a paragraph needs: air above
-   and below to separate it from speech. */
 .transcript-entry[data-prose] { padding-block: 1.75rem 0.75rem; }
 .transcript-empty { padding: 1rem; font-size: 0.875rem; color: var(--muted-foreground); }
 .return-to-latest {
