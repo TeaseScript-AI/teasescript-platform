@@ -19,6 +19,39 @@ function paint(...layers: readonly string[]) {
   return [red!, green!, blue!] as const;
 }
 
+/**
+ * A theme colour as a colour rather than as the recipe for one. Custom properties are
+ * carried around unresolved, so a token like light-dark() only becomes a colour once it
+ * is used as one. Using it is therefore how it is read.
+ */
+export function resolveColour(element: Element, value: string, fallback: string) {
+  const probe = document.createElement("span");
+  probe.style.display = "none";
+  probe.style.color = value;
+  element.append(probe);
+  const resolved = getComputedStyle(probe).color;
+  probe.remove();
+  return resolved === "" ? fallback : resolved;
+}
+
+/**
+ * What is actually painted behind an element. A message names its own surface, but a
+ * passage that has none is read against whatever the page puts there, which may be
+ * several partly transparent layers deep. They are composited rather than guessed at,
+ * bottom layer first, by the same engine that resolves everything else here.
+ */
+export function backdropBehind(element: Element | null) {
+  const layers: string[] = [];
+  for (let node = element; node !== null; node = node.parentElement) {
+    const colour = getComputedStyle(node).backgroundColor;
+    if (colour === "" || colour === "transparent" || colour === "rgba(0, 0, 0, 0)") continue;
+    layers.unshift(colour);
+    if (!colour.startsWith("rgba(")) break; // Opaque: nothing below it can show through.
+  }
+  const [red, green, blue] = paint("#ffffff", ...layers);
+  return `rgb(${red} ${green} ${blue})`;
+}
+
 function luminance(channels: readonly [number, number, number]) {
   const [red, green, blue] = channels.map((channel) => {
     const value = channel / 255;

@@ -195,6 +195,20 @@ const authoredSources: readonly (readonly [
     "And this passage was given nothing, so it sits straight on the page.",
     authored("prose", null, null),
   ],
+  // A link inside a coloured message. The page paints links its own blue, so the colour
+  // the author gave the message is not the colour this reader has to read.
+  [
+    "guide",
+    "A colour on the words, and a [link](https://example.com) the page paints its own way.",
+    authored("bubble", "#ffffff", null),
+  ],
+  // A passage with no panel is read against the page, which in one mode is nowhere near
+  // the surface a bubble would have given it.
+  [
+    "narrator",
+    "And this one was given a colour but nothing to sit on.",
+    authored("prose", "#444444", null),
+  ],
 ];
 
 /** Every combination of authored colours a resolved message presentation can carry. */

@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/message";
 import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } from "../../../model.js";
 import TranscriptMarkup from "./TranscriptMarkup.vue";
-import { inkFor, scrimFor } from "./messageContrast";
+import { backdropBehind, inkFor, resolveColour, scrimFor } from "./messageContrast";
 
 const props = defineProps<{
   entries: readonly PlayerTranscriptEntryPresentation[];
@@ -85,12 +85,18 @@ watch(endInset, (inset, previous) => {
 // palette this component does not own.
 const palette = ref({
   surface: "#ffffff",
+  canvas: "#ffffff",
+  link: "#0000ee",
 });
 function readPalette() {
   const element = scrollElement.value;
   if (element === null) return;
   palette.value = {
-    surface: getComputedStyle(element).getPropertyValue("--message-surface").trim() || "#ffffff",
+    surface: resolveColour(element, "var(--message-surface)", "#ffffff"),
+    // A passage with no panel of its own is read against the page, not against the
+    // surface a bubble would have given it.
+    canvas: backdropBehind(element),
+    link: resolveColour(element, "var(--markup-link)", "#0000ee"),
   };
 }
 // The palette is applied to the document by whoever owns the theme, so watching our own
@@ -118,7 +124,11 @@ const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => {
   const authored = authoredOn(entry);
   const words = authored?.color ?? null;
   const written = authored?.background ?? null;
-  const surface = written ?? palette.value.surface;
+  // A bubble stands on the player's own surface; a passage set apart has none of its own
+  // and stands on the page. Measuring either against the wrong one answers a question
+  // nobody asked.
+  const unpanelled = authored?.kind === "prose" ? palette.value.canvas : palette.value.surface;
+  const surface = written ?? unpanelled;
   // Where both colours are the author's, he wrote them in one breath and was looking
   // straight at the pairing, so it stands as written. Where only the words are his, what
   // they land on is the player's own surface, and covering it until they can be read is
@@ -139,6 +149,10 @@ const rows = computed(() => virtualizer.value.getVirtualItems().map((item) => {
     // them; a colour written behind words is still a colour somebody has to read off.
     ink: words ?? (written === null ? null : inkFor(written)),
     backdrop: surface,
+    // A link is painted blue by the page unless the message carries a fill of its own, in
+    // which case it is set in the message's own colour. Whichever it is, that is the
+    // colour a reader has to read, so that is the colour its cover has to answer for.
+    link: written === null ? palette.value.link : words ?? inkFor(written),
     // A named typeface is only ever a request: it is used where the reader's device happens
     // to have it and quietly ignored everywhere else, so the theme's own stack is left
     // standing behind it to catch that. The families every device does have — serif,
@@ -292,7 +306,7 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
         onTouchcancel: () => touching = false }">
       <div class="transcript-history" :style="{ height: `${virtualizer.getTotalSize()}px` }">
         <div role="list">
-          <article v-for="{ item, entry, panel, cover, placement, ink, backdrop, typeface } in rows" :key="entry.id"
+          <article v-for="{ item, entry, panel, cover, placement, ink, backdrop, link, typeface } in rows" :key="entry.id"
             :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
             :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
             role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
@@ -312,7 +326,7 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
                 {{ nameOf(entry) }}
               </p>
               <TranscriptMarkup v-if="entry.content" :content="entry.content"
-                :backdrop="backdrop" :cover="cover" />
+                :backdrop="backdrop" :cover="cover" :link="link" />
               <template v-else>{{ entry.text }}</template>
             </div>
             <Message v-else :align="entry.speakerId === 'user' ? 'end' : 'start'">
@@ -340,7 +354,7 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
                       {{ nameOf(entry) }}
                     </MessageHeader>
                     <TranscriptMarkup v-if="entry.speakerId !== 'user' && entry.content" :content="entry.content"
-                      :backdrop="backdrop" :cover="cover" />
+                      :backdrop="backdrop" :cover="cover" :link="link" />
                     <!-- A reply that was chosen rather than typed says so: the mark is decorative
                          and the label carries it to a reader who hears the transcript instead. -->
                     <template v-else><span v-if="entry.kind === 'message' && entry.responseKind" class="choice-marker" aria-hidden="true">› </span><span v-if="entry.kind === 'message' && entry.responseKind" class="sr-only">Selected option: </span>{{ entry.text }}</template>

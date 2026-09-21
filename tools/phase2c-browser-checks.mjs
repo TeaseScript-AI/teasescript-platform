@@ -1561,6 +1561,71 @@ async function timerChecks(page) {
   return "PASS timer design, semantics, identity, motion and Stage integration";
 }
 
+// A cover is chosen from a colour and a surface, and is only worth anything if those are
+// the ones the browser really paints. These read the painted result back out.
+async function authoredContrastChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
+  await page.getByRole("button", { name: "Authored colour sample", exact: true }).click();
+  const painted = (selector) =>
+    page.evaluate((selector) => {
+      const element = document.querySelector(selector);
+      if (element === null) return null;
+      const context = document.createElement("canvas").getContext("2d");
+      const flatten = (layers) => {
+        context.clearRect(0, 0, 1, 1);
+        for (const layer of layers) {
+          context.fillStyle = layer;
+          context.fillRect(0, 0, 1, 1);
+        }
+        const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
+        return [red, green, blue];
+      };
+      const luminance = (channels) => {
+        const [red, green, blue] = channels.map((channel) => {
+          const value = channel / 255;
+          return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+      };
+      const layers = ["#ffffff"];
+      for (let node = element; node !== null; node = node.parentElement) {
+        const colour = getComputedStyle(node).backgroundColor;
+        if (colour === "" || colour === "transparent" || colour === "rgba(0, 0, 0, 0)") continue;
+        layers.splice(1, 0, colour);
+        if (!colour.startsWith("rgba(")) break;
+      }
+      const text = luminance(flatten([getComputedStyle(element).color]));
+      const behind = luminance(flatten(layers));
+      return (Math.max(text, behind) + 0.05) / (Math.min(text, behind) + 0.05);
+    }, selector);
+  const link = '.transcript-entry a[href^="https://example.com"]';
+  // The cover is painted on the piece that carries the words, so that is what is read.
+  const prose = '.transcript-entry .prose:not([data-panel])[style*="color"] .markup-paragraph span';
+  for (const mode of ["light", "dark"]) {
+    const toggle = page.getByRole("button", { name: `Switch to ${mode} theme`, exact: true });
+    if (await toggle.isVisible()) await toggle.click();
+    await page.waitForTimeout(150);
+    const linkRatio = await painted(link);
+    check(linkRatio !== null, `Authored link sample missing in ${mode} mode`);
+    check(
+      linkRatio >= 4.5,
+      `Link inside an authored message is unreadable in ${mode} mode: ${linkRatio}:1`,
+    );
+    const proseRatio = await painted(prose);
+    check(proseRatio !== null, `Unpanelled prose sample missing in ${mode} mode`);
+    check(
+      proseRatio >= 4.5,
+      `Prose without a panel is unreadable in ${mode} mode: ${proseRatio}:1`,
+    );
+  }
+  return "PASS authored contrast measured on the painted link and unpanelled prose";
+}
+
 async function conversationWidthChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -1811,6 +1876,7 @@ const groups = [
   conversationWidthChecks,
   timerChecks,
   transcriptChecks,
+  authoredContrastChecks,
 ];
 
 async function runGroup(browserPage, run, url, artifacts) {
