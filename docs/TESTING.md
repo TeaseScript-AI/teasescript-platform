@@ -30,6 +30,16 @@ tests, preserving actionable failure information. `npm run format` applies the f
 `npm run format:check` verifies it without writing. `npm run lint` applies the [type-evidence policy](LINTING.md);
 `npm run test:lint` type-checks and tests the maintained rule implementation; `npm run knip` checks the selected
 unused-code and dependency categories.
+Independent pre-test gates and UI checks/builds run concurrently through `tools/run-parallel.mjs`.
+TypeScript compilation precedes UI work; compiled tests run only after all builds pass. Each command's output is
+printed together, including warnings. A failure stops the group and subsequent stages; SIGINT/SIGTERM also terminate
+child process groups, escalating after a grace period. `npm run test:verification` checks scheduling, diagnostics and
+process cleanup (POSIX cleanup assertions run on CI; Windows uses `taskkill /t /f`).
+
+Use `VERIFY_SERIAL=1 npm run check` for serial diagnosis or constrained machines; it runs the same commands.
+No additional verification caches are enabled. UI builds write separate `dist` subdirectories, Vue typechecking
+emits nothing, and the clean-build regression uses an isolated temporary directory.
+
 `npm run test:full-output` and `npm run check:full-output`
 are diagnostic reruns only when compact output is insufficient for a failure or
 specific investigation. Do not run a normal and full-output variant by default
