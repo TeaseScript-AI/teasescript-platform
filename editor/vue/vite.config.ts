@@ -10,7 +10,7 @@ export default defineConfig({
   publicDir: false,
   build: {
     outDir: fileURLToPath(new URL("../../dist/editor", import.meta.url)),
-    sourcemap: true,
+    sourcemap: process.env.BUILD_SOURCEMAPS !== "0",
     emptyOutDir: true,
   },
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },

@@ -37,8 +37,9 @@ child process groups, escalating after a grace period. `npm run test:verificatio
 process cleanup (POSIX cleanup assertions run on CI; Windows uses `taskkill /t /f`).
 
 Use `VERIFY_SERIAL=1 npm run check` for serial diagnosis or constrained machines; it runs the same commands.
-No additional verification caches are enabled. UI builds write separate `dist` subdirectories, Vue typechecking
-emits nothing, and the clean-build regression uses an isolated temporary directory.
+No additional verification caches are enabled. Standard checks omit UI source maps because no configured check
+consumes them; direct `npm run build` and `npm test` runs retain source maps. UI builds write separate `dist`
+subdirectories, Vue typechecking emits nothing, and the clean-build regression uses an isolated temporary directory.
 
 `npm run test:full-output` and `npm run check:full-output`
 are diagnostic reruns only when compact output is insufficient for a failure or

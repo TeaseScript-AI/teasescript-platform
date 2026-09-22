@@ -16,7 +16,7 @@ export default defineConfig({
   build: {
     outDir: fileURLToPath(new URL("../../dist/player-phase2c", import.meta.url)),
     emptyOutDir: true,
-    sourcemap: true,
+    sourcemap: process.env.BUILD_SOURCEMAPS !== "0",
     rollupOptions: { input: fileURLToPath(new URL("./phase2c/index.html", import.meta.url)) },
   },
 });
