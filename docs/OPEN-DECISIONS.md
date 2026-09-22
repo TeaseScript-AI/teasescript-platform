@@ -74,6 +74,24 @@ Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRAR
 - Whether and how to revise the accepted V30 timer API for explicit handles and final pause/resume/stop/restart,
   repetition, persistence, and visible-presentation semantics.
 
+## Main-site frontend and rendering
+
+Current constraints: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`CURRENT-DESIGN.md`](../CURRENT-DESIGN.md), and
+[ADR 0020](decisions/0020-vue-3-production-browser-ui.md). Comparative non-authoritative analysis is retained in
+[`planning/MAIN-SITE-FRONTEND-OPTIONS.md`](planning/MAIN-SITE-FRONTEND-OPTIONS.md).
+
+- Final main-site rendering architecture: Blade-first with targeted Vue regions, Inertia + Vue client rendering,
+  Inertia + Vue server-side rendering (SSR), or a deliberate Blade/Vue split between public content and application-like
+  surfaces. The choice must account for SEO, initial and mobile performance, browser JavaScript cost, server/runtime and
+  deployment complexity, caching and personalization, authentication, component reuse, and operational failure modes.
+- Clarify ADR 0020's scope for the main site before implementation: its decision text says production browser UI uses
+  Vue 3, while its context and rejected broader-stack alternative are Player-focused. Any selected main-site model that
+  renders substantial UI with Blade or adds Inertia-style navigation or SSR must be reconciled explicitly with that ADR.
+- If SSR is selected, define its internal server-side JavaScript runtime/process boundary while preserving Laravel as
+  the only public backend unless a later accepted decision changes that boundary.
+- If a Blade/Vue split is selected, define a stable surface boundary and component/design-system strategy so the project
+  does not drift into arbitrary per-page rendering choices or an unnecessary second interactive frontend stack.
+
 ## Editor and authoring
 
 Current constraints: [`CODE-EDITOR.md`](CODE-EDITOR.md), [`ARCHITECTURE.md`](ARCHITECTURE.md), and
