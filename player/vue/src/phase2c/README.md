@@ -35,7 +35,8 @@ Keep experimental fixtures separate from the components that own settled behavio
 - `usePlayerTheme.ts` applies/restores document variables; `player/theme` calculates colours and Theme Lab edits intent.
   See [theme evaluation](../../../README.md#experimental-dynamic-theme-evaluation).
 - `StageRightRail.vue` owns the rail, `TimerRegion.vue` its timer collection and `TimerDisplay.vue` individual timers.
-  Multiple-timer allocation and future rail controls remain experimental.
+  `BackgroundControlsFixture.vue` demonstrates repeatable, removable, boolean and disabled buttons using the shared
+  action material. These local interactions and timer allocation remain experimental, without runtime wiring.
 
 The preview opens with choices. Visual Lab restarts that scenario or selects text/number/choice interaction;
 transcript fixtures switch App back to local preview replies. Composer dimensions and height caps remain visual trials.

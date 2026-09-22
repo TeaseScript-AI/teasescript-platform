@@ -389,7 +389,7 @@ has been destroyed. Exact retention and LLM context policy remain upstream work.
 The transcript:
 
 - uses the canvas surface, continuous with the stage background above it;
-- is centered within the actual middle content region rather than the full viewport;
+- is centered within the available conversation region; resizing stage media vertically does not move or narrow the column;
 - keeps the maintained ultrawide readability cap pending visual retuning;
 - places one viewport of empty scroll space before the messages, so even a single message can be scrolled; at the latest
   position, messages and active controls sit above the composer and new messages grow the conversation upward;

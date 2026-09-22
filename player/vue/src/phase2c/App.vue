@@ -15,6 +15,7 @@ import { stageFixtures } from "./stageFixtures";
 import type { PlayerTimerKind } from "../../../model.js";
 import TimerFixtureRegion from "./TimerFixtureRegion.vue";
 import StageRightRail from "./StageRightRail.vue";
+import BackgroundControlsFixture from "./BackgroundControlsFixture.vue";
 import { Button } from "@/components/ui/button";
 import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
 import type { PlayerThemeIntent } from "../../../theme/palette.js";
@@ -33,6 +34,7 @@ const timerKind = ref<PlayerTimerKind>("visible");
 const timerCount = ref(1);
 const timerReset = ref(0);
 const timerPaused = ref(true);
+const backgroundControlsReset = ref(0);
 const themeIntent = ref<PlayerThemeIntent>({
   mode: "light", contrast: "standard",
   surfaceHue: 70, surfaceTint: 0.5,
@@ -166,6 +168,7 @@ async function toggleFullscreen() {
                 <input v-model="timerPaused" type="checkbox" /> Pause timer fixtures
               </label>
               <Button class="min-w-0" variant="outline" @click="timerReset++">Reset timers</Button>
+              <Button class="min-w-0" variant="outline" @click="backgroundControlsReset++">Reset background buttons</Button>
             </fieldset>
             <fieldset class="grid min-w-0 gap-2">
               <legend class="mb-2">Transcript fixtures</legend>
@@ -216,6 +219,9 @@ async function toggleFullscreen() {
               <StageRightRail v-if="isDevelopment">
                 <template #timers>
                   <TimerFixtureRegion :kind="timerKind" :count="timerCount" :reset="timerReset" :paused="timerPaused" />
+                </template>
+                <template #controls>
+                  <BackgroundControlsFixture :key="backgroundControlsReset" />
                 </template>
               </StageRightRail>
             </template>

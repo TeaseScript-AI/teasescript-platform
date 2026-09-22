@@ -602,8 +602,9 @@ async function toolContentChecks(page) {
     await Promise.allSettled(el.getAnimations().map((animation) => animation.finished));
   });
   await page.mouse.move(380, 650);
-  await page.getByRole("tooltip").waitFor({ state: "hidden" });
   await page.locator('[data-tool="Layout Debug"]').getByRole("checkbox").first().focus();
+  // A closing tooltip still owns Escape until its animated layer unmounts.
+  await page.locator('[data-slot="tooltip-content"]').waitFor({ state: "detached" });
   await page.keyboard.press("Escape");
   // Focus returns only after Sheet disposes its exiting presentation subtree.
   await page.locator('[data-slot="sheet-content"]').waitFor({ state: "detached" });
@@ -624,6 +625,24 @@ async function transcriptChecks(page) {
     if (!value) throw new Error(message);
   };
   await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  const conversation = page.locator(".player-conversation");
+  const beforeResize = await conversation.boundingBox();
+  const stageBeforeResize = await page.locator(".player-stage").boundingBox();
+  const separator = page.getByRole("separator", { name: "Resize media and conversation" });
+  await separator.focus();
+  for (let step = 0; step < 6; step++) await separator.press("ArrowUp");
+  const afterResize = await conversation.boundingBox();
+  const stageAfterResize = await page.locator(".player-stage").boundingBox();
+  check(
+    stageAfterResize.height < stageBeforeResize.height,
+    "Stage resize did not exercise allocation",
+  );
+  check(
+    Math.abs(beforeResize.x - afterResize.x) < 1 &&
+      Math.abs(beforeResize.width - afterResize.width) < 1,
+    "Resizing media vertically moved or narrowed the conversation column",
+  );
   await page.reload();
   const lab = page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" });
   await lab.click();
