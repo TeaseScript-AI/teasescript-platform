@@ -16,15 +16,15 @@ function requestHint() {
 
 <template>
   <div class="background-controls-fixture">
-    <PlayerActionButton surface="rail" @click="repetitions++; feedback = `Repeated ${repetitions} time${repetitions === 1 ? '' : 's'}.`">
+    <PlayerActionButton @click="repetitions++; feedback = `Repeated ${repetitions} time${repetitions === 1 ? '' : 's'}.`">
       Repeat
     </PlayerActionButton>
-    <PlayerActionButton surface="rail" :aria-pressed="enabled" @click="enabled = !enabled">
+    <PlayerActionButton :aria-pressed="enabled" @click="enabled = !enabled">
       <span>Extra challenge <span class="block text-xs font-normal">{{ enabled ? 'On' : 'Off' }}</span></span>
       <Check class="size-4 shrink-0" :class="{ invisible: !enabled }" aria-hidden="true" />
     </PlayerActionButton>
-    <PlayerActionButton v-if="hintVisible" surface="rail" @click="requestHint">Give me a hint</PlayerActionButton>
-    <PlayerActionButton surface="rail" disabled>Not available</PlayerActionButton>
+    <PlayerActionButton v-if="hintVisible" @click="requestHint">Give me a hint</PlayerActionButton>
+    <PlayerActionButton disabled>Not available</PlayerActionButton>
     <p role="status" class="fixture-feedback">{{ feedback }}</p>
   </div>
 </template>

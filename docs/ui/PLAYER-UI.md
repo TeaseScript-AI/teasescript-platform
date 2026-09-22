@@ -551,11 +551,10 @@ scroller. The transcript’s leading scroll space keeps messages and controls to
 following the latest content. After completion, the active controls disappear and the existing runtime
 transcript records the response. Completed choices and buttons carry a visible `›` marker in the transcript,
 distinct from typed text/number answers. Pointer or touch activation does not focus the composer or summon a
-software keyboard; keyboard activation can move focus to the next choice. Authored foreground buttons retain
-their opaque authored colour as the material base because media never sits behind this lane. Without an authored
+software keyboard; keyboard activation can move focus to the next choice. Foreground and right-rail action buttons retain
+their opaque authored colour as the material base. Without an authored
 fill, the theme accent supplies that base. Black or white labels and contrast-limited lighting keep the material
-readable across normal, hover, and pressed states. Unavailable action buttons use the shared disabled surface, text and border roles, without relief or hover/pressed feedback. They retain native disabled semantics and cannot activate. Authored right-rail actions retain the translucent
-floating-control treatment described below.
+readable across normal, hover, and pressed states. Unavailable action buttons use the shared disabled surface, text and border roles, without relief or hover/pressed feedback. They retain native disabled semantics and cannot activate. Right-rail action buttons use the same opaque material as foreground buttons.
 
 The [story-button design rationale](UI-DESIGN-AND-ENGINEERING.md#player-story-button-design-rationale) explains the
 material choice and its reuse boundaries.
@@ -672,8 +671,8 @@ and complete action stack; no action-specific alignment owner may move the butto
 - in rail geometry with transparent backing, stage media may extend behind the floating controls while transcript and
   composer retain their readable rail reservation;
 - in stage-overlay geometry, stage, transcript, foreground lane, and composer all reclaim the returned right track;
-- timer and ordinary background-control surfaces keep the tuned approximately `60%` component-surface opacity in both
-  backing modes, while explicitly authored action colour uses the same translucent right-rail treatment.
+- timer surfaces keep the tuned approximately `60%` component-surface opacity in both backing modes; right-rail action
+  buttons remain fully opaque, including authored colours and hover/pressed states.
 
 ## Interaction states and input methods
 
