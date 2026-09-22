@@ -1268,6 +1268,44 @@ async function timerChecks(page) {
   return "PASS timer secrecy, hidden state and reduced motion";
 }
 
+async function buttonInkChecks(page) {
+  if (!(await page.evaluate(() => matchMedia("(any-hover: hover)").matches))) {
+    throw new Error("Button ink regression requires a hover-capable desktop context");
+  }
+  const paintedInk = async (button) =>
+    button.evaluate(async (el) => {
+      await Promise.all(el.getAnimations().map((animation) => animation.finished));
+      const context = document.createElement("canvas").getContext("2d");
+      context.fillStyle = getComputedStyle(el).color;
+      context.fillRect(0, 0, 1, 1);
+      return Array.from(context.getImageData(0, 0, 1, 1).data).join(",");
+    });
+  for (const mode of ["light", "dark"]) {
+    if ((await page.locator("html").getAttribute("data-phase2c-theme")) !== mode) {
+      await page.getByRole("button", { name: `Switch to ${mode} theme`, exact: true }).click();
+    }
+    for (const [label, expected] of [
+      ["Follow the lights", "0,0,0,255"],
+      ["Explore the old harbour", "255,255,255,255"],
+    ]) {
+      const button = page.getByRole("button", { name: label, exact: true });
+      await page.mouse.move(0, 0);
+      if ((await paintedInk(button)) !== expected) throw new Error(`${mode}: ${label} resting ink`);
+      await button.hover();
+      if ((await paintedInk(button)) !== expected) throw new Error(`${mode}: ${label} hover ink`);
+      await page.mouse.down();
+      try {
+        if ((await paintedInk(button)) !== expected)
+          throw new Error(`${mode}: ${label} pressed ink`);
+      } finally {
+        await page.mouse.move(0, 0);
+        await page.mouse.up();
+      }
+    }
+  }
+  return "PASS authored button ink across light/dark, hover and press";
+}
+
 async function authoredPresentationChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -1543,6 +1581,7 @@ const groups = [
   interactionChecks,
   timerChecks,
   transcriptChecks,
+  buttonInkChecks,
   authoredPresentationChecks,
 ];
 
@@ -1570,7 +1609,17 @@ try {
   const config = join(scratch, "browser.json");
   writeFileSync(
     config,
-    JSON.stringify({ browser: { contextOptions: { ignoreHTTPSErrors: true } } }),
+    JSON.stringify({
+      browser: {
+        contextOptions: { ignoreHTTPSErrors: true },
+        // X11 agents may report no pointer; exercise the real desktop hover CSS as well as touch tests.
+        launchOptions: {
+          args: [
+            "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4",
+          ],
+        },
+      },
+    }),
   );
   cli("open", url, "--config", config);
   for (const group of groups) {

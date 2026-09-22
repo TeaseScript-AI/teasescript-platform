@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   contrastRatio,
+  authoredColorToOklch,
+  blackOrWhiteInk,
   inSrgbGamut,
   mapToSrgb,
   oklchCss,
@@ -10,6 +12,20 @@ import {
 } from "../player/theme/color.js";
 const white = { l: 1, c: 0, h: 0 };
 const black = { l: 0, c: 0, h: 0 };
+test("automatic ink uses relative luminance for saturated fills and the neutral crossover", () => {
+  for (const [background, expected] of [
+    ["gold", "#000000"],
+    ["yellow", "#000000"],
+    ["blue", "#ffffff"],
+    ["#ffffff", "#000000"],
+    ["#000000", "#ffffff"],
+    ["#757575", "#ffffff"],
+    ["#767676", "#000000"],
+    ["oklch(90% 0.3 100)", "#000000"],
+  ]) {
+    assert.equal(blackOrWhiteInk(authoredColorToOklch(background!)), expected, background);
+  }
+});
 test("opaque contrast handles neutral endpoints", () => {
   assert.ok(Math.abs(contrastRatio(white, black) - 21) < 1e-6);
   assert.equal(contrastRatio(white, white), 1);

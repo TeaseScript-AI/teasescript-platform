@@ -24,6 +24,7 @@ const material = computed(() =>
 
 <style scoped>
 .player-action-button {
+  --button-text: var(--story-choice-ink);
   height: auto;
   min-height: 43px;
   min-width: 0;

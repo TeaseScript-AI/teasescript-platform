@@ -49,6 +49,14 @@ export function contrastRatio(first: OklchColor, second: OklchColor): number {
   return Color.contrast(colorValue(first), colorValue(second), "WCAG21");
 }
 
+/** Choose against the realized opaque fill, not OKLCH lightness alone. */
+export function blackOrWhiteInk(background: OklchColor): "#000000" | "#ffffff" {
+  const fill = mapToSrgb(background);
+  const black = { l: 0, c: 0, h: 0 };
+  const white = { l: 1, c: 0, h: 0 };
+  return contrastRatio(fill, black) >= contrastRatio(fill, white) ? "#000000" : "#ffffff";
+}
+
 export function mixColors(
   background: OklchColor,
   foreground: OklchColor,

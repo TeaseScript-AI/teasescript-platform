@@ -46,11 +46,6 @@ function ratio(first: number, second: number) {
   return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
 }
 
-export function inkFor(backdrop: string) {
-  const behind = luminance(paint(backdrop));
-  return 1.05 / (behind + 0.05) >= (behind + 0.05) / 0.05 ? "#ffffff" : "#000000";
-}
-
 // Binary search the smallest black or white cover that reaches the contrast target.
 export function scrimFor(colour: string, backdrop: string, target = 4.6) {
   const text = luminance(paint(colour));

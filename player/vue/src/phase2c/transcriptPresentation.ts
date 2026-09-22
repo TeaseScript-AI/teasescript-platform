@@ -2,7 +2,8 @@ import type {
   PlayerSpeakerPresentation,
   PlayerTranscriptEntryPresentation,
 } from "../../../model.js";
-import { inkFor, scrimFor } from "./messageContrast";
+import { authoredColorToOklch, blackOrWhiteInk } from "../../../theme/color.js";
+import { scrimFor } from "./messageContrast";
 
 export interface TranscriptPalette {
   readonly surface: string;
@@ -54,6 +55,10 @@ export function resolveAppearance(
   const authored = authoredOn(entry);
   const authoredText = authored?.color ?? null;
   const authoredBackground = authored?.background ?? null;
+  const panelInk =
+    authoredBackground === null
+      ? null
+      : (authoredText ?? blackOrWhiteInk(authoredColorToOklch(authoredBackground)));
   const backdrop =
     authoredBackground ?? (authored?.kind === "prose" ? palette.canvas : palette.surface);
   return {
@@ -66,9 +71,9 @@ export function resolveAppearance(
       authored?.kind !== "prose"
         ? null
         : { position: authored.position ?? "center", text: authored.align ?? "center" },
-    ink: authoredText ?? (authoredBackground === null ? null : inkFor(authoredBackground)),
+    ink: authoredText ?? panelInk,
     backdrop,
-    link: authoredBackground === null ? palette.link : (authoredText ?? inkFor(authoredBackground)),
+    link: panelInk ?? palette.link,
     typeface: authored?.font == null ? null : `${authored.font}, var(--transcript-typeface)`,
   };
 }

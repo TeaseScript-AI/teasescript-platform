@@ -1,11 +1,16 @@
-import { contrastRatio, mapToSrgb, oklchCss, type OklchColor } from "./color.js";
+import {
+  authoredColorToOklch,
+  blackOrWhiteInk,
+  contrastRatio,
+  mapToSrgb,
+  oklchCss,
+  type OklchColor,
+} from "./color.js";
 
 /** Opaque story-button material, shared by theme defaults and literal authored fills. */
 export function storyChoiceVariables(input: OklchColor): Record<string, string> {
   const base = mapToSrgb(input);
-  const black: OklchColor = { l: 0, c: 0, h: 0 };
-  const white: OklchColor = { l: 1, c: 0, h: 0 };
-  const ink = contrastRatio(base, black) >= contrastRatio(base, white) ? black : white;
+  const ink = authoredColorToOklch(blackOrWhiteInk(base));
   const shift = (amount: number) =>
     mapToSrgb({ ...base, l: Math.max(0, Math.min(1, base.l + amount)) });
   let fills: Record<string, OklchColor> = {};
