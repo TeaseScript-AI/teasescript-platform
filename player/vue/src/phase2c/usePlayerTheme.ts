@@ -1,4 +1,5 @@
 import { storyChoiceVariables } from "../../../theme/story-choice.js";
+import type { InkContrastMethod } from "../../../theme/color.js";
 import { onBeforeUnmount, watchEffect, type Ref } from "vue";
 import {
   generatePlayerTheme,
@@ -6,7 +7,7 @@ import {
   type PlayerThemeIntent,
 } from "../../../theme/palette.js";
 
-export function usePlayerTheme(intent: Ref<PlayerThemeIntent>) {
+export function usePlayerTheme(intent: Ref<PlayerThemeIntent>, inkMethod?: Ref<InkContrastMethod>) {
   // The standalone Player owns root tokens so body-portaled Reka surfaces share the theme.
   // Retain previous inline values so unmounting restores the exact baseline.
   const previousThemeProperties = new Map<string, { value: string; priority: string }>();
@@ -47,7 +48,10 @@ export function usePlayerTheme(intent: Ref<PlayerThemeIntent>) {
     const theme = generatePlayerTheme(intent.value);
     applyGeneratedTheme({
       mode: intent.value.mode,
-      variables: { ...themeCssVariables(theme), ...storyChoiceVariables(intent.value.accentSeed) },
+      variables: {
+        ...themeCssVariables(theme),
+        ...storyChoiceVariables(intent.value.accentSeed, inkMethod?.value),
+      },
     });
   });
   onBeforeUnmount(clearGeneratedTheme);

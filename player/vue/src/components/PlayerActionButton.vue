@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, inject } from "vue";
+import { playerInkComparison } from "./playerInkComparison";
 import { Button } from "@/components/ui/button";
 import { authoredColorToOklch } from "../../../theme/color.js";
 import { storyChoiceVariables } from "../../../theme/story-choice.js";
 
 const props = defineProps<{ authoredFill?: string | undefined; disabled?: boolean }>();
+const inkMethod = inject(playerInkComparison, undefined);
 const material = computed(() =>
   props.authoredFill === undefined
     ? undefined
-    : storyChoiceVariables(authoredColorToOklch(props.authoredFill)),
+    : storyChoiceVariables(authoredColorToOklch(props.authoredFill), inkMethod?.value),
 );
 </script>
 

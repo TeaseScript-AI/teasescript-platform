@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef } from "vue";
+import { computed, provide, ref, shallowRef } from "vue";
+import type { InkContrastMethod } from "../../../theme/color.js";
+import { playerInkComparison } from "@/components/playerInkComparison";
 import { useEventListener, useResizeObserver } from "@vueuse/core";
 import ToolLifetimeFixture from "./ToolLifetimeFixture.vue";
 import LayoutDebug from "./LayoutDebug.vue";
@@ -41,7 +43,9 @@ const themeIntent = ref<PlayerThemeIntent>({
   surfaceMaxChroma: 8.5, monochrome: false,
   accentSeed: { l: 0.59208, c: 0.19138, h: 11.08 },
 });
-usePlayerTheme(themeIntent);
+const inkMethod = ref<InkContrastMethod>("WCAG21");
+provide(playerInkComparison, inkMethod);
+usePlayerTheme(themeIntent, inkMethod);
 function toggleThemeMode() {
   themeIntent.value = { ...themeIntent.value, mode: themeIntent.value.mode === "dark" ? "light" : "dark" };
 }
@@ -136,6 +140,14 @@ async function toggleFullscreen() {
           <ToolLifetimeFixture v-if="toolStateFixture && tool === 'Layout Debug'" />
           <LayoutDebug v-else-if="isDevelopment && tool === 'Layout Debug' && player" :player="player" />
           <div v-if="isDevelopment && tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
+            <label class="grid gap-2">
+              Button text contrast
+              <select v-model="inkMethod" aria-label="Button text contrast" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
+                <option value="WCAG21">Current · WCAG</option>
+                <option value="APCA">APCA · experiment</option>
+              </select>
+              <span class="text-xs">Compare story-button text only. Send and transcript keep their current appearance.</span>
+            </label>
             <ThemeLab :intent="themeIntent"
               @update:intent="setThemeIntent" />
             <label class="grid gap-2">

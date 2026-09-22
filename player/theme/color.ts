@@ -49,12 +49,20 @@ export function contrastRatio(first: OklchColor, second: OklchColor): number {
   return Color.contrast(colorValue(first), colorValue(second), "WCAG21");
 }
 
+export type InkContrastMethod = "WCAG21" | "APCA";
+
 /** Choose against the realized opaque fill, not OKLCH lightness alone. */
-export function blackOrWhiteInk(background: OklchColor): "#000000" | "#ffffff" {
+export function blackOrWhiteInk(
+  background: OklchColor,
+  method: InkContrastMethod = "WCAG21",
+): "#000000" | "#ffffff" {
   const fill = mapToSrgb(background);
   const black = { l: 0, c: 0, h: 0 };
   const white = { l: 1, c: 0, h: 0 };
-  return contrastRatio(fill, black) >= contrastRatio(fill, white) ? "#000000" : "#ffffff";
+  // APCA is directional: background first; the sign indicates text polarity, not quality.
+  const score = (ink: OklchColor) =>
+    Math.abs(Color.contrast(colorValue(fill), colorValue(ink), method));
+  return score(black) >= score(white) ? "#000000" : "#ffffff";
 }
 
 export function mixColors(

@@ -1,8 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import Color from "colorjs.io";
-import { pickerHexToOklch } from "../player/theme/color.js";
+import { authoredColorToOklch, pickerHexToOklch } from "../player/theme/color.js";
 import { storyChoiceVariables } from "../player/theme/story-choice.js";
+
+test("APCA comparison changes ink without changing the button material", () => {
+  for (const [fill, expected] of [
+    ["gold", "black"],
+    ["seagreen", "white"],
+    ["oklch(59.208% 0.19138 11.08)", "white"],
+    ["hsl(265 45% 50%)", "white"],
+  ] as const) {
+    const base = authoredColorToOklch(fill);
+    const current = storyChoiceVariables(base);
+    const apca = storyChoiceVariables(base, "APCA");
+    assert.ok(new Color(apca["--story-choice-ink"]!).deltaE(expected) < 1e-6, fill);
+    for (const key of Object.keys(current)) {
+      if (key !== "--story-choice-ink") assert.equal(apca[key], current[key], `${fill}: ${key}`);
+    }
+  }
+});
 
 test("story-button lighting preserves readable labels for extreme and varied authored fills", () => {
   const colors = ["#ffffff", "#000000", "#777777", "#fff9b0", "#07163b", "#39ff14", "#ff00ff"];

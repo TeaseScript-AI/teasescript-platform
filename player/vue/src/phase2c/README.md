@@ -41,6 +41,9 @@ Keep experimental fixtures separate from the components that own settled behavio
 The preview opens with choices. Visual Lab restarts that scenario or selects text/number/choice interaction;
 transcript fixtures switch App back to local preview replies. Composer dimensions and height caps remain visual trials.
 
+Visual Lab's button-text comparison switches WCAG/APCA ink only, preserving fills, typography, Send and transcript.
+It uses Color.js's APCA 0.0.98G implementation to compare absolute black/white scores, not to certify font-size/weight suitability.
+
 Shared chrome geometry lives in `style.css`; the
 [Player geometry contract](../../../../docs/ui/PLAYER-UI.md#global-geometry-and-overflow) records dimensions and their tuning status.
 Top controls, menu and tool headers share edge/control tokens. The menu width ruler avoids a second JavaScript
