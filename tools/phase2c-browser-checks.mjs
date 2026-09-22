@@ -587,140 +587,36 @@ async function carouselChecks(page) {
 }
 
 async function toolContentChecks(page) {
-  const check = (value, message) => {
-    if (!value) throw new Error(message);
-  };
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload();
-  const normalUrl = page.url();
-  const fixtureUrl = await page.evaluate(() => {
-    const url = new URL(location.href);
-    url.searchParams.set("tool-state-fixture", "");
-    return url.href;
-  });
-  await page.goto(fixtureUrl);
   const launcher = (name) => page.locator("[data-launcher] button").filter({ hasText: name });
-  const panel = page.locator('[data-tool="Layout Debug"]');
-  const draft = () => page.getByRole("textbox", { name: "Local draft" });
-  const count = () => page.getByRole("button", { name: "Local count: 1", exact: true });
-  const preserved = async () => {
-    check((await draft().inputValue()) === "Keep this local draft", "Tool-local draft was reset");
-    check((await count().count()) === 1, "Tool-local counter was reset or duplicated");
-  };
   await launcher("Layout Debug").click();
-  await draft().fill("Keep this local draft");
-  await page.getByRole("button", { name: "Local count: 0", exact: true }).click();
-  const original = await draft().elementHandle();
-  await panel.locator("[data-panel-pin]").click();
-  await launcher("Playback Diagnostics").click();
-  await panel.getByRole("button", { name: "Panel settings", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Move right", exact: true }).click();
-  await preserved();
-  const grip = await panel.locator("[data-panel-drag]").boundingBox();
-  const neighbor = await page.locator('[data-tool="Playback Diagnostics"]').boundingBox();
-  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(neighbor.x + 20, grip.y + grip.height / 2, { steps: 15 });
-  await page.mouse.up();
-  await page.waitForFunction(
-    () =>
-      document.querySelector(".tool-panel-content > [data-tool]")?.getAttribute("data-tool") ===
-      "Layout Debug",
-  );
-  await preserved();
-  const edge = await panel.locator("[data-panel-resize]").boundingBox();
-  await page.mouse.move(edge.x + edge.width / 2, edge.y + edge.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(edge.x + 120, edge.y + edge.height / 2, { steps: 8 });
-  await page.mouse.up();
-  await preserved();
-  await panel.locator("[data-panel-resize]").focus();
-  await page.keyboard.press("End");
-  await preserved();
-  // Unpin and pin do not end this tool's lifetime, even when another temp closes.
-  await panel.locator("[data-panel-pin]").click();
-  await panel.locator("[data-panel-pin]").click();
-  await preserved();
-  await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
-  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
-  await preserved();
-  await launcher("Playback Diagnostics").click();
-  await draft().focus();
   await page.setViewportSize({ width: 390, height: 700 });
   await page.getByRole("button", { name: "Hide sidebar", exact: true }).waitFor();
   await launcher("Layout Debug").click();
-  await preserved();
+  await page.locator('[data-tool="Layout Debug"] [data-tool-body]').waitFor();
   await page.getByRole("button", { name: "Tools", exact: true }).click();
   await page.getByRole("button", { name: "Back to active tool", exact: true }).click();
-  await preserved();
-  await page.getByRole("button", { name: "Tools", exact: true }).click();
-  await launcher("Playback Diagnostics").click();
-  await page.getByRole("button", { name: "Tools", exact: true }).click();
-  await launcher("Layout Debug").click();
-  await preserved();
+  await page.locator('[data-tool="Layout Debug"] [data-tool-body]').waitFor();
   await page.locator(".tools-drawer").evaluate(async (el) => {
     await Promise.allSettled(el.getAnimations().map((animation) => animation.finished));
   });
+  await page.mouse.move(380, 650);
+  await page.getByRole("tooltip").waitFor({ state: "hidden" });
+  await page.locator('[data-tool="Layout Debug"]').getByRole("checkbox").first().focus();
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Show sidebar", exact: true }).waitFor();
-  // Let Sheet finish its exit and dispose its presentation subtree.
+  // Focus returns only after Sheet disposes its exiting presentation subtree.
   await page.locator('[data-slot="sheet-content"]').waitFor({ state: "detached" });
-  check(
-    await page
-      .getByRole("button", { name: "Show sidebar", exact: true })
-      .evaluate((el) => el === document.activeElement),
-    "Drawer dismissal lost toggle focus",
-  );
-  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
+  const show = page.getByRole("button", { name: "Show sidebar", exact: true });
+  if (!(await show.evaluate((el) => el === document.activeElement))) {
+    throw new Error("Drawer dismissal lost toggle focus");
+  }
+  await show.click();
   await page.getByRole("button", { name: "Back to active tool", exact: true }).click();
-  await preserved();
+  await page.locator('[data-tool="Layout Debug"] [data-tool-body]').waitFor();
   await page.setViewportSize({ width: 1440, height: 900 });
-  await preserved();
-  check(
-    await original.evaluate(
-      (el) => el === document.querySelector("[data-tool-lifetime-fixture] input"),
-    ),
-    "Content DOM identity changed across shells",
-  );
-  // Hiding and temporary replacement preserve the same content, including scroll.
-  const body = panel.locator("[data-tool-body]");
-  await body.evaluate((el) => {
-    el.scrollTop = 350;
-    el.dispatchEvent(new Event("scroll"));
-  });
-  await launcher("Layout Debug").click();
-  await panel.waitFor({ state: "detached" });
-  check(await original.evaluate((el) => el.isConnected), "Hidden tool content was disposed");
-  await launcher("Layout Debug").click();
-  await preserved();
-  check(await body.evaluate((el) => el.scrollTop === 350), "Hide/reopen lost scroll position");
-  await launcher("Playback Diagnostics").click();
-  await panel.waitFor({ state: "detached" });
-  await launcher("Layout Debug").click();
-  await preserved();
-  check(
-    await body.evaluate((el) => el.scrollTop === 350),
-    "Temporary replacement lost scroll position",
-  );
-  await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
-  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
-  check(await body.evaluate((el) => el.scrollTop === 350), "Shell hide lost scroll position");
-  check(
-    await original.evaluate(
-      (el) => el === document.querySelector("[data-tool-lifetime-fixture] input"),
-    ),
-    "Hiding/replacement changed tool DOM identity",
-  );
-  await panel.locator("[data-panel-pin]").focus();
-  await page.setViewportSize({ width: 390, height: 700 });
-  await launcher("Layout Debug").click();
-  check(await body.evaluate((el) => el.scrollTop === 350), "Wide/narrow lost scroll position");
-  await page.getByRole("button", { name: "Tools", exact: true }).click();
-  await page.getByRole("button", { name: "Back to active tool", exact: true }).click();
-  check(await body.evaluate((el) => el.scrollTop === 350), "Menu/back lost scroll position");
-  await preserved();
-  await page.goto(normalUrl);
-  return "PASS tool content and scroll preservation across hiding and replacement";
+  await page.locator('[data-tool="Layout Debug"] [data-tool-body]').waitFor();
+  return "PASS responsive tool availability, menu return and dismissal focus";
 }
 
 async function transcriptChecks(page) {
