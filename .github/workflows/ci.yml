@@ -40,21 +40,4 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
       - name: Check source
-        run: |
-          # Whole-runner usage bounds aggregate build memory, including runner overhead.
-          node --input-type=module - <<'JS' &
-          import { readFileSync } from 'node:fs';
-          let peak = 0;
-          const timer = setInterval(() => {
-            const info = readFileSync('/proc/meminfo', 'utf8');
-            const kb = name => Number(info.match(new RegExp(`${name}:\\s+(\\d+)`))[1]);
-            peak = Math.max(peak, kb('MemTotal') - kb('MemAvailable'));
-          }, 100);
-          process.on('SIGTERM', () => {
-            clearInterval(timer);
-            console.log(`Peak runner memory in use: ${(peak / 1024).toFixed(0)} MiB`);
-          });
-          JS
-          monitor=$!
-          trap 'status=$?; set +e; kill "$monitor"; wait "$monitor"; exit "$status"' EXIT
-          /usr/bin/time -f 'Check wall time: %e s' npm run check
+        run: npm run check
