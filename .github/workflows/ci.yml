@@ -56,5 +56,5 @@ jobs:
           });
           JS
           monitor=$!
-          trap 'kill "$monitor"; wait "$monitor"' EXIT
+          trap 'status=$?; set +e; kill "$monitor"; wait "$monitor"; exit "$status"' EXIT
           /usr/bin/time -f 'Check wall time: %e s' npm run check
