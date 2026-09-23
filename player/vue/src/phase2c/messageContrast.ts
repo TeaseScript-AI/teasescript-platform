@@ -1,6 +1,10 @@
 import Color from "colorjs.io";
 import type { ScrimComparison } from "./scrimComparison";
 
+export const WCAG_SCRIM_TARGET = 4.5;
+// Canvas readback and CSS alpha compositing can round a painted channel differently.
+const WCAG_SEARCH_TARGET = WCAG_SCRIM_TARGET + 0.05;
+
 let context: CanvasRenderingContext2D | null = null;
 
 function paint(...layers: readonly string[]) {
@@ -77,27 +81,21 @@ export function scrimFor(
   backdrop: string,
   comparison?: ScrimComparison,
 ): string | null {
-  const method = comparison?.method ?? "WCAG21";
-  const target = method === "APCA" ? (comparison?.apcaTarget ?? 60) : 4.6;
   const textChannels = paint(colour);
   const backdropChannels = paint(backdrop);
+  if (
+    comparison?.mode === "APCA_FILTER" &&
+    Math.abs(Color.contrast(rgb(backdropChannels), rgb(textChannels), "APCA")) >=
+      comparison.apcaCutoff
+  )
+    return null;
   const text = luminance(textChannels);
-  const score = (channels: readonly [number, number, number]) =>
-    method === "APCA"
-      ? Math.abs(Color.contrast(rgb(channels), rgb(textChannels), "APCA"))
-      : ratio(text, luminance(channels));
-  if (score(backdropChannels) >= target) return null;
-  const poles =
-    method === "APCA" ? ["0 0 0", "255 255 255"] : [text > 0.179 ? "0 0 0" : "255 255 255"];
-  const candidates = poles.map((pole) => coverFor(backdrop, pole, target, score));
-  const reachable = candidates.filter((candidate) => candidate.reachable);
-  // A fixed authored ink can make an APCA target impossible even on pure black or white.
-  if (reachable.length === 0)
-    return method === "APCA" ? scrimFor(colour, backdrop) : `rgb(${poles[0]} / 1)`;
-  const selected = reachable.reduce((best, candidate) =>
-    candidate.opacity < best.opacity ? candidate : best,
-  );
-  const opacity =
-    method === "APCA" ? Math.ceil(selected.opacity * 1000) / 1000 : selected.opacity.toFixed(3);
-  return `rgb(${selected.pole} / ${opacity})`;
+  const score = (channels: readonly [number, number, number]) => ratio(text, luminance(channels));
+  if (score(backdropChannels) >= WCAG_SCRIM_TARGET) return null;
+  const black = coverFor(backdrop, "0 0 0", WCAG_SEARCH_TARGET, score);
+  const white = coverFor(backdrop, "255 255 255", WCAG_SEARCH_TARGET, score);
+  const selected =
+    !black.reachable || (white.reachable && white.opacity < black.opacity) ? white : black;
+  if (!selected.reachable) throw new Error("No readable scrim exists for this text colour");
+  return `rgb(${selected.pole} / ${Math.ceil(selected.opacity * 1000) / 1000})`;
 }

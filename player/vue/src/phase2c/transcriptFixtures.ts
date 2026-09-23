@@ -181,7 +181,7 @@ const authoredSources: readonly (readonly [
   ],
   [
     "guide",
-    "This green remains clear on a light bubble, even when the contrast methods disagree.",
+    "This green remains clear on a light bubble, even when the contrast methods disagree. [color=#6e7777]Midtone grey near the contrast boundary.[/color]",
     authored("bubble", "#008000", null),
   ],
   [

@@ -1196,13 +1196,14 @@ async function interactionChecks(page) {
     "Narrow interaction causes outer scrolling",
   );
   await page.setViewportSize({ width: 390, height: 700 });
-  const repliesBefore = await rows.count();
+  const repliesBefore = Number(await rows.first().getAttribute("aria-setsize"));
   await surface.getByRole("button", { name: "Continue", exact: true }).evaluate((el) => {
     el.click();
     el.click();
   });
+  await page.getByText("Touch answer / 100 / right / first").waitFor();
   check(
-    (await rows.count()) === repliesBefore + 2,
+    Number(await rows.first().getAttribute("aria-setsize")) === repliesBefore + 2,
     "Repeated button activation duplicated a reply or continuation",
   );
   await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
@@ -1316,15 +1317,23 @@ async function authoredPresentationChecks(page) {
   await page.getByRole("button", { name: "Authored colour sample", exact: true }).click();
   const scrimMethod = page.getByRole("combobox", { name: "Transcript scrim contrast" });
   const green = page.locator(".transcript-entry").filter({ hasText: "This green remains clear" });
-  await green.locator(".markup-scrim").waitFor();
-  await scrimMethod.selectOption("APCA");
-  await green.locator(".markup-scrim").waitFor({ state: "detached" });
+  check(
+    (await scrimMethod.inputValue()) === "APCA_FILTER",
+    "The preview did not start with the reduced-scrim comparison",
+  );
+  await green.waitFor();
+  check(
+    (await green.locator(".markup-scrim").count()) === 0,
+    "The preview added an unnecessary light-theme scrim",
+  );
   await scrimMethod.selectOption("WCAG21");
-  await green.locator(".markup-scrim").waitFor();
-  const painted = (selector) =>
-    page.evaluate((selector) => {
-      const element = document.querySelector(selector);
-      if (element === null) return null;
+  await green.locator(".markup-scrim").first().waitFor();
+  await scrimMethod.selectOption("APCA_FILTER");
+  await green.locator(".markup-scrim").first().waitFor({ state: "detached" });
+  await scrimMethod.selectOption("WCAG21");
+  await green.locator(".markup-scrim").first().waitFor();
+  const painted = (locator) =>
+    locator.evaluate((element) => {
       const context = document.createElement("canvas").getContext("2d");
       const flatten = (layers) => {
         context.clearRect(0, 0, 1, 1);
@@ -1352,9 +1361,19 @@ async function authoredPresentationChecks(page) {
       const text = luminance(flatten([getComputedStyle(element).color]));
       const behind = luminance(flatten(layers));
       return (Math.max(text, behind) + 0.05) / (Math.min(text, behind) + 0.05);
-    }, selector);
+    });
   const link = '.transcript-entry a[href^="https://example.com"]';
   const prose = '.transcript-entry .prose:not([data-panel])[style*="color"] .markup-paragraph span';
+  const boundary = green
+    .locator(".markup-scrim")
+    .filter({ hasText: "Midtone grey near the contrast boundary" });
+  const boundaryRatio = await painted(boundary);
+  check(
+    boundaryRatio >= 4.5,
+    `Midtone authored text did not reach readable contrast (${boundaryRatio})`,
+  );
+  const boundaryCover = await boundary.evaluate((el) => getComputedStyle(el).backgroundColor);
+  check(boundaryCover.startsWith("rgba("), "Midtone authored text received an opaque scrim");
   const portalUsesTheme = async (slot) => {
     const portal = page.locator(`[data-slot="${slot}"]`);
     await portal.waitFor();
@@ -1386,6 +1405,10 @@ async function authoredPresentationChecks(page) {
       await Promise.allSettled(document.getAnimations().map((animation) => animation.finished));
     });
     if (mode === "dark") {
+      const rose = page.locator(".transcript-entry").filter({ hasText: "Deep rose words" });
+      const roseCover = await rose
+        .locator(".markup-scrim")
+        .evaluate((el) => getComputedStyle(el).backgroundColor);
       const brightGreen = page
         .locator(".transcript-entry")
         .filter({ hasText: "Bright green on a dark bubble" });
@@ -1394,11 +1417,23 @@ async function authoredPresentationChecks(page) {
         (await brightGreen.locator(".markup-scrim").count()) === 0,
         "Dark green sample unexpectedly has a WCAG scrim",
       );
-      await scrimMethod.selectOption("APCA");
+      await scrimMethod.selectOption("APCA_FILTER");
       check(
         (await brightGreen.locator(".markup-scrim").count()) === 0,
-        "Unreachable APCA target drew an opaque scrim",
+        "APCA filter added a scrim where the current mode needs none",
       );
+      for (const cutoff of [40, 55, 60]) {
+        await page.getByRole("slider", { name: "APCA scrim cutoff" }).evaluate((el, value) => {
+          el.value = String(value);
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        }, cutoff);
+        check(
+          (await rose
+            .locator(".markup-scrim")
+            .evaluate((el) => getComputedStyle(el).backgroundColor)) === roseCover,
+          "Changing the APCA cutoff changed a needed scrim's colour or strength",
+        );
+      }
       await scrimMethod.selectOption("WCAG21");
     }
     await page
@@ -1417,14 +1452,12 @@ async function authoredPresentationChecks(page) {
         media: document.querySelector(".stage-media")?.getAttribute("src"),
       })),
     );
-    const linkRatio = await painted(link);
-    check(linkRatio !== null, `Authored link sample missing in ${mode} mode`);
+    const linkRatio = await painted(page.locator(link));
     check(
       linkRatio >= 4.5,
       `Link inside an authored message is unreadable in ${mode} mode: ${linkRatio}:1`,
     );
-    const proseRatio = await painted(prose);
-    check(proseRatio !== null, `Unpanelled prose sample missing in ${mode} mode`);
+    const proseRatio = await painted(page.locator(prose));
     check(
       proseRatio >= 4.5,
       `Prose without a panel is unreadable in ${mode} mode: ${proseRatio}:1`,
