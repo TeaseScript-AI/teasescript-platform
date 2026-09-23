@@ -2,6 +2,7 @@ import Color from "colorjs.io";
 import type { ScrimComparison } from "./scrimComparison";
 
 export const WCAG_SCRIM_TARGET = 4.5;
+const ADAPTIVE_WCAG_TARGET = 3.5;
 // Canvas readback and CSS alpha compositing can round a painted channel differently.
 const SEARCH_MARGIN = 0.05;
 const ENHANCED_WCAG_TARGET = 7;
@@ -165,7 +166,7 @@ export function readabilityFor(
       : Math.max(
           apca / (STANDARD_APCA_TARGET + 0.5),
           Math.min(
-            wcag / (WCAG_SCRIM_TARGET + SEARCH_MARGIN),
+            wcag / (ADAPTIVE_WCAG_TARGET + SEARCH_MARGIN),
             apca / (MINIMUM_APCA_WITH_WCAG + 0.5),
           ),
         );
@@ -175,7 +176,7 @@ export function readabilityFor(
     enhanced
       ? originalWcag >= ENHANCED_WCAG_TARGET && Math.abs(originalApca) >= STANDARD_APCA_TARGET
       : Math.abs(originalApca) >= STANDARD_APCA_TARGET ||
-        (originalWcag >= WCAG_SCRIM_TARGET && Math.abs(originalApca) >= MINIMUM_APCA_WITH_WCAG)
+        (originalWcag >= ADAPTIVE_WCAG_TARGET && Math.abs(originalApca) >= MINIMUM_APCA_WITH_WCAG)
   )
     return { ink: colour, cover: null };
   const target = enhanced ? 1 + SEARCH_MARGIN / ENHANCED_WCAG_TARGET : 1;
