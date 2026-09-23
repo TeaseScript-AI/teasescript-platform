@@ -437,11 +437,16 @@ The runtime adapter supplies resolved message presentation according to the
 contract reports no authored choice, the Player supplies one. Prose has no avatar, defaults its block and text alignment
 to centre, uses the same width limits as bubbles, and has no panel unless the author supplies a background.
 
-Authored colours are preserved. When an authored foreground has no background at its own presentation level, the Player
-measures it against the rendered surface and adds the smallest scrim that restores readable contrast. Inline coloured
-text is therefore measured against its balloon, even when that balloon has an authored background. A message-level
-foreground/background pair, or an inline run with both colours, remains unchanged; compile-time feedback for a poorly
-contrasting authored pair is tracked in #434.
+When an authored foreground has no authored background at its own presentation level, the Player measures it against
+the rendered surface unless an inline authored background encloses it. It leaves visibly readable pairs alone, preserves
+the exact foreground with a subtle local backing when that is sufficient, and otherwise adjusts its lightness while
+retaining its hue where the display gamut allows and its original light/dark direction. Harder pairs may need both
+changes. Inline coloured text is measured against its balloon, even when that balloon has an authored background. A
+message-level foreground/background pair and authored text inside an inline background (including inherited message
+colour) remain unchanged; compile-time feedback for a poorly contrasting authored pair is tracked in #434. The visual
+fallback for one-sided colours is not a universal WCAG 4.5:1 guarantee: APCA screens the ordinary treatment because a
+WCAG-only scrim can reverse polarity and produce heavy bands. The experimental high-contrast theme setting gives
+one-sided colours stronger treatment; explicit authored pairs still remain author-owned.
 
 An authored typeface uses the theme font stack as its fallback. Font bundling is tracked in
 [`RELEASE-ROADMAP.md`](../planning/RELEASE-ROADMAP.md).

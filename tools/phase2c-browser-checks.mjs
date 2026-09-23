@@ -1318,9 +1318,10 @@ async function authoredPresentationChecks(page) {
   const scrimMethod = page.getByRole("combobox", { name: "Transcript scrim contrast" });
   const green = page.locator(".transcript-entry").filter({ hasText: "This green exposes" });
   check(
-    (await scrimMethod.inputValue()) === "WCAG21",
-    "The preview did not start with the readable-contrast comparison",
+    (await scrimMethod.inputValue()) === "ADAPTIVE_INK",
+    "The preview did not start with the adaptive readability treatment",
   );
+  await scrimMethod.selectOption("WCAG21");
   await green.locator(".markup-scrim").first().waitFor();
   await scrimMethod.selectOption("APCA_FILTER");
   await green.locator(".markup-scrim").first().waitFor({ state: "detached" });
@@ -1372,7 +1373,7 @@ async function authoredPresentationChecks(page) {
     .locator(".transcript-entry")
     .filter({ hasText: "White words on an authored coral bubble" });
   const coralText = coral
-    .locator(".markup-scrim")
+    .locator(".transcript-markup span")
     .filter({ hasText: "White words on an authored coral bubble" });
   const transcriptScroll = page.locator(".transcript-scroll");
   await transcriptScroll.evaluate((element) => {
@@ -1383,9 +1384,74 @@ async function authoredPresentationChecks(page) {
     (await painted(coralText)) >= 4.5,
     "Inline authored text on an authored bubble did not reach readable contrast",
   );
+  await scrimMethod.selectOption("ADAPTIVE_INK");
+  check(
+    await coralText.evaluate((element) => {
+      const ink = getComputedStyle(element).color;
+      const cover = getComputedStyle(element).backgroundColor;
+      const context = document.createElement("canvas").getContext("2d");
+      context.fillStyle = ink;
+      context.fillRect(0, 0, 1, 1);
+      const channels = [...context.getImageData(0, 0, 1, 1).data].slice(0, 3);
+      return channels.every((channel) => channel === 255) && cover === "rgba(0, 0, 0, 0)";
+    }),
+    "Adaptive preview changed white authored text or heavily covered the coral bubble",
+  );
+  const themeContrast = page.getByRole("combobox", { name: "Theme contrast" });
+  await themeContrast.selectOption("high");
+  await coral
+    .locator(".markup-scrim")
+    .filter({ hasText: "White words on an authored coral bubble" })
+    .waitFor();
+  check(
+    (await painted(coralText)) >= 7,
+    "High theme contrast did not protect authored white text on the coral bubble",
+  );
+  await themeContrast.selectOption("standard");
+  const inheritedInk = page
+    .locator(".transcript-entry")
+    .filter({ hasText: "Inline backing keeps its parent colour" })
+    .locator(".transcript-markup span")
+    .filter({ hasText: "Inline backing keeps its parent colour" });
+  check(
+    await inheritedInk.evaluate((element) => {
+      const context = document.createElement("canvas").getContext("2d");
+      const channels = (colour) => {
+        context.fillStyle = colour;
+        context.fillRect(0, 0, 1, 1);
+        return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3).join(",");
+      };
+      return channels(getComputedStyle(element).color) === channels("#ffe066");
+    }),
+    "An inline background changed the inherited authored text colour",
+  );
+  check(
+    await page.evaluate(async () => {
+      const moduleUrl = new URL("/src/phase2c/messageContrast.ts", location.origin);
+      const { readabilityFor } = await import(moduleUrl.href);
+      const mode = { mode: "ADAPTIVE_INK", apcaCutoff: 55, enhanced: false };
+      const magenta = readabilityFor("#ff00ff", "#ffffff", mode);
+      const nearWhite = readabilityFor("#f8f8f8", "#f07080", mode);
+      const red = readabilityFor("#ff0000", "#111318", mode);
+      const whiteYellow = readabilityFor("#ffffff", "#ffff00", mode);
+      return (
+        magenta.cover === null &&
+        magenta.ink === "#ff00ff" &&
+        nearWhite.ink !== "rgb(0 0 0)" &&
+        (nearWhite.cover === null ||
+          Number(nearWhite.cover.match(/\/ ([\d.]+)\)/)?.[1] ?? 1) < 0.05) &&
+        red.ink !== "#ff0000" &&
+        red.cover === null &&
+        whiteYellow.ink === "rgb(255 255 255)" &&
+        whiteYellow.cover !== null
+      );
+    }),
+    "Adaptive treatment did not preserve readable colours or protect difficult pairs",
+  );
+  await scrimMethod.selectOption("WCAG21");
   const contrastFailures = await page.evaluate(async () => {
     const moduleUrl = new URL("/src/phase2c/messageContrast.ts", location.origin);
-    const { scrimFor } = await import(moduleUrl.href);
+    const { readabilityFor } = await import(moduleUrl.href);
     const canvas = document.createElement("canvas");
     const context = canvas.getContext("2d", { willReadFrequently: true });
     const luminance = (layers) => {
@@ -1429,7 +1495,7 @@ async function authoredPresentationChecks(page) {
     const failures = [];
     for (const background of backgrounds) {
       for (const text of texts) {
-        const cover = scrimFor(text, background);
+        const cover = readabilityFor(text, background, { mode: "WCAG21", apcaCutoff: 55 }).cover;
         const before = ratio(text, [background]);
         const after = ratio(text, cover === null ? [background] : [background, cover]);
         if ((before >= 4.5 && cover !== null) || after < 4.5)

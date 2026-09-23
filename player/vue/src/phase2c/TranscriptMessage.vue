@@ -2,7 +2,10 @@
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Message, MessageAvatar, MessageContent, MessageHeader } from "@/components/ui/message";
-import type { PlayerSpeakerPresentation, PlayerTranscriptEntryPresentation } from "../../../model.js";
+import type {
+  PlayerSpeakerPresentation,
+  PlayerTranscriptEntryPresentation,
+} from "../../../model.js";
 import TranscriptMarkup from "./TranscriptMarkup.vue";
 import { cornerClass, nameOf, resolveAppearance } from "./transcriptPresentation";
 
@@ -38,6 +41,7 @@ const name = !player && !props.continues ? nameOf(props.speakers, props.entry) :
       :backdrop="appearance.backdrop"
       :cover="appearance.cover"
       :link="appearance.link"
+      :authored-ink="appearance.authoredInk"
     />
     <template v-else>{{ entry.text }}</template>
   </div>
@@ -75,6 +79,7 @@ const name = !player && !props.continues ? nameOf(props.speakers, props.entry) :
             :backdrop="appearance.backdrop"
             :cover="appearance.cover"
             :link="appearance.link"
+            :authored-ink="appearance.authoredInk"
           />
           <template v-else
             ><span

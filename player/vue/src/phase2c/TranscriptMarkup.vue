@@ -9,6 +9,7 @@ const props = defineProps<{
   backdrop: string;
   cover: string | null;
   link: string;
+  authoredInk: string | null;
 }>();
 const blocks = computed(() => preparePlayerMessageMarkup(props.content));
 </script>
@@ -22,7 +23,13 @@ const blocks = computed(() => preparePlayerMessageMarkup(props.content));
         :aria-level="block.level"
         class="markup-heading"
       >
-        <TranscriptLine :pieces="block.line.pieces" :backdrop="backdrop" :cover="cover" :link="link" />
+        <TranscriptLine
+          :pieces="block.line.pieces"
+          :backdrop="backdrop"
+          :cover="cover"
+          :link="link"
+          :authored-ink="authoredInk"
+        />
       </div>
       <component
         :is="block.kind === 'quote' ? 'blockquote' : 'div'"
@@ -30,12 +37,23 @@ const blocks = computed(() => preparePlayerMessageMarkup(props.content));
         :class="{ 'markup-paragraph': block.kind === 'paragraph' }"
       >
         <template v-for="(line, li) in block.lines" :key="li"
-          ><TranscriptLine :pieces="line.pieces" :backdrop="backdrop" :cover="cover" :link="link" /><br v-if="line.ending"
+          ><TranscriptLine
+            :pieces="line.pieces"
+            :backdrop="backdrop"
+            :cover="cover"
+            :link="link"
+            :authored-ink="authoredInk" /><br v-if="line.ending"
         /></template>
       </component>
       <component :is="block.ordered ? 'ol' : 'ul'" v-else>
         <li v-for="(item, li) in block.items" :key="li" :value="item.ordinal ?? undefined">
-          <TranscriptLine :pieces="item.line.pieces" :backdrop="backdrop" :cover="cover" :link="link" />
+          <TranscriptLine
+            :pieces="item.line.pieces"
+            :backdrop="backdrop"
+            :cover="cover"
+            :link="link"
+            :authored-ink="authoredInk"
+          />
         </li>
       </component>
     </template>

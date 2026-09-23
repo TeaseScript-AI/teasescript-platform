@@ -63,7 +63,13 @@ const themeIntent = ref<PlayerThemeIntent>({
 });
 const inkMethod = ref<InkContrastMethod>("WCAG21");
 provide(playerInkComparison, inkMethod);
-const scrimPreview = ref<ScrimComparison>({ mode: "WCAG21", apcaCutoff: 55 });
+const scrimMode = ref<ScrimComparison["mode"]>("ADAPTIVE_INK");
+const apcaCutoff = ref(55);
+const scrimPreview = computed<ScrimComparison>(() => ({
+  mode: scrimMode.value,
+  apcaCutoff: apcaCutoff.value,
+  enhanced: themeIntent.value.contrast === "high",
+}));
 provide(scrimComparison, scrimPreview);
 usePlayerTheme(themeIntent, inkMethod);
 function toggleThemeMode() {
@@ -192,18 +198,23 @@ async function toggleFullscreen() {
         <label class="grid gap-2">
           Transcript scrim contrast
           <select
-            v-model="scrimPreview.mode"
+            v-model="scrimMode"
             aria-label="Transcript scrim contrast"
             class="min-w-0 rounded border bg-[var(--surface-component)] p-2"
           >
-            <option value="WCAG21">Current · WCAG {{ WCAG_SCRIM_TARGET }}:1</option>
+            <option value="ADAPTIVE_INK">Current · preserve light/dark text direction</option>
+            <option value="WCAG21">Previous · WCAG {{ WCAG_SCRIM_TARGET }}:1 scrim</option>
             <option value="APCA_FILTER">APCA filter · experiment</option>
           </select>
+          <span v-if="scrimPreview.mode === 'ADAPTIVE_INK'" class="text-xs"
+            >Keeps authored text on its original light or dark side. Theme contrast High applies
+            stronger protection. Standard is a visual treatment, not a WCAG 4.5:1 guarantee.</span
+          >
         </label>
         <label v-if="scrimPreview.mode === 'APCA_FILTER'" class="grid gap-2">
           APCA cutoff · Lc {{ scrimPreview.apcaCutoff }}
           <input
-            v-model.number="scrimPreview.apcaCutoff"
+            v-model.number="apcaCutoff"
             aria-label="APCA scrim cutoff"
             type="range"
             min="40"

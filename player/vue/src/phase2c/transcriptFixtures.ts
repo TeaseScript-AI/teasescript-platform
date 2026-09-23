@@ -150,6 +150,11 @@ const authoredSources: readonly (readonly [
   ],
   [
     "guide",
+    "The surrounding yellow may adapt. [bg=#303030]Inline backing keeps its parent colour.[/bg]",
+    authored("bubble", "#ffe066", null),
+  ],
+  [
+    "guide",
     "Both colours written together. The author was looking straight at this pairing, so it stands exactly as written.",
     authored("bubble", "#cbb9e8", "#4a2d6b"),
   ],

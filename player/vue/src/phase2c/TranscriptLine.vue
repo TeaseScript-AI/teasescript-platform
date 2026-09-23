@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { h, inject } from "vue";
 import type { PlayerMarkupPiece } from "../../../message-markup.js";
-import { scrimFor } from "./messageContrast";
+import { readabilityFor } from "./messageContrast";
 import { scrimComparison } from "./scrimComparison";
 
 const props = defineProps<{
@@ -9,23 +9,44 @@ const props = defineProps<{
   backdrop: string;
   cover: string | null;
   link: string;
+  authoredInk: string | null;
 }>();
 const activeScrimComparison = inject(scrimComparison, undefined);
-function authoredScrim(piece: { style: Readonly<Record<string, string>>; href: string | null }) {
-  if (piece.style["backgroundColor"] !== undefined) return null;
+function authoredTreatment(piece: {
+  style: Readonly<Record<string, string>>;
+  href: string | null;
+}) {
+  if (piece.style["backgroundColor"] !== undefined) {
+    if (
+      activeScrimComparison?.value.mode === "ADAPTIVE_INK" &&
+      piece.style["color"] === undefined &&
+      piece.href === null &&
+      props.authoredInk !== null
+    )
+      return { ink: props.authoredInk, cover: null };
+    return null;
+  }
   const colour = piece.style["color"] ?? (piece.href === null ? undefined : props.link);
-  if (colour === undefined) return props.cover;
-  return scrimFor(colour, props.backdrop, activeScrimComparison?.value);
+  if (colour === undefined) return props.cover === null ? null : { ink: null, cover: props.cover };
+  const treatment = readabilityFor(colour, props.backdrop, activeScrimComparison?.value);
+  return treatment.ink === colour && treatment.cover === null ? null : treatment;
 }
 // The canonical preparation helper supplies validated text/style/link pieces, never HTML.
 function renderLine() {
   return props.pieces.map((piece) => {
-    const scrim = authoredScrim(piece);
+    const treatment = authoredTreatment(piece);
     return h(
       piece.href === null ? "span" : "a",
       {
-        class: scrim === null ? piece.classes : [...piece.classes, "markup-scrim"],
-        style: scrim === null ? piece.style : { ...piece.style, backgroundColor: scrim },
+        class: treatment?.cover == null ? piece.classes : [...piece.classes, "markup-scrim"],
+        style:
+          treatment === null
+            ? piece.style
+            : {
+                ...piece.style,
+                ...(treatment.ink === null ? {} : { color: treatment.ink }),
+                ...(treatment.cover === null ? {} : { backgroundColor: treatment.cover }),
+              },
         ...(piece.href === null
           ? {}
           : { href: piece.href, target: "_blank", rel: "noopener noreferrer" }),
