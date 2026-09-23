@@ -1,9 +1,6 @@
 <script setup lang="ts">
 import { computed, provide, ref, shallowRef } from "vue";
-import type { InkContrastMethod } from "../../../theme/color.js";
-import { playerInkComparison } from "@/components/playerInkComparison";
-import { scrimComparison, type ScrimComparison } from "./scrimComparison";
-import { WCAG_SCRIM_TARGET } from "./messageContrast";
+import { enhancedTranscriptContrast } from "./transcriptContrast";
 import { useEventListener, useResizeObserver } from "@vueuse/core";
 import ToolLifetimeFixture from "./ToolLifetimeFixture.vue";
 import LayoutDebug from "./LayoutDebug.vue";
@@ -61,17 +58,11 @@ const themeIntent = ref<PlayerThemeIntent>({
   monochrome: false,
   accentSeed: { l: 0.59208, c: 0.19138, h: 11.08 },
 });
-const inkMethod = ref<InkContrastMethod>("WCAG21");
-provide(playerInkComparison, inkMethod);
-const scrimMode = ref<ScrimComparison["mode"]>("ADAPTIVE_INK");
-const apcaCutoff = ref(55);
-const scrimPreview = computed<ScrimComparison>(() => ({
-  mode: scrimMode.value,
-  apcaCutoff: apcaCutoff.value,
-  enhanced: themeIntent.value.contrast === "high",
-}));
-provide(scrimComparison, scrimPreview);
-usePlayerTheme(themeIntent, inkMethod);
+provide(
+  enhancedTranscriptContrast,
+  computed(() => themeIntent.value.contrast === "high"),
+);
+usePlayerTheme(themeIntent);
 function toggleThemeMode() {
   themeIntent.value = {
     ...themeIntent.value,
@@ -180,52 +171,6 @@ async function toggleFullscreen() {
         :player="player"
       />
       <div v-if="isDevelopment && tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
-        <label class="grid gap-2">
-          Button text contrast
-          <select
-            v-model="inkMethod"
-            aria-label="Button text contrast"
-            class="min-w-0 rounded border bg-[var(--surface-component)] p-2"
-          >
-            <option value="WCAG21">Current · WCAG</option>
-            <option value="APCA">APCA · experiment</option>
-          </select>
-          <span class="text-xs"
-            >Compare story-button text only. Send and transcript keep their current
-            appearance.</span
-          >
-        </label>
-        <label class="grid gap-2">
-          Transcript scrim contrast
-          <select
-            v-model="scrimMode"
-            aria-label="Transcript scrim contrast"
-            class="min-w-0 rounded border bg-[var(--surface-component)] p-2"
-          >
-            <option value="ADAPTIVE_INK">Current · preserve light/dark text direction</option>
-            <option value="WCAG21">Previous · WCAG {{ WCAG_SCRIM_TARGET }}:1 scrim</option>
-            <option value="APCA_FILTER">APCA filter · experiment</option>
-          </select>
-          <span v-if="scrimPreview.mode === 'ADAPTIVE_INK'" class="text-xs"
-            >Keeps authored text on its original light or dark side. Theme contrast High applies
-            stronger protection. Standard is a visual treatment, not a WCAG 4.5:1 guarantee.</span
-          >
-        </label>
-        <label v-if="scrimPreview.mode === 'APCA_FILTER'" class="grid gap-2">
-          APCA cutoff · Lc {{ scrimPreview.apcaCutoff }}
-          <input
-            v-model.number="apcaCutoff"
-            aria-label="APCA scrim cutoff"
-            type="range"
-            min="40"
-            max="60"
-            step="5"
-          />
-          <span class="text-xs"
-            >Visual trial: this filter can remove scrims even when 16px text falls below WCAG 4.5:1.
-            It cannot add or recolour a scrim.</span
-          >
-        </label>
         <ThemeLab :intent="themeIntent" @update:intent="setThemeIntent" />
         <label class="grid gap-2">
           Stage media fixture

@@ -4,7 +4,6 @@ import type {
 } from "../../../model.js";
 import { authoredColorToOklch, blackOrWhiteInk } from "../../../theme/color.js";
 import { readabilityFor } from "./messageContrast";
-import type { ScrimComparison } from "./scrimComparison";
 
 export interface TranscriptPalette {
   readonly surface: string;
@@ -52,7 +51,7 @@ export function cornerClass(continues: boolean, continued: boolean, player: bool
 export function resolveAppearance(
   entry: PlayerTranscriptEntryPresentation,
   palette: TranscriptPalette,
-  scrimComparison?: ScrimComparison,
+  enhancedContrast = false,
 ) {
   const authored = authoredOn(entry);
   const authoredText = authored?.color ?? null;
@@ -65,7 +64,7 @@ export function resolveAppearance(
     authoredBackground ?? (authored?.kind === "prose" ? palette.canvas : palette.surface);
   const readability =
     authoredBackground === null && authoredText !== null
-      ? readabilityFor(authoredText, backdrop, scrimComparison)
+      ? readabilityFor(authoredText, backdrop, enhancedContrast)
       : null;
   return {
     panel: authoredBackground,

@@ -2,7 +2,7 @@
 import { h, inject } from "vue";
 import type { PlayerMarkupPiece } from "../../../message-markup.js";
 import { readabilityFor } from "./messageContrast";
-import { scrimComparison } from "./scrimComparison";
+import { enhancedTranscriptContrast } from "./transcriptContrast";
 
 const props = defineProps<{
   pieces: readonly PlayerMarkupPiece[];
@@ -11,24 +11,19 @@ const props = defineProps<{
   link: string;
   authoredInk: string | null;
 }>();
-const activeScrimComparison = inject(scrimComparison, undefined);
+const enhancedContrast = inject(enhancedTranscriptContrast, undefined);
 function authoredTreatment(piece: {
   style: Readonly<Record<string, string>>;
   href: string | null;
 }) {
   if (piece.style["backgroundColor"] !== undefined) {
-    if (
-      activeScrimComparison?.value.mode === "ADAPTIVE_INK" &&
-      piece.style["color"] === undefined &&
-      piece.href === null &&
-      props.authoredInk !== null
-    )
+    if (piece.style["color"] === undefined && piece.href === null && props.authoredInk !== null)
       return { ink: props.authoredInk, cover: null };
     return null;
   }
   const colour = piece.style["color"] ?? (piece.href === null ? undefined : props.link);
   if (colour === undefined) return props.cover === null ? null : { ink: null, cover: props.cover };
-  const treatment = readabilityFor(colour, props.backdrop, activeScrimComparison?.value);
+  const treatment = readabilityFor(colour, props.backdrop, enhancedContrast?.value);
   return treatment.ink === colour && treatment.cover === null ? null : treatment;
 }
 // The canonical preparation helper supplies validated text/style/link pieces, never HTML.

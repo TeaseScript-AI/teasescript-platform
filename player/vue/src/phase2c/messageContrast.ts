@@ -1,7 +1,5 @@
 import Color from "colorjs.io";
-import type { ScrimComparison } from "./scrimComparison";
 
-export const WCAG_SCRIM_TARGET = 4.5;
 const ADAPTIVE_WCAG_TARGET = 3.5;
 // Canvas readback and CSS alpha compositing can round a painted channel differently.
 const SEARCH_MARGIN = 0.05;
@@ -86,58 +84,15 @@ function minimalAmount(score: (amount: number) => number, target: number): numbe
   return Math.ceil(sufficient * 1000) / 1000;
 }
 
-function coverFor(
-  backdrop: string,
-  pole: string,
-  target: number,
-  score: (channels: readonly [number, number, number]) => number,
-) {
-  const maximum = score(paint(`rgb(${pole})`));
-  if (maximum < target) return { pole, opacity: 1, reachable: false };
-  let insufficient = 0;
-  let sufficient = 1;
-  for (let step = 0; step < 12; step += 1) {
-    const cover = (insufficient + sufficient) / 2;
-    const candidate = paint(backdrop, `rgb(${pole} / ${cover})`);
-    if (score(candidate) >= target) sufficient = cover;
-    else insufficient = cover;
-  }
-  return { pole, opacity: sufficient, reachable: true };
-}
-
-function scrimFor(colour: string, backdrop: string, comparison?: ScrimComparison): string | null {
-  const textChannels = paint(colour);
-  const backdropChannels = paint(backdrop);
-  if (
-    comparison?.mode === "APCA_FILTER" &&
-    Math.abs(Color.contrast(rgb(backdropChannels), rgb(textChannels), "APCA")) >=
-      comparison.apcaCutoff
-  )
-    return null;
-  const text = luminance(textChannels);
-  const score = (channels: readonly [number, number, number]) => ratio(text, luminance(channels));
-  if (score(backdropChannels) >= WCAG_SCRIM_TARGET) return null;
-  const black = coverFor(backdrop, "0 0 0", WCAG_SCRIM_TARGET + SEARCH_MARGIN, score);
-  const white = coverFor(backdrop, "255 255 255", WCAG_SCRIM_TARGET + SEARCH_MARGIN, score);
-  const selected =
-    !black.reachable || (white.reachable && white.opacity < black.opacity) ? white : black;
-  if (!selected.reachable) throw new Error("No readable scrim exists for this text colour");
-  return `rgb(${selected.pole} / ${Math.ceil(selected.opacity * 1000) / 1000})`;
-}
-
 export function readabilityFor(
   colour: string,
   backdrop: string,
-  comparison?: ScrimComparison,
+  enhanced = false,
 ): { ink: string; cover: string | null } {
-  if (comparison !== undefined && comparison.mode !== "ADAPTIVE_INK")
-    return { ink: colour, cover: scrimFor(colour, backdrop, comparison) };
-
   const ink = paint(colour);
   const background = paint(backdrop);
   const inkLuminance = luminance(ink);
   const backgroundLuminance = luminance(background);
-  const enhanced = comparison?.enhanced ?? false;
   const originalApca = Color.contrast(rgb(background), rgb(ink), "APCA");
   const lighterInk = originalApca === 0 ? inkLuminance >= backgroundLuminance : originalApca < 0;
   const inkPole = lighterInk ? 255 : 0;

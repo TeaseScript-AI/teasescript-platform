@@ -1315,18 +1315,6 @@ async function authoredPresentationChecks(page) {
   await page.reload();
   await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
   await page.getByRole("button", { name: "Authored colour sample", exact: true }).click();
-  const scrimMethod = page.getByRole("combobox", { name: "Transcript scrim contrast" });
-  const green = page.locator(".transcript-entry").filter({ hasText: "This green exposes" });
-  check(
-    (await scrimMethod.inputValue()) === "ADAPTIVE_INK",
-    "The preview did not start with the adaptive readability treatment",
-  );
-  await scrimMethod.selectOption("WCAG21");
-  await green.locator(".markup-scrim").first().waitFor();
-  await scrimMethod.selectOption("APCA_FILTER");
-  await green.locator(".markup-scrim").first().waitFor({ state: "detached" });
-  await scrimMethod.selectOption("WCAG21");
-  await green.locator(".markup-scrim").first().waitFor();
   const painted = (locator) =>
     locator.evaluate((element) => {
       const context = document.createElement("canvas").getContext("2d");
@@ -1359,16 +1347,6 @@ async function authoredPresentationChecks(page) {
     });
   const link = '.transcript-entry a[href^="https://example.com"]';
   const prose = '.transcript-entry .prose:not([data-panel])[style*="color"] .markup-paragraph span';
-  const boundary = green
-    .locator(".markup-scrim")
-    .filter({ hasText: "Mid-grey text needs a stronger check" });
-  const boundaryRatio = await painted(boundary);
-  check(
-    boundaryRatio >= 4.5,
-    `Midtone authored text did not reach readable contrast (${boundaryRatio})`,
-  );
-  const boundaryCover = await boundary.evaluate((el) => getComputedStyle(el).backgroundColor);
-  check(boundaryCover.startsWith("rgba("), "Midtone authored text received an opaque scrim");
   const coral = page
     .locator(".transcript-entry")
     .filter({ hasText: "White words on an authored coral bubble" });
@@ -1381,11 +1359,6 @@ async function authoredPresentationChecks(page) {
   });
   await coralText.waitFor();
   check(
-    (await painted(coralText)) >= 4.5,
-    "Inline authored text on an authored bubble did not reach readable contrast",
-  );
-  await scrimMethod.selectOption("ADAPTIVE_INK");
-  check(
     await coralText.evaluate((element) => {
       const ink = getComputedStyle(element).color;
       const cover = getComputedStyle(element).backgroundColor;
@@ -1395,7 +1368,7 @@ async function authoredPresentationChecks(page) {
       const channels = [...context.getImageData(0, 0, 1, 1).data].slice(0, 3);
       return channels.every((channel) => channel === 255) && cover === "rgba(0, 0, 0, 0)";
     }),
-    "Adaptive preview changed white authored text or heavily covered the coral bubble",
+    "Standard contrast changed white authored text or covered the coral bubble",
   );
   const themeContrast = page.getByRole("combobox", { name: "Theme contrast" });
   await themeContrast.selectOption("high");
@@ -1424,102 +1397,6 @@ async function authoredPresentationChecks(page) {
       return channels(getComputedStyle(element).color) === channels("#ffe066");
     }),
     "An inline background changed the inherited authored text colour",
-  );
-  check(
-    await page.evaluate(async () => {
-      const moduleUrl = new URL("/src/phase2c/messageContrast.ts", location.origin);
-      const { readabilityFor } = await import(moduleUrl.href);
-      const mode = { mode: "ADAPTIVE_INK", apcaCutoff: 55, enhanced: false };
-      const magenta = readabilityFor("#ff00ff", "#ffffff", mode);
-      const nearWhite = readabilityFor("#f8f8f8", "#f07080", mode);
-      const red = readabilityFor("#ff0000", "#111318", mode);
-      const whiteYellow = readabilityFor("#ffffff", "#ffff00", mode);
-      const darkPink = readabilityFor("#f157b3", "#302b27", mode);
-      const pinkTeal = readabilityFor("#f157b3", "#178b8b", mode);
-      const canvas = document.createElement("canvas");
-      const context = canvas.getContext("2d");
-      context.fillStyle = pinkTeal.ink;
-      context.fillRect(0, 0, 1, 1);
-      const [redChannel, greenChannel, blueChannel] = context.getImageData(0, 0, 1, 1).data;
-      return (
-        magenta.cover === null &&
-        magenta.ink === "#ff00ff" &&
-        nearWhite.ink !== "rgb(0 0 0)" &&
-        (nearWhite.cover === null ||
-          Number(nearWhite.cover.match(/\/ ([\d.]+)\)/)?.[1] ?? 1) < 0.05) &&
-        red.ink !== "#ff0000" &&
-        red.cover === null &&
-        whiteYellow.ink === "rgb(255 255 255)" &&
-        whiteYellow.cover !== null &&
-        darkPink.ink === "#f157b3" &&
-        darkPink.cover === null &&
-        Math.max(redChannel, greenChannel, blueChannel) -
-          Math.min(redChannel, greenChannel, blueChannel) >
-          50 &&
-        (pinkTeal.ink !== "#f157b3" || pinkTeal.cover !== null)
-      );
-    }),
-    "Adaptive treatment did not preserve readable colours or protect difficult pairs",
-  );
-  await scrimMethod.selectOption("WCAG21");
-  const contrastFailures = await page.evaluate(async () => {
-    const moduleUrl = new URL("/src/phase2c/messageContrast.ts", location.origin);
-    const { readabilityFor } = await import(moduleUrl.href);
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d", { willReadFrequently: true });
-    const luminance = (layers) => {
-      context.clearRect(0, 0, 1, 1);
-      for (const layer of layers) {
-        context.fillStyle = layer;
-        context.fillRect(0, 0, 1, 1);
-      }
-      const channels = [...context.getImageData(0, 0, 1, 1).data].slice(0, 3);
-      const [red, green, blue] = channels.map((channel) => {
-        const value = channel / 255;
-        return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-      });
-      return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-    };
-    const ratio = (text, layers) => {
-      const foreground = luminance([text]);
-      const background = luminance(layers);
-      return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
-    };
-    const texts = [
-      "#ffffff",
-      "#000000",
-      "#7c7c7c",
-      "#008000",
-      "#ff00ff",
-      "#aa3355",
-      "#00c000",
-      "#ffff00",
-    ];
-    const backgrounds = [
-      "#ffffff",
-      "#eee7e3",
-      "#302b27",
-      "#000000",
-      "#f07080",
-      "#808080",
-      "#00ff00",
-      "#800080",
-    ];
-    const failures = [];
-    for (const background of backgrounds) {
-      for (const text of texts) {
-        const cover = readabilityFor(text, background, { mode: "WCAG21", apcaCutoff: 55 }).cover;
-        const before = ratio(text, [background]);
-        const after = ratio(text, cover === null ? [background] : [background, cover]);
-        if ((before >= 4.5 && cover !== null) || after < 4.5)
-          failures.push({ text, background, before, after, cover });
-      }
-    }
-    return failures.slice(0, 5);
-  });
-  check(
-    contrastFailures.length === 0,
-    `Representative authored colour pairs violate scrim contrast: ${JSON.stringify(contrastFailures)}`,
   );
   const portalUsesTheme = async (slot) => {
     const portal = page.locator(`[data-slot="${slot}"]`);
@@ -1551,37 +1428,56 @@ async function authoredPresentationChecks(page) {
     await page.evaluate(async () => {
       await Promise.allSettled(document.getAnimations().map((animation) => animation.finished));
     });
+    await transcriptScroll.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    const green = page
+      .locator(".transcript-entry")
+      .filter({ hasText: "Forest green words on the Player bubble" });
+    await green.waitFor();
+    check(
+      (await green.locator(".markup-scrim").count()) === 0,
+      `Readable green text gained an unnecessary backing in ${mode} mode`,
+    );
+    const greenInk = await green
+      .locator(".transcript-markup span")
+      .first()
+      .evaluate((element) => getComputedStyle(element).color);
+    if (mode === "light") {
+      const pink = page
+        .locator(".transcript-entry")
+        .filter({ hasText: "Pink words on an authored teal bubble" })
+        .locator(".markup-scrim");
+      await pink.waitFor();
+      check(
+        await pink.evaluate((element) => {
+          const context = document.createElement("canvas").getContext("2d");
+          context.fillStyle = getComputedStyle(element).color;
+          context.fillRect(0, 0, 1, 1);
+          const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
+          return (
+            red > green &&
+            blue > green &&
+            Math.max(red, green, blue) - Math.min(red, green, blue) > 50
+          );
+        }),
+        "Pink authored text lost its colour on a teal bubble",
+      );
+      const pinkRatio = await painted(pink);
+      check(
+        pinkRatio >= 3.4,
+        `Pink text on an authored teal bubble became unreadable: ${pinkRatio}`,
+      );
+    }
     if (mode === "dark") {
-      const rose = page.locator(".transcript-entry").filter({ hasText: "Deep rose words" });
-      const roseCover = await rose
-        .locator(".markup-scrim")
-        .evaluate((el) => getComputedStyle(el).backgroundColor);
       const brightGreen = page
         .locator(".transcript-entry")
-        .filter({ hasText: "Bright green on a dark bubble" });
+        .filter({ hasText: "Bright green words on the Player bubble" });
       await brightGreen.waitFor();
       check(
         (await brightGreen.locator(".markup-scrim").count()) === 0,
-        "Dark green sample unexpectedly has a WCAG scrim",
+        "Readable bright green text gained an unnecessary backing in dark mode",
       );
-      await scrimMethod.selectOption("APCA_FILTER");
-      check(
-        (await brightGreen.locator(".markup-scrim").count()) === 0,
-        "APCA filter added a scrim where the current mode needs none",
-      );
-      for (const cutoff of [40, 55, 60]) {
-        await page.getByRole("slider", { name: "APCA scrim cutoff" }).evaluate((el, value) => {
-          el.value = String(value);
-          el.dispatchEvent(new Event("input", { bubbles: true }));
-        }, cutoff);
-        check(
-          (await rose
-            .locator(".markup-scrim")
-            .evaluate((el) => getComputedStyle(el).backgroundColor)) === roseCover,
-          "Changing the APCA cutoff changed a needed scrim's colour or strength",
-        );
-      }
-      await scrimMethod.selectOption("WCAG21");
     }
     await page
       .locator('[data-tool="Visual Lab"]')
@@ -1591,13 +1487,17 @@ async function authoredPresentationChecks(page) {
     await page.locator("[data-settings-trigger]").click();
     await portalUsesTheme("dialog-content");
     themes.push(
-      await page.evaluate(() => ({
-        surface: getComputedStyle(document.documentElement).getPropertyValue(
-          "--theme-surface-floating",
-        ),
-        width: document.querySelector(".transcript-scroll").getBoundingClientRect().width,
-        media: document.querySelector(".stage-media")?.getAttribute("src"),
-      })),
+      await page.evaluate(
+        (greenInk) => ({
+          surface: getComputedStyle(document.documentElement).getPropertyValue(
+            "--theme-surface-floating",
+          ),
+          greenInk,
+          width: document.querySelector(".transcript-scroll").getBoundingClientRect().width,
+          media: document.querySelector(".stage-media")?.getAttribute("src"),
+        }),
+        greenInk,
+      ),
     );
     await transcriptScroll.evaluate((element) => {
       element.scrollTop = (element.scrollHeight - element.clientHeight) / 2;
@@ -1615,6 +1515,10 @@ async function authoredPresentationChecks(page) {
     );
   }
   check(themes[0].surface !== themes[1].surface, "Theme toggle did not change the live palette");
+  check(
+    themes[0].greenInk !== themes[1].greenInk,
+    "One-sided authored ink did not follow the Player palette",
+  );
   check(
     themes[0].width === themes[1].width && themes[0].media === themes[1].media,
     "Theme toggle changed transcript geometry or authored media",
