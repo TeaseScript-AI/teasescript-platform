@@ -4,7 +4,7 @@ import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Message, MessageAvatar, MessageContent, MessageHeader } from "@/components/ui/message";
 import type { PlayerSpeakerPresentation, PlayerTranscriptEntryPresentation } from "../../../model.js";
 import TranscriptMarkup from "./TranscriptMarkup.vue";
-import { cornerClass, nameOf, resolveAppearance } from "./transcriptPresentation";
+import { nameOf, resolveAppearance } from "./transcriptPresentation";
 
 const props = defineProps<{
   entry: PlayerTranscriptEntryPresentation;
@@ -58,7 +58,8 @@ const name = !player && !props.continues ? nameOf(props.speakers, props.entry) :
         <BubbleContent
           class="text-base/normal"
           :class="[
-            cornerClass(continues, continued, player),
+            continues && (player ? 'rounded-tr-sm' : 'rounded-tl-sm'),
+            continued && (player ? 'rounded-br-sm' : 'rounded-bl-sm'),
             player ? '' : 'message-speaker',
             appearance.panel ? 'message-authored' : '',
           ]"

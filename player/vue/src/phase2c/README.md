@@ -15,6 +15,12 @@ plus exactly `rounded-[inherit]`, `transition-[width]`, and `transition-[left,ri
 component mechanics. `no-unknown-classes` exempts seven exact structural or debug hooks listed in
 `eslint.design.config.mjs`; these hooks do not claim to generate Tailwind CSS.
 
+The enabled rules currently produce no warnings and use no `eslint-disable` directives. The preview
+theme declares the shared `destructive` and `input` roles. `TranscriptMessage.vue` exposes its four
+literal corner classes to Tailwind and the linter. In this ESLint/Vue setup, HTML
+`eslint-disable` comments do not suppress template diagnostics; a directive in `<script>` disables
+a rule for the whole file.
+
 `no-restyle` and `no-inline-styles` are entirely off in this trial; no files or components receive
 partial enforcement. The full-rule trial reported 20 warnings from each. Before considering a
 `no-restyle` contract, assess whether Composer's Textarea overrides, the panel settings Button's

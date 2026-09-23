@@ -41,14 +41,6 @@ export function nameOf(
   return entry.kind === "message" ? (speakers[entry.speakerId]?.name ?? "").trim() : "";
 }
 
-// Keep literal classes so Tailwind can discover every grouping variant.
-export function cornerClass(continues: boolean, continued: boolean, player: boolean) {
-  const classes: string[] = [];
-  if (continues) classes.push(player ? "rounded-tr-sm" : "rounded-tl-sm");
-  if (continued) classes.push(player ? "rounded-br-sm" : "rounded-bl-sm");
-  return classes.join(" ");
-}
-
 export function resolveAppearance(
   entry: PlayerTranscriptEntryPresentation,
   palette: TranscriptPalette,
