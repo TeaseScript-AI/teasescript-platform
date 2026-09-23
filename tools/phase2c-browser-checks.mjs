@@ -1434,6 +1434,13 @@ async function authoredPresentationChecks(page) {
       const nearWhite = readabilityFor("#f8f8f8", "#f07080", mode);
       const red = readabilityFor("#ff0000", "#111318", mode);
       const whiteYellow = readabilityFor("#ffffff", "#ffff00", mode);
+      const darkPink = readabilityFor("#f157b3", "#302b27", mode);
+      const pinkTeal = readabilityFor("#f157b3", "#178b8b", mode);
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      context.fillStyle = pinkTeal.ink;
+      context.fillRect(0, 0, 1, 1);
+      const [redChannel, greenChannel, blueChannel] = context.getImageData(0, 0, 1, 1).data;
       return (
         magenta.cover === null &&
         magenta.ink === "#ff00ff" &&
@@ -1443,7 +1450,13 @@ async function authoredPresentationChecks(page) {
         red.ink !== "#ff0000" &&
         red.cover === null &&
         whiteYellow.ink === "rgb(255 255 255)" &&
-        whiteYellow.cover !== null
+        whiteYellow.cover !== null &&
+        darkPink.ink === "#f157b3" &&
+        darkPink.cover === null &&
+        Math.max(redChannel, greenChannel, blueChannel) -
+          Math.min(redChannel, greenChannel, blueChannel) >
+          50 &&
+        (pinkTeal.ink !== "#f157b3" || pinkTeal.cover !== null)
       );
     }),
     "Adaptive treatment did not preserve readable colours or protect difficult pairs",

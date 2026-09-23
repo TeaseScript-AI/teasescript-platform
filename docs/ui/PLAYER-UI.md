@@ -438,15 +438,14 @@ contract reports no authored choice, the Player supplies one. Prose has no avata
 to centre, uses the same width limits as bubbles, and has no panel unless the author supplies a background.
 
 When an authored foreground has no authored background at its own presentation level, the Player measures it against
-the rendered surface unless an inline authored background encloses it. It leaves visibly readable pairs alone, preserves
-the exact foreground with a subtle local backing when that is sufficient, and otherwise adjusts its lightness while
-retaining its hue where the display gamut allows and its original light/dark direction. Harder pairs may need both
-changes. Inline coloured text is measured against its balloon, even when that balloon has an authored background. A
-message-level foreground/background pair and authored text inside an inline background (including inherited message
-colour) remain unchanged; compile-time feedback for a poorly contrasting authored pair is tracked in #434. The visual
-fallback for one-sided colours is not a universal WCAG 4.5:1 guarantee: APCA screens the ordinary treatment because a
-WCAG-only scrim can reverse polarity and produce heavy bands. The experimental high-contrast theme setting gives
-one-sided colours stronger treatment; explicit authored pairs still remain author-owned.
+the rendered surface unless an inline authored background encloses it. It leaves readable pairs alone using APCA or a
+WCAG ratio backed by a minimum APCA score; neither is a universal readability guarantee. For other pairs it compares a
+subtle local backing with an ink lightness change by colour difference, and can combine both when gamut mapping would
+wash out the authored colour. It retains the ink's original light/dark direction. Inline coloured text is measured
+against its balloon, even when that balloon has an authored background. A message-level foreground/background pair and
+authored text inside an inline background (including inherited message colour) remain unchanged; compile-time feedback
+for a poorly contrasting authored pair is tracked in #434. The experimental high-contrast theme setting gives one-sided
+colours stronger treatment; explicit authored pairs remain author-owned.
 
 An authored typeface uses the theme font stack as its fallback. Font bundling is tracked in
 [`RELEASE-ROADMAP.md`](../planning/RELEASE-ROADMAP.md).

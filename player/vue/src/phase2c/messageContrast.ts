@@ -7,7 +7,9 @@ const SEARCH_MARGIN = 0.05;
 const ENHANCED_WCAG_TARGET = 7;
 // Standard is a visually tuned treatment, not an APCA or WCAG conformance claim.
 const STANDARD_APCA_TARGET = 55;
+const MINIMUM_APCA_WITH_WCAG = 40;
 const SUBTLE_COVER_LIMIT = 0.08;
+const MAX_IDENTITY_COVER = 0.35;
 
 let context: CanvasRenderingContext2D | null = null;
 
@@ -59,6 +61,10 @@ function ratio(first: number, second: number) {
 
 function rgb(channels: readonly [number, number, number]) {
   return `rgb(${channels[0]} ${channels[1]} ${channels[2]})`;
+}
+
+function chromaOf(channels: readonly [number, number, number]) {
+  return new Color(rgb(channels)).to("oklch").coords[1]!;
 }
 
 function byte(value: number | null | undefined) {
@@ -152,16 +158,27 @@ export function readabilityFor(
     adjustedBackground: readonly [number, number, number],
   ) => {
     const apca = Math.abs(Color.contrast(rgb(adjustedBackground), rgb(adjustedInk), "APCA"));
+    const wcag = ratio(luminance(adjustedInk), luminance(adjustedBackground));
+    // A WCAG pass must not override very weak APCA on a chromatic pair.
     return enhanced
-      ? Math.min(
-          ratio(luminance(adjustedInk), luminance(adjustedBackground)) / ENHANCED_WCAG_TARGET,
+      ? Math.min(wcag / ENHANCED_WCAG_TARGET, apca / (STANDARD_APCA_TARGET + 0.5))
+      : Math.max(
           apca / (STANDARD_APCA_TARGET + 0.5),
-        )
-      : apca;
+          Math.min(
+            wcag / (WCAG_SCRIM_TARGET + SEARCH_MARGIN),
+            apca / (MINIMUM_APCA_WITH_WCAG + 0.5),
+          ),
+        );
   };
-  if (score(ink, background) >= (enhanced ? 1 : STANDARD_APCA_TARGET))
+  const originalWcag = ratio(inkLuminance, backgroundLuminance);
+  if (
+    enhanced
+      ? originalWcag >= ENHANCED_WCAG_TARGET && Math.abs(originalApca) >= STANDARD_APCA_TARGET
+      : Math.abs(originalApca) >= STANDARD_APCA_TARGET ||
+        (originalWcag >= WCAG_SCRIM_TARGET && Math.abs(originalApca) >= MINIMUM_APCA_WITH_WCAG)
+  )
     return { ink: colour, cover: null };
-  const target = enhanced ? 1 + SEARCH_MARGIN / ENHANCED_WCAG_TARGET : STANDARD_APCA_TARGET + 0.5;
+  const target = enhanced ? 1 + SEARCH_MARGIN / ENHANCED_WCAG_TARGET : 1;
 
   const cover = minimalAmount(
     (amount) =>
@@ -171,14 +188,53 @@ export function readabilityFor(
       ),
     target,
   );
-  if (cover !== null && cover <= SUBTLE_COVER_LIMIT)
-    return {
-      ink: colour,
-      cover: `rgb(${backgroundPole} ${backgroundPole} ${backgroundPole} / ${cover})`,
-    };
-
   const inkAmount = minimalAmount((amount) => score(adjustInk(amount), background), target);
-  if (inkAmount !== null) return { ink: rgb(adjustInk(inkAmount)), cover: null };
+  if (cover !== null && cover <= SUBTLE_COVER_LIMIT) {
+    const coveredBackground = paint(
+      backdrop,
+      `rgb(${backgroundPole} ${backgroundPole} ${backgroundPole} / ${cover})`,
+    );
+    const backingChange = Color.deltaE(rgb(background), rgb(coveredBackground), "OK");
+    const inkChange =
+      inkAmount === null ? Infinity : Color.deltaE(rgb(ink), rgb(adjustInk(inkAmount)), "OK");
+    if (backingChange < inkChange)
+      return {
+        ink: colour,
+        cover: `rgb(${backgroundPole} ${backgroundPole} ${backgroundPole} / ${cover})`,
+      };
+  }
+  if (inkAmount !== null) {
+    const adjustedInk = adjustInk(inkAmount);
+    const adjustedChroma = chromaOf(adjustedInk);
+    if (chroma! > 0.15 && adjustedChroma < chroma! / 3) {
+      // Gamut mapping can wash a saturated authored colour almost to grey.
+      let preserved = 0;
+      let faded = inkAmount;
+      for (let step = 0; step < 12; step += 1) {
+        const candidate = (preserved + faded) / 2;
+        if (chromaOf(adjustInk(candidate)) >= chroma! / 2) preserved = candidate;
+        else faded = candidate;
+      }
+      const protectedInk = adjustInk(preserved);
+      const protectedCover = minimalAmount(
+        (amount) =>
+          score(
+            protectedInk,
+            paint(
+              backdrop,
+              `rgb(${backgroundPole} ${backgroundPole} ${backgroundPole} / ${amount})`,
+            ),
+          ),
+        target,
+      );
+      if (protectedCover !== null && protectedCover <= MAX_IDENTITY_COVER)
+        return {
+          ink: rgb(protectedInk),
+          cover: `rgb(${backgroundPole} ${backgroundPole} ${backgroundPole} / ${protectedCover})`,
+        };
+    }
+    return { ink: rgb(adjustedInk), cover: null };
+  }
 
   const amount = minimalAmount(
     (value) =>
