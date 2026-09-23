@@ -3,6 +3,18 @@
 This is the Greenfield preview, not the production Player entry point.
 Keep experimental fixtures separate from the components that own settled behavior.
 
+## Optional design lint trial
+
+`npm run lint:design:phase2c` checks the preview and its local `components/ui` source with
+`@shadcn/lint` through ESLint. The nearby `components.json` selects the preview theme rather than
+the maintained Player theme. Warnings are advisory while this design candidate is evaluated.
+
+ESLint and its Vue/TypeScript parsers are needed because Oxlint cannot inspect Vue templates through
+JavaScript plugins; the existing Oxlint check remains the normal repository lint. These pinned
+packages run only during development checks and read local source/theme files, adding no browser
+runtime code. Reassess parser compatibility, package audit results, and the trial's value before
+making it a required check or carrying it into the selected Player.
+
 ## Responsibility boundaries
 
 - `App.vue` composes the Player, development scenarios and tool contents. It installs `usePlayerKeyboardFocus.ts`
