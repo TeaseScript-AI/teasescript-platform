@@ -43,7 +43,7 @@ transcript fixtures switch App back to local preview replies. Composer dimension
 
 Visual Lab's button-text comparison switches WCAG/APCA ink only, preserving fills, typography, Send and transcript.
 It uses Color.js's APCA 0.0.98G implementation to compare absolute black/white scores, not to certify font-size/weight suitability.
-Its separate transcript-scrim comparison uses the least black/white cover reaching an adjustable APCA target (initially Lc 75), or the highest attainable contrast when neither can reach it. This is a visual trial; authored text/background pairs remain untouched.
+Its separate transcript-scrim comparison uses the least black/white cover reaching an adjustable APCA target (initially Lc 60). An unattainable target falls back to the current WCAG result. This is a visual trial; authored text/background pairs remain untouched.
 
 Shared chrome geometry lives in `style.css`; the
 [Player geometry contract](../../../../docs/ui/PLAYER-UI.md#global-geometry-and-overflow) records dimensions and their tuning status.

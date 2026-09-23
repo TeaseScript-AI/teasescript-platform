@@ -46,7 +46,7 @@ const themeIntent = ref<PlayerThemeIntent>({
 });
 const inkMethod = ref<InkContrastMethod>("WCAG21");
 provide(playerInkComparison, inkMethod);
-const scrimPreview = ref<ScrimComparison>({ method: "WCAG21", apcaTarget: 75 });
+const scrimPreview = ref<ScrimComparison>({ method: "WCAG21", apcaTarget: 60 });
 provide(scrimComparison, scrimPreview);
 usePlayerTheme(themeIntent, inkMethod);
 function toggleThemeMode() {
@@ -160,8 +160,8 @@ async function toggleFullscreen() {
             </label>
             <label v-if="scrimPreview.method === 'APCA'" class="grid gap-2">
               APCA target · Lc {{ scrimPreview.apcaTarget }}
-              <input v-model.number="scrimPreview.apcaTarget" aria-label="APCA scrim target" type="range" min="60" max="90" step="5" />
-              <span class="text-xs">Visual trial. If neither black nor white reaches the target, the strongest attainable cover is used.</span>
+              <input v-model.number="scrimPreview.apcaTarget" aria-label="APCA scrim target" type="range" min="40" max="90" step="5" />
+              <span class="text-xs">Visual trial. If this target is unreachable, the current WCAG result is used.</span>
             </label>
             <ThemeLab :intent="themeIntent"
               @update:intent="setThemeIntent" />

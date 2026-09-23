@@ -60,7 +60,7 @@ function coverFor(
   score: (channels: readonly [number, number, number]) => number,
 ) {
   const maximum = score(paint(`rgb(${pole})`));
-  if (maximum < target) return { pole, opacity: 1, maximum, reachable: false };
+  if (maximum < target) return { pole, opacity: 1, reachable: false };
   let insufficient = 0;
   let sufficient = 1;
   for (let step = 0; step < 12; step += 1) {
@@ -69,12 +69,16 @@ function coverFor(
     if (score(candidate) >= target) sufficient = cover;
     else insufficient = cover;
   }
-  return { pole, opacity: sufficient, maximum, reachable: true };
+  return { pole, opacity: sufficient, reachable: true };
 }
 
-export function scrimFor(colour: string, backdrop: string, comparison?: ScrimComparison) {
+export function scrimFor(
+  colour: string,
+  backdrop: string,
+  comparison?: ScrimComparison,
+): string | null {
   const method = comparison?.method ?? "WCAG21";
-  const target = method === "APCA" ? (comparison?.apcaTarget ?? 75) : 4.6;
+  const target = method === "APCA" ? (comparison?.apcaTarget ?? 60) : 4.6;
   const textChannels = paint(colour);
   const backdropChannels = paint(backdrop);
   const text = luminance(textChannels);
@@ -87,12 +91,12 @@ export function scrimFor(colour: string, backdrop: string, comparison?: ScrimCom
     method === "APCA" ? ["0 0 0", "255 255 255"] : [text > 0.179 ? "0 0 0" : "255 255 255"];
   const candidates = poles.map((pole) => coverFor(backdrop, pole, target, score));
   const reachable = candidates.filter((candidate) => candidate.reachable);
-  const selected =
-    reachable.length > 0
-      ? reachable.reduce((best, candidate) => (candidate.opacity < best.opacity ? candidate : best))
-      : candidates.reduce((best, candidate) =>
-          candidate.maximum > best.maximum ? candidate : best,
-        );
+  // A fixed authored ink can make an APCA target impossible even on pure black or white.
+  if (reachable.length === 0)
+    return method === "APCA" ? scrimFor(colour, backdrop) : `rgb(${poles[0]} / 1)`;
+  const selected = reachable.reduce((best, candidate) =>
+    candidate.opacity < best.opacity ? candidate : best,
+  );
   const opacity =
     method === "APCA" ? Math.ceil(selected.opacity * 1000) / 1000 : selected.opacity.toFixed(3);
   return `rgb(${selected.pole} / ${opacity})`;

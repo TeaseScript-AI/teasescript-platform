@@ -1315,16 +1315,12 @@ async function authoredPresentationChecks(page) {
   await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
   await page.getByRole("button", { name: "Authored colour sample", exact: true }).click();
   const scrimMethod = page.getByRole("combobox", { name: "Transcript scrim contrast" });
-  const rose = page.locator(".transcript-entry").filter({ hasText: "Deep rose words" });
-  await rose.waitFor();
-  check(
-    (await rose.locator(".markup-scrim").count()) === 0,
-    "WCAG sample unexpectedly has a scrim",
-  );
+  const green = page.locator(".transcript-entry").filter({ hasText: "This green remains clear" });
+  await green.locator(".markup-scrim").waitFor();
   await scrimMethod.selectOption("APCA");
-  await rose.locator(".markup-scrim").waitFor();
+  await green.locator(".markup-scrim").waitFor({ state: "detached" });
   await scrimMethod.selectOption("WCAG21");
-  await rose.locator(".markup-scrim").waitFor({ state: "detached" });
+  await green.locator(".markup-scrim").waitFor();
   const painted = (selector) =>
     page.evaluate((selector) => {
       const element = document.querySelector(selector);
@@ -1389,6 +1385,22 @@ async function authoredPresentationChecks(page) {
     await page.evaluate(async () => {
       await Promise.allSettled(document.getAnimations().map((animation) => animation.finished));
     });
+    if (mode === "dark") {
+      const brightGreen = page
+        .locator(".transcript-entry")
+        .filter({ hasText: "Bright green on a dark bubble" });
+      await brightGreen.waitFor();
+      check(
+        (await brightGreen.locator(".markup-scrim").count()) === 0,
+        "Dark green sample unexpectedly has a WCAG scrim",
+      );
+      await scrimMethod.selectOption("APCA");
+      check(
+        (await brightGreen.locator(".markup-scrim").count()) === 0,
+        "Unreachable APCA target drew an opaque scrim",
+      );
+      await scrimMethod.selectOption("WCAG21");
+    }
     await page
       .locator('[data-tool="Visual Lab"]')
       .getByRole("button", { name: "Panel settings", exact: true })

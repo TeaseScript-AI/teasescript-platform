@@ -179,6 +179,16 @@ const authoredSources: readonly (readonly [
     "Deep rose words against a Player-owned bubble. The two contrast methods can treat this colour differently.",
     authored("bubble", "#aa3355", null),
   ],
+  [
+    "guide",
+    "This green remains clear on a light bubble, even when the contrast methods disagree.",
+    authored("bubble", "#008000", null),
+  ],
+  [
+    "guide",
+    "Bright green on a dark bubble should not gain an opaque black strip.",
+    authored("bubble", "#00c000", null),
+  ],
   ["keeper", "Something said out loud.", authored("bubble", null, null)],
   ["keeper", "Then a passage that stands on its own.", authored("prose", null, null)],
   ["keeper", "And speaking again afterwards.", authored("bubble", null, null)],
