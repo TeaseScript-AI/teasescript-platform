@@ -58,7 +58,7 @@ selected revision in `tools/oxlint/anti-slop/`; upgrades require reviewing chang
 The local adaptations allow precise contracts and honest `unknown` dictionaries and restrict assertion-comment scope.
 Do not enable new upstream defaults as an incidental upgrade.
 
-This avoids adding ESLint, a schema library, another test runner, or a second type-checking engine. Node runs the rule
-fixtures directly; the existing compiler type-checks their source. The separate exception checker reuses the existing
-`ts-morph` parser dependency. The costs are maintaining the selected plugin source and reviewing justified exceptions;
-the plugin's lexical analysis does not prove cross-file type safety or replace runtime boundary tests.
+This type-evidence route avoids a schema library, another test runner, and a second type-checking engine. Node runs
+the rule fixtures directly; the existing compiler type-checks their source. The separate exception checker reuses the
+existing `ts-morph` parser dependency. The costs are maintaining the selected plugin source and reviewing justified
+exceptions; the plugin's lexical analysis does not prove cross-file type safety or replace runtime boundary tests.
