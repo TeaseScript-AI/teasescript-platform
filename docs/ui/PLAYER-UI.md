@@ -437,9 +437,11 @@ The runtime adapter supplies resolved message presentation according to the
 contract reports no authored choice, the Player supplies one. Prose has no avatar, defaults its block and text alignment
 to centre, uses the same width limits as bubbles, and has no panel unless the author supplies a background.
 
-Authored colours are preserved. When authored text meets a Player-owned surface, the Player measures the painted pair
-and adds the smallest scrim that restores readable contrast. A foreground/background pair authored together remains
-unchanged; compile-time feedback for a poorly contrasting authored pair is tracked in #434.
+Authored colours are preserved. When an authored foreground has no background at its own presentation level, the Player
+measures it against the rendered surface and adds the smallest scrim that restores readable contrast. Inline coloured
+text is therefore measured against its balloon, even when that balloon has an authored background. A message-level
+foreground/background pair, or an inline run with both colours, remains unchanged; compile-time feedback for a poorly
+contrasting authored pair is tracked in #434.
 
 An authored typeface uses the theme font stack as its fallback. Font bundling is tracked in
 [`RELEASE-ROADMAP.md`](../planning/RELEASE-ROADMAP.md).

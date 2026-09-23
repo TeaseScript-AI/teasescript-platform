@@ -43,7 +43,7 @@ transcript fixtures switch App back to local preview replies. Composer dimension
 
 Visual Lab's button-text comparison switches WCAG/APCA ink only, preserving fills, typography, Send and transcript.
 It uses Color.js's APCA 0.0.98G implementation to compare absolute black/white scores, not to certify font-size/weight suitability.
-The transcript-scrim preview defaults to an Lc 55 filter, with strict WCAG 4.5:1 available for comparison. APCA only filters out WCAG scrims when the original text/background pair clears the cutoff; it never chooses a scrim colour or opacity. This visual trial does not certify readability for 16px regular text; authored text/background pairs remain untouched.
+The transcript-scrim preview defaults to WCAG 4.5:1. Visual Lab can opt into an Lc 55 APCA filter that only removes current scrims; it never chooses their colour or opacity. The filter can leave 16px text below readable contrast, so it is experimental. Foreground/background pairs authored on the same message or text run remain untouched.
 
 Shared chrome geometry lives in `style.css`; the
 [Player geometry contract](../../../../docs/ui/PLAYER-UI.md#global-geometry-and-overflow) records dimensions and their tuning status.

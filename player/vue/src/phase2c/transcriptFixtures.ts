@@ -140,8 +140,8 @@ const authoredSources: readonly (readonly [
   ],
   [
     "guide",
-    "A colour behind the words. What the words themselves become is measured against it, because the author never said.",
-    authored("bubble", null, "#4a2d6b"),
+    "A colour behind the words. What the words themselves become is measured against it, because the author never said. [color=#ffffff]White words on an authored coral bubble.[/color]",
+    authored("bubble", null, "#f07080"),
   ],
   [
     "guide",
@@ -181,7 +181,7 @@ const authoredSources: readonly (readonly [
   ],
   [
     "guide",
-    "This green remains clear on a light bubble, even when the contrast methods disagree. [color=#6e7777]Midtone grey near the contrast boundary.[/color]",
+    "This green exposes a contrast disagreement on a light bubble. [color=#7c7c7c]Mid-grey text needs a stronger check.[/color]",
     authored("bubble", "#008000", null),
   ],
   [

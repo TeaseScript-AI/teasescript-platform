@@ -63,7 +63,7 @@ const themeIntent = ref<PlayerThemeIntent>({
 });
 const inkMethod = ref<InkContrastMethod>("WCAG21");
 provide(playerInkComparison, inkMethod);
-const scrimPreview = ref<ScrimComparison>({ mode: "APCA_FILTER", apcaCutoff: 55 });
+const scrimPreview = ref<ScrimComparison>({ mode: "WCAG21", apcaCutoff: 55 });
 provide(scrimComparison, scrimPreview);
 usePlayerTheme(themeIntent, inkMethod);
 function toggleThemeMode() {
@@ -196,8 +196,8 @@ async function toggleFullscreen() {
             aria-label="Transcript scrim contrast"
             class="min-w-0 rounded border bg-[var(--surface-component)] p-2"
           >
-            <option value="APCA_FILTER">Current preview · fewer scrims</option>
-            <option value="WCAG21">Strict WCAG {{ WCAG_SCRIM_TARGET }}:1</option>
+            <option value="WCAG21">Current · WCAG {{ WCAG_SCRIM_TARGET }}:1</option>
+            <option value="APCA_FILTER">APCA filter · experiment</option>
           </select>
         </label>
         <label v-if="scrimPreview.mode === 'APCA_FILTER'" class="grid gap-2">
@@ -211,8 +211,8 @@ async function toggleFullscreen() {
             step="5"
           />
           <span class="text-xs"
-            >Visual trial: APCA can remove a current WCAG scrim, never add one or change its colour.
-            This is not an APCA readability guarantee for 16px text.</span
+            >Visual trial: this filter can remove scrims even when 16px text falls below WCAG 4.5:1.
+            It cannot add or recolour a scrim.</span
           >
         </label>
         <ThemeLab :intent="themeIntent" @update:intent="setThemeIntent" />

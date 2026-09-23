@@ -1316,17 +1316,11 @@ async function authoredPresentationChecks(page) {
   await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
   await page.getByRole("button", { name: "Authored colour sample", exact: true }).click();
   const scrimMethod = page.getByRole("combobox", { name: "Transcript scrim contrast" });
-  const green = page.locator(".transcript-entry").filter({ hasText: "This green remains clear" });
+  const green = page.locator(".transcript-entry").filter({ hasText: "This green exposes" });
   check(
-    (await scrimMethod.inputValue()) === "APCA_FILTER",
-    "The preview did not start with the reduced-scrim comparison",
+    (await scrimMethod.inputValue()) === "WCAG21",
+    "The preview did not start with the readable-contrast comparison",
   );
-  await green.waitFor();
-  check(
-    (await green.locator(".markup-scrim").count()) === 0,
-    "The preview added an unnecessary light-theme scrim",
-  );
-  await scrimMethod.selectOption("WCAG21");
   await green.locator(".markup-scrim").first().waitFor();
   await scrimMethod.selectOption("APCA_FILTER");
   await green.locator(".markup-scrim").first().waitFor({ state: "detached" });
@@ -1366,7 +1360,7 @@ async function authoredPresentationChecks(page) {
   const prose = '.transcript-entry .prose:not([data-panel])[style*="color"] .markup-paragraph span';
   const boundary = green
     .locator(".markup-scrim")
-    .filter({ hasText: "Midtone grey near the contrast boundary" });
+    .filter({ hasText: "Mid-grey text needs a stronger check" });
   const boundaryRatio = await painted(boundary);
   check(
     boundaryRatio >= 4.5,
@@ -1374,6 +1368,80 @@ async function authoredPresentationChecks(page) {
   );
   const boundaryCover = await boundary.evaluate((el) => getComputedStyle(el).backgroundColor);
   check(boundaryCover.startsWith("rgba("), "Midtone authored text received an opaque scrim");
+  const coral = page
+    .locator(".transcript-entry")
+    .filter({ hasText: "White words on an authored coral bubble" });
+  const coralText = coral
+    .locator(".markup-scrim")
+    .filter({ hasText: "White words on an authored coral bubble" });
+  const transcriptScroll = page.locator(".transcript-scroll");
+  await transcriptScroll.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await coralText.waitFor();
+  check(
+    (await painted(coralText)) >= 4.5,
+    "Inline authored text on an authored bubble did not reach readable contrast",
+  );
+  const contrastFailures = await page.evaluate(async () => {
+    const moduleUrl = new URL("/src/phase2c/messageContrast.ts", location.origin);
+    const { scrimFor } = await import(moduleUrl.href);
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    const luminance = (layers) => {
+      context.clearRect(0, 0, 1, 1);
+      for (const layer of layers) {
+        context.fillStyle = layer;
+        context.fillRect(0, 0, 1, 1);
+      }
+      const channels = [...context.getImageData(0, 0, 1, 1).data].slice(0, 3);
+      const [red, green, blue] = channels.map((channel) => {
+        const value = channel / 255;
+        return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    };
+    const ratio = (text, layers) => {
+      const foreground = luminance([text]);
+      const background = luminance(layers);
+      return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+    };
+    const texts = [
+      "#ffffff",
+      "#000000",
+      "#7c7c7c",
+      "#008000",
+      "#ff00ff",
+      "#aa3355",
+      "#00c000",
+      "#ffff00",
+    ];
+    const backgrounds = [
+      "#ffffff",
+      "#eee7e3",
+      "#302b27",
+      "#000000",
+      "#f07080",
+      "#808080",
+      "#00ff00",
+      "#800080",
+    ];
+    const failures = [];
+    for (const background of backgrounds) {
+      for (const text of texts) {
+        const cover = scrimFor(text, background);
+        const before = ratio(text, [background]);
+        const after = ratio(text, cover === null ? [background] : [background, cover]);
+        if ((before >= 4.5 && cover !== null) || after < 4.5)
+          failures.push({ text, background, before, after, cover });
+      }
+    }
+    return failures.slice(0, 5);
+  });
+  check(
+    contrastFailures.length === 0,
+    `Representative authored colour pairs violate scrim contrast: ${JSON.stringify(contrastFailures)}`,
+  );
   const portalUsesTheme = async (slot) => {
     const portal = page.locator(`[data-slot="${slot}"]`);
     await portal.waitFor();
@@ -1452,6 +1520,10 @@ async function authoredPresentationChecks(page) {
         media: document.querySelector(".stage-media")?.getAttribute("src"),
       })),
     );
+    await transcriptScroll.evaluate((element) => {
+      element.scrollTop = (element.scrollHeight - element.clientHeight) / 2;
+    });
+    await page.locator(link).waitFor();
     const linkRatio = await painted(page.locator(link));
     check(
       linkRatio >= 4.5,
@@ -1468,6 +1540,10 @@ async function authoredPresentationChecks(page) {
     themes[0].width === themes[1].width && themes[0].media === themes[1].media,
     "Theme toggle changed transcript geometry or authored media",
   );
+  await transcriptScroll.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await page.getByText("And speaking again afterwards.").waitFor();
   const grouping = await page.evaluate(() => {
     const rows = [...document.querySelectorAll(".transcript-entry")];
     const spoken = rows.filter((row) => row.dataset.speakerId === "keeper");
