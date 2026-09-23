@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { h } from "vue";
+import { h, inject } from "vue";
 import type { PlayerMarkupPiece } from "../../../message-markup.js";
 import { scrimFor } from "./messageContrast";
+import { scrimComparison } from "./scrimComparison";
 
 const props = defineProps<{
   pieces: readonly PlayerMarkupPiece[];
@@ -9,11 +10,12 @@ const props = defineProps<{
   cover: string | null;
   link: string;
 }>();
+const activeScrimComparison = inject(scrimComparison, undefined);
 function authoredScrim(piece: { style: Readonly<Record<string, string>>; href: string | null }) {
   if (piece.style["backgroundColor"] !== undefined) return null;
   const colour = piece.style["color"] ?? (piece.href === null ? undefined : props.link);
   if (colour === undefined) return props.cover;
-  return scrimFor(colour, props.backdrop);
+  return scrimFor(colour, props.backdrop, activeScrimComparison?.value);
 }
 // The canonical preparation helper supplies validated text/style/link pieces, never HTML.
 function renderLine() {

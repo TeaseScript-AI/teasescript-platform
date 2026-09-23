@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { elementScroll, observeElementRect, useVirtualizer } from "@tanstack/vue-virtual";
 import { useResizeObserver } from "@vueuse/core";
 import { ArrowDown } from "@lucide/vue";
@@ -9,6 +9,7 @@ import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } fro
 import TranscriptMessage from "./TranscriptMessage.vue";
 import { backdropBehind, resolveColour } from "./messageContrast";
 import { adjoins, resolveAppearance } from "./transcriptPresentation";
+import { scrimComparison } from "./scrimComparison";
 
 const props = defineProps<{
   entries: readonly PlayerTranscriptEntryPresentation[];
@@ -16,6 +17,7 @@ const props = defineProps<{
   revision?: number;
   bottomInset?: number;
 }>();
+const activeScrimComparison = inject(scrimComparison, undefined);
 const scrollElement = ref<HTMLDivElement | null>(null);
 const touching = ref(false);
 const viewportHeight = ref(0);
@@ -99,7 +101,7 @@ onBeforeUnmount(() => { paletteObserver?.disconnect(); });
 const rows = computed(() =>
   virtualizer.value.getVirtualItems().map((item) => {
     const entry = props.entries[item.index]!;
-    return { item, entry, appearance: resolveAppearance(entry, palette.value) };
+    return { item, entry, appearance: resolveAppearance(entry, palette.value, activeScrimComparison?.value) };
   }));
 const showLatest = computed(() => !touching.value && !virtualizer.value.isScrolling &&
   virtualizer.value.getDistanceFromEnd() > Math.max(80, (virtualizer.value.scrollRect?.height ?? 0) / 2));

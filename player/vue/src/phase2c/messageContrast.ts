@@ -1,3 +1,6 @@
+import Color from "colorjs.io";
+import type { ScrimComparison } from "./scrimComparison";
+
 let context: CanvasRenderingContext2D | null = null;
 
 function paint(...layers: readonly string[]) {
@@ -46,19 +49,51 @@ function ratio(first: number, second: number) {
   return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
 }
 
-// Binary search the smallest black or white cover that reaches the contrast target.
-export function scrimFor(colour: string, backdrop: string, target = 4.6) {
-  const text = luminance(paint(colour));
-  const behind = luminance(paint(backdrop));
-  if (ratio(text, behind) >= target) return null;
-  const pole = text > 0.179 ? "0 0 0" : "255 255 255";
+function rgb(channels: readonly [number, number, number]) {
+  return `rgb(${channels[0]} ${channels[1]} ${channels[2]})`;
+}
+
+function coverFor(
+  backdrop: string,
+  pole: string,
+  target: number,
+  score: (channels: readonly [number, number, number]) => number,
+) {
+  const maximum = score(paint(`rgb(${pole})`));
+  if (maximum < target) return { pole, opacity: 1, maximum, reachable: false };
   let insufficient = 0;
   let sufficient = 1;
   for (let step = 0; step < 12; step += 1) {
     const cover = (insufficient + sufficient) / 2;
-    const candidate = luminance(paint(backdrop, `rgb(${pole} / ${cover})`));
-    if (ratio(text, candidate) >= target) sufficient = cover;
+    const candidate = paint(backdrop, `rgb(${pole} / ${cover})`);
+    if (score(candidate) >= target) sufficient = cover;
     else insufficient = cover;
   }
-  return `rgb(${pole} / ${sufficient.toFixed(3)})`;
+  return { pole, opacity: sufficient, maximum, reachable: true };
+}
+
+export function scrimFor(colour: string, backdrop: string, comparison?: ScrimComparison) {
+  const method = comparison?.method ?? "WCAG21";
+  const target = method === "APCA" ? (comparison?.apcaTarget ?? 75) : 4.6;
+  const textChannels = paint(colour);
+  const backdropChannels = paint(backdrop);
+  const text = luminance(textChannels);
+  const score = (channels: readonly [number, number, number]) =>
+    method === "APCA"
+      ? Math.abs(Color.contrast(rgb(channels), rgb(textChannels), "APCA"))
+      : ratio(text, luminance(channels));
+  if (score(backdropChannels) >= target) return null;
+  const poles =
+    method === "APCA" ? ["0 0 0", "255 255 255"] : [text > 0.179 ? "0 0 0" : "255 255 255"];
+  const candidates = poles.map((pole) => coverFor(backdrop, pole, target, score));
+  const reachable = candidates.filter((candidate) => candidate.reachable);
+  const selected =
+    reachable.length > 0
+      ? reachable.reduce((best, candidate) => (candidate.opacity < best.opacity ? candidate : best))
+      : candidates.reduce((best, candidate) =>
+          candidate.maximum > best.maximum ? candidate : best,
+        );
+  const opacity =
+    method === "APCA" ? Math.ceil(selected.opacity * 1000) / 1000 : selected.opacity.toFixed(3);
+  return `rgb(${selected.pole} / ${opacity})`;
 }

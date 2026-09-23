@@ -174,6 +174,11 @@ const authoredSources: readonly (readonly [
     "And this one was given a colour but nothing to sit on.",
     authored("prose", "#444444", null),
   ],
+  [
+    "guide",
+    "Deep rose words against a Player-owned bubble. The two contrast methods can treat this colour differently.",
+    authored("bubble", "#aa3355", null),
+  ],
   ["keeper", "Something said out loud.", authored("bubble", null, null)],
   ["keeper", "Then a passage that stands on its own.", authored("prose", null, null)],
   ["keeper", "And speaking again afterwards.", authored("bubble", null, null)],

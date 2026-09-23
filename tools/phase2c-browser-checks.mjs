@@ -1314,6 +1314,17 @@ async function authoredPresentationChecks(page) {
   await page.reload();
   await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
   await page.getByRole("button", { name: "Authored colour sample", exact: true }).click();
+  const scrimMethod = page.getByRole("combobox", { name: "Transcript scrim contrast" });
+  const rose = page.locator(".transcript-entry").filter({ hasText: "Deep rose words" });
+  await rose.waitFor();
+  check(
+    (await rose.locator(".markup-scrim").count()) === 0,
+    "WCAG sample unexpectedly has a scrim",
+  );
+  await scrimMethod.selectOption("APCA");
+  await rose.locator(".markup-scrim").waitFor();
+  await scrimMethod.selectOption("WCAG21");
+  await rose.locator(".markup-scrim").waitFor({ state: "detached" });
   const painted = (selector) =>
     page.evaluate((selector) => {
       const element = document.querySelector(selector);

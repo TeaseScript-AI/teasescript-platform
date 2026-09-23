@@ -2,6 +2,7 @@
 import { computed, provide, ref, shallowRef } from "vue";
 import type { InkContrastMethod } from "../../../theme/color.js";
 import { playerInkComparison } from "@/components/playerInkComparison";
+import { scrimComparison, type ScrimComparison } from "./scrimComparison";
 import { useEventListener, useResizeObserver } from "@vueuse/core";
 import ToolLifetimeFixture from "./ToolLifetimeFixture.vue";
 import LayoutDebug from "./LayoutDebug.vue";
@@ -45,6 +46,8 @@ const themeIntent = ref<PlayerThemeIntent>({
 });
 const inkMethod = ref<InkContrastMethod>("WCAG21");
 provide(playerInkComparison, inkMethod);
+const scrimPreview = ref<ScrimComparison>({ method: "WCAG21", apcaTarget: 75 });
+provide(scrimComparison, scrimPreview);
 usePlayerTheme(themeIntent, inkMethod);
 function toggleThemeMode() {
   themeIntent.value = { ...themeIntent.value, mode: themeIntent.value.mode === "dark" ? "light" : "dark" };
@@ -147,6 +150,18 @@ async function toggleFullscreen() {
                 <option value="APCA">APCA · experiment</option>
               </select>
               <span class="text-xs">Compare story-button text only. Send and transcript keep their current appearance.</span>
+            </label>
+            <label class="grid gap-2">
+              Transcript scrim contrast
+              <select v-model="scrimPreview.method" aria-label="Transcript scrim contrast" class="min-w-0 rounded border bg-[var(--surface-component)] p-2">
+                <option value="WCAG21">Current · WCAG 4.6:1</option>
+                <option value="APCA">APCA · experiment</option>
+              </select>
+            </label>
+            <label v-if="scrimPreview.method === 'APCA'" class="grid gap-2">
+              APCA target · Lc {{ scrimPreview.apcaTarget }}
+              <input v-model.number="scrimPreview.apcaTarget" aria-label="APCA scrim target" type="range" min="60" max="90" step="5" />
+              <span class="text-xs">Visual trial. If neither black nor white reaches the target, the strongest attainable cover is used.</span>
             </label>
             <ThemeLab :intent="themeIntent"
               @update:intent="setThemeIntent" />
