@@ -9,6 +9,18 @@ export default [
     plugins: { shadcn },
     rules: {
       "shadcn/no-raw-colors": "warn",
+      "shadcn/no-arbitrary-values": [
+        "warn",
+        {
+          // Responsive geometry and these component mechanics need exact values.
+          allow: [
+            "layout",
+            "rounded-[inherit]",
+            "transition-[width]",
+            "transition-[left,right,width]",
+          ],
+        },
+      ],
       "shadcn/no-unknown-classes": [
         "warn",
         {
