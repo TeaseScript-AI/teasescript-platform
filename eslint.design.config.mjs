@@ -37,6 +37,8 @@ export default [
         },
       ],
       "shadcn/require-static-classes": "warn",
+      "shadcn/no-restyle": "off",
+      "shadcn/no-inline-styles": "off",
     },
   },
 ];

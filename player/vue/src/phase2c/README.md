@@ -9,6 +9,20 @@ Keep experimental fixtures separate from the components that own settled behavio
 `@shadcn/lint` through ESLint. The nearby `components.json` selects the preview theme rather than
 the maintained Player theme. Warnings are advisory while this design candidate is evaluated.
 
+The enabled warnings are `no-raw-colors`, `no-unknown-classes`, `require-static-classes`, and
+`no-arbitrary-values`. The last rule exempts Tailwind's `layout` category for responsive geometry,
+plus exactly `rounded-[inherit]`, `transition-[width]`, and `transition-[left,right,width]` for
+component mechanics. `no-unknown-classes` exempts seven exact structural or debug hooks listed in
+`eslint.design.config.mjs`; these hooks do not claim to generate Tailwind CSS.
+
+`no-restyle` and `no-inline-styles` are entirely off in this trial; no files or components receive
+partial enforcement. The full-rule trial reported 20 warnings from each. Before considering a
+`no-restyle` contract, assess whether Composer's Textarea overrides, the panel settings Button's
+spacing, and transcript typography belong in shared component variants or local Player components.
+In this trial, authored content styles, virtualizer positions, and measured debug geometry remain
+direct runtime values. The inline-style rule cannot exempt every unreadable dynamic object through
+property or component contracts, so its warnings alone do not justify indirect CSS.
+
 ESLint and its Vue/TypeScript parsers are needed because Oxlint cannot inspect Vue templates through
 JavaScript plugins; the existing Oxlint check remains the normal repository lint. These pinned
 packages run only during development checks and read local source/theme files, adding no browser
