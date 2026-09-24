@@ -132,7 +132,7 @@ function center(rect: LayoutRect) {
     </fieldset>
     <section v-if="snapshot && layers.spacing" class="space-y-2 text-xs" aria-label="Layout spacing">
       <p>Green: padding inside its owner. Purple: gap between children. Orange: outer margin. Message styling is not measured.</p>
-      <div v-for="item in snapshot.spacing" :key="`${item.owner}-${item.kind}`" :class="`spacing-key spacing-key-${item.kind}`">
+      <div v-for="item in snapshot.spacing" :key="`${item.owner}-${item.kind}`" class="spacing-key" :data-spacing-kind="item.kind">
         <p class="font-medium">{{ item.owner }} · {{ item.kind }}</p><p>{{ item.values }}</p>
       </div>
     </section>
@@ -152,7 +152,7 @@ function center(rect: LayoutRect) {
       <div v-if="layers.reserves && snapshot.reserve" class="debug-reserve" :style="{ width: `${snapshot.reserve}px` }"><span>Tools reservation</span></div>
       <template v-if="layers.spacing">
         <template v-for="item in snapshot.spacing" :key="`${item.owner}-${item.kind}`">
-          <div v-for="(area, index) in item.areas" :key="index" :class="`debug-spacing debug-spacing-${item.kind}`" :data-spacing-owner="item.owner" :data-spacing-kind="item.kind" :style="box(area)" />
+          <div v-for="(area, index) in item.areas" :key="index" class="debug-spacing" :data-spacing-owner="item.owner" :data-spacing-kind="item.kind" :style="box(area)" />
         </template>
       </template>
       <template v-if="layers.regions">
@@ -174,13 +174,13 @@ function center(rect: LayoutRect) {
 .debug-controls dd { margin: 0 0 0.5rem; font-family: monospace; overflow-wrap: anywhere; }
 .layout-debug-overlay { position: absolute; inset: 0; z-index: 90; overflow: hidden; pointer-events: none; }
 .layout-debug-overlay > div { position: absolute; pointer-events: none; box-sizing: border-box; }
-.debug-spacing-padding { background: rgb(22 163 74 / 14%); border: 1px dotted rgb(22 163 74 / 55%); }
-.debug-spacing-gap { background: rgb(147 51 234 / 12%); border: 1px dotted rgb(147 51 234 / 55%); }
-.debug-spacing-margin { background: rgb(217 119 6 / 12%); border: 1px dotted rgb(217 119 6 / 55%); }
+.debug-spacing[data-spacing-kind="padding"] { background: rgb(22 163 74 / 14%); border: 1px dotted rgb(22 163 74 / 55%); }
+.debug-spacing[data-spacing-kind="gap"] { background: rgb(147 51 234 / 12%); border: 1px dotted rgb(147 51 234 / 55%); }
+.debug-spacing[data-spacing-kind="margin"] { background: rgb(217 119 6 / 12%); border: 1px dotted rgb(217 119 6 / 55%); }
 .spacing-key { border-left: 3px solid; padding-left: 0.5rem; }
-.spacing-key-padding { border-color: #16a34a; }
-.spacing-key-gap { border-color: #9333ea; }
-.spacing-key-margin { border-color: #d97706; }
+.spacing-key[data-spacing-kind="padding"] { border-color: #16a34a; }
+.spacing-key[data-spacing-kind="gap"] { border-color: #9333ea; }
+.spacing-key[data-spacing-kind="margin"] { border-color: #d97706; }
 .debug-box { border: 1px dashed #2563eb; }
 .debug-box[data-region="Tools"] > span { margin-top: 16px; }
 .debug-box[data-region="Stage"] > span { margin-top: 16px; }

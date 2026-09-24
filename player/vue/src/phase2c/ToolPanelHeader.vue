@@ -117,7 +117,7 @@ onBeforeUnmount(() => observer?.disconnect());
                 <Button
                   variant="ghost"
                   size="sm"
-                  class="panel-settings-trigger group gap-1 px-2"
+                  class="panel-settings-trigger group"
                   aria-label="Panel settings"
                   :data-tools-focus="`settings:${tool}`"
                 >

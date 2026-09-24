@@ -3,37 +3,11 @@
 This is the Greenfield preview, not the production Player entry point.
 Keep experimental fixtures separate from the components that own settled behavior.
 
-## Optional design lint trial
+## Design lint
 
-`npm run lint:design:phase2c` checks the preview and its local `components/ui` source with
-`@shadcn/lint` through ESLint. The nearby `components.json` selects the preview theme rather than
-the maintained Player theme. Warnings are advisory while this design candidate is evaluated.
-
-The enabled warnings are `no-raw-colors`, `no-unknown-classes`, `require-static-classes`, and
-`no-arbitrary-values`. The last rule exempts Tailwind's `layout` category for responsive geometry,
-plus exactly `rounded-[inherit]`, `transition-[width]`, and `transition-[left,right,width]` for
-component mechanics. `no-unknown-classes` exempts seven exact structural or debug hooks listed in
-`eslint.design.config.mjs`; these hooks do not claim to generate Tailwind CSS.
-
-The enabled rules currently produce no warnings and use no `eslint-disable` directives. The preview
-theme declares the shared `destructive` and `input` roles. `TranscriptMessage.vue` exposes its four
-literal corner classes to Tailwind and the linter. In this ESLint/Vue setup, HTML
-`eslint-disable` comments do not suppress template diagnostics; a directive in `<script>` disables
-a rule for the whole file.
-
-`no-restyle` and `no-inline-styles` are entirely off in this trial; no files or components receive
-partial enforcement. The full-rule trial reported 20 warnings from each. Before considering a
-`no-restyle` contract, assess whether Composer's Textarea overrides, the panel settings Button's
-spacing, and transcript typography belong in shared component variants or local Player components.
-In this trial, authored content styles, virtualizer positions, and measured debug geometry remain
-direct runtime values. The inline-style rule cannot exempt every unreadable dynamic object through
-property or component contracts, so its warnings alone do not justify indirect CSS.
-
-ESLint and its Vue/TypeScript parsers are needed because Oxlint cannot inspect Vue templates through
-JavaScript plugins; the existing Oxlint check remains the normal repository lint. These pinned
-packages run only during development checks and read local source/theme files, adding no browser
-runtime code. Reassess parser compatibility, package audit results, and the trial's value before
-making it a required check or carrying it into the selected Player.
+The required [Player design lint](../../../../docs/LINTING.md#player-design-lint) checks this preview,
+shared UI definitions and the story-button wrapper. `components.json` selects the preview theme for
+utility resolution; it does not change the maintained Player theme or select a production UI.
 
 ## Responsibility boundaries
 

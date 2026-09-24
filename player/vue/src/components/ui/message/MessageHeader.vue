@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
 
 interface Props extends PrimitiveProps {
   class?: HTMLAttributes["class"]
+  inset?: boolean
 }
 const props = withDefaults(defineProps<Props>(), {
   as: "div",
@@ -18,7 +19,8 @@ const props = withDefaults(defineProps<Props>(), {
     :as="as"
     :as-child="asChild"
     :class="cn(
-      'text-xs font-medium text-muted-foreground px-3 group-has-data-[variant=ghost]/message:px-0 flex max-w-full min-w-0 items-center',
+      'text-xs font-medium text-muted-foreground flex max-w-full min-w-0 items-center',
+      props.inset ? 'px-0 pb-0.5' : 'px-3 group-has-data-[variant=ghost]/message:px-0',
       props.class,
     )"
   >

@@ -29,7 +29,9 @@ The repository currently has no browser-automation dependency and no external pr
 tests, preserving actionable failure information. `npm run format` applies the formatter policy;
 `npm run format:check` verifies it without writing. `npm run lint` applies the [type-evidence policy](LINTING.md);
 `npm run test:lint` type-checks and tests the maintained rule implementation; `npm run knip` checks the selected
-unused-code and dependency categories.
+unused-code and dependency categories. `npm run lint:design:phase2c` and `npm run test:lint:design`
+check the [Player design contracts](LINTING.md#player-design-lint) and their positive/negative fixtures;
+both are included in `npm run check`.
 Independent pre-test gates and UI checks/builds run concurrently through `tools/run-parallel.mjs`.
 TypeScript compilation precedes UI work; compiled tests run only after all builds pass. Each command's output is
 printed together, including warnings. A failure stops the group and subsequent stages; SIGINT/SIGTERM also terminate

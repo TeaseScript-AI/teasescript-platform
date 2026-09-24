@@ -61,10 +61,10 @@ const name = !player && !props.continues ? nameOf(props.speakers, props.entry) :
         :align="player ? 'end' : 'start'"
       >
         <BubbleContent
-          class="text-base/normal"
+          size="reading"
+          :join-start="continues ? (player ? 'right' : 'left') : undefined"
+          :join-end="continued ? (player ? 'right' : 'left') : undefined"
           :class="[
-            continues && (player ? 'rounded-tr-sm' : 'rounded-tl-sm'),
-            continued && (player ? 'rounded-br-sm' : 'rounded-bl-sm'),
             player ? '' : 'message-speaker',
             appearance.panel ? 'message-authored' : '',
           ]"
@@ -74,7 +74,7 @@ const name = !player && !props.continues ? nameOf(props.speakers, props.entry) :
             fontFamily: appearance.typeface ?? undefined,
           }"
         >
-          <MessageHeader v-if="name !== ''" class="px-0 pb-0.5">{{ name }}</MessageHeader>
+          <MessageHeader v-if="name !== ''" inset>{{ name }}</MessageHeader>
           <TranscriptMarkup
             v-if="!player && entry.content"
             :content="entry.content"

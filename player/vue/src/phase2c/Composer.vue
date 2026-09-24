@@ -73,7 +73,8 @@ defineExpose({ focusInput });
         :placeholder="placeholder"
         :inputmode="inputMode"
         :disabled="disabled"
-        class="composer-input min-h-0 rounded-none border-0 shadow-none focus-visible:ring-0"
+        variant="embedded"
+        class="composer-input"
         @update:model-value="value = String($event)"
         @keydown="handleKeydown"
       />
