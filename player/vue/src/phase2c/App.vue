@@ -176,7 +176,7 @@ async function toggleFullscreen() {
           Stage media fixture
           <select
             v-model="mediaFixture"
-            class="min-w-0 rounded border bg-[var(--surface-component)] p-2"
+            class="min-w-0 rounded border bg-card p-2"
           >
             <option v-for="(_, name) in stageFixtures" :key="name">{{ name }}</option>
           </select>
@@ -191,7 +191,7 @@ async function toggleFullscreen() {
             <select
               v-model="timerKind"
               data-timer-fixture-kind
-              class="min-w-0 rounded border bg-[var(--surface-component)] p-2"
+              class="min-w-0 rounded border bg-card p-2"
             >
               <option value="visible">Visible</option>
               <option value="mystery">Mystery</option>
@@ -203,7 +203,7 @@ async function toggleFullscreen() {
             <select
               v-model.number="timerCount"
               data-timer-fixture-count
-              class="min-w-0 rounded border bg-[var(--surface-component)] p-2"
+              class="min-w-0 rounded border bg-card p-2"
             >
               <option :value="1">One</option>
               <option :value="3">Three</option>

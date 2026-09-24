@@ -22,7 +22,10 @@
   --color-secondary-foreground: var(--foreground);
   --color-accent: var(--component-hover);
   --color-accent-foreground: var(--foreground);
+  /* Shared component roles follow ../styles/globals.css. */
+  --color-destructive: var(--theme-accent-solid, var(--package-accent));
   --color-border: var(--border);
+  --color-input: var(--border);
   --color-ring: var(--focus-ring, var(--border-strong));
   --radius-md: 0.375rem;
   --radius-lg: 0.5rem;

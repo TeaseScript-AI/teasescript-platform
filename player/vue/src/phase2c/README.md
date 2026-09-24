@@ -3,6 +3,12 @@
 This is the Greenfield preview, not the production Player entry point.
 Keep experimental fixtures separate from the components that own settled behavior.
 
+## Design lint
+
+The required [Player design lint](../../../../docs/LINTING.md#player-design-lint) checks this preview,
+shared UI definitions and the story-button wrapper. `components.json` selects the preview theme for
+utility resolution; it does not change the maintained Player theme or select a production UI.
+
 ## Responsibility boundaries
 
 - `App.vue` composes the Player, development scenarios and tool contents. It installs `usePlayerKeyboardFocus.ts`

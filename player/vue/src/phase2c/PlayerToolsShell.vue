@@ -788,7 +788,7 @@ async function updateSidebarVisibility(open: boolean) {
               :data-tool="tool"
               :aria-label="`${tool} panel`"
               :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }"
-              class="relative flex min-h-0 shrink-0 bg-[var(--surface-component)]"
+              class="relative flex min-h-0 shrink-0 bg-card"
             >
               <div class="flex min-h-0 min-w-0 flex-1 flex-col">
                 <ToolPanelHeader

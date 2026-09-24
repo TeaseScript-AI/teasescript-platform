@@ -7,7 +7,7 @@ import type {
   PlayerTranscriptEntryPresentation,
 } from "../../../model.js";
 import TranscriptMarkup from "./TranscriptMarkup.vue";
-import { cornerClass, nameOf, resolveAppearance } from "./transcriptPresentation";
+import { nameOf, resolveAppearance } from "./transcriptPresentation";
 
 const props = defineProps<{
   entry: PlayerTranscriptEntryPresentation;
@@ -61,9 +61,10 @@ const name = !player && !props.continues ? nameOf(props.speakers, props.entry) :
         :align="player ? 'end' : 'start'"
       >
         <BubbleContent
-          class="text-base/normal"
+          size="reading"
+          :join-start="continues ? (player ? 'right' : 'left') : undefined"
+          :join-end="continued ? (player ? 'right' : 'left') : undefined"
           :class="[
-            cornerClass(continues, continued, player),
             player ? '' : 'message-speaker',
             appearance.panel ? 'message-authored' : '',
           ]"
@@ -73,7 +74,7 @@ const name = !player && !props.continues ? nameOf(props.speakers, props.entry) :
             fontFamily: appearance.typeface ?? undefined,
           }"
         >
-          <MessageHeader v-if="name !== ''" class="px-0 pb-0.5">{{ name }}</MessageHeader>
+          <MessageHeader v-if="name !== ''" inset>{{ name }}</MessageHeader>
           <TranscriptMarkup
             v-if="!player && entry.content"
             :content="entry.content"
