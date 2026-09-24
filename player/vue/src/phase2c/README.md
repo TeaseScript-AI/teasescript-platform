@@ -73,9 +73,8 @@ making it a required check or carrying it into the selected Player.
 The preview opens with choices. Visual Lab restarts that scenario or selects text/number/choice interaction;
 transcript fixtures switch App back to local preview replies. Composer dimensions and height caps remain visual trials.
 
-Visual Lab's button-text comparison switches WCAG/APCA ink only, preserving fills, typography, Send and transcript.
-It uses Color.js's APCA 0.0.98G implementation to compare absolute black/white scores, not to certify font-size/weight suitability.
-The transcript-scrim preview defaults to WCAG 4.5:1. Visual Lab can opt into an Lc 55 APCA filter that only removes current scrims; it never chooses their colour or opacity. The filter can leave 16px text below readable contrast, so it is experimental. Foreground/background pairs authored on the same message or text run remain untouched.
+Story-button ink and transcript readability follow the current Player treatment in
+[Player UI](../../../../docs/ui/PLAYER-UI.md); Visual Lab does not offer contrast-method switches.
 
 Shared chrome geometry lives in `style.css`; the
 [Player geometry contract](../../../../docs/ui/PLAYER-UI.md#global-geometry-and-overflow) records dimensions and their tuning status.

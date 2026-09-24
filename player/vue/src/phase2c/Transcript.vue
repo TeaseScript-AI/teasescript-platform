@@ -9,7 +9,7 @@ import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } fro
 import TranscriptMessage from "./TranscriptMessage.vue";
 import { backdropBehind, resolveColour } from "./messageContrast";
 import { adjoins, resolveAppearance } from "./transcriptPresentation";
-import { scrimComparison } from "./scrimComparison";
+import { enhancedTranscriptContrast } from "./transcriptContrast";
 
 const props = defineProps<{
   entries: readonly PlayerTranscriptEntryPresentation[];
@@ -17,7 +17,7 @@ const props = defineProps<{
   revision?: number;
   bottomInset?: number;
 }>();
-const activeScrimComparison = inject(scrimComparison, undefined);
+const enhancedContrast = inject(enhancedTranscriptContrast, undefined);
 const scrollElement = ref<HTMLDivElement | null>(null);
 const touching = ref(false);
 const viewportHeight = ref(0);
@@ -101,7 +101,7 @@ onBeforeUnmount(() => { paletteObserver?.disconnect(); });
 const rows = computed(() =>
   virtualizer.value.getVirtualItems().map((item) => {
     const entry = props.entries[item.index]!;
-    return { item, entry, appearance: resolveAppearance(entry, palette.value, activeScrimComparison?.value) };
+    return { item, entry, appearance: resolveAppearance(entry, palette.value, enhancedContrast?.value) };
   }));
 const showLatest = computed(() => !touching.value && !virtualizer.value.isScrolling &&
   virtualizer.value.getDistanceFromEnd() > Math.max(80, (virtualizer.value.scrollRect?.height ?? 0) / 2));

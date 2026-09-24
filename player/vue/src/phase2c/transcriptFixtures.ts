@@ -5,6 +5,7 @@ import type {
 import type { MessagePresentation } from "../../../../src/message-presentation.js";
 import { parseMessageMarkup } from "../../../../src/message-markup.js";
 import { normalizeColor } from "../../../../src/color.js";
+import { createPlayerRuntimeSession } from "../../../runtime-adapter.js";
 
 export const transcriptFixtureSpeakers: Readonly<Record<string, PlayerSpeakerPresentation>> = {
   guide: { name: "Guide", accent: "inherit", avatar: "G", fontFamily: "inherit" },
@@ -50,16 +51,25 @@ const markupSources: readonly (readonly [speaker: string, source: string])[] = [
 ];
 
 export function transcriptMarkupFixtures(): PlayerTranscriptEntryPresentation[] {
-  return markupSources.map(([speakerId, source], index) => {
-    const content = parseMessageMarkup(source);
-    return {
-      id: `markup-${index}`,
-      kind: "message",
-      speakerId: speakerId!,
-      text: content.visibleText,
-      content,
-    };
-  });
+  const entries: PlayerTranscriptEntryPresentation[] = markupSources.map(
+    ([speakerId, source], index) => {
+      const content = parseMessageMarkup(source);
+      return {
+        id: `markup-${index}`,
+        kind: "message",
+        speakerId: speakerId!,
+        text: content.visibleText,
+        content,
+      };
+    },
+  );
+  // Keep list readability coverage on the source/compiler/runtime/adapter path.
+  const lists = createPlayerRuntimeSession(`
+say bubble(color: "white") "- Pale list ink\\n3. Pale numbered ink\\n12. A longer numbered item that wraps when the reading column becomes narrow.", instant
+say prose(color: "#111111") "- Dark list ink\\n3. Dark numbered ink\\n12. A longer numbered item that wraps when the reading column becomes narrow.", instant
+say prose(color: "white", background: "#eeeeee") "- Authored list pair\\n3. Authored numbered pair", instant
+`);
+  return [...entries, ...lists.transcriptEntries];
 }
 
 const proseSources: readonly (readonly [speaker: string, source: string, prose?: true])[] = [
@@ -140,12 +150,17 @@ const authoredSources: readonly (readonly [
   ],
   [
     "guide",
-    "A colour behind the words. What the words themselves become is measured against it, because the author never said. [color=#ffffff]White words on an authored coral bubble.[/color]",
+    "A colour behind the words. The Player chooses default ink because the author did not. [color=#ffffff]White words on an authored coral bubble.[/color]",
     authored("bubble", null, "#f07080"),
   ],
   [
     "guide",
     "A colour on the words and none behind them. The bubble is the player's, so the player owes it.",
+    authored("bubble", "#ffe066", null),
+  ],
+  [
+    "guide",
+    "The surrounding yellow may adapt. [bg=#303030]Inline backing keeps its parent colour.[/bg]",
     authored("bubble", "#ffe066", null),
   ],
   [
@@ -156,7 +171,7 @@ const authoredSources: readonly (readonly [
   ["user", "And my own lines are authored by nobody, so they keep the theme's accent."],
   [
     "keeper",
-    "*My dear,*\n\nThis one was given a surface of its own to sit on, so it reads as a page rather than as something said out loud.\n\n**— H.**",
+    "*My dear,*\n\nThis one was given a surface of its own to sit on. [color=#cf3857]Rose words on an authored prose panel.[/color]\n\n**— H.**",
     authored("prose", "#3b2f2a", "#efe4c8", "serif"),
   ],
   [
@@ -174,21 +189,18 @@ const authoredSources: readonly (readonly [
     "And this one was given a colour but nothing to sit on.",
     authored("prose", "#444444", null),
   ],
+  ["guide", "Deep rose words against a Player-owned bubble.", authored("bubble", "#aa3355", null)],
   [
     "guide",
-    "Deep rose words against a Player-owned bubble. The two contrast methods can treat this colour differently.",
-    authored("bubble", "#aa3355", null),
-  ],
-  [
-    "guide",
-    "This green exposes a contrast disagreement on a light bubble. [color=#7c7c7c]Mid-grey text needs a stronger check.[/color]",
+    "Forest green words on the Player bubble. [color=#7c7c7c]Mid-grey words share the bubble.[/color]",
     authored("bubble", "#008000", null),
   ],
   [
     "guide",
-    "Bright green on a dark bubble should not gain an opaque black strip.",
-    authored("bubble", "#00c000", null),
+    "[color=#f157b3]Pink words on an authored teal bubble.[/color]",
+    authored("bubble", null, "#178b8b"),
   ],
+  ["guide", "Bright green words on the Player bubble.", authored("bubble", "#00c000", null)],
   ["keeper", "Something said out loud.", authored("bubble", null, null)],
   ["keeper", "Then a passage that stands on its own.", authored("prose", null, null)],
   ["keeper", "And speaking again afterwards.", authored("bubble", null, null)],

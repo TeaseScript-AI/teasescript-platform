@@ -161,8 +161,9 @@ is supplied, the Player theme provides the base. Do not silently replace an awkw
 
 Derive lighting from the base colour while keeping its hue recognizable. Near a text-contrast boundary, reduce the
 lighting variation instead of sacrificing legibility for relief. Choose readable black or white text against the
-rendered fill states, accounting for gamut mapping. Buttons and authored transcript backgrounds share
-`blackOrWhiteInk` in `player/theme/color.ts` (Color.js WCAG contrast); explicit authored text colours remain separate.
+rendered fill states, accounting for gamut mapping. Story buttons use APCA to choose black or white ink;
+their existing lighting is bounded with WCAG contrast. Authored transcript backgrounds use WCAG to choose
+default ink. Both call `blackOrWhiteInk` in `player/theme/color.ts`; explicit authored text colours remain separate.
 A gradient and its hover/pressed variants need checking, not just
 one nominal base colour. Focus remains a separate visible keyboard indication. Very dark fills can show less relief;
 neon or clashing colours can remain aesthetically loud even when the controls are readable and coherent.

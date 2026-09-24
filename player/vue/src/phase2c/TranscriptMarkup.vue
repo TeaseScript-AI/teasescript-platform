@@ -9,6 +9,8 @@ const props = defineProps<{
   backdrop: string;
   cover: string | null;
   link: string;
+  authoredInk: string | null;
+  authoredBackground: boolean;
 }>();
 const blocks = computed(() => preparePlayerMessageMarkup(props.content));
 </script>
@@ -22,7 +24,14 @@ const blocks = computed(() => preparePlayerMessageMarkup(props.content));
         :aria-level="block.level"
         class="markup-heading"
       >
-        <TranscriptLine :pieces="block.line.pieces" :backdrop="backdrop" :cover="cover" :link="link" />
+        <TranscriptLine
+          :pieces="block.line.pieces"
+          :backdrop="backdrop"
+          :cover="cover"
+          :link="link"
+          :authored-ink="authoredInk"
+          :authored-background="authoredBackground"
+        />
       </div>
       <component
         :is="block.kind === 'quote' ? 'blockquote' : 'div'"
@@ -30,12 +39,30 @@ const blocks = computed(() => preparePlayerMessageMarkup(props.content));
         :class="{ 'markup-paragraph': block.kind === 'paragraph' }"
       >
         <template v-for="(line, li) in block.lines" :key="li"
-          ><TranscriptLine :pieces="line.pieces" :backdrop="backdrop" :cover="cover" :link="link" /><br v-if="line.ending"
+          ><TranscriptLine
+            :pieces="line.pieces"
+            :backdrop="backdrop"
+            :cover="cover"
+            :link="link"
+            :authored-ink="authoredInk"
+            :authored-background="authoredBackground" /><br v-if="line.ending"
         /></template>
       </component>
       <component :is="block.ordered ? 'ol' : 'ul'" v-else>
-        <li v-for="(item, li) in block.items" :key="li" :value="item.ordinal ?? undefined">
-          <TranscriptLine :pieces="item.line.pieces" :backdrop="backdrop" :cover="cover" :link="link" />
+        <li v-for="(item, li) in block.items" :key="li" :value="item.ordinal ?? undefined"
+          :data-backed="cover !== null || undefined">
+          <!-- Native markers cannot paint a background. Keep their numbering and
+               list semantics, with an aria-hidden painted copy only when needed. -->
+          <span v-if="cover !== null" aria-hidden="true" class="markup-list-marker markup-scrim"
+            :style="{ backgroundColor: cover }" />
+          <TranscriptLine
+            :pieces="item.line.pieces"
+            :backdrop="backdrop"
+            :cover="cover"
+            :link="link"
+            :authored-ink="authoredInk"
+            :authored-background="authoredBackground"
+          />
         </li>
       </component>
     </template>
@@ -70,6 +97,23 @@ ol {
 ul {
   list-style: disc;
   padding-inline-start: 1.5em;
+}
+li[data-backed] {
+  position: relative;
+}
+li[data-backed]::marker {
+  color: transparent;
+}
+.markup-list-marker {
+  position: absolute;
+  inset-inline-end: calc(100% + 0.25em);
+  white-space: nowrap;
+}
+.markup-list-marker::before {
+  content: counter(list-item) ".";
+}
+ul .markup-list-marker::before {
+  content: "•";
 }
 blockquote {
   border-inline-start: 2px solid var(--border);

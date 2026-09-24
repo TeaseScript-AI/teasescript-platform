@@ -1315,17 +1315,6 @@ async function authoredPresentationChecks(page) {
   await page.reload();
   await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
   await page.getByRole("button", { name: "Authored colour sample", exact: true }).click();
-  const scrimMethod = page.getByRole("combobox", { name: "Transcript scrim contrast" });
-  const green = page.locator(".transcript-entry").filter({ hasText: "This green exposes" });
-  check(
-    (await scrimMethod.inputValue()) === "WCAG21",
-    "The preview did not start with the readable-contrast comparison",
-  );
-  await green.locator(".markup-scrim").first().waitFor();
-  await scrimMethod.selectOption("APCA_FILTER");
-  await green.locator(".markup-scrim").first().waitFor({ state: "detached" });
-  await scrimMethod.selectOption("WCAG21");
-  await green.locator(".markup-scrim").first().waitFor();
   const painted = (locator) =>
     locator.evaluate((element) => {
       const context = document.createElement("canvas").getContext("2d");
@@ -1358,89 +1347,58 @@ async function authoredPresentationChecks(page) {
     });
   const link = '.transcript-entry a[href^="https://example.com"]';
   const prose = '.transcript-entry .prose:not([data-panel])[style*="color"] .markup-paragraph span';
-  const boundary = green
-    .locator(".markup-scrim")
-    .filter({ hasText: "Mid-grey text needs a stronger check" });
-  const boundaryRatio = await painted(boundary);
-  check(
-    boundaryRatio >= 4.5,
-    `Midtone authored text did not reach readable contrast (${boundaryRatio})`,
-  );
-  const boundaryCover = await boundary.evaluate((el) => getComputedStyle(el).backgroundColor);
-  check(boundaryCover.startsWith("rgba("), "Midtone authored text received an opaque scrim");
-  const coral = page
-    .locator(".transcript-entry")
-    .filter({ hasText: "White words on an authored coral bubble" });
-  const coralText = coral
-    .locator(".markup-scrim")
-    .filter({ hasText: "White words on an authored coral bubble" });
   const transcriptScroll = page.locator(".transcript-scroll");
+  const themeContrast = page.getByRole("combobox", { name: "Theme contrast" });
+  const authoredPair = async (source, phrase, ink, background, scrollFraction) => {
+    await transcriptScroll.evaluate((element, fraction) => {
+      element.scrollTop = (element.scrollHeight - element.clientHeight) * fraction;
+    }, scrollFraction);
+    const row = page.locator(".transcript-entry").filter({ hasText: phrase });
+    const span = row.locator(".transcript-markup span").filter({ hasText: phrase });
+    await span.waitFor();
+    check((await row.locator(".markup-scrim").count()) === 0, `${source} gained a scrim`);
+    check(
+      await span.evaluate(
+        (element, expected) => {
+          const context = document.createElement("canvas").getContext("2d");
+          const paint = (colour) => {
+            context.clearRect(0, 0, 1, 1);
+            context.fillStyle = colour;
+            context.fillRect(0, 0, 1, 1);
+            return Array.from(context.getImageData(0, 0, 1, 1).data).join(",");
+          };
+          const panel = element.closest(".message-authored, .prose[data-panel]");
+          return (
+            panel !== null &&
+            paint(getComputedStyle(element).color) === paint(expected.ink) &&
+            getComputedStyle(element).backgroundColor === "rgba(0, 0, 0, 0)" &&
+            paint(getComputedStyle(panel).backgroundColor) === paint(expected.background)
+          );
+        },
+        { ink, background },
+      ),
+      `${source} changed its authored ink or background`,
+    );
+  };
+  const inheritedInk = page
+    .locator(".transcript-entry")
+    .filter({ hasText: "Inline backing keeps its parent colour" })
+    .locator(".transcript-markup span")
+    .filter({ hasText: "Inline backing keeps its parent colour" });
   await transcriptScroll.evaluate((element) => {
     element.scrollTop = 0;
   });
-  await coralText.waitFor();
   check(
-    (await painted(coralText)) >= 4.5,
-    "Inline authored text on an authored bubble did not reach readable contrast",
-  );
-  const contrastFailures = await page.evaluate(async () => {
-    const moduleUrl = new URL("/src/phase2c/messageContrast.ts", location.origin);
-    const { scrimFor } = await import(moduleUrl.href);
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d", { willReadFrequently: true });
-    const luminance = (layers) => {
-      context.clearRect(0, 0, 1, 1);
-      for (const layer of layers) {
-        context.fillStyle = layer;
+    await inheritedInk.evaluate((element) => {
+      const context = document.createElement("canvas").getContext("2d");
+      const channels = (colour) => {
+        context.fillStyle = colour;
         context.fillRect(0, 0, 1, 1);
-      }
-      const channels = [...context.getImageData(0, 0, 1, 1).data].slice(0, 3);
-      const [red, green, blue] = channels.map((channel) => {
-        const value = channel / 255;
-        return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-      });
-      return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-    };
-    const ratio = (text, layers) => {
-      const foreground = luminance([text]);
-      const background = luminance(layers);
-      return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
-    };
-    const texts = [
-      "#ffffff",
-      "#000000",
-      "#7c7c7c",
-      "#008000",
-      "#ff00ff",
-      "#aa3355",
-      "#00c000",
-      "#ffff00",
-    ];
-    const backgrounds = [
-      "#ffffff",
-      "#eee7e3",
-      "#302b27",
-      "#000000",
-      "#f07080",
-      "#808080",
-      "#00ff00",
-      "#800080",
-    ];
-    const failures = [];
-    for (const background of backgrounds) {
-      for (const text of texts) {
-        const cover = scrimFor(text, background);
-        const before = ratio(text, [background]);
-        const after = ratio(text, cover === null ? [background] : [background, cover]);
-        if ((before >= 4.5 && cover !== null) || after < 4.5)
-          failures.push({ text, background, before, after, cover });
-      }
-    }
-    return failures.slice(0, 5);
-  });
-  check(
-    contrastFailures.length === 0,
-    `Representative authored colour pairs violate scrim contrast: ${JSON.stringify(contrastFailures)}`,
+        return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3).join(",");
+      };
+      return channels(getComputedStyle(element).color) === channels("#ffe066");
+    }),
+    "An inline background changed the inherited authored text colour",
   );
   const portalUsesTheme = async (slot) => {
     const portal = page.locator(`[data-slot="${slot}"]`);
@@ -1472,37 +1430,55 @@ async function authoredPresentationChecks(page) {
     await page.evaluate(async () => {
       await Promise.allSettled(document.getAnimations().map((animation) => animation.finished));
     });
+    for (const contrast of ["standard", "high"]) {
+      await themeContrast.selectOption(contrast);
+      await authoredPair(
+        `${mode}/${contrast} coral bubble`,
+        "White words on an authored coral bubble",
+        "#ffffff",
+        "#f07080",
+        0,
+      );
+      await authoredPair(
+        `${mode}/${contrast} teal bubble`,
+        "Pink words on an authored teal bubble",
+        "#f157b3",
+        "#178b8b",
+        1,
+      );
+      await authoredPair(
+        `${mode}/${contrast} prose panel`,
+        "Rose words on an authored prose panel",
+        "#cf3857",
+        "#efe4c8",
+        0.5,
+      );
+    }
+    await themeContrast.selectOption("standard");
+    await transcriptScroll.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    const green = page
+      .locator(".transcript-entry")
+      .filter({ hasText: "Forest green words on the Player bubble" });
+    await green.waitFor();
+    check(
+      (await green.locator(".markup-scrim").count()) === 0,
+      `Readable green text gained an unnecessary backing in ${mode} mode`,
+    );
+    const greenInk = await green
+      .locator(".transcript-markup span")
+      .first()
+      .evaluate((element) => getComputedStyle(element).color);
     if (mode === "dark") {
-      const rose = page.locator(".transcript-entry").filter({ hasText: "Deep rose words" });
-      const roseCover = await rose
-        .locator(".markup-scrim")
-        .evaluate((el) => getComputedStyle(el).backgroundColor);
       const brightGreen = page
         .locator(".transcript-entry")
-        .filter({ hasText: "Bright green on a dark bubble" });
+        .filter({ hasText: "Bright green words on the Player bubble" });
       await brightGreen.waitFor();
       check(
         (await brightGreen.locator(".markup-scrim").count()) === 0,
-        "Dark green sample unexpectedly has a WCAG scrim",
+        "Readable bright green text gained an unnecessary backing in dark mode",
       );
-      await scrimMethod.selectOption("APCA_FILTER");
-      check(
-        (await brightGreen.locator(".markup-scrim").count()) === 0,
-        "APCA filter added a scrim where the current mode needs none",
-      );
-      for (const cutoff of [40, 55, 60]) {
-        await page.getByRole("slider", { name: "APCA scrim cutoff" }).evaluate((el, value) => {
-          el.value = String(value);
-          el.dispatchEvent(new Event("input", { bubbles: true }));
-        }, cutoff);
-        check(
-          (await rose
-            .locator(".markup-scrim")
-            .evaluate((el) => getComputedStyle(el).backgroundColor)) === roseCover,
-          "Changing the APCA cutoff changed a needed scrim's colour or strength",
-        );
-      }
-      await scrimMethod.selectOption("WCAG21");
     }
     await page
       .locator('[data-tool="Visual Lab"]')
@@ -1512,13 +1488,17 @@ async function authoredPresentationChecks(page) {
     await page.locator("[data-settings-trigger]").click();
     await portalUsesTheme("dialog-content");
     themes.push(
-      await page.evaluate(() => ({
-        surface: getComputedStyle(document.documentElement).getPropertyValue(
-          "--theme-surface-floating",
-        ),
-        width: document.querySelector(".transcript-scroll").getBoundingClientRect().width,
-        media: document.querySelector(".stage-media")?.getAttribute("src"),
-      })),
+      await page.evaluate(
+        (greenInk) => ({
+          surface: getComputedStyle(document.documentElement).getPropertyValue(
+            "--theme-surface-floating",
+          ),
+          greenInk,
+          width: document.querySelector(".transcript-scroll").getBoundingClientRect().width,
+          media: document.querySelector(".stage-media")?.getAttribute("src"),
+        }),
+        greenInk,
+      ),
     );
     await transcriptScroll.evaluate((element) => {
       element.scrollTop = (element.scrollHeight - element.clientHeight) / 2;
@@ -1536,6 +1516,10 @@ async function authoredPresentationChecks(page) {
     );
   }
   check(themes[0].surface !== themes[1].surface, "Theme toggle did not change the live palette");
+  check(
+    themes[0].greenInk !== themes[1].greenInk,
+    "One-sided authored ink did not follow the Player palette",
+  );
   check(
     themes[0].width === themes[1].width && themes[0].media === themes[1].media,
     "Theme toggle changed transcript geometry or authored media",
@@ -1566,6 +1550,69 @@ async function authoredPresentationChecks(page) {
   );
   check(grouping.avatarHidden === false, "A bubble after a passage must show its avatar");
   return "PASS authored contrast and grouping across a prose boundary";
+}
+
+async function listContrastChecks(page) {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
+  await page.getByRole("button", { name: "Markup sample", exact: true }).click();
+  const scroll = page.locator(".transcript-scroll");
+  for (const mode of ["light", "dark"]) {
+    if ((await page.locator("html").getAttribute("data-phase2c-theme")) !== mode)
+      await page.getByRole("button", { name: `Switch to ${mode} theme`, exact: true }).click();
+    for (const contrast of ["standard", "high"]) {
+      await page.getByRole("combobox", { name: "Theme contrast" }).selectOption(contrast);
+      await scroll.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      const row = page
+        .locator(".transcript-entry")
+        .filter({ hasText: mode === "light" ? "Pale list ink" : "Dark list ink" });
+      await row.waitFor();
+      const protectedMarkers = await row.locator("li").evaluateAll(
+        (items) =>
+          items.length === 3 &&
+          items.every((item) => {
+            const marker = item.querySelector('[aria-hidden="true"]');
+            const text = item.querySelector("span:not([aria-hidden])");
+            if (!marker || !text) return false;
+            const markerStyle = getComputedStyle(marker);
+            const textStyle = getComputedStyle(text);
+            return (
+              markerStyle.color === textStyle.color &&
+              markerStyle.backgroundColor === textStyle.backgroundColor &&
+              markerStyle.backgroundColor !== "rgba(0, 0, 0, 0)" &&
+              getComputedStyle(item, "::marker").color === "rgba(0, 0, 0, 0)"
+            );
+          }),
+      );
+      if (!protectedMarkers)
+        throw new Error(`${mode}/${contrast}: list markers lost text protection`);
+      const ordinals = await row
+        .locator("ol li")
+        .evaluateAll((items) => items.map((item) => item.value));
+      if (JSON.stringify(ordinals) !== "[3,12]") throw new Error("List ordinals changed");
+      const authored = page.locator(".transcript-entry").filter({ hasText: "Authored list pair" });
+      const unchanged = await authored.locator("li").evaluateAll((items) => {
+        const context = document.createElement("canvas").getContext("2d");
+        return (
+          items.length === 2 &&
+          items.every((item) => {
+            context.fillStyle = getComputedStyle(item).color;
+            context.fillRect(0, 0, 1, 1);
+            const ink = [...context.getImageData(0, 0, 1, 1).data].join(",");
+            return (
+              ink === "255,255,255,255" &&
+              !item.querySelector(".markup-scrim") &&
+              getComputedStyle(item, "::marker").color === getComputedStyle(item).color
+            );
+          })
+        );
+      });
+      if (!unchanged) throw new Error(`${mode}/${contrast}: authored list pair was overridden`);
+    }
+  }
+  return "PASS list marker protection, numbering and unchanged authored pairs";
 }
 
 async function topBarChecks(page) {
@@ -1715,6 +1762,7 @@ const groups = [
   transcriptChecks,
   buttonInkChecks,
   authoredPresentationChecks,
+  listContrastChecks,
 ];
 
 async function runGroup(browserPage, run, url, artifacts) {
