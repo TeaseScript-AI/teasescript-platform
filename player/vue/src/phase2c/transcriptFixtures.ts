@@ -5,6 +5,7 @@ import type {
 import type { MessagePresentation } from "../../../../src/message-presentation.js";
 import { parseMessageMarkup } from "../../../../src/message-markup.js";
 import { normalizeColor } from "../../../../src/color.js";
+import { createPlayerRuntimeSession } from "../../../runtime-adapter.js";
 
 export const transcriptFixtureSpeakers: Readonly<Record<string, PlayerSpeakerPresentation>> = {
   guide: { name: "Guide", accent: "inherit", avatar: "G", fontFamily: "inherit" },
@@ -50,16 +51,25 @@ const markupSources: readonly (readonly [speaker: string, source: string])[] = [
 ];
 
 export function transcriptMarkupFixtures(): PlayerTranscriptEntryPresentation[] {
-  return markupSources.map(([speakerId, source], index) => {
-    const content = parseMessageMarkup(source);
-    return {
-      id: `markup-${index}`,
-      kind: "message",
-      speakerId: speakerId!,
-      text: content.visibleText,
-      content,
-    };
-  });
+  const entries: PlayerTranscriptEntryPresentation[] = markupSources.map(
+    ([speakerId, source], index) => {
+      const content = parseMessageMarkup(source);
+      return {
+        id: `markup-${index}`,
+        kind: "message",
+        speakerId: speakerId!,
+        text: content.visibleText,
+        content,
+      };
+    },
+  );
+  // Keep list readability coverage on the source/compiler/runtime/adapter path.
+  const lists = createPlayerRuntimeSession(`
+say bubble(color: "white") "- Pale list ink\\n3. Pale numbered ink\\n12. A longer numbered item that wraps when the reading column becomes narrow.", instant
+say prose(color: "#111111") "- Dark list ink\\n3. Dark numbered ink\\n12. A longer numbered item that wraps when the reading column becomes narrow.", instant
+say prose(color: "white", background: "#eeeeee") "- Authored list pair\\n3. Authored numbered pair", instant
+`);
+  return [...entries, ...lists.transcriptEntries];
 }
 
 const proseSources: readonly (readonly [speaker: string, source: string, prose?: true])[] = [

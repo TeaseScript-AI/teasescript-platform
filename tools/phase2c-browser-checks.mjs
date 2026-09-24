@@ -1552,6 +1552,69 @@ async function authoredPresentationChecks(page) {
   return "PASS authored contrast and grouping across a prose boundary";
 }
 
+async function listContrastChecks(page) {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
+  await page.getByRole("button", { name: "Markup sample", exact: true }).click();
+  const scroll = page.locator(".transcript-scroll");
+  for (const mode of ["light", "dark"]) {
+    if ((await page.locator("html").getAttribute("data-phase2c-theme")) !== mode)
+      await page.getByRole("button", { name: `Switch to ${mode} theme`, exact: true }).click();
+    for (const contrast of ["standard", "high"]) {
+      await page.getByRole("combobox", { name: "Theme contrast" }).selectOption(contrast);
+      await scroll.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      const row = page
+        .locator(".transcript-entry")
+        .filter({ hasText: mode === "light" ? "Pale list ink" : "Dark list ink" });
+      await row.waitFor();
+      const protectedMarkers = await row.locator("li").evaluateAll(
+        (items) =>
+          items.length === 3 &&
+          items.every((item) => {
+            const marker = item.querySelector('[aria-hidden="true"]');
+            const text = item.querySelector("span:not([aria-hidden])");
+            if (!marker || !text) return false;
+            const markerStyle = getComputedStyle(marker);
+            const textStyle = getComputedStyle(text);
+            return (
+              markerStyle.color === textStyle.color &&
+              markerStyle.backgroundColor === textStyle.backgroundColor &&
+              markerStyle.backgroundColor !== "rgba(0, 0, 0, 0)" &&
+              getComputedStyle(item, "::marker").color === "rgba(0, 0, 0, 0)"
+            );
+          }),
+      );
+      if (!protectedMarkers)
+        throw new Error(`${mode}/${contrast}: list markers lost text protection`);
+      const ordinals = await row
+        .locator("ol li")
+        .evaluateAll((items) => items.map((item) => item.value));
+      if (JSON.stringify(ordinals) !== "[3,12]") throw new Error("List ordinals changed");
+      const authored = page.locator(".transcript-entry").filter({ hasText: "Authored list pair" });
+      const unchanged = await authored.locator("li").evaluateAll((items) => {
+        const context = document.createElement("canvas").getContext("2d");
+        return (
+          items.length === 2 &&
+          items.every((item) => {
+            context.fillStyle = getComputedStyle(item).color;
+            context.fillRect(0, 0, 1, 1);
+            const ink = [...context.getImageData(0, 0, 1, 1).data].join(",");
+            return (
+              ink === "255,255,255,255" &&
+              !item.querySelector(".markup-scrim") &&
+              getComputedStyle(item, "::marker").color === getComputedStyle(item).color
+            );
+          })
+        );
+      });
+      if (!unchanged) throw new Error(`${mode}/${contrast}: authored list pair was overridden`);
+    }
+  }
+  return "PASS list marker protection, numbering and unchanged authored pairs";
+}
+
 async function topBarChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -1699,6 +1762,7 @@ const groups = [
   transcriptChecks,
   buttonInkChecks,
   authoredPresentationChecks,
+  listContrastChecks,
 ];
 
 async function runGroup(browserPage, run, url, artifacts) {
