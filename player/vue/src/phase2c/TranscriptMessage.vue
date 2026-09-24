@@ -42,6 +42,7 @@ const name = !player && !props.continues ? nameOf(props.speakers, props.entry) :
       :cover="appearance.cover"
       :link="appearance.link"
       :authored-ink="appearance.authoredInk"
+      :authored-background="appearance.panel !== null"
     />
     <template v-else>{{ entry.text }}</template>
   </div>
@@ -80,6 +81,7 @@ const name = !player && !props.continues ? nameOf(props.speakers, props.entry) :
             :cover="appearance.cover"
             :link="appearance.link"
             :authored-ink="appearance.authoredInk"
+            :authored-background="appearance.panel !== null"
           />
           <template v-else
             ><span

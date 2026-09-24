@@ -10,6 +10,7 @@ const props = defineProps<{
   cover: string | null;
   link: string;
   authoredInk: string | null;
+  authoredBackground: boolean;
 }>();
 const blocks = computed(() => preparePlayerMessageMarkup(props.content));
 </script>
@@ -29,6 +30,7 @@ const blocks = computed(() => preparePlayerMessageMarkup(props.content));
           :cover="cover"
           :link="link"
           :authored-ink="authoredInk"
+          :authored-background="authoredBackground"
         />
       </div>
       <component
@@ -42,7 +44,8 @@ const blocks = computed(() => preparePlayerMessageMarkup(props.content));
             :backdrop="backdrop"
             :cover="cover"
             :link="link"
-            :authored-ink="authoredInk" /><br v-if="line.ending"
+            :authored-ink="authoredInk"
+            :authored-background="authoredBackground" /><br v-if="line.ending"
         /></template>
       </component>
       <component :is="block.ordered ? 'ol' : 'ul'" v-else>
@@ -53,6 +56,7 @@ const blocks = computed(() => preparePlayerMessageMarkup(props.content));
             :cover="cover"
             :link="link"
             :authored-ink="authoredInk"
+            :authored-background="authoredBackground"
           />
         </li>
       </component>

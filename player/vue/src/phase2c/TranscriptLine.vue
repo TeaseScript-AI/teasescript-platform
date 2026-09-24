@@ -10,12 +10,14 @@ const props = defineProps<{
   cover: string | null;
   link: string;
   authoredInk: string | null;
+  authoredBackground: boolean;
 }>();
 const enhancedContrast = inject(enhancedTranscriptContrast, undefined);
 function authoredTreatment(piece: {
   style: Readonly<Record<string, string>>;
   href: string | null;
 }) {
+  if (props.authoredBackground) return null;
   if (piece.style["backgroundColor"] !== undefined) {
     if (piece.style["color"] === undefined && piece.href === null && props.authoredInk !== null)
       return { ink: props.authoredInk, cover: null };

@@ -1347,45 +1347,47 @@ async function authoredPresentationChecks(page) {
     });
   const link = '.transcript-entry a[href^="https://example.com"]';
   const prose = '.transcript-entry .prose:not([data-panel])[style*="color"] .markup-paragraph span';
-  const coral = page
-    .locator(".transcript-entry")
-    .filter({ hasText: "White words on an authored coral bubble" });
-  const coralText = coral
-    .locator(".transcript-markup span")
-    .filter({ hasText: "White words on an authored coral bubble" });
   const transcriptScroll = page.locator(".transcript-scroll");
-  await transcriptScroll.evaluate((element) => {
-    element.scrollTop = 0;
-  });
-  await coralText.waitFor();
-  check(
-    await coralText.evaluate((element) => {
-      const ink = getComputedStyle(element).color;
-      const cover = getComputedStyle(element).backgroundColor;
-      const context = document.createElement("canvas").getContext("2d");
-      context.fillStyle = ink;
-      context.fillRect(0, 0, 1, 1);
-      const channels = [...context.getImageData(0, 0, 1, 1).data].slice(0, 3);
-      return channels.every((channel) => channel === 255) && cover === "rgba(0, 0, 0, 0)";
-    }),
-    "Standard contrast changed white authored text or covered the coral bubble",
-  );
   const themeContrast = page.getByRole("combobox", { name: "Theme contrast" });
-  await themeContrast.selectOption("high");
-  await coral
-    .locator(".markup-scrim")
-    .filter({ hasText: "White words on an authored coral bubble" })
-    .waitFor();
-  check(
-    (await painted(coralText)) >= 7,
-    "High theme contrast did not protect authored white text on the coral bubble",
-  );
-  await themeContrast.selectOption("standard");
+  const authoredPair = async (source, phrase, ink, background, scrollFraction) => {
+    await transcriptScroll.evaluate((element, fraction) => {
+      element.scrollTop = (element.scrollHeight - element.clientHeight) * fraction;
+    }, scrollFraction);
+    const row = page.locator(".transcript-entry").filter({ hasText: phrase });
+    const span = row.locator(".transcript-markup span").filter({ hasText: phrase });
+    await span.waitFor();
+    check((await row.locator(".markup-scrim").count()) === 0, `${source} gained a scrim`);
+    check(
+      await span.evaluate(
+        (element, expected) => {
+          const context = document.createElement("canvas").getContext("2d");
+          const paint = (colour) => {
+            context.clearRect(0, 0, 1, 1);
+            context.fillStyle = colour;
+            context.fillRect(0, 0, 1, 1);
+            return Array.from(context.getImageData(0, 0, 1, 1).data).join(",");
+          };
+          const panel = element.closest(".message-authored, .prose[data-panel]");
+          return (
+            panel !== null &&
+            paint(getComputedStyle(element).color) === paint(expected.ink) &&
+            getComputedStyle(element).backgroundColor === "rgba(0, 0, 0, 0)" &&
+            paint(getComputedStyle(panel).backgroundColor) === paint(expected.background)
+          );
+        },
+        { ink, background },
+      ),
+      `${source} changed its authored ink or background`,
+    );
+  };
   const inheritedInk = page
     .locator(".transcript-entry")
     .filter({ hasText: "Inline backing keeps its parent colour" })
     .locator(".transcript-markup span")
     .filter({ hasText: "Inline backing keeps its parent colour" });
+  await transcriptScroll.evaluate((element) => {
+    element.scrollTop = 0;
+  });
   check(
     await inheritedInk.evaluate((element) => {
       const context = document.createElement("canvas").getContext("2d");
@@ -1428,6 +1430,31 @@ async function authoredPresentationChecks(page) {
     await page.evaluate(async () => {
       await Promise.allSettled(document.getAnimations().map((animation) => animation.finished));
     });
+    for (const contrast of ["standard", "high"]) {
+      await themeContrast.selectOption(contrast);
+      await authoredPair(
+        `${mode}/${contrast} coral bubble`,
+        "White words on an authored coral bubble",
+        "#ffffff",
+        "#f07080",
+        0,
+      );
+      await authoredPair(
+        `${mode}/${contrast} teal bubble`,
+        "Pink words on an authored teal bubble",
+        "#f157b3",
+        "#178b8b",
+        1,
+      );
+      await authoredPair(
+        `${mode}/${contrast} prose panel`,
+        "Rose words on an authored prose panel",
+        "#cf3857",
+        "#efe4c8",
+        0.5,
+      );
+    }
+    await themeContrast.selectOption("standard");
     await transcriptScroll.evaluate((element) => {
       element.scrollTop = element.scrollHeight;
     });
@@ -1443,32 +1470,6 @@ async function authoredPresentationChecks(page) {
       .locator(".transcript-markup span")
       .first()
       .evaluate((element) => getComputedStyle(element).color);
-    if (mode === "light") {
-      const pink = page
-        .locator(".transcript-entry")
-        .filter({ hasText: "Pink words on an authored teal bubble" })
-        .locator(".markup-scrim");
-      await pink.waitFor();
-      check(
-        await pink.evaluate((element) => {
-          const context = document.createElement("canvas").getContext("2d");
-          context.fillStyle = getComputedStyle(element).color;
-          context.fillRect(0, 0, 1, 1);
-          const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
-          return (
-            red > green &&
-            blue > green &&
-            Math.max(red, green, blue) - Math.min(red, green, blue) > 50
-          );
-        }),
-        "Pink authored text lost its colour on a teal bubble",
-      );
-      const pinkRatio = await painted(pink);
-      check(
-        pinkRatio >= 3.4,
-        `Pink text on an authored teal bubble became unreadable: ${pinkRatio}`,
-      );
-    }
     if (mode === "dark") {
       const brightGreen = page
         .locator(".transcript-entry")

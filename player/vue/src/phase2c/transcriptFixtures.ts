@@ -140,7 +140,7 @@ const authoredSources: readonly (readonly [
   ],
   [
     "guide",
-    "A colour behind the words. What the words themselves become is measured against it, because the author never said. [color=#ffffff]White words on an authored coral bubble.[/color]",
+    "A colour behind the words. The Player chooses default ink because the author did not. [color=#ffffff]White words on an authored coral bubble.[/color]",
     authored("bubble", null, "#f07080"),
   ],
   [
@@ -161,7 +161,7 @@ const authoredSources: readonly (readonly [
   ["user", "And my own lines are authored by nobody, so they keep the theme's accent."],
   [
     "keeper",
-    "*My dear,*\n\nThis one was given a surface of its own to sit on, so it reads as a page rather than as something said out loud.\n\n**— H.**",
+    "*My dear,*\n\nThis one was given a surface of its own to sit on. [color=#cf3857]Rose words on an authored prose panel.[/color]\n\n**— H.**",
     authored("prose", "#3b2f2a", "#efe4c8", "serif"),
   ],
   [
