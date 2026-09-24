@@ -1281,10 +1281,20 @@ async function buttonInkChecks(page) {
       context.fillRect(0, 0, 1, 1);
       return Array.from(context.getImageData(0, 0, 1, 1).data).join(",");
     });
+  const backgrounds = [];
   for (const mode of ["light", "dark"]) {
     if ((await page.locator("html").getAttribute("data-phase2c-theme")) !== mode) {
       await page.getByRole("button", { name: `Switch to ${mode} theme`, exact: true }).click();
     }
+    backgrounds.push(
+      await Promise.all(
+        ["Wait for sunset", "Follow the lights"].map((label) =>
+          page
+            .getByRole("button", { name: label, exact: true })
+            .evaluate((button) => getComputedStyle(button).backgroundImage),
+        ),
+      ),
+    );
     for (const [label, expected] of [
       ["Follow the lights", "0,0,0,255"],
       ["Explore the old harbour", "255,255,255,255"],
@@ -1304,7 +1314,11 @@ async function buttonInkChecks(page) {
       }
     }
   }
-  return "PASS authored button ink across light/dark, hover and press";
+  if (backgrounds[0][0] === backgrounds[1][0])
+    throw new Error("Uncoloured choice must follow the light/dark theme");
+  if (backgrounds[0][1] !== backgrounds[1][1])
+    throw new Error("Authored choice fill must stay fixed across theme changes");
+  return "PASS theme-following default and authored button ink across light/dark, hover and press";
 }
 
 async function authoredPresentationChecks(page) {

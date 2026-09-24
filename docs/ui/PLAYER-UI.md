@@ -550,18 +550,20 @@ Actual interactive controls always take precedence and must not also fire the vi
 
 A `showButton` is the one-option presentation of the same Standard foreground-control vocabulary. Controls share
 the transcript's reading width, grow with their labels, and allow long labels to wrap. The group centers its
-buttons and wraps onto additional rows rather than scrolling horizontally. The current visual trial uses 12px
-between buttons and rows. Story buttons use the shared shadcn Button with a soft-bevel presentation: modest
-rounding, a lighter top, darker lower edge, and a small depth shadow. Hover changes the lighting without moving
-the label; pressing reduces the depth. Controls scroll away with the transcript; there is no separate button
-scroller. The transcript’s leading scroll space keeps messages and controls together above the composer when
-following the latest content. After completion, the active controls disappear and the existing runtime
-transcript records the response. Completed choices and buttons carry a visible `›` marker in the transcript,
-distinct from typed text/number answers. Pointer or touch activation does not focus the composer or summon a
-software keyboard; keyboard activation can move focus to the next choice. Foreground and right-rail action buttons retain
-their opaque authored colour as the material base. Without an authored
-fill, the theme accent supplies that base. Black or white labels and contrast-limited lighting keep the material
-readable across normal, hover, and pressed states. Unavailable action buttons use the shared disabled surface, text and border roles, without relief or hover/pressed feedback. They retain native disabled semantics and cannot activate. Right-rail action buttons use the same opaque material as foreground buttons.
+buttons and wraps onto additional rows rather than scrolling horizontally. Foreground choices use 10px horizontal
+spacing and no added row gap. Story buttons have 10px padding and use the shared shadcn Button with a soft-bevel
+presentation: modest rounding, a lighter top, darker lower edge, and a small depth shadow. Hover changes the lighting
+without moving the label; pressing reduces the depth. Controls scroll away with the transcript; there is no separate
+button scroller. The transcript’s leading scroll space keeps messages and controls together above the composer when
+following the latest content. After completion, the active controls disappear and the existing runtime transcript
+records the response. Completed choices and buttons carry a visible `›` marker in the transcript, distinct from typed
+text/number answers. Pointer or touch activation does not focus the composer or summon a software keyboard; keyboard
+activation can move focus to the next choice. Foreground and right-rail action buttons retain their opaque authored
+colour as the material base. Without an authored fill, the light or dark theme's neutral control surface supplies that
+base. Black or white labels and contrast-limited lighting keep the material readable across normal, hover, and pressed
+states. Unavailable action buttons use the shared disabled surface, text and border roles, without relief or hover/pressed
+feedback. They retain native disabled semantics and cannot activate. Right-rail action buttons use the same opaque
+material as foreground buttons.
 
 The [story-button design rationale](UI-DESIGN-AND-ENGINEERING.md#player-story-button-design-rationale) explains the
 material choice and its reuse boundaries.

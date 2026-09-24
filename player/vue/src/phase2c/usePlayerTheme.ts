@@ -47,7 +47,10 @@ export function usePlayerTheme(intent: Ref<PlayerThemeIntent>) {
     const theme = generatePlayerTheme(intent.value);
     applyGeneratedTheme({
       mode: intent.value.mode,
-      variables: { ...themeCssVariables(theme), ...storyChoiceVariables(intent.value.accentSeed) },
+      variables: {
+        ...themeCssVariables(theme),
+        ...storyChoiceVariables(theme.roles["surface-control"]),
+      },
     });
   });
   onBeforeUnmount(clearGeneratedTheme);
