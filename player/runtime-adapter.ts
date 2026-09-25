@@ -165,6 +165,11 @@ export function submitPlayerRuntimeComposer(
   submittedText: string,
 ): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
   const action = activeInteraction(session.snapshot);
+  if (action?.ui.kind === "button") {
+    return submittedText !== "" && submittedText === action.ui.buttonLabel
+      ? completePlayerAction(session, action, { kind: "activate" })
+      : null;
+  }
   if (
     action === null ||
     (action.interactionKind !== "text" &&

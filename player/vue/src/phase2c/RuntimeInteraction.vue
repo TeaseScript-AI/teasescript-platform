@@ -74,7 +74,7 @@ async function complete(
     const result = operation(props.session);
     if (!result) {
       feedback.value =
-        foreground.value?.kind === "show-button" ? "Activate the button above to continue." : "";
+        foreground.value?.kind === "show-button" ? "Type the exact button text or activate it above." : "";
       focusInput();
       return;
     }

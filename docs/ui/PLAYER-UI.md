@@ -538,8 +538,8 @@ Standard keyboard behavior is:
 enabled rather than visually disabling it:
 
 - `choose`: selecting a rendered control or typing one exact unambiguous visible option completes the same choice;
-- `showButton`: clicking the rendered button activates it; composer submission, including its exact visible label, and
-  Space while the empty composer owns focus do not activate it;
+- `showButton`: clicking the rendered button or submitting its exact non-empty visible label in the composer activates
+  the same action; other text and Space while the empty composer owns focus do not activate it;
 - a primary click on unrelated/blank Player space does **not** activate `showButton`;
 - while any mandatory foreground interaction is active, other composer text does not advance ordinary canonical script
   execution. In the deterministic first POC it is an invalid attempt and the same interaction remains active with the

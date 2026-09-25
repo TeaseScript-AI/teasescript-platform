@@ -998,7 +998,8 @@ async function runtimeTranscriptChecks(page) {
     );
   const before = await snapshot();
   await page.getByRole("button", { name: "Capture runtime checkpoint", exact: true }).click();
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.locator("[data-runtime-interaction] textarea").fill("Continue **literally**");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
   await transcript.locator('[aria-setsize="5"]').first().waitFor();
   const selectedButton = transcript
     .locator('[data-speaker-id="user"] [data-slot="bubble-content"]')
@@ -1105,11 +1106,8 @@ async function interactionChecks(page) {
   await reject("Same");
   await surface.getByRole("button", { name: "Same", exact: true }).nth(1).click();
   const beforeButton = await snapshot();
-  await submit("Finish");
-  check(
-    JSON.stringify(await snapshot()) === JSON.stringify(beforeButton),
-    "Composer activated showButton",
-  );
+  await reject("finish");
+  await reject("Finish ");
   await input.fill("");
   await input.press("Space");
   check(
@@ -1121,6 +1119,17 @@ async function interactionChecks(page) {
     JSON.stringify(await snapshot()) === JSON.stringify(beforeButton),
     "Background activated showButton",
   );
+  await page.getByRole("button", { name: "Capture runtime checkpoint", exact: true }).click();
+  await submit("Finish");
+  await page.waitForFunction(
+    () => document.querySelector("[data-runtime-interaction] textarea")?.disabled,
+  );
+  const typedFinal = await snapshot();
+  check(
+    typedFinal.at(-1).text.includes("First\nx / 0 / left / second"),
+    "Canonical typed results were lost",
+  );
+  await page.getByRole("button", { name: "Restore runtime checkpoint", exact: true }).click();
   await surface.getByRole("button", { name: "Continue", exact: true }).focus();
   await page.keyboard.press("Space");
   await page.waitForFunction(
@@ -1128,8 +1137,8 @@ async function interactionChecks(page) {
   );
   const final = await snapshot();
   check(
-    final.at(-1).text.includes("First\nx / 0 / left / second"),
-    "Canonical typed results were lost",
+    JSON.stringify(final) === JSON.stringify(typedFinal),
+    "Typing the exact button text did not match keyboard button activation",
   );
   await page.getByRole("button", { name: "Start interaction scenario", exact: true }).click();
   await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();

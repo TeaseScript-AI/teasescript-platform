@@ -107,10 +107,19 @@ exit
   );
 
   const buttonSnapshot = structuredClone(session.snapshot);
-  assert.equal(submitPlayerRuntimeComposer(session, "Continue"), null);
+  assert.equal(submitPlayerRuntimeComposer(session, "continue"), null);
+  assert.equal(submitPlayerRuntimeComposer(session, "Continue "), null);
+  assert.equal(submitPlayerRuntimeComposer(session, ""), null);
   assert.deepEqual(session.snapshot, buttonSnapshot);
-  const button = activatePlayerRuntimeButton(session);
+  const buttonRestorePoint = createPlayerRuntimeRestorePoint(session);
+  const button = submitPlayerRuntimeComposer(session, "Continue");
   assert.equal(button?.outcome.kind, "completed");
+  const clickedButton = activatePlayerRuntimeButton(
+    restorePlayerRuntimeSession(buttonRestorePoint),
+  );
+  assert.deepEqual(button?.outcome, clickedButton?.outcome);
+  assert.deepEqual(button?.session.snapshot, clickedButton?.session.snapshot);
+  assert.deepEqual(button?.session.transcriptEntries, clickedButton?.session.transcriptEntries);
   session = button!.session;
 
   const invalidText = submitPlayerRuntimeComposer(session, " \t ");
