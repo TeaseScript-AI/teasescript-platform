@@ -1799,6 +1799,92 @@ async function topBarChecks(page) {
   return "PASS transparent top bar alignment, truncation, input, geometry and fullscreen";
 }
 
+async function contentAlignmentChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  const aligned = (actual, expected) => Math.abs(actual - expected) < 1.5;
+  const measure = () =>
+    page.evaluate(() => {
+      const bounds = (selector) => {
+        const rect = document.querySelector(selector).getBoundingClientRect();
+        return {
+          left: rect.left,
+          right: rect.right,
+          width: rect.width,
+          center: rect.left + rect.width / 2,
+        };
+      };
+      return {
+        viewportCenter: innerWidth / 2,
+        stage: bounds(".player-stage"),
+        media: bounds(".stage-media-frame"),
+        conversation: bounds(".player-conversation"),
+        composer: bounds("[data-composer-shell]"),
+        readingInset: Number.parseFloat(
+          getComputedStyle(document.querySelector(".player-conversation")).paddingLeft,
+        ),
+      };
+    });
+  const verify = async (label, centered) => {
+    const { viewportCenter, stage, media, conversation, composer, readingInset } = await measure();
+    check(
+      aligned(media.center, conversation.center),
+      `${label}: media and transcript centers differ`,
+    );
+    check(aligned(conversation.center, composer.center), `${label}: composer center differs`);
+    check(
+      aligned(composer.left, conversation.left + readingInset) &&
+        aligned(composer.right, conversation.right - readingInset),
+      `${label}: composer does not span transcript reading width`,
+    );
+    check(
+      media.left >= stage.left - 1 && conversation.left >= stage.left - 1,
+      `${label}: content runs under the dock`,
+    );
+    check(
+      media.right <= stage.right + 1 && conversation.right <= stage.right + 1,
+      `${label}: content runs beyond the stage`,
+    );
+    if (centered)
+      check(
+        aligned(media.center, viewportCenter),
+        `${label}: free margin did not preserve viewport center`,
+      );
+    return { media, conversation };
+  };
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "icons"));
+  await page.reload();
+  const compact = await verify("compact menu, landscape", true);
+  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
+  const wide = await verify("open tool, landscape", false);
+  check(
+    wide.media.center > compact.media.center + 20,
+    "Wide tool did not move the shared content envelope",
+  );
+  const separator = page.getByRole("separator", { name: "Resize media and conversation" });
+  await separator.focus();
+  for (let step = 0; step < 6; step++) await separator.press("ArrowUp");
+  await verify("resized stage, landscape", false);
+  await page.getByLabel("Stage media fixture").selectOption("Portrait");
+  await page.waitForFunction(
+    () =>
+      Number.parseFloat(
+        document.querySelector("#phase2c-shell").style.getPropertyValue("--media-aspect"),
+      ) < 1,
+  );
+  await verify("open tool, portrait", false);
+  for (let step = 0; step < 6; step++) await separator.press("ArrowDown");
+  await verify("resized stage, portrait", false);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await verify("narrow stage", true);
+  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
+  await verify("narrow drawer", true);
+  return "PASS shared media/transcript/composer center and reading width across docks and aspect ratios";
+}
+
 const groups = [
   topBarChecks,
   checks,
@@ -1813,6 +1899,7 @@ const groups = [
   interactionChecks,
   timerChecks,
   transcriptChecks,
+  contentAlignmentChecks,
   buttonInkChecks,
   authoredPresentationChecks,
   listContrastChecks,

@@ -390,7 +390,7 @@ has been destroyed. Exact retention and LLM context policy remain upstream work.
 The transcript:
 
 - uses the canvas surface, continuous with the stage background above it;
-- is centered within the available conversation region; resizing stage media vertically does not move or narrow the column;
+- shares the stage media's horizontal center: both remain centered in the Player viewport until a docked left tool consumes their free margin, then move together to stay visible; vertical stage resizing never narrows the reading column, but can move it when the media width changes the shared envelope beside an open dock;
 - keeps the maintained ultrawide readability cap pending visual retuning;
 - places one viewport of empty scroll space before the messages, so even a single message can be scrolled; at the latest
   position, messages and active controls sit above the composer and new messages grow the conversation upward;
@@ -478,7 +478,8 @@ same vertically scrolling transcript. The composer stays at the bottom.
 
 At normal wide presentation the composer is one integrated component shell containing the expanding input and primary
 `Send` control. The shell owns its border, hover/pressed feedback, focus outline, disabled treatment, and moderate
-rounding; the input does not draw a second bordered box inside it.
+rounding; the input does not draw a second bordered box inside it. The shell spans the transcript's reading width, so
+received-message avatars and player bubbles align with its outer edges.
 
 ### Narrow presentation
 

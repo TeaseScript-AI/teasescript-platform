@@ -194,15 +194,18 @@
 .phase2c-sidebar {
   --conversation-content-max-width: 864px;
   --conversation-inline-inset: 1rem;
+  --conversation-outer-width: calc(var(--conversation-content-max-width) + 2 * var(--conversation-inline-inset));
   --content-reserve: 0px;
-  /* Keep the natural contained image and selected conversation width. Only
-     content moves; the Stage and its floating controls keep their own geometry. */
+  /* Media and conversation share one horizontal envelope. It stays centered
+     in the viewport until the dock consumes its left margin. */
   --content-ideal-width: min(var(--usable-width), max(
-    calc(var(--conversation-content-max-width) + 2 * var(--conversation-inline-inset)),
+    var(--conversation-outer-width),
     calc(var(--stage-height) * var(--media-aspect))
   ));
   --content-width: min(var(--content-ideal-width), calc(var(--usable-width) - var(--content-reserve)));
   --content-offset: max(0px, calc((var(--usable-width) - var(--content-ideal-width)) / 2 - var(--content-reserve)));
+  --conversation-width: min(var(--conversation-outer-width), var(--content-width));
+  --conversation-offset: calc(var(--content-offset) + (var(--content-width) - var(--conversation-width)) / 2);
   /* One continuous canvas beneath the dock reservation and Player content.
      Layout-only children stay transparent; tools paint their own surfaces. */
   /* Same ambient wash as player/styles/effects.css; no legacy layout rules. */
@@ -347,10 +350,8 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
 .phase2c-sidebar[data-narrow="true"] [data-panel-resize] { display: none; }
 
 .player-conversation {
-  /* The reading column belongs to the available conversation region, not the
-     contained image width (which changes when resizing the stage vertically). */
-  width: min(calc(var(--conversation-content-max-width) + 2 * var(--conversation-inline-inset)), 100%);
-  margin-inline: auto;
+  width: var(--conversation-width);
+  margin-inline-start: var(--conversation-offset);
 }
 
 html:fullscreen { background: var(--background); }
