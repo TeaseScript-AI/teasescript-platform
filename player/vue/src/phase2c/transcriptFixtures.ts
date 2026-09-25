@@ -27,7 +27,7 @@ const messages = [
 const markupSources: readonly (readonly [speaker: string, source: string])[] = [
   [
     "guide",
-    "# The lighthouse\nThe path splits here. *Take your time* — the **tide** is still going out.\n## The keeper's stair\nSixty steps, and a rail on the seaward side.\n### Before you climb\nCheck that the beam is turning.",
+    "# The [size=x-large]lighthouse[/size]\nThe path splits here. [size=x-large]Take your time[/size] — the **tide** is still going out.\n## The keeper's stair\nSixty steps, and a rail on the seaward side.\n### Before you climb\nCheck that the beam is turning.",
   ],
   [
     "guide",

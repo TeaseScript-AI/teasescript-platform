@@ -1911,6 +1911,98 @@ async function contentAlignmentChecks(page) {
   return "PASS shared media/transcript/composer center and reading width across docks and aspect ratios";
 }
 
+async function typographyChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  const close = (actual, expected) => Math.abs(actual - expected) < 0.15;
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const geometry = await page.evaluate(() => {
+    const composition = document.querySelector(".player-composition").getBoundingClientRect();
+    const stage = document.querySelector(".player-stage").getBoundingClientRect();
+    const conversation = document.querySelector(".player-conversation").getBoundingClientRect();
+    return {
+      stage: stage.height / composition.height,
+      conversation: conversation.height / composition.height,
+    };
+  });
+  check(
+    Math.abs(geometry.stage - 0.6) < 0.01 && Math.abs(geometry.conversation - 0.4) < 0.01,
+    "Default stage/conversation split is not 60/40",
+  );
+
+  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
+  await page.getByRole("button", { name: "Markup sample", exact: true }).click();
+  await page.locator(".transcript-scroll").evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  const first = page.locator('[data-message-id="markup-0"]');
+  await first.locator(".markup-heading .markup-size-x-large").waitFor();
+  const measure = () =>
+    first.evaluate((element) => {
+      const size = (selector) => {
+        const target =
+          selector === ""
+            ? element.querySelector('[data-slot="bubble-content"]')
+            : element.querySelector(selector);
+        const style = getComputedStyle(target);
+        return {
+          font: Number.parseFloat(style.fontSize),
+          line: Number.parseFloat(style.lineHeight),
+        };
+      };
+      return {
+        body: size(""),
+        heading: size(".markup-heading"),
+        headingLarge: size(".markup-heading .markup-size-x-large"),
+        bodyLarge: size(".markup-paragraph .markup-size-x-large"),
+      };
+    });
+  const normal = await measure();
+  check(
+    close(normal.body.font, 16) && close(normal.body.line, 24),
+    "Default reading text is not 16px/24px",
+  );
+  check(
+    normal.headingLarge.font > normal.heading.font && normal.heading.font > normal.body.font,
+    "Heading and inline size hierarchy was lost",
+  );
+  await page.locator(".phase2c-sidebar").evaluate((element) => {
+    element.style.setProperty("--player-reading-font-size", "20px");
+  });
+  const enlarged = await measure();
+  for (const role of ["body", "heading", "headingLarge", "bodyLarge"]) {
+    check(
+      close(enlarged[role].font, normal[role].font * 1.25),
+      `${role} did not scale with reading text`,
+    );
+    check(close(enlarged[role].line, enlarged[role].font + 8), `${role} lost its 8px line gap`);
+  }
+  const inputSize = await page.locator("[data-composer-input]").evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { font: Number.parseFloat(style.fontSize), line: Number.parseFloat(style.lineHeight) };
+  });
+  check(
+    close(inputSize.font, 20) && close(inputSize.line, 28),
+    "Composer did not share the reading size",
+  );
+  await page.getByRole("button", { name: "Prose sample", exact: true }).click();
+  await page.locator(".transcript-scroll").evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  const prose = page.locator('[data-message-id="prose-2"] .prose');
+  await prose.waitFor();
+  const proseSize = await prose.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { font: Number.parseFloat(style.fontSize), line: Number.parseFloat(style.lineHeight) };
+  });
+  check(
+    close(proseSize.font, 20) && close(proseSize.line, 28),
+    "Loose prose did not share the reading size",
+  );
+  return "PASS 60/40 stage split and linked reading, heading, inline-size, prose and composer scales";
+}
+
 const groups = [
   topBarChecks,
   checks,
@@ -1926,6 +2018,7 @@ const groups = [
   timerChecks,
   transcriptChecks,
   contentAlignmentChecks,
+  typographyChecks,
   buttonInkChecks,
   authoredPresentationChecks,
   listContrastChecks,

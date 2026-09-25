@@ -79,7 +79,7 @@ const blocks = computed(() => preparePlayerMessageMarkup(props.content));
 }
 .markup-heading {
   font-weight: 700;
-  line-height: 1.25;
+  line-height: calc(1em + var(--player-reading-line-gap, 8px));
 }
 .markup-heading[aria-level="1"] {
   font-size: 1.45em;
@@ -165,5 +165,8 @@ blockquote {
 }
 :deep(.markup-size-x-large) {
   font-size: 1.3em;
+}
+:deep(:is(.markup-size-small, .markup-size-normal, .markup-size-large, .markup-size-x-large)) {
+  line-height: calc(1em + var(--player-reading-line-gap, 8px));
 }
 </style>

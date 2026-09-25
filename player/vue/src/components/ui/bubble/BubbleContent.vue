@@ -23,7 +23,7 @@ const props = withDefaults(defineProps<Props>(), {
     :as-child="asChild"
     :class="cn(
       'rounded-xl border border-transparent px-3 py-2 [button,a]:outline-none [button,a]:focus-visible:border-ring [button,a]:focus-visible:ring-3 [button,a]:focus-visible:ring-ring/50 group-data-[align=end]/bubble:self-end w-fit max-w-full min-w-0 overflow-hidden wrap-break-word [button]:text-left [button,a]:transition-colors',
-      props.size === 'reading' ? 'text-base/normal' : 'text-sm leading-relaxed',
+      props.size === 'reading' ? 'reading-bubble-content' : 'text-sm leading-relaxed',
       props.joinStart === 'left' && 'rounded-tl-sm',
       props.joinStart === 'right' && 'rounded-tr-sm',
       props.joinEnd === 'left' && 'rounded-bl-sm',
@@ -34,3 +34,10 @@ const props = withDefaults(defineProps<Props>(), {
     <slot />
   </Primitive>
 </template>
+
+<style scoped>
+.reading-bubble-content {
+  font-size: var(--player-reading-font-size, 1rem);
+  line-height: calc(1em + var(--player-reading-line-gap, 8px));
+}
+</style>

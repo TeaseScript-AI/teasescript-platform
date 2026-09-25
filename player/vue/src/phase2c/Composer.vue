@@ -116,9 +116,10 @@ defineExpose({ focusInput });
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
   gap: 8px;
+  font-size: var(--player-reading-font-size, 1rem);
 }
 .composer-form .composer-input {
-  min-block-size: calc(1.5rem + 16px);
+  min-block-size: calc(1em + var(--player-reading-line-gap, 8px) + 16px);
   max-block-size: min(10lh, var(--composer-input-limit, 30dvh));
   overflow-y: auto;
   resize: none;
@@ -127,7 +128,7 @@ defineExpose({ focusInput });
   background: transparent;
   color: var(--foreground);
   font: inherit;
-  line-height: 1.5;
+  line-height: calc(1em + var(--player-reading-line-gap, 8px));
   scrollbar-width: thin;
   scrollbar-color: var(--border-strong) transparent;
 }

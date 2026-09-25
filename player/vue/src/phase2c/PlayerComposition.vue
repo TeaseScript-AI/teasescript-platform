@@ -8,7 +8,7 @@ const hitAreaMargins = { fine: 0, coarse: 0 };
   <div class="player-composition relative flex min-h-0 min-w-0 flex-1">
     <slot name="topbar" />
     <SplitterGroup direction="vertical" class="min-h-0 min-w-0 flex-1">
-      <SplitterPanel :default-size="70" :min-size="20" class="flex min-h-0 flex-col">
+      <SplitterPanel :default-size="60" :min-size="20" class="flex min-h-0 flex-col">
         <slot name="stage" />
       </SplitterPanel>
       <SplitterResizeHandle class="conversation-resize" aria-label="Resize media and conversation"
@@ -16,7 +16,7 @@ const hitAreaMargins = { fine: 0, coarse: 0 };
         :hit-area-margins="hitAreaMargins">
         <span aria-hidden="true" />
       </SplitterResizeHandle>
-      <SplitterPanel :default-size="30" :min-size="20" class="flex min-h-0 flex-col">
+      <SplitterPanel :default-size="40" :min-size="20" class="flex min-h-0 flex-col">
         <slot />
       </SplitterPanel>
     </SplitterGroup>

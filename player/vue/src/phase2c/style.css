@@ -192,6 +192,8 @@
 }
 
 .phase2c-sidebar {
+  --player-reading-font-size: 1rem;
+  --player-reading-line-gap: 8px;
   --conversation-content-max-width: 864px;
   --conversation-inline-inset: 1rem;
   --conversation-outer-width: calc(var(--conversation-content-max-width) + 2 * var(--conversation-inline-inset));

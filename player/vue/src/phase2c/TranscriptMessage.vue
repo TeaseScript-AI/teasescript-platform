@@ -123,8 +123,8 @@ const name = !player && !props.continues ? nameOf(props.speakers, props.entry) :
 .prose {
   width: fit-content;
   max-width: min(65ch, 75%);
-  font-size: 1rem;
-  line-height: 1.7;
+  font-size: var(--player-reading-font-size, 1rem);
+  line-height: calc(1em + var(--player-reading-line-gap, 8px));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

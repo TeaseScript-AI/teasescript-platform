@@ -198,16 +198,19 @@ scrollbar for the same axis/responsibility.
 
 Current typography and component geometry are provisional visual baselines. Values marked for tuning may change through
 `Visual Lab` before production without implying a compatibility promise.
+The reading size is shared by transcript bubbles, loose prose, and composer input. Headings scale relative to that size,
+and authored `[size]` spans scale relative to their containing text, including inside headings. Changing the reading
+size therefore scales ordinary text, headings, and authored size spans together without changing Player chrome text.
 
 | Element | Current Player baseline |
 | --- | --- |
 | UI font stack | `"Inter Tight", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif` |
 | title | `14px`, weight `500` |
 | speaker name | `9px`, weight `700`, line-height `1.2` |
-| speaker message | `16px` (`1rem`), line-height `1.25`; authored speaker font may replace the UI font |
-| player-authored message | `16px` (`1rem`), following the same transcript rhythm |
-| normal composer text / Send | composer `16px` (`1rem`); Send remains `11px`, weight `700` |
-| narrow composer text | composer remains `16px` (`1rem`); Send remains `11px` |
+| speaker message and loose prose | shared reading size `1rem` (16px at the current browser base), line-height `1em + 8px`; authored speaker font may replace the UI font |
+| player-authored message | shared reading size, following the same transcript rhythm |
+| normal composer text / Send | composer uses the shared reading size; Send remains `14px`, weight `700` |
+| narrow composer text | composer keeps the shared reading size; Send remains `14px` |
 | normal timer | `18px`, weight `700`, tabular numerals |
 | compact timer | current smaller timer values remain a visual-tuning baseline rather than a final `<= 480px` contract |
 | background control label | `12px`, weight `600`, line-height `1.2` |
@@ -355,7 +358,7 @@ The stage is a dedicated structural surface above the transcript in the main con
 when no media is active. An empty stage shows its normal background/ambience rather than collapsing and expanding the
 transcript into that space.
 
-The Greenfield preview currently tries a 70% stage / 30% conversation split. A keyboard-accessible horizontal handle
+The Greenfield preview currently starts with a 60% stage / 40% conversation split. A keyboard-accessible horizontal handle
 lets the user adjust that division; only the compact centered grip starts a drag, not the full-width boundary. The composer grows inside the conversation allocation. The chosen split survives
 viewport resizing for the current mount. The starting ratio and 20% minimum per panel remain visual trials.
 
