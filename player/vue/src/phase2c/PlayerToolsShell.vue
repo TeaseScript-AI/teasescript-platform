@@ -701,7 +701,7 @@ async function updateSidebarVisibility(open: boolean) {
                 </Tooltip>
               </div>
               <ScrollArea class="min-h-0" :viewport-attrs="{ 'aria-label': 'Tools' }">
-              <nav aria-label="Tools" class="player-edge-padding">
+              <nav aria-label="Tools" class="player-edge-padding player-tool-menu">
                 <SidebarMenu>
                   <SidebarMenuItem v-for="tool in launcherTools" :key="tool.name">
                     <MenuSidebarButton

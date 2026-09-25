@@ -1665,6 +1665,45 @@ async function topBarChecks(page) {
     );
   };
   await aligned(hide);
+  const topControlGaps = () =>
+    page.evaluate(() => {
+      const bottom = document
+        .querySelector('[data-sidebar="header"] button')
+        .getBoundingClientRect().bottom;
+      const menu = document
+        .querySelector('[data-launcher] [data-sidebar="menu-button"]')
+        .getBoundingClientRect();
+      const timer = document.querySelector(".timer-display").getBoundingClientRect();
+      return { menu: menu.top - bottom, timer: timer.top - bottom };
+    });
+  check(
+    Object.values(await topControlGaps()).every((gap) => gap === 16),
+    "Menu and timer must share the visible gap below top controls",
+  );
+  await page.evaluate(() =>
+    document.documentElement.style.setProperty("--player-title-font-size", "24px"),
+  );
+  try {
+    await page.waitForFunction(
+      () =>
+        document.querySelector('[data-sidebar="header"] button').getBoundingClientRect().height ===
+        40,
+    );
+    await aligned(hide);
+    check(
+      (await page.locator('[data-launcher] [data-sidebar="menu-button"]').first().boundingBox())
+        .height === 32,
+      "Larger title text must not resize ordinary tool-menu buttons",
+    );
+    check(
+      Object.values(await topControlGaps()).every((gap) => gap === 16),
+      "Menu and timer must follow taller top controls without adding spacing",
+    );
+  } finally {
+    await page.evaluate(() =>
+      document.documentElement.style.removeProperty("--player-title-font-size"),
+    );
+  }
   await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
   await page.getByLabel("Long stage title").check();
   await hide.click();

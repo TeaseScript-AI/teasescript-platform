@@ -157,8 +157,9 @@ content. Major numerical values below are POC reconstruction/tuning baselines un
 | --- | --- |
 | Player viewport | full viewport width and currently usable visual-viewport height; `100dvh` is the CSS baseline and the outer document is not the normal scroll owner |
 | Player chrome outer spacing | fixed `8px` for top controls, menu edges and right rail; independent of root font size |
-| Player chrome control size | `calc(1rem + 16px)`; a 1rem icon/text allowance plus fixed 8px internal space on each side |
+| Player chrome control size | compact controls use `calc(1rem + 16px)`; top-row controls grow together when the title's text line plus 8px needs more height |
 | title bar row | derived control size plus 8px outer padding above and below; do not separately hardcode the height |
+| content below top controls | one 16px visible gap from the controls' lower edge to the first tool-menu control or timer; timer halo space is included in placement, not added to the gap |
 | normal stage row | current `55dvh` baseline; expose as a development tuning value and visually re-evaluate |
 | overlay-chrome stage row | current `64dvh` baseline; visually re-evaluate with low-height and fullscreen cases |
 | tool column | fixed `300px` default; individual columns do not shrink to hide their content |
@@ -201,7 +202,7 @@ Current typography and component geometry are provisional visual baselines. Valu
 | Element | Current Player baseline |
 | --- | --- |
 | UI font stack | `"Inter Tight", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif` |
-| title | `14px`, weight `700` |
+| title | `14px`, weight `500` |
 | speaker name | `9px`, weight `700`, line-height `1.2` |
 | speaker message | `16px` (`1rem`), line-height `1.25`; authored speaker font may replace the UI font |
 | player-authored message | `16px` (`1rem`), following the same transcript rhythm |

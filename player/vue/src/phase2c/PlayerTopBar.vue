@@ -79,8 +79,8 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
   pointer-events: auto;
 }
 .player-top-bar-tools :deep(button) {
-  inline-size: var(--player-control-size);
-  block-size: var(--player-control-size);
+  inline-size: var(--player-top-control-size);
+  block-size: var(--player-top-control-size);
 }
 .player-top-bar-actions {
   --action-group-radius: var(--player-top-control-radius);
@@ -88,7 +88,7 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
   align-items: center;
   gap: 0.125rem;
   box-sizing: border-box;
-  block-size: var(--player-control-size);
+  block-size: var(--player-top-control-size);
   border: 1px solid var(--media-border);
   border-radius: var(--action-group-radius);
   background: var(--media-surface);
@@ -96,8 +96,8 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
   backdrop-filter: blur(3px);
 }
 .player-top-bar-actions :deep(button) {
-  inline-size: var(--player-control-size);
-  block-size: calc(var(--player-control-size) - 2px);
+  inline-size: var(--player-top-control-size);
+  block-size: calc(var(--player-top-control-size) - 2px);
   border-radius: 0;
 }
 /* Match the shared shell without clipping the buttons' keyboard focus rings. */
@@ -112,10 +112,11 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
 .player-top-bar-title {
   flex: 1;
   min-width: 0;
-  block-size: var(--player-control-size);
+  block-size: var(--player-top-control-size);
   display: flex;
   align-items: center;
-  font-size: 0.875rem;
+  font-size: var(--player-title-font-size);
+  line-height: calc(1em + 8px);
   font-weight: 500;
 }
 .player-top-bar-title > span {
@@ -124,7 +125,7 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
   box-sizing: border-box;
   min-inline-size: 0;
   max-inline-size: 100%;
-  block-size: var(--player-control-size);
+  block-size: var(--player-top-control-size);
   padding-inline: 12px;
   border-radius: 9999px;
 }

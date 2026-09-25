@@ -37,12 +37,19 @@
   --player-edge-space: 8px;
   --player-control-padding: 8px;
   --player-top-control-radius: 0.75rem;
+  --player-title-font-size: 0.875rem;
   --player-control-size: calc(1rem + 2 * var(--player-control-padding));
-  --player-header-size: calc(var(--player-control-size) + 2 * var(--player-edge-space));
+  --player-top-control-size: max(var(--player-control-size), calc(var(--player-title-font-size) + 16px));
+  --player-header-size: calc(var(--player-top-control-size) + 2 * var(--player-edge-space));
+  /* Measure from the bottom of the top controls, not the transparent header. */
+  --player-following-control-gap: 16px;
+  --player-following-control-top: calc(
+    var(--player-edge-space) + var(--player-top-control-size) + var(--player-following-control-gap)
+  );
   --player-resize-rail-size: 5px;
   --player-timer-size: 132px;
   --player-timer-halo-space: 12px;
-  --player-menu-compact-width: calc(var(--player-control-size) + 2 * var(--player-edge-space));
+  --player-menu-compact-width: calc(var(--player-top-control-size) + 2 * var(--player-edge-space));
   font-family: ui-sans-serif, system-ui, sans-serif;
   /* Existing Player light palette: player/styles/layout.css. */
   --background: oklch(95.839% 0.01306 71.33);
@@ -354,9 +361,10 @@ html:fullscreen { background: var(--background); }
 
 /* Shared Player chrome geometry; content panels keep their own content spacing. */
 .player-edge-padding { padding: var(--player-edge-space); }
+.player-tool-menu { padding-block-start: calc(var(--player-following-control-gap) - var(--player-edge-space)); }
 .player-control-square {
-  width: var(--player-control-size);
-  height: var(--player-control-size);
+  width: var(--player-top-control-size);
+  height: var(--player-top-control-size);
 }
 .player-menu-compact-ruler {
   position: absolute; visibility: hidden; pointer-events: none;
@@ -375,9 +383,9 @@ html:fullscreen { background: var(--background); }
   min-height: var(--player-header-size);
 }
 .tool-panel-header :is(.panel-settings-trigger, [data-panel-pin]) {
-  height: var(--player-control-size);
+  height: var(--player-top-control-size);
 }
-.tool-panel-header [data-panel-pin] { width: var(--player-control-size); min-width: var(--player-control-size); }
+.tool-panel-header [data-panel-pin] { width: var(--player-top-control-size); min-width: var(--player-top-control-size); }
 
 
 /* The menu resize target shares the existing edge padding, not layout width. */
