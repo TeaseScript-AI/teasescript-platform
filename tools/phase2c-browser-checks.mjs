@@ -1851,7 +1851,7 @@ async function contentAlignmentChecks(page) {
         aligned(media.center, viewportCenter),
         `${label}: free margin did not preserve viewport center`,
       );
-    return { media, conversation };
+    return { stage, media, conversation };
   };
 
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -1867,7 +1867,12 @@ async function contentAlignmentChecks(page) {
   const separator = page.getByRole("separator", { name: "Resize media and conversation" });
   await separator.focus();
   for (let step = 0; step < 6; step++) await separator.press("ArrowUp");
-  await verify("resized stage, landscape", false);
+  const resizedLandscape = await verify("resized stage, landscape", false);
+  check(
+    aligned(resizedLandscape.conversation.left, wide.conversation.left) &&
+      aligned(resizedLandscape.conversation.width, wide.conversation.width),
+    "Vertical stage resize moved or narrowed the transcript beside an open tool",
+  );
   await page.getByLabel("Stage media fixture").selectOption("Portrait");
   await page.waitForFunction(
     () =>
@@ -1875,9 +1880,21 @@ async function contentAlignmentChecks(page) {
         document.querySelector("#phase2c-shell").style.getPropertyValue("--media-aspect"),
       ) < 1,
   );
-  await verify("open tool, portrait", false);
+  const portrait = await verify("open tool, portrait", false);
+  check(
+    aligned(portrait.conversation.left, wide.conversation.left) &&
+      aligned(portrait.conversation.width, wide.conversation.width) &&
+      aligned(portrait.stage.left, wide.stage.left) &&
+      aligned(portrait.stage.width, wide.stage.width),
+    "Changing image aspect ratio moved the stage or transcript beside an open tool",
+  );
   for (let step = 0; step < 6; step++) await separator.press("ArrowDown");
-  await verify("resized stage, portrait", false);
+  const resizedPortrait = await verify("resized stage, portrait", false);
+  check(
+    aligned(resizedPortrait.conversation.left, portrait.conversation.left) &&
+      aligned(resizedPortrait.conversation.width, portrait.conversation.width),
+    "Vertical stage resize moved or narrowed the portrait transcript",
+  );
   await page.setViewportSize({ width: 390, height: 844 });
   await verify("narrow stage", true);
   await page.getByRole("button", { name: "Show sidebar", exact: true }).click();

@@ -196,16 +196,17 @@
   --conversation-inline-inset: 1rem;
   --conversation-outer-width: calc(var(--conversation-content-max-width) + 2 * var(--conversation-inline-inset));
   --content-reserve: 0px;
-  /* Media and conversation share one horizontal envelope. It stays centered
-     in the viewport until the dock consumes its left margin. */
+  /* The reading column owns the shared center. Media may grow around it, but
+     an image or vertical stage resize cannot move the transcript. */
+  --conversation-width: min(var(--conversation-outer-width), calc(var(--usable-width) - var(--content-reserve)));
+  --conversation-offset: max(0px, calc((var(--usable-width) - var(--conversation-width)) / 2 - var(--content-reserve)));
+  --content-center: calc(var(--conversation-offset) + var(--conversation-width) / 2);
   --content-ideal-width: min(var(--usable-width), max(
     var(--conversation-outer-width),
     calc(var(--stage-height) * var(--media-aspect))
   ));
-  --content-width: min(var(--content-ideal-width), calc(var(--usable-width) - var(--content-reserve)));
-  --content-offset: max(0px, calc((var(--usable-width) - var(--content-ideal-width)) / 2 - var(--content-reserve)));
-  --conversation-width: min(var(--conversation-outer-width), var(--content-width));
-  --conversation-offset: calc(var(--content-offset) + (var(--content-width) - var(--conversation-width)) / 2);
+  --content-width: min(var(--content-ideal-width), calc(2 * var(--content-center)));
+  --content-offset: calc(var(--content-center) - var(--content-width) / 2);
   /* One continuous canvas beneath the dock reservation and Player content.
      Layout-only children stay transparent; tools paint their own surfaces. */
   /* Same ambient wash as player/styles/effects.css; no legacy layout rules. */

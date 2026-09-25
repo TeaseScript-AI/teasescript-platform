@@ -390,7 +390,7 @@ has been destroyed. Exact retention and LLM context policy remain upstream work.
 The transcript:
 
 - uses the canvas surface, continuous with the stage background above it;
-- shares the stage media's horizontal center: both remain centered in the Player viewport until a docked left tool consumes their free margin, then move together to stay visible; vertical stage resizing never narrows the reading column, but can move it when the media width changes the shared envelope beside an open dock;
+- owns a stable horizontal center shared by the stage media and composer: all remain centered in the Player viewport until a docked left tool consumes the reading column's free margin, then move together to stay visible; changing media or resizing the stage vertically does not move or narrow the reading column, while media fits within the remaining space around that center;
 - keeps the maintained ultrawide readability cap pending visual retuning;
 - places one viewport of empty scroll space before the messages, so even a single message can be scrolled; at the latest
   position, messages and active controls sit above the composer and new messages grow the conversation upward;
