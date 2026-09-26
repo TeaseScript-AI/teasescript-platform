@@ -43,6 +43,6 @@ useResizeObserver(overlay, () => {
 .conversation-overlay {
   position: absolute; inset: auto var(--conversation-inline-inset) 0; z-index: 2; pointer-events: none;
   max-inline-size: var(--conversation-content-max-width); margin-inline: auto;
-  padding-top: 0.5rem; padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+  padding-top: 12px; padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
 }
 </style>

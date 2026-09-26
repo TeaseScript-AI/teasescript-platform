@@ -10,7 +10,7 @@ const emit = defineEmits<{ activate: [optionId: string | null] }>();
     v-if="foreground?.kind === 'choose' || foreground?.kind === 'show-button'"
     role="group"
     :aria-label="foreground.accessibleName"
-    class="flex min-w-0 flex-wrap justify-center px-1 pb-3"
+    class="flex min-w-0 flex-wrap justify-center px-1"
   >
     <template v-if="foreground.kind === 'choose'">
       <PlayerActionButton
@@ -35,5 +35,6 @@ const emit = defineEmits<{ activate: [optionId: string | null] }>();
 <style scoped>
 [data-foreground-controls] {
   gap: 8px;
+  padding-block-start: 1rem;
 }
 </style>

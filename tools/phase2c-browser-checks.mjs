@@ -1289,6 +1289,11 @@ async function actionButtonGeometryChecks(page) {
     page.evaluate(() => {
       const foreground = document.querySelector("[data-foreground-controls]");
       const background = document.querySelector(".background-controls-fixture");
+      const bubble = document.querySelector(
+        ".transcript-entry:last-child [data-slot='bubble-content']",
+      );
+      const composer = document.querySelector("[data-composer-shell]");
+      const overlay = document.querySelector("[data-conversation-overlay]");
       const button = (element) => {
         const style = getComputedStyle(element);
         const box = element.getBoundingClientRect();
@@ -1309,6 +1314,14 @@ async function actionButtonGeometryChecks(page) {
           getComputedStyle(foreground).columnGap,
         ],
         backgroundGap: getComputedStyle(background).gap,
+        messageToChoices:
+          foreground.querySelector(".player-action-button").getBoundingClientRect().top -
+          bubble.getBoundingClientRect().bottom,
+        choicesToComposer:
+          composer.getBoundingClientRect().top -
+          foreground.lastElementChild.getBoundingClientRect().bottom,
+        composerToBottom:
+          overlay.getBoundingClientRect().bottom - composer.getBoundingClientRect().bottom,
         foregroundWidth: foreground.getBoundingClientRect().width,
         foregroundButtons: Array.from(foreground.querySelectorAll(".player-action-button"), button),
         backgroundButtons: Array.from(background.querySelectorAll(".player-action-button"), button),
@@ -1321,6 +1334,12 @@ async function actionButtonGeometryChecks(page) {
   check(
     initial.foregroundGap.join("/") === "8px/8px" && initial.backgroundGap === "8px",
     "Player action button groups do not use 8px gaps",
+  );
+  check(
+    Math.abs(initial.messageToChoices - 16) < 1 &&
+      Math.abs(initial.choicesToComposer - 12) < 1 &&
+      Math.abs(initial.composerToBottom - 12) < 1,
+    "Message, choice group and composer do not use the agreed vertical spacing",
   );
   for (const button of [...initial.foregroundButtons, ...initial.backgroundButtons]) {
     check(

@@ -475,7 +475,8 @@ The POC's letter-glyph avatars remain fixtures; accepted V30 speaker avatar refe
 
 The Standard Player uses one persistent composer at the bottom of the conversation area. It is the normal chat input and
 the answer field for `askText` and `askNumber`; `choose` and `showButton` controls appear after the latest message inside the
-same vertically scrolling transcript. The composer stays at the bottom.
+same vertically scrolling transcript. The composer stays at the bottom. Its shell has a 12px gap above and below in the
+normal viewport; a larger bottom safe-area inset takes precedence where needed.
 
 ### Wide presentation
 
@@ -555,7 +556,8 @@ Actual interactive controls always take precedence and must not also fire the vi
 
 A `showButton` is the one-option presentation of the same Standard foreground-control vocabulary. Controls share
 the transcript's reading width, grow with their labels, and allow long labels to wrap. The group centers its
-buttons and wraps onto additional rows rather than scrolling horizontally. The Player action button is the shared style
+buttons and wraps onto additional rows rather than scrolling horizontally. The gap from the preceding message to the
+group matches the normal 16px transcript-entry gap. The Player action button is the shared style
 for script-driven foreground and right-rail actions, including `choose` and `showButton`: minimum height `44px`, `8px`
 vertical and `12px` horizontal padding, `8px` gaps in both directions, `0.875rem` label text, and unitless `1.3`
 line-height. Short buttons take their content width; long labels wrap and grow the button vertically. These dimensions
