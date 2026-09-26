@@ -1399,6 +1399,56 @@ async function actionButtonGeometryChecks(page) {
   return "PASS shared action button size, spacing, wrapping, intrinsic width and root-font scaling";
 }
 
+async function transcriptSpacingChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  await page.getByRole("button", { name: "Visual Lab", exact: true }).click();
+  await page.getByRole("button", { name: "Start spacing sample", exact: true }).click();
+  await page.getByRole("button", { name: "Visit the lighthouse", exact: true }).waitFor();
+  const select = page.locator("[data-transcript-entry-gap]");
+  const measure = () =>
+    page.evaluate(() => {
+      const rows = Array.from(document.querySelectorAll(".transcript-entry"));
+      const controls = document.querySelector("[data-foreground-controls]");
+      return {
+        speakers: rows.map((row) => row.getAttribute("data-speaker-id")),
+        continues: rows.map((row) => row.getAttribute("data-continues")),
+        gaps: rows.map((row) => Number.parseFloat(getComputedStyle(row).paddingTop)),
+        choiceGap: Number.parseFloat(getComputedStyle(controls).paddingTop),
+      };
+    });
+  for (const gap of [16, 12, 8]) {
+    await select.selectOption(String(gap));
+    const result = await measure();
+    check(
+      result.speakers.length === 5 &&
+        result.speakers[2] === "user" &&
+        result.speakers[3] !== result.speakers[4] &&
+        result.continues[1] === "true",
+      "Spacing sample does not show grouped, player and other-speaker messages with choices",
+    );
+    check(
+      JSON.stringify(result.gaps) === JSON.stringify([gap, 3, gap, gap, gap]) &&
+        result.choiceGap === gap,
+      `Transcript spacing selector did not apply ${gap}px to separate bubbles and choices`,
+    );
+  }
+  await page.goto(`${page.url().split("?")[0]}?spacing-sample`);
+  await page.getByRole("button", { name: "Visit the lighthouse", exact: true }).waitFor();
+  const directSample = await page.evaluate(() => ({
+    stageHeight: document.querySelector(".player-stage").getBoundingClientRect().height,
+    viewportHeight: window.innerHeight,
+    messages: document.querySelectorAll(".transcript-entry").length,
+  }));
+  check(
+    directSample.messages === 5 &&
+      Math.abs(directSample.stageHeight / directSample.viewportHeight - 0.45) < 0.01,
+    "Direct spacing sample does not show the conversation-first example",
+  );
+  return "PASS grouped 3px and selectable 8/12/16px transcript and choice spacing";
+}
+
 async function buttonInkChecks(page) {
   if (!(await page.evaluate(() => matchMedia("(any-hover: hover)").matches))) {
     throw new Error("Button ink regression requires a hover-capable desktop context");
@@ -2141,6 +2191,7 @@ const groups = [
   contentAlignmentChecks,
   typographyChecks,
   actionButtonGeometryChecks,
+  transcriptSpacingChecks,
   buttonInkChecks,
   authoredPresentationChecks,
   listContrastChecks,

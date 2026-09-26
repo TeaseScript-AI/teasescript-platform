@@ -23,6 +23,7 @@ const props = defineProps<{
   speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
   revision?: number;
   transcriptKey: string;
+  transcriptEntryGap?: 8 | 12 | 16;
 }>();
 const emit = defineEmits<{
   "update:session": [session: PlayerRuntimeSession];
@@ -113,7 +114,8 @@ function submit() {
 </script>
 
 <template>
-  <div ref="root" data-runtime-interaction class="contents">
+  <div ref="root" data-runtime-interaction class="contents"
+    :style="{ '--transcript-entry-gap': `${transcriptEntryGap ?? 16}px` }">
     <ConversationSurface @margin-wheel="transcript?.scrollFromMargin($event)">
       <template #default="{ bottomInset }">
         <Transcript ref="transcript" :key="transcriptKey" :entries="entries" :speakers="speakers" :revision="revision ?? 0" :bottom-inset="bottomInset">

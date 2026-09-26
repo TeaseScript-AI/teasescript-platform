@@ -36,3 +36,16 @@ let next = choose as guide stay: "Stay a little longer", walk: "Walk together"
 showButton as guide "Finish"
 exit
 `;
+
+// A completed reply keeps the player bubble, speaker changes and active choices visible together.
+export const spacingScenario = `
+speaker guide { title: "Coastal Guide" }
+speaker keeper { title: "Harbour Keeper" }
+say as guide "The path splits just beyond the dunes.", instant
+say as guide "We can still hear the water from here.", instant
+let reply = askText as guide "Your reply"
+say as keeper "The lighthouse path is open tonight.", instant
+say as guide "Where would you like to go?", instant
+let direction = choose as guide shore: "Walk by the water", light: "Visit the lighthouse", harbour: "Return to the harbour"
+exit
+`;

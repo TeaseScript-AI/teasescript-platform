@@ -20,10 +20,16 @@ import {
   createPlayerRuntimeSession,
   createPlayerRuntimeRestorePoint,
   restorePlayerRuntimeSession,
+  submitPlayerRuntimeComposer,
   type PlayerRuntimeSession,
   type PlayerRuntimeRestorePoint,
 } from "../../../runtime-adapter.js";
-import { runtimeScenario, interactionScenario, buttonScenario } from "./runtimeScenario";
+import {
+  runtimeScenario,
+  interactionScenario,
+  buttonScenario,
+  spacingScenario,
+} from "./runtimeScenario";
 import { stageFixtures } from "./stageFixtures";
 import type { PlayerTimerKind } from "../../../model.js";
 import TimerFixtureRegion from "./TimerFixtureRegion.vue";
@@ -42,6 +48,8 @@ const isDevelopment = import.meta.env.DEV;
 // Opt-in browser-test content; never populate the normal settings surface with fixtures.
 const toolStateFixture =
   isDevelopment && new URLSearchParams(window.location.search).has("tool-state-fixture");
+const spacingSample =
+  isDevelopment && new URLSearchParams(window.location.search).has("spacing-sample");
 const mediaFixture = ref<keyof typeof stageFixtures>("Landscape");
 const longTitle = ref(false);
 const timerKind = ref<PlayerTimerKind>("visible");
@@ -77,13 +85,26 @@ const runtimeSession = shallowRef<PlayerRuntimeSession | null>(null);
 const runtimeRestore = shallowRef<PlayerRuntimeRestorePoint | null>(null);
 const runtimeGeneration = ref(0);
 const interactionReset = ref(0);
-function startRuntime(source = runtimeScenario) {
+const transcriptEntryGap = ref<8 | 12 | 16>(16);
+function setRuntimeSession(session: PlayerRuntimeSession) {
   runtimeGeneration.value++;
   interactionReset.value++;
-  runtimeSession.value = createPlayerRuntimeSession(source);
-  runtimeRestore.value = createPlayerRuntimeRestorePoint(runtimeSession.value);
+  runtimeSession.value = session;
+  runtimeRestore.value = createPlayerRuntimeRestorePoint(session);
 }
-if (isDevelopment) startRuntime(buttonScenario);
+function startRuntime(source = runtimeScenario) {
+  setRuntimeSession(createPlayerRuntimeSession(source));
+}
+function startSpacingSample() {
+  const session = createPlayerRuntimeSession(spacingScenario);
+  const reply = submitPlayerRuntimeComposer(session, "Let's see what is near the lighthouse.");
+  if (!reply || reply.outcome.kind !== "completed") throw new Error("Spacing sample reply failed");
+  setRuntimeSession(reply.session);
+}
+if (isDevelopment) {
+  if (spacingSample) startSpacingSample();
+  else startRuntime(buttonScenario);
+}
 function restoreRuntime() {
   if (!runtimeRestore.value) return;
   interactionReset.value++;
@@ -219,6 +240,18 @@ async function toggleFullscreen() {
         </fieldset>
         <fieldset class="grid min-w-0 gap-2">
           <legend class="mb-2">Transcript fixtures</legend>
+          <label class="grid gap-2">
+            Gap between separate messages
+            <select
+              v-model.number="transcriptEntryGap"
+              data-transcript-entry-gap
+              class="min-w-0 rounded border bg-card p-2"
+            >
+              <option :value="8">8px</option>
+              <option :value="12">12px</option>
+              <option :value="16">16px</option>
+            </select>
+          </label>
           <Button
             class="min-w-0"
             variant="outline"
@@ -250,6 +283,9 @@ async function toggleFullscreen() {
         </fieldset>
         <fieldset class="grid min-w-0 gap-2">
           <legend class="mb-2">Runtime transcript scenario</legend>
+          <Button class="min-w-0" variant="outline" @click="startSpacingSample"
+            >Start spacing sample</Button
+          >
           <Button class="min-w-0" variant="outline" @click="startRuntime()"
             >Start runtime scenario</Button
           >
@@ -278,7 +314,7 @@ async function toggleFullscreen() {
       </div>
     </template>
     <template #default="{ sidebarVisible }">
-      <PlayerComposition>
+      <PlayerComposition :initial-stage-size="spacingSample ? 45 : 60">
         <template #topbar>
           <PlayerTopBar
             :title="
@@ -330,6 +366,7 @@ async function toggleFullscreen() {
           :entries="runtimeSession?.transcriptEntries ?? transcriptEntries"
           :speakers="runtimeSession?.speakers ?? transcriptFixtureSpeakers"
           :revision="runtimeSession?.transcriptRevision ?? 0"
+          :transcript-entry-gap="transcriptEntryGap"
           @preview-submit="appendPreviewResponse"
         />
       </PlayerComposition>

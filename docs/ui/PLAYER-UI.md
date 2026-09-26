@@ -434,7 +434,8 @@ alignment; authors can set `position` and `align` only for prose, as defined by 
 occupy at most `75%` of the conversation width and `65ch`. Consecutive messages group only while both the speaker and
 presentation kind remain the same. The first received bubble in a group shows its avatar and name. Player-authored
 messages do not. Speaker identity colour/font and per-message rich-text styling are content presentation, not
-application palette roles.
+application palette roles. Adjacent bubbles in one speaker/presentation group have a 3px gap. Separate bubble groups
+currently start 16px apart; Visual Lab offers 8px and 12px alternatives for comparison. Prose keeps its own spacing.
 
 The runtime adapter supplies resolved message presentation according to the
 [language contract](../specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides). Where that
@@ -557,7 +558,7 @@ Actual interactive controls always take precedence and must not also fire the vi
 A `showButton` is the one-option presentation of the same Standard foreground-control vocabulary. Controls share
 the transcript's reading width, grow with their labels, and allow long labels to wrap. The group centers its
 buttons and wraps onto additional rows rather than scrolling horizontally. The gap from the preceding message to the
-group matches the normal 16px transcript-entry gap. The Player action button is the shared style
+group follows the separate-bubble gap (16px by default). The Player action button is the shared style
 for script-driven foreground and right-rail actions, including `choose` and `showButton`: minimum height `44px`, `8px`
 vertical and `12px` horizontal padding, `8px` gaps in both directions, `0.875rem` label text, and unitless `1.3`
 line-height. Short buttons take their content width; long labels wrap and grow the button vertically. These dimensions

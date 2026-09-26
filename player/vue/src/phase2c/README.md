@@ -44,8 +44,12 @@ utility resolution; it does not change the maintained Player theme or select a p
   `BackgroundControlsFixture.vue` demonstrates repeatable, removable, boolean and disabled buttons using the shared
   action material. These local interactions and timer allocation remain experimental, without runtime wiring.
 
-The preview opens with choices. Visual Lab restarts that scenario or selects text/number/choice interaction;
-transcript fixtures switch App back to local preview replies. Composer dimensions and height caps remain visual trials.
+The preview opens with choices. Visual Lab restarts that scenario, selects text/number/choice interaction, or loads a
+spacing sample with grouped guide bubbles, a player reply, another speaker, and active choices. Its 8px/12px/16px
+separate-message gap selector changes that sample and the regular preview without changing the 3px grouped-bubble gap.
+The `?spacing-sample` preview URL opens that sample directly with a 45/55 stage/conversation split so all messages and
+choices can be compared together. Transcript fixtures switch App back to local preview replies. Composer dimensions and
+height caps remain visual trials.
 
 Story-button ink and transcript readability follow the current Player treatment in
 [Player UI](../../../../docs/ui/PLAYER-UI.md); Visual Lab does not offer contrast-method switches.

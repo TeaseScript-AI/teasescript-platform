@@ -268,8 +268,8 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
 :deep(.transcript-scroll[data-scrolled="true"]) { --transcript-top-fade: 1rem; }
 .transcript-foreground { position: absolute; left: 0; width: 100%; }
 .transcript-history { position: relative; width: 100%; }
-.transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: 1rem 0; }
-.transcript-entry[data-continues="true"] { padding-block-start: 0.125rem; }
+.transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: var(--transcript-entry-gap, 16px) 0; }
+.transcript-entry[data-continues="true"] { padding-block-start: 3px; }
 .transcript-entry[data-prose] { padding-block: 1.75rem 0.75rem; }
 .transcript-empty { padding: 1rem; font-size: 0.875rem; color: var(--muted-foreground); }
 .return-to-latest {
