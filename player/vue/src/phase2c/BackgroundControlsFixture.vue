@@ -20,7 +20,7 @@ function requestHint() {
       Repeat
     </PlayerActionButton>
     <PlayerActionButton :aria-pressed="enabled" @click="enabled = !enabled">
-      <span>Extra challenge <span class="block text-xs font-normal">{{ enabled ? 'On' : 'Off' }}</span></span>
+      <span>Extra challenge <span class="block font-normal">{{ enabled ? 'On' : 'Off' }}</span></span>
       <Check class="size-4 shrink-0" :class="{ invisible: !enabled }" aria-hidden="true" />
     </PlayerActionButton>
     <PlayerActionButton v-if="hintVisible" @click="requestHint">Give me a hint</PlayerActionButton>
@@ -33,7 +33,8 @@ function requestHint() {
 .background-controls-fixture {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  align-items: center;
+  gap: 8px;
   padding: 6px;
 }
 .fixture-feedback {

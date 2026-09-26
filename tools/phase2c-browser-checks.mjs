@@ -1278,6 +1278,108 @@ async function timerChecks(page) {
   return "PASS timer secrecy, hidden state and reduced motion";
 }
 
+async function actionButtonGeometryChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  const close = (actual, expected) => Math.abs(actual - expected) < 0.15;
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator("[data-foreground-controls] .player-action-button").first().waitFor();
+  const geometry = () =>
+    page.evaluate(() => {
+      const foreground = document.querySelector("[data-foreground-controls]");
+      const background = document.querySelector(".background-controls-fixture");
+      const button = (element) => {
+        const style = getComputedStyle(element);
+        const box = element.getBoundingClientRect();
+        return {
+          text: element.innerText,
+          width: box.width,
+          height: box.height,
+          minHeight: Number.parseFloat(style.minHeight),
+          paddingBlock: Number.parseFloat(style.paddingTop),
+          paddingInline: Number.parseFloat(style.paddingLeft),
+          font: Number.parseFloat(style.fontSize),
+          line: Number.parseFloat(style.lineHeight),
+        };
+      };
+      return {
+        foregroundGap: [
+          getComputedStyle(foreground).rowGap,
+          getComputedStyle(foreground).columnGap,
+        ],
+        backgroundGap: getComputedStyle(background).gap,
+        foregroundWidth: foreground.getBoundingClientRect().width,
+        foregroundButtons: Array.from(foreground.querySelectorAll(".player-action-button"), button),
+        backgroundButtons: Array.from(background.querySelectorAll(".player-action-button"), button),
+        stateLabelFont: Number.parseFloat(
+          getComputedStyle(background.querySelector(".block")).fontSize,
+        ),
+      };
+    });
+  const initial = await geometry();
+  check(
+    initial.foregroundGap.join("/") === "8px/8px" && initial.backgroundGap === "8px",
+    "Player action button groups do not use 8px gaps",
+  );
+  for (const button of [...initial.foregroundButtons, ...initial.backgroundButtons]) {
+    check(
+      close(button.minHeight, 44) && button.height >= 44,
+      `Player action button is shorter than 44px: ${button.text}`,
+    );
+    check(
+      close(button.paddingBlock, 8) && close(button.paddingInline, 12),
+      `Player action button padding changed: ${button.text}`,
+    );
+    check(
+      close(button.font, 14) && close(button.line, 18.2),
+      `Player action button type changed: ${button.text}`,
+    );
+  }
+  check(initial.stateLabelFont === 14, "Right-rail button state label uses a different text size");
+  check(
+    new Set(initial.backgroundButtons.map((button) => Math.round(button.width))).size > 1,
+    "Right-rail action buttons were stretched to equal widths",
+  );
+
+  await page.setViewportSize({ width: 700, height: 900 });
+  const narrow = await geometry();
+  const long = narrow.foregroundButtons.find((button) =>
+    button.text.startsWith("Take the longer path"),
+  );
+  check(
+    long && long.height > 44 && long.width <= narrow.foregroundWidth,
+    "Long choice did not wrap and grow inside its group",
+  );
+  await page.getByRole("button", { name: "Stay by the water", exact: true }).click();
+  const continueButton = page.getByRole("button", { name: "Continue", exact: true });
+  await continueButton.waitFor();
+  const continueSize = await continueButton.evaluate((element) => {
+    const style = getComputedStyle(element),
+      box = element.getBoundingClientRect();
+    return { height: box.height, font: Number.parseFloat(style.fontSize) };
+  });
+  check(
+    continueSize.height >= 44 && close(continueSize.font, 14),
+    "Standalone showButton did not share the Player action button style",
+  );
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = "20px";
+  });
+  const scaled = await geometry();
+  for (const button of [...scaled.foregroundButtons, ...scaled.backgroundButtons]) {
+    check(
+      close(button.font, 17.5) && close(button.line, 22.75),
+      `Player action button text did not follow the root size: ${button.text}`,
+    );
+    check(
+      close(button.paddingBlock, 8) && close(button.paddingInline, 12),
+      `Player action button padding should remain in pixels: ${button.text}`,
+    );
+  }
+  return "PASS shared action button size, spacing, wrapping, intrinsic width and root-font scaling";
+}
+
 async function buttonInkChecks(page) {
   if (!(await page.evaluate(() => matchMedia("(any-hover: hover)").matches))) {
     throw new Error("Button ink regression requires a hover-capable desktop context");
@@ -2019,6 +2121,7 @@ const groups = [
   transcriptChecks,
   contentAlignmentChecks,
   typographyChecks,
+  actionButtonGeometryChecks,
   buttonInkChecks,
   authoredPresentationChecks,
   listContrastChecks,

@@ -34,7 +34,6 @@ const emit = defineEmits<{ activate: [optionId: string | null] }>();
 </template>
 <style scoped>
 [data-foreground-controls] {
-  column-gap: 10px;
-  row-gap: 0;
+  gap: 8px;
 }
 </style>

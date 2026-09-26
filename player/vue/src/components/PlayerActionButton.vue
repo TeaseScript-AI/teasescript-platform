@@ -26,15 +26,17 @@ const material = computed(() =>
 .player-action-button {
   --button-text: var(--story-choice-ink);
   height: auto;
+  min-height: 44px;
   min-width: 0;
   max-width: 100%;
   flex-shrink: 1;
-  padding: 10px;
+  padding: 8px 12px;
   white-space: normal;
   overflow-wrap: anywhere;
   text-align: center;
+  font-size: 0.875rem;
   font-weight: 600;
-  line-height: 1.2;
+  line-height: 1.3;
   border: 1px solid var(--story-choice-rim);
   border-radius: 9px;
   color: var(--story-choice-ink);

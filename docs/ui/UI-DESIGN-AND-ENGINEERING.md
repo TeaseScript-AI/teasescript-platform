@@ -25,7 +25,7 @@ task crosses categories or the relevant ownership is unclear.
   [Keep defaults and visual roles explicit](#keep-defaults-and-visual-roles-explicit),
   [Build colour systems from semantic roles](#build-colour-systems-from-semantic-roles),
   [Shared control baseline](#shared-control-baseline),
-  [Player story-button design rationale](#player-story-button-design-rationale), and
+  [Player action button design rationale](#player-action-button-design-rationale), and
   [Match interaction feedback to input capability](#match-interaction-feedback-to-input-capability).
 - **Demo/content independence, media decoration, or effect containment:**
   [Keep content independent from demo markup and decorative
@@ -140,10 +140,10 @@ Individual product surfaces may compose the shared roles differently where their
 product-surface widths, heights, spacing, layout geometry, and palette values remain owned by the maintained
 specification for that surface unless this shared baseline deliberately adopts them.
 
-### Player story-button design rationale
+### Player action button design rationale
 
-The accepted Standard Player story-button direction is **soft bevel**: a filled, modestly raised surface for actions
-that belong to the story. This is a deliberate exception to flat ordinary controls, not a new default for settings,
+The accepted Standard Player action-button direction is **soft bevel**: a filled, modestly raised surface for scripted
+Player actions. This is a deliberate exception to flat ordinary controls, not a new default for settings,
 toolbars, or every button in the product. The observable contract remains in
 [Composer and foreground interactions](PLAYER-UI.md#composer-and-foreground-interactions).
 
@@ -161,7 +161,7 @@ is supplied, the Player theme provides the base. Do not silently replace an awkw
 
 Derive lighting from the base colour while keeping its hue recognizable. Near a text-contrast boundary, reduce the
 lighting variation instead of sacrificing legibility for relief. Choose readable black or white text against the
-rendered fill states, accounting for gamut mapping. Story buttons use APCA to choose black or white ink;
+rendered fill states, accounting for gamut mapping. Player action buttons use APCA to choose black or white ink;
 their existing lighting is bounded with WCAG contrast. Authored transcript backgrounds use WCAG to choose
 default ink. Both call `blackOrWhiteInk` in `player/theme/color.ts`; explicit authored text colours remain separate.
 A gradient and its hover/pressed variants need checking, not just

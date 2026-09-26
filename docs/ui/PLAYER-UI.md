@@ -213,7 +213,7 @@ size therefore scales ordinary text, headings, and authored size spans together 
 | narrow composer text | composer keeps the shared reading size; Send remains `14px` |
 | normal timer | `18px`, weight `700`, tabular numerals |
 | compact timer | current smaller timer values remain a visual-tuning baseline rather than a final `<= 480px` contract |
-| background control label | `12px`, weight `600`, line-height `1.2` |
+| Player action button label | `0.875rem` (14px at the current browser base), weight `600`, line-height `1.3` |
 | global icon control | `34px` square, `6px` corner radius |
 | tool column | fixed width from the maintained global-geometry baseline; column radius `8px` |
 | tool-column header | minimum `44px` high; selector/add/close controls are `30px` high; add/close are `30px` square; controls use `6px` radius |
@@ -555,8 +555,11 @@ Actual interactive controls always take precedence and must not also fire the vi
 
 A `showButton` is the one-option presentation of the same Standard foreground-control vocabulary. Controls share
 the transcript's reading width, grow with their labels, and allow long labels to wrap. The group centers its
-buttons and wraps onto additional rows rather than scrolling horizontally. Foreground choices use 10px horizontal
-spacing and no added row gap. Story buttons have 10px padding and use the shared shadcn Button with a soft-bevel
+buttons and wraps onto additional rows rather than scrolling horizontally. The Player action button is the shared style
+for script-driven foreground and right-rail actions, including `choose` and `showButton`: minimum height `44px`, `8px`
+vertical and `12px` horizontal padding, `8px` gaps in both directions, `0.875rem` label text, and unitless `1.3`
+line-height. Short buttons take their content width; long labels wrap and grow the button vertically. These dimensions
+apply on desktop and touch alike. Player action buttons use the shared shadcn Button with a soft-bevel
 presentation: modest rounding, a lighter top, darker lower edge, and a small depth shadow. Hover changes the lighting
 without moving the label; pressing reduces the depth. Controls scroll away with the transcript; there is no separate
 button scroller. The transcript’s leading scroll space keeps messages and controls together above the composer when
@@ -570,7 +573,7 @@ states. Unavailable action buttons use the shared disabled surface, text and bor
 feedback. They retain native disabled semantics and cannot activate. Right-rail action buttons use the same opaque
 material as foreground buttons.
 
-The [story-button design rationale](UI-DESIGN-AND-ENGINEERING.md#player-story-button-design-rationale) explains the
+The [Player action button design rationale](UI-DESIGN-AND-ENGINEERING.md#player-action-button-design-rationale) explains the
 material choice and its reuse boundaries.
 
 Validation content and retry semantics come from the controlling interaction/runtime contract. The Player must not
