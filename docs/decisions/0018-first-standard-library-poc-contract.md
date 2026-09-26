@@ -26,9 +26,11 @@ This ADR was accepted as documentation and design. Its generic foreground-intera
 9. `askText`, `askNumber`, `choose`, and `showButton` are mandatory foreground interactions. They cannot be cancelled and do not return `null`.
 10. Interaction definitions and completions are bounded, typed, JSON-safe data. Over-limit data is rejected deterministically without truncation or partial state mutation.
 11. The Standard Player application uses one focused chat composer for typed answers. Choice controls may render as
-    buttons or a dropdown without changing semantics; `showButton` completes only through its rendered button.
+    buttons or a dropdown without changing semantics; `showButton` completes through its rendered button or exact
+    visible-text composer submission.
 12. Valid answers and choice/button activations become player-authored transcript messages. Exact unambiguous visible
-    choice text may activate `choose`; composer text and Space do not activate `showButton`.
+    choice text may activate `choose`; exact visible button text may activate `showButton`. Space in the empty composer
+    does not activate `showButton`.
 13. `say` uses account-configured smart autoplay by default, supports exact seconds, `0`, and `instant`, and supports speaker defaults plus per-message `skippable` or `unskippable` overrides.
 14. Every positive pacing gate is one ADR 0016 pending action. It begins as background work and may become the foreground action when it blocks a prepared later `say`.
 15. A skippable pacing gate may be completed by a primary click or tap inside the player iframe viewport, or by Space while the focused composer is empty. Skip completes only the pacing gate.
@@ -196,6 +198,25 @@ A labelled button or dropdown selection submits the selected label to the engine
 
 This compact syntax supersedes the V30 split between labelled `{...}` and unlabelled `[...]` choice bodies. The question itself is normally a preceding `say`; compact `choose` has no prompt argument.
 
+### Authored button backgrounds
+
+Owner-approved extension (2026-09-21): each choice may use `{ text: expression, background: colour }` instead of
+its ordinary text expression. `text` is required; `background` is optional. Labelled and unlabelled forms retain their
+existing selection, typed-match, return-value and transcript semantics. Object properties and options evaluate in
+source order. A computed object follows the same shape; unknown properties are rejected.
+
+```tease
+let result = choose coast: { text: "Stay by the water", background: "seagreen" },
+  lights: { text: "Follow the lights", background: "gold" }, sunset: "Wait for sunset"
+showButton "Continue", background: "hsl(155 55% 35%)"
+```
+
+`background` accepts the shared [opaque authored CSS colours](../specifications/accepted-syntaxes-v30.md#authored-colours).
+Invalid statically known colours fail compilation; invalid computed colours fail the interaction before it is published. Omission uses the
+Player theme. The Player derives readable text and the approved button material from this base colour; this extension
+adds no authored text-colour or disabled syntax. The normalized background is captured with the active interaction
+and survives checkpoint save/restore without re-evaluating author expressions.
+
 ### `showButton`
 
 ```tease
@@ -204,9 +225,10 @@ showButton as mistress "Ready"
 ```
 
 The first POC form displays one blocking button and has no useful script return value, timeout, or cancellation path. It
-is the one-option form of the same Standard foreground-control vocabulary as `choose`. The Player activates it only by
-clicking/tapping the rendered button. Composer submission, including the exact stored visible button text, Space in the
-empty focused composer, and a click/tap on unrelated blank Player space do not activate `showButton`.
+is the one-option form of the same Standard foreground-control vocabulary as `choose`. The Player activates it by
+clicking/tapping the rendered button or submitting its exact non-empty stored visible text in the composer. Other text,
+Space in the empty focused composer, and a click/tap on unrelated blank Player space do not activate `showButton`.
+Typed matching does not trim, fold case, or normalize Unicode.
 
 The engine derives the canonical player-authored transcript text from the stored button label; the Player application
 does not provide replacement transcript text.
@@ -359,9 +381,10 @@ For `choose`, selecting a button or dropdown entry:
 
 Typing an exact unambiguous visible choice has the same completion effect.
 
-For `showButton`, clicking/tapping the rendered control makes the stored visible text the player's transcript message
-and completes the pending action. Composer submission, including the exact visible text, Space with the empty focused
-composer, and clicking unrelated blank Player space do not activate the button. For example:
+For `showButton`, clicking/tapping the rendered control or submitting its exact non-empty visible text in the composer
+makes the stored visible text the player's transcript message and completes the same pending action. Other composer
+submissions, Space with the empty focused composer, and clicking unrelated blank Player space do not activate the
+button. For example:
 
 ```tease
 say as mistress "Tell me when you are ready."

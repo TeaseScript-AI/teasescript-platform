@@ -29,7 +29,20 @@ The repository currently has no browser-automation dependency and no external pr
 tests, preserving actionable failure information. `npm run format` applies the formatter policy;
 `npm run format:check` verifies it without writing. `npm run lint` applies the [type-evidence policy](LINTING.md);
 `npm run test:lint` type-checks and tests the maintained rule implementation; `npm run knip` checks the selected
-unused-code and dependency categories.
+unused-code and dependency categories. `npm run lint:design:phase2c` and `npm run test:lint:design`
+check the [Player design contracts](LINTING.md#player-design-lint) and their positive/negative fixtures;
+both are included in `npm run check`.
+Independent pre-test gates and UI checks/builds run concurrently through `tools/run-parallel.mjs`.
+TypeScript compilation precedes UI work; compiled tests run only after all builds pass. Each command's output is
+printed together, including warnings. A failure stops the group and subsequent stages; SIGINT/SIGTERM also terminate
+child process groups, escalating after a grace period. `npm run test:verification` checks scheduling, diagnostics and
+process cleanup (POSIX cleanup assertions run on CI; Windows uses `taskkill /t /f`).
+
+Use `VERIFY_SERIAL=1 npm run check` for serial diagnosis or constrained machines; it runs the same commands.
+No additional verification caches are enabled. Standard checks omit UI source maps because no configured check
+consumes them; direct `npm run build` and `npm test` runs retain source maps. UI builds write separate `dist`
+subdirectories, Vue typechecking emits nothing, and the clean-build regression uses an isolated temporary directory.
+
 `npm run test:full-output` and `npm run check:full-output`
 are diagnostic reruns only when compact output is insufficient for a failure or
 specific investigation. Do not run a normal and full-output variant by default
@@ -42,10 +55,6 @@ and real machine-checkable boundaries. They must not freeze living documentation
 prose, headings, routing wording, lifecycle wording, or equivalent Markdown
 content as required string assertions. Documentation correctness and ownership
 remain implementation, review, and explicitly assigned audit responsibilities.
-
-Use the smallest representative bounded fixture that proves the invariant,
-and reserve maximum-size or worst-form fixtures for cases where size or form is
-itself under test.
 
 The ChatGPT project-settings prompt has an owner-confirmed hard acceptance limit
 of 8,000 characters. CI may enforce that quantitative external interface
@@ -71,6 +80,27 @@ build/tests, while strict documentation-only changes retain exact candidate
 identity verification without executing Node. The normal pull-request CI starts
 again after publication and still runs the complete canonical command on the
 published commit.
+
+## Test admission and consolidation
+
+Give each maintained test family a distinct evidence obligation: accepted behavior, a real public/trusted boundary,
+confirmed regression, deterministic invariant, or material browser-only risk. Choose the cheapest layer that proves it;
+keep representative source-to-runtime integration where isolated tests cannot prove the connection. Browser tests own
+rendering, focus, input, scrolling and accessibility semantics, not repeated runtime normalization/checkpoint matrices.
+
+Use the smallest representative fixture; retain large inputs when scale itself caused the defect. Separate expensive
+setup from the boundary under test when a small integration case plus direct boundary evidence proves both obligations.
+Measure changed suites and record revision, environment, command and timings in the issue/PR rather than imposing local
+measurements as permanent limits.
+
+Before removing or consolidating a family, record its obligation and remaining evidence in the issue/PR. Delete checks
+that only freeze provisional geometry, development-fixture content or private implementation details; preserve genuine
+regressions and browser risks exercised *through* fixtures. Replace numeric tuning assertions with observable behavior
+where possible. A POC check needs reassessment when its experiment changes or ends, not automatic repair to preserve an
+obsolete expectation. Repeated input/viewport cases need distinct failure modes, not merely different values.
+
+Tests do not establish product policy. A numeric oracle tied to a current algorithm may detect regression without making
+that number a project-wide accessibility or performance requirement; identify that scope explicitly.
 
 ## Test layers
 
@@ -104,7 +134,10 @@ End-to-end testing does not replace focused unit, validator, and invariant tests
 Use focused unit tests for deterministic presentation logic and the repository's local Chromium smoke route for changed
 browser behavior, including layout, focus, input, scrolling, overlays, and accessibility state. The current smoke route
 is a dependency-free development check outside `npm run check`; it is not a final cross-browser or production-host E2E
-suite.
+suite. For the Phase 2C development preview, run
+`npm run test:player:phase2c-browser -- <preview-url>`. Each group uses a fresh browser context;
+history checks explicitly load their fixtures through Visual Lab instead of depending on the opening demo.
+On failure the runner reports a retained scratch directory with a screenshot and Playwright trace for the failing group.
 
 After every visible UI change, the implementer must also open the affected flow with interactive browser tooling
 (computer use where available) and inspect the changed state plus its immediate responsive/interaction neighbors. This

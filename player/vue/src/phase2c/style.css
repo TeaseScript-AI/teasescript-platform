@@ -1,0 +1,400 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme inline {
+  --color-popover: var(--popover, var(--surface-component));
+  --color-popover-foreground: var(--foreground);
+  --color-primary: var(--theme-accent-solid, var(--package-accent));
+  --color-primary-foreground: var(--theme-text-on-accent, white);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--foreground);
+  --color-sidebar-border: var(--border);
+  --color-sidebar-accent: var(--component-hover);
+  --color-sidebar-accent-foreground: var(--foreground);
+  --color-sidebar-ring: var(--focus-ring, var(--border-strong));
+  --color-muted-foreground: var(--text-muted);
+  /* The shadcn message/bubble parts style themselves through these names. */
+  --color-card: var(--surface-component);
+  --color-muted: var(--sidebar);
+  --color-secondary: var(--surface-component);
+  --color-secondary-foreground: var(--foreground);
+  --color-accent: var(--component-hover);
+  --color-accent-foreground: var(--foreground);
+  /* Shared component roles follow ../styles/globals.css. */
+  --color-destructive: var(--theme-accent-solid, var(--package-accent));
+  --color-border: var(--border);
+  --color-input: var(--border);
+  --color-ring: var(--focus-ring, var(--border-strong));
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+}
+
+:root {
+  /* Player edge layout is fixed; controls grow only with their icon/text size. */
+  --player-edge-space: 8px;
+  --player-control-padding: 8px;
+  --player-top-control-radius: 0.75rem;
+  --player-title-font-size: 0.875rem;
+  --player-control-size: calc(1rem + 2 * var(--player-control-padding));
+  --player-top-control-size: max(var(--player-control-size), calc(var(--player-title-font-size) + 16px));
+  --player-header-size: calc(var(--player-top-control-size) + 2 * var(--player-edge-space));
+  /* Measure from the bottom of the top controls, not the transparent header. */
+  --player-following-control-gap: 16px;
+  --player-following-control-top: calc(
+    var(--player-edge-space) + var(--player-top-control-size) + var(--player-following-control-gap)
+  );
+  --player-resize-rail-size: 5px;
+  --player-timer-size: 132px;
+  --player-timer-halo-space: 12px;
+  --player-menu-compact-width: calc(var(--player-top-control-size) + 2 * var(--player-edge-space));
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  /* Existing Player light palette: player/styles/layout.css. */
+  --background: oklch(95.839% 0.01306 71.33);
+  --foreground: oklch(30.838% 0.01712 35.72);
+  --sidebar: oklch(97.586% 0.01130 71.90);
+  --surface-component: oklch(99.199% 0.00734 80.72);
+  --component-hover: oklch(95.449% 0.01618 64.67);
+  --component-pressed: oklch(92.481% 0.02213 58.77);
+  --border: oklch(84.246% 0.02905 65.71);
+  --border-hover: oklch(78.050% 0.03740 56.32);
+  --border-strong: oklch(68.851% 0.04826 51.55);
+  --text-muted: oklch(52.649% 0.02679 41.27);
+  --package-accent: oklch(59.208% 0.19138 11.08);
+  /* Existing demo ambience (#f7cdaf), expressed in OKLCH. */
+  --scene-ambient: oklch(87.69778% 0.062244 57.33796);
+  color: var(--foreground);
+  background: var(--background);
+}
+
+/* data-button survives composed triggers replacing shadcn data-slot.
+   Composer owns its material; Send uses the shared primary button family. */
+:where([data-button]:not([data-variant="destructive"], [data-variant="link"]), [data-panel-pin], [data-slot="dialog-close"], [data-launcher] [data-sidebar="menu-button"]) {
+  --button-rest: transparent;
+  --button-hover: var(--component-hover);
+  --button-pressed: var(--component-pressed);
+  --button-text: var(--foreground);
+  --button-hover-border: var(--border-hover);
+  --button-pressed-border: var(--border-strong);
+  background-color: var(--button-rest);
+  color: var(--button-text);
+}
+[data-button]:is([data-variant="outline"], [data-variant="secondary"]) {
+  --button-rest: var(--control-surface, var(--surface-component));
+  --button-hover: var(--theme-control-hover, var(--component-hover));
+  --button-pressed: var(--theme-control-pressed, var(--component-pressed));
+}
+[data-panel-pin][data-state="on"],
+[data-settings-trigger][aria-expanded="true"],
+[data-button]:is([data-variant="outline"], [data-variant="ghost"], [data-variant="secondary"])[data-state="open"] {
+  --button-rest: var(--theme-surface-selected, var(--component-pressed));
+}
+[data-button]:is([data-variant="default"], :not([data-variant])) {
+  --button-rest: var(--theme-accent-solid, var(--package-accent));
+  --button-hover: var(--theme-accent-hover, oklch(56.375% 0.18326 11.66));
+  --button-pressed: var(--theme-accent-pressed, oklch(52.588% 0.17301 12.20));
+  --button-text: var(--theme-text-on-accent, white);
+  --button-hover-border: var(--button-hover);
+  --button-pressed-border: var(--button-pressed);
+}
+@media (any-hover: hover) {
+  :where([data-button]:not([data-variant="destructive"], [data-variant="link"]), [data-panel-pin], [data-slot="dialog-close"], [data-launcher] [data-sidebar="menu-button"]):enabled:hover {
+    background-color: var(--button-hover);
+    color: var(--button-text);
+    border-color: var(--button-hover-border);
+  }
+}
+:where([data-button]:not([data-variant="destructive"], [data-variant="link"]), [data-panel-pin], [data-slot="dialog-close"], [data-launcher] [data-sidebar="menu-button"]):enabled:active {
+  background-color: var(--button-pressed);
+  transition-duration: 0s;
+  color: var(--button-text);
+  border-color: var(--button-pressed-border);
+}
+
+/* The development Theme Lab resolves canonical roles; this adapter lets the
+   standalone Player and its body-portaled controls act as the live preview. */
+:root[data-phase2c-theme] {
+  --background: var(--theme-surface-canvas);
+  --foreground: var(--theme-text-primary);
+  --sidebar: var(--theme-surface-chrome);
+  --surface-component: var(--theme-surface-raised);
+  --control-surface: var(--theme-surface-control);
+  --component-hover: var(--theme-surface-hover);
+  --component-pressed: var(--theme-surface-pressed);
+  --border: var(--theme-border-subtle);
+  --border-hover: var(--theme-border-default);
+  --border-strong: var(--theme-border-strong);
+  --text-muted: var(--theme-text-secondary);
+  --popover: var(--theme-surface-floating);
+  --focus-ring: var(--theme-accent-focus);
+  /* UI ambience follows the surface family; exact scene/media color remains content-owned. */
+  --player-ambient: var(--theme-ambient-wash);
+  accent-color: var(--theme-accent-solid);
+}
+:root[data-phase2c-theme="light"] { color-scheme: light; }
+:root[data-phase2c-theme="dark"] { color-scheme: dark; }
+:root[data-phase2c-theme] :is([data-slot="dialog-content"], [data-slot="sheet-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="popover-content"]) {
+  --component-hover: var(--theme-floating-hover);
+  --component-pressed: var(--theme-floating-pressed);
+  color: var(--theme-text-primary);
+  background: var(--theme-surface-floating);
+  border-color: var(--theme-border-floating);
+  box-shadow: 0 12px 28px -6px var(--theme-floating-shadow), 0 2px 6px -2px var(--theme-floating-shadow);
+}
+:root[data-phase2c-theme] :is([data-slot="dialog-overlay"], [data-slot="sheet-overlay"]) {
+  background: var(--theme-structural-scrim);
+}
+:root[data-phase2c-theme] :is(button, textarea, input, select):disabled {
+  color: var(--theme-text-disabled);
+  background: var(--theme-surface-disabled);
+  border-color: var(--theme-border-disabled);
+  opacity: 1;
+}
+/* The tools Sheet is relocated chrome, not a floating menu surface. */
+:root[data-phase2c-theme] .tools-drawer {
+  --component-hover: var(--theme-surface-hover);
+  --component-pressed: var(--theme-surface-pressed);
+  background: var(--theme-surface-chrome);
+}
+:root[data-phase2c-theme] .tool-panel-strip:focus-visible {
+  outline-color: var(--theme-accent-focus);
+}
+
+/* Native controls and Reka menu items share the same semantic states. */
+:root[data-phase2c-theme] select { background: var(--theme-surface-control); }
+@media (any-hover: hover) {
+  :root[data-phase2c-theme] :is(select, textarea, input):enabled:hover { border-color: var(--theme-border-default); }
+}
+:root[data-phase2c-theme] [role^="menuitem"]:active:not([data-disabled]) { background: var(--component-pressed); }
+:root[data-phase2c-theme] [role^="menuitem"][data-disabled] { color: var(--theme-text-disabled); opacity: 1; }
+
+:root[data-phase2c-theme] :is(textarea, input)::placeholder { color: var(--theme-text-secondary); }
+:root[data-phase2c-theme] :is(button, textarea:not([data-composer-input]), input, select, summary, a[href], [data-tools-focus^="title:"]):focus-visible {
+  outline: 2px solid var(--theme-accent-focus);
+  outline-offset: 2px;
+}
+/* Native :focus-visible includes mouse-focused text inputs. App's shared
+   navigation modality keeps editing quiet, including body-portaled controls. */
+:root[data-player-keyboard-focus="false"] :is(button, input, textarea, select, summary, a[href], [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    margin: 0;
+  }
+}
+
+.phase2c-sidebar {
+  --player-reading-font-size: 1rem;
+  --player-reading-line-gap: 8px;
+  --conversation-content-max-width: 864px;
+  --conversation-inline-inset: 1rem;
+  --conversation-outer-width: calc(var(--conversation-content-max-width) + 2 * var(--conversation-inline-inset));
+  --content-reserve: 0px;
+  /* The reading column owns the shared center. Media may grow around it, but
+     an image or vertical stage resize cannot move the transcript. */
+  --conversation-width: min(var(--conversation-outer-width), calc(var(--usable-width) - var(--content-reserve)));
+  --conversation-offset: max(0px, calc((var(--usable-width) - var(--conversation-width)) / 2 - var(--content-reserve)));
+  --content-center: calc(var(--conversation-offset) + var(--conversation-width) / 2);
+  --content-ideal-width: min(var(--usable-width), max(
+    var(--conversation-outer-width),
+    calc(var(--stage-height) * var(--media-aspect))
+  ));
+  --content-width: min(var(--content-ideal-width), calc(2 * var(--content-center)));
+  --content-offset: calc(var(--content-center) - var(--content-width) / 2);
+  /* One continuous canvas beneath the dock reservation and Player content.
+     Layout-only children stay transparent; tools paint their own surfaces. */
+  /* Same ambient wash as player/styles/effects.css; no legacy layout rules. */
+  background:
+    radial-gradient(ellipse 90% 55% at 68% 0%,
+      color-mix(in srgb, var(--player-ambient, var(--scene-ambient)) 34%, transparent), transparent 72%),
+    linear-gradient(to bottom,
+      color-mix(in srgb, var(--player-ambient, var(--scene-ambient)) 26%, transparent) 0 var(--stage-height),
+      transparent calc(var(--stage-height) + 200px)),
+    var(--background);
+  --launcher-width: var(--player-menu-compact-width);
+  --launcher-space: var(--player-menu-compact-width);
+  --tool-space-limit: max(0px, calc(var(--usable-width) - var(--player-reserve) - var(--launcher-space) - 1px));
+  --sidebar-width: calc(var(--launcher-space) + min(var(--tool-columns-width), var(--tool-space-limit)) + 1px) !important;
+}
+
+.phase2c-sidebar[data-narrow="false"][data-sidebar-visible="true"] {
+  --content-reserve: var(--sidebar-width);
+}
+
+/* Reserve the final Player layout immediately; only the visible sidebar transitions. */
+.phase2c-sidebar [data-slot="sidebar-gap"] { transition: none; }
+/* A width transition creates temporary carousel overflow around full-width panels.
+   Apply dock capacity immediately; retain the sidebar's slide in/out motion. */
+.phase2c-sidebar [data-slot="sidebar"] > .fixed { transition-property: left, right; }
+
+/* The shared Sidebar owns positioning and the layout reservation.  Phase 2C's
+   menu and panels own the visible surfaces, so the shell itself must not paint
+   a second full-width background while the dock changes size. */
+.phase2c-sidebar [data-sidebar="sidebar"] { background: transparent; }
+.phase2c-sidebar [data-sidebar="trigger"] { border-radius: var(--player-top-control-radius); }
+
+.phase2c-sidebar[data-tools-open="true"] [data-slot="sidebar"][data-state="expanded"] > .fixed {
+  box-shadow: 6px 0 14px -6px var(--theme-structural-shadow, rgb(0 0 0 / 18%));
+}
+
+.phase2c-sidebar[data-labels-visible="true"] {
+  --launcher-width: clamp(13rem, var(--measured-menu-width), 16rem);
+}
+
+.phase2c-sidebar[data-labels="labels"] {
+  --launcher-width: var(--permanent-menu-width);
+  --launcher-space: var(--permanent-menu-width);
+}
+
+[data-launcher-space] { width: var(--launcher-space); }
+[data-launcher] { width: var(--launcher-width); max-width: min(24rem, 40dvw); z-index: 30; }
+.phase2c-sidebar[data-labels="labels"] [data-launcher] { max-width: none; }
+[data-launcher-label] { display: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phase2c-sidebar[data-labels-visible="true"] [data-launcher-label] { display: block; }
+
+/* Animate only the preview overlay; its reserved icon-strip width stays fixed. */
+.phase2c-sidebar[data-labels="preview"] [data-launcher] {
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: width 200ms ease-out;
+}
+.phase2c-sidebar[data-labels="preview"] [data-launcher-label] {
+  display: block;
+  opacity: 0;
+}
+.phase2c-sidebar[data-labels="preview"][data-labels-visible="true"] [data-launcher-label] { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .phase2c-sidebar[data-labels="preview"] [data-launcher] { transition: none; }
+}
+
+[data-panel-drag]:active { background: var(--component-pressed); }
+
+/* Keep open tools distinguishable from a transient pointer hover. */
+[data-launcher] [data-sidebar="menu-button"][data-active="true"] {
+  --button-rest: var(--theme-surface-selected, var(--component-pressed));
+  box-shadow: inset 3px 0 var(--border-strong);
+}
+
+.panel-settings-trigger { position: relative; }
+.panel-settings-compact { display: none; }
+
+[data-compact-settings="true"] .panel-settings-trigger { width: 2rem; }
+[data-compact-settings="true"] .panel-settings-expanded {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+}
+[data-compact-settings="true"] .panel-settings-compact { display: block; }
+
+.tool-panel-drag-placeholder { opacity: 0.35; }
+.tool-panel-dragging { opacity: 0.85; pointer-events: none; }
+
+/* Sortable's body-level drag copy lets the pointer hit underlying controls. */
+body:has(> .tool-panel-dragging),
+body:has(> .tool-panel-dragging) * { cursor: grabbing !important; }
+body:has(> .tool-panel-dragging) [data-slot="tooltip-content"] { visibility: hidden; }
+
+/* Match the menu's 14px text, icon, gap, padding and border without reserving space. */
+.menu-width-ruler {
+  position: absolute; visibility: hidden; pointer-events: none; width: max-content;
+  font-size: 0.875rem; font-weight: 500;
+}
+.menu-width-ruler span { display: block; width: max-content; padding-inline: calc(0.75rem + var(--player-edge-space) + var(--player-control-padding)); }
+.tool-panel-strip { scroll-snap-type: x proximity; }
+/* Use final dock capacity, not its animated width: hiding must not reflow tool bodies.
+   Multiple panels still scroll and snap horizontally. */
+.tool-panel-content > [data-tool] { max-width: var(--tool-space-limit); min-width: 0; scroll-snap-align: start; isolation: isolate; }
+.tool-panel-strip[data-reordering], .phase2c-sidebar[data-resizing="true"] .tool-panel-strip { scroll-snap-type: none; }
+.resize-size-label { position: absolute; right: 8px; top: 3.5rem; white-space: nowrap; border: 1px solid var(--border); border-radius: 4px; background: var(--background); padding: 2px 6px; font-size: 0.75rem; }
+.phase2c-sidebar[data-resizing="true"], .phase2c-sidebar[data-resizing="true"] * { cursor: col-resize !important; user-select: none; }
+body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] { visibility: hidden; }
+/* Pointer resizing already owns the geometry; do not trail it with a dock transition. */
+.phase2c-sidebar[data-resizing="true"] [data-slot="sidebar"] > .fixed { transition: none; }
+
+/* The Sheet portal stays in the shell so menu width/preview tokens have one owner. */
+.phase2c-sidebar { height: var(--usable-height); min-height: 0; }
+.phase2c-sidebar[data-narrow="true"] {
+  --sidebar-width: min(var(--active-tool-width), calc(var(--usable-width) * 0.9)) !important;
+}
+/* Reserve the broad drawer only for a tool, not empty space beside its launcher. */
+.phase2c-sidebar[data-narrow="true"][data-menu-visible="true"] {
+  --sidebar-width: min(calc(var(--launcher-space) + 1px), calc(var(--usable-width) * 0.9)) !important;
+}
+.phase2c-sidebar .tools-drawer {
+  left: var(--viewport-left); top: var(--viewport-top); bottom: auto;
+  height: var(--usable-height); width: var(--sidebar-width); max-width: none;
+  padding: 0; gap: 0; background: var(--sidebar); z-index: 40;
+  transition: none; animation-duration: 200ms;
+}
+.tools-drawer > button { display: none; }
+.phase2c-sidebar > [data-slot="sheet-overlay"] { z-index: 39; background: var(--theme-structural-scrim, rgb(0 0 0 / 25%)); }
+.phase2c-sidebar[data-narrow="true"] [data-sidebar="trigger"] { flex-shrink: 0; }
+.phase2c-sidebar[data-narrow="true"] > [data-sidebar="trigger"] { top: calc(var(--viewport-top) + 0.5rem); left: calc(var(--viewport-left) + 0.5rem); }
+.phase2c-sidebar[data-narrow="true"] [data-launcher] { max-width: min(24rem, calc(var(--usable-width) * 0.9)); }
+/* Narrow only caps presentation; the user-selected wide width remains untouched. */
+.phase2c-sidebar[data-narrow="true"][data-labels="labels"] {
+  --launcher-width: min(var(--permanent-menu-width), calc(var(--usable-width) * 0.9));
+  --launcher-space: var(--launcher-width);
+}
+
+/* The active tool fills the drawer; its selected preset is capped by available space. */
+.phase2c-sidebar[data-narrow="true"] [data-launcher-space] { flex: 1; min-height: 0; }
+.phase2c-sidebar[data-narrow="true"] .tool-panel-strip { min-height: 0; overflow-x: hidden; scroll-snap-type: none; }
+.phase2c-sidebar[data-narrow="true"] .tool-panel-content > [data-tool] { width: 100% !important; max-width: 100%; min-width: 0; }
+.phase2c-sidebar[data-narrow="true"] [data-panel-drag],
+.phase2c-sidebar[data-narrow="true"] [data-panel-resize] { display: none; }
+
+.player-conversation {
+  width: var(--conversation-width);
+  margin-inline-start: var(--conversation-offset);
+}
+
+html:fullscreen { background: var(--background); }
+
+/* Native text editing keeps its browser scrollport; match the overlay thumb. */
+.phase2c-sidebar textarea { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+
+
+/* Shared Player chrome geometry; content panels keep their own content spacing. */
+.player-edge-padding { padding: var(--player-edge-space); }
+.player-tool-menu { padding-block-start: calc(var(--player-following-control-gap) - var(--player-edge-space)); }
+.player-control-square {
+  width: var(--player-top-control-size);
+  height: var(--player-top-control-size);
+}
+.player-menu-compact-ruler {
+  position: absolute; visibility: hidden; pointer-events: none;
+  width: var(--player-menu-compact-width); height: 0;
+}
+[data-launcher] [data-sidebar="menu-button"] {
+  height: var(--player-control-size);
+  padding: var(--player-control-padding);
+}
+.player-drawer-header {
+  min-height: var(--player-header-size);
+  padding-inline: var(--player-edge-space);
+}
+.tool-panel-header {
+  padding: var(--player-edge-space);
+  min-height: var(--player-header-size);
+}
+.tool-panel-header :is(.panel-settings-trigger, [data-panel-pin]) {
+  height: var(--player-top-control-size);
+}
+.tool-panel-header [data-panel-pin] { width: var(--player-top-control-size); min-width: var(--player-top-control-size); }
+
+
+/* The menu resize target shares the existing edge padding, not layout width. */
+.phase2c-sidebar [data-launcher-space] > .menu-resize-edge {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: var(--player-resize-rail-size);
+}

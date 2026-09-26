@@ -2,7 +2,7 @@ import Color from "colorjs.io";
 
 const NORMALIZED_NUMBER = "(-?\\d+(?:\\.\\d+)?(?:e[+-]?\\d+)?)";
 const NORMALIZED_COLOR = new RegExp(
-  `^oklch\\(${NORMALIZED_NUMBER} ${NORMALIZED_NUMBER} ${NORMALIZED_NUMBER} / ${NORMALIZED_NUMBER}\\)$`,
+  `^oklch\\(${NORMALIZED_NUMBER} ${NORMALIZED_NUMBER} ${NORMALIZED_NUMBER}\\)$`,
   "u",
 );
 
@@ -85,7 +85,7 @@ function clampInputChannels(color: Color): void {
   }
 }
 
-/** Concrete CSS colours only; no host variables, relative colours or executable CSS. */
+/** Concrete opaque CSS colours only; no host variables, relative colours or executable CSS. */
 export function normalizeColor(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const source = value.trim().toLowerCase();
@@ -101,12 +101,13 @@ export function normalizeColor(value: unknown): string | null {
       )
     )
       return null;
+    if (parsed.alpha !== 1) return null;
     clampInputChannels(parsed);
     const color = parsed.to("oklch");
     const coordinates = color.coords.map((coordinate) => coordinate ?? 0);
-    if (![...coordinates, color.alpha].every(Number.isFinite)) return null;
+    if (!coordinates.every(Number.isFinite)) return null;
     const [lightness, chroma, hue] = coordinates;
-    return `oklch(${lightness} ${chroma} ${hue} / ${color.alpha})`;
+    return `oklch(${lightness} ${chroma} ${hue})`;
   } catch {
     return null;
   }
@@ -115,7 +116,15 @@ export function normalizeColor(value: unknown): string | null {
 export function isNormalizedColor(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const match = NORMALIZED_COLOR.exec(value);
-  if (match === null) return false;
-  const numbers = match.slice(1).map(Number);
-  return numbers.every(Number.isFinite) && numbers[3]! >= 0 && numbers[3]! <= 1;
+  return match !== null && match.slice(1).map(Number).every(Number.isFinite);
+}
+
+/** Opaque authored surfaces share the CSS parser without accepting theme-dependent transparency. */
+export function normalizeOpaqueColor(value: unknown): string | null {
+  const color = normalizeColor(value);
+  return color !== null && new Color(color).alpha === 1 ? color : null;
+}
+
+export function isNormalizedOpaqueColor(value: unknown): value is string {
+  return isNormalizedColor(value) && new Color(value).alpha === 1;
 }

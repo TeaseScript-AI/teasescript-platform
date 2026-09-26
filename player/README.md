@@ -38,7 +38,42 @@ source. Those values are also maintained as observable Player contract in `docs/
 consume semantic roles rather than raw application-palette primitives. Speaker, package-accent, media, and technical
 mask colours remain separate presentation data.
 
+## Experimental dynamic theme evaluation
+
+Run `npm run dev:player:phase2c -- --host 0.0.0.0` and open `/phase2c/`, then Visual Lab → Theme Lab.
+See the [preview component map](vue/src/phase2c/README.md) for composition and interaction responsibilities.
+
+`theme/palette.ts` resolves Material-based light/dark roles; `theme/material.ts` isolates MCU's tonal palettes;
+`theme/color.ts` isolates Color.js conversion, gamut mapping and contrast. `usePlayerTheme.ts` applies the generated
+roles to the document root, including body-portaled controls, and restores previous inline values on unmount.
+Theme Lab edits session-local intent: accent, surface hue/tint, maximum chroma, monochrome and contrast. Zero tint
+is achromatic; accent remains independent. High contrast increases tone separation rather than saturation.
+Colour-pair presets change surface/accent inputs without changing mode or contrast; they do not register themes.
+
+Surface roles drive canvas ambience, containers and neutral interaction states; accent drives primary actions,
+focus and progress. Nested surfaces use less tint. Translucent media controls and Timer materials account for
+background media independently of light/dark mode; theme generation does not control their geometry or recolour
+content. Exact provisional tones and effects live in the implementation. Diagnostics measure opaque colour pairs;
+they do not certify translucent overlays or perceptual state distinction.
+
+The generator consumes resolved platform intent. User/package precedence, authored-theme registration and
+missing-variant fallback remain outside this preview; see the
+[theme boundary](../docs/ui/PLAYER-UI.md#theme-and-customization-boundary). It does not convert authored custom themes
+or scene/speaker colours. Production adoption, persistence and final palette/contrast policy remain Owner decisions.
+
+MCU (Apache-2.0) and Color.js (MIT) replace local colour-science implementations while leaving product role choices
+explicit. Versions are pinned in the package manifest/lockfile. They add browser bundle size and dependency-update
+review, without a network service or new data access. MCU 0.4.0's extensionless internal ESM imports require the Vite
+bundler here: direct Node ESM execution of the adapter fails. No package patch or custom loader is installed.
+
 ## Demo-only behavior
+
+The Phase 2C Tool Panel strip uses SortableJS for mouse/touch reordering and edge autoscroll. The binding restores
+Sortable's DOM move before updating Vue's authoritative order; pinning and widths remain independent. Reka menu
+actions provide the keyboard/non-drag alternative. A Vue wrapper adds little value for this single list, native drag
+and drop has weaker touch support, and Pointer Events would require custom sorting/autoscroll.
+SortableJS adds browser code and dependency maintenance, but no network service, runtime data access or host boundary.
+Its type package is development-only; versions live in the manifest/lockfile. Verify sorting and scrolling on updates.
 
 The local playground server may select a supported image from `player/demo-media/` when the Player opens. Visual Lab,
 Layout Debug, Runtime Session, their fixture content, local tuning/inspection controls, and the demo-media endpoint are

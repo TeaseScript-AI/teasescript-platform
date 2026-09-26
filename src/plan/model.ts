@@ -1,5 +1,5 @@
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 20;
+export const INSTRUCTION_PLAN_VERSION = 22;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -315,13 +315,14 @@ export type InteractionAccessibleName =
       readonly key: "answer" | "number" | "chooseOption" | "continue";
     };
 export type InteractionChoiceOption =
-  | { readonly text: string; readonly label: null }
-  | { readonly text: string; readonly label: string }
-  | { readonly text: string; readonly label: number };
+  | { readonly text: string; readonly background?: string; readonly label: null }
+  | { readonly text: string; readonly background?: string; readonly label: string }
+  | { readonly text: string; readonly background?: string; readonly label: number };
 export type InteractionUiPayload =
   | {
       readonly kind: "button";
       readonly buttonLabel: string;
+      readonly background?: string;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {
@@ -346,6 +347,7 @@ export type PreparedInteractionUiPayload =
   | {
       readonly kind: "button";
       readonly buttonLabelTemporary: number;
+      readonly backgroundTemporary?: number;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {

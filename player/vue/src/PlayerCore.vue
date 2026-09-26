@@ -130,7 +130,7 @@ function submitComposer(): void {
   const result = submitPlayerRuntimeComposer(runtime.value, state.value.composerValue);
   if (result === null) {
     if (foreground.value?.kind === "show-button") {
-      setFeedback("Use the rendered button to continue.");
+      setFeedback("Type the exact button text or activate it above.");
     } else if (foreground.value === null) {
       dispatch({ type: "submit-fixture-composer" });
     }

@@ -181,6 +181,11 @@ subsystems may still have different maturity levels.
   - **Reference:** Issues #288 and #304, PR #293, [ADR 0019](../decisions/0019-resource-limit-governance.md),
     `docs/RESOURCE-LIMITS.md`, and **Establish a runtime performance baseline and optimization plan**.
 
+- [ ] **Bundle supported author fonts**
+  - **Outcome:** Provide a product-carried font set so supported authored font choices render consistently across
+    devices.
+  - **Reference:** Issue #421 and [`PLAYER-UI.md`](../ui/PLAYER-UI.md).
+
 ## Release Candidate
 
 **Goal:** Validate a specific candidate containing the scope selected for the first stable release.

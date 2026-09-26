@@ -11,6 +11,7 @@ const props = defineProps<{
 
 const timers = computed(() =>
   Array.from({ length: props.timerCount }, (_, index): PlayerTimerPresentation => ({
+    id: index === 0 ? props.timer.id : `${props.timer.id}-${index + 1}`,
     ...(index === 0 && props.timer.name !== undefined ? { name: props.timer.name } : {}),
     remainingSeconds: props.timer.remainingSeconds + index * 37,
     totalSeconds: props.timer.totalSeconds + index * 60,
@@ -28,7 +29,7 @@ function label(timer: PlayerTimerPresentation, index: number): string | null {
     <div class="timer-list">
       <div
         v-for="(item, index) in timers"
-        :key="index"
+        :key="item.id"
         class="timer"
         :aria-label="label(item, index) ?? 'Timer'"
         data-label-placement="below"

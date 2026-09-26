@@ -91,7 +91,12 @@ export function playerRuntimeForeground(
   const accessibleName = interactionAccessibleName(action.ui.accessibleName);
   switch (action.ui.kind) {
     case "button":
-      return Object.freeze({ kind: "show-button", accessibleName, label: action.ui.buttonLabel });
+      return Object.freeze({
+        kind: "show-button",
+        accessibleName,
+        label: action.ui.buttonLabel,
+        ...(action.ui.background === undefined ? {} : { authoredFill: action.ui.background }),
+      });
     case "text":
       return Object.freeze({
         kind: "ask-text",
@@ -110,7 +115,11 @@ export function playerRuntimeForeground(
         accessibleName,
         options: Object.freeze(
           action.ui.options.map((option, index) =>
-            Object.freeze({ id: choiceOptionId(action.actionId, index), label: option.text }),
+            Object.freeze({
+              id: choiceOptionId(action.actionId, index),
+              label: option.text,
+              ...(option.background === undefined ? {} : { authoredFill: option.background }),
+            }),
           ),
         ),
       });
@@ -156,6 +165,11 @@ export function submitPlayerRuntimeComposer(
   submittedText: string,
 ): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
   const action = activeInteraction(session.snapshot);
+  if (action?.ui.kind === "button") {
+    return submittedText !== "" && submittedText === action.ui.buttonLabel
+      ? completePlayerAction(session, action, { kind: "activate" })
+      : null;
+  }
   if (
     action === null ||
     (action.interactionKind !== "text" &&
@@ -263,9 +277,20 @@ function appendRuntimeEvents(
   // EVIDENCE: emptySession creates an unfrozen adapter-owned transcript accumulator for every session.
   const transcriptEntries = session.transcriptEntries as PlayerTranscriptEntryPresentation[];
   for (const event of events) retainedEvents.push(event);
+  const responseKinds = new Map<number, "choice" | "button">();
+  for (const event of events) {
+    if (
+      event.kind === "actionCompleted" &&
+      event.settlement.actionKind === "interaction" &&
+      (event.settlement.interactionKind === "choice" ||
+        event.settlement.interactionKind === "button")
+    ) {
+      responseKinds.set(event.settlement.transcriptEventSequence, event.settlement.interactionKind);
+    }
+  }
   for (const event of events) {
     if (event.kind === "say") {
-      const speakerId = event.speaker === null ? "narrator" : `runtime-speaker-${event.sequence}`;
+      const speakerId = event.speaker === null ? "narrator" : speakerKey(event.speaker);
       if (event.speaker !== null) speakers[speakerId] = speakerPresentation(event.speaker);
       transcriptEntries.push(
         Object.freeze({
@@ -284,6 +309,9 @@ function appendRuntimeEvents(
           id: `runtime-event-${event.sequence}`,
           speakerId: "user",
           text: event.text,
+          ...(responseKinds.has(event.sequence)
+            ? { responseKind: responseKinds.get(event.sequence)! }
+            : {}),
         }),
       );
     }
@@ -315,6 +343,24 @@ function interactionAccessibleName(value: InteractionAccessibleName): string {
   }[value.key];
 }
 
+// Include presentation state so later speaker changes do not restyle earlier messages.
+function speakerKey(speaker: {
+  readonly identifier: string;
+  readonly displayName: string;
+  readonly color: string | null;
+  readonly font: string | null;
+  readonly avatar: string | null;
+}): string {
+  const shape = [
+    speaker.identifier,
+    speaker.displayName,
+    speaker.color,
+    speaker.font,
+    speaker.avatar,
+  ];
+  return `runtime-speaker-${JSON.stringify(shape)}`;
+}
+
 function speakerPresentation(speaker: {
   readonly displayName: string;
   readonly color: string | null;
@@ -323,7 +369,7 @@ function speakerPresentation(speaker: {
 }): PlayerSpeakerPresentation {
   return Object.freeze({
     name: speaker.displayName,
-    accent: speaker.color ?? "#9a867d",
+    accent: speaker.color ?? "inherit",
     avatar: speaker.avatar ?? (speaker.displayName.trim().charAt(0).toUpperCase() || "?"),
     fontFamily: speaker.font ?? "inherit",
   });
