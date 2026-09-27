@@ -1,31 +1,77 @@
-import { normalizeOpaqueColor } from "../../../../src/color.js";
-import { authoredColorToOklch, contrastRatio, mixColors, oklchCss } from "../../../theme/color.js";
-
-// Distinct, readable letter/fill pairs; the same identities work in both Player themes.
-const defaultColors = [
-  { background: "#075b43", color: "#37e6a2" },
-  { background: "#3e3a75", color: "#c1b9ff" },
-  { background: "#154a73", color: "#8bd0ff" },
-  { background: "#783d26", color: "#ffc49d" },
-  { background: "#6b3159", color: "#ffaddf" },
-  { background: "#5b501b", color: "#f4d973" },
+// Opposite hues come first; later assignments fill the gaps. Each pair keeps its hue across themes.
+export const speakerAvatarPalette = [
+  {
+    light: { background: "#bcf1c6", color: "#004209" },
+    dark: { background: "#004e0f", color: "#8fe1a1" },
+  },
+  {
+    light: { background: "#ffcffb", color: "#560553" },
+    dark: { background: "#62155f", color: "#f7aef0" },
+  },
+  {
+    light: { background: "#ffd5ac", color: "#542300" },
+    dark: { background: "#632b00", color: "#ffb777" },
+  },
+  {
+    light: { background: "#b6e9ff", color: "#003760" },
+    dark: { background: "#004270", color: "#82d4ff" },
+  },
+  {
+    light: { background: "#ffcddf", color: "#640030" },
+    dark: { background: "#71073a", color: "#ffa9c7" },
+  },
+  {
+    light: { background: "#f6e0a4", color: "#433000" },
+    dark: { background: "#503900", color: "#e9c769" },
+  },
+  {
+    light: { background: "#a5f3e3", color: "#003f34" },
+    dark: { background: "#004b3f", color: "#61e4cd" },
+  },
+  {
+    light: { background: "#d0e0ff", color: "#1a2678" },
+    dark: { background: "#233285", color: "#b1c8ff" },
+  },
+  {
+    light: { background: "#ffd1c6", color: "#690000" },
+    dark: { background: "#760a03", color: "#ffaf9f" },
+  },
+  {
+    light: { background: "#daeaae", color: "#2d3900" },
+    dark: { background: "#374400", color: "#c0d67a" },
+  },
+  {
+    light: { background: "#a1f0ff", color: "#003c48" },
+    dark: { background: "#004855", color: "#58e0f6" },
+  },
+  {
+    light: { background: "#e9d7ff", color: "#40166d" },
+    dark: { background: "#4a237a", color: "#d6b9ff" },
+  },
 ] as const;
 
-export function speakerAvatarColors(accent: string | undefined, ordinal: number) {
-  const authored = normalizeOpaqueColor(accent);
-  if (authored === null) return defaultColors[Math.max(ordinal, 0) % defaultColors.length]!;
+export function leastUsedAvatarColor(messageCounts: readonly number[]): number {
+  let selected = 0;
+  for (let index = 1; index < speakerAvatarPalette.length; index += 1) {
+    if (messageCounts[index]! < messageCounts[selected]!) selected = index;
+  }
+  return selected;
+}
 
-  // Keep the author's exact colour on the letter; choose a tinted fill behind it.
-  const ink = authoredColorToOklch(authored);
-  const dark = mixColors(ink, { l: 0, c: 0, h: 0 }, 0.86);
-  const light = mixColors(ink, { l: 1, c: 0, h: 0 }, 0.86);
-  const background = contrastRatio(ink, dark) >= contrastRatio(ink, light) ? dark : light;
-  const extreme =
-    contrastRatio(ink, dark) >= contrastRatio(ink, light)
-      ? { l: 0, c: 0, h: 0 }
-      : { l: 1, c: 0, h: 0 };
-  return {
-    background: oklchCss(contrastRatio(ink, background) >= 4.5 ? background : extreme),
-    color: authored,
-  };
+export function recordSpeakerAvatarMessage(
+  assignments: Map<string, number>,
+  messageCounts: number[],
+  identity: string,
+  hasBubble: boolean,
+): void {
+  let colorIndex = assignments.get(identity);
+  if (colorIndex === undefined && hasBubble) {
+    colorIndex = leastUsedAvatarColor(messageCounts);
+    assignments.set(identity, colorIndex);
+  }
+  if (colorIndex !== undefined) messageCounts[colorIndex]! += 1;
+}
+
+export function speakerAvatarColors(index: number) {
+  return speakerAvatarPalette[Math.max(index, 0) % speakerAvatarPalette.length]!;
 }

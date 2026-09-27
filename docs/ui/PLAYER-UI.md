@@ -476,9 +476,10 @@ when shown, uses a neutral session-event presentation rather than implying spoke
 are not user activations and use the same neutral event family with their script origin identified. Visual markers must
 not become canonical punctuation; their exact appearance remains tuning work.
 
-The POC's letter-glyph avatars use a fixed sequence of readable colour pairs in first-bubble order among speakers
-without an authored colour, so the first two differ. A speaker's authored `color` takes precedence for the letter,
-with a contrasting tinted fill. The palette repeats after six automatic assignments. Accepted V30 speaker avatar
+The POC's letter-glyph avatars use twelve fixed colour families, with a light fill and dark letter in light mode and
+the inverse in dark mode. On a speaker's first bubble, the Player assigns the colour used by the fewest messages so far;
+ties follow a fixed, perceptually spaced palette order. Later messages increase that colour's count, and the speaker
+keeps the assignment. Authored text and bubble colours do not choose avatar colours. Accepted V30 speaker avatar
 references remain the product capability.
 
 ## Composer and foreground interactions

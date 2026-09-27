@@ -41,6 +41,7 @@ export interface PlayerSpeakerPresentation {
   readonly accent: string;
   readonly avatar: string;
   readonly fontFamily: string;
+  readonly identityId?: string;
 }
 
 export interface PlayerMessagePresentation {

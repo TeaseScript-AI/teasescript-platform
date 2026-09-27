@@ -21,11 +21,13 @@ const props = defineProps<{
 }>();
 const player = props.entry.kind === "message" && props.entry.speakerId === "user";
 const name = !player && !props.continues ? nameOf(props.speakers, props.entry) : "";
-const avatarColors = computed(() =>
-  props.entry.kind === "message"
-    ? speakerAvatarColors(props.speakers[props.entry.speakerId]?.accent, props.avatarOrdinal ?? 0)
-    : undefined,
-);
+const avatarColors = computed(() => speakerAvatarColors(props.avatarOrdinal ?? 0));
+const avatarStyle = computed(() => ({
+  "--avatar-light-background": avatarColors.value.light.background,
+  "--avatar-light-ink": avatarColors.value.light.color,
+  "--avatar-dark-background": avatarColors.value.dark.background,
+  "--avatar-dark-ink": avatarColors.value.dark.color,
+}));
 </script>
 
 <template>
@@ -57,7 +59,7 @@ const avatarColors = computed(() =>
   <Message v-else :align="player ? 'end' : 'start'">
     <MessageAvatar v-if="!player" class="self-start" :class="continues ? 'invisible' : ''">
       <Avatar>
-        <AvatarFallback class="text-xs font-semibold" :style="avatarColors">
+        <AvatarFallback data-speaker-avatar class="text-xs font-semibold" :style="avatarStyle">
           {{ entry.kind === "message" ? speakers[entry.speakerId]?.avatar : "" }}
         </AvatarFallback>
       </Avatar>
@@ -106,6 +108,10 @@ const avatarColors = computed(() =>
 </template>
 
 <style scoped>
+:deep([data-speaker-avatar]) {
+  background: light-dark(var(--avatar-light-background), var(--avatar-dark-background));
+  color: light-dark(var(--avatar-light-ink), var(--avatar-dark-ink));
+}
 .message-speaker {
   background: var(--message-surface);
   border-color: var(--message-separator);

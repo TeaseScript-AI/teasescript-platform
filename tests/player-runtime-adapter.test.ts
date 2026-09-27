@@ -51,6 +51,25 @@ showButton "Continue"
   assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
 });
 
+test("speaker identity remains stable when authored presentation changes", () => {
+  const session = createPlayerRuntimeSession(`
+speaker guide { displayName: "Guide" }
+say as guide "First", instant
+guide.displayName = "Captain"
+say as guide "Second", instant
+exit
+`);
+  const entries = session.transcriptEntries;
+  const first = entries[0];
+  const second = entries[1];
+  if (first?.kind !== "message" || second?.kind !== "message") {
+    throw new Error("Expected two runtime messages.");
+  }
+  assert.notEqual(first.speakerId, second.speakerId);
+  assert.equal(session.speakers[first.speakerId]?.identityId, "guide");
+  assert.equal(session.speakers[second.speakerId]?.identityId, "guide");
+});
+
 test("runtime adapter preserves omitted alignment separately from explicit center through restore", () => {
   const session = createPlayerRuntimeSession(`
 say "Default bubble", instant
@@ -93,6 +112,7 @@ exit
   if (firstEntry?.kind !== "message") throw new Error("Expected a runtime message.");
   const guide = session.speakers[firstEntry.speakerId];
   assert.deepEqual(guide, {
+    identityId: "guide",
     name: "Guide",
     accent: normalizeColor("#b784ff"),
     avatar: "G",

@@ -1484,6 +1484,9 @@ async function transcriptSpacingChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
   };
+  if ((await page.locator("html").getAttribute("data-phase2c-theme")) === "dark") {
+    await page.getByRole("button", { name: "Switch to light theme" }).click();
+  }
   await page.getByRole("button", { name: "Visual Lab", exact: true }).click();
   await page.getByRole("button", { name: "Start spacing sample", exact: true }).click();
   await page.getByRole("button", { name: "Visit the lighthouse", exact: true }).waitFor();
@@ -1522,6 +1525,15 @@ async function transcriptSpacingChecks(page) {
       result.avatars[0]?.background === result.avatars[4]?.background,
     "Distinct speakers need distinct, stable fallback avatar colours",
   );
+  await page.getByRole("button", { name: "Switch to dark theme" }).click();
+  const darkAvatars = (await measure()).avatars;
+  check(
+    darkAvatars[0]?.background !== result.avatars[0]?.background &&
+      darkAvatars[0]?.color !== result.avatars[0]?.color &&
+      darkAvatars[0]?.background === darkAvatars[4]?.background,
+    "Avatar identity or light/dark polarity changed incorrectly",
+  );
+  await page.getByRole("button", { name: "Switch to light theme" }).click();
   check(
     (await page.locator("[data-transcript-entry-gap]").count()) === 0,
     "Visual Lab still exposes the removed transcript spacing selector",

@@ -9,8 +9,8 @@ import type {
   PlayerTranscriptEntryPresentation,
   PlayerSpeakerPresentation,
 } from "../../../model.js";
-import { normalizeOpaqueColor } from "../../../../src/color.js";
 import TranscriptMessage from "./TranscriptMessage.vue";
+import { recordSpeakerAvatarMessage, speakerAvatarPalette } from "./speakerAvatar";
 import { backdropBehind, resolveColour } from "./messageContrast";
 import { adjoins, resolveAppearance } from "./transcriptPresentation";
 import { enhancedTranscriptContrast } from "./transcriptContrast";
@@ -24,7 +24,10 @@ const props = defineProps<{
 const avatarOrdinals = reactive(new Map<string, number>());
 let assignedEntries = props.entries;
 let assignedThrough = 0;
-let nextAutomaticOrdinal = 0;
+const avatarMessageCounts = Array<number>(speakerAvatarPalette.length).fill(0);
+function avatarIdentity(speakerId: string): string {
+  return props.speakers[speakerId]?.identityId ?? speakerId;
+}
 watch(
   [() => props.entries, () => props.entries.length, () => props.revision],
   () => {
@@ -32,23 +35,17 @@ watch(
       avatarOrdinals.clear();
       assignedEntries = props.entries;
       assignedThrough = 0;
-      nextAutomaticOrdinal = 0;
+      avatarMessageCounts.fill(0);
     }
     for (let index = assignedThrough; index < props.entries.length; index += 1) {
       const entry = props.entries[index]!;
-      if (
-        entry.kind === "message" &&
-        entry.speakerId !== "user" &&
-        entry.presentation?.kind !== "prose" &&
-        !avatarOrdinals.has(entry.speakerId)
-      ) {
-        avatarOrdinals.set(
-          entry.speakerId,
-          normalizeOpaqueColor(props.speakers[entry.speakerId]?.accent) === null
-            ? nextAutomaticOrdinal++
-            : -1,
-        );
-      }
+      if (entry.kind !== "message" || entry.speakerId === "user") continue;
+      recordSpeakerAvatarMessage(
+        avatarOrdinals,
+        avatarMessageCounts,
+        avatarIdentity(entry.speakerId),
+        entry.presentation?.kind !== "prose",
+      );
     }
     assignedThrough = props.entries.length;
   },
@@ -329,7 +326,9 @@ onMounted(() => {
               :entry="entry"
               :speakers="speakers"
               :avatar-ordinal="
-                entry.kind === 'message' ? avatarOrdinals.get(entry.speakerId) : undefined
+                entry.kind === 'message'
+                  ? avatarOrdinals.get(avatarIdentity(entry.speakerId))
+                  : undefined
               "
               :appearance="appearance"
               :continues="continues(item.index)"

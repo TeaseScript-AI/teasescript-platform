@@ -362,12 +362,14 @@ function speakerKey(speaker: {
 }
 
 function speakerPresentation(speaker: {
+  readonly identifier: string;
   readonly displayName: string;
   readonly color: string | null;
   readonly font: string | null;
   readonly avatar: string | null;
 }): PlayerSpeakerPresentation {
   return Object.freeze({
+    identityId: speaker.identifier,
     name: speaker.displayName,
     accent: speaker.color ?? "inherit",
     avatar: speaker.avatar ?? (speaker.displayName.trim().charAt(0).toUpperCase() || "?"),
