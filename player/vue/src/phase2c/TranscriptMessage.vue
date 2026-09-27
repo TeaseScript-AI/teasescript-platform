@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Message, MessageAvatar, MessageContent, MessageHeader } from "@/components/ui/message";
@@ -8,6 +9,7 @@ import type {
 } from "../../../model.js";
 import TranscriptMarkup from "./TranscriptMarkup.vue";
 import { nameOf, resolveAppearance } from "./transcriptPresentation";
+import { speakerAvatarColors } from "./speakerAvatar";
 
 const props = defineProps<{
   entry: PlayerTranscriptEntryPresentation;
@@ -15,9 +17,15 @@ const props = defineProps<{
   appearance: ReturnType<typeof resolveAppearance>;
   continues: boolean;
   continued: boolean;
+  avatarOrdinal: number | undefined;
 }>();
 const player = props.entry.kind === "message" && props.entry.speakerId === "user";
 const name = !player && !props.continues ? nameOf(props.speakers, props.entry) : "";
+const avatarColors = computed(() =>
+  props.entry.kind === "message"
+    ? speakerAvatarColors(props.speakers[props.entry.speakerId]?.accent, props.avatarOrdinal ?? 0)
+    : undefined,
+);
 </script>
 
 <template>
@@ -49,7 +57,7 @@ const name = !player && !props.continues ? nameOf(props.speakers, props.entry) :
   <Message v-else :align="player ? 'end' : 'start'">
     <MessageAvatar v-if="!player" class="self-start" :class="continues ? 'invisible' : ''">
       <Avatar>
-        <AvatarFallback class="text-xs font-semibold">
+        <AvatarFallback class="text-xs font-semibold" :style="avatarColors">
           {{ entry.kind === "message" ? speakers[entry.speakerId]?.avatar : "" }}
         </AvatarFallback>
       </Avatar>
@@ -64,10 +72,7 @@ const name = !player && !props.continues ? nameOf(props.speakers, props.entry) :
           size="reading"
           :join-start="continues ? (player ? 'right' : 'left') : undefined"
           :join-end="continued ? (player ? 'right' : 'left') : undefined"
-          :class="[
-            player ? '' : 'message-speaker',
-            appearance.panel ? 'message-authored' : '',
-          ]"
+          :class="[player ? '' : 'message-speaker', appearance.panel ? 'message-authored' : '']"
           :style="{
             '--message-authored-fill': appearance.panel ?? undefined,
             color: appearance.ink ?? undefined,

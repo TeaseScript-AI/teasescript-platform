@@ -476,7 +476,10 @@ when shown, uses a neutral session-event presentation rather than implying spoke
 are not user activations and use the same neutral event family with their script origin identified. Visual markers must
 not become canonical punctuation; their exact appearance remains tuning work.
 
-The POC's letter-glyph avatars remain fixtures; accepted V30 speaker avatar references are the product capability.
+The POC's letter-glyph avatars use a fixed sequence of readable colour pairs in first-bubble order among speakers
+without an authored colour, so the first two differ. A speaker's authored `color` takes precedence for the letter,
+with a contrasting tinted fill. The palette repeats after six automatic assignments. Accepted V30 speaker avatar
+references remain the product capability.
 
 ## Composer and foreground interactions
 
@@ -571,7 +574,8 @@ Actual interactive controls always take precedence and must not also fire the vi
 
 A `showButton` is the one-option presentation of the same Standard foreground-control vocabulary. Controls share
 the transcript's reading width, grow with their labels, and allow long labels to wrap. The group centers its
-buttons and wraps onto additional rows rather than scrolling horizontally. The gap from the preceding message to the
+buttons and wraps onto additional rows rather than scrolling horizontally. It adds no inline padding beyond the
+transcript reading gutter; each button retains its own label padding. The gap from the preceding message to the
 group follows the separate-bubble gap (12px). The Player action button is the shared style
 for script-driven foreground and right-rail actions, including `choose` and `showButton`: minimum height `44px`, `8px`
 vertical and `12px` horizontal padding, `8px` gaps in both directions, `0.875rem` label text, and unitless `1.3`

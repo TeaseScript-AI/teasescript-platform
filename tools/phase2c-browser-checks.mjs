@@ -1366,6 +1366,18 @@ async function actionButtonGeometryChecks(page) {
           getComputedStyle(foreground).rowGap,
           getComputedStyle(foreground).columnGap,
         ],
+        foregroundPaddingInline: [
+          getComputedStyle(foreground).paddingLeft,
+          getComputedStyle(foreground).paddingRight,
+        ],
+        foregroundEdges: [
+          foreground.getBoundingClientRect().left,
+          foreground.getBoundingClientRect().right,
+        ],
+        composerEdges: [
+          composer.getBoundingClientRect().left,
+          composer.getBoundingClientRect().right,
+        ],
         backgroundGap: getComputedStyle(background).gap,
         messageToChoices:
           foreground.querySelector(".player-action-button").getBoundingClientRect().top -
@@ -1387,6 +1399,11 @@ async function actionButtonGeometryChecks(page) {
   check(
     initial.foregroundGap.join("/") === "8px/8px" && initial.backgroundGap === "8px",
     "Player action button groups do not use 8px gaps",
+  );
+  check(
+    initial.foregroundPaddingInline.join("/") === "0px/0px" &&
+      initial.foregroundEdges.every((edge, index) => close(edge, initial.composerEdges[index])),
+    "Choices add inline padding inside the shared reading width",
   );
   check(
     Math.abs(initial.messageToChoices - 12) < 1 &&
@@ -1476,6 +1493,12 @@ async function transcriptSpacingChecks(page) {
       const controls = document.querySelector("[data-foreground-controls]");
       return {
         speakers: rows.map((row) => row.getAttribute("data-speaker-id")),
+        avatars: rows.map((row) => {
+          const avatar = row.querySelector('[data-slot="avatar-fallback"]');
+          if (avatar === null) return null;
+          const style = getComputedStyle(avatar);
+          return { background: style.backgroundColor, color: style.color };
+        }),
         continues: rows.map((row) => row.getAttribute("data-continues")),
         gaps: rows.map((row) => Number.parseFloat(getComputedStyle(row).paddingTop)),
         choiceGap: Number.parseFloat(getComputedStyle(controls).paddingTop),
@@ -1492,6 +1515,12 @@ async function transcriptSpacingChecks(page) {
   check(
     JSON.stringify(result.gaps) === JSON.stringify([12, 3, 12, 12, 12]) && result.choiceGap === 12,
     "Separate bubbles and choices must have a 12px gap; grouped bubbles must have a 3px gap",
+  );
+  check(
+    result.avatars[0]?.background !== result.avatars[3]?.background &&
+      result.avatars[0]?.color !== result.avatars[3]?.color &&
+      result.avatars[0]?.background === result.avatars[4]?.background,
+    "Distinct speakers need distinct, stable fallback avatar colours",
   );
   check(
     (await page.locator("[data-transcript-entry-gap]").count()) === 0,

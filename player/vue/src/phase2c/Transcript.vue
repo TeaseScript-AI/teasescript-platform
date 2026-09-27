@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
-import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { elementScroll, observeElementRect, useVirtualizer } from "@tanstack/vue-virtual";
 import { useResizeObserver } from "@vueuse/core";
 import { ArrowDown } from "@lucide/vue";
@@ -9,6 +9,7 @@ import type {
   PlayerTranscriptEntryPresentation,
   PlayerSpeakerPresentation,
 } from "../../../model.js";
+import { normalizeOpaqueColor } from "../../../../src/color.js";
 import TranscriptMessage from "./TranscriptMessage.vue";
 import { backdropBehind, resolveColour } from "./messageContrast";
 import { adjoins, resolveAppearance } from "./transcriptPresentation";
@@ -20,6 +21,39 @@ const props = defineProps<{
   revision?: number;
   bottomInset?: number;
 }>();
+const avatarOrdinals = reactive(new Map<string, number>());
+let assignedEntries = props.entries;
+let assignedThrough = 0;
+let nextAutomaticOrdinal = 0;
+watch(
+  [() => props.entries, () => props.entries.length, () => props.revision],
+  () => {
+    if (props.entries !== assignedEntries || props.entries.length < assignedThrough) {
+      avatarOrdinals.clear();
+      assignedEntries = props.entries;
+      assignedThrough = 0;
+      nextAutomaticOrdinal = 0;
+    }
+    for (let index = assignedThrough; index < props.entries.length; index += 1) {
+      const entry = props.entries[index]!;
+      if (
+        entry.kind === "message" &&
+        entry.speakerId !== "user" &&
+        entry.presentation?.kind !== "prose" &&
+        !avatarOrdinals.has(entry.speakerId)
+      ) {
+        avatarOrdinals.set(
+          entry.speakerId,
+          normalizeOpaqueColor(props.speakers[entry.speakerId]?.accent) === null
+            ? nextAutomaticOrdinal++
+            : -1,
+        );
+      }
+    }
+    assignedThrough = props.entries.length;
+  },
+  { immediate: true },
+);
 const enhancedContrast = inject(enhancedTranscriptContrast, undefined);
 const scrollElement = ref<HTMLDivElement | null>(null);
 const touching = ref(false);
@@ -294,6 +328,9 @@ onMounted(() => {
             <TranscriptMessage
               :entry="entry"
               :speakers="speakers"
+              :avatar-ordinal="
+                entry.kind === 'message' ? avatarOrdinals.get(entry.speakerId) : undefined
+              "
               :appearance="appearance"
               :continues="continues(item.index)"
               :continued="continued(item.index)"
