@@ -5,6 +5,7 @@ import ToolPanelHeader from "./ToolPanelHeader.vue";
 import ToolPanelBody from "./ToolPanelBody.vue";
 import ResizeHandle from "./ResizeHandle.vue";
 import { toolPanelSizes } from "./toolPanelSizes";
+import { providePlayerConditions } from "./usePlayerConditions";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
@@ -37,7 +38,7 @@ import {
   watch,
   type ComponentPublicInstance,
 } from "vue";
-import { onClickOutside, useEventListener, useResizeObserver, useStorage } from "@vueuse/core";
+import { onClickOutside, useResizeObserver, useStorage } from "@vueuse/core";
 import {
   FlaskConical,
   Settings,
@@ -50,7 +51,7 @@ import {
 
 // Own tool interaction, panel lifetime and dock/drawer composition together.
 // Callers supply tool contents and the Player composition through slots.
-defineProps<{ stageHeight: number; mediaAspect: number }>();
+defineProps<{ stageHeight: number; mediaAspect: number; fullscreen: boolean }>();
 const isDevelopment = import.meta.env.DEV;
 type LabelMode = "icons" | "preview" | "labels";
 const labelMode = isDevelopment
@@ -166,32 +167,20 @@ useResizeObserver(menuRuler, () => {
   remSize.value = parseFloat(getComputedStyle(document.documentElement).fontSize);
 });
 const permanentMenuWidth = computed(() => menuWidthRem.value * remSize.value);
-// Use the usable viewport, including browser keyboard resizing, without guessing keyboard height.
-const viewport = ref({ width: window.innerWidth, height: window.innerHeight, left: 0, top: 0 });
-function updateViewport() {
-  const visual = window.visualViewport;
-  viewport.value = {
-    width: visual?.width ?? window.innerWidth,
-    height: visual?.height ?? window.innerHeight,
-    left: visual?.offsetLeft ?? 0,
-    top: visual?.offsetTop ?? 0,
-  };
-  remSize.value = parseFloat(getComputedStyle(document.documentElement).fontSize);
-}
-updateViewport();
-useEventListener(window, "resize", updateViewport);
-useEventListener(window.visualViewport, "resize", updateViewport);
-useEventListener(window.visualViewport, "scroll", updateViewport);
 // Existing provisional conversation width plus fixture margins/borders.
 const protectedPlayerWidth = computed(() => 380 + 6 * remSize.value + 4);
-const narrow = computed(
+const requiredDockWidth = computed(
   () =>
-    viewport.value.width <
     protectedPlayerWidth.value +
       (labelMode.value === "labels" ? permanentMenuWidth.value : compactMenuWidth.value) +
       toolPanelSizes.Small * remSize.value +
       1,
 );
+const conditions = providePlayerConditions(requiredDockWidth);
+const { viewport, horizontalConstrained: narrow } = conditions;
+watch(viewport, () => {
+  remSize.value = parseFloat(getComputedStyle(document.documentElement).fontSize);
+});
 const sidebarVisible = ref(!narrow.value);
 let transitionFocusKey: string | null = null;
 watch(
@@ -568,29 +557,41 @@ async function updateSidebarVisibility(open: boolean) {
 </script>
 
 <template>
+  <div
+    class="player-viewport-canvas"
+    :style="{
+      '--stage-height': `${stageHeight}px`,
+      '--usable-width': `${viewport.width}px`,
+      '--usable-height': `${viewport.height}px`,
+      '--viewport-left': `${viewport.left}px`,
+      '--viewport-top': `${viewport.top}px`,
+    }"
+  >
   <SidebarProvider
     id="phase2c-shell"
-    :data-narrow="narrow"
+    :data-player-horizontal="narrow ? 'constrained' : 'comfortable'"
+    :data-player-vertical="conditions.verticalConstrained.value ? 'constrained' : 'comfortable'"
+    :data-player-touch="conditions.touchAvailable.value ? 'available' : 'unavailable'"
+    :data-player-hover="conditions.hoverAvailable.value ? 'available' : 'unavailable'"
+    :data-player-fullscreen="fullscreen ? 'active' : 'inactive'"
+    :data-player-touch-edge="conditions.touchAtScreenEdge.value ? 'protected' : 'normal'"
+    :data-player-keyboard="conditions.keyboardRaised.value ? 'raised' : 'closed'"
+    :data-player-edge="conditions.edgeClearance.value ? 'protected' : 'normal'"
     :data-sidebar-visible="sidebarVisible"
     :data-menu-visible="narrowMenuVisible"
     :style="{
-      '--stage-height': `${stageHeight}px`,
       '--media-aspect': mediaAspect,
       '--active-tool-width': `${toolPanelSizes[narrowTool ? toolSizes[narrowTool] : 'Medium']}rem`,
       '--player-reserve': `${protectedPlayerWidth}px`,
       '--tool-columns-width': `${toolColumnsWidth}rem`,
       '--permanent-menu-width': `${menuWidthRem}rem`,
       '--measured-menu-width': `${measuredMenuWidth}px`,
-      '--usable-width': `${viewport.width}px`,
-      '--usable-height': `${viewport.height}px`,
-      '--viewport-left': `${viewport.left}px`,
-      '--viewport-top': `${viewport.top}px`,
     }"
     :data-resizing="resizing !== null"
     :data-labels="labelMode"
     :data-tools-open="openTools.length > 0"
     :data-labels-visible="labelsVisible"
-    class="phase2c-sidebar relative h-dvh min-h-0 overflow-hidden"
+    class="phase2c-sidebar fixed inset-x-0 min-h-0 overflow-hidden"
     :open="sidebarVisible"
     :responsive="false"
     @update:open="updateSidebarVisibility"
@@ -830,4 +831,5 @@ async function updateSidebarVisibility(open: boolean) {
       <slot :sidebar-visible="sidebarVisible" />
     </SidebarInset>
   </SidebarProvider>
+  </div>
 </template>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useResizeObserver } from "@vueuse/core";
+import { usePlayerConditions } from "./usePlayerConditions";
 
 const emit = defineEmits<{ "margin-wheel": [event: WheelEvent] }>();
 function scrollMargin(event: WheelEvent) {
@@ -11,6 +12,7 @@ const overlay = ref<HTMLElement | null>(null);
 const bottomInset = ref(0);
 const container = ref<HTMLElement | null>(null);
 const availableHeight = ref(0);
+const conditions = usePlayerConditions();
 useResizeObserver(container, ([entry]) => { availableHeight.value = entry?.contentRect.height ?? 0; });
 const composerEdges = ref({ top: 0, bottom: 0 });
 // Measure the complete overlay, including its safe-area spacing.
@@ -30,7 +32,7 @@ useResizeObserver(overlay, () => {
   <section ref="container" class="player-conversation conversation-surface"
     :style="{ '--composer-input-limit': `${Math.max(40, availableHeight * 0.45)}px`, '--composer-top-from-bottom': `${composerEdges.top}px`, '--composer-bottom-from-bottom': `${composerEdges.bottom}px` }">
     <slot :bottom-inset="bottomInset" />
-    <div ref="overlay" class="conversation-overlay" data-conversation-overlay>
+    <div ref="overlay" class="conversation-overlay" :class="{ 'edge-clearance': conditions.edgeClearance.value }" data-conversation-overlay>
       <slot name="interaction" />
     </div>
   </section>
@@ -41,8 +43,20 @@ useResizeObserver(overlay, () => {
 .conversation-region { flex: 1; display: flex; min-width: 0; min-height: 0; }
 .conversation-surface { position: relative; display: flex; min-height: 0; padding-inline: var(--conversation-inline-inset); }
 .conversation-overlay {
-  position: absolute; inset: auto var(--conversation-inline-inset) 0; z-index: 2; pointer-events: none;
+  --composer-inline-gutter: var(--conversation-inline-inset);
+  position: absolute;
+  inset: auto max(var(--composer-inline-gutter), env(safe-area-inset-right, 0px)) 0
+    max(var(--composer-inline-gutter), env(safe-area-inset-left, 0px));
+  z-index: 2; pointer-events: none;
   max-inline-size: var(--conversation-content-max-width); margin-inline: auto;
   padding-top: 12px; padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+}
+.conversation-overlay.edge-clearance {
+  /* Keep 32px at narrow viewport edges without narrowing the capped reading width. */
+  --composer-inline-gutter: clamp(
+    var(--conversation-inline-inset),
+    calc(32px - (100vw - var(--conversation-outer-width)) / 2),
+    32px
+  );
 }
 </style>

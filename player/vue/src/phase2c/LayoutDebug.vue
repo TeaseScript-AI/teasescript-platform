@@ -90,14 +90,14 @@ function measure() {
   const style = getComputedStyle(root);
   snapshot.value = {
     regions, media, spacing,
-    reserve: root.dataset.narrow === "true" ? 0 : root.querySelector('[data-slot="sidebar-gap"]')?.getBoundingClientRect().width ?? 0,
+    reserve: root.dataset.playerHorizontal === "constrained" ? 0 : root.querySelector('[data-slot="sidebar-gap"]')?.getBoundingClientRect().width ?? 0,
     tracks: contentStyle ? parseGridTracks(contentStyle.gridTemplateRows, parseFloat(contentStyle.rowGap)).map(track => track.offset + track.size) : [],
     constraints: [
       ...(topBarStyle && topBarRect ? [
         `Top bar: ${topBarStyle.position} overlay (outside grid tracks); height ${formatPixels(topBarRect.height)}; Stage overlap ${formatPixels(stageOverlap)}; insets top ${topBarStyle.top}, right ${topBarStyle.right}, left ${topBarStyle.left}`,
       ] : []),
       `Composer overlay: ${formatPixels(root.querySelector("[data-conversation-overlay]")?.getBoundingClientRect().height ?? 0)} (scroll-end clearance, not a layout gap)`,
-      `Mode: ${root.dataset.narrow === "true" ? "overlay" : "docked"}`,
+      `Mode: ${root.dataset.playerHorizontal === "constrained" ? "overlay" : "docked"}`,
       `Protected Player width: ${style.getPropertyValue("--player-reserve").trim()} (provisional)`,
       `Conversation max: ${style.getPropertyValue("--conversation-max-width").trim()}`,
       `Stage / conversation tracks: ${contentStyle?.gridTemplateRows ?? "—"}`,

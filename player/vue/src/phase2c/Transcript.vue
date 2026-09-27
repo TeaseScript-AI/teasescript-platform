@@ -5,7 +5,10 @@ import { elementScroll, observeElementRect, useVirtualizer } from "@tanstack/vue
 import { useResizeObserver } from "@vueuse/core";
 import { ArrowDown } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } from "../../../model.js";
+import type {
+  PlayerTranscriptEntryPresentation,
+  PlayerSpeakerPresentation,
+} from "../../../model.js";
 import TranscriptMessage from "./TranscriptMessage.vue";
 import { backdropBehind, resolveColour } from "./messageContrast";
 import { adjoins, resolveAppearance } from "./transcriptPresentation";
@@ -29,57 +32,63 @@ useResizeObserver(foregroundElement, () => {
 // Include the live controls in the same measured scroll extent and follow target.
 const endInset = computed(() => (props.bottomInset ?? 0) + foregroundHeight.value);
 const latestThreshold = 24;
-const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(computed(() => {
-  // Capture the supplied list so replacing fixtures retains the previous key mapping on prepend.
-  void props.revision; // The canonical adapter appends in place and publishes a revision.
-  const entries = props.entries;
-  return {
-    count: entries.length,
-    getScrollElement: () => scrollElement.value,
-    getItemKey: (index: number) => entries[index]!.id,
-    estimateSize: () => 140,
-    overscan: 5,
-    // A viewport of leading space keeps even a single message scrollable.
-    paddingStart: viewportHeight.value,
-    paddingEnd: endInset.value,
-    anchorTo: "end" as const,
-    followOnAppend: true,
-    scrollEndThreshold: latestThreshold,
-    // Vue commits the new virtual spacer after options change. Apply TanStack's target
-    // after that commit so the browser cannot clamp a prepend to the old scroll height.
-    scrollToFn: (offset, options, instance) => {
-      void nextTick(() => elementScroll(offset, options, instance));
-    },
-    // Preserve follow/reading intent before changing the viewport and leading space.
-    observeElementRect: (instance, callback) => observeElementRect(instance, (rect) => {
-      const previous = instance.scrollRect;
-      const offset = instance.scrollOffset ?? 0;
-      // On growth the browser may already have clamped scrollTop to the new end.
-      const following = previous === null || previous.height === 0 ||
-        instance.getTotalSize() - offset - Math.max(previous.height, rect.height) <= latestThreshold;
-      viewportHeight.value = rect.height;
-      callback(rect);
-      if (previous?.height !== rect.height) {
-        void nextTick(() => {
-          if (following && !touching.value) instance.scrollToEnd();
-          else instance.scrollToOffset(offset + rect.height - (previous?.height ?? 0));
-        });
-      }
-    }),
-  };
-}));
+const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
+  computed(() => {
+    // Capture the supplied list so replacing fixtures retains the previous key mapping on prepend.
+    void props.revision; // The canonical adapter appends in place and publishes a revision.
+    const entries = props.entries;
+    return {
+      count: entries.length,
+      getScrollElement: () => scrollElement.value,
+      getItemKey: (index: number) => entries[index]!.id,
+      estimateSize: () => 140,
+      overscan: 5,
+      // A viewport of leading space keeps even a single message scrollable.
+      paddingStart: viewportHeight.value,
+      paddingEnd: endInset.value,
+      anchorTo: "end" as const,
+      followOnAppend: true,
+      scrollEndThreshold: latestThreshold,
+      // Vue commits the new virtual spacer after options change. Apply TanStack's target
+      // after that commit so the browser cannot clamp a prepend to the old scroll height.
+      scrollToFn: (offset, options, instance) => {
+        void nextTick(() => elementScroll(offset, options, instance));
+      },
+      // Preserve follow/reading intent before changing the viewport and leading space.
+      observeElementRect: (instance, callback) =>
+        observeElementRect(instance, (rect) => {
+          const previous = instance.scrollRect;
+          const offset = instance.scrollOffset ?? 0;
+          // On growth the browser may already have clamped scrollTop to the new end.
+          const following =
+            previous === null ||
+            previous.height === 0 ||
+            instance.getTotalSize() - offset - Math.max(previous.height, rect.height) <=
+              latestThreshold;
+          viewportHeight.value = rect.height;
+          callback(rect);
+          if (previous?.height !== rect.height) {
+            void nextTick(() => {
+              if (following && !touching.value) instance.scrollToEnd();
+              else instance.scrollToOffset(offset + rect.height - (previous?.height ?? 0));
+            });
+          }
+        }),
+    };
+  }),
+);
 watch(endInset, (inset, previous) => {
   const instance = virtualizer.value;
-  const previousDistance = instance.getTotalSize() - instance.options.paddingEnd + previous
-    - (instance.scrollOffset ?? 0) - (instance.scrollRect?.height ?? 0);
+  const previousDistance =
+    instance.getTotalSize() -
+    instance.options.paddingEnd +
+    previous -
+    (instance.scrollOffset ?? 0) -
+    (instance.scrollRect?.height ?? 0);
   if (inset !== previous && previousDistance <= latestThreshold && !touching.value)
     void nextTick(() => instance.scrollToEnd());
 });
-const palette = ref({
-  surface: "#ffffff",
-  canvas: "#ffffff",
-  link: "#0000ee",
-});
+const palette = ref({ surface: "#ffffff", canvas: "#ffffff", link: "#0000ee" });
 function readPalette() {
   const element = scrollElement.value;
   if (element === null) return;
@@ -94,17 +103,30 @@ let paletteObserver: MutationObserver | null = null;
 onMounted(() => {
   paletteObserver = new MutationObserver(readPalette);
   paletteObserver.observe(document.documentElement, {
-    attributes: true, attributeFilter: ["style", "class", "data-phase2c-theme"],
+    attributes: true,
+    attributeFilter: ["style", "class", "data-phase2c-theme"],
   });
 });
-onBeforeUnmount(() => { paletteObserver?.disconnect(); });
+onBeforeUnmount(() => {
+  paletteObserver?.disconnect();
+});
 const rows = computed(() =>
   virtualizer.value.getVirtualItems().map((item) => {
     const entry = props.entries[item.index]!;
-    return { item, entry, appearance: resolveAppearance(entry, palette.value, enhancedContrast?.value) };
-  }));
-const showLatest = computed(() => !touching.value && !virtualizer.value.isScrolling &&
-  virtualizer.value.getDistanceFromEnd() > Math.max(80, (virtualizer.value.scrollRect?.height ?? 0) / 2));
+    return {
+      item,
+      entry,
+      appearance: resolveAppearance(entry, palette.value, enhancedContrast?.value),
+    };
+  }),
+);
+const showLatest = computed(
+  () =>
+    !touching.value &&
+    !virtualizer.value.isScrolling &&
+    virtualizer.value.getDistanceFromEnd() >
+      Math.max(80, (virtualizer.value.scrollRect?.height ?? 0) / 2),
+);
 const scrolled = computed(() => (virtualizer.value.scrollOffset ?? 0) > 1);
 function continues(index: number) {
   return adjoins(props.entries, index, index - 1);
@@ -113,35 +135,44 @@ function continued(index: number) {
   return adjoins(props.entries, index, index + 1);
 }
 const following = ref(true);
+let initialPositioning = true;
 // Read the DOM: the virtualizer may already reflect rows Vue has not rendered.
 function readingLatest() {
   const viewport = scrollElement.value;
-  return viewport === null ||
-    viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= latestThreshold;
+  return (
+    viewport === null ||
+    viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= latestThreshold
+  );
 }
 function rememberFollow() {
-  if (!touching.value) following.value = readingLatest();
+  if (!initialPositioning && !touching.value) following.value = readingLatest();
 }
 // Shrinking row measurements can mimic reaching the end; do not resume follow here.
 function releaseFollow() {
-  if (!touching.value && !readingLatest()) following.value = false;
+  if (!initialPositioning && !touching.value && !readingLatest()) following.value = false;
 }
 // Capture intent before rendering; revision also covers in-place adapter updates.
-watch([() => props.entries, () => props.revision, () => props.entries.length],
-  rememberFollow, { flush: "pre" });
+watch([() => props.entries, () => props.revision, () => props.entries.length], rememberFollow, {
+  flush: "pre",
+});
 let measuredTotal = 0;
 let measuredInset = 0;
-watch(() => [virtualizer.value.getTotalSize(), endInset.value] as const, ([total, inset]) => {
-  // Exclude composer/control clearance changes from message remeasurement.
-  const messagesGrew = total - measuredTotal !== inset - measuredInset;
-  measuredTotal = total;
-  measuredInset = inset;
-  if (!messagesGrew || !following.value || touching.value || props.entries.length === 0) return;
-  const instance = virtualizer.value;
-  void nextTick(() =>
-    instance.scrollToOffset(
-      Math.max(instance.getTotalSize() - (instance.scrollRect?.height ?? 0), 0)));
-});
+watch(
+  () => [virtualizer.value.getTotalSize(), endInset.value] as const,
+  ([total, inset]) => {
+    // Exclude composer/control clearance changes from message remeasurement.
+    const messagesGrew = total - measuredTotal !== inset - measuredInset;
+    measuredTotal = total;
+    measuredInset = inset;
+    if (!messagesGrew || !following.value || touching.value || props.entries.length === 0) return;
+    const instance = virtualizer.value;
+    void nextTick(() =>
+      instance.scrollToOffset(
+        Math.max(instance.getTotalSize() - (instance.scrollRect?.height ?? 0), 0),
+      ),
+    );
+  },
+);
 function interruptFollow() {
   following.value = false;
   // Replace an in-flight measured end target before native user scrolling starts.
@@ -152,14 +183,24 @@ function onWheel(event: WheelEvent) {
 }
 function scrollFromMargin(event: WheelEvent) {
   const viewport = scrollElement.value;
-  if (!viewport || event.ctrlKey || event.defaultPrevented ||
-      Math.abs(event.deltaX) > Math.abs(event.deltaY) || !event.deltaY ||
-      viewport.scrollHeight <= viewport.clientHeight) return;
+  if (
+    !viewport ||
+    event.ctrlKey ||
+    event.defaultPrevented ||
+    Math.abs(event.deltaX) > Math.abs(event.deltaY) ||
+    !event.deltaY ||
+    viewport.scrollHeight <= viewport.clientHeight
+  )
+    return;
   // Wheel deltas can be pixels, text lines or pages depending on the input device.
   const style = getComputedStyle(viewport);
   const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2;
-  const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? lineHeight
-    : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? viewport.clientHeight : 1;
+  const unit =
+    event.deltaMode === WheelEvent.DOM_DELTA_LINE
+      ? lineHeight
+      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+        ? viewport.clientHeight
+        : 1;
   event.preventDefault();
   onWheel(event);
   const delta = event.deltaY * unit;
@@ -193,47 +234,100 @@ function returnToLatest() {
   virtualizer.value.scrollToEnd();
   scrollElement.value?.focus({ preventScroll: true });
 }
-onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollToEnd(); }); });
+onMounted(() => {
+  void nextTick(() => {
+    readPalette();
+    // The viewport, measured rows, and foreground can all grow during the first paint.
+    requestAnimationFrame(() => {
+      virtualizer.value.scrollToEnd();
+      requestAnimationFrame(() => {
+        virtualizer.value.scrollToEnd();
+        initialPositioning = false;
+      });
+    });
+  });
+});
 </script>
 
 <template>
-  <section class="transcript" aria-label="Conversation"
-    :style="{ '--transcript-bottom-inset': `${bottomInset ?? 0}px` }">
-    <ScrollArea type="scroll" class="transcript-scroll-area" viewport-class="transcript-scroll"
+  <section
+    class="transcript"
+    aria-label="Conversation"
+    :style="{ '--transcript-bottom-inset': `${bottomInset ?? 0}px` }"
+  >
+    <ScrollArea
+      type="scroll"
+      class="transcript-scroll-area"
+      viewport-class="transcript-scroll"
       content-class="transcript-scroll-content"
       @viewport="scrollElement = $event"
-      :viewport-attrs="{ 'data-scrolled': scrolled, role: 'region', 'aria-label': 'Transcript',
-        tabindex: 0, onKeydown: onScrollKeydown, onWheel: onWheel, onScroll: releaseFollow,
-        onTouchstart: onTouchStart, onTouchend: () => touching = false,
-        onTouchcancel: () => touching = false }">
+      :viewport-attrs="{
+        'data-scrolled': scrolled,
+        role: 'region',
+        'aria-label': 'Transcript',
+        tabindex: 0,
+        onKeydown: onScrollKeydown,
+        onWheel: onWheel,
+        onScroll: releaseFollow,
+        onTouchstart: onTouchStart,
+        onTouchend: () => (touching = false),
+        onTouchcancel: () => (touching = false),
+      }"
+    >
       <div class="transcript-history" :style="{ height: `${virtualizer.getTotalSize()}px` }">
         <div role="list">
-          <article v-for="{ item, entry, appearance } in rows" :key="entry.id"
+          <article
+            v-for="{ item, entry, appearance } in rows"
+            :key="entry.id"
             :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
-            :data-index="item.index" :data-message-id="entry.id" :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
-            role="listitem" :aria-posinset="item.index + 1" :aria-setsize="entries.length"
-            class="transcript-entry" :data-continues="continues(item.index)"
+            :data-index="item.index"
+            :data-message-id="entry.id"
+            :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
+            role="listitem"
+            :aria-posinset="item.index + 1"
+            :aria-setsize="entries.length"
+            class="transcript-entry"
+            :data-continues="continues(item.index)"
             :data-prose="appearance.placement !== null || undefined"
-            :style="{ transform: `translateY(${item.start}px)` }">
-            <TranscriptMessage :entry="entry" :speakers="speakers" :appearance="appearance"
-              :continues="continues(item.index)" :continued="continued(item.index)" />
+            :style="{ transform: `translateY(${item.start}px)` }"
+          >
+            <TranscriptMessage
+              :entry="entry"
+              :speakers="speakers"
+              :appearance="appearance"
+              :continues="continues(item.index)"
+              :continued="continued(item.index)"
+            />
           </article>
         </div>
-        <div ref="foregroundElement" class="transcript-foreground"
-          :style="{ top: `${virtualizer.getTotalSize() - endInset}px` }">
+        <div
+          ref="foregroundElement"
+          class="transcript-foreground"
+          :style="{ top: `${virtualizer.getTotalSize() - endInset}px` }"
+        >
           <slot name="foreground" />
         </div>
       </div>
       <p v-if="!entries.length" class="transcript-empty">No messages yet.</p>
     </ScrollArea>
-    <Button v-if="showLatest" variant="ghost" size="icon" class="return-to-latest"
-      aria-label="Return to latest" @click="returnToLatest"><ArrowDown class="size-4" /></Button>
+    <Button
+      v-if="showLatest"
+      variant="ghost"
+      size="icon"
+      class="return-to-latest"
+      aria-label="Return to latest"
+      @click="returnToLatest"
+      ><ArrowDown class="size-4"
+    /></Button>
   </section>
 </template>
 
 <style scoped>
 .transcript {
-  position: relative; flex: 1; min-height: 0; min-width: 0;
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
   --message-surface: var(--surface-component);
   --message-separator: var(--border);
   --markup-link: light-dark(oklch(50% 0.17 254), oklch(79% 0.12 240));
@@ -247,34 +341,79 @@ onMounted(() => { void nextTick(() => { readPalette(); virtualizer.value.scrollT
   margin-inline: calc(-1 * var(--conversation-inline-inset));
   --scroll-area-bottom-inset: var(--transcript-bottom-inset);
 }
-:deep(.transcript-scroll-content) { padding-inline: var(--conversation-inline-inset); }
+/* Keep the track inside the 8px reading gutter while retaining its 5px thumb. */
+.transcript-scroll-area :deep([data-slot="scroll-area-scrollbar"][data-orientation="vertical"]) {
+  width: 8px;
+  padding-inline: 1.5px;
+}
+:deep(.transcript-scroll-content) {
+  padding-inline: var(--conversation-inline-inset);
+}
 :deep(.transcript-scroll) {
-  height: 100%; overflow-y: auto; overflow-x: hidden; overscroll-behavior-y: contain;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
   /* Browser scroll anchoring would compete with TanStack's keyed corrections. */
-  overflow-anchor: none; scrollbar-width: none;
+  overflow-anchor: none;
+  scrollbar-width: none;
 }
 
-:deep(.transcript-scroll:focus-visible) { outline: 2px solid var(--focus-ring, var(--border-strong)); outline-offset: -2px; }
+:deep(.transcript-scroll:focus-visible) {
+  outline: 2px solid var(--focus-ring, var(--border-strong));
+  outline-offset: -2px;
+}
 /* Keep transcript contrast intact above the composer, then reduce it across
    the complete composer height while retaining a faint trace to the bottom. */
 :deep(.transcript-scroll) {
   --transcript-top-fade: 0px;
-  mask-image: linear-gradient(to bottom,
-    transparent 0, black var(--transcript-top-fade),
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    black var(--transcript-top-fade),
     black max(var(--transcript-top-fade), calc(100% - var(--composer-top-from-bottom, 0px))),
     rgb(0 0 0 / 20%) calc(100% - var(--composer-bottom-from-bottom, 0px)),
-    rgb(0 0 0 / 20%) 100%);
+    rgb(0 0 0 / 20%) 100%
+  );
 }
-:deep(.transcript-scroll[data-scrolled="true"]) { --transcript-top-fade: 1rem; }
-.transcript-foreground { position: absolute; left: 0; width: 100%; }
-.transcript-history { position: relative; width: 100%; }
-.transcript-entry { position: absolute; top: 0; left: 0; width: 100%; padding-block: var(--transcript-entry-gap, 16px) 0; }
-.transcript-entry[data-continues="true"] { padding-block-start: 3px; }
-.transcript-entry[data-prose] { padding-block: 1.75rem 0.75rem; }
-.transcript-empty { padding: 1rem; font-size: 0.875rem; color: var(--muted-foreground); }
+:deep(.transcript-scroll[data-scrolled="true"]) {
+  --transcript-top-fade: 1rem;
+}
+.transcript-foreground {
+  position: absolute;
+  left: 0;
+  width: 100%;
+}
+.transcript-history {
+  position: relative;
+  width: 100%;
+}
+.transcript-entry {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  padding-block: var(--player-entry-gap) 0;
+}
+.transcript-entry[data-continues="true"] {
+  padding-block-start: 3px;
+}
+.transcript-entry[data-prose] {
+  padding-block: 1.75rem 0.75rem;
+}
+.transcript-empty {
+  padding: 1rem;
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
+}
 .return-to-latest {
-  position: absolute; bottom: calc(var(--transcript-bottom-inset, 0px) + 0.5rem); right: 0.25rem; width: 2.75rem; height: 2.75rem;
-  border: 1px solid var(--border); border-radius: 50%;
+  position: absolute;
+  bottom: calc(var(--transcript-bottom-inset, 0px) + 0.5rem);
+  right: 0.25rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid var(--border);
+  border-radius: 50%;
   --button-rest: color-mix(in srgb, var(--surface-component) 80%, transparent);
   backdrop-filter: blur(4px);
 }

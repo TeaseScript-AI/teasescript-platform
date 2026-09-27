@@ -101,7 +101,7 @@ async function checks(page) {
   check(closedWide.width > docked.width, "Wide dock must reserve Player width");
   await page.setViewportSize({ width: 390, height: 700 });
   await page.waitForFunction(
-    () => document.querySelector("#phase2c-shell").dataset.narrow === "true",
+    () => document.querySelector("#phase2c-shell").dataset.playerHorizontal === "constrained",
   );
   const closedNarrow = await page.locator(".player-stage").boundingBox();
   await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
@@ -117,7 +117,7 @@ async function checks(page) {
   await page.getByRole("button", { name: "Show sidebar", exact: true }).waitFor();
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.waitForFunction(
-    () => document.querySelector("#phase2c-shell").dataset.narrow === "false",
+    () => document.querySelector("#phase2c-shell").dataset.playerHorizontal === "comfortable",
   );
   await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
   await expectState(expected);
@@ -1069,7 +1069,21 @@ async function interactionChecks(page) {
   };
   const reject = async (text) => {
     const before = await snapshot();
-    await submit(text);
+    await input.fill(text);
+    const geometry = await page.evaluate(() => {
+      const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
+      const controls = document
+        .querySelector("[data-foreground-controls]")
+        ?.getBoundingClientRect();
+      const overlay = document.querySelector("[data-conversation-overlay]").getBoundingClientRect();
+      return {
+        composerTop: composer.top,
+        composerHeight: composer.height,
+        controlsBottom: controls?.bottom,
+        overlayHeight: overlay.height,
+      };
+    });
+    await input.press("Enter");
     check(
       JSON.stringify(await snapshot()) === JSON.stringify(before),
       "Rejected input changed transcript",
@@ -1079,7 +1093,30 @@ async function interactionChecks(page) {
       await input.evaluate((el) => el === document.activeElement),
       "Rejection lost composer focus",
     );
-    await surface.getByRole("status").waitFor();
+    const notice = surface.getByRole("status");
+    await notice.waitFor();
+    check(
+      await notice.evaluate((el, before) => {
+        const composer = document.querySelector("[data-composer-shell]");
+        const overlay = document.querySelector("[data-conversation-overlay]");
+        const controls = document.querySelector("[data-foreground-controls]");
+        const noticeBox = el.getBoundingClientRect();
+        const composerBox = composer.getBoundingClientRect();
+        const overlayBox = overlay.getBoundingClientRect();
+        return (
+          !composer.contains(el) &&
+          noticeBox.left >= 0 &&
+          noticeBox.right <= innerWidth &&
+          Math.abs(composerBox.top - noticeBox.bottom - 8) < 1 &&
+          Math.abs(composerBox.top - before.composerTop) < 1 &&
+          Math.abs(composerBox.height - before.composerHeight) < 1 &&
+          Math.abs(overlayBox.height - before.overlayHeight) < 1 &&
+          (!controls ||
+            Math.abs(controls.getBoundingClientRect().bottom - before.controlsBottom) < 1)
+        );
+      }, geometry),
+      "Validation feedback resized the composer, moved the choices, or moved away from the input",
+    );
   };
   await page.getByRole("button", { name: "Capture runtime checkpoint", exact: true }).click();
   await reject("   ");
@@ -1188,6 +1225,22 @@ async function interactionChecks(page) {
     () =>
       document.querySelector("[data-runtime-interaction] textarea")?.getAttribute("aria-label") ===
       "Number",
+  );
+  await input.fill("not a number");
+  await tap(surface.getByRole("button", { name: "Send", exact: true }));
+  await surface.getByRole("status").waitFor();
+  check(
+    await page.evaluate(() => {
+      const notice = document.querySelector(".composer-notice").getBoundingClientRect();
+      const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
+      return (
+        notice.left >= 0 &&
+        notice.right <= innerWidth &&
+        Math.abs(composer.top - notice.bottom - 8) < 1 &&
+        document.documentElement.scrollWidth <= innerWidth
+      );
+    }),
+    "Narrow validation notice is not beside the composer or overflows the Player",
   );
   await input.fill("1e2");
   await tap(surface.getByRole("button", { name: "Send", exact: true }));
@@ -1336,7 +1389,7 @@ async function actionButtonGeometryChecks(page) {
     "Player action button groups do not use 8px gaps",
   );
   check(
-    Math.abs(initial.messageToChoices - 16) < 1 &&
+    Math.abs(initial.messageToChoices - 12) < 1 &&
       Math.abs(initial.choicesToComposer - 12) < 1 &&
       Math.abs(initial.composerToBottom - 12) < 1,
     "Message, choice group and composer do not use the agreed vertical spacing",
@@ -1359,6 +1412,17 @@ async function actionButtonGeometryChecks(page) {
   check(
     new Set(initial.backgroundButtons.map((button) => Math.round(button.width))).size > 1,
     "Right-rail action buttons were stretched to equal widths",
+  );
+  const background = page.locator(".background-controls-fixture");
+  const transcriptBefore = await page.locator(".transcript-entry").allInnerTexts();
+  await background.getByRole("button", { name: "Repeat", exact: true }).click();
+  await background.getByRole("button", { name: "Give me a hint", exact: true }).click();
+  check(
+    (await background.getByRole("button", { name: "Give me a hint", exact: true }).count()) === 1 &&
+      (await background.getByRole("status").count()) === 0 &&
+      JSON.stringify(await page.locator(".transcript-entry").allInnerTexts()) ===
+        JSON.stringify(transcriptBefore),
+    "Unwired right-rail fixture actions produced their own feedback or transcript text",
   );
 
   await page.setViewportSize({ width: 700, height: 900 });
@@ -1406,7 +1470,6 @@ async function transcriptSpacingChecks(page) {
   await page.getByRole("button", { name: "Visual Lab", exact: true }).click();
   await page.getByRole("button", { name: "Start spacing sample", exact: true }).click();
   await page.getByRole("button", { name: "Visit the lighthouse", exact: true }).waitFor();
-  const select = page.locator("[data-transcript-entry-gap]");
   const measure = () =>
     page.evaluate(() => {
       const rows = Array.from(document.querySelectorAll(".transcript-entry"));
@@ -1418,22 +1481,22 @@ async function transcriptSpacingChecks(page) {
         choiceGap: Number.parseFloat(getComputedStyle(controls).paddingTop),
       };
     });
-  for (const gap of [16, 12, 8]) {
-    await select.selectOption(String(gap));
-    const result = await measure();
-    check(
-      result.speakers.length === 5 &&
-        result.speakers[2] === "user" &&
-        result.speakers[3] !== result.speakers[4] &&
-        result.continues[1] === "true",
-      "Spacing sample does not show grouped, player and other-speaker messages with choices",
-    );
-    check(
-      JSON.stringify(result.gaps) === JSON.stringify([gap, 3, gap, gap, gap]) &&
-        result.choiceGap === gap,
-      `Transcript spacing selector did not apply ${gap}px to separate bubbles and choices`,
-    );
-  }
+  const result = await measure();
+  check(
+    result.speakers.length === 5 &&
+      result.speakers[2] === "user" &&
+      result.speakers[3] !== result.speakers[4] &&
+      result.continues[1] === "true",
+    "Spacing sample does not show grouped, player and other-speaker messages with choices",
+  );
+  check(
+    JSON.stringify(result.gaps) === JSON.stringify([12, 3, 12, 12, 12]) && result.choiceGap === 12,
+    "Separate bubbles and choices must have a 12px gap; grouped bubbles must have a 3px gap",
+  );
+  check(
+    (await page.locator("[data-transcript-entry-gap]").count()) === 0,
+    "Visual Lab still exposes the removed transcript spacing selector",
+  );
   await page.goto(`${page.url().split("?")[0]}?spacing-sample`);
   await page.getByRole("button", { name: "Visit the lighthouse", exact: true }).waitFor();
   const directSample = await page.evaluate(() => ({
@@ -1446,7 +1509,7 @@ async function transcriptSpacingChecks(page) {
       Math.abs(directSample.stageHeight / directSample.viewportHeight - 0.45) < 0.01,
     "Direct spacing sample does not show the conversation-first example",
   );
-  return "PASS grouped 3px and selectable 8/12/16px transcript and choice spacing";
+  return "PASS grouped 3px and fixed 12px transcript and choice spacing";
 }
 
 async function buttonInkChecks(page) {
@@ -2016,7 +2079,7 @@ async function contentAlignmentChecks(page) {
     check(
       aligned(composer.left, conversation.left + readingInset) &&
         aligned(composer.right, conversation.right - readingInset),
-      `${label}: composer does not span transcript reading width`,
+      `${label}: composer side spacing differs from the available reading width`,
     );
     check(
       media.left >= stage.left - 1 && conversation.left >= stage.left - 1,
@@ -2079,7 +2142,280 @@ async function contentAlignmentChecks(page) {
   await verify("narrow stage", true);
   await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
   await verify("narrow drawer", true);
+  await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
   return "PASS shared media/transcript/composer center and reading width across docks and aspect ratios";
+}
+
+async function playerConditionChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(
+    () => document.querySelector(".phase2c-sidebar")?.dataset.playerHorizontal === "constrained",
+  );
+  check(
+    await page.evaluate(() => {
+      const shell = document.querySelector(".phase2c-sidebar");
+      const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
+      return (
+        shell.dataset.playerHorizontal === "constrained" &&
+        shell.dataset.playerTouch === "unavailable" &&
+        shell.dataset.playerEdge === "normal" &&
+        Math.abs(composer.left - 8) < 1
+      );
+    }),
+    "Narrow desktop window was treated as a rounded touch screen",
+  );
+
+  const hybridContext = await page
+    .context()
+    .browser()
+    .newContext({
+      viewport: { width: 390, height: 844 },
+      screen: { width: 1920, height: 1080 },
+      hasTouch: true,
+    });
+  try {
+    const hybrid = await hybridContext.newPage();
+    await hybrid.goto(`${page.url().split("?")[0]}?feedback-demo=composer`);
+    check(
+      await hybrid.evaluate(() => {
+        const shell = document.querySelector(".phase2c-sidebar");
+        const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
+        return (
+          shell.dataset.playerTouch === "available" &&
+          shell.dataset.playerEdge === "normal" &&
+          Math.abs(composer.left - 8) < 1
+        );
+      }),
+      "A narrow touchscreen laptop window received phone corner clearance",
+    );
+  } finally {
+    await hybridContext.close();
+  }
+
+  const context = await page
+    .context()
+    .browser()
+    .newContext({
+      viewport: { width: 390, height: 844 },
+      screen: { width: 410, height: 844 },
+      isMobile: true,
+      hasTouch: true,
+    });
+  const mobile = await context.newPage();
+  try {
+    await mobile.goto(`${page.url().split("?")[0]}?feedback-demo=composer`);
+    const state = () =>
+      mobile.evaluate(() => {
+        const shell = document.querySelector(".phase2c-sidebar");
+        const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
+        return {
+          horizontal: shell.dataset.playerHorizontal,
+          vertical: shell.dataset.playerVertical,
+          touch: shell.dataset.playerTouch,
+          keyboard: shell.dataset.playerKeyboard,
+          edge: shell.dataset.playerEdge,
+          fullscreen: shell.dataset.playerFullscreen,
+          left: composer.left,
+        };
+      });
+    const bottom = await state();
+    check(
+      bottom.horizontal === "constrained" &&
+        bottom.vertical === "comfortable" &&
+        bottom.touch === "available" &&
+        bottom.keyboard === "closed" &&
+        bottom.edge === "protected" &&
+        bottom.fullscreen === "inactive" &&
+        Math.abs(bottom.left - 32) < 1,
+      "Touch-first narrow viewport did not protect the bottom composer edges",
+    );
+    await mobile.locator("[data-composer-input]").focus();
+    await mobile.setViewportSize({ width: 390, height: 544 });
+    await mobile.waitForFunction(
+      () => document.querySelector(".phase2c-sidebar")?.dataset.playerKeyboard === "raised",
+    );
+    const raised = await state();
+    check(
+      raised.vertical === "constrained" &&
+        raised.edge === "normal" &&
+        Math.abs(raised.left - 8) < 1,
+      "Keyboard-open composer did not return to the normal reading width",
+    );
+    await mobile.setViewportSize({ width: 390, height: 844 });
+    await mobile.waitForFunction(
+      () => document.querySelector(".phase2c-sidebar")?.dataset.playerKeyboard === "closed",
+    );
+    const restored = await state();
+    check(
+      restored.edge === "protected" && Math.abs(restored.left - 32) < 1,
+      "Closing the keyboard did not restore the edge clearance",
+    );
+    const beforeTop = await mobile.evaluate(() => {
+      const shell = document.querySelector(".phase2c-sidebar").getBoundingClientRect();
+      const stage = document.querySelector(".player-stage").getBoundingClientRect();
+      const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
+      const control = document.querySelector("[data-fullscreen-control]").getBoundingClientRect();
+      const timer = document.querySelector(".timer-display").getBoundingClientRect();
+      return {
+        shellTop: shell.top,
+        shellBottom: shell.bottom,
+        stageTop: stage.top,
+        composerBottom: composer.bottom,
+        controlTop: control.top,
+        timerGap: timer.top - control.bottom,
+      };
+    });
+    await mobile.locator("[data-fullscreen-control]").click();
+    await mobile.waitForFunction(() => document.fullscreenElement === document.documentElement);
+    await mobile.waitForFunction(
+      () => document.querySelector(".phase2c-sidebar")?.dataset.playerFullscreen === "active",
+    );
+    const top = await mobile.evaluate(() => {
+      const bar = document.querySelector("[data-player-top-bar]");
+      const canvas = document.querySelector(".player-viewport-canvas");
+      const shell = document.querySelector(".phase2c-sidebar").getBoundingClientRect();
+      const canvasBounds = canvas.getBoundingClientRect();
+      const stage = document.querySelector(".player-stage").getBoundingClientRect();
+      const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
+      const control = bar.querySelector("[data-fullscreen-control]").getBoundingClientRect();
+      const timer = document.querySelector(".timer-display").getBoundingClientRect();
+      return {
+        fullscreen: document.querySelector(".phase2c-sidebar").dataset.playerFullscreen,
+        padding: parseFloat(getComputedStyle(bar).paddingTop),
+        shellTop: shell.top,
+        shellBottom: shell.bottom,
+        canvasCoversClearance:
+          canvasBounds.top === 0 &&
+          canvasBounds.bottom === shell.bottom &&
+          document.elementFromPoint(10, shell.top / 2) === canvas &&
+          getComputedStyle(canvas).backgroundImage !== "none",
+        stageTop: stage.top,
+        composerBottom: composer.bottom,
+        controlTop: control.top,
+        timerGap: timer.top - control.bottom,
+      };
+    });
+    check(
+      top.fullscreen === "active" &&
+        top.padding === 8 &&
+        Math.abs(top.shellTop - beforeTop.shellTop - 32) < 1 &&
+        Math.abs(top.shellBottom - beforeTop.shellBottom) < 1 &&
+        top.canvasCoversClearance &&
+        Math.abs(top.stageTop - beforeTop.stageTop - 32) < 1 &&
+        Math.abs(top.composerBottom - beforeTop.composerBottom) < 1 &&
+        Math.abs(top.controlTop - beforeTop.controlTop - 32) < 1 &&
+        Math.abs(top.timerGap - beforeTop.timerGap) < 1,
+      "Touch-first fullscreen did not move the complete Player below the cutout",
+    );
+    const topWithSecondaryHover = await mobile.evaluate(() => {
+      const shell = document.querySelector(".phase2c-sidebar");
+      const previous = shell.dataset.playerHover;
+      shell.dataset.playerHover = "available";
+      const top = shell.getBoundingClientRect().top;
+      shell.dataset.playerHover = previous;
+      return top;
+    });
+    check(
+      Math.abs(topWithSecondaryHover - top.shellTop) < 1,
+      "A secondary hover pointer removed the touch-first fullscreen cutout clearance",
+    );
+    await mobile.getByRole("button", { name: "Show sidebar", exact: true }).click();
+    const drawer = mobile.locator(".tools-drawer");
+    await drawer.waitFor();
+    const drawerBounds = await drawer.boundingBox();
+    check(
+      Math.abs(drawerBounds.y - top.shellTop) < 1 &&
+        Math.abs(drawerBounds.y + drawerBounds.height - top.shellBottom) < 1,
+      "Fullscreen tools drawer did not use the Player's safe rectangle",
+    );
+    await mobile.getByRole("button", { name: "Hide sidebar", exact: true }).click();
+    await mobile.locator("[data-fullscreen-control]").click();
+    await mobile.waitForFunction(() => !document.fullscreenElement);
+    await mobile.waitForFunction(
+      () => document.querySelector(".phase2c-sidebar")?.dataset.playerFullscreen === "inactive",
+    );
+    const afterTop = await mobile.evaluate(() => {
+      const bar = document.querySelector("[data-player-top-bar]");
+      const shell = document.querySelector(".phase2c-sidebar").getBoundingClientRect();
+      const control = bar.querySelector("[data-fullscreen-control]").getBoundingClientRect();
+      return {
+        fullscreen: document.querySelector(".phase2c-sidebar").dataset.playerFullscreen,
+        padding: parseFloat(getComputedStyle(bar).paddingTop),
+        shellTop: shell.top,
+        controlTop: control.top,
+      };
+    });
+    check(
+      afterTop.fullscreen === "inactive" &&
+        afterTop.padding === 8 &&
+        Math.abs(afterTop.shellTop - beforeTop.shellTop) < 1 &&
+        Math.abs(afterTop.controlTop - beforeTop.controlTop) < 1,
+      "Leaving fullscreen did not restore the normal top-bar position",
+    );
+    return "PASS independent space, touch, keyboard and edge conditions";
+  } finally {
+    await context.close();
+  }
+}
+
+async function zoomedViewportChecks(page) {
+  const context = await page
+    .context()
+    .browser()
+    .newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const mobile = await context.newPage();
+  try {
+    await mobile.goto(`${page.url().split("?")[0]}?feedback-demo=composer`);
+    await mobile.evaluate(() => {
+      document.querySelector('meta[name="viewport"]').content = "width=980";
+    });
+    await mobile.waitForFunction(() => window.innerWidth >= 900);
+    const session = await context.newCDPSession(mobile);
+    await session.send("Emulation.setPageScaleFactor", { pageScaleFactor: 0.6 });
+    await mobile.evaluate(() => {
+      const spacer = document.createElement("div");
+      spacer.style.height = "3000px";
+      document.body.append(spacer);
+      window.scrollTo(0, 300);
+    });
+    await mobile.waitForFunction(() => window.visualViewport?.pageTop > 100);
+    await mobile.waitForFunction(() => {
+      const visual = window.visualViewport;
+      const shell = document.querySelector(".phase2c-sidebar").getBoundingClientRect();
+      const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
+      return (
+        Math.abs(shell.top - visual.offsetTop) <= 1 &&
+        Math.abs(shell.bottom - visual.offsetTop - visual.height) <= 1 &&
+        Math.abs(composer.bottom - (visual.offsetTop + visual.height - 12)) <= 2
+      );
+    });
+    const bounds = await mobile.evaluate(() => {
+      const visual = window.visualViewport;
+      const shell = document.querySelector(".phase2c-sidebar").getBoundingClientRect();
+      const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
+      return {
+        visibleTop: visual.offsetTop,
+        visibleBottom: visual.offsetTop + visual.height,
+        shellTop: shell.top,
+        shellBottom: shell.bottom,
+        composerBottom: composer.bottom,
+      };
+    });
+    if (
+      Math.abs(bounds.shellTop - bounds.visibleTop) > 1 ||
+      Math.abs(bounds.shellBottom - bounds.visibleBottom) > 1 ||
+      Math.abs(bounds.composerBottom - (bounds.visibleBottom - 12)) > 2
+    )
+      throw new Error(
+        "Zooming or outer-page panning separated the composer from the visible viewport",
+      );
+    return "PASS zoomed desktop-width mobile viewport keeps the composer at the visible bottom";
+  } finally {
+    await context.close();
+  }
 }
 
 async function typographyChecks(page) {
@@ -2174,6 +2510,237 @@ async function typographyChecks(page) {
   return "PASS 60/40 stage split and linked reading, heading, inline-size, prose and composer scales";
 }
 
+async function composerNoticeChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  const baseUrl = page.url().split("?")[0];
+  await page.setViewportSize({ width: 920, height: 560 });
+  await page.goto(`${baseUrl}?feedback-demo=composer`);
+  await page.getByRole("button", { name: "Walk by the water", exact: true }).waitFor();
+  const input = page.locator("[data-runtime-interaction] textarea");
+  const before = await page.evaluate(() => ({
+    controls: document.querySelector("[data-foreground-controls]").getBoundingClientRect().bottom,
+    composer: document.querySelector("[data-composer-shell]").getBoundingClientRect().top,
+  }));
+  await input.fill("Not an option");
+  await input.press("Enter");
+  await page.locator("[data-runtime-interaction]").getByRole("status").waitFor();
+  check(
+    await page.evaluate((before) => {
+      const noticeElement = document.querySelector(".composer-notice");
+      const notice = noticeElement.getBoundingClientRect();
+      const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
+      return (
+        !!document.querySelector(".composer-notice-arrow") &&
+        getComputedStyle(noticeElement).backgroundColor === "rgb(255, 240, 239)" &&
+        notice.left >= 0 &&
+        notice.right <= innerWidth &&
+        Math.abs(composer.top - notice.bottom - 8) < 1 &&
+        Math.abs(composer.top - before.composer) < 1 &&
+        Math.abs(
+          document.querySelector("[data-foreground-controls]").getBoundingClientRect().bottom -
+            before.controls,
+        ) < 1
+      );
+    }, before),
+    "Standard red composer notice did not open beside the input or moved the controls",
+  );
+  await page.mouse.click(100, 120);
+  check(
+    (await page.locator(".composer-notice").count()) === 0,
+    "Outside press did not dismiss the notice",
+  );
+  await page.getByRole("button", { name: "Visual Lab", exact: true }).click();
+  check(
+    (await page
+      .locator("select[data-feedback-demo-variant], select[data-feedback-demo-tone]")
+      .count()) === 0,
+    "Visual Lab still exposes removed notice variants",
+  );
+  await page.setViewportSize({ width: 390, height: 700 });
+  await page.goto(`${baseUrl}?feedback-demo=composer`);
+  await page.getByRole("button", { name: "Walk by the water", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Switch to dark theme" }).click();
+  const narrowControls = await page.evaluate(
+    () => document.querySelector("[data-foreground-controls]").getBoundingClientRect().bottom,
+  );
+  await input.fill("Not an option");
+  await input.press("Enter");
+  await page.locator("[data-runtime-interaction]").getByRole("status").waitFor();
+  check(
+    await page.evaluate((controlsBefore) => {
+      const notice = document.querySelector(".composer-notice");
+      const bounds = notice.getBoundingClientRect();
+      return (
+        document.documentElement.dataset.phase2cTheme === "dark" &&
+        getComputedStyle(notice).backgroundColor === "rgb(58, 35, 35)" &&
+        bounds.left >= 0 &&
+        bounds.right <= innerWidth &&
+        document.documentElement.scrollWidth <= innerWidth &&
+        Math.abs(
+          document.querySelector("[data-foreground-controls]").getBoundingClientRect().bottom -
+            controlsBefore,
+        ) < 1
+      );
+    }, narrowControls),
+    "Narrow dark notice changed layout, overflowed, or kept its light colour",
+  );
+  await page.setViewportSize({ width: 920, height: 560 });
+  await page.goto(baseUrl);
+  await page.getByRole("button", { name: "Visual Lab", exact: true }).click();
+  await page.getByRole("button", { name: "Empty history", exact: true }).click();
+  await page.setViewportSize({ width: 390, height: 700 });
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  const emptyNotice = page.locator(".composer-notice");
+  await emptyNotice.waitFor();
+  check(
+    (await emptyNotice.textContent()) === "Enter a response before sending.",
+    "Empty preview submission did not use the standard notice",
+  );
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x: 100, y: 120 }],
+  });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await emptyNotice.waitFor({ state: "hidden" });
+  return "PASS single composer notice, outside dismissal, stationary choices, and narrow dark styling";
+}
+
+async function composerSendFocusChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  const context = await page
+    .context()
+    .browser()
+    .newContext({
+      viewport: { width: 390, height: 700 },
+      isMobile: true,
+      hasTouch: true,
+      deviceScaleFactor: 2,
+    });
+  const mobile = await context.newPage();
+  try {
+    await mobile.goto(`${page.url().split("?")[0]}?feedback-demo=composer`);
+    await mobile.getByRole("button", { name: "Walk by the water", exact: true }).waitFor();
+    const input = mobile.locator("[data-runtime-interaction] textarea");
+    const send = mobile
+      .locator("[data-runtime-interaction]")
+      .getByRole("button", { name: "Send", exact: true });
+    await input.fill("Not an option");
+    await mobile.evaluate(() => {
+      window.__composerFocusCalls = 0;
+      const original = HTMLTextAreaElement.prototype.focus;
+      HTMLTextAreaElement.prototype.focus = function (...args) {
+        if (this.matches("[data-composer-input]")) window.__composerFocusCalls++;
+        return original.apply(this, args);
+      };
+    });
+    // A shorter visual viewport represents an open software keyboard.
+    await mobile.setViewportSize({ width: 390, height: 420 });
+    await send.tap();
+    await mobile.locator(".composer-notice").waitFor();
+    check(
+      await mobile.evaluate(
+        () =>
+          window.__composerFocusCalls === 0 &&
+          document.activeElement === document.querySelector("[data-composer-input]"),
+      ),
+      "Send dismissed focus from an active composer input",
+    );
+    // Android Back can dismiss the keyboard without blurring the textarea.
+    await mobile.setViewportSize({ width: 390, height: 700 });
+    check(
+      await mobile.evaluate(
+        () => document.activeElement === document.querySelector("[data-composer-input]"),
+      ),
+      "The dismissed-keyboard case must retain textarea focus before Send",
+    );
+    await send.tap();
+    check(
+      await mobile.evaluate(
+        () =>
+          window.__composerFocusCalls === 0 &&
+          document.activeElement === document.querySelector("[data-composer-input]") &&
+          document.querySelector("[data-composer-input]").inputMode === "none",
+      ),
+      "Send lost hardware-keyboard focus or left the software keyboard enabled",
+    );
+    await mobile.keyboard.type(" again");
+    check(
+      (await input.inputValue()).endsWith(" again"),
+      "Hardware typing did not reach the composer",
+    );
+    await input.tap();
+    check(
+      await input.evaluate((element) => element.inputMode === "text"),
+      "Tapping the input did not allow the software keyboard again",
+    );
+    await input.fill("Walk by the water");
+    await mobile.evaluate(() => {
+      window.__composerFocusCalls = 0;
+    });
+    await send.tap();
+    await mobile.waitForFunction(() => document.querySelector("[data-composer-input]")?.disabled);
+    check(
+      await mobile.evaluate(() => window.__composerFocusCalls === 0),
+      "Completed Send submission refocused the composer input",
+    );
+    return "PASS touch Send preserves hardware focus and software keyboard state";
+  } finally {
+    await context.close();
+  }
+}
+
+async function directDemoLatestChecks(page) {
+  const context = await page
+    .context()
+    .browser()
+    .newContext({
+      viewport: { width: 390, height: 700 },
+      isMobile: true,
+      hasTouch: true,
+      deviceScaleFactor: 2,
+    });
+  const mobile = await context.newPage();
+  try {
+    await mobile.goto(`${page.url().split("?")[0]}?feedback-demo=composer`);
+    await mobile.getByRole("button", { name: "Walk by the water", exact: true }).waitFor();
+    await mobile.waitForFunction(() => {
+      const scroll = document.querySelector(".transcript-scroll");
+      const composer = document.querySelector(".conversation-glass");
+      const rows = document.querySelectorAll(".transcript-entry");
+      const choices = document.querySelector("[data-foreground-controls]");
+      return (
+        scroll &&
+        composer &&
+        rows.length &&
+        choices &&
+        scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop <= 2 &&
+        rows[rows.length - 1].getBoundingClientRect().bottom <=
+          composer.getBoundingClientRect().top + 1 &&
+        choices.getBoundingClientRect().bottom <= composer.getBoundingClientRect().top + 1 &&
+        !document.querySelector(".return-to-latest")
+      );
+    });
+    const scroll = mobile.locator(".transcript-scroll");
+    await scroll.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    await mobile.getByRole("button", { name: "Return to latest", exact: true }).waitFor();
+    await mobile.waitForTimeout(200);
+    if (await scroll.evaluate((element) => element.scrollTop !== 0))
+      throw new Error("Initial positioning pulled the reader back after scrolling up");
+    return "PASS direct mobile demo opens at latest and allows reading older messages";
+  } finally {
+    await context.close();
+  }
+}
+
 const groups = [
   topBarChecks,
   checks,
@@ -2186,9 +2753,14 @@ const groups = [
   toolContentChecks,
   runtimeTranscriptChecks,
   interactionChecks,
+  composerNoticeChecks,
+  composerSendFocusChecks,
+  directDemoLatestChecks,
   timerChecks,
   transcriptChecks,
   contentAlignmentChecks,
+  playerConditionChecks,
+  zoomedViewportChecks,
   typographyChecks,
   actionButtonGeometryChecks,
   transcriptSpacingChecks,

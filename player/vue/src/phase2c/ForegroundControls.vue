@@ -35,6 +35,6 @@ const emit = defineEmits<{ activate: [optionId: string | null] }>();
 <style scoped>
 [data-foreground-controls] {
   gap: 8px;
-  padding-block-start: var(--transcript-entry-gap, 16px);
+  padding-block-start: var(--player-entry-gap);
 }
 </style>

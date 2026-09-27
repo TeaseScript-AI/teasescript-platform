@@ -106,8 +106,7 @@ surrounding Player geometry to change.
 - **Canvas surface:** transcript and composer-area background.
 - **Chrome surface:** title bar and opaque docked side regions.
 - **Component surface:** tool columns, input/control surfaces, timer, and ordinary Standard controls.
-- **Stage surface:** visually separate content region; media may be full-bleed to device edges while Player chrome
-  respects safe areas.
+- **Stage surface:** visually separate content region; media may fill the Player's usable rectangle up to its edges.
 - **Content identity:** speaker, authored control, theme, and media-derived colours remain distinct from unrelated
   application chrome roles.
 
@@ -115,22 +114,25 @@ The title, tools, right rail, stage, transcript, foreground controls, and compos
 vertical middle-column order is stage, transcript, foreground controls when active, then composer. The stage and
 transcript remain present in the Standard Player even when empty.
 
-## Responsive modes
+## Player conditions
 
-Responsive behavior is constraint-driven. Current width/height thresholds remain implementation baselines where noted;
-they are not a substitute for checking usable stage width, readable conversation width, side-region reservation, and
-currently available visual-viewport height.
+The Player combines independent conditions rather than choosing a phone, tablet, or desktop mode. The Phase 2C preview
+exposes them on the Player shell; [`usePlayerConditions.ts`](../../player/vue/src/phase2c/usePlayerConditions.ts)
+owns their shared browser signals. Add a new responsive rule to the condition that describes its actual constraint;
+do not infer device identity or add a separate width breakpoint for touch or rounded corners.
 
-| Condition | Current POC role | Intended behavior |
+| Condition | Signal | Current behavior |
 | --- | --- | --- |
-| width `>= 761px` | wide tool-composition baseline | Open tools use a docked horizontal strip. Right-control docking is decided separately from the width breakpoint by the space left after the complete preferred tool-strip width. |
-| width `<= 760px` | narrow tool-composition baseline | Left tools become an overlay drawer. Right-side presentation overlays the stage so the conversation can use the full width beneath it. |
-| width `<= 480px` | compact review target | Re-audit selected control geometry. If compact values remain, use deliberate discrete values rather than continuous viewport-driven shrinking. Do not shrink arbitrary tool content. |
-| usable visual-viewport height `<= 768px`, or fullscreen | **overlay chrome mode** | Ordinary title chrome auto-hides/overlays so stage height is not consumed unnecessarily; required tools/fullscreen-exit/global controls remain reachable. Timer compaction is a separate height decision and currently starts at `<= 600px`. |
+| Horizontal space | Usable visual-viewport width compared with the complete minimum dock composition, including the chosen menu width | The tool owner switches between a dock and an overlay drawer. A narrow desktop window can use the drawer. |
+| Vertical space | Usable visual-viewport height; `<= 768px` is the current review baseline | The condition is exposed for future height decisions; it does not currently switch Player layout by itself. A future overlay chrome mode may use it or fullscreen state. |
+| Touch and hover | `any-pointer: coarse` and `any-hover: hover`, independently; each pointer event still identifies the pointer actually used | Touch taps, mouse hover, and keyboard focus retain their distinct menu behavior, including on hybrid devices. Primary coarse input without hover identifies the fallback corner-clearance case. |
+| Raised software keyboard | Composer input focused while the visual viewport shrinks by more than the current `120px` detection allowance on a touch-capable browser | The composer uses the normal reading width above the keyboard; Send keeps the existing focus behavior. |
+| Composer edge clearance | Browser safe-area inset; when it reports zero, a touch-first viewport spans the screen width and the composer is at the bottom near its sides | Only the composer receives up to `32px` side clearance. A narrow browser window on a touchscreen laptop keeps the normal composer width. This does not change the transcript, tool layout, or bottom spacing. |
+| Fullscreen top clearance | Browser top safe-area inset; in fullscreen, a touch-first viewport reaching the display edge also needs a minimum when the browser reports zero at a camera cutout | The Player shell begins its usable rectangle below that clearance. Media, title controls, tools, transcript, and composer all stay inside it. The canvas background continues behind the clearance. Normal presentation uses the browser-reported inset. |
 
-The old term `low-height mode` is therefore replaced by **overlay chrome mode**. Low available height and actual
-fullscreen may activate the same chrome presentation rather than maintaining two unrelated implementations. Fullscreen
-is an actual Player/browser fullscreen state; it is separate from a future package full-player takeover.
+These conditions can overlap. For example, a tablet in split screen can have constrained horizontal space, touch
+input, and a raised keyboard at the same time. Fullscreen is a Player/browser state, separate from a future package
+full-player takeover.
 
 Use available dimensions rather than device classes. Portrait/landscape or aspect ratio may be used as an optimization
 signal when both axes are constrained: a tall shape can spend relatively more vertical space to preserve horizontal
@@ -163,9 +165,9 @@ content. Major numerical values below are POC reconstruction/tuning baselines un
 | normal stage row | current `55dvh` baseline; expose as a development tuning value and visually re-evaluate |
 | overlay-chrome stage row | current `64dvh` baseline; visually re-evaluate with low-height and fullscreen cases |
 | tool column | fixed `300px` default; individual columns do not shrink to hide their content |
-| readable conversation maximum | current `900px` baseline; keep a cap for ultrawide readability and visually retest, including browser zoom |
+| readable conversation maximum | current `880px` reading width inside a `896px` outer column; keep a cap for ultrawide readability and visually retest, including browser zoom |
 | protected conversation minimum | current `380px` baseline; remeasure after tool-width/right-rail simplification |
-| normal conversation side gap | current `18px` baseline before safe-area contribution |
+| normal conversation side gap | current `8px` on each side of the reading width; the narrow composer has separate edge clearance |
 | narrow tools drawer | grows from one complete `300px` tool plus strip gutters when more columns are open, capped at `90vw`; the remaining outside area dismisses the drawer |
 
 Keeping the stage roughly square when practical is a design goal, not a hard 1:1 layout invariant. The goal exists so
@@ -173,10 +175,14 @@ both portrait and landscape media remain useful. Side panels should not casually
 but a rigid 1:1 rule must not cause surprising responsive transitions. Final dock/overlay decisions should use the full
 set of layout constraints.
 
-Current dynamic safe-area insets reported by the browser affect Player chrome and controls. Do not permanently reserve
-the static maximum inset, infer rounded hardware corners, or add a device/UA-based fallback when the browser reports
-zero; rectangular and currently unobstructed viewports must not lose space. Stage/media remains allowed to occupy its
-complete visual region rather than receiving identical safe-area padding by default. During the POC, `Visual Lab` may
+Current dynamic safe-area insets reported by the browser affect Player chrome and controls. The bottom composer has the
+limited touch-first side-clearance fallback described above because browsers can report zero beside rounded corners;
+viewport width comparisons tolerate small browser rounding and scrollbar differences. The whole Player viewport has a
+scoped touch-first top minimum in fullscreen when a browser reports zero despite drawing through a camera cutout.
+Do not infer a device model or apply that fallback to a narrow desktop window, including one with touch input. A maximized
+touch-first rectangular screen can still qualify because the web platform cannot report its corner shape. Stage/media remains allowed
+to occupy its complete visual region rather than receiving identical safe-area padding by default. During the POC,
+`Visual Lab` may
 temporarily override stage
 heights, fixed tool width, conversation bounds, and composer line/viewport caps; Reset removes those development-only
 overrides. The shared `2px` focus outline is the accepted Player baseline rather than a tuning control.
@@ -217,8 +223,8 @@ size therefore scales ordinary text, headings, and authored size spans together 
 | global icon control | `34px` square, `6px` corner radius |
 | tool column | fixed width from the maintained global-geometry baseline; column radius `8px` |
 | tool-column header | minimum `44px` high; selector/add/close controls are `30px` high; add/close are `30px` square; controls use `6px` radius |
-| wide integrated composer shell | minimum `50px` high, `8px` corner radius; input minimum `38px`; Send `38px` high with `7px` radius |
-| narrow composer controls | input and Send `42px` minimum/high respectively, each `7px` radius |
+| integrated composer shell (POC tuning candidate) | `42px` high for one line at the current reading size, `24px` corner radius, `2px` vertical padding, and `8px`/`4px` start/end padding |
+| composer input / Send (POC tuning candidate) | `36px` minimum height at the current reading size; input has `6px` vertical padding and grows upward for longer text; Send keeps its full button bounds while its fill is inset `2px` vertically |
 | right background control | current maximum `156px` wide and `6px` radius remain the POC baseline; final sizing is visually reviewable |
 
 Tool-column header and body use one continuous `surface-component` background. The header separator does not introduce
@@ -435,7 +441,7 @@ occupy at most `75%` of the conversation width and `65ch`. Consecutive messages 
 presentation kind remain the same. The first received bubble in a group shows its avatar and name. Player-authored
 messages do not. Speaker identity colour/font and per-message rich-text styling are content presentation, not
 application palette roles. Adjacent bubbles in one speaker/presentation group have a 3px gap. Separate bubble groups
-currently start 16px apart; Visual Lab offers 8px and 12px alternatives for comparison. Prose keeps its own spacing.
+start 12px apart. Prose keeps its own spacing.
 
 The runtime adapter supplies resolved message presentation according to the
 [language contract](../specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides). Where that
@@ -478,18 +484,22 @@ The Standard Player uses one persistent composer at the bottom of the conversati
 the answer field for `askText` and `askNumber`; `choose` and `showButton` controls appear after the latest message inside the
 same vertically scrolling transcript. The composer stays at the bottom. Its shell has a 12px gap above and below in the
 normal viewport; a larger bottom safe-area inset takes precedence where needed.
+Invalid submissions show a short red notice anchored to the composer input without changing its height or moving choices.
+In a tight layout the floating notice may temporarily cover a choice. It clears when typing resumes, the interaction
+changes, after a brief delay, or when the player taps outside it.
 
 ### Wide presentation
 
 At normal wide presentation the composer is one integrated component shell containing the expanding input and primary
 `Send` control. The shell owns its border, hover/pressed feedback, focus outline, disabled treatment, and moderate
 rounding; the input does not draw a second bordered box inside it. The shell spans the transcript's reading width, so
-received-message avatars and player bubbles align with its outer edges.
+received-message avatars and player bubbles align with its outer edges. The current reading gutter is `8px` on both
+sides; the narrow composer can retain larger side clearance near rounded screen corners.
 
 ### Narrow presentation
 
-At `<= 760px` under the current baseline, the composer remains in the bottom footer position but the input and `Send`
-control are separate visible component surfaces on the canvas. This is an intentional mobile presentation difference.
+The composer remains one integrated shell in narrow layouts. Its extra side clearance follows the edge condition above,
+independently of the tool drawer and the transcript reading width.
 
 ### Input growth, focus, and keyboard behavior
 
@@ -520,6 +530,10 @@ usable bottom edge includes its reported top offset rather than treating its hei
 
 The composer receives focus by default. Non-interactive Player clicks should not arbitrarily steal typing focus; an
 explicitly focused tool/input/control naturally owns keyboard input while it is active.
+Submitting with `Send` keeps editing focus and preserves the software keyboard's current state: a visible keyboard stays
+open, while a dismissed keyboard is not reopened. A hardware keyboard can continue typing after Send; tapping the input
+explicitly opens the software keyboard again. Submitting with `Enter` from the input keeps editing focus for a retry or
+the next interaction.
 
 Focus indication distinguishes navigation from text editing. Clicking or touching the composer and then typing does
 not add a focus outline. Keyboard navigation into its input marks the integrated composer shell; Tab to Send removes
@@ -558,7 +572,7 @@ Actual interactive controls always take precedence and must not also fire the vi
 A `showButton` is the one-option presentation of the same Standard foreground-control vocabulary. Controls share
 the transcript's reading width, grow with their labels, and allow long labels to wrap. The group centers its
 buttons and wraps onto additional rows rather than scrolling horizontally. The gap from the preceding message to the
-group follows the separate-bubble gap (16px by default). The Player action button is the shared style
+group follows the separate-bubble gap (12px). The Player action button is the shared style
 for script-driven foreground and right-rail actions, including `choose` and `showButton`: minimum height `44px`, `8px`
 vertical and `12px` horizontal padding, `8px` gaps in both directions, `0.875rem` label text, and unitless `1.3`
 line-height. Short buttons take their content width; long labels wrap and grow the button vertically. These dimensions
@@ -646,8 +660,9 @@ contract is synchronized. Exact busy animation remains an unresolved visual-tuni
 indeterminate-activity cue, must not require control reflow, and must remain distinguishable from keyboard focus and
 disabled/inert presentation. Programmatic updates visibly change the same control state but must remain recognizable as
 script-initiated rather than user input. They add a neutral session event to transcript history rather than a speaker
-message. Additional feedback is transient and must not add permanent text to the control or change rail geometry. The
-Visual Lab currently compares toast, local highlight, and toast-plus-highlight; this fixture intentionally does not
+message. Momentary buttons do not generate explanatory text on their own; narrative responses come from the script.
+Feedback for programmatic updates is transient and must not add permanent text to the control or change rail geometry.
+The Visual Lab currently compares toast, local highlight, and toast-plus-highlight; this fixture intentionally does not
 select the final transient paint treatment. Explicit removal is a separate lifecycle operation.
 
 Ordering is stable and deterministic at the presentation level:

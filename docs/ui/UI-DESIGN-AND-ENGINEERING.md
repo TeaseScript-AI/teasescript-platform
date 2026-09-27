@@ -209,6 +209,8 @@ measurement when modern CSS can express the same invariant more directly and rel
 
 Consume current dynamic safe-area insets as browser-reported layout inputs; do not permanently reserve their static
 maximum, infer physical corner shapes from a device or user agent, or subtract guessed space from rectangular viewports.
+The Standard Player's touch-first fullscreen top minimum is a narrow exception for browsers that draw through a
+camera cutout while reporting zero safe area; the Player shell owns the resulting usable rectangle.
 For software keyboards, use the browser-resized visual viewport in normal presentation. In fullscreen, prefer
 feature-detected keyboard geometry when the browser exposes it and otherwise use the visual viewport. Do not combine a
 reported keyboard occlusion with a second bottom-safe-area reservation. Re-evaluate after viewport transitions settle

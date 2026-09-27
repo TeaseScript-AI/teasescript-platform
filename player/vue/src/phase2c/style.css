@@ -40,12 +40,9 @@
   --player-title-font-size: 0.875rem;
   --player-control-size: calc(1rem + 2 * var(--player-control-padding));
   --player-top-control-size: max(var(--player-control-size), calc(var(--player-title-font-size) + 16px));
-  --player-header-size: calc(var(--player-top-control-size) + 2 * var(--player-edge-space));
+  --player-entry-gap: 12px;
   /* Measure from the bottom of the top controls, not the transparent header. */
   --player-following-control-gap: 16px;
-  --player-following-control-top: calc(
-    var(--player-edge-space) + var(--player-top-control-size) + var(--player-following-control-gap)
-  );
   --player-resize-rail-size: 5px;
   --player-timer-size: 132px;
   --player-timer-halo-space: 12px;
@@ -191,11 +188,35 @@
   }
 }
 
+.player-viewport-canvas {
+  position: fixed;
+  left: var(--viewport-left);
+  top: var(--viewport-top);
+  width: var(--usable-width);
+  height: var(--usable-height);
+  /* One continuous canvas includes the cutout clearance above Player content. */
+  background:
+    radial-gradient(ellipse 90% 55% at 68% 0%,
+      color-mix(in srgb, var(--player-ambient, var(--scene-ambient)) 34%, transparent), transparent 72%),
+    linear-gradient(to bottom,
+      color-mix(in srgb, var(--player-ambient, var(--scene-ambient)) 26%, transparent) 0 var(--stage-height),
+      transparent calc(var(--stage-height) + 200px)),
+    var(--background);
+}
+
 .phase2c-sidebar {
+  /* The Player's usable rectangle begins below the browser's top obstruction. */
+  --player-top-safe-space: env(safe-area-inset-top, 0px);
+  --player-content-top: calc(var(--viewport-top) + var(--player-top-safe-space));
+  --player-content-height: max(0px, calc(var(--usable-height) - var(--player-top-safe-space)));
+  --player-header-size: calc(var(--player-top-control-size) + 2 * var(--player-edge-space));
+  --player-following-control-top: calc(
+    var(--player-edge-space) + var(--player-top-control-size) + var(--player-following-control-gap)
+  );
   --player-reading-font-size: 1rem;
   --player-reading-line-gap: 8px;
-  --conversation-content-max-width: 864px;
-  --conversation-inline-inset: 1rem;
+  --conversation-content-max-width: 880px;
+  --conversation-inline-inset: 8px;
   --conversation-outer-width: calc(var(--conversation-content-max-width) + 2 * var(--conversation-inline-inset));
   --content-reserve: 0px;
   /* The reading column owns the shared center. Media may grow around it, but
@@ -209,23 +230,14 @@
   ));
   --content-width: min(var(--content-ideal-width), calc(2 * var(--content-center)));
   --content-offset: calc(var(--content-center) - var(--content-width) / 2);
-  /* One continuous canvas beneath the dock reservation and Player content.
-     Layout-only children stay transparent; tools paint their own surfaces. */
-  /* Same ambient wash as player/styles/effects.css; no legacy layout rules. */
-  background:
-    radial-gradient(ellipse 90% 55% at 68% 0%,
-      color-mix(in srgb, var(--player-ambient, var(--scene-ambient)) 34%, transparent), transparent 72%),
-    linear-gradient(to bottom,
-      color-mix(in srgb, var(--player-ambient, var(--scene-ambient)) 26%, transparent) 0 var(--stage-height),
-      transparent calc(var(--stage-height) + 200px)),
-    var(--background);
+  /* Tools paint their own surfaces; the outer viewport owns the canvas. */
   --launcher-width: var(--player-menu-compact-width);
   --launcher-space: var(--player-menu-compact-width);
   --tool-space-limit: max(0px, calc(var(--usable-width) - var(--player-reserve) - var(--launcher-space) - 1px));
   --sidebar-width: calc(var(--launcher-space) + min(var(--tool-columns-width), var(--tool-space-limit)) + 1px) !important;
 }
 
-.phase2c-sidebar[data-narrow="false"][data-sidebar-visible="true"] {
+.phase2c-sidebar[data-player-horizontal="comfortable"][data-sidebar-visible="true"] {
   --content-reserve: var(--sidebar-width);
 }
 
@@ -320,37 +332,42 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
 .phase2c-sidebar[data-resizing="true"] [data-slot="sidebar"] > .fixed { transition: none; }
 
 /* The Sheet portal stays in the shell so menu width/preview tokens have one owner. */
-.phase2c-sidebar { height: var(--usable-height); min-height: 0; }
-.phase2c-sidebar[data-narrow="true"] {
+.phase2c-sidebar { top: var(--player-content-top); height: var(--player-content-height); min-height: 0; }
+.phase2c-sidebar [data-slot="sidebar"] > .fixed {
+  top: var(--player-content-top);
+  bottom: auto;
+  height: var(--player-content-height);
+}
+.phase2c-sidebar[data-player-horizontal="constrained"] {
   --sidebar-width: min(var(--active-tool-width), calc(var(--usable-width) * 0.9)) !important;
 }
 /* Reserve the broad drawer only for a tool, not empty space beside its launcher. */
-.phase2c-sidebar[data-narrow="true"][data-menu-visible="true"] {
+.phase2c-sidebar[data-player-horizontal="constrained"][data-menu-visible="true"] {
   --sidebar-width: min(calc(var(--launcher-space) + 1px), calc(var(--usable-width) * 0.9)) !important;
 }
 .phase2c-sidebar .tools-drawer {
-  left: var(--viewport-left); top: var(--viewport-top); bottom: auto;
-  height: var(--usable-height); width: var(--sidebar-width); max-width: none;
+  left: var(--viewport-left); top: var(--player-content-top); bottom: auto;
+  height: var(--player-content-height); width: var(--sidebar-width); max-width: none;
   padding: 0; gap: 0; background: var(--sidebar); z-index: 40;
   transition: none; animation-duration: 200ms;
 }
 .tools-drawer > button { display: none; }
 .phase2c-sidebar > [data-slot="sheet-overlay"] { z-index: 39; background: var(--theme-structural-scrim, rgb(0 0 0 / 25%)); }
-.phase2c-sidebar[data-narrow="true"] [data-sidebar="trigger"] { flex-shrink: 0; }
-.phase2c-sidebar[data-narrow="true"] > [data-sidebar="trigger"] { top: calc(var(--viewport-top) + 0.5rem); left: calc(var(--viewport-left) + 0.5rem); }
-.phase2c-sidebar[data-narrow="true"] [data-launcher] { max-width: min(24rem, calc(var(--usable-width) * 0.9)); }
+.phase2c-sidebar[data-player-horizontal="constrained"] [data-sidebar="trigger"] { flex-shrink: 0; }
+.phase2c-sidebar[data-player-horizontal="constrained"] > [data-sidebar="trigger"] { top: calc(var(--player-content-top) + 0.5rem); left: calc(var(--viewport-left) + 0.5rem); }
+.phase2c-sidebar[data-player-horizontal="constrained"] [data-launcher] { max-width: min(24rem, calc(var(--usable-width) * 0.9)); }
 /* Narrow only caps presentation; the user-selected wide width remains untouched. */
-.phase2c-sidebar[data-narrow="true"][data-labels="labels"] {
+.phase2c-sidebar[data-player-horizontal="constrained"][data-labels="labels"] {
   --launcher-width: min(var(--permanent-menu-width), calc(var(--usable-width) * 0.9));
   --launcher-space: var(--launcher-width);
 }
 
 /* The active tool fills the drawer; its selected preset is capped by available space. */
-.phase2c-sidebar[data-narrow="true"] [data-launcher-space] { flex: 1; min-height: 0; }
-.phase2c-sidebar[data-narrow="true"] .tool-panel-strip { min-height: 0; overflow-x: hidden; scroll-snap-type: none; }
-.phase2c-sidebar[data-narrow="true"] .tool-panel-content > [data-tool] { width: 100% !important; max-width: 100%; min-width: 0; }
-.phase2c-sidebar[data-narrow="true"] [data-panel-drag],
-.phase2c-sidebar[data-narrow="true"] [data-panel-resize] { display: none; }
+.phase2c-sidebar[data-player-horizontal="constrained"] [data-launcher-space] { flex: 1; min-height: 0; }
+.phase2c-sidebar[data-player-horizontal="constrained"] .tool-panel-strip { min-height: 0; overflow-x: hidden; scroll-snap-type: none; }
+.phase2c-sidebar[data-player-horizontal="constrained"] .tool-panel-content > [data-tool] { width: 100% !important; max-width: 100%; min-width: 0; }
+.phase2c-sidebar[data-player-horizontal="constrained"] [data-panel-drag],
+.phase2c-sidebar[data-player-horizontal="constrained"] [data-panel-resize] { display: none; }
 
 .player-conversation {
   width: var(--conversation-width);
@@ -358,6 +375,12 @@ body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] {
 }
 
 html:fullscreen { background: var(--background); }
+
+/* Firefox Android can draw through a camera cutout while reporting zero inset.
+   The Player shell owns the fullscreen clearance for a touch-first display edge. */
+.phase2c-sidebar[data-player-fullscreen="active"][data-player-touch-edge="protected"] {
+  --player-top-safe-space: max(env(safe-area-inset-top, 0px), 32px);
+}
 
 /* Native text editing keeps its browser scrollport; match the overlay thumb. */
 .phase2c-sidebar textarea { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }

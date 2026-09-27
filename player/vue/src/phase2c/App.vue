@@ -46,10 +46,10 @@ usePlayerKeyboardFocus();
 
 const isDevelopment = import.meta.env.DEV;
 // Opt-in browser-test content; never populate the normal settings surface with fixtures.
-const toolStateFixture =
-  isDevelopment && new URLSearchParams(window.location.search).has("tool-state-fixture");
-const spacingSample =
-  isDevelopment && new URLSearchParams(window.location.search).has("spacing-sample");
+const previewParams = new URLSearchParams(window.location.search);
+const toolStateFixture = isDevelopment && previewParams.has("tool-state-fixture");
+const feedbackSample = isDevelopment && previewParams.get("feedback-demo") === "composer";
+const spacingSample = isDevelopment && (previewParams.has("spacing-sample") || feedbackSample);
 const mediaFixture = ref<keyof typeof stageFixtures>("Landscape");
 const longTitle = ref(false);
 const timerKind = ref<PlayerTimerKind>("visible");
@@ -85,7 +85,6 @@ const runtimeSession = shallowRef<PlayerRuntimeSession | null>(null);
 const runtimeRestore = shallowRef<PlayerRuntimeRestorePoint | null>(null);
 const runtimeGeneration = ref(0);
 const interactionReset = ref(0);
-const transcriptEntryGap = ref<8 | 12 | 16>(16);
 function setRuntimeSession(session: PlayerRuntimeSession) {
   runtimeGeneration.value++;
   interactionReset.value++;
@@ -184,7 +183,7 @@ async function toggleFullscreen() {
 </script>
 
 <template>
-  <PlayerToolsShell :stage-height="stageHeight" :media-aspect="mediaAspect">
+  <PlayerToolsShell :stage-height="stageHeight" :media-aspect="mediaAspect" :fullscreen="fullscreen">
     <template #tool="{ tool, player }">
       <ToolLifetimeFixture v-if="toolStateFixture && tool === 'Layout Debug'" />
       <LayoutDebug
@@ -195,10 +194,7 @@ async function toggleFullscreen() {
         <ThemeLab :intent="themeIntent" @update:intent="setThemeIntent" />
         <label class="grid gap-2">
           Stage media fixture
-          <select
-            v-model="mediaFixture"
-            class="min-w-0 rounded border bg-card p-2"
-          >
+          <select v-model="mediaFixture" class="min-w-0 rounded border bg-card p-2">
             <option v-for="(_, name) in stageFixtures" :key="name">{{ name }}</option>
           </select>
         </label>
@@ -240,18 +236,6 @@ async function toggleFullscreen() {
         </fieldset>
         <fieldset class="grid min-w-0 gap-2">
           <legend class="mb-2">Transcript fixtures</legend>
-          <label class="grid gap-2">
-            Gap between separate messages
-            <select
-              v-model.number="transcriptEntryGap"
-              data-transcript-entry-gap
-              class="min-w-0 rounded border bg-card p-2"
-            >
-              <option :value="8">8px</option>
-              <option :value="12">12px</option>
-              <option :value="16">16px</option>
-            </select>
-          </label>
           <Button
             class="min-w-0"
             variant="outline"
@@ -366,7 +350,6 @@ async function toggleFullscreen() {
           :entries="runtimeSession?.transcriptEntries ?? transcriptEntries"
           :speakers="runtimeSession?.speakers ?? transcriptFixtureSpeakers"
           :revision="runtimeSession?.transcriptRevision ?? 0"
-          :transcript-entry-gap="transcriptEntryGap"
           @preview-submit="appendPreviewResponse"
         />
       </PlayerComposition>

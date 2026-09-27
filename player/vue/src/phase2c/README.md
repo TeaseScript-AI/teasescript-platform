@@ -20,6 +20,11 @@ utility resolution; it does not change the maintained Player theme or select a p
   `components/ui/scroll-area` supports per-location visibility without reserving width. The transcript currently
   reveals its thumb during scrolling or track hover; native textareas keep browser editing/scrolling. Visibility
   remains a visual trial.
+- `usePlayerConditions.ts` owns the five independent Player conditions: horizontal and vertical space, touch/hover
+  capability, raised keyboard, and composer edge clearance. The shell exposes these as `data-player-*` attributes;
+  descendants consume the provided signals. Keep feature-specific fit calculations with their layout owner and use
+  actual pointer events for hybrid mouse/touch interactions. See [Player conditions](../../../../docs/ui/PLAYER-UI.md#player-conditions)
+  before adding a responsive rule.
 - `ResizeHandle.vue` supplies the separator, marker and tooltip for menu/panel widths. Panel handles sit outside
   scrolling content; menu handles share existing right padding. Dotted grips move entire panels.
 - `PlayerTopBar.vue` owns control placement and translucent material. Fullscreen is rightmost; the title truncates
@@ -41,15 +46,18 @@ utility resolution; it does not change the maintained Player theme or select a p
 - `usePlayerTheme.ts` applies/restores document variables; `player/theme` calculates colours and Theme Lab edits intent.
   See [theme evaluation](../../../README.md#experimental-dynamic-theme-evaluation).
 - `StageRightRail.vue` owns the rail, `TimerRegion.vue` its timer collection and `TimerDisplay.vue` individual timers.
-  `BackgroundControlsFixture.vue` demonstrates repeatable, removable, boolean and disabled buttons using the shared
-  action material. These local interactions and timer allocation remain experimental, without runtime wiring.
+  `BackgroundControlsFixture.vue` shows action, toggle, and disabled button states using the shared action material.
+  Its action buttons have no scripted handler, so clicking them adds no text or local feedback. Timer allocation and the
+  toggle remain experimental, without runtime wiring.
 
 The preview opens with choices. Visual Lab restarts that scenario, selects text/number/choice interaction, or loads a
-spacing sample with grouped guide bubbles, a player reply, another speaker, and active choices. Its 8px/12px/16px
-separate-message gap selector changes that sample and the regular preview without changing the 3px grouped-bubble gap.
+spacing sample with grouped guide bubbles, a player reply, another speaker, and active choices. Separate messages and
+choices have a 12px gap; grouped bubbles remain 3px apart.
 The `?spacing-sample` preview URL opens that sample directly with a 45/55 stage/conversation split so all messages and
 choices can be compared together. Transcript fixtures switch App back to local preview replies. Composer dimensions and
 height caps remain visual trials.
+The development-only `?feedback-demo=composer` URL opens the sample directly. Submit text that does not exactly match a
+choice to see the standard red validation notice beside the composer input.
 
 Story-button ink and transcript readability follow the current Player treatment in
 [Player UI](../../../../docs/ui/PLAYER-UI.md); Visual Lab does not offer contrast-method switches.
