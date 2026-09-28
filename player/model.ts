@@ -40,8 +40,6 @@ export interface PlayerSpeakerPresentation {
   readonly name: string;
   readonly accent: string;
   readonly avatar: string;
-  readonly avatarReference?: string;
-  readonly avatarImageUrl?: string;
   readonly fontFamily: string;
   readonly identityId?: string;
 }

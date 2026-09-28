@@ -309,7 +309,7 @@ test("runtime development scenarios compile through the real Player adapter", as
 
   for (const [fileName, actionKind, interactionKind, skippable] of scenarios) {
     const source = await readFile(
-      resolve(process.cwd(), `tests/fixtures/player-runtime/${fileName}.tease`),
+      resolve(process.cwd(), `player/vue/src/runtime-scenarios/${fileName}.tease`),
       "utf8",
     );
     const session = createPlayerRuntimeSession(source);

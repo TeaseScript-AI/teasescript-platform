@@ -51,8 +51,8 @@ import {
 
 // Own tool interaction, panel lifetime and dock/drawer composition together.
 // Callers supply tool contents and the Player composition through slots.
-const props = defineProps<{ stageHeight: number; mediaAspect: number; fullscreen: boolean; preview: boolean }>();
-const isDevelopment = props.preview;
+defineProps<{ stageHeight: number; mediaAspect: number; fullscreen: boolean }>();
+const isDevelopment = import.meta.env.DEV;
 type LabelMode = "icons" | "preview" | "labels";
 const labelMode = isDevelopment
   ? useStorage<LabelMode>("phase2c-menu-label-mode", "icons")
@@ -132,8 +132,8 @@ function clickMenuSpace(event: MouseEvent) {
   clickPreview.value = clickPreview.value !== true;
 }
 const tools = [
-  { name: "Visual Lab", icon: FlaskConical, developmentOnly: true },
-  { name: "Layout Debug", icon: ScanLine, developmentOnly: true },
+  { name: "Visual Lab", icon: FlaskConical, developmentOnly: false },
+  { name: "Layout Debug", icon: ScanLine, developmentOnly: false },
   { name: "Playback Diagnostics", icon: Activity, developmentOnly: true },
   { name: "Media Playback Configuration", icon: SlidersHorizontal, developmentOnly: true },
 ] as const;
@@ -181,7 +181,7 @@ const { viewport, horizontalConstrained: narrow } = conditions;
 watch(viewport, () => {
   remSize.value = parseFloat(getComputedStyle(document.documentElement).fontSize);
 });
-const sidebarVisible = ref(launcherTools.length > 0 && !narrow.value);
+const sidebarVisible = ref(!narrow.value);
 let transitionFocusKey: string | null = null;
 watch(
   narrow,

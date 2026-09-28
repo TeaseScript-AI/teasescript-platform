@@ -372,8 +372,7 @@ function speakerPresentation(speaker: {
     identityId: speaker.identifier,
     name: speaker.displayName,
     accent: speaker.color ?? "inherit",
-    avatar: speaker.displayName.trim().charAt(0).toUpperCase() || "?",
-    ...(speaker.avatar === null ? {} : { avatarReference: speaker.avatar }),
+    avatar: speaker.avatar ?? (speaker.displayName.trim().charAt(0).toUpperCase() || "?"),
     fontFamily: speaker.font ?? "inherit",
   });
 }

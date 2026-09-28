@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { AvatarImage } from "reka-ui";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Message, MessageAvatar, MessageContent, MessageHeader } from "@/components/ui/message";
 import type {
@@ -60,12 +59,6 @@ const avatarStyle = computed(() => ({
   <Message v-else :align="player ? 'end' : 'start'">
     <MessageAvatar v-if="!player" class="self-start" :class="continues ? 'invisible' : ''">
       <Avatar>
-        <AvatarImage
-          v-if="entry.kind === 'message' && speakers[entry.speakerId]?.avatarImageUrl"
-          :src="speakers[entry.speakerId]?.avatarImageUrl ?? ''"
-          :alt="`${nameOf(speakers, entry)} avatar`"
-          class="size-full object-cover"
-        />
         <AvatarFallback data-speaker-avatar class="text-xs font-semibold" :style="avatarStyle">
           {{ entry.kind === "message" ? speakers[entry.speakerId]?.avatar : "" }}
         </AvatarFallback>

@@ -31,7 +31,6 @@
     "test:full-output": "npm run build && node ./tools/test-output-filter.mjs --full-output",
     "check:full-output": "npm run format:check && npm run lint && npm run lint:design:phase2c && npm run test:lint:design && npm run test:lint -- --full-output && npm run knip && npm run test:build:typescript && npm run test:verification && BUILD_SOURCEMAPS=0 npm run test:full-output",
     "test:player:phase2c-browser": "node tools/phase2c-browser-checks.mjs",
-    "test:player:production-browser": "node tools/player-production-browser-checks.mjs",
     "dev:player:phase2c": "vite --config player/vue/vite.phase2c.config.ts",
     "build:player:phase2c": "vite build --config player/vue/vite.phase2c.config.ts",
     "test:verification": "node --test tools/run-parallel.test.mjs",

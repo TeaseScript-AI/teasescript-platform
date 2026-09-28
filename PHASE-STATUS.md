@@ -30,8 +30,8 @@ accept syntax, architecture, or implementation details.
   and TanStack Vue Virtual as the single bounded, variable-height, stable-anchor transcript owner) connected through a
   framework-independent adapter to the implemented deterministic interaction, transcript, pacing, time-observation,
   checkpoint, and restore slice, including typed message-markup rendering with controlled links and spoilers; the Vue
-  Player at `/player/` starts a repository demo script and uses the Greenfield composition, while Visual Lab and Layout
-  Debug are confined to the separate `/phase2c/` preview; source-to-runtime
+  Player now hosts development-only Visual Lab, Layout Debug, and Runtime
+  Session tools; source-to-runtime
   conformance coverage; focused runtime/checkpoint/state-validation tests;
   reproducible desktop and narrow-screen browser smoke coverage; and a bounded deterministic property campaign.
 

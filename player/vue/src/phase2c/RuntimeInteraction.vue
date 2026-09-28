@@ -6,7 +6,6 @@ import {
   activePlayerRuntimeInteraction,
   activatePlayerRuntimeButton,
   playerRuntimeForeground,
-  playerRuntimePacingGate,
   selectPlayerRuntimeChoice,
   submitPlayerRuntimeComposer,
   type PlayerRuntimeControlResult,
@@ -34,7 +33,6 @@ const emit = defineEmits<{
   "preview-submit": [text: string];
 }>();
 const foreground = computed(() => (props.session ? playerRuntimeForeground(props.session) : null));
-const pacingGate = computed(() => (props.session ? playerRuntimePacingGate(props.session) : null));
 const actionId = computed(() =>
   props.session ? activePlayerRuntimeInteraction(props.session.snapshot)?.actionId : undefined,
 );
@@ -194,8 +192,7 @@ function submit(source: "input" | "button") {
         <Composer
           ref="composer"
           v-model="draft"
-          :disabled="!foreground && !pacingGate && !(preview && !session)"
-          :readonly="!foreground && !!pacingGate"
+          :disabled="!foreground && !(preview && !session)"
           :submitting="submitting"
           :placeholder="
             foreground && 'hint' in foreground ? foreground.hint : 'Type your response…'

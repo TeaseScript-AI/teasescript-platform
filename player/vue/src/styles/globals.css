@@ -1,0 +1,56 @@
+/*
+ * Tailwind is a low-precedence foundation for Vue-owned additions. The
+ * existing Player stylesheet layers remain the visual and layout authority.
+ */
+@layer tailwind;
+@import "tailwindcss" layer(tailwind);
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) * 0.75);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) * 1.25);
+}
+
+@layer tailwind {
+  :root {
+    --background: var(--color-surface-canvas);
+    --foreground: var(--color-text-primary);
+    --card: var(--color-surface-component);
+    --card-foreground: var(--color-text-primary);
+    --popover: var(--color-surface-component);
+    --popover-foreground: var(--color-text-primary);
+    --primary: var(--color-accent-solid);
+    --primary-foreground: var(--color-text-inverse);
+    --secondary: var(--color-surface-component);
+    --secondary-foreground: var(--color-text-primary);
+    --muted: var(--color-surface-chrome);
+    --muted-foreground: var(--color-text-muted);
+    --accent: var(--color-component-hover);
+    --accent-foreground: var(--color-text-primary);
+    --destructive: var(--color-accent-solid);
+    --destructive-foreground: var(--color-text-inverse);
+    --border: var(--color-border-default);
+    --input: var(--color-border-default);
+    --ring: var(--color-accent-focus);
+    --radius: 7px;
+  }
+}

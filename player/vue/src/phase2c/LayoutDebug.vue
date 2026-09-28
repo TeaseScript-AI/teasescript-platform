@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, shallowRef, watch } from "vue";
-import { captureRect, formatPixels, formatRect, parseGridTracks, type LayoutRect } from "./layoutGeometry";
+import { captureRect, formatPixels, formatRect, parseGridTracks, type LayoutRect } from "../devtools/layoutDebugMeasurement";
 
 const props = defineProps<{ player: HTMLElement }>();
 const enabled = ref(false);
