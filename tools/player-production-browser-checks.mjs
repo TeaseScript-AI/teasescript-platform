@@ -47,22 +47,8 @@ async function checkPlayer(page, url) {
   await page.getByRole("heading", { name: "Evening by the coast" }).waitFor();
   if ((await page.locator(".phase2c-sidebar").getAttribute("data-player-touch")) !== "available")
     throw new Error("Mobile touch capability is missing.");
-  await page.getByRole("button", { name: "Show sidebar" }).click();
-  await page.getByRole("navigation", { name: "Tools" }).waitFor();
-  await page.getByRole("button", { name: "Settings" }).click();
-  await page.getByRole("dialog", { name: "Player Settings" }).waitFor();
-  await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Hide sidebar" }).click();
-  await page.getByRole("button", { name: "Show sidebar" }).waitFor();
-  for (const name of [
-    "Visual Lab",
-    "Layout Debug",
-    "Playback Diagnostics",
-    "Media Playback Configuration",
-  ]) {
-    if (await page.getByRole("button", { name }).count())
-      throw new Error(`Production Player exposes ${name}.`);
-  }
+  if (await page.getByRole("button", { name: "Settings" }).count())
+    throw new Error("Production Player exposes development tools.");
   if (await page.locator(".stage-right-rail").count())
     throw new Error("Production Player exposes fixture timers or controls.");
   const avatarLoaded = await page
@@ -88,13 +74,7 @@ async function checkPlayer(page, url) {
     throw new Error("Fullscreen touch Player ignores camera-cutout clearance.");
   await page.getByRole("button", { name: "Exit fullscreen" }).click();
   await page.waitForFunction(() => document.fullscreenElement === null);
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await page.reload();
-  await page.getByRole("button", { name: "Hide sidebar" }).waitFor();
-  await page.getByRole("button", { name: "Settings" }).waitFor();
-  await page.getByRole("button", { name: "Hide sidebar" }).click();
-  await page.getByRole("button", { name: "Show sidebar" }).waitFor();
-  return "PASS production menu, demo, avatar, choices, input, completion, and fullscreen";
+  return "PASS production demo, avatar, choices, input, completion, and fullscreen";
 }
 
 let passed = false;
