@@ -11,7 +11,8 @@ import Stage from "./Stage.vue";
 import PlayerComposition from "./PlayerComposition.vue";
 import PlayerTopBar from "./PlayerTopBar.vue";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
-import PlayerShell from "./PlayerShell.vue";
+import PlayerToolsShell from "./PlayerToolsShell.vue";
+import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
 import { usePlayerTheme } from "./usePlayerTheme";
 import { usePlayerKeyboardFocus } from "./usePlayerKeyboardFocus";
 import { useRuntimeClock } from "./useRuntimeClock";
@@ -80,30 +81,36 @@ async function toggleFullscreen() {
 </script>
 
 <template>
-  <PlayerShell :stage-height="stageHeight" :media-aspect="mediaAspect" :fullscreen="fullscreen">
-    <PlayerComposition @click="skipFromBackground" @keydown="skipFromComposer">
-      <template #topbar>
-        <PlayerTopBar
-          title="Evening by the coast"
-          :fullscreen="fullscreen"
-          :fullscreen-supported="fullscreenSupported"
-          :fullscreen-error="fullscreenError"
-          :theme-mode="themeIntent.mode"
-          @toggle-fullscreen="toggleFullscreen"
-          @toggle-theme-mode="toggleThemeMode"
+  <PlayerToolsShell :stage-height="stageHeight" :media-aspect="mediaAspect" :fullscreen="fullscreen" :preview="false">
+    <template #default="{ sidebarVisible }">
+      <PlayerComposition @click="skipFromBackground" @keydown="skipFromComposer">
+        <template #topbar>
+          <PlayerTopBar
+            title="Evening by the coast"
+            :fullscreen="fullscreen"
+            :fullscreen-supported="fullscreenSupported"
+            :fullscreen-error="fullscreenError"
+            :theme-mode="themeIntent.mode"
+            @toggle-fullscreen="toggleFullscreen"
+            @toggle-theme-mode="toggleThemeMode"
+          >
+            <template v-if="!sidebarVisible" #tools>
+              <SidebarTrigger class="size-8" aria-label="Show sidebar" title="Show sidebar" />
+            </template>
+          </PlayerTopBar>
+        </template>
+        <template #stage>
+          <Stage ref="stage" :media="{ src: demoStageUrl, alt: 'Coast at dusk' }" @media-aspect="mediaAspect = $event" />
+        </template>
+        <RuntimeInteraction
+          v-model:session="runtimeSession"
+          :reset="0"
+          transcript-key="demo"
+          :entries="runtimeSession.transcriptEntries"
+          :speakers="speakers"
+          :revision="runtimeSession.transcriptRevision"
         />
-      </template>
-      <template #stage>
-        <Stage ref="stage" :media="{ src: demoStageUrl, alt: 'Coast at dusk' }" @media-aspect="mediaAspect = $event" />
-      </template>
-      <RuntimeInteraction
-        v-model:session="runtimeSession"
-        :reset="0"
-        transcript-key="demo"
-        :entries="runtimeSession.transcriptEntries"
-        :speakers="speakers"
-        :revision="runtimeSession.transcriptRevision"
-      />
-    </PlayerComposition>
-  </PlayerShell>
+      </PlayerComposition>
+    </template>
+  </PlayerToolsShell>
 </template>

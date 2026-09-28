@@ -40,6 +40,7 @@ import StageRightRail from "./StageRightRail.vue";
 import BackgroundControlsFixture from "./BackgroundControlsFixture.vue";
 import { Button } from "@/components/ui/button";
 import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
+import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue";
 import type { PlayerThemeIntent } from "../../../theme/palette.js";
 import PlayerToolsShell from "./PlayerToolsShell.vue";
 import { usePlayerTheme } from "./usePlayerTheme";
@@ -51,6 +52,12 @@ usePlayerKeyboardFocus();
 
 const isDevelopment = import.meta.env.DEV;
 const isPreview = isDevelopment && window.location.pathname.startsWith("/phase2c/");
+const previewTools = [
+  { name: "Visual Lab", icon: FlaskConical },
+  { name: "Layout Debug", icon: ScanLine },
+  { name: "Playback Diagnostics", icon: Activity },
+  { name: "Media Playback Configuration", icon: SlidersHorizontal },
+];
 // Opt-in browser-test content; never populate the normal settings surface with fixtures.
 const previewParams = new URLSearchParams(window.location.search);
 const toolStateFixture = isPreview && previewParams.has("tool-state-fixture");
@@ -209,7 +216,7 @@ async function toggleFullscreen() {
 </script>
 
 <template>
-  <PlayerToolsShell :stage-height="stageHeight" :media-aspect="mediaAspect" :fullscreen="fullscreen" :preview="isPreview">
+  <PlayerToolsShell :stage-height="stageHeight" :media-aspect="mediaAspect" :fullscreen="fullscreen" :preview="isPreview" :tools="previewTools">
     <template #tool="{ tool, player }">
       <ToolLifetimeFixture v-if="toolStateFixture && tool === 'Layout Debug'" />
       <LayoutDebug

@@ -36,22 +36,26 @@ import {
   ref,
   shallowReactive,
   watch,
+  type Component,
   type ComponentPublicInstance,
 } from "vue";
 import { onClickOutside, useResizeObserver, useStorage } from "@vueuse/core";
 import {
-  FlaskConical,
   Settings,
-  ScanLine,
-  Activity,
-  SlidersHorizontal,
   PanelLeftOpen,
   PanelRightOpen,
 } from "@lucide/vue";
 
 // Own tool interaction, panel lifetime and dock/drawer composition together.
 // Callers supply tool contents and the Player composition through slots.
-const props = defineProps<{ stageHeight: number; mediaAspect: number; fullscreen: boolean; preview: boolean }>();
+type Tool = string;
+const props = defineProps<{
+  stageHeight: number;
+  mediaAspect: number;
+  fullscreen: boolean;
+  preview: boolean;
+  tools?: { name: Tool; icon: Component }[];
+}>();
 const isDevelopment = props.preview;
 type LabelMode = "icons" | "preview" | "labels";
 const labelMode = isDevelopment
@@ -131,20 +135,13 @@ function clickMenuSpace(event: MouseEvent) {
     return;
   clickPreview.value = clickPreview.value !== true;
 }
-const tools = [
-  { name: "Visual Lab", icon: FlaskConical, developmentOnly: true },
-  { name: "Layout Debug", icon: ScanLine, developmentOnly: true },
-  { name: "Playback Diagnostics", icon: Activity, developmentOnly: true },
-  { name: "Media Playback Configuration", icon: SlidersHorizontal, developmentOnly: true },
-] as const;
-type Tool = (typeof tools)[number]["name"];
-const launcherTools = tools.filter((tool) => isDevelopment || !tool.developmentOnly);
-const toolSizes = ref<Record<Tool, keyof typeof toolPanelSizes>>({
-  "Visual Lab": "Medium",
-  "Layout Debug": "Medium",
-  "Playback Diagnostics": "Medium",
-  "Media Playback Configuration": "Medium",
-});
+const launcherTools = props.tools ?? [];
+const toolSizes = ref<Record<Tool, keyof typeof toolPanelSizes>>(
+  Object.fromEntries(launcherTools.map((tool) => [tool.name, "Medium"])),
+);
+function sizeFor(tool: Tool): keyof typeof toolPanelSizes {
+  return toolSizes.value[tool] ?? "Medium";
+}
 // Preview measures content; the permanent label width is a session-only rem choice.
 const menuRuler = ref<HTMLElement | null>(null);
 const measuredMenuWidth = ref(0);
@@ -181,7 +178,7 @@ const { viewport, horizontalConstrained: narrow } = conditions;
 watch(viewport, () => {
   remSize.value = parseFloat(getComputedStyle(document.documentElement).fontSize);
 });
-const sidebarVisible = ref(launcherTools.length > 0 && !narrow.value);
+const sidebarVisible = ref(!narrow.value);
 let transitionFocusKey: string | null = null;
 watch(
   narrow,
@@ -329,7 +326,7 @@ function resizePanelKey(event: KeyboardEvent, tool: Tool) {
       ? 0
       : event.key === "End"
         ? panelSizeNames.length - 1
-        : panelSizeNames.indexOf(toolSizes.value[tool]) + (event.key === "ArrowRight" ? 1 : -1);
+        : panelSizeNames.indexOf(sizeFor(tool)) + (event.key === "ArrowRight" ? 1 : -1);
   const size = panelSizeNames[index];
   if (size) toolSizes.value[tool] = size;
 }
@@ -407,7 +404,7 @@ async function revealTool(tool: Tool) {
 }
 
 const toolColumnsWidth = computed(() =>
-  openTools.value.reduce((width, tool) => width + toolPanelSizes[toolSizes.value[tool]], 0),
+  openTools.value.reduce((width, tool) => width + toolPanelSizes[sizeFor(tool)], 0),
 );
 
 function cancelPendingClose() {
@@ -581,7 +578,7 @@ async function updateSidebarVisibility(open: boolean) {
     :data-menu-visible="narrowMenuVisible"
     :style="{
       '--media-aspect': mediaAspect,
-      '--active-tool-width': `${toolPanelSizes[narrowTool ? toolSizes[narrowTool] : 'Medium']}rem`,
+      '--active-tool-width': `${toolPanelSizes[narrowTool ? sizeFor(narrowTool) : 'Medium']}rem`,
       '--player-reserve': `${protectedPlayerWidth}px`,
       '--tool-columns-width': `${toolColumnsWidth}rem`,
       '--permanent-menu-width': `${menuWidthRem}rem`,
@@ -788,13 +785,13 @@ async function updateSidebarVisibility(open: boolean) {
               v-show="!narrow || tool === narrowTool"
               :data-tool="tool"
               :aria-label="`${tool} panel`"
-              :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }"
+              :style="{ width: `${toolPanelSizes[sizeFor(tool)]}rem` }"
               class="relative flex min-h-0 shrink-0 bg-card"
             >
               <div class="flex min-h-0 min-w-0 flex-1 flex-col">
                 <ToolPanelHeader
                   :tool="tool"
-                  :size="toolSizes[tool]"
+                  :size="sizeFor(tool)"
                   :pinned="pinnedTools.includes(tool)"
                   :can-move-left="openTools.indexOf(tool) > 0"
                   :can-move-right="openTools.indexOf(tool) < openTools.length - 1"
@@ -813,8 +810,8 @@ async function updateSidebarVisibility(open: boolean) {
                 :data-active="resizing === tool ? '' : undefined"
                 :aria-valuemin="toolPanelSizes.Small"
                 :aria-valuemax="toolPanelSizes['Extra Large']"
-                :aria-valuenow="toolPanelSizes[toolSizes[tool]]"
-                :aria-valuetext="toolSizes[tool]"
+                :aria-valuenow="toolPanelSizes[sizeFor(tool)]"
+                :aria-valuetext="sizeFor(tool)"
                 @pointerdown="startResize($event, tool)"
                 @keydown="resizePanelKey($event, tool)"
               >
