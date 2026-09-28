@@ -31,7 +31,7 @@ This table is generated from the current section order.
 - [24. Comments](#24-comments)
 - [25. Persistent storage and keys](#25-persistent-storage-and-keys)
 - [26. Labels and goto](#26-labels-and-goto)
-- [27. Blocking and background timers](#27-blocking-and-background-timers)
+- [27. Blocking timers](#27-blocking-timers)
 - [28. Permanent buttons](#28-permanent-buttons)
 - [29. Script files and paths](#29-script-files-and-paths)
 - [30. Script endings](#30-script-endings)
@@ -1976,10 +1976,8 @@ Rules:
 - Unknown labels are compile errors.
 - A `goto` triggered by an event aborts the current execution path and does not return.
 
-## 27. Blocking and background timers
+## 27. Blocking timers
 **Status:** Accepted
-
-### Blocking timers
 
 Hidden blocking wait:
 
@@ -1993,85 +1991,15 @@ Visible blocking timer:
 timer 10
 ```
 
-Visible blocking timer with a hidden duration:
-
-```text
-mysteryTimer 10
-```
-
-Ranges may be used for randomized durations:
+A visible blocking timer may use a range for a randomized duration:
 
 ```text
 timer 5..10
-mysteryTimer 5..10
 ```
 
-Range bounds follow the general range rules in this document.
-
-### Background timers
-
-A background timer continues while the main script proceeds. Its block is inherently the finish action, so no `onFinish` wrapper is used:
-
-```text
-let timerId = startTimer 30 {
-    timeExpired()
-}
-```
-
-A timer may jump to a label:
-
-```text
-let timerId = startTimer 30 {
-    goto tooLate
-}
-```
-
-Stop a timer:
-
-```text
-stopTimer(timerId)
-```
-
-### Repeating timers
-
-```text
-let timerId = startTimer 10 {
-    repeat: true
-    playBackgroundSound("sounds/bell.mp3")
-}
-```
-
-A repeating random-range timer chooses a new random duration before each repetition:
-
-```text
-let timerId = startTimer 5..10 {
-    repeat: true
-    playBackgroundSound("sounds/laughter.mp3")
-}
-```
-
-### Persistent timers
-
-```text
-let timerId = startTimer 30 {
-    persist: true
-    playBackgroundSound("sounds/laughter.mp3")
-}
-```
-
-Finish-action behavior:
-
-- The timer block runs without pausing currently playing audio or video.
-- After a normal finish action completes, the interrupted script continues where it left off.
-- The block may call normal functions and start new timers.
-- Timer finish actions are processed one at a time.
-- A `goto` in the timer block abandons the interrupted execution path.
-
-Cleanup:
-
-- A non-persistent timer is removed on `goto`, `end`, `run`, `call`, or `exit`.
-- A persistent timer survives `goto`, `end`, `run`, and `call`.
-- Every timer stops on `exit`.
+Range bounds follow the general range rules in this document. Mystery presentation, asynchronous timers, handles,
+repetition, persistence, and timer lifecycle control need a later accepted syntax and runtime contract. The previously
+listed `mysteryTimer`, `startTimer`, and `stopTimer` spellings were not Owner-approved and are not accepted syntax.
 
 ## 28. Permanent buttons
 **Status:** Accepted
@@ -2454,6 +2382,9 @@ months
 ```
 
 Consequently, `24 hours` is always exactly 24 elapsed hours, while `1 day` means the same local clock time on the next calendar day and may span 23, 24, or 25 elapsed hours around daylight-saving transitions.
+
+When adding a calendar month to a date whose day does not exist in the target month, use that month's last day. For
+example, January 31 plus one month is February 28, or February 29 in a leap year.
 
 ### Arithmetic and comparison
 
@@ -3326,9 +3257,6 @@ askTime
 askDateTime
 wait
 timer
-mysteryTimer
-startTimer
-stopTimer
 showPermanentButton
 removePermanentButton
 playSound
@@ -3449,7 +3377,7 @@ resume
 stop
 ```
 
-They are not currently executable syntax. Existing specific controls such as `stopVideo()`, `stopTimer(...)`, and `stopBackgroundSound(...)` remain valid.
+They are not currently executable syntax. Existing specific controls such as `stopVideo()` and `stopBackgroundSound(...)` remain valid.
 
 ### Reserved for later design
 

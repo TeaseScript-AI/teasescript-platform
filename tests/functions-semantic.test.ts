@@ -146,6 +146,14 @@ test("rejects all accepted V30 protected names in declarations", () => {
   assert.ok(protectedType.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV001"));
 });
 
+test("allows the unapproved timer names as ordinary identifiers", () => {
+  for (const name of ["mysteryTimer", "startTimer", "stopTimer"]) {
+    const result = compileSource(`let ${name} = 1`);
+    assert.deepEqual(result.diagnostics, []);
+    assert.notEqual(result.plan, null);
+  }
+});
+
 test("does not treat deferred protected engine names as implemented built-ins", () => {
   const result = compileSource("wait()\ngetDate()\nshowImage()");
 

@@ -132,7 +132,7 @@ ADR 0016 already provides the shared deterministic timing foundation. The core s
 
 Visible countdowns, mystery presentation, labels, default controls, repeating policies, friendly timer handles, and convenience names belong above those primitives when possible.
 
-This ADR does not choose whether the final author API uses `timer`, `startTimer`, another name, methods on a returned handle, or official syntax sugar. It also does not define whether a stopped timer can be restarted; pause/resume and restart-after-stop are separate lifecycle decisions.
+This ADR does not choose final author-facing timer names, methods on a returned handle, or official syntax sugar. It also does not define whether a stopped timer can be restarted; pause/resume and restart-after-stop are separate lifecycle decisions.
 
 ## Standard Library responsibilities
 
