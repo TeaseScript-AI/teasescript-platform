@@ -1,52 +1,53 @@
-// Opposite hues come first; later assignments fill the gaps. Each pair keeps its hue across themes.
+// Early assignments span the palette; neighboring hues use different lightness levels.
+// Each pair keeps its hue across themes.
 export const speakerAvatarPalette = [
   {
-    light: { background: "#bcf1c6", color: "#004209" },
-    dark: { background: "#004e0f", color: "#8fe1a1" },
+    light: { background: "#99cc7c", color: "#0c2100" },
+    dark: { background: "#2b6200", color: "#d2efc4" },
   },
   {
-    light: { background: "#ffcffb", color: "#560553" },
-    dark: { background: "#62155f", color: "#f7aef0" },
+    light: { background: "#d2a5f4", color: "#241031" },
+    dark: { background: "#6a368b", color: "#f2d9ff" },
   },
   {
-    light: { background: "#ffd5ac", color: "#542300" },
-    dark: { background: "#632b00", color: "#ffb777" },
+    light: { background: "#ffc9ac", color: "#320e00" },
+    dark: { background: "#5f1400", color: "#ffd8c1" },
   },
   {
-    light: { background: "#b6e9ff", color: "#003760" },
-    dark: { background: "#004270", color: "#82d4ff" },
+    light: { background: "#8de9ff", color: "#002030" },
+    dark: { background: "#003a52", color: "#b6efff" },
   },
   {
-    light: { background: "#ffcddf", color: "#640030" },
-    dark: { background: "#71073a", color: "#ffa9c7" },
+    light: { background: "#fe9aa2", color: "#330a11" },
+    dark: { background: "#8f2639", color: "#ffd4d7" },
   },
   {
-    light: { background: "#f6e0a4", color: "#433000" },
-    dark: { background: "#503900", color: "#e9c769" },
+    light: { background: "#e6df7e", color: "#201b00" },
+    dark: { background: "#3a3400", color: "#eae8b6" },
   },
   {
-    light: { background: "#a5f3e3", color: "#003f34" },
-    dark: { background: "#004b3f", color: "#61e4cd" },
+    light: { background: "#40d2d2", color: "#002223" },
+    dark: { background: "#006263", color: "#b2f3f2" },
   },
   {
-    light: { background: "#d0e0ff", color: "#1a2678" },
-    dark: { background: "#233285", color: "#b1c8ff" },
+    light: { background: "#ccd8ff", color: "#131638" },
+    dark: { background: "#232378", color: "#d8e2ff" },
   },
   {
-    light: { background: "#ffd1c6", color: "#690000" },
-    dark: { background: "#760a03", color: "#ffaf9f" },
+    light: { background: "#e7af5c", color: "#2b1400" },
+    dark: { background: "#764700", color: "#ffdfb5" },
   },
   {
-    light: { background: "#daeaae", color: "#2d3900" },
-    dark: { background: "#374400", color: "#c0d67a" },
+    light: { background: "#ffc1e4", color: "#2f0b1f" },
+    dark: { background: "#61003d", color: "#ffd4eb" },
   },
   {
-    light: { background: "#a1f0ff", color: "#003c48" },
-    dark: { background: "#004855", color: "#58e0f6" },
+    light: { background: "#87f4c7", color: "#002313" },
+    dark: { background: "#004027", color: "#bdf3da" },
   },
   {
-    light: { background: "#e9d7ff", color: "#40166d" },
-    dark: { background: "#4a237a", color: "#d6b9ff" },
+    light: { background: "#7dc0ff", color: "#001b37" },
+    dark: { background: "#00539b", color: "#c6e9ff" },
   },
 ] as const;
 
