@@ -369,9 +369,10 @@ author-facing syntax. Exact schemas and APIs remain future work.
 
 Session time remains continuous across browser unavailability, reload, reconnect, device sleep, and visibility changes.
 After restore, explicit time observation may settle due work, but recovery must not skip the first script event that
-should have executed during the absence or replay events already materialized in the selected valid checkpoint. Exact
-checkpoint selection, deadline recalculation, reconnect, repeating-timer, and server-authoritative time mechanics remain
-open.
+should have executed during the absence or replay events already materialized in the selected valid checkpoint. If a
+timer's deadline passed while the Player was unavailable, the pending timer starts again from its full duration when
+play resumes at that timer. This does not rewind earlier script events. Exact checkpoint selection, interactions with
+repeating and background timers, reconnect, and server-authoritative time mechanics remain open.
 
 ### Long-lived Standard controls
 

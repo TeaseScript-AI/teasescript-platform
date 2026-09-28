@@ -13,13 +13,14 @@ owner-selected work that is not yet accepted as a detailed contract.
 ## Timer authoring direction
 
 V30 section 27 accepts `wait` and a visible blocking `timer`. Earlier unapproved `mysteryTimer`, `startTimer`, and
-`stopTimer` spellings have been removed from that specification. The Owner is reviewing a unified `timer` form with an
-explicit handle. The examples below are a **candidate design, not accepted or executable syntax**. They preserve the
-direction and open questions from the timer discussion without scheduling compiler work on the Player PR.
+`stopTimer` spellings have been removed from that specification. The Owner selected a unified `timer` direction with an
+explicit handle for async timers. The examples below record that direction; they are **not executable or accepted source
+syntax** until the parser/compiler/runtime and canonical specification change together. This planning does not schedule
+compiler work on the Player PR.
 
 The future timer design should build on one foreground delay primitive and one background timed-work primitive.
 `wait` remains the simple hidden blocking pause for pacing. A bare `timer` is intended to default to visible and
-blocking.
+blocking. A blocking timer does not return a handle because the script continues only after it has finished.
 The timer presentation choices are `visible`, `mystery`, and `hidden`; `async` allows the script to continue while the
 timer runs. These sketches cover the resulting six combinations:
 
@@ -56,7 +57,7 @@ pause/resume behavior remain open. An omitted display and execution mode should 
 
 An asynchronous timer returns a script-visible, typed, opaque handle, separate from the engine's persisted internal
 action ID. The handle references validated timer state across checkpoints, rather than retaining a JavaScript object or
-callback. Handle methods are the preferred author-facing direction for lifecycle control:
+callback. The Owner selected methods on that handle for lifecycle control:
 
 ```tease
 deadline.pause()
@@ -65,12 +66,17 @@ deadline.stop()
 deadline.display = "mystery"
 ```
 
-`stop` is cancellation; restart after stop and reads from a stopped handle remain open. Display changes may select
-`visible`, `mystery`, or `hidden`. The handle should expose `duration` values for `elapsed` and `remaining`:
+`stop` is cancellation; a timer that no longer exists cannot be resumed. Whether an invalid runtime operation is an
+error or a warning remains deferred. Display changes may select `visible`, `mystery`, or `hidden`. The Owner selected
+`elapsed` and `remaining` as author-facing `duration` properties:
 
 ```tease
 if deadline.remaining > 10 seconds {
     say "There is still time."
+}
+
+if deadline.elapsed >= 2 min {
+    say "Two minutes have passed."
 }
 ```
 
@@ -78,9 +84,12 @@ if deadline.remaining > 10 seconds {
 `pause()` stops that count. `remaining` concerns only the current round. Browser suspension while an unpaused timer runs
 is different from script-requested pause and follows the accepted session-time observation contract. An exact timer
 duration can be represented internally in milliseconds; author-facing unit conversion should be typed, not manual.
+Duration comparisons must compare values across exact units, so `90 seconds > 1 minute` is true. The comparison
+operators already exist, but runtime support for duration values remains to be implemented.
 
 Changing a current round and changing future repeat rounds are distinct operations. The following property names and
-assignment forms are **proposals**, not final syntax:
+assignment forms are Owner-selected direction; they become accepted source syntax when implemented with the canonical
+specification:
 
 ```tease
 deadline.remaining += 10 seconds       // current round only
@@ -89,13 +98,20 @@ deadline.remaining = 20 seconds        // set current round
 deadline.repeatDuration = 50 seconds   // later repeat rounds only
 ```
 
-`+=` and `-=` would be general TeaseScript assignment operators, not timer-only methods. An adjustment reaching zero
-would finish the current round without creating negative remaining time. A repeat resets `remaining` for its next round
-but does not reset `elapsed`. The final runtime contract will define the exact lifecycle and checkpoint behavior.
+`+=` and `-=` are intended as general TeaseScript assignment operators, not timer-only methods. An adjustment reaching
+zero finishes the current round without creating negative remaining time. A repeat resets `remaining` for its next round
+but does not reset `elapsed`. The exact behavior of operations on a settled handle and adjustment while paused or at the
+expiry boundary remains unsettled.
 
 The eventual accepted change must update the canonical syntax and the parser/compiler/runtime together, with
 source-to-runtime coverage. The Player PR may implement presentation and integration that current runtime events
 support, but a visual timer fixture is not evidence that authored timer scripts work.
+
+The remaining substantive scheduling question is what an expiry handler may do while an `ask` is pending. A deadline
+must be able to make an unanswered prompt expire without leaving two active story paths. Current `ask` functions do not
+return `null`; an interrupted assignment has not produced a value. Whether to give `ask` its own deadline option and how
+to reject use of a value that was never assigned remain to be designed. Timer handlers run one at a time under V30;
+this does not by itself settle their order relative to a pending prompt or another handler that is waiting.
 
 ## Time continuity and missed-event barrier
 
@@ -107,9 +123,9 @@ Browser unavailability creates a separate execution problem: TeaseScript cannot 
 the Player is closed or suspended. Logical script time therefore may not advance past the first event that should have
 executed while the Player was unavailable. A restore/resume design needs a **missed-event barrier** (or execution
 frontier) that resumes through that first missed event instead of jumping wall-clock time over dialogue, branches, or
-other script work that never executed. Events already materialized in a later valid checkpoint are not replayed. Exact
-checkpoint selection, deadline recalculation, repeating-timer behavior, and server-authoritative time policy require a
-later accepted runtime decision.
+other script work that never executed. Events already materialized in a later valid checkpoint are not replayed. The
+Owner-selected timer restart rule is recorded in `docs/RUNTIME.md`; checkpoint selection, interactions with repeating
+and background timers, and server-authoritative time mechanics still need implementation detail.
 
 ## Author-defined recovery points
 

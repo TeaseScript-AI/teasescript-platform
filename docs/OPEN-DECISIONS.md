@@ -31,8 +31,8 @@ Current constraints: [`RUNTIME.md`](RUNTIME.md), [`ARCHITECTURE.md`](ARCHITECTUR
 - Minimal engine primitive families for background timed work and future media capabilities under ADR 0017.
 - Serializable lowering or engine-managed continuation representation for resumable library workflows not covered by
   ADR 0018's full-lowering choice.
-- Exact checkpoint selection, deadline recalculation, repeating-timer, and server-authoritative-time mechanics needed
-  to implement the owner-selected missed-event barrier for browser unavailability/reload/reconnect/device sleep.
+- Exact checkpoint selection, repeating/background-timer interaction, and server-authoritative-time mechanics needed
+  to implement the owner-selected missed-event barrier and full-duration timer restart after an unavailable expiry.
 - Exact recovery-frontier mechanics for non-restorable custom presentation, including checkpoint selection and optional
   advanced reconstruction/snapshot support.
 - Exact durable external-effect protocol across recovery boundaries: effect identity, ownership/release authority,
@@ -71,8 +71,9 @@ Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRAR
   autoplay.
 - Constrained LLM interpretation contract and author-facing options for natural-language numbers and non-exact choice
   answers.
-- How to revise the accepted V30 timer API for explicit handles and pause/resume/stop/restart, final presentation
-  syntax, and remaining lifecycle details without changing section 27's accepted repeat, persist, and cleanup behavior.
+- Final short/long timer grammar and the remaining handle lifecycle details, especially operations after settlement and
+  expiry-handler scheduling during an open `ask`, without reopening the selected property names or V30's accepted
+  repeat, persist, and cleanup behavior.
 
 ## Editor and authoring
 
