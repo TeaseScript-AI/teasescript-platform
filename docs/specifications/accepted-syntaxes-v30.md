@@ -31,7 +31,7 @@ This table is generated from the current section order.
 - [24. Comments](#24-comments)
 - [25. Persistent storage and keys](#25-persistent-storage-and-keys)
 - [26. Labels and goto](#26-labels-and-goto)
-- [27. Blocking timers](#27-blocking-timers)
+- [27. Blocking and background timer behavior](#27-blocking-and-background-timer-behavior)
 - [28. Permanent buttons](#28-permanent-buttons)
 - [29. Script files and paths](#29-script-files-and-paths)
 - [30. Script endings](#30-script-endings)
@@ -1976,8 +1976,10 @@ Rules:
 - Unknown labels are compile errors.
 - A `goto` triggered by an event aborts the current execution path and does not return.
 
-## 27. Blocking timers
-**Status:** Accepted
+## 27. Blocking and background timer behavior
+**Status:** Accepted behavior; final background timer syntax pending
+
+### Blocking timers
 
 Hidden blocking wait:
 
@@ -1997,9 +1999,32 @@ A visible blocking timer may use a range for a randomized duration:
 timer 5..10
 ```
 
-Range bounds follow the general range rules in this document. Mystery presentation, asynchronous timers, handles,
-repetition, persistence, and timer lifecycle control need a later accepted syntax and runtime contract. The previously
-listed `mysteryTimer`, `startTimer`, and `stopTimer` spellings were not Owner-approved and are not accepted syntax.
+Range bounds follow the general range rules in this document. The previously listed `mysteryTimer`, `startTimer`, and
+`stopTimer` spellings were not Owner-approved and are not accepted syntax. Mystery presentation, async execution, and
+handle control still need their final source forms.
+
+### Background timer behavior
+
+A background timer continues while the main script proceeds. Its block is the finish action; it does not need an
+`onFinish` wrapper. The timer may be stopped explicitly, and its finish action may jump to a label. The final command
+spelling and handle API remain open.
+
+The `repeat: true` and `persist: true` timer options retain their accepted meanings; their placement in the final
+unified `timer` form remains open:
+
+- `repeat: true` starts another round after expiration. A repeating random-range timer chooses a new random duration
+  before each repetition.
+- A non-persistent timer is removed on `goto`, `end`, `run`, `call`, or `exit`.
+- `persist: true` keeps a timer active across `goto`, `end`, `run`, and `call`.
+- Every timer stops on `exit`, including persistent timers.
+
+Finish-action behavior:
+
+- The timer block runs without pausing currently playing audio or video.
+- After a normal finish action completes, the interrupted script continues where it left off.
+- The block may call normal functions and start new timers.
+- Timer finish actions are processed one at a time.
+- A `goto` in the timer block abandons the interrupted execution path.
 
 ## 28. Permanent buttons
 **Status:** Accepted
