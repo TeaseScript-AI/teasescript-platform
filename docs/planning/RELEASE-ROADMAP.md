@@ -96,6 +96,14 @@ the scripting, editor/tooling, and Player experience selected for alpha.
 website, community platform, or every planned product feature is not required. Rough UX, missing secondary capabilities,
 and breaking changes remain acceptable.
 
+- [ ] **Review TeaseScript syntax coherence**
+  - **Outcome:** Compare author-facing syntax across the language for consistent names, modifier and argument order,
+    defaults, and compact versus named forms. Record any approved corrections in the canonical syntax specification.
+  - **Trigger:** Begin when timer, audio, and video syntax and representative scripts are available, before stabilizing
+    author-facing syntax.
+  - **Reference:** [`TEASESCRIPT.md`](../TEASESCRIPT.md) and
+    [`accepted-syntaxes-v30.md`](../specifications/accepted-syntaxes-v30.md).
+
 - [ ] **Cross-origin Player host contract**
   - **Outcome:** Define the smallest coherent production contract between the application host shell and its cross-origin
     Player iframe: iframe creation/lifecycle, sandbox/CSP, validated parent/Player messages, capability negotiation,
