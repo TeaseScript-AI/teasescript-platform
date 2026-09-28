@@ -31,6 +31,9 @@ import {
   spacingScenario,
 } from "./runtimeScenario";
 import { stageFixtures } from "./stageFixtures";
+import demoSource from "../../../demo.tease?raw";
+import guideAvatarUrl from "../../../demo-assets/coastal-guide.svg?url";
+import demoStageUrl from "../../../demo-assets/coast.svg?url";
 import type { PlayerTimerKind } from "../../../model.js";
 import TimerFixtureRegion from "./TimerFixtureRegion.vue";
 import StageRightRail from "./StageRightRail.vue";
@@ -41,16 +44,21 @@ import type { PlayerThemeIntent } from "../../../theme/palette.js";
 import PlayerToolsShell from "./PlayerToolsShell.vue";
 import { usePlayerTheme } from "./usePlayerTheme";
 import { usePlayerKeyboardFocus } from "./usePlayerKeyboardFocus";
+import { useRuntimeClock } from "./useRuntimeClock";
+import { usePacingSkip } from "./usePacingSkip";
 
 usePlayerKeyboardFocus();
 
 const isDevelopment = import.meta.env.DEV;
+const isPreview = isDevelopment && window.location.pathname.startsWith("/phase2c/");
 // Opt-in browser-test content; never populate the normal settings surface with fixtures.
 const previewParams = new URLSearchParams(window.location.search);
-const toolStateFixture = isDevelopment && previewParams.has("tool-state-fixture");
-const feedbackSample = isDevelopment && previewParams.get("feedback-demo") === "composer";
-const spacingSample = isDevelopment && (previewParams.has("spacing-sample") || feedbackSample);
+const toolStateFixture = isPreview && previewParams.has("tool-state-fixture");
+const feedbackSample = isPreview && previewParams.get("feedback-demo") === "composer";
+const spacingSample = isPreview && (previewParams.has("spacing-sample") || feedbackSample);
+const demoSample = isPreview && previewParams.has("demo");
 const mediaFixture = ref<keyof typeof stageFixtures>("Landscape");
+const demoMedia = { src: demoStageUrl, alt: "Coast at dusk" };
 const longTitle = ref(false);
 const timerKind = ref<PlayerTimerKind>("visible");
 const timerCount = ref(1);
@@ -80,14 +88,29 @@ function toggleThemeMode() {
 function setThemeIntent(intent: PlayerThemeIntent) {
   themeIntent.value = intent;
 }
-const transcriptEntries = ref(transcriptFixtures(0, 2000));
+const transcriptEntries = ref(isPreview ? transcriptFixtures(0, 2000) : []);
 const runtimeSession = shallowRef<PlayerRuntimeSession | null>(null);
+const presentedSpeakers = computed(() => {
+  const speakers = runtimeSession.value?.speakers;
+  if (!speakers) return transcriptFixtureSpeakers;
+  return Object.fromEntries(
+    Object.entries(speakers).map(([id, speaker]) => [
+      id,
+      speaker.avatarReference === "avatars/coastal-guide.svg"
+        ? { ...speaker, avatarImageUrl: guideAvatarUrl }
+        : speaker,
+    ]),
+  );
+});
 const runtimeRestore = shallowRef<PlayerRuntimeRestorePoint | null>(null);
 const runtimeGeneration = ref(0);
 const interactionReset = ref(0);
+const { resetOrigin } = useRuntimeClock(runtimeSession);
+const { skipFromBackground, skipFromComposer } = usePacingSkip(runtimeSession);
 function setRuntimeSession(session: PlayerRuntimeSession) {
   runtimeGeneration.value++;
   interactionReset.value++;
+  resetOrigin(session);
   runtimeSession.value = session;
   runtimeRestore.value = createPlayerRuntimeRestorePoint(session);
 }
@@ -100,14 +123,17 @@ function startSpacingSample() {
   if (!reply || reply.outcome.kind !== "completed") throw new Error("Spacing sample reply failed");
   setRuntimeSession(reply.session);
 }
-if (isDevelopment) {
+if (isPreview) {
   if (spacingSample) startSpacingSample();
+  else if (demoSample) startRuntime(demoSource);
   else startRuntime(buttonScenario);
-}
+} else startRuntime(demoSource);
 function restoreRuntime() {
   if (!runtimeRestore.value) return;
   interactionReset.value++;
-  runtimeSession.value = restorePlayerRuntimeSession(runtimeRestore.value);
+  const session = restorePlayerRuntimeSession(runtimeRestore.value);
+  resetOrigin(session);
+  runtimeSession.value = session;
 }
 let nextMessage = 2000;
 let firstMessage = 0;
@@ -183,14 +209,14 @@ async function toggleFullscreen() {
 </script>
 
 <template>
-  <PlayerToolsShell :stage-height="stageHeight" :media-aspect="mediaAspect" :fullscreen="fullscreen">
+  <PlayerToolsShell :stage-height="stageHeight" :media-aspect="mediaAspect" :fullscreen="fullscreen" :preview="isPreview">
     <template #tool="{ tool, player }">
       <ToolLifetimeFixture v-if="toolStateFixture && tool === 'Layout Debug'" />
       <LayoutDebug
-        v-else-if="isDevelopment && tool === 'Layout Debug' && player"
+        v-else-if="isPreview && tool === 'Layout Debug' && player"
         :player="player"
       />
-      <div v-if="isDevelopment && tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
+      <div v-if="isPreview && tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
         <ThemeLab :intent="themeIntent" @update:intent="setThemeIntent" />
         <label class="grid gap-2">
           Stage media fixture
@@ -298,7 +324,11 @@ async function toggleFullscreen() {
       </div>
     </template>
     <template #default="{ sidebarVisible }">
-      <PlayerComposition :initial-stage-size="spacingSample ? 45 : 60">
+      <PlayerComposition
+        :initial-stage-size="spacingSample ? 45 : 60"
+        @click="skipFromBackground"
+        @keydown="skipFromComposer"
+      >
         <template #topbar>
           <PlayerTopBar
             :title="
@@ -313,7 +343,7 @@ async function toggleFullscreen() {
             @toggle-fullscreen="toggleFullscreen"
             @toggle-theme-mode="toggleThemeMode"
           >
-            <template v-if="!sidebarVisible" #tools>
+            <template v-if="isPreview && !sidebarVisible" #tools>
               <SidebarTrigger class="size-8" aria-label="Show sidebar" title="Show sidebar" />
             </template>
           </PlayerTopBar>
@@ -321,11 +351,11 @@ async function toggleFullscreen() {
         <template #stage>
           <Stage
             ref="stage"
-            :media="stageFixtures[mediaFixture]"
+            :media="isPreview ? stageFixtures[mediaFixture] : demoMedia"
             @media-aspect="mediaAspect = $event"
           >
             <template #right-rail>
-              <StageRightRail v-if="isDevelopment">
+              <StageRightRail v-if="isPreview">
                 <template #timers>
                   <TimerFixtureRegion
                     :kind="timerKind"
@@ -345,10 +375,10 @@ async function toggleFullscreen() {
         <RuntimeInteraction
           v-model:session="runtimeSession"
           :reset="interactionReset"
-          :preview="isDevelopment"
+          :preview="isPreview"
           :transcript-key="runtimeSession ? `runtime-${runtimeGeneration}` : 'fixtures'"
           :entries="runtimeSession?.transcriptEntries ?? transcriptEntries"
-          :speakers="runtimeSession?.speakers ?? transcriptFixtureSpeakers"
+          :speakers="presentedSpeakers"
           :revision="runtimeSession?.transcriptRevision ?? 0"
           @preview-submit="appendPreviewResponse"
         />

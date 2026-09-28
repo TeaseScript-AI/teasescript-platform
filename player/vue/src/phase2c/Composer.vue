@@ -9,6 +9,7 @@ const props = withDefaults(
   defineProps<{
     modelValue: string;
     disabled?: boolean;
+    readonly?: boolean;
     submitting?: boolean;
     placeholder?: string;
     accessibleName?: string;
@@ -17,6 +18,7 @@ const props = withDefaults(
   }>(),
   {
     disabled: false,
+    readonly: false,
     submitting: false,
     placeholder: "Type your response…",
     accessibleName: "Response",
@@ -52,6 +54,7 @@ function focusInput(): void {
 
 function handleKeydown(event: KeyboardEvent): void {
   if (event.isComposing || event.keyCode === 229) return;
+  if (props.readonly) return;
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     emit("submit", "input");
@@ -102,6 +105,7 @@ defineExpose({ focusInput });
           :placeholder="placeholder"
           :inputmode="effectiveInputMode"
           :disabled="disabled"
+          :readonly="readonly"
           variant="embedded"
           class="composer-input"
           @update:model-value="value = String($event)"
@@ -113,7 +117,7 @@ defineExpose({ focusInput });
           type="submit"
           variant="default"
           class="composer-send"
-          :disabled="disabled || submitting"
+          :disabled="disabled || readonly || submitting"
           @pointerdown="preserveEditingFocus"
         >
           Send

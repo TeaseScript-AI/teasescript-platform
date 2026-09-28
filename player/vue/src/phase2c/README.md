@@ -1,7 +1,8 @@
 # Phase 2C Player preview
 
-This is the Greenfield preview, not the production Player entry point.
-Keep experimental fixtures separate from the components that own settled behavior.
+These components serve both the `/player/` entry point and the `/phase2c/` development preview. `PlayerApp.vue` is
+the production entry; `App.vue` owns preview fixtures. The preview keeps experimental fixtures separate from components
+that own settled behavior.
 
 ## Design lint
 
@@ -50,7 +51,7 @@ utility resolution; it does not change the maintained Player theme or select a p
   Its action buttons have no scripted handler, so clicking them adds no text or local feedback. Timer allocation and the
   toggle remain experimental, without runtime wiring.
 
-The preview opens with choices. Visual Lab restarts that scenario, selects text/number/choice interaction, or loads a
+The `/player/` route starts `player/demo.tease` automatically. The preview opens with choices. Visual Lab restarts that scenario, selects text/number/choice interaction, or loads a
 spacing sample with grouped guide bubbles, a player reply, another speaker, and active choices. Separate messages and
 choices have a 12px gap; grouped bubbles remain 3px apart.
 The `?spacing-sample` preview URL opens that sample directly with a 45/55 stage/conversation split so all messages and

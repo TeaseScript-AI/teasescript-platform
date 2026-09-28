@@ -517,19 +517,16 @@ control reconstruction, and desktop/button versus narrow/dropdown presentation.
 
 ## Local browser smoke and future host E2E gate
 
-The local Standard Player POC has a reproducible Chromium smoke route after `npm run build`:
+The local Standard Player POC has a reproducible production-build browser route. Start `npm run playground` in another
+terminal, then run:
 
 ```shell
-node tools/player-browser-smoke.mjs
+npm run test:player:production-browser -- http://127.0.0.1:4173/player/
 ```
 
-It drives the real playground and runtime-backed Vue Player at representative desktop
-and 390 × 844 CSS-pixel viewports. The Vue runtime scenario covers interactions, pacing, focus, transcript chronology,
-checkpoint/restore, and responsive behavior. The development-only route
-`/player/?fixture=transcript-stress` retains 2,000 entries while asserting bounded rendered DOM, variable-height
-measurement, stable keyed prepend/append anchoring, pinned and scroll-away resize behavior, and
-follow-latest/scroll-away return-to-latest behavior. An unavailable Chromium executable is an explicit skip; an
-available browser must pass these checks.
+It runs Chrome, Firefox, and WebKit at a narrow viewport against the compiled demo, checking the avatar, script
+completion, absence of preview tools, and fullscreen. The separate Phase 2C preview browser suite covers transcript
+virtualization, checkpoint/restore, responsive conditions, and presentation fixtures.
 
 Production browser E2E coverage becomes required after the cross-origin host shell and player exist. It should then
 include:
@@ -545,8 +542,8 @@ include:
 - invalid host/player messages.
 
 Select the production host's browser-automation stack when that concrete surface exists, based on the engines,
-accessibility checks, isolation boundaries, cost, and stability it must prove. The current dependency-free Chromium
-smoke does not predetermine that later tooling decision.
+accessibility checks, isolation boundaries, cost, and stability it must prove. The current Playwright CLI checks do
+not predetermine that later tooling decision.
 
 ## Coverage and performance boundaries
 

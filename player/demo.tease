@@ -1,0 +1,18 @@
+speaker guide {
+    title: "Coastal Guide"
+    avatar: "avatars/coastal-guide.svg"
+}
+
+say as guide "Welcome to the coast. The lighthouse is still open.", 2
+say as guide "Take a moment to look around before we choose a path.", 2
+wait 1
+
+let destination = choose as guide shore: "Walk by the water", lighthouse: "Visit the lighthouse"
+say as guide "That sounds like a good choice.", instant
+
+let reply = askText as guide "What would you like to say?"
+say as guide "I heard you: ${reply}", instant
+
+showButton as guide "Continue"
+say as guide "Let's keep walking.", instant
+exit
