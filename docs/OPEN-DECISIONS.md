@@ -71,8 +71,8 @@ Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRAR
   autoplay.
 - Constrained LLM interpretation contract and author-facing options for natural-language numbers and non-exact choice
   answers.
-- Whether and how to revise the accepted V30 timer API for explicit handles and final pause/resume/stop/restart,
-  repetition, persistence, and visible-presentation semantics.
+- How to revise the accepted V30 timer API for explicit handles and pause/resume/stop/restart, final presentation
+  syntax, and remaining lifecycle details without changing section 27's accepted repeat, persist, and cleanup behavior.
 
 ## Editor and authoring
 

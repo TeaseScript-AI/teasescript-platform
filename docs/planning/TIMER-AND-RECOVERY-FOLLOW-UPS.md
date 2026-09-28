@@ -48,9 +48,9 @@ let deadline = timer(
 }
 ```
 
-`repeat` and `persist` remain in the design; their final lifecycle and cleanup behavior has not been settled by this
-sketch. An omitted timer display and execution mode should mean visible and blocking. Ranges such as `5..10` remain a
-candidate duration input; whether repeating ranges redraw every round remains open.
+V30 section 27 retains the accepted `repeat: true` and `persist: true` behavior, including a fresh random draw for
+each repeating range and the established cleanup rules. Their placement in the new syntax and interaction with future
+pause/resume behavior remain open. An omitted display and execution mode should mean visible and blocking.
 
 ### Handle and time values
 
