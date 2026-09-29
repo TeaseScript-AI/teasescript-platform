@@ -171,13 +171,23 @@ const permanentMenuWidth = computed(() => menuWidthRem.value * remSize.value);
 const protectedPlayerWidth = computed(() => 380 + 6 * remSize.value + 4);
 const requiredDockWidth = computed(
   () =>
-    protectedPlayerWidth.value +
-      (labelMode.value === "labels" ? permanentMenuWidth.value : compactMenuWidth.value) +
-      toolPanelSizes.Small * remSize.value +
-      1,
+    Math.max(
+      900,
+      protectedPlayerWidth.value +
+        (labelMode.value === "labels" ? permanentMenuWidth.value : compactMenuWidth.value) +
+        toolPanelSizes.Small * remSize.value +
+        1,
+    ),
 );
 const conditions = providePlayerConditions(requiredDockWidth);
 const { viewport, horizontalConstrained: narrow } = conditions;
+// All compact presentation follows the same space constraints. The broad
+// comfortable state may use the larger timer without another compact switch.
+const timerSize = computed(() => {
+  if (narrow.value || conditions.verticalConstrained.value) return 96;
+  return viewport.value.width >= 2240 ? 192 : 128;
+});
+const timerRailWidth = computed(() => timerSize.value === 192 ? 192 : 156);
 watch(viewport, () => {
   remSize.value = parseFloat(getComputedStyle(document.documentElement).fontSize);
 });
@@ -565,6 +575,8 @@ async function updateSidebarVisibility(open: boolean) {
       '--usable-height': `${viewport.height}px`,
       '--viewport-left': `${viewport.left}px`,
       '--viewport-top': `${viewport.top}px`,
+      '--player-timer-size': `${timerSize}px`,
+      '--player-timer-rail-width': `${timerRailWidth}px`,
     }"
   >
   <SidebarProvider

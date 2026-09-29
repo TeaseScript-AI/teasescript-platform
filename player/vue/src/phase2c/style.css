@@ -44,8 +44,8 @@
   /* Measure from the bottom of the top controls, not the transparent header. */
   --player-following-control-gap: 16px;
   --player-resize-rail-size: 5px;
-  --player-timer-size: 132px;
-  --player-timer-halo-space: 12px;
+  --player-timer-size: 128px;
+  --player-timer-rail-width: 156px;
   --player-menu-compact-width: calc(var(--player-top-control-size) + 2 * var(--player-edge-space));
   font-family: ui-sans-serif, system-ui, sans-serif;
   /* Existing Player light palette: player/styles/layout.css. */

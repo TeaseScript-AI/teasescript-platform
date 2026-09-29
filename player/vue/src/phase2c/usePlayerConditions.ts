@@ -76,8 +76,8 @@ export function providePlayerConditions(requiredDockWidth: ComputedRef<number>):
   const conditions: PlayerConditions = {
     viewport,
     horizontalConstrained: computed(() => viewport.value.width < requiredDockWidth.value),
-    // Current Player UI baseline; no layout switches on this signal yet.
-    verticalConstrained: computed(() => viewport.value.height <= 768),
+    // Shared compact presentation threshold for limited usable height.
+    verticalConstrained: computed(() => viewport.value.height <= 700),
     touchAvailable,
     hoverAvailable,
     keyboardRaised,

@@ -1,10 +1,62 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onBeforeUnmount, onMounted, onUpdated, ref } from "vue";
 import { Button } from "@/components/ui/button";
 import { authoredColorToOklch } from "../../../theme/color.js";
 import { storyChoiceVariables } from "../../../theme/story-choice.js";
 
-const props = defineProps<{ authoredFill?: string | undefined; disabled?: boolean }>();
+const props = defineProps<{
+  authoredFill?: string | undefined;
+  disabled?: boolean;
+  label?: string | undefined;
+}>();
+const emit = defineEmits<{ widthChange: [] }>();
+const labelElement = ref<HTMLElement | null>(null);
+let observer: ResizeObserver | undefined;
+let measureFrame = 0;
+
+function fitWrappedLabel() {
+  const text = labelElement.value;
+  const button = text?.closest("button");
+  if (!text || !button) return;
+
+  const previousWidth = button.getBoundingClientRect().width;
+  button.style.width = "";
+  const range = document.createRange();
+  range.selectNodeContents(text);
+  const lines = range.getClientRects();
+  if (lines.length > 1) {
+    const style = getComputedStyle(button);
+    const inset =
+      Number.parseFloat(style.paddingLeft) +
+      Number.parseFloat(style.paddingRight) +
+      Number.parseFloat(style.borderLeftWidth) +
+      Number.parseFloat(style.borderRightWidth);
+    let widestLine = 0;
+    for (const line of lines) widestLine = Math.max(widestLine, line.width);
+    button.style.width = `${Math.ceil(widestLine + inset)}px`;
+  }
+  if (Math.abs(button.getBoundingClientRect().width - previousWidth) > 1) emit("widthChange");
+}
+
+function scheduleFit() {
+  cancelAnimationFrame(measureFrame);
+  measureFrame = requestAnimationFrame(fitWrappedLabel);
+}
+
+onMounted(() => {
+  if (props.label === undefined) return;
+  const group = labelElement.value?.closest("button")?.parentElement;
+  observer = new ResizeObserver(scheduleFit);
+  if (group) observer.observe(group);
+  scheduleFit();
+  void document.fonts.ready.then(scheduleFit);
+});
+onUpdated(scheduleFit);
+onBeforeUnmount(() => {
+  observer?.disconnect();
+  cancelAnimationFrame(measureFrame);
+});
+
 const material = computed(() =>
   props.authoredFill === undefined
     ? undefined
@@ -19,7 +71,10 @@ const material = computed(() =>
     class="player-action-button"
     :style="material"
     :disabled="disabled"
-  ><slot /></Button>
+  >
+    <span v-if="props.label !== undefined" ref="labelElement" class="player-action-label">{{ props.label }}</span>
+    <slot v-else />
+  </Button>
 </template>
 
 <style scoped>
@@ -43,6 +98,10 @@ const material = computed(() =>
   background: linear-gradient(var(--story-choice-top), var(--story-choice-bottom));
   box-shadow: inset 0 1px 0 #ffffff24, 0 1px 0 var(--story-choice-depth), 0 2px 3px #00000020;
   transition: box-shadow 100ms;
+}
+.player-action-label {
+  min-width: 0;
+  max-width: 55ch;
 }
 .player-action-button:hover:not(:disabled) {
   background: linear-gradient(var(--story-choice-hover-top), var(--story-choice-hover-bottom));

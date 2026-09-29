@@ -25,7 +25,11 @@ function timerLabel(timer: PlayerTimerPresentation, index: number): string | nul
 </script>
 
 <template>
-  <ScrollArea v-if="activeTimers.length" class="max-h-full w-full" viewport-class="overscroll-y-contain">
+  <ScrollArea
+    v-if="activeTimers.length"
+    class="timer-pane max-h-full"
+    viewport-class="overscroll-y-contain"
+  >
     <TransitionGroup name="stage-timer" tag="div" class="timer-region">
       <TimerDisplay
         v-for="(timer, index) in activeTimers"
@@ -39,6 +43,11 @@ function timerLabel(timer: PlayerTimerPresentation, index: number): string | nul
 </template>
 
 <style scoped>
+.timer-pane {
+  inline-size: var(--player-timer-size);
+  margin-inline: auto;
+}
+
 .timer-region {
   display: flex;
   max-block-size: 100%;
@@ -46,7 +55,6 @@ function timerLabel(timer: PlayerTimerPresentation, index: number): string | nul
   flex-direction: column;
   align-items: center;
   gap: 1rem;
-  padding: var(--player-timer-halo-space);
 }
 
 

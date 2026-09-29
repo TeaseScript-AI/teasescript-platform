@@ -25,21 +25,21 @@ import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
   right: var(--player-edge-space);
   bottom: 0;
   display: grid;
-  inline-size: calc(var(--player-timer-size) + 2 * var(--player-timer-halo-space));
+  inline-size: var(--player-timer-rail-width);
   min-block-size: 0;
   grid-template-rows: minmax(0, 1fr);
   padding-block: var(--player-following-control-top) var(--player-edge-space);
-}
-
-/* The timer's halo padding protects its shadow; it is not extra visible spacing. */
-.stage-right-rail:has(.timer-region) {
-  padding-block-start: calc(var(--player-following-control-top) - var(--player-timer-halo-space));
 }
 
 .stage-right-rail[data-has-controls] {
   /* Timers use their natural height until both panes would contend, then leave
      at least half of the rail to background controls. */
   grid-template-rows: fit-content(50%) minmax(0, 1fr);
+}
+
+/* A single timer stays complete; the controls own the remaining scrollable space. */
+.stage-right-rail[data-has-controls]:has(.timer-display:only-child) {
+  grid-template-rows: max-content minmax(0, 1fr);
 }
 
 .stage-right-rail-timers,

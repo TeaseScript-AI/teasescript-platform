@@ -123,8 +123,8 @@ do not infer device identity or add a separate width breakpoint for touch or rou
 
 | Condition | Signal | Current behavior |
 | --- | --- | --- |
-| Horizontal space | Usable visual-viewport width compared with the complete minimum dock composition, including the chosen menu width | The tool owner switches between a dock and an overlay drawer. A narrow desktop window can use the drawer. |
-| Vertical space | Usable visual-viewport height; `<= 768px` is the current review baseline | The condition is exposed for future height decisions; it does not currently switch Player layout by itself. A future overlay chrome mode may use it or fullscreen state. |
+| Horizontal space | Usable visual-viewport width compared with the greater of `900px` and the complete minimum dock composition, including the chosen menu width | The tool owner switches between a dock and an overlay drawer. A narrow desktop window can use the drawer; wider menu labels may require more than `900px`. |
+| Vertical space | Usable visual-viewport height; `<= 700px` selects compact presentation | The timer follows this shared compact condition. The separate titlebar comparison may use the same signal; fullscreen behavior remains a separate decision. |
 | Touch and hover | `any-pointer: coarse` and `any-hover: hover`, independently; each pointer event still identifies the pointer actually used | Touch taps, mouse hover, and keyboard focus retain their distinct menu behavior, including on hybrid devices. Primary coarse input without hover identifies the fallback corner-clearance case. |
 | Raised software keyboard | Composer input focused while the visual viewport shrinks by more than the current `120px` detection allowance on a touch-capable browser | The composer uses the normal reading width above the keyboard; Send keeps the existing focus behavior. |
 | Composer edge clearance | Browser safe-area inset; when it reports zero, a touch-first viewport spans the screen width and the composer is at the bottom near its sides | Only the composer receives up to `32px` side clearance. A narrow browser window on a touchscreen laptop keeps the normal composer width. This does not change the transcript, tool layout, or bottom spacing. |
@@ -161,7 +161,7 @@ content. Major numerical values below are POC reconstruction/tuning baselines un
 | Player chrome outer spacing | fixed `8px` for top controls, menu edges and right rail; independent of root font size |
 | Player chrome control size | compact controls use `calc(1rem + 16px)`; top-row controls grow together when the title's text line plus 8px needs more height |
 | title bar row | derived control size plus 8px outer padding above and below; do not separately hardcode the height |
-| content below top controls | one 16px visible gap from the controls' lower edge to the first tool-menu control or timer; timer halo space is included in placement, not added to the gap |
+| content below top controls | one 16px visible gap from the controls' lower edge to the first tool-menu control or timer; no separate outer timer-halo space is reserved |
 | normal stage row | current `55dvh` baseline; expose as a development tuning value and visually re-evaluate |
 | overlay-chrome stage row | current `64dvh` baseline; visually re-evaluate with low-height and fullscreen cases |
 | tool column | fixed `300px` default; individual columns do not shrink to hide their content |
@@ -631,11 +631,17 @@ Normal timer text is:
 - below one hour: `m:ss`;
 - one hour or more: `h:mm:ss`.
 
-The determinate ring represents elapsed fraction. The current circular size and package/theme accent treatment remain the
-POC visual baseline. In overlay chrome mode the timer may use the current compact title-height presentation; exact compact
-size remains visually tuneable. Multiple compact timers use one horizontally scrollable row rather than consuming
-additional Action height. A timer disappears when its underlying visible timer action/lifecycle has completed and no
-longer requires presentation.
+The determinate ring represents elapsed fraction. In the current Player presentation, the existing horizontal and
+vertical space conditions select compact timer presentation together: if either reports insufficient room, the timer is
+`96px`. When both have enough room, the timer is `192px` from `2240px` of usable viewport width and `128px` below that.
+The right presentation column is `156px` in compact and ordinary
+layouts and `192px` with the large timer. Timer diameter and column width are separate layout values; neither restores
+the removed outside halo shadow or its `12px` reservation. These values are visual presentation rules, independent of
+authored timer labels and of the number of timers or controls. In overlay chrome mode the timer may use the current
+compact title-height presentation; exact compact size remains visually tuneable. Multiple compact timers use one
+horizontally scrollable row rather than consuming additional Action height. A timer disappears when its underlying
+visible timer action/lifecycle has completed and no longer requires presentation. The package/theme accent treatment
+remains the POC visual baseline.
 
 When exactly one visible timer exists, its timer pane never presents a scrollbar; the complete ring fits and stays fixed
 while the background-control/status list scrolls independently beneath it. When multiple visible timers exist, the timer

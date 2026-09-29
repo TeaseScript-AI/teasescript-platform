@@ -443,7 +443,7 @@ async function menuCollapseChecks(page) {
 async function panelResizeChecks(page) {
   // Reduced CSS viewport models the space left by browser zoom, without device detection.
   for (const [width, mode, multiple] of [
-    [800, "icons", false],
+    [900, "icons", false],
     [1440, "icons", true],
   ]) {
     await page.setViewportSize({ width, height: 650 });
@@ -528,7 +528,7 @@ async function panelResizeChecks(page) {
 }
 
 async function carouselChecks(page) {
-  await page.setViewportSize({ width: 800, height: 420 });
+  await page.setViewportSize({ width: 900, height: 420 });
   await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "icons"));
   await page.reload();
   for (const name of ["Layout Debug", "Visual Lab"]) {
@@ -575,7 +575,7 @@ async function carouselChecks(page) {
     for (let i = 1; i <= 10; i++)
       await cdp.send("Input.dispatchTouchEvent", {
         type: "touchMove",
-        touchPoints: [{ x: x + i * 22, y }],
+        touchPoints: [{ x: x + (i * state.width * 1.2) / 10, y }],
       });
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     await page.waitForFunction(() => document.querySelector(".tool-panel-strip").scrollLeft < 2);
@@ -1352,6 +1352,7 @@ async function actionButtonGeometryChecks(page) {
         const box = element.getBoundingClientRect();
         return {
           text: element.innerText,
+          top: box.top,
           width: box.width,
           height: box.height,
           minHeight: Number.parseFloat(style.minHeight),
@@ -1396,6 +1397,48 @@ async function actionButtonGeometryChecks(page) {
       };
     });
   const initial = await geometry();
+  const rowTops = initial.foregroundButtons.map((button) => Math.round(button.top));
+  check(
+    rowTops.length === 5 &&
+      rowTops[0] === rowTops[1] &&
+      rowTops[1] === rowTops[2] &&
+      rowTops[2] < rowTops[3] &&
+      rowTops[3] === rowTops[4],
+    "The final long choice is left alone although it fits beside the preceding choice",
+  );
+  check(
+    initial.foregroundButtons[4].height > 44,
+    "The long desktop choice did not wrap after its width was limited",
+  );
+  const fittedChoice = await page
+    .locator("[data-foreground-controls] button")
+    .last()
+    .evaluate((button) => {
+      const label = button.querySelector(".player-action-label");
+      const range = document.createRange();
+      range.selectNodeContents(label);
+      const lines = range.getClientRects();
+      const style = getComputedStyle(button);
+      const inset =
+        Number.parseFloat(style.paddingLeft) +
+        Number.parseFloat(style.paddingRight) +
+        Number.parseFloat(style.borderLeftWidth) +
+        Number.parseFloat(style.borderRightWidth);
+      let widestLine = 0;
+      for (const line of lines) widestLine = Math.max(widestLine, line.width);
+      return {
+        lineCount: lines.length,
+        textLimit: Number.parseFloat(getComputedStyle(label).maxWidth),
+        widestLine,
+        contentWidth: button.getBoundingClientRect().width - inset,
+      };
+    });
+  check(
+    fittedChoice.lineCount > 1 &&
+      fittedChoice.widestLine <= fittedChoice.textLimit + 1 &&
+      Math.abs(fittedChoice.contentWidth - fittedChoice.widestLine) < 2,
+    "Wrapped choice border does not follow the rendered text plus its padding",
+  );
   check(
     initial.foregroundGap.join("/") === "8px/8px" && initial.backgroundGap === "8px",
     "Player action button groups do not use 8px gaps",
@@ -2191,6 +2234,20 @@ async function playerConditionChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
   };
+  for (const [width, expectedHorizontal, expectedTimer] of [
+    [768, "constrained", 96],
+    [899, "constrained", 96],
+    [900, "comfortable", 128],
+    [1024, "comfortable", 128],
+  ]) {
+    await page.setViewportSize({ width, height: 768 });
+    await page.waitForFunction(
+      ({ horizontal, timer }) =>
+        document.querySelector(".phase2c-sidebar")?.dataset.playerHorizontal === horizontal &&
+        document.querySelector(".timer-display")?.getBoundingClientRect().width === timer,
+      { horizontal: expectedHorizontal, timer: expectedTimer },
+    );
+  }
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForFunction(
     () => document.querySelector(".phase2c-sidebar")?.dataset.playerHorizontal === "constrained",

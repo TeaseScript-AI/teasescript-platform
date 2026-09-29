@@ -84,7 +84,6 @@ const accessibleName = computed(() => {
     color-mix(in oklab, var(--timer-surface) 26%, transparent) 52%,
     color-mix(in oklab, var(--timer-surface) 12%, transparent) 100%
   );
-  box-shadow: 0 0 12px color-mix(in oklab, var(--timer-surface) 12%, transparent);
   backdrop-filter: blur(6px);
   filter: blur(0.75px);
   content: "";
