@@ -127,7 +127,7 @@ export function playerRuntimeTimers(
   snapshot: RuntimeSnapshot,
   currentSessionTimeMs: number,
 ): readonly PlayerRuntimeTimerPresentation[] {
-  const now = Math.max(snapshot.currentSessionTimeMs, currentSessionTimeMs);
+  const now = Math.max(snapshot.observedSessionTimeMs, currentSessionTimeMs);
   const timers: Array<PlayerRuntimeTimerPresentation & { readonly actionId: number }> = [];
   const delays = [
     snapshot.foregroundAction,
