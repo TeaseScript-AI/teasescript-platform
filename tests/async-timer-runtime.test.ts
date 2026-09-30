@@ -673,6 +673,17 @@ test("runtime review regressions stay checkpointable and ordered", () => {
   );
   stopped.at(3_000);
   assert.deepEqual(stopped.said(), [], "a block that ran first can still stop a later timer");
+
+  const observedTwice = new Session(
+    'let second = timer async 2 s { say "second" }\nlet first = timer async 1 s { second.stop() }\nwait 3 s',
+  );
+  let twice = observeTime(observedTwice.plan, observedTwice.snapshot, 1_000).snapshot;
+  twice = observeTime(observedTwice.plan, twice, 3_000).snapshot;
+  const twiceEvents = run(observedTwice.plan, twice).events;
+  assert.ok(
+    twiceEvents.every((event) => event.kind !== "say"),
+    "a queued block runs before later due work even across repeated observations",
+  );
 });
 
 test("a late observation skips silent fixed repeat rounds arithmetically", () => {

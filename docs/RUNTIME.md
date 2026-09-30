@@ -494,7 +494,8 @@ Presentation refresh cadence does not impose a minimum timer duration.
 
 A blocking `timer` is a foreground `delay` like `wait`, with its presentation (`visible`, `mystery`, or `hidden`) and
 evaluated label. An asynchronous timer is a background action of kind `timer`: it allocates an action ID and emits
-`actionRequested` when started and `actionCompleted` when it finishes or stops. No Player completion can target
+`actionRequested` when started and `actionCompleted` when it finishes naturally or through `stop()`; script-end and
+`exit` cleanup stop remaining timers without individual completion events. No Player completion can target
 it, so its settlement is not retained as `lastSettlement`. The action holds the timer record: state, presentation,
 label, repeat configuration, current-round length, and either its deadline (running) or remaining time (paused), plus
 accumulated elapsed time. A finished or stopped record moves to `settledTimers` so its opaque handle
@@ -508,7 +509,8 @@ share an entry with a count. A handler-free fixed repeating timer skips silent r
 observation.
 
 Due-work processing pauses after a round queues an expiry block that can interrupt now. Later due work, including
-other timers, the foreground delay, and pacing gates, stays unsettled while that block is queued or running.
+other timers, the foreground delay, and pacing gates, stays unsettled while that block is queued or running, including
+across further observations before execution.
 Processing resumes when the block returns, or through observations while the block itself waits. This reproduces a
 Player that observed every deadline on time: a block can `stop()` a later timer before it expires. A Player delay
 completion that an earlier-due block will interrupt returns `suspendedAction` while keeping the time observation.

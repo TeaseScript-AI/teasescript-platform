@@ -2016,13 +2016,13 @@ let beat = timer(duration: 1..=3, async: true, display: "mystery", label: "Beat"
 ```
 
 The named form carries the same fields plus `repeat` and `persist`. `async`, `repeat`, and `persist` are the
-literals `true` or `false`; `duration`, `display`, and `label` are expressions evaluated in source order. A blocking
-named timer needs a literal `display`.
+literals `true` or `false`; `duration`, `display`, and `label` are expressions evaluated in source order. `display`
+defaults to `visible`; a blocking timer's explicit `display` must be a literal.
 
 ### Blocking and asynchronous timers
 
-A blocking timer returns no handle; using one as a value, or giving it an expiry block, `repeat`, or `persist`, is a
-compile error. An asynchronous timer lets the script continue and evaluates to an opaque handle, which may be
+A blocking timer returns no handle; using one as a value, or giving it an expiry block, `repeat: true`, or
+`persist: true`, is a compile error. An asynchronous timer lets the script continue and evaluates to an opaque handle, which may be
 ignored. Standalone `startTimer`, `stopTimer`, and `mysteryTimer` spellings are not TeaseScript syntax.
 
 ### Handles

@@ -43,9 +43,10 @@ export function observeTime(
 }
 
 /**
- * Settles due work at the persisted scene time in `(deadline, action ID)` order. Processing pauses after a round
- * queues an expiry block that can interrupt now: later due work waits until that block has run, exactly as in a
- * Player that observed every deadline on time. A block's return resumes processing.
+ * Settles due work at the persisted scene time in `(deadline, action ID)` order. Processing pauses while an expiry
+ * block that can interrupt now is queued: later due work waits until that block has run, exactly as in a Player that
+ * observed every deadline on time, even when several observations arrive before execution. A block's return resumes
+ * processing.
  */
 export function processDueWork(
   plan: InstructionPlan,
@@ -53,6 +54,7 @@ export function processDueWork(
   events: InterpreterEvent[],
 ): RuntimeActionSettlementSnapshot | null {
   let completion: RuntimeActionSettlementSnapshot | null = null;
+  if (timerHandlerDispatchable(current)) return completion;
   for (let due = nextDueWork(current); due !== null; due = nextDueWork(current)) {
     if (due.kind === "timer") {
       skipSilentRounds(due.action.timer, current.currentSessionTimeMs);

@@ -504,8 +504,7 @@ node tools/player-browser-smoke.mjs
 
 It drives the real playground and runtime-backed Vue Player at representative desktop
 and 390 × 844 CSS-pixel viewports. The Vue runtime scenario covers interactions, pacing, focus, transcript chronology,
-checkpoint/restore, and responsive behavior. The timer scenario covers an authored visible blocking `timer` countdown and
-ring, compact title placement, removal after settlement, hidden `wait` absence, and checkpoint reconstruction. The development-only route
+checkpoint/restore, and responsive behavior. The development-only route
 `/player/?fixture=transcript-stress` retains 2,000 entries while asserting bounded rendered DOM, variable-height
 measurement, stable keyed prepend/append anchoring, pinned and scroll-away resize behavior, and
 follow-latest/scroll-away return-to-latest behavior. An unavailable Chromium executable is an explicit skip; an
