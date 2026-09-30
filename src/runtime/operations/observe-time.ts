@@ -153,8 +153,8 @@ function nextDueWork(snapshot: RuntimeSnapshot): DueWork | null {
 }
 
 /**
- * A delay interrupted by an expiry block still settles in deadline order. Its continuation stays suspended and runs
- * once when the block returns normally.
+ * A delay interrupted by an expiry block still settles in deadline order and publishes `actionCompleted`. Its
+ * continuation stays suspended and runs once when the block returns normally.
  */
 function settleSuspendedDelay(
   plan: InstructionPlan,
@@ -171,7 +171,8 @@ function settleSuspendedDelay(
   );
   frame.returnInstruction = action.continuationInstruction;
   frame.timerInterruption = { ...frame.timerInterruption!, suspendedAction: null };
-  snapshot.lastSettlement = settlement;
+  // Not retained as `lastSettlement`: the running block may own released prepared output whose provenance is the
+  // retained pacing settlement, and completions for a suspended action were already rejected as `suspendedAction`.
   events.push(
     Object.freeze({
       kind: "actionCompleted",

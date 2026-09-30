@@ -106,8 +106,13 @@ export function returnFromTimerHandler(
   }
   snapshot.foregroundAction = suspended;
   snapshot.status = "waiting";
-  // A delay that was already due when interrupted and saw no observation during the block settles now.
-  if (suspended.kind === "delay" && suspended.deadlineMs <= snapshot.currentSessionTimeMs) {
+  // A delay that was already due when interrupted and saw no observation during the block settles now, unless
+  // another earlier-due block is queued: that block interrupts it again first.
+  if (
+    suspended.kind === "delay" &&
+    suspended.deadlineMs <= snapshot.currentSessionTimeMs &&
+    snapshot.pendingTimerHandlers.length === 0
+  ) {
     settleForegroundTimedAction(plan, snapshot, suspended, events);
   }
 }
