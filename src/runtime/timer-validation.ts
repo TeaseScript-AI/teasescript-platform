@@ -32,11 +32,6 @@ const TIMER_ACTION_KEYS = [
   "timer",
 ] as const;
 
-/** Whether a plan can interrupt a waiting path, which relaxes action-history ordering after a block returns. */
-export function planHasTimerHandlers(plan: InstructionPlan | undefined): boolean {
-  return plan === undefined || plan.functions.some((definition) => definition.timerHandler);
-}
-
 /**
  * A deadline equal to scene time stays unsettled while execution can continue at that time, and in a failed session,
  * which settles nothing further.

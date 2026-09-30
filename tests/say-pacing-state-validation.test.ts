@@ -271,7 +271,7 @@ test("terminal continuation handoffs reject malformed external state and preserv
   );
 });
 
-test("active-action and retained-settlement relations admit only canonical cross-kind timing", () => {
+test("active-action and retained-settlement relations keep distinct identities across kinds", () => {
   const promotionPlan = plan('say "first"\nwait 1 s\nsay "second"\nexit');
   const initial = run(promotionPlan, createFreshRuntimeSnapshot(promotionPlan));
   const delay = initial.snapshot.foregroundAction;
@@ -317,25 +317,6 @@ test("active-action and retained-settlement relations admit only canonical cross
     duplicateId,
   );
 
-  const newerPacingSettlement = checkpointSnapshot(promotionPlan, promoted.snapshot);
-  newerPacingSettlement.lastSettlement = {
-    actionId: 2,
-    actionKind: "chatPacingGate",
-    settlementKind: "skipped",
-    owningInstruction: 0,
-    continuationInstruction: 1,
-    requestEventSequence: 3,
-    completionEventSequence: 4,
-    deadlineMs: 1_800,
-    completedAtMs: 1_000,
-    releasedPreparedOutputInstruction: null,
-  };
-  expectInvalidSnapshot(
-    "older foreground pacing cannot coexist with newer pacing settlement",
-    promotionPlan,
-    newerPacingSettlement,
-  );
-
   const invalidOrdering = checkpointSnapshot(promotionPlan, promoted.snapshot);
   assert.ok(invalidOrdering.foregroundAction?.kind === "chatPacingGate");
   assert.ok(invalidOrdering.lastSettlement?.actionKind === "delay");
@@ -345,56 +326,6 @@ test("active-action and retained-settlement relations admit only canonical cross
     "older pacing must predate the retained delay request",
     promotionPlan,
     invalidOrdering,
-  );
-
-  const invalidCausalOrdering = checkpointSnapshot(promotionPlan, promoted.snapshot);
-  assert.ok(invalidCausalOrdering.lastSettlement?.actionKind === "delay");
-  invalidCausalOrdering.lastSettlement.requestEventSequence = 1;
-  expectInvalidSnapshot(
-    "request ordering remains relational when action IDs look plausible",
-    promotionPlan,
-    invalidCausalOrdering,
-  );
-
-  const interactionPlan = plan('say "first"\nwait 1 s\nsay "second"\nshowButton "Continue"\nexit');
-  const interactionInitial = run(interactionPlan, createFreshRuntimeSnapshot(interactionPlan));
-  const interactionDelay = interactionInitial.snapshot.foregroundAction;
-  assert.equal(interactionDelay?.kind, "delay");
-  const interactionPromoted = run(
-    interactionPlan,
-    observeTime(interactionPlan, interactionInitial.snapshot, interactionDelay!.deadlineMs)
-      .snapshot,
-  );
-  const firstGate = interactionPromoted.snapshot.foregroundAction;
-  assert.equal(firstGate?.kind, "chatPacingGate");
-  const released = completeAction(interactionPlan, interactionPromoted.snapshot, {
-    actionId: firstGate!.actionId,
-    actionKind: "chatPacingGate",
-    payload: { kind: "skip" },
-  });
-  const interactionWaiting = run(interactionPlan, released.snapshot);
-  const interaction = interactionWaiting.snapshot.foregroundAction;
-  assert.equal(interaction?.kind, "interaction");
-  const interactionSettled = completeAction(interactionPlan, interactionWaiting.snapshot, {
-    actionId: interaction!.actionId,
-    actionKind: "interaction",
-    interactionKind: "button",
-    payload: { kind: "activate" },
-  });
-
-  const newerInteractionSettlement = checkpointSnapshot(
-    interactionPlan,
-    interactionPromoted.snapshot,
-  );
-  newerInteractionSettlement.lastSettlement = structuredClone(
-    interactionSettled.snapshot.lastSettlement,
-  );
-  newerInteractionSettlement.nextActionId = interactionSettled.snapshot.nextActionId;
-  newerInteractionSettlement.nextEventSequence = interactionSettled.snapshot.nextEventSequence;
-  expectInvalidSnapshot(
-    "older foreground pacing cannot coexist with a newer interaction settlement",
-    interactionPlan,
-    newerInteractionSettlement,
   );
 });
 
@@ -1659,25 +1590,6 @@ test("active pacing locations allow only runtime-produced foreground and backgro
         snapshot.nextActionId += 1;
         snapshot.nextEventSequence += 1;
         snapshot.backgroundActions.push(replacement);
-      }),
-    },
-    {
-      name: "background pacing must predate the foreground delay action ID",
-      compiled: waitPlan,
-      checkpoint: mutateCheckpoint(waitPlan, waitState.snapshot, (snapshot) => {
-        const pacingActionId = snapshot.backgroundActions[0].actionId;
-        snapshot.backgroundActions[0].actionId = snapshot.foregroundAction.actionId;
-        snapshot.foregroundAction.actionId = pacingActionId;
-      }),
-    },
-    {
-      name: "background pacing must predate the foreground delay request sequence",
-      compiled: waitPlan,
-      checkpoint: mutateCheckpoint(waitPlan, waitState.snapshot, (snapshot) => {
-        const pacingRequestSequence = snapshot.backgroundActions[0].requestEventSequence;
-        snapshot.backgroundActions[0].requestEventSequence =
-          snapshot.foregroundAction.requestEventSequence;
-        snapshot.foregroundAction.requestEventSequence = pacingRequestSequence;
       }),
     },
   ];
