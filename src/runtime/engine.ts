@@ -2109,18 +2109,31 @@ function startMedia(
   if (!instruction.async && repeat.kind === "indefinite") {
     throw fault("TSR050", "Blocking media cannot repeat indefinitely.", instruction.span);
   }
-  const startAtMs =
-    startAt === null ? 0 : mediaMilliseconds(startAt, "startAt", instruction.startAt!.span);
-  const endAtMs =
-    endAt === null ? null : mediaMilliseconds(endAt, "endAt", instruction.endAt!.span);
-  if (endAtMs !== null && endAtMs <= startAtMs) {
-    throw fault("TSR050", "Media endAt must be later than startAt.", instruction.endAt!.span);
+  if (repeat.kind === "indefinite" && instruction.finishFunctionId !== null) {
+    throw fault(
+      "TSR050",
+      "'finish' never runs for media that repeats indefinitely; stop() does not run it.",
+      instruction.span,
+    );
   }
-  if (volume !== null && (typeof volume !== "number" || !(volume >= 0 && volume <= 1))) {
+  // A supplied option is validated even when it evaluates to null; only an omitted option takes its default.
+  const startAtMs =
+    instruction.startAt === null
+      ? 0
+      : mediaMilliseconds(startAt, "startAt", instruction.startAt.span);
+  const endAtMs =
+    instruction.endAt === null ? null : mediaMilliseconds(endAt, "endAt", instruction.endAt.span);
+  if (instruction.endAt !== null && endAtMs !== null && endAtMs <= startAtMs) {
+    throw fault("TSR050", "Media endAt must be later than startAt.", instruction.endAt.span);
+  }
+  if (
+    instruction.volume !== null &&
+    (typeof volume !== "number" || !(volume >= 0 && volume <= 1))
+  ) {
     throw fault(
       "TSR050",
       "Media volume must be a number from 0 through 1.",
-      instruction.volume!.span,
+      instruction.volume.span,
     );
   }
   const cues = instruction.cues.map((cue, index) => ({
@@ -2159,7 +2172,7 @@ function startMedia(
       durationMs: null,
       startAtMs,
       endAtMs,
-      volume: volume ?? 1,
+      volume: typeof volume === "number" ? volume : 1,
       repeat,
       cues,
       finishFunctionId: instruction.finishFunctionId,

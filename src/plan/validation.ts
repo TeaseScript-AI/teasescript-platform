@@ -462,6 +462,15 @@ function validateInstruction(
       }
       if (value.receiver !== null) {
         validateExpression(value.receiver, `${path}.receiver`, errors, false, temporaryCount);
+        if (!isBarrierReceiver(value.receiver)) {
+          errors.push(
+            planError(
+              "TSC002",
+              "A pacing-barrier receiver must be an identifier with property or simple index access.",
+              `${path}.receiver`,
+            ),
+          );
+        }
       }
       return;
     case "showImage":
@@ -480,6 +489,25 @@ function validateInstruction(
       return;
     default:
       errors.push(planError("TSC002", `Unknown instruction kind '${value.kind}'.`, `${path}.kind`));
+  }
+}
+
+/** The receiver shapes the compiler emits: an identifier with property access or literal/identifier indexes. */
+function isBarrierReceiver(value: unknown): boolean {
+  let current = value;
+  for (;;) {
+    if (!isRecord(current)) return false;
+    if (current.kind === "identifier") return true;
+    if (current.kind === "property") {
+      current = current.object;
+    } else if (current.kind === "index") {
+      const index = current.index;
+      if (!isRecord(index) || (index.kind !== "literal" && index.kind !== "identifier"))
+        return false;
+      current = current.object;
+    } else {
+      return false;
+    }
   }
 }
 
@@ -516,7 +544,10 @@ function validatePlayMediaInstruction(
   if (!isRecord(repeat)) {
     errors.push(planError("TSC002", "Media repeat is invalid.", `${path}.repeat`));
   } else if (repeat.kind === "once" || repeat.kind === "indefinite") {
-    if (!hasExactKeys(repeat, ["kind"]) || (repeat.kind === "indefinite" && value.async !== true)) {
+    if (
+      !hasExactKeys(repeat, ["kind"]) ||
+      (repeat.kind === "indefinite" && (value.async !== true || value.finishFunctionId !== null))
+    ) {
       errors.push(planError("TSC002", "Media repeat is invalid.", `${path}.repeat`));
     }
   } else if (repeat.kind === "value" && hasExactKeys(repeat, ["kind", "value"])) {

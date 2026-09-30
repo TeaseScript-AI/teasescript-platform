@@ -1047,8 +1047,10 @@ class Parser {
   }
 
   /**
-   * `at` and `beforeEnd` followed by a complete cue position and `{`, and `finish` followed by `{`, start a cue
-   * declaration. Other uses, such as `at = 1`, `at[0] = 1`, or a call `at(1)`, stay ordinary statements.
+   * `at` and `beforeEnd` followed on the same line by the start of a cue position, and `finish` followed by `{`, start a
+   * cue declaration. A call `at(1)` or an index `at[0]` written directly after the word, an assignment such as
+   * `at = 1`, and other non-expression continuations stay ordinary statements. The decision looks at one token only,
+   * so nested cue positions are never parsed twice.
    */
   #isMediaCueStart(): boolean {
     const token = this.#peek();
@@ -1057,15 +1059,10 @@ class Parser {
     if (token.lexeme === "finish") return next.kind === TokenKind.LeftBrace;
     if (token.lexeme !== "at" && token.lexeme !== "beforeEnd") return false;
     if (next.kind === TokenKind.LeftBrace || !isExpressionStart(next)) return false;
-    if (next.kind === TokenKind.LeftParenthesis && next.span.start.offset === token.span.end.offset)
-      return false;
-    const speculative = new Parser(this.tokens);
-    speculative.#current = this.#current + 1;
-    const offset = speculative.#parseExpression();
-    return (
-      offset !== null &&
-      speculative.#diagnostics.length === 0 &&
-      speculative.#check(TokenKind.LeftBrace)
+    const adjacent = next.span.start.offset === token.span.end.offset;
+    return !(
+      adjacent &&
+      (next.kind === TokenKind.LeftParenthesis || next.kind === TokenKind.LeftBracket)
     );
   }
 

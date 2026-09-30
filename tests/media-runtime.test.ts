@@ -542,3 +542,21 @@ test("controlling other media inside a cue block keeps the catch-up order of wor
     .at(1_000, [1, 1_000], [2, 1_000]);
   assert.deepEqual(stopped.said(), ["a", "timer"]);
 });
+
+test("dynamic media options are validated when supplied, including null and indefinite finish", () => {
+  const failure = (source: string) => {
+    const compiled = plan(source);
+    const operation = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
+    assert.equal(operation.snapshot.status, "failed", source);
+    return operation.snapshot.failure?.message ?? "";
+  };
+  assert.match(
+    failure(
+      'let loop = true\nplayAudio(file: "a", async: true, repeat: loop) {\n  finish {\n    say "x"\n  }\n}',
+    ),
+    /finish' never runs/u,
+  );
+  assert.match(failure('let v = null\nplayAudio(file: "a", volume: v)'), /volume/u);
+  assert.match(failure('let s = null\nplayAudio(file: "a", startAt: s)'), /startAt/u);
+  assert.match(failure('let e = null\nplayAudio(file: "a", endAt: e)'), /endAt/u);
+});

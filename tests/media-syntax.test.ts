@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
-import type { Instruction, PlayMediaInstruction } from "../src/plan/model.js";
+import type { Instruction, InstructionPlan, PlayMediaInstruction } from "../src/plan/model.js";
+import { validateInstructionPlan } from "../src/plan/validation.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
 function diagnostics(source: string): string[] {
@@ -247,7 +248,7 @@ test("statement-level media handle operations get a receiver barrier; reads do n
 
 test("cue detection needs a complete position and block; indexed and called uses stay ordinary", () => {
   plan(["let at = [0]", 'playAudio async "a.mp3" {', "  at[0] = 1", "}"].join("\n"));
-  assertRejected('playAudio async "a.mp3" {\n  at 1 s\n}', "TSP001", "Expected a supported");
+  assertRejected('playAudio async "a.mp3" {\n  at 1 s\n}', "TSP018", "cue block");
 });
 
 test("media parse errors recover at the end of the line and keep enclosing blocks", () => {
@@ -270,7 +271,7 @@ test("media playback is rejected in function parameter defaults", () => {
   );
 });
 
-test("deeply nested media operands parse without native recursion", () => {
+test("deeply nested media operands compile without native recursion", () => {
   const depth = 2_500;
   const source = [
     "function name(value) {",
@@ -279,8 +280,66 @@ test("deeply nested media operands parse without native recursion", () => {
     `let m = ${"playAudio async name(".repeat(depth)}"a.mp3"${")".repeat(depth)}`,
   ].join("\n");
   const result = compileSource(source);
-  assert.deepEqual(
-    result.diagnostics.filter((diagnostic) => diagnostic.code.startsWith("TSP")),
-    [],
+  assert.deepEqual(result.diagnostics, []);
+  assert.notEqual(result.plan, null);
+});
+
+test("media nested in cue positions parses each position once", () => {
+  let play = 'playAudio async "a"';
+  for (let level = 0; level < 40; level += 1) {
+    play = `playAudio async "a" { at point(${play}) { } }`;
+  }
+  const started = performance.now();
+  const result = compileSource(`function point(x) {\n  return 1 s\n}\nlet m = ${play}`);
+  assert.deepEqual(result.diagnostics, []);
+  assert.ok(
+    performance.now() - started < 5_000,
+    "nested cue positions must not reparse exponentially",
   );
+});
+
+test("statically evident invalid media values are compile errors", () => {
+  const cases: readonly (readonly [string, string, string])[] = [
+    ["playAudio 3", "TSV036", "media file reference"],
+    ["showImage -1", "TSV036", "image file reference"],
+    ['playAudio(file: "a", endAt: 0 s)', "TSV036", "endAt must be later"],
+    ['let m = playAudio async "a"\nm.position += "x"', "TSV037", "duration"],
+    ['let m = playAudio async "a"\nm.remaining -= true', "TSV037", "duration"],
+    ['let m = playAudio async "a"\nm.position += 3', "TSV037", "duration"],
+    ['let m = playAudio async "a"\nm.volume += 1 s', "TSV037", "volume"],
+    ['playAudio(file: "a", repeat: 9007199254740992 times)', "TSV036", "at least 1"],
+  ];
+  for (const [source, code, fragment] of cases) assertRejected(source, code, fragment);
+  plan('let m = playAudio async "a"\nm.volume += 0.5\nm.volume -= 2');
+});
+
+/** A mutable JSON copy of a compiled plan for corruption tests. */
+function mutablePlan(compiled: InstructionPlan): { instructions: Record<string, unknown>[] } {
+  // EVIDENCE: JSON serialization preserves the compiled plan's plain-data shape; callers apply documented invalid mutations.
+  return JSON.parse(JSON.stringify(compiled)) as { instructions: Record<string, unknown>[] };
+}
+
+test("plan validation accepts only compiler-shaped barrier receivers and no finish on indefinite media", () => {
+  const compiled = plan('let m = playAudio async "a"\nm.stop()');
+  const barrierIndex = compiled.instructions.findIndex(
+    (instruction) => instruction.kind === "pacingBarrier" && instruction.receiver !== null,
+  );
+  const corrupted = mutablePlan(compiled);
+  const span = compiled.instructions[barrierIndex]!.span;
+  corrupted.instructions[barrierIndex]!.receiver = {
+    kind: "call",
+    callee: { kind: "identifier", name: "m", span },
+    arguments: [],
+    span,
+  };
+  assert.equal(validateInstructionPlan(corrupted).valid, false);
+
+  const repeating = plan('playAudio async repeat "a" {\n  at 1 s {\n  }\n}');
+  const play = repeating.instructions.find(
+    (instruction): instruction is PlayMediaInstruction => instruction.kind === "playMedia",
+  )!;
+  const withFinish = mutablePlan(repeating);
+  withFinish.instructions[repeating.instructions.indexOf(play)]!.finishFunctionId =
+    play.cues[0]!.functionId;
+  assert.equal(validateInstructionPlan(withFinish).valid, false);
 });

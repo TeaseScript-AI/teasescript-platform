@@ -354,14 +354,23 @@ class SemanticValidator {
   }
 
   /** Static checks of a play command; runtime validates the values that are not literals. */
-  #validateMedia(
+  *#validateMediaTask(
     media: MediaParts,
     scope: SemanticScope,
     valuePosition: boolean,
     selfHandle: string | null,
-  ): void {
+  ): CompileTask<void> {
     const command = media.media === "audio" ? "playAudio" : "playVideo";
-    for (const operand of mediaOperands(media)) this.#validateExpression(operand, scope, null);
+    for (const operand of mediaOperands(media)) {
+      yield* compileChild(this.#validateExpressionTask(operand, scope, null));
+    }
+    if (isDefinitelyNonFileReference(media.file)) {
+      this.#report(
+        semanticCode.invalidMedia,
+        `${command} needs a media file reference or null.`,
+        media.file.span,
+      );
+    }
     if (!media.async && valuePosition) {
       this.#report(
         semanticCode.invalidMedia,
@@ -407,7 +416,7 @@ class SemanticValidator {
     } else if (repeat?.kind === "times") {
       const count = staticNumber(repeat.count);
       if (
-        (count !== undefined && (!Number.isInteger(count) || count < 1)) ||
+        (count !== undefined && (!Number.isSafeInteger(count) || count < 1)) ||
         isDefinitelyNonNumeric(repeat.count)
       ) {
         this.#report(
@@ -419,7 +428,9 @@ class SemanticValidator {
     }
     const startMs = this.#validateMediaPosition(media.startAt, "startAt");
     const endMs = this.#validateMediaPosition(media.endAt, "endAt");
-    if (startMs !== undefined && endMs !== undefined && endMs <= startMs) {
+    // An omitted startAt is the start of the file.
+    const effectiveStartMs = media.startAt === null ? 0 : startMs;
+    if (effectiveStartMs !== undefined && endMs !== undefined && endMs <= effectiveStartMs) {
       this.#report(
         semanticCode.invalidMedia,
         "endAt must be later than startAt.",
@@ -503,15 +514,18 @@ class SemanticValidator {
     use: "read" | "assign" | "call",
     value?: Expression,
     callArguments?: readonly CallArgument[],
+    compound = false,
   ): void {
     object = unwrapParentheses(object);
     if (object.kind !== "identifier") return;
     const handle = scope.resolve(object.name)?.handle;
     if (handle === "media") {
-      this.#validateMediaHandleMember(name, use, value, callArguments);
+      this.#validateMediaHandleMember(name, use, value, callArguments, compound);
       return;
     }
     if (handle !== "timer") return;
+    // Timer compound assignments keep their runtime operand check.
+    if (compound) value = undefined;
     const known =
       use === "call"
         ? TIMER_HANDLE_METHODS
@@ -548,6 +562,7 @@ class SemanticValidator {
     use: "read" | "assign" | "call",
     value?: Expression,
     callArguments?: readonly CallArgument[],
+    compound = false,
   ): void {
     const known =
       use === "call"
@@ -574,10 +589,12 @@ class SemanticValidator {
         name.span,
       );
     } else if (use === "assign" && value !== undefined) {
+      // A compound volume operand is a change, so only its type is known statically.
       const invalid =
         name.name === "volume"
           ? isDefinitelyNonNumeric(value) ||
-            (staticNumber(value) !== undefined &&
+            (!compound &&
+              staticNumber(value) !== undefined &&
               !(staticNumber(value)! >= 0 && staticNumber(value)! <= 1))
           : literalKind(value) !== "durationLiteral" && isDefinitelyNonDuration(value);
       if (invalid) {
@@ -611,7 +628,9 @@ class SemanticValidator {
       case "letStatement": {
         const initializer = unwrapParentheses(statement.initializer);
         if (initializer.kind === "playMediaExpression") {
-          this.#validateMedia(initializer, scope, true, statement.name.name);
+          yield* compileChild(
+            this.#validateMediaTask(initializer, scope, true, statement.name.name),
+          );
         } else {
           this.#validateExpression(statement.initializer, scope, null);
         }
@@ -703,16 +722,11 @@ class SemanticValidator {
         this.#validateTimer(statement, scope, false);
         return;
       case "playMediaStatement":
-        this.#validateMedia(statement, scope, false, null);
+        yield* compileChild(this.#validateMediaTask(statement, scope, false, null));
         return;
       case "showImageStatement": {
         this.#validateExpression(statement.image, scope, null);
-        const kind = literalKind(statement.image);
-        if (
-          kind !== "nullLiteral" &&
-          kind !== "stringLiteral" &&
-          isDefinitelyNonText(statement.image)
-        ) {
+        if (isDefinitelyNonFileReference(statement.image)) {
           this.#report(
             semanticCode.invalidMedia,
             "showImage needs an image file reference or null.",
@@ -736,7 +750,9 @@ class SemanticValidator {
             statement.target.property,
             scope,
             "assign",
-            statement.operator === "=" ? statement.value : undefined,
+            statement.value,
+            undefined,
+            statement.operator !== "=",
           );
         }
         return;
@@ -1050,7 +1066,7 @@ class SemanticValidator {
         this.#validateTimer(expression, scope, true);
         return;
       case "playMediaExpression":
-        this.#validateMedia(expression, scope, true, null);
+        yield* compileChild(this.#validateMediaTask(expression, scope, true, null));
         return;
       case "indexExpression":
         yield* compileChild(
@@ -1442,6 +1458,23 @@ function isDefinitelyNonDuration(expression: Expression): boolean {
     kind === "setLiteral" ||
     kind === "objectLiteral" ||
     kind === "rangeExpression"
+  );
+}
+
+/** A literal that can never be a file reference string or `null`. */
+function isDefinitelyNonFileReference(expression: Expression): boolean {
+  const kind = literalKind(expression);
+  return (
+    kind === "numberLiteral" ||
+    kind === "durationLiteral" ||
+    kind === "booleanLiteral" ||
+    kind === "listLiteral" ||
+    kind === "setLiteral" ||
+    kind === "objectLiteral" ||
+    kind === "rangeExpression" ||
+    kind === "timerExpression" ||
+    kind === "playMediaExpression" ||
+    kind === "unaryExpression"
   );
 }
 
