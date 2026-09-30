@@ -110,7 +110,11 @@ function selectTool(columnId: string, event: Event): void {
             </button>
           </header>
           <div class="tool-column-body" :data-tool-body="column.toolId ?? ''">
-            <slot name="tool" :layout-debug-snapshot="layoutDebugSnapshot" :tool-id="column.toolId">
+            <slot
+              name="tool"
+              :layout-debug-snapshot="layoutDebugSnapshot"
+              :tool-id="column.toolId"
+            >
               <p class="tool-placeholder">
                 {{
                   column.toolId === null

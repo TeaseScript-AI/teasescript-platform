@@ -1,229 +1,240 @@
 @layer components {
-  /* ---------- Transcript ---------- */
+      /* ---------- Transcript ---------- */
 
-  .message {
-    width: 90%;
-    max-width: 90%;
+      .message {
+        width: 90%;
+        max-width: 90%;
 
-    --speaker-accent: #9ba4b2;
-    --speaker-font: inherit;
-  }
+        --speaker-accent: #9ba4b2;
+        --speaker-font: inherit;
+      }
 
-  .message.user {
-    align-self: flex-end;
-    margin-inline-start: auto;
+      .message.user {
+        align-self: flex-end;
+        margin-inline-start: auto;
 
-    text-align: right;
-  }
+        text-align: right;
+      }
 
-  .message-row {
-    display: grid;
-    grid-template-columns:
-      auto
-      minmax(0, 1fr);
+      .message-row {
+        display: grid;
+        grid-template-columns:
+          auto
+          minmax(0, 1fr);
 
-    align-items: start;
-    gap: 12px;
-  }
+        align-items: start;
+        gap: 12px;
+      }
 
-  .message.user .message-row {
-    grid-template-columns:
-      minmax(0, 1fr)
-      auto;
+      .message.user .message-row {
+        grid-template-columns:
+          minmax(0, 1fr)
+          auto;
 
-    justify-items: end;
-  }
+        justify-items: end;
+      }
 
-  .speaker-avatar {
-    width: 30px;
-    aspect-ratio: 1;
+      .speaker-avatar {
+        width: 30px;
+        aspect-ratio: 1;
 
-    display: grid;
-    place-items: center;
+        display: grid;
+        place-items: center;
 
-    margin-top: 4px;
-    border: 1px solid var(--speaker-accent);
-    border-radius: 50%;
+        margin-top: 4px;
+        border: 1px solid var(--speaker-accent);
+        border-radius: 50%;
 
-    background: var(--color-surface-component);
-    color: var(--speaker-accent);
+        background: var(--color-surface-component);
+        color: var(--speaker-accent);
 
-    font-size: 10px;
-    font-weight: 700;
-  }
+        font-size: 10px;
+        font-weight: 700;
+      }
 
-  .message.user .speaker-avatar {
-    order: 2;
-  }
+      .message.user .speaker-avatar {
+        order: 2;
+      }
 
-  .message-copy {
-    min-width: 0;
-    max-width: 65ch;
-    font-family: var(--speaker-font);
-  }
+      .message-copy {
+        min-width: 0;
+        max-width: 65ch;
+        font-family: var(--speaker-font);
+      }
 
-  .message.user .message-copy {
-    text-align: right;
-  }
+      .message.user .message-copy {
+        text-align: right;
+      }
 
-  .speaker-name {
-    margin-bottom: 5px;
+      .speaker-name {
+        margin-bottom: 5px;
 
-    color: var(--speaker-accent);
+        color: var(--speaker-accent);
 
-    font-family: "Inter Tight", Inter, ui-sans-serif, system-ui, sans-serif;
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0;
-    line-height: 1.2;
-  }
+        font-family:
+          "Inter Tight",
+          Inter,
+          ui-sans-serif,
+          system-ui,
+          sans-serif;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0;
+        line-height: 1.2;
+      }
 
-  .message-body {
-    padding-left: 12px;
-    white-space: pre-wrap;
+      .message-body {
+        padding-left: 12px;
+        white-space: pre-wrap;
 
-    border-left: 2px solid color-mix(in srgb, var(--speaker-accent) 85%, transparent);
+        border-left: 2px solid color-mix(in srgb, var(--speaker-accent) 85%, transparent);
 
-    color: var(--color-text-primary);
-    font-size: 1rem;
-    line-height: 1.25;
-  }
+        color: var(--color-text-primary);
+        font-size: 1rem;
+        line-height: 1.25;
+      }
 
-  .message-markup,
-  .markup-paragraph,
-  .markup-quote,
-  .markup-list {
-    margin: 0;
-  }
+      .message-markup,
+      .markup-paragraph,
+      .markup-quote,
+      .markup-list {
+        margin: 0;
+      }
 
-  .message-markup > :not(:first-child) {
-    margin-block-start: 0.65em;
-  }
+      .message-markup > :not(:first-child) {
+        margin-block-start: 0.65em;
+      }
 
-  .markup-heading {
-    font-weight: 700;
-    line-height: 1.25;
-  }
+      .markup-heading {
+        font-weight: 700;
+        line-height: 1.25;
+      }
 
-  .markup-heading-1 {
-    font-size: 1.2em;
-  }
+      .markup-heading-1 {
+        font-size: 1.2em;
+      }
 
-  .markup-heading-2 {
-    font-size: 1.1em;
-  }
+      .markup-heading-2 {
+        font-size: 1.1em;
+      }
 
-  .markup-heading-3 {
-    font-size: 1.02em;
-  }
+      .markup-heading-3 {
+        font-size: 1.02em;
+      }
 
-  .markup-quote {
-    padding-inline-start: 0.75em;
-    border-inline-start: 0.18em solid color-mix(in srgb, currentColor 45%, transparent);
-    opacity: 0.9;
-  }
+      .markup-quote {
+        padding-inline-start: 0.75em;
+        border-inline-start: 0.18em solid color-mix(in srgb, currentColor 45%, transparent);
+        opacity: 0.9;
+      }
 
-  .markup-list {
-    padding-inline-start: 1.4em;
-  }
+      .markup-list {
+        padding-inline-start: 1.4em;
+      }
 
-  ul.markup-list {
-    list-style-type: disc;
-  }
+      ul.markup-list {
+        list-style-type: disc;
+      }
 
-  ol.markup-list {
-    list-style-type: decimal;
-  }
+      ol.markup-list {
+        list-style-type: decimal;
+      }
 
-  .markup-italic {
-    font-style: italic;
-  }
+      .markup-italic {
+        font-style: italic;
+      }
 
-  .markup-bold {
-    font-weight: 700;
-  }
+      .markup-bold {
+        font-weight: 700;
+      }
 
-  .markup-strikethrough {
-    text-decoration-line: line-through;
-  }
+      .markup-strikethrough {
+        text-decoration-line: line-through;
+      }
 
-  .markup-underline {
-    text-decoration-line: underline;
-  }
+      .markup-underline {
+        text-decoration-line: underline;
+      }
 
-  .markup-strikethrough.markup-underline {
-    text-decoration-line: underline line-through;
-  }
+      .markup-strikethrough.markup-underline {
+        text-decoration-line: underline line-through;
+      }
 
-  .markup-code {
-    padding: 0.08em 0.28em;
-    border-radius: 0.28em;
-    background: color-mix(in srgb, currentColor 10%, transparent);
-    font-family: ui-monospace, "DejaVu Sans Mono", Consolas, monospace;
-    font-size: 0.92em;
-  }
+      .markup-code {
+        padding: 0.08em 0.28em;
+        border-radius: 0.28em;
+        background: color-mix(in srgb, currentColor 10%, transparent);
+        font-family: ui-monospace, "DejaVu Sans Mono", Consolas, monospace;
+        font-size: 0.92em;
+      }
 
-  .markup-size-small {
-    font-size: 0.86em;
-  }
+      .markup-size-small {
+        font-size: 0.86em;
+      }
 
-  .markup-size-large {
-    font-size: 1.16em;
-  }
+      .markup-size-large {
+        font-size: 1.16em;
+      }
 
-  .markup-size-x-large {
-    font-size: 1.32em;
-  }
+      .markup-size-x-large {
+        font-size: 1.32em;
+      }
 
-  .message-markup a {
-    color: inherit;
-    text-decoration: underline;
-    text-underline-offset: 0.12em;
-  }
+      .message-markup a {
+        color: inherit;
+        text-decoration: underline;
+        text-underline-offset: 0.12em;
+      }
 
-  .message.user .message-body {
-    padding-left: 0;
-    padding-right: 12px;
+      .message.user .message-body {
+        padding-left: 0;
+        padding-right: 12px;
 
-    border-left: 0;
-    border-right: 2px solid var(--speaker-accent);
+        border-left: 0;
+        border-right: 2px solid var(--speaker-accent);
 
-    font-size: 1rem;
-  }
+        font-size: 1rem;
+      }
 
-  .session-event {
-    align-self: center;
-    max-width: min(90%, 65ch);
-    color: var(--color-text-muted);
-    font-family: "Inter Tight", Inter, ui-sans-serif, system-ui, sans-serif;
-    font-size: 0.75rem;
-    line-height: 1.25;
-    text-align: center;
-  }
+      .session-event {
+        align-self: center;
+        max-width: min(90%, 65ch);
+        color: var(--color-text-muted);
+        font-family:
+          "Inter Tight",
+          Inter,
+          ui-sans-serif,
+          system-ui,
+          sans-serif;
+        font-size: 0.75rem;
+        line-height: 1.25;
+        text-align: center;
+      }
 
-  .session-event-text {
-    display: inline-block;
-    padding: 4px 8px;
-    border: 1px solid var(--color-border-default);
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--color-surface-component) 88%, transparent);
-  }
+      .session-event-text {
+        display: inline-block;
+        padding: 4px 8px;
+        border: 1px solid var(--color-border-default);
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--color-surface-component) 88%, transparent);
+      }
 }
 
 @layer components {
-  .transcript-virtualizer {
-    position: relative;
+      .transcript-virtualizer {
+        position: relative;
 
-    flex: 0 0 auto;
-    inline-size: 100%;
-    min-block-size: 0;
-  }
+        flex: 0 0 auto;
+        inline-size: 100%;
+        min-block-size: 0;
+      }
 
-  .transcript-virtual-item {
-    display: flex;
-    flex-direction: column;
+      .transcript-virtual-item {
+        display: flex;
+        flex-direction: column;
 
-    box-sizing: border-box;
-    inset-block-start: 0;
-  }
+        box-sizing: border-box;
+        inset-block-start: 0;
+      }
+
 }
