@@ -19,7 +19,7 @@ import {
 import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
 import type {
   PlayerForegroundPresentation,
-  PlayerRuntimeTimerPresentation,
+  PlayerTimerPresentation,
   PlayerSpeakerPresentation,
   PlayerTranscriptEntryPresentation,
 } from "./model.js";
@@ -126,9 +126,9 @@ export function playerRuntimeForeground(
 export function playerRuntimeTimers(
   snapshot: RuntimeSnapshot,
   currentSessionTimeMs: number,
-): readonly PlayerRuntimeTimerPresentation[] {
+): readonly PlayerTimerPresentation[] {
   const now = Math.max(snapshot.observedSessionTimeMs, currentSessionTimeMs);
-  const timers: Array<PlayerRuntimeTimerPresentation & { readonly actionId: number }> = [];
+  const timers: Array<PlayerTimerPresentation & { readonly actionId: number }> = [];
   const delays = [
     snapshot.foregroundAction,
     ...snapshot.callFrames.map((frame) => frame.timerInterruption?.suspendedAction ?? null),
