@@ -124,7 +124,7 @@ function validActiveActionCompletionCapacity(snapshot: Record<string, unknown>):
   const backgroundActions = Array.isArray(snapshot.backgroundActions)
     ? snapshot.backgroundActions
     : [];
-  const actions = [snapshot.foregroundAction, ...backgroundActions];
+  const actions = [snapshot.foregroundAction, ...backgroundActions, ...suspendedActions(snapshot)];
   const requiredCompletionEvents = actions.reduce(
     (count, action) => count + (isPlainRecord(action) ? requiredActionCompletionEvents(action) : 0),
     0,
@@ -329,6 +329,20 @@ function awaitsTimerInterrupt(snapshot: Record<string, unknown>): boolean {
     snapshot.pendingTimerHandlers.length > 0 &&
     Array.isArray(snapshot.callFrames) &&
     !snapshot.callFrames.some((frame) => isPlainRecord(frame) && frame.timerInterruption !== null)
+  );
+}
+
+/**
+ * Due-work processing pauses after queuing an expiry block that can interrupt, so later-due work may stay unsettled
+ * while that block is queued or running.
+ */
+export function dueWorkAwaitsQueuedBlock(snapshot: Record<string, unknown>): boolean {
+  return (
+    (Array.isArray(snapshot.pendingTimerHandlers) && snapshot.pendingTimerHandlers.length > 0) ||
+    (Array.isArray(snapshot.callFrames) &&
+      snapshot.callFrames.some(
+        (frame) => isPlainRecord(frame) && isPlainRecord(frame.timerInterruption),
+      ))
   );
 }
 
@@ -609,7 +623,7 @@ function validPacingGateTiming(
     validSessionTime(action.deadlineMs) &&
     validSessionTime(snapshot.currentSessionTimeMs) &&
     action.createdAtMs <= snapshot.currentSessionTimeMs &&
-    action.deadlineMs > snapshot.currentSessionTimeMs
+    (action.deadlineMs > snapshot.currentSessionTimeMs || dueWorkAwaitsQueuedBlock(snapshot))
   );
 }
 

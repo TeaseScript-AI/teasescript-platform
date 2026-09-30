@@ -1,5 +1,6 @@
 import type { InstructionPlan } from "../plan/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
+import { dueWorkAwaitsQueuedBlock } from "./action-validation.js";
 
 /** Restore validation for asynchronous timers, their handles, and queued expiry blocks. */
 
@@ -54,7 +55,7 @@ export function validTimerAction(
     action.createdAtMs > now ||
     !nonNegativeSafeInteger(action.owningInstruction) ||
     !isPlainRecord(action.timer) ||
-    !validTimerRecord(action.timer, true, now, plan)
+    !validTimerRecord(action.timer, true, now, plan, dueWorkAwaitsQueuedBlock(snapshot))
   ) {
     return false;
   }
@@ -75,6 +76,7 @@ export function validTimerRecord(
   active: boolean,
   now: unknown,
   plan: InstructionPlan | undefined,
+  allowDue = false,
 ): boolean {
   if (
     !hasExactKeys(timer, TIMER_KEYS) ||
@@ -106,7 +108,7 @@ export function validTimerRecord(
         timer.remainingMs === null &&
         isValidSessionTime(timer.deadlineMs) &&
         isValidSessionTime(timer.runningSinceMs) &&
-        timer.deadlineMs > now &&
+        (timer.deadlineMs > now || allowDue) &&
         timer.runningSinceMs <= now
       );
     case "paused":
@@ -189,6 +191,7 @@ export function validateTimerState(
       !isPlainRecord(invocation) ||
       !hasExactKeys(invocation, ["timerId", "handlerFunctionId", "dueAtMs", "count"]) ||
       record === undefined ||
+      !positiveSafeInteger(invocation.handlerFunctionId) ||
       invocation.handlerFunctionId !== record.handlerFunctionId ||
       !positiveSafeInteger(invocation.count) ||
       !isValidSessionTime(invocation.dueAtMs) ||
@@ -201,6 +204,17 @@ export function validateTimerState(
       continue;
     }
     previousDue = invocation.dueAtMs;
+  }
+  if (Array.isArray(value.callFrames)) {
+    for (const frame of value.callFrames) {
+      if (!isPlainRecord(frame) || !isPlainRecord(frame.timerInterruption)) continue;
+      const record = positiveSafeInteger(frame.timerInterruption.timerId)
+        ? records.get(frame.timerInterruption.timerId)
+        : undefined;
+      if (record === undefined || record.handlerFunctionId !== frame.functionId) {
+        errors.push("Runtime timer expiry-block frame does not belong to its timer.");
+      }
+    }
   }
   if ((value.status === "halted" || value.status === "ready") && queue.length > 0) {
     errors.push("Runtime pending timer expiry blocks require an active session.");

@@ -14,7 +14,8 @@ import type { ActionCompletedEvent, InterpreterEvent } from "../events.js";
 import { isValidSessionTime } from "../actions/delay.js";
 import type { PendingActionOperationResult, TimeObservationOutcome } from "./model.js";
 import { settleBackgroundPacingGate } from "./pacing-gate.js";
-import { expireTimerAction, timerSpan } from "./timer-lifecycle.js";
+import { skipSilentRounds } from "../timers.js";
+import { expireTimerAction, timerHandlerDispatchable, timerSpan } from "./timer-lifecycle.js";
 import { terminalContinuationHandoffFor } from "./terminal-continuation.js";
 import { captureExecutableData, copySpan, pendingResult, takeSequence } from "./support.js";
 
@@ -33,39 +34,49 @@ export function observeTime(
   const effectiveNow = Math.max(current.currentSessionTimeMs, suppliedNowMs);
   current.currentSessionTimeMs = effectiveNow;
   const events: InterpreterEvent[] = [];
-  let completion: RuntimeActionSettlementSnapshot | null = null;
-  // Process the globally earliest due work first, so repeat draws and queued expiry blocks follow scene time.
-  for (let due = nextDueWork(current); due !== null; due = nextDueWork(current)) {
-    if (due.kind === "timer") {
-      expireTimerAction(
-        current,
-        due.action,
-        due.deadlineMs,
-        timerSpan(captured.plan, due.action.owningInstruction),
-        events,
-      );
-    } else if (due.kind === "suspended") {
-      settleSuspendedDelay(captured.plan, current, due.frame, due.action, events);
-    } else if (
-      due.action.kind === "chatPacingGate" &&
-      current.backgroundActions.includes(due.action)
-    ) {
-      completion = settleBackgroundPacingGate(
-        captured.plan,
-        current,
-        due.action,
-        "completed",
-        events,
-      );
-    } else {
-      completion = settleForegroundTimedAction(captured.plan, current, due.action, events);
-    }
-  }
+  const completion = processDueWork(captured.plan, current, events);
   return pendingResult(current, events, {
     kind: "observed",
     currentSessionTimeMs: current.currentSessionTimeMs,
     completion,
   });
+}
+
+/**
+ * Settles due work at the persisted scene time in `(deadline, action ID)` order. Processing pauses after a round
+ * queues an expiry block that can interrupt now: later due work waits until that block has run, exactly as in a
+ * Player that observed every deadline on time. A block's return resumes processing.
+ */
+export function processDueWork(
+  plan: InstructionPlan,
+  current: RuntimeSnapshot,
+  events: InterpreterEvent[],
+): RuntimeActionSettlementSnapshot | null {
+  let completion: RuntimeActionSettlementSnapshot | null = null;
+  for (let due = nextDueWork(current); due !== null; due = nextDueWork(current)) {
+    if (due.kind === "timer") {
+      skipSilentRounds(due.action.timer, current.currentSessionTimeMs);
+      const queued = due.action.timer.handlerFunctionId !== null;
+      expireTimerAction(
+        current,
+        due.action,
+        due.action.timer.deadlineMs!,
+        timerSpan(plan, due.action.owningInstruction),
+        events,
+      );
+      if (queued && timerHandlerDispatchable(current)) break;
+    } else if (due.kind === "suspended") {
+      settleSuspendedDelay(plan, current, due.frame, due.action, events);
+    } else if (
+      due.action.kind === "chatPacingGate" &&
+      current.backgroundActions.includes(due.action)
+    ) {
+      completion = settleBackgroundPacingGate(plan, current, due.action, "completed", events);
+    } else {
+      completion = settleForegroundTimedAction(plan, current, due.action, events);
+    }
+  }
+  return completion;
 }
 
 type DueWork =

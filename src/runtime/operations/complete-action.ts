@@ -116,8 +116,15 @@ export function completeAction(
     });
   }
   const observed = observeTime(captured.plan, current, effectiveNow);
-  if (observed.outcome.kind !== "observed" || observed.outcome.completion === null) {
+  if (observed.outcome.kind !== "observed") {
     throw new RuntimeDataError("TSR101", "Due delay completion did not settle.");
+  }
+  if (
+    observed.snapshot.foregroundAction?.actionId === actionId &&
+    observed.snapshot.pendingTimerHandlers.length > 0
+  ) {
+    // An earlier-due expiry block interrupts the delay first; the observation itself is kept.
+    return Object.freeze({ ...observed, outcome: { kind: "suspendedAction" as const, actionId } });
   }
   const requestedCompletion = observed.events.find(
     (event): event is ActionCompletedEvent & { settlement: RuntimeActionSettlementSnapshot } =>

@@ -1,35 +1,17 @@
 import type { InstructionPlan } from "../../plan/model.js";
 import type { InterpreterEvent } from "../events.js";
 import type { RuntimeCallFrameSnapshot, RuntimeSnapshot } from "../state.js";
-import { settleForegroundTimedAction } from "./observe-time.js";
+import { processDueWork } from "./observe-time.js";
+import { timerHandlerDispatchable } from "./timer-lifecycle.js";
+
+export { timerHandlerDispatchable };
 import { settleBackgroundPacingGate } from "./pacing-gate.js";
 import { assertCounterCanAdvance, copySpan } from "./support.js";
 
 /**
- * Whether a queued expiry block may interrupt now. Blocks never nest, and they wait for single-instruction commit
- * windows (a released prepared `say`, an interaction result handoff, or a settled terminal action) and for a
- * foreground pacing gate, whose prepared output owns the one Standard chat target.
- */
-export function timerHandlerDispatchable(snapshot: RuntimeSnapshot): boolean {
-  if (snapshot.pendingTimerHandlers.length === 0) return false;
-  if (snapshot.status !== "ready" && snapshot.status !== "running" && snapshot.status !== "waiting")
-    return false;
-  if (snapshot.callFrames.some((frame) => frame.timerInterruption !== null)) return false;
-  // The block needs its own frame; at the call-depth limit it waits until the path returns.
-  if (snapshot.callFrames.length >= snapshot.maxCallDepth) return false;
-  if (
-    snapshot.preparedSayOutput !== null ||
-    snapshot.interactionResultHandoff !== null ||
-    snapshot.terminalContinuationHandoff !== null
-  )
-    return false;
-  const foreground = snapshot.foregroundAction;
-  return foreground === null || foreground.kind === "delay" || foreground.kind === "interaction";
-}
-
-/**
  * Starts the next queued expiry block as an interrupt frame. The block sees top-level names and its own locals;
- * the interrupted foreground action becomes inert inside the frame. Emits no event and runs no instruction.
+ * the interrupted foreground action becomes inert inside the frame. Emits no event and runs no instruction; due work that became due meanwhile stays unsettled until the block
+ * returns or a later observation arrives while it waits.
  */
 export function startTimerHandler(plan: InstructionPlan, snapshot: RuntimeSnapshot): void {
   const invocation = snapshot.pendingTimerHandlers[0]!;
@@ -98,6 +80,17 @@ export function returnFromTimerHandler(
     ...frame.callerTemporaries.map((temporary) => ({ ...temporary })),
   );
   snapshot.nextInstruction = frame.returnInstruction;
+  restoreSuspendedAction(plan, snapshot, frame, events);
+  // Due work that waited behind this block continues in scene-time order, including a restored overdue delay.
+  processDueWork(plan, snapshot, events);
+}
+
+function restoreSuspendedAction(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  frame: RuntimeCallFrameSnapshot,
+  events: InterpreterEvent[],
+): void {
   const suspended = frame.timerInterruption!.suspendedAction;
   if (suspended === null) return;
   if (suspended.kind === "interaction") {
@@ -108,13 +101,4 @@ export function returnFromTimerHandler(
   }
   snapshot.foregroundAction = suspended;
   snapshot.status = "waiting";
-  // A delay that was already due when interrupted and saw no observation during the block settles now, unless
-  // another earlier-due block is queued: that block interrupts it again first.
-  if (
-    suspended.kind === "delay" &&
-    suspended.deadlineMs <= snapshot.currentSessionTimeMs &&
-    snapshot.pendingTimerHandlers.length === 0
-  ) {
-    settleForegroundTimedAction(plan, snapshot, suspended, events);
-  }
 }

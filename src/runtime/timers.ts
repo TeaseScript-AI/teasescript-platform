@@ -23,7 +23,7 @@ export interface RuntimeTimerSnapshot {
   readonly persist: boolean;
   readonly handlerFunctionId: number | null;
   /** Present only for a repeating range without a `repeatDuration` override. */
-  readonly range: RuntimeTimerRangeSnapshot | null;
+  range: RuntimeTimerRangeSnapshot | null;
   /** Duration of later rounds for a repeating fixed duration or after `repeatDuration` assignment. */
   repeatDurationMs: number | null;
   /** Total length of the current round, used for presentation progress. */
@@ -118,6 +118,8 @@ export function setTimerRepeatDuration(
     return settledWarning(timer, "repeatDuration");
   }
   timer.repeatDurationMs = durationMs;
+  // An explicit later-round duration replaces a repeating range's redraw.
+  timer.range = null;
   return null;
 }
 
@@ -166,6 +168,32 @@ export function expireTimerRound(
   } else {
     timer.remainingMs = nextMs;
   }
+}
+
+/**
+ * A fixed repeating timer without an expiry block produces nothing observable per round, so a late observation skips
+ * whole rounds arithmetically, leaving the last due round for ordinary expiry.
+ */
+export function skipSilentRounds(timer: RuntimeTimerSnapshot, nowMs: number): void {
+  const roundMs = timer.repeatDurationMs;
+  if (
+    timer.state !== "running" ||
+    !timer.repeat ||
+    timer.handlerFunctionId !== null ||
+    timer.range !== null ||
+    roundMs === null ||
+    timer.deadlineMs === null
+  ) {
+    return;
+  }
+  const skipped = Math.floor((nowMs - timer.deadlineMs) / roundMs);
+  if (!(skipped >= 1) || !Number.isSafeInteger(skipped)) return;
+  // The current round and `skipped - 1` further rounds complete; the next one is still due at or before `nowMs`.
+  const nextStartMs = timer.deadlineMs + (skipped - 1) * roundMs;
+  timer.elapsedMs += nextStartMs - timer.runningSinceMs!;
+  timer.runningSinceMs = nextStartMs;
+  timer.roundDurationMs = roundMs;
+  timer.deadlineMs = nextStartMs + roundMs;
 }
 
 /** Handle property reads; `undefined` means the property does not exist. */

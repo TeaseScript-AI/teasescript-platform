@@ -600,3 +600,60 @@ test("malformed restored timer, handle, queue, and interrupt data is rejected", 
     );
   }
 });
+
+test("runtime review regressions stay checkpointable and ordered", () => {
+  const override = new Session(
+    "let t = timer(duration: 1..=3, async: true, repeat: true)\nt.repeatDuration = 2 s\nwait 5 s",
+  );
+  assert.equal(override.timers()[0]!.timer.range, null);
+  override.at(5_000);
+
+  const rootEnd = new Session(
+    'timer async 1 s {\n  timer async 0 ms { say "nested" }\n  wait 1 s\n}\nwait 2 s',
+  );
+  rootEnd.at(1_000).at(2_000);
+  assert.deepEqual(rootEnd.said(), ["nested"]);
+  assert.equal(rootEnd.snapshot.status, "halted");
+
+  const depthPlan = plan(
+    'function f {\n  wait 2 s\n  return 1\n}\ntimer async 1 s { say "interrupt" }\nlet x = f()\nsay "x ${x}"',
+  );
+  let depth = run(
+    depthPlan,
+    createImmediatePacingRuntimeSnapshot(depthPlan, { maxCallDepth: 1 }),
+  ).snapshot;
+  depth = run(depthPlan, observeTime(depthPlan, depth, 3_000).snapshot).snapshot;
+  depth = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(depthPlan, depth))).snapshot;
+  assert.equal(depth.status, "halted");
+
+  const huge = new Session(
+    "let t = timer async 1 s\nt.remaining = 10000000000000000000 h\nwait 1 s",
+  );
+  assert.equal(huge.snapshot.failure?.code, "TSR050");
+
+  const deferred = new Session('timer async 1 s { say "interrupt" }\nwait 2 s');
+  const delay = deferred.snapshot.foregroundAction!;
+  const completion = completeAction(deferred.plan, deferred.snapshot, {
+    actionId: delay.actionId,
+    actionKind: "delay",
+    payload: { kind: "time", currentSessionTimeMs: 2_000 },
+  });
+  assert.equal(completion.outcome.kind, "suspendedAction");
+
+  const stopped = new Session(
+    'let second = timer async 2 s { say "second" }\nlet first = timer async 1 s { second.stop() }\nwait 3 s',
+  );
+  stopped.at(3_000);
+  assert.deepEqual(stopped.said(), [], "a block that ran first can still stop a later timer");
+});
+
+test("a late observation skips silent fixed repeat rounds arithmetically", () => {
+  const source = "let t = timer(duration: 1 ms, async: true, repeat: true)\nwait 10000 s\nexit";
+  const late = new Session(source);
+  const started = performance.now();
+  late.at(3_600_000);
+  assert.ok(performance.now() - started < 500, "catch-up must not process every silent round");
+  const timer = late.timers()[0]!.timer;
+  assert.equal(timer.elapsedMs, 3_600_000);
+  assert.equal(timer.deadlineMs, 3_600_001);
+});

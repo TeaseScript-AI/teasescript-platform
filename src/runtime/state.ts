@@ -1531,7 +1531,14 @@ function validateCallFrames(
     errors.push("Runtime callFrames must be an array.");
     return ids;
   }
-  if (nonNegativeSafeInteger(maxCallDepth) && value.length > maxCallDepth) {
+  // An expiry block's interrupt frame is not an author call, so it may exceed the call-depth limit by one.
+  const interruptFrames = value.filter(
+    (frame) => isPlainRecord(frame) && isPlainRecord(frame.timerInterruption),
+  ).length;
+  if (
+    nonNegativeSafeInteger(maxCallDepth) &&
+    value.length > maxCallDepth + Math.min(1, interruptFrames)
+  ) {
     errors.push("Runtime call stack exceeds maxCallDepth.");
   }
   const frameCount = Array.isArray(frames) ? frames.length : 0;
@@ -2352,7 +2359,10 @@ function validateRootEndTransition(
     value.foregroundAction === null &&
     value.failure === null &&
     value.contextualSpeaker === null;
-  if (!common || value.terminalContinuationHandoff === null) {
+  // Queued expiry blocks run before the script ends, so a block may return to the root end without a handoff.
+  const awaitsQueuedBlock =
+    Array.isArray(value.pendingTimerHandlers) && value.pendingTimerHandlers.length > 0;
+  if (!common || (value.terminalContinuationHandoff === null && !awaitsQueuedBlock)) {
     errors.push(
       "Running root-end state is not a canonical settled terminal foreground transition.",
     );

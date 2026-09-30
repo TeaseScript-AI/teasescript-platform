@@ -16,6 +16,26 @@ import {
 } from "../timers.js";
 import { assertEventSequenceCapacity, copySpan, takeSequence } from "./support.js";
 
+/**
+ * Whether a queued expiry block may interrupt now. Blocks never nest, and they wait for single-instruction commit
+ * windows (a released prepared `say`, an interaction result handoff, or a settled terminal action) and for a
+ * foreground pacing gate, whose prepared output owns the one Standard chat target.
+ */
+export function timerHandlerDispatchable(snapshot: RuntimeSnapshot): boolean {
+  if (snapshot.pendingTimerHandlers.length === 0) return false;
+  if (snapshot.status !== "ready" && snapshot.status !== "running" && snapshot.status !== "waiting")
+    return false;
+  if (snapshot.callFrames.some((frame) => frame.timerInterruption !== null)) return false;
+  if (
+    snapshot.preparedSayOutput !== null ||
+    snapshot.interactionResultHandoff !== null ||
+    snapshot.terminalContinuationHandoff !== null
+  )
+    return false;
+  const foreground = snapshot.foregroundAction;
+  return foreground === null || foreground.kind === "delay" || foreground.kind === "interaction";
+}
+
 /** Finds the active background action of a handle's timer, if it is still running or paused. */
 export function activeTimerAction(
   snapshot: RuntimeSnapshot,

@@ -1146,6 +1146,9 @@ export class Evaluator {
       if (action !== undefined) stopTimerAction(this.snapshot, action, span, this.events);
       return null;
     }
+    if (name === "resume" && timer.state === "paused") {
+      assertRepresentableRound(now, timer.remainingMs!, span);
+    }
     const warning = name === "pause" ? pauseTimer(timer, now) : resumeTimer(timer, now);
     if (warning !== null) this.#warn(warning.code, warning.message, span);
     return null;
@@ -1168,6 +1171,9 @@ export class Evaluator {
         throw fault("TSR050", `Timer ${name} must be assigned a duration such as 10 s.`, span);
       }
       if (name === "remaining") {
+        if (timer.state === "running" || timer.state === "paused") {
+          assertRepresentableRound(now, Math.max(0, value.milliseconds), span);
+        }
         warning = setTimerRemaining(timer, value.milliseconds, now);
       } else {
         if (
@@ -1402,6 +1408,18 @@ export class Evaluator {
       return fault(code, error.message, span);
     }
     throw error;
+  }
+}
+
+/** A running round must end at a supported session time strictly after a positive remaining time starts. */
+function assertRepresentableRound(nowMs: number, remainingMs: number, span: SourceSpan): void {
+  const deadlineMs = nowMs + remainingMs;
+  if (!isValidSessionTime(deadlineMs) || (remainingMs > 0 && deadlineMs <= nowMs)) {
+    throw fault(
+      "TSR050",
+      "Timer remaining time is outside the supported session-time range.",
+      span,
+    );
   }
 }
 

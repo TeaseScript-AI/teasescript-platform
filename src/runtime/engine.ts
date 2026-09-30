@@ -1741,6 +1741,8 @@ function failSnapshot(
 ): void {
   const failureSequence = takeSequence(snapshot);
   snapshot.status = "failed";
+  // A failed session is terminal; no foreground action stays pending.
+  snapshot.foregroundAction = null;
   snapshot.failure = { code: failure.code, message: failure.message, span: copySpan(failure.span) };
   events.push(
     Object.freeze({
