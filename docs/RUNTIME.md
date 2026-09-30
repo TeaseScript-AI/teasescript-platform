@@ -510,8 +510,9 @@ with a count. A handler-free fixed repeating timer skips silent rounds arithmeti
 observation.
 
 An observation records `observedSessionTimeMs`; `currentSessionTimeMs` is the scene time at which execution stands.
-Due work settles one deadline at a time, advancing scene time to each. While an expiry block can execute, catch-up
-pauses with scene time at the moment its work became due: the block starts at its expiry's deadline and continues
+Due work settles one deadline at a time, advancing scene time to each. While an expiry block can execute, now or
+right after the current single-instruction commit window, catch-up pauses with scene time at the moment its work
+became due: the block starts at its expiry's deadline and continues
 after its own waits and pacing at their deadlines, and catch-up continues toward the observed time once the block
 returns or waits. Later due work, including other timers, the foreground delay, and pacing gates, therefore stays
 unsettled until then, however late or often the Player observes. The main path still continues at the observed

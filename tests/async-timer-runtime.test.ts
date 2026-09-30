@@ -805,3 +805,41 @@ test("catch-up keeps observation-time settlements and rejects an unexplained obs
   const json = serializeCheckpoint(createCheckpoint(waiting.plan, waiting.snapshot));
   assertForgedRejected(json, ["snapshot", "observedSessionTimeMs"], 5_000);
 });
+
+test("catch-up holds for a queued block behind a commit window and keeps observation-time timer settlements", () => {
+  const source =
+    'let t = timer async 3 { say "too late", 0 }\ntimer async 1 { t.stop() }\nsay "first", 2\nsay "second", 1\nlet name = askText "Hold"';
+  const onTime = new Session(source, { pacing: true });
+  for (const nowMs of [1_000, 2_000, 3_000, 5_000]) onTime.at(nowMs);
+  const late = new Session(source, { pacing: true }).at(5_000);
+  assert.deepEqual(onTime.said(), ["first", "second"]);
+  assert.deepEqual(late.said(), onTime.said());
+
+  const asking = new Session(
+    'timer async 1 { say "handler" }\nlet name = askText "Name?"\nsay name',
+  );
+  const observed = observeTime(asking.plan, asking.snapshot, 5_000).snapshot;
+  const completed = completeAction(asking.plan, observed, {
+    actionId: observed.foregroundAction!.actionId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: { kind: "submittedText", submittedText: "ok" },
+  });
+  assert.equal(completed.outcome.kind, "completed");
+  const restored = deserializeCheckpoint(
+    serializeCheckpoint(createCheckpoint(asking.plan, completed.snapshot)),
+  ).snapshot;
+  assert.deepEqual(
+    run(asking.plan, restored).events.flatMap((event) =>
+      event.kind === "say" ? [event.text] : [],
+    ),
+    ["handler", "ok"],
+  );
+
+  const silent = new Session("timer async 1\nwait 10").at(5_000);
+  const settled = silent.events.find(
+    (event) => event.kind === "actionCompleted" && event.settlement.actionKind === "timer",
+  );
+  assert.ok(settled?.kind === "actionCompleted" && settled.settlement.actionKind === "timer");
+  assert.equal(settled.settlement.completedAtMs, 5_000);
+});

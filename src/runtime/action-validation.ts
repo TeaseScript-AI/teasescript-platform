@@ -333,29 +333,24 @@ export function validForegroundActionState(
 }
 
 /**
- * Mirrors the engine's pause of catch-up toward the observed time: a queued expiry block can interrupt now, or the
- * running block can continue. Only then may scene time stand behind the observed time, and timed work due exactly now
- * wait for that block.
+ * Mirrors the engine's pause of catch-up toward the observed time: the running expiry block can continue, or a queued
+ * block can interrupt now or after the current commit window. Only then may scene time stand behind the observed time,
+ * and timed work due exactly now wait for that block.
  */
 export function timerBlockHoldsCatchUp(snapshot: Record<string, unknown>): boolean {
   if (!Array.isArray(snapshot.callFrames)) return false;
+  const executable =
+    snapshot.status === "ready" || snapshot.status === "running" || snapshot.status === "waiting";
   const blockRunning = snapshot.callFrames.some(
     (frame) => isPlainRecord(frame) && isPlainRecord(frame.timerInterruption),
   );
-  if (blockRunning) return snapshot.status === "running" || snapshot.status === "ready";
+  if (blockRunning) return executable && snapshot.status !== "waiting";
   const foreground = snapshot.foregroundAction;
   return (
+    executable &&
     Array.isArray(snapshot.pendingTimerHandlers) &&
     snapshot.pendingTimerHandlers.length > 0 &&
-    (snapshot.status === "ready" ||
-      snapshot.status === "running" ||
-      snapshot.status === "waiting") &&
-    snapshot.preparedSayOutput === null &&
-    snapshot.interactionResultHandoff === null &&
-    snapshot.terminalContinuationHandoff === null &&
-    (foreground === null ||
-      (isPlainRecord(foreground) &&
-        (foreground.kind === "delay" || foreground.kind === "interaction")))
+    !(isPlainRecord(foreground) && foreground.kind === "chatPacingGate")
   );
 }
 

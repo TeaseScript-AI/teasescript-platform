@@ -37,14 +37,21 @@ export function timerHandlerDispatchable(snapshot: RuntimeSnapshot): boolean {
 }
 
 /**
- * Catch-up toward the observed time pauses while an expiry block can execute: a queued block can interrupt, or the
- * running block itself can continue. Scene time then stays at the moment that block's work became due.
+ * Catch-up toward the observed time pauses while an expiry block can execute: the running block can continue, or a
+ * queued block can interrupt now or right after the current single-instruction commit window (released prepared
+ * `say` output, an interaction result, or a settled terminal action). Scene time then stays at the moment that
+ * block's work became due. A foreground pacing gate holds a queued block until the gate's own deadline.
  */
 export function timerBlockHoldsCatchUp(snapshot: RuntimeSnapshot): boolean {
-  if (timerHandlerDispatchable(snapshot)) return true;
+  const executable =
+    snapshot.status === "ready" || snapshot.status === "running" || snapshot.status === "waiting";
+  if (snapshot.callFrames.some((frame) => frame.timerInterruption !== null)) {
+    return executable && snapshot.status !== "waiting";
+  }
   return (
-    (snapshot.status === "running" || snapshot.status === "ready") &&
-    snapshot.callFrames.some((frame) => frame.timerInterruption !== null)
+    executable &&
+    snapshot.pendingTimerHandlers.length > 0 &&
+    snapshot.foregroundAction?.kind !== "chatPacingGate"
   );
 }
 
@@ -105,7 +112,7 @@ function settleTimerAction(
     owningInstruction: action.owningInstruction,
     requestEventSequence: action.requestEventSequence,
     completionEventSequence,
-    completedAtMs: snapshot.currentSessionTimeMs,
+    completedAtMs: settlementTimeMs(snapshot),
   });
   events.push(
     Object.freeze({
