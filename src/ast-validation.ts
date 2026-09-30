@@ -4,6 +4,10 @@ import { createCapturedArray } from "./external-data-capture.js";
 import { DURATION_UNIT_MILLISECONDS } from "./duration.js";
 import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
 
+const UNIT_MILLISECONDS: ReadonlyMap<string, number> = new Map(
+  Object.entries(DURATION_UNIT_MILLISECONDS),
+);
+
 const FALLBACK_SPAN = createSourceSpan(
   createSourcePosition(0, 0, 0),
   createSourcePosition(0, 0, 0),
@@ -54,11 +58,7 @@ export function findNonFiniteNumericLiteralDiagnosticsInStableProgram(
       typeof node.amount.value === "number" &&
       Number.isFinite(node.amount.value) &&
       typeof node.unit === "string" &&
-      Object.hasOwn(DURATION_UNIT_MILLISECONDS, node.unit) &&
-      !Number.isFinite(
-        node.amount.value *
-          DURATION_UNIT_MILLISECONDS[node.unit as keyof typeof DURATION_UNIT_MILLISECONDS],
-      )
+      !Number.isFinite(node.amount.value * (UNIT_MILLISECONDS.get(node.unit) ?? 1))
     ) {
       diagnostics.push(
         createDiagnostic(

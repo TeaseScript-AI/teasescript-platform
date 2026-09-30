@@ -326,7 +326,8 @@ class SemanticValidator {
     name: Identifier,
     scope: SemanticScope,
     use: "read" | "assign" | "call",
-    operand?: Expression | readonly CallArgument[],
+    value?: Expression,
+    callArguments?: readonly CallArgument[],
   ): void {
     object = unwrapParentheses(object);
     if (object.kind !== "identifier" || scope.resolve(object.name)?.timerHandle !== true) return;
@@ -339,21 +340,11 @@ class SemanticValidator {
     if (known.has(name.name)) {
       const invalidOperand =
         use === "call"
-          ? Array.isArray(operand) && operand.length > 0
+          ? callArguments !== undefined && callArguments.length > 0
             ? `Timer ${name.name}() takes no arguments.`
             : null
-          : use === "assign" && operand !== undefined && !Array.isArray(operand)
-            ? name.name === "display"
-              ? isDefinitelyNonText(operand as Expression) ||
-                ((text) => text !== undefined && !TIMER_DISPLAYS.has(text))(
-                  staticVisibleText(operand as Expression),
-                )
-                ? 'Timer display must be "visible", "mystery", or "hidden".'
-                : null
-              : literalKind(operand as Expression) !== "durationLiteral" &&
-                  isDefinitelyNonDuration(operand as Expression)
-                ? `Timer ${name.name} must be assigned a duration such as 10 s.`
-                : null
+          : use === "assign" && value !== undefined
+            ? invalidTimerAssignment(name.name, value)
             : null;
       if (invalidOperand !== null) {
         this.#report(semanticCode.invalidTimerHandleMember, invalidOperand, name.span);
@@ -838,6 +829,7 @@ class SemanticValidator {
             expression.callee.property,
             scope,
             "call",
+            undefined,
             expression.arguments,
           );
         } else {
@@ -1137,6 +1129,19 @@ function literalKind(expression: Expression): Expression["kind"] {
 function isAsyncTimer(expression: Expression): boolean {
   expression = unwrapParentheses(expression);
   return expression.kind === "timerExpression" && expression.async;
+}
+
+/** A statically evident wrong value for an assignable timer handle property. */
+function invalidTimerAssignment(name: string, value: Expression): string | null {
+  if (name === "display") {
+    const text = staticVisibleText(value);
+    return isDefinitelyNonText(value) || (text !== undefined && !TIMER_DISPLAYS.has(text))
+      ? 'Timer display must be "visible", "mystery", or "hidden".'
+      : null;
+  }
+  return literalKind(value) !== "durationLiteral" && isDefinitelyNonDuration(value)
+    ? `Timer ${name} must be assigned a duration such as 10 s.`
+    : null;
 }
 
 function isDefinitelyNonDuration(expression: Expression): boolean {

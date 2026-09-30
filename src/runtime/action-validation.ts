@@ -347,7 +347,7 @@ export function dueWorkAwaitsQueuedBlock(snapshot: Record<string, unknown>): boo
 }
 
 /** Foreground actions held by an interrupting timer expiry block. */
-export function suspendedActions(snapshot: Record<string, unknown>): Record<string, unknown>[] {
+function suspendedActions(snapshot: Record<string, unknown>): Record<string, unknown>[] {
   if (!Array.isArray(snapshot.callFrames)) return [];
   return snapshot.callFrames.flatMap((frame) =>
     isPlainRecord(frame) &&

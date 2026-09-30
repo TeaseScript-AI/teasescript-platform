@@ -71,7 +71,7 @@ export function validTimerAction(
   );
 }
 
-export function validTimerRecord(
+function validTimerRecord(
   timer: Record<string, unknown>,
   active: boolean,
   now: unknown,
@@ -221,24 +221,6 @@ export function validateTimerState(
   }
 }
 
-/** Collects the timer IDs of every handle value reachable in the given runtime values. */
-export function collectTimerHandleIds(values: readonly unknown[], output: Set<number>): void {
-  const work = [...values];
-  while (work.length > 0) {
-    const current = work.pop();
-    if (!isPlainRecord(current)) continue;
-    if (current.kind === "timerHandle" && positiveSafeInteger(current.timerId)) {
-      output.add(current.timerId);
-    } else if (current.kind === "list" && Array.isArray(current.items)) {
-      work.push(...current.items);
-    } else if (current.kind === "object" && Array.isArray(current.properties)) {
-      for (const property of current.properties) {
-        if (isPlainRecord(property)) work.push(property.value);
-      }
-    }
-  }
-}
-
 function addRecord(
   records: Map<number, Record<string, unknown>>,
   timer: Record<string, unknown>,
@@ -251,16 +233,16 @@ function addRecord(
 
 function validRange(value: unknown): boolean {
   if (value === null) return true;
+  if (!isPlainRecord(value) || !hasExactKeys(value, ["start", "end", "inclusive"])) return false;
+  const { start, end, inclusive } = value;
   return (
-    isPlainRecord(value) &&
-    hasExactKeys(value, ["start", "end", "inclusive"]) &&
-    Number.isSafeInteger(value.start) &&
-    Number.isSafeInteger(value.end) &&
-    typeof value.inclusive === "boolean" &&
-    (value.start as number) >= 1 &&
-    (value.inclusive
-      ? (value.end as number) >= (value.start as number)
-      : (value.end as number) > (value.start as number))
+    typeof start === "number" &&
+    typeof end === "number" &&
+    Number.isSafeInteger(start) &&
+    Number.isSafeInteger(end) &&
+    typeof inclusive === "boolean" &&
+    start >= 1 &&
+    (inclusive ? end >= start : end > start)
   );
 }
 

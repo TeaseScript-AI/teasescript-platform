@@ -434,10 +434,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
               suspendedAction:
                 frame.timerInterruption.suspendedAction === null
                   ? null
-                  : // EVIDENCE: invariant: cloning preserves the suspended action kind.
-                    (clonePendingAction(
-                      frame.timerInterruption.suspendedAction,
-                    ) as RuntimeTimerInterruptionSnapshot["suspendedAction"]),
+                  : cloneForegroundAction(frame.timerInterruption.suspendedAction),
             },
       callerTemporaries: frame.callerTemporaries.map(cloneTemporary),
       scopeBaseDepth: frame.scopeBaseDepth,
@@ -460,10 +457,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     currentSessionTimeMs: snapshot.currentSessionTimeMs,
     chatPacingSettings: cloneChatPacingSettings(snapshot.chatPacingSettings),
     foregroundAction:
-      snapshot.foregroundAction === null
-        ? null
-        : // EVIDENCE: invariant: cloning preserves the foreground action kind.
-          (clonePendingAction(snapshot.foregroundAction) as RuntimeForegroundActionSnapshot),
+      snapshot.foregroundAction === null ? null : cloneForegroundAction(snapshot.foregroundAction),
     backgroundActions: snapshot.backgroundActions.map(clonePendingAction),
     nextActionId: snapshot.nextActionId,
     lastSettlement:
@@ -533,6 +527,11 @@ function clonePreparedSayOutput(
     durationMs: output.durationMs,
     skippable: output.skippable,
   };
+}
+
+function cloneForegroundAction<T extends RuntimeForegroundActionSnapshot>(action: T): T {
+  // EVIDENCE: invariant: clonePendingAction returns a copy of the same action kind.
+  return clonePendingAction(action) as T;
 }
 
 function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendingActionSnapshot {
@@ -1832,7 +1831,7 @@ function validateTimerHandlerFrame(
   );
   const action = interruption.suspendedAction;
   if (action === null) return;
-  const view: Record<string, unknown> = {
+  const view = {
     ...snapshotValue,
     nextInstruction: resume,
     frames: Array.isArray(frames) ? frames.slice(0, scopeBase) : frames,

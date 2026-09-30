@@ -608,12 +608,12 @@ class Parser {
     const async = this.#checkIdentifier("async");
     if (async) this.#advance();
     let display: TimerDisplay | null = null;
-    if (
-      this.#checkIdentifier("visible") ||
-      this.#checkIdentifier("mystery") ||
-      this.#checkIdentifier("hidden")
-    ) {
-      display = this.#advance().lexeme as TimerDisplay;
+    for (const candidate of ["visible", "mystery", "hidden"] as const) {
+      if (this.#checkIdentifier(candidate)) {
+        this.#advance();
+        display = candidate;
+        break;
+      }
     }
     let duration = this.#parseExpression();
     if (duration === null) {
@@ -1136,7 +1136,13 @@ class Parser {
       this.#match(TokenKind.PlusEqual) ||
       this.#match(TokenKind.MinusEqual)
     ) {
-      const operator = this.#previous().lexeme as AssignmentStatement["operator"];
+      const operatorKind = this.#previous().kind;
+      const operator: AssignmentStatement["operator"] =
+        operatorKind === TokenKind.PlusEqual
+          ? "+="
+          : operatorKind === TokenKind.MinusEqual
+            ? "-="
+            : "=";
       this.#skipContinuationNewlines();
       const value = this.#parseRequiredExpression();
       if (value === null) {

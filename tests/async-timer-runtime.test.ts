@@ -93,6 +93,42 @@ class Session {
   }
 }
 
+type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
+type JsonPath = readonly (string | number)[];
+
+/** Returns the checkpoint JSON with the value at `path` replaced, or appended when the path ends in `push`. */
+function forged(json: string, path: JsonPath, value: Json): string {
+  // EVIDENCE: fixture: checkpoint serialization produces plain JSON data.
+  const root = JSON.parse(json) as Json;
+  let parent = root;
+  for (const key of path.slice(0, -1)) parent = child(parent, key);
+  const last = path.at(-1)!;
+  if (Array.isArray(parent)) {
+    if (last === "push") parent.push(value);
+    else if (typeof last === "number") parent[last] = value;
+    else assert.fail(`cannot index an array with ${last}`);
+  } else {
+    assert.ok(typeof parent === "object" && parent !== null && typeof last === "string");
+    parent[last] = value;
+  }
+  return JSON.stringify(root);
+}
+
+function child(value: Json, key: string | number): Json {
+  if (Array.isArray(value) && typeof key === "number") return value[key]!;
+  assert.ok(typeof value === "object" && value !== null && !Array.isArray(value));
+  assert.ok(typeof key === "string");
+  return value[key]!;
+}
+
+function assertForgedRejected(json: string, path: JsonPath, value: Json): void {
+  assert.throws(
+    () => deserializeCheckpoint(forged(json, path, value)),
+    (error: unknown) => error instanceof CheckpointError,
+    JSON.stringify(path),
+  );
+}
+
 function diagnostics(source: string): string[] {
   const result = compileSource(source);
   assert.equal(result.plan, null, `${JSON.stringify(source)} must not compile`);
@@ -554,51 +590,43 @@ test("malformed restored timer, handle, queue, and interrupt data is rejected", 
   );
   session.at(2_000);
   const json = serializeCheckpoint(createCheckpoint(session.plan, session.snapshot));
-  const mutations: Array<(snapshot: Record<string, any>) => void> = [
-    (snapshot) => (snapshot.nextTimerId = 5),
-    (snapshot) => (snapshot.settledTimers[0].state = "running"),
-    (snapshot) => (snapshot.settledTimers[0].elapsedMs = -1),
-    (snapshot) => (snapshot.frames[0].bindings[0].value = { kind: "timerHandle", timerId: 9 }),
-    (snapshot) =>
-      snapshot.pendingTimerHandlers.push({
-        timerId: 1,
-        handlerFunctionId: 1,
-        dueAtMs: 99_999,
-        count: 1,
-      }),
-    (snapshot) => (snapshot.callFrames[0].timerInterruption.suspendedAction.scopeDepth = 7),
-    (snapshot) => (snapshot.callFrames[0].destinationTemporary = 1),
-    (snapshot) => (snapshot.callFrames[0].timerInterruption = null),
+  const frame = ["snapshot", "callFrames", 0];
+  const cases: ReadonlyArray<readonly [JsonPath, Json]> = [
+    [["snapshot", "nextTimerId"], 5],
+    [["snapshot", "settledTimers", 0, "state"], "running"],
+    [["snapshot", "settledTimers", 0, "elapsedMs"], -1],
+    [["snapshot", "frames", 0, "bindings", 0, "value"], { kind: "timerHandle", timerId: 9 }],
+    [
+      ["snapshot", "pendingTimerHandlers", "push"],
+      { timerId: 1, handlerFunctionId: 1, dueAtMs: 99_999, count: 1 },
+    ],
+    [
+      ["snapshot", "pendingTimerHandlers", "push"],
+      { timerId: 1, handlerFunctionId: null, dueAtMs: 2_000, count: 1 },
+    ],
+    [[...frame, "timerInterruption", "suspendedAction", "scopeDepth"], 7],
+    [[...frame, "timerInterruption", "timerId"], 999],
+    [[...frame, "destinationTemporary"], 1],
+    [[...frame, "timerInterruption"], null],
   ];
-  for (const mutate of mutations) {
-    const candidate = JSON.parse(json);
-    mutate(candidate.snapshot);
-    assert.throws(
-      () => deserializeCheckpoint(JSON.stringify(candidate)),
-      (error: unknown) => error instanceof CheckpointError,
-      mutate.toString(),
-    );
-  }
+  for (const [path, value] of cases) assertForgedRejected(json, path, value);
 
   const running = new Session("let t = timer async 5\nwait 10");
   const runningJson = serializeCheckpoint(createCheckpoint(running.plan, running.snapshot));
-  const timerMutations: Array<(action: Record<string, any>) => void> = [
-    (action) => (action.timer.deadlineMs = 0),
-    (action) => (action.timer.state = "paused"),
-    (action) => (action.timer.display = "loud"),
-    (action) => (action.timer.handlerFunctionId = 1),
-    (action) => (action.owningInstruction = action.owningInstruction + 1),
-    (action) => (action.extra = true),
+  const timerIndex = running.snapshot.backgroundActions.findIndex(
+    (action) => action.kind === "timer",
+  );
+  const action = ["snapshot", "backgroundActions", timerIndex];
+  const owner = running.timers()[0]!.owningInstruction;
+  const timerCases: ReadonlyArray<readonly [JsonPath, Json]> = [
+    [[...action, "timer", "deadlineMs"], 0],
+    [[...action, "timer", "state"], "paused"],
+    [[...action, "timer", "display"], "loud"],
+    [[...action, "timer", "handlerFunctionId"], 1],
+    [[...action, "owningInstruction"], owner + 1],
+    [[...action, "extra"], true],
   ];
-  for (const mutate of timerMutations) {
-    const candidate = JSON.parse(runningJson);
-    mutate(candidate.snapshot.backgroundActions.find((action: any) => action.kind === "timer"));
-    assert.throws(
-      () => deserializeCheckpoint(JSON.stringify(candidate)),
-      (error: unknown) => error instanceof CheckpointError,
-      mutate.toString(),
-    );
-  }
+  for (const [path, value] of timerCases) assertForgedRejected(runningJson, path, value);
 });
 
 test("runtime review regressions stay checkpointable and ordered", () => {

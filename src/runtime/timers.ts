@@ -59,13 +59,13 @@ export interface TimerWarning {
   readonly message: string;
 }
 
-export function timerRemainingMs(timer: RuntimeTimerSnapshot, nowMs: number): number {
+function timerRemainingMs(timer: RuntimeTimerSnapshot, nowMs: number): number {
   if (timer.state === "running") return Math.max(0, timer.deadlineMs! - nowMs);
   if (timer.state === "paused") return timer.remainingMs!;
   return 0;
 }
 
-export function timerElapsedMs(timer: RuntimeTimerSnapshot, nowMs: number): number {
+function timerElapsedMs(timer: RuntimeTimerSnapshot, nowMs: number): number {
   return timer.state === "running"
     ? timer.elapsedMs + Math.max(0, Math.min(nowMs, timer.deadlineMs!) - timer.runningSinceMs!)
     : timer.elapsedMs;

@@ -194,7 +194,7 @@ function settleSuspendedDelay(
   );
 }
 
-export function settleForegroundTimedAction(
+function settleForegroundTimedAction(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   action: RuntimeDelayActionSnapshot | RuntimeChatPacingGateActionSnapshot,
@@ -227,7 +227,7 @@ export function settleForegroundTimedAction(
   return settlement;
 }
 
-export function createDelaySettlement(
+function createDelaySettlement(
   action: RuntimeDelayActionSnapshot,
   completionEventSequence: number,
   completedAtMs: number,

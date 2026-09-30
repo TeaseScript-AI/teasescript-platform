@@ -61,7 +61,7 @@ export function timerRecord(
  * Removes a finished or stopped timer from background work, retains its handle data, and publishes its
  * `actionCompleted`. Timer settlements are not retained as `lastSettlement` because no Player completion targets them.
  */
-export function settleTimerAction(
+function settleTimerAction(
   snapshot: RuntimeSnapshot,
   action: RuntimeTimerActionSnapshot,
   span: SourceSpan | PlanSourceLocation,
