@@ -9,10 +9,7 @@ export interface RuntimeOperationResult {
 }
 
 export type TimeObservationOutcome =
-  | {
-      readonly kind: "observed";
-      readonly currentSessionTimeMs: number;
-    }
+  | { readonly kind: "observed"; readonly currentSessionTimeMs: number }
   | { readonly kind: "invalidObservation"; readonly message: string };
 
 export interface PendingActionOperationResult<T> extends RuntimeOperationResult {

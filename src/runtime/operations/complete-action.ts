@@ -89,7 +89,10 @@ export function completeAction(
     });
   }
   // Host input happens at the observed time: scene time must have caught up, and a due expiry block runs first.
-  if (current.currentSessionTimeMs < current.observedSessionTimeMs || timerHandlerDispatchable(current)) {
+  if (
+    current.currentSessionTimeMs < current.observedSessionTimeMs ||
+    timerHandlerDispatchable(current)
+  ) {
     return pendingResult(current, [], { kind: "executionPending", actionId });
   }
   if (active.kind === "interaction") {
