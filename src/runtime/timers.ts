@@ -259,13 +259,15 @@ export function skipSilentRounds(
     const deadlineMs = anchoredDeadlineMs(anchorMs, index, roundMs);
     return deadlineMs < limitMs || (includeLimit && deadlineMs === limitMs);
   };
-  // The largest due round index, estimated and then settled with the exact formula.
-  let last = Math.min(
-    LAST_ANCHORED_ROUND,
-    Math.max(rounds, Math.floor((limitMs - anchorMs) / roundMs) - 1),
-  );
-  while (last > rounds && !due(last)) last -= 1;
-  while (last < LAST_ANCHORED_ROUND && due(last + 1)) last += 1;
+  // The largest due round index. Deadlines never decrease with the index, so a binary search over the exact formula
+  // finds it in bounded steps, even where many consecutive deadlines round to the same time.
+  let last = rounds;
+  let high = LAST_ANCHORED_ROUND;
+  while (last < high) {
+    const middle = last + Math.ceil((high - last) / 2);
+    if (due(middle)) last = middle;
+    else high = middle - 1;
+  }
   if (last <= rounds) return;
   timer.anchoredRounds = last;
   timer.deadlineMs = anchoredDeadlineMs(anchorMs, last, roundMs);

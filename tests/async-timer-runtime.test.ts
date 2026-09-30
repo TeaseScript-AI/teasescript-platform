@@ -52,6 +52,7 @@ class Session {
     const result = run(this.plan, this.snapshot);
     this.events.push(...result.events);
     this.snapshot = result.snapshot;
+    this.#restore();
     return this;
   }
 
@@ -1058,4 +1059,43 @@ test("re-audit regressions: skipped rounds keep tie order, termination, and rest
     (error: unknown) => error instanceof CheckpointError,
     "completed anchored rounds must have ended",
   );
+});
+
+test("second re-audit regressions: plateau skipping, failure at a due deadline, and the index limit", () => {
+  const plateau =
+    "let t = timer(duration: 1 ms, async: true, repeat: true)\nt.repeatDuration = 1e-300 ms\nwait 2 ms";
+  const started = performance.now();
+  const walked = new Session(plateau).at(1).at(2);
+  assert.ok(
+    performance.now() - started < 1_000,
+    "equal-deadline rounds are skipped in bounded steps",
+  );
+  assert.equal(walked.snapshot.status, "halted");
+
+  const failing = new Session(
+    "let t = timer(duration: 1 ms, async: true, repeat: true) { return }\nt.repeatDuration = 1e-300 ms\nwait 2 ms",
+  ).at(1);
+  assert.equal(
+    failing.snapshot.failure?.code,
+    "TSR037",
+    "handler catch-up exhausts the instruction budget",
+  );
+  const observed = observeTime(failing.plan, failing.snapshot, 5);
+  assert.equal(observed.snapshot.currentSessionTimeMs, failing.snapshot.currentSessionTimeMs);
+  assert.equal(observed.snapshot.observedSessionTimeMs, 5);
+  assert.deepEqual(observed.events, [], "a failed session settles nothing further");
+
+  // The last anchored round index ends both an on-time and a late schedule at the same point.
+  const indexLimit =
+    'let t = timer(duration: 1e-16 ms, async: true, repeat: true)\ntimer async 1 ms {\n  if t.elapsed > 0.900719925474099 ms { say "extra", 0 }\n  else { say "end", 0 }\n}\nwait 10 ms';
+  const prefix = new Session(indexLimit).at(0.9007199254740984);
+  const late = new Session(indexLimit).at(0.9007199254740984).at(1);
+  for (let guard = 0; prefix.snapshot.observedSessionTimeMs < 1; guard += 1) {
+    assert.ok(guard < 20, "the remaining rounds are few");
+    const deadline = prefix.timers()[0]?.timer.deadlineMs ?? 1;
+    prefix.at(Math.min(1, deadline));
+  }
+  assert.deepEqual(late.said(), ["end"]);
+  assert.deepEqual(prefix.said(), late.said());
+  assert.deepEqual(late.snapshot.settledTimers, prefix.snapshot.settledTimers);
 });

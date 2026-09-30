@@ -472,11 +472,13 @@ scene time at which execution stands. A time observation updates the snapshot at
 
 ```text
 snapshot.observedSessionTimeMs = max(snapshot.observedSessionTimeMs, suppliedNow)
-settle due work in (deadline, action ID) order, advancing currentSessionTimeMs toward observedSessionTimeMs
+unless the session has failed:
+  settle due work in (deadline, action ID) order, advancing currentSessionTimeMs toward observedSessionTimeMs
 ```
 
-Without timer expiry blocks both coordinates are equal after every operation; catch-up with expiry blocks is defined
-under [Timers and scene time](#timers-and-scene-time). No checkpoint may contain due-action processing performed
+Outside a failed session, and without timer expiry blocks, both coordinates are equal after every operation. A failed
+session is terminal: later observations record the observed time but settle nothing and leave scene time unchanged.
+Catch-up with expiry blocks is defined under [Timers and scene time](#timers-and-scene-time). No checkpoint may contain due-action processing performed
 against a newer time than its `currentSessionTimeMs`; a checkpoint taken while catch-up is held keeps both coordinates
 and the pending work.
 

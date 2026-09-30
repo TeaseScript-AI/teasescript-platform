@@ -37,6 +37,14 @@ export function planHasTimerHandlers(plan: InstructionPlan | undefined): boolean
   return plan === undefined || plan.functions.some((definition) => definition.timerHandler);
 }
 
+/**
+ * A deadline equal to scene time stays unsettled while a block holds catch-up, and in a failed session, which settles
+ * nothing further.
+ */
+function dueDeadlineMayRemain(snapshot: Record<string, unknown>): boolean {
+  return snapshot.status === "failed" || timerBlockHoldsCatchUp(snapshot);
+}
+
 export function validTimerAction(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
@@ -57,7 +65,7 @@ export function validTimerAction(
     action.createdAtMs > now ||
     !nonNegativeSafeInteger(action.owningInstruction) ||
     !isPlainRecord(action.timer) ||
-    !validTimerRecord(action.timer, true, now, plan, timerBlockHoldsCatchUp(snapshot)) ||
+    !validTimerRecord(action.timer, true, now, plan, dueDeadlineMayRemain(snapshot)) ||
     !validActiveChronology(action.timer, action.createdAtMs, now)
   ) {
     return false;

@@ -632,7 +632,8 @@ function validPacingGateTiming(
     validSessionTime(snapshot.currentSessionTimeMs) &&
     action.createdAtMs <= snapshot.currentSessionTimeMs &&
     (action.deadlineMs > snapshot.currentSessionTimeMs ||
-      (action.deadlineMs === snapshot.currentSessionTimeMs && timerBlockHoldsCatchUp(snapshot)))
+      (action.deadlineMs === snapshot.currentSessionTimeMs &&
+        (snapshot.status === "failed" || timerBlockHoldsCatchUp(snapshot))))
   );
 }
 

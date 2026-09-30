@@ -86,7 +86,7 @@ The player/controller owns:
 
 The future host/player protocol must expose typed operations equivalent to observing time and completing, cancelling, or reporting a capability outcome for one action ID. The host supplies observations but may not directly mutate `currentSessionTimeMs`, arbitrary snapshot fields, or continuation state.
 
-Time observation is one atomic runtime transition: validate the supplied coordinate, persist `max(observedSessionTimeMs, suppliedNow)` as the observed time, then settle due work in order while `currentSessionTimeMs` advances toward it; see [`RUNTIME.md`](RUNTIME.md#timers-and-scene-time).
+Time observation is one atomic runtime transition: validate the supplied coordinate, persist `max(observedSessionTimeMs, suppliedNow)` as the observed time, then, unless the session has failed, settle due work in order while `currentSessionTimeMs` advances toward it; see [`RUNTIME.md`](RUNTIME.md#timers-and-scene-time).
 
 Completion correlation uses the accepted order:
 
