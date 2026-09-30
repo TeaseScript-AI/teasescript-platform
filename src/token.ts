@@ -47,6 +47,8 @@ export const TokenKind = {
   Question: "question",
   Plus: "plus",
   Minus: "minus",
+  PlusEqual: "plusEqual",
+  MinusEqual: "minusEqual",
   Star: "star",
   Slash: "slash",
   Percent: "percent",

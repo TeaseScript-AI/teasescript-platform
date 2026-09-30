@@ -20,6 +20,8 @@ export interface RuntimeDelayActionSnapshot {
   readonly expectedCompletion: "time";
   /** Copied from the owning instruction; Players present only `visible` delays. */
   readonly display: DelayDisplay;
+  /** Evaluated once from a blocking timer's label; always `null` for `wait`. */
+  readonly label: string | null;
   readonly requestEventSequence: number;
 }
 

@@ -494,6 +494,7 @@ function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendin
       deadlineMs: action.deadlineMs,
       expectedCompletion: "time",
       display: action.display,
+      label: action.label,
       requestEventSequence: action.requestEventSequence,
     };
   if (action.kind === "chatPacingGate")

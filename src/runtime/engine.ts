@@ -1,6 +1,7 @@
 import { resolveMessagePresentation } from "./message-presentation.js";
 import type { MessagePresentation } from "../message-presentation.js";
 import type {
+  DurationUnitPlan,
   Instruction,
   InstructionPlan,
   InteractionUiPayload,
@@ -84,7 +85,15 @@ import {
   secondsToPacingMilliseconds,
 } from "./actions/pacing.js";
 import { settleBackgroundPacingGate } from "./operations/pacing-gate.js";
-import { isList, isObject, isRange, isSet, isSpeakerReference } from "./value-predicates.js";
+import {
+  isDuration,
+  isList,
+  isObject,
+  isRange,
+  isSet,
+  isSpeakerReference,
+} from "./value-predicates.js";
+import { DURATION_UNIT_MILLISECONDS } from "../duration.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -517,47 +526,24 @@ function executePlannedInstruction(
       return;
     }
     case "wait": {
-      const timer = instruction.display === "visible";
       const evaluated = evaluator.evaluate(instruction.duration);
-      const range = timer && isRange(evaluated) ? evaluated : null;
-      // A negative range start fails before the draw so failure never depends on RNG state.
-      const value =
-        range === null || range.start < 0
-          ? evaluated
-          : evaluator.randomIntegerInRange(range, instruction.duration.span, "timer");
-      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-        throw fault(
-          "TSR050",
-          timer
-            ? "Timer duration must be a finite non-negative number of seconds or a range of whole seconds."
-            : "Wait duration must be a finite non-negative number.",
-          instruction.duration.span,
-        );
-      }
-      const multiplier =
-        instruction.unit === "ms"
-          ? 1
-          : instruction.unit === "min"
-            ? 60_000
-            : instruction.unit === "h"
-              ? 3_600_000
-              : 1_000;
-      const durationMs = value * multiplier;
-      const deadlineMs = snapshot.currentSessionTimeMs + durationMs;
-      if (!Number.isFinite(durationMs) || !isValidSessionTime(deadlineMs)) {
-        throw fault(
-          "TSR050",
-          `${timer ? "Timer" : "Wait"} duration is outside the supported session-time range.`,
-          instruction.duration.span,
-        );
-      }
-      if (value > 0 && (durationMs <= 0 || deadlineMs <= snapshot.currentSessionTimeMs)) {
-        throw fault(
-          "TSR050",
-          `${timer ? "Timer" : "Wait"} duration cannot produce a representable future deadline.`,
-          instruction.duration.span,
-        );
-      }
+      const label =
+        instruction.label === null
+          ? null
+          : timerLabel(evaluator.evaluate(instruction.label), instruction.label.span);
+      const durationMs = timerDurationMs(
+        evaluator,
+        evaluated,
+        instruction.unit,
+        instruction.command,
+        instruction.duration.span,
+      );
+      const deadlineMs = futureDeadline(
+        snapshot,
+        durationMs,
+        instruction.command,
+        instruction.duration.span,
+      );
       if (durationMs === 0) {
         advance(snapshot);
         return;
@@ -586,6 +572,7 @@ function executePlannedInstruction(
         deadlineMs,
         expectedCompletion: "time" as const,
         display: instruction.display,
+        label,
         requestEventSequence: sequence,
       });
       snapshot.nextActionId += 1;
@@ -692,6 +679,8 @@ function executePlannedInstruction(
       );
       return;
     }
+    case "startTimer":
+      throw fault("TSR050", "Async timers are not implemented yet.", instruction.span);
     case "exit":
       snapshot.backgroundActions.length = 0;
       snapshot.preparedSayOutput = null;
@@ -1752,6 +1741,78 @@ function instructionBudget(value: number | undefined): number {
     throw new RangeError("Instruction budget must be a positive safe integer.");
   }
   return budget;
+}
+
+/**
+ * Converts an evaluated `wait`/`timer` duration to milliseconds: a duration value, a number of `unit` (seconds by
+ * default), or, for timers, an integer-second range drawn once from the session RNG. Invalid ranges fail before the draw.
+ */
+export function timerDurationMs(
+  evaluator: Evaluator,
+  value: SerializableRuntimeValue,
+  unit: DurationUnitPlan | null,
+  command: "wait" | "timer",
+  span: SourceSpan,
+): number {
+  const range =
+    command === "timer" && isRange(value) && (unit === null || unit === "s") ? value : null;
+  const drawn =
+    range === null || range.start < 0
+      ? value
+      : evaluator.randomIntegerInRange(range, span, "timer");
+  const amount = isDuration(drawn) && unit === null ? drawn.milliseconds : drawn;
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0) {
+    throw fault(
+      "TSR050",
+      command === "timer"
+        ? "Timer duration must be a non-negative duration, number of seconds, or range of whole seconds."
+        : "Wait duration must be a non-negative duration or finite number.",
+      span,
+    );
+  }
+  const durationMs = isDuration(drawn) ? amount : amount * DURATION_UNIT_MILLISECONDS[unit ?? "s"];
+  if (!Number.isFinite(durationMs)) {
+    throw fault(
+      "TSR050",
+      `${commandName(command)} duration is outside the supported session-time range.`,
+      span,
+    );
+  }
+  return durationMs;
+}
+
+/** Absolute deadline for a positive duration; `0` stays immediate. */
+export function futureDeadline(
+  snapshot: RuntimeSnapshot,
+  durationMs: number,
+  command: "wait" | "timer",
+  span: SourceSpan,
+): number {
+  const deadlineMs = snapshot.currentSessionTimeMs + durationMs;
+  if (!isValidSessionTime(deadlineMs)) {
+    throw fault(
+      "TSR050",
+      `${commandName(command)} duration is outside the supported session-time range.`,
+      span,
+    );
+  }
+  if (durationMs > 0 && deadlineMs <= snapshot.currentSessionTimeMs) {
+    throw fault(
+      "TSR050",
+      `${commandName(command)} duration cannot produce a representable future deadline.`,
+      span,
+    );
+  }
+  return deadlineMs;
+}
+
+function commandName(command: "wait" | "timer"): string {
+  return command === "timer" ? "Timer" : "Wait";
+}
+
+export function timerLabel(value: SerializableRuntimeValue, span: SourceSpan): string {
+  if (typeof value !== "string") throw fault("TSR050", "A timer label must be a string.", span);
+  return value;
 }
 
 function fault(code: string, message: string, span: SourceSpan): RuntimeFault {

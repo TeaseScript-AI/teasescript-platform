@@ -37,6 +37,8 @@ export interface CompiledFunctionParameter {
 
 export interface CompiledFunctionDefinition {
   readonly id: number;
+  /** A parameterless expiry-block region; it is entered only by the runtime, never by `callFunction`. */
+  readonly timerHandler: boolean;
   readonly name: string;
   readonly declarationSpan: PlanSourceLocation;
   readonly parameters: readonly CompiledFunctionParameter[];
@@ -80,6 +82,7 @@ export type Instruction =
   | ReturnVoidInstruction
   | SayInstruction
   | WaitInstruction
+  | StartTimerInstruction
   | InteractionInstruction
   | ExitInstruction;
 
@@ -300,16 +303,39 @@ export interface SayInstruction extends InstructionBase {
   readonly pacing: ExpressionPlan | "smart" | "instant";
 }
 
-/** One foreground delay: hidden `wait` or visible blocking `timer`. */
+export type DurationUnitPlan = "ms" | "s" | "min" | "h";
+
+/** One foreground delay: `wait` or a blocking `timer`. */
 export interface WaitInstruction extends InstructionBase {
   readonly kind: "wait";
+  /** A `timer` also accepts an integer-second range drawn once, after its operands are evaluated. */
+  readonly command: "wait" | "timer";
   readonly duration: ExpressionPlan;
-  readonly unit: "ms" | "s" | "min" | "h" | null;
-  /** `visible` durations are seconds or an integer-second range drawn once when the delay starts. */
+  readonly unit: DurationUnitPlan | null;
   readonly display: DelayDisplay;
+  /** Evaluated after the duration; always `null` for `wait`. */
+  readonly label: ExpressionPlan | null;
 }
 
-export type DelayDisplay = "hidden" | "visible";
+export type DelayDisplay = "hidden" | "visible" | "mystery";
+
+/**
+ * Starts one asynchronous timer. Operands are evaluated as duration, display, then label; the compiler
+ * materializes them first when source order differs. A range is drawn after every operand is evaluated.
+ */
+export interface StartTimerInstruction extends InstructionBase {
+  readonly kind: "startTimer";
+  readonly duration: ExpressionPlan;
+  readonly unit: DurationUnitPlan | null;
+  readonly display: DelayDisplay | ExpressionPlan;
+  readonly label: ExpressionPlan | null;
+  readonly repeat: boolean;
+  readonly persist: boolean;
+  /** A compiled timer-handler region, or `null` when the timer has no expiry block. */
+  readonly handlerFunctionId: number | null;
+  /** Receives the handle when the timer is used as a value. */
+  readonly destinationTemporary: number | null;
+}
 
 export type InteractionKind = "button" | "text" | "number" | "choice";
 export type InteractionResultDomain = "none" | "string" | "number";
@@ -411,6 +437,7 @@ export type AssignmentTargetPlan =
 
 export type ExpressionPlan =
   | LiteralExpressionPlan
+  | DurationExpressionPlan
   | IdentifierExpressionPlan
   | ListExpressionPlan
   | ObjectExpressionPlan
@@ -433,6 +460,12 @@ interface ExpressionPlanBase {
 export interface LiteralExpressionPlan extends ExpressionPlanBase {
   readonly kind: "literal";
   readonly value: string | number | boolean | null;
+}
+
+/** An exact elapsed-duration literal, already converted to milliseconds. */
+export interface DurationExpressionPlan extends ExpressionPlanBase {
+  readonly kind: "duration";
+  readonly milliseconds: number;
 }
 
 export interface IdentifierExpressionPlan extends ExpressionPlanBase {

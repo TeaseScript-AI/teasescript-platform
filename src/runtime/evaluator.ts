@@ -34,6 +34,7 @@ import {
   serializableSetContains,
   SerializableValueError,
   setCapturedSerializableProperty,
+  type SerializableRuntimeDuration,
   type SerializableRuntimeList,
   type SerializableRuntimeObject,
   type SerializableRuntimeRange,
@@ -47,7 +48,15 @@ import type {
   RuntimeSpeakerSnapshot,
   RuntimeTemporarySnapshot,
 } from "./state.js";
-import { isList, isObject, isRange, isSet, isSpeakerReference } from "./value-predicates.js";
+import {
+  isDuration,
+  isList,
+  isObject,
+  isRange,
+  isSet,
+  isSpeakerReference,
+} from "./value-predicates.js";
+import { formatDuration } from "../duration.js";
 
 export interface RuntimeCapabilityCall {
   readonly positional: readonly SerializableRuntimeValue[];
@@ -113,12 +122,14 @@ export class Evaluator {
   #evaluateLeaf(
     expression: Extract<
       ExpressionPlan,
-      { kind: "literal" | "identifier" | "temporary" | "preparedReference" }
+      { kind: "literal" | "duration" | "identifier" | "temporary" | "preparedReference" }
     >,
   ): SerializableRuntimeValue {
     switch (expression.kind) {
       case "literal":
         return expression.value;
+      case "duration":
+        return { kind: "duration", milliseconds: expression.milliseconds };
       case "identifier": {
         if (expression.name === "speaker" && this.snapshot.contextualSpeaker !== null) {
           const speaker = this.speakerById(this.snapshot.contextualSpeaker, expression.span);
@@ -291,6 +302,7 @@ export class Evaluator {
       let owned = false;
       switch (expression.kind) {
         case "literal":
+        case "duration":
         case "identifier":
         case "temporary":
         case "preparedReference":
@@ -429,6 +441,14 @@ export class Evaluator {
             if (typeof result.value !== "boolean")
               throw fault("TSR026", "Expected a boolean value.", expression.operand.span);
             value = !result.value;
+          } else if (isDuration(result.value)) {
+            value = {
+              kind: "duration",
+              milliseconds:
+                expression.operator === "+"
+                  ? result.value.milliseconds
+                  : 0 - result.value.milliseconds,
+            };
           } else {
             const number = this.#number(result.value, expression.operand.span);
             value = this.#finite(expression.operator === "+" ? number : -number, expression.span);
@@ -761,6 +781,7 @@ export class Evaluator {
       if (typeof selected === "string") return selected;
       if (typeof selected === "number" && Number.isFinite(selected))
         return String(Object.is(selected, -0) ? 0 : selected);
+      if (isDuration(selected)) return formatDuration(selected.milliseconds);
       throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
     }
     if (typeof value === "string") return value;
@@ -768,6 +789,7 @@ export class Evaluator {
       return String(Object.is(value, -0) ? 0 : value);
     if (typeof value === "boolean") return value ? "true" : "false";
     if (value === null) return "null";
+    if (isDuration(value)) return formatDuration(value.milliseconds);
     throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
   }
 
@@ -790,6 +812,7 @@ export class Evaluator {
         throw this.#translateValueError(error, expression.span);
       }
     }
+    if (isDuration(left) || isDuration(right)) return this.#durationBinary(expression, left, right);
     if (["<", "<=", ">", ">="].includes(expression.operator)) {
       if (
         (typeof left !== "number" || typeof right !== "number") &&
@@ -822,6 +845,46 @@ export class Evaluator {
       default:
         throw fault("TSR035", "Unsupported binary operation.", expression.span);
     }
+  }
+
+  /** V30 §35 exact-duration arithmetic and comparison; mixing with plain numbers is explicit only. */
+  #durationBinary(
+    expression: BinaryExpressionPlan,
+    left: SerializableRuntimeValue,
+    right: SerializableRuntimeValue,
+  ): SerializableRuntimeValue {
+    const duration = (milliseconds: number): SerializableRuntimeDuration => ({
+      kind: "duration",
+      milliseconds: this.#finite(milliseconds, expression.span),
+    });
+    if (isDuration(left) && isDuration(right)) {
+      switch (expression.operator) {
+        case "+":
+          return duration(left.milliseconds + right.milliseconds);
+        case "-":
+          return duration(left.milliseconds - right.milliseconds);
+        case "/":
+          return this.#finite(left.milliseconds / right.milliseconds, expression.span);
+        case "<":
+          return left.milliseconds < right.milliseconds;
+        case "<=":
+          return left.milliseconds <= right.milliseconds;
+        case ">":
+          return left.milliseconds > right.milliseconds;
+        case ">=":
+          return left.milliseconds >= right.milliseconds;
+      }
+    } else if (isDuration(left) && typeof right === "number") {
+      if (expression.operator === "*") return duration(left.milliseconds * right);
+      if (expression.operator === "/") return duration(left.milliseconds / right);
+    } else if (typeof left === "number" && isDuration(right) && expression.operator === "*") {
+      return duration(left * right.milliseconds);
+    }
+    throw fault(
+      "TSR009",
+      `Operator '${expression.operator}' is not supported for these duration operands; add durations to durations and multiply or divide durations by numbers.`,
+      expression.span,
+    );
   }
 
   #call(

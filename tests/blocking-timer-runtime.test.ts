@@ -231,11 +231,19 @@ test("zero timers are immediate and create no action", () => {
 
 test("unsupported and invalid timer forms fail with structured diagnostics", () => {
   const cases: ReadonlyArray<readonly [string, string]> = [
-    ["timer", "TSP012 Expected a duration"],
-    ["timer(10)", "TSP012 Timer uses command syntax"],
-    ["timer 10 s", "TSP002"],
-    ["timer mystery 10", "TSP002"],
-    ['timer 10 "Label"', "TSP002"],
+    ["timer", "TSP012 Expected a timer duration"],
+    ["timer(10)", "TSP034 The parenthesized timer form uses named arguments"],
+    ["timer(duration: 1, repeat: yes)", "TSP034 Timer argument 'repeat' must be the literal"],
+    ["timer(duration: 1, speed: 2)", "TSP034 Unknown timer argument 'speed'"],
+    ['timer(label: "x")', "TSP034 The parenthesized timer form requires a 'duration'"],
+    ["timer 10 { exit }", "TSV033 Only an async timer may have an expiry block"],
+    ["timer(duration: 1, repeat: true)", "TSV033 Only an async timer may have an expiry block"],
+    ["let t = timer 10", "TSV033 A blocking timer returns no handle"],
+    ['timer(duration: 1, display: "loud")', "TSV033 Timer display must be"],
+    ["timer 10 s ms", "TSV033 This duration already has a unit."],
+    ["timer 1 day", "TSP033"],
+    ["timer 5..10 min", "TSV010 Range bounds must be numeric values."],
+    ["let n = 10\ntimer 5..n min", "TSV010 A timer range counts whole seconds"],
     ["timer -1", "TSV011 Timer duration must not be negative."],
     ["timer 1.5..3", "TSV010 A statically known timer range must have integer second bounds."],
     ["timer -2..3", "TSV010 A timer range must not start below zero seconds."],
@@ -254,12 +262,28 @@ test("unsupported and invalid timer forms fail with structured diagnostics", () 
 
 test("invalid dynamic timer durations fail deterministically before any action", () => {
   const cases: ReadonlyArray<readonly [string, string, string]> = [
-    ['let d = "soon"\ntimer d', "TSR050", "Timer duration must be a finite non-negative number"],
-    ["let d = -1\ntimer d", "TSR050", "Timer duration must be a finite non-negative number"],
+    [
+      'let d = "soon"\ntimer d',
+      "TSR050",
+      "Timer duration must be a non-negative duration, number of seconds, or range of whole seconds.",
+    ],
+    [
+      "let d = -1\ntimer d",
+      "TSR050",
+      "Timer duration must be a non-negative duration, number of seconds, or range of whole seconds.",
+    ],
     ["let a = 3\ntimer a..a", "TSR041", "timer requires a non-empty range."],
     ["let a = 0.5\ntimer a..3", "TSR045", "Range iteration requires safe integer bounds."],
-    ["let a = -3\ntimer a..3", "TSR050", "Timer duration must be a finite non-negative number"],
-    ["let d = 1..3\nwait d", "TSR050", "Wait duration must be a finite non-negative number."],
+    [
+      "let a = -3\ntimer a..3",
+      "TSR050",
+      "Timer duration must be a non-negative duration, number of seconds, or range of whole seconds.",
+    ],
+    [
+      "let d = 1..3\nwait d",
+      "TSR050",
+      "Wait duration must be a non-negative duration or finite number.",
+    ],
   ];
   for (const [source, code, message] of cases) {
     for (const seed of SEEDS) {
@@ -296,8 +320,10 @@ test("restored timer display data is validated against its owning instruction", 
 
   const planVariants: Array<(instruction: Record<string, unknown>) => void> = [
     (instruction) => delete instruction.display,
-    (instruction) => (instruction.display = "mystery"),
-    (instruction) => (instruction.unit = "s"),
+    (instruction) => (instruction.display = "loud"),
+    (instruction) => (instruction.unit = "days"),
+    (instruction) => delete instruction.label,
+    (instruction) => (instruction.command = "sleep"),
     (instruction) => (instruction.extra = true),
   ];
   for (const mutate of planVariants) {

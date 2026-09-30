@@ -5,6 +5,7 @@ import type {
   SayStatement,
   ShowButtonStatement,
   Statement,
+  TimerParts,
 } from "./ast.js";
 import { compileSource } from "./compiler.js";
 import type { Diagnostic } from "./diagnostics.js";
@@ -567,7 +568,7 @@ function visitStatement(statement: Statement, visitor: Visitor): void {
       if (statement.value !== null) visitExpression(statement.value, visitor);
       return;
     case "timerStatement":
-      visitExpression(statement.duration, visitor);
+      visitTimer(statement, visitor);
       return;
     case "speakerSetterStatement":
     case "waitStatement":
@@ -576,6 +577,15 @@ function visitStatement(statement: Statement, visitor: Visitor): void {
     case "continueStatement":
       return;
   }
+}
+
+function visitTimer(timer: TimerParts, visitor: Visitor): void {
+  if (typeof timer.display === "object" && timer.display !== null) {
+    visitExpression(timer.display, visitor);
+  }
+  visitExpression(timer.duration, visitor);
+  if (timer.label !== null) visitExpression(timer.label, visitor);
+  for (const child of timer.handler?.statements ?? []) visitStatement(child, visitor);
 }
 
 function visitExpression(expression: Expression, visitor: Visitor): void {
@@ -623,10 +633,14 @@ function visitExpression(expression: Expression, visitor: Visitor): void {
       for (const part of expression.parts)
         if (part.kind === "stringInterpolation") visitExpression(part.expression, visitor);
       return;
+    case "timerExpression":
+      visitTimer(expression, visitor);
+      return;
     case "identifier":
     case "booleanLiteral":
     case "nullLiteral":
     case "numberLiteral":
+    case "durationLiteral":
       return;
   }
   expression satisfies never;

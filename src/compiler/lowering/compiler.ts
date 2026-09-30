@@ -1,6 +1,7 @@
 import type {
   Block,
   Expression,
+  TimerParts,
   FunctionDeclaration,
   ListLiteral,
   ObjectLiteral,
@@ -15,6 +16,7 @@ import type {
   AssignmentTargetPlan,
   CompiledFunctionDefinition,
   ExpressionPlan,
+  DelayDisplay,
   Instruction,
   JumpIfFalseInstruction,
   JumpInstruction,
@@ -30,6 +32,7 @@ import type {
 } from "../../plan/model.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 import { staticVisibleText } from "../../static-evaluation.js";
+import { durationLiteralMilliseconds } from "../../duration.js";
 import { runCompileTask, compileChild, type CompileTask } from "../continuation.js";
 import { expressionChildren as instructionEmissionChildren } from "../../expression-children.js";
 
@@ -74,7 +77,13 @@ export class InstructionCompiler {
     for (const declaration of this.declarations) {
       this.#compileFunction(declaration);
     }
+    // Handlers found while compiling a handler are appended and compiled in ID order.
+    for (let index = 0; index < this.#timerHandlers.length; index += 1) {
+      this.#compileTimerHandler(this.#timerHandlers[index]!, this.declarations.length + index + 1);
+    }
   }
+
+  readonly #timerHandlers: Block[] = [];
 
   public compileStatements(statements: readonly Statement[]): void {
     runCompileTask(this.#compileStatements(statements));
@@ -257,26 +266,19 @@ export class InstructionCompiler {
         const lowered = this.#lowerExpression(statement.duration);
         this.instructions.push({
           kind: "wait",
+          command: "wait",
           duration: lowered.plan,
           unit: statement.unit,
           display: "hidden",
+          label: null,
           span: copySpan(statement.span),
         });
         this.#emitTemporaryCleanup(lowered.temporaryIds, statement.span);
         return;
       }
-      case "timerStatement": {
-        const lowered = this.#lowerExpression(statement.duration);
-        this.instructions.push({
-          kind: "wait",
-          duration: lowered.plan,
-          unit: null,
-          display: "visible",
-          span: copySpan(statement.span),
-        });
-        this.#emitTemporaryCleanup(lowered.temporaryIds, statement.span);
+      case "timerStatement":
+        yield* compileChild(this.#lowerTimerTask(statement, false));
         return;
-      }
       case "exitStatement":
         this.instructions.push({ kind: "exit", span: copySpan(statement.span) });
         return;
@@ -300,14 +302,35 @@ export class InstructionCompiler {
             span: copySpan(statement.target.span),
           });
         }
+        // A compound assignment reads the current value before any instruction-emitting operand runs.
+        const current =
+          statement.operator === "=" || !this.#containsUserCall(statement.value)
+            ? null
+            : this.#materializeExpression(
+                { plan: target.plan, temporaryIds: [] },
+                statement.target.span,
+              );
         const value = this.#lowerExpression(statement.value);
+        const assigned: ExpressionPlan =
+          statement.operator === "="
+            ? value.plan
+            : {
+                kind: "binary",
+                operator: statement.operator === "+=" ? "+" : "-",
+                left: current?.plan ?? target.plan,
+                right: value.plan,
+                span: copySpan(statement.span),
+              };
         this.instructions.push({
           kind: "assign",
           target: target.plan,
-          value: value.plan,
+          value: assigned,
           span: copySpan(statement.span),
         });
-        this.#emitTemporaryCleanup([...target.temporaryIds, ...value.temporaryIds], statement.span);
+        this.#emitTemporaryCleanup(
+          [...target.temporaryIds, ...(current?.temporaryIds ?? []), ...value.temporaryIds],
+          statement.span,
+        );
         return;
       }
       case "expressionStatement": {
@@ -484,6 +507,114 @@ export class InstructionCompiler {
     }
   }
 
+  /**
+   * Lowers a blocking timer to a foreground `wait` delay and an async timer to `startTimer`. The instruction evaluates
+   * duration, display, then label; operands written in another order are materialized first in source order.
+   */
+  *#lowerTimerTask(timer: TimerParts, value: boolean): CompileTask<LoweredExpression | null> {
+    const dynamicDisplay = typeof timer.display === "object" ? timer.display : null;
+    const operands = [timer.duration, dynamicDisplay, timer.label].filter(
+      (operand): operand is Expression => operand !== null,
+    );
+    const sourceOrder = [...operands].sort(
+      (left, right) => left.span.start.offset - right.span.start.offset,
+    );
+    const reordered = sourceOrder.some((operand, index) => operand !== operands[index]);
+    const lowered = yield* compileChild(this.#lowerOrderedExpressionsTask(sourceOrder));
+    const planOf = (operand: Expression): LoweredExpression => {
+      const item = lowered[sourceOrder.indexOf(operand)]!;
+      return reordered && item.plan.kind !== "temporary"
+        ? this.#materializeExpression(item, operand.span)
+        : item;
+    };
+    // Materialization must follow source order, so resolve every operand before building the instruction.
+    const loweredBySource = sourceOrder.map(planOf);
+    const plan = (operand: Expression): ExpressionPlan =>
+      loweredBySource[sourceOrder.indexOf(operand)]!.plan;
+    const temporaryIds = loweredBySource.flatMap((item) => item.temporaryIds);
+    const staticDisplay =
+      typeof timer.display === "string"
+        ? timer.display
+        : dynamicDisplay === null
+          ? "visible"
+          : staticVisibleText(dynamicDisplay);
+    if (!timer.async) {
+      this.instructions.push({
+        kind: "wait",
+        command: "timer",
+        duration: plan(timer.duration),
+        unit: timer.unit,
+        // Semantic validation requires a literal display for a blocking timer.
+        display: staticDisplay as DelayDisplay,
+        label: timer.label === null ? null : plan(timer.label),
+        span: copySpan(timer.span),
+      });
+      this.#emitTemporaryCleanup(temporaryIds, timer.span);
+      return null;
+    }
+    const destinationTemporary = value ? this.#allocateTemporary() : null;
+    this.instructions.push({
+      kind: "startTimer",
+      duration: plan(timer.duration),
+      unit: timer.unit,
+      display: dynamicDisplay === null ? (staticDisplay as DelayDisplay) : plan(dynamicDisplay),
+      label: timer.label === null ? null : plan(timer.label),
+      repeat: timer.repeat,
+      persist: timer.persist,
+      handlerFunctionId: timer.handler === null ? null : this.#registerTimerHandler(timer.handler),
+      destinationTemporary,
+      span: copySpan(timer.span),
+    });
+    this.#emitTemporaryCleanup(temporaryIds, timer.span);
+    return destinationTemporary === null
+      ? null
+      : {
+          plan: {
+            kind: "temporary",
+            temporaryId: destinationTemporary,
+            span: copySpan(timer.span),
+          },
+          temporaryIds: [destinationTemporary],
+        };
+  }
+
+  /** Reserves the next function ID; the region is compiled after all user functions. */
+  #registerTimerHandler(handler: Block): number {
+    const id = this.declarations.length + this.#timerHandlers.length + 1;
+    this.#timerHandlers.push(handler);
+    return id;
+  }
+
+  #compileTimerHandler(handler: Block, id: number): void {
+    const entryInstruction = this.instructions.length;
+    this.instructions.push({
+      kind: "beginFunctionDefaults",
+      functionId: id,
+      span: copySpan(handler.span),
+    });
+    this.instructions.push({
+      kind: "enterFunctionBody",
+      functionId: id,
+      span: copySpan(handler.span),
+    });
+    const bodyEntryInstruction = this.instructions.length;
+    this.compileStatements(handler.statements);
+    const implicitReturnInstruction = this.instructions.length;
+    this.instructions.push({ kind: "returnVoid", span: copySpan(handler.span) });
+    this.functions.push({
+      id,
+      timerHandler: true,
+      name: "timer expiry",
+      declarationSpan: copySpan(handler.span),
+      parameters: [],
+      entryInstruction,
+      bodyEntryInstruction,
+      implicitReturnInstruction,
+      endInstruction: this.instructions.length,
+      bodySpan: copySpan(handler.span),
+    });
+  }
+
   #compileFunction(declaration: FunctionDeclaration): void {
     const registered = this.#functionByName.get(declaration.name.name);
     if (registered === undefined) {
@@ -538,6 +669,7 @@ export class InstructionCompiler {
     const endInstruction = this.instructions.length;
     this.functions.push({
       id: registered.id,
+      timerHandler: false,
       name: declaration.name.name,
       declarationSpan: copySpan(declaration.span),
       parameters: declaration.parameters.map((parameter, index) => ({
@@ -566,6 +698,11 @@ export class InstructionCompiler {
     if (expression.kind === "interactionExpression") {
       return yield* compileChild(this.#lowerInteractionTask(expression));
     }
+    if (expression.kind === "timerExpression") {
+      const lowered = yield* compileChild(this.#lowerTimerTask(expression, true));
+      if (lowered === null) throw new TypeError("A blocking timer reached value lowering.");
+      return lowered;
+    }
     if (
       expression.kind === "callExpression" &&
       expression.callee.kind === "identifier" &&
@@ -584,6 +721,7 @@ export class InstructionCompiler {
       case "booleanLiteral":
       case "nullLiteral":
       case "numberLiteral":
+      case "durationLiteral":
         return { plan: compileExpression(expression), temporaryIds: [] };
       case "stringLiteral": {
         const interpolations = expression.parts
@@ -1330,7 +1468,10 @@ export class InstructionCompiler {
         continue;
       }
 
-      if (current.expression.kind === "interactionExpression") {
+      if (
+        current.expression.kind === "interactionExpression" ||
+        current.expression.kind === "timerExpression"
+      ) {
         this.#instructionEmissionByExpression.set(current.expression, true);
         continue;
       }
@@ -1487,6 +1628,12 @@ function assembleExpression(
     case "nullLiteral":
     case "numberLiteral":
       return { kind: "literal", value: expression.value, span: copySpan(expression.span) };
+    case "durationLiteral":
+      return {
+        kind: "duration",
+        milliseconds: durationLiteralMilliseconds(expression),
+        span: copySpan(expression.span),
+      };
     case "stringLiteral":
       return expression.parts.some((part) => part.kind === "stringInterpolation")
         ? {
@@ -1594,8 +1741,9 @@ function assembleExpression(
         span: copySpan(expression.span),
       };
     case "interactionExpression":
+    case "timerExpression":
       throw new TypeError(
-        "Blocking interactions must be lowered before expression-plan compilation.",
+        "Interactions and timers must be lowered before expression-plan compilation.",
       );
   }
 }

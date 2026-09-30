@@ -995,7 +995,8 @@ function producedTemporaryId(instruction: Record<string, unknown>): number | nul
     instruction.kind === "prepareInteractionSpeaker" ||
     instruction.kind === "prepareReference" ||
     instruction.kind === "callFunction" ||
-    instruction.kind === "interaction"
+    instruction.kind === "interaction" ||
+    instruction.kind === "startTimer"
   ) {
     value = instruction.destinationTemporary;
   }
@@ -1164,6 +1165,14 @@ function validateFunctionDefinitions(
     }
     requirePositiveInteger(definition.id, `${path}.id`, errors);
     requireString(definition.name, `${path}.name`, errors);
+    if (typeof definition.timerHandler !== "boolean") {
+      errors.push(planError("TSC002", "Function timer-handler flag must be boolean.", path));
+    } else if (
+      definition.timerHandler &&
+      (!Array.isArray(definition.parameters) || definition.parameters.length !== 0)
+    ) {
+      errors.push(planError("TSC002", "A timer handler has no parameters.", path));
+    }
     validateSpan(definition.declarationSpan, `${path}.declarationSpan`, errors);
     validateSpan(definition.bodySpan, `${path}.bodySpan`, errors);
     if (typeof definition.id === "number") {
@@ -1177,7 +1186,7 @@ function validateFunctionDefinitions(
       }
       ids.add(definition.id);
     }
-    if (typeof definition.name === "string") {
+    if (typeof definition.name === "string" && definition.timerHandler !== true) {
       if (names.has(definition.name)) {
         errors.push(planError("TSC002", "Function names must be unique.", `${path}.name`));
       }
@@ -1299,6 +1308,30 @@ function validateFunctionDefinitions(
           `$.instructions[${instructionIndex}].functionId`,
         ),
       );
+    }
+    if (
+      (instruction.kind === "callFunction" || instruction.kind === "startTimer") &&
+      typeof (instruction.kind === "callFunction"
+        ? instruction.functionId
+        : instruction.handlerFunctionId) === "number"
+    ) {
+      const target = index?.functionsById.get(
+        // EVIDENCE: validation: the enclosing condition established the numeric ID.
+        (instruction.kind === "callFunction"
+          ? instruction.functionId
+          : instruction.handlerFunctionId) as number,
+      )?.definition;
+      if (target !== undefined && target.timerHandler !== (instruction.kind === "startTimer")) {
+        errors.push(
+          planError(
+            "TSC002",
+            instruction.kind === "startTimer"
+              ? "A timer must refer to a timer-handler region."
+              : "A call must not enter a timer-handler region.",
+            `$.instructions[${instructionIndex}]`,
+          ),
+        );
+      }
     }
     if (instruction.kind === "callFunction" && typeof instruction.functionId === "number") {
       const target = index?.functionsById.get(instruction.functionId)?.definition;

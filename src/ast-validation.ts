@@ -1,6 +1,7 @@
 import type { Program } from "./ast.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { createCapturedArray } from "./external-data-capture.js";
+import { DURATION_UNIT_MILLISECONDS } from "./duration.js";
 import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
 
 const FALLBACK_SPAN = createSourceSpan(
@@ -29,6 +30,8 @@ export function findNonFiniteNumericLiteralDiagnosticsInStableProgram(
       readonly kind?: unknown;
       readonly value?: unknown;
       readonly span?: unknown;
+      readonly amount?: unknown;
+      readonly unit?: unknown;
     };
     if (
       node.kind === "numberLiteral" &&
@@ -40,6 +43,28 @@ export function findNonFiniteNumericLiteralDiagnosticsInStableProgram(
           DiagnosticSeverity.Error,
           "TSC001",
           "Numeric literal must evaluate to a finite number.",
+          isSourceSpan(node.span) ? node.span : FALLBACK_SPAN,
+        ),
+      );
+      continue;
+    }
+    if (
+      node.kind === "durationLiteral" &&
+      isPlainRecord(node.amount) &&
+      typeof node.amount.value === "number" &&
+      Number.isFinite(node.amount.value) &&
+      typeof node.unit === "string" &&
+      Object.hasOwn(DURATION_UNIT_MILLISECONDS, node.unit) &&
+      !Number.isFinite(
+        node.amount.value *
+          DURATION_UNIT_MILLISECONDS[node.unit as keyof typeof DURATION_UNIT_MILLISECONDS],
+      )
+    ) {
+      diagnostics.push(
+        createDiagnostic(
+          DiagnosticSeverity.Error,
+          "TSC001",
+          "Duration literal must evaluate to a finite number of milliseconds.",
           isSourceSpan(node.span) ? node.span : FALLBACK_SPAN,
         ),
       );

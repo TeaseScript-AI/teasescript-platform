@@ -5,6 +5,8 @@ import {
 import type {
   AssignmentTarget,
   Block,
+  Identifier,
+  TimerParts,
   Expression,
   FunctionDeclaration,
   Program,
@@ -34,7 +36,25 @@ type BindingKind = "variable" | "speaker" | "global" | "function";
 
 interface Binding {
   readonly kind: BindingKind;
+  /** Set while a variable statically holds an async timer handle. */
+  timerHandle?: boolean;
 }
+
+const TIMER_HANDLE_PROPERTIES: ReadonlySet<string> = new Set([
+  "remaining",
+  "elapsed",
+  "display",
+  "label",
+  "state",
+  "repeatDuration",
+]);
+const TIMER_HANDLE_ASSIGNABLE: ReadonlySet<string> = new Set([
+  "remaining",
+  "display",
+  "repeatDuration",
+]);
+const TIMER_HANDLE_METHODS: ReadonlySet<string> = new Set(["pause", "resume", "stop"]);
+const TIMER_DISPLAYS: ReadonlySet<string> = new Set(["visible", "mystery", "hidden"]);
 
 const semanticCode = {
   duplicateDeclaration: "TSV001",
@@ -68,6 +88,8 @@ const semanticCode = {
   invalidInteractionChoice: "TSV029",
   duplicateInteractionChoice: "TSV030",
   unsupportedBlockingContext: "TSV032",
+  invalidTimer: "TSV033",
+  invalidTimerHandleMember: "TSV034",
 } as const;
 
 export function validateSemantics(
@@ -115,6 +137,9 @@ class SemanticValidator {
   readonly #invalidConfiguredNames: readonly string[];
 
   #functionDepth = 0;
+
+  /** Expiry blocks are validated after all top-level names are known, like function bodies. */
+  readonly #pendingTimerHandlers: Block[] = [];
 
   public constructor(options: SemanticValidationOptions) {
     this.#invalidConfiguredNames = Object.freeze(
@@ -168,6 +193,143 @@ class SemanticValidator {
         this.#validateFunction(statement);
       }
     }
+    for (let index = 0; index < this.#pendingTimerHandlers.length; index += 1) {
+      this.#validateTimerHandler(this.#pendingTimerHandlers[index]!);
+    }
+  }
+
+  /** An expiry block sees top-level names and its own locals, like a function body without parameters. */
+  #validateTimerHandler(handler: Block): void {
+    this.#functionDepth += 1;
+    this.#timerHandlerDepth += 1;
+    try {
+      runCompileTask(
+        this.#validateStatements(handler.statements, new SemanticScope(this.#root), 0),
+      );
+    } finally {
+      this.#functionDepth -= 1;
+      this.#timerHandlerDepth -= 1;
+    }
+  }
+
+  #timerHandlerDepth = 0;
+
+  #validateTimer(timer: TimerParts, scope: SemanticScope, valuePosition: boolean): void {
+    if (typeof timer.display === "object" && timer.display !== null) {
+      this.#validateExpression(timer.display, scope, null);
+      const display = staticVisibleText(timer.display);
+      if (
+        (display !== undefined && !TIMER_DISPLAYS.has(display)) ||
+        isDefinitelyNonText(timer.display)
+      ) {
+        this.#report(
+          semanticCode.invalidTimer,
+          'Timer display must be "visible", "mystery", or "hidden".',
+          timer.display.span,
+        );
+      }
+    }
+    this.#validateExpression(timer.duration, scope, null);
+    if (timer.label !== null) this.#validateExpression(timer.label, scope, null);
+    if (!timer.async) {
+      const invalid = timer.handler ?? (timer.repeat || timer.persist ? timer : null);
+      if (invalid !== null) {
+        this.#report(
+          semanticCode.invalidTimer,
+          "Only an async timer may have an expiry block, repeat, or persist.",
+          invalid.span,
+        );
+      }
+      if (valuePosition) {
+        this.#report(
+          semanticCode.invalidTimer,
+          "A blocking timer returns no handle; use 'timer async ...' to keep one.",
+          timer.span,
+        );
+      }
+    }
+    const duration = unwrapParentheses(timer.duration);
+    if (timer.unit !== null && duration.kind === "durationLiteral") {
+      this.#report(
+        semanticCode.invalidTimer,
+        "This duration already has a unit.",
+        timer.duration.span,
+      );
+    }
+    if (duration.kind === "rangeExpression") {
+      const start = staticNumber(duration.start);
+      const end = staticNumber(duration.end);
+      if (timer.unit !== null && timer.unit !== "s") {
+        this.#report(
+          semanticCode.invalidRangeOperand,
+          "A timer range counts whole seconds; other units are not supported for ranges yet.",
+          timer.duration.span,
+        );
+      } else if (!isKnownInteger(duration.start) || !isKnownInteger(duration.end)) {
+        this.#report(
+          semanticCode.invalidRangeOperand,
+          "A statically known timer range must have integer second bounds.",
+          duration.span,
+        );
+      } else if (start !== undefined && start < (timer.repeat ? 1 : 0)) {
+        this.#report(
+          semanticCode.invalidRangeOperand,
+          timer.repeat
+            ? "A repeating timer range must start at one second or more."
+            : "A timer range must not start below zero seconds.",
+          duration.span,
+        );
+      } else if (
+        start !== undefined &&
+        end !== undefined &&
+        (duration.inclusive ? end < start : end <= start)
+      ) {
+        this.#report(
+          semanticCode.invalidRangeOperand,
+          "A timer range must contain at least one whole second.",
+          duration.span,
+        );
+      }
+    } else {
+      const known =
+        duration.kind === "durationLiteral" ? duration.amount.value : staticNumber(duration);
+      if (known !== undefined && (known < 0 || (timer.repeat && known === 0))) {
+        this.#report(
+          semanticCode.invalidRepeatCount,
+          timer.repeat
+            ? "A repeating timer duration must be greater than zero."
+            : "Timer duration must not be negative.",
+          timer.duration.span,
+        );
+      }
+    }
+    if (timer.handler !== null) this.#pendingTimerHandlers.push(timer.handler);
+  }
+
+  /** Rejects unknown members of a variable that statically holds an async timer handle. */
+  #validateTimerHandleMember(
+    object: Expression,
+    name: Identifier,
+    scope: SemanticScope,
+    use: "read" | "assign" | "call",
+  ): void {
+    if (object.kind !== "identifier" || scope.resolve(object.name)?.timerHandle !== true) return;
+    const known =
+      use === "call"
+        ? TIMER_HANDLE_METHODS
+        : use === "assign"
+          ? TIMER_HANDLE_ASSIGNABLE
+          : TIMER_HANDLE_PROPERTIES;
+    if (known.has(name.name)) return;
+    this.#report(
+      semanticCode.invalidTimerHandleMember,
+      use === "call"
+        ? `Timer handles have no method '${name.name}'; use pause(), resume(), or stop().`
+        : use === "assign"
+          ? `Timer handle property '${name.name}' cannot be assigned; assign remaining, display, or repeatDuration.`
+          : `Timer handles have no property '${name.name}'.`,
+      name.span,
+    );
   }
 
   *#validateStatements(
@@ -188,7 +350,11 @@ class SemanticValidator {
     switch (statement.kind) {
       case "letStatement":
         this.#validateExpression(statement.initializer, scope, null);
-        this.#declare(statement.name.name, "variable", statement.name.span, scope);
+        if (this.#declare(statement.name.name, "variable", statement.name.span, scope)) {
+          scope.bindings.get(statement.name.name)!.timerHandle = isAsyncTimer(
+            statement.initializer,
+          );
+        }
         return;
       case "speakerDeclaration": {
         const declared = this.#declare(statement.name.name, "speaker", statement.name.span, scope);
@@ -249,6 +415,16 @@ class SemanticValidator {
       }
       case "waitStatement": {
         this.#validateExpression(statement.duration, scope, null);
+        if (
+          statement.unit !== null &&
+          unwrapParentheses(statement.duration).kind === "durationLiteral"
+        ) {
+          this.#report(
+            semanticCode.invalidTimer,
+            "This duration already has a unit.",
+            statement.duration.span,
+          );
+        }
         const known = staticNumber(statement.duration);
         if (known !== undefined && known < 0) {
           this.#report(
@@ -259,50 +435,25 @@ class SemanticValidator {
         }
         return;
       }
-      case "timerStatement": {
-        this.#validateExpression(statement.duration, scope, null);
-        const duration = unwrapParentheses(statement.duration);
-        if (duration.kind === "rangeExpression") {
-          const start = staticNumber(duration.start);
-          const end = staticNumber(duration.end);
-          if (!isKnownInteger(duration.start) || !isKnownInteger(duration.end)) {
-            this.#report(
-              semanticCode.invalidRangeOperand,
-              "A statically known timer range must have integer second bounds.",
-              duration.span,
-            );
-          } else if (start !== undefined && start < 0) {
-            this.#report(
-              semanticCode.invalidRangeOperand,
-              "A timer range must not start below zero seconds.",
-              duration.span,
-            );
-          } else if (
-            start !== undefined &&
-            end !== undefined &&
-            (duration.inclusive ? end < start : end <= start)
-          ) {
-            this.#report(
-              semanticCode.invalidRangeOperand,
-              "A timer range must contain at least one whole second.",
-              duration.span,
-            );
-          }
-        } else {
-          const known = staticNumber(duration);
-          if (known !== undefined && known < 0) {
-            this.#report(
-              semanticCode.invalidRepeatCount,
-              "Timer duration must not be negative.",
-              statement.duration.span,
-            );
-          }
-        }
+      case "timerStatement":
+        this.#validateTimer(statement, scope, false);
         return;
-      }
       case "assignmentStatement":
         this.#validateAssignmentTarget(statement.target, scope);
         this.#validateExpression(statement.value, scope, null);
+        if (statement.target.kind === "identifier") {
+          const binding = scope.resolve(statement.target.name);
+          if (binding?.kind === "variable") {
+            binding.timerHandle = statement.operator === "=" && isAsyncTimer(statement.value);
+          }
+        } else if (statement.target.kind === "propertyAccessExpression") {
+          this.#validateTimerHandleMember(
+            statement.target.object,
+            statement.target.property,
+            scope,
+            "assign",
+          );
+        }
         return;
       case "expressionStatement":
         this.#validateExpression(statement.expression, scope, null);
@@ -389,6 +540,12 @@ class SemanticValidator {
             semanticCode.returnOutsideFunction,
             "'return' may only appear inside a function.",
             statement.span,
+          );
+        } else if (this.#timerHandlerDepth > 0 && statement.value !== null) {
+          this.#report(
+            semanticCode.invalidTimer,
+            "A timer expiry block may use 'return' only without a value.",
+            statement.value.span,
           );
         }
         if (statement.value !== null) {
@@ -536,6 +693,7 @@ class SemanticValidator {
       case "booleanLiteral":
       case "nullLiteral":
       case "numberLiteral":
+      case "durationLiteral":
         return;
       case "stringLiteral":
         for (const part of expression.parts) {
@@ -597,6 +755,10 @@ class SemanticValidator {
         yield* compileChild(
           this.#validateExpressionTask(expression.object, scope, contextualSpeaker),
         );
+        this.#validateTimerHandleMember(expression.object, expression.property, scope, "read");
+        return;
+      case "timerExpression":
+        this.#validateTimer(expression, scope, true);
         return;
       case "indexExpression":
         yield* compileChild(
@@ -628,6 +790,16 @@ class SemanticValidator {
               expression.callee.span,
             );
           }
+        } else if (expression.callee.kind === "propertyAccessExpression") {
+          yield* compileChild(
+            this.#validateExpressionTask(expression.callee.object, scope, contextualSpeaker),
+          );
+          this.#validateTimerHandleMember(
+            expression.callee.object,
+            expression.callee.property,
+            scope,
+            "call",
+          );
         } else {
           yield* compileChild(
             this.#validateExpressionTask(expression.callee, scope, contextualSpeaker),
@@ -895,6 +1067,25 @@ class SemanticValidator {
   }
 }
 
+function isAsyncTimer(expression: Expression): boolean {
+  expression = unwrapParentheses(expression);
+  return expression.kind === "timerExpression" && expression.async;
+}
+
+function isDefinitelyNonText(expression: Expression): boolean {
+  expression = unwrapParentheses(expression);
+  return (
+    expression.kind === "numberLiteral" ||
+    expression.kind === "durationLiteral" ||
+    expression.kind === "booleanLiteral" ||
+    expression.kind === "nullLiteral" ||
+    expression.kind === "listLiteral" ||
+    expression.kind === "setLiteral" ||
+    expression.kind === "objectLiteral" ||
+    expression.kind === "rangeExpression"
+  );
+}
+
 function isKnownInteger(expression: Expression): boolean {
   const value = staticNumber(expression);
   return value === undefined || Number.isInteger(value);
@@ -932,7 +1123,9 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
     expression.kind === "listLiteral" ||
     expression.kind === "setLiteral" ||
     expression.kind === "objectLiteral" ||
-    expression.kind === "rangeExpression"
+    expression.kind === "rangeExpression" ||
+    expression.kind === "durationLiteral" ||
+    expression.kind === "timerExpression"
   );
 }
 
