@@ -90,6 +90,7 @@ const semanticCode = {
   unsupportedBlockingContext: "TSV032",
   invalidTimer: "TSV033",
   invalidTimerHandleMember: "TSV034",
+  mixedDurationOperands: "TSV035",
 } as const;
 
 export function validateSemantics(
@@ -828,14 +829,28 @@ class SemanticValidator {
           }
         }
         return;
-      case "binaryExpression":
+      case "binaryExpression": {
         yield* compileChild(
           this.#validateExpressionTask(expression.left, scope, contextualSpeaker),
         );
         yield* compileChild(
           this.#validateExpressionTask(expression.right, scope, contextualSpeaker),
         );
+        const left = unwrapParentheses(expression.left).kind;
+        const right = unwrapParentheses(expression.right).kind;
+        if (
+          !["*", "/", "==", "!=", "and", "or"].includes(expression.operator) &&
+          ((left === "numberLiteral" && right === "durationLiteral") ||
+            (left === "durationLiteral" && right === "numberLiteral"))
+        ) {
+          this.#report(
+            semanticCode.mixedDurationOperands,
+            "A number and a duration cannot be combined with this operator; give both a unit, or group a number before its unit as in '(1 + 2) s'.",
+            expression.span,
+          );
+        }
         return;
+      }
       case "rangeExpression":
         yield* compileChild(
           this.#validateExpressionTask(expression.start, scope, contextualSpeaker),

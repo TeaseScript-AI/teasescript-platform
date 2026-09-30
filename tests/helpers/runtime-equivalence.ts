@@ -91,7 +91,7 @@ export function assertRuntimeResumeEquivalent(
       readonly snapshot: RuntimeSnapshot;
       readonly events: readonly InterpreterEvent[];
     };
-    if (boundarySnapshot.status === "waiting") {
+    if (awaitsTime(boundarySnapshot)) {
       operation = observeDueDelay(plan, boundarySnapshot, `${scenario}: boundary ${boundary + 1}`);
     } else {
       const executed = executeInstruction(plan, boundarySnapshot);
@@ -160,8 +160,9 @@ export function assertRuntimeResumeEquivalent(
 }
 
 /**
- * Runs to completion, settling each foreground delay (`wait` or `timer`) with an explicit time
- * observation at its deadline. Blocking behavior is preserved: a delay never settles without one.
+ * Runs to completion, observing time at the next deadline whenever execution waits: a foreground or interrupted
+ * delay (`wait` or blocking `timer`) or a running async timer. Blocking behavior is preserved: nothing settles
+ * without an observation.
  */
 function runServicingDelays(
   plan: InstructionPlan,
@@ -173,7 +174,7 @@ function runServicingDelays(
   let current = snapshot;
   for (let observations = 0; ; observations += 1) {
     assert.ok(observations <= instructionGuard, `${context}: delay servicing exceeded guard`);
-    if (current.status === "waiting") {
+    if (awaitsTime(current)) {
       const observed = observeDueDelay(plan, current, context);
       events.push(...observed.events);
       current = observed.snapshot;
@@ -186,16 +187,34 @@ function runServicingDelays(
   }
 }
 
+/** Waiting with nothing runnable: only a time observation can make progress. */
+function awaitsTime(snapshot: RuntimeSnapshot): boolean {
+  return snapshot.status === "waiting" && snapshot.pendingTimerHandlers.length === 0;
+}
+
 function observeDueDelay(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   context: string,
 ): { readonly snapshot: RuntimeSnapshot; readonly events: readonly InterpreterEvent[] } {
-  const action = snapshot.foregroundAction;
-  assert.ok(action?.kind === "delay", `${context}: only foreground delays can be serviced`);
-  const observed = observeTime(plan, snapshot, action.deadlineMs);
+  const deadlines: number[] = [];
+  for (const action of [
+    snapshot.foregroundAction,
+    ...snapshot.backgroundActions,
+    ...snapshot.callFrames.map((frame) => frame.timerInterruption?.suspendedAction ?? null),
+  ]) {
+    if (action?.kind === "delay") deadlines.push(action.deadlineMs);
+    if (action?.kind === "timer" && action.timer.deadlineMs !== null) {
+      deadlines.push(action.timer.deadlineMs);
+    }
+  }
+  assert.ok(
+    snapshot.foregroundAction?.kind === "delay" || deadlines.length > 0,
+    `${context}: only delays and timers can be serviced`,
+  );
+  const observed = observeTime(plan, snapshot, Math.min(...deadlines));
   assert.equal(observed.outcome.kind, "observed", `${context}: delay observation must succeed`);
-  assert.notEqual(observed.snapshot.status, "waiting", `${context}: due delay must settle`);
+  assert.ok(observed.events.length > 0, `${context}: the due delay or timer must settle`);
   return observed;
 }
 

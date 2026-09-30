@@ -14,6 +14,7 @@ import {
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
   playerRuntimeForeground,
+  playerRuntimeDeadlines,
   playerRuntimePacingGate,
   playerRuntimeTimers,
   restorePlayerRuntimeSession,
@@ -412,13 +413,7 @@ function observeCurrentTime(): void {
 
 function scheduleTimeObservation(): void {
   if (timeTimer !== null) clearTimeout(timeTimer);
-  const actions = [
-    runtime.value.snapshot.foregroundAction,
-    ...runtime.value.snapshot.backgroundActions,
-  ];
-  const deadlines = actions.flatMap((action) =>
-    action?.kind === "delay" || action?.kind === "chatPacingGate" ? [action.deadlineMs] : [],
-  );
+  const deadlines = playerRuntimeDeadlines(runtime.value.snapshot);
   if (deadlines.length === 0) {
     timeTimer = null;
     return;

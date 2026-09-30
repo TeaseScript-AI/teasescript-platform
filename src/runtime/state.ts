@@ -2225,6 +2225,7 @@ function instructionKilledTemporaries(instruction: Instruction): ReadonlySet<num
     case "callFunction":
       return new Set([instruction.destinationTemporary]);
     case "interaction":
+    case "startTimer":
       return instruction.destinationTemporary === null
         ? new Set<number>()
         : new Set([instruction.destinationTemporary]);
@@ -2297,6 +2298,12 @@ function validateStatusConsistency(
     }
     if (isExplicitExitHaltState(value, plan) && hasActivePacingGate(value)) {
       errors.push("Explicit exit runtime state must not retain active pacing work.");
+    }
+    if (
+      Array.isArray(value.backgroundActions) &&
+      value.backgroundActions.some((action) => isPlainRecord(action) && action.kind === "timer")
+    ) {
+      errors.push("Halted runtime state must not retain active timers.");
     }
   } else if (value.status === "running") {
     if (value.failure !== null) errors.push("Running runtime state contains failure information.");
@@ -2545,6 +2552,12 @@ function requiredInstructionTemporaries(
       break;
     case "wait":
       collect(instruction.duration);
+      if (instruction.label !== null) collect(instruction.label);
+      break;
+    case "startTimer":
+      collect(instruction.duration);
+      if (typeof instruction.display === "object") collect(instruction.display);
+      if (instruction.label !== null) collect(instruction.label);
       break;
     case "interaction":
       if ("preparedUi" in instruction) {

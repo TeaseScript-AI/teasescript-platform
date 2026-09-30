@@ -119,24 +119,69 @@ export function playerRuntimeForeground(
 }
 
 /**
- * Visible timers derived from the pending foreground delay at the Player's session-time estimate.
- * Hidden `wait` delays produce no entry; a settled delay disappears with its action.
+ * Visible and mystery timers at the Player's session-time estimate, in creation order: a blocking timer (also while
+ * an expiry block interrupts it) and every running or paused async timer. Hidden timers and `wait` produce no entry,
+ * and a settled timer disappears with its action. A paused timer shows its frozen remaining time.
  */
 export function playerRuntimeTimers(
   snapshot: RuntimeSnapshot,
   currentSessionTimeMs: number,
 ): readonly PlayerTimerPresentation[] {
-  const action = snapshot.foregroundAction;
-  if (action?.kind !== "delay" || action.display !== "visible") return Object.freeze([]);
   const now = Math.max(snapshot.currentSessionTimeMs, currentSessionTimeMs);
-  return Object.freeze([
-    Object.freeze({
+  const timers: Array<PlayerTimerPresentation & { readonly actionId: number }> = [];
+  const delays = [
+    snapshot.foregroundAction,
+    ...snapshot.callFrames.map((frame) => frame.timerInterruption?.suspendedAction ?? null),
+  ];
+  for (const action of delays) {
+    if (action?.kind !== "delay" || action.display === "hidden") continue;
+    timers.push({
+      actionId: action.actionId,
       id: `runtime-timer-${action.actionId}`,
-      kind: "visible" as const,
+      kind: action.display,
+      ...(action.label === null ? {} : { name: action.label }),
       remainingSeconds: Math.max(0, action.deadlineMs - now) / 1000,
       totalSeconds: (action.deadlineMs - action.createdAtMs) / 1000,
-    }),
-  ]);
+    });
+  }
+  for (const action of snapshot.backgroundActions) {
+    if (action.kind !== "timer") continue;
+    const timer = action.timer;
+    const display = timer.display;
+    if (display === "hidden") continue;
+    const remainingMs =
+      timer.deadlineMs === null ? (timer.remainingMs ?? 0) : Math.max(0, timer.deadlineMs - now);
+    timers.push({
+      actionId: action.actionId,
+      id: `runtime-timer-${action.actionId}`,
+      kind: display,
+      ...(timer.label === null ? {} : { name: timer.label }),
+      remainingSeconds: remainingMs / 1000,
+      totalSeconds: timer.roundDurationMs / 1000,
+    });
+  }
+  return Object.freeze(
+    timers
+      .sort((left, right) => left.actionId - right.actionId)
+      .map(({ actionId: _actionId, ...timer }) => Object.freeze(timer)),
+  );
+}
+
+/** Session-time deadlines at which the Player must observe time again. */
+export function playerRuntimeDeadlines(snapshot: RuntimeSnapshot): readonly number[] {
+  const deadlines: number[] = [];
+  for (const action of [
+    snapshot.foregroundAction,
+    ...snapshot.backgroundActions,
+    ...snapshot.callFrames.map((frame) => frame.timerInterruption?.suspendedAction ?? null),
+  ]) {
+    if (action?.kind === "delay" || action?.kind === "chatPacingGate") {
+      deadlines.push(action.deadlineMs);
+    } else if (action?.kind === "timer" && action.timer.deadlineMs !== null) {
+      deadlines.push(action.timer.deadlineMs);
+    }
+  }
+  return deadlines;
 }
 
 export function playerRuntimePacingGate(
@@ -232,11 +277,9 @@ export function observePlayerRuntimeTime(
     { ...session, snapshot: operation.snapshot },
     operation.events,
   );
+  // A settlement or a queued timer expiry block may make execution eligible; `run` returns at once otherwise.
   return Object.freeze({
-    session:
-      operation.outcome.kind === "observed" && operation.outcome.completion !== null
-        ? continuePlayerRuntime(observed)
-        : observed,
+    session: operation.outcome.kind === "observed" ? continuePlayerRuntime(observed) : observed,
     outcome: operation.outcome,
   });
 }

@@ -15,6 +15,8 @@ export function timerHandlerDispatchable(snapshot: RuntimeSnapshot): boolean {
   if (snapshot.status !== "ready" && snapshot.status !== "running" && snapshot.status !== "waiting")
     return false;
   if (snapshot.callFrames.some((frame) => frame.timerInterruption !== null)) return false;
+  // The block needs its own frame; at the call-depth limit it waits until the path returns.
+  if (snapshot.callFrames.length >= snapshot.maxCallDepth) return false;
   if (
     snapshot.preparedSayOutput !== null ||
     snapshot.interactionResultHandoff !== null ||
