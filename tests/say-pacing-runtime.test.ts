@@ -655,11 +655,14 @@ test("unskippable pacing rejects typed skips without mutating foreground or back
   assert.deepEqual(backgroundRejected.snapshot, backgroundActive.snapshot);
 });
 
-test("delay completion returns its own settlement when it also settles background pacing", () => {
+test("a late delay completion replays the script at the delay deadline before later pacing", () => {
   const compiled = plan('say "first"\nwait 1 s\nexit');
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   const delay = waiting.snapshot.foregroundAction;
+  const pacing = waiting.snapshot.backgroundActions[0];
   assert.equal(delay?.kind, "delay");
+  assert.equal(pacing?.kind, "chatPacingGate");
+  assert.ok(pacing!.deadlineMs > delay!.deadlineMs);
 
   const completed = completeAction(compiled, waiting.snapshot, {
     actionId: delay!.actionId,
@@ -668,21 +671,31 @@ test("delay completion returns its own settlement when it also settles backgroun
   });
   assert.equal(completed.outcome.kind, "completed");
   assert.equal(completed.outcome.settlement.actionId, delay!.actionId);
+  assert.equal(
+    completed.outcome.settlement.actionKind === "delay"
+      ? completed.outcome.settlement.completedAtMs
+      : null,
+    delay!.deadlineMs,
+  );
+  // The script continues at the delay's deadline, before the later pacing deadline.
   assert.deepEqual(
     completed.events.map((event) => event.kind),
-    ["actionCompleted", "actionCompleted"],
+    ["actionCompleted"],
   );
+  assert.equal(completed.snapshot.currentSessionTimeMs, delay!.deadlineMs);
+  assert.equal(completed.snapshot.observedSessionTimeMs, 2_000);
+  assert.equal(completed.snapshot.backgroundActions[0]?.actionId, pacing!.actionId);
+  assert.equal(validateRuntimeSnapshot(completed.snapshot, compiled).valid, true);
+
+  const exited = run(compiled, completed.snapshot);
   assert.deepEqual(
-    completed.events.map((event) =>
-      event.kind === "actionCompleted" ? event.settlement.actionId : null,
-    ),
-    [delay!.actionId, 1],
+    exited.events.map((event) => event.kind),
+    ["exit"],
   );
-  assert.equal(completed.snapshot.foregroundAction, null);
-  assert.equal(completed.snapshot.backgroundActions.length, 0);
+  assert.equal(exited.snapshot.backgroundActions.length, 0);
 });
 
-test("terminal delay handoff survives a later background pacing settlement", () => {
+test("an observation while a terminal delay handoff is pending settles nothing until the script runs", () => {
   const compiled = plan('say "first", 5\nwait 1 ms');
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   const delay = waiting.snapshot.foregroundAction;
@@ -690,31 +703,39 @@ test("terminal delay handoff survives a later background pacing settlement", () 
   assert.equal(delay?.kind, "delay");
   assert.equal(pacing?.kind, "chatPacingGate");
 
-  const delaySettled = observeTime(compiled, waiting.snapshot, delay!.deadlineMs);
-  assert.equal(delaySettled.snapshot.status, "running");
-  assert.equal(delaySettled.snapshot.nextInstruction, compiled.rootEndInstruction);
-  assert.deepEqual(delaySettled.snapshot.terminalContinuationHandoff, {
+  const observed = observeTime(compiled, waiting.snapshot, pacing!.deadlineMs);
+  assert.deepEqual(
+    observed.events.map((event) =>
+      event.kind === "actionCompleted" ? event.settlement.actionId : null,
+    ),
+    [delay!.actionId],
+  );
+  assert.equal(observed.snapshot.status, "running");
+  assert.equal(observed.snapshot.currentSessionTimeMs, delay!.deadlineMs);
+  assert.equal(observed.snapshot.observedSessionTimeMs, pacing!.deadlineMs);
+  assert.deepEqual(observed.snapshot.terminalContinuationHandoff, {
     actionId: delay!.actionId,
     actionKind: "delay",
     owningInstruction: delay!.owningInstruction,
     continuationInstruction: compiled.rootEndInstruction,
   });
-  assert.equal(validateRuntimeSnapshot(delaySettled.snapshot, compiled).valid, true);
-  assert.doesNotThrow(() => createCheckpoint(compiled, delaySettled.snapshot));
-
-  const pacingSettled = observeTime(compiled, delaySettled.snapshot, pacing!.deadlineMs);
-  assert.equal(pacingSettled.snapshot.lastSettlement?.actionId, pacing!.actionId);
-  assert.equal(pacingSettled.snapshot.terminalContinuationHandoff?.actionId, delay!.actionId);
+  assert.equal(observed.snapshot.backgroundActions[0]?.actionId, pacing!.actionId);
+  const again = observeTime(compiled, observed.snapshot, pacing!.deadlineMs + 1);
+  assert.deepEqual(again.events, []);
   const restored = deserializeCheckpoint(
-    serializeCheckpoint(createCheckpoint(compiled, pacingSettled.snapshot)),
+    serializeCheckpoint(createCheckpoint(compiled, again.snapshot)),
   );
-  assert.deepEqual(restored.snapshot, pacingSettled.snapshot);
+  assert.deepEqual(restored.snapshot, again.snapshot);
 
+  // The script ends at the delay's deadline; the final say's pacing then completes during catch-up.
   const completed = run(restored.plan, restored.snapshot);
   assert.deepEqual(
-    completed.events.map((event) => event.kind),
-    ["complete"],
+    completed.events.map((event) =>
+      event.kind === "actionCompleted" ? event.settlement.actionId : event.kind,
+    ),
+    ["complete", pacing!.actionId],
   );
+  assert.equal(completed.snapshot.currentSessionTimeMs, pacing!.deadlineMs + 1);
   assert.equal(completed.snapshot.terminalContinuationHandoff, null);
   assert.equal(completed.snapshot.status, "halted");
   assert.equal(validateRuntimeSnapshot(completed.snapshot, restored.plan).valid, true);
@@ -791,36 +812,6 @@ test("skip release followed by explicit exit leaves a checkpointable replay sett
   );
   assert.equal(validateRuntimeSnapshot(exited.snapshot, compiled).valid, true);
   assert.doesNotThrow(() => createCheckpoint(compiled, exited.snapshot));
-});
-
-test("one observation may settle terminal delay then pacing without losing terminal continuation", () => {
-  const compiled = plan('say "first", 5\nwait 1 ms');
-  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
-  const delay = waiting.snapshot.foregroundAction;
-  const pacing = waiting.snapshot.backgroundActions[0];
-  assert.equal(delay?.kind, "delay");
-  assert.equal(pacing?.kind, "chatPacingGate");
-
-  const observed = observeTime(compiled, waiting.snapshot, pacing!.deadlineMs);
-  assert.deepEqual(
-    observed.events.map((event) =>
-      event.kind === "actionCompleted" ? event.settlement.actionId : null,
-    ),
-    [delay!.actionId, pacing!.actionId],
-  );
-  assert.equal(observed.snapshot.lastSettlement?.actionId, pacing!.actionId);
-  assert.equal(observed.snapshot.terminalContinuationHandoff?.actionId, delay!.actionId);
-  assert.equal(validateRuntimeSnapshot(observed.snapshot, compiled).valid, true);
-  assert.doesNotThrow(() =>
-    deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, observed.snapshot))),
-  );
-
-  const completed = run(compiled, observed.snapshot);
-  assert.deepEqual(
-    completed.events.map((event) => event.kind),
-    ["complete"],
-  );
-  assert.equal(completed.snapshot.status, "halted");
 });
 
 test("equal due pacing and delay actions settle by action ID", () => {
@@ -1553,7 +1544,7 @@ test("pacing event-order matrix covers representative lifecycle transitions", ()
     ["interaction consumption", interaction.events.map((event) => event.kind)],
     ["instant supersession", instant.events.map((event) => event.kind)],
     [
-      "simultaneously due delay and pacing",
+      "late observation replays the delay before later pacing",
       observeTime(dualPlan, dual.snapshot, 2_000).events.map((event) => event.kind),
     ],
     [
@@ -1568,7 +1559,7 @@ test("pacing event-order matrix covers representative lifecycle transitions", ()
     ["background typed skip", ["actionCompleted"]],
     ["interaction consumption", ["say", "actionRequested", "actionCompleted", "actionRequested"]],
     ["instant supersession", ["say", "actionRequested", "actionCompleted", "say", "complete"]],
-    ["simultaneously due delay and pacing", ["actionCompleted", "actionCompleted"]],
+    ["late observation replays the delay before later pacing", ["actionCompleted"]],
     ["prepared re-entry replacement", ["say", "actionRequested", "complete"]],
   ]);
   for (const [label, events] of cases) assert.deepEqual(events, expected.get(label), label);

@@ -6,7 +6,6 @@ import type {
 import type { ActionCompletedEvent, InterpreterEvent } from "../events.js";
 import type { RuntimeSnapshot } from "../state.js";
 import { assertEventSequenceCapacity, copySpan, takeSequence } from "./support.js";
-import { settlementTimeMs } from "./timer-lifecycle.js";
 
 export function settleBackgroundPacingGate(
   plan: InstructionPlan,
@@ -30,9 +29,7 @@ export function settleBackgroundPacingGate(
     requestEventSequence: action.requestEventSequence,
     completionEventSequence,
     deadlineMs: action.deadlineMs,
-    // A skip or consumption happens at the current scene time; elapsed completion follows settlement time rules.
-    completedAtMs:
-      settlementKind === "completed" ? settlementTimeMs(snapshot) : snapshot.currentSessionTimeMs,
+    completedAtMs: snapshot.currentSessionTimeMs,
     releasedPreparedOutputInstruction: null,
   });
   snapshot.lastSettlement = settlement;

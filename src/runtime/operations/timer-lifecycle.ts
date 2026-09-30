@@ -36,35 +36,6 @@ export function timerHandlerDispatchable(snapshot: RuntimeSnapshot): boolean {
   return foreground === null || foreground.kind === "delay" || foreground.kind === "interaction";
 }
 
-/**
- * Catch-up toward the observed time pauses while an expiry block can execute: the running block can continue, or a
- * queued block can interrupt now or right after the current single-instruction commit window (released prepared
- * `say` output, an interaction result, or a settled terminal action). Scene time then stays at the moment that
- * block's work became due. A foreground pacing gate holds a queued block until the gate's own deadline.
- */
-export function timerBlockHoldsCatchUp(snapshot: RuntimeSnapshot): boolean {
-  const executable =
-    snapshot.status === "ready" || snapshot.status === "running" || snapshot.status === "waiting";
-  if (snapshot.callFrames.some((frame) => frame.timerInterruption !== null)) {
-    return executable && snapshot.status !== "waiting";
-  }
-  return (
-    executable &&
-    snapshot.pendingTimerHandlers.length > 0 &&
-    snapshot.foregroundAction?.kind !== "chatPacingGate"
-  );
-}
-
-/**
- * Time recorded for a delay or pacing settlement. Work settled for a running expiry block records the scene time at
- * which the block continues; other settlements record the observation, as for plans without expiry blocks.
- */
-export function settlementTimeMs(snapshot: RuntimeSnapshot): number {
-  return snapshot.callFrames.some((frame) => frame.timerInterruption !== null)
-    ? snapshot.currentSessionTimeMs
-    : snapshot.observedSessionTimeMs;
-}
-
 /** Finds the active background action of a handle's timer, if it is still running or paused. */
 export function activeTimerAction(
   snapshot: RuntimeSnapshot,
@@ -112,7 +83,7 @@ function settleTimerAction(
     owningInstruction: action.owningInstruction,
     requestEventSequence: action.requestEventSequence,
     completionEventSequence,
-    completedAtMs: settlementTimeMs(snapshot),
+    completedAtMs: snapshot.currentSessionTimeMs,
   });
   events.push(
     Object.freeze({

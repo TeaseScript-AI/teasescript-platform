@@ -171,10 +171,7 @@ function executeInstructionBoundary(
     assertEventSequenceCapacity(snapshot, completeEventAndFutureCompletions);
     snapshot.terminalContinuationHandoff = null;
     snapshot.status = "halted";
-    const terminalInstruction = plan.instructions[plan.rootEndInstruction - 1];
-    context.events.push(
-      createCompleteEvent(snapshot, terminalInstruction?.span ?? plan.sourceSpan),
-    );
+    context.events.push(createCompleteEvent(snapshot, rootCompletionSpan(plan)));
     return 1;
   }
   const instructionIndex = snapshot.nextInstruction;
@@ -203,7 +200,7 @@ function executeInstructionBoundary(
       snapshot.status = "halted";
       const completeEventAndFutureCompletions = requiredEventSequencesForRootCompletion(snapshot);
       assertEventSequenceCapacity(snapshot, completeEventAndFutureCompletions);
-      context.events.push(createCompleteEvent(snapshot, instruction.span));
+      context.events.push(createCompleteEvent(snapshot, rootCompletionSpan(plan)));
     }
   } catch (error) {
     if (!(error instanceof RuntimeFault)) throw error;
@@ -1744,6 +1741,11 @@ function requiredEventSequencesForNewDelay(snapshot: RuntimeSnapshot): number {
 function requiredEventSequencesForRootCompletion(snapshot: RuntimeSnapshot): number {
   const rootCompleteEvent = 1;
   return rootCompleteEvent + requiredFutureActionCompletionEvents(snapshot);
+}
+
+/** Completion is attributed to the script's last root instruction, however execution reached the end. */
+function rootCompletionSpan(plan: InstructionPlan): SourceSpan {
+  return plan.instructions[plan.rootEndInstruction - 1]?.span ?? plan.sourceSpan;
 }
 
 function createCompleteEvent(snapshot: RuntimeSnapshot, span: SourceSpan): CompleteEvent {

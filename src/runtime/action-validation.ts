@@ -92,10 +92,10 @@ export function validatePendingActionState(
     value.observedSessionTimeMs < value.currentSessionTimeMs ||
     (value.observedSessionTimeMs > value.currentSessionTimeMs &&
       value.status !== "failed" &&
-      !timerBlockHoldsCatchUp(value))
+      !catchUpPaused(value))
   ) {
     errors.push(
-      "Runtime observedSessionTimeMs must not precede scene time, and exceeds it only while an expiry block holds catch-up.",
+      "Runtime observedSessionTimeMs must not precede scene time, and exceeds it only while execution can continue.",
     );
   }
   if (!validBackgroundPacingActions(value, plan)) {
@@ -104,10 +104,7 @@ export function validatePendingActionState(
   if (!positiveSafeInteger(value.nextActionId))
     errors.push("Runtime nextActionId must be a positive safe integer.");
   const action = value.foregroundAction;
-  if (
-    action !== null &&
-    !validForegroundActionState(action, value, plan, timerBlockHoldsCatchUp(value))
-  ) {
+  if (action !== null && !validForegroundActionState(action, value, plan, catchUpPaused(value))) {
     errors.push("Runtime foreground action is malformed.");
   }
   const settlement = value.lastSettlement;
@@ -333,24 +330,29 @@ export function validForegroundActionState(
 }
 
 /**
- * Mirrors the engine's pause of catch-up toward the observed time: the running expiry block can continue, or a queued
- * block can interrupt now or after the current commit window. Only then may scene time stand behind the observed time,
- * and timed work due exactly now wait for that block.
+ * Mirrors the engine's pause of catch-up toward the observed time: the script or a queued expiry block can execute.
+ * Only then may scene time stand behind the observed time, and timed work due exactly now wait for that execution.
  */
-export function timerBlockHoldsCatchUp(snapshot: Record<string, unknown>): boolean {
-  if (!Array.isArray(snapshot.callFrames)) return false;
-  const executable =
-    snapshot.status === "ready" || snapshot.status === "running" || snapshot.status === "waiting";
-  const blockRunning = snapshot.callFrames.some(
-    (frame) => isPlainRecord(frame) && isPlainRecord(frame.timerInterruption),
-  );
-  if (blockRunning) return executable && snapshot.status !== "waiting";
+export function catchUpPaused(snapshot: Record<string, unknown>): boolean {
+  if (snapshot.status === "ready" || snapshot.status === "running") return true;
+  if (
+    snapshot.status !== "waiting" ||
+    !Array.isArray(snapshot.callFrames) ||
+    !Array.isArray(snapshot.pendingTimerHandlers) ||
+    snapshot.pendingTimerHandlers.length === 0 ||
+    snapshot.callFrames.some(
+      (frame) => isPlainRecord(frame) && isPlainRecord(frame.timerInterruption),
+    ) ||
+    snapshot.preparedSayOutput !== null ||
+    snapshot.interactionResultHandoff !== null ||
+    snapshot.terminalContinuationHandoff !== null
+  )
+    return false;
   const foreground = snapshot.foregroundAction;
   return (
-    executable &&
-    Array.isArray(snapshot.pendingTimerHandlers) &&
-    snapshot.pendingTimerHandlers.length > 0 &&
-    !(isPlainRecord(foreground) && foreground.kind === "chatPacingGate")
+    foreground === null ||
+    (isPlainRecord(foreground) &&
+      (foreground.kind === "delay" || foreground.kind === "interaction"))
   );
 }
 
@@ -633,7 +635,7 @@ function validPacingGateTiming(
     action.createdAtMs <= snapshot.currentSessionTimeMs &&
     (action.deadlineMs > snapshot.currentSessionTimeMs ||
       (action.deadlineMs === snapshot.currentSessionTimeMs &&
-        (snapshot.status === "failed" || timerBlockHoldsCatchUp(snapshot))))
+        (snapshot.status === "failed" || catchUpPaused(snapshot))))
   );
 }
 
@@ -1621,7 +1623,7 @@ function validPacingGateSettlement(
   if (settlement.settlementKind === "completed") {
     return validSettlementChronology(settlement, snapshot);
   }
-  return validNonTimePacingSettlementChronology(settlement, snapshot, plan);
+  return validNonTimePacingSettlementChronology(settlement, snapshot);
 }
 
 function validPacingSettlementKind(
@@ -1663,18 +1665,14 @@ function validPacingSettlementReleaseLineage(
 function validNonTimePacingSettlementChronology(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
 ): boolean {
+  // A skip, consumption or supersession happens at scene time no later than the deadline.
   return (
     validSessionTime(settlement.deadlineMs) &&
     validSessionTime(settlement.completedAtMs) &&
     validSessionTime(snapshot.currentSessionTimeMs) &&
-    validSessionTime(snapshot.observedSessionTimeMs) &&
-    // A skip or consumption happens before the deadline, or at it when an expiry block with the same due time
-    // runs first and supersedes the gate.
-    (settlement.completedAtMs < settlement.deadlineMs ||
-      (settlement.completedAtMs === settlement.deadlineMs && planHasTimerHandlers(plan))) &&
-    settlement.completedAtMs <= snapshot.observedSessionTimeMs
+    settlement.completedAtMs <= settlement.deadlineMs &&
+    settlement.completedAtMs <= snapshot.currentSessionTimeMs
   );
 }
 
@@ -1737,14 +1735,12 @@ function validSettlementChronology(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
 ): boolean {
-  // Settlements outside a running expiry block record the observation, which may lead scene time.
-  const observedSessionTimeMs = snapshot.observedSessionTimeMs;
+  // Time-driven settlements happen exactly at their deadline in scene time.
   return (
     validSessionTime(settlement.deadlineMs) &&
-    validSessionTime(settlement.completedAtMs) &&
-    validSessionTime(observedSessionTimeMs) &&
-    settlement.completedAtMs >= settlement.deadlineMs &&
-    settlement.completedAtMs <= observedSessionTimeMs
+    validSessionTime(snapshot.currentSessionTimeMs) &&
+    settlement.completedAtMs === settlement.deadlineMs &&
+    settlement.completedAtMs <= snapshot.currentSessionTimeMs
   );
 }
 

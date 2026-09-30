@@ -1,7 +1,7 @@
 import type { InstructionPlan } from "../plan/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import { anchoredDeadlineMs } from "./timers.js";
-import { timerBlockHoldsCatchUp } from "./action-validation.js";
+import { catchUpPaused } from "./action-validation.js";
 
 /** Restore validation for asynchronous timers, their handles, and queued expiry blocks. */
 
@@ -38,11 +38,11 @@ export function planHasTimerHandlers(plan: InstructionPlan | undefined): boolean
 }
 
 /**
- * A deadline equal to scene time stays unsettled while a block holds catch-up, and in a failed session, which settles
- * nothing further.
+ * A deadline equal to scene time stays unsettled while execution can continue at that time, and in a failed session,
+ * which settles nothing further.
  */
 function dueDeadlineMayRemain(snapshot: Record<string, unknown>): boolean {
-  return snapshot.status === "failed" || timerBlockHoldsCatchUp(snapshot);
+  return snapshot.status === "failed" || catchUpPaused(snapshot);
 }
 
 export function validTimerAction(

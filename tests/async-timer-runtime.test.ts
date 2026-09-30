@@ -812,26 +812,39 @@ test("late observations run expiry blocks at their due scene time, like on-time 
     assert.deepEqual(said(source, onTime), expected, source);
     assert.deepEqual(said(source, [onTime.at(-1)!]), expected, `late: ${source}`);
   }
+  // Scene-time replay makes the complete result independent of observation cadence, not only the output.
+  const scripts = [
+    ...cases.map(([source]) => source),
+    'say "a"\nwait 1\nlet t = timer async 2 { say "block" }\nwait 3\nsay "b"\nt.stop()\nwait 1',
+  ];
+  for (const source of scripts) {
+    const onTime = new Session(source, { pacing: true });
+    for (let nowMs = 250; nowMs <= 12_000; nowMs += 250) onTime.at(nowMs);
+    const late = new Session(source, { pacing: true }).at(12_000);
+    assert.deepEqual(late.events, onTime.events, `events: ${source}`);
+    assert.deepEqual(late.snapshot, onTime.snapshot, `snapshot: ${source}`);
+  }
 });
 
-test("catch-up keeps observation-time settlements and rejects an unexplained observed-time lead", () => {
-  const plain = new Session('wait 1\nsay "done"').at(5_000);
-  const settled = plain.events.find(
-    (event) => event.kind === "actionCompleted" && event.settlement.actionKind === "delay",
+test("late observations replay the script at scene time and reject an unexplained observed-time lead", () => {
+  const late = new Session('wait 1\nsay "done"\nwait 1\nsay "later"').at(5_000);
+  const delays = late.events.flatMap((event) =>
+    event.kind === "actionCompleted" && event.settlement.actionKind === "delay"
+      ? [event.settlement.completedAtMs]
+      : [],
   );
-  assert.ok(settled?.kind === "actionCompleted" && settled.settlement.actionKind === "delay");
-  assert.equal(
-    settled.settlement.completedAtMs,
-    5_000,
-    "plans without expiry blocks settle at the observation",
-  );
+  assert.deepEqual(delays, [1_000, 2_000], "every delay settles at its deadline");
+  assert.deepEqual(late.said(), ["done", "later"]);
+  const onTime = new Session('wait 1\nsay "done"\nwait 1\nsay "later"');
+  for (const nowMs of [1_000, 2_000, 5_000]) onTime.at(nowMs);
+  assert.deepEqual(late.snapshot, onTime.snapshot);
 
   const waiting = new Session('wait 1\nsay "done"');
   const json = serializeCheckpoint(createCheckpoint(waiting.plan, waiting.snapshot));
   assertForgedRejected(json, ["snapshot", "observedSessionTimeMs"], 5_000);
 });
 
-test("catch-up holds for a queued block behind a commit window and keeps observation-time timer settlements", () => {
+test("catch-up holds for a queued block behind a commit window and timer settlements record scene time", () => {
   const source =
     'let t = timer async 3 { say "too late", 0 }\ntimer async 1 { t.stop() }\nsay "first", 2\nsay "second", 1\nlet name = askText "Hold"';
   const onTime = new Session(source, { pacing: true });
@@ -866,7 +879,7 @@ test("catch-up holds for a queued block behind a commit window and keeps observa
     (event) => event.kind === "actionCompleted" && event.settlement.actionKind === "timer",
   );
   assert.ok(settled?.kind === "actionCompleted" && settled.settlement.actionKind === "timer");
-  assert.equal(settled.settlement.completedAtMs, 5_000);
+  assert.equal(settled.settlement.completedAtMs, 1_000);
 });
 
 test("pacing consumed or skipped during catch-up and terminal completions keep queued blocks valid", () => {

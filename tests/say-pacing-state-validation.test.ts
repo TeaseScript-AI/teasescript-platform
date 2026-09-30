@@ -1700,11 +1700,12 @@ test("pacing settlement release provenance and chronology accept only canonical 
   const background = executeInstruction(backgroundPlan, createFreshRuntimeSnapshot(backgroundPlan));
   const backgroundGate = background.snapshot.backgroundActions[0];
   assert.equal(backgroundGate?.kind, "chatPacingGate");
-  const backgroundCompleted = observeTime(
-    backgroundPlan,
-    background.snapshot,
-    backgroundGate!.deadlineMs,
-  );
+  // Time completes a background gate only while the script waits; a runnable script continues first.
+  const waitingPlan = plan('say "first"\nwait 10 s');
+  const waiting = run(waitingPlan, createFreshRuntimeSnapshot(waitingPlan));
+  const waitingGate = waiting.snapshot.backgroundActions[0];
+  assert.equal(waitingGate?.kind, "chatPacingGate");
+  const backgroundCompleted = observeTime(waitingPlan, waiting.snapshot, waitingGate!.deadlineMs);
   const backgroundSkipped = completeAction(backgroundPlan, background.snapshot, {
     actionId: backgroundGate!.actionId,
     actionKind: "chatPacingGate",
@@ -1734,7 +1735,7 @@ test("pacing settlement release provenance and chronology accept only canonical 
   const cases = [
     {
       name: "background time completion",
-      compiled: backgroundPlan,
+      compiled: waitingPlan,
       snapshot: backgroundCompleted.snapshot,
       kind: "completed",
       releasedPreparedOutputInstruction: null,
