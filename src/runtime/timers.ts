@@ -2,8 +2,9 @@ import type { DelayDisplay } from "../plan/model.js";
 import type { SerializableRuntimeValue } from "./serializable-values.js";
 
 /**
- * Asynchronous timer state. Timers are engine background timed work: they accept no Player completion, so they own
- * no ADR 0016 action ID. Settled records remain so handles stay readable.
+ * Asynchronous timer state. The enclosing background action owns an ADR 0016 action ID for ordering and events; the
+ * timer ID is the separate identity behind opaque handles. No Player completion targets a timer, and its settlements
+ * do not replace `lastSettlement`. Settled records remain so handles stay readable.
  */
 export type RuntimeTimerState = "running" | "paused" | "finished" | "stopped";
 
@@ -34,8 +35,18 @@ export interface RuntimeTimerSnapshot {
   remainingMs: number | null;
   /** Active running time before `runningSinceMs`, across all rounds. */
   elapsedMs: number;
-  /** Session time when the current running period began; `null` unless running. */
+  /**
+   * Session time when the current running period began; `null` unless running. For anchored rounds it is the anchor
+   * of the round sequence rather than the start of the current round.
+   */
   runningSinceMs: number | null;
+  /**
+   * Fixed-length rounds completed since `runningSinceMs`, or `null` when the current round is not part of an anchored
+   * sequence. While anchored, `deadlineMs` is exactly `runningSinceMs + (anchoredRounds + 1) * repeatDurationMs`, so
+   * each deadline is computed from the anchor rather than accumulated. Observing every deadline and one late
+   * observation therefore yield identical values, and silent rounds can be skipped in one step.
+   */
+  anchoredRounds: number | null;
 }
 
 /**
@@ -71,6 +82,21 @@ function timerElapsedMs(timer: RuntimeTimerSnapshot, nowMs: number): number {
     : timer.elapsedMs;
 }
 
+/** Deadline of anchored round `rounds` (zero-based), computed the same way whenever it is needed. */
+export function anchoredDeadlineMs(anchorMs: number, rounds: number, roundMs: number): number {
+  return anchorMs + (rounds + 1) * roundMs;
+}
+
+/**
+ * Starts a new running period at `nowMs` without changing the current deadline. Used before a script changes the
+ * current round, which ends any anchored sequence.
+ */
+function rebaseRunningPeriod(timer: RuntimeTimerSnapshot, nowMs: number): void {
+  timer.elapsedMs = timerElapsedMs(timer, nowMs);
+  timer.runningSinceMs = nowMs;
+  timer.anchoredRounds = null;
+}
+
 export function pauseTimer(timer: RuntimeTimerSnapshot, nowMs: number): TimerWarning | null {
   if (timer.state === "paused") return null;
   if (timer.state !== "running") return settledWarning(timer, "pause()");
@@ -78,6 +104,7 @@ export function pauseTimer(timer: RuntimeTimerSnapshot, nowMs: number): TimerWar
   timer.remainingMs = timerRemainingMs(timer, nowMs);
   timer.deadlineMs = null;
   timer.runningSinceMs = null;
+  timer.anchoredRounds = null;
   timer.state = "paused";
   return null;
 }
@@ -87,6 +114,7 @@ export function resumeTimer(timer: RuntimeTimerSnapshot, nowMs: number): TimerWa
   if (timer.state !== "paused") return settledWarning(timer, "resume()");
   timer.deadlineMs = nowMs + timer.remainingMs!;
   timer.runningSinceMs = nowMs;
+  timer.anchoredRounds = null;
   timer.remainingMs = null;
   timer.state = "running";
   return null;
@@ -113,10 +141,13 @@ export function setTimerDisplay(
 export function setTimerRepeatDuration(
   timer: RuntimeTimerSnapshot,
   durationMs: number,
+  nowMs: number,
 ): TimerWarning | null {
   if (timer.state === "finished" || timer.state === "stopped") {
     return settledWarning(timer, "repeatDuration");
   }
+  // The current round keeps its deadline; later rounds use the new length from a new anchor.
+  if (timer.state === "running") rebaseRunningPeriod(timer, nowMs);
   timer.repeatDurationMs = durationMs;
   // An explicit later-round duration replaces a repeating range's redraw.
   timer.range = null;
@@ -124,8 +155,9 @@ export function setTimerRepeatDuration(
 }
 
 /**
- * Sets the current round's remaining time, clamped at zero. The round's total changes by the same amount so
- * presentation progress stays continuous. Returns `expired` when the round must end now.
+ * Sets the current round's remaining time, clamped at zero. The round's total becomes its consumed part plus the new
+ * remaining time, so presentation progress stays continuous; the consumed part is clamped at zero so rounding in the
+ * old remaining time cannot make the total negative. Returns `expired` when the round must end now.
  */
 export function setTimerRemaining(
   timer: RuntimeTimerSnapshot,
@@ -136,64 +168,99 @@ export function setTimerRemaining(
     return settledWarning(timer, "remaining");
   }
   const remainingMs = Math.max(0, requestedMs);
-  timer.roundDurationMs += remainingMs - timerRemainingMs(timer, nowMs);
-  if (timer.state === "running") timer.deadlineMs = nowMs + remainingMs;
-  else timer.remainingMs = remainingMs;
+  const consumedMs = Math.max(0, timer.roundDurationMs - timerRemainingMs(timer, nowMs));
+  timer.roundDurationMs = consumedMs + remainingMs;
+  if (timer.state === "running") {
+    rebaseRunningPeriod(timer, nowMs);
+    timer.deadlineMs = nowMs + remainingMs;
+  } else {
+    timer.remainingMs = remainingMs;
+  }
   return remainingMs === 0 ? "expired" : null;
 }
 
 /**
  * Ends the current round at `endedAtMs`. A repeating timer starts its next round at that moment, so catch-up after a
- * late observation keeps the original schedule; a paused timer stays paused with a full next round.
+ * late observation keeps the original schedule; a paused timer stays paused with a full next round. An anchored
+ * round that ends at its deadline continues the anchored sequence; any other fixed-length round starts a new one.
  */
 export function expireTimerRound(
   timer: RuntimeTimerSnapshot,
   endedAtMs: number,
   draw: TimerRoundDraw,
 ): void {
-  if (timer.state === "running") {
-    timer.elapsedMs += Math.max(0, endedAtMs - timer.runningSinceMs!);
-  }
   if (!timer.repeat) {
+    if (timer.state === "running") timer.elapsedMs = timerElapsedMs(timer, endedAtMs);
     settle(timer, "finished");
     return;
   }
-  const nextMs =
-    timer.repeatDurationMs ??
-    (timer.range === null ? timer.roundDurationMs : draw(timer.range) * 1_000);
-  timer.roundDurationMs = nextMs;
-  if (timer.state === "running") {
-    timer.runningSinceMs = endedAtMs;
-    timer.deadlineMs = endedAtMs + nextMs;
+  if (timer.state !== "running") {
+    timer.roundDurationMs =
+      timer.repeatDurationMs ??
+      (timer.range === null ? timer.roundDurationMs : draw(timer.range) * 1_000);
+    timer.remainingMs = timer.roundDurationMs;
+    return;
+  }
+  if (
+    timer.anchoredRounds !== null &&
+    timer.repeatDurationMs !== null &&
+    endedAtMs === timer.deadlineMs
+  ) {
+    timer.anchoredRounds += 1;
+    timer.deadlineMs = anchoredDeadlineMs(
+      timer.runningSinceMs!,
+      timer.anchoredRounds,
+      timer.repeatDurationMs,
+    );
+    return;
+  }
+  timer.elapsedMs = timerElapsedMs(timer, endedAtMs);
+  timer.runningSinceMs = endedAtMs;
+  if (timer.repeatDurationMs !== null) {
+    timer.roundDurationMs = timer.repeatDurationMs;
+    timer.anchoredRounds = 0;
+    timer.deadlineMs = anchoredDeadlineMs(endedAtMs, 0, timer.repeatDurationMs);
   } else {
-    timer.remainingMs = nextMs;
+    timer.roundDurationMs =
+      timer.range === null ? timer.roundDurationMs : draw(timer.range) * 1_000;
+    timer.anchoredRounds = null;
+    timer.deadlineMs = endedAtMs + timer.roundDurationMs;
   }
 }
 
 /**
- * A fixed repeating timer without an expiry block produces nothing observable per round, so a late observation skips
- * whole rounds arithmetically, leaving the last due round for ordinary expiry.
+ * An anchored repeating timer without an expiry block produces nothing observable per round, so catch-up moves
+ * directly to the last anchored round due by `limitMs`, leaving that round for ordinary expiry. The result equals
+ * expiring every round in turn because each deadline comes from the same anchor formula.
  */
-export function skipSilentRounds(timer: RuntimeTimerSnapshot, nowMs: number): void {
+export function skipSilentRounds(timer: RuntimeTimerSnapshot, limitMs: number): void {
   const roundMs = timer.repeatDurationMs;
+  const anchorMs = timer.runningSinceMs;
+  const rounds = timer.anchoredRounds;
   if (
     timer.state !== "running" ||
-    !timer.repeat ||
     timer.handlerFunctionId !== null ||
-    timer.range !== null ||
     roundMs === null ||
-    timer.deadlineMs === null
+    anchorMs === null ||
+    rounds === null
   ) {
     return;
   }
-  const skipped = Math.floor((nowMs - timer.deadlineMs) / roundMs);
-  if (!(skipped >= 1) || !Number.isSafeInteger(skipped)) return;
-  // The current round and `skipped - 1` further rounds complete; the next one is still due at or before `nowMs`.
-  const nextStartMs = timer.deadlineMs + (skipped - 1) * roundMs;
-  timer.elapsedMs += nextStartMs - timer.runningSinceMs!;
-  timer.runningSinceMs = nextStartMs;
-  timer.roundDurationMs = roundMs;
-  timer.deadlineMs = nextStartMs + roundMs;
+  // The largest round index whose deadline is due by the limit, estimated and then settled with the exact formula.
+  let last = Math.min(
+    Number.MAX_SAFE_INTEGER - 1,
+    Math.max(rounds, Math.floor((limitMs - anchorMs) / roundMs) - 1),
+  );
+  while (last > rounds && anchoredDeadlineMs(anchorMs, last, roundMs) > limitMs) last -= 1;
+  while (
+    last + 1 < Number.MAX_SAFE_INTEGER - 1 &&
+    anchoredDeadlineMs(anchorMs, last + 1, roundMs) <= limitMs
+  ) {
+    last += 1;
+  }
+  if (last <= rounds) return;
+  timer.anchoredRounds = last;
+  timer.deadlineMs = anchoredDeadlineMs(anchorMs, last, roundMs);
 }
 
 /** Handle property reads; `undefined` means the property does not exist. */
@@ -227,6 +294,7 @@ function settle(timer: RuntimeTimerSnapshot, state: "finished" | "stopped"): voi
   timer.deadlineMs = null;
   timer.remainingMs = null;
   timer.runningSinceMs = null;
+  timer.anchoredRounds = null;
 }
 
 function settledWarning(timer: RuntimeTimerSnapshot, operation: string): TimerWarning {
@@ -237,5 +305,6 @@ function settledWarning(timer: RuntimeTimerSnapshot, operation: string): TimerWa
 }
 
 export function cloneTimer(timer: RuntimeTimerSnapshot): RuntimeTimerSnapshot {
+  // Every field is a primitive except `range`.
   return { ...timer, range: timer.range === null ? null : { ...timer.range } };
 }

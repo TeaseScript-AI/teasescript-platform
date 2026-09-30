@@ -818,7 +818,6 @@ export class Evaluator {
       if (typeof selected === "string") return selected;
       if (typeof selected === "number" && Number.isFinite(selected))
         return String(Object.is(selected, -0) ? 0 : selected);
-      if (isDuration(selected)) return formatDuration(selected.milliseconds);
       throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
     }
     if (typeof value === "string") return value;
@@ -1191,7 +1190,7 @@ export class Evaluator {
             span,
           );
         }
-        warning = setTimerRepeatDuration(timer, value.milliseconds);
+        warning = setTimerRepeatDuration(timer, value.milliseconds, now);
       }
     } else {
       throw fault(

@@ -1893,6 +1893,14 @@ function startTimer(
     (instruction.unit === null || instruction.unit === "s")
       ? duration
       : null;
+  const zeroRoundFault = () =>
+    fault(
+      "TSR050",
+      "A repeating timer needs every round to last longer than zero.",
+      instruction.duration.span,
+    );
+  // A range that allows a zero-length round is rejected before its first round is drawn.
+  if (range !== null && range.start < 1) throw zeroRoundFault();
   const roundDurationMs = timerDurationMs(
     evaluator,
     duration,
@@ -1900,13 +1908,7 @@ function startTimer(
     "timer",
     instruction.duration.span,
   );
-  if (instruction.repeat && (roundDurationMs <= 0 || (range !== null && range.start < 1))) {
-    throw fault(
-      "TSR050",
-      "A repeating timer needs every round to last longer than zero.",
-      instruction.duration.span,
-    );
-  }
+  if (instruction.repeat && roundDurationMs <= 0) throw zeroRoundFault();
   const deadlineMs = futureDeadline(snapshot, roundDurationMs, "timer", instruction.duration.span);
   if (
     !Number.isSafeInteger(snapshot.nextActionId) ||
@@ -1945,6 +1947,7 @@ function startTimer(
       remainingMs: null,
       elapsedMs: 0,
       runningSinceMs: snapshot.currentSessionTimeMs,
+      anchoredRounds: instruction.repeat && range === null ? 0 : null,
     },
   };
   snapshot.nextActionId += 1;

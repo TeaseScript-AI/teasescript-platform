@@ -462,33 +462,37 @@ replay or stale/unknown classification. A completion targeting an interrupted ac
 without mutation. Otherwise, an inactive ID matching `lastSettlement` is `alreadySettled`, an issued inactive ID is
 `staleAction`, and an unissued ID is `unknownAction`.
 
-Running timed actions store an absolute deadline derived from `currentSessionTimeMs`; paused timers retain remaining
-round time instead. The runtime does not read browser or operating-system clocks directly. The player maps monotonic
-elapsed deltas onto the session coordinate, schedules wake-ups, and submits validated observations; tests use a fake
-clock and never sleep in real time.
+Running timed actions store an absolute deadline on the scene-time coordinate; paused timers retain remaining round
+time instead. The runtime does not read browser or operating-system clocks directly. The player maps monotonic elapsed
+deltas onto the session coordinate, schedules wake-ups, and submits validated observations; tests use a fake clock and
+never sleep in real time.
 
-A time observation updates the snapshot atomically:
+A snapshot carries two coordinates: `observedSessionTimeMs`, the latest observed time, and `currentSessionTimeMs`, the
+scene time at which execution stands. A time observation updates the snapshot atomically:
 
 ```text
-effectiveNow = max(snapshot.currentSessionTimeMs, suppliedNow)
-snapshot.currentSessionTimeMs = effectiveNow
-settle actions due at effectiveNow
+snapshot.observedSessionTimeMs = max(snapshot.observedSessionTimeMs, suppliedNow)
+settle due work in (deadline, action ID) order, advancing currentSessionTimeMs toward observedSessionTimeMs
 ```
 
-No checkpoint may contain due-action processing performed against a newer observation while retaining the older session-time value.
+Without timer expiry blocks both coordinates are equal after every operation; catch-up with expiry blocks is defined
+under [Timers and scene time](#timers-and-scene-time). No checkpoint may contain due-action processing performed
+against a newer time than its `currentSessionTimeMs`; a checkpoint taken while catch-up is held keeps both coordinates
+and the pending work.
 
 Blocking `wait` and `timer`, foreground interactions, pacing gates, and asynchronous timers share ADR 0016 action,
 identity, observation, event, and checkpoint infrastructure. Their timer-specific composition is defined below.
 
 ## Timers and scene time
 
-Timers and `wait` measure Player-executed scene time: the persisted `currentSessionTimeMs`. The engine never reads a
+Timers and `wait` measure Player-executed scene time on the persisted session coordinate. The engine never reads a
 clock. A live Player maps a monotonic clock onto the session coordinate and submits explicit observations at the
 next deadline, before input continues the script, when the page's visibility changes, and on `pagehide`. Callbacks
 are only observation opportunities, so a throttled background callback catches up rather than losing elapsed time,
-and visibility changes never pause time. Restoring a checkpoint rebases the Player clock on the saved coordinate, so
-the gap while no Player ran, including a device handoff, does not consume timer time; a timer continues with its
-saved remaining time. Extreme platform suspension without any lifecycle opportunity is not covered. Absolute
+and visibility changes never pause time. Restoring a checkpoint rebases the Player clock on the saved
+`observedSessionTimeMs`: new observations are `savedObservedSessionTimeMs + monotonicDeltaSinceRestore`, while held
+catch-up continues from the saved `currentSessionTimeMs`. The gap while no Player ran, including a device handoff,
+therefore does not consume timer time; a timer continues with its saved remaining time. Extreme platform suspension without any lifecycle opportunity is not covered. Absolute
 wall-clock deadlines belong to future scheduled events, not to timers.
 Presentation refresh cadence does not impose a minimum timer duration.
 
@@ -506,8 +510,10 @@ and timer rounds. A round that expires naturally ends at its deadline and a repe
 there, drawing a repeating range from the session RNG; `remaining` reaching zero ends the round at the current scene
 time, as does pausing a round that is already due while its expiry waits behind a running block. An expired round
 with an expiry block is queued in `pendingTimerHandlers` in due order; consecutive expiries of one timer share an entry
-with a count. A handler-free fixed repeating timer skips silent rounds arithmetically on a late
-observation.
+with a count. A fixed-length repeating timer computes each round's deadline from an anchor as
+`anchor + (anchoredRounds + 1) * repeatDuration` instead of accumulating it, so every observation schedule yields the
+same deadlines; a handler-free one skips silent rounds in one step. A script change to the current round (`pause`,
+`resume`, `remaining`, or `repeatDuration`) starts a new anchor at the next full round.
 
 An observation records `observedSessionTimeMs`; `currentSessionTimeMs` is the scene time at which execution stands.
 Due work settles one deadline at a time, advancing scene time to each. While an expiry block can execute, now or
@@ -516,9 +522,10 @@ became due: the block starts at its expiry's deadline and continues
 after its own waits and pacing at their deadlines, and catch-up continues toward the observed time once the block
 returns or waits. Later due work, including other timers, the foreground delay, and pacing gates, therefore stays
 unsettled until then, however late or often the Player observes. The main path still continues at the observed
-time, and settlements outside a running block record the observation, as for plans without expiry blocks. This reproduces a Player that observed every deadline on time: a block can `stop()` a later timer
-before it expires, a timer it starts orders by its own deadline, and a handler-free repeating timer skips silent
-rounds only up to the next other due work. A Player delay completion that an earlier-due block will interrupt
+time. Time-driven settlements outside a running block record the observation, as for plans without expiry blocks; a
+pacing gate that is skipped or consumed records the current scene time. This reproduces a Player that observed every
+deadline on time: a block can `stop()` a later timer before it expires, a timer it starts orders by its own
+deadline, and a handler-free repeating timer skips silent rounds only up to the next other due work. A Player delay completion that an earlier-due block will interrupt
 returns `suspendedAction` while keeping the time observation.
 
 Expiry blocks compile to parameterless handler regions. A runtime entry starts the first queued block before

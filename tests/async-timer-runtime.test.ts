@@ -15,6 +15,7 @@ import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
+import { timerProperty } from "../src/runtime/timers.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
@@ -571,6 +572,15 @@ test("async timers and interrupts resume identically from every checkpoint bound
     ].join("\n"),
     { scenarioName: "async timer equivalence" },
   );
+  // A queued block held behind pacing, and a repeat expiring while its own block waits.
+  assertRuntimeResumeEquivalent(
+    'timer async 1 { say "handler", 0 }\nsay "one", 2\nsay "two", 1\nwait 10',
+    { scenarioName: "block behind pacing", instructionGuard: 200 },
+  );
+  assertRuntimeResumeEquivalent(
+    "let n = 0\nlet t = timer(duration: 1, async: true, repeat: true) { n += 1\nwait 2\nif n == 2 { t.stop() } }\nwait 10",
+    { scenarioName: "repeat behind a waiting block", instructionGuard: 200 },
+  );
 });
 
 test("timer actions cannot be completed by the Player", () => {
@@ -694,7 +704,11 @@ test("a late observation skips silent fixed repeat rounds arithmetically", () =>
   late.at(3_600_000);
   assert.ok(performance.now() - started < 500, "catch-up must not process every silent round");
   const timer = late.timers()[0]!.timer;
-  assert.equal(timer.elapsedMs, 3_600_000);
+  assert.deepEqual(timerProperty(timer, "elapsed", 3_600_000), {
+    kind: "duration",
+    milliseconds: 3_600_000,
+  });
+  assert.equal(timer.anchoredRounds, 3_600_000, "rounds since the anchor at 0 ms");
   assert.equal(timer.deadlineMs, 3_600_001);
 });
 
@@ -887,4 +901,96 @@ test("pacing consumed or skipped during catch-up and terminal completions keep q
     "expiry blocks queued before a terminal action completes still run",
   );
   assert.equal(ended.snapshot.status, "halted");
+});
+
+test("audit regressions: fractional repeats, tiny rounds, remaining rounding, and visible lists", () => {
+  // Observes every timer deadline up to the horizon, as a Player that is never late would.
+  const onTime = (source: string, horizonMs: number): Session => {
+    const session = new Session(source);
+    for (let guard = 0; session.snapshot.observedSessionTimeMs < horizonMs; guard += 1) {
+      assert.ok(guard < 100, "on-time schedule must reach the horizon");
+      const deadlines = session
+        .timers()
+        .map((action) => action.timer.deadlineMs)
+        .filter((deadline): deadline is number => deadline !== null);
+      session.at(Math.min(horizonMs, ...deadlines));
+    }
+    return session;
+  };
+  const fractional =
+    'let t = timer(duration: 0.1 ms, async: true, repeat: true)\ntimer async 1 ms {\n  if t.remaining > 0.1 ms { say "long", 0 }\n  else { say "short", 0 }\n}\nwait 10 ms';
+  const timely = onTime(fractional, 1);
+  const late = new Session(fractional).at(1);
+  assert.deepEqual(late.said(), timely.said());
+  assert.deepEqual(late.timers()[0]!.timer, timely.timers()[0]!.timer);
+
+  const started = performance.now();
+  const tiny = new Session("timer(duration: 1e-16 ms, async: true, repeat: true)\nwait 1 ms").at(1);
+  assert.ok(performance.now() - started < 1_000, "tiny silent rounds are skipped in one step");
+  assert.equal(tiny.snapshot.foregroundAction, null);
+
+  const adjusted = new Session(
+    "wait 0.1 ms\nlet t = timer async 0.2 ms\nt.remaining = 0 ms\nwait 1 ms",
+  ).at(0.1);
+  assert.equal(adjusted.snapshot.status, "waiting");
+  assert.ok(adjusted.snapshot.settledTimers.every((timer) => timer.roundDurationMs >= 0));
+
+  const list = run(
+    plan("say [90 seconds], 0"),
+    createImmediatePacingRuntimeSnapshot(plan("say [90 seconds], 0")),
+  );
+  assert.equal(list.snapshot.failure?.code, "TSR021");
+
+  const range = plan("let n = 0\ntimer(duration: n..2, async: true, repeat: true)\nwait 10");
+  const fresh = createImmediatePacingRuntimeSnapshot(range, { seed: 0x1234_5678 });
+  const failed = run(range, fresh).snapshot;
+  assert.equal(failed.failure?.code, "TSR050");
+  assert.deepEqual(failed.rng, fresh.rng, "an invalid range fails before its round is drawn");
+});
+
+test("audit regressions: restore rejects contradictory rounds, early expiries, and count overflow", () => {
+  const path = ["snapshot", "backgroundActions", 0, "timer"] as const;
+  const paused = new Session("let t = timer async 5\nt.pause()\nwait 10");
+  const pausedJson = serializeCheckpoint(createCheckpoint(paused.plan, paused.snapshot));
+  assertForgedRejected(pausedJson, [...path, "roundDurationMs"], 0);
+  assertForgedRejected(pausedJson, [...path, "roundDurationMs"], 10_000);
+  const running = new Session("let t = timer async 5\nwait 10");
+  const runningJson = serializeCheckpoint(createCheckpoint(running.plan, running.snapshot));
+  assertForgedRejected(runningJson, [...path, "roundDurationMs"], 0);
+  const anchored = new Session("let t = timer(duration: 1, async: true, repeat: true)\nwait 10").at(
+    2_500,
+  );
+  const anchoredJson = serializeCheckpoint(createCheckpoint(anchored.plan, anchored.snapshot));
+  assertForgedRejected(anchoredJson, [...path, "deadlineMs"], 3_500);
+  assertForgedRejected(anchoredJson, [...path, "anchoredRounds"], 5);
+
+  const born = new Session(
+    'wait 1\nlet t = timer(duration: 1, async: true, repeat: true) { say "expired", 0 }\nwait 10',
+  ).at(1_000);
+  const bornJson = serializeCheckpoint(createCheckpoint(born.plan, born.snapshot));
+  assertForgedRejected(bornJson, ["snapshot", "pendingTimerHandlers", "push"], {
+    timerId: 1,
+    handlerFunctionId: born.timers()[0]!.timer.handlerFunctionId,
+    dueAtMs: 0,
+    count: 1,
+  });
+
+  const counted = new Session(
+    "let t = timer(duration: 1, async: true, repeat: true) { wait 100 }\nwait 1000",
+  )
+    .at(1_000)
+    .at(2_000);
+  assert.equal(counted.snapshot.pendingTimerHandlers.length, 1);
+  // EVIDENCE: fixture: checkpoint serialization produces plain JSON data with this queue shape.
+  const full = JSON.parse(
+    serializeCheckpoint(createCheckpoint(counted.plan, counted.snapshot)),
+  ) as { snapshot: { pendingTimerHandlers: { count: number }[] } };
+  full.snapshot.pendingTimerHandlers[0]!.count = Number.MAX_SAFE_INTEGER;
+  counted.snapshot = deserializeCheckpoint(JSON.stringify(full)).snapshot;
+  counted.at(3_000);
+  assert.deepEqual(
+    counted.snapshot.pendingTimerHandlers.map((entry) => entry.count),
+    [Number.MAX_SAFE_INTEGER, 1],
+    "a full aggregate count starts a new entry",
+  );
 });

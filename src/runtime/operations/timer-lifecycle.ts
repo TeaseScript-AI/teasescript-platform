@@ -140,11 +140,16 @@ export function expireTimerAction(
   // A next deadline that cannot advance or leaves the session range would loop forever; the timer finishes instead.
   if (
     timer.state === "running" &&
-    (!isValidSessionTime(timer.deadlineMs) || timer.deadlineMs! <= endedAtMs)
+    (!isValidSessionTime(timer.deadlineMs) ||
+      timer.deadlineMs! <= endedAtMs ||
+      (timer.anchoredRounds !== null && timer.anchoredRounds >= Number.MAX_SAFE_INTEGER - 1))
   ) {
+    // Running time up to the end of the last round is kept, including an anchored sequence's rounds.
+    timer.elapsedMs += Math.max(0, endedAtMs - timer.runningSinceMs!);
     timer.state = "finished";
     timer.deadlineMs = null;
     timer.runningSinceMs = null;
+    timer.anchoredRounds = null;
   }
   if (timer.handlerFunctionId !== null) {
     queueTimerHandler(snapshot, timer.timerId, timer.handlerFunctionId, endedAtMs);
@@ -194,7 +199,8 @@ function queueTimerHandler(
   let index = queue.length;
   while (index > 0 && queue[index - 1]!.dueAtMs > dueAtMs) index -= 1;
   const previous = queue[index - 1];
-  if (previous?.timerId === timerId) {
+  // A full count starts a new entry, so aggregation never publishes an unsafe integer.
+  if (previous?.timerId === timerId && previous.count < Number.MAX_SAFE_INTEGER) {
     previous.count += 1;
     return;
   }

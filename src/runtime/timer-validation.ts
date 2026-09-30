@@ -1,5 +1,6 @@
 import type { InstructionPlan } from "../plan/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
+import { anchoredDeadlineMs } from "./timers.js";
 import { timerBlockHoldsCatchUp } from "./action-validation.js";
 
 /** Restore validation for asynchronous timers, their handles, and queued expiry blocks. */
@@ -19,6 +20,7 @@ const TIMER_KEYS = [
   "remainingMs",
   "elapsedMs",
   "runningSinceMs",
+  "anchoredRounds",
 ] as const;
 
 const TIMER_ACTION_KEYS = [
@@ -99,6 +101,51 @@ function withinSceneTime(elapsedMs: number, availableMs: number): boolean {
   return elapsedMs <= availableMs + Number.EPSILON * 16 * Math.max(1, availableMs);
 }
 
+/** `value <= bound`, allowing rounding relative to the largest magnitude that produced either side. */
+function atMost(value: number, bound: number, magnitude: number): boolean {
+  return value <= bound + Number.EPSILON * 16 * Math.max(1, Math.abs(magnitude));
+}
+
+/**
+ * The current round's total covers the time still left in it, and its consumed part fits the timer's running time. An
+ * anchored round sequence instead fixes the deadline exactly by its anchor formula.
+ */
+function validCurrentRound(timer: Record<string, unknown>): boolean {
+  const { roundDurationMs, elapsedMs, anchoredRounds } = timer;
+  if (typeof roundDurationMs !== "number" || typeof elapsedMs !== "number") return false;
+  if (anchoredRounds !== null) {
+    return (
+      nonNegativeSafeInteger(anchoredRounds) &&
+      anchoredRounds < Number.MAX_SAFE_INTEGER - 1 &&
+      timer.state === "running" &&
+      timer.range === null &&
+      typeof timer.repeatDurationMs === "number" &&
+      roundDurationMs === timer.repeatDurationMs &&
+      typeof timer.runningSinceMs === "number" &&
+      timer.deadlineMs ===
+        anchoredDeadlineMs(timer.runningSinceMs, anchoredRounds, timer.repeatDurationMs)
+    );
+  }
+  if (timer.state === "running") {
+    if (typeof timer.deadlineMs !== "number" || typeof timer.runningSinceMs !== "number") {
+      return false;
+    }
+    const leftMs = timer.deadlineMs - timer.runningSinceMs;
+    return (
+      atMost(leftMs, roundDurationMs, timer.deadlineMs) &&
+      atMost(roundDurationMs, elapsedMs + leftMs, timer.deadlineMs + elapsedMs)
+    );
+  }
+  if (timer.state === "paused") {
+    if (typeof timer.remainingMs !== "number") return false;
+    return (
+      atMost(timer.remainingMs, roundDurationMs, roundDurationMs) &&
+      atMost(roundDurationMs - timer.remainingMs, elapsedMs, roundDurationMs + elapsedMs)
+    );
+  }
+  return true;
+}
+
 function validTimerRecord(
   timer: Record<string, unknown>,
   active: boolean,
@@ -120,7 +167,8 @@ function validTimerRecord(
     !validRange(timer.range) ||
     (timer.range !== null && (!timer.repeat || timer.repeatDurationMs !== null)) ||
     (timer.repeat && timer.range === null && timer.repeatDurationMs === null) ||
-    !isValidSessionTime(now)
+    !isValidSessionTime(now) ||
+    !validCurrentRound(timer)
   ) {
     return false;
   }
@@ -194,10 +242,15 @@ export function validateTimerState(
       addRecord(records, timer, errors);
     }
   }
+  // Known creation times of active timers bound when their expiries can be due.
+  const createdAt = new Map<number, number>();
   if (Array.isArray(value.backgroundActions)) {
     for (const action of value.backgroundActions) {
       if (isPlainRecord(action) && action.kind === "timer" && isPlainRecord(action.timer)) {
         addRecord(records, action.timer, errors);
+        if (positiveSafeInteger(action.timer.timerId) && typeof action.createdAtMs === "number") {
+          createdAt.set(action.timer.timerId, action.createdAtMs);
+        }
       }
     }
   }
@@ -230,6 +283,7 @@ export function validateTimerState(
       !isValidSessionTime(value.currentSessionTimeMs) ||
       invocation.dueAtMs > value.currentSessionTimeMs ||
       invocation.dueAtMs < previousDue ||
+      invocation.dueAtMs < (createdAt.get(Number(invocation.timerId)) ?? 0) ||
       record.state === "stopped"
     ) {
       errors.push("Runtime pending timer expiry block is malformed.");
@@ -250,7 +304,14 @@ export function validateTimerState(
       const record = positiveSafeInteger(frame.timerInterruption.timerId)
         ? records.get(frame.timerInterruption.timerId)
         : undefined;
-      if (record === undefined || record.handlerFunctionId !== frame.functionId) {
+      const dueAtMs = frame.timerInterruption.dueAtMs;
+      if (
+        record === undefined ||
+        record.handlerFunctionId !== frame.functionId ||
+        (typeof dueAtMs === "number" &&
+          positiveSafeInteger(record.timerId) &&
+          dueAtMs < (createdAt.get(record.timerId) ?? 0))
+      ) {
         errors.push("Runtime timer expiry-block frame does not belong to its timer.");
       } else if (record.repeat !== true && positiveSafeInteger(record.timerId)) {
         const id = record.timerId;

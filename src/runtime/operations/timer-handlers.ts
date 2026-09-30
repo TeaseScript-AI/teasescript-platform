@@ -74,11 +74,9 @@ export function returnFromTimerHandler(
   snapshot.frames.splice(frame.scopeBaseDepth);
   snapshot.loopFrames.splice(frame.loopBaseDepth);
   snapshot.callFrames.pop();
-  snapshot.temporaries.splice(
-    0,
-    snapshot.temporaries.length,
-    ...frame.callerTemporaries.map((temporary) => ({ ...temporary })),
-  );
+  // Copied one by one: a wide caller state must not depend on the host's argument-spread limit.
+  snapshot.temporaries.length = 0;
+  for (const temporary of frame.callerTemporaries) snapshot.temporaries.push({ ...temporary });
   snapshot.nextInstruction = frame.returnInstruction;
   restoreSuspendedAction(plan, snapshot, frame, events);
   // Due work that waited behind this block continues in scene-time order, including a restored overdue delay.

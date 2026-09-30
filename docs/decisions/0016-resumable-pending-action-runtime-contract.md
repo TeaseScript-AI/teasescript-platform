@@ -290,12 +290,12 @@ The canonical persisted coordinate is not raw `performance.now()`, because that 
 Conceptually:
 
 ```text
-sessionNow = persistedSceneTime + monotonicDeltaSinceAnchor
+sessionNow = savedObservedSessionTimeMs + monotonicDeltaSinceAnchor
 ```
 
 During a live Player execution, elapsed observations advance scene time, including ordinary background throttling.
-A new Player execution rebases its clock on the persisted coordinate; genuine unavailability does not consume timer
-duration. Visibility changes provide observation opportunities and do not pause a live Player.
+A new Player execution rebases its clock on the persisted observed time (`observedSessionTimeMs`); genuine
+unavailability does not consume timer duration. Visibility changes provide observation opportunities and do not pause a live Player.
 
 Absolute wall-clock targets and server-authoritative deadlines are separate scheduling concerns. The Player
 observation and restore contract is maintained in [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time).
@@ -322,7 +322,7 @@ observation and restore contract is maintained in [`RUNTIME.md`](../RUNTIME.md#t
 No checkpoint may expose due-action processing performed against a newer time than its `currentSessionTimeMs`
 value.
 
-A backward clock adjustment therefore does not extend an active wait. Restore itself does not read a clock and has no hidden completion side effect. After restore, the player submits an explicit observation; the persisted coordinate then prevents time from moving backwards.
+A backward clock adjustment therefore does not extend an active wait. Restore itself does not read a clock and has no hidden completion side effect. After restore, the player submits an explicit observation; the persisted observed time then prevents time from moving backwards.
 
 ### Timed actions
 

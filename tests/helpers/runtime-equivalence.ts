@@ -15,6 +15,7 @@ import {
   type RuntimeSnapshot,
 } from "../../src/index.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
+import { timerHandlerDispatchable } from "../../src/runtime/operations/timer-lifecycle.js";
 
 const DEFAULT_EQUIVALENCE_SEED = 0x1234_5678;
 const DEFAULT_INSTRUCTION_GUARD = 2_000;
@@ -187,9 +188,12 @@ function runServicingDelays(
   }
 }
 
-/** Waiting with nothing runnable: only a time observation can make progress. */
+/**
+ * Waiting with nothing runnable: only a time observation can make progress. A queued expiry block held behind pacing
+ * or a running block is not runnable.
+ */
 function awaitsTime(snapshot: RuntimeSnapshot): boolean {
-  return snapshot.status === "waiting" && snapshot.pendingTimerHandlers.length === 0;
+  return snapshot.status === "waiting" && !timerHandlerDispatchable(snapshot);
 }
 
 function observeDueDelay(
@@ -203,15 +207,14 @@ function observeDueDelay(
     ...snapshot.backgroundActions,
     ...snapshot.callFrames.map((frame) => frame.timerInterruption?.suspendedAction ?? null),
   ]) {
-    if (action?.kind === "delay") deadlines.push(action.deadlineMs);
+    if (action?.kind === "delay" || action?.kind === "chatPacingGate") {
+      deadlines.push(action.deadlineMs);
+    }
     if (action?.kind === "timer" && action.timer.deadlineMs !== null) {
       deadlines.push(action.timer.deadlineMs);
     }
   }
-  assert.ok(
-    snapshot.foregroundAction?.kind === "delay" || deadlines.length > 0,
-    `${context}: only delays and timers can be serviced`,
-  );
+  assert.ok(deadlines.length > 0, `${context}: only delays, pacing, and timers can be serviced`);
   const observed = observeTime(plan, snapshot, Math.min(...deadlines));
   assert.equal(observed.outcome.kind, "observed", `${context}: delay observation must succeed`);
   assert.notDeepEqual(
