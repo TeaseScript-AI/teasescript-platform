@@ -551,6 +551,19 @@ function validForegroundDelayWithOlderPacingSettlement(
   );
 }
 
+/** An async play's wait ends with its load result; a blocking play's wait ends with its media. */
+function validMediaWaitOutcome(
+  settlement: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+): boolean {
+  if (plan === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return true;
+  const owner = plan.instructions[settlement.owningInstruction];
+  if (owner?.kind !== "playMedia") return false;
+  return owner.async
+    ? settlement.outcome === "loaded" || settlement.outcome === "failed"
+    : settlement.outcome !== "loaded";
+}
+
 /**
  * A script waiting on media: an async play waits for its unloaded media's load result, a blocking play for its active
  * media to end. The media record is validated with the media state.
@@ -588,9 +601,13 @@ function validMediaPlaybackAction(
       isPlainRecord(candidate.media) &&
       candidate.media.mediaId === action.mediaId,
   );
+  // A play creates its media action and then its wait, so the wait belongs to the media action just before it.
   return (
     isPlainRecord(media) &&
     isPlainRecord(media.media) &&
+    media.owningInstruction === action.owningInstruction &&
+    positiveSafeInteger(media.actionId) &&
+    media.actionId + 1 === action.actionId &&
     (action.until === "ended" || media.media.loaded === false)
   );
 }
@@ -1556,6 +1573,9 @@ function validSettlementKindData(
       ]) &&
       ["loaded", "finished", "stopped", "failed"].includes(String(settlement.outcome)) &&
       positiveSafeInteger(settlement.mediaId) &&
+      positiveSafeInteger(snapshot.nextMediaId) &&
+      settlement.mediaId < snapshot.nextMediaId &&
+      validMediaWaitOutcome(settlement, plan) &&
       validSessionTime(settlement.completedAtMs) &&
       validSessionTime(snapshot.observedSessionTimeMs) &&
       settlement.completedAtMs <= snapshot.observedSessionTimeMs

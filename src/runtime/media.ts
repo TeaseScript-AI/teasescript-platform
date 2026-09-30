@@ -485,6 +485,7 @@ export function mediaPlayheadMs(media: RuntimeMediaSnapshot): number {
   const toEnd = end - media.positionMs;
   if (pending < toEnd) return media.positionMs + pending;
   const passLength = end - media.startAtMs;
+  if (passLength <= 0) return end;
   const beyond = pending - toEnd;
   // Playback that ends exactly at the end of a pass stays at that end rather than wrapping.
   if (

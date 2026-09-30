@@ -242,7 +242,7 @@ test("statement-level media handle operations get a receiver barrier; reads do n
   );
   assert.deepEqual(
     barriers.map((barrier) => barrier.kind === "pacingBarrier" && barrier.receiver?.kind),
-    [undefined, "identifier", "identifier", "identifier"],
+    [undefined, "identifier", "preparedReference", "preparedReference"],
   );
 });
 

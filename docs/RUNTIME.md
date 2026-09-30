@@ -5,7 +5,8 @@
 `player/runtime-adapter.ts` is the framework-independent Player adapter shared by the Vue reference and the
 playground's action lookup/completion path. It maps validated pending actions and runtime events to Player presentation,
 submits typed interactions, pacing/time observations, media load reports, and media progress, projects the Stage and
-active media for playback, and uses the canonical runtime checkpoint operations.
+active media for playback, and uses the canonical runtime checkpoint operations. Authored image and audio browser
+wiring is pending in #446; browser video playback remains deferred.
 `playground/workspace/controller.ts` retains the DOM-free compiler/execution and development-automation workspace
 facade. Neither adapter normalizes answers, matches choices, derives canonical transcript text, or retains an
 independent action lifecycle.
@@ -300,8 +301,8 @@ the actual separation is the longer of the remaining `say` gate and the explicit
 Main-story media presentation waits for the previous message like a following `say`. The compiler emits a
 `pacingBarrier` instruction before `showImage`, `hideImage`, `playAudio`, and `playVideo`, and before a statement-level
 media handle operation (`h.pause()`, `h.resume()`, `h.stop()`, or an assignment to `h.position`, `h.remaining`, or
-`h.volume`) whose receiver is an identifier with property or literal/identifier index access. Such a barrier evaluates
-that receiver when it runs and waits only for a media handle; call-result receivers do not wait. When a background
+`h.volume`). The receiver is evaluated once, before the barrier, and the operation uses that value; the barrier waits
+only when it is a media handle. When a background
 pacing gate is active, the barrier moves that gate, with its identity, deadline, and skip policy unchanged, into the
 foreground without prepared output and keeps `nextInstruction` at the barrier. Time or skip settlement leaves
 `nextInstruction` there, so the barrier runs again during a later runtime entry and then advances; the media statement
@@ -431,13 +432,14 @@ lastSettlement:
     ActionSettlement | null
 ```
 
-A valid current `waiting` snapshot contains exactly one active foreground delay, interaction, or `chatPacingGate`.
-Non-waiting states contain no active foreground action. `backgroundActions` may contain timer actions and at most
-one pacing gate. A background pacing gate may coexist with a foreground delay; it is consumed before a foreground
+A valid current `waiting` snapshot contains exactly one active foreground delay, interaction, `chatPacingGate`, or
+`mediaPlayback` wait. Non-waiting states contain no active foreground action. `backgroundActions` may contain timer
+and media actions and at most one pacing gate. A background pacing gate may coexist with a foreground delay; it is consumed before a foreground
 interaction and cannot coexist with a foreground pacing gate.
 
-Timer interrupt state may retain one inert suspended foreground action. Its ownership, settlement, and restore
-rules are defined under [Timers and scene time](#timers-and-scene-time).
+The shared timer and media interrupt state may retain one inert suspended foreground delay, interaction, or media
+wait. Its ownership, settlement, and restore rules are defined under [Timers and scene time](#timers-and-scene-time)
+and [Stage image and media playback](#stage-image-and-media-playback).
 
 Blocking `wait` and `timer` use the foreground-delay path. `wait` is hidden; `timer` carries `visible`, `mystery`, or
 `hidden` display and an evaluated label. Durations follow specification
@@ -478,8 +480,9 @@ replay or stale/unknown classification. A completion targeting an interrupted ac
 without mutation. Otherwise, an inactive ID matching `lastSettlement` is `alreadySettled`, an issued inactive ID is
 `staleAction`, and an unissued ID is `unknownAction`.
 
-Running timed actions store an absolute deadline on the scene-time coordinate; paused timers retain remaining round
-time instead. The runtime does not read browser or operating-system clocks directly. The player maps monotonic elapsed
+Running countdown actions store an absolute deadline on the scene-time coordinate; paused timers retain remaining
+round time instead. Media playback uses progress observations instead; see
+[Stage image and media playback](#stage-image-and-media-playback). The runtime does not read browser or operating-system clocks directly. The player maps monotonic elapsed
 deltas onto the session coordinate, schedules wake-ups, and submits validated observations; tests use a fake clock and
 never sleep in real time.
 
@@ -489,11 +492,12 @@ scene time at which execution stands. A time observation updates the snapshot at
 ```text
 snapshot.observedSessionTimeMs = max(snapshot.observedSessionTimeMs, suppliedNow)
 unless the session has failed:
-  settle due work in (deadline, action ID) order, advancing currentSessionTimeMs toward observedSessionTimeMs
+  settle due work in (scene time, phase, action ID) order, advancing currentSessionTimeMs toward observedSessionTimeMs
 ```
 
-Outside a failed session, and without timer expiry blocks, both coordinates are equal after every operation. A failed
-session is terminal: later observations record the observed time but settle nothing and leave scene time unchanged.
+Outside a failed session, both coordinates are equal after every operation unless queued or running timer expiry
+blocks or media cue blocks hold `currentSessionTimeMs` behind `observedSessionTimeMs`. A failed session is terminal:
+later observations record the observed time but settle nothing and leave scene time unchanged.
 Catch-up with expiry blocks is defined under [Timers and scene time](#timers-and-scene-time). No checkpoint may contain due-action processing performed
 against a newer time than its `currentSessionTimeMs`; a checkpoint taken while catch-up is held keeps both coordinates
 and the pending work.
@@ -507,9 +511,11 @@ Timers and `wait` measure Player-executed scene time on the persisted session co
 clock. A live Player maps a monotonic clock onto the session coordinate and submits explicit observations at the
 next deadline, before input continues the script, when the page's visibility changes, and on `pagehide`. Callbacks
 are only observation opportunities, so a throttled background callback catches up rather than losing elapsed time,
-and visibility changes never pause time. Restoring a checkpoint rebases the Player clock on the saved
-`observedSessionTimeMs`: new observations are `savedObservedSessionTimeMs + monotonicDeltaSinceRestore`, while held
-catch-up continues from the saved `currentSessionTimeMs`. The gap while no Player ran, including a device handoff,
+and visibility changes never pause time. When restored execution resumes, the Player rebases its clock on the saved
+`observedSessionTimeMs`: new observations are `savedObservedSessionTimeMs + monotonicDeltaSinceResume`, while held
+catch-up continues from the saved `currentSessionTimeMs`. After a page reload, the explicit Continue of
+[Session start and user activation](ui/PLAYER-UI.md#session-start-and-user-activation) precedes that resumption, so
+waiting for Continue does not consume scene or playback time. The gap while no Player ran, including a device handoff,
 therefore does not consume timer time; a timer continues with its saved remaining time. Extreme platform suspension without any lifecycle opportunity is not covered. Absolute
 wall-clock deadlines belong to future scheduled events, not to timers.
 Presentation refresh cadence does not impose a minimum timer duration.
@@ -523,8 +529,8 @@ label, repeat configuration, current-round length, and either its deadline (runn
 accumulated elapsed time. A finished or stopped record moves to `settledTimers` so its opaque handle
 (`{ kind: "timerHandle", timerId }`) stays readable; `nextTimerId` allocates handle IDs.
 
-`observeTime` processes due work globally by `(deadline, action ID)`: foreground and suspended delays, pacing gates,
-and timer rounds. A round that expires naturally ends at its deadline and a repeating timer starts its next round
+`observeTime` processes due work globally by `(scene time, phase, action ID)`: foreground and suspended delays, pacing
+gates, timer rounds, and media timeline events (see [Stage image and media playback](#stage-image-and-media-playback)). A round that expires naturally ends at its deadline and a repeating timer starts its next round
 there, drawing a repeating range from the session RNG; `remaining` reaching zero ends the round at the current scene
 time, as does pausing a round that is already due while its expiry waits behind a running block. An expired round
 with an expiry block is queued in `pendingTimerHandlers` in due order; consecutive expiries of one timer share an entry
@@ -585,16 +591,22 @@ stops it.
 **Waiting and load.** A play first waits in a foreground `mediaPlayback` action: an async play until the Player's load
 report, a blocking play until the media finishes, stops, or fails. The wait settles through runtime work, never
 through `completeAction`; its settlement is retained like a delay's, it may be a terminal action, and an interrupt
-block may suspend it. The Player reports each source with `reportMediaLoad(plan, snapshot, mediaId, report)`:
-`{ kind: "loaded", durationMs }` makes duration-dependent state authoritative and starts the first playback segment;
-`{ kind: "failed", message? }` reports developer warning `TSW013`, stops the media without cues or `finish`, and
-releases any wait. No load timeout is defined by the runtime; a Player that gives up reports `failed`.
+block may suspend it. A `null` file plays nothing and creates no wait. The Player reports the initial load result of
+each active unloaded media with `reportMediaLoad(plan, snapshot, mediaId, report)`: `{ kind: "loaded", durationMs }`
+records the source duration and starts the first playback segment when the effective range is non-empty; an empty
+range reports `TSW013` and stops without cues or `finish`, keeping the duration readable. `{ kind: "failed",
+message? }` reports `TSW013`, stops the media without cues or `finish`, and releases any wait; its handle reads `null`
+for `duration` and `remaining`. Reports for loaded or settled media are `ignored`, unissued IDs are `unknownMedia`,
+and malformed input is `invalidReport`. The runtime defines no load timeout and no post-load playback failure; a Player
+that gives up before loading reports `failed`.
 
 **Progress observations.** Playback progress enters only through validated observations:
 `observeTime(plan, snapshot, nowMs, [{ mediaId, segment, progressMs }])`, where `progressMs` is the active playback
 time of the current segment, excluding stalls and pauses. Each accepted report becomes a sample `(nowMs, progressMs)`;
 samples must increase in time and must not decrease in progress, and reports for another segment or unknown, settled,
-or unloaded media are ignored. A running media without a report in an observation has made no known progress, so
+or unloaded media are ignored, as are reports with non-increasing times or decreasing progress; a malformed report
+batch rejects the whole observation as `invalidObservation`. A running media without a report in an observation has
+made no known progress, so
 Players report every running media on every observation. Every canonical timeline change starts a new segment
 anchored at `(scene time, 0)`: load, pause, resume from pause, seek, stop, and Stage replacement; lifecycle no-ops and
 volume changes do not. A Player acknowledges a new segment by reporting progress `0` when it applies it.
@@ -616,9 +628,9 @@ settlements outside a running block record the observation.
 **Script operations.** Handle reads use the progress interpolated at current scene time, capped at the next
 uncommitted arrival. Before `pause()`, `resume()`, `stop()`, a seek, or a Stage replacement changes a segment, the
 media's events due before current scene time are committed; events due exactly now keep their catch-up order, so cues
-at the point where the media stops stay pending until it plays on. A seek clamps to the active range, fires no cue it
-jumps across, leaves cues at the new position pending until playback proceeds, and at the end of the range completes
-the pass at once, also while paused. `stop()` and replacement drop the media's queued, not yet started cue blocks.
+at the point where the media stops stay pending until it plays on. After a seek, a pass that the seek completed is
+committed at once. `stop()` and replacement drop the media's queued, not yet started cue blocks. Author-visible seek,
+lifecycle, cue, and handle behavior is defined in specification §22.
 
 **Cue blocks.** Cue, compact, and `finish` blocks compile to parameterless handler regions (`handler: "media"`),
 optionally with a self-handle name bound on entry to the media's handle. Their invocations share the timer expiry
@@ -630,13 +642,15 @@ rewrite it. Restore validation requires issued media IDs to have exactly one act
 to issued IDs, queued and running cue blocks to belong to their media's own blocks, at most one active video, and
 waits to refer to their active media. Cross-device handoff is not part of this contract.
 
-**Player projection.** `mediaPlaybackProjection(snapshot)` lists active media with `segment`, `playheadMs` (the source
-position that the reported progress reaches), `reportedProgressMs`, the active range, `volume`, and
-`terminalProgressMs` (segment progress at which playback ends, `null` when indefinite); `stageProjection(snapshot)`
-gives the Stage image and active video. On a new segment the Player repositions to `playheadMs` (rewinding any
-overshoot), plays the range and wraps natively until `terminalProgressMs`, keeps counting progress across wraps, and
-reports progress with each time observation. A restored Player resumes at `playheadMs` and continues counting from
-`reportedProgressMs`. Browser `ended` or `timeupdate` callbacks are not settlement.
+**Player projection.** `mediaPlaybackProjection(snapshot)` exposes each active media's identity, source, `loaded`,
+state, `segment`, active range, `volume`, `playheadMs` (the source position that the reported progress reaches),
+`reportedProgressMs`, and `terminalProgressMs` (segment progress at which playback ends; `null` before loading or when
+repeating indefinitely); `stageProjection(snapshot)` gives the Stage image and active video. The Player reports the load
+result of unloaded media and keeps paused media silent. For running media, on a new segment it repositions to
+`playheadMs` (rewinding any overshoot), reports progress `0`, plays and wraps the range natively until
+`terminalProgressMs`, and keeps counting progress across wraps. A restored running media continues from `playheadMs`
+and `reportedProgressMs` after Continue. Browser `ended` or `timeupdate` callbacks are observation opportunities, not
+settlement.
 
 ## Compiler and execution entry points
 
@@ -795,7 +809,7 @@ Runtime state must be serializable at every instruction boundary, but normal exe
 
 A checkpoint is currently a self-contained plan-and-snapshot bundle. Restore validates the checkpoint, instruction plan, snapshot, format versions, references, function/call progress, RNG state, and other structural invariants before execution resumes.
 
-Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preserves the same action, `currentSessionTimeMs`, settlement, and event identities. Restore does not read time or silently complete a deadline. The Player application submits an explicit observation after restore; the atomic observation operation persists the nondecreasing effective coordinate before settling due actions.
+Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preserves the same action, `currentSessionTimeMs`, settlement, and event identities. Restore does not read time or silently complete a deadline. After the restored-session activation gate, the Player application submits an explicit observation; the atomic observation operation persists the nondecreasing effective coordinate before settling due actions.
 
 ## Format evolution
 

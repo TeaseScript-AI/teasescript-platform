@@ -466,7 +466,7 @@ function validateInstruction(
           errors.push(
             planError(
               "TSC002",
-              "A pacing-barrier receiver must be an identifier with property or simple index access.",
+              "A pacing-barrier receiver must be a prepared value or an identifier with property or simple index access.",
               `${path}.receiver`,
             ),
           );
@@ -492,12 +492,20 @@ function validateInstruction(
   }
 }
 
-/** The receiver shapes the compiler emits: an identifier with property access or literal/identifier indexes. */
+/**
+ * The receiver shapes the compiler emits: an identifier, temporary, or prepared reference, with property access or
+ * literal/identifier indexes.
+ */
 function isBarrierReceiver(value: unknown): boolean {
   let current = value;
   for (;;) {
     if (!isRecord(current)) return false;
-    if (current.kind === "identifier") return true;
+    if (
+      current.kind === "identifier" ||
+      current.kind === "temporary" ||
+      current.kind === "preparedReference"
+    )
+      return true;
     if (current.kind === "property") {
       current = current.object;
     } else if (current.kind === "index") {

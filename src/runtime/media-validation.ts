@@ -126,36 +126,68 @@ function validMediaRecord(
   }
   if (!validMilliseconds(media.durationMs)) return false;
   const end = media.endAtMs === null ? media.durationMs : Math.min(media.endAtMs, media.durationMs);
-  if (media.positionMs < media.startAtMs || media.positionMs > end) {
-    // A load with an empty range stops before any playback.
+  if (media.startAtMs >= end) {
+    // A load with an empty range stops before any playback; playback itself needs a positive range length.
     return (
       !active &&
       media.state === "stopped" &&
-      media.startAtMs >= end &&
-      media.positionMs === media.startAtMs
+      media.segment === 0 &&
+      points.length === 0 &&
+      media.positionMs === media.startAtMs &&
+      media.committedProgressMs === 0 &&
+      media.elapsedMs === 0
     );
   }
+  if (media.positionMs < media.startAtMs || media.positionMs > end) return false;
+  const reportedProgress = points.at(-1)?.progressMs ?? 0;
+  const segmentStart = points.length === 1 && points[0]!.progressMs === 0;
   switch (media.state) {
     case "running":
       return (
         active &&
         media.segment >= 1 &&
         points.length > 0 &&
-        media.committedProgressMs <= points.at(-1)!.progressMs &&
+        media.committedProgressMs <= reportedProgress &&
         withinRepeatLimit(media)
       );
     case "paused":
       return (
         active &&
         media.segment >= 1 &&
-        points.length === 1 &&
-        points[0]!.progressMs === 0 &&
+        segmentStart &&
         media.committedProgressMs === 0 &&
         withinRepeatLimit(media)
       );
     case "finished":
+      return (
+        !active &&
+        media.segment >= 1 &&
+        media.committedProgressMs <= reportedProgress &&
+        reachedRepeatLimit(media)
+      );
     case "stopped":
-      return !active;
+      // Stopping starts a final empty segment at the stop position.
+      return !active && media.segment >= 1 && segmentStart && media.committedProgressMs === 0;
+    default:
+      return false;
+  }
+}
+
+/** Finished media ended naturally: after its only or last counted pass, or when its duration budget ran out. */
+function reachedRepeatLimit(media: Record<string, unknown>): boolean {
+  const repeat = media.repeat;
+  if (!isPlainRecord(repeat) || typeof media.passesCompleted !== "number") return false;
+  switch (repeat.kind) {
+    case "once":
+      return media.passesCompleted === 1;
+    case "count":
+      return media.passesCompleted === repeat.passes;
+    case "budget":
+      return (
+        typeof media.elapsedMs === "number" &&
+        typeof repeat.milliseconds === "number" &&
+        media.elapsedMs >= repeat.milliseconds
+      );
     default:
       return false;
   }
@@ -312,6 +344,20 @@ export function validateMediaState(
     (media.finishFunctionId === functionId ||
       (Array.isArray(media.cues) &&
         media.cues.some((cue) => isPlainRecord(cue) && cue.functionId === functionId)));
+  // Cue blocks exist only for loaded media; `finish` runs once, after the media finished.
+  const finishRuns = new Map<number, number>();
+  const validOwner = (
+    media: Record<string, unknown> | undefined,
+    functionId: unknown,
+    count: number,
+  ) => {
+    if (media === undefined || !ownsHandler(media, functionId) || media.loaded !== true)
+      return false;
+    if (functionId !== media.finishFunctionId) return true;
+    if (!positiveSafeInteger(media.mediaId)) return false;
+    finishRuns.set(media.mediaId, (finishRuns.get(media.mediaId) ?? 0) + count);
+    return media.state === "finished";
+  };
   if (Array.isArray(value.pendingTimerHandlers)) {
     for (const invocation of value.pendingTimerHandlers) {
       if (!isPlainRecord(invocation) || !Object.hasOwn(invocation, "mediaId")) continue;
@@ -321,9 +367,8 @@ export function validateMediaState(
       if (
         !hasExactKeys(invocation, ["mediaId", "handlerFunctionId", "dueAtMs", "count"]) ||
         !positiveSafeInteger(invocation.count) ||
-        !ownsHandler(media, invocation.handlerFunctionId) ||
         media?.state === "stopped" ||
-        (invocation.handlerFunctionId === media?.finishFunctionId && media?.state !== "finished")
+        !validOwner(media, invocation.handlerFunctionId, invocation.count)
       ) {
         errors.push("Runtime pending media cue block is malformed.");
       }
@@ -340,10 +385,13 @@ export function validateMediaState(
       const media = positiveSafeInteger(frame.timerInterruption.mediaId)
         ? records.get(frame.timerInterruption.mediaId)
         : undefined;
-      if (!ownsHandler(media, frame.functionId)) {
+      if (!validOwner(media, frame.functionId, 1)) {
         errors.push("Runtime media cue-block frame does not belong to its media.");
       }
     }
+  }
+  if ([...finishRuns.values()].some((count) => count > 1)) {
+    errors.push("Runtime media finish block runs more than once.");
   }
   if (
     (value.status === "halted" || value.status === "ready") &&

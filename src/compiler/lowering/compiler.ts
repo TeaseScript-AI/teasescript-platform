@@ -95,6 +95,9 @@ export class InstructionCompiler {
     readonly selfHandle: string | null;
   }[] = [];
 
+  /** A statement-level media control call whose receiver waits at a pacing barrier once it is evaluated. */
+  #barrierCall: Expression | null = null;
+
   /** The `let` name that a media initializer binds in its own blocks. */
   readonly #selfHandleByInitializer = new Map<MediaParts, string>();
 
@@ -329,13 +332,11 @@ export class InstructionCompiler {
         return;
       }
       case "assignmentStatement": {
-        if (
-          statement.target.kind === "propertyAccessExpression" &&
-          MEDIA_ASSIGNABLE_PROPERTIES.has(statement.target.property.name)
-        ) {
-          this.#emitPacingBarrier(statement.target.object, statement.span);
-        }
         const target = this.#lowerAssignmentTarget(statement.target);
+        // The target object is already prepared once; the barrier waits when it holds a media handle.
+        if (target.plan.kind === "property" && MEDIA_ASSIGNABLE_PROPERTIES.has(target.plan.name)) {
+          this.#emitPacingBarrier(target.plan.object, statement.span);
+        }
         if (target.plan.kind !== "identifier") {
           this.instructions.push({
             kind: "validateAssignmentTarget",
@@ -381,7 +382,7 @@ export class InstructionCompiler {
           call.callee.kind === "propertyAccessExpression" &&
           MEDIA_CONTROL_METHODS.has(call.callee.property.name)
         ) {
-          this.#emitPacingBarrier(call.callee.object, statement.span);
+          this.#barrierCall = call;
         }
         const lowered = this.#lowerExpression(statement.expression);
         this.instructions.push({
@@ -721,16 +722,11 @@ export class InstructionCompiler {
   }
 
   /**
-   * Main-story media presentation waits for the previous message's pacing. A handle operation passes its receiver when
-   * that receiver can be evaluated again without effects; the barrier then waits only for a media handle.
+   * Main-story media presentation waits for the previous message's pacing. A handle operation passes its already
+   * evaluated receiver; the barrier then waits only for a media handle.
    */
-  #emitPacingBarrier(receiver: Expression | null, span: SourceSpan): void {
-    if (receiver !== null && !isSideEffectFreeReceiver(receiver)) return;
-    this.instructions.push({
-      kind: "pacingBarrier",
-      receiver: receiver === null ? null : compileExpression(receiver),
-      span: copySpan(span),
-    });
+  #emitPacingBarrier(receiver: ExpressionPlan | null, span: SourceSpan): void {
+    this.instructions.push({ kind: "pacingBarrier", receiver, span: copySpan(span) });
   }
 
   /** Reserves the next function ID; the region is compiled after all user functions. */
@@ -858,7 +854,11 @@ export class InstructionCompiler {
 
   *#lowerExpressionTask(expression: Expression): CompileTask<LoweredExpression> {
     expression = unwrapParentheses(expression);
-    if (this.#contextualSpeakerTemporary === null && !this.#containsUserCall(expression))
+    if (
+      this.#contextualSpeakerTemporary === null &&
+      expression !== this.#barrierCall &&
+      !this.#containsUserCall(expression)
+    )
       return { plan: compileExpression(expression), temporaryIds: [] };
     if (expression.kind === "interactionExpression") {
       return yield* compileChild(this.#lowerInteractionTask(expression));
@@ -971,6 +971,18 @@ export class InstructionCompiler {
         let callee: LoweredExpression;
         if (expression.callee.kind === "propertyAccessExpression") {
           let receiver = yield* compileChild(this.#lowerExpressionTask(expression.callee.object));
+          if (expression === this.#barrierCall) {
+            this.#barrierCall = null;
+            // The receiver is evaluated once; the barrier and the call then use that value.
+            if (
+              receiver.plan.kind !== "temporary" &&
+              receiver.plan.kind !== "preparedReference" &&
+              !isSideEffectFreeReceiver(expression.callee.object)
+            ) {
+              receiver = this.#prepareReferenceExpression(receiver, expression.callee.object.span);
+            }
+            this.#emitPacingBarrier(receiver.plan, expression.span);
+          }
           if (expression.arguments.some((argument) => this.#containsUserCall(argument.value))) {
             receiver = this.#prepareReferenceExpression(receiver, expression.callee.object.span);
             this.instructions.push({
@@ -1798,8 +1810,8 @@ const MEDIA_ASSIGNABLE_PROPERTIES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * A receiver the barrier can evaluate again without effects: an identifier, and property or index access on one with
- * literal or identifier indexes. Other receivers, such as call results, do not wait for pacing.
+ * A receiver that can be evaluated again without effects: an identifier, and property or index access on one with
+ * literal or identifier indexes. Other receivers are prepared once before the barrier.
  */
 function isSideEffectFreeReceiver(expression: Expression): boolean {
   let current = unwrapParentheses(expression);

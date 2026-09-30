@@ -1659,8 +1659,8 @@ command; write `playAudio (async)` to use a variable of that name.
 
 - Plain media is blocking: the script continues when playback finishes, is stopped, or cannot play. Blocking media
   returns no value; using it as a value is a compile error.
-- `async` media continues once the Player has loaded the source, so its duration is known, and evaluates to an opaque
-  handle that may be ignored.
+- `async` media continues once the Player has reported the load result and evaluates to an opaque handle that may be
+  ignored; after a successful load its duration is known.
 - Several audio sources may play at once. The Stage shows one video at a time over the Stage image: a new `playVideo`,
   `showImage`, or `hideImage` stops an active video (`stopped`, without `finish`), and the Stage image is visible again
   when the video ends.
@@ -1678,9 +1678,11 @@ let music = playAudio(
 )
 ```
 
-`file` is required and `async` is the literal `true` or `false`. `startAt` and `endAt` are durations or numbers of
-seconds; they default to the start and end of the file and define the active playback range. The effective end is
-limited to the source duration. `volume` is a number from `0` through `1` and defaults to `1`.
+`file` is required and evaluates to a reference string or `null`; `async` is the literal `true` or `false`. `startAt`,
+`endAt`, `at`, and `beforeEnd` accept non-negative durations or numbers of seconds. `startAt` and `endAt` default to the
+start and end of the file and define the active playback range; a supplied `endAt` must be later than `startAt`, and
+the effective end is limited to the source duration. `volume` is a number from `0` through `1` and defaults to `1`.
+Arguments evaluate in source order, followed by the cue positions in block order.
 
 Repeat:
 
@@ -1689,8 +1691,8 @@ Repeat:
 - `repeat: 60 s` repeats for 60 seconds of active playback and may end mid-pass;
 - `repeat: false`, or no repeat, plays one pass.
 
-A plain number such as `repeat: 3` is an error; write `3 times` or a duration. Blocking media may use a count or a
-duration but not indefinite repetition.
+A count is a whole number of at least one and a duration is greater than zero. A plain number such as `repeat: 3` is
+an error; write `3 times` or a duration. Blocking media may use a count or a duration but not indefinite repetition.
 
 On the ordinary story path, `showImage`, `hideImage`, `playAudio`, `playVideo`, and statement-level media handle
 operations such as `music.pause()` or `music.position = 2 min` wait until the previous message's pacing has completed or
@@ -1719,9 +1721,10 @@ say "${music.elapsed} of ${music.duration}"
 - `state` is `running`, `paused`, `finished`, or `stopped`. Idempotent calls, other operations on settled media, and
   developer warning `TSW010` follow the timer handle rules.
 - An assignment to `position` or `remaining` is a seek. It is clamped to the active range and does not fire cues it
-  jumps across; a cue exactly at the new position fires once playback proceeds from it. A seek to the end of the range
-  completes the current pass at once, like a timer's `remaining = 0`; paused media stays paused in its next pass.
-  Seeks do not change `elapsed`.
+  jumps across; a cue exactly at a new position before the end fires once playback proceeds from it. A seek to the end
+  of the range fires the cues there and completes the current pass at once, like a timer's `remaining = 0`, also while
+  paused, where the next pass stays paused. Seeks do not change `elapsed`.
+- After media finishes or stops, `remaining` is zero and `position` and `elapsed` keep their final values.
 
 ### Cues
 
@@ -1762,8 +1765,9 @@ playAudio async repeat "music/beat.mp3" {
 
 ### Failures, cleanup, and restore
 
-- When the Player cannot load a source, the runtime reports developer warning `TSW013`, the media becomes `stopped`
-  without cues or `finish`, and a blocking play continues. A `null` file plays nothing and reports `TSW011`.
+- When the Player cannot load a source, or the source leaves an empty playback range, the runtime reports developer
+  warning `TSW013`, the media becomes `stopped` without cues or `finish`, and the script continues. A `null` file plays
+  nothing, continues at once, and reports `TSW011`.
 - `exit` and the end of the script stop all media; the last Stage image stays.
 - Checkpoint and restore preserve the Stage image and media state; playback resumes from the persisted position, and
   time without a running Player does not advance media. Restore does not imply cross-device handoff.
@@ -1779,9 +1783,10 @@ playAudio async repeat "music/beat.mp3" {
 | positioned or timed top-level `showImage(...)` and `hideImage(ref)` | `showImage <file>` and `hideImage` for the Stage image |
 
 ### Future layered scene
-**Status:** Provisional. Background and overlay layers, their coordinate space, movement, blur, drawings, edited copies,
-and transitions remain the intended direction but are not implemented. Their names and options must be reconciled with
-the Stage image model before implementation.
+**Status:** Accepted V30 direction; not implemented. Background and overlay layers, their coordinate space, movement,
+blur, drawings, edited copies, and transitions remain separate from the Stage image and media foundation above, which
+supersedes the old positioned and timed top-level image. Points affected by the Stage image model must be reconciled
+before the layered scene is implemented.
 
 ```text
 showBackgroundImage backgroundFile
@@ -2422,20 +2427,8 @@ How the browser internally stores or resolves references, handles permissions, o
 
 Potentially nullable results produce compiler warnings when used without an explicit check, but they are not automatically hard compile errors.
 
-Example:
-
-```text
-let photo = takePhoto()
-showImage photo
-```
-
-Possible warning:
-
-```text
-Warning: `photo` may be null.
-Expected: string
-Possible value: null
-```
+Nullable-result compiler warnings are accepted future behavior and not yet implemented. Media commands accept `null`
+references at runtime; see the fallback below.
 
 Compatible built-ins may apply a safe fallback. For example, `showImage null` clears the Stage image, reports developer warning `TSW011` with the source location, and continues ([§22](#22-stage-image-audio-and-video)).
 

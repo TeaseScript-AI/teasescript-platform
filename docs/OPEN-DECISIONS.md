@@ -28,7 +28,8 @@ Current constraints: [`RUNTIME.md`](RUNTIME.md), [`ARCHITECTURE.md`](ARCHITECTUR
   semantics.
 - Host/global representation for future opaque engine references beyond speakers.
 - Server-versus-browser authoritative checkpoint ownership and conflict resolution.
-- Minimal engine primitive families for future media capabilities under ADR 0017.
+- Engine primitive contracts for deferred layered-scene and camera capabilities beyond the specification §22 playback
+  foundation, under ADR 0017.
 - Serializable lowering or engine-managed continuation representation for resumable library workflows not covered by
   ADR 0018's full-lowering choice.
 - Recovery and missed-event ordering for absolute scheduled events/deadlines, including local/offline versus

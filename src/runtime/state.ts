@@ -1888,6 +1888,7 @@ function validateTimerHandlerFrame(
     plan,
     errors,
   );
+  validateSelfHandleBinding(frame, interruption, frames, plan, errors);
   const action = interruption.suspendedAction;
   if (action === null) return;
   const view = {
@@ -1906,6 +1907,45 @@ function validateTimerHandlerFrame(
     !validForegroundActionState(action, view, plan, true)
   ) {
     errors.push("Runtime suspended foreground action is malformed.");
+  }
+}
+
+/**
+ * Until a media block's body starts, its self-handle local holds exactly its own media's handle; afterwards the
+ * block may reassign it like any local.
+ */
+function validateSelfHandleBinding(
+  frame: Record<string, unknown>,
+  interruption: Record<string, unknown>,
+  frames: unknown,
+  plan: InstructionPlan | undefined,
+  errors: string[],
+): void {
+  if (plan === undefined || !nonNegativeSafeInteger(frame.functionId)) return;
+  const definition = plan.functions[frame.functionId - 1];
+  if (
+    definition?.selfHandle == null ||
+    !isPlainRecord(frame.parameterState) ||
+    frame.parameterState.phase === "body"
+  )
+    return;
+  const scope =
+    Array.isArray(frames) && nonNegativeSafeInteger(frame.scopeBaseDepth)
+      ? frames[frame.scopeBaseDepth]
+      : undefined;
+  const binding =
+    isPlainRecord(scope) && Array.isArray(scope.bindings)
+      ? scope.bindings.find(
+          (candidate) => isPlainRecord(candidate) && candidate.name === definition.selfHandle,
+        )
+      : undefined;
+  const value = isPlainRecord(binding) ? binding.value : undefined;
+  if (
+    !isPlainRecord(value) ||
+    value.kind !== "mediaHandle" ||
+    value.mediaId !== interruption.mediaId
+  ) {
+    errors.push("Runtime media block self-handle binding is malformed.");
   }
 }
 
@@ -2295,6 +2335,7 @@ function instructionKilledTemporaries(instruction: Instruction): ReadonlySet<num
       return new Set([instruction.destinationTemporary]);
     case "interaction":
     case "startTimer":
+    case "playMedia":
       return instruction.destinationTemporary === null
         ? new Set<number>()
         : new Set([instruction.destinationTemporary]);
@@ -2630,6 +2671,21 @@ function requiredInstructionTemporaries(
       collect(instruction.duration);
       if (typeof instruction.display === "object") collect(instruction.display);
       if (instruction.label !== null) collect(instruction.label);
+      break;
+    case "pacingBarrier":
+      if (instruction.receiver !== null) collect(instruction.receiver);
+      break;
+    case "showImage":
+      if (instruction.image !== null) collect(instruction.image);
+      break;
+    case "playMedia":
+      collect(instruction.file);
+      if (instruction.repeat.kind === "value") collect(instruction.repeat.value);
+      if (instruction.repeat.kind === "times") collect(instruction.repeat.count);
+      for (const operand of [instruction.startAt, instruction.endAt, instruction.volume]) {
+        if (operand !== null) collect(operand);
+      }
+      for (const cue of instruction.cues) collect(cue.offset);
       break;
     case "interaction":
       if ("preparedUi" in instruction) {

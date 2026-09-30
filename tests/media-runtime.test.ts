@@ -19,6 +19,31 @@ import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
+/** A JSON copy of a snapshot for corruption tests. */
+interface MutableSnapshot {
+  foregroundAction: { mediaId?: number } | null;
+  backgroundActions: { kind: string; media?: MutableMedia }[];
+  pendingTimerHandlers: Record<string, unknown>[];
+  nextMediaId: number;
+}
+
+interface MutableMedia {
+  mediaId: number;
+  loaded: boolean;
+  durationMs: number | null;
+  points: unknown[];
+  segment: number;
+  finishFunctionId: number | null;
+}
+
+function mediaOf(snapshot: MutableSnapshot, mediaId: number): MutableMedia {
+  const media = snapshot.backgroundActions.find(
+    (action) => action.media?.mediaId === mediaId,
+  )?.media;
+  assert.ok(media !== undefined, `media ${mediaId} is active`);
+  return media;
+}
+
 /** A deterministic scripted Player: every operation validates the snapshot and continues execution. */
 class Session {
   readonly plan: InstructionPlan;
@@ -559,4 +584,98 @@ test("dynamic media options are validated when supplied, including null and inde
   assert.match(failure('let v = null\nplayAudio(file: "a", volume: v)'), /volume/u);
   assert.match(failure('let s = null\nplayAudio(file: "a", startAt: s)'), /startAt/u);
   assert.match(failure('let e = null\nplayAudio(file: "a", endAt: e)'), /endAt/u);
+});
+
+test("media controls on any receiver wait for pacing and evaluate the receiver once", () => {
+  const session = new Session(
+    [
+      'let music = playAudio async "music.mp3"',
+      "let calls = 0",
+      "let box = [music]",
+      "function current {",
+      "  calls += 1",
+      "  return music",
+      "}",
+      'say "Pause now."',
+      "current().pause()",
+      'say "Paused ${calls}."',
+      "box[0 + 0].resume()",
+      'say "${music.state}"',
+    ].join("\n"),
+    { pacing: true },
+  );
+  session.load(1, 60_000);
+  assert.equal(session.media(1)?.state, "running", "the pause waits for the message");
+  session.skip();
+  assert.equal(session.media(1)?.state, "paused");
+  session.skip();
+  assert.deepEqual(session.said(), ["Pause now.", "Paused 1.", "running"]);
+});
+
+test("an interrupt before an async media assignment keeps a valid, resumable state", () => {
+  const session = new Session(
+    'timer async 0 s {\n  say "timer"\n}\nlet m = playAudio async "a.mp3"\nsay "${m.state}"',
+  );
+  session.load(1, 1_000);
+  assert.deepEqual(session.said(), ["timer", "running"]);
+  assertRuntimeResumeEquivalent(
+    'timer async 0 s {\n  say "timer"\n}\nlet m = playAudio async "a.mp3"\nsay "${m.state}"\nwait 2',
+    { mediaDurationMs: 1_000 },
+  );
+});
+
+test("restore validation rejects malformed media state", () => {
+  const source = [
+    'let a = playAudio async repeat "a.mp3" {',
+    "  at 0 s {",
+    "    a.volume = 0.5",
+    "  }",
+    "}",
+    'playAudio "b.mp3" {',
+    "  finish {",
+    '    say "done"',
+    "  }",
+    "}",
+  ].join("\n");
+  const session = new Session(source).load(1, 1_000).load(2, 2_000);
+  const valid = session.snapshot;
+  assert.equal(validateRuntimeSnapshot(valid, session.plan).valid, true);
+  const mutations: readonly (readonly [string, (snapshot: MutableSnapshot) => void])[] = [
+    ["empty active range", (snapshot) => (mediaOf(snapshot, 1).durationMs = 0)],
+    ["unloaded media with samples", (snapshot) => (mediaOf(snapshot, 2).loaded = false)],
+    ["wait on another media", (snapshot) => (snapshot.foregroundAction!.mediaId = 1)],
+    [
+      "cue invocation before load",
+      (snapshot) => {
+        const media = mediaOf(snapshot, 2);
+        media.loaded = false;
+        media.durationMs = null;
+        media.points = [];
+        media.segment = 0;
+        snapshot.pendingTimerHandlers.push({
+          mediaId: 2,
+          handlerFunctionId: media.finishFunctionId!,
+          dueAtMs: 0,
+          count: 1,
+        });
+      },
+    ],
+    [
+      "finish invocation before finishing",
+      (snapshot) =>
+        snapshot.pendingTimerHandlers.push({
+          mediaId: 2,
+          handlerFunctionId: mediaOf(snapshot, 2).finishFunctionId!,
+          dueAtMs: 0,
+          count: 1,
+        }),
+    ],
+    ["handle to unissued media", (snapshot) => (snapshot.nextMediaId = 2)],
+  ];
+  for (const [name, mutate] of mutations) {
+    // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; each case applies one invalid mutation.
+    const corrupted = JSON.parse(JSON.stringify(valid)) as MutableSnapshot;
+    mutate(corrupted);
+    assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false, name);
+  }
 });

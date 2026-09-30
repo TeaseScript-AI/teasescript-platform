@@ -381,8 +381,8 @@ Standard image/video-like presentation:
   tool columns, the right rail, and Player chrome keep their own application surfaces. Stage and transcript remain
   separate regions with separate content and scrolling ownership;
 - clips the vignette to the stage and keeps decorative effects pointer-neutral;
-- uses a direct replacement as the Standard default transition; V30 `fade`/`crossfade` belong to the provisional
-  future layered scene;
+- uses a direct replacement as the Standard default transition; V30 `fade`/`crossfade` belong to the future layered
+  scene and are not part of the Stage image and media foundation;
 - does not add duplicate filename, fit, or scene-information captions merely because those values exist elsewhere.
 
 Accepted future background/foreground/overlay media, canvas, and custom stage rendering should replace stage content
