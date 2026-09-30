@@ -8,7 +8,11 @@ import {
   watch,
   type CSSProperties,
 } from "vue";
-import type { PlayerRightControlPresentation, PlayerTimerPresentation } from "../../../model.js";
+import type {
+  PlayerRightControlPresentation,
+  PlayerTimerKind,
+  PlayerTimerPresentation,
+} from "../../../model.js";
 import { orderRightControls, readableControlText } from "../../../presentation.js";
 import { allocateRightRailPaneHeights } from "../../../right-rail-layout.js";
 import type {
@@ -26,7 +30,9 @@ const props = defineProps<{
   controlsDisabled: boolean;
   scriptUpdateControlId: string | null;
   scriptUpdateFeedback: ScriptUpdateFeedback | null;
-  timers: readonly PlayerTimerPresentation[];
+  timer: PlayerTimerPresentation;
+  timerCount: number;
+  timerKind: PlayerTimerKind;
 }>();
 
 defineEmits<{
@@ -42,7 +48,7 @@ const orderedControls = computed(() => orderRightControls(props.controls));
 let observer: ResizeObserver | null = null;
 
 watch(
-  () => [props.compactTimers, props.controls, props.timers.map((timer) => timer.id)] as const,
+  () => [props.compactTimers, props.controls, props.timerCount, props.timerKind] as const,
   async () => {
     await nextTick();
     observePaneElements();
@@ -143,7 +149,12 @@ function scriptUpdateMarker(controlId: string): "highlight" | undefined {
     aria-label="Timer and background controls"
     :style="{ '--timer-pane-size': `${timerPaneSize}px` }"
   >
-    <PlayerTimer v-if="!compactTimers" :timers="timers" />
+    <PlayerTimer
+      v-if="!compactTimers"
+      :timer="timer"
+      :timer-count="timerCount"
+      :timer-kind="timerKind"
+    />
 
     <div
       ref="actionPane"

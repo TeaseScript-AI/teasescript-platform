@@ -1,21 +1,12 @@
 import askNumberSource from "./runtime-scenarios/ask-number.tease?raw";
 import askTextSource from "./runtime-scenarios/ask-text.tease?raw";
-import authoredTimersSource from "./runtime-scenarios/authored-timers.tease?raw";
-import blockingTimerSource from "./runtime-scenarios/blocking-timer.tease?raw";
 import chooseSource from "./runtime-scenarios/choose.tease?raw";
 import showButtonSource from "./runtime-scenarios/show-button.tease?raw";
 import skippablePacingSource from "./runtime-scenarios/skippable-pacing.tease?raw";
 import unskippablePacingSource from "./runtime-scenarios/unskippable-pacing.tease?raw";
 
 export type PlayerRuntimeScenarioId =
-  | "show-button"
-  | "choose"
-  | "ask-text"
-  | "ask-number"
-  | "skippable-pacing"
-  | "unskippable-pacing"
-  | "blocking-timer"
-  | "authored-timers";
+  "show-button" | "choose" | "ask-text" | "ask-number" | "skippable-pacing" | "unskippable-pacing";
 
 export interface PlayerRuntimeScenario {
   readonly id: PlayerRuntimeScenarioId;
@@ -38,6 +29,4 @@ export const PLAYER_RUNTIME_SCENARIOS: readonly PlayerRuntimeScenario[] = Object
     label: "Unskippable pacing",
     source: unskippablePacingSource,
   }),
-  Object.freeze({ id: "blocking-timer", label: "Blocking timer", source: blockingTimerSource }),
-  Object.freeze({ id: "authored-timers", label: "Authored timers", source: authoredTimersSource }),
 ]);

@@ -92,6 +92,7 @@ Completion correlation uses the accepted order:
 
 ```text
 active foreground/background action
+-> suspended foreground action: suspendedAction
 -> matching lastSettlement
 -> issued inactive stale action
 -> unknown unissued action

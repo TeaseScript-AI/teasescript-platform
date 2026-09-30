@@ -107,7 +107,9 @@ ADR 0018 selects this ordered author-facing sequence:
 1. `showButton`, `askText`, `askNumber`, and `choose` on one generic typed foreground-interaction primitive;
 2. `say` with deterministic smart autoplay and player-controlled gate completion.
 
-`wait` remains compiler/core-owned. Camera, files, media, background timers, persistence, custom UI, and LLM interpretation are excluded.
+`wait` remains compiler/core-owned. Camera, files, media, background timers, persistence, custom UI, and LLM
+interpretation are excluded from ADR 0018's interaction/pacing slice. Compiler-owned timer support is defined in
+specification [§27](specifications/accepted-syntaxes-v30.md#27-timers).
 
 ### Default prelude
 
@@ -167,7 +169,9 @@ choice
 
 The engine owns action identity, continuation, result destination, expected type, allowed values, completion validation, canonical transcript-result derivation, events, checkpoint/restore, and bounded duplicate settlement behavior. The Standard Library/compiler own author-facing defaults, compact syntax, Standard UI payload, localized feedback, and accessibility defaults.
 
-The interactions are mandatory and permanently non-cancellable. `askText`, `askNumber`, and `choose` never return `null`; `showButton` has no useful first-slice return value. Invalid input keeps the same action active.
+The interactions are mandatory and expose no cancellation result. `askText`, `askNumber`, and `choose` never return
+`null`; `showButton` has no useful first-slice return value. Invalid input keeps the same action active.
+Timer interrupts and handler-exit cleanup follow [`RUNTIME.md`](RUNTIME.md#timers-and-scene-time).
 
 Interaction definitions and completions remain subject to justified platform guards; ADR 0018 defines no separate
 author-facing counts. Under ADR 0019, tests verify rather than justify a retained bound. Retained guards reject
@@ -238,7 +242,10 @@ Valid input and choice/button activations become player-authored transcript mess
 
 ### Player and developer controls
 
-The normal Player application has no player-facing pause control, and this POC introduces no author-facing pause command. Developer mode may provide Run, Step, Pause, checkpoint, restore, and debugger controls. Browser-unavailability and reconnect time policy remains separate.
+The normal Player application has no player-facing pause control, and this POC introduces no author-facing pause
+command. Developer mode may provide Run, Step, Pause, checkpoint, restore, and debugger controls. Timer scene-time
+observation and restore follow [`RUNTIME.md`](RUNTIME.md#timers-and-scene-time); production host lifecycle and server
+time integrity remain separate.
 
 ### Deferred Standard Library details
 

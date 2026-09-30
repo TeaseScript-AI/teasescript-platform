@@ -198,9 +198,6 @@ async function loadRuntimeSource(): Promise<string | null> {
   if (fixture === "runtime-skippable-long") {
     return 'say "Long pacing", 60\nsay "After", 60\nshowButton "Continue"';
   }
-  if (fixture === "runtime-timer") {
-    return 'timer 2\nsay "After timer", instant\nwait 1\nsay "After wait", instant\nshowButton "Done"';
-  }
   if (fixture === "runtime-message-markup") {
     return 'say "# Heading\\n- **Bold** [spoiler]Keyboard[/spoiler] [spoiler]Pointer[/spoiler] [Docs](https://example.com) <img src=x onerror=alert(1)>\\n1. Ordered", instant';
   }

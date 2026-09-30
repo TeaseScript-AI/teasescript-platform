@@ -15,16 +15,16 @@ accept syntax, architecture, or implementation details.
 
 - **Source pipeline:** lexer, parser, immutable AST, source spans, diagnostics, semantic validation, and compilation
   for the implemented TeaseScript subset.
-- **Language foundation:** values, variables, assignments, speakers, output, collections, expressions, interpolated
+- **Language foundation:** values including elapsed durations, variables, assignments including `+=`/`-=`, speakers,
+  output, collections, expressions, interpolated
   single-line and block strings, constrained authored `say` message markup, protected `escapeMarkup` literal insertion,
   control flow, deterministic random built-ins, and top-level user-defined functions.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and
   call state, deterministic RNG state, typed sequenced events, instruction budgets, and defensive restore validation.
-- **Pending-action, compact-interaction, and chat-pacing foundation:** compiler-owned blocking `wait` and visible
-  blocking `timer` (fixed seconds or a once-drawn whole-second range, presented by the Vue Player); protected
-  compact `showButton`, `askText`, `askNumber`, and `choose` forms lowered into one typed foreground-interaction
-  family; and ADR 0018 `say` smart/exact pacing with one resumable `chatPacingGate`, deterministic checkpoint/restore,
-  prepared output, typed skip settlement, and interaction/`wait` composition.
+- **Pending actions, timers, and chat pacing:** blocking `wait`/`timer` and asynchronous timers with presentation metadata,
+  labels, opaque handles, lifecycle control, repetition, queued expiry interrupts, and scene-time checkpoint/restore;
+  protected compact interactions on one typed foreground family; and ADR 0018 resumable `say` pacing, prepared
+  output, typed skip settlement, and interaction/timer composition.
 - **Development and verification:** a standalone browser playground with Standard interaction and pacing controls; a
   modular production-oriented Player presentation POC with a verified, design-neutral Vue 3 Phase 1 foundation
   (Vue/Vite, Tailwind CSS 4, repository-owned local shadcn-vue source/config, the selected Reka primitive foundation,
@@ -41,10 +41,11 @@ contracts and boundaries.
 
 ## Current major exclusions and blockers
 
-- complete V30 coverage, complete static typing, and units/date/time/duration values;
+- complete V30 coverage, complete static typing, measurement units, date/time values, calendar durations,
+  generalized duration ranges, and locale-aware duration presentation;
 - production cross-origin Player/host integration, richer editor support, and final browser acceptance coverage;
-- background-action kinds beyond `chatPacingGate`, background/async, mystery, labelled, and handle-controlled timers,
-  unavailability recovery for timers, media actions, camera lifecycle, and custom views;
+- pending-action capabilities beyond the implemented timer, interaction, and pacing families; media actions,
+  camera lifecycle, and custom views;
 - the cross-origin player-host protocol and production browser security integration;
 - TypeScript library linkage, final Standard Library/package identity and compatibility, richer module selection, and
   community dependency resolution;

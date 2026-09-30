@@ -296,7 +296,7 @@ say "[color=red][bg=ivory]outer [color=\${bad}][bg=\${bad}]inner **bold**[/bg][/
 
 test("blocking timer scenario presents runtime timers, hides waits, and restores the same draw", async () => {
   const source = await readFile(
-    resolve(process.cwd(), "player/vue/src/runtime-scenarios/blocking-timer.tease"),
+    resolve(process.cwd(), "tests/fixtures/timers/blocking-timer.tease"),
     "utf8",
   );
   let session = createPlayerRuntimeSession(source);
@@ -370,7 +370,7 @@ test("blocking timer scenario presents runtime timers, hides waits, and restores
 
 test("authored timers scenario presents concurrent timers and interrupts the unanswered question", async () => {
   const source = await readFile(
-    resolve(process.cwd(), "player/vue/src/runtime-scenarios/authored-timers.tease"),
+    resolve(process.cwd(), "tests/fixtures/timers/authored-timers.tease"),
     "utf8",
   );
   const texts = (session: ReturnType<typeof createPlayerRuntimeSession>) =>

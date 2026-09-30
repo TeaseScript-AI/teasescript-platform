@@ -16,9 +16,9 @@ otherwise produce an invalid date; V30 section 35 records that existing `month` 
 A recurring monthly event should retain its original calendar-day anchor rather than applying each recurrence to the
 previous clamped result: January 31 -> February 28 (or 29) -> March 31. The analogous yearly case retains a
 February 29 anchor across non-leap years and returns to February 29 in leap years. Each recurrence should target
-the same local clock time for the player, including daylight-saving and timezone changes. This is calendar
-scheduling, not a countdown timer. A long-lived schedule must resume through server-backed state; it must not require
-an open browser tab.
+the same local clock time for the player, including daylight-saving and timezone changes. This is calendar scheduling.
+Local/offline and server-backed persistence/execution policy remain part of the joint scheduled-event design; see
+[`TIMER-AND-RECOVERY-FOLLOW-UPS.md`](TIMER-AND-RECOVERY-FOLLOW-UPS.md).
 
 `year`/`years` are owner-requested future calendar-duration units, but no spelling or abbreviation is added to accepted
 V30 syntax here. Before implementation, settle the exact unit spelling, how a pending one-time event responds to a

@@ -60,20 +60,17 @@ The default Vue development route compiles real `player-controls.tease` source a
 `runtime-adapter.ts`. Engine operations remain authoritative for action identity, validation, normalization, choice
 matching, transcript derivation, settlement, and continuation. The checkpoint's companion transcript-event history is
 presentation-owned and retained only for same-session development restore; it does not alter the canonical runtime
-checkpoint or define the deferred production persistence/host payload. Saving first submits an ordinary time
-observation so the checkpoint records the elapsed session time of a running countdown.
+checkpoint or define the deferred production persistence/host payload.
 
-Authored visible blocking `timer` countdowns are derived from the pending runtime delay in both the right rail and the
-compact title strip; a hidden `wait` presents nothing. The Visual Lab `Blocking timer` scenario runs the real
-`runtime-scenarios/blocking-timer.tease` demo. Demo media, Visual Lab fixture timers, rendered right-rail controls, tool
-content, and the transcript stress route remain explicitly fixture-backed. Accepted Standard interaction behavior remains controlled by ADR 0018 and the runtime contracts; the
+Demo media, timers, rendered right-rail controls, tool content, and the transcript stress route remain explicitly
+fixture-backed. Accepted Standard interaction behavior remains controlled by ADR 0018 and the runtime contracts; the
 maintained placement/presentation boundary is described in `docs/ui/PLAYER-UI.md`.
 
 Current Visual Lab fixtures deliberately exercise several presentation questions without promoting their fixture state
 to runtime or product semantics:
 
-- fixture timers start at zero; when added they use the authored-label example, and generic labels, mystery
-  presentation, hidden presentation, and multiple-timer pressure remain selectable beside any runtime timer;
+- the timer starts with the authored-label example; generic labels, mystery presentation, hidden presentation, and
+  multiple-timer pressure remain selectable;
 - the pacing-gate fixture reveals a short message sequence over time, with Player-background/empty-composer Space
   skipping available only in the skippable variant;
 - script-initiated control changes add a neutral event to transcript history and compare toast, local highlight, and

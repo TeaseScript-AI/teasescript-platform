@@ -787,7 +787,12 @@ Modify an existing variable without another keyword:
 ```text
 score = 20
 hasKey = false
+score += 5
+score -= 2
 ```
+
+`+=` and `-=` are general assignment operators using the corresponding arithmetic operation and the target's
+existing type rules. Timer-property assignment is defined in [§27](#27-timers).
 
 Rules:
 
@@ -2035,16 +2040,19 @@ t.display = "mystery"
 ```
 
 Readable properties are `remaining` and `elapsed` (durations), `display`, `label`, `state`, and `repeatDuration`.
+Assignable properties are `remaining` (`=`, `+=`, `-=`), `display`, and `repeatDuration`. Changing `repeatDuration`
+affects future rounds, not the current round.
+
 `elapsed` is active running time since the first start across all rounds, excluding explicit pauses; `remaining`
 concerns the current round. `state` is `running`, `paused`, `finished`, or `stopped`:
 
 - reads stay valid after the timer settles; `remaining` is then zero and `elapsed` is frozen;
 - `pause()` while paused, `resume()` while running, and `stop()` on a finished or stopped timer do nothing;
-- any other operation on a finished or stopped timer does not revive or change it and reports a developer warning
-  with its source location instead of stopping the story;
+- other lifecycle methods or property assignments on a finished or stopped timer have no effect and report
+  developer warning `TSW010` with the source location;
 - adjusting `remaining` while paused changes the current round and the timer stays paused;
 - setting or reducing `remaining` to zero expires the current round at once; remaining time never becomes negative;
-- `stop()` cancels the timer and any of its expiry blocks that have not started yet.
+- `stop()` on an active timer cancels it and any of its expiry blocks that have not started yet.
 
 Unknown handle members are compile errors when the handle's variable is initialized from `timer async`; values
 of the wrong type are rejected.
@@ -2054,9 +2062,11 @@ of the wrong type are rejected.
 - `repeat: true` starts another round when a round expires. A repeating range draws a new duration for each round;
   every round must last longer than zero. Rounds that expire during one late time observation keep their original
   schedule and each run the expiry block once.
-- A non-persistent timer is removed on `goto`, `end`, `run`, `call`, or `exit`.
-- `persist: true` keeps a timer active across `goto`, `end`, `run`, and `call`.
 - Every timer stops on `exit` and when the script ends.
+- For future `goto`, `end`, `run`, and `call` transfers, non-persistent timers are removed and persistent timers
+  remain active.
+
+The current runtime stores `persist` but it has no effect: `goto`, `end`, `run`, and `call` are not implemented.
 
 ### Expiry blocks
 
@@ -2070,8 +2080,11 @@ is inert while the block runs, so there are never two active story paths:
 
 - if the block completes normally, the interrupted action is presented again and the script continues where it
   left off;
-- if the block uses `goto`, `end`, or `exit`, the interrupted action and its instruction are cancelled: an
-  interrupted `let answer = askText ...` completes nothing and binds no value.
+- if the block uses `exit`, the session halts and the interrupted action and source instruction are discarded:
+  an interrupted `let answer = askText ...` completes nothing and binds no value.
+
+Future `goto` or `end` transfers must also discard the interrupted action and instruction; those commands are not
+implemented in the current runtime.
 
 Blocks run one at a time in due order. A block may itself wait; later expiries queue behind it.
 
@@ -2376,9 +2389,12 @@ Recovered errors should record:
 Recovery is not offered for structural errors such as malformed syntax, unknown functions, invalid labels, or internal engine exceptions. The exact recovery interface and whether recovery is enabled are runtime implementation details, not syntax.
 
 ## 35. Date, time, durations, and Unix time
-**Status:** Accepted
+**Status:** Accepted direction; exact elapsed durations implemented
 
-TeaseScript has separate `date`, `time`, `datetime`, and `duration` types.
+TeaseScript has separate `date`, `time`, `datetime`, and `duration` types. The current runtime implements elapsed
+duration literals and values using `ms`, `s`, `min`, and `h`, including their singular and plural long forms.
+Calendar durations, date/time APIs, technical conversions, and locale-aware presentation remain deferred.
+Calendar duration units are rejected by the current compiler.
 
 Current values:
 
@@ -2419,7 +2435,9 @@ now.weekdayNumber
 
 ### Duration literals
 
-Long and short duration forms are accepted:
+Exact elapsed suffixes are `ms`/`millisecond`/`milliseconds`, `s`/`second`/`seconds`,
+`min`/`minute`/`minutes`, and `h`/`hour`/`hours`. The calendar examples below describe deferred accepted
+direction:
 
 ```text
 500 milliseconds
@@ -2482,18 +2500,23 @@ duration / number -> duration
 duration / duration -> number
 ```
 
-Date/time values support `==`, `!=`, `<`, `<=`, `>`, and `>=`. `datetime` comparisons use the represented exact moment.
+Elapsed duration values support `==`, `!=`, `<`, `<=`, `>`, and `>=` across compatible units:
+`90 seconds > 1 minute` is true.
+
+Date/time values also support those comparisons; `datetime` comparisons use the represented exact moment.
 
 ### Display and technical conversion
 
-In visible text, date/time and duration values are formatted using the player's locale and effective timezone:
+Current elapsed duration values use deterministic English visible-text formatting; `90 seconds` displays as
+`1 min 30 s`. Locale-aware duration formatting is deferred. Locale- and timezone-aware date/time presentation
+remains accepted future direction:
 
 ```text
 say `Your punishment ends ${chastityEnd}.`
 say `You still have ${remaining} remaining.`
 ```
 
-Explicit presentation methods return strings:
+The following explicit presentation methods are deferred; their accepted return type is `string`:
 
 ```text
 chastityEnd.formatDate()
@@ -2526,37 +2549,14 @@ Unix values are integers counted from `1970-01-01T00:00:00Z`.
 
 
 ## 36. Scheduling
-**Status:** Accepted
+**Status:** Wanted capability; final syntax, authority, and Player UI deferred
 
-`schedule` accepts a `datetime` value. The block itself is inherently the trigger action, so no `onTrigger` wrapper is used:
+Scheduled events and deadlines target absolute wall-clock moments and may become due while no Player is running.
+This differs from [timer and `wait` scene time](#27-timers), which excludes genuine Player unavailability.
 
-```text
-let releaseTime = getDateTime() + 1 day
-
-let eventId = schedule releaseTime {
-    say "Your punishment is over."
-}
-```
-
-A technical ISO 8601 string is converted to `datetime` before it is scheduled:
-
-```text
-let releaseTime = toDateTime("2026-08-01T21:00:00+02:00")
-
-let eventId = schedule releaseTime {
-    goto eveningScene
-}
-```
-
-Rules:
-
-- The value passed to `schedule` must have type `datetime`. Passing a plain string directly is a compile-time type error.
-- `toDateTime(...)` may be used for a valid ISO 8601 string with `Z` or an explicit UTC offset when a technical timestamp is required.
-- Normal calculated scheduling should use `getDateTime()` plus or minus a `duration`.
-- `schedule` returns an event identifier.
-- The schedule block runs once when the scheduled moment is reached.
-- Scheduled events can be cancelled with `cancelSchedule(eventId)`.
-- The runtime stores a stable exact representation before persisting or transmitting a scheduled moment.
+Exact event syntax and handles, local/offline versus server-backed authority, recovery, and deadline presentation
+require a separate design. The earlier `schedule datetime { ... }` and `cancelSchedule(...)` forms are not accepted
+final author syntax. See [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md).
 
 ## 37. Dynamic speaker terms
 **Status:** Accepted

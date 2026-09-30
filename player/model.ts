@@ -29,13 +29,16 @@ export interface PlayerMediaPresentation {
 }
 
 export interface PlayerTimerPresentation {
-  /** Stable presentation key; runtime timers derive it from the action ID, which is never displayed. */
-  readonly id: string;
-  /** Hidden timers are never presented, so they have no presentation entry. */
-  readonly kind: Exclude<PlayerTimerKind, "hidden">;
   readonly name?: string;
   readonly remainingSeconds: number;
   readonly totalSeconds: number;
+}
+
+/** A timer derived from runtime state. Hidden timers are never presented, so they have no entry. */
+export interface PlayerRuntimeTimerPresentation extends PlayerTimerPresentation {
+  /** Stable presentation key derived from the action ID; it is never displayed. */
+  readonly id: string;
+  readonly kind: Exclude<PlayerTimerKind, "hidden">;
 }
 
 export interface PlayerSpeakerPresentation {
@@ -124,8 +127,7 @@ export type PlayerRightControlPresentation =
 export interface PlayerPresentation {
   readonly package: PlayerPackagePresentation;
   readonly media: PlayerMediaPresentation;
-  /** Development fixture template for Visual Lab timers; authored timers come from runtime state. */
-  readonly timer: Omit<PlayerTimerPresentation, "id" | "kind">;
+  readonly timer: PlayerTimerPresentation;
   readonly speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
   readonly rightControls: readonly PlayerRightControlPresentation[];
 }

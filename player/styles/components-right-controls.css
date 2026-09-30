@@ -41,6 +41,11 @@
         display: none;
       }
 
+      .player[data-timer-kind="hidden"] .timer-wrap,
+      .player[data-timer-kind="hidden"] .timer-list {
+        display: none;
+      }
+
       .timer[data-timer-kind="mystery"] .timer-text {
         font-size: 1.15em;
       }
