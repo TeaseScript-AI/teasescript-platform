@@ -696,3 +696,38 @@ test("a late observation skips silent fixed repeat rounds arithmetically", () =>
   assert.equal(timer.elapsedMs, 3_600_000);
   assert.equal(timer.deadlineMs, 3_600_001);
 });
+
+test("final review regressions keep late expiries valid and reject forged invocations", () => {
+  const paused = new Session(
+    "let t = timer(duration: 1, async: true, repeat: true) { t.pause() }\nwait 10",
+  ).at(3_000);
+  const pausedTimer = paused.timers()[0]!.timer;
+  assert.equal(pausedTimer.state, "paused", "pausing an overdue round ends it and stays paused");
+  assert.equal(pausedTimer.remainingMs, 1_000);
+
+  const ordered = new Session(
+    'timer async 1 {\n  timer async 0 { say "nested" }\n  wait 1\n}\ntimer async 2 { say "second" }\nwait 10',
+  ).at(3_000);
+  ordered.at(4_000);
+  assert.deepEqual(ordered.said(), ["second", "nested"], "expiry blocks run in due order");
+
+  const oneShot = new Session(
+    'let hits = 0\ntimer async 1 { hits += 1 }\nwait 2\nsay "hits ${hits}"',
+  );
+  const queued = serializeCheckpoint(
+    createCheckpoint(oneShot.plan, observeTime(oneShot.plan, oneShot.snapshot, 1_000).snapshot),
+  );
+  assertForgedRejected(queued, ["snapshot", "pendingTimerHandlers", 0, "count"], 2);
+  // EVIDENCE: fixture: checkpoint serialization produces plain JSON data.
+  const entry = child(
+    child(child(JSON.parse(queued) as Json, "snapshot"), "pendingTimerHandlers"),
+    0,
+  );
+  assertForgedRejected(queued, ["snapshot", "pendingTimerHandlers", "push"], entry);
+
+  const created = new Session('wait 1\nlet t = timer async 2\nwait 3\nsay "${t.elapsed}"').at(
+    1_000,
+  );
+  const running = serializeCheckpoint(createCheckpoint(created.plan, created.snapshot));
+  assertForgedRejected(running, ["snapshot", "backgroundActions", 0, "timer", "runningSinceMs"], 0);
+});

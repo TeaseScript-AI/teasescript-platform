@@ -504,8 +504,9 @@ accumulated elapsed time. A finished or stopped record moves to `settledTimers` 
 `observeTime` processes due work globally by `(deadline, action ID)`: foreground and suspended delays, pacing gates,
 and timer rounds. A round that expires naturally ends at its deadline and a repeating timer starts its next round
 there, drawing a repeating range from the session RNG; `remaining` reaching zero ends the round at the current scene
-time. An expired round with an expiry block appends to `pendingTimerHandlers`; consecutive expiries of one timer
-share an entry with a count. A handler-free fixed repeating timer skips silent rounds arithmetically on a late
+time, as does pausing a round that is already due while its expiry waits behind a running block. An expired round
+with an expiry block is queued in `pendingTimerHandlers` in due order; consecutive expiries of one timer share an entry
+with a count. A handler-free fixed repeating timer skips silent rounds arithmetically on a late
 observation.
 
 Due-work processing pauses after a round queues an expiry block that can interrupt now. Later due work, including

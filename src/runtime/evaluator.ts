@@ -1151,6 +1151,10 @@ export class Evaluator {
     }
     const warning = name === "pause" ? pauseTimer(timer, now) : resumeTimer(timer, now);
     if (warning !== null) this.#warn(warning.code, warning.message, span);
+    // A round that is already due while its expiry work waits behind a block ends now, like `remaining = 0`.
+    if (action !== undefined && timer.state === "paused" && timer.remainingMs === 0) {
+      expireTimerAction(this.snapshot, action, now, span, this.events);
+    }
     return null;
   }
 

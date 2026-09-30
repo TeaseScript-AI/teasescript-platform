@@ -55,7 +55,9 @@ export function validTimerAction(
     action.createdAtMs > now ||
     !nonNegativeSafeInteger(action.owningInstruction) ||
     !isPlainRecord(action.timer) ||
-    !validTimerRecord(action.timer, true, now, plan, dueWorkAwaitsQueuedBlock(snapshot))
+    !validTimerRecord(action.timer, true, now, plan, dueWorkAwaitsQueuedBlock(snapshot)) ||
+    (typeof action.timer.runningSinceMs === "number" &&
+      action.timer.runningSinceMs < action.createdAtMs)
   ) {
     return false;
   }
@@ -182,6 +184,7 @@ export function validateTimerState(
     return;
   }
   let previousDue = -Infinity;
+  const oneShotInvocations = new Map<number, number>();
   for (const invocation of queue) {
     const record =
       isPlainRecord(invocation) && positiveSafeInteger(invocation.timerId)
@@ -204,6 +207,10 @@ export function validateTimerState(
       continue;
     }
     previousDue = invocation.dueAtMs;
+    const { timerId, count } = invocation;
+    if (record.repeat !== true && positiveSafeInteger(timerId) && positiveSafeInteger(count)) {
+      oneShotInvocations.set(timerId, (oneShotInvocations.get(timerId) ?? 0) + count);
+    }
   }
   if (Array.isArray(value.callFrames)) {
     for (const frame of value.callFrames) {
@@ -213,8 +220,15 @@ export function validateTimerState(
         : undefined;
       if (record === undefined || record.handlerFunctionId !== frame.functionId) {
         errors.push("Runtime timer expiry-block frame does not belong to its timer.");
+      } else if (record.repeat !== true && positiveSafeInteger(record.timerId)) {
+        const id = record.timerId;
+        oneShotInvocations.set(id, (oneShotInvocations.get(id) ?? 0) + 1);
       }
     }
+  }
+  // A timer that does not repeat expires once, so its block is queued or running at most once.
+  if ([...oneShotInvocations.values()].some((count) => count > 1)) {
+    errors.push("Runtime one-shot timer has more than one expiry block invocation.");
   }
   if ((value.status === "halted" || value.status === "ready") && queue.length > 0) {
     errors.push("Runtime pending timer expiry blocks require an active session.");

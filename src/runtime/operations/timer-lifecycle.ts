@@ -160,12 +160,16 @@ function queueTimerHandler(
   handlerFunctionId: number,
   dueAtMs: number,
 ): void {
-  const last = snapshot.pendingTimerHandlers.at(-1);
-  if (last?.timerId === timerId) {
-    last.count += 1;
+  // Keep the queue in due order: an expiry processed late may be due before one queued at an earlier observation.
+  const queue = snapshot.pendingTimerHandlers;
+  let index = queue.length;
+  while (index > 0 && queue[index - 1]!.dueAtMs > dueAtMs) index -= 1;
+  const previous = queue[index - 1];
+  if (previous?.timerId === timerId) {
+    previous.count += 1;
     return;
   }
-  snapshot.pendingTimerHandlers.push({ timerId, handlerFunctionId, dueAtMs, count: 1 });
+  queue.splice(index, 0, { timerId, handlerFunctionId, dueAtMs, count: 1 });
 }
 
 /** Draws a repeat round from the persisted session RNG. */
