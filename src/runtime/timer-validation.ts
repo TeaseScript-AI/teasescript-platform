@@ -1,6 +1,6 @@
 import type { InstructionPlan } from "../plan/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
-import { executionPendingAtCurrentTime } from "./action-validation.js";
+import { timerBlockHoldsCatchUp } from "./action-validation.js";
 
 /** Restore validation for asynchronous timers, their handles, and queued expiry blocks. */
 
@@ -55,7 +55,7 @@ export function validTimerAction(
     action.createdAtMs > now ||
     !nonNegativeSafeInteger(action.owningInstruction) ||
     !isPlainRecord(action.timer) ||
-    !validTimerRecord(action.timer, true, now, plan, executionPendingAtCurrentTime(snapshot)) ||
+    !validTimerRecord(action.timer, true, now, plan, timerBlockHoldsCatchUp(snapshot)) ||
     !validActiveChronology(action.timer, action.createdAtMs, now)
   ) {
     return false;

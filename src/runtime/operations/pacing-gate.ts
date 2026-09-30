@@ -6,6 +6,7 @@ import type {
 import type { ActionCompletedEvent, InterpreterEvent } from "../events.js";
 import type { RuntimeSnapshot } from "../state.js";
 import { assertEventSequenceCapacity, copySpan, takeSequence } from "./support.js";
+import { settlementTimeMs } from "./timer-lifecycle.js";
 
 export function settleBackgroundPacingGate(
   plan: InstructionPlan,
@@ -29,7 +30,7 @@ export function settleBackgroundPacingGate(
     requestEventSequence: action.requestEventSequence,
     completionEventSequence,
     deadlineMs: action.deadlineMs,
-    completedAtMs: snapshot.currentSessionTimeMs,
+    completedAtMs: settlementTimeMs(snapshot),
     releasedPreparedOutputInstruction: null,
   });
   snapshot.lastSettlement = settlement;

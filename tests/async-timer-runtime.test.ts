@@ -777,9 +777,31 @@ test("late observations run expiry blocks at their due scene time, like on-time 
       [1_000, 2_000, 3_000, 5_000],
       ["8 s 5 s"],
     ],
+    [
+      'let t = timer async 3 { say "too late" }\ntimer async 1 {\n  wait 1\n  t.stop()\n}\nwait 10',
+      [1_000, 2_000, 3_000, 5_000],
+      [],
+    ],
   ];
   for (const [source, onTime, expected] of cases) {
     assert.deepEqual(said(source, onTime), expected, source);
     assert.deepEqual(said(source, [onTime.at(-1)!]), expected, `late: ${source}`);
   }
+});
+
+test("catch-up keeps observation-time settlements and rejects an unexplained observed-time lead", () => {
+  const plain = new Session('wait 1\nsay "done"').at(5_000);
+  const settled = plain.events.find(
+    (event) => event.kind === "actionCompleted" && event.settlement.actionKind === "delay",
+  );
+  assert.ok(settled?.kind === "actionCompleted" && settled.settlement.actionKind === "delay");
+  assert.equal(
+    settled.settlement.completedAtMs,
+    5_000,
+    "plans without expiry blocks settle at the observation",
+  );
+
+  const waiting = new Session('wait 1\nsay "done"');
+  const json = serializeCheckpoint(createCheckpoint(waiting.plan, waiting.snapshot));
+  assertForgedRejected(json, ["snapshot", "observedSessionTimeMs"], 5_000);
 });

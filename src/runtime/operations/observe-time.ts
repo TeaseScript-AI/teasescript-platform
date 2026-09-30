@@ -15,7 +15,13 @@ import { isValidSessionTime } from "../actions/delay.js";
 import type { PendingActionOperationResult, TimeObservationOutcome } from "./model.js";
 import { settleBackgroundPacingGate } from "./pacing-gate.js";
 import { skipSilentRounds } from "../timers.js";
-import { expireTimerAction, timerHandlerDispatchable, timerSpan } from "./timer-lifecycle.js";
+import {
+  expireTimerAction,
+  settlementTimeMs,
+  timerBlockHoldsCatchUp,
+  timerHandlerDispatchable,
+  timerSpan,
+} from "./timer-lifecycle.js";
 import { terminalContinuationHandoffFor } from "./terminal-continuation.js";
 import { captureExecutableData, copySpan, pendingResult, takeSequence } from "./support.js";
 
@@ -42,11 +48,11 @@ export function observeTime(
 }
 
 /**
- * Advances scene time toward the observed time one due deadline at a time, in `(deadline, action ID)` order. When an
- * expiry becomes able to interrupt, catch-up pauses with scene time at that expiry's deadline: the block runs at the
- * time it became due, and catch-up resumes once it returns or waits. Expiry blocks therefore behave as if every
- * deadline were observed on time, however late the observation arrives. Other settled work continues at the observed
- * time, as before.
+ * Advances scene time toward the observed time one due deadline at a time, in `(deadline, action ID)` order. While
+ * an expiry block can execute, catch-up pauses with scene time at the moment its work became due: the block starts
+ * at its expiry's deadline and continues after its own waits at their deadlines, and catch-up resumes once it returns
+ * or waits. Expiry blocks therefore behave as if every deadline were observed on time, however late the observation
+ * arrives. The main path continues at the observed time and records it in settlements, as before.
  */
 export function processDueWork(
   plan: InstructionPlan,
@@ -55,7 +61,7 @@ export function processDueWork(
 ): RuntimeActionSettlementSnapshot | null {
   let completion: RuntimeActionSettlementSnapshot | null = null;
   for (;;) {
-    if (timerHandlerDispatchable(current)) return completion;
+    if (timerBlockHoldsCatchUp(current)) return completion;
     const due = nextDueWork(current);
     if (due === null) {
       current.currentSessionTimeMs = current.observedSessionTimeMs;
@@ -203,7 +209,7 @@ function settleSuspendedDelay(
   const settlement = createDelaySettlement(
     action,
     completionEventSequence,
-    snapshot.currentSessionTimeMs,
+    settlementTimeMs(snapshot),
   );
   frame.returnInstruction = action.continuationInstruction;
   frame.timerInterruption = { ...frame.timerInterruption!, suspendedAction: null };
@@ -228,8 +234,8 @@ function settleForegroundTimedAction(
   const completionEventSequence = takeSequence(snapshot, 1);
   const settlement =
     action.kind === "delay"
-      ? createDelaySettlement(action, completionEventSequence, snapshot.currentSessionTimeMs)
-      : createPacingSettlement(action, completionEventSequence, snapshot.currentSessionTimeMs);
+      ? createDelaySettlement(action, completionEventSequence, settlementTimeMs(snapshot))
+      : createPacingSettlement(action, completionEventSequence, settlementTimeMs(snapshot));
   snapshot.foregroundAction = null;
   snapshot.lastSettlement = settlement;
   snapshot.terminalContinuationHandoff =

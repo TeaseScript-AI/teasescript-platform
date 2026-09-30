@@ -36,6 +36,28 @@ export function timerHandlerDispatchable(snapshot: RuntimeSnapshot): boolean {
   return foreground === null || foreground.kind === "delay" || foreground.kind === "interaction";
 }
 
+/**
+ * Catch-up toward the observed time pauses while an expiry block can execute: a queued block can interrupt, or the
+ * running block itself can continue. Scene time then stays at the moment that block's work became due.
+ */
+export function timerBlockHoldsCatchUp(snapshot: RuntimeSnapshot): boolean {
+  if (timerHandlerDispatchable(snapshot)) return true;
+  return (
+    (snapshot.status === "running" || snapshot.status === "ready") &&
+    snapshot.callFrames.some((frame) => frame.timerInterruption !== null)
+  );
+}
+
+/**
+ * Time recorded for a delay or pacing settlement. Work settled for a running expiry block records the scene time at
+ * which the block continues; other settlements record the observation, as for plans without expiry blocks.
+ */
+export function settlementTimeMs(snapshot: RuntimeSnapshot): number {
+  return snapshot.callFrames.some((frame) => frame.timerInterruption !== null)
+    ? snapshot.currentSessionTimeMs
+    : snapshot.observedSessionTimeMs;
+}
+
 /** Finds the active background action of a handle's timer, if it is still running or paused. */
 export function activeTimerAction(
   snapshot: RuntimeSnapshot,

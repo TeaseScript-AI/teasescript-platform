@@ -510,11 +510,12 @@ with a count. A handler-free fixed repeating timer skips silent rounds arithmeti
 observation.
 
 An observation records `observedSessionTimeMs`; `currentSessionTimeMs` is the scene time at which execution stands.
-Due work settles one deadline at a time, advancing scene time to each. When an expiry block becomes able to
-interrupt, catch-up pauses with scene time at that expiry's deadline: the block runs at the time it became due, and
-catch-up continues toward the observed time once the block returns or waits. Later due work, including other
-timers, the foreground delay, and pacing gates, therefore stays unsettled until then, however late or often the
-Player observes. This reproduces a Player that observed every deadline on time: a block can `stop()` a later timer
+Due work settles one deadline at a time, advancing scene time to each. While an expiry block can execute, catch-up
+pauses with scene time at the moment its work became due: the block starts at its expiry's deadline and continues
+after its own waits and pacing at their deadlines, and catch-up continues toward the observed time once the block
+returns or waits. Later due work, including other timers, the foreground delay, and pacing gates, therefore stays
+unsettled until then, however late or often the Player observes. The main path still continues at the observed
+time, and settlements outside a running block record the observation, as for plans without expiry blocks. This reproduces a Player that observed every deadline on time: a block can `stop()` a later timer
 before it expires, a timer it starts orders by its own deadline, and a handler-free repeating timer skips silent
 rounds only up to the next other due work. A Player delay completion that an earlier-due block will interrupt
 returns `suspendedAction` while keeping the time observation.
