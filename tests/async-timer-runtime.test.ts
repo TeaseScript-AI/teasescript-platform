@@ -842,6 +842,16 @@ test("late observations replay the script at scene time and reject an unexplaine
   const waiting = new Session('wait 1\nsay "done"');
   const json = serializeCheckpoint(createCheckpoint(waiting.plan, waiting.snapshot));
   assertForgedRejected(json, ["snapshot", "observedSessionTimeMs"], 5_000);
+
+  // Observed but not yet replayed: the script is runnable at the delay deadline behind the horizon.
+  const held = observeTime(waiting.plan, waiting.snapshot, 5_000).snapshot;
+  assert.equal(held.status, "running");
+  assert.equal(held.currentSessionTimeMs, 1_000);
+  assert.equal(held.observedSessionTimeMs, 5_000);
+  const heldJson = serializeCheckpoint(createCheckpoint(waiting.plan, held));
+  assert.deepEqual(deserializeCheckpoint(heldJson).snapshot, held);
+  assertForgedRejected(heldJson, ["snapshot", "lastSettlement", "completedAtMs"], 3_000);
+  assertForgedRejected(heldJson, ["snapshot", "currentSessionTimeMs"], 6_000);
 });
 
 test("catch-up holds for a queued block behind a commit window and timer settlements record scene time", () => {

@@ -2093,7 +2093,8 @@ Blocks run one at a time in due order. A block may itself wait; later expiries q
 Timers and `wait` measure Player-executed scene time. Presentation and blocking do not change the clock. Time keeps
 running while a live Player is minimized or in the background; when the Player is closed and later restored,
 including on another device, the gap does not consume timer time and the timer continues with its saved remaining
-time. See [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time) for the observation contract.
+time. A script plays the same however late or often the Player observes time: everything happens at its own moment
+in scene time. See [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time) for the observation contract.
 
 ## 28. Permanent buttons
 **Status:** Accepted

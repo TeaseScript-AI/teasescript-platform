@@ -314,9 +314,9 @@ observation and restore contract is maintained in [`RUNTIME.md`](../RUNTIME.md#t
 3. Persist `snapshot.observedSessionTimeMs = effectiveNow`.
 4. Determine which timed foreground and background actions are due at `effectiveNow`.
 5. Unless the session has failed, settle due actions according to the accepted deterministic ordering, advancing
-   `snapshot.currentSessionTimeMs` to each settled deadline and finally to `effectiveNow`. While a timer expiry
-   block can execute, `currentSessionTimeMs` stands at the moment its work became due until the block returns or
-   waits; see [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time).
+   `snapshot.currentSessionTimeMs` to each settled deadline and finally to `effectiveNow`. While the script or a
+   timer expiry block can execute, `currentSessionTimeMs` stands at the moment that work became due until execution
+   waits or ends; see [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time).
 6. Return the updated validated snapshot and structured outcomes.
 
 No checkpoint may expose due-action processing performed against a newer time than its `currentSessionTimeMs`

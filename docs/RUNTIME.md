@@ -476,11 +476,12 @@ unless the session has failed:
   settle due work in (deadline, action ID) order, advancing currentSessionTimeMs toward observedSessionTimeMs
 ```
 
-Outside a failed session, and without timer expiry blocks, both coordinates are equal after every operation. A failed
-session is terminal: later observations record the observed time but settle nothing and leave scene time unchanged.
-Catch-up with expiry blocks is defined under [Timers and scene time](#timers-and-scene-time). No checkpoint may contain due-action processing performed
-against a newer time than its `currentSessionTimeMs`; a checkpoint taken while catch-up is held keeps both coordinates
-and the pending work.
+Scene time stands behind the observed time only while the script or an expiry block can execute; once execution
+waits or ends, catch-up continues and both coordinates are equal again. A failed session is terminal: later
+observations record the observed time but settle nothing and leave scene time unchanged. Catch-up is defined under
+[Timers and scene time](#timers-and-scene-time). No checkpoint may contain due-action processing performed against a
+newer time than its `currentSessionTimeMs`; a checkpoint taken while catch-up is held keeps both coordinates and the
+pending work.
 
 Blocking `wait` and `timer`, foreground interactions, pacing gates, and asynchronous timers share ADR 0016 action,
 identity, observation, event, and checkpoint infrastructure. Their timer-specific composition is defined below.
@@ -521,16 +522,15 @@ script change to the current round (`pause`, `resume`, `remaining`, or `repeatDu
 next full round. Observations after a runtime failure record the observed time but settle no further work.
 
 An observation records `observedSessionTimeMs`; `currentSessionTimeMs` is the scene time at which execution stands.
-Due work settles one deadline at a time, advancing scene time to each. While an expiry block can execute, now or
-right after the current single-instruction commit window, catch-up pauses with scene time at the moment its work
-became due: the block starts at its expiry's deadline and continues
-after its own waits and pacing at their deadlines, and catch-up continues toward the observed time once the block
-returns or waits. Later due work, including other timers, the foreground delay, and pacing gates, therefore stays
-unsettled until then, however late or often the Player observes. The main path still continues at the observed
-time. Time-driven settlements outside a running block record the observation, as for plans without expiry blocks; a
-pacing gate that is skipped or consumed records the current scene time. This reproduces a Player that observed every
-deadline on time: a block can `stop()` a later timer before it expires, a timer it starts orders by its own
-deadline, and a handler-free repeating timer skips silent rounds only up to the next other due work. A Player delay completion that an earlier-due block will interrupt
+Due work settles one deadline at a time, advancing scene time to each. Whenever the script or an expiry block can
+execute, catch-up pauses with scene time at the moment that work became due: the script continues after a `wait` or
+pacing gate at its deadline, a block starts at its expiry's deadline, and catch-up continues toward the observed time
+once execution waits or ends. Every settlement records the scene time at which it happened: a time-driven settlement
+records its deadline, and a pacing gate that is skipped, consumed, or superseded records the current scene time. A
+late observation therefore gives the same output, events, and snapshot as observing every deadline on time: a block
+can `stop()` a later timer before it expires, a timer it starts orders by its own deadline, and a handler-free
+repeating timer skips silent rounds only up to the next other due work. A Player delay completion that an earlier-due
+block will interrupt
 returns `suspendedAction` while keeping the time observation.
 
 Expiry blocks compile to parameterless handler regions. A runtime entry starts the first queued block before
