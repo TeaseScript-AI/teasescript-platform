@@ -56,8 +56,7 @@ export function validTimerAction(
     !nonNegativeSafeInteger(action.owningInstruction) ||
     !isPlainRecord(action.timer) ||
     !validTimerRecord(action.timer, true, now, plan, dueWorkAwaitsQueuedBlock(snapshot)) ||
-    (typeof action.timer.runningSinceMs === "number" &&
-      action.timer.runningSinceMs < action.createdAtMs)
+    !validActiveChronology(action.timer, action.createdAtMs, now)
   ) {
     return false;
   }
@@ -71,6 +70,33 @@ export function validTimerAction(
     owner.handlerFunctionId === timer.handlerFunctionId &&
     (owner.label === null) === (timer.label === null)
   );
+}
+
+/**
+ * A timer runs only after it was created, its deadline follows its current running period, and accumulated elapsed
+ * time fits the scene time available before that period (or before now while paused).
+ */
+function validActiveChronology(
+  timer: Record<string, unknown>,
+  createdAtMs: number,
+  now: number,
+): boolean {
+  const { runningSinceMs, deadlineMs, elapsedMs } = timer;
+  if (typeof elapsedMs !== "number") return false;
+  if (typeof runningSinceMs === "number") {
+    return (
+      runningSinceMs >= createdAtMs &&
+      typeof deadlineMs === "number" &&
+      deadlineMs >= runningSinceMs &&
+      withinSceneTime(elapsedMs, runningSinceMs - createdAtMs)
+    );
+  }
+  return withinSceneTime(elapsedMs, now - createdAtMs);
+}
+
+/** Elapsed time accumulates by subtraction, so allow floating-point rounding relative to the bound. */
+function withinSceneTime(elapsedMs: number, availableMs: number): boolean {
+  return elapsedMs <= availableMs + Number.EPSILON * 16 * Math.max(1, availableMs);
 }
 
 function validTimerRecord(
@@ -157,7 +183,10 @@ export function validateTimerState(
     for (const timer of settled) {
       if (
         !isPlainRecord(timer) ||
-        !validTimerRecord(timer, false, value.currentSessionTimeMs, plan)
+        !validTimerRecord(timer, false, value.currentSessionTimeMs, plan) ||
+        typeof value.currentSessionTimeMs !== "number" ||
+        typeof timer.elapsedMs !== "number" ||
+        !withinSceneTime(timer.elapsedMs, value.currentSessionTimeMs)
       ) {
         errors.push("Runtime settled timer is malformed.");
         continue;
@@ -210,6 +239,9 @@ export function validateTimerState(
     const { timerId, count } = invocation;
     if (record.repeat !== true && positiveSafeInteger(timerId) && positiveSafeInteger(count)) {
       oneShotInvocations.set(timerId, (oneShotInvocations.get(timerId) ?? 0) + count);
+      if (record.state !== "finished") {
+        errors.push("Runtime one-shot timer expiry block requires a finished timer.");
+      }
     }
   }
   if (Array.isArray(value.callFrames)) {
@@ -223,6 +255,9 @@ export function validateTimerState(
       } else if (record.repeat !== true && positiveSafeInteger(record.timerId)) {
         const id = record.timerId;
         oneShotInvocations.set(id, (oneShotInvocations.get(id) ?? 0) + 1);
+        if (record.state !== "finished") {
+          errors.push("Runtime one-shot timer expiry block requires a finished timer.");
+        }
       }
     }
   }

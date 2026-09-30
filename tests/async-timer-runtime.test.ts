@@ -731,3 +731,31 @@ test("final review regressions keep late expiries valid and reject forged invoca
   const running = serializeCheckpoint(createCheckpoint(created.plan, created.snapshot));
   assertForgedRejected(running, ["snapshot", "backgroundActions", 0, "timer", "runningSinceMs"], 0);
 });
+
+test("restore rejects impossible timer chronology and a repeated one-shot expiry", () => {
+  const oneShot = new Session(
+    'let hits = 0\nlet t = timer async 1 { hits += 1 }\nwait 2\nsay "hits ${hits}"',
+  );
+  const waiting = serializeCheckpoint(createCheckpoint(oneShot.plan, oneShot.snapshot));
+  const timer = oneShot.timers()[0]!.timer;
+  assertForgedRejected(waiting, ["snapshot", "pendingTimerHandlers", "push"], {
+    timerId: timer.timerId,
+    handlerFunctionId: timer.handlerFunctionId,
+    dueAtMs: 0,
+    count: 1,
+  });
+
+  const running = new Session("wait 1\nlet t = timer async 2\nwait 3").at(1_000);
+  const runningJson = serializeCheckpoint(createCheckpoint(running.plan, running.snapshot));
+  const path = ["snapshot", "backgroundActions", 0, "timer"] as const;
+  assertForgedRejected(runningJson, [...path, "deadlineMs"], 500);
+  assertForgedRejected(runningJson, [...path, "elapsedMs"], 10);
+
+  const paused = new Session("let t = timer async 5\nt.pause()\nwait 1");
+  const pausedJson = serializeCheckpoint(createCheckpoint(paused.plan, paused.snapshot));
+  assertForgedRejected(pausedJson, [...path, "elapsedMs"], 10_000);
+
+  const stopped = new Session("let t = timer async 5\nt.stop()\nwait 1");
+  const stoppedJson = serializeCheckpoint(createCheckpoint(stopped.plan, stopped.snapshot));
+  assertForgedRejected(stoppedJson, ["snapshot", "settledTimers", 0, "elapsedMs"], 10_000);
+});
