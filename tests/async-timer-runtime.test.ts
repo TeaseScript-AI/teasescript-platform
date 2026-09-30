@@ -1099,3 +1099,24 @@ test("second re-audit regressions: plateau skipping, failure at a due deadline, 
   assert.deepEqual(prefix.said(), late.said());
   assert.deepEqual(late.snapshot.settledTimers, prefix.snapshot.settledTimers);
 });
+
+test("third re-audit regressions: exact display strings and failed pacing gates at scene time", () => {
+  const session = new Session("let t = timer async 5\nwait 10");
+  const json = serializeCheckpoint(createCheckpoint(session.plan, session.snapshot));
+  assertForgedRejected(json, ["snapshot", "backgroundActions", 0, "timer", "display"], ["hidden"]);
+
+  const failed = new Session(
+    'timer async 1 ms { let n = 0\nlet x = 1 / n }\nsay "pacing", 0.001\nwait 2 ms',
+    { pacing: true },
+  ).at(1);
+  assert.equal(failed.snapshot.status, "failed");
+  const gate = failed.snapshot.backgroundActions.find((action) => action.kind === "chatPacingGate");
+  assert.equal(
+    gate?.kind === "chatPacingGate" && gate.deadlineMs,
+    failed.snapshot.currentSessionTimeMs,
+  );
+  const observed = observeTime(failed.plan, failed.snapshot, 5);
+  assert.deepEqual(observed.events, []);
+  assert.equal(observed.snapshot.observedSessionTimeMs, 5);
+  assert.equal(observed.snapshot.currentSessionTimeMs, failed.snapshot.currentSessionTimeMs);
+});

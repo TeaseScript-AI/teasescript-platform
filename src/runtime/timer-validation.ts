@@ -170,7 +170,7 @@ function validTimerRecord(
   if (
     !hasExactKeys(timer, TIMER_KEYS) ||
     !positiveSafeInteger(timer.timerId) ||
-    !["visible", "mystery", "hidden"].includes(String(timer.display)) ||
+    (timer.display !== "visible" && timer.display !== "mystery" && timer.display !== "hidden") ||
     (timer.label !== null && typeof timer.label !== "string") ||
     typeof timer.repeat !== "boolean" ||
     typeof timer.persist !== "boolean" ||
