@@ -31,7 +31,7 @@ This table is generated from the current section order.
 - [24. Comments](#24-comments)
 - [25. Persistent storage and keys](#25-persistent-storage-and-keys)
 - [26. Labels and goto](#26-labels-and-goto)
-- [27. Blocking and background timer behavior](#27-blocking-and-background-timer-behavior)
+- [27. Timers](#27-timers)
 - [28. Permanent buttons](#28-permanent-buttons)
 - [29. Script files and paths](#29-script-files-and-paths)
 - [30. Script endings](#30-script-endings)
@@ -1976,57 +1976,111 @@ Rules:
 - Unknown labels are compile errors.
 - A `goto` triggered by an event aborts the current execution path and does not return.
 
-## 27. Blocking and background timer behavior
-**Status:** Accepted behavior; final background timer syntax pending
+## 27. Timers
+**Status:** Accepted (Owner decisions on PR #443, 2026-09-30)
 
-### Blocking timers
+One `timer` concept covers blocking and asynchronous countdowns. `wait` is the shorthand for a hidden blocking
+timer and shares its clock, checkpoint, and restore behavior.
 
-Hidden blocking wait:
-
-```text
-wait 10
-```
-
-Visible blocking timer:
+### Short form
 
 ```text
-timer 10
+wait 10                                   // hidden, blocking
+timer 10                                  // visible, blocking
+timer mystery 5..10 "Hold"                // mystery, blocking, labelled
+timer async 30 s "Deadline" { ... }       // visible, asynchronous, with an expiry block
+let t = timer async hidden 2 min { ... }  // keeps the handle
 ```
 
-A visible blocking timer may use a range for a randomized duration:
+`timer [async] [visible|mystery|hidden] <duration> [unit] ["label"] [{ expiry block }]`: the execution modifier
+comes first, then the presentation, the duration, an optional string-literal label, and the expiry block. Omitted
+modifiers mean visible and blocking. `async`, `visible`, `mystery`, and `hidden` are recognized only directly after
+`timer`; write `timer (hidden)` to use a variable of that name as the duration.
+
+A duration is a bare number of seconds, a [§35](#35-date-time-durations-and-unix-time) elapsed duration such as
+`500 ms` or `2 min`, or a number followed by a trailing unit as for `wait` (`timer n ms`). A range such as `5..10` or
+`5..=10` counts whole seconds and is drawn once per round from the session RNG after the timer's operands are
+evaluated; ranges with other units are not yet supported. `timer 0` and `wait 0` continue immediately.
+
+### Named form
 
 ```text
-timer 5..10
+let beat = timer(duration: 1..=3, async: true, display: "mystery", label: "Beat", repeat: true, persist: true) {
+    say "Beat."
+}
 ```
 
-A bare duration counts seconds, as for `wait`, and `timer 0` continues immediately. Range bounds follow the general
-range rules in this document: the session RNG selects one whole-second duration when the timer starts, and checkpoint
-restore keeps that selection. The previously listed `mysteryTimer`, `startTimer`, and `stopTimer` spellings were not
-Owner-approved and are not accepted syntax. Mystery presentation, async execution, handle control, labels, and timer
-duration units still need their final source forms.
+The named form carries the same fields plus `repeat` and `persist`. `async`, `repeat`, and `persist` are the
+literals `true` or `false`; `duration`, `display`, and `label` are expressions evaluated in source order. A blocking
+named timer needs a literal `display`.
 
-### Background timer behavior
+### Blocking and asynchronous timers
 
-A background timer continues while the main script proceeds. Its block is the finish action; it does not need an
-`onFinish` wrapper. The timer may be stopped explicitly, and its finish action may jump to a label. The final command
-spelling and handle API remain open.
+A blocking timer returns no handle; using one as a value, or giving it an expiry block, `repeat`, or `persist`, is a
+compile error. An asynchronous timer lets the script continue and evaluates to an opaque handle, which may be
+ignored. Standalone `startTimer`, `stopTimer`, and `mysteryTimer` spellings are not TeaseScript syntax.
 
-The `repeat: true` and `persist: true` timer options retain their accepted meanings; their placement in the final
-unified `timer` form remains open:
+### Handles
 
-- `repeat: true` starts another round after expiration. A repeating random-range timer chooses a new random duration
-  before each repetition.
+```text
+t.pause()
+t.resume()
+t.stop()
+if t.remaining > 10 seconds { ... }
+t.remaining += 10 s        // current round only
+t.remaining -= 5 s
+t.remaining = 20 s
+t.repeatDuration = 50 s    // later repeat rounds only
+t.display = "mystery"
+```
+
+Readable properties are `remaining` and `elapsed` (durations), `display`, `label`, `state`, and `repeatDuration`.
+`elapsed` is active running time since the first start across all rounds, excluding explicit pauses; `remaining`
+concerns the current round. `state` is `running`, `paused`, `finished`, or `stopped`:
+
+- reads stay valid after the timer settles; `remaining` is then zero and `elapsed` is frozen;
+- `pause()` while paused, `resume()` while running, and `stop()` on a finished or stopped timer do nothing;
+- any other operation on a finished or stopped timer does not revive or change it and reports a developer warning
+  with its source location instead of stopping the story;
+- adjusting `remaining` while paused changes the current round and the timer stays paused;
+- setting or reducing `remaining` to zero expires the current round at once; remaining time never becomes negative;
+- `stop()` cancels the timer and any of its expiry blocks that have not started yet.
+
+Unknown handle members are compile errors when the handle's variable is initialized from `timer async`; values
+of the wrong type are rejected.
+
+### Repeat, persistence, and cleanup
+
+- `repeat: true` starts another round when a round expires. A repeating range draws a new duration for each round;
+  every round must last longer than zero. Rounds that expire during one late time observation keep their original
+  schedule and each run the expiry block once.
 - A non-persistent timer is removed on `goto`, `end`, `run`, `call`, or `exit`.
 - `persist: true` keeps a timer active across `goto`, `end`, `run`, and `call`.
-- Every timer stops on `exit`, including persistent timers.
+- Every timer stops on `exit` and when the script ends.
 
-Finish-action behavior:
+### Expiry blocks
 
-- The timer block runs without pausing currently playing audio or video.
-- After a normal finish action completes, the interrupted script continues where it left off.
-- The block may call normal functions and start new timers.
-- Timer finish actions are processed one at a time.
-- A `goto` in the timer block abandons the interrupted execution path.
+The block runs when the timer expires. It does not need an `onFinish` wrapper and runs without pausing currently
+playing audio or video. It may use top-level names, its own locals, normal functions, and new timers, but not the
+local variables of the code that started the timer.
+
+A due block interrupts at the next deterministic runtime boundary, including while the main path waits on an
+interaction, `wait`, or blocking timer; it waits while a paced message still blocks the chat. The interrupted action
+is inert while the block runs, so there are never two active story paths:
+
+- if the block completes normally, the interrupted action is presented again and the script continues where it
+  left off;
+- if the block uses `goto`, `end`, or `exit`, the interrupted action and its instruction are cancelled: an
+  interrupted `let answer = askText ...` completes nothing and binds no value.
+
+Blocks run one at a time in due order. A block may itself wait; later expiries queue behind it.
+
+### Time
+
+Timers and `wait` measure Player-executed scene time. Presentation and blocking do not change the clock. Time keeps
+running while a live Player is minimized or in the background; when the Player is closed and later restored,
+including on another device, the gap does not consume timer time and the timer continues with its saved remaining
+time. See [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time) for the observation contract.
 
 ## 28. Permanent buttons
 **Status:** Accepted

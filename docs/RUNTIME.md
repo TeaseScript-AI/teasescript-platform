@@ -314,9 +314,8 @@ A real interactive control has priority and must not also trigger viewport-wide 
 
 The normal Player application has no player-facing pause control and ADR 0018 adds no author-facing pause command. Developer mode may expose Pause alongside Run, Step, checkpoint, restore, and debugger controls. Developer pause is tooling and does not establish player-initiated pause semantics.
 
-Browser unavailability, reload, reconnect, device sleep, and visibility changes are not implicit Player pause. The
-future continuity direction is maintained under
-[Owner-resolved future runtime semantics](#owner-resolved-future-runtime-semantics).
+Visibility changes are not a Player pause, and a closed Player's absence does not consume scene time; see
+[Timers and scene time](#timers-and-scene-time).
 
 ### Checkpoint and event requirements
 
@@ -364,14 +363,6 @@ lifecycle/time integrity and the final cross-origin Player shell remain out of s
 
 These owner decisions are independent of final Player visual tuning but are not implemented capability or accepted
 author-facing syntax. Exact schemas and APIs remain future work.
-
-### Time continuity across unavailability
-
-Session time remains continuous across browser unavailability, reload, reconnect, device sleep, and visibility changes.
-After restore, explicit time observation may settle due work, but recovery must not skip the first script event that
-should have executed during the absence or replay events already materialized in the selected valid checkpoint. Exact
-checkpoint selection, deadline recalculation, reconnect, repeating-timer, and server-authoritative time mechanics remain
-open.
 
 ### Long-lived Standard controls
 
@@ -467,6 +458,47 @@ with `display: "visible"`. The generic interaction runtime is the second foregro
 of ADR 0016. ADR 0018 `say` pacing now adds the first populated background-action slice through `chatPacingGate`,
 including background-to-foreground promotion, prepared output, typed/time settlement, `wait` coexistence, interaction
 consumption, and checkpoint/restore.
+
+## Timers and scene time
+
+Timers and `wait` measure Player-executed scene time: the persisted `currentSessionTimeMs`. The engine never reads a
+clock. A live Player maps a monotonic clock onto the session coordinate and submits explicit observations at the
+next deadline, before input continues the script, when the page's visibility changes, and on `pagehide`. Callbacks
+are only observation opportunities, so a throttled background callback catches up rather than losing elapsed time,
+and visibility changes never pause time. Restoring a checkpoint rebases the Player clock on the saved coordinate, so
+the gap while no Player ran, including a device handoff, does not consume timer time; a timer continues with its
+saved remaining time. Extreme platform suspension without any lifecycle opportunity is not covered. Absolute
+wall-clock deadlines belong to future scheduled events, not to timers.
+
+A blocking `timer` is a foreground `delay` like `wait`, with its presentation (`visible`, `mystery`, or `hidden`) and
+evaluated label. An asynchronous timer is a background action of kind `timer`: it allocates an action ID and emits
+`actionRequested` when started and `actionCompleted` when it finishes or stops. No Player completion can target
+it, so its settlement is not retained as `lastSettlement`. The action holds the timer record: state, presentation,
+label, repeat configuration, current-round length, and either its deadline (running) or remaining time (paused), plus
+accumulated elapsed time. A finished or stopped record moves to `settledTimers` so its opaque handle
+(`{ kind: "timerHandle", timerId }`) stays readable; `nextTimerId` allocates handle IDs.
+
+`observeTime` processes due work globally by `(deadline, action ID)`: foreground and suspended delays, pacing gates,
+and timer rounds. A round that expires naturally ends at its deadline and a repeating timer starts its next round
+there, drawing a repeating range from the session RNG; `remaining` reaching zero ends the round at the current scene
+time. An expired round with an expiry block appends to `pendingTimerHandlers`; consecutive expiries of one timer
+share an entry with a count.
+
+Expiry blocks compile to parameterless handler regions. A runtime entry starts the first queued block before
+executing the next instruction, including from `waiting`, unless a block is already running, the call depth is
+exhausted, or a single-instruction commit window is open (released prepared `say` output, an interaction result
+handoff, or a settled terminal action), or a foreground pacing gate holds the chat. The block runs in an
+interrupt call frame that saves the interrupted position, temporaries, scope and loop depth, and the interrupted
+foreground delay or interaction. That action is inert: a completion for it returns `suspendedAction`. A suspended
+delay still settles in deadline order and publishes `actionCompleted`, without replacing `lastSettlement`; its
+continuation runs once when the block returns. A due foreground delay stays unsettled while an earlier-due block is
+queued, so the block interrupts it first. A normal return restores the interrupted action with its original
+identity; returning to an interaction first consumes a pacing gate created by the block. `exit` inside a block halts
+the session and discards the interrupted action. `exit` and script end stop every timer and drop queued blocks.
+
+Restore validation requires every issued timer ID to have exactly one active or settled record, handles to refer
+to issued IDs, queued blocks to belong to their timer, at most one interrupt frame, and suspended actions to be
+consistent with the interrupted context.
 
 ## Compiler and execution entry points
 
@@ -626,9 +658,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 21 | `wait` instructions carry a required `display` (`hidden` for `wait`, `visible` for blocking `timer`). |
-| Runtime snapshot | 22 | Foreground delay actions carry the required `display` of their owning instruction. |
-| Checkpoint | 30 | Updated the self-contained bundle for display-aware plans and delay actions. |
+| Instruction plan | 21 | Timer instructions: `wait` carries `command`, `display`, and `label`; `startTimer`; duration literals; timer-handler regions. |
+| Runtime snapshot | 22 | Timer state: delay `display`/`label`, background `timer` actions, `settledTimers`, `nextTimerId`, `pendingTimerHandlers`, interrupt frames, and duration/timer-handle values. |
+| Checkpoint | 30 | Updated the self-contained bundle for the timer plan and snapshot contracts. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 

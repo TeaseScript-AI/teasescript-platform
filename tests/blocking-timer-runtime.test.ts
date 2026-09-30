@@ -242,7 +242,7 @@ test("unsupported and invalid timer forms fail with structured diagnostics", () 
     ['timer(duration: 1, display: "loud")', "TSV033 Timer display must be"],
     ["timer 10 s ms", "TSV033 This duration already has a unit."],
     ["timer 1 day", "TSP033"],
-    ["timer 5..10 min", "TSV010 Range bounds must be numeric values."],
+    ["timer 5..10 min", "TSV010 A timer range counts whole seconds"],
     ["let n = 10\ntimer 5..n min", "TSV010 A timer range counts whole seconds"],
     ["timer -1", "TSV011 Timer duration must not be negative."],
     ["timer 1.5..3", "TSV010 A statically known timer range must have integer second bounds."],

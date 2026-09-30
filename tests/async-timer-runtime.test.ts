@@ -169,6 +169,18 @@ test("timer forms reject invalid positions, members, and handler scope", () => {
       "TSV011 A repeating timer duration must be greater than zero.",
     ],
     [
+      'let d = "hidden"\ntimer(duration: 1, display: d)',
+      "TSV033 A blocking timer needs a literal display",
+    ],
+    ["let t = timer async 5\n(t).bogus()", "TSV034 Timer handles have no method 'bogus'"],
+    [
+      "let t = timer async 5\nt.remaining = 1",
+      "TSV034 Timer remaining must be assigned a duration",
+    ],
+    ["let t = timer async 5\nt.display = 1", "TSV034 Timer display must be"],
+    ["let t = timer async 5\nt.pause(1)", "TSV034 Timer pause() takes no arguments."],
+    ["timer 5..10 min", "TSV010 A timer range counts whole seconds"],
+    [
       "timer(duration: 0..2, async: true, repeat: true)",
       "TSV010 A repeating timer range must start at one second or more.",
     ],
@@ -180,6 +192,27 @@ test("timer forms reject invalid positions, members, and handler scope", () => {
       `${JSON.stringify(source)}: ${found.join(" | ")}`,
     );
   }
+});
+
+test("static handle hints do not leak from untaken or reassigned paths", () => {
+  const compiled = compileSource(
+    'let o = { x: 1 }\nif false {\n  o = timer async 1\n}\nsay "${o.x}"\nlet t = timer async 1\nt = { x: 2 }\nsay "${t.x}"',
+  );
+  assert.deepEqual(compiled.diagnostics, []);
+});
+
+test("a whole-second range may carry a trailing seconds unit", () => {
+  const session = new Session("timer 5..10 s\nexit");
+  const action = session.snapshot.foregroundAction;
+  assert.ok(action?.kind === "delay");
+  const seconds = (action.deadlineMs - action.createdAtMs) / 1_000;
+  assert.ok(Number.isInteger(seconds) && seconds >= 5 && seconds < 10, String(seconds));
+});
+
+test("nested timers created by an expiry block leave the terminal wait valid", () => {
+  const session = new Session("timer async 1 {\n  timer async 1\n}\nwait 3");
+  session.at(1_000).at(3_000);
+  assert.equal(session.snapshot.status, "halted");
 });
 
 test("an async timer returns a typed handle whose reads follow scene time", () => {

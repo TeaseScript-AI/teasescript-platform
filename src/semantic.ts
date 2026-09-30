@@ -5,6 +5,7 @@ import {
 import type {
   AssignmentTarget,
   Block,
+  CallArgument,
   Identifier,
   TimerParts,
   Expression,
@@ -232,6 +233,18 @@ class SemanticValidator {
     }
     this.#validateExpression(timer.duration, scope, null);
     if (timer.label !== null) this.#validateExpression(timer.label, scope, null);
+    if (
+      !timer.async &&
+      typeof timer.display === "object" &&
+      timer.display !== null &&
+      staticVisibleText(timer.display) === undefined
+    ) {
+      this.#report(
+        semanticCode.invalidTimer,
+        'A blocking timer needs a literal display such as "hidden".',
+        timer.display.span,
+      );
+    }
     if (!timer.async) {
       const invalid = timer.handler ?? (timer.repeat || timer.persist ? timer : null);
       if (invalid !== null) {
@@ -313,7 +326,9 @@ class SemanticValidator {
     name: Identifier,
     scope: SemanticScope,
     use: "read" | "assign" | "call",
+    operand?: Expression | readonly CallArgument[],
   ): void {
+    object = unwrapParentheses(object);
     if (object.kind !== "identifier" || scope.resolve(object.name)?.timerHandle !== true) return;
     const known =
       use === "call"
@@ -321,7 +336,30 @@ class SemanticValidator {
         : use === "assign"
           ? TIMER_HANDLE_ASSIGNABLE
           : TIMER_HANDLE_PROPERTIES;
-    if (known.has(name.name)) return;
+    if (known.has(name.name)) {
+      const invalidOperand =
+        use === "call"
+          ? Array.isArray(operand) && operand.length > 0
+            ? `Timer ${name.name}() takes no arguments.`
+            : null
+          : use === "assign" && operand !== undefined && !Array.isArray(operand)
+            ? name.name === "display"
+              ? isDefinitelyNonText(operand as Expression) ||
+                ((text) => text !== undefined && !TIMER_DISPLAYS.has(text))(
+                  staticVisibleText(operand as Expression),
+                )
+                ? 'Timer display must be "visible", "mystery", or "hidden".'
+                : null
+              : literalKind(operand as Expression) !== "durationLiteral" &&
+                  isDefinitelyNonDuration(operand as Expression)
+                ? `Timer ${name.name} must be assigned a duration such as 10 s.`
+                : null
+            : null;
+      if (invalidOperand !== null) {
+        this.#report(semanticCode.invalidTimerHandleMember, invalidOperand, name.span);
+      }
+      return;
+    }
     this.#report(
       semanticCode.invalidTimerHandleMember,
       use === "call"
@@ -444,15 +482,15 @@ class SemanticValidator {
         this.#validateExpression(statement.value, scope, null);
         if (statement.target.kind === "identifier") {
           const binding = scope.resolve(statement.target.name);
-          if (binding?.kind === "variable") {
-            binding.timerHandle = statement.operator === "=" && isAsyncTimer(statement.value);
-          }
+          // Reassignment may happen on any path, so the variable is no longer known to hold a handle.
+          if (binding?.kind === "variable") binding.timerHandle = false;
         } else if (statement.target.kind === "propertyAccessExpression") {
           this.#validateTimerHandleMember(
             statement.target.object,
             statement.target.property,
             scope,
             "assign",
+            statement.operator === "=" ? statement.value : undefined,
           );
         }
         return;
@@ -800,6 +838,7 @@ class SemanticValidator {
             expression.callee.property,
             scope,
             "call",
+            expression.arguments,
           );
         } else {
           yield* compileChild(
@@ -836,13 +875,17 @@ class SemanticValidator {
         yield* compileChild(
           this.#validateExpressionTask(expression.right, scope, contextualSpeaker),
         );
-        const left = unwrapParentheses(expression.left).kind;
-        const right = unwrapParentheses(expression.right).kind;
-        if (
-          !["*", "/", "==", "!=", "and", "or"].includes(expression.operator) &&
-          ((left === "numberLiteral" && right === "durationLiteral") ||
-            (left === "durationLiteral" && right === "numberLiteral"))
-        ) {
+        const left = literalKind(expression.left);
+        const right = literalKind(expression.right);
+        const mixed =
+          (left === "numberLiteral" && right === "durationLiteral") ||
+          (left === "durationLiteral" && right === "numberLiteral");
+        // Durations scale by numbers (`d * n`, `n * d`, `d / n`); every other mixed operator has no meaning.
+        const scaling =
+          expression.operator === "*" ||
+          (expression.operator === "/" && left === "durationLiteral") ||
+          ["==", "!=", "and", "or"].includes(expression.operator);
+        if (mixed && !scaling) {
           this.#report(
             semanticCode.mixedDurationOperands,
             "A number and a duration cannot be combined with this operator; give both a unit, or group a number before its unit as in '(1 + 2) s'.",
@@ -1082,9 +1125,32 @@ class SemanticValidator {
   }
 }
 
+/** The literal kind of an operand, looking through parentheses and unary signs. */
+function literalKind(expression: Expression): Expression["kind"] {
+  let current = unwrapParentheses(expression);
+  while (current.kind === "unaryExpression" && current.operator !== "not") {
+    current = unwrapParentheses(current.operand);
+  }
+  return current.kind;
+}
+
 function isAsyncTimer(expression: Expression): boolean {
   expression = unwrapParentheses(expression);
   return expression.kind === "timerExpression" && expression.async;
+}
+
+function isDefinitelyNonDuration(expression: Expression): boolean {
+  const kind = literalKind(expression);
+  return (
+    kind === "numberLiteral" ||
+    kind === "stringLiteral" ||
+    kind === "booleanLiteral" ||
+    kind === "nullLiteral" ||
+    kind === "listLiteral" ||
+    kind === "setLiteral" ||
+    kind === "objectLiteral" ||
+    kind === "rangeExpression"
+  );
 }
 
 function isDefinitelyNonText(expression: Expression): boolean {

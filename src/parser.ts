@@ -615,7 +615,7 @@ class Parser {
     ) {
       display = this.#advance().lexeme as TimerDisplay;
     }
-    const duration = this.#parseExpression();
+    let duration = this.#parseExpression();
     if (duration === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedExpression,
@@ -625,8 +625,20 @@ class Parser {
       return null;
     }
     let end = duration.span;
-    const unit = this.#parseTrailingDurationUnit("timer");
-    if (unit !== null) end = this.#previous().span;
+    let unit: DurationUnit | null;
+    // In `timer 5..10 s` the unit belongs to the whole range, not only to its end bound.
+    if (duration.kind === "rangeExpression" && duration.end.kind === "durationLiteral") {
+      unit = duration.end.unit;
+      end = duration.end.span;
+      duration = Object.freeze({
+        ...duration,
+        end: duration.end.amount,
+        span: spanFrom(duration.start.span, duration.end.amount.span),
+      });
+    } else {
+      unit = this.#parseTrailingDurationUnit("timer");
+      if (unit !== null) end = this.#previous().span;
+    }
     let label: Expression | null = null;
     if (this.#match(TokenKind.StringStart)) {
       label = yield* parseChild(this.#parseStringLiteral(this.#previous()));

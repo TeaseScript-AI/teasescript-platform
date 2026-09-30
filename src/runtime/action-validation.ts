@@ -960,11 +960,18 @@ export function validateTerminalContinuationHandoffState(
     !nonNegativeSafeInteger(handoff.owningInstruction) ||
     !nonNegativeSafeInteger(handoff.continuationInstruction) ||
     !positiveSafeInteger(snapshot.nextActionId) ||
-    handoff.actionId !== snapshot.nextActionId - 1 ||
+    // An expiry block may have allocated newer actions before the terminal action settled.
+    (planHasTimerHandlers(plan)
+      ? handoff.actionId >= snapshot.nextActionId
+      : handoff.actionId !== snapshot.nextActionId - 1) ||
     snapshot.status !== "running" ||
     snapshot.foregroundAction !== null ||
     snapshot.interactionResultHandoff !== null ||
-    !validTerminalContinuationHandoffSettlement(handoff, snapshot.lastSettlement)
+    !validTerminalContinuationHandoffSettlement(
+      handoff,
+      snapshot.lastSettlement,
+      planHasTimerHandlers(plan),
+    )
   ) {
     errors.push("Runtime terminal continuation handoff is malformed.");
     return;
@@ -990,6 +997,7 @@ export function validateTerminalContinuationHandoffState(
 function validTerminalContinuationHandoffSettlement(
   handoff: Record<string, unknown>,
   settlement: unknown,
+  interruptible: boolean,
 ): boolean {
   if (!positiveSafeInteger(handoff.actionId) || !isPlainRecord(settlement)) return false;
   if (settlement.actionId === handoff.actionId) {
@@ -1002,11 +1010,12 @@ function validTerminalContinuationHandoffSettlement(
 
   // Only the older background pacing gate can settle after a terminal delay
   // and replace bounded replay before root completion is entered.
+  // With expiry blocks, a gate created by a block may be the newer one.
   return (
     handoff.actionKind === "delay" &&
     settlement.actionKind === "chatPacingGate" &&
     positiveSafeInteger(settlement.actionId) &&
-    settlement.actionId < handoff.actionId
+    (interruptible || settlement.actionId < handoff.actionId)
   );
 }
 
