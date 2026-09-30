@@ -47,6 +47,7 @@ export interface VisualLabTuningControl extends VisualLabBoundedNumberControl {
 export type VisualLabRuntimeScenarioId =
   | "ask-number"
   | "ask-text"
+  | "authored-timers"
   | "blocking-timer"
   | "choose"
   | "show-button"
@@ -272,6 +273,7 @@ export const VISUAL_LAB_CONTROLS = defineVisualLabRegistry([
     "unskippable-pacing",
   ),
   runtimeScenario("scenario-blocking-timer", "Run blocking timer scenario", "blocking-timer"),
+  runtimeScenario("scenario-authored-timers", "Run authored timers scenario", "authored-timers"),
   tuning(
     "stage-height",
     "Stage height",

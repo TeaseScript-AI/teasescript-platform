@@ -78,6 +78,7 @@ test("Visual Lab registry describes retained controls and excludes resolved expe
       "skippable-pacing",
       "unskippable-pacing",
       "blocking-timer",
+      "authored-timers",
     ],
   );
 });

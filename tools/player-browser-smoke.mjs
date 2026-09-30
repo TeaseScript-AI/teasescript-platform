@@ -376,6 +376,34 @@ async function vueTimerScenario(cdp, origin) {
     true,
     "restore must reconstruct the timer from the pending action and its saved session time",
   );
+
+  await selectVueTool(cdp, "visuals");
+  await evaluate(
+    cdp,
+    `([...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Run authored timers scenario')).click()`,
+  );
+  await waitFor(cdp, `document.querySelectorAll('#rightZone .timer').length === 3`);
+  assertEqual(
+    await value(
+      cdp,
+      `JSON.stringify([...document.querySelectorAll('#rightZone .timer')].map((timer) => [timer.dataset.timerKind, timer.querySelector('.timer-label')?.textContent.trim() ?? null, timer.dataset.timerKind === 'mystery' ? timer.querySelector('.timer-text').textContent.trim() : null]))`,
+    ),
+    JSON.stringify([
+      ["visible", "Pulse", null],
+      ["mystery", "Secret", "?"],
+      ["visible", "Answer deadline", null],
+    ]),
+    "concurrent async timers must present labels and mystery state while the hidden timer stays hidden",
+  );
+  await waitFor(cdp, `document.body.textContent.includes('A hidden timer just expired.')`);
+  assertEqual(
+    await value(cdp, `document.querySelector('.composer textarea') !== null`),
+    true,
+    "the interrupted question must return after the expiry block",
+  );
+  await typeAndSubmitVuePlayer(cdp, "Ada");
+  await waitFor(cdp, `document.body.textContent.includes('Thank you, Ada.')`);
+  await waitFor(cdp, `document.querySelectorAll('#rightZone .timer').length === 2`);
 }
 
 async function timerProgress(cdp) {
