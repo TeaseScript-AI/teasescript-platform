@@ -30,7 +30,9 @@ export function settleBackgroundPacingGate(
     requestEventSequence: action.requestEventSequence,
     completionEventSequence,
     deadlineMs: action.deadlineMs,
-    completedAtMs: settlementTimeMs(snapshot),
+    // A skip or consumption happens at the current scene time; elapsed completion follows settlement time rules.
+    completedAtMs:
+      settlementKind === "completed" ? settlementTimeMs(snapshot) : snapshot.currentSessionTimeMs,
     releasedPreparedOutputInstruction: null,
   });
   snapshot.lastSettlement = settlement;

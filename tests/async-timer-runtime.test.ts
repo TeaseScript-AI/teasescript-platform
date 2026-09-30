@@ -843,3 +843,48 @@ test("catch-up holds for a queued block behind a commit window and keeps observa
   assert.ok(settled?.kind === "actionCompleted" && settled.settlement.actionKind === "timer");
   assert.equal(settled.settlement.completedAtMs, 5_000);
 });
+
+test("pacing consumed or skipped during catch-up and terminal completions keep queued blocks valid", () => {
+  const paced = new Session('timer async 1 { say "handler", 2 }\nlet name = askText "Name"', {
+    pacing: true,
+  }).at(5_000);
+  assert.deepEqual(paced.said(), ["handler"]);
+  assert.equal(paced.snapshot.lastSettlement?.settlementKind, "consumedByForegroundInteraction");
+
+  const superseded = new Session(
+    'timer async 1 { say "first", 2 }\ntimer async 3 { say "second", 0 }\nwait 10',
+    { pacing: true },
+  ).at(5_000);
+  assert.deepEqual(superseded.said(), ["first", "second"]);
+
+  const skipping = new Session('timer async 1 { say "handler", 0 }\nsay "first", 2\nwait 10', {
+    pacing: true,
+  });
+  const held = observeTime(skipping.plan, skipping.snapshot, 5_000).snapshot;
+  const gate = held.backgroundActions.find((action) => action.kind === "chatPacingGate");
+  assert.ok(gate !== undefined);
+  const skipped = completeAction(skipping.plan, held, {
+    actionId: gate.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+  assert.equal(skipped.outcome.kind, "completed");
+  deserializeCheckpoint(serializeCheckpoint(createCheckpoint(skipping.plan, skipped.snapshot)));
+
+  const button = new Session('timer async 1 { say "handler", 0 }\nshowButton "Continue"');
+  const due = observeTime(button.plan, button.snapshot, 5_000).snapshot;
+  const pressed = completeAction(button.plan, due, {
+    actionId: due.foregroundAction!.actionId,
+    actionKind: "interaction",
+    interactionKind: "button",
+    payload: { kind: "activate" },
+  });
+  assert.equal(pressed.outcome.kind, "completed");
+  const ended = run(button.plan, pressed.snapshot);
+  assert.deepEqual(
+    ended.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["handler"],
+    "expiry blocks queued before a terminal action completes still run",
+  );
+  assert.equal(ended.snapshot.status, "halted");
+});

@@ -1620,7 +1620,7 @@ function validPacingGateSettlement(
   if (settlement.settlementKind === "completed") {
     return validSettlementChronology(settlement, snapshot);
   }
-  return validNonTimePacingSettlementChronology(settlement, snapshot);
+  return validNonTimePacingSettlementChronology(settlement, snapshot, plan);
 }
 
 function validPacingSettlementKind(
@@ -1662,13 +1662,17 @@ function validPacingSettlementReleaseLineage(
 function validNonTimePacingSettlementChronology(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
 ): boolean {
   return (
     validSessionTime(settlement.deadlineMs) &&
     validSessionTime(settlement.completedAtMs) &&
     validSessionTime(snapshot.currentSessionTimeMs) &&
     validSessionTime(snapshot.observedSessionTimeMs) &&
-    settlement.completedAtMs < settlement.deadlineMs &&
+    // A skip or consumption happens before the deadline, or at it when an expiry block with the same due time
+    // runs first and supersedes the gate.
+    (settlement.completedAtMs < settlement.deadlineMs ||
+      (settlement.completedAtMs === settlement.deadlineMs && planHasTimerHandlers(plan))) &&
     settlement.completedAtMs <= snapshot.observedSessionTimeMs
   );
 }

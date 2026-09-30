@@ -161,6 +161,11 @@ function executeInstructionBoundary(
   }
   if (snapshot.status === "waiting") return 0;
   if (snapshot.nextInstruction === plan.rootEndInstruction && snapshot.callFrames.length === 0) {
+    // A settled terminal action's commit window closes here; expiry blocks queued before the end still run first.
+    if (snapshot.terminalContinuationHandoff !== null && snapshot.pendingTimerHandlers.length > 0) {
+      snapshot.terminalContinuationHandoff = null;
+      return 1;
+    }
     stopAllTimersForSessionEnd(snapshot);
     const completeEventAndFutureCompletions = requiredEventSequencesForRootCompletion(snapshot);
     assertEventSequenceCapacity(snapshot, completeEventAndFutureCompletions);
