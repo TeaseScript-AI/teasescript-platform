@@ -1,0 +1,27 @@
+// Visible blocking timers: fixed seconds, a randomized whole-second range drawn once,
+// timers inside functions and loops, and a hidden wait that shows no timer.
+speaker guide {
+    title: "Guide"
+    firstName: "Vera"
+    color: "#b784ff"
+}
+
+speaker guide
+
+function hold(round) {
+    say "Round ${round}: hold still until the timer ends.", instant
+    timer 3..=5
+}
+
+say "A visible timer blocks the script and shows its countdown.", instant
+timer 5
+say "Next, a timer between 4 and 8 seconds. Save a checkpoint while it runs, then restore it.", instant
+timer 4..=8
+say "A hidden wait pauses without any timer.", instant
+wait 3
+for round in 1..=2 {
+    hold(round)
+}
+say "Every timer has settled.", instant
+showButton "Finish"
+exit

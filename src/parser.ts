@@ -29,6 +29,7 @@ import type {
   InteractionExpression,
   InteractionChoiceOption,
   WaitStatement,
+  TimerStatement,
   ListLiteral,
   RepeatStatement,
   ReturnStatement,
@@ -139,6 +140,9 @@ class Parser {
   *#parseStatement(): ParseTask<Statement | null> {
     if (this.#checkIdentifier("showButton")) {
       return this.#parseShowButtonStatement();
+    }
+    if (this.#checkIdentifier("timer")) {
+      return this.#parseTimerStatement();
     }
     if (
       this.#check(TokenKind.KeywordWait) &&
@@ -591,6 +595,36 @@ class Parser {
       duration,
       unit,
       span: spanFrom(keyword.span, duration.span),
+    });
+  }
+
+  #parseTimerStatement(): TimerStatement | null {
+    const command = this.#advance();
+    if (
+      this.#check(TokenKind.LeftParenthesis) &&
+      this.#peek().span.start.offset === command.span.end.offset
+    ) {
+      this.#reportToken(
+        parserDiagnosticCode.expectedExpression,
+        "Timer uses command syntax; write 'timer 10' rather than 'timer(10)'.",
+        this.#peek(),
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    const duration = this.#parseExpression();
+    if (duration === null) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedExpression,
+        "Expected a duration in seconds or a seconds range after 'timer'.",
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    return Object.freeze({
+      kind: "timerStatement",
+      duration,
+      span: spanFrom(command.span, duration.span),
     });
   }
 

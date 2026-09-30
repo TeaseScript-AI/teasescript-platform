@@ -1,5 +1,5 @@
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 20;
+export const INSTRUCTION_PLAN_VERSION = 21;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -300,11 +300,16 @@ export interface SayInstruction extends InstructionBase {
   readonly pacing: ExpressionPlan | "smart" | "instant";
 }
 
+/** One foreground delay: hidden `wait` or visible blocking `timer`. */
 export interface WaitInstruction extends InstructionBase {
   readonly kind: "wait";
   readonly duration: ExpressionPlan;
   readonly unit: "ms" | "s" | "min" | "h" | null;
+  /** `visible` durations are seconds or an integer-second range drawn once when the delay starts. */
+  readonly display: DelayDisplay;
 }
+
+export type DelayDisplay = "hidden" | "visible";
 
 export type InteractionKind = "button" | "text" | "number" | "choice";
 export type InteractionResultDomain = "none" | "string" | "number";

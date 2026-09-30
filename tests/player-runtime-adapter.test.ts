@@ -14,6 +14,7 @@ import {
   observePlayerRuntimeTime,
   playerRuntimeForeground,
   playerRuntimePacingGate,
+  playerRuntimeTimers,
   restorePlayerRuntimeSession,
   selectPlayerRuntimeChoice,
   skipPlayerRuntimePacing,
@@ -290,4 +291,78 @@ say "[color=red][bg=ivory]outer [color=\${bad}][bg=\${bad}]inner **bold**[/bg][/
     assert.equal(piece.style.backgroundColor, normalizeColor("ivory"));
   }
   assert.deepEqual(pieces.at(-1)?.style, {});
+});
+
+test("blocking timer scenario presents runtime timers, hides waits, and restores the same draw", async () => {
+  const source = await readFile(
+    resolve(process.cwd(), "player/vue/src/runtime-scenarios/blocking-timer.tease"),
+    "utf8",
+  );
+  let session = createPlayerRuntimeSession(source);
+  const presented: Array<number | null> = [];
+  let restoredChecked = false;
+  for (let guard = 0; session.snapshot.foregroundAction?.kind === "delay"; guard += 1) {
+    assert.ok(guard < 10, "scenario must reach its final button");
+    const action = session.snapshot.foregroundAction;
+    const now = session.snapshot.currentSessionTimeMs;
+    const timers = playerRuntimeTimers(session.snapshot, now);
+    if (action.display === "hidden") {
+      assert.deepEqual(timers, [], "a hidden wait has no timer presentation");
+      presented.push(null);
+    } else {
+      const total = (action.deadlineMs - action.createdAtMs) / 1000;
+      assert.deepEqual(timers, [
+        {
+          id: `runtime-timer-${action.actionId}`,
+          kind: "visible",
+          remainingSeconds: total,
+          totalSeconds: total,
+        },
+      ]);
+      assert.equal(
+        playerRuntimeTimers(session.snapshot, now + 1_250)[0]?.remainingSeconds,
+        total - 1.25,
+      );
+      assert.equal(
+        playerRuntimeTimers(session.snapshot, action.deadlineMs + 5_000)[0]?.remainingSeconds,
+        0,
+      );
+      assert.equal(playerRuntimeTimers(session.snapshot, now - 5_000)[0]?.remainingSeconds, total);
+      presented.push(total);
+
+      if (!restoredChecked && presented.length === 2) {
+        const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
+        assert.deepEqual(restored.snapshot, session.snapshot, "restore keeps the drawn duration");
+        assert.deepEqual(
+          playerRuntimeTimers(restored.snapshot, now + 500),
+          playerRuntimeTimers(session.snapshot, now + 500),
+        );
+        session = restored;
+        restoredChecked = true;
+      }
+    }
+    const early = observePlayerRuntimeTime(session, action.deadlineMs - 1);
+    assert.equal(early.session.snapshot.foregroundAction?.actionId, action.actionId);
+    session = observePlayerRuntimeTime(early.session, action.deadlineMs).session;
+    assert.notEqual(
+      session.snapshot.foregroundAction?.actionId,
+      action.actionId,
+      "settled timer is removed",
+    );
+  }
+  assert.ok(restoredChecked);
+  assert.equal(presented.length, 5);
+  assert.equal(presented[0], 5);
+  assert.ok(presented[1]! >= 4 && presented[1]! <= 8);
+  assert.equal(presented[2], null);
+  assert.ok(presented.slice(3).every((total) => total! >= 3 && total! <= 5));
+  assert.equal(playerRuntimeForeground(session)?.kind, "show-button");
+  assert.deepEqual(
+    playerRuntimeTimers(session.snapshot, session.snapshot.currentSessionTimeMs),
+    [],
+  );
+  assert.deepEqual(
+    session.transcriptEntries.map((entry) => (entry.kind === "message" ? entry.text : "")).at(-1),
+    "Every timer has settled.",
+  );
 });

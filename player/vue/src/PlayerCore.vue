@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import type { CSSProperties } from "vue";
 import type {
   PlayerPresentation,
+  PlayerTimerPresentation,
   PlayerToolDefinition,
   PlayerTranscriptEntryPresentation,
 } from "../../model.js";
@@ -14,6 +15,7 @@ import {
   observePlayerRuntimeTime,
   playerRuntimeForeground,
   playerRuntimePacingGate,
+  playerRuntimeTimers,
   restorePlayerRuntimeSession,
   selectPlayerRuntimeChoice,
   skipPlayerRuntimePacing,
@@ -82,6 +84,26 @@ const toolsAvailable = computed(() => toolDefinitions.value.length > 0);
 const effectiveLeftMode = computed(() => (toolsAvailable.value ? layout.leftMode.value : "closed"));
 let sessionTimeOriginMs = performance.now() - runtime.value.snapshot.currentSessionTimeMs;
 let timeTimer: ReturnType<typeof setTimeout> | null = null;
+let timerDisplayClock: ReturnType<typeof setInterval> | null = null;
+const displayedSessionTimeMs = ref(runtime.value.snapshot.currentSessionTimeMs);
+const runtimeTimers = computed(() =>
+  playerRuntimeTimers(runtime.value.snapshot, displayedSessionTimeMs.value),
+);
+const timers = computed<readonly PlayerTimerPresentation[]>(() => {
+  const fixture = props.presentation.timer;
+  const kind = props.development.timerKind;
+  const fixtureTimers =
+    kind === "hidden"
+      ? []
+      : Array.from({ length: props.development.timerCount }, (_, index) => ({
+          id: `fixture-timer-${index}`,
+          kind,
+          ...(index === 0 && fixture.name !== undefined ? { name: fixture.name } : {}),
+          remainingSeconds: fixture.remainingSeconds + index * 37,
+          totalSeconds: fixture.totalSeconds + index * 60,
+        }));
+  return [...runtimeTimers.value, ...fixtureTimers];
+});
 let scriptUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 let activeTypedActionId = typedInteractionActionId();
 const pointerGestures = new Map<
@@ -293,6 +315,8 @@ function relevantPlayerTextSelection(): boolean {
 }
 
 function saveCheckpoint(): PlayerRuntimeRestorePoint {
+  // Record elapsed session time first so a restored countdown resumes where it was saved.
+  observeCurrentTime();
   return createPlayerRuntimeRestorePoint(runtime.value);
 }
 
@@ -352,11 +376,29 @@ function simulateScriptUpdate(target: ScriptUpdateTarget, feedback: ScriptUpdate
   }, 1_600);
 }
 
-function observeCurrentTime(): void {
-  const currentSessionTimeMs = Math.max(
+function estimatedSessionTimeMs(): number {
+  return Math.max(
     runtime.value.snapshot.currentSessionTimeMs,
     Math.floor(performance.now() - sessionTimeOriginMs),
   );
+}
+
+/** Ticks the countdown only while a runtime timer is visible; runtime state changes only on observation. */
+function syncTimerDisplayClock(): void {
+  displayedSessionTimeMs.value = estimatedSessionTimeMs();
+  const visible = playerRuntimeTimers(runtime.value.snapshot, 0).length > 0;
+  if (visible && timerDisplayClock === null) {
+    timerDisplayClock = setInterval(() => {
+      displayedSessionTimeMs.value = estimatedSessionTimeMs();
+    }, 250);
+  } else if (!visible && timerDisplayClock !== null) {
+    clearInterval(timerDisplayClock);
+    timerDisplayClock = null;
+  }
+}
+
+function observeCurrentTime(): void {
+  const currentSessionTimeMs = estimatedSessionTimeMs();
   const result = observePlayerRuntimeTime(runtime.value, currentSessionTimeMs);
   applyRuntimeSession(result.session, false);
   if (result.outcome.kind === "invalidObservation") setFeedback(result.outcome.message);
@@ -378,10 +420,7 @@ function scheduleTimeObservation(): void {
     return;
   }
   const nextDeadline = Math.min(...deadlines);
-  const currentSessionTimeMs = Math.max(
-    runtime.value.snapshot.currentSessionTimeMs,
-    Math.floor(performance.now() - sessionTimeOriginMs),
-  );
+  const currentSessionTimeMs = estimatedSessionTimeMs();
   const delay = Math.max(0, nextDeadline - currentSessionTimeMs);
   timeTimer = setTimeout(observeCurrentTime, Math.min(delay + 1, 2_147_483_647));
 }
@@ -390,12 +429,16 @@ function observeAfterVisibilityChange(): void {
   if (document.visibilityState === "visible") observeCurrentTime();
 }
 
+watch(runtime, syncTimerDisplayClock, { flush: "post" });
+
 onMounted(() => {
+  syncTimerDisplayClock();
   scheduleTimeObservation();
   document.addEventListener("visibilitychange", observeAfterVisibilityChange);
 });
 onBeforeUnmount(() => {
   if (timeTimer !== null) clearTimeout(timeTimer);
+  if (timerDisplayClock !== null) clearInterval(timerDisplayClock);
   if (scriptUpdateTimer !== null) clearTimeout(scriptUpdateTimer);
   document.removeEventListener("visibilitychange", observeAfterVisibilityChange);
 });
@@ -428,7 +471,6 @@ function closeToolColumn(id: string): void {
     :data-right="layout.rightMode.value"
     :data-right-backing="layout.rightBacking.value"
     :data-right-layout="layout.rightLayout.value"
-    :data-timer-kind="development.timerKind"
     :style="playerStyle"
     @pointercancel="forgetPlayerPointerTarget"
     @pointerdown="rememberPlayerPointerTarget"
@@ -440,9 +482,7 @@ function closeToolColumn(id: string): void {
       :fullscreen-active="layout.fullscreenActive.value"
       :left-open="toolsAvailable && layout.leftOpen.value"
       :right-docked="layout.rightDocked.value"
-      :timer="presentation.timer"
-      :timer-count="development.timerCount"
-      :timer-kind="development.timerKind"
+      :timers="timers"
       :tools-available="toolsAvailable"
       @toggle-fullscreen="layout.toggleFullscreen"
       @toggle-left="layout.toggleLeft"
@@ -499,9 +539,7 @@ function closeToolColumn(id: string): void {
       :controls-disabled="development.controlsDisabled"
       :script-update-control-id="state.scriptUpdateControlId"
       :script-update-feedback="state.scriptUpdateFeedback"
-      :timer="presentation.timer"
-      :timer-count="development.timerCount"
-      :timer-kind="development.timerKind"
+      :timers="timers"
       @action="dispatch({ type: 'activate-right-action', controlId: $event })"
       @select="(controlId, value) => dispatch({ type: 'change-right-select', controlId, value })"
       @toggle="

@@ -1104,12 +1104,21 @@ export class Evaluator {
     if (!isRange(range)) {
       throw fault("TSR040", "randomInteger(range) requires a range value.", call.span);
     }
-    assertIntegerRange(range, call.span);
+    return this.randomIntegerInRange(range, call.span, "randomInteger(range)");
+  }
+
+  /** Draws one whole number from a non-empty integer range with the session RNG. */
+  public randomIntegerInRange(
+    range: SerializableRuntimeRange,
+    span: SourceSpan,
+    subject: string,
+  ): number {
+    assertIntegerRange(range, span);
     const length = rangeLength(range);
     if (length < 1) {
-      throw fault("TSR041", "randomInteger(range) requires a non-empty range.", call.span);
+      throw fault("TSR041", `${subject} requires a non-empty range.`, span);
     }
-    return range.start + Math.floor(this.#findRandom(call.span) * length);
+    return range.start + Math.floor(this.#findRandom(span) * length);
   }
 
   #escapeMarkupBuiltin(call: RuntimeCapabilityCall): string {

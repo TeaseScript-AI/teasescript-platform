@@ -110,8 +110,10 @@ export function validatePendingActionState(
         "createdAtMs",
         "deadlineMs",
         "expectedCompletion",
+        "display",
         "requestEventSequence",
       ]) &&
+      (action.display === "hidden" || action.display === "visible") &&
       validSessionTime(action.createdAtMs) &&
       validSessionTime(action.deadlineMs) &&
       validSessionTime(currentSessionTimeMs) &&
@@ -1701,6 +1703,10 @@ function validForegroundActionOwnership(
     !["wait", "interaction", "say"].includes(plan.instructions[owningInstruction]?.kind ?? "")
   )
     return false;
+  const owner = plan.instructions[owningInstruction];
+  if (action.kind === "delay" && (owner?.kind !== "wait" || owner.display !== action.display)) {
+    return false;
+  }
 
   const definition = plan.functions.find(
     (candidate) =>

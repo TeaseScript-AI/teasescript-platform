@@ -352,9 +352,9 @@ The implementation includes:
 
 The current internal instruction-plan, runtime-snapshot, and checkpoint format revisions are listed under [Format evolution](#format-evolution). They are POC formats rather than permanent public wire-format guarantees.
 
-The current implementation contains compiler-owned blocking `wait`, the compact `showButton`, `askText`, `askNumber`,
-and `choose` forms lowered into one generic foreground `interaction` family, and ADR 0018 `say` pacing lowered into the
-`chatPacingGate` pending-action lifecycle. Runtime state retains persisted session time, at most one foreground action,
+The current implementation contains compiler-owned blocking `wait` and visible blocking `timer`, the compact
+`showButton`, `askText`, `askNumber`, and `choose` forms lowered into one generic foreground `interaction` family, and
+ADR 0018 `say` pacing lowered into the `chatPacingGate` pending-action lifecycle. Runtime state retains persisted session time, at most one foreground action,
 zero or one background pacing gate, monotonic action IDs, bounded settlement replay, prepared `say` output, explicit
 time observation, and typed completion operations. The local playground reconstructs Standard controls from this state,
 and the Vue reference schedules local browser wake-ups and submits explicit time observations. Production host
@@ -425,7 +425,12 @@ Non-waiting states contain no foreground action. `backgroundActions` is empty or
 `chatPacingGate` with coherent identity, request sequence, deadline, ownership, and creation order.
 
 Delay creation time is no later than the persisted session coordinate and its deadline is strictly later; a due delay
-is settled only by an explicit time observation. An interaction retains its kind, ownership depths, call-frame identity,
+is settled only by an explicit time observation. A delay's `display` matches its owning `wait` instruction: `hidden`
+for `wait` and `visible` for a blocking `timer`. A `timer` duration is seconds; a range duration is drawn once from the
+session RNG, after its bounds are evaluated, as a whole number of seconds when the delay starts. The drawn value exists
+only in the persisted deadline, so restore never redraws it. Players present only `visible` delays.
+
+An interaction retains its kind, ownership depths, call-frame identity,
 destination/result domain, Standard chat target, optional requesting speaker ID, validated UI payload, and request
 sequence. A waiting result destination must still be absent. Successful interaction completion commits the canonical
 typed value directly into that destination and leaves the snapshot at the local compiler-defined continuation. Snapshot
@@ -457,7 +462,8 @@ settle actions due at effectiveNow
 
 No checkpoint may contain due-action processing performed against a newer observation while retaining the older session-time value.
 
-Blocking `wait` remains the first source-to-runtime slice. The generic interaction runtime is the second foreground use
+Blocking `wait` remains the first source-to-runtime slice; visible blocking `timer` reuses the same foreground delay
+with `display: "visible"`. The generic interaction runtime is the second foreground use
 of ADR 0016. ADR 0018 `say` pacing now adds the first populated background-action slice through `chatPacingGate`,
 including background-to-foreground promotion, prepared output, typed/time settlement, `wait` coexistence, interaction
 consumption, and checkpoint/restore.
@@ -620,9 +626,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 20 | `say` carries an explicit nullable presentation expression; option expressions lower through the existing resumable evaluation path. |
-| Runtime snapshot | 21 | Prepared `say` output also captures validated resolved presentation; spoiler spans are no longer accepted. |
-| Checkpoint | 29 | Updated the self-contained bundle for presentation-aware plans and runtime snapshots. |
+| Instruction plan | 21 | `wait` instructions carry a required `display` (`hidden` for `wait`, `visible` for blocking `timer`). |
+| Runtime snapshot | 22 | Foreground delay actions carry the required `display` of their owning instruction. |
+| Checkpoint | 30 | Updated the self-contained bundle for display-aware plans and delay actions. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 

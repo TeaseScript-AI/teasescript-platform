@@ -20,7 +20,8 @@ accept syntax, architecture, or implementation details.
   control flow, deterministic random built-ins, and top-level user-defined functions.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and
   call state, deterministic RNG state, typed sequenced events, instruction budgets, and defensive restore validation.
-- **Pending-action, compact-interaction, and chat-pacing foundation:** compiler-owned blocking `wait`; protected
+- **Pending-action, compact-interaction, and chat-pacing foundation:** compiler-owned blocking `wait` and visible
+  blocking `timer` (fixed seconds or a once-drawn whole-second range, presented by the Vue Player); protected
   compact `showButton`, `askText`, `askNumber`, and `choose` forms lowered into one typed foreground-interaction
   family; and ADR 0018 `say` smart/exact pacing with one resumable `chatPacingGate`, deterministic checkpoint/restore,
   prepared output, typed skip settlement, and interaction/`wait` composition.
@@ -42,7 +43,8 @@ contracts and boundaries.
 
 - complete V30 coverage, complete static typing, and units/date/time/duration values;
 - production cross-origin Player/host integration, richer editor support, and final browser acceptance coverage;
-- background-action kinds beyond `chatPacingGate`, general timers, media actions, camera lifecycle, and custom views;
+- background-action kinds beyond `chatPacingGate`, background/async, mystery, labelled, and handle-controlled timers,
+  unavailability recovery for timers, media actions, camera lifecycle, and custom views;
 - the cross-origin player-host protocol and production browser security integration;
 - TypeScript library linkage, final Standard Library/package identity and compatibility, richer module selection, and
   community dependency resolution;

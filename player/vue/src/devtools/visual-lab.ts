@@ -45,7 +45,13 @@ export interface VisualLabTuningControl extends VisualLabBoundedNumberControl {
 }
 
 export type VisualLabRuntimeScenarioId =
-  "ask-number" | "ask-text" | "choose" | "show-button" | "skippable-pacing" | "unskippable-pacing";
+  | "ask-number"
+  | "ask-text"
+  | "blocking-timer"
+  | "choose"
+  | "show-button"
+  | "skippable-pacing"
+  | "unskippable-pacing";
 
 export type VisualLabActionTarget =
   | { readonly kind: "replace-demo-media" }
@@ -156,7 +162,15 @@ export const VISUAL_LAB_CONTROLS = defineVisualLabRegistry([
       ["select", "Select"],
     ],
   ),
-  numeric("timer-count", "Timer count", "Generate timers for layout pressure.", 1, 1, 24, 1),
+  numeric(
+    "timer-count",
+    "Fixture timers",
+    "Add development fixture timers beside runtime timers for layout pressure.",
+    0,
+    0,
+    24,
+    1,
+  ),
   select(
     "media-transition",
     "Media transition",
@@ -186,8 +200,8 @@ export const VISUAL_LAB_CONTROLS = defineVisualLabRegistry([
   ),
   select(
     "timer-presentation",
-    "Timer presentation",
-    "Exercise visible, mystery, and hidden timers.",
+    "Fixture timer presentation",
+    "Exercise visible, mystery, and hidden fixture timers.",
     "visible",
     [
       ["visible", "Visible"],
@@ -257,6 +271,7 @@ export const VISUAL_LAB_CONTROLS = defineVisualLabRegistry([
     "Run unskippable pacing scenario",
     "unskippable-pacing",
   ),
+  runtimeScenario("scenario-blocking-timer", "Run blocking timer scenario", "blocking-timer"),
   tuning(
     "stage-height",
     "Stage height",

@@ -393,8 +393,16 @@ function validateInstruction(
       }
       return;
     case "wait":
+      if (!hasExactKeys(value, ["kind", "duration", "unit", "display", "span"])) {
+        errors.push(planError("TSC002", "Wait instruction has an invalid shape.", path));
+      }
       if (value.unit !== null && !["ms", "s", "min", "h"].includes(String(value.unit))) {
         errors.push(planError("TSC002", "Wait unit is invalid.", `${path}.unit`));
+      }
+      if (value.display !== "hidden" && value.display !== "visible") {
+        errors.push(planError("TSC002", "Wait display is invalid.", `${path}.display`));
+      } else if (value.display === "visible" && value.unit !== null) {
+        errors.push(planError("TSC002", "A visible timer has no wait unit.", `${path}.unit`));
       }
       validateExpression(value.duration, `${path}.duration`, errors, false, temporaryCount);
       return;

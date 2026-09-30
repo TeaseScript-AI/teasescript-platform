@@ -5,10 +5,12 @@ import {
   createCheckpoint,
   deserializeCheckpoint,
   executeInstruction,
+  observeTime,
   run,
   serializeCheckpoint,
   validateRuntimeSnapshot,
   validateInstructionPlan,
+  type InstructionPlan,
   type InterpreterEvent,
   type RuntimeSnapshot,
 } from "../../src/index.js";
@@ -66,7 +68,7 @@ export function assertRuntimeResumeEquivalent(
     `${scenario}: fresh snapshot must validate: ${initialSnapshotValidation.errors.join("; ")}`,
   );
 
-  const uninterrupted = run(plan, initial, {}, { instructionBudget: instructionGuard });
+  const uninterrupted = runServicingDelays(plan, initial, instructionGuard, scenario);
   assert.equal(
     uninterrupted.snapshot.status,
     "halted",
@@ -85,12 +87,21 @@ export function assertRuntimeResumeEquivalent(
       `${scenario}: instruction-boundary execution exceeded guard ${instructionGuard}`,
     );
 
-    const operation = executeInstruction(plan, boundarySnapshot);
-    assert.equal(
-      operation.instructionsExecuted,
-      1,
-      `${scenario}: boundary ${boundary + 1} must execute exactly one instruction`,
-    );
+    let operation: {
+      readonly snapshot: RuntimeSnapshot;
+      readonly events: readonly InterpreterEvent[];
+    };
+    if (boundarySnapshot.status === "waiting") {
+      operation = observeDueDelay(plan, boundarySnapshot, `${scenario}: boundary ${boundary + 1}`);
+    } else {
+      const executed = executeInstruction(plan, boundarySnapshot);
+      assert.equal(
+        executed.instructionsExecuted,
+        1,
+        `${scenario}: boundary ${boundary + 1} must execute exactly one instruction`,
+      );
+      operation = executed;
+    }
     boundarySnapshot = operation.snapshot;
     accumulatedEvents.push(...operation.events);
     boundary += 1;
@@ -118,12 +129,7 @@ export function assertRuntimeResumeEquivalent(
       `${context}: restored snapshot changed during JSON roundtrip`,
     );
 
-    const resumed = run(
-      restored.plan,
-      restored.snapshot,
-      {},
-      { instructionBudget: instructionGuard },
-    );
+    const resumed = runServicingDelays(restored.plan, restored.snapshot, instructionGuard, context);
     assert.equal(
       resumed.snapshot.status,
       "halted",
@@ -151,6 +157,46 @@ export function assertRuntimeResumeEquivalent(
     events: uninterrupted.events,
     finalSnapshot: uninterrupted.snapshot,
   });
+}
+
+/**
+ * Runs to completion, settling each foreground delay (`wait` or `timer`) with an explicit time
+ * observation at its deadline. Blocking behavior is preserved: a delay never settles without one.
+ */
+function runServicingDelays(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  instructionGuard: number,
+  context: string,
+): { readonly snapshot: RuntimeSnapshot; readonly events: readonly InterpreterEvent[] } {
+  const events: InterpreterEvent[] = [];
+  let current = snapshot;
+  for (let observations = 0; ; observations += 1) {
+    assert.ok(observations <= instructionGuard, `${context}: delay servicing exceeded guard`);
+    if (current.status === "waiting") {
+      const observed = observeDueDelay(plan, current, context);
+      events.push(...observed.events);
+      current = observed.snapshot;
+      continue;
+    }
+    const operation = run(plan, current, {}, { instructionBudget: instructionGuard });
+    events.push(...operation.events);
+    current = operation.snapshot;
+    if (current.status !== "waiting") return { snapshot: current, events };
+  }
+}
+
+function observeDueDelay(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  context: string,
+): { readonly snapshot: RuntimeSnapshot; readonly events: readonly InterpreterEvent[] } {
+  const action = snapshot.foregroundAction;
+  assert.ok(action?.kind === "delay", `${context}: only foreground delays can be serviced`);
+  const observed = observeTime(plan, snapshot, action.deadlineMs);
+  assert.equal(observed.outcome.kind, "observed", `${context}: delay observation must succeed`);
+  assert.notEqual(observed.snapshot.status, "waiting", `${context}: due delay must settle`);
+  return observed;
 }
 
 function assertMonotonicEventSequences(events: readonly InterpreterEvent[], context: string): void {

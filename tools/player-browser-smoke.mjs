@@ -57,6 +57,7 @@ async function main() {
       await narrowScenario(cdp);
       await vueRuntimeScenario(cdp, origin);
       await vueDevelopmentToolsScenario(cdp, origin);
+      await vueTimerScenario(cdp, origin);
       await vueTranscriptScenario(cdp, origin);
       console.log(
         "player-browser-smoke: PASS runtime-backed Vue Player plus transcript virtualization, anchoring, and follow",
@@ -154,7 +155,7 @@ async function vueDevelopmentToolsScenario(cdp, origin) {
     cdp,
     `(() => { const selects=document.querySelectorAll('[data-tool-column-select]'); selects[1].value='visuals'; selects[1].dispatchEvent(new Event('change',{bubbles:true})); })()`,
   );
-  await waitFor(cdp, `document.querySelector('[aria-label="Timer count"]') !== null`);
+  await waitFor(cdp, `document.querySelector('[aria-label="Fixture timers"]') !== null`);
   await evaluate(cdp, `document.querySelector('[data-tool-column-add]').click()`);
   await waitFor(cdp, `document.querySelectorAll('[data-tool-column-id]').length === 3`);
   await evaluate(
@@ -206,13 +207,23 @@ async function vueDevelopmentToolsScenario(cdp, origin) {
     cdp,
     `document.querySelector('[data-visual-lab-instance] [aria-expanded="true"]') === null`,
   );
+  assertEqual(
+    await value(cdp, `document.querySelector('.timer-wrap') === null`),
+    true,
+    "the Player must not present a timer without a runtime or requested fixture timer",
+  );
+  await evaluate(
+    cdp,
+    `(() => { const input=document.querySelector('[aria-label="Fixture timers"]'); input.value='1'; input.dispatchEvent(new Event('change',{bubbles:true})); })()`,
+  );
+  await waitFor(cdp, `document.querySelector('#rightZone > .timer-wrap') !== null`);
   const timerPaneBefore = await value(
     cdp,
     `document.querySelector('#rightZone > .timer-wrap').getBoundingClientRect().height`,
   );
   await evaluate(
     cdp,
-    `(() => { const input=document.querySelector('[aria-label="Timer count"]'); input.value='24'; input.dispatchEvent(new Event('change',{bubbles:true})); })()`,
+    `(() => { const input=document.querySelector('[aria-label="Fixture timers"]'); input.value='24'; input.dispatchEvent(new Event('change',{bubbles:true})); })()`,
   );
   await waitFor(
     cdp,
@@ -294,6 +305,83 @@ async function vueDevelopmentToolsScenario(cdp, origin) {
     ),
     true,
     "Runtime Session restore must preserve local Visual Lab, tool, right-rail, and composer state",
+  );
+}
+
+async function vueTimerScenario(cdp, origin) {
+  await setViewport(cdp, 1200, 760);
+  await navigate(cdp, `${origin}/player/?fixture=runtime-timer`);
+  await waitFor(cdp, `document.querySelector('#rightZone > .timer-wrap .timer') !== null`);
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const timers=document.querySelectorAll('.timer'); const timer=timers[0]; return timers.length === 1 && timer.dataset.timerKind === 'visible' && timer.getAttribute('aria-label') === 'Timer' && timer.querySelector('.timer-label') === null && timer.querySelector('.timer-text').textContent.trim(); })()`,
+    ),
+    "0:02",
+    "an authored timer must present one unlabeled runtime countdown",
+  );
+  const progressBefore = await timerProgress(cdp);
+  await waitFor(cdp, `document.querySelector('.timer .timer-text')?.textContent.trim() === '0:01'`);
+  assertEqual(
+    (await timerProgress(cdp)) > progressBefore,
+    true,
+    "the timer ring must advance with elapsed runtime time",
+  );
+
+  await setViewport(cdp, 900, 560);
+  await waitFor(
+    cdp,
+    `document.querySelector('.compact-timer-host .timer') !== null && document.querySelector('#rightZone > .timer-wrap') === null`,
+  );
+
+  await waitFor(cdp, `document.body.textContent.includes('After timer')`);
+  assertEqual(
+    await value(cdp, `document.querySelector('.timer-wrap') === null`),
+    true,
+    "a settled timer and the following hidden wait must leave no timer presentation",
+  );
+  await waitFor(cdp, `document.querySelector('[data-foreground-button]')?.textContent === 'Done'`);
+  assertEqual(
+    await value(cdp, `document.querySelector('.timer-wrap') === null`),
+    true,
+    "no timer presentation may remain after the lifecycle settles",
+  );
+
+  await setViewport(cdp, 1200, 760);
+  await navigate(cdp, `${origin}/player/`);
+  await waitFor(cdp, `document.querySelector('.player') !== null`);
+  await selectVueTool(cdp, "visuals");
+  await evaluate(
+    cdp,
+    `([...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Run blocking timer scenario')).click()`,
+  );
+  await waitFor(
+    cdp,
+    `document.querySelector('#rightZone .timer .timer-text')?.textContent.trim() === '0:05'`,
+  );
+  await selectVueTool(cdp, "runtime-session");
+  await waitFor(cdp, `document.querySelector('.timer .timer-text')?.textContent.trim() === '0:04'`);
+  await physicalClick(cdp, "[data-save-player-checkpoint]");
+  await waitFor(cdp, `document.querySelector('.timer .timer-text')?.textContent.trim() === '0:02'`);
+  await physicalClick(cdp, "[data-restore-player-checkpoint]");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-player-runtime-status]')?.textContent.includes('restored')`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `['0:04', '0:03'].includes(document.querySelector('.timer .timer-text')?.textContent.trim())`,
+    ),
+    true,
+    "restore must reconstruct the timer from the pending action and its saved session time",
+  );
+}
+
+async function timerProgress(cdp) {
+  return value(
+    cdp,
+    `Number.parseFloat(document.querySelector('.timer').style.getPropertyValue('--timer-progress'))`,
   );
 }
 

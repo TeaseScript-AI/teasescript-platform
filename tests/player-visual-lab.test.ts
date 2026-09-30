@@ -39,11 +39,11 @@ test("Visual Lab registry describes retained controls and excludes resolved expe
     "Accent",
     "Busy Action",
     "Busy control target",
-    "Timer count",
+    "Fixture timers",
     "Media transition",
     "Replace demo media",
     "Stage content",
-    "Timer presentation",
+    "Fixture timer presentation",
     "Ordinary control availability",
     "Script update target",
     "Simulate script update",
@@ -70,7 +70,15 @@ test("Visual Lab registry describes retained controls and excludes resolved expe
         ? [control.target.scenarioId]
         : [],
     ),
-    ["show-button", "choose", "ask-text", "ask-number", "skippable-pacing", "unskippable-pacing"],
+    [
+      "show-button",
+      "choose",
+      "ask-text",
+      "ask-number",
+      "skippable-pacing",
+      "unskippable-pacing",
+      "blocking-timer",
+    ],
   );
 });
 
@@ -94,7 +102,7 @@ test("Visual Lab updates are immutable and reset to the supplied branch baseline
   assert.equal(reset.values["history-messages"], 0);
 
   assert.throws(
-    () => updateVisualLabControl(VISUAL_LAB_CONTROLS, reset, "timer-count", 0),
+    () => updateVisualLabControl(VISUAL_LAB_CONTROLS, reset, "timer-count", 25),
     /Invalid Visual Lab value/u,
   );
   assert.throws(

@@ -566,6 +566,9 @@ function visitStatement(statement: Statement, visitor: Visitor): void {
     case "returnStatement":
       if (statement.value !== null) visitExpression(statement.value, visitor);
       return;
+    case "timerStatement":
+      visitExpression(statement.duration, visitor);
+      return;
     case "speakerSetterStatement":
     case "waitStatement":
     case "exitStatement":

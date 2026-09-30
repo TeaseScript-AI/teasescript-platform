@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { PlayerTimerKind, PlayerTimerPresentation } from "../../../model.js";
+import type { PlayerTimerPresentation } from "../../../model.js";
 import PlayerTimer from "./PlayerTimer.vue";
 
 defineProps<{
@@ -7,9 +7,7 @@ defineProps<{
   fullscreenActive: boolean;
   leftOpen: boolean;
   rightDocked: boolean;
-  timer: PlayerTimerPresentation;
-  timerCount: number;
-  timerKind: PlayerTimerKind;
+  timers: readonly PlayerTimerPresentation[];
   toolsAvailable: boolean;
 }>();
 
@@ -34,12 +32,7 @@ defineEmits<{ toggleFullscreen: []; toggleLeft: []; toggleRight: [] }>();
     <div class="title-text">TeaseScript Player</div>
 
     <div class="toolbar-spacer compact-timer-host">
-      <PlayerTimer
-        v-if="compactTimers"
-        :timer="timer"
-        :timer-count="timerCount"
-        :timer-kind="timerKind"
-      />
+      <PlayerTimer v-if="compactTimers" :timers="timers" />
     </div>
 
     <div class="global-controls">

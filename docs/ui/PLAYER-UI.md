@@ -73,8 +73,9 @@ controlling source adopts it; remove this section and its router references when
   synchronization. Runtime value, scheduling, stale-event, media-continuity, lifecycle, and provenance semantics are
   maintained in [`RUNTIME.md`](../RUNTIME.md); exact public API names and author syntax remain open.
 - **Timer presentation metadata:** the maintained timer section below defines visible/mystery/hidden presentation and
-  optional labeling. The accepted label placement remains presentation-only; exact runtime/Standard-Library metadata,
-  author syntax, and stable generic-label numbering across timer lifecycle changes remain unsynchronized.
+  optional labeling. Runtime delays now carry `visible`/`hidden` display for the accepted blocking `timer` and `wait`
+  (see [`RUNTIME.md`](../RUNTIME.md)); mystery and label metadata, their author syntax, and stable generic-label
+  numbering across timer lifecycle changes remain unsynchronized.
 
 ## Surface hierarchy
 

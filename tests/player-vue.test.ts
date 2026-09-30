@@ -236,7 +236,7 @@ test("Vue media transitions and timer allocation preserve accessibility and live
   ]);
   assert.match(media, /media-transition-outgoing[\s\S]*alt=""[\s\S]*aria-hidden="true"/u);
   assert.match(mediaStyles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*animation: none/u);
-  assert.match(rightRail, /props\.timerCount, props\.timerKind/u);
+  assert.match(rightRail, /props\.timers\.map\(\(timer\) => timer\.id\)/u);
   assert.match(rightRail, /querySelector<HTMLElement>\("\.timer-list"\)/u);
   assert.match(rightRail, /observer\?\.observe\(timerList\)/u);
 });

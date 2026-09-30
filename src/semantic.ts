@@ -259,6 +259,47 @@ class SemanticValidator {
         }
         return;
       }
+      case "timerStatement": {
+        this.#validateExpression(statement.duration, scope, null);
+        const duration = unwrapParentheses(statement.duration);
+        if (duration.kind === "rangeExpression") {
+          const start = staticNumber(duration.start);
+          const end = staticNumber(duration.end);
+          if (!isKnownInteger(duration.start) || !isKnownInteger(duration.end)) {
+            this.#report(
+              semanticCode.invalidRangeOperand,
+              "A statically known timer range must have integer second bounds.",
+              duration.span,
+            );
+          } else if (start !== undefined && start < 0) {
+            this.#report(
+              semanticCode.invalidRangeOperand,
+              "A timer range must not start below zero seconds.",
+              duration.span,
+            );
+          } else if (
+            start !== undefined &&
+            end !== undefined &&
+            (duration.inclusive ? end < start : end <= start)
+          ) {
+            this.#report(
+              semanticCode.invalidRangeOperand,
+              "A timer range must contain at least one whole second.",
+              duration.span,
+            );
+          }
+        } else {
+          const known = staticNumber(duration);
+          if (known !== undefined && known < 0) {
+            this.#report(
+              semanticCode.invalidRepeatCount,
+              "Timer duration must not be negative.",
+              statement.duration.span,
+            );
+          }
+        }
+        return;
+      }
       case "assignmentStatement":
         this.#validateAssignmentTarget(statement.target, scope);
         this.#validateExpression(statement.value, scope, null);

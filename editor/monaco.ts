@@ -92,7 +92,7 @@ export function registerTeaseScriptLanguage(): void {
         "function",
         "return",
       ],
-      commands: ["showButton", "askText", "askNumber", "choose", "say", "wait", "exit"],
+      commands: ["showButton", "askText", "askNumber", "choose", "say", "wait", "timer", "exit"],
     });
     monaco.languages.setLanguageConfiguration(TEASE_LANGUAGE_ID, {
       comments: { lineComment: "//", blockComment: ["/*", "*/"] },

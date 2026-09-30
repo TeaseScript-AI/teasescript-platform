@@ -12,6 +12,7 @@ export type Statement =
   | SayStatement
   | ShowButtonStatement
   | WaitStatement
+  | TimerStatement
   | ExitStatement
   | LetStatement
   | AssignmentStatement
@@ -75,6 +76,13 @@ export interface WaitStatement {
   readonly kind: "waitStatement";
   readonly duration: Expression;
   readonly unit: "ms" | "s" | "min" | "h" | null;
+  readonly span: SourceSpan;
+}
+
+/** A visible blocking timer. The duration is seconds or an integer-second range drawn once. */
+export interface TimerStatement {
+  readonly kind: "timerStatement";
+  readonly duration: Expression;
   readonly span: SourceSpan;
 }
 

@@ -259,6 +259,19 @@ export class InstructionCompiler {
           kind: "wait",
           duration: lowered.plan,
           unit: statement.unit,
+          display: "hidden",
+          span: copySpan(statement.span),
+        });
+        this.#emitTemporaryCleanup(lowered.temporaryIds, statement.span);
+        return;
+      }
+      case "timerStatement": {
+        const lowered = this.#lowerExpression(statement.duration);
+        this.instructions.push({
+          kind: "wait",
+          duration: lowered.plan,
+          unit: null,
+          display: "visible",
           span: copySpan(statement.span),
         });
         this.#emitTemporaryCleanup(lowered.temporaryIds, statement.span);

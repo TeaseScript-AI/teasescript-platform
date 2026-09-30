@@ -1,5 +1,9 @@
 import type { MessagePresentation } from "../../message-presentation.js";
-import type { InteractionResultDomain, InteractionUiPayload } from "../../plan/model.js";
+import type {
+  DelayDisplay,
+  InteractionResultDomain,
+  InteractionUiPayload,
+} from "../../plan/model.js";
 import type { MessageMarkup } from "../../message-markup.js";
 
 /** Shared serializable pending-action and settlement contracts. */
@@ -14,6 +18,8 @@ export interface RuntimeDelayActionSnapshot {
   readonly createdAtMs: number;
   readonly deadlineMs: number;
   readonly expectedCompletion: "time";
+  /** Copied from the owning instruction; Players present only `visible` delays. */
+  readonly display: DelayDisplay;
   readonly requestEventSequence: number;
 }
 

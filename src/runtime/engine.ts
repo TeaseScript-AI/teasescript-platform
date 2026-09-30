@@ -517,11 +517,20 @@ function executePlannedInstruction(
       return;
     }
     case "wait": {
-      const value = evaluator.evaluate(instruction.duration);
+      const timer = instruction.display === "visible";
+      const evaluated = evaluator.evaluate(instruction.duration);
+      const range = timer && isRange(evaluated) ? evaluated : null;
+      // A negative range start fails before the draw so failure never depends on RNG state.
+      const value =
+        range === null || range.start < 0
+          ? evaluated
+          : evaluator.randomIntegerInRange(range, instruction.duration.span, "timer");
       if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
         throw fault(
           "TSR050",
-          "Wait duration must be a finite non-negative number.",
+          timer
+            ? "Timer duration must be a finite non-negative number of seconds or a range of whole seconds."
+            : "Wait duration must be a finite non-negative number.",
           instruction.duration.span,
         );
       }
@@ -538,14 +547,14 @@ function executePlannedInstruction(
       if (!Number.isFinite(durationMs) || !isValidSessionTime(deadlineMs)) {
         throw fault(
           "TSR050",
-          "Wait duration is outside the supported session-time range.",
+          `${timer ? "Timer" : "Wait"} duration is outside the supported session-time range.`,
           instruction.duration.span,
         );
       }
       if (value > 0 && (durationMs <= 0 || deadlineMs <= snapshot.currentSessionTimeMs)) {
         throw fault(
           "TSR050",
-          "Wait duration cannot produce a representable future deadline.",
+          `${timer ? "Timer" : "Wait"} duration cannot produce a representable future deadline.`,
           instruction.duration.span,
         );
       }
@@ -576,6 +585,7 @@ function executePlannedInstruction(
         createdAtMs: snapshot.currentSessionTimeMs,
         deadlineMs,
         expectedCompletion: "time" as const,
+        display: instruction.display,
         requestEventSequence: sequence,
       });
       snapshot.nextActionId += 1;

@@ -20,6 +20,7 @@ import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions
 import type {
   PlayerForegroundPresentation,
   PlayerSpeakerPresentation,
+  PlayerTimerPresentation,
   PlayerTranscriptEntryPresentation,
 } from "./model.js";
 
@@ -115,6 +116,27 @@ export function playerRuntimeForeground(
         ),
       });
   }
+}
+
+/**
+ * Visible timers derived from the pending foreground delay at the Player's session-time estimate.
+ * Hidden `wait` delays produce no entry; a settled delay disappears with its action.
+ */
+export function playerRuntimeTimers(
+  snapshot: RuntimeSnapshot,
+  currentSessionTimeMs: number,
+): readonly PlayerTimerPresentation[] {
+  const action = snapshot.foregroundAction;
+  if (action?.kind !== "delay" || action.display !== "visible") return Object.freeze([]);
+  const now = Math.max(snapshot.currentSessionTimeMs, currentSessionTimeMs);
+  return Object.freeze([
+    Object.freeze({
+      id: `runtime-timer-${action.actionId}`,
+      kind: "visible" as const,
+      remainingSeconds: Math.max(0, action.deadlineMs - now) / 1000,
+      totalSeconds: (action.deadlineMs - action.createdAtMs) / 1000,
+    }),
+  ]);
 }
 
 export function playerRuntimePacingGate(

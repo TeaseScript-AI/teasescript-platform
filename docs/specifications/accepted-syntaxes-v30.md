@@ -1999,9 +1999,11 @@ A visible blocking timer may use a range for a randomized duration:
 timer 5..10
 ```
 
-Range bounds follow the general range rules in this document. The previously listed `mysteryTimer`, `startTimer`, and
-`stopTimer` spellings were not Owner-approved and are not accepted syntax. Mystery presentation, async execution, and
-handle control still need their final source forms.
+A bare duration counts seconds, as for `wait`, and `timer 0` continues immediately. Range bounds follow the general
+range rules in this document: the session RNG selects one whole-second duration when the timer starts, and checkpoint
+restore keeps that selection. The previously listed `mysteryTimer`, `startTimer`, and `stopTimer` spellings were not
+Owner-approved and are not accepted syntax. Mystery presentation, async execution, handle control, labels, and timer
+duration units still need their final source forms.
 
 ### Background timer behavior
 
