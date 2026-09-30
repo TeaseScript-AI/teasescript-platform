@@ -456,11 +456,108 @@ function validateInstruction(
         );
       }
       return;
+    case "pacingBarrier":
+      if (!hasExactKeys(value, ["kind", "receiver", "span"])) {
+        errors.push(planError("TSC002", "Pacing-barrier instruction has an invalid shape.", path));
+      }
+      if (value.receiver !== null) {
+        validateExpression(value.receiver, `${path}.receiver`, errors, false, temporaryCount);
+      }
+      return;
+    case "showImage":
+      if (!hasExactKeys(value, ["kind", "image", "span"])) {
+        errors.push(planError("TSC002", "Show-image instruction has an invalid shape.", path));
+      }
+      if (value.image !== null) {
+        validateExpression(value.image, `${path}.image`, errors, false, temporaryCount);
+      }
+      return;
+    case "playMedia":
+      validatePlayMediaInstruction(value, path, temporaryCount, functionIds, errors);
+      return;
     case "interaction":
       validateInteractionInstruction(value, path, temporaryCount, errors);
       return;
     default:
       errors.push(planError("TSC002", `Unknown instruction kind '${value.kind}'.`, `${path}.kind`));
+  }
+}
+
+function validatePlayMediaInstruction(
+  value: Record<string, unknown>,
+  path: string,
+  temporaryCount: number,
+  functionIds: ReadonlySet<number>,
+  errors: PlanValidationError[],
+): void {
+  if (
+    !hasExactKeys(value, [
+      "kind",
+      "media",
+      "async",
+      "file",
+      "repeat",
+      "startAt",
+      "endAt",
+      "volume",
+      "cues",
+      "finishFunctionId",
+      "destinationTemporary",
+      "span",
+    ]) ||
+    (value.media !== "audio" && value.media !== "video") ||
+    typeof value.async !== "boolean" ||
+    (value.destinationTemporary !== null && value.async !== true)
+  ) {
+    errors.push(planError("TSC002", "Play-media instruction has an invalid shape.", path));
+  }
+  validateExpression(value.file, `${path}.file`, errors, false, temporaryCount);
+  const repeat = value.repeat;
+  if (!isRecord(repeat)) {
+    errors.push(planError("TSC002", "Media repeat is invalid.", `${path}.repeat`));
+  } else if (repeat.kind === "once" || repeat.kind === "indefinite") {
+    if (!hasExactKeys(repeat, ["kind"]) || (repeat.kind === "indefinite" && value.async !== true)) {
+      errors.push(planError("TSC002", "Media repeat is invalid.", `${path}.repeat`));
+    }
+  } else if (repeat.kind === "value" && hasExactKeys(repeat, ["kind", "value"])) {
+    validateExpression(repeat.value, `${path}.repeat.value`, errors, false, temporaryCount);
+  } else if (repeat.kind === "times" && hasExactKeys(repeat, ["kind", "count"])) {
+    validateExpression(repeat.count, `${path}.repeat.count`, errors, false, temporaryCount);
+  } else {
+    errors.push(planError("TSC002", "Media repeat is invalid.", `${path}.repeat`));
+  }
+  for (const name of ["startAt", "endAt", "volume"] as const) {
+    if (value[name] !== null) {
+      validateExpression(value[name], `${path}.${name}`, errors, false, temporaryCount);
+    }
+  }
+  if (!Array.isArray(value.cues)) {
+    errors.push(planError("TSC002", "Media cues must be an array.", `${path}.cues`));
+  } else {
+    value.cues.forEach((cue: unknown, index) => {
+      const cuePath = `${path}.cues[${index}]`;
+      if (
+        !isRecord(cue) ||
+        !hasExactKeys(cue, ["kind", "offset", "functionId"]) ||
+        (cue.kind !== "at" && cue.kind !== "beforeEnd")
+      ) {
+        errors.push(planError("TSC002", "Media cue has an invalid shape.", cuePath));
+        return;
+      }
+      validateExpression(cue.offset, `${cuePath}.offset`, errors, false, temporaryCount);
+      validateFunctionId(cue.functionId, `${cuePath}.functionId`, functionIds, errors);
+    });
+  }
+  if (value.finishFunctionId !== null) {
+    validateFunctionId(value.finishFunctionId, `${path}.finishFunctionId`, functionIds, errors);
+  }
+  if (value.destinationTemporary !== null) {
+    validateTemporaryId(
+      value.destinationTemporary,
+      `${path}.destinationTemporary`,
+      temporaryCount,
+      errors,
+    );
   }
 }
 

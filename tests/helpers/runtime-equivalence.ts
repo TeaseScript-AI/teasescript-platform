@@ -6,6 +6,7 @@ import {
   deserializeCheckpoint,
   executeInstruction,
   observeTime,
+  reportMediaLoad,
   run,
   serializeCheckpoint,
   validateRuntimeSnapshot,
@@ -24,7 +25,15 @@ export interface RuntimeResumeEquivalenceOptions {
   readonly scenarioName?: string;
   readonly seed?: number;
   readonly instructionGuard?: number;
+  /**
+   * Media scenarios: the simulated Player loads every source with this duration and then plays all running media at
+   * normal speed, reporting progress on each time observation.
+   */
+  readonly mediaDurationMs?: number;
 }
+
+/** Spacing of the simulated Player's media progress observations. */
+const MEDIA_OBSERVATION_STEP_MS = 250;
 
 export interface RuntimeResumeEquivalenceResult {
   readonly boundaries: readonly RuntimeSnapshot[];
@@ -69,7 +78,14 @@ export function assertRuntimeResumeEquivalent(
     `${scenario}: fresh snapshot must validate: ${initialSnapshotValidation.errors.join("; ")}`,
   );
 
-  const uninterrupted = runServicingDelays(plan, initial, instructionGuard, scenario);
+  const mediaDurationMs = options.mediaDurationMs;
+  const uninterrupted = runServicingDelays(
+    plan,
+    initial,
+    instructionGuard,
+    scenario,
+    mediaDurationMs,
+  );
   assert.equal(
     uninterrupted.snapshot.status,
     "halted",
@@ -93,7 +109,12 @@ export function assertRuntimeResumeEquivalent(
       readonly events: readonly InterpreterEvent[];
     };
     if (awaitsTime(boundarySnapshot)) {
-      operation = observeDueDelay(plan, boundarySnapshot, `${scenario}: boundary ${boundary + 1}`);
+      operation = observeDueDelay(
+        plan,
+        boundarySnapshot,
+        `${scenario}: boundary ${boundary + 1}`,
+        mediaDurationMs,
+      );
     } else {
       const executed = executeInstruction(plan, boundarySnapshot);
       assert.equal(
@@ -130,7 +151,13 @@ export function assertRuntimeResumeEquivalent(
       `${context}: restored snapshot changed during JSON roundtrip`,
     );
 
-    const resumed = runServicingDelays(restored.plan, restored.snapshot, instructionGuard, context);
+    const resumed = runServicingDelays(
+      restored.plan,
+      restored.snapshot,
+      instructionGuard,
+      context,
+      mediaDurationMs,
+    );
     assert.equal(
       resumed.snapshot.status,
       "halted",
@@ -170,13 +197,14 @@ function runServicingDelays(
   snapshot: RuntimeSnapshot,
   instructionGuard: number,
   context: string,
+  mediaDurationMs: number | undefined,
 ): { readonly snapshot: RuntimeSnapshot; readonly events: readonly InterpreterEvent[] } {
   const events: InterpreterEvent[] = [];
   let current = snapshot;
   for (let observations = 0; ; observations += 1) {
     assert.ok(observations <= instructionGuard, `${context}: delay servicing exceeded guard`);
     if (awaitsTime(current)) {
-      const observed = observeDueDelay(plan, current, context);
+      const observed = observeDueDelay(plan, current, context, mediaDurationMs);
       events.push(...observed.events);
       current = observed.snapshot;
       continue;
@@ -200,8 +228,27 @@ function observeDueDelay(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   context: string,
+  mediaDurationMs: number | undefined,
 ): { readonly snapshot: RuntimeSnapshot; readonly events: readonly InterpreterEvent[] } {
+  const unloaded = snapshot.backgroundActions.find(
+    (action) => action.kind === "media" && !action.media.loaded,
+  );
+  if (unloaded?.kind === "media") {
+    assert.ok(mediaDurationMs !== undefined, `${context}: media scenarios need mediaDurationMs`);
+    const reported = reportMediaLoad(plan, snapshot, unloaded.media.mediaId, {
+      kind: "loaded",
+      durationMs: mediaDurationMs,
+    });
+    assert.equal(reported.outcome.kind, "accepted", `${context}: media load must be accepted`);
+    return reported;
+  }
   const deadlines: number[] = [];
+  const playing = snapshot.backgroundActions.flatMap((action) =>
+    action.kind === "media" && action.media.state === "running" ? [action.media] : [],
+  );
+  if (playing.length > 0) {
+    deadlines.push(snapshot.observedSessionTimeMs + MEDIA_OBSERVATION_STEP_MS);
+  }
   for (const action of [
     snapshot.foregroundAction,
     ...snapshot.backgroundActions,
@@ -214,8 +261,25 @@ function observeDueDelay(
       deadlines.push(action.timer.deadlineMs);
     }
   }
-  assert.ok(deadlines.length > 0, `${context}: only delays, pacing, and timers can be serviced`);
-  const observed = observeTime(plan, snapshot, Math.min(...deadlines));
+  assert.ok(
+    deadlines.length > 0,
+    `${context}: only delays, pacing, timers, and media can be serviced`,
+  );
+  const nowMs = Math.min(...deadlines);
+  // The simulated Player plays at normal speed from each media's latest sample.
+  const reports = playing.flatMap((media) => {
+    const last = media.points.at(-1)!;
+    return nowMs > last.atMs
+      ? [
+          {
+            mediaId: media.mediaId,
+            segment: media.segment,
+            progressMs: last.progressMs + (nowMs - last.atMs),
+          },
+        ]
+      : [];
+  });
+  const observed = observeTime(plan, snapshot, nowMs, reports);
   assert.equal(observed.outcome.kind, "observed", `${context}: delay observation must succeed`);
   assert.notDeepEqual(
     observed.snapshot,

@@ -9,6 +9,7 @@ import type {
   Identifier,
   TimerParts,
   Expression,
+  MediaParts,
   FunctionDeclaration,
   Program,
   Statement,
@@ -22,7 +23,8 @@ import {
 } from "./protected-names.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
 import { runCompileTask, compileChild, type CompileTask } from "./compiler/continuation.js";
-import { expressionChildren } from "./expression-children.js";
+import { expressionChildren, mediaHandlerBlocks, mediaOperands } from "./expression-children.js";
+import { durationLiteralMilliseconds } from "./duration.js";
 
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
@@ -37,8 +39,8 @@ type BindingKind = "variable" | "speaker" | "global" | "function";
 
 interface Binding {
   readonly kind: BindingKind;
-  /** Set while a variable statically holds an async timer handle. */
-  timerHandle?: boolean;
+  /** Set while a variable statically holds an async timer or media handle. */
+  handle?: "timer" | "media" | null;
 }
 
 const TIMER_HANDLE_PROPERTIES: ReadonlySet<string> = new Set([
@@ -56,6 +58,15 @@ const TIMER_HANDLE_ASSIGNABLE: ReadonlySet<string> = new Set([
 ]);
 const TIMER_HANDLE_METHODS: ReadonlySet<string> = new Set(["pause", "resume", "stop"]);
 const TIMER_DISPLAYS: ReadonlySet<string> = new Set(["visible", "mystery", "hidden"]);
+const MEDIA_HANDLE_PROPERTIES: ReadonlySet<string> = new Set([
+  "position",
+  "elapsed",
+  "remaining",
+  "duration",
+  "volume",
+  "state",
+]);
+const MEDIA_HANDLE_ASSIGNABLE: ReadonlySet<string> = new Set(["position", "remaining", "volume"]);
 
 const semanticCode = {
   duplicateDeclaration: "TSV001",
@@ -92,6 +103,8 @@ const semanticCode = {
   invalidTimer: "TSV033",
   invalidTimerHandleMember: "TSV034",
   mixedDurationOperands: "TSV035",
+  invalidMedia: "TSV036",
+  invalidMediaHandleMember: "TSV037",
 } as const;
 
 export function validateSemantics(
@@ -140,8 +153,15 @@ class SemanticValidator {
 
   #functionDepth = 0;
 
-  /** Expiry blocks are validated after all top-level names are known, like function bodies. */
-  readonly #pendingTimerHandlers: Block[] = [];
+  /**
+   * Timer expiry blocks and media cue blocks are validated after all top-level names are known, like function bodies.
+   * A media block may bind the handle of its own `let` declaration.
+   */
+  readonly #pendingHandlers: {
+    readonly block: Block;
+    readonly owner: "timer" | "media";
+    readonly selfHandle: string | null;
+  }[] = [];
 
   public constructor(options: SemanticValidationOptions) {
     this.#invalidConfiguredNames = Object.freeze(
@@ -195,26 +215,38 @@ class SemanticValidator {
         this.#validateFunction(statement);
       }
     }
-    for (let index = 0; index < this.#pendingTimerHandlers.length; index += 1) {
-      this.#validateTimerHandler(this.#pendingTimerHandlers[index]!);
+    for (let index = 0; index < this.#pendingHandlers.length; index += 1) {
+      this.#validateHandler(this.#pendingHandlers[index]!);
     }
   }
 
-  /** An expiry block sees top-level names and its own locals, like a function body without parameters. */
-  #validateTimerHandler(handler: Block): void {
+  /**
+   * A handler block sees top-level names and its own locals, like a function body without parameters. A media block's
+   * self-handle is a local of the handler scope, so it shadows any outer name of the same spelling.
+   */
+  #validateHandler(handler: {
+    readonly block: Block;
+    readonly owner: "timer" | "media";
+    readonly selfHandle: string | null;
+  }): void {
     this.#functionDepth += 1;
-    this.#timerHandlerDepth += 1;
+    this.#handlerDepth += 1;
+    this.#handlerOwner = handler.owner;
     try {
-      runCompileTask(
-        this.#validateStatements(handler.statements, new SemanticScope(this.#root), 0),
-      );
+      const scope = new SemanticScope(this.#root);
+      if (handler.selfHandle !== null) {
+        scope.bindings.set(handler.selfHandle, { kind: "variable", handle: "media" });
+      }
+      runCompileTask(this.#validateStatements(handler.block.statements, scope, 0));
     } finally {
       this.#functionDepth -= 1;
-      this.#timerHandlerDepth -= 1;
+      this.#handlerDepth -= 1;
     }
   }
 
-  #timerHandlerDepth = 0;
+  #handlerDepth = 0;
+
+  #handlerOwner: "timer" | "media" = "timer";
 
   #validateTimer(timer: TimerParts, scope: SemanticScope, valuePosition: boolean): void {
     if (typeof timer.display === "object" && timer.display !== null) {
@@ -317,7 +349,150 @@ class SemanticValidator {
         );
       }
     }
-    if (timer.handler !== null) this.#pendingTimerHandlers.push(timer.handler);
+    if (timer.handler !== null)
+      this.#pendingHandlers.push({ block: timer.handler, owner: "timer", selfHandle: null });
+  }
+
+  /** Static checks of a play command; runtime validates the values that are not literals. */
+  #validateMedia(
+    media: MediaParts,
+    scope: SemanticScope,
+    valuePosition: boolean,
+    selfHandle: string | null,
+  ): void {
+    const command = media.media === "audio" ? "playAudio" : "playVideo";
+    for (const operand of mediaOperands(media)) this.#validateExpression(operand, scope, null);
+    if (!media.async && valuePosition) {
+      this.#report(
+        semanticCode.invalidMedia,
+        `Blocking media returns no handle; use '${command} async ...' to keep one.`,
+        media.span,
+      );
+    }
+    const repeat = media.repeat;
+    if (
+      repeat?.kind === "indefinite" ||
+      (repeat?.kind === "value" && isTrueLiteral(repeat.value))
+    ) {
+      if (!media.async) {
+        this.#report(
+          semanticCode.invalidMedia,
+          `Blocking media cannot repeat indefinitely; use '${command} async', a count such as 'repeat: 3 times', or a duration such as 'repeat: 60 s'.`,
+          repeat.span,
+        );
+      }
+    } else if (repeat?.kind === "value") {
+      const kind = literalKind(repeat.value);
+      if (kind === "numberLiteral") {
+        this.#report(
+          semanticCode.invalidMedia,
+          "Write a repeat count with 'times', such as 'repeat: 3 times', or a duration such as 'repeat: 60 s'.",
+          repeat.value.span,
+        );
+      } else if (kind === "durationLiteral") {
+        if (!(staticDurationMs(repeat.value)! > 0)) {
+          this.#report(
+            semanticCode.invalidMedia,
+            "A repeat duration must be greater than zero.",
+            repeat.value.span,
+          );
+        }
+      } else if (kind !== "booleanLiteral" && isDefinitelyNonDuration(repeat.value)) {
+        this.#report(
+          semanticCode.invalidMedia,
+          "Repeat must be true, false, a count such as '3 times', or a duration such as '60 s'.",
+          repeat.value.span,
+        );
+      }
+    } else if (repeat?.kind === "times") {
+      const count = staticNumber(repeat.count);
+      if (
+        (count !== undefined && (!Number.isInteger(count) || count < 1)) ||
+        isDefinitelyNonNumeric(repeat.count)
+      ) {
+        this.#report(
+          semanticCode.invalidMedia,
+          "A repeat count must be a whole number of at least 1, such as '3 times'.",
+          repeat.count.span,
+        );
+      }
+    }
+    const startMs = this.#validateMediaPosition(media.startAt, "startAt");
+    const endMs = this.#validateMediaPosition(media.endAt, "endAt");
+    if (startMs !== undefined && endMs !== undefined && endMs <= startMs) {
+      this.#report(
+        semanticCode.invalidMedia,
+        "endAt must be later than startAt.",
+        media.endAt!.span,
+      );
+    }
+    if (media.volume !== null) {
+      const volume = staticNumber(media.volume);
+      if (
+        (volume !== undefined && !(volume >= 0 && volume <= 1)) ||
+        isDefinitelyNonNumeric(media.volume)
+      ) {
+        this.#report(
+          semanticCode.invalidMedia,
+          "Volume must be a number from 0 through 1.",
+          media.volume.span,
+        );
+      }
+    }
+    if (media.handlers?.kind === "cues") {
+      let finishes = 0;
+      for (const cue of media.handlers.cues) {
+        if (cue.kind === "finish") {
+          finishes += 1;
+          if (finishes > 1) {
+            this.#report(
+              semanticCode.invalidMedia,
+              "A media block may declare 'finish' only once.",
+              cue.keywordSpan,
+            );
+          }
+          if (media.repeat?.kind === "indefinite" || isIndefiniteRepeatValue(media.repeat)) {
+            this.#report(
+              semanticCode.invalidMedia,
+              "'finish' never runs for media that repeats indefinitely; stop() does not run it.",
+              cue.keywordSpan,
+            );
+          }
+          continue;
+        }
+        this.#validateMediaPosition(cue.offset, cue.kind);
+      }
+    }
+    for (const block of mediaHandlerBlocks(media)) {
+      this.#pendingHandlers.push({
+        block,
+        owner: "media",
+        selfHandle: media.async ? selfHandle : null,
+      });
+    }
+  }
+
+  /**
+   * A media position is a duration or a number of seconds that is not negative. Returns its static value in
+   * milliseconds when known.
+   */
+  #validateMediaPosition(expression: Expression | null, name: string): number | undefined {
+    if (expression === null) return undefined;
+    const known = staticDurationMs(expression);
+    if (known !== undefined && known < 0) {
+      this.#report(semanticCode.invalidMedia, `${name} must not be negative.`, expression.span);
+    } else if (
+      known === undefined &&
+      literalKind(expression) !== "durationLiteral" &&
+      isDefinitelyNonNumeric(expression)
+    ) {
+      this.#report(
+        semanticCode.invalidMedia,
+        `${name} must be a duration such as '30 s' or a number of seconds.`,
+        expression.span,
+      );
+    }
+    return known;
   }
 
   /** Rejects unknown members of a variable that statically holds an async timer handle. */
@@ -330,7 +505,13 @@ class SemanticValidator {
     callArguments?: readonly CallArgument[],
   ): void {
     object = unwrapParentheses(object);
-    if (object.kind !== "identifier" || scope.resolve(object.name)?.timerHandle !== true) return;
+    if (object.kind !== "identifier") return;
+    const handle = scope.resolve(object.name)?.handle;
+    if (handle === "media") {
+      this.#validateMediaHandleMember(name, use, value, callArguments);
+      return;
+    }
+    if (handle !== "timer") return;
     const known =
       use === "call"
         ? TIMER_HANDLE_METHODS
@@ -362,6 +543,55 @@ class SemanticValidator {
     );
   }
 
+  #validateMediaHandleMember(
+    name: Identifier,
+    use: "read" | "assign" | "call",
+    value?: Expression,
+    callArguments?: readonly CallArgument[],
+  ): void {
+    const known =
+      use === "call"
+        ? TIMER_HANDLE_METHODS
+        : use === "assign"
+          ? MEDIA_HANDLE_ASSIGNABLE
+          : MEDIA_HANDLE_PROPERTIES;
+    if (!known.has(name.name)) {
+      this.#report(
+        semanticCode.invalidMediaHandleMember,
+        use === "call"
+          ? `Media handles have no method '${name.name}'; use pause(), resume(), or stop().`
+          : use === "assign"
+            ? `Media handle property '${name.name}' cannot be assigned; assign position, remaining, or volume.`
+            : `Media handles have no property '${name.name}'.`,
+        name.span,
+      );
+      return;
+    }
+    if (use === "call" && callArguments !== undefined && callArguments.length > 0) {
+      this.#report(
+        semanticCode.invalidMediaHandleMember,
+        `Media ${name.name}() takes no arguments.`,
+        name.span,
+      );
+    } else if (use === "assign" && value !== undefined) {
+      const invalid =
+        name.name === "volume"
+          ? isDefinitelyNonNumeric(value) ||
+            (staticNumber(value) !== undefined &&
+              !(staticNumber(value)! >= 0 && staticNumber(value)! <= 1))
+          : literalKind(value) !== "durationLiteral" && isDefinitelyNonDuration(value);
+      if (invalid) {
+        this.#report(
+          semanticCode.invalidMediaHandleMember,
+          name.name === "volume"
+            ? "Media volume must be a number from 0 through 1."
+            : `Media ${name.name} must be assigned a duration such as 10 s.`,
+          name.span,
+        );
+      }
+    }
+  }
+
   *#validateStatements(
     statements: readonly Statement[],
     scope: SemanticScope,
@@ -378,14 +608,18 @@ class SemanticValidator {
     loopDepth: number,
   ): CompileTask<void> {
     switch (statement.kind) {
-      case "letStatement":
-        this.#validateExpression(statement.initializer, scope, null);
+      case "letStatement": {
+        const initializer = unwrapParentheses(statement.initializer);
+        if (initializer.kind === "playMediaExpression") {
+          this.#validateMedia(initializer, scope, true, statement.name.name);
+        } else {
+          this.#validateExpression(statement.initializer, scope, null);
+        }
         if (this.#declare(statement.name.name, "variable", statement.name.span, scope)) {
-          scope.bindings.get(statement.name.name)!.timerHandle = isAsyncTimer(
-            statement.initializer,
-          );
+          scope.bindings.get(statement.name.name)!.handle = handleKind(statement.initializer);
         }
         return;
+      }
       case "speakerDeclaration": {
         const declared = this.#declare(statement.name.name, "speaker", statement.name.span, scope);
         const names = new Set<string>();
@@ -468,13 +702,34 @@ class SemanticValidator {
       case "timerStatement":
         this.#validateTimer(statement, scope, false);
         return;
+      case "playMediaStatement":
+        this.#validateMedia(statement, scope, false, null);
+        return;
+      case "showImageStatement": {
+        this.#validateExpression(statement.image, scope, null);
+        const kind = literalKind(statement.image);
+        if (
+          kind !== "nullLiteral" &&
+          kind !== "stringLiteral" &&
+          isDefinitelyNonText(statement.image)
+        ) {
+          this.#report(
+            semanticCode.invalidMedia,
+            "showImage needs an image file reference or null.",
+            statement.image.span,
+          );
+        }
+        return;
+      }
+      case "hideImageStatement":
+        return;
       case "assignmentStatement":
         this.#validateAssignmentTarget(statement.target, scope);
         this.#validateExpression(statement.value, scope, null);
         if (statement.target.kind === "identifier") {
           const binding = scope.resolve(statement.target.name);
           // Reassignment may happen on any path, so the variable is no longer known to hold a handle.
-          if (binding?.kind === "variable") binding.timerHandle = false;
+          if (binding?.kind === "variable") binding.handle = null;
         } else if (statement.target.kind === "propertyAccessExpression") {
           this.#validateTimerHandleMember(
             statement.target.object,
@@ -571,10 +826,12 @@ class SemanticValidator {
             "'return' may only appear inside a function.",
             statement.span,
           );
-        } else if (this.#timerHandlerDepth > 0 && statement.value !== null) {
+        } else if (this.#handlerDepth > 0 && statement.value !== null) {
           this.#report(
             semanticCode.invalidTimer,
-            "A timer expiry block may use 'return' only without a value.",
+            this.#handlerOwner === "timer"
+              ? "A timer expiry block may use 'return' only without a value."
+              : "A media block may use 'return' only without a value.",
             statement.value.span,
           );
         }
@@ -647,7 +904,9 @@ class SemanticValidator {
         if (blockingInteraction !== null) {
           this.#report(
             semanticCode.unsupportedBlockingContext,
-            "Blocking interactions are not supported in function parameter defaults.",
+            blockingInteraction.kind === "playMediaExpression"
+              ? "Media playback is not supported in function parameter defaults."
+              : "Blocking interactions are not supported in function parameter defaults.",
             blockingInteraction.span,
           );
         }
@@ -789,6 +1048,9 @@ class SemanticValidator {
         return;
       case "timerExpression":
         this.#validateTimer(expression, scope, true);
+        return;
+      case "playMediaExpression":
+        this.#validateMedia(expression, scope, true, null);
         return;
       case "indexExpression":
         yield* compileChild(
@@ -1126,9 +1388,34 @@ function literalKind(expression: Expression): Expression["kind"] {
   return current.kind;
 }
 
-function isAsyncTimer(expression: Expression): boolean {
+/** The handle kind statically held by a variable initialized from `expression`. */
+function handleKind(expression: Expression): "timer" | "media" | null {
   expression = unwrapParentheses(expression);
-  return expression.kind === "timerExpression" && expression.async;
+  if (expression.kind === "timerExpression" && expression.async) return "timer";
+  if (expression.kind === "playMediaExpression" && expression.async) return "media";
+  return null;
+}
+
+function isTrueLiteral(expression: Expression): boolean {
+  expression = unwrapParentheses(expression);
+  return expression.kind === "booleanLiteral" && expression.value;
+}
+
+function isIndefiniteRepeatValue(repeat: MediaParts["repeat"]): boolean {
+  return repeat?.kind === "value" && isTrueLiteral(repeat.value);
+}
+
+/** A statically known media position in milliseconds: a duration literal or a number of seconds. */
+function staticDurationMs(expression: Expression): number | undefined {
+  let current = unwrapParentheses(expression);
+  let sign = 1;
+  while (current.kind === "unaryExpression" && current.operator !== "not") {
+    if (current.operator === "-") sign = -sign;
+    current = unwrapParentheses(current.operand);
+  }
+  if (current.kind === "durationLiteral") return sign * durationLiteralMilliseconds(current);
+  const seconds = staticNumber(expression);
+  return seconds === undefined ? undefined : seconds * 1_000;
 }
 
 /** A statically evident wrong value for an assignable timer handle property. */
@@ -1177,13 +1464,15 @@ function isKnownInteger(expression: Expression): boolean {
   return value === undefined || Number.isInteger(value);
 }
 
+/** The first interaction or media playback in a parameter default, which cannot pause a default's evaluation. */
 function findFirstInteraction(
   expression: Expression,
-): Extract<Expression, { kind: "interactionExpression" }> | null {
+): Extract<Expression, { kind: "interactionExpression" | "playMediaExpression" }> | null {
   const work = [expression];
   while (work.length) {
     const current = work.pop()!;
-    if (current.kind === "interactionExpression") return current;
+    if (current.kind === "interactionExpression" || current.kind === "playMediaExpression")
+      return current;
     const children = expressionChildren(current);
     for (let i = children.length - 1; i >= 0; i--) work.push(children[i]!);
   }
@@ -1211,7 +1500,8 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
     expression.kind === "objectLiteral" ||
     expression.kind === "rangeExpression" ||
     expression.kind === "durationLiteral" ||
-    expression.kind === "timerExpression"
+    expression.kind === "timerExpression" ||
+    expression.kind === "playMediaExpression"
   );
 }
 

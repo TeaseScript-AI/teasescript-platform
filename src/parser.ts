@@ -32,6 +32,14 @@ import type {
   TimerStatement,
   TimerParts,
   TimerDisplay,
+  HideImageStatement,
+  MediaCue,
+  MediaHandlers,
+  MediaKind,
+  MediaParts,
+  MediaRepeat,
+  PlayMediaStatement,
+  ShowImageStatement,
   DurationUnit,
   ListLiteral,
   NumberLiteral,
@@ -95,7 +103,10 @@ const parserDiagnosticCode = {
   unsupportedInteractionForm: "TSP032",
   unsupportedDurationUnit: "TSP033",
   invalidTimerForm: "TSP034",
+  invalidMediaForm: "TSP035",
 } as const;
+
+const MEDIA_ARGUMENTS = ["file", "async", "repeat", "startAt", "endAt", "volume"] as const;
 
 /** Parses the accepted core-language milestone. */
 export function parse(source: string): ParseResult {
@@ -150,6 +161,18 @@ class Parser {
     }
     if (this.#checkIdentifier("timer")) {
       return yield* parseChild(this.#parseTimerStatement());
+    }
+    if (this.#checkIdentifier("showImage")) {
+      return this.#parseShowImageStatement();
+    }
+    if (this.#checkIdentifier("hideImage")) {
+      return this.#parseHideImageStatement();
+    }
+    if (this.#checkIdentifier("playAudio") || this.#checkIdentifier("playVideo")) {
+      const parts = yield* parseChild(this.#parseMediaParts());
+      return parts === null
+        ? null
+        : Object.freeze({ kind: "playMediaStatement", ...parts } satisfies PlayMediaStatement);
     }
     if (
       this.#check(TokenKind.KeywordWait) &&
@@ -753,6 +776,332 @@ class Parser {
     if (!this.#check(TokenKind.LeftBrace)) return null;
     const block = yield* parseChild(this.#parseBlock());
     return block ?? false;
+  }
+
+  /** `showImage <file>` uses command syntax; the V30 parenthesized layered-image form is not supported. */
+  #parseShowImageStatement(): ShowImageStatement | null {
+    const command = this.#advance();
+    if (
+      this.#rejectAdjacentParenthesis(
+        command,
+        "showImage uses command syntax, such as 'showImage \"room.jpg\"'.",
+      )
+    )
+      return null;
+    const image = this.#parseExpression();
+    if (image === null) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedExpression,
+        "Expected an image file or null after 'showImage'.",
+      );
+      this.#synchronizeStatement(true);
+      return null;
+    }
+    return Object.freeze({
+      kind: "showImageStatement",
+      image,
+      span: spanFrom(command.span, image.span),
+    });
+  }
+
+  #parseHideImageStatement(): HideImageStatement | null {
+    const command = this.#advance();
+    if (
+      this.#rejectAdjacentParenthesis(command, "hideImage takes no arguments; write 'hideImage'.")
+    )
+      return null;
+    return Object.freeze({ kind: "hideImageStatement", span: copySpan(command.span) });
+  }
+
+  /**
+   * Reports and skips a parenthesized group written directly after a command that uses command syntax. Recovery stops at
+   * the end of the line, so an enclosing block keeps its closing brace.
+   */
+  #rejectAdjacentParenthesis(command: Token, message: string): boolean {
+    if (
+      !this.#check(TokenKind.LeftParenthesis) ||
+      this.#peek().span.start.offset !== command.span.end.offset
+    )
+      return false;
+    this.#reportToken(parserDiagnosticCode.invalidMediaForm, message, this.#peek());
+    let depth = 0;
+    while (!this.#check(TokenKind.Newline) && !this.#check(TokenKind.EndOfFile)) {
+      const token = this.#advance();
+      if (token.kind === TokenKind.LeftParenthesis) depth += 1;
+      else if (token.kind === TokenKind.RightParenthesis && --depth === 0) break;
+    }
+    return true;
+  }
+
+  /**
+   * Parses `playAudio|playVideo [async] [repeat] <file> [{ ... }]` or `playAudio|playVideo(name: value, ...) [{ ... }]`.
+   * `async` and `repeat` are recognized only directly after the command; `playAudio (async)` uses a variable.
+   */
+  *#parseMediaParts(): ParseTask<MediaParts | null> {
+    const command = this.#advance();
+    const media: MediaKind = command.lexeme === "playAudio" ? "audio" : "video";
+    if (
+      this.#check(TokenKind.LeftParenthesis) &&
+      this.#peek().span.start.offset === command.span.end.offset
+    ) {
+      return yield* parseChild(this.#parseNamedMedia(command, media));
+    }
+    const async = this.#checkIdentifier("async");
+    if (async) this.#advance();
+    let repeat: MediaRepeat | null = null;
+    if (this.#check(TokenKind.KeywordRepeat)) {
+      repeat = Object.freeze({ kind: "indefinite", span: copySpan(this.#advance().span) });
+    }
+    const file = yield* parseChild(this.#parseOr());
+    if (file === null) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedExpression,
+        `Expected a media file such as "sounds/bell.mp3" after '${command.lexeme}'.`,
+      );
+      this.#synchronizeStatement(true);
+      return null;
+    }
+    const handlers = yield* parseChild(this.#parseMediaHandlers());
+    if (handlers === false) return null;
+    return {
+      media,
+      form: "short",
+      async,
+      file,
+      repeat,
+      startAt: null,
+      endAt: null,
+      volume: null,
+      handlers,
+      commandSpan: copySpan(command.span),
+      span: spanFrom(command.span, handlers === null ? file.span : mediaHandlersSpan(handlers)),
+    };
+  }
+
+  /** The named form; `repeat:` also accepts `<count> times`. */
+  *#parseNamedMedia(command: Token, media: MediaKind): ParseTask<MediaParts | null> {
+    const left = this.#advance();
+    const values: Partial<Record<(typeof MEDIA_ARGUMENTS)[number], Expression>> = {};
+    let repeat: MediaRepeat | null = null;
+    let async = false;
+    let valid = true;
+    this.#skipNewlines();
+    while (!this.#check(TokenKind.RightParenthesis) && !this.#check(TokenKind.EndOfFile)) {
+      if (!isPropertyName(this.#peek()) || this.#peek(1).kind !== TokenKind.Colon) {
+        const value = yield* parseChild(this.#parseRequiredExpressionTask());
+        this.#reportSpan(
+          parserDiagnosticCode.invalidMediaForm,
+          `The parenthesized ${command.lexeme} form uses named arguments, such as '${command.lexeme}(file: "${media === "audio" ? "sounds/bell.mp3" : "videos/intro.mp4"}")'.`,
+          value?.span ?? this.#peek().span,
+        );
+        valid = false;
+        if (value === null) break;
+      } else {
+        const name = this.#identifier(this.#advance());
+        this.#advance();
+        this.#skipContinuationNewlines();
+        const value = yield* parseChild(this.#parseRequiredExpressionTask());
+        if (value === null) {
+          valid = false;
+          break;
+        }
+        const argument = MEDIA_ARGUMENTS.find((candidate) => candidate === name.name);
+        if (argument === undefined) {
+          this.#reportSpan(
+            parserDiagnosticCode.invalidMediaForm,
+            `Unknown ${command.lexeme} argument '${name.name}'; use ${MEDIA_ARGUMENTS.join(", ")}.`,
+            name.span,
+          );
+          valid = false;
+        } else if (Object.hasOwn(values, name.name)) {
+          this.#reportSpan(
+            parserDiagnosticCode.invalidMediaForm,
+            `Duplicate ${command.lexeme} argument '${name.name}'.`,
+            name.span,
+          );
+          valid = false;
+        } else {
+          values[argument] = value;
+        }
+        if (name.name === "async") {
+          if (value.kind !== "booleanLiteral") {
+            this.#reportSpan(
+              parserDiagnosticCode.invalidMediaForm,
+              `${command.lexeme} argument 'async' must be the literal true or false.`,
+              value.span,
+            );
+            valid = false;
+          } else {
+            async = value.value;
+          }
+        }
+        if (name.name === "repeat") {
+          if (this.#checkIdentifier("times")) {
+            const times = this.#advance();
+            repeat = Object.freeze({
+              kind: "times",
+              count: value,
+              span: spanFrom(value.span, times.span),
+            });
+          } else {
+            repeat = Object.freeze({ kind: "value", value, span: copySpan(value.span) });
+          }
+        }
+      }
+      this.#skipNewlines();
+      if (!this.#match(TokenKind.Comma)) break;
+      this.#skipNewlines();
+      if (this.#check(TokenKind.RightParenthesis)) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedExpression,
+          "Expected an argument after ','.",
+        );
+        valid = false;
+        break;
+      }
+    }
+    if (!this.#match(TokenKind.RightParenthesis)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedDelimiter,
+        `Expected ')' after the ${command.lexeme} arguments.`,
+      );
+      this.#synchronizeStatement(true);
+      return null;
+    }
+    const right = this.#previous();
+    const file = values.file ?? null;
+    if (file === null && valid) {
+      this.#reportSpan(
+        parserDiagnosticCode.invalidMediaForm,
+        `The parenthesized ${command.lexeme} form requires a 'file' argument.`,
+        spanFrom(left.span, right.span),
+      );
+    }
+    const handlers = yield* parseChild(this.#parseMediaHandlers());
+    if (handlers === false || file === null || !valid) return null;
+    return {
+      media,
+      form: "named",
+      async,
+      file,
+      repeat,
+      startAt: values.startAt ?? null,
+      endAt: values.endAt ?? null,
+      volume: values.volume ?? null,
+      handlers,
+      commandSpan: copySpan(command.span),
+      span: spanFrom(command.span, handlers === null ? right.span : mediaHandlersSpan(handlers)),
+    };
+  }
+
+  /**
+   * An optional block on the same line. Its top level holds either ordinary statements (a compact block) or cue
+   * declarations; `false` reports an already diagnosed failure.
+   */
+  *#parseMediaHandlers(): ParseTask<MediaHandlers | null | false> {
+    if (!this.#check(TokenKind.LeftBrace)) return null;
+    const leftBrace = this.#advance();
+    this.#skipNewlines();
+    const cueMode = this.#isMediaCueStart();
+    const statements: Statement[] = [];
+    const cues: MediaCue[] = [];
+    while (!this.#check(TokenKind.RightBrace) && !this.#check(TokenKind.EndOfFile)) {
+      const startIndex = this.#current;
+      const cueStart = this.#isMediaCueStart();
+      if (cueStart !== cueMode) {
+        this.#reportToken(
+          parserDiagnosticCode.invalidMediaForm,
+          "A media block holds either cue declarations (at, beforeEnd, finish) or ordinary statements, not both.",
+          this.#peek(),
+        );
+      }
+      if (cueStart) {
+        const cue = yield* parseChild(this.#parseMediaCue());
+        if (cue !== null) cues.push(cue);
+      } else {
+        const statement = yield* parseChild(this.#parseStatement());
+        if (statement !== null) statements.push(statement);
+      }
+      if (this.#current === startIndex) this.#advance();
+      if (this.#recoveredAtStatementBoundary) {
+        this.#recoveredAtStatementBoundary = false;
+      } else {
+        this.#finishStatement(true);
+      }
+      this.#skipNewlines();
+    }
+    if (!this.#match(TokenKind.RightBrace)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedRightBrace,
+        "Expected '}' to close the block.",
+      );
+      return false;
+    }
+    const span = spanFrom(leftBrace.span, this.#previous().span);
+    return cueMode
+      ? Object.freeze({ kind: "cues", cues: Object.freeze(cues), span })
+      : Object.freeze({
+          kind: "compact",
+          body: Object.freeze({ kind: "block", statements: Object.freeze(statements), span }),
+        });
+  }
+
+  /**
+   * `at` and `beforeEnd` followed by a complete cue position and `{`, and `finish` followed by `{`, start a cue
+   * declaration. Other uses, such as `at = 1`, `at[0] = 1`, or a call `at(1)`, stay ordinary statements.
+   */
+  #isMediaCueStart(): boolean {
+    const token = this.#peek();
+    if (token.kind !== TokenKind.Identifier) return false;
+    const next = this.#peek(1);
+    if (token.lexeme === "finish") return next.kind === TokenKind.LeftBrace;
+    if (token.lexeme !== "at" && token.lexeme !== "beforeEnd") return false;
+    if (next.kind === TokenKind.LeftBrace || !isExpressionStart(next)) return false;
+    if (next.kind === TokenKind.LeftParenthesis && next.span.start.offset === token.span.end.offset)
+      return false;
+    const speculative = new Parser(this.tokens);
+    speculative.#current = this.#current + 1;
+    const offset = speculative.#parseExpression();
+    return (
+      offset !== null &&
+      speculative.#diagnostics.length === 0 &&
+      speculative.#check(TokenKind.LeftBrace)
+    );
+  }
+
+  *#parseMediaCue(): ParseTask<MediaCue | null> {
+    const keyword = this.#advance();
+    const kind: MediaCue["kind"] =
+      keyword.lexeme === "at" ? "at" : keyword.lexeme === "beforeEnd" ? "beforeEnd" : "finish";
+    let offset: Expression | null = null;
+    if (kind !== "finish") {
+      offset = yield* parseChild(this.#parseOr());
+      if (offset === null) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedExpression,
+          `Expected a cue position such as '30 s' after '${keyword.lexeme}'.`,
+        );
+        this.#synchronizeStatement(true);
+        return null;
+      }
+    }
+    if (!this.#check(TokenKind.LeftBrace)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedBlock,
+        `Expected '{' to start the ${keyword.lexeme} cue block.`,
+      );
+      this.#synchronizeStatement(true);
+      return null;
+    }
+    const body = yield* parseChild(this.#parseBlock());
+    if (body === null) return null;
+    return Object.freeze({
+      kind,
+      offset,
+      body,
+      keywordSpan: copySpan(keyword.span),
+      span: spanFrom(keyword.span, body.span),
+    });
   }
 
   /** A trailing `ms`, `s`, `min`, or `h` after a `wait` or short `timer` duration expression. */
@@ -1551,6 +1900,10 @@ class Parser {
       const parts = yield* parseChild(this.#parseTimerParts());
       return parts === null ? null : Object.freeze({ kind: "timerExpression", ...parts });
     }
+    if (this.#checkIdentifier("playAudio") || this.#checkIdentifier("playVideo")) {
+      const parts = yield* parseChild(this.#parseMediaParts());
+      return parts === null ? null : Object.freeze({ kind: "playMediaExpression", ...parts });
+    }
     if (this.#match(TokenKind.NumberLiteral)) {
       const amount: NumberLiteral = Object.freeze({
         kind: "numberLiteral",
@@ -2227,6 +2580,10 @@ const propertyNameKinds: ReadonlySet<TokenKind> = new Set([
   TokenKind.KeywordFunction,
   TokenKind.KeywordReturn,
 ]);
+
+function mediaHandlersSpan(handlers: MediaHandlers): SourceSpan {
+  return handlers.kind === "compact" ? handlers.body.span : handlers.span;
+}
 
 function isPropertyName(token: Token): boolean {
   return propertyNameKinds.has(token.kind);

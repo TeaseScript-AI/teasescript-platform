@@ -100,8 +100,8 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Exact Player presentation for absolute deadlines and long/upcoming scheduled events; see specification §36 and
   [`planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md`](planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md).
 - Cross-origin parent/player message schemas, capability negotiation, sandbox flags, and Content Security Policy.
-- Action-kind-specific media completion, advanced timeout, cancellation, and recovery policies beyond ADR 0018's
-  mandatory basic interactions.
+- Advanced timeout, cancellation, and recovery policies beyond ADR 0018's mandatory basic interactions and the
+  media playback contract in [`RUNTIME.md`](RUNTIME.md#stage-image-and-media-playback).
 - Stable text-output target handles beyond the first Standard chat target.
 - Exact author-facing theme schema/registration API and platform dark-theme token values. `ui/PLAYER-UI.md` fixes
   precedence, standalone/light/dark theme semantics, missing-variant fallback, and the no-arbitrary-CSS boundary.
@@ -129,7 +129,8 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Camera UI and lifecycle around accepted `askImage(...)` and nullable `takePhoto(...)`, including preview, countdown,
   retake, permission, and restore behavior.
 - Motion detection, sampling, camera resource limits, and scene ownership.
-- Media layering, concurrent ownership, cleanup, recovery, and resource handles.
+- Layered-scene media (backgrounds, overlays, blur, drawings, transitions) and its reconciliation with the Stage image
+  model of specification §22.
 - Persistent media identity, labels, timestamps, retrieval, privacy, retention, encryption, export, and quotas.
 - Exact PWA offline, storage, cache, and update lifecycle under
   [ADR 0001](decisions/0001-browser-first.md): asset/media/data boundaries, persistent-storage requests, offline session

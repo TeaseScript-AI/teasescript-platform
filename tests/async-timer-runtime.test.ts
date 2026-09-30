@@ -190,7 +190,7 @@ test("short and named timer forms lower to blocking delays or async timer starts
       ["expression", true, true, true, true],
     ],
   );
-  assert.ok(compiled.functions.every((definition) => definition.timerHandler));
+  assert.ok(compiled.functions.every((definition) => definition.handler === "timer"));
   assert.equal(compiled.functions.length, 2);
 });
 

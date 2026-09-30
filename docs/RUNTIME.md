@@ -4,7 +4,8 @@
 
 `player/runtime-adapter.ts` is the framework-independent Player adapter shared by the Vue reference and the
 playground's action lookup/completion path. It maps validated pending actions and runtime events to Player presentation,
-submits typed interactions and pacing/time observations, and uses the canonical runtime checkpoint operations.
+submits typed interactions, pacing/time observations, media load reports, and media progress, projects the Stage and
+active media for playback, and uses the canonical runtime checkpoint operations.
 `playground/workspace/controller.ts` retains the DOM-free compiler/execution and development-automation workspace
 facade. Neither adapter normalizes answers, matches choices, derives canonical transcript text, or retains an
 independent action lifecycle.
@@ -294,6 +295,20 @@ say as mistress "Two"
 
 the actual separation is the longer of the remaining `say` gate and the explicit one-second wait. The durations are not automatically added.
 
+#### Media pacing barrier
+
+Main-story media presentation waits for the previous message like a following `say`. The compiler emits a
+`pacingBarrier` instruction before `showImage`, `hideImage`, `playAudio`, and `playVideo`, and before a statement-level
+media handle operation (`h.pause()`, `h.resume()`, `h.stop()`, or an assignment to `h.position`, `h.remaining`, or
+`h.volume`) whose receiver is an identifier with property or literal/identifier index access. Such a barrier evaluates
+that receiver when it runs and waits only for a media handle; call-result receivers do not wait. When a background
+pacing gate is active, the barrier moves that gate, with its identity, deadline, and skip policy unchanged, into the
+foreground without prepared output and keeps `nextInstruction` at the barrier. Time or skip settlement leaves
+`nextInstruction` there, so the barrier runs again during a later runtime entry and then advances; the media statement
+evaluates its operands only after the wait. The settlement records `releasedPreparedOutputInstruction: null` and opens
+no prepared-output commit window, so queued interrupt blocks may run first. While a timer expiry block or media cue
+block, or a function it calls, runs, barriers never wait. `wait` and `timer` keep overlapping pacing.
+
 Player-authored messages do not create gates. No compiler lookahead across branches, calls, or loops is used.
 
 Message presentation follows the accepted [speaker inheritance and override contract](specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides).
@@ -355,13 +370,14 @@ The implementation includes:
 
 The current internal instruction-plan, runtime-snapshot, and checkpoint format revisions are listed under [Format evolution](#format-evolution). They are POC formats rather than permanent public wire-format guarantees.
 
-The current runtime implements blocking `wait`/`timer`, asynchronous timers, compact foreground interactions, and
-ADR 0018 `say` pacing. Timer lifecycle, interrupts, and Player clock recovery are defined under
-[Timers and scene time](#timers-and-scene-time).
+The current runtime implements blocking `wait`/`timer`, asynchronous timers, compact foreground interactions,
+ADR 0018 `say` pacing, and the Stage image and audio/video playback state. Timer lifecycle, interrupts, and Player
+clock recovery are defined under [Timers and scene time](#timers-and-scene-time); media under
+[Stage image and media playback](#stage-image-and-media-playback).
 
-Runtime state retains persisted scene time, at most one active foreground action, background timers and at most
-one pacing gate, monotonic identities, bounded settlement replay, prepared output, and explicit time/completion
-operations. The Player reconstructs presentation from canonical state. Production cross-origin host wiring,
+Runtime state retains persisted scene time, at most one active foreground action, background timers and media and at
+most one pacing gate, the Stage image, monotonic identities, bounded settlement replay, prepared output, and explicit
+time/completion operations. The Player reconstructs presentation from canonical state. Production cross-origin host wiring,
 server time integrity, and server persistence remain deferred.
 
 ## Owner-resolved future runtime semantics
@@ -553,6 +569,72 @@ Restore validation requires every issued timer ID to have exactly one active or 
 to issued IDs, queued blocks to belong to their timer, at most one interrupt frame, and suspended actions to be
 consistent with the interrupted context.
 
+## Stage image and media playback
+
+Author-facing behavior is defined in specification
+[§22](specifications/accepted-syntaxes-v30.md#22-stage-image-audio-and-video). This section defines the runtime
+contract that Players and hosts rely on.
+
+**State.** `stageImage` holds the persistent Stage image reference or `null`. Each play creates a background `media`
+action (ADR 0016 identity, request event, creation time) holding a media record; the script-visible handle
+`{ kind: "mediaHandle", mediaId }` refers to that record. Finished and stopped records move to `settledMedia` so
+handles stay readable; `nextMediaId` issues IDs. A media settlement publishes `actionCompleted` and, like a timer
+settlement, is not retained as `lastSettlement`. At most one video is active; a new video, `showImage`, or `hideImage`
+stops it.
+
+**Waiting and load.** A play first waits in a foreground `mediaPlayback` action: an async play until the Player's load
+report, a blocking play until the media finishes, stops, or fails. The wait settles through runtime work, never
+through `completeAction`; its settlement is retained like a delay's, it may be a terminal action, and an interrupt
+block may suspend it. The Player reports each source with `reportMediaLoad(plan, snapshot, mediaId, report)`:
+`{ kind: "loaded", durationMs }` makes duration-dependent state authoritative and starts the first playback segment;
+`{ kind: "failed", message? }` reports developer warning `TSW013`, stops the media without cues or `finish`, and
+releases any wait. No load timeout is defined by the runtime; a Player that gives up reports `failed`.
+
+**Progress observations.** Playback progress enters only through validated observations:
+`observeTime(plan, snapshot, nowMs, [{ mediaId, segment, progressMs }])`, where `progressMs` is the active playback
+time of the current segment, excluding stalls and pauses. Each accepted report becomes a sample `(nowMs, progressMs)`;
+samples must increase in time and must not decrease in progress, and reports for another segment or unknown, settled,
+or unloaded media are ignored. A running media without a report in an observation has made no known progress, so
+Players report every running media on every observation. Every canonical timeline change starts a new segment
+anchored at `(scene time, 0)`: load, pause, resume from pause, seek, stop, and Stage replacement; lifecycle no-ops and
+volume changes do not. A Player acknowledges a new segment by reporting progress `0` when it applies it.
+
+**Timeline events.** The engine owns passes, repeat limits, cue order, and settlement. Between samples, progress is
+interpolated linearly; interpolated scene times and progress are canonical in whole milliseconds. The next event is
+either an arrival — the next cue point, the end of the pass, or the end of a repeat duration — due when reported
+progress reaches it, or a departure — the cues at a start position after load, seek, or a pass wrap — due when
+playback proceeds from that position (the right edge of a stall there). `processDueWork` orders media events with
+delays, pacing gates, and timers by `(scene time, phase, action ID)`, where departures have phase 1 and all other work
+phase 0, and commits one event per step, so queued cue blocks hold catch-up exactly like timer expiry blocks. An
+arrival queues every cue exactly at its point in source order and, at the end of the range, completes the pass
+atomically: the next pass restarts at `startAt` with its start cues pending, or the media finishes and queues `finish`.
+A repeat duration that ends mid-pass queues the cues reached there, then finishes. Committed values advance only by
+event distances, so the same events produce the same values however the Player's samples are spaced.
+
+**Script operations.** Handle reads use the progress interpolated at current scene time, capped at the next
+uncommitted arrival. Before `pause()`, `resume()`, `stop()`, a seek, or a Stage replacement changes a segment, the
+media's events already reached by current scene time are committed. A seek clamps to the active range, fires no cue it
+jumps across, leaves cues at the new position pending until playback proceeds, and at the end of the range completes
+the pass at once, also while paused. `stop()` and replacement drop the media's queued, not yet started cue blocks.
+
+**Cue blocks.** Cue, compact, and `finish` blocks compile to parameterless handler regions (`handler: "media"`),
+optionally with a self-handle name bound on entry to the media's handle. Their invocations share the timer expiry
+queue and interrupt machinery above; interrupt frames record `mediaId` instead of `timerId`.
+
+**Cleanup and restore.** `exit` and script end stop all media without events and drop queued blocks; the Stage image
+stays. Checkpoints carry the complete media state, including unprocessed samples, and restore does not advance or
+rewrite it. Restore validation requires issued media IDs to have exactly one active or settled record, handles to refer
+to issued IDs, queued and running cue blocks to belong to their media's own blocks, at most one active video, and
+waits to refer to their active media. Cross-device handoff is not part of this contract.
+
+**Player projection.** `mediaPlaybackProjection(snapshot)` lists active media with `segment`, `playheadMs` (the source
+position that the reported progress reaches), `reportedProgressMs`, the active range, `volume`, and
+`terminalProgressMs` (segment progress at which playback ends, `null` when indefinite); `stageProjection(snapshot)`
+gives the Stage image and active video. On a new segment the Player repositions to `playheadMs` (rewinding any
+overshoot), plays the range and wraps natively until `terminalProgressMs`, keeps counting progress across wraps, and
+reports progress with each time observation. A restored Player resumes at `playheadMs` and continues counting from
+`reportedProgressMs`. Browser `ended` or `timeupdate` callbacks are not settlement.
+
 ## Compiler and execution entry points
 
 ### Normal source route
@@ -718,9 +800,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 21 | Timer instructions: `wait` carries `command`, `display`, and `label`; `startTimer`; duration literals; timer-handler regions. |
-| Runtime snapshot | 22 | Timer state: delay `display`/`label`, background `timer` actions, `settledTimers`, `nextTimerId`, `pendingTimerHandlers`, interrupt frames, `observedSessionTimeMs`, and duration/timer-handle values. |
-| Checkpoint | 30 | Updated the self-contained bundle for the timer plan and snapshot contracts. |
+| Instruction plan | 22 | Media instructions `pacingBarrier`, `showImage`, and `playMedia`; handler regions carry `handler` (`timer` or `media`) and `selfHandle`. Revision 21 added the timer instructions. |
+| Runtime snapshot | 23 | Media state: `stageImage`, background `media` actions, `settledMedia`, `nextMediaId`, foreground `mediaPlayback` waits and settlements, media cue invocations and interrupt frames, barrier-promoted pacing gates, and media handles. Revision 22 added timer state. |
+| Checkpoint | 31 | Updated the self-contained bundle for the media plan and snapshot contracts. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
@@ -753,12 +835,12 @@ The exported TypeScript source frontend, source compiler, low-level runtime, sna
 
 - preserve the implemented timer, interaction, and pacing contracts while extending later runtime capabilities
   through explicit versioned schema changes;
-- define action-kind-specific media, advanced timeout, and detailed-result contracts without unnecessary independent state machines;
+- define advanced timeout and detailed-result contracts without unnecessary independent state machines;
 - define broader text-output targets and involved-speaker/conversation provenance before multi-context LLM work;
 - stable package/plan identity and migration policy;
 - Standard Library imports, generated declarations/editor metadata transport, versioning, and capability access;
 - iframe host commands and response correlation;
-- camera stream ownership, media ownership, cleanup, persistence, and recovery;
+- camera stream ownership and persistent media collections, their cleanup, persistence, and recovery;
 - time-integrity diagnostics and future server-authoritative scheduling;
 - server checkpoint persistence and conflict resolution;
 - performance profiling and safe optimization of snapshot cloning/liveness metadata.

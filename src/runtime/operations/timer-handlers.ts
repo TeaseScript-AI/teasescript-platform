@@ -16,7 +16,7 @@ import { assertCounterCanAdvance, copySpan } from "./support.js";
 export function startTimerHandler(plan: InstructionPlan, snapshot: RuntimeSnapshot): void {
   const invocation = snapshot.pendingTimerHandlers[0]!;
   const definition = plan.functions[invocation.handlerFunctionId - 1];
-  if (definition === undefined || !definition.timerHandler) {
+  if (definition === undefined || definition.handler === null) {
     throw new Error("Queued timer expiry block does not refer to a handler region.");
   }
   assertCounterCanAdvance(snapshot.nextCallFrameId, "nextCallFrameId");
@@ -24,12 +24,8 @@ export function startTimerHandler(plan: InstructionPlan, snapshot: RuntimeSnapsh
   if (invocation.count > 1) invocation.count -= 1;
   else snapshot.pendingTimerHandlers.shift();
   const suspendedAction = snapshot.foregroundAction;
-  if (
-    suspendedAction !== null &&
-    suspendedAction.kind !== "delay" &&
-    suspendedAction.kind !== "interaction"
-  ) {
-    throw new Error("Only a foreground delay or interaction can be interrupted.");
+  if (suspendedAction !== null && suspendedAction.kind === "chatPacingGate") {
+    throw new Error("Only a foreground delay, interaction, or media wait can be interrupted.");
   }
   const frame: RuntimeCallFrameSnapshot = {
     id: snapshot.nextCallFrameId,
@@ -38,11 +34,10 @@ export function startTimerHandler(plan: InstructionPlan, snapshot: RuntimeSnapsh
     callSiteSpan: copySpan(definition.declarationSpan),
     returnInstruction: snapshot.nextInstruction,
     destinationTemporary: null,
-    timerInterruption: {
-      timerId: invocation.timerId,
-      dueAtMs: invocation.dueAtMs,
-      suspendedAction,
-    },
+    timerInterruption:
+      "mediaId" in invocation
+        ? { mediaId: invocation.mediaId, dueAtMs: invocation.dueAtMs, suspendedAction }
+        : { timerId: invocation.timerId, dueAtMs: invocation.dueAtMs, suspendedAction },
     callerTemporaries: snapshot.temporaries.map((temporary) => ({ ...temporary })),
     scopeBaseDepth: snapshot.frames.length,
     loopBaseDepth: snapshot.loopFrames.length,
@@ -52,7 +47,19 @@ export function startTimerHandler(plan: InstructionPlan, snapshot: RuntimeSnapsh
   snapshot.nextCallFrameId += 1;
   snapshot.callFrames.push(frame);
   snapshot.temporaries.length = 0;
-  snapshot.frames.push({ id: snapshot.nextScopeId, bindings: [] });
+  // A media block of `let NAME = play... async` sees its own handle as a local.
+  snapshot.frames.push({
+    id: snapshot.nextScopeId,
+    bindings:
+      definition.selfHandle !== null && "mediaId" in invocation
+        ? [
+            {
+              name: definition.selfHandle,
+              value: { kind: "mediaHandle", mediaId: invocation.mediaId },
+            },
+          ]
+        : [],
+  });
   snapshot.nextScopeId += 1;
   snapshot.foregroundAction = null;
   snapshot.status = "running";

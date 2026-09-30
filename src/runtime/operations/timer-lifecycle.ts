@@ -33,7 +33,12 @@ export function timerHandlerDispatchable(snapshot: RuntimeSnapshot): boolean {
   )
     return false;
   const foreground = snapshot.foregroundAction;
-  return foreground === null || foreground.kind === "delay" || foreground.kind === "interaction";
+  return (
+    foreground === null ||
+    foreground.kind === "delay" ||
+    foreground.kind === "interaction" ||
+    foreground.kind === "mediaPlayback"
+  );
 }
 
 /**
@@ -169,7 +174,8 @@ export function stopTimerAction(
 ): void {
   stopTimer(action.timer, snapshot.currentSessionTimeMs);
   for (let index = snapshot.pendingTimerHandlers.length - 1; index >= 0; index -= 1) {
-    if (snapshot.pendingTimerHandlers[index]!.timerId === action.timer.timerId) {
+    const invocation = snapshot.pendingTimerHandlers[index]!;
+    if ("timerId" in invocation && invocation.timerId === action.timer.timerId) {
       snapshot.pendingTimerHandlers.splice(index, 1);
     }
   }
@@ -203,7 +209,12 @@ function queueTimerHandler(
   while (index > 0 && queue[index - 1]!.dueAtMs > dueAtMs) index -= 1;
   const previous = queue[index - 1];
   // A full count starts a new entry, so aggregation never publishes an unsafe integer.
-  if (previous?.timerId === timerId && previous.count < Number.MAX_SAFE_INTEGER) {
+  if (
+    previous !== undefined &&
+    "timerId" in previous &&
+    previous.timerId === timerId &&
+    previous.count < Number.MAX_SAFE_INTEGER
+  ) {
     previous.count += 1;
     return;
   }

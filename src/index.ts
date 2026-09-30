@@ -128,7 +128,18 @@ export {
   type RuntimeRunOptions,
 } from "./runtime/engine.js";
 export { completeAction } from "./runtime/operations/complete-action.js";
-export { observeTime } from "./runtime/operations/observe-time.js";
+export { observeTime, type MediaProgressReport } from "./runtime/operations/observe-time.js";
+export {
+  reportMediaLoad,
+  type MediaLoadReport,
+  type MediaReportOutcome,
+} from "./runtime/operations/media-reports.js";
+export {
+  mediaPlaybackProjection,
+  stageProjection,
+  type MediaPlaybackProjection,
+  type StageProjection,
+} from "./runtime/media-projection.js";
 export type {
   PendingActionOperationResult,
   TimeObservationOutcome,
@@ -174,6 +185,10 @@ export type {
   RuntimeActionSettlementSnapshot,
   RuntimeDelayActionSnapshot,
   RuntimeInteractionActionSnapshot,
+  RuntimeMediaActionSnapshot,
+  RuntimeMediaPlaybackActionSnapshot,
+  RuntimeMediaPlaybackSettlementSnapshot,
+  RuntimeMediaSettlementSnapshot,
   RuntimeDelayActionSettlementSnapshot,
   RuntimeInteractionActionSettlementSnapshot,
   RuntimePendingActionSnapshot,
@@ -199,6 +214,7 @@ export {
   type SerializableRuntimeSet,
   type SerializableRuntimeValue,
   type SerializableSpeakerReference,
+  type SerializableMediaHandle,
 } from "./runtime/serializable-values.js";
 export {
   combineSourceSpans,
@@ -248,6 +264,15 @@ export type {
   ShowButtonStatement,
   WaitStatement,
   TimerStatement,
+  ShowImageStatement,
+  HideImageStatement,
+  MediaCue,
+  MediaHandlers,
+  MediaKind,
+  MediaParts,
+  MediaRepeat,
+  PlayMediaExpression,
+  PlayMediaStatement,
   SetLiteral,
   SpeakerDeclaration,
   SpeakerProperty,

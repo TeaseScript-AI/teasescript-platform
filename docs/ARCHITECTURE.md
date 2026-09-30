@@ -91,7 +91,7 @@ JSON-safe after every instruction boundary does not mean serializing or persisti
 ## Deferred architecture
 
 The cross-origin host protocol, Standard Library linkage and packaging, deterministic library identity/version binding,
-generated editor metadata, privileged adapter boundaries, media handles, server checkpoint persistence, package
+generated editor metadata, privileged adapter boundaries, server checkpoint persistence, package
 identity/migrations, and continuous-personality scheduling remain later work.
 
 ## Implemented source-layout seams

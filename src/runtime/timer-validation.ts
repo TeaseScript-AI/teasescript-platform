@@ -34,7 +34,7 @@ const TIMER_ACTION_KEYS = [
 
 /** Whether a plan can interrupt a waiting path, which relaxes action-history ordering after a block returns. */
 export function planHasTimerHandlers(plan: InstructionPlan | undefined): boolean {
-  return plan === undefined || plan.functions.some((definition) => definition.timerHandler);
+  return plan === undefined || plan.functions.some((definition) => definition.handler !== null);
 }
 
 /**
@@ -188,7 +188,7 @@ function validTimerRecord(
   }
   if (timer.handlerFunctionId !== null) {
     if (!positiveSafeInteger(timer.handlerFunctionId)) return false;
-    if (plan !== undefined && plan.functions[timer.handlerFunctionId - 1]?.timerHandler !== true)
+    if (plan !== undefined && plan.functions[timer.handlerFunctionId - 1]?.handler !== "timer")
       return false;
   }
   switch (timer.state) {
@@ -282,6 +282,20 @@ export function validateTimerState(
   let previousDue = -Infinity;
   const oneShotInvocations = new Map<number, number>();
   for (const invocation of queue) {
+    // Media cue invocations share the queue; their ownership is validated with media state, their order here.
+    if (isPlainRecord(invocation) && Object.hasOwn(invocation, "mediaId")) {
+      if (
+        !isValidSessionTime(invocation.dueAtMs) ||
+        !isValidSessionTime(value.currentSessionTimeMs) ||
+        invocation.dueAtMs > value.currentSessionTimeMs ||
+        invocation.dueAtMs < previousDue
+      ) {
+        errors.push("Runtime pending media cue block is malformed.");
+      } else {
+        previousDue = invocation.dueAtMs;
+      }
+      continue;
+    }
     const record =
       isPlainRecord(invocation) && positiveSafeInteger(invocation.timerId)
         ? records.get(invocation.timerId)
@@ -314,7 +328,12 @@ export function validateTimerState(
   }
   if (Array.isArray(value.callFrames)) {
     for (const frame of value.callFrames) {
-      if (!isPlainRecord(frame) || !isPlainRecord(frame.timerInterruption)) continue;
+      if (
+        !isPlainRecord(frame) ||
+        !isPlainRecord(frame.timerInterruption) ||
+        Object.hasOwn(frame.timerInterruption, "mediaId")
+      )
+        continue;
       const record = positiveSafeInteger(frame.timerInterruption.timerId)
         ? records.get(frame.timerInterruption.timerId)
         : undefined;

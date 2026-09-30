@@ -448,9 +448,9 @@ test("current pacing serialization versions accept only their exact schemas", ()
   const compiled = plan('say "first"');
   const snapshot = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
   const checkpoint = JSON.parse(serializeCheckpoint(createCheckpoint(compiled, snapshot)));
-  assert.equal(compiled.version, 21);
-  assert.equal(snapshot.version, 22);
-  assert.equal(checkpoint.version, 30);
+  assert.equal(compiled.version, 22);
+  assert.equal(snapshot.version, 23);
+  assert.equal(checkpoint.version, 31);
   assert.doesNotThrow(() => deserializeCheckpoint(JSON.stringify(checkpoint)));
 
   const oldSnapshot = structuredClone(snapshot);

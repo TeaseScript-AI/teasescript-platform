@@ -13,6 +13,9 @@ export type Statement =
   | ShowButtonStatement
   | WaitStatement
   | TimerStatement
+  | ShowImageStatement
+  | HideImageStatement
+  | PlayMediaStatement
   | ExitStatement
   | LetStatement
   | AssignmentStatement
@@ -108,6 +111,76 @@ export interface TimerStatement extends TimerParts {
 /** An asynchronous timer used as a value; it evaluates to its handle. */
 export interface TimerExpression extends TimerParts {
   readonly kind: "timerExpression";
+}
+
+/** `showImage <file>`: sets the persistent Stage image; a `null` value clears it with a developer warning. */
+export interface ShowImageStatement {
+  readonly kind: "showImageStatement";
+  readonly image: Expression;
+  readonly span: SourceSpan;
+}
+
+/** `hideImage`: clears the persistent Stage image. */
+export interface HideImageStatement {
+  readonly kind: "hideImageStatement";
+  readonly span: SourceSpan;
+}
+
+export type MediaKind = "audio" | "video";
+
+/**
+ * The compact `repeat` modifier (`indefinite`), a named `repeat: <value>` (`true`, `false`, or a duration budget), or a
+ * named `repeat: <count> times`.
+ */
+export type MediaRepeat =
+  | { readonly kind: "indefinite"; readonly span: SourceSpan }
+  | { readonly kind: "value"; readonly value: Expression; readonly span: SourceSpan }
+  | { readonly kind: "times"; readonly count: Expression; readonly span: SourceSpan };
+
+/** One structured timeline cue: `at <position> { ... }`, `beforeEnd <offset> { ... }`, or `finish { ... }`. */
+export interface MediaCue {
+  readonly kind: "at" | "beforeEnd" | "finish";
+  /** The cue point; `null` for `finish`. */
+  readonly offset: Expression | null;
+  readonly body: Block;
+  readonly keywordSpan: SourceSpan;
+  readonly span: SourceSpan;
+}
+
+/**
+ * A block after a play command. Ordinary statements form a compact block that runs at the end of every pass, like
+ * `beforeEnd 0 s`; a block of cue declarations lists structured cues.
+ */
+export type MediaHandlers =
+  | { readonly kind: "compact"; readonly body: Block }
+  | { readonly kind: "cues"; readonly cues: readonly MediaCue[]; readonly span: SourceSpan };
+
+/**
+ * Shared data of the short form `playAudio|playVideo [async] [repeat] <file> [{ ... }]` and the named form
+ * `playAudio|playVideo(file:, async:, repeat:, startAt:, endAt:, volume:) [{ ... }]`.
+ */
+export interface MediaParts {
+  readonly media: MediaKind;
+  readonly form: "short" | "named";
+  readonly async: boolean;
+  readonly file: Expression;
+  readonly repeat: MediaRepeat | null;
+  readonly startAt: Expression | null;
+  readonly endAt: Expression | null;
+  readonly volume: Expression | null;
+  readonly handlers: MediaHandlers | null;
+  readonly commandSpan: SourceSpan;
+  readonly span: SourceSpan;
+}
+
+/** Blocking playback, or asynchronous playback whose handle is ignored. */
+export interface PlayMediaStatement extends MediaParts {
+  readonly kind: "playMediaStatement";
+}
+
+/** Asynchronous playback used as a value; it evaluates to its handle. */
+export interface PlayMediaExpression extends MediaParts {
+  readonly kind: "playMediaExpression";
 }
 
 export interface ExitStatement {
@@ -232,7 +305,8 @@ export type Expression =
   | BinaryExpression
   | RangeExpression
   | InteractionExpression
-  | TimerExpression;
+  | TimerExpression
+  | PlayMediaExpression;
 
 export interface InteractionExpression {
   readonly kind: "interactionExpression";
