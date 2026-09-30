@@ -130,7 +130,7 @@ test("required campaign reaches retained variants and varied source-fuzz familie
   for (const operation of ["run", "executeInstruction", "observeTime", "completeAction"]) {
     assert.ok(contexts.some((context) => context.includes(`operation=${operation}`)));
   }
-  for (const variant of ["not-due", "duplicate-settlement"]) {
+  for (const variant of ["time-completion", "duplicate-settlement"]) {
     assert.ok(contexts.some((context) => context.includes(`rejected-completion=${variant}`)));
   }
   for (const malformed of ["plan", "snapshot", "checkpoint"]) {

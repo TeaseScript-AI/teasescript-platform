@@ -683,12 +683,12 @@ test("runtime review regressions stay checkpointable and ordered", () => {
 
   const deferred = new Session('timer async 1 s { say "interrupt" }\nwait 2 s');
   const delay = deferred.snapshot.foregroundAction!;
-  const completion = completeAction(deferred.plan, deferred.snapshot, {
-    actionId: delay.actionId,
-    actionKind: "delay",
-    payload: { kind: "time", currentSessionTimeMs: 2_000 },
-  });
-  assert.equal(completion.outcome.kind, "suspendedAction");
+  const interrupted = observeTime(deferred.plan, deferred.snapshot, 2_000);
+  assert.equal(interrupted.snapshot.currentSessionTimeMs, 1_000, "the earlier block runs first");
+  assert.equal(interrupted.snapshot.foregroundAction?.actionId, delay.actionId);
+  deferred.at(2_000);
+  assert.deepEqual(deferred.said(), ["interrupt"]);
+  assert.equal(deferred.snapshot.status, "halted");
 
   const stopped = new Session(
     'let second = timer async 2 s { say "second" }\nlet first = timer async 1 s { second.stop() }\nwait 3 s',
@@ -867,18 +867,27 @@ test("catch-up holds for a queued block behind a commit window and timer settlem
     'timer async 1 { say "handler" }\nlet name = askText "Name?"\nsay name',
   );
   const observed = observeTime(asking.plan, asking.snapshot, 5_000).snapshot;
-  const completed = completeAction(asking.plan, observed, {
-    actionId: observed.foregroundAction!.actionId,
-    actionKind: "interaction",
-    interactionKind: "text",
-    payload: { kind: "submittedText", submittedText: "ok" },
-  });
+  const answer = (snapshot: RuntimeSnapshot, actionId: number, text: string) =>
+    completeAction(asking.plan, snapshot, {
+      actionId,
+      actionKind: "interaction",
+      interactionKind: "text",
+      payload: { kind: "submittedText", submittedText: text },
+    });
+  const questionId = observed.foregroundAction!.actionId;
+  const early = answer(observed, questionId, "ok");
+  assert.equal(early.outcome.kind, "executionPending", "the due block runs before input");
+  assert.deepEqual(early.snapshot, observed);
+  assert.deepEqual(early.events, []);
+  const caughtUp = run(asking.plan, observed);
+  assert.equal(caughtUp.snapshot.currentSessionTimeMs, 5_000);
+  const completed = answer(caughtUp.snapshot, questionId, "ok");
   assert.equal(completed.outcome.kind, "completed");
   const restored = deserializeCheckpoint(
     serializeCheckpoint(createCheckpoint(asking.plan, completed.snapshot)),
   ).snapshot;
   assert.deepEqual(
-    run(asking.plan, restored).events.flatMap((event) =>
+    [...caughtUp.events, ...run(asking.plan, restored).events].flatMap((event) =>
       event.kind === "say" ? [event.text] : [],
     ),
     ["handler", "ok"],
@@ -916,25 +925,77 @@ test("pacing consumed or skipped during catch-up and terminal completions keep q
     actionKind: "chatPacingGate",
     payload: { kind: "skip" },
   });
-  assert.equal(skipped.outcome.kind, "completed");
-  deserializeCheckpoint(serializeCheckpoint(createCheckpoint(skipping.plan, skipped.snapshot)));
+  assert.equal(skipped.outcome.kind, "executionPending");
+  assert.deepEqual(skipped.snapshot, held);
 
   const button = new Session('timer async 1 { say "handler", 0 }\nshowButton "Continue"');
   const due = observeTime(button.plan, button.snapshot, 5_000).snapshot;
-  const pressed = completeAction(button.plan, due, {
-    actionId: due.foregroundAction!.actionId,
-    actionKind: "interaction",
-    interactionKind: "button",
-    payload: { kind: "activate" },
-  });
+  const buttonId = due.foregroundAction!.actionId;
+  const press = (snapshot: RuntimeSnapshot) =>
+    completeAction(button.plan, snapshot, {
+      actionId: buttonId,
+      actionKind: "interaction",
+      interactionKind: "button",
+      payload: { kind: "activate" },
+    });
+  assert.equal(press(due).outcome.kind, "executionPending");
+  const handled = run(button.plan, due);
+  assert.deepEqual(
+    handled.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["handler"],
+  );
+  const pressed = press(handled.snapshot);
   assert.equal(pressed.outcome.kind, "completed");
   const ended = run(button.plan, pressed.snapshot);
-  assert.deepEqual(
-    ended.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
-    ["handler"],
-    "expiry blocks queued before a terminal action completes still run",
-  );
   assert.equal(ended.snapshot.status, "halted");
+});
+
+test("host input waits for scene-time catch-up and for an expiry block due at the same time", () => {
+  // An answer at 5 s must not continue the script at the 1 s scene time of a queued block.
+  const late = new Session(
+    'let answer = "old"\ntimer async 1 { say answer, instant }\nanswer = askText "Name?"\nwait 1\nshowButton "Done"',
+  );
+  const lateObserved = observeTime(late.plan, late.snapshot, 5_000).snapshot;
+  const lateId = lateObserved.foregroundAction!.actionId;
+  const lateRequest = {
+    actionId: lateId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: { kind: "submittedText", submittedText: "new" },
+  };
+  assert.equal(
+    completeAction(late.plan, lateObserved, lateRequest).outcome.kind,
+    "executionPending",
+  );
+  const lateRun = run(late.plan, lateObserved).snapshot;
+  const answered = completeAction(late.plan, lateRun, lateRequest);
+  assert.equal(answered.outcome.kind, "completed");
+  const waiting = run(late.plan, answered.snapshot).snapshot;
+  assert.equal(waiting.foregroundAction?.kind, "delay");
+  assert.equal(
+    waiting.foregroundAction?.kind === "delay" ? waiting.foregroundAction.deadlineMs : null,
+    6_000,
+  );
+
+  // At equal time the due block still runs first, and its exit cancels the question.
+  const exiting = new Session(
+    'timer async 1 s { exit }\nlet answer = askText "Your answer"\nsay answer',
+  );
+  const equal = observeTime(exiting.plan, exiting.snapshot, 1_000).snapshot;
+  assert.equal(equal.currentSessionTimeMs, equal.observedSessionTimeMs);
+  const questionId = equal.foregroundAction!.actionId;
+  const request = {
+    actionId: questionId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: { kind: "submittedText", submittedText: "too late" },
+  };
+  const pending = completeAction(exiting.plan, equal, request);
+  assert.equal(pending.outcome.kind, "executionPending");
+  assert.deepEqual(pending.snapshot, equal);
+  const exited = run(exiting.plan, equal).snapshot;
+  assert.equal(exited.status, "halted");
+  assert.equal(completeAction(exiting.plan, exited, request).outcome.kind, "staleAction");
 });
 
 test("audit regressions: fractional repeats, tiny rounds, remaining rounding, and visible lists", () => {

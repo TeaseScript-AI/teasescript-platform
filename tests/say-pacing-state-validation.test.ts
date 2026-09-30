@@ -440,7 +440,8 @@ test("retained replay remains bounded across the legal cross-kind relations", ()
     actionKind: "chatPacingGate",
     payload: { kind: "skip" },
   });
-  assert.equal(wrongKind.outcome.kind, "wrongActionKind");
+  // A wait accepts no host completion, whatever kind the request claims.
+  assert.equal(wrongKind.outcome.kind, "invalidPayload");
   assert.equal(JSON.stringify(wrongKind.snapshot), baseline);
 });
 

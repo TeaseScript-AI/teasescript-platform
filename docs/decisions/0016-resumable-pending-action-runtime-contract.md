@@ -252,7 +252,7 @@ unknownAction
 staleAction
 wrongActionKind
 invalidPayload
-notDue
+executionPending
 ```
 
 Rules:
@@ -266,7 +266,10 @@ Rules:
   is `staleAction`;
 - an ID at or above `nextActionId` is `unknownAction`;
 - a response for another action kind is rejected;
-- a timed action submitted before its deadline is `notDue`;
+- waits, timers, and other timed actions accept no completion: time reaches them only through `observeTime`, and a
+  completion request for one is `invalidPayload`;
+- host input for an active action is `executionPending` while scene time is behind the observed time or a due timer
+  expiry block can run; the host runs the engine and retries with the same action ID if it is still active;
 - a late response after timeout, cancellation, or replacement does not revive the action.
 
 ## Time model

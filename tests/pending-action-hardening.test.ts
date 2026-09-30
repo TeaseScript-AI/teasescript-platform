@@ -387,7 +387,8 @@ test("#82 uses the wait keyword path and rejects forged ownership, missing wait 
     actionKind: hostileKind,
     payload: { kind: "time", currentSessionTimeMs: 1 },
   });
-  assert.equal(completion.outcome.kind, "wrongActionKind");
+  // A wait accepts no host completion at all, whatever the request claims.
+  assert.equal(completion.outcome.kind, "invalidPayload");
 });
 
 test("#82 allocates the final safe action identity and then fails without reuse", () => {

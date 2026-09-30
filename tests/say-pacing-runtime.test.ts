@@ -655,7 +655,7 @@ test("unskippable pacing rejects typed skips without mutating foreground or back
   assert.deepEqual(backgroundRejected.snapshot, backgroundActive.snapshot);
 });
 
-test("a late delay completion replays the script at the delay deadline before later pacing", () => {
+test("a late observation replays the script at the delay deadline before later pacing", () => {
   const compiled = plan('say "first"\nwait 1 s\nexit');
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   const delay = waiting.snapshot.foregroundAction;
@@ -664,17 +664,11 @@ test("a late delay completion replays the script at the delay deadline before la
   assert.equal(pacing?.kind, "chatPacingGate");
   assert.ok(pacing!.deadlineMs > delay!.deadlineMs);
 
-  const completed = completeAction(compiled, waiting.snapshot, {
-    actionId: delay!.actionId,
-    actionKind: "delay",
-    payload: { kind: "time", currentSessionTimeMs: 2_000 },
-  });
-  assert.equal(completed.outcome.kind, "completed");
-  assert.equal(completed.outcome.settlement.actionId, delay!.actionId);
+  const completed = observeTime(compiled, waiting.snapshot, 2_000);
+  const settlement = completed.snapshot.lastSettlement;
+  assert.equal(settlement?.actionId, delay!.actionId);
   assert.equal(
-    completed.outcome.settlement.actionKind === "delay"
-      ? completed.outcome.settlement.completedAtMs
-      : null,
+    settlement?.actionKind === "delay" ? settlement.completedAtMs : null,
     delay!.deadlineMs,
   );
   // The script continues at the delay's deadline, before the later pacing deadline.
@@ -962,7 +956,7 @@ test("a background pacing gate restores before promotion and preserves prepared 
   assert.deepEqual(resumed.snapshot, uninterrupted.snapshot);
 });
 
-test("pacing completion preserves active-first, replay, stale, unknown, and wrong-kind outcomes", () => {
+test("pacing completion preserves active-first, replay, stale, unknown, and wait-rejection outcomes", () => {
   const compiled = plan('say "first"\nwait 10 s\nexit');
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   const delay = waiting.snapshot.foregroundAction;
@@ -975,7 +969,8 @@ test("pacing completion preserves active-first, replay, stale, unknown, and wron
     actionKind: "chatPacingGate",
     payload: { kind: "skip" },
   });
-  assert.equal(wrongKind.outcome.kind, "wrongActionKind");
+  // A wait accepts no host completion, whatever kind the request claims.
+  assert.equal(wrongKind.outcome.kind, "invalidPayload");
   assert.deepEqual(wrongKind.snapshot, waiting.snapshot);
 
   const skipped = completeAction(compiled, waiting.snapshot, {

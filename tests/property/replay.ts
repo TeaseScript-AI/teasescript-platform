@@ -33,7 +33,7 @@ export const PROPERTY_DEFAULT_RUNS = 128;
 export const MAX_PROPERTY_RUNS = 100_000;
 
 const OPERATION_VARIANTS = ["run", "executeInstruction", "observeTime", "completeAction"] as const;
-const REJECTION_VARIANTS = ["not-due", "duplicate-settlement"] as const;
+const REJECTION_VARIANTS = ["time-completion", "duplicate-settlement"] as const;
 const MALFORMED_VARIANTS = ["plan", "snapshot", "checkpoint"] as const;
 
 export interface PropertyCampaignConfig {
@@ -339,7 +339,7 @@ function fallbackPropertyCaseResult(
 }
 
 function assertOperationClosure(seed: number, index: number): void {
-  const plan = compilePlan("wait 1 ms\nexit");
+  const plan = compilePlan('showButton "Go"\nwait 1 ms\nexit');
   const snapshot = createFreshRuntimeSnapshot(plan, { seed: caseSeed(seed, index) });
   const variant = OPERATION_VARIANTS[index % OPERATION_VARIANTS.length]!;
   const result = runOperationVariant(plan, snapshot, variant);
@@ -362,7 +362,7 @@ function runOperationVariant(
     }
     case "completeAction": {
       const waiting = run(plan, snapshot).snapshot;
-      return completeAction(plan, waiting, delayCompletion(waiting, 1));
+      return completeAction(plan, waiting, buttonCompletion(waiting));
     }
   }
 }
@@ -373,19 +373,30 @@ function describeOperationClosure(_seed: number, index: number): PropertyCaseCon
 }
 
 function assertRejectedCompletionIsAtomic(seed: number, index: number): void {
-  const plan = compilePlan("wait 10 ms\nexit");
+  const variant = REJECTION_VARIANTS[index % REJECTION_VARIANTS.length]!;
+  // Time reaches a wait only through observation; a button can be completed only once.
+  const plan = compilePlan(
+    variant === "time-completion" ? "wait 10 ms\nexit" : 'showButton "Go"\nexit',
+  );
   const waiting = run(
     plan,
     createFreshRuntimeSnapshot(plan, { seed: caseSeed(seed, index) }),
   ).snapshot;
   const waitingBefore = structuredClone(waiting);
-  const variant = REJECTION_VARIANTS[index % REJECTION_VARIANTS.length]!;
-  const request = delayCompletion(waiting, variant === "not-due" ? 9 : 10);
-  const input = variant === "not-due" ? waiting : completeAction(plan, waiting, request).snapshot;
+  const request =
+    variant === "time-completion"
+      ? {
+          actionId: waiting.foregroundAction!.actionId,
+          actionKind: "delay",
+          payload: { kind: "time", currentSessionTimeMs: 10 },
+        }
+      : buttonCompletion(waiting);
+  const input =
+    variant === "time-completion" ? waiting : completeAction(plan, waiting, request).snapshot;
   const inputBefore = structuredClone(input);
   const result = completeAction(plan, input, request);
 
-  assert.ok(["notDue", "alreadySettled"].includes(result.outcome.kind));
+  assert.ok(["invalidPayload", "alreadySettled"].includes(result.outcome.kind));
   assert.deepEqual(result.snapshot, inputBefore);
   assert.deepEqual(result.events, []);
   assert.deepEqual(waiting, waitingBefore);
@@ -546,17 +557,20 @@ function compilePlan(
   return compiled.plan;
 }
 
-function delayCompletion(
-  snapshot: RuntimeSnapshot,
-  currentSessionTimeMs: number,
-): {
+function buttonCompletion(snapshot: RuntimeSnapshot): {
   readonly actionId: number;
-  readonly actionKind: "delay";
-  readonly payload: { readonly kind: "time"; readonly currentSessionTimeMs: number };
+  readonly actionKind: "interaction";
+  readonly interactionKind: "button";
+  readonly payload: { readonly kind: "activate" };
 } {
   const actionId = snapshot.foregroundAction?.actionId;
   assert.ok(actionId !== undefined);
-  return { actionId, actionKind: "delay", payload: { kind: "time", currentSessionTimeMs } };
+  return {
+    actionId,
+    actionKind: "interaction",
+    interactionKind: "button",
+    payload: { kind: "activate" },
+  };
 }
 
 function assertValidSnapshot(plan: InstructionPlan, snapshot: RuntimeSnapshot): void {

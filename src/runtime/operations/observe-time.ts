@@ -33,11 +33,10 @@ export function observeTime(
     });
   current.observedSessionTimeMs = Math.max(current.observedSessionTimeMs, suppliedNowMs);
   const events: InterpreterEvent[] = [];
-  const completion = processDueWork(captured.plan, current, events);
+  processDueWork(captured.plan, current, events);
   return pendingResult(current, events, {
     kind: "observed",
     currentSessionTimeMs: current.currentSessionTimeMs,
-    completion,
   });
 }
 
@@ -51,16 +50,15 @@ export function processDueWork(
   plan: InstructionPlan,
   current: RuntimeSnapshot,
   events: InterpreterEvent[],
-): RuntimeActionSettlementSnapshot | null {
-  let completion: RuntimeActionSettlementSnapshot | null = null;
+): void {
   // A failed session is terminal: later observations record time but settle nothing.
-  if (current.status === "failed") return completion;
+  if (current.status === "failed") return;
   for (;;) {
-    if (executionRunnable(current)) return completion;
+    if (executionRunnable(current)) return;
     const due = nextDueWork(current);
     if (due === null) {
       current.currentSessionTimeMs = current.observedSessionTimeMs;
-      return completion;
+      return;
     }
     current.currentSessionTimeMs = Math.max(current.currentSessionTimeMs, due.deadlineMs);
     if (due.kind === "timer") {
@@ -84,9 +82,9 @@ export function processDueWork(
       due.action.kind === "chatPacingGate" &&
       current.backgroundActions.includes(due.action)
     ) {
-      completion = settleBackgroundPacingGate(plan, current, due.action, "completed", events);
+      settleBackgroundPacingGate(plan, current, due.action, "completed", events);
     } else {
-      completion = settleForegroundTimedAction(plan, current, due.action, events);
+      settleForegroundTimedAction(plan, current, due.action, events);
     }
   }
 }
