@@ -106,7 +106,7 @@ export function completeAction(
       message: "Delay completion payload must contain a valid time observation.",
     });
   }
-  const effectiveNow = Math.max(current.currentSessionTimeMs, value.payload.currentSessionTimeMs);
+  const effectiveNow = Math.max(current.observedSessionTimeMs, value.payload.currentSessionTimeMs);
   if (effectiveNow < active.deadlineMs) {
     return pendingResult(current, [], {
       kind: "notDue",

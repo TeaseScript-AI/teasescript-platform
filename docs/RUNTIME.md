@@ -509,12 +509,15 @@ with an expiry block is queued in `pendingTimerHandlers` in due order; consecuti
 with a count. A handler-free fixed repeating timer skips silent rounds arithmetically on a late
 observation.
 
-Due-work processing pauses after a round queues an expiry block that can interrupt now. Later due work, including
-other timers, the foreground delay, and pacing gates, stays unsettled while that block is queued or running, including
-across further observations before execution.
-Processing resumes when the block returns, or through observations while the block itself waits. This reproduces a
-Player that observed every deadline on time: a block can `stop()` a later timer before it expires. A Player delay
-completion that an earlier-due block will interrupt returns `suspendedAction` while keeping the time observation.
+An observation records `observedSessionTimeMs`; `currentSessionTimeMs` is the scene time at which execution stands.
+Due work settles one deadline at a time, advancing scene time to each. When an expiry block becomes able to
+interrupt, catch-up pauses with scene time at that expiry's deadline: the block runs at the time it became due, and
+catch-up continues toward the observed time once the block returns or waits. Later due work, including other
+timers, the foreground delay, and pacing gates, therefore stays unsettled until then, however late or often the
+Player observes. This reproduces a Player that observed every deadline on time: a block can `stop()` a later timer
+before it expires, a timer it starts orders by its own deadline, and a handler-free repeating timer skips silent
+rounds only up to the next other due work. A Player delay completion that an earlier-due block will interrupt
+returns `suspendedAction` while keeping the time observation.
 
 Expiry blocks compile to parameterless handler regions. A runtime entry starts the first queued block before
 executing the next instruction, including from `waiting`, unless a block is already running, a single-instruction
@@ -702,7 +705,7 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
 | Instruction plan | 21 | Timer instructions: `wait` carries `command`, `display`, and `label`; `startTimer`; duration literals; timer-handler regions. |
-| Runtime snapshot | 22 | Timer state: delay `display`/`label`, background `timer` actions, `settledTimers`, `nextTimerId`, `pendingTimerHandlers`, interrupt frames, and duration/timer-handle values. |
+| Runtime snapshot | 22 | Timer state: delay `display`/`label`, background `timer` actions, `settledTimers`, `nextTimerId`, `pendingTimerHandlers`, interrupt frames, `observedSessionTimeMs`, and duration/timer-handle values. |
 | Checkpoint | 30 | Updated the self-contained bundle for the timer plan and snapshot contracts. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.

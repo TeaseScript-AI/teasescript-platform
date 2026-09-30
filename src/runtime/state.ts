@@ -79,6 +79,7 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "nextSpeakerId",
   "nextCallFrameId",
   "currentSessionTimeMs",
+  "observedSessionTimeMs",
   "chatPacingSettings",
   "foregroundAction",
   "backgroundActions",
@@ -234,7 +235,13 @@ export interface RuntimeSnapshot {
   nextScopeId: number;
   nextSpeakerId: number;
   nextCallFrameId: number;
+  /** Scene time at which execution currently stands; engine operations read it as "now". */
   currentSessionTimeMs: number;
+  /**
+   * Latest observed scene time. Execution catches up to it event by event: at each due deadline scene time stands at
+   * that deadline while the script or expiry block runs, so late and on-time observation produce the same result.
+   */
+  observedSessionTimeMs: number;
   readonly chatPacingSettings: ChatPacingSettings;
   foregroundAction: RuntimeForegroundActionSnapshot | null;
   readonly backgroundActions: RuntimePendingActionSnapshot[];
@@ -354,6 +361,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     nextSpeakerId: 1,
     nextCallFrameId: 1,
     currentSessionTimeMs: initialSessionTimeMs,
+    observedSessionTimeMs: initialSessionTimeMs,
     chatPacingSettings,
     foregroundAction: null,
     backgroundActions: [],
@@ -455,6 +463,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     nextSpeakerId: snapshot.nextSpeakerId,
     nextCallFrameId: snapshot.nextCallFrameId,
     currentSessionTimeMs: snapshot.currentSessionTimeMs,
+    observedSessionTimeMs: snapshot.observedSessionTimeMs,
     chatPacingSettings: cloneChatPacingSettings(snapshot.chatPacingSettings),
     foregroundAction:
       snapshot.foregroundAction === null ? null : cloneForegroundAction(snapshot.foregroundAction),

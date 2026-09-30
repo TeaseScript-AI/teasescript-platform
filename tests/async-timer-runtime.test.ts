@@ -456,8 +456,9 @@ test("expiry blocks run one at a time in due order, and later expiries queue beh
       'say "main"',
     ].join("\n"),
   );
+  // B's wait ends at 6 s, so a late observation at 10 s runs the whole block and then the queued C and A.
   session.at(10_000);
-  assert.deepEqual(session.said(), ["B start"]);
+  assert.deepEqual(session.said(), ["B start", "B end", "C", "A"]);
   session.at(20_000);
   assert.deepEqual(session.said(), ["B start", "B end", "C", "A", "main"]);
 });
@@ -705,12 +706,6 @@ test("final review regressions keep late expiries valid and reject forged invoca
   assert.equal(pausedTimer.state, "paused", "pausing an overdue round ends it and stays paused");
   assert.equal(pausedTimer.remainingMs, 1_000);
 
-  const ordered = new Session(
-    'timer async 1 {\n  timer async 0 { say "nested" }\n  wait 1\n}\ntimer async 2 { say "second" }\nwait 10',
-  ).at(3_000);
-  ordered.at(4_000);
-  assert.deepEqual(ordered.said(), ["second", "nested"], "expiry blocks run in due order");
-
   const oneShot = new Session(
     'let hits = 0\ntimer async 1 { hits += 1 }\nwait 2\nsay "hits ${hits}"',
   );
@@ -758,4 +753,33 @@ test("restore rejects impossible timer chronology and a repeated one-shot expiry
   const stopped = new Session("let t = timer async 5\nt.stop()\nwait 1");
   const stoppedJson = serializeCheckpoint(createCheckpoint(stopped.plan, stopped.snapshot));
   assertForgedRejected(stoppedJson, ["snapshot", "settledTimers", 0, "elapsedMs"], 10_000);
+});
+
+test("late observations run expiry blocks at their due scene time, like on-time observations", () => {
+  const said = (source: string, observations: readonly number[]): string[] => {
+    const session = new Session(source);
+    for (const nowMs of observations) session.at(nowMs);
+    return session.said();
+  };
+  const cases: readonly (readonly [string, readonly number[], readonly string[]])[] = [
+    [
+      'timer async 1 { timer async 0 { say "nested" } }\ntimer async 2 { say "second" }\nwait 10',
+      [1_000, 2_000, 3_000],
+      ["nested", "second"],
+    ],
+    [
+      'timer async 1 {\n  timer async 0 { say "nested" }\n  wait 1\n}\ntimer async 3 { say "second" }\nwait 10',
+      [1_000, 2_000, 3_000, 4_000],
+      ["nested", "second"],
+    ],
+    [
+      'let t = timer(duration: 1, async: true, repeat: true)\ntimer async 2 { t.repeatDuration = 10 s }\nwait 5\nsay "${t.remaining} ${t.elapsed}"',
+      [1_000, 2_000, 3_000, 5_000],
+      ["8 s 5 s"],
+    ],
+  ];
+  for (const [source, onTime, expected] of cases) {
+    assert.deepEqual(said(source, onTime), expected, source);
+    assert.deepEqual(said(source, [onTime.at(-1)!]), expected, `late: ${source}`);
+  }
 });

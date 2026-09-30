@@ -1,6 +1,6 @@
 import type { InstructionPlan } from "../plan/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
-import { dueWorkAwaitsQueuedBlock } from "./action-validation.js";
+import { executionPendingAtCurrentTime } from "./action-validation.js";
 
 /** Restore validation for asynchronous timers, their handles, and queued expiry blocks. */
 
@@ -55,7 +55,7 @@ export function validTimerAction(
     action.createdAtMs > now ||
     !nonNegativeSafeInteger(action.owningInstruction) ||
     !isPlainRecord(action.timer) ||
-    !validTimerRecord(action.timer, true, now, plan, dueWorkAwaitsQueuedBlock(snapshot)) ||
+    !validTimerRecord(action.timer, true, now, plan, executionPendingAtCurrentTime(snapshot)) ||
     !validActiveChronology(action.timer, action.createdAtMs, now)
   ) {
     return false;
@@ -136,7 +136,7 @@ function validTimerRecord(
         timer.remainingMs === null &&
         isValidSessionTime(timer.deadlineMs) &&
         isValidSessionTime(timer.runningSinceMs) &&
-        (timer.deadlineMs > now || allowDue) &&
+        (timer.deadlineMs > now || (allowDue && timer.deadlineMs === now)) &&
         timer.runningSinceMs <= now
       );
     case "paused":

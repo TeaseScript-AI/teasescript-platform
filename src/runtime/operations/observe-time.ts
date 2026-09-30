@@ -31,8 +31,7 @@ export function observeTime(
       kind: "invalidObservation",
       message: `Time observation must be a finite number from 0 through ${MAX_RUNTIME_SESSION_TIME_MS}.`,
     });
-  const effectiveNow = Math.max(current.currentSessionTimeMs, suppliedNowMs);
-  current.currentSessionTimeMs = effectiveNow;
+  current.observedSessionTimeMs = Math.max(current.observedSessionTimeMs, suppliedNowMs);
   const events: InterpreterEvent[] = [];
   const completion = processDueWork(captured.plan, current, events);
   return pendingResult(current, events, {
@@ -43,10 +42,11 @@ export function observeTime(
 }
 
 /**
- * Settles due work at the persisted scene time in `(deadline, action ID)` order. Processing pauses while an expiry
- * block that can interrupt now is queued: later due work waits until that block has run, exactly as in a Player that
- * observed every deadline on time, even when several observations arrive before execution. A block's return resumes
- * processing.
+ * Advances scene time toward the observed time one due deadline at a time, in `(deadline, action ID)` order. When an
+ * expiry becomes able to interrupt, catch-up pauses with scene time at that expiry's deadline: the block runs at the
+ * time it became due, and catch-up resumes once it returns or waits. Expiry blocks therefore behave as if every
+ * deadline were observed on time, however late the observation arrives. Other settled work continues at the observed
+ * time, as before.
  */
 export function processDueWork(
   plan: InstructionPlan,
@@ -54,11 +54,17 @@ export function processDueWork(
   events: InterpreterEvent[],
 ): RuntimeActionSettlementSnapshot | null {
   let completion: RuntimeActionSettlementSnapshot | null = null;
-  if (timerHandlerDispatchable(current)) return completion;
-  for (let due = nextDueWork(current); due !== null; due = nextDueWork(current)) {
+  for (;;) {
+    if (timerHandlerDispatchable(current)) return completion;
+    const due = nextDueWork(current);
+    if (due === null) {
+      current.currentSessionTimeMs = current.observedSessionTimeMs;
+      return completion;
+    }
+    current.currentSessionTimeMs = Math.max(current.currentSessionTimeMs, due.deadlineMs);
     if (due.kind === "timer") {
-      skipSilentRounds(due.action.timer, current.currentSessionTimeMs);
-      const queued = due.action.timer.handlerFunctionId !== null;
+      // Silent rounds may be skipped only up to the next other work, which could observe or change this timer.
+      skipSilentRounds(due.action.timer, nextOtherDeadline(current, due.actionId));
       expireTimerAction(
         current,
         due.action,
@@ -66,7 +72,6 @@ export function processDueWork(
         timerSpan(plan, due.action.owningInstruction),
         events,
       );
-      if (queued && timerHandlerDispatchable(current)) break;
     } else if (due.kind === "suspended") {
       settleSuspendedDelay(plan, current, due.frame, due.action, events);
     } else if (
@@ -78,7 +83,12 @@ export function processDueWork(
       completion = settleForegroundTimedAction(plan, current, due.action, events);
     }
   }
-  return completion;
+}
+
+/** The script or a queued expiry block can execute. */
+export function executionRunnable(snapshot: RuntimeSnapshot): boolean {
+  if (snapshot.status === "ready" || snapshot.status === "running") return true;
+  return snapshot.status === "waiting" && timerHandlerDispatchable(snapshot);
 }
 
 type DueWork =
@@ -103,11 +113,35 @@ type DueWork =
     };
 
 /**
- * The earliest due timed work by `(deadline, action ID)`. A due foreground delay waits while an expiry block that
- * became due earlier is queued: the block interrupts that delay first, and the delay then settles as suspended work.
+ * The earliest timed work due by the observed time, by `(deadline, action ID)`. A due foreground delay waits while an
+ * expiry block that became due earlier is queued: the block interrupts that delay first, and the delay then settles
+ * as suspended work.
  */
 function nextDueWork(snapshot: RuntimeSnapshot): DueWork | null {
-  const now = snapshot.currentSessionTimeMs;
+  let earliest: DueWork | null = null;
+  for (const candidate of timedWork(snapshot)) {
+    if (candidate.deadlineMs > snapshot.observedSessionTimeMs) continue;
+    if (
+      earliest === null ||
+      candidate.deadlineMs < earliest.deadlineMs ||
+      (candidate.deadlineMs === earliest.deadlineMs && candidate.actionId < earliest.actionId)
+    ) {
+      earliest = candidate;
+    }
+  }
+  return earliest;
+}
+
+/** The earliest deadline of other timed work, capped at the observed time. */
+function nextOtherDeadline(snapshot: RuntimeSnapshot, actionId: number): number {
+  let limit = snapshot.observedSessionTimeMs;
+  for (const candidate of timedWork(snapshot)) {
+    if (candidate.actionId !== actionId) limit = Math.min(limit, candidate.deadlineMs);
+  }
+  return limit;
+}
+
+function timedWork(snapshot: RuntimeSnapshot): DueWork[] {
   const candidates: DueWork[] = [];
   const foreground = snapshot.foregroundAction;
   const handlerRunning = snapshot.callFrames.some((frame) => frame.timerInterruption !== null);
@@ -151,18 +185,7 @@ function nextDueWork(snapshot: RuntimeSnapshot): DueWork | null {
       });
     }
   }
-  let earliest: DueWork | null = null;
-  for (const candidate of candidates) {
-    if (candidate.deadlineMs > now) continue;
-    if (
-      earliest === null ||
-      candidate.deadlineMs < earliest.deadlineMs ||
-      (candidate.deadlineMs === earliest.deadlineMs && candidate.actionId < earliest.actionId)
-    ) {
-      earliest = candidate;
-    }
-  }
-  return earliest;
+  return candidates;
 }
 
 /**

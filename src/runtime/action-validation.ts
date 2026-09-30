@@ -86,6 +86,18 @@ export function validatePendingActionState(
 ): void {
   if (!validSessionTime(value.currentSessionTimeMs))
     errors.push("Runtime currentSessionTimeMs is outside the supported range.");
+  if (
+    !validSessionTime(value.observedSessionTimeMs) ||
+    !validSessionTime(value.currentSessionTimeMs) ||
+    value.observedSessionTimeMs < value.currentSessionTimeMs ||
+    (value.observedSessionTimeMs > value.currentSessionTimeMs &&
+      value.status !== "failed" &&
+      !executionPendingAtCurrentTime(value))
+  ) {
+    errors.push(
+      "Runtime observedSessionTimeMs must not precede scene time, and exceeds it only while execution is pending.",
+    );
+  }
   if (!validBackgroundPacingActions(value, plan)) {
     errors.push("Runtime backgroundActions are malformed.");
   }
@@ -94,7 +106,7 @@ export function validatePendingActionState(
   const action = value.foregroundAction;
   if (
     action !== null &&
-    !validForegroundActionState(action, value, plan, awaitsTimerInterrupt(value))
+    !validForegroundActionState(action, value, plan, executionPendingAtCurrentTime(value))
   ) {
     errors.push("Runtime foreground action is malformed.");
   }
@@ -273,8 +285,8 @@ function validActiveActionIdentityCoherence(
 }
 
 /**
- * Validates one foreground action against the execution context in `snapshot`. `allowDue` admits a delay whose
- * deadline has passed but which settles later in order: one awaiting a queued expiry block, or one suspended by it.
+ * Validates one foreground action against the execution context in `snapshot`. `allowDue` admits a delay due exactly
+ * now that settles after the execution pending at this scene time, or one suspended by an expiry block.
  */
 export function validForegroundActionState(
   action: unknown,
@@ -310,7 +322,8 @@ export function validForegroundActionState(
     validSessionTime(action.deadlineMs) &&
     validSessionTime(currentSessionTimeMs) &&
     action.createdAtMs <= currentSessionTimeMs &&
-    (action.deadlineMs > currentSessionTimeMs || allowDue);
+    (action.deadlineMs > currentSessionTimeMs ||
+      (allowDue && action.deadlineMs === currentSessionTimeMs));
   return (
     validForegroundActionBase(action, snapshot, callIds) &&
     validForegroundActionKind(action, snapshot, plan, delayTimesAreValid) &&
@@ -320,29 +333,20 @@ export function validForegroundActionState(
 }
 
 /**
- * A due foreground delay stays unsettled while an earlier-due expiry block is queued: the block interrupts first and
- * the delay then settles as suspended work, preserving scene-time order.
+ * Catch-up to the observed scene time pauses while a queued expiry block can interrupt, and a host may observe before
+ * running a ready script. Timed work due exactly now then waits for that execution, and scene time may stand behind
+ * the observed time.
  */
-function awaitsTimerInterrupt(snapshot: Record<string, unknown>): boolean {
+export function executionPendingAtCurrentTime(snapshot: Record<string, unknown>): boolean {
+  if (snapshot.status === "ready" || snapshot.status === "running") return true;
   return (
+    snapshot.status === "waiting" &&
     Array.isArray(snapshot.pendingTimerHandlers) &&
     snapshot.pendingTimerHandlers.length > 0 &&
     Array.isArray(snapshot.callFrames) &&
-    !snapshot.callFrames.some((frame) => isPlainRecord(frame) && frame.timerInterruption !== null)
-  );
-}
-
-/**
- * Due-work processing pauses after queuing an expiry block that can interrupt, so later-due work may stay unsettled
- * while that block is queued or running.
- */
-export function dueWorkAwaitsQueuedBlock(snapshot: Record<string, unknown>): boolean {
-  return (
-    (Array.isArray(snapshot.pendingTimerHandlers) && snapshot.pendingTimerHandlers.length > 0) ||
-    (Array.isArray(snapshot.callFrames) &&
-      snapshot.callFrames.some(
-        (frame) => isPlainRecord(frame) && isPlainRecord(frame.timerInterruption),
-      ))
+    !snapshot.callFrames.some(
+      (frame) => isPlainRecord(frame) && isPlainRecord(frame.timerInterruption),
+    )
   );
 }
 
@@ -623,7 +627,9 @@ function validPacingGateTiming(
     validSessionTime(action.deadlineMs) &&
     validSessionTime(snapshot.currentSessionTimeMs) &&
     action.createdAtMs <= snapshot.currentSessionTimeMs &&
-    (action.deadlineMs > snapshot.currentSessionTimeMs || dueWorkAwaitsQueuedBlock(snapshot))
+    (action.deadlineMs > snapshot.currentSessionTimeMs ||
+      (action.deadlineMs === snapshot.currentSessionTimeMs &&
+        executionPendingAtCurrentTime(snapshot)))
   );
 }
 

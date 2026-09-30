@@ -1523,6 +1523,8 @@ function settledHandoffFixture(): SettlementHandoffFixture {
   validatedCompositeWithNewerSettlement.nextEventSequence = laterSettled.snapshot.nextEventSequence;
   validatedCompositeWithNewerSettlement.currentSessionTimeMs =
     laterSettled.snapshot.currentSessionTimeMs;
+  validatedCompositeWithNewerSettlement.observedSessionTimeMs =
+    laterSettled.snapshot.observedSessionTimeMs;
   const compositeValidation = validateRuntimeSnapshot(
     validatedCompositeWithNewerSettlement,
     injected.plan,
@@ -1791,6 +1793,7 @@ test("PR194 matrix: settlement and active handoff validation", () => {
         snapshot.nextActionId = pendingDelay.nextActionId;
         snapshot.nextEventSequence = pendingDelay.nextEventSequence;
         snapshot.currentSessionTimeMs = pendingDelay.currentSessionTimeMs;
+        snapshot.observedSessionTimeMs = pendingDelay.observedSessionTimeMs;
       },
     },
     {

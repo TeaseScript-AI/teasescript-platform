@@ -93,6 +93,7 @@ import {
   timerHandlerDispatchable,
 } from "./operations/timer-handlers.js";
 import { expireTimerAction, stopAllTimersForSessionEnd } from "./operations/timer-lifecycle.js";
+import { executionRunnable, processDueWork } from "./operations/observe-time.js";
 import { cloneTimer } from "./timers.js";
 import {
   isDuration,
@@ -125,7 +126,27 @@ export function executeInstruction(
   return result(captured.snapshot, context.events, instructionsExecuted);
 }
 
+/**
+ * Executes one instruction boundary. Once execution waits or ends, scene time continues toward the already observed
+ * time, which may make a later deadline's work runnable at that deadline.
+ */
 function executeCapturedInstruction(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  context: RuntimeExecutionContext,
+): number {
+  const executed = executeInstructionBoundary(plan, snapshot, context);
+  if (
+    snapshot.status !== "failed" &&
+    snapshot.currentSessionTimeMs < snapshot.observedSessionTimeMs &&
+    !executionRunnable(snapshot)
+  ) {
+    processDueWork(plan, snapshot, context.events);
+  }
+  return executed;
+}
+
+function executeInstructionBoundary(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   context: RuntimeExecutionContext,
@@ -208,7 +229,7 @@ export function stepValidatedStateToEvent(
   const budget = instructionBudget(options.instructionBudget);
   const context = new RuntimeExecutionContext(snapshot, capabilities);
   let instructionsExecuted = 0;
-  while (runnable(snapshot) && context.events.length === 0) {
+  while (executionRunnable(snapshot) && context.events.length === 0) {
     if (instructionsExecuted >= budget) {
       failForBudget(plan, snapshot, context.events);
       break;
@@ -238,7 +259,7 @@ export function runValidatedState(
   const budget = instructionBudget(options.instructionBudget);
   const context = new RuntimeExecutionContext(snapshot, capabilities);
   let instructionsExecuted = 0;
-  while (runnable(snapshot)) {
+  while (executionRunnable(snapshot)) {
     if (instructionsExecuted >= budget) {
       failForBudget(plan, snapshot, context.events);
       break;
@@ -246,12 +267,6 @@ export function runValidatedState(
     instructionsExecuted += executeCapturedInstruction(plan, snapshot, context);
   }
   return result(snapshot, context.events, instructionsExecuted);
-}
-
-/** Execution may continue, including when a queued expiry block can interrupt a waiting path. */
-function runnable(snapshot: RuntimeSnapshot): boolean {
-  if (snapshot.status === "halted" || snapshot.status === "failed") return false;
-  return snapshot.status !== "waiting" || timerHandlerDispatchable(snapshot);
 }
 
 function executePlannedInstruction(

@@ -1406,6 +1406,7 @@ test("prepared output remains canonical when replacement pacing cannot meet its 
   });
   const atLimit = structuredClone(released.snapshot);
   atLimit.currentSessionTimeMs = Number.MAX_SAFE_INTEGER;
+  atLimit.observedSessionTimeMs = Number.MAX_SAFE_INTEGER;
   const failed = run(compiled, atLimit);
   assert.equal(failed.snapshot.status, "failed");
   assert.equal(failed.snapshot.preparedSayOutput?.text, "second");
