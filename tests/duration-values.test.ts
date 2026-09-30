@@ -60,19 +60,23 @@ test("duration arithmetic and cross-unit comparisons follow V30 section 35", () 
   );
 });
 
-test("mixing plain numbers with durations fails at runtime instead of guessing a unit", () => {
+test("mixing plain numbers with durations fails instead of guessing a unit", () => {
   for (const source of [
-    'say "${1 s + 1}"',
-    'say "${1 - 1 s}"',
-    'say "${2 / 1 s}"',
-    'say "${1 s < 2}"',
-    'say "${1 s * 1 s}"',
-    'say "${1 s % 2}"',
+    'let n = 1\nsay "${1 s + n}"',
+    'let n = 1\nsay "${n - 1 s}"',
+    'let n = 2\nsay "${n / 1 s}"',
+    'let n = 2\nsay "${1 s < n}"',
+    'let d = 1 s\nsay "${d * d}"',
+    'let n = 2\nsay "${1 s % n}"',
   ]) {
     assert.equal(runtimeFailure(source), "TSR009", source);
   }
-  assert.equal(runtimeFailure('say "${1 s / 0}"'), "TSR036");
-  assert.equal(runtimeFailure('say "${0 s / 0 s}"'), "TSR036");
+  assert.equal(runtimeFailure('let n = 0\nsay "${1 s / n}"'), "TSR036");
+  assert.equal(runtimeFailure('let d = 0 s\nsay "${d / d}"'), "TSR036");
+  for (const source of ['say "${1 s + 1}"', "wait 1 + 2 ms", 'say "${2 < 1 min}"']) {
+    assert.deepEqual(diagnostics(source), ["TSV035"], source);
+  }
+  assert.equal(runValidSource("wait (1 + 2) ms").snapshot.foregroundAction?.kind, "delay");
 });
 
 test("calendar units and doubled units are rejected at compile time", () => {

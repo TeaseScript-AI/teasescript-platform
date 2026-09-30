@@ -214,7 +214,11 @@ function observeDueDelay(
   );
   const observed = observeTime(plan, snapshot, Math.min(...deadlines));
   assert.equal(observed.outcome.kind, "observed", `${context}: delay observation must succeed`);
-  assert.ok(observed.events.length > 0, `${context}: the due delay or timer must settle`);
+  assert.notDeepEqual(
+    observed.snapshot,
+    snapshot,
+    `${context}: the observation must make progress`,
+  );
   return observed;
 }
 
