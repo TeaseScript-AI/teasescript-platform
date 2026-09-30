@@ -263,9 +263,14 @@ test("invalid dynamic timer durations fail deterministically before any action",
   ];
   for (const [source, code, message] of cases) {
     for (const seed of SEEDS) {
-      const { snapshot, events } = start(source, seed);
+      const { compiled, snapshot, events } = start(source, seed);
       assert.equal(snapshot.status, "failed", source);
       assert.equal(snapshot.nextActionId, 1, source);
+      assert.deepEqual(
+        snapshot.rng,
+        createImmediatePacingRuntimeSnapshot(compiled, { seed }).rng,
+        `${source}: rejection happens before any RNG draw`,
+      );
       const failure = events.at(-1);
       assert.ok(failure?.kind === "runtimeFailure", source);
       assert.equal(failure.code, code, source);
