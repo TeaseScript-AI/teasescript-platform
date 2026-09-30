@@ -1311,7 +1311,9 @@ export class Evaluator {
       name === "position" ? value.milliseconds : mediaEndMs(media) - value.milliseconds;
     this.#mediaWarning(seekMedia(media, target, this.snapshot.currentSessionTimeMs, name), span);
     // A seek to the end of the range completes the pass at once, like a timer's `remaining = 0`.
-    if (action !== undefined) drainMediaEvents(null, this.snapshot, action, this.events, span);
+    if (action !== undefined) {
+      drainMediaEvents(null, this.snapshot, action, this.events, span, true);
+    }
   }
 
   #mediaWarning(warning: MediaWarning | null, span: SourceSpan): void {

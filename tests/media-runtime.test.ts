@@ -488,3 +488,57 @@ test("media scenarios resume equivalently from every checkpoint boundary", () =>
   ];
   for (const source of scenarios) assertRuntimeResumeEquivalent(source, { mediaDurationMs: 1_000 });
 });
+
+test("a media statement may end the script, also with a finish block or a failed load", () => {
+  for (const source of [
+    'playAudio "a.mp3"',
+    'playAudio async "a.mp3"',
+    'playVideo "a.mp4" {\n  finish {\n    say "finished"\n  }\n}',
+  ]) {
+    const session = new Session(source).load(1, 1_000).at(1_000, [1, 1_000]);
+    assert.equal(session.snapshot.status, "halted", source);
+  }
+  const finished = new Session('playVideo "a.mp4" {\n  finish {\n    say "finished"\n  }\n}');
+  finished.load(1, 1_000).at(1_000, [1, 1_000]);
+  assert.deepEqual(finished.said(), ["finished"]);
+  const failed = new Session('playAudio "missing.mp3"').fail(1);
+  assert.equal(failed.snapshot.status, "halted");
+});
+
+test("controlling other media inside a cue block keeps the catch-up order of work due at the same time", () => {
+  const source = (timerBody: string) =>
+    [
+      'let a = playAudio async "a.mp3" {',
+      "  at 500 ms {",
+      '    say "a"',
+      "    b.pause()",
+      "  }",
+      "}",
+      "timer async 500 ms {",
+      `  ${timerBody}`,
+      "}",
+      'let b = playAudio async "b.mp3" {',
+      "  at 500 ms {",
+      '    say "b"',
+      "  }",
+      "}",
+      "wait 10",
+      'say "${b.state} ${b.position}"',
+      "b.resume()",
+      "wait 10",
+    ].join("\n");
+  const paused = new Session(source('say "timer"'))
+    .load(1, 1_000)
+    .load(2, 1_000)
+    .at(1_000, [1, 1_000], [2, 1_000]);
+  // The cue of b at 500 ms follows the timer; b was paused exactly there, so it fires once b plays on.
+  assert.deepEqual(paused.said(), ["a", "timer"]);
+  paused.at(10_000).at(10_500, [2, 500]);
+  assert.deepEqual(paused.said(), ["a", "timer", "paused 500 ms", "b"]);
+
+  const stopped = new Session(source('say "timer"\n  b.stop()'))
+    .load(1, 1_000)
+    .load(2, 1_000)
+    .at(1_000, [1, 1_000], [2, 1_000]);
+  assert.deepEqual(stopped.said(), ["a", "timer"]);
+});

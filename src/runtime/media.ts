@@ -306,6 +306,15 @@ function progressBefore(media: RuntimeMediaSnapshot, atMs: number): number {
  */
 function startSegment(media: RuntimeMediaSnapshot, atMs: number): void {
   const progress = progressBefore(media, atMs);
+  // Playback that reached a cue point whose turn has not come yet at this scene time leaves those cues pending.
+  if (
+    progress > media.committedProgressMs &&
+    progress === nextArrival(media).progressMs &&
+    media.positionMs + (progress - media.committedProgressMs) < mediaEndMs(media)
+  ) {
+    media.startCuesPending =
+      cuesAt(media, media.positionMs + (progress - media.committedProgressMs)).length > 0;
+  }
   media.positionMs += progress - media.committedProgressMs;
   media.elapsedMs += progress - media.committedProgressMs;
   media.segment += 1;

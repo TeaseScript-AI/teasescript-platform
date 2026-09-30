@@ -609,11 +609,14 @@ phase 0, and commits one event per step, so queued cue blocks hold catch-up exac
 arrival queues every cue exactly at its point in source order and, at the end of the range, completes the pass
 atomically: the next pass restarts at `startAt` with its start cues pending, or the media finishes and queues `finish`.
 A repeat duration that ends mid-pass queues the cues reached there, then finishes. Committed values advance only by
-event distances, so the same events produce the same values however the Player's samples are spaced.
+event distances, so the same events produce the same values however the Player's samples are spaced. As for timers,
+cue blocks behave as if every sample had arrived on time, while the main path continues at the observed time and
+settlements outside a running block record the observation.
 
 **Script operations.** Handle reads use the progress interpolated at current scene time, capped at the next
 uncommitted arrival. Before `pause()`, `resume()`, `stop()`, a seek, or a Stage replacement changes a segment, the
-media's events already reached by current scene time are committed. A seek clamps to the active range, fires no cue it
+media's events due before current scene time are committed; events due exactly now keep their catch-up order, so cues
+at the point where the media stops stay pending until it plays on. A seek clamps to the active range, fires no cue it
 jumps across, leaves cues at the new position pending until playback proceeds, and at the end of the range completes
 the pass at once, also while paused. `stop()` and replacement drop the media's queued, not yet started cue blocks.
 

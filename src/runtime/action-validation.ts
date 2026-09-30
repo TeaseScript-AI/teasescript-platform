@@ -1043,7 +1043,9 @@ export function validateTerminalContinuationHandoffState(
       "continuationInstruction",
     ]) ||
     !positiveSafeInteger(handoff.actionId) ||
-    (handoff.actionKind !== "delay" && handoff.actionKind !== "interaction") ||
+    (handoff.actionKind !== "delay" &&
+      handoff.actionKind !== "interaction" &&
+      handoff.actionKind !== "mediaPlayback") ||
     !nonNegativeSafeInteger(handoff.owningInstruction) ||
     !nonNegativeSafeInteger(handoff.continuationInstruction) ||
     !positiveSafeInteger(snapshot.nextActionId) ||
@@ -1070,6 +1072,9 @@ export function validateTerminalContinuationHandoffState(
     snapshot.nextInstruction === plan.rootEndInstruction &&
     handoff.owningInstruction + 1 === handoff.continuationInstruction &&
     ((handoff.actionKind === "delay" && instruction?.kind === "wait") ||
+      (handoff.actionKind === "mediaPlayback" &&
+        instruction?.kind === "playMedia" &&
+        instruction.destinationTemporary === null) ||
       (handoff.actionKind === "interaction" &&
         instruction?.kind === "interaction" &&
         instruction.interactionKind === "button" &&

@@ -103,9 +103,10 @@ export function applyMediaEvent(
 }
 
 /**
- * Commits this media's events that reported playback reached by the current scene time: arrivals up to and including
- * it and departures before it. A script operation does this before changing the media, so a boundary playback already
- * reached is never lost, and again afterwards, so a seek to the end completes its pass at once.
+ * Commits this media's events due before the current scene time, or, with `includeNow`, also its arrivals due exactly
+ * now. A script operation commits the earlier events before changing the media, so playback that already reached a
+ * boundary is never lost; events due exactly now belong to catch-up order, where they may follow other work due now.
+ * After a seek, `includeNow` completes a pass the seek reached, at once.
  */
 export function drainMediaEvents(
   plan: InstructionPlan | null,
@@ -113,6 +114,7 @@ export function drainMediaEvents(
   action: RuntimeMediaActionSnapshot,
   events: InterpreterEvent[],
   span: SourceSpan | PlanSourceLocation,
+  includeNow = false,
 ): void {
   const now = snapshot.currentSessionTimeMs;
   while (snapshot.backgroundActions.includes(action)) {
@@ -120,7 +122,8 @@ export function drainMediaEvents(
     if (
       event === null ||
       event.dueAtMs === null ||
-      (event.kind === "arrival" ? event.dueAtMs > now : event.dueAtMs >= now)
+      event.dueAtMs > now ||
+      (event.dueAtMs === now && (!includeNow || event.kind === "departure"))
     )
       return;
     applyMediaEvent(plan, snapshot, action, event, events, span);
