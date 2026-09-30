@@ -224,6 +224,9 @@ export function releaseMediaWait(
   events: InterpreterEvent[],
   span: SourceSpan | PlanSourceLocation,
 ): void {
+  // An async play waits only for a usable load: anything else ends its wait as a failed load.
+  const outcomeFor = (action: RuntimeMediaPlaybackActionSnapshot): MediaWaitOutcome =>
+    action.until === "loaded" && outcome !== "loaded" ? "failed" : outcome;
   const releases = (action: RuntimeMediaPlaybackActionSnapshot | null | undefined): boolean =>
     action?.kind === "mediaPlayback" &&
     action.mediaId === mediaId &&
@@ -232,7 +235,7 @@ export function releaseMediaWait(
   if (foreground?.kind === "mediaPlayback" && releases(foreground)) {
     // A foreground wait settles only through Player reports and due work, which always supply the plan.
     if (plan === null) throw new Error("A foreground media wait settled without its plan.");
-    const settlement = mediaWaitSettlement(snapshot, foreground, outcome);
+    const settlement = mediaWaitSettlement(snapshot, foreground, outcomeFor(foreground));
     snapshot.foregroundAction = null;
     snapshot.lastSettlement = settlement;
     snapshot.terminalContinuationHandoff = terminalContinuationHandoffFor(plan, foreground);
@@ -246,7 +249,7 @@ export function releaseMediaWait(
     if (suspended?.kind !== "mediaPlayback" || !releases(suspended)) continue;
     // Like a suspended delay: the continuation runs once the interrupt block returns normally, and the settlement is
     // not retained so released prepared output of the running block keeps its provenance.
-    const settlement = mediaWaitSettlement(snapshot, suspended, outcome);
+    const settlement = mediaWaitSettlement(snapshot, suspended, outcomeFor(suspended));
     frame.returnInstruction = suspended.continuationInstruction;
     frame.timerInterruption = { ...frame.timerInterruption!, suspendedAction: null };
     pushWaitCompletion(events, span, settlement);

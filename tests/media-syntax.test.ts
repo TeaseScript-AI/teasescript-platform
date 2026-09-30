@@ -242,13 +242,24 @@ test("statement-level media handle operations get a receiver barrier; reads do n
   );
   assert.deepEqual(
     barriers.map((barrier) => barrier.kind === "pacingBarrier" && barrier.receiver?.kind),
-    [undefined, "identifier", "preparedReference", "preparedReference"],
+    [undefined, "preparedReference", "preparedReference", "preparedReference"],
   );
 });
 
 test("cue detection needs a complete position and block; indexed and called uses stay ordinary", () => {
   plan(["let at = [0]", 'playAudio async "a.mp3" {', "  at[0] = 1", "}"].join("\n"));
-  assertRejected('playAudio async "a.mp3" {\n  at 1 s\n}', "TSP018", "cue block");
+  assertRejected('playAudio async "a.mp3" {\n  at 1 s\n}', "TSP001", "Expected a supported");
+  plan(
+    [
+      "function at(x) {",
+      "}",
+      "let beforeEnd = [0, 1]",
+      'playAudio async "a" {',
+      "  at (1)",
+      "  beforeEnd [1] = 2",
+      "}",
+    ].join("\n"),
+  );
 });
 
 test("media parse errors recover at the end of the line and keep enclosing blocks", () => {

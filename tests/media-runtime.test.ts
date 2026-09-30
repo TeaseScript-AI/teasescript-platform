@@ -679,3 +679,32 @@ test("restore validation rejects malformed media state", () => {
     assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false, name);
   }
 });
+
+test("a media control uses the receiver it had before the pacing wait", () => {
+  const session = new Session(
+    [
+      'let a = playAudio async "a.mp3"',
+      'let b = playAudio async "b.mp3"',
+      "let h = a",
+      "timer async 1 {",
+      "  h = b",
+      "}",
+      'say "gate", 2',
+      "h.pause()",
+      "wait 10",
+    ].join("\n"),
+    { pacing: true },
+  );
+  session.load(1, 60_000).load(2, 60_000).at(2_000);
+  assert.equal(session.media(1)?.state, "paused");
+  assert.equal(session.media(2)?.state, "running");
+});
+
+test("an async play whose loaded source leaves no range continues as a failed load", () => {
+  const session = new Session(
+    'let m = playAudio(file: "a", async: true, startAt: 2 s)\nsay "${m.state} ${m.duration}"',
+  );
+  session.load(1, 1_000);
+  assert.deepEqual(session.said(), ["stopped 1 s"]);
+  assert.equal(session.warnings().filter((warning) => warning.startsWith("TSW013")).length, 1);
+});

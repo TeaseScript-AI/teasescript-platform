@@ -1047,10 +1047,10 @@ class Parser {
   }
 
   /**
-   * `at` and `beforeEnd` followed on the same line by the start of a cue position, and `finish` followed by `{`, start a
-   * cue declaration. A call `at(1)` or an index `at[0]` written directly after the word, an assignment such as
-   * `at = 1`, and other non-expression continuations stay ordinary statements. The decision looks at one token only,
-   * so nested cue positions are never parsed twice.
+   * `at` and `beforeEnd` followed by a cue position and `{` on the same line, and `finish` followed by `{`, start a cue
+   * declaration. A call or index written directly after the word, and lines without a top-level `{` or with a
+   * top-level assignment, such as `at (1)` or `beforeEnd [1] = 2`, stay ordinary statements. The scan is linear in the
+   * line and never reparses a cue position.
    */
   #isMediaCueStart(): boolean {
     const token = this.#peek();
@@ -1059,11 +1059,41 @@ class Parser {
     if (token.lexeme === "finish") return next.kind === TokenKind.LeftBrace;
     if (token.lexeme !== "at" && token.lexeme !== "beforeEnd") return false;
     if (next.kind === TokenKind.LeftBrace || !isExpressionStart(next)) return false;
-    const adjacent = next.span.start.offset === token.span.end.offset;
-    return !(
-      adjacent &&
+    if (
+      next.span.start.offset === token.span.end.offset &&
       (next.kind === TokenKind.LeftParenthesis || next.kind === TokenKind.LeftBracket)
-    );
+    )
+      return false;
+    let depth = 0;
+    for (let index = this.#current + 1; index < this.tokens.length; index += 1) {
+      const kind = this.tokens[index]!.kind;
+      if (kind === TokenKind.EndOfFile) return false;
+      if (depth === 0) {
+        if (kind === TokenKind.LeftBrace) return true;
+        if (
+          kind === TokenKind.Newline ||
+          kind === TokenKind.RightBrace ||
+          kind === TokenKind.Equal ||
+          kind === TokenKind.PlusEqual ||
+          kind === TokenKind.MinusEqual
+        )
+          return false;
+      }
+      if (
+        kind === TokenKind.LeftParenthesis ||
+        kind === TokenKind.LeftBracket ||
+        kind === TokenKind.LeftBrace
+      ) {
+        depth += 1;
+      } else if (
+        kind === TokenKind.RightParenthesis ||
+        kind === TokenKind.RightBracket ||
+        kind === TokenKind.RightBrace
+      ) {
+        depth = Math.max(0, depth - 1);
+      }
+    }
+    return false;
   }
 
   *#parseMediaCue(): ParseTask<MediaCue | null> {

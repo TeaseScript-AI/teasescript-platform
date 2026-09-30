@@ -1724,7 +1724,8 @@ say "${music.elapsed} of ${music.duration}"
   jumps across; a cue exactly at a new position before the end fires once playback proceeds from it. A seek to the end
   of the range fires the cues there and completes the current pass at once, like a timer's `remaining = 0`, also while
   paused, where the next pass stays paused. Seeks do not change `elapsed`.
-- After media finishes or stops, `remaining` is zero and `position` and `elapsed` keep their final values.
+- After media finishes or stops, `position` and `elapsed` keep their final values; `remaining` is zero if the source
+  loaded and `null` otherwise.
 
 ### Cues
 
@@ -3568,7 +3569,7 @@ Resolved in this revision:
 - `showImage <file>` and `hideImage` control the persistent Stage image; `playAudio` and `playVideo` are blocking by default, `async` returns a handle, and cues use `at`, `beforeEnd`, and `finish` ([§22](#22-stage-image-audio-and-video));
 - blur uses `showBlur` and `hideBlur` as a separate non-destructive visual layer;
 - drawing uses dedicated shape/text functions and removable references;
-- initial layered-scene transitions are `"none"`, `"fade"`, and `"crossfade"` (provisional with the future layered scene in [§22](#22-stage-image-audio-and-video));
+- initial layered-scene transitions are `"none"`, `"fade"`, and `"crossfade"` (accepted future direction; not implemented; see [§22](#22-stage-image-audio-and-video));
 - `account` is the read-only typed account reference;
 - account-change operations include `save`, `add`, `remove`, `removeAll`, `increase`, and `decrease`, while saving `[]` empties a list;
 - toys have server-generated IDs, may share visible names, can be disabled without script-driven deletion, and have common photos plus initial detailed schemas for butt plugs, dildos, chastity devices, and ball gags;

@@ -974,11 +974,7 @@ export class InstructionCompiler {
           if (expression === this.#barrierCall) {
             this.#barrierCall = null;
             // The receiver is evaluated once; the barrier and the call then use that value.
-            if (
-              receiver.plan.kind !== "temporary" &&
-              receiver.plan.kind !== "preparedReference" &&
-              !isSideEffectFreeReceiver(expression.callee.object)
-            ) {
+            if (receiver.plan.kind !== "temporary" && receiver.plan.kind !== "preparedReference") {
               receiver = this.#prepareReferenceExpression(receiver, expression.callee.object.span);
             }
             this.#emitPacingBarrier(receiver.plan, expression.span);
@@ -1808,30 +1804,6 @@ const MEDIA_ASSIGNABLE_PROPERTIES: ReadonlySet<string> = new Set([
   "remaining",
   "volume",
 ]);
-
-/**
- * A receiver that can be evaluated again without effects: an identifier, and property or index access on one with
- * literal or identifier indexes. Other receivers are prepared once before the barrier.
- */
-function isSideEffectFreeReceiver(expression: Expression): boolean {
-  let current = unwrapParentheses(expression);
-  for (;;) {
-    if (current.kind === "propertyAccessExpression") {
-      current = unwrapParentheses(current.object);
-    } else if (current.kind === "indexExpression") {
-      const index = unwrapParentheses(current.index);
-      if (
-        index.kind !== "identifier" &&
-        index.kind !== "numberLiteral" &&
-        !(index.kind === "stringLiteral" && index.parts.every((part) => part.kind === "stringText"))
-      )
-        return false;
-      current = unwrapParentheses(current.object);
-    } else {
-      return current.kind === "identifier";
-    }
-  }
-}
 
 function delayDisplay(text: string | undefined): DelayDisplay {
   if (text === "visible" || text === "mystery" || text === "hidden") return text;
