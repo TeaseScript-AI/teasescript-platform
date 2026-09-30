@@ -1,5 +1,8 @@
 import type {
   RuntimeActionSettlementSnapshot,
+  RuntimeDelayActionSnapshot,
+  RuntimeForegroundActionSnapshot,
+  RuntimeInteractionActionSnapshot,
   RuntimePendingActionSnapshot,
   RuntimePreparedSayOutputSnapshot,
 } from "./actions/model.js";
@@ -17,6 +20,7 @@ import {
   hasActivePacingGate,
   hasPacingExecutionHistory,
   isExplicitExitHaltState,
+  validForegroundActionState,
   validPreparedSayOutput,
   validTopLevelPreparedSayOutputRelationship,
   validateInteractionResultHandoffState,
@@ -39,10 +43,16 @@ import {
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
 import { recordValidationTestWork } from "../validation-testing.js";
+import { validateTimerState } from "./timer-validation.js";
+import {
+  cloneTimer,
+  type RuntimeTimerHandlerInvocationSnapshot,
+  type RuntimeTimerSnapshot,
+} from "./timers.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 22;
+export const RUNTIME_SNAPSHOT_VERSION = 23;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -77,6 +87,9 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "interactionResultHandoff",
   "terminalContinuationHandoff",
   "preparedSayOutput",
+  "settledTimers",
+  "nextTimerId",
+  "pendingTimerHandlers",
   "maxCallDepth",
   "status",
   "failure",
@@ -149,13 +162,27 @@ export interface RuntimeParameterStateSnapshot {
   parameterIndex: number;
 }
 
+/**
+ * An expiry block running as an interrupt. The interrupted foreground delay or interaction is inert here and is
+ * restored, or settled when its deadline has passed, when the block returns normally.
+ */
+export interface RuntimeTimerInterruptionSnapshot {
+  readonly timerId: number;
+  readonly dueAtMs: number;
+  readonly suspendedAction: RuntimeDelayActionSnapshot | RuntimeInteractionActionSnapshot | null;
+}
+
 export interface RuntimeCallFrameSnapshot {
   readonly id: number;
   readonly functionId: number;
   readonly functionName: string;
+  /** A user call site, or the timer statement for an expiry block. */
   readonly callSiteSpan: SourceSpan;
-  readonly returnInstruction: number;
-  readonly destinationTemporary: number;
+  /** For an expiry block, the interrupted position, or the continuation once its suspended delay settled. */
+  returnInstruction: number;
+  /** `null` only for an expiry block, which returns no value. */
+  readonly destinationTemporary: number | null;
+  timerInterruption: RuntimeTimerInterruptionSnapshot | null;
   readonly callerTemporaries: RuntimeTemporarySnapshot[];
   readonly scopeBaseDepth: number;
   readonly loopBaseDepth: number;
@@ -209,13 +236,18 @@ export interface RuntimeSnapshot {
   nextCallFrameId: number;
   currentSessionTimeMs: number;
   readonly chatPacingSettings: ChatPacingSettings;
-  foregroundAction: RuntimePendingActionSnapshot | null;
+  foregroundAction: RuntimeForegroundActionSnapshot | null;
   readonly backgroundActions: RuntimePendingActionSnapshot[];
   nextActionId: number;
   lastSettlement: RuntimeActionSettlementSnapshot | null;
   interactionResultHandoff: RuntimeInteractionResultHandoffSnapshot | null;
   terminalContinuationHandoff: RuntimeTerminalContinuationHandoffSnapshot | null;
   preparedSayOutput: RuntimePreparedSayOutputSnapshot | null;
+  /** Finished or stopped timers, retained so their handles stay readable. Active timers are background actions. */
+  readonly settledTimers: RuntimeTimerSnapshot[];
+  nextTimerId: number;
+  /** Expired rounds whose expiry blocks run one at a time in `(dueAtMs, timerId)` order. */
+  readonly pendingTimerHandlers: RuntimeTimerHandlerInvocationSnapshot[];
   readonly maxCallDepth: number;
   status: RuntimeStatus;
   failure: RuntimeFailureSnapshot | null;
@@ -330,6 +362,9 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     interactionResultHandoff: null,
     terminalContinuationHandoff: null,
     preparedSayOutput: null,
+    settledTimers: [],
+    nextTimerId: 1,
+    pendingTimerHandlers: [],
     maxCallDepth,
     status: plan.rootEndInstruction === 0 ? "halted" : "ready",
     failure: null,
@@ -390,6 +425,20 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
       callSiteSpan: copySpan(frame.callSiteSpan),
       returnInstruction: frame.returnInstruction,
       destinationTemporary: frame.destinationTemporary,
+      timerInterruption:
+        frame.timerInterruption === null
+          ? null
+          : {
+              timerId: frame.timerInterruption.timerId,
+              dueAtMs: frame.timerInterruption.dueAtMs,
+              suspendedAction:
+                frame.timerInterruption.suspendedAction === null
+                  ? null
+                  : // EVIDENCE: invariant: cloning preserves the suspended action kind.
+                    (clonePendingAction(
+                      frame.timerInterruption.suspendedAction,
+                    ) as RuntimeTimerInterruptionSnapshot["suspendedAction"]),
+            },
       callerTemporaries: frame.callerTemporaries.map(cloneTemporary),
       scopeBaseDepth: frame.scopeBaseDepth,
       loopBaseDepth: frame.loopBaseDepth,
@@ -411,7 +460,10 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     currentSessionTimeMs: snapshot.currentSessionTimeMs,
     chatPacingSettings: cloneChatPacingSettings(snapshot.chatPacingSettings),
     foregroundAction:
-      snapshot.foregroundAction === null ? null : clonePendingAction(snapshot.foregroundAction),
+      snapshot.foregroundAction === null
+        ? null
+        : // EVIDENCE: invariant: cloning preserves the foreground action kind.
+          (clonePendingAction(snapshot.foregroundAction) as RuntimeForegroundActionSnapshot),
     backgroundActions: snapshot.backgroundActions.map(clonePendingAction),
     nextActionId: snapshot.nextActionId,
     lastSettlement:
@@ -428,6 +480,9 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
       snapshot.preparedSayOutput === null
         ? null
         : clonePreparedSayOutput(snapshot.preparedSayOutput),
+    settledTimers: snapshot.settledTimers.map(cloneTimer),
+    nextTimerId: snapshot.nextTimerId,
+    pendingTimerHandlers: snapshot.pendingTimerHandlers.map((invocation) => ({ ...invocation })),
     maxCallDepth: snapshot.maxCallDepth,
     status: snapshot.status,
     failure:
@@ -481,6 +536,7 @@ function clonePreparedSayOutput(
 }
 
 function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendingActionSnapshot {
+  if (action.kind === "timer") return { ...action, timer: cloneTimer(action.timer) };
   if (action.kind === "delay")
     return {
       kind: "delay",
@@ -724,9 +780,10 @@ function validateCapturedRuntimeSnapshotDetails(
     analysis,
     preparedReferenceTemporaryIds,
     preparedSayTemporaryOwnership,
+    value,
     errors,
   );
-  validateSpeakerReferences(
+  const timerHandleIds = validateSpeakerReferences(
     value.frames,
     value.speakers,
     value.loopFrames,
@@ -829,6 +886,7 @@ function validateCapturedRuntimeSnapshotDetails(
     errors.push("Runtime maxCallDepth is outside the supported range.");
   }
   validatePendingActionState(value, plan, analysis, errors);
+  validateTimerState(value, plan, timerHandleIds, errors);
   validateInteractionResultHandoffState(value, plan, analysis, errors);
   validateTerminalContinuationHandoffState(value, plan, errors);
   if (!["ready", "running", "waiting", "halted", "failed"].includes(String(value.status))) {
@@ -1464,9 +1522,11 @@ function validateCallFrames(
   analysis: SnapshotValidationAnalysis | undefined,
   preparedReferenceTemporaryIds: ReadonlySet<number>,
   preparedSayTemporaryOwnership: PreparedSayTemporaryOwnership,
+  snapshotValue: Record<string, unknown>,
   errors: string[],
 ): Set<number> {
   const ids = new Set<number>();
+  let handlerFrameSeen = false;
   if (!Array.isArray(value)) {
     errors.push("Runtime callFrames must be an array.");
     return ids;
@@ -1494,6 +1554,30 @@ function validateCallFrames(
     const definition = nonNegativeSafeInteger(frame.functionId)
       ? analysis?.functionsById.get(frame.functionId)
       : undefined;
+    const interruption = frame.timerInterruption;
+    if (
+      !Object.hasOwn(frame, "timerInterruption") ||
+      (interruption !== null && !isPlainRecord(interruption)) ||
+      (definition !== undefined && definition.timerHandler !== (interruption !== null))
+    ) {
+      errors.push("Runtime call frame does not match its function kind.");
+    }
+    if (isPlainRecord(interruption)) {
+      if (handlerFrameSeen) errors.push("Runtime timer expiry blocks must not nest.");
+      handlerFrameSeen = true;
+      validateTimerHandlerFrame(
+        frame,
+        interruption,
+        frameIndex,
+        value,
+        frames,
+        loopFrames,
+        snapshotValue,
+        plan,
+        analysis,
+        errors,
+      );
+    }
     let callInstruction: InstructionPlan["instructions"][number] | undefined;
     if (
       !nonNegativeSafeInteger(frame.functionId) ||
@@ -1506,7 +1590,9 @@ function validateCallFrames(
     ) {
       errors.push("Runtime call frame refers to a malformed or unknown function.");
     }
-    if (
+    if (isPlainRecord(interruption)) {
+      // Validated with the interrupted position above.
+    } else if (
       !nonNegativeSafeInteger(frame.returnInstruction) ||
       frame.returnInstruction < 1 ||
       (plan !== undefined && frame.returnInstruction > plan.instructions.length)
@@ -1526,9 +1612,11 @@ function validateCallFrames(
       }
     }
     if (
-      !nonNegativeSafeInteger(frame.destinationTemporary) ||
-      frame.destinationTemporary < 1 ||
-      (plan !== undefined && frame.destinationTemporary > plan.temporaryCount)
+      isPlainRecord(interruption)
+        ? frame.destinationTemporary !== null
+        : !nonNegativeSafeInteger(frame.destinationTemporary) ||
+          frame.destinationTemporary < 1 ||
+          (plan !== undefined && frame.destinationTemporary > plan.temporaryCount)
     ) {
       errors.push("Runtime call frame has an invalid result destination.");
     }
@@ -1580,12 +1668,12 @@ function validateCallFrames(
     if (
       plan !== undefined &&
       nonNegativeSafeInteger(frame.returnInstruction) &&
-      nonNegativeSafeInteger(frame.destinationTemporary) &&
+      (nonNegativeSafeInteger(frame.destinationTemporary) || isPlainRecord(interruption)) &&
       Array.isArray(frame.callerTemporaries)
     ) {
       validateSuspendedContinuationTemporaries(
         frame.callerTemporaries,
-        frame.destinationTemporary,
+        nonNegativeSafeInteger(frame.destinationTemporary) ? frame.destinationTemporary : null,
         frame.returnInstruction,
         Array.isArray(loopFrames) && nonNegativeSafeInteger(frame.loopBaseDepth)
           ? loopFrames.slice(0, frame.loopBaseDepth)
@@ -1595,7 +1683,11 @@ function validateCallFrames(
       );
     }
 
-    if (plan !== undefined && nonNegativeSafeInteger(frame.returnInstruction)) {
+    if (
+      plan !== undefined &&
+      nonNegativeSafeInteger(frame.returnInstruction) &&
+      !isPlainRecord(interruption)
+    ) {
       const callIndex = frame.returnInstruction - 1;
       const caller = frameIndex === 0 ? undefined : value[frameIndex - 1];
       const callerDefinition =
@@ -1630,6 +1722,26 @@ function validateCallFrames(
           analysis!,
           errors,
         );
+      } else if (
+        isPlainRecord(child) &&
+        nonNegativeSafeInteger(child.returnInstruction) &&
+        isPlainRecord(child.timerInterruption)
+      ) {
+        // An expiry block interrupted this function exactly at its recorded position.
+        if (
+          child.returnInstruction < definition.entryInstruction ||
+          child.returnInstruction >= definition.endInstruction
+        ) {
+          errors.push("Runtime timer expiry block interrupted outside its caller.");
+        } else {
+          validateExactParameterPosition(
+            frame.parameterState,
+            definition,
+            child.returnInstruction,
+            analysis!,
+            errors,
+          );
+        }
       } else if (isPlainRecord(child) && nonNegativeSafeInteger(child.returnInstruction)) {
         validateExactParameterPosition(
           frame.parameterState,
@@ -1649,6 +1761,87 @@ function validateCallFrames(
     }
   });
   return ids;
+}
+
+/**
+ * An expiry-block frame records the interrupted position and, while it is still pending, the interrupted foreground
+ * delay or interaction. That action is validated against the interrupted context: the caller's scopes, loops, call
+ * frames, and temporaries at the recorded position.
+ */
+function validateTimerHandlerFrame(
+  frame: Record<string, unknown>,
+  interruption: Record<string, unknown>,
+  frameIndex: number,
+  callFrames: unknown[],
+  frames: unknown,
+  loopFrames: unknown,
+  snapshotValue: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+  analysis: SnapshotValidationAnalysis | undefined,
+  errors: string[],
+): void {
+  const now = snapshotValue.currentSessionTimeMs;
+  if (
+    !hasExactKeys(interruption, ["timerId", "dueAtMs", "suspendedAction"]) ||
+    !positiveSafeInteger(interruption.timerId) ||
+    !validSessionTime(interruption.dueAtMs) ||
+    !validSessionTime(now) ||
+    interruption.dueAtMs > now ||
+    !Array.isArray(frame.arguments) ||
+    frame.arguments.length !== 0
+  ) {
+    errors.push("Runtime timer expiry-block frame is malformed.");
+    return;
+  }
+  const resume = frame.returnInstruction;
+  const caller = frameIndex === 0 ? undefined : callFrames[frameIndex - 1];
+  const callerDefinition =
+    isPlainRecord(caller) && nonNegativeSafeInteger(caller.functionId)
+      ? analysis?.functionsById.get(caller.functionId)
+      : undefined;
+  if (
+    !nonNegativeSafeInteger(resume) ||
+    (plan !== undefined &&
+      (frameIndex === 0
+        ? resume > plan.rootEndInstruction
+        : callerDefinition === undefined ||
+          resume < callerDefinition.entryInstruction ||
+          resume >= callerDefinition.endInstruction))
+  ) {
+    errors.push("Runtime timer expiry block interrupted outside its caller.");
+    return;
+  }
+  const scopeBase = frame.scopeBaseDepth;
+  const loopBase = frame.loopBaseDepth;
+  if (!nonNegativeSafeInteger(scopeBase) || !nonNegativeSafeInteger(loopBase)) return;
+  const interruptedLoops = Array.isArray(loopFrames) ? loopFrames.slice(0, loopBase) : [];
+  validateCurrentTemporaryRequirements(
+    frame.callerTemporaries,
+    interruptedLoops,
+    resume,
+    "running",
+    plan,
+    errors,
+  );
+  const action = interruption.suspendedAction;
+  if (action === null) return;
+  const view: Record<string, unknown> = {
+    ...snapshotValue,
+    nextInstruction: resume,
+    frames: Array.isArray(frames) ? frames.slice(0, scopeBase) : frames,
+    loopFrames: interruptedLoops,
+    callFrames: callFrames.slice(0, frameIndex),
+    temporaries: frame.callerTemporaries,
+    foregroundAction: action,
+    status: "waiting",
+  };
+  if (
+    !isPlainRecord(action) ||
+    (action.kind !== "delay" && action.kind !== "interaction") ||
+    !validForegroundActionState(action, view, plan, true)
+  ) {
+    errors.push("Runtime suspended foreground action is malformed.");
+  }
 }
 
 function validateCallArgumentSupply(
@@ -1906,14 +2099,14 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
 
 function validateSuspendedContinuationTemporaries(
   callerTemporaries: unknown[],
-  destinationTemporary: number,
+  destinationTemporary: number | null,
   returnInstruction: number,
   callerLoopFrames: unknown,
   analysis: SnapshotValidationAnalysis,
   errors: string[],
 ): void {
   const present = new Set(createTemporaryMap(callerTemporaries).keys());
-  present.add(destinationTemporary);
+  if (destinationTemporary !== null) present.add(destinationTemporary);
   const required = requiredContinuationTemporaries(analysis, returnInstruction, callerLoopFrames);
   if ([...required].some((temporaryId) => !present.has(temporaryId))) {
     errors.push("Runtime caller temporaries cannot resume the suspended continuation.");
@@ -2485,7 +2678,7 @@ function validateSpeakerReferences(
   callFrames: unknown,
   speakerIds: ReadonlySet<number>,
   errors: string[],
-): void {
+): Set<number> {
   const values: unknown[] = [];
   if (Array.isArray(frames)) {
     for (const frame of frames) {
@@ -2531,22 +2724,33 @@ function validateSpeakerReferences(
     }
   }
   const referencedIds = new Set<number>();
-  for (const value of values) collectSpeakerReferenceIds(value, referencedIds);
+  const timerHandleIds = new Set<number>();
+  for (const value of values) collectSpeakerReferenceIds(value, referencedIds, timerHandleIds);
   for (const id of referencedIds) {
     if (!speakerIds.has(id)) {
       errors.push("Runtime value refers to an unknown speaker ID.");
-      return;
+      break;
     }
   }
+  return timerHandleIds;
 }
 
-function collectSpeakerReferenceIds(value: unknown, output: Set<number>): void {
+/** Collects speaker references and, in the same traversal, timer handle IDs. */
+function collectSpeakerReferenceIds(
+  value: unknown,
+  output: Set<number>,
+  timerHandleIds: Set<number>,
+): void {
   const work: unknown[] = [value];
   while (work.length > 0) {
     const current = work.pop();
     if (!isPlainRecord(current)) continue;
     if (current.kind === "speakerReference" && nonNegativeSafeInteger(current.speakerId)) {
       output.add(current.speakerId);
+      continue;
+    }
+    if (current.kind === "timerHandle" && nonNegativeSafeInteger(current.timerId)) {
+      timerHandleIds.add(current.timerId);
       continue;
     }
     if (current.kind === "list" && Array.isArray(current.items)) {

@@ -1,6 +1,7 @@
 import { resolveMessagePresentation } from "./message-presentation.js";
 import type { MessagePresentation } from "../message-presentation.js";
 import type {
+  DelayDisplay,
   DurationUnitPlan,
   Instruction,
   InstructionPlan,
@@ -77,6 +78,7 @@ import type {
   RuntimeChatPacingGateActionSnapshot,
   RuntimeInteractionActionSnapshot,
   RuntimePreparedSayOutputSnapshot,
+  RuntimeTimerActionSnapshot,
 } from "./actions/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import {
@@ -85,6 +87,13 @@ import {
   secondsToPacingMilliseconds,
 } from "./actions/pacing.js";
 import { settleBackgroundPacingGate } from "./operations/pacing-gate.js";
+import {
+  returnFromTimerHandler,
+  startTimerHandler,
+  timerHandlerDispatchable,
+} from "./operations/timer-handlers.js";
+import { expireTimerAction, stopAllTimersForSessionEnd } from "./operations/timer-lifecycle.js";
+import { cloneTimer } from "./timers.js";
 import {
   isDuration,
   isList,
@@ -124,8 +133,14 @@ function executeCapturedInstruction(
   if (snapshot.status === "halted" || snapshot.status === "failed") {
     return 0;
   }
+  // A queued expiry block interrupts at this boundary, even while the main path waits.
+  if (timerHandlerDispatchable(snapshot)) {
+    startTimerHandler(plan, snapshot);
+    return 1;
+  }
   if (snapshot.status === "waiting") return 0;
   if (snapshot.nextInstruction === plan.rootEndInstruction && snapshot.callFrames.length === 0) {
+    stopAllTimersForSessionEnd(snapshot);
     const completeEventAndFutureCompletions = requiredEventSequencesForRootCompletion(snapshot);
     assertEventSequenceCapacity(snapshot, completeEventAndFutureCompletions);
     snapshot.terminalContinuationHandoff = null;
@@ -153,8 +168,12 @@ function executeCapturedInstruction(
     if (
       snapshot.status === "running" &&
       snapshot.callFrames.length === 0 &&
-      snapshot.nextInstruction === plan.rootEndInstruction
+      snapshot.nextInstruction === plan.rootEndInstruction &&
+      // Expiry blocks queued before the script ends still run first.
+      !timerHandlerDispatchable(snapshot)
     ) {
+      stopAllTimersForSessionEnd(snapshot);
+      snapshot.terminalContinuationHandoff = null;
       snapshot.status = "halted";
       const completeEventAndFutureCompletions = requiredEventSequencesForRootCompletion(snapshot);
       assertEventSequenceCapacity(snapshot, completeEventAndFutureCompletions);
@@ -189,12 +208,7 @@ export function stepValidatedStateToEvent(
   const budget = instructionBudget(options.instructionBudget);
   const context = new RuntimeExecutionContext(snapshot, capabilities);
   let instructionsExecuted = 0;
-  while (
-    snapshot.status !== "waiting" &&
-    snapshot.status !== "halted" &&
-    snapshot.status !== "failed" &&
-    context.events.length === 0
-  ) {
+  while (runnable(snapshot) && context.events.length === 0) {
     if (instructionsExecuted >= budget) {
       failForBudget(plan, snapshot, context.events);
       break;
@@ -224,11 +238,7 @@ export function runValidatedState(
   const budget = instructionBudget(options.instructionBudget);
   const context = new RuntimeExecutionContext(snapshot, capabilities);
   let instructionsExecuted = 0;
-  while (
-    snapshot.status !== "waiting" &&
-    snapshot.status !== "halted" &&
-    snapshot.status !== "failed"
-  ) {
+  while (runnable(snapshot)) {
     if (instructionsExecuted >= budget) {
       failForBudget(plan, snapshot, context.events);
       break;
@@ -236,6 +246,12 @@ export function runValidatedState(
     instructionsExecuted += executeCapturedInstruction(plan, snapshot, context);
   }
   return result(snapshot, context.events, instructionsExecuted);
+}
+
+/** Execution may continue, including when a queued expiry block can interrupt a waiting path. */
+function runnable(snapshot: RuntimeSnapshot): boolean {
+  if (snapshot.status === "halted" || snapshot.status === "failed") return false;
+  return snapshot.status !== "waiting" || timerHandlerDispatchable(snapshot);
 }
 
 function executePlannedInstruction(
@@ -516,10 +532,16 @@ function executePlannedInstruction(
       enterFunctionBody(plan, instruction.functionId, snapshot, instruction.span);
       return;
     case "returnValue":
-      returnFromFunction(plan, snapshot, evaluator.evaluate(instruction.value), instruction.span);
+      returnFromFunction(
+        plan,
+        snapshot,
+        evaluator.evaluate(instruction.value),
+        instruction.span,
+        events,
+      );
       return;
     case "returnVoid":
-      returnFromFunction(plan, snapshot, null, instruction.span);
+      returnFromFunction(plan, snapshot, null, instruction.span, events);
       return;
     case "say": {
       executeSayAtomically(plan, instruction, snapshot, evaluator, events);
@@ -680,8 +702,10 @@ function executePlannedInstruction(
       return;
     }
     case "startTimer":
-      throw fault("TSR050", "Async timers are not implemented yet.", instruction.span);
+      startTimer(instruction, snapshot, evaluator, events);
+      return;
     case "exit":
+      stopAllTimersForSessionEnd(snapshot);
       snapshot.backgroundActions.length = 0;
       snapshot.preparedSayOutput = null;
       if (
@@ -907,6 +931,7 @@ function enterFunction(
     callSiteSpan: copySpan(instruction.span),
     returnInstruction: instruction.returnInstruction,
     destinationTemporary: instruction.destinationTemporary,
+    timerInterruption: null,
     callerTemporaries: snapshot.temporaries.map(cloneTemporary),
     scopeBaseDepth: snapshot.frames.length,
     loopBaseDepth: snapshot.loopFrames.length,
@@ -1053,8 +1078,13 @@ function returnFromFunction(
   snapshot: RuntimeSnapshot,
   value: SerializableRuntimeValue,
   span: SourceSpan,
+  events: InterpreterEvent[],
 ): void {
   const { frame } = activeFunction(plan, snapshot, span);
+  if (frame.timerInterruption !== null) {
+    returnFromTimerHandler(plan, snapshot, frame, events);
+    return;
+  }
   const returned = cloneCapturedSerializableValue(value);
   snapshot.frames.splice(frame.scopeBaseDepth);
   snapshot.loopFrames.splice(frame.loopBaseDepth);
@@ -1064,10 +1094,11 @@ function returnFromFunction(
     snapshot.temporaries.length,
     ...frame.callerTemporaries.map(cloneTemporary),
   );
-  if (snapshot.temporaries.some((temporary) => temporary.id === frame.destinationTemporary)) {
+  const destinationTemporary = frame.destinationTemporary!;
+  if (snapshot.temporaries.some((temporary) => temporary.id === destinationTemporary)) {
     throw fault("TSR050", "Function result destination is already occupied.", span);
   }
-  snapshot.temporaries.push({ id: frame.destinationTemporary, value: returned });
+  snapshot.temporaries.push({ id: destinationTemporary, value: returned });
   snapshot.nextInstruction = frame.returnInstruction;
 }
 
@@ -1813,6 +1844,119 @@ function commandName(command: "wait" | "timer"): string {
 export function timerLabel(value: SerializableRuntimeValue, span: SourceSpan): string {
   if (typeof value !== "string") throw fault("TSR050", "A timer label must be a string.", span);
   return value;
+}
+
+/**
+ * Starts an asynchronous timer as background timed work and, when used as a value, stores its handle. Operands are
+ * evaluated in plan order before a range is drawn. A zero first round expires at once and queues its expiry block.
+ */
+function startTimer(
+  instruction: Extract<Instruction, { kind: "startTimer" }>,
+  snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
+  events: InterpreterEvent[],
+): void {
+  const duration = evaluator.evaluate(instruction.duration);
+  const display =
+    typeof instruction.display === "string"
+      ? instruction.display
+      : timerDisplay(evaluator.evaluate(instruction.display), instruction.display.span);
+  const label =
+    instruction.label === null
+      ? null
+      : timerLabel(evaluator.evaluate(instruction.label), instruction.label.span);
+  const range =
+    instruction.repeat &&
+    isRange(duration) &&
+    (instruction.unit === null || instruction.unit === "s")
+      ? duration
+      : null;
+  const roundDurationMs = timerDurationMs(
+    evaluator,
+    duration,
+    instruction.unit,
+    "timer",
+    instruction.duration.span,
+  );
+  if (instruction.repeat && (roundDurationMs <= 0 || (range !== null && range.start < 1))) {
+    throw fault(
+      "TSR050",
+      "A repeating timer needs every round to last longer than zero.",
+      instruction.duration.span,
+    );
+  }
+  const deadlineMs = futureDeadline(snapshot, roundDurationMs, "timer", instruction.duration.span);
+  if (
+    !Number.isSafeInteger(snapshot.nextActionId) ||
+    snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
+  ) {
+    throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+  }
+  assertCounterCanAdvance(snapshot.nextTimerId, "nextTimerId");
+  // The request, its eventual settlement, and the other active actions' completions must stay representable.
+  assertEventSequenceCapacity(
+    snapshot,
+    2 + requiredFutureActionCompletionEvents(snapshot),
+    instruction.span,
+  );
+  const timerId = snapshot.nextTimerId;
+  const sequence = takeSequence(snapshot);
+  const action: RuntimeTimerActionSnapshot = {
+    kind: "timer",
+    actionId: snapshot.nextActionId,
+    owningInstruction: snapshot.nextInstruction,
+    createdAtMs: snapshot.currentSessionTimeMs,
+    requestEventSequence: sequence,
+    timer: {
+      timerId,
+      state: "running",
+      display,
+      label,
+      repeat: instruction.repeat,
+      persist: instruction.persist,
+      handlerFunctionId: instruction.handlerFunctionId,
+      range:
+        range === null ? null : { start: range.start, end: range.end, inclusive: range.inclusive },
+      repeatDurationMs: instruction.repeat && range === null ? roundDurationMs : null,
+      roundDurationMs,
+      deadlineMs,
+      remainingMs: null,
+      elapsedMs: 0,
+      runningSinceMs: snapshot.currentSessionTimeMs,
+    },
+  };
+  snapshot.nextActionId += 1;
+  snapshot.nextTimerId += 1;
+  snapshot.backgroundActions.push(action);
+  if (instruction.destinationTemporary !== null) {
+    setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, {
+      kind: "timerHandle",
+      timerId,
+    });
+  }
+  events.push(
+    Object.freeze({
+      kind: "actionRequested",
+      sequence,
+      action: { ...action, timer: cloneTimer(action.timer) },
+      span: copySpan(instruction.span),
+    } satisfies ActionRequestedEvent),
+  );
+  if (roundDurationMs === 0) {
+    expireTimerAction(
+      snapshot,
+      action,
+      snapshot.currentSessionTimeMs,
+      copySpan(instruction.span),
+      events,
+    );
+  }
+  advance(snapshot);
+}
+
+export function timerDisplay(value: SerializableRuntimeValue, span: SourceSpan): DelayDisplay {
+  if (value === "visible" || value === "mystery" || value === "hidden") return value;
+  throw fault("TSR050", 'Timer display must be "visible", "mystery", or "hidden".', span);
 }
 
 function fault(code: string, message: string, span: SourceSpan): RuntimeFault {

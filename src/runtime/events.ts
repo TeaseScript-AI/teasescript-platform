@@ -4,6 +4,7 @@ import type { MessageMarkup } from "../message-markup.js";
 import type {
   RuntimeActionSettlementSnapshot,
   RuntimePendingActionSnapshot,
+  RuntimeTimerSettlementSnapshot,
 } from "./actions/model.js";
 
 export interface OutputSpeaker {
@@ -46,7 +47,7 @@ export interface ActionRequestedEvent {
 export interface ActionCompletedEvent {
   readonly kind: "actionCompleted";
   readonly sequence: number;
-  readonly settlement: RuntimeActionSettlementSnapshot;
+  readonly settlement: RuntimeActionSettlementSnapshot | RuntimeTimerSettlementSnapshot;
   readonly span: SourceSpan;
 }
 

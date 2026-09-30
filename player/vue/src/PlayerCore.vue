@@ -149,6 +149,8 @@ function setFeedback(message: string): void {
 }
 
 function submitComposer(): void {
+  // Input continues the script, so any timed action it creates must start at the current scene time.
+  observeCurrentTime();
   const result = submitPlayerRuntimeComposer(runtime.value, state.value.composerValue);
   if (result === null) {
     if (foreground.value?.kind === "show-button") {
@@ -162,6 +164,7 @@ function submitComposer(): void {
 }
 
 function activateForeground(optionId: string | null): void {
+  observeCurrentTime();
   const result =
     optionId === null
       ? activatePlayerRuntimeButton(runtime.value)
@@ -171,6 +174,7 @@ function activateForeground(optionId: string | null): void {
 
 function skipPacing(): void {
   if (relevantPlayerTextSelection()) return;
+  observeCurrentTime();
   const result = skipPlayerRuntimePacing(runtime.value);
   if (result !== null) applyRuntimeControl(result, false);
 }
@@ -425,8 +429,12 @@ function scheduleTimeObservation(): void {
   timeTimer = setTimeout(observeCurrentTime, Math.min(delay + 1, 2_147_483_647));
 }
 
-function observeAfterVisibilityChange(): void {
-  if (document.visibilityState === "visible") observeCurrentTime();
+/**
+ * Page lifecycle changes are observation opportunities, not pauses: a hidden but live Player keeps scene time running,
+ * and observing when hiding or leaving records the elapsed time before a later save or unload.
+ */
+function observeAtLifecycleBoundary(): void {
+  observeCurrentTime();
 }
 
 watch(runtime, syncTimerDisplayClock, { flush: "post" });
@@ -434,13 +442,15 @@ watch(runtime, syncTimerDisplayClock, { flush: "post" });
 onMounted(() => {
   syncTimerDisplayClock();
   scheduleTimeObservation();
-  document.addEventListener("visibilitychange", observeAfterVisibilityChange);
+  document.addEventListener("visibilitychange", observeAtLifecycleBoundary);
+  window.addEventListener("pagehide", observeAtLifecycleBoundary);
 });
 onBeforeUnmount(() => {
   if (timeTimer !== null) clearTimeout(timeTimer);
   if (timerDisplayClock !== null) clearInterval(timerDisplayClock);
   if (scriptUpdateTimer !== null) clearTimeout(scriptUpdateTimer);
-  document.removeEventListener("visibilitychange", observeAfterVisibilityChange);
+  document.removeEventListener("visibilitychange", observeAtLifecycleBoundary);
+  window.removeEventListener("pagehide", observeAtLifecycleBoundary);
 });
 
 defineExpose({

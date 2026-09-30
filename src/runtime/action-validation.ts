@@ -11,6 +11,7 @@ import { isMessageMarkup } from "../message-markup.js";
 import type { RuntimeChatPacingGateSettlementSnapshot } from "./actions/model.js";
 import { requiredActionCompletionEvents } from "./actions/model.js";
 import { recordValidationTestWork } from "../validation-testing.js";
+import { planHasTimerHandlers, validTimerAction } from "./timer-validation.js";
 
 interface ActionValidationAnalysis {
   readonly functionIdsByInstruction: readonly (number | null)[];
@@ -91,60 +92,22 @@ export function validatePendingActionState(
   if (!positiveSafeInteger(value.nextActionId))
     errors.push("Runtime nextActionId must be a positive safe integer.");
   const action = value.foregroundAction;
-  if (action !== null) {
-    const callIds = Array.isArray(value.callFrames)
-      ? new Set(value.callFrames.filter(isPlainRecord).map((frame) => frame.id))
-      : new Set<unknown>();
-    const currentSessionTimeMs = value.currentSessionTimeMs;
-    const delayTimesAreValid =
-      isPlainRecord(action) &&
-      action.kind === "delay" &&
-      hasExactKeys(action, [
-        "kind",
-        "actionId",
-        "owningInstruction",
-        "continuationInstruction",
-        "ownerCallFrameId",
-        "scopeDepth",
-        "loopDepth",
-        "createdAtMs",
-        "deadlineMs",
-        "expectedCompletion",
-        "display",
-        "label",
-        "requestEventSequence",
-      ]) &&
-      (action.display === "hidden" ||
-        action.display === "visible" ||
-        action.display === "mystery") &&
-      (action.label === null || typeof action.label === "string") &&
-      validSessionTime(action.createdAtMs) &&
-      validSessionTime(action.deadlineMs) &&
-      validSessionTime(currentSessionTimeMs) &&
-      action.createdAtMs <= currentSessionTimeMs &&
-      action.deadlineMs > currentSessionTimeMs;
-    const baseValid = validForegroundActionBase(action, value, callIds);
-    const kindValid = validForegroundActionKind(action, value, plan, delayTimesAreValid);
-    if (
-      !baseValid ||
-      !kindValid ||
-      (plan !== undefined &&
-        isPlainRecord(action) &&
-        !validForegroundActionOwnership(action, value, plan))
-    ) {
-      errors.push("Runtime foreground action is malformed.");
-    }
+  if (
+    action !== null &&
+    !validForegroundActionState(action, value, plan, awaitsTimerInterrupt(value))
+  ) {
+    errors.push("Runtime foreground action is malformed.");
   }
   const settlement = value.lastSettlement;
   if (!validRetainedSettlement(settlement, value, plan, analysis)) {
     errors.push("Runtime lastSettlement is malformed.");
   }
-  if (!validActiveActionIdentityCoherence(value)) {
+  if (!validActiveActionIdentityCoherence(value, plan)) {
     errors.push(
       "Runtime active action identities are inconsistent with each other or the retained settlement.",
     );
   }
-  if (!validActiveActionLocationCoherence(value)) {
+  if (!validActiveActionLocationCoherence(value, plan)) {
     errors.push("Runtime foreground and background action locations are incoherent.");
   }
   if (!validActiveActionCompletionCapacity(value)) {
@@ -174,10 +137,22 @@ function validBackgroundPacingActions(
   plan: InstructionPlan | undefined,
 ): boolean {
   const actions = snapshot.backgroundActions;
-  if (!isCanonicalJsonArray(actions) || actions.length > 1) return false;
+  if (!isCanonicalJsonArray(actions)) return false;
 
+  let pacingGates = 0;
+  let previousActionId = 0;
   for (let index = 0; index < actions.length; index += 1) {
-    if (!validPacingGateAction(actions[index], snapshot, plan, false)) return false;
+    const action = actions[index];
+    if (!isPlainRecord(action)) return false;
+    if (action.kind === "timer") {
+      if (!validTimerAction(action, snapshot, plan)) return false;
+    } else {
+      pacingGates += 1;
+      if (pacingGates > 1 || !validPacingGateAction(action, snapshot, plan, false)) return false;
+    }
+    // Background work is kept in creation order.
+    if (!positiveSafeInteger(action.actionId) || action.actionId <= previousActionId) return false;
+    previousActionId = action.actionId;
   }
   return true;
 }
@@ -261,11 +236,18 @@ function validSettlementIdentityAndEventSequences(
   );
 }
 
-function validActiveActionIdentityCoherence(snapshot: Record<string, unknown>): boolean {
+function validActiveActionIdentityCoherence(
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+): boolean {
   const actions = [
     snapshot.foregroundAction,
     ...(Array.isArray(snapshot.backgroundActions) ? snapshot.backgroundActions : []),
+    ...suspendedActions(snapshot),
   ].filter(isPlainRecord);
+  // Timers outlive later settlements, and an expiry block can settle newer actions before an interrupted older one
+  // resumes. Such actions need unique identities that differ from the retained settlement, not a younger history.
+  const interruptible = planHasTimerHandlers(plan);
   const actionIds = new Set<number>();
   const requestSequences = new Set<number>();
   const settlement = isPlainRecord(snapshot.lastSettlement) ? snapshot.lastSettlement : null;
@@ -275,7 +257,14 @@ function validActiveActionIdentityCoherence(snapshot: Record<string, unknown>): 
       return false;
     if (actionIds.has(action.actionId) || requestSequences.has(action.requestEventSequence))
       return false;
-    if (settlement !== null && !validActiveActionAgainstSettlement(action, settlement))
+    if (
+      settlement !== null &&
+      !(
+        (action.kind === "timer" || interruptible) &&
+        validActiveActionEventIdentity(action, settlement)
+      ) &&
+      !validActiveActionAgainstSettlement(action, settlement)
+    )
       return false;
     actionIds.add(action.actionId);
     requestSequences.add(action.requestEventSequence);
@@ -283,7 +272,82 @@ function validActiveActionIdentityCoherence(snapshot: Record<string, unknown>): 
   return true;
 }
 
-function validActiveActionLocationCoherence(snapshot: Record<string, unknown>): boolean {
+/**
+ * Validates one foreground action against the execution context in `snapshot`. `allowDue` admits a delay whose
+ * deadline has passed but which settles later in order: one awaiting a queued expiry block, or one suspended by it.
+ */
+export function validForegroundActionState(
+  action: unknown,
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+  allowDue: boolean,
+): boolean {
+  const callIds = Array.isArray(snapshot.callFrames)
+    ? new Set(snapshot.callFrames.filter(isPlainRecord).map((frame) => frame.id))
+    : new Set<unknown>();
+  const currentSessionTimeMs = snapshot.currentSessionTimeMs;
+  const delayTimesAreValid =
+    isPlainRecord(action) &&
+    action.kind === "delay" &&
+    hasExactKeys(action, [
+      "kind",
+      "actionId",
+      "owningInstruction",
+      "continuationInstruction",
+      "ownerCallFrameId",
+      "scopeDepth",
+      "loopDepth",
+      "createdAtMs",
+      "deadlineMs",
+      "expectedCompletion",
+      "display",
+      "label",
+      "requestEventSequence",
+    ]) &&
+    (action.display === "hidden" || action.display === "visible" || action.display === "mystery") &&
+    (action.label === null || typeof action.label === "string") &&
+    validSessionTime(action.createdAtMs) &&
+    validSessionTime(action.deadlineMs) &&
+    validSessionTime(currentSessionTimeMs) &&
+    action.createdAtMs <= currentSessionTimeMs &&
+    (action.deadlineMs > currentSessionTimeMs || allowDue);
+  return (
+    validForegroundActionBase(action, snapshot, callIds) &&
+    validForegroundActionKind(action, snapshot, plan, delayTimesAreValid) &&
+    (plan === undefined ||
+      (isPlainRecord(action) && validForegroundActionOwnership(action, snapshot, plan)))
+  );
+}
+
+/**
+ * A due foreground delay stays unsettled while an earlier-due expiry block is queued: the block interrupts first and
+ * the delay then settles as suspended work, preserving scene-time order.
+ */
+function awaitsTimerInterrupt(snapshot: Record<string, unknown>): boolean {
+  return (
+    Array.isArray(snapshot.pendingTimerHandlers) &&
+    snapshot.pendingTimerHandlers.length > 0 &&
+    Array.isArray(snapshot.callFrames) &&
+    !snapshot.callFrames.some((frame) => isPlainRecord(frame) && frame.timerInterruption !== null)
+  );
+}
+
+/** Foreground actions held by an interrupting timer expiry block. */
+export function suspendedActions(snapshot: Record<string, unknown>): Record<string, unknown>[] {
+  if (!Array.isArray(snapshot.callFrames)) return [];
+  return snapshot.callFrames.flatMap((frame) =>
+    isPlainRecord(frame) &&
+    isPlainRecord(frame.timerInterruption) &&
+    isPlainRecord(frame.timerInterruption.suspendedAction)
+      ? [frame.timerInterruption.suspendedAction]
+      : [],
+  );
+}
+
+function validActiveActionLocationCoherence(
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+): boolean {
   const backgroundActions = snapshot.backgroundActions;
   if (!Array.isArray(backgroundActions)) return false;
 
@@ -313,7 +377,11 @@ function validActiveActionLocationCoherence(snapshot: Record<string, unknown>): 
   const backgroundPacingAction = backgroundPacingActions[0];
   if (backgroundPacingAction === undefined) return false;
 
-  return validPacingGateCreatedBeforeForegroundDelay(backgroundPacingAction, foregroundAction);
+  // After an expiry block returns to a delay, its own paced output may have left a newer background gate.
+  return (
+    planHasTimerHandlers(plan) ||
+    validPacingGateCreatedBeforeForegroundDelay(backgroundPacingAction, foregroundAction)
+  );
 }
 
 function validPacingGateCreatedBeforeForegroundDelay(

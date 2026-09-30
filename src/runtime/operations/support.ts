@@ -122,7 +122,11 @@ export function assertEventSequenceCapacity(
  * The count is derived from canonical action state, not persisted separately.
  */
 export function requiredFutureActionCompletionEvents(snapshot: RuntimeSnapshot): number {
-  const actions = [snapshot.foregroundAction, ...snapshot.backgroundActions];
+  const actions = [
+    snapshot.foregroundAction,
+    ...snapshot.backgroundActions,
+    ...snapshot.callFrames.map((frame) => frame.timerInterruption?.suspendedAction ?? null),
+  ];
   return actions.reduce((count, action) => count + requiredActionCompletionEvents(action), 0);
 }
 

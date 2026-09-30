@@ -25,6 +25,8 @@ export type ActionCompletionOutcome =
   | { readonly kind: "alreadySettled"; readonly settlement: RuntimeActionSettlementSnapshot }
   | { readonly kind: "staleAction"; readonly actionId: number }
   | { readonly kind: "unknownAction"; readonly actionId: number }
+  /** The action belongs to a path interrupted by a running timer expiry block. */
+  | { readonly kind: "suspendedAction"; readonly actionId: number }
   | {
       readonly kind: "wrongActionKind";
       readonly actionId: number;

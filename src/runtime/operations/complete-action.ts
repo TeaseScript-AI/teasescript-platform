@@ -51,11 +51,16 @@ export function completeAction(
   const active =
     current.foregroundAction?.actionId === actionId
       ? current.foregroundAction
-      : (current.backgroundActions.find(
-          (action): action is RuntimeChatPacingGateActionSnapshot =>
-            action.kind === "chatPacingGate" && action.actionId === actionId,
-        ) ?? null);
+      : (current.backgroundActions.find((action) => action.actionId === actionId) ?? null);
   if (active === null) {
+    if (
+      current.callFrames.some(
+        (frame) => frame.timerInterruption?.suspendedAction?.actionId === actionId,
+      )
+    ) {
+      // An interrupted action is inert while a timer expiry block runs; it is not settled.
+      return pendingResult(current, [], { kind: "suspendedAction" as const, actionId });
+    }
     if (current.lastSettlement?.actionId === actionId) {
       return pendingResult(current, [], {
         kind: "alreadySettled",
@@ -67,6 +72,12 @@ export function completeAction(
         ? { kind: "staleAction" as const, actionId }
         : { kind: "unknownAction" as const, actionId };
     return pendingResult(current, [], outcome);
+  }
+  if (active.kind === "timer") {
+    return pendingResult(current, [], {
+      kind: "invalidPayload",
+      message: "Timers settle only through time observation and script operations.",
+    });
   }
   if (value.actionKind !== active.kind) {
     const receivedActionKind = validRequestedActionKind(value.actionKind)
@@ -109,8 +120,10 @@ export function completeAction(
     throw new RuntimeDataError("TSR101", "Due delay completion did not settle.");
   }
   const requestedCompletion = observed.events.find(
-    (event): event is ActionCompletedEvent =>
-      event.kind === "actionCompleted" && event.settlement.actionId === actionId,
+    (event): event is ActionCompletedEvent & { settlement: RuntimeActionSettlementSnapshot } =>
+      event.kind === "actionCompleted" &&
+      event.settlement.actionKind !== "timer" &&
+      event.settlement.actionId === actionId,
   );
   if (requestedCompletion === undefined) {
     throw new RuntimeDataError(
