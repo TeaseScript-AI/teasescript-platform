@@ -107,10 +107,11 @@ function atMost(value: number, bound: number, magnitude: number): boolean {
 }
 
 /**
- * The current round's total covers the time still left in it, and its consumed part fits the timer's running time. An
- * anchored round sequence instead fixes the deadline exactly by its anchor formula.
+ * The current round's total covers the time still left in it, and its consumed part fits the timer's running time.
+ * These values come from subtracting session coordinates, so rounding scales with the scene time `now`. An anchored
+ * round sequence instead fixes the deadline exactly by its anchor formula, and its completed rounds have ended.
  */
-function validCurrentRound(timer: Record<string, unknown>): boolean {
+function validCurrentRound(timer: Record<string, unknown>, now: number): boolean {
   const { roundDurationMs, elapsedMs, anchoredRounds } = timer;
   if (typeof roundDurationMs !== "number" || typeof elapsedMs !== "number") return false;
   if (anchoredRounds !== null) {
@@ -118,12 +119,15 @@ function validCurrentRound(timer: Record<string, unknown>): boolean {
       nonNegativeSafeInteger(anchoredRounds) &&
       anchoredRounds < Number.MAX_SAFE_INTEGER - 1 &&
       timer.state === "running" &&
+      timer.repeat === true &&
       timer.range === null &&
       typeof timer.repeatDurationMs === "number" &&
       roundDurationMs === timer.repeatDurationMs &&
       typeof timer.runningSinceMs === "number" &&
       timer.deadlineMs ===
-        anchoredDeadlineMs(timer.runningSinceMs, anchoredRounds, timer.repeatDurationMs)
+        anchoredDeadlineMs(timer.runningSinceMs, anchoredRounds, timer.repeatDurationMs) &&
+      (anchoredRounds === 0 ||
+        anchoredDeadlineMs(timer.runningSinceMs, anchoredRounds - 1, timer.repeatDurationMs) <= now)
     );
   }
   if (timer.state === "running") {
@@ -131,16 +135,18 @@ function validCurrentRound(timer: Record<string, unknown>): boolean {
       return false;
     }
     const leftMs = timer.deadlineMs - timer.runningSinceMs;
+    const magnitude = Math.max(timer.deadlineMs, now) + elapsedMs;
     return (
-      atMost(leftMs, roundDurationMs, timer.deadlineMs) &&
-      atMost(roundDurationMs, elapsedMs + leftMs, timer.deadlineMs + elapsedMs)
+      atMost(leftMs, roundDurationMs, magnitude) &&
+      atMost(roundDurationMs, elapsedMs + leftMs, magnitude)
     );
   }
   if (timer.state === "paused") {
     if (typeof timer.remainingMs !== "number") return false;
+    const magnitude = now + roundDurationMs + elapsedMs;
     return (
-      atMost(timer.remainingMs, roundDurationMs, roundDurationMs) &&
-      atMost(roundDurationMs - timer.remainingMs, elapsedMs, roundDurationMs + elapsedMs)
+      atMost(timer.remainingMs, roundDurationMs, magnitude) &&
+      atMost(roundDurationMs - timer.remainingMs, elapsedMs, magnitude)
     );
   }
   return true;
@@ -168,7 +174,7 @@ function validTimerRecord(
     (timer.range !== null && (!timer.repeat || timer.repeatDurationMs !== null)) ||
     (timer.repeat && timer.range === null && timer.repeatDurationMs === null) ||
     !isValidSessionTime(now) ||
-    !validCurrentRound(timer)
+    !validCurrentRound(timer, now)
   ) {
     return false;
   }

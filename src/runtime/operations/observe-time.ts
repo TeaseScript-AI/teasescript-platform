@@ -60,6 +60,8 @@ export function processDueWork(
   events: InterpreterEvent[],
 ): RuntimeActionSettlementSnapshot | null {
   let completion: RuntimeActionSettlementSnapshot | null = null;
+  // A failed session is terminal: later observations record time but settle nothing.
+  if (current.status === "failed") return completion;
   for (;;) {
     if (timerBlockHoldsCatchUp(current)) return completion;
     const due = nextDueWork(current);
@@ -70,7 +72,12 @@ export function processDueWork(
     current.currentSessionTimeMs = Math.max(current.currentSessionTimeMs, due.deadlineMs);
     if (due.kind === "timer") {
       // Silent rounds may be skipped only up to the next other work, which could observe or change this timer.
-      skipSilentRounds(due.action.timer, nextOtherDeadline(current, due.actionId));
+      const boundary = nextOtherWork(current, due.actionId);
+      skipSilentRounds(due.action.timer, boundary.deadlineMs, due.actionId < boundary.actionId);
+      current.currentSessionTimeMs = Math.max(
+        current.currentSessionTimeMs,
+        due.action.timer.deadlineMs!,
+      );
       expireTimerAction(
         current,
         due.action,
@@ -138,13 +145,25 @@ function nextDueWork(snapshot: RuntimeSnapshot): DueWork | null {
   return earliest;
 }
 
-/** The earliest deadline of other timed work, capped at the observed time. */
-function nextOtherDeadline(snapshot: RuntimeSnapshot, actionId: number): number {
-  let limit = snapshot.observedSessionTimeMs;
+/**
+ * The earliest other timed work by `(deadline, action ID)`, or the observed time, which every action precedes. Work at
+ * the same deadline goes first when its action ID is lower.
+ */
+function nextOtherWork(
+  snapshot: RuntimeSnapshot,
+  actionId: number,
+): { readonly deadlineMs: number; readonly actionId: number } {
+  let boundary = { deadlineMs: snapshot.observedSessionTimeMs, actionId: Infinity };
   for (const candidate of timedWork(snapshot)) {
-    if (candidate.actionId !== actionId) limit = Math.min(limit, candidate.deadlineMs);
+    if (
+      candidate.actionId !== actionId &&
+      (candidate.deadlineMs < boundary.deadlineMs ||
+        (candidate.deadlineMs === boundary.deadlineMs && candidate.actionId < boundary.actionId))
+    ) {
+      boundary = { deadlineMs: candidate.deadlineMs, actionId: candidate.actionId };
+    }
   }
-  return limit;
+  return boundary;
 }
 
 function timedWork(snapshot: RuntimeSnapshot): DueWork[] {

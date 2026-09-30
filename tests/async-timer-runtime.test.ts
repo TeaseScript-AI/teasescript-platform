@@ -26,13 +26,23 @@ class Session {
   snapshot: RuntimeSnapshot;
   readonly events: InterpreterEvent[] = [];
 
-  constructor(source: string, options: { readonly pacing?: boolean; readonly seed?: number } = {}) {
+  constructor(
+    source: string,
+    options: {
+      readonly pacing?: boolean;
+      readonly seed?: number;
+      readonly initialSessionTimeMs?: number;
+    } = {},
+  ) {
     this.plan = plan(source);
-    const seed = options.seed ?? 0x1234_5678;
+    const settings = {
+      seed: options.seed ?? 0x1234_5678,
+      initialSessionTimeMs: options.initialSessionTimeMs ?? 0,
+    };
     const fresh =
       options.pacing === true
-        ? createFreshRuntimeSnapshot(this.plan, { seed })
-        : createImmediatePacingRuntimeSnapshot(this.plan, { seed });
+        ? createFreshRuntimeSnapshot(this.plan, settings)
+        : createImmediatePacingRuntimeSnapshot(this.plan, settings);
     this.snapshot = fresh;
     this.run();
   }
@@ -992,5 +1002,60 @@ test("audit regressions: restore rejects contradictory rounds, early expiries, a
     counted.snapshot.pendingTimerHandlers.map((entry) => entry.count),
     [Number.MAX_SAFE_INTEGER, 1],
     "a full aggregate count starts a new entry",
+  );
+});
+
+test("re-audit regressions: skipped rounds keep tie order, termination, and restorable rounds", () => {
+  const onTime = (source: string, horizonMs: number, initialSessionTimeMs = 0): Session => {
+    const session = new Session(source, { initialSessionTimeMs });
+    for (let guard = 0; session.snapshot.observedSessionTimeMs < horizonMs; guard += 1) {
+      assert.ok(guard < 100, "on-time schedule must reach the horizon");
+      const deadlines = session
+        .timers()
+        .map((action) => action.timer.deadlineMs)
+        .filter((deadline): deadline is number => deadline !== null);
+      session.at(Math.min(horizonMs, ...deadlines));
+    }
+    return session;
+  };
+  const tie =
+    'timer async 1 ms {\n  if t.remaining == 0 ms { say "due", 0 }\n  else { say "next round", 0 }\n}\nlet t = timer(duration: 0.1 ms, async: true, repeat: true)\nwait 10 ms';
+  assert.deepEqual(onTime(tie, 1).said(), ["due"]);
+  assert.deepEqual(new Session(tie).at(1).said(), ["due"], "a lower action ID runs first at a tie");
+
+  const origin = Number.MAX_SAFE_INTEGER - 4;
+  const terminal =
+    'let t = timer(duration: 1 ms, async: true, repeat: true)\ntimer async 0 ms { wait 4 ms }\nlet answer = askText "Hold"';
+  const timely = onTime(terminal, Number.MAX_SAFE_INTEGER, origin);
+  const late = new Session(terminal, { initialSessionTimeMs: origin }).at(Number.MAX_SAFE_INTEGER);
+  const finished = (session: Session) =>
+    session.events.filter(
+      (event) => event.kind === "actionCompleted" && event.settlement.actionKind === "timer",
+    );
+  assert.deepEqual(finished(late), finished(timely));
+
+  const paused = new Session("wait 1\nlet t = timer async 0.1 ms\nt.pause()\nwait 1").at(1_000);
+  assert.equal(
+    paused.timers()[0]!.timer.state,
+    "paused",
+    "a rounded paused record stays restorable",
+  );
+  const large = new Session("let t = timer async 0.3 ms\nt.pause()\nwait 1", {
+    initialSessionTimeMs: 1e12,
+  });
+  assert.equal(large.timers()[0]!.timer.state, "paused");
+
+  const anchored = new Session("let t = timer(duration: 5, async: true, repeat: true)\nwait 20");
+  const json = serializeCheckpoint(createCheckpoint(anchored.plan, anchored.snapshot));
+  // EVIDENCE: fixture: checkpoint serialization produces plain JSON data.
+  const forgedRounds = JSON.parse(json) as {
+    snapshot: { backgroundActions: { timer: { anchoredRounds: number; deadlineMs: number } }[] };
+  };
+  forgedRounds.snapshot.backgroundActions[0]!.timer.anchoredRounds = 1;
+  forgedRounds.snapshot.backgroundActions[0]!.timer.deadlineMs = 10_000;
+  assert.throws(
+    () => deserializeCheckpoint(JSON.stringify(forgedRounds)),
+    (error: unknown) => error instanceof CheckpointError,
+    "completed anchored rounds must have ended",
   );
 });

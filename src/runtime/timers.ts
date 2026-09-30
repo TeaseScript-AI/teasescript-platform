@@ -228,12 +228,21 @@ export function expireTimerRound(
   }
 }
 
+/** The last anchored round index; expiring it reaches the index limit and finishes the timer. */
+const LAST_ANCHORED_ROUND = Number.MAX_SAFE_INTEGER - 2;
+
 /**
  * An anchored repeating timer without an expiry block produces nothing observable per round, so catch-up moves
- * directly to the last anchored round due by `limitMs`, leaving that round for ordinary expiry. The result equals
- * expiring every round in turn because each deadline comes from the same anchor formula.
+ * directly to the last anchored round due before the boundary, leaving that round for ordinary expiry. A round
+ * ending exactly at `limitMs` counts only when `includeLimit` says this timer precedes the work there. The result
+ * equals expiring every round in turn because each deadline comes from the same anchor formula and the same index
+ * limit ends both paths.
  */
-export function skipSilentRounds(timer: RuntimeTimerSnapshot, limitMs: number): void {
+export function skipSilentRounds(
+  timer: RuntimeTimerSnapshot,
+  limitMs: number,
+  includeLimit: boolean,
+): void {
   const roundMs = timer.repeatDurationMs;
   const anchorMs = timer.runningSinceMs;
   const rounds = timer.anchoredRounds;
@@ -246,18 +255,17 @@ export function skipSilentRounds(timer: RuntimeTimerSnapshot, limitMs: number): 
   ) {
     return;
   }
-  // The largest round index whose deadline is due by the limit, estimated and then settled with the exact formula.
+  const due = (index: number): boolean => {
+    const deadlineMs = anchoredDeadlineMs(anchorMs, index, roundMs);
+    return deadlineMs < limitMs || (includeLimit && deadlineMs === limitMs);
+  };
+  // The largest due round index, estimated and then settled with the exact formula.
   let last = Math.min(
-    Number.MAX_SAFE_INTEGER - 1,
+    LAST_ANCHORED_ROUND,
     Math.max(rounds, Math.floor((limitMs - anchorMs) / roundMs) - 1),
   );
-  while (last > rounds && anchoredDeadlineMs(anchorMs, last, roundMs) > limitMs) last -= 1;
-  while (
-    last + 1 < Number.MAX_SAFE_INTEGER - 1 &&
-    anchoredDeadlineMs(anchorMs, last + 1, roundMs) <= limitMs
-  ) {
-    last += 1;
-  }
+  while (last > rounds && !due(last)) last -= 1;
+  while (last < LAST_ANCHORED_ROUND && due(last + 1)) last += 1;
   if (last <= rounds) return;
   timer.anchoredRounds = last;
   timer.deadlineMs = anchoredDeadlineMs(anchorMs, last, roundMs);

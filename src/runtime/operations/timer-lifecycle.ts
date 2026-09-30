@@ -137,12 +137,15 @@ export function expireTimerAction(
 ): void {
   const timer = action.timer;
   expireTimerRound(timer, endedAtMs, (range) => drawWholeSeconds(snapshot, range));
-  // A next deadline that cannot advance or leaves the session range would loop forever; the timer finishes instead.
+  // A next deadline outside the session range, an exhausted anchored round index, or an unanchored round that cannot
+  // advance would loop forever; the timer finishes instead. Anchored rounds always advance their index, so rounds
+  // shorter than the deadline's resolution may end at the same time without looping.
   if (
     timer.state === "running" &&
     (!isValidSessionTime(timer.deadlineMs) ||
-      timer.deadlineMs! <= endedAtMs ||
-      (timer.anchoredRounds !== null && timer.anchoredRounds >= Number.MAX_SAFE_INTEGER - 1))
+      (timer.anchoredRounds === null
+        ? timer.deadlineMs! <= endedAtMs
+        : timer.anchoredRounds >= Number.MAX_SAFE_INTEGER - 1))
   ) {
     // Running time up to the end of the last round is kept, including an anchored sequence's rounds.
     timer.elapsedMs += Math.max(0, endedAtMs - timer.runningSinceMs!);
