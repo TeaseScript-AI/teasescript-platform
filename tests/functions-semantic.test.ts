@@ -117,7 +117,7 @@ test("rejects calls to non-callable variables", () => {
   assert.ok(result.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV019"));
 });
 
-test("rejects all accepted V30 protected names in declarations", () => {
+test("rejects representative protected names across function, parameter and local declarations", () => {
   const protectedFunction = compileSource("function wait { return 1 }");
   assert.equal(protectedFunction.plan, null);
   assert.ok(
