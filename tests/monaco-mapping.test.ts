@@ -50,28 +50,37 @@ test("Monaco markers retain canonical diagnostic code, severity, and range", () 
 
 test("Monaco providers receive presentation-only completion, hover, and signature shapes", () => {
   const sourceRange = createSourceSpan(
-    createSourcePosition(0, 0, 0),
-    createSourcePosition(3, 0, 3),
+    createSourcePosition(4, 1, 2),
+    createSourcePosition(9, 2, 3),
   );
-  const range = toMonacoRange(sourceRange);
-  assert.equal(
+  const range = { startLineNumber: 2, startColumn: 3, endLineNumber: 3, endColumn: 4 };
+  assert.deepEqual(
     toMonacoCompletions(
-      [{ label: "say", kind: "command", detail: "command", insertText: "say" }],
+      [{ label: "label-a", kind: "command", detail: "detail-b", insertText: "insert-c" }],
       range,
       { Keyword: 1, Function: 2, Variable: 3, Value: 4 },
-    )[0]?.kind,
-    2,
+    ),
+    [{ label: "label-a", kind: 2, detail: "detail-b", insertText: "insert-c", range }],
   );
-  assert.deepEqual(toMonacoHover({ range: sourceRange, contents: ["one", "two"] }).contents, [
-    { value: "one" },
-    { value: "two" },
-  ]);
-  const signature = toMonacoSignatureHelp({
-    label: "askText [hint]",
-    documentation: "help",
-    activeParameter: 1,
-    parameters: ["speaker", "hint"],
+  assert.deepEqual(toMonacoHover({ range: sourceRange, contents: ["one", "two"] }), {
+    range,
+    contents: [{ value: "one" }, { value: "two" }],
   });
-  assert.equal(signature.value.activeSignature, 0);
-  assert.equal(signature.value.activeParameter, 1);
+  const signature = toMonacoSignatureHelp({
+    label: "signature-label",
+    documentation: "signature-docs",
+    activeParameter: 1,
+    parameters: ["first-slot", "second-slot"],
+  });
+  assert.deepEqual(signature.value, {
+    signatures: [
+      {
+        label: "signature-label",
+        documentation: "signature-docs",
+        parameters: [{ label: "first-slot" }, { label: "second-slot" }],
+      },
+    ],
+    activeSignature: 0,
+    activeParameter: 1,
+  });
 });
