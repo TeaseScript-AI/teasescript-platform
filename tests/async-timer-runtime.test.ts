@@ -151,10 +151,24 @@ function assertForgedRejected(json: string, path: JsonPath, value: Json): void {
   );
 }
 
+/** Rejected-source diagnostics as code plus source offsets. */
 function diagnostics(source: string): string[] {
   const result = compileSource(source);
   assert.equal(result.plan, null, `${JSON.stringify(source)} must not compile`);
-  return result.diagnostics.map((diagnostic) => `${diagnostic.code} ${diagnostic.message}`);
+  return result.diagnostics.map(({ code, span }) =>
+    located(code, span.start.offset, span.end.offset),
+  );
+}
+
+function located(code: string, start: number, end: number): string {
+  return `${code} ${start}-${end}`;
+}
+
+/** Expected code at the last occurrence of `subject`; an empty subject names the source end. */
+function expectedAt(source: string, code: string, subject: string): string {
+  const start = source.lastIndexOf(subject);
+  assert.ok(start >= 0, `${JSON.stringify(subject)} must occur in ${JSON.stringify(source)}`);
+  return located(code, start, start + subject.length);
 }
 
 /** Requested actions in request order. */
@@ -255,46 +269,33 @@ test("a blocking timer evaluates a named display expression like an async timer"
 });
 
 test("timer forms reject invalid positions, members, and handler scope", () => {
-  const cases: ReadonlyArray<readonly [string, string]> = [
-    ["let t = timer 5", "TSV033 A blocking timer returns no handle"],
-    ["timer 5 { exit }", "TSV033 Only an async timer may have an expiry block"],
-    ["let t = timer async 5\nsay t.nope", "TSV034 Timer handles have no property 'nope'"],
-    [
-      "let t = timer async 5\nt.elapsed = 1 s",
-      "TSV034 Timer handle property 'elapsed' cannot be assigned",
-    ],
-    ["let t = timer async 5\nt.restart()", "TSV034 Timer handles have no method 'restart'"],
-    [
-      'function f {\n  let local = 1\n  timer async 1 { say "${local}" }\n}',
-      "TSV002 Unknown variable 'local'",
-    ],
-    [
-      "timer async 1 { return 5 }",
-      "TSV033 A timer expiry block may use 'return' only without a value.",
-    ],
+  const cases: ReadonlyArray<readonly [source: string, code: string, subject: string]> = [
+    ["let t = timer 5", "TSV033", "timer 5"],
+    ["timer 5 { exit }", "TSV033", "{ exit }"],
+    ["let t = timer async 5\nsay t.nope", "TSV034", "nope"],
+    ["let t = timer async 5\nt.elapsed = 1 s", "TSV034", "elapsed"],
+    ["let t = timer async 5\nt.restart()", "TSV034", "restart"],
+    ['function f {\n  let local = 1\n  timer async 1 { say "${local}" }\n}', "TSV002", "local"],
+    ["timer async 1 { return 5 }", "TSV033", "5"],
     [
       "timer(duration: 1, async: true, repeat: true)\ntimer(duration: 0, async: true, repeat: true)",
-      "TSV011 A repeating timer duration must be greater than zero.",
+      "TSV011",
+      "0",
     ],
-    ["timer(duration: 1, display: 5)", "TSV033 Timer display must be"],
-    ["let t = timer async 5\n(t).bogus()", "TSV034 Timer handles have no method 'bogus'"],
-    [
-      "let t = timer async 5\nt.remaining = 1",
-      "TSV034 Timer remaining must be assigned a duration",
-    ],
-    ["let t = timer async 5\nt.display = 1", "TSV034 Timer display must be"],
-    ["let t = timer async 5\nt.pause(1)", "TSV034 Timer pause() takes no arguments."],
-    ["timer 5..10 min", "TSV010 A timer range counts whole seconds"],
-    [
-      "timer(duration: 0..2, async: true, repeat: true)",
-      "TSV010 A repeating timer range must start at one second or more.",
-    ],
+    ["timer(duration: 1, display: 5)", "TSV033", "5"],
+    ["let t = timer async 5\n(t).bogus()", "TSV034", "bogus"],
+    ["let t = timer async 5\nt.remaining = 1", "TSV034", "remaining"],
+    ["let t = timer async 5\nt.display = 1", "TSV034", "display"],
+    ["let t = timer async 5\nt.pause(1)", "TSV034", "pause"],
+    ["timer 5..10 min", "TSV010", "5..10"],
+    ["timer(duration: 0..2, async: true, repeat: true)", "TSV010", "0..2"],
   ];
-  for (const [source, expected] of cases) {
+  for (const [source, code, subject] of cases) {
     const found = diagnostics(source);
+    const expected = expectedAt(source, code, subject);
     assert.ok(
-      found.some((diagnostic) => diagnostic.startsWith(expected)),
-      `${JSON.stringify(source)}: ${found.join(" | ")}`,
+      found.includes(expected),
+      `${JSON.stringify(source)}: ${expected} not in ${found.join(" | ")}`,
     );
   }
 });
