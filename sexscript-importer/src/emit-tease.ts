@@ -53,6 +53,20 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
     case "delete":
       lines.push(`${pad}delete ${emitExpression(statement.key)}`);
       return;
+    case "function": {
+      const parameters = statement.parameters.map((parameter) =>
+        parameter.defaultValue === null
+          ? parameter.name
+          : `${parameter.name} = ${emitExpression(parameter.defaultValue)}`,
+      );
+      lines.push(`${pad}function ${statement.name}${parameters.length === 0 ? "" : `(${parameters.join(", ")})`} {`);
+      emitStatements(statement.body, lines, depth + 1);
+      lines.push(`${pad}}`);
+      return;
+    }
+    case "return":
+      lines.push(`${pad}return${statement.value === null ? "" : ` ${emitExpression(statement.value)}`}`);
+      return;
     case "let":
       lines.push(`${pad}let ${statement.name} = ${emitExpression(statement.value)}`);
       return;
@@ -127,6 +141,8 @@ export function emitExpression(expression: IrExpression): string {
       return expression.name;
     case "list":
       return `[${expression.items.map(emitExpression).join(", ")}]`;
+    case "index":
+      return `${parenthesize(expression.target)}[${emitExpression(expression.index)}]`;
     case "range":
       return `${parenthesize(expression.from)}${expression.inclusive ? "..=" : ".."}${parenthesize(expression.to)}`;
     case "unary":

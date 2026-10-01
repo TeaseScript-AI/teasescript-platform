@@ -172,3 +172,108 @@ test("maps legacy save(key, null) deletion semantics to delete", () => {
   assert.deepEqual(program.diagnostics, []);
   assert.equal(emitTease(program), 'delete "intro.running"\n');
 });
+
+
+test("lowers top-level Groovy closure helpers to TeaseScript functions with defaults and returns", () => {
+  const helperClosure: AstNode = {
+    kind: "closure",
+    span,
+    parameterSpecified: true,
+    parameters: [
+      { name: "count", type: "java.lang.Object", default: null },
+      { name: "record", type: "java.lang.Object", default: constant(true) },
+    ],
+    body: {
+      kind: "block",
+      span,
+      statements: [{ kind: "return", span, value: variable("count") }],
+    },
+  };
+  const source = file([
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("helper"),
+      right: helperClosure,
+    }),
+    statement(call("helper", constant(4))),
+  ]);
+
+  const program = lowerParsedFile(source);
+  assert.deepEqual(program.diagnostics, []);
+  assert.equal(
+    emitTease(program),
+    [
+      "function helper(count, record = true) {",
+      "  return count",
+      "}",
+      "helper(4)",
+      "",
+    ].join("\n"),
+  );
+});
+
+test("synthesizes optional it only when an implicit Groovy closure is called with one argument", () => {
+  const implicitClosure: AstNode = {
+    kind: "closure",
+    span,
+    parameterSpecified: false,
+    parameters: [],
+    body: { kind: "block", span, statements: [statement(call("show", constant("ok")))] },
+  };
+  const source = file([
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("helper"),
+      right: implicitClosure,
+    }),
+    statement(call("helper", constant("ignored"))),
+  ]);
+
+  const program = lowerParsedFile(source);
+  assert.deepEqual(program.diagnostics, []);
+  assert.equal(
+    emitTease(program),
+    [
+      "function helper(it = null) {",
+      '  say "ok"',
+      "}",
+      'helper("ignored")',
+      "",
+    ].join("\n"),
+  );
+});
+
+test("lowers indexing, primitive casts, and compound multiplication assignments", () => {
+  const indexed: AstNode = {
+    kind: "binary",
+    span,
+    operator: "[",
+    left: variable("items"),
+    right: constant(1),
+  };
+  const cast: AstNode = { kind: "cast", span, type: "int", value: indexed };
+  const source = file([
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("value"),
+      right: cast,
+    }),
+    statement({
+      kind: "binary",
+      span,
+      operator: "*=",
+      left: variable("value"),
+      right: constant(2),
+    }),
+  ]);
+
+  const program = lowerParsedFile(source);
+  assert.deepEqual(program.diagnostics, []);
+  assert.equal(emitTease(program), "let value = toInteger(items[1])\nvalue = value * 2\n");
+});

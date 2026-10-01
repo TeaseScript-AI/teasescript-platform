@@ -31,6 +31,11 @@ interface IrBase {
   span: SourceSpan | null;
 }
 
+export interface IrFunctionParameter {
+  name: string;
+  defaultValue: IrExpression | null;
+}
+
 export type IrStatement =
   | (IrBase & { kind: "say"; value: IrExpression })
   | (IrBase & { kind: "wait"; duration: IrExpression; visible: boolean })
@@ -46,6 +51,8 @@ export type IrStatement =
     })
   | (IrBase & { kind: "save"; key: IrExpression; value: IrExpression })
   | (IrBase & { kind: "delete"; key: IrExpression })
+  | (IrBase & { kind: "function"; name: string; parameters: IrFunctionParameter[]; body: IrStatement[] })
+  | (IrBase & { kind: "return"; value: IrExpression | null })
   | (IrBase & { kind: "let"; name: string; value: IrExpression })
   | (IrBase & { kind: "assign"; target: string; operator: "=" | "+=" | "-="; value: IrExpression })
   | (IrBase & { kind: "expression"; expression: IrExpression })
@@ -70,6 +77,7 @@ export type IrExpression =
   | { kind: "literal"; value: string | number | boolean | null }
   | { kind: "variable"; name: string }
   | { kind: "list"; items: IrExpression[] }
+  | { kind: "index"; target: IrExpression; index: IrExpression }
   | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean }
   | { kind: "unary"; operator: "not" | "+" | "-"; value: IrExpression }
   | { kind: "binary"; operator: string; left: IrExpression; right: IrExpression }

@@ -372,7 +372,12 @@ public final class SexScriptAstExporter {
             List<Object> parameters = new ArrayList<>();
             if (child.getParameters() != null) {
                 for (Parameter parameter : child.getParameters()) {
-                    parameters.add(mapOf("name", parameter.getName(), "type", parameter.getType().getName()));
+                    parameters.add(mapOf(
+                            "name", parameter.getName(),
+                            "type", parameter.getType().getName(),
+                            "default", parameter.hasInitialExpression()
+                                    ? expression(parameter.getInitialExpression())
+                                    : null));
                 }
             }
             return nodeMap(node, "closure",

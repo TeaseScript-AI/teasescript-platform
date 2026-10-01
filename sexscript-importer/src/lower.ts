@@ -1,6 +1,7 @@
-import { constantString, isAstNode, variableName, type AstNode, type ParsedGroovyFile, type SourceSpan } from "./ast.ts";
+import { constantString, isAstNode, variableName, walkAst, type AstNode, type ParsedGroovyFile, type SourceSpan } from "./ast.ts";
 import type {
   IrExpression,
+  IrFunctionParameter,
   IrStatement,
   IrSwitchCase,
   LegacyMetadata,
@@ -8,9 +9,17 @@ import type {
   MigrationProgram,
 } from "./ir.ts";
 
+interface ClosureInfo {
+  implicitParameter: boolean;
+  minArgs: number;
+  maxArgs: number;
+}
+
 interface LowerContext {
   diagnostics: MigrationDiagnostic[];
   metadata: LegacyMetadata | null;
+  functions: Map<string, ClosureInfo>;
+  functionDepth: number;
 }
 
 const STORAGE_LOADS = new Set([
@@ -24,7 +33,7 @@ const STORAGE_LOADS = new Set([
 ]);
 
 export function lowerParsedFile(file: ParsedGroovyFile): MigrationProgram {
-  const context: LowerContext = { diagnostics: [], metadata: null };
+  const context: LowerContext = { diagnostics: [], metadata: null, functions: new Map(), functionDepth: 0 };
   if (file.diagnostics.length > 0 || file.root === null) {
     for (const diagnostic of file.diagnostics) {
       context.diagnostics.push({
@@ -48,6 +57,7 @@ export function lowerParsedFile(file: ParsedGroovyFile): MigrationProgram {
   }
 
   const body = asNode(file.root.body);
+  if (body?.kind === "block") context.functions = collectClosureInfo(body);
   const statements = body?.kind === "block" ? lowerBlock(body, context) : [];
   if (body?.kind !== "block") {
     addDiagnostic(context, "SX_INVALID_SCRIPT_BODY", "error", "Parser output does not contain a script body block.", file.root.span);
@@ -83,7 +93,7 @@ function lowerStatement(node: AstNode, context: LowerContext): IrStatement[] {
     case "switch":
       return lowerSwitch(node, context);
     case "return":
-      return lowerScriptReturn(node, context);
+      return lowerReturnStatement(node, context);
     case "break":
       return [{ kind: "break", span: node.span }];
     case "continue":
@@ -115,6 +125,15 @@ function lowerDeclaration(node: AstNode, span: SourceSpan | null, context: Lower
   if (name === null || right === null) {
     return [unsupportedStatement(context, node, "SX_UNSUPPORTED_DECLARATION", "Only single-variable declarations are supported.")];
   }
+  if (right.kind === "closure") return lowerClosureDeclaration(name, right, span, context);
+  if (context.functions.has(name)) {
+    return [unsupportedStatement(
+      context,
+      node,
+      "SX_FUNCTION_LOCAL_NAME_CONFLICT",
+      `Variable ${name} conflicts with a migrated closure function of the same name.`,
+    )];
+  }
   const value = lowerExpression(right, context);
   if (value === null) {
     return [unsupportedStatement(context, node, "SX_UNSUPPORTED_DECLARATION_VALUE", `Cannot safely migrate initializer for ${name}.`)];
@@ -122,9 +141,54 @@ function lowerDeclaration(node: AstNode, span: SourceSpan | null, context: Lower
   return [{ kind: "let", name, value, span }];
 }
 
+function lowerClosureDeclaration(
+  name: string,
+  closure: AstNode,
+  span: SourceSpan | null,
+  context: LowerContext,
+): IrStatement[] {
+  if (context.functionDepth !== 0) {
+    return [unsupportedStatement(context, closure, "SX_NESTED_CLOSURE", "Nested Groovy closures are not lowered automatically.")];
+  }
+  const info = context.functions.get(name);
+  if (info === undefined) {
+    return [unsupportedStatement(context, closure, "SX_CLOSURE_DISCOVERY", `Closure ${name} was not discovered during the prepass.`)];
+  }
+
+  const parameters: IrFunctionParameter[] = [];
+  if (info.implicitParameter) {
+    if (info.maxArgs === 1) parameters.push({ name: "it", defaultValue: { kind: "literal", value: null } });
+  } else {
+    const rawParameters = Array.isArray(closure.parameters) ? closure.parameters : [];
+    for (const raw of rawParameters) {
+      if (typeof raw !== "object" || raw === null || typeof (raw as Record<string, unknown>).name !== "string") {
+        return [unsupportedStatement(context, closure, "SX_CLOSURE_PARAMETER", `Closure ${name} has an invalid parameter.`)];
+      }
+      const record = raw as Record<string, unknown>;
+      const defaultNode = asNode(record.default);
+      const defaultValue = defaultNode === null ? null : lowerExpression(defaultNode, context);
+      if (defaultNode !== null && defaultValue === null) {
+        return [unsupportedStatement(context, closure, "SX_CLOSURE_PARAMETER_DEFAULT", `Default value for ${String(record.name)} could not be migrated.`)];
+      }
+      parameters.push({ name: String(record.name), defaultValue });
+    }
+  }
+
+  const body = asNode(closure.body);
+  if (body?.kind !== "block") {
+    return [unsupportedStatement(context, closure, "SX_CLOSURE_BODY", `Closure ${name} does not contain a normal block body.`)];
+  }
+  context.functionDepth += 1;
+  try {
+    return [{ kind: "function", name, parameters, body: lowerBlock(body, context), span }];
+  } finally {
+    context.functionDepth -= 1;
+  }
+}
+
 function lowerAssignment(node: AstNode, span: SourceSpan | null, context: LowerContext): IrStatement[] {
   const operator = text(node.operator);
-  if (operator !== "=" && operator !== "+=" && operator !== "-=") {
+  if (operator !== "=" && operator !== "+=" && operator !== "-=" && operator !== "*=" && operator !== "/=") {
     const lowered = lowerExpression(node, context);
     return lowered === null
       ? [unsupportedStatement(context, node, "SX_UNSUPPORTED_BINARY_STATEMENT", `Unsupported binary statement operator ${operator ?? "?"}.`)]
@@ -138,6 +202,20 @@ function lowerAssignment(node: AstNode, span: SourceSpan | null, context: LowerC
   const value = lowerExpression(right, context);
   if (value === null) {
     return [unsupportedStatement(context, node, "SX_UNSUPPORTED_ASSIGNMENT_VALUE", `Cannot safely migrate assignment to ${target}.`)];
+  }
+  if (operator === "*=" || operator === "/=") {
+    return [{
+      kind: "assign",
+      target,
+      operator: "=",
+      value: {
+        kind: "binary",
+        operator: operator === "*=" ? "*" : "/",
+        left: { kind: "variable", name: target },
+        right: value,
+      },
+      span,
+    }];
   }
   return [{ kind: "assign", target, operator, value, span }];
 }
@@ -308,14 +386,21 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
   return [{ kind: "switch", value, cases, default: defaultStatements, span: node.span }];
 }
 
-function lowerScriptReturn(node: AstNode, context: LowerContext): IrStatement[] {
+function lowerReturnStatement(node: AstNode, context: LowerContext): IrStatement[] {
   const valueNode = asNode(node.value);
+  if (context.functionDepth > 0) {
+    if (valueNode === null) return [{ kind: "return", value: null, span: node.span }];
+    const value = lowerExpression(valueNode, context);
+    if (value === null) {
+      return [unsupportedStatement(context, node, "SX_UNSUPPORTED_FUNCTION_RETURN", "Function return value could not be migrated.")];
+    }
+    return [{ kind: "return", value, span: node.span }];
+  }
+
   if (valueNode === null || isNullConstant(valueNode)) return [{ kind: "end", span: node.span }];
   const script = lowerExpression(valueNode, context);
   if (script === null) return [unsupportedStatement(context, node, "SX_UNSUPPORTED_SCRIPT_RETURN", "Script return value could not be migrated.")];
-  if (script.kind === "literal" && typeof script.value === "string") {
-    script.value = migrateScriptPath(script.value);
-  }
+  if (script.kind === "literal" && typeof script.value === "string") script.value = migrateScriptPath(script.value);
   return [{ kind: "run", script, span: node.span }];
 }
 
@@ -325,7 +410,16 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
       return isLiteral(node.value) ? { kind: "literal", value: node.value } : unsupportedExpression(context, node, "SX_UNSUPPORTED_CONSTANT", "Unsupported Groovy constant value.");
     case "variable": {
       const name = variableName(node);
-      return name === null ? unsupportedExpression(context, node, "SX_INVALID_VARIABLE", "Variable is missing a name.") : { kind: "variable", name };
+      if (name === null) return unsupportedExpression(context, node, "SX_INVALID_VARIABLE", "Variable is missing a name.");
+      if (context.functions.has(name)) {
+        return unsupportedExpression(
+          context,
+          node,
+          "SX_FUNCTION_VALUE_REFERENCE",
+          `Groovy closure ${name} is used as a value instead of being called.`,
+        );
+      }
+      return { kind: "variable", name };
     }
     case "list": {
       const items: IrExpression[] = [];
@@ -348,6 +442,8 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
       return lowerBinaryExpression(node, context);
     case "boolean":
       return asNode(node.value) === null ? null : lowerExpression(asNode(node.value)!, context);
+    case "cast":
+      return lowerCast(node, context);
     case "not":
       return lowerUnary(node, "not", context);
     case "unaryMinus":
@@ -363,6 +459,13 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
 
 function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpression | null {
   const operator = text(node.operator);
+  if (operator === "[") {
+    const targetNode = asNode(node.left);
+    const indexNode = asNode(node.right);
+    const target = targetNode === null ? null : lowerExpression(targetNode, context);
+    const index = indexNode === null ? null : lowerExpression(indexNode, context);
+    return target === null || index === null ? null : { kind: "index", target, index };
+  }
   const mapped = operator === "&&" ? "and" : operator === "||" ? "or" : operator;
   if (mapped === null || !new Set(["==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "and", "or"]).has(mapped)) {
     return unsupportedExpression(context, node, "SX_UNSUPPORTED_OPERATOR", `Groovy operator ${operator ?? "?"} is not safely mapped yet.`);
@@ -372,6 +475,36 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   const left = leftNode === null ? null : lowerExpression(leftNode, context);
   const right = rightNode === null ? null : lowerExpression(rightNode, context);
   return left === null || right === null ? null : { kind: "binary", operator: mapped, left, right };
+}
+
+function lowerCast(node: AstNode, context: LowerContext): IrExpression | null {
+  const valueNode = asNode(node.value);
+  const value = valueNode === null ? null : lowerExpression(valueNode, context);
+  if (value === null) return null;
+  switch (text(node.type)) {
+    case "int":
+    case "Integer":
+    case "long":
+    case "Long":
+      return { kind: "call", name: "toInteger", positional: [value], named: {} };
+    case "float":
+    case "Float":
+    case "double":
+    case "Double":
+    case "BigDecimal":
+      return { kind: "call", name: "toNumber", positional: [value], named: {} };
+    case "String":
+    case "java.lang.String":
+      return { kind: "call", name: "toString", positional: [value], named: {} };
+    case "Boolean":
+    case "boolean":
+      return { kind: "call", name: "toBoolean", positional: [value], named: {} };
+    case "List":
+    case "java.util.List":
+      return value.kind === "list" ? value : unsupportedExpression(context, node, "SX_UNSUPPORTED_CAST", "Only literal-list List casts are erased safely.");
+    default:
+      return unsupportedExpression(context, node, "SX_UNSUPPORTED_CAST", `Groovy cast to ${text(node.type) ?? "unknown"} is not mapped.`);
+  }
 }
 
 function lowerUnary(node: AstNode, operator: "not" | "+" | "-", context: LowerContext): IrExpression | null {
@@ -384,6 +517,19 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
   const call = callParts(node);
   if (call === null || !call.inherited) {
     return unsupportedExpression(context, node, "SX_DYNAMIC_OR_OBJECT_CALL", "Object/dynamic Groovy method calls are not lowered by the first slice.");
+  }
+  const functionInfo = context.functions.get(call.name);
+  if (functionInfo !== undefined) {
+    if (call.arguments.length < functionInfo.minArgs || call.arguments.length > functionInfo.maxArgs) {
+      return unsupportedExpression(
+        context,
+        node,
+        "SX_FUNCTION_ARITY",
+        `Call to ${call.name} has ${call.arguments.length} arguments; expected ${functionInfo.minArgs}..${functionInfo.maxArgs}.`,
+      );
+    }
+    const args = lowerArguments(call.arguments, context);
+    return args === null ? null : { kind: "call", name: call.name, positional: args, named: {} };
   }
   if (STORAGE_LOADS.has(call.name)) {
     return unsupportedExpression(
@@ -487,6 +633,39 @@ function callParts(node: AstNode): { name: string; inherited: boolean; arguments
   const inherited = node.implicitThis === true || objectName === "main";
   const argsNode = asNode(node.arguments);
   return { name, inherited, arguments: argsNode === null ? [] : nodeArray(argsNode.items) };
+}
+
+function collectClosureInfo(body: AstNode): Map<string, ClosureInfo> {
+  const result = new Map<string, ClosureInfo>();
+  for (const statement of nodeArray(body.statements)) {
+    const expression = statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+    if (expression?.kind !== "declaration") continue;
+    const name = variableName(expression.left);
+    const closure = asNode(expression.right);
+    if (name === null || closure?.kind !== "closure") continue;
+    const implicitParameter = closure.parameterSpecified !== true;
+    const parameters = Array.isArray(closure.parameters) ? closure.parameters : [];
+    let minArgs = 0;
+    if (!implicitParameter) {
+      minArgs = parameters.filter((parameter) => {
+        if (typeof parameter !== "object" || parameter === null) return true;
+        return (parameter as Record<string, unknown>).default === null;
+      }).length;
+    }
+    result.set(name, { implicitParameter, minArgs, maxArgs: implicitParameter ? 0 : parameters.length });
+  }
+
+  walkAst(body, (node) => {
+    if (node.kind !== "methodCall" || node.implicitThis !== true) return;
+    const name = constantString(node.method);
+    if (name === null) return;
+    const info = result.get(name);
+    if (info === undefined || !info.implicitParameter) return;
+    const argumentsNode = asNode(node.arguments);
+    const argumentCount = argumentsNode === null ? 0 : nodeArray(argumentsNode.items).length;
+    if (argumentCount === 1) info.maxArgs = 1;
+  });
+  return result;
 }
 
 function unsupportedExpression(context: LowerContext, node: AstNode, code: string, message: string): null {
