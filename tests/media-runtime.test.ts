@@ -1140,6 +1140,7 @@ test(
       ["0.1 ms", "true"],
       ["1.1 ms", "true"],
       ["0.1 ms", "9007199254740991 times"],
+      ["0.0000000000000001 ms", "true"],
     ] as const) {
       const session = new Session(
         `let m = playAudio(file: "a", async: true, repeat: ${repeat}, endAt: ${endAt}) {\n  at 0 ms { }\n}\nwait 10`,
@@ -1184,4 +1185,38 @@ test("crossings never become due before an on-time observation could report them
     const interpolated = new Session(source).load(1, 30).at(20, [1, 20]);
     assert.deepEqual(interpolated.said(), exact.said(), String(q));
   }
+});
+
+test("reads at a fractional sample are whole milliseconds like interpolated reads", () => {
+  const source = [
+    'let m = playAudio async "a"',
+    "wait 10 ms",
+    'say "${m.position} ${m.elapsed} ${m.remaining}", instant',
+    "m.pause()",
+    "wait 100 ms",
+  ].join("\n");
+  const fine = new Session(source).load(1, 1_000).at(10, [1, 10.1]).at(20);
+  const late = new Session(source).load(1, 1_000).at(20, [1, 20.2]);
+  assert.deepEqual(fine.said(), ["10 ms 10 ms 990 ms"]);
+  assert.deepEqual(late.said(), fine.said());
+  assert.deepEqual(late.media(1), fine.media(1));
+});
+
+test("a load report waits for a due block even when scene time has caught up", () => {
+  const compiled = plan(
+    'timer async 500 ms {\n  let x = 1\n}\nlet a = playAudio async "a.mp3"\nwait 10',
+  );
+  let snapshot = run(compiled, createImmediatePacingRuntimeSnapshot(compiled)).snapshot;
+  snapshot = observeTime(compiled, snapshot, 500).snapshot;
+  assert.equal(snapshot.currentSessionTimeMs, snapshot.observedSessionTimeMs);
+  for (const report of [{ kind: "loaded", durationMs: 2_000 }, { kind: "failed" }] as const) {
+    const pending = reportMediaLoad(compiled, snapshot, 1, report);
+    assert.deepEqual(pending.outcome, { kind: "executionPending", mediaId: 1 });
+    assert.deepEqual(pending.snapshot, snapshot);
+    assert.deepEqual(pending.events, []);
+  }
+  snapshot = run(compiled, snapshot).snapshot;
+  const accepted = reportMediaLoad(compiled, snapshot, 1, { kind: "loaded", durationMs: 2_000 });
+  assert.deepEqual(accepted.outcome, { kind: "accepted" });
+  assert.equal(validateRuntimeSnapshot(accepted.snapshot, compiled).valid, true);
 });
