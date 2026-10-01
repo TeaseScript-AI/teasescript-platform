@@ -751,6 +751,46 @@ function lowerObjectMethodCallExpression(
       `Legacy helper ${helperClass}.${name}() requires helper-library migration.`,
     );
   }
+
+  if (receiverName === "Math") {
+    if ((name === "ceil" || name === "floor") && argumentsNodes.length === 1) {
+      const args = lowerArguments(argumentsNodes, context);
+      return args === null ? null : { kind: "call", name, positional: args, named: {} };
+    }
+    if (name === "round") {
+      return unsupportedExpression(
+        context,
+        node,
+        "SX_ROUNDING_SEMANTICS",
+        "Java Math.round() is not migrated until its tie-breaking semantics are proven equivalent to TeaseScript round().",
+      );
+    }
+  }
+  if (receiverName === "System" && name === "exit") {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_JVM_PROCESS_CONTROL",
+      "System.exit() terminates the legacy JVM process and is not automatically equivalent to TeaseScript exit.",
+    );
+  }
+  if (name === "get" && targetNode?.kind === "methodCall") {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_JAVA_REFLECTION",
+      "Java/reflection call chains are not reproduced by the TeaseScript importer.",
+    );
+  }
+  if (targetNode?.kind === "constructorCall") {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_JAVA_OBJECT_CALL",
+      `Method ${name}() on a constructed Java object requires manual or helper migration.`,
+    );
+  }
+
   if (targetNode === null || !isKnownListExpression(targetNode, context)) {
     return unsupportedExpression(context, node, "SX_DYNAMIC_OR_OBJECT_CALL", "Object/dynamic Groovy method calls are not lowered by the first slice.");
   }
@@ -759,9 +799,9 @@ function lowerObjectMethodCallExpression(
   if (name === "size" && argumentsNodes.length === 0) {
     return { kind: "property", target, name: "length" };
   }
-  if (name === "contains" && argumentsNodes.length === 1) {
+  if ((name === "contains" || name === "add") && argumentsNodes.length === 1) {
     const args = lowerArguments(argumentsNodes, context);
-    return args === null ? null : { kind: "methodCall", target, name: "contains", arguments: args };
+    return args === null ? null : { kind: "methodCall", target, name, arguments: args };
   }
   return unsupportedExpression(context, node, "SX_UNSUPPORTED_LIST_METHOD", `Groovy list method ${name}() is not safely mapped yet.`);
 }

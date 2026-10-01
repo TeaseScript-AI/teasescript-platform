@@ -758,3 +758,114 @@ test("expands Groovy switch fallthrough into explicit TeaseScript case bodies", 
     ].join("\n"),
   );
 });
+
+
+test("maps proven Math ceil/floor and list add to accepted TeaseScript operations", () => {
+  const source = file([
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("items"),
+      right: { kind: "list", span, items: [constant(1)] },
+    }),
+    statement({
+      kind: "methodCall",
+      span,
+      object: variable("items"),
+      method: constant("add"),
+      arguments: args(constant(2)),
+      implicitThis: false,
+      safe: false,
+      spreadSafe: false,
+    }),
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("high"),
+      right: {
+        kind: "methodCall",
+        span,
+        object: variable("Math"),
+        method: constant("ceil"),
+        arguments: args(constant(2.1)),
+        implicitThis: false,
+        safe: false,
+        spreadSafe: false,
+      },
+    }),
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("low"),
+      right: {
+        kind: "methodCall",
+        span,
+        object: variable("Math"),
+        method: constant("floor"),
+        arguments: args(constant(2.9)),
+        implicitThis: false,
+        safe: false,
+        spreadSafe: false,
+      },
+    }),
+  ]);
+
+  const program = lowerParsedFile(source);
+  assert.deepEqual(program.diagnostics.filter((diagnostic) => diagnostic.severity === "error"), []);
+  assert.equal(
+    emitTease(program),
+    ["let items = [1]", "items.add(2)", "let high = ceil(2.1)", "let low = floor(2.9)", ""].join("\n"),
+  );
+});
+
+test("classifies JVM process control, Java reflection, and unresolved Math round separately", () => {
+  const source = file([
+    statement({
+      kind: "methodCall",
+      span,
+      object: variable("System"),
+      method: constant("exit"),
+      arguments: args(constant(0)),
+      implicitThis: false,
+      safe: false,
+      spreadSafe: false,
+    }),
+    statement({
+      kind: "methodCall",
+      span,
+      object: variable("Math"),
+      method: constant("round"),
+      arguments: args(constant(2.5)),
+      implicitThis: false,
+      safe: false,
+      spreadSafe: false,
+    }),
+    statement({
+      kind: "methodCall",
+      span,
+      object: {
+        kind: "methodCall",
+        span,
+        object: variable("clazz"),
+        method: constant("getMethod"),
+        arguments: args(constant("x")),
+        implicitThis: false,
+        safe: false,
+        spreadSafe: false,
+      },
+      method: constant("get"),
+      arguments: args(),
+      implicitThis: false,
+      safe: false,
+      spreadSafe: false,
+    }),
+  ]);
+
+  const codes = new Set(lowerParsedFile(source).diagnostics.map((diagnostic) => diagnostic.code));
+  assert.ok(codes.has("SX_JVM_PROCESS_CONTROL"));
+  assert.ok(codes.has("SX_ROUNDING_SEMANTICS"));
+  assert.ok(codes.has("SX_JAVA_REFLECTION"));
+});
