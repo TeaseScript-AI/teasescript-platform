@@ -103,7 +103,7 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Action-kind-specific media completion, advanced timeout, cancellation, and recovery policies beyond ADR 0018's
   mandatory basic interactions.
 - Stable text-output target handles beyond the first Standard chat target.
-- Exact author-facing theme schema/registration API and platform dark-theme token values. `ui/PLAYER-UI.md` fixes
+- Exact author-facing theme schema/registration API. `ui/PLAYER-UI.md` fixes the default light/dark theme intents,
   precedence, standalone/light/dark theme semantics, missing-variant fallback, and the no-arbitrary-CSS boundary.
 - Exact author-facing data/API form for supported Standard Player per-control base/fill colours. The Player already owns
   derived interaction styling and automatic readable black/white control-label text; syntax, serialization, and which

@@ -55,8 +55,9 @@ Current implementation status belongs in [`PHASE-STATUS.md`](../../PHASE-STATUS.
 [`player/README.md`](../../player/README.md) records implementation seams and development-only behavior. This
 specification may lead the implementation. The Phase 2C Player presents supported transcript, foreground interaction,
 and pacing behavior from canonical runtime state. Its development preview opens one runtime choice scenario and adds
-Visual Lab, Layout Debug, the Stage media picker, Theme Lab, and timer/background-button presentation fixtures. The
-default build mounts the Player without that preview; the development server or explicit `?dev` URL opt-in loads it.
+Visual Lab, Layout Debug, the Stage media picker, Theme Lab, a focus-offset A/B choice, and timer/background-button
+presentation fixtures. The default build mounts the Player without that preview; the development server or explicit
+`?dev` URL opt-in loads it.
 Runtime timer/media wiring and production host integration remain separate work. Values marked for retesting remain
 provisional tuning baselines.
 
@@ -144,9 +145,7 @@ Foldables likewise use their currently available dimensions rather than a specia
 Manual open/closed tool intent is preserved across resizing and rotation when the tool region owns focus or remains the
 active interaction context. A responsive change must not spontaneously open a previously closed drawer. When an open
 docked strip becomes an overlay drawer while focus is elsewhere, it may close so that it does not unexpectedly block the
-active Player region. Right backing intent is likewise stable, while the layout independently decides whether the right
-controls can occupy a reserved rail or must overlay the stage. A future persistent user preference may refine this
-session-local policy separately.
+active Player region. A future persistent user preference may refine this session-local policy separately.
 
 The Player must size against the currently usable visual viewport when a software keyboard or similar browser UI reduces
 available space.
@@ -209,7 +208,7 @@ size therefore scales ordinary text, headings, and authored size spans together 
 
 | Element | Current Player baseline |
 | --- | --- |
-| UI font stack | `"Inter Tight", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif` |
+| UI font stack | system stack `ui-sans-serif, system-ui, sans-serif`; the POC bundles no UI web font |
 | title | `14px`, weight `500` |
 | speaker name | current bubble attribution uses `0.75rem`, weight `500`; this remains a visual baseline |
 | speaker message and loose prose | shared reading size `1rem` (16px at the current browser base), line-height `1em + 8px`; authored speaker font may replace the UI font |
@@ -253,7 +252,8 @@ width, horizontal dock overflow, and responsive drawer composition. A tool owns 
 
 ### Panel state
 
-The tools sidebar starts visible on comfortable layouts and closed when constrained. The toggle changes its visibility.
+The tools sidebar starts visible on comfortable layouts and closed when constrained. The toggle and `Ctrl/Meta+B` change
+its visibility; the shortcut is ignored while focus is in the composer or another text-editing control.
 Resizing does not spontaneously reopen a closed sidebar. An open dock becoming a drawer stays open only when tools own
 the active focus, drag, or resize context; otherwise it closes to avoid covering the Player unexpectedly.
 
@@ -326,11 +326,10 @@ resizing. In the constrained drawer, the menu and active-tool views replace mult
 A gesture that becomes a pan/scroll must not also activate a child control. Panel movement has a keyboard/non-drag
 alternative through Panel settings.
 
-Compact explanatory copy for Visual Lab-style options may be disclosed without permanently consuming every row. The
-complete title/copy area reveals its information on pointer hover and toggles it on tap/click; a visible information
-button remains the touch and keyboard affordance. Keyboard focus reveals the same text. At most one such disclosure is
-latched open, and an outside activation or `Escape` closes it. This disclosure behavior is Player/tool chrome behavior,
-not a requirement that every custom tool use the same explanatory-copy component.
+Compact explanatory copy for Visual Lab-style options may be plain visible text or a disclosure. A disclosure reveals
+its text on pointer hover and keyboard focus, toggles it on tap/click, keeps a visible information button as the touch
+and keyboard affordance, latches at most one disclosure open, and closes it on outside activation or `Escape`. Neither
+pattern is required for the POC or for custom tools.
 
 ### Wide sizing direction
 
@@ -526,8 +525,9 @@ second bottom-safe-area reservation. While that keyboard is open, the measured u
 height instead of being capped again by a potentially stale dynamic-viewport unit. For a shifted visual viewport, that
 usable bottom edge includes its reported top offset rather than treating its height alone as a document coordinate.
 
-The composer receives focus by default. Non-interactive Player clicks should not arbitrarily steal typing focus; an
-explicitly focused tool/input/control naturally owns keyboard input while it is active.
+The composer receives focus by default, except on touch-only devices, where automatic focus would raise the software
+keyboard; there the user taps the input to start typing. Non-interactive Player clicks should not arbitrarily steal
+typing focus; an explicitly focused tool/input/control naturally owns keyboard input while it is active.
 Submitting with `Send` keeps editing focus and preserves the software keyboard's current state: a visible keyboard stays
 open, while a dismissed keyboard is not reopened. A hardware keyboard can continue typing after Send; tapping the input
 explicitly opens the software keyboard again. Submitting with `Enter` from the input keeps editing focus for a retry or
@@ -692,32 +692,11 @@ when the fixed timer would otherwise collide with it. A software keyboard reduce
 Once the control/status list no longer fits, only that list scrolls and the timer remains fixed. With multiple timers,
 the timer pane owns vertical timer overflow and the action pane continues to own action overflow.
 
-### Right background mode
+### Stage overlay and material
 
-The Phase 2C Player currently places its timer/background rail over the stage, without a backing toggle or separately
-reserved right-hand track. Rail dimensions remain provisional.
-
-The right presentation has two independent state axes: **control geometry** (`rail` or stage overlay) and **backing
-paint** (docked surface or transparent overlay). The compact toggle changes only the backing preference; it never moves
-the controls, changes their vertical owner, or alters timer/control existence. Its icon represents the effective backing
-state.
-
-Automatic control geometry is constraint-driven rather than tied to a second viewport breakpoint. It considers the
-complete preferred width of all currently open docked tool columns, the `190px` right-control width, and the larger of
-the protected conversation minimum and useful stage minimum. If that full composition fits, controls occupy the
-right-rail track from the title boundary downward. If it does not fit—or tools use the narrow drawer—the right track is
-returned to the middle region and the same controls overlay the stage. This one geometry decision applies to the timer
-and complete action stack; no action-specific alignment owner may move the buttons at another threshold.
-
-- explicit backing preference remains stable while geometry changes;
-- a docked backing may remain reserved even when no timer/control/status item is currently visible so later content does
-  not cause geometry churn;
-- removing the backing surface does not alter control geometry or state styling;
-- in rail geometry with transparent backing, stage media may extend behind the floating controls while transcript and
-  composer retain their readable rail reservation;
-- in stage-overlay geometry, stage, transcript, foreground lane, and composer all reclaim the returned right track;
-- timer surfaces keep the tuned approximately `60%` component-surface opacity in both backing modes; right-rail action
-  buttons remain fully opaque, including authored colours and hover/pressed states.
+The rail always overlays the stage; it has no separately reserved right-hand track and no backing toggle. Rail
+dimensions remain provisional. Timer surfaces use the current graded translucent timer material. Right-rail action
+buttons remain fully opaque, including authored colours and hover/pressed states.
 
 ## Interaction states and input methods
 
@@ -725,10 +704,11 @@ and complete action stack; no action-specific alignment owner may move the butto
 
 Ordinary neutral controls use the shared progression without geometric movement:
 
-1. default: quiet component surface with `border-subtle`;
-2. hover: `border-interactive` plus component-hover fill;
-3. pressed/active: `border-strong` plus component-pressed fill;
-4. keyboard focus: use the shared `2px` accent-outline baseline with `1px` visible separation and no layout shift;
+1. default: quiet control surface with `border-subtle`;
+2. hover: `border-default` plus `surface-hover` fill;
+3. pressed/active: `border-strong` plus `surface-pressed` fill;
+4. keyboard focus: use the shared `2px` accent-outline width with `2px` visible separation and no layout shift. Visual
+   Lab offers a temporary `1px` separation candidate for comparison with the shared `1px` baseline;
 5. disabled: dedicated readable disabled surface/border/text roles and non-interactive semantics/cursor behavior.
 
 A non-interactive status item is a separate semantic/visual class, not a disabled control.
@@ -773,41 +753,20 @@ The maintained relative layering direction is:
 5. critical fullscreen/global auto-hide controls needed to leave or operate the Player.
 
 Exact numeric `z-index` values are implementation detail. The drawer scrim intentionally intercepts outside activation.
-Decorative stage/media effects are pointer-neutral. Floating right controls remain interactive even when their backing
-surface is absent. A visible overlay must not create accidental click-through into covered controls.
+Decorative stage/media effects are pointer-neutral. Floating right controls remain interactive over the stage. A visible
+overlay must not create accidental click-through into covered controls.
 
 Custom tool/stage HTML/CSS is confined to its assigned surface and cannot escape through accidental selectors or
 `z-index`. A deliberate full-player takeover uses its future explicit capability rather than CSS leakage from a smaller
 custom surface.
 
-## Current light theme
+## Default themes
 
-The Standard Player currently has one approved light theme. Application palette primitives are represented canonically
-in OKLCH and mapped to semantic roles before components consume them. The sRGB values below are references for tools and
-review, not a second colour authority.
-
-| Semantic role | Canonical OKLCH | sRGB reference |
-| --- | --- | --- |
-| surface-base | `oklch(95.839% 0.01306 71.33)` | `#F7F0E8` |
-| surface-chrome | `oklch(97.586% 0.01130 71.90)` | `#FCF6EF` |
-| surface-component | `oklch(99.199% 0.00734 80.72)` | `#FFFCF7` |
-| component-hover | `oklch(95.449% 0.01618 64.67)` | `#F8EEE5` |
-| component-pressed | `oklch(92.481% 0.02213 58.77)` | `#F2E3D8` |
-| border-subtle | `oklch(84.246% 0.02905 65.71)` | `#D9C8B8` |
-| border-interactive | `oklch(78.050% 0.03740 56.32)` | `#CBB2A1` |
-| border-strong | `oklch(68.851% 0.04826 51.55)` | `#B49380` |
-| text-primary | `oklch(30.838% 0.01712 35.72)` | `#382D2A` |
-| text-muted | `oklch(52.649% 0.02679 41.27)` | `#79665F` |
-| accent-focus | `oklch(64.182% 0.19236 10.29)` | `#E84C71` |
-| accent-solid | `oklch(59.208% 0.19138 11.08)` | `#D63B61` |
-| accent-solid-hover | `oklch(56.375% 0.18326 11.66)` | `#C93659` |
-| accent-solid-pressed | `oklch(52.588% 0.17301 12.20)` | `#B82F4F` |
-| disabled-bg | `oklch(93.009% 0.01361 60.56)` | `#EFE6DF` |
-| disabled-border | `oklch(86.370% 0.02252 58.74)` | `#DECFC4` |
-| disabled-text | `oklch(58.486% 0.02603 41.30)` | `#8A7770` |
-
-Structural shadow uses the primary-text hue at `8%` alpha; the drawer scrim uses it at `18%` alpha. Inverse text is
-white. These are semantic support roles rather than extra surface levels.
+The Standard Player generates its semantic colour roles from a theme intent (`player/theme/palette.ts`) and applies
+them before components consume them. The defaults are a warm light theme (surface hue `70°`, `50%` tint, maximum
+surface chroma `8.5`, rose accent `#D63B61`) and a cool dark theme (surface hue `240°`, otherwise the same surface
+intent, blue accent `#2255EE`). Switching light/dark applies that mode's default palette and keeps the contrast
+choice. Generated values and contrast targets remain provisional and are tuned through `Visual Lab`.
 
 The palette follows the project-owned Radix-inspired twelve-step role-band convention described in the shared UI guide;
 there is no Radix runtime or CSS dependency.
@@ -831,7 +790,7 @@ ownership, and other Standard Player properties remain Player-owned unless a lat
 Authored speaker/rich-text/control colours that carry script meaning are content semantics, not theme defaults. User
 theme or accessibility preferences must preserve that meaning: for example, a story-defined red control cannot simply
 be recoloured blue. Accessibility treatment may add or alter non-semantic presentation while retaining the authored
-distinction. Platform dark-theme values, theme API shape, preference persistence, exact authored-colour fallback
+distinction. Theme API shape, preference persistence, exact authored-colour fallback
 mechanics, and numeric accessibility thresholds remain open; see [OPEN-DECISIONS.md](../OPEN-DECISIONS.md). Ordinary
 transcript text does not accept unrestricted raw HTML. Fully custom HTML/CSS/TypeScript uses the separate custom
 view/tool/stage capability inside the accepted sandbox.
