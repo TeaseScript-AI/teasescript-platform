@@ -15,6 +15,7 @@ import {
   toMonacoSignatureHelp,
   toMonacoTextEdits,
 } from "../src/editor/monaco-mapping.js";
+import type { LanguageCompletionKind } from "../src/language-tooling.js";
 
 test("Monaco mapping preserves canonical multiline half-open ranges exactly", () => {
   assert.deepEqual(toMonacoPosition(createSourcePosition(2, 1, 8)), { lineNumber: 2, column: 9 });
@@ -92,5 +93,25 @@ test("Monaco providers receive presentation-only completion, hover, and signatur
       activeSignature: 0,
       activeParameter: 1,
     },
+  );
+});
+
+test("Monaco completion kinds map every canonical kind to the supplied enum", () => {
+  const kinds = { Keyword: 17, Function: 1, Variable: 4, Value: 13 };
+  const table: readonly (readonly [LanguageCompletionKind, number])[] = [
+    ["command", kinds.Function],
+    ["keyword", kinds.Keyword],
+    ["modifier", kinds.Keyword],
+    ["speaker", kinds.Variable],
+    ["value", kinds.Value],
+  ];
+  const range = { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 };
+  assert.deepEqual(
+    toMonacoCompletions(
+      table.map(([kind]) => ({ label: kind, kind, detail: kind, insertText: kind })),
+      range,
+      kinds,
+    ).map((item) => item.kind),
+    table.map(([, monacoKind]) => monacoKind),
   );
 });

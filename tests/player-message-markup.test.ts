@@ -68,6 +68,18 @@ test("ends each inline style before adjacent plain text and honors nested weight
   assert.deepEqual(byText("under")[0]?.classes, ["markup-underline"]);
 });
 
+test("Player runs keep rejected link targets and HTML-like text inert", () => {
+  const source = '[bad](javascript:alert) <b onclick="x">tag</b> [good](https://example.com)';
+  const pieces = firstLinePieces(source);
+  assert.equal(pieces.map((piece) => piece.text).join(""), parseMessageMarkup(source).visibleText);
+  assert.deepEqual(
+    pieces.filter((piece) => piece.href !== null).map((piece) => [piece.text, piece.href]),
+    [["good", "https://example.com/"]],
+  );
+  const literal = pieces.find((piece) => piece.text.includes('<b onclick="x">tag</b>'));
+  assert.deepEqual([literal?.classes, literal?.style], [[], {}]);
+});
+
 function firstLinePieces(source: string): readonly PlayerMarkupPiece[] {
   const blocks = preparePlayerMessageMarkup(parseMessageMarkup(source));
   if (blocks[0]?.kind !== "paragraph") throw new Error("Expected paragraph markup.");
