@@ -26,6 +26,7 @@ interface MutableSnapshot {
   backgroundActions: { kind: string; media?: MutableMedia }[];
   pendingTimerHandlers: Record<string, unknown>[];
   nextMediaId: number;
+  callFrames: { timerInterruption: { mediaId?: number } | null }[];
 }
 
 interface MutableMedia {
@@ -37,6 +38,7 @@ interface MutableMedia {
   finishFunctionId: number | null;
   segmentPositionMs: number;
   segmentPasses: number;
+  segmentElapsedMs: number;
 }
 
 function mediaOf(snapshot: MutableSnapshot, mediaId: number): MutableMedia {
@@ -513,6 +515,23 @@ test("media scenarios resume equivalently from every checkpoint boundary", () =>
       "scene()",
     ].join("\n"),
     'let v = playVideo async "a.mp4"\nplayVideo "b.mp4" {\n  at 250 ms {\n    showImage "x.jpg"\n  }\n}\nsay "${v.state}"',
+    [
+      'let f = playAudio(file: "f.mp3", async: true, repeat: 7 times, endAt: 100.1 ms) {',
+      "  at 50.05 ms {",
+      "    f.pause()",
+      "    f.resume()",
+      "  }",
+      "  finish {",
+      '    say "f ${f.elapsed}"',
+      "  }",
+      "}",
+      'playAudio(file: "b.mp3", repeat: 777.7 ms, startAt: 0.05 ms, endAt: 110.1 ms) {',
+      "  beforeEnd 10.1 ms {",
+      '    say "b ${f.position}"',
+      "  }",
+      "}",
+      'say "after"',
+    ].join("\n"),
   ];
   for (const source of scenarios) assertRuntimeResumeEquivalent(source, { mediaDurationMs: 1_000 });
 });
@@ -1016,4 +1035,79 @@ test("the main path reads and stops media at scene time however late playback is
   assert.deepEqual(late.said(), ["1 s", "1 s"]);
   assert.deepEqual(late.said(), fine.said());
   assert.deepEqual(late.media(1)?.positionMs, fine.media(1)?.positionMs);
+});
+
+test("restore validation rejects incoherent anchor elapsed and a cue frame of another media", () => {
+  const session = new Session(
+    [
+      'let a = playAudio async "a.mp3" {',
+      "  at 500 ms {",
+      "    wait 1",
+      "  }",
+      "}",
+      'let b = playAudio async "b.mp3"',
+      "wait 10",
+    ].join("\n"),
+  );
+  session.load(1, 2_000).load(2, 2_000).at(600, [1, 600], [2, 600]);
+  const valid = session.snapshot;
+  assert.equal(validateRuntimeSnapshot(valid, session.plan).valid, true);
+  const mutations: readonly (readonly [string, (snapshot: MutableSnapshot) => void])[] = [
+    ["anchor elapsed", (snapshot) => (mediaOf(snapshot, 1).segmentElapsedMs = 100)],
+    [
+      "running cue frame of another media",
+      (snapshot) => {
+        const frame = snapshot.callFrames.find((candidate) => candidate.timerInterruption !== null);
+        assert.ok(frame?.timerInterruption, "a cue block is running");
+        frame.timerInterruption.mediaId = 2;
+      },
+    ],
+  ];
+  for (const [name, mutate] of mutations) {
+    // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; each case applies one invalid mutation.
+    const corrupted = JSON.parse(JSON.stringify(valid)) as MutableSnapshot;
+    mutate(corrupted);
+    assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false, name);
+  }
+});
+
+test("fractional controls, budget ends, and terminal playheads agree with the arrival they reach", () => {
+  // A pause exactly when a fractional range end is due keeps that arrival, however coarse the samples.
+  const source = [
+    "timer async 10 ms {",
+    "  m.pause()",
+    "}",
+    'let m = playAudio(file: "m", async: true, endAt: 10.1 ms) {',
+    "  beforeEnd 0 ms {",
+    '    say "end"',
+    "  }",
+    "  finish {",
+    '    say "finish ${m.elapsed}"',
+    "  }",
+    "}",
+    "wait 100 ms",
+  ].join("\n");
+  const fine = new Session(source).load(1, 20).at(10, [1, 10.1]).at(20);
+  const late = new Session(source).load(1, 20).at(20, [1, 20.2]);
+  assert.deepEqual(fine.said(), ["end", "finish 10.1 ms"]);
+  assert.deepEqual(late.said(), fine.said());
+  // A repeat duration ending inside the last pass never carries the position past the range.
+  const budget = new Session('playAudio(file: "a", repeat: 7.7 ms, endAt: 1.1 ms)\nsay "done"');
+  budget.load(1, 100);
+  const [projected] = mediaPlaybackProjection(budget.snapshot);
+  budget.at(10, [1, projected!.terminalProgressMs!]);
+  assert.deepEqual(budget.said(), ["done"]);
+  assert.ok(budget.media(1)!.positionMs <= 1.1);
+  // Reported playback at the terminal progress projects the end of the last pass.
+  const terminal = new Session(
+    'playAudio(file: "a", repeat: 7 times, endAt: 1000.1 ms) {\n  at 500.05 ms {\n    wait 1\n  }\n}',
+  );
+  terminal.load(1, 10_000);
+  const end = mediaPlaybackProjection(terminal.snapshot)[0]!.terminalProgressMs!;
+  terminal.snapshot = observeTime(terminal.plan, terminal.snapshot, 20_000, [
+    { mediaId: 1, segment: 1, progressMs: end },
+  ]).snapshot;
+  const [held] = mediaPlaybackProjection(terminal.snapshot);
+  assert.equal(held?.reportedProgressMs, end);
+  assert.equal(held?.playheadMs, 1000.1);
 });

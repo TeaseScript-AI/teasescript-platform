@@ -619,7 +619,8 @@ anchored at `(scene time, 0)`: load, pause, resume from pause, seek, stop, and S
 volume changes do not. A Player acknowledges a new segment by reporting progress `0` when it applies it.
 
 **Timeline events.** The engine owns passes, repeat limits, cue order, and settlement. Between samples, progress is
-interpolated linearly; interpolated scene times and progress are canonical in whole milliseconds. The next event is
+interpolated linearly; interpolated scene times and progress read at a scene time are canonical in whole milliseconds,
+except that an arrival due by that time is reached exactly. The next event is
 either an arrival — the next cue point, the end of the pass, or the end of a repeat duration — due when reported
 progress reaches it, or a departure — the cues at a start position after load, seek, or a pass wrap — due when
 playback proceeds from that position (the right edge of a stall there). `processDueWork` orders media events with

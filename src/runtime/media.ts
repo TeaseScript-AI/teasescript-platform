@@ -205,8 +205,12 @@ function nextArrival(media: RuntimeMediaSnapshot): { progressMs: number; positio
     progressTo(media, target, media.passesCompleted),
   );
   const budgetEnd = Math.max(media.committedProgressMs, budgetEndProgressMs(media));
+  // A repeat duration ending before the target ends inside this stretch; rounding never carries it past the target.
   return budgetEnd < progressMs
-    ? { progressMs: budgetEnd, positionMs: from + (budgetEnd - media.committedProgressMs) }
+    ? {
+        progressMs: budgetEnd,
+        positionMs: Math.min(target, from + (budgetEnd - media.committedProgressMs)),
+      }
     : { progressMs, positionMs: target };
 }
 
@@ -249,16 +253,16 @@ function departureTime(
   return arrivalTime(points, progressMs);
 }
 
-/** Reported segment progress at scene time `atMs`, interpolated and rounded; never extrapolated. */
+/** Reported segment progress at scene time `atMs`, interpolated and rounded to whole milliseconds; never extrapolated. */
 function progressAt(points: readonly RuntimeMediaPointSnapshot[], atMs: number): number {
   let index = -1;
   for (let candidate = 0; candidate < points.length; candidate += 1) {
     if (points[candidate]!.atMs <= atMs) index = candidate;
   }
-  if (index < 0) return points[0]?.progressMs ?? 0;
+  if (index < 0) return roundMs(points[0]?.progressMs ?? 0);
   const before = points[index]!;
   const after = points[index + 1];
-  if (after === undefined) return before.progressMs;
+  if (after === undefined) return roundMs(before.progressMs);
   return roundMs(
     before.progressMs +
       ((atMs - before.atMs) * (after.progressMs - before.progressMs)) / (after.atMs - before.atMs),
@@ -342,11 +346,17 @@ function finishMedia(media: RuntimeMediaSnapshot, event: MediaTimelineEvent): vo
     media.points = [{ atMs: event.dueAtMs, progressMs: event.progressMs }];
 }
 
-/** Segment progress at scene time `atMs`, never beyond the next uncommitted arrival. */
+/**
+ * Segment progress at scene time `atMs`, never beyond the next uncommitted arrival. An arrival due by then is reached
+ * exactly, so reads and segment changes agree with the arrival's due time; other progress is in whole milliseconds.
+ */
 function progressBefore(media: RuntimeMediaSnapshot, atMs: number): number {
   if (media.state !== "running" || !media.loaded) return media.committedProgressMs;
+  const arrival = nextArrival(media);
+  const dueAtMs = arrivalTime(media.points, arrival.progressMs);
+  if (dueAtMs !== null && dueAtMs <= atMs) return arrival.progressMs;
   const reported = Math.max(media.committedProgressMs, progressAt(media.points, atMs));
-  return Math.min(reported, nextArrival(media).progressMs);
+  return Math.min(reported, arrival.progressMs);
 }
 
 /**
@@ -532,23 +542,27 @@ export function mediaPlayheadMs(media: RuntimeMediaSnapshot): number {
   if (!media.loaded || media.state !== "running") return media.positionMs;
   const terminal = mediaTerminalProgressMs(media);
   const reported = media.points.at(-1)!.progressMs;
-  const pending =
-    (terminal === null ? reported : Math.min(reported, terminal)) - media.committedProgressMs;
+  const progress = terminal === null ? reported : Math.min(reported, terminal);
   const end = mediaEndMs(media);
-  const toEnd = end - media.positionMs;
-  if (pending < toEnd) return media.positionMs + pending;
+  const passes = media.passesCompleted;
+  // Pass ends come from the anchor formula, so they agree exactly with the arrivals the timeline commits.
+  const passEnd = (pass: number): number => progressTo(media, end, pass);
+  if (progress < passEnd(passes)) {
+    return Math.min(end, media.positionMs + (progress - media.committedProgressMs));
+  }
   const passLength = end - media.startAtMs;
   if (passLength <= 0) return end;
-  const beyond = pending - toEnd;
-  // Playback that ends exactly at the end of a pass stays at that end rather than wrapping.
-  if (
-    terminal !== null &&
-    terminal - media.committedProgressMs === pending &&
-    beyond % passLength === 0
-  ) {
-    return end;
+  // The pass `passes + laps` contains the progress: it ends at or after it, and the pass before ends before it.
+  let laps = Math.max(0, Math.ceil((progress - passEnd(passes)) / passLength));
+  while (laps > 0 && passEnd(passes + laps - 1) >= progress) laps -= 1;
+  while (passEnd(passes + laps) < progress) laps += 1;
+  if (progress === passEnd(passes + laps)) {
+    // Playback that ends exactly at the end of a pass stays at that end; otherwise it wraps to the next pass.
+    return progress === terminal ? end : media.startAtMs;
   }
-  return media.startAtMs + (beyond % passLength);
+  return laps === 0
+    ? Math.min(end, media.positionMs + (progress - media.committedProgressMs))
+    : Math.min(end, media.startAtMs + (progress - passEnd(passes + laps - 1)));
 }
 
 function settledWarning(media: RuntimeMediaSnapshot, operation: string): MediaWarning {
