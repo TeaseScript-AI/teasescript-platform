@@ -187,33 +187,25 @@ test("keeps same-named speakers in sibling lexical scopes as distinct state", ()
   const compiled = plan(
     [
       "if true {",
-      "  speaker voice {}",
+      '  speaker voice { displayName: "Scope one" }',
       '  say as voice "First"',
       "}",
       "if true {",
-      "  speaker voice {}",
+      '  speaker voice { displayName: "Scope two" }',
       '  say as voice "Second"',
       "}",
       "exit",
     ].join("\n"),
   );
-  // Each say is attributed to the speaker its lexical `voice` binding references at that event.
-  const says: Array<[speakerId: number | undefined, text: string]> = [];
+  // Each say is emitted with the speaker declared in its own scope, told apart by authored display name.
+  const says: Array<[displayName: string | undefined, text: string]> = [];
   let snapshot = createImmediatePacingRuntimeSnapshot(compiled);
   for (let step = 0; step < 8 && snapshot.status !== "halted"; step += 1) {
     const stepped = stepToEvent(compiled, snapshot);
     snapshot = stepped.snapshot;
     assert.ok(snapshot.status === "running" || snapshot.status === "halted", snapshot.status);
     for (const event of stepped.events) {
-      if (event.kind !== "say") continue;
-      const voice = snapshot.frames.at(-1)?.bindings.find((binding) => binding.name === "voice");
-      const reference = voice?.value;
-      says.push([
-        typeof reference === "object" && reference?.kind === "speakerReference"
-          ? reference.speakerId
-          : undefined,
-        event.text,
-      ]);
+      if (event.kind === "say") says.push([event.speaker?.displayName, event.text]);
     }
   }
 
@@ -222,11 +214,10 @@ test("keeps same-named speakers in sibling lexical scopes as distinct state", ()
   assert.equal(speakerIds.length, 2);
   assert.ok(speakerIds.every((id) => Number.isSafeInteger(id) && id > 0));
   assert.notEqual(speakerIds[0], speakerIds[1]);
-  assert.deepEqual(
-    says.map(([, text]) => text),
-    ["First", "Second"],
-  );
-  assert.deepEqual(new Set(says.map(([speakerId]) => speakerId)), new Set(speakerIds));
+  assert.deepEqual(says, [
+    ["Scope one", "First"],
+    ["Scope two", "Second"],
+  ]);
 });
 
 test("continues fallback-warning deduplication and event sequences after restore", () => {

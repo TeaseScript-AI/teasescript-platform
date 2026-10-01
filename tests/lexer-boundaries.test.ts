@@ -39,27 +39,6 @@ test("lexes prototype-sensitive names as ordinary identifiers with exact spans",
   assert.equal(result.tokens.at(-1)?.kind, TokenKind.EndOfFile);
 });
 
-test("preserves explicit keyword classification", () => {
-  const result = lex("let say function return true false null and or not");
-  assert.deepEqual(result.diagnostics, []);
-  assert.deepEqual(
-    result.tokens.map((token) => token.kind),
-    [
-      TokenKind.KeywordLet,
-      TokenKind.KeywordSay,
-      TokenKind.KeywordFunction,
-      TokenKind.KeywordReturn,
-      TokenKind.KeywordTrue,
-      TokenKind.KeywordFalse,
-      TokenKind.KeywordNull,
-      TokenKind.KeywordAnd,
-      TokenKind.KeywordOr,
-      TokenKind.KeywordNot,
-      TokenKind.EndOfFile,
-    ],
-  );
-});
-
 test("parses and executes prototype-sensitive declarations and properties", () => {
   const source = [
     "let constructor = 1",

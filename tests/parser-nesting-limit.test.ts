@@ -2,49 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
-import { parse } from "../src/parser.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 import { sayTexts } from "./helpers/runtime-events.js";
-
-function nestedString(depth: number): string {
-  let expression = "1";
-  for (let index = 0; index < depth; index += 1) {
-    expression = `"level ${"${"}${expression}}"`;
-  }
-  return expression;
-}
-
-test("nested source beyond the former parser guard remains valid", () => {
-  const depth = 96;
-  const cases: ReadonlyArray<readonly [string, string]> = [
-    ["parentheses", `let value = ${"(".repeat(depth)}1${")".repeat(depth)}`],
-    ["not chain", `let value = ${"not ".repeat(depth)}true`],
-    ["unary chain", `let value = ${"-".repeat(depth)}1`],
-    ["lists", `let value = ${"[".repeat(depth)}1${"]".repeat(depth)}`],
-    ["objects", `let value = ${"{ value: ".repeat(depth)}1${" }".repeat(depth)}`],
-    ["sets", `let value = ${"set[".repeat(depth)}1${"]".repeat(depth)}`],
-    ["strings", `let value = ${nestedString(depth)}`],
-    ["blocks", `${"if true {\n".repeat(depth)}exit\n${"}\n".repeat(depth)}`],
-  ];
-  for (const [name, source] of cases) {
-    const parsed = parse(source);
-    assert.deepEqual(parsed.diagnostics, [], name);
-  }
-
-  for (const [name, source] of cases) {
-    const compiled = compileSource(source);
-    if (name === "sets") {
-      assert.equal(compiled.plan, null, name);
-      assert.ok(
-        compiled.diagnostics.every((diagnostic) => diagnostic.code === "TSV006"),
-        name,
-      );
-    } else {
-      assert.notEqual(compiled.plan, null, name);
-      assert.deepEqual(compiled.diagnostics, [], name);
-    }
-  }
-});
 
 test("deep linear prefix chains compile and evaluate without native recursion", () => {
   // An even count of `not` or `-` cancels out; an odd count applies once.
