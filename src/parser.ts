@@ -283,7 +283,6 @@ class Parser {
       }
       this.#advance();
       this.#advance();
-      this.#skipContinuationNewlines();
       background = this.#parseExpression();
       if (background === null) {
         this.#reportInsertion(
