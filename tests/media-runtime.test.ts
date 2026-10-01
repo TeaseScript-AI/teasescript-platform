@@ -1253,6 +1253,11 @@ test("anchor coherence follows the producing arithmetic exactly", () => {
     counted.load(1, 1_000).at(end, [1, end]);
     corrupt(counted, (media) => (media.positionMs = 0), `finished ${repeat} at the start`);
   }
+  const aligned = new Session(
+    'let m = playAudio(file: "a", async: true, endAt: 1000 ms, repeat: 2000 ms)\nwait 10',
+  );
+  aligned.load(1, 1_000).at(2_000, [1, 2_000]);
+  corrupt(aligned, (media) => (media.positionMs = 0), "duration ending at a pass end");
   // Genuine states at rounding edges stay valid: a wrapped start beyond the previous pass end, and a repeat duration
   // that ends exactly at a cue arrival.
   new Session('let m = playAudio(file: "a", async: true, repeat: 7 times, endAt: 1.1 ms)\nwait 10')
@@ -1283,6 +1288,7 @@ test("a terminal playhead stays at the range end beyond exactly countable passes
     ["0.7 ms", "9007199254740991 times"],
     ["0.00000000000001 ms", "9007199254740991 times"],
     ["0.0625 ms", "1000000000000000 ms"],
+    ["0.1 ms", "1000000000000000 ms"],
   ] as const) {
     const session = new Session(
       `let m = playAudio(file: "a", async: true, repeat: ${repeat}, endAt: ${endAt}) {\n  at 0 ms { }\n}\nwait 1000000`,
@@ -1293,6 +1299,8 @@ test("a terminal playhead stays at the range end beyond exactly countable passes
       { mediaId: 1, segment: 1, progressMs: terminal },
     ]).snapshot;
     const [media] = mediaPlaybackProjection(session.snapshot);
-    assert.equal(media?.playheadMs, media?.endMs, `${endAt} ${repeat}`);
+    // A repeat duration that ends inside a pass keeps its position there.
+    const expected = endAt === "0.1 ms" ? 0.019488848768742184 : media?.endMs;
+    assert.equal(media?.playheadMs, expected, `${endAt} ${repeat}`);
   }
 });
