@@ -1,13 +1,13 @@
 # Standard Player UI specification
 
 - **Status:** Provisional maintained normative specification for the intended Standard Player presentation.
-- **Purpose:** Define the intended Standard Player presentation built on the Phase 2C Player: observable layout,
+- **Purpose:** Define the intended Standard Player presentation built on the Vue Player: observable layout,
   responsive behavior, interaction presentation, and visual states, independently of the current HTML/CSS/JavaScript
   implementation.
 - **Authority:** Accepted ADRs and accepted specifications remain higher authority for the exact architecture, runtime,
   language, isolation, and persistence scope they decide. The temporary [Upstream contract integration](#upstream-contract-integration)
   section below records Owner-decided Player behavior that still needs synchronization into those upstream contracts.
-- **Implementation state:** The Player is the Phase 2C implementation under `player/vue/src/phase2c/`. Its implemented
+- **Implementation state:** The Player is the Vue implementation under `player/vue/src/`. Its implemented
   transcript, foreground interaction, pacing, runtime timer, Stage image, and audio paths use the shared runtime
   adapter. Browser video playback, production host integration, and several provisional presentation values remain
   incomplete.
@@ -54,10 +54,10 @@ ADR 0001 fixes the responsive PWA direction; exact offline, storage, cache, and 
 
 Current implementation status belongs in [`PHASE-STATUS.md`](../../PHASE-STATUS.md);
 [`player/README.md`](../../player/README.md) records implementation seams and development-only behavior. This
-specification may lead the implementation. The Phase 2C Player presents supported transcript, foreground interaction,
-and pacing behavior from canonical runtime state. Its development preview opens one runtime choice scenario and adds
-Visual Lab, Layout Debug, the Stage media picker, Theme Lab, and timer/background-button presentation fixtures. The
-default build mounts the Player without that preview; the development server or explicit `?dev` URL opt-in loads it.
+specification may lead the implementation. The Player presents supported transcript, foreground interaction, and
+pacing behavior from canonical runtime state. Its development preview opens one runtime choice scenario and adds Visual
+Lab, Layout Debug, the Stage media picker, Theme Lab, and timer/background-button presentation fixtures. The default
+build plays the repository demo without that preview; the development server or explicit `?dev` URL opt-in loads it.
 Runtime timers, the Stage image, and audio are wired; browser video playback and production host integration remain
 separate work. Values marked for retesting remain provisional tuning baselines.
 
@@ -77,7 +77,7 @@ controlling source adopts it; remove this section and its router references when
 - **Timer presentation metadata:** the maintained timer section below defines visible/mystery/hidden presentation and
   optional labeling. Authored timers carry visible/mystery/hidden display and optional labels (see
   [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time)); `player/runtime-adapter.ts` derives presented timers and
-  observation deadlines from runtime state. The Phase 2C Player renders runtime timers in its right rail; its
+  observation deadlines from runtime state. The Player renders runtime timers in its right rail; its
   development preview shows timer fixtures only while no runtime timer is presented. Stable generic-label numbering across timer lifecycle changes remains unsynchronized.
 
 ## Surface hierarchy
@@ -118,8 +118,8 @@ present even when empty.
 
 ## Player conditions
 
-The Player combines independent conditions rather than choosing a phone, tablet, or desktop mode. The Phase 2C Player
-exposes them on its shell; [`usePlayerConditions.ts`](../../player/vue/src/phase2c/usePlayerConditions.ts) owns their
+The Player combines independent conditions rather than choosing a phone, tablet, or desktop mode. The Player exposes
+them on its shell; [`usePlayerConditions.ts`](../../player/vue/src/usePlayerConditions.ts) owns their
 shared browser signals. Add a responsive rule to the condition that describes its actual constraint; do not infer device
 identity or add a separate width breakpoint for touch or rounded corners.
 
@@ -181,7 +181,7 @@ scoped touch-first top minimum in fullscreen when a browser reports zero despite
 infer a device model or apply that fallback to a narrow desktop window, including one with touch input. A maximized
 touch-first rectangular screen can still qualify because the web platform cannot report its corner shape. Stage/media
 remains allowed to occupy its complete visual region rather than receiving identical safe-area padding by default.
-Development-only Visual Lab controls live in the Phase 2C development preview. Their fixture content and provisional
+Development-only Visual Lab controls live in the development preview. Their fixture content and provisional
 presentation values do not redefine this specification. The shared `2px` focus outline remains the accepted Player
 baseline rather than a tuning control.
 
@@ -344,7 +344,7 @@ is tracked in [OPEN-DECISIONS.md](../OPEN-DECISIONS.md).
 The active tool body occupies the remaining panel height and owns vertical overflow. Its title is not repeated as a body
 heading merely because it already appears in the shared header. A fully custom tool body is confined to its assigned
 surface; Shadow DOM remains the preferred isolation candidate when custom CSS/DOM is allowed. Custom-body isolation
-is not yet implemented in Phase 2C.
+is not yet implemented in the Player.
 
 Open docked panels share one horizontal scroll surface when they exceed the dock allocation; each body keeps its own
 vertical scrolling. Native pointer/trackpad/touch and keyboard scrolling remain available. Proximity snapping helps
@@ -366,7 +366,7 @@ dock composition determine whether the tools framework uses a dock or drawer. Ex
 individual panels are capped by available allocation while retaining their chosen width preset. Conversation bounds and
 the stage-shape goal remain provisional visual inputs, not additional device modes.
 
-`Visual Lab` and `Layout Debug` are Phase 2C development-preview tools, not Standard Player product tools. A real
+`Visual Lab` and `Layout Debug` are development-preview tools, not Standard Player product tools. A real
 platform Debugger remains future work described in [DEBUGGER.md](../DEBUGGER.md).
 
 ## Session start and user activation
@@ -378,7 +378,7 @@ relies on, so scripts may play audio from their first statement without a separa
 
 If the browser still refuses required audible playback, the Player surfaces a deliberate activation/retry control. It
 does not silently substitute muted playback or report the audio as played: refused audio reports no progress, so its
-cues and settlement wait, and an **Enable audio** control retries playback from the user's click. In Phase 2C the
+cues and settlement wait, and an **Enable audio** control retries playback from the user's click. In the Player the
 session is created only when Start is activated; the Continue path applies to a session the host restores. Durable
 checkpoint storage and automatic resume across page reloads are tracked in #469.
 
@@ -406,10 +406,11 @@ acting on the media element ([`RUNTIME.md`](../RUNTIME.md#stage-image-and-media-
 
 The trusted host resolves authored package-relative references, such as `sounds/bell.mp3`, to playable sources; the
 runtime keeps them opaque, and arbitrary external URLs are not resolved. An audio reference the host cannot resolve is
-reported as a failed load; an unresolvable Stage image leaves the Stage empty. Phase 2C plays audio; a `playVideo` request is reported as a failed load ("Video playback
-is not supported by this Player yet."), so the script continues with the runtime's warning. An authored Stage image
-has no alternative text yet. Media-derived ambience, explicit transitions, and custom stage rendering are not yet
-implemented in Phase 2C; the development preview's Stage media picker can override the Stage for layout comparison.
+reported as a failed load; an unresolvable Stage image leaves the Stage empty. The Player plays audio; a `playVideo`
+request is reported as a failed load ("Video playback is not supported by this Player yet."), so the script continues
+with the runtime's warning. An authored Stage image has no alternative text yet. Media-derived ambience, explicit
+transitions, and custom stage rendering are not yet implemented in the Player; the development preview's Stage media
+picker can override the Stage for layout comparison.
 
 Standard image/video-like presentation:
 
@@ -518,15 +519,15 @@ momentary action is shown as a player-authored transcript action; toggle/select 
 when shown, uses a neutral session-event presentation rather than implying spoken prose. Programmatic control updates
 are not user activations and use the same neutral event family with their script origin identified. Visual markers must
 not become canonical punctuation; their exact appearance remains tuning work.
-Long-lived control activation/update history is not yet implemented in Phase 2C.
+Long-lived control activation/update history is not yet implemented in the Player.
 
 The POC's letter-glyph avatars use twelve fixed colour families, with a light fill and dark letter in light mode and the
 inverse in dark mode. On a speaker's first bubble, the Player assigns the colour used by the fewest messages so far;
 ties follow a fixed, perceptually spaced palette order. Later messages increase that colour's count, and the speaker
 keeps the assignment. Authored text and bubble colours do not choose avatar colours. An authored V30 speaker `avatar`
 image replaces the glyph and is decorative beside the visible speaker name; while it is unavailable or fails to load,
-the glyph remains. Package-relative asset resolution is not yet defined, so the Phase 2C Player currently uses the
-authored reference as the image URL.
+the glyph remains. Like Stage media, the reference is package-relative and resolved by the trusted host; an
+unresolvable avatar keeps the glyph.
 
 ## Composer and foreground interactions
 
@@ -623,7 +624,7 @@ This is distinct from a skippable `say` pacing gate: when no foreground interact
 click/tap on Player background/unused space or Space with the empty focused composer may settle that gate under ADR 0018.
 Actual interactive controls always take precedence and must not also fire the viewport-wide pacing shortcut.
 
-Constraint-driven dropdown presentation under ADR 0018 is not yet implemented in Phase 2C; it currently uses wrapping
+Constraint-driven dropdown presentation under ADR 0018 is not yet implemented in the Player; it currently uses wrapping
 buttons.
 
 A `showButton` is the one-option presentation of the same Standard foreground-control vocabulary. Controls share
@@ -703,7 +704,7 @@ region.
 
 ### Background controls and status
 
-Runtime-backed long-lived controls/status are not yet implemented in Phase 2C; the development preview demonstrates
+Runtime-backed long-lived controls/status are not yet implemented in the Player; the development preview demonstrates
 only local button/toggle/disabled presentation.
 
 The Standard rail presentation supports:
@@ -801,7 +802,7 @@ browser scroll behavior with matching scrollbar colors.
 
 ## Z-order, overlays, and click-through
 
-The complete blocking/custom-overlay and critical-global-control hierarchy is not yet implemented in Phase 2C.
+The complete blocking/custom-overlay and critical-global-control hierarchy is not yet implemented in the Player.
 
 The maintained relative layering direction is:
 
@@ -842,7 +843,7 @@ Custom themes are standalone, light, or dark. A developer may provide one or a l
 required. A standalone theme is used as authored. A mode-qualified theme uses the variant matching the effective
 light/dark mode; a missing variant falls back to the corresponding platform theme. Do not synthesize or auto-convert it.
 Exact author-facing schema/names remain upstream API work. Theme registration, user/package precedence, and
-missing-variant fallback are not yet implemented in Phase 2C.
+missing-variant fallback are not yet implemented in the Player.
 
 Standard theming covers defined semantic colour roles, not arbitrary CSS. Geometry, fonts, spacing, DOM/chrome
 ownership, and other Standard Player properties remain Player-owned unless a later explicit capability says otherwise.

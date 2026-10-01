@@ -1,13 +1,11 @@
-# Phase 2C Player
+# Player components
 
-This is the Player implementation. Its current `/phase2c/` inspection route is separate from the legacy `/player/`
-reference; final demo boot and route integration belong to #448. Keep development fixtures separate from the components
-that own Player presentation.
+This is the Player implementation. Keep development fixtures separate from the components that own Player presentation.
 
 ## Design lint
 
 The required [Player design lint](../../../docs/LINTING.md#player-design-lint) checks these Player components,
-shared UI definitions and the story-button wrapper. `components.json` selects `phase2c/style.css` for utility
+shared UI definitions and the story-button wrapper. `player/vue/components.json` selects `src/style.css` for utility
 resolution; the component and theme boundaries remain defined by the Player implementation and its maintained UI
 specification.
 
@@ -27,12 +25,14 @@ specification.
   Continue. The host also owns the framework-independent `player/media-device.ts`: it reconciles the session's media
   projection onto `Audio` elements, reports loading through the adapter, and contributes measured progress to every
   clock observation, which runs every 100 ms while media loads or plays. Authored media references resolve only through
-  the host-supplied `resolveAsset`. `PlayerApp.vue` derives the Stage image from runtime state.
+  the host-supplied `resolveAsset`. `PlayerApp.vue` derives the Stage image from runtime state and provides the same
+  resolver to `TranscriptMessage.vue` for speaker avatars.
 - `DevelopmentPreview.vue` opens one runtime choice scenario, with a Stage image and a short chime that
   `developmentMedia.ts` resolves, and supplies Visual Lab's Theme Lab, Stage media picker,
   and timer/background-button presentation fixtures, plus Layout Debug. `main.ts` loads it as a separate chunk on the
-  development server, or in a build only with the `?dev` URL opt-in. The default build mounts `PlayerApp.vue` with
-  runtime-owned content only; integration supplies sessions through `usePlayerSession.ts`.
+  development server, or in a build only with the `?dev` URL opt-in. The default build mounts `PlayerApp.vue` with the
+  repository demo: `demoHost.ts` supplies its source and resolves its package-relative references to the package's
+  SVG files and to sounds that `generatedAudio.ts` synthesizes.
 - `PlayerToolsShell.vue` receives its tool list from the root and owns tool selection, pinning, order, resizing, retained content and dock/drawer focus.
   Its tool slot supplies content; its default slot supplies the Player. Closing a visited panel retains its content.
   Tool bodies scroll vertically; the outer carousel handles overflow between panels. Shared shadcn-vue/Reka
