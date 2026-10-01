@@ -659,8 +659,11 @@ to issued IDs, queued and running cue blocks to belong to their media's own bloc
 waits to refer to their active media, each media's total playback to agree with its segment anchor, whose first
 sample does not lie after current scene time, and each committed cursor to be one the runtime produces: at the origin
 of a pass, where pending start cues wait, or exactly the arrival that the runtime's own next-arrival step commits from
-the preceding arrival point. Distinct cue points whose segment progress is identical in double precision, which needs
-extreme source ranges, cannot be told apart this way. Cross-device handoff is not part of this contract.
+the preceding arrival point. For media that have played only since loading, start cues and queued cue invocations must
+also agree with that playback: a start cue is pending until reported playback moves past it, and a cue cannot be
+queued more often than playback reached it. Later segments follow controls whose history is not retained, and
+distinct cue points whose segment progress is identical in double precision, which needs extreme source ranges,
+cannot be told apart. Cross-device handoff is not part of this contract.
 
 **Player projection.** `mediaPlaybackProjection(snapshot)` exposes each active media's identity, source, `loaded`,
 state, `segment`, active range, `volume`, `playheadMs` (the source position that the reported progress reaches),

@@ -438,9 +438,17 @@ export function validateMediaState(
     finishRuns.set(media.mediaId, (finishRuns.get(media.mediaId) ?? 0) + count);
     return media.state === "finished";
   };
+  const invocations = new Map<unknown, Map<unknown, number>>();
+  const countInvocation = (mediaId: unknown, functionId: unknown, count: unknown): void => {
+    if (!positiveSafeInteger(count)) return;
+    const byFunction = invocations.get(mediaId) ?? new Map<unknown, number>();
+    byFunction.set(functionId, (byFunction.get(functionId) ?? 0) + count);
+    invocations.set(mediaId, byFunction);
+  };
   if (Array.isArray(value.pendingTimerHandlers)) {
     for (const invocation of value.pendingTimerHandlers) {
       if (!isPlainRecord(invocation) || !Object.hasOwn(invocation, "mediaId")) continue;
+      countInvocation(invocation.mediaId, invocation.handlerFunctionId, invocation.count);
       const media = positiveSafeInteger(invocation.mediaId)
         ? records.get(invocation.mediaId)
         : undefined;
@@ -462,6 +470,7 @@ export function validateMediaState(
         !Object.hasOwn(frame.timerInterruption, "mediaId")
       )
         continue;
+      countInvocation(frame.timerInterruption.mediaId, frame.functionId, 1);
       const media = positiveSafeInteger(frame.timerInterruption.mediaId)
         ? records.get(frame.timerInterruption.mediaId)
         : undefined;
@@ -473,6 +482,11 @@ export function validateMediaState(
   if ([...finishRuns.values()].some((count) => count > 1)) {
     errors.push("Runtime media finish block runs more than once.");
   }
+  for (const [mediaId, media] of records) {
+    if (!cueBookkeepingFits(media, invocations.get(mediaId) ?? new Map<unknown, number>())) {
+      errors.push("Runtime media cue bookkeeping does not match its playback.");
+    }
+  }
   if (
     (value.status === "halted" || value.status === "ready") &&
     Array.isArray(value.backgroundActions) &&
@@ -480,6 +494,60 @@ export function validateMediaState(
   ) {
     errors.push("Runtime active media require an active session.");
   }
+}
+
+/**
+ * Media that have played only since loading (segment 1, no control since) fix their cue bookkeeping: a start cue at
+ * a pass origin is pending until reported playback moves past it, when its departure queues it; in the first pass a
+ * pending start cue has not been queued yet; and a cue's queued and running invocations cannot outnumber the passes
+ * that reached its point. Later segments may follow seeks and pauses whose history is not retained.
+ */
+function cueBookkeepingFits(
+  media: Record<string, unknown>,
+  invocations: ReadonlyMap<unknown, number>,
+): boolean {
+  const { segment, loaded, points, cues, durationMs, endAtMs, startAtMs, positionMs } = media;
+  const { passesCompleted, committedProgressMs, startCuesPending, state } = media;
+  if (
+    segment !== 1 ||
+    loaded !== true ||
+    !isPointList(points) ||
+    !Array.isArray(cues) ||
+    !validMilliseconds(durationMs) ||
+    !validMilliseconds(startAtMs) ||
+    !validMilliseconds(positionMs) ||
+    !validMilliseconds(committedProgressMs) ||
+    !nonNegativeSafeInteger(passesCompleted)
+  )
+    return true;
+  const end = typeof endAtMs === "number" ? Math.min(endAtMs, durationMs) : durationMs;
+  const finished = state === "finished";
+  const cuePoints = cues.flatMap((cue: unknown) => {
+    if (!isPlainRecord(cue) || typeof cue.offsetMs !== "number") return [];
+    const point = cue.kind === "at" ? cue.offsetMs : end - cue.offsetMs;
+    return point >= startAtMs && point <= end ? [{ point, functionId: cue.functionId }] : [];
+  });
+  // The load anchors segment 1 at the range start; a later pass starts there too.
+  const origin = startAtMs;
+  const atOrigin = !finished && positionMs === origin && positionMs < end;
+  const originCues = cuePoints.filter((cue) => cue.point === origin);
+  if (atOrigin && originCues.length > 0) {
+    const reported = points.at(-1)?.progressMs ?? 0;
+    if (startCuesPending !== true && reported <= committedProgressMs) return false;
+    if (
+      startCuesPending === true &&
+      passesCompleted === 0 &&
+      originCues.some((cue) => (invocations.get(cue.functionId) ?? 0) > 0)
+    )
+      return false;
+  }
+  return cuePoints.every(({ point, functionId }) => {
+    const reachedInPass =
+      !(finished && positionMs >= end) &&
+      (positionMs > point ||
+        (positionMs === point && !(point === origin && startCuesPending === true)));
+    return (invocations.get(functionId) ?? 0) <= passesCompleted + (reachedInPass ? 1 : 0);
+  });
 }
 
 function validMilliseconds(value: unknown): value is number {

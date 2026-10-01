@@ -1472,3 +1472,59 @@ test("position reads and the terminal playhead use the arrival the timeline comm
   assert.equal(terminal.media(1)?.state, "finished");
   assert.equal(projected, terminal.media(1)?.positionMs);
 });
+
+test("restore validation ties start cues and queued cue counts to playback since loading", () => {
+  const source =
+    'let m = playAudio(file: "a", async: true, endAt: 10 ms) {\n  at 0 ms { say "start", instant }\n  at 5 ms { say "cue", instant }\n  finish { say "finish", instant }\n}\nwait 100 ms';
+  const rejects = (
+    snapshot: RuntimeSnapshot,
+    compiled: InstructionPlan,
+    mutate: (state: MutableSnapshot) => void,
+    name: string,
+  ): void => {
+    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true, name);
+    // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; each case applies one invalid mutation.
+    const corrupted = JSON.parse(JSON.stringify(snapshot)) as MutableSnapshot;
+    mutate(corrupted);
+    assert.equal(validateRuntimeSnapshot(corrupted, compiled).valid, false, name);
+  };
+  const compiled = plan(source);
+  let snapshot = run(compiled, createImmediatePacingRuntimeSnapshot(compiled)).snapshot;
+  snapshot = run(
+    compiled,
+    reportMediaLoad(compiled, snapshot, 1, { kind: "loaded", durationMs: 10 }).snapshot,
+  ).snapshot;
+  rejects(
+    snapshot,
+    compiled,
+    (state) => (mediaOf(state, 1).startCuesPending = false),
+    "start cue cleared before departing",
+  );
+  const departed = observeTime(compiled, snapshot, 1, [
+    { mediaId: 1, segment: 1, progressMs: 1 },
+  ]).snapshot;
+  rejects(
+    departed,
+    compiled,
+    (state) => (mediaOf(state, 1).startCuesPending = true),
+    "start cue pending after it was queued",
+  );
+  const atCue = observeTime(compiled, snapshot, 5, [
+    { mediaId: 1, segment: 1, progressMs: 5 },
+  ]).snapshot;
+  rejects(
+    atCue,
+    compiled,
+    (state) => {
+      const invocation = state.pendingTimerHandlers.at(-1)!;
+      invocation.count = 2;
+    },
+    "cue queued more often than reached",
+  );
+  // A start cue that pauses its media leaves a valid paused anchor without later samples.
+  const pausing = new Session(
+    'let m = playAudio(file: "a", async: true, endAt: 10 ms) {\n  at 0 ms {\n    m.pause()\n  }\n}\nwait 100 ms',
+  );
+  pausing.load(1, 10).at(1, [1, 1]);
+  assert.equal(pausing.media(1)?.state, "paused");
+});
