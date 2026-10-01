@@ -195,6 +195,23 @@ function containerChain(value: unknown): {
   }
 }
 
+function assertSteppedOrHalted(snapshot: RuntimeSnapshot): void {
+  assert.ok(
+    snapshot.status === "running" || snapshot.status === "halted",
+    `unexpected ${snapshot.status} snapshot while stepping instant says`,
+  );
+}
+
+/** Bounded caller-state view: every ordinary field plus the sparse frames' length and own entries. */
+function sparseSnapshotState(snapshot: RuntimeSnapshot) {
+  const { frames, ...ordinary } = snapshot;
+  return {
+    ordinary: structuredClone(ordinary),
+    framesLength: frames.length,
+    frameEntries: Object.keys(frames).map((key) => [key, structuredClone(frames[Number(key)])]),
+  };
+}
+
 function deepBindingValue(snapshot: RuntimeSnapshot): SerializableRuntimeValue | undefined {
   return snapshot.frames[0]!.bindings.find((binding) => binding.name === "deep")?.value;
 }
@@ -290,11 +307,15 @@ test("repeated event stepping reuses validated immutable plans and preserves res
   const events: (typeof uninterrupted.events)[number][] = [];
   let calls = 0;
 
+  // One event per instant say, plus a small terminal allowance, bounds both stepping loops.
+  const stepLimit = statementCount + 2;
   const statistics = withValidationTestStatistics((finish) => {
     while (snapshot.status !== "halted") {
+      assert.ok(calls < stepLimit, "event stepping exceeded the expected event count");
       const callerBefore = structuredClone(snapshot);
       const stepped = stepToEvent(plan, snapshot);
       assert.deepEqual(snapshot, callerBefore);
+      assertSteppedOrHalted(stepped.snapshot);
       events.push(...stepped.events);
       calls += 1;
       snapshot = stepped.snapshot;
@@ -312,8 +333,10 @@ test("repeated event stepping reuses validated immutable plans and preserves res
   let restoredPlan = plan;
   let restoredSnapshot = createFreshRuntimeSnapshot(plan);
   const restoredEvents: (typeof uninterrupted.events)[number][] = [];
-  while (restoredSnapshot.status !== "halted") {
+  for (let restoredCalls = 0; restoredSnapshot.status !== "halted"; restoredCalls += 1) {
+    assert.ok(restoredCalls < stepLimit, "restored stepping exceeded the expected event count");
     const stepped = stepToEvent(restoredPlan, restoredSnapshot);
+    assertSteppedOrHalted(stepped.snapshot);
     restoredEvents.push(...stepped.events);
     const restored = deserializeCheckpoint(
       JSON.stringify(createCheckpoint(restoredPlan, stepped.snapshot)),
@@ -507,7 +530,12 @@ test("runtime entry points accept valid deep plan and snapshot data without muta
 });
 
 test("serializable cloning is stack-independent beyond the removed depth threshold", () => {
-  assert.doesNotThrow(() => cloneSerializableValue(deepList(FAILING_BEFORE_DEPTH)));
+  const input = deepList(FAILING_BEFORE_DEPTH);
+  const copy = listChain(cloneSerializableValue(input));
+  assert.deepEqual([copy.depth, copy.leaf], [FAILING_BEFORE_DEPTH, "leaf"]);
+  // Changing the innermost copied list leaves the input intact, so no level is shared.
+  copy.innermost!.items[0] = "changed";
+  assert.equal(listChain(input).leaf, "leaf");
 });
 
 test("external capture rejects sparse arrays as non-canonical regardless of length", () => {
@@ -582,19 +610,40 @@ test("external capture rejects non-canonical proxy arrays without invoking gette
   }
 });
 
-test("external capture rejects malformed proxy length descriptors without invoking getters", () => {
-  for (const getOwnPropertyDescriptor of [
-    () => undefined,
-    () => ({ get: () => 0, enumerable: false, configurable: false }),
-    () => {
-      throw new Error("raw descriptor failure");
-    },
-  ]) {
-    const hostile = new Proxy([], { getOwnPropertyDescriptor });
-    assert.deepEqual(captureExternalData(hostile), {
-      ok: false,
-      failure: { kind: "nonJsonSafeValue", path: "$" },
+test("external capture rejects failing proxy length-descriptor traps without invoking getters", () => {
+  // The first two rows violate the Proxy invariants for an array's non-configurable length, so the
+  // descriptor request itself throws before capture can inspect the reported shape.
+  const rows: ReadonlyArray<readonly [string, () => PropertyDescriptor | undefined]> = [
+    ["missing length descriptor", () => undefined],
+    [
+      "accessor length descriptor",
+      () => ({ get: () => 0, enumerable: false, configurable: false }),
+    ],
+    [
+      "throwing descriptor trap",
+      () => {
+        throw new Error("raw descriptor failure");
+      },
+    ],
+  ];
+  for (const [name, describe] of rows) {
+    const reads = { descriptors: 0, gets: 0 };
+    const hostile = new Proxy([], {
+      getOwnPropertyDescriptor() {
+        reads.descriptors += 1;
+        return describe();
+      },
+      get() {
+        reads.gets += 1;
+        return 0;
+      },
     });
+    assert.deepEqual(
+      captureExternalData(hostile),
+      { ok: false, failure: { kind: "nonJsonSafeValue", path: "$" } },
+      name,
+    );
+    assert.deepEqual(reads, { descriptors: 1, gets: 0 }, name);
   }
 });
 
@@ -701,8 +750,7 @@ test("snapshot and checkpoint paths reject sparse arrays as malformed data", () 
   for (const operation of [executeInstruction, stepToEvent, run]) {
     const snapshot = mutableSnapshot(plan);
     snapshot.frames.length = 0xffff_ffff;
-    const rngState = snapshot.rng.state;
-    const eventSequence = snapshot.nextEventSequence;
+    const before = sparseSnapshotState(snapshot);
     let randomCalls = 0;
     assert.throws(
       () =>
@@ -717,8 +765,7 @@ test("snapshot and checkpoint paths reject sparse arrays as malformed data", () 
       (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
     );
     assert.equal(randomCalls, 0);
-    assert.equal(snapshot.rng.state, rngState);
-    assert.equal(snapshot.nextEventSequence, eventSequence);
+    assert.deepEqual(sparseSnapshotState(snapshot), before);
   }
 
   const malformedCheckpoint = checkpoint(plan, createFreshRuntimeSnapshot(plan));
