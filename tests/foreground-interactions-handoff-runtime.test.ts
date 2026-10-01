@@ -2638,93 +2638,115 @@ test("PR194 matrix: direct handoff forms resume equivalently", () => {
 test("PR194 matrix: invalid local handoff shapes reject without mutating plans", () => {
   const injected = injectTextInteraction('let answer = "__interaction_result__"\nsay answer\nexit');
   const span = injected.plan.instructions[injected.handoffInstruction]!.span;
-  const rows: readonly { readonly id: string; readonly mutate: (plan: ExternalRecord) => void }[] =
-    [
-      {
-        id: "PR194-jump-continuation",
-        mutate: (plan) => {
-          externalInstructions(plan)[injected.handoffInstruction] = {
-            kind: "jump",
-            target: injected.clearInstruction,
-            span,
-          };
-        },
+  const handoffPath = `$.instructions[${injected.handoffInstruction}]`;
+  const clearPath = `$.instructions[${injected.clearInstruction}]`;
+  const producerPath = `$.instructions[${injected.interactionInstruction}].destinationTemporary`;
+  // Every replacement instruction is otherwise well formed and in range, so the exact error paths
+  // show that only the local handoff rule rejects the plan.
+  const rows: readonly {
+    readonly id: string;
+    readonly mutate: (plan: ExternalRecord) => void;
+    readonly paths: readonly string[];
+  }[] = [
+    {
+      id: "PR194-jump-continuation",
+      mutate: (plan) => {
+        externalInstructions(plan)[injected.handoffInstruction] = {
+          kind: "jump",
+          target: injected.clearInstruction,
+          span,
+        };
       },
-      {
-        id: "PR194-second-blocking-action",
-        mutate: (plan) => {
-          externalInstructions(plan)[injected.handoffInstruction] = {
-            kind: "wait",
-            duration: { kind: "literal", value: 1, span },
-            unit: "ms",
-            span,
-          };
-        },
+      paths: [handoffPath],
+    },
+    {
+      id: "PR194-second-blocking-action",
+      mutate: (plan) => {
+        externalInstructions(plan)[injected.handoffInstruction] = {
+          kind: "wait",
+          command: "wait",
+          duration: { kind: "literal", value: 1, span },
+          unit: "ms",
+          display: "hidden",
+          label: null,
+          span,
+        };
       },
-      {
-        id: "PR194-consume-wrong-temporary",
-        mutate: (plan) => {
-          plan.temporaryCount = injected.plan.temporaryCount + 1;
-          externalRecord(externalInstructions(plan)[injected.handoffInstruction], "handoff").value =
-            { kind: "temporary", temporaryId: injected.destinationTemporary + 1, span };
-        },
+      paths: [handoffPath],
+    },
+    {
+      id: "PR194-consume-wrong-temporary",
+      mutate: (plan) => {
+        plan.temporaryCount = injected.plan.temporaryCount + 1;
+        externalRecord(externalInstructions(plan)[injected.handoffInstruction], "handoff").value = {
+          kind: "temporary",
+          temporaryId: injected.destinationTemporary + 1,
+          span,
+        };
       },
-      {
-        id: "PR194-missing-clear",
-        mutate: (plan) => {
-          externalInstructions(plan)[injected.clearInstruction] = {
-            kind: "say",
-            presentation: null,
-            speaker: null,
-            value: { kind: "literal", value: "x", span },
-            span,
-          };
-        },
+      paths: [handoffPath],
+    },
+    {
+      id: "PR194-missing-clear",
+      mutate: (plan) => {
+        externalInstructions(plan)[injected.clearInstruction] = {
+          kind: "say",
+          presentation: null,
+          speaker: null,
+          value: { kind: "literal", value: "x", span },
+          skipPolicy: null,
+          pacing: "instant",
+          span,
+        };
       },
-      {
-        id: "PR194-wrong-clear",
-        mutate: (plan) => {
-          externalRecord(
-            externalInstructions(plan)[injected.clearInstruction],
-            "clear",
-          ).temporaryId = injected.destinationTemporary + 1;
-        },
+      paths: [clearPath],
+    },
+    {
+      id: "PR194-wrong-clear",
+      mutate: (plan) => {
+        plan.temporaryCount = injected.plan.temporaryCount + 1;
+        externalRecord(externalInstructions(plan)[injected.clearInstruction], "clear").temporaryId =
+          injected.destinationTemporary + 1;
       },
-      {
-        id: "PR194-second-producer",
-        mutate: (plan) => {
-          externalInstructions(plan)[injected.clearInstruction] = {
-            kind: "storeTemporary",
-            temporaryId: injected.destinationTemporary,
-            value: { kind: "literal", value: "x", span },
-            expectBoolean: false,
-            span,
-          };
-        },
+      paths: [clearPath],
+    },
+    {
+      id: "PR194-second-producer",
+      mutate: (plan) => {
+        externalInstructions(plan)[injected.clearInstruction] = {
+          kind: "storeTemporary",
+          temporaryId: injected.destinationTemporary,
+          value: { kind: "literal", value: "x", span },
+          expectBoolean: false,
+          span,
+        };
       },
-      {
-        id: "PR194-return-value-not-guaranteed",
-        mutate: (plan) => {
-          externalRecord(externalInstructions(plan)[injected.handoffInstruction], "handoff").value =
-            {
-              kind: "binary",
-              operator: "or",
-              left: { kind: "literal", value: true, span },
-              right: { kind: "temporary", temporaryId: injected.destinationTemporary, span },
-              span,
-            };
-        },
+      paths: [producerPath, clearPath],
+    },
+    {
+      id: "PR194-return-value-not-guaranteed",
+      mutate: (plan) => {
+        externalRecord(externalInstructions(plan)[injected.handoffInstruction], "handoff").value = {
+          kind: "binary",
+          operator: "or",
+          left: { kind: "literal", value: true, span },
+          right: { kind: "temporary", temporaryId: injected.destinationTemporary, span },
+          span,
+        };
       },
-    ];
+      paths: [handoffPath],
+    },
+  ];
   for (const row of rows) {
     const plan = externalRecord(structuredClone(injected.plan), row.id);
     row.mutate(plan);
     const beforeValidation = structuredClone(plan);
     const validation = validateInstructionPlan(plan);
     assert.equal(validation.valid, false, row.id);
-    assert.ok(
-      validation.errors.some((error) => error.code === "TSC002"),
-      row.id,
+    assert.deepEqual(
+      validation.errors.map((error) => [error.code, error.path]),
+      row.paths.map((path) => ["TSC002", path]),
+      `${row.id}: ${JSON.stringify(validation.errors)}`,
     );
     assert.deepEqual(plan, beforeValidation, row.id);
   }
@@ -2836,6 +2858,7 @@ test("PR194 matrix: rejected completion and snapshot operations preserve canonic
   const requests = [
     {
       id: "PR194-invalid-payload",
+      expectedOutcome: "invalidPayload",
       request: {
         actionId,
         actionKind: "interaction" as const,
@@ -2845,6 +2868,7 @@ test("PR194 matrix: rejected completion and snapshot operations preserve canonic
     },
     {
       id: "PR194-wrong-action-kind",
+      expectedOutcome: "wrongActionKind",
       request: {
         actionId,
         actionKind: "delay" as const,
@@ -2855,7 +2879,9 @@ test("PR194 matrix: rejected completion and snapshot operations preserve canonic
   for (const row of requests) {
     const before = structuredClone(pending.snapshot);
     const result = completeAction(injected.plan, pending.snapshot, row.request);
+    assert.equal(result.outcome.kind, row.expectedOutcome, row.id);
     assert.deepEqual(result.snapshot, before, row.id);
+    assert.deepEqual(pending.snapshot, before, `${row.id}: snapshot input`);
     assert.deepEqual(result.events, [], row.id);
   }
   const completed = completeAction(injected.plan, pending.snapshot, {
