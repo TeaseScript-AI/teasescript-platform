@@ -128,11 +128,13 @@ ADR 0016 already provides the shared deterministic timing foundation. The core s
 
 - a foreground delay that blocks the active execution path;
 - background timed work that lets the main path continue and later makes a deterministic handler eligible;
-- validated lifecycle operations required for background timed work, including pause, resume, and stop once their exact semantics are separately accepted.
+- validated lifecycle operations required for background timed work, including timer pause, resume, and stop as
+  defined in specification [§27](../specifications/accepted-syntaxes-v30.md#27-timers).
 
 Visible countdowns, mystery presentation, labels, default controls, repeating policies, friendly timer handles, and convenience names belong above those primitives when possible.
 
-This ADR does not choose whether the final author API uses `timer`, `startTimer`, another name, methods on a returned handle, or official syntax sugar. It also does not define whether a stopped timer can be restarted; pause/resume and restart-after-stop are separate lifecycle decisions.
+This ADR defines the primitive/library boundary. Timer author syntax, handles, lifecycle methods, and settled-state
+behavior are now defined in specification [§27](../specifications/accepted-syntaxes-v30.md#27-timers).
 
 ## Standard Library responsibilities
 
@@ -278,7 +280,7 @@ This ADR intentionally does not decide:
 - generated metadata format and editor protocol;
 - exact privileged adapter implementation;
 - final `say` syntax and detailed smart-autoplay behavior;
-- final timer syntax, explicit handle representation, handle methods, pause/resume/stop/restart semantics, repetition, persistence, or presentation;
+- future timer/library composition beyond the accepted specification §27 and current runtime contract;
 - final generic interaction schema or `ask...` APIs;
 - exact output-target and participant/conversation data structures;
 - player-initiated pause time policy or author recovery-point rollback semantics;

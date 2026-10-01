@@ -42,6 +42,7 @@ const timers = computed<readonly PlayerTimerPresentation[]>(() => {
   const elapsed = elapsedSeconds.value;
   return seeds.slice(0, props.count).map((timer) => ({
     id: timer.id,
+    kind: props.kind === "mystery" ? ("mystery" as const) : ("visible" as const),
     ...("name" in timer ? { name: timer.name } : {}),
     remainingSeconds: Math.max(0, timer.remainingSeconds - elapsed),
     totalSeconds: timer.totalSeconds,

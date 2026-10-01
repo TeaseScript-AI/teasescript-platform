@@ -1,6 +1,8 @@
 import { resolveMessagePresentation } from "./message-presentation.js";
 import type { MessagePresentation } from "../message-presentation.js";
 import type {
+  DelayDisplay,
+  DurationUnitPlan,
   Instruction,
   InstructionPlan,
   InteractionUiPayload,
@@ -76,6 +78,7 @@ import type {
   RuntimeChatPacingGateActionSnapshot,
   RuntimeInteractionActionSnapshot,
   RuntimePreparedSayOutputSnapshot,
+  RuntimeTimerActionSnapshot,
 } from "./actions/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import {
@@ -85,7 +88,23 @@ import {
 } from "./actions/pacing.js";
 import { settleBackgroundPacingGate } from "./operations/pacing-gate.js";
 import { normalizeOpaqueColor } from "../color.js";
-import { isList, isObject, isRange, isSet, isSpeakerReference } from "./value-predicates.js";
+import {
+  returnFromTimerHandler,
+  startTimerHandler,
+  timerHandlerDispatchable,
+} from "./operations/timer-handlers.js";
+import { expireTimerAction, stopAllTimersForSessionEnd } from "./operations/timer-lifecycle.js";
+import { executionRunnable, processDueWork } from "./operations/observe-time.js";
+import { cloneTimer } from "./timers.js";
+import {
+  isDuration,
+  isList,
+  isObject,
+  isRange,
+  isSet,
+  isSpeakerReference,
+} from "./value-predicates.js";
+import { DURATION_UNIT_MILLISECONDS } from "../duration.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -108,7 +127,28 @@ export function executeInstruction(
   return result(captured.snapshot, context.events, instructionsExecuted);
 }
 
+/**
+ * Executes one instruction boundary. Once execution waits or ends, scene time continues toward the already observed
+ * time, which may make a later deadline's work runnable at that deadline.
+ */
 function executeCapturedInstruction(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  context: RuntimeExecutionContext,
+): number {
+  const executed = executeInstructionBoundary(plan, snapshot, context);
+  if (
+    snapshot.status !== "failed" &&
+    // Work due exactly at the observed time also settles once execution waits or ends.
+    snapshot.currentSessionTimeMs <= snapshot.observedSessionTimeMs &&
+    !executionRunnable(snapshot)
+  ) {
+    processDueWork(plan, snapshot, context.events);
+  }
+  return executed;
+}
+
+function executeInstructionBoundary(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   context: RuntimeExecutionContext,
@@ -116,16 +156,24 @@ function executeCapturedInstruction(
   if (snapshot.status === "halted" || snapshot.status === "failed") {
     return 0;
   }
+  // A queued expiry block interrupts at this boundary, even while the main path waits.
+  if (timerHandlerDispatchable(snapshot)) {
+    startTimerHandler(plan, snapshot);
+    return 1;
+  }
   if (snapshot.status === "waiting") return 0;
   if (snapshot.nextInstruction === plan.rootEndInstruction && snapshot.callFrames.length === 0) {
+    // A settled terminal action's commit window closes here; expiry blocks queued before the end still run first.
+    if (snapshot.terminalContinuationHandoff !== null && snapshot.pendingTimerHandlers.length > 0) {
+      snapshot.terminalContinuationHandoff = null;
+      return 1;
+    }
+    stopAllTimersForSessionEnd(snapshot);
     const completeEventAndFutureCompletions = requiredEventSequencesForRootCompletion(snapshot);
     assertEventSequenceCapacity(snapshot, completeEventAndFutureCompletions);
     snapshot.terminalContinuationHandoff = null;
     snapshot.status = "halted";
-    const terminalInstruction = plan.instructions[plan.rootEndInstruction - 1];
-    context.events.push(
-      createCompleteEvent(snapshot, terminalInstruction?.span ?? plan.sourceSpan),
-    );
+    context.events.push(createCompleteEvent(snapshot, rootCompletionSpan(plan)));
     return 1;
   }
   const instructionIndex = snapshot.nextInstruction;
@@ -145,12 +193,16 @@ function executeCapturedInstruction(
     if (
       snapshot.status === "running" &&
       snapshot.callFrames.length === 0 &&
-      snapshot.nextInstruction === plan.rootEndInstruction
+      snapshot.nextInstruction === plan.rootEndInstruction &&
+      // Expiry blocks queued before the script ends still run first.
+      !timerHandlerDispatchable(snapshot)
     ) {
+      stopAllTimersForSessionEnd(snapshot);
+      snapshot.terminalContinuationHandoff = null;
       snapshot.status = "halted";
       const completeEventAndFutureCompletions = requiredEventSequencesForRootCompletion(snapshot);
       assertEventSequenceCapacity(snapshot, completeEventAndFutureCompletions);
-      context.events.push(createCompleteEvent(snapshot, instruction.span));
+      context.events.push(createCompleteEvent(snapshot, rootCompletionSpan(plan)));
     }
   } catch (error) {
     if (!(error instanceof RuntimeFault)) throw error;
@@ -181,12 +233,7 @@ export function stepValidatedStateToEvent(
   const budget = instructionBudget(options.instructionBudget);
   const context = new RuntimeExecutionContext(snapshot, capabilities);
   let instructionsExecuted = 0;
-  while (
-    snapshot.status !== "waiting" &&
-    snapshot.status !== "halted" &&
-    snapshot.status !== "failed" &&
-    context.events.length === 0
-  ) {
+  while (executionRunnable(snapshot) && context.events.length === 0) {
     if (instructionsExecuted >= budget) {
       failForBudget(plan, snapshot, context.events);
       break;
@@ -216,11 +263,7 @@ export function runValidatedState(
   const budget = instructionBudget(options.instructionBudget);
   const context = new RuntimeExecutionContext(snapshot, capabilities);
   let instructionsExecuted = 0;
-  while (
-    snapshot.status !== "waiting" &&
-    snapshot.status !== "halted" &&
-    snapshot.status !== "failed"
-  ) {
+  while (executionRunnable(snapshot)) {
     if (instructionsExecuted >= budget) {
       failForBudget(plan, snapshot, context.events);
       break;
@@ -508,48 +551,44 @@ function executePlannedInstruction(
       enterFunctionBody(plan, instruction.functionId, snapshot, instruction.span);
       return;
     case "returnValue":
-      returnFromFunction(plan, snapshot, evaluator.evaluate(instruction.value), instruction.span);
+      returnFromFunction(
+        plan,
+        snapshot,
+        evaluator.evaluate(instruction.value),
+        instruction.span,
+        events,
+      );
       return;
     case "returnVoid":
-      returnFromFunction(plan, snapshot, null, instruction.span);
+      returnFromFunction(plan, snapshot, null, instruction.span, events);
       return;
     case "say": {
       executeSayAtomically(plan, instruction, snapshot, evaluator, events);
       return;
     }
     case "wait": {
-      const value = evaluator.evaluate(instruction.duration);
-      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-        throw fault(
-          "TSR050",
-          "Wait duration must be a finite non-negative number.",
-          instruction.duration.span,
-        );
-      }
-      const multiplier =
-        instruction.unit === "ms"
-          ? 1
-          : instruction.unit === "min"
-            ? 60_000
-            : instruction.unit === "h"
-              ? 3_600_000
-              : 1_000;
-      const durationMs = value * multiplier;
-      const deadlineMs = snapshot.currentSessionTimeMs + durationMs;
-      if (!Number.isFinite(durationMs) || !isValidSessionTime(deadlineMs)) {
-        throw fault(
-          "TSR050",
-          "Wait duration is outside the supported session-time range.",
-          instruction.duration.span,
-        );
-      }
-      if (value > 0 && (durationMs <= 0 || deadlineMs <= snapshot.currentSessionTimeMs)) {
-        throw fault(
-          "TSR050",
-          "Wait duration cannot produce a representable future deadline.",
-          instruction.duration.span,
-        );
-      }
+      const evaluated = evaluator.evaluate(instruction.duration);
+      const display =
+        typeof instruction.display === "string"
+          ? instruction.display
+          : timerDisplay(evaluator.evaluate(instruction.display), instruction.display.span);
+      const label =
+        instruction.label === null
+          ? null
+          : timerLabel(evaluator.evaluate(instruction.label), instruction.label.span);
+      const durationMs = timerDurationMs(
+        evaluator,
+        evaluated,
+        instruction.unit,
+        instruction.command,
+        instruction.duration.span,
+      );
+      const deadlineMs = futureDeadline(
+        snapshot,
+        durationMs,
+        instruction.command,
+        instruction.duration.span,
+      );
       if (durationMs === 0) {
         advance(snapshot);
         return;
@@ -577,6 +616,8 @@ function executePlannedInstruction(
         createdAtMs: snapshot.currentSessionTimeMs,
         deadlineMs,
         expectedCompletion: "time" as const,
+        display,
+        label,
         requestEventSequence: sequence,
       });
       snapshot.nextActionId += 1;
@@ -683,7 +724,11 @@ function executePlannedInstruction(
       );
       return;
     }
+    case "startTimer":
+      startTimer(instruction, snapshot, evaluator, events);
+      return;
     case "exit":
+      stopAllTimersForSessionEnd(snapshot);
       snapshot.backgroundActions.length = 0;
       snapshot.preparedSayOutput = null;
       if (
@@ -951,6 +996,7 @@ function enterFunction(
     callSiteSpan: copySpan(instruction.span),
     returnInstruction: instruction.returnInstruction,
     destinationTemporary: instruction.destinationTemporary,
+    timerInterruption: null,
     callerTemporaries: snapshot.temporaries.map(cloneTemporary),
     scopeBaseDepth: snapshot.frames.length,
     loopBaseDepth: snapshot.loopFrames.length,
@@ -1097,8 +1143,13 @@ function returnFromFunction(
   snapshot: RuntimeSnapshot,
   value: SerializableRuntimeValue,
   span: SourceSpan,
+  events: InterpreterEvent[],
 ): void {
   const { frame } = activeFunction(plan, snapshot, span);
+  if (frame.timerInterruption !== null) {
+    returnFromTimerHandler(plan, snapshot, frame, events);
+    return;
+  }
   const returned = cloneCapturedSerializableValue(value);
   snapshot.frames.splice(frame.scopeBaseDepth);
   snapshot.loopFrames.splice(frame.loopBaseDepth);
@@ -1108,10 +1159,11 @@ function returnFromFunction(
     snapshot.temporaries.length,
     ...frame.callerTemporaries.map(cloneTemporary),
   );
-  if (snapshot.temporaries.some((temporary) => temporary.id === frame.destinationTemporary)) {
+  const destinationTemporary = frame.destinationTemporary!;
+  if (snapshot.temporaries.some((temporary) => temporary.id === destinationTemporary)) {
     throw fault("TSR050", "Function result destination is already occupied.", span);
   }
-  snapshot.temporaries.push({ id: frame.destinationTemporary, value: returned });
+  snapshot.temporaries.push({ id: destinationTemporary, value: returned });
   snapshot.nextInstruction = frame.returnInstruction;
 }
 
@@ -1749,6 +1801,11 @@ function requiredEventSequencesForRootCompletion(snapshot: RuntimeSnapshot): num
   return rootCompleteEvent + requiredFutureActionCompletionEvents(snapshot);
 }
 
+/** Completion is attributed to the script's last root instruction, however execution reached the end. */
+function rootCompletionSpan(plan: InstructionPlan): SourceSpan {
+  return plan.instructions[plan.rootEndInstruction - 1]?.span ?? plan.sourceSpan;
+}
+
 function createCompleteEvent(snapshot: RuntimeSnapshot, span: SourceSpan): CompleteEvent {
   return Object.freeze({
     kind: "complete",
@@ -1764,6 +1821,8 @@ function failSnapshot(
 ): void {
   const failureSequence = takeSequence(snapshot);
   snapshot.status = "failed";
+  // A failed session is terminal; no foreground action stays pending.
+  snapshot.foregroundAction = null;
   snapshot.failure = { code: failure.code, message: failure.message, span: copySpan(failure.span) };
   events.push(
     Object.freeze({
@@ -1795,6 +1854,194 @@ function instructionBudget(value: number | undefined): number {
     throw new RangeError("Instruction budget must be a positive safe integer.");
   }
   return budget;
+}
+
+/**
+ * Converts an evaluated `wait`/`timer` duration to milliseconds: a duration value, a number of `unit` (seconds by
+ * default), or, for timers, an integer-second range drawn once from the session RNG. Invalid ranges fail before the draw.
+ */
+export function timerDurationMs(
+  evaluator: Evaluator,
+  value: SerializableRuntimeValue,
+  unit: DurationUnitPlan | null,
+  command: "wait" | "timer",
+  span: SourceSpan,
+): number {
+  const range =
+    command === "timer" && isRange(value) && (unit === null || unit === "s") ? value : null;
+  const drawn =
+    range === null || range.start < 0
+      ? value
+      : evaluator.randomIntegerInRange(range, span, "timer");
+  const amount = isDuration(drawn) && unit === null ? drawn.milliseconds : drawn;
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0) {
+    throw fault(
+      "TSR050",
+      command === "timer"
+        ? "Timer duration must be a non-negative duration, number of seconds, or range of whole seconds."
+        : "Wait duration must be a non-negative duration or finite number.",
+      span,
+    );
+  }
+  const durationMs = isDuration(drawn) ? amount : amount * DURATION_UNIT_MILLISECONDS[unit ?? "s"];
+  if (!Number.isFinite(durationMs)) {
+    throw fault(
+      "TSR050",
+      `${commandName(command)} duration is outside the supported session-time range.`,
+      span,
+    );
+  }
+  return durationMs;
+}
+
+/** Absolute deadline for a positive duration; `0` stays immediate. */
+export function futureDeadline(
+  snapshot: RuntimeSnapshot,
+  durationMs: number,
+  command: "wait" | "timer",
+  span: SourceSpan,
+): number {
+  const deadlineMs = snapshot.currentSessionTimeMs + durationMs;
+  if (!isValidSessionTime(deadlineMs)) {
+    throw fault(
+      "TSR050",
+      `${commandName(command)} duration is outside the supported session-time range.`,
+      span,
+    );
+  }
+  if (durationMs > 0 && deadlineMs <= snapshot.currentSessionTimeMs) {
+    throw fault(
+      "TSR050",
+      `${commandName(command)} duration cannot produce a representable future deadline.`,
+      span,
+    );
+  }
+  return deadlineMs;
+}
+
+function commandName(command: "wait" | "timer"): string {
+  return command === "timer" ? "Timer" : "Wait";
+}
+
+export function timerLabel(value: SerializableRuntimeValue, span: SourceSpan): string {
+  if (typeof value !== "string") throw fault("TSR050", "A timer label must be a string.", span);
+  return value;
+}
+
+/**
+ * Starts an asynchronous timer as background timed work and, when used as a value, stores its handle. Operands are
+ * evaluated in plan order before a range is drawn. A zero first round expires at once and queues its expiry block.
+ */
+function startTimer(
+  instruction: Extract<Instruction, { kind: "startTimer" }>,
+  snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
+  events: InterpreterEvent[],
+): void {
+  const duration = evaluator.evaluate(instruction.duration);
+  const display =
+    typeof instruction.display === "string"
+      ? instruction.display
+      : timerDisplay(evaluator.evaluate(instruction.display), instruction.display.span);
+  const label =
+    instruction.label === null
+      ? null
+      : timerLabel(evaluator.evaluate(instruction.label), instruction.label.span);
+  const range =
+    instruction.repeat &&
+    isRange(duration) &&
+    (instruction.unit === null || instruction.unit === "s")
+      ? duration
+      : null;
+  const zeroRoundFault = () =>
+    fault(
+      "TSR050",
+      "A repeating timer needs every round to last longer than zero.",
+      instruction.duration.span,
+    );
+  // A range that allows a zero-length round is rejected before its first round is drawn.
+  if (range !== null && range.start < 1) throw zeroRoundFault();
+  const roundDurationMs = timerDurationMs(
+    evaluator,
+    duration,
+    instruction.unit,
+    "timer",
+    instruction.duration.span,
+  );
+  if (instruction.repeat && roundDurationMs <= 0) throw zeroRoundFault();
+  const deadlineMs = futureDeadline(snapshot, roundDurationMs, "timer", instruction.duration.span);
+  if (
+    !Number.isSafeInteger(snapshot.nextActionId) ||
+    snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
+  ) {
+    throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+  }
+  assertCounterCanAdvance(snapshot.nextTimerId, "nextTimerId");
+  // The request, its eventual settlement, and the other active actions' completions must stay representable.
+  assertEventSequenceCapacity(
+    snapshot,
+    2 + requiredFutureActionCompletionEvents(snapshot),
+    instruction.span,
+  );
+  const timerId = snapshot.nextTimerId;
+  const sequence = takeSequence(snapshot);
+  const action: RuntimeTimerActionSnapshot = {
+    kind: "timer",
+    actionId: snapshot.nextActionId,
+    owningInstruction: snapshot.nextInstruction,
+    createdAtMs: snapshot.currentSessionTimeMs,
+    requestEventSequence: sequence,
+    timer: {
+      timerId,
+      state: "running",
+      display,
+      label,
+      repeat: instruction.repeat,
+      persist: instruction.persist,
+      handlerFunctionId: instruction.handlerFunctionId,
+      range:
+        range === null ? null : { start: range.start, end: range.end, inclusive: range.inclusive },
+      repeatDurationMs: instruction.repeat && range === null ? roundDurationMs : null,
+      roundDurationMs,
+      deadlineMs,
+      remainingMs: null,
+      elapsedMs: 0,
+      runningSinceMs: snapshot.currentSessionTimeMs,
+      anchoredRounds: instruction.repeat && range === null ? 0 : null,
+    },
+  };
+  snapshot.nextActionId += 1;
+  snapshot.nextTimerId += 1;
+  snapshot.backgroundActions.push(action);
+  if (instruction.destinationTemporary !== null) {
+    setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, {
+      kind: "timerHandle",
+      timerId,
+    });
+  }
+  events.push(
+    Object.freeze({
+      kind: "actionRequested",
+      sequence,
+      action: { ...action, timer: cloneTimer(action.timer) },
+      span: copySpan(instruction.span),
+    } satisfies ActionRequestedEvent),
+  );
+  if (roundDurationMs === 0) {
+    expireTimerAction(
+      snapshot,
+      action,
+      snapshot.currentSessionTimeMs,
+      copySpan(instruction.span),
+      events,
+    );
+  }
+  advance(snapshot);
+}
+
+export function timerDisplay(value: SerializableRuntimeValue, span: SourceSpan): DelayDisplay {
+  if (value === "visible" || value === "mystery" || value === "hidden") return value;
+  throw fault("TSR050", 'Timer display must be "visible", "mystery", or "hidden".', span);
 }
 
 function fault(code: string, message: string, span: SourceSpan): RuntimeFault {

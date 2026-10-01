@@ -118,6 +118,12 @@ class Lexer {
     }
 
     switch (character) {
+      case "+":
+        this.#scanOptionalEqual(TokenKind.Plus, TokenKind.PlusEqual);
+        return;
+      case "-":
+        this.#scanOptionalEqual(TokenKind.Minus, TokenKind.MinusEqual);
+        return;
       case "=":
         this.#scanOptionalEqual(TokenKind.Equal, TokenKind.EqualEqual);
         return;
@@ -748,8 +754,6 @@ const singleCharacterKinds: Readonly<Record<string, TokenKind>> = {
   ",": TokenKind.Comma,
   ".": TokenKind.Dot,
   "?": TokenKind.Question,
-  "+": TokenKind.Plus,
-  "-": TokenKind.Minus,
   "*": TokenKind.Star,
   "/": TokenKind.Slash,
   "%": TokenKind.Percent,

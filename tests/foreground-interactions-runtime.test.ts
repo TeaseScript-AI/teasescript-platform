@@ -1066,7 +1066,7 @@ test("huge completion kind tokens are not reflected or allowed to mutate canonic
   }
 });
 
-test("a foreground action is strictly newer than the retained settlement", () => {
+test("a foreground action keeps identities distinct from the retained settlement", () => {
   const compiled = compileSource("wait 1\nwait 1\nexit");
   assert.deepEqual(compiled.diagnostics, []);
   const base = compiled.plan!;
@@ -1105,10 +1105,6 @@ test("a foreground action is strictly newer than the retained settlement", () =>
 
   // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture callbacks create impossible active/settled action identity and event chronology relations.
   const mutations: Array<(snapshot: any) => void> = [
-    (snapshot) => {
-      snapshot.lastSettlement.actionId = snapshot.foregroundAction.actionId + 1;
-      snapshot.nextActionId = snapshot.lastSettlement.actionId + 1;
-    },
     (snapshot) => {
       snapshot.lastSettlement.actionId = snapshot.foregroundAction.actionId;
     },

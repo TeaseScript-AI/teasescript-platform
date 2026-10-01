@@ -67,8 +67,8 @@ progress record plus active, non-implemented planning; entries do not schedule t
 
 - `planning/RELEASE-ROADMAP.md` records owner-selected release-stage placement, open release-stage outcomes, and
   compact roadmap progress history.
-- `planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md` retains open timer-handle, browser-unavailability, and author-defined
-  recovery-point direction.
+- `planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md` retains absolute-event/deadline and author-defined recovery-point direction.
+- `planning/CALENDAR-DURATION-FOLLOW-UPS.md` retains calendar-recurrence and year-duration direction for later design.
 - `planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md` retains open camera ownership, capture, media-lifetime, and
   browser/server time-integrity direction.
 - `planning/MAINTENANCE-CANDIDATES.md` lists optimization and maintenance candidates to revalidate when selected for

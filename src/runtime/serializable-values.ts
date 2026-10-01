@@ -30,6 +30,18 @@ export interface SerializableRuntimeRange {
   readonly inclusive: boolean;
 }
 
+/** An exact elapsed duration. Calendar units are not represented. */
+export interface SerializableRuntimeDuration {
+  readonly kind: "duration";
+  readonly milliseconds: number;
+}
+
+/** An opaque script handle for one asynchronous timer record. */
+export interface SerializableTimerHandle {
+  readonly kind: "timerHandle";
+  readonly timerId: number;
+}
+
 export interface SerializableRuntimeProperty {
   readonly name: string;
   value: SerializableRuntimeValue;
@@ -41,6 +53,8 @@ export type SerializableRuntimeValue =
   | SerializableRuntimeObject
   | SerializableRuntimeSet
   | SerializableRuntimeRange
+  | SerializableRuntimeDuration
+  | SerializableTimerHandle
   | SerializableSpeakerReference;
 
 export class SerializableValueError extends Error {
@@ -214,6 +228,8 @@ function cloneSerializableNode(value: SerializableRuntimeValue): SerializableRun
     case "range":
       return { ...value };
     case "speakerReference":
+    case "duration":
+    case "timerHandle":
       return { ...value };
     case "set":
       return { kind: "set", items: [...value.items] };
@@ -284,6 +300,20 @@ export function serializableEquals(
   if (typeof left !== "object" || typeof right !== "object") return left === right;
   if (left.kind === "speakerReference" && right.kind === "speakerReference") {
     return left.speakerId === right.speakerId;
+  }
+  if (left.kind === "duration" && right.kind === "duration") {
+    return left.milliseconds === right.milliseconds;
+  }
+  if (left.kind === "timerHandle" && right.kind === "timerHandle") {
+    return left.timerId === right.timerId;
+  }
+  if (
+    left.kind === "duration" ||
+    right.kind === "duration" ||
+    left.kind === "timerHandle" ||
+    right.kind === "timerHandle"
+  ) {
+    return false;
   }
   throw new SerializableValueError(
     "equality",
@@ -417,6 +447,25 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
         return `${path()} contains a malformed speaker reference.`;
       continue;
     }
+    if (current.kind === "duration") {
+      if (
+        !hasOnlyKeys(current, ["kind", "milliseconds"]) ||
+        typeof current.milliseconds !== "number" ||
+        !Number.isFinite(current.milliseconds)
+      )
+        return `${path()} contains a malformed duration.`;
+      continue;
+    }
+    if (current.kind === "timerHandle") {
+      // EVIDENCE: validation: Number.isSafeInteger establishes the numeric timer ID before comparison.
+      if (
+        !hasOnlyKeys(current, ["kind", "timerId"]) ||
+        !Number.isSafeInteger(current.timerId) ||
+        (current.timerId as number) < 1
+      )
+        return `${path()} contains a malformed timer handle.`;
+      continue;
+    }
     if (current.kind === "range") {
       if (
         typeof current.start !== "number" ||
@@ -499,6 +548,11 @@ function isScalar(value: unknown): value is SerializableRuntimeScalar {
     typeof value === "boolean" ||
     (typeof value === "number" && Number.isFinite(value))
   );
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(value);
+  return actual.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

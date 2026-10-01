@@ -40,7 +40,13 @@ export const DEMO_PRESENTATION: PlayerPresentation = {
     ambientColor: "#f7cdaf",
   },
 
-  timer: { id: "warm-up", name: "Warm-up", remainingSeconds: 161, totalSeconds: 300 },
+  timer: {
+    id: "warm-up",
+    kind: "visible",
+    name: "Warm-up",
+    remainingSeconds: 161,
+    totalSeconds: 300,
+  },
 
   speakers: {
     eva: {

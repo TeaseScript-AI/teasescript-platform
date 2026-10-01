@@ -7,14 +7,12 @@ import type {
   RuntimeInteractionActionSnapshot,
 } from "../actions/model.js";
 import type { ActionCompletedEvent, InterpreterEvent, PlayerTranscriptEvent } from "../events.js";
-import { isValidSessionTime } from "../actions/delay.js";
 import { resolveInteractionCompletion } from "../actions/interaction.js";
 import type { ActionCompletionOutcome, PendingActionOperationResult } from "./model.js";
-import { observeTime } from "./observe-time.js";
+import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 import { settleBackgroundPacingGate } from "./pacing-gate.js";
 import { terminalContinuationHandoffFor } from "./terminal-continuation.js";
 import {
-  RuntimeDataError,
   assertEventSequenceCapacity,
   captureExecutableData,
   cloneSettlement,
@@ -51,11 +49,16 @@ export function completeAction(
   const active =
     current.foregroundAction?.actionId === actionId
       ? current.foregroundAction
-      : (current.backgroundActions.find(
-          (action): action is RuntimeChatPacingGateActionSnapshot =>
-            action.kind === "chatPacingGate" && action.actionId === actionId,
-        ) ?? null);
+      : (current.backgroundActions.find((action) => action.actionId === actionId) ?? null);
   if (active === null) {
+    if (
+      current.callFrames.some(
+        (frame) => frame.timerInterruption?.suspendedAction?.actionId === actionId,
+      )
+    ) {
+      // An interrupted action is inert while a timer expiry block runs; it is not settled.
+      return pendingResult(current, [], { kind: "suspendedAction" as const, actionId });
+    }
     if (current.lastSettlement?.actionId === actionId) {
       return pendingResult(current, [], {
         kind: "alreadySettled",
@@ -68,6 +71,12 @@ export function completeAction(
         : { kind: "unknownAction" as const, actionId };
     return pendingResult(current, [], outcome);
   }
+  if (active.kind === "timer" || active.kind === "delay") {
+    return pendingResult(current, [], {
+      kind: "invalidPayload",
+      message: "Waits and timers settle only through time observation and script operations.",
+    });
+  }
   if (value.actionKind !== active.kind) {
     const receivedActionKind = validRequestedActionKind(value.actionKind)
       ? value.actionKind
@@ -79,49 +88,23 @@ export function completeAction(
       receivedActionKind,
     });
   }
+  if (current.status === "failed") {
+    return pendingResult(current, [], {
+      kind: "invalidPayload",
+      message: "The session has failed and accepts no further input.",
+    });
+  }
+  // Host input happens at the observed time: scene time must have caught up, and a due expiry block runs first.
+  if (
+    current.currentSessionTimeMs < current.observedSessionTimeMs ||
+    timerHandlerDispatchable(current)
+  ) {
+    return pendingResult(current, [], { kind: "executionPending", actionId });
+  }
   if (active.kind === "interaction") {
     return completeInteraction(captured.plan, current, active, value);
   }
-  if (active.kind === "chatPacingGate") {
-    return completePacingGate(captured.plan, current, active, value);
-  }
-  if (
-    !isPlainRecord(value.payload) ||
-    value.payload.kind !== "time" ||
-    !isValidSessionTime(value.payload.currentSessionTimeMs)
-  ) {
-    return pendingResult(current, [], {
-      kind: "invalidPayload",
-      message: "Delay completion payload must contain a valid time observation.",
-    });
-  }
-  const effectiveNow = Math.max(current.currentSessionTimeMs, value.payload.currentSessionTimeMs);
-  if (effectiveNow < active.deadlineMs) {
-    return pendingResult(current, [], {
-      kind: "notDue",
-      actionId,
-      currentSessionTimeMs: current.currentSessionTimeMs,
-      deadlineMs: active.deadlineMs,
-    });
-  }
-  const observed = observeTime(captured.plan, current, effectiveNow);
-  if (observed.outcome.kind !== "observed" || observed.outcome.completion === null) {
-    throw new RuntimeDataError("TSR101", "Due delay completion did not settle.");
-  }
-  const requestedCompletion = observed.events.find(
-    (event): event is ActionCompletedEvent =>
-      event.kind === "actionCompleted" && event.settlement.actionId === actionId,
-  );
-  if (requestedCompletion === undefined) {
-    throw new RuntimeDataError(
-      "TSR101",
-      "Due delay completion did not settle the requested action.",
-    );
-  }
-  return Object.freeze({
-    ...observed,
-    outcome: { kind: "completed" as const, settlement: requestedCompletion.settlement },
-  });
+  return completePacingGate(captured.plan, current, active, value);
 }
 
 function completePacingGate(
@@ -181,10 +164,8 @@ function completePacingGate(
   return pendingResult(current, events, { kind: "completed", settlement });
 }
 
-function validRequestedActionKind(
-  value: unknown,
-): value is "delay" | "interaction" | "chatPacingGate" {
-  return value === "delay" || value === "interaction" || value === "chatPacingGate";
+function validRequestedActionKind(value: unknown): value is "interaction" | "chatPacingGate" {
+  return value === "interaction" || value === "chatPacingGate";
 }
 
 function completeInteraction(

@@ -6,9 +6,10 @@
 - **Do not use for:** Chat pacing, the public timer API, accepted interaction semantics, or current implementation
   status
 
-This file covers only camera, media, and time integrity. Chat pacing and timer foundations are owned by ADRs
-0016–0018, current topic documents, and `TIMER-AND-RECOVERY-FOLLOW-UPS.md`. This planning does not schedule
-implementation or accept final TeaseScript APIs.
+This file covers only camera, media, and time integrity. Accepted chat-pacing and timer foundations are maintained in
+ADRs 0016–0018, the accepted specification, and [`RUNTIME.md`](../RUNTIME.md). Adjacent event/recovery planning lives in
+[`TIMER-AND-RECOVERY-FOLLOW-UPS.md`](TIMER-AND-RECOVERY-FOLLOW-UPS.md). This planning does not schedule implementation
+or accept final TeaseScript APIs.
 
 ## Camera ownership
 

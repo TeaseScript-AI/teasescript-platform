@@ -28,11 +28,11 @@ Current constraints: [`RUNTIME.md`](RUNTIME.md), [`ARCHITECTURE.md`](ARCHITECTUR
   semantics.
 - Host/global representation for future opaque engine references beyond speakers.
 - Server-versus-browser authoritative checkpoint ownership and conflict resolution.
-- Minimal engine primitive families for background timed work and future media capabilities under ADR 0017.
+- Minimal engine primitive families for future media capabilities under ADR 0017.
 - Serializable lowering or engine-managed continuation representation for resumable library workflows not covered by
   ADR 0018's full-lowering choice.
-- Exact checkpoint selection, deadline recalculation, repeating-timer, and server-authoritative-time mechanics needed
-  to implement the owner-selected missed-event barrier for browser unavailability/reload/reconnect/device sleep.
+- Recovery and missed-event ordering for absolute scheduled events/deadlines, including local/offline versus
+  server-backed authority and cross-device persistence.
 - Exact recovery-frontier mechanics for non-restorable custom presentation, including checkpoint selection and optional
   advanced reconstruction/snapshot support.
 - Exact durable external-effect protocol across recovery boundaries: effect identity, ownership/release authority,
@@ -71,8 +71,8 @@ Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRAR
   autoplay.
 - Constrained LLM interpretation contract and author-facing options for natural-language numbers and non-exact choice
   answers.
-- Whether and how to revise the accepted V30 timer API for explicit handles and final pause/resume/stop/restart,
-  repetition, persistence, and visible-presentation semantics.
+- Generalized elapsed-duration range precision and locale-aware duration presentation beyond the implemented slice.
+- Final scheduled-event author syntax and object/handle API under specification §36.
 
 ## Editor and authoring
 
@@ -97,6 +97,8 @@ Current constraints: [`RUNTIME.md`](RUNTIME.md), [`SECURITY.md`](SECURITY.md),
 [ADR 0018](decisions/0018-first-standard-library-poc-contract.md). Owner-selected release-stage design outcomes
 remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 
+- Exact Player presentation for absolute deadlines and long/upcoming scheduled events; see specification §36 and
+  [`planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md`](planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md).
 - Cross-origin parent/player message schemas, capability negotiation, sandbox flags, and Content Security Policy.
 - Action-kind-specific media completion, advanced timeout, cancellation, and recovery policies beyond ADR 0018's
   mandatory basic interactions.

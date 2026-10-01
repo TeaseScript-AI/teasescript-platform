@@ -73,8 +73,10 @@ controlling source adopts it; remove this section and its router references when
   synchronization. Runtime value, scheduling, stale-event, media-continuity, lifecycle, and provenance semantics are
   maintained in [`RUNTIME.md`](../RUNTIME.md); exact public API names and author syntax remain open.
 - **Timer presentation metadata:** the maintained timer section below defines visible/mystery/hidden presentation and
-  optional labeling. The accepted label placement remains presentation-only; exact runtime/Standard-Library metadata,
-  author syntax, and stable generic-label numbering across timer lifecycle changes remain unsynchronized.
+  optional labeling. Authored timers carry visible/mystery/hidden display and optional labels (see
+  [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time)); `player/runtime-adapter.ts` derives presented timers and
+  observation deadlines from runtime state. No maintained Player view renders runtime timers yet, and stable
+  generic-label numbering across timer lifecycle changes remains unsynchronized.
 
 ## Surface hierarchy
 

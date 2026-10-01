@@ -1,5 +1,5 @@
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 22;
+export const INSTRUCTION_PLAN_VERSION = 23;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -37,6 +37,8 @@ export interface CompiledFunctionParameter {
 
 export interface CompiledFunctionDefinition {
   readonly id: number;
+  /** A parameterless expiry-block region; it is entered only by the runtime, never by `callFunction`. */
+  readonly timerHandler: boolean;
   readonly name: string;
   readonly declarationSpan: PlanSourceLocation;
   readonly parameters: readonly CompiledFunctionParameter[];
@@ -80,6 +82,7 @@ export type Instruction =
   | ReturnVoidInstruction
   | SayInstruction
   | WaitInstruction
+  | StartTimerInstruction
   | InteractionInstruction
   | ExitInstruction;
 
@@ -300,10 +303,39 @@ export interface SayInstruction extends InstructionBase {
   readonly pacing: ExpressionPlan | "smart" | "instant";
 }
 
+export type DurationUnitPlan = "ms" | "s" | "min" | "h";
+
+/** One foreground delay: `wait` or a blocking `timer`. */
 export interface WaitInstruction extends InstructionBase {
   readonly kind: "wait";
+  /** A `timer` also accepts an integer-second range drawn once, after its operands are evaluated. */
+  readonly command: "wait" | "timer";
   readonly duration: ExpressionPlan;
-  readonly unit: "ms" | "s" | "min" | "h" | null;
+  readonly unit: DurationUnitPlan | null;
+  /** Evaluated after the duration when it is an expression; always `"hidden"` for `wait`. */
+  readonly display: DelayDisplay | ExpressionPlan;
+  /** Evaluated after the duration and display; always `null` for `wait`. */
+  readonly label: ExpressionPlan | null;
+}
+
+export type DelayDisplay = "hidden" | "visible" | "mystery";
+
+/**
+ * Starts one asynchronous timer. Operands are evaluated as duration, display, then label; the compiler
+ * materializes them first when source order differs. A range is drawn after every operand is evaluated.
+ */
+export interface StartTimerInstruction extends InstructionBase {
+  readonly kind: "startTimer";
+  readonly duration: ExpressionPlan;
+  readonly unit: DurationUnitPlan | null;
+  readonly display: DelayDisplay | ExpressionPlan;
+  readonly label: ExpressionPlan | null;
+  readonly repeat: boolean;
+  readonly persist: boolean;
+  /** A compiled timer-handler region, or `null` when the timer has no expiry block. */
+  readonly handlerFunctionId: number | null;
+  /** Receives the handle when the timer is used as a value. */
+  readonly destinationTemporary: number | null;
 }
 
 export type InteractionKind = "button" | "text" | "number" | "choice";
@@ -408,6 +440,7 @@ export type AssignmentTargetPlan =
 
 export type ExpressionPlan =
   | LiteralExpressionPlan
+  | DurationExpressionPlan
   | IdentifierExpressionPlan
   | ListExpressionPlan
   | ObjectExpressionPlan
@@ -430,6 +463,12 @@ interface ExpressionPlanBase {
 export interface LiteralExpressionPlan extends ExpressionPlanBase {
   readonly kind: "literal";
   readonly value: string | number | boolean | null;
+}
+
+/** An exact elapsed-duration literal, already converted to milliseconds. */
+export interface DurationExpressionPlan extends ExpressionPlanBase {
+  readonly kind: "duration";
+  readonly milliseconds: number;
 }
 
 export interface IdentifierExpressionPlan extends ExpressionPlanBase {

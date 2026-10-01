@@ -4,6 +4,7 @@ export function expressionChildren(expression: Expression): readonly Expression[
     case "booleanLiteral":
     case "nullLiteral":
     case "numberLiteral":
+    case "durationLiteral":
       return [];
     case "stringLiteral":
       return expression.parts.flatMap((part) =>
@@ -31,5 +32,13 @@ export function expressionChildren(expression: Expression): readonly Expression[
       return [expression.left, expression.right];
     case "rangeExpression":
       return [expression.start, expression.end];
+    case "timerExpression":
+      return [
+        ...(typeof expression.display === "object" && expression.display !== null
+          ? [expression.display]
+          : []),
+        expression.duration,
+        ...(expression.label === null ? [] : [expression.label]),
+      ];
   }
 }

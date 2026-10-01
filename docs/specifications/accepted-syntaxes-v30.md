@@ -31,7 +31,7 @@ This table is generated from the current section order.
 - [24. Comments](#24-comments)
 - [25. Persistent storage and keys](#25-persistent-storage-and-keys)
 - [26. Labels and goto](#26-labels-and-goto)
-- [27. Blocking and background timers](#27-blocking-and-background-timers)
+- [27. Timers](#27-timers)
 - [28. Permanent buttons](#28-permanent-buttons)
 - [29. Script files and paths](#29-script-files-and-paths)
 - [30. Script endings](#30-script-endings)
@@ -787,7 +787,12 @@ Modify an existing variable without another keyword:
 ```text
 score = 20
 hasKey = false
+score += 5
+score -= 2
 ```
+
+`+=` and `-=` are general assignment operators using the corresponding arithmetic operation and the target's
+existing type rules. Timer-property assignment is defined in [§27](#27-timers).
 
 Rules:
 
@@ -1976,102 +1981,121 @@ Rules:
 - Unknown labels are compile errors.
 - A `goto` triggered by an event aborts the current execution path and does not return.
 
-## 27. Blocking and background timers
-**Status:** Accepted
+## 27. Timers
+**Status:** Accepted (Owner decisions on PR #443, 2026-09-30)
 
-### Blocking timers
+One `timer` concept covers blocking and asynchronous countdowns. `wait` is the shorthand for a hidden blocking
+timer and shares its clock, checkpoint, and restore behavior.
 
-Hidden blocking wait:
+### Short form
 
 ```text
-wait 10
+wait 10                                   // hidden, blocking
+timer 10                                  // visible, blocking
+timer mystery 5..10 "Hold"                // mystery, blocking, labelled
+timer async 30 s "Deadline" { ... }       // visible, asynchronous, with an expiry block
+let t = timer async hidden 2 min { ... }  // keeps the handle
 ```
 
-Visible blocking timer:
+`timer [async] [visible|mystery|hidden] <duration> [unit] ["label"] [{ expiry block }]`: the execution modifier
+comes first, then the presentation, the duration, an optional string-literal label, and the expiry block. Omitted
+modifiers mean visible and blocking. `async`, `visible`, `mystery`, and `hidden` are recognized only directly after
+`timer`; write `timer (hidden)` to use a variable of that name as the duration.
+
+A duration is a bare number of seconds, a [§35](#35-date-time-durations-and-unix-time) elapsed duration such as
+`500 ms` or `2 min`, or a number followed by a trailing unit as for `wait` (`timer n ms`). A range such as `5..10` or
+`5..=10` counts whole seconds and is drawn once per round from the session RNG after the timer's operands are
+evaluated; ranges with other units are not yet supported. `timer 0` and `wait 0` continue immediately.
+
+### Named form
 
 ```text
-timer 10
-```
-
-Visible blocking timer with a hidden duration:
-
-```text
-mysteryTimer 10
-```
-
-Ranges may be used for randomized durations:
-
-```text
-timer 5..10
-mysteryTimer 5..10
-```
-
-Range bounds follow the general range rules in this document.
-
-### Background timers
-
-A background timer continues while the main script proceeds. Its block is inherently the finish action, so no `onFinish` wrapper is used:
-
-```text
-let timerId = startTimer 30 {
-    timeExpired()
+let beat = timer(duration: 1..=3, async: true, display: "mystery", label: "Beat", repeat: true, persist: true) {
+    say "Beat."
 }
 ```
 
-A timer may jump to a label:
+The named form carries the same fields plus `repeat` and `persist`. `async`, `repeat`, and `persist` are the
+literals `true` or `false`; `duration`, `display`, and `label` are expressions evaluated in source order. `display`
+defaults to `visible`, and an expression must evaluate to `"visible"`, `"mystery"`, or `"hidden"` for blocking and
+asynchronous timers alike.
+
+### Blocking and asynchronous timers
+
+A blocking timer returns no handle; using one as a value, or giving it an expiry block, `repeat: true`, or
+`persist: true`, is a compile error. An asynchronous timer lets the script continue and evaluates to an opaque handle, which may be
+ignored. Standalone `startTimer`, `stopTimer`, and `mysteryTimer` spellings are not TeaseScript syntax.
+
+### Handles
 
 ```text
-let timerId = startTimer 30 {
-    goto tooLate
-}
+t.pause()
+t.resume()
+t.stop()
+if t.remaining > 10 seconds { ... }
+t.remaining += 10 s        // current round only
+t.remaining -= 5 s
+t.remaining = 20 s
+t.repeatDuration = 50 s    // later repeat rounds only
+t.display = "mystery"
 ```
 
-Stop a timer:
+Readable properties are `remaining` and `elapsed` (durations), `display`, `label`, `state`, and `repeatDuration`.
+Assignable properties are `remaining` (`=`, `+=`, `-=`), `display`, and `repeatDuration`. Changing `repeatDuration`
+affects future rounds, not the current round.
 
-```text
-stopTimer(timerId)
-```
+`elapsed` is active running time since the first start across all rounds, excluding explicit pauses; `remaining`
+concerns the current round. `state` is `running`, `paused`, `finished`, or `stopped`:
 
-### Repeating timers
+- reads stay valid after the timer settles; `remaining` is then zero and `elapsed` is frozen;
+- `pause()` while paused, `resume()` while running, and `stop()` on a finished or stopped timer do nothing;
+- other lifecycle methods or property assignments on a finished or stopped timer have no effect and report
+  developer warning `TSW010` with the source location;
+- adjusting `remaining` while paused changes the current round and the timer stays paused;
+- setting or reducing `remaining` to zero expires the current round at once; remaining time never becomes negative;
+- `stop()` on an active timer cancels it and any of its expiry blocks that have not started yet.
 
-```text
-let timerId = startTimer 10 {
-    repeat: true
-    playBackgroundSound("sounds/bell.mp3")
-}
-```
+Unknown handle members are compile errors when the handle's variable is initialized from `timer async`; values
+of the wrong type are rejected.
 
-A repeating random-range timer chooses a new random duration before each repetition:
+### Repeat, persistence, and cleanup
 
-```text
-let timerId = startTimer 5..10 {
-    repeat: true
-    playBackgroundSound("sounds/laughter.mp3")
-}
-```
+- `repeat: true` starts another round when a round expires. A repeating range draws a new duration for each round;
+  every round must last longer than zero. Rounds that expire during one late time observation keep their original
+  schedule and each run the expiry block once.
+- Every timer stops on `exit` and when the script ends.
+- For future `goto`, `end`, `run`, and `call` transfers, non-persistent timers are removed and persistent timers
+  remain active.
 
-### Persistent timers
+The current runtime stores `persist` but it has no effect: `goto`, `end`, `run`, and `call` are not implemented.
 
-```text
-let timerId = startTimer 30 {
-    persist: true
-    playBackgroundSound("sounds/laughter.mp3")
-}
-```
+### Expiry blocks
 
-Finish-action behavior:
+The block runs when the timer expires. It does not need an `onFinish` wrapper and runs without pausing currently
+playing audio or video. It may use top-level names, its own locals, normal functions, and new timers, but not the
+local variables of the code that started the timer.
 
-- The timer block runs without pausing currently playing audio or video.
-- After a normal finish action completes, the interrupted script continues where it left off.
-- The block may call normal functions and start new timers.
-- Timer finish actions are processed one at a time.
-- A `goto` in the timer block abandons the interrupted execution path.
+A due block interrupts at the next deterministic runtime boundary, including while the main path waits on an
+interaction, `wait`, or blocking timer; it waits while a paced message still blocks the chat. The interrupted action
+is inert while the block runs, so there are never two active story paths:
 
-Cleanup:
+- if the block completes normally, the interrupted action is presented again and the script continues where it
+  left off;
+- if the block uses `exit`, the session halts and the interrupted action and source instruction are discarded:
+  an interrupted `let answer = askText ...` completes nothing and binds no value.
 
-- A non-persistent timer is removed on `goto`, `end`, `run`, `call`, or `exit`.
-- A persistent timer survives `goto`, `end`, `run`, and `call`.
-- Every timer stops on `exit`.
+Future `goto` or `end` transfers must also discard the interrupted action and instruction; those commands are not
+implemented in the current runtime.
+
+Blocks run one at a time in due order. A block may itself wait; later expiries queue behind it.
+
+### Time
+
+Timers and `wait` measure Player-executed scene time. Presentation and blocking do not change the clock. Time keeps
+running while a live Player is minimized or in the background; when the Player is closed and later restored,
+including on another device, the gap does not consume timer time and the timer continues with its saved remaining
+time. A script plays the same however late or often the Player observes time: everything happens at its own moment
+in scene time. See [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time) for the observation contract.
 
 ## 28. Permanent buttons
 **Status:** Accepted
@@ -2367,9 +2391,12 @@ Recovered errors should record:
 Recovery is not offered for structural errors such as malformed syntax, unknown functions, invalid labels, or internal engine exceptions. The exact recovery interface and whether recovery is enabled are runtime implementation details, not syntax.
 
 ## 35. Date, time, durations, and Unix time
-**Status:** Accepted
+**Status:** Accepted direction; exact elapsed durations implemented
 
-TeaseScript has separate `date`, `time`, `datetime`, and `duration` types.
+TeaseScript has separate `date`, `time`, `datetime`, and `duration` types. The current runtime implements elapsed
+duration literals and values using `ms`, `s`, `min`, and `h`, including their singular and plural long forms.
+Calendar durations, date/time APIs, technical conversions, and locale-aware presentation remain deferred.
+Calendar duration units are rejected by the current compiler.
 
 Current values:
 
@@ -2410,7 +2437,9 @@ now.weekdayNumber
 
 ### Duration literals
 
-Long and short duration forms are accepted:
+Exact elapsed suffixes are `ms`/`millisecond`/`milliseconds`, `s`/`second`/`seconds`,
+`min`/`minute`/`minutes`, and `h`/`hour`/`hours`. The calendar examples below describe deferred accepted
+direction:
 
 ```text
 500 milliseconds
@@ -2455,6 +2484,9 @@ months
 
 Consequently, `24 hours` is always exactly 24 elapsed hours, while `1 day` means the same local clock time on the next calendar day and may span 23, 24, or 25 elapsed hours around daylight-saving transitions.
 
+When adding a calendar month to a date whose day does not exist in the target month, use that month's last day. For
+example, January 31 plus one month is February 28, or February 29 in a leap year.
+
 ### Arithmetic and comparison
 
 Supported operations:
@@ -2470,18 +2502,23 @@ duration / number -> duration
 duration / duration -> number
 ```
 
-Date/time values support `==`, `!=`, `<`, `<=`, `>`, and `>=`. `datetime` comparisons use the represented exact moment.
+Elapsed duration values support `==`, `!=`, `<`, `<=`, `>`, and `>=` across compatible units:
+`90 seconds > 1 minute` is true.
+
+Date/time values also support those comparisons; `datetime` comparisons use the represented exact moment.
 
 ### Display and technical conversion
 
-In visible text, date/time and duration values are formatted using the player's locale and effective timezone:
+Current elapsed duration values use deterministic English visible-text formatting; `90 seconds` displays as
+`1 min 30 s`. Locale-aware duration formatting is deferred. Locale- and timezone-aware date/time presentation
+remains accepted future direction:
 
 ```text
 say `Your punishment ends ${chastityEnd}.`
 say `You still have ${remaining} remaining.`
 ```
 
-Explicit presentation methods return strings:
+The following explicit presentation methods are deferred; their accepted return type is `string`:
 
 ```text
 chastityEnd.formatDate()
@@ -2514,37 +2551,14 @@ Unix values are integers counted from `1970-01-01T00:00:00Z`.
 
 
 ## 36. Scheduling
-**Status:** Accepted
+**Status:** Wanted capability; final syntax, authority, and Player UI deferred
 
-`schedule` accepts a `datetime` value. The block itself is inherently the trigger action, so no `onTrigger` wrapper is used:
+Scheduled events and deadlines target absolute wall-clock moments and may become due while no Player is running.
+This differs from [timer and `wait` scene time](#27-timers), which excludes genuine Player unavailability.
 
-```text
-let releaseTime = getDateTime() + 1 day
-
-let eventId = schedule releaseTime {
-    say "Your punishment is over."
-}
-```
-
-A technical ISO 8601 string is converted to `datetime` before it is scheduled:
-
-```text
-let releaseTime = toDateTime("2026-08-01T21:00:00+02:00")
-
-let eventId = schedule releaseTime {
-    goto eveningScene
-}
-```
-
-Rules:
-
-- The value passed to `schedule` must have type `datetime`. Passing a plain string directly is a compile-time type error.
-- `toDateTime(...)` may be used for a valid ISO 8601 string with `Z` or an explicit UTC offset when a technical timestamp is required.
-- Normal calculated scheduling should use `getDateTime()` plus or minus a `duration`.
-- `schedule` returns an event identifier.
-- The schedule block runs once when the scheduled moment is reached.
-- Scheduled events can be cancelled with `cancelSchedule(eventId)`.
-- The runtime stores a stable exact representation before persisting or transmitting a scheduled moment.
+Exact event syntax and handles, local/offline versus server-backed authority, recovery, and deadline presentation
+require a separate design. The earlier `schedule datetime { ... }` and `cancelSchedule(...)` forms are not accepted
+final author syntax. See [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md).
 
 ## 37. Dynamic speaker terms
 **Status:** Accepted
@@ -3336,9 +3350,6 @@ askTime
 askDateTime
 wait
 timer
-mysteryTimer
-startTimer
-stopTimer
 showPermanentButton
 removePermanentButton
 playSound
@@ -3459,7 +3470,7 @@ resume
 stop
 ```
 
-They are not currently executable syntax. Existing specific controls such as `stopVideo()`, `stopTimer(...)`, and `stopBackgroundSound(...)` remain valid.
+They are not currently executable syntax. Existing specific controls such as `stopVideo()` and `stopBackgroundSound(...)` remain valid.
 
 ### Reserved for later design
 

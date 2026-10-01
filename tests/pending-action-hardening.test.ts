@@ -44,11 +44,13 @@ test("#78 rejects due foreground delays through direct and checkpoint boundaries
   for (const currentSessionTimeMs of [9, 10, 11]) {
     const candidate = mutable(snapshot);
     candidate.currentSessionTimeMs = currentSessionTimeMs;
+    candidate.observedSessionTimeMs = currentSessionTimeMs;
     assert.equal(validateRuntimeSnapshot(candidate, compiled).valid, currentSessionTimeMs === 9);
   }
 
   const due = mutable(snapshot);
   due.currentSessionTimeMs = delayAction(due).deadlineMs;
+  due.observedSessionTimeMs = due.currentSessionTimeMs;
   const checkpoint = { ...createCheckpoint(compiled, snapshot), snapshot: due };
   assert.throws(() => restoreCheckpoint(checkpoint), checkpointError);
   assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)), checkpointError);
@@ -385,7 +387,8 @@ test("#82 uses the wait keyword path and rejects forged ownership, missing wait 
     actionKind: hostileKind,
     payload: { kind: "time", currentSessionTimeMs: 1 },
   });
-  assert.equal(completion.outcome.kind, "wrongActionKind");
+  // A wait accepts no host completion at all, whatever the request claims.
+  assert.equal(completion.outcome.kind, "invalidPayload");
 });
 
 test("#82 allocates the final safe action identity and then fails without reuse", () => {

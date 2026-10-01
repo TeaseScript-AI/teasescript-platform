@@ -19,8 +19,10 @@ import {
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
+  playerRuntimeDeadlines,
   playerRuntimeForeground,
   playerRuntimePacingGate,
+  playerRuntimeTimers,
   restorePlayerRuntimeSession,
   selectPlayerRuntimeChoice,
   skipPlayerRuntimePacing,
@@ -362,4 +364,143 @@ exit
     kinds(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session))),
     kinds(session),
   );
+});
+
+test("blocking timer scenario presents runtime timers, hides waits, and restores the same draw", async () => {
+  const source = await readFile(
+    resolve(process.cwd(), "tests/fixtures/timers/blocking-timer.tease"),
+    "utf8",
+  );
+  let session = createPlayerRuntimeSession(source);
+  const presented: Array<number | null> = [];
+  let restoredChecked = false;
+  for (let guard = 0; session.snapshot.foregroundAction?.kind === "delay"; guard += 1) {
+    assert.ok(guard < 10, "scenario must reach its final button");
+    const action = session.snapshot.foregroundAction;
+    const now = session.snapshot.currentSessionTimeMs;
+    const timers = playerRuntimeTimers(session.snapshot, now);
+    if (action.display === "hidden") {
+      assert.deepEqual(timers, [], "a hidden wait has no timer presentation");
+      presented.push(null);
+    } else {
+      const total = (action.deadlineMs - action.createdAtMs) / 1000;
+      assert.deepEqual(timers, [
+        {
+          id: `runtime-timer-${action.actionId}`,
+          kind: "visible",
+          remainingSeconds: total,
+          totalSeconds: total,
+        },
+      ]);
+      assert.equal(
+        playerRuntimeTimers(session.snapshot, now + 1_250)[0]?.remainingSeconds,
+        total - 1.25,
+      );
+      assert.equal(
+        playerRuntimeTimers(session.snapshot, action.deadlineMs + 5_000)[0]?.remainingSeconds,
+        0,
+      );
+      assert.equal(playerRuntimeTimers(session.snapshot, now - 5_000)[0]?.remainingSeconds, total);
+      presented.push(total);
+
+      if (!restoredChecked && presented.length === 2) {
+        const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
+        assert.deepEqual(restored.snapshot, session.snapshot, "restore keeps the drawn duration");
+        assert.deepEqual(
+          playerRuntimeTimers(restored.snapshot, now + 500),
+          playerRuntimeTimers(session.snapshot, now + 500),
+        );
+        session = restored;
+        restoredChecked = true;
+      }
+    }
+    const early = observePlayerRuntimeTime(session, action.deadlineMs - 1);
+    assert.equal(early.session.snapshot.foregroundAction?.actionId, action.actionId);
+    session = observePlayerRuntimeTime(early.session, action.deadlineMs).session;
+    assert.notEqual(
+      session.snapshot.foregroundAction?.actionId,
+      action.actionId,
+      "settled timer is removed",
+    );
+  }
+  assert.ok(restoredChecked);
+  assert.equal(presented.length, 5);
+  assert.equal(presented[0], 5);
+  assert.ok(presented[1]! >= 4 && presented[1]! <= 8);
+  assert.equal(presented[2], null);
+  assert.ok(presented.slice(3).every((total) => total! >= 3 && total! <= 5));
+  assert.equal(playerRuntimeForeground(session)?.kind, "show-button");
+  assert.deepEqual(
+    playerRuntimeTimers(session.snapshot, session.snapshot.currentSessionTimeMs),
+    [],
+  );
+  assert.deepEqual(
+    session.transcriptEntries.map((entry) => (entry.kind === "message" ? entry.text : "")).at(-1),
+    "Every timer has settled.",
+  );
+});
+
+test("authored timers scenario presents concurrent timers and interrupts the unanswered question", async () => {
+  const source = await readFile(
+    resolve(process.cwd(), "tests/fixtures/timers/authored-timers.tease"),
+    "utf8",
+  );
+  const texts = (session: ReturnType<typeof createPlayerRuntimeSession>) =>
+    session.transcriptEntries.flatMap((entry) => (entry.kind === "message" ? [entry.text] : []));
+  const presented = (session: ReturnType<typeof createPlayerRuntimeSession>, now: number) =>
+    playerRuntimeTimers(session.snapshot, now).map((timer) => [
+      timer.kind,
+      timer.name ?? null,
+      timer.remainingSeconds,
+    ]);
+
+  let session = createPlayerRuntimeSession(source);
+  assert.equal(playerRuntimeForeground(session)?.kind, "ask-text");
+  const pulse = presented(session, 0)[0]!;
+  assert.deepEqual(presented(session, 0).slice(1), [
+    ["mystery", "Secret", 40],
+    ["visible", "Answer deadline", 20],
+  ]);
+  assert.deepEqual(pulse.slice(0, 2), ["visible", "Pulse"], "the hidden reminder is not presented");
+  assert.ok(Number(pulse[2]) >= 2 && Number(pulse[2]) <= 4);
+  assert.ok(playerRuntimeDeadlines(session.snapshot).includes(6_000));
+
+  session = observePlayerRuntimeTime(session, 6_000).session;
+  assert.match(texts(session).at(-1)!, /^A hidden timer just expired\. [1-3] pulses so far\.$/u);
+  assert.equal(playerRuntimeForeground(session)?.kind, "ask-text", "the question returns");
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
+  assert.deepEqual(restored.snapshot, session.snapshot);
+
+  const answered = submitPlayerRuntimeComposer(
+    observePlayerRuntimeTime(restored, 8_000).session,
+    "Ada",
+  );
+  assert.equal(answered?.outcome.kind, "completed");
+  session = answered!.session;
+  assert.ok(texts(session).includes("Thank you, Ada. 12 s were left on the deadline."));
+  assert.deepEqual(
+    presented(session, 8_000).map(([kind, name]) => [kind, name]),
+    [
+      ["visible", "Pulse"],
+      ["mystery", "Secret"],
+    ],
+    "the stopped deadline disappears",
+  );
+  assert.equal(presented(session, 10_000)[1]?.[2], 32, "a paused timer keeps its remaining time");
+  session = observePlayerRuntimeTime(session, 11_000).session;
+  assert.deepEqual(presented(session, 11_000).at(-2)?.slice(0, 2), ["visible", "Secret"]);
+  assert.deepEqual(presented(session, 11_000).at(-1), ["visible", "Final countdown", 3]);
+  session = observePlayerRuntimeTime(session, 14_000).session;
+  assert.match(texts(session).at(-1)!, /^Done after \d+ pulses\.$/u);
+  assert.equal(playerRuntimeForeground(session)?.kind, "show-button");
+
+  let unanswered = createPlayerRuntimeSession(source);
+  for (const now of [6_000, 12_000, 20_000]) {
+    unanswered = observePlayerRuntimeTime(unanswered, now).session;
+  }
+  assert.equal(texts(unanswered).at(-1), "Time is up, so the question is cancelled.");
+  assert.equal(playerRuntimeForeground(unanswered)?.kind, "show-button");
+  unanswered = activatePlayerRuntimeButton(unanswered)!.session;
+  assert.equal(unanswered.snapshot.status, "halted");
+  assert.deepEqual(playerRuntimeTimers(unanswered.snapshot, 20_000), []);
 });

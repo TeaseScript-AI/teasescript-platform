@@ -1,0 +1,44 @@
+// Asynchronous timers: labelled, mystery, and hidden timers running at once, a repeating
+// randomized pulse, an expiry block that interrupts an unanswered question, handle control
+// (pause, resume, stop, remaining, display), and a labelled blocking timer.
+speaker guide {
+    title: "Guide"
+    firstName: "Vera"
+    color: "#b784ff"
+}
+
+speaker guide
+
+let pulses = 0
+let pulse = timer(duration: 2..=4, async: true, repeat: true, label: "Pulse") {
+    pulses += 1
+}
+let secret = timer async mystery 40 s "Secret"
+let reminder = timer async hidden 6 s {
+    say "A hidden timer just expired. ${pulses} pulses so far.", instant
+}
+let deadline = timer async 20 s "Answer deadline" {
+    say "Time is up, so the question is cancelled.", instant
+    showButton "Finish"
+    exit
+}
+
+say "Four timers run at once: a pulse, a mystery timer, a hidden reminder, and your answer deadline.", instant
+let name = askText "What is your name? Answer before the deadline."
+let left = deadline.remaining
+deadline.stop()
+say "Thank you, ${name}. ${left} were left on the deadline.", instant
+
+say "The mystery timer pauses for three seconds.", instant
+secret.pause()
+wait 3
+secret.resume()
+secret.remaining -= 10 s
+secret.display = "visible"
+say "It is now revealed and ten seconds shorter.", instant
+
+pulse.stop()
+timer 3 "Final countdown"
+say "Done after ${pulses} pulses.", instant
+showButton "Finish"
+exit

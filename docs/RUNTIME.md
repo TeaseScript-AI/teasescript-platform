@@ -75,7 +75,11 @@ accessible-name data or localized default key
 
 The engine owns action identity, active state, completion validation, transcript-result derivation, result writes, events, settlement replay, checkpoint/restore, and structured rejection. Compiler/Standard Library lowering owns compact syntax and default UI payload.
 
-The selected interactions are mandatory and non-cancellable. Wrong-kind, whitespace-only required text, non-finite-number, unknown-label, unknown-visible-choice, ambiguous-choice, and over-limit completions leave the same action active without mutating its result, transcript, event sequence, RNG, or continuation.
+The selected interactions expose no player cancellation result. Timer interrupts may suspend them, and handler `exit`
+discards the interrupted instruction without producing a result; see [Timers and scene time](#timers-and-scene-time).
+Wrong-kind, whitespace-only required text, non-finite-number, unknown-label, unknown-visible-choice, ambiguous-choice,
+and over-limit completions leave the same action active without mutating its result, transcript, event sequence, RNG, or
+continuation.
 
 The compact compiler fully lowers these forms into the versioned plan. Static control text is embedded directly in the interaction instruction. Dynamic control text first captures the requesting speaker, evaluates payload expressions in source order, and stores one prepared UI value; dynamic `choose` batches all option expressions into one prepared list rather than emitting one interaction-preparation instruction per option. The runtime materializes and validates that prepared UI atomically before publishing the pending action. No Standard Library lookup or suspended JavaScript/TypeScript call survives the compile boundary.
 
@@ -314,9 +318,8 @@ A real interactive control has priority and must not also trigger viewport-wide 
 
 The normal Player application has no player-facing pause control and ADR 0018 adds no author-facing pause command. Developer mode may expose Pause alongside Run, Step, checkpoint, restore, and debugger controls. Developer pause is tooling and does not establish player-initiated pause semantics.
 
-Browser unavailability, reload, reconnect, device sleep, and visibility changes are not implicit Player pause. The
-future continuity direction is maintained under
-[Owner-resolved future runtime semantics](#owner-resolved-future-runtime-semantics).
+Visibility changes are not a Player pause, and a closed Player's absence does not consume scene time; see
+[Timers and scene time](#timers-and-scene-time).
 
 ### Checkpoint and event requirements
 
@@ -352,26 +355,19 @@ The implementation includes:
 
 The current internal instruction-plan, runtime-snapshot, and checkpoint format revisions are listed under [Format evolution](#format-evolution). They are POC formats rather than permanent public wire-format guarantees.
 
-The current implementation contains compiler-owned blocking `wait`, the compact `showButton`, `askText`, `askNumber`,
-and `choose` forms lowered into one generic foreground `interaction` family, and ADR 0018 `say` pacing lowered into the
-`chatPacingGate` pending-action lifecycle. Runtime state retains persisted session time, at most one foreground action,
-zero or one background pacing gate, monotonic action IDs, bounded settlement replay, prepared `say` output, explicit
-time observation, and typed completion operations. The local playground reconstructs Standard controls from this state,
-and the Vue reference schedules local browser wake-ups and submits explicit time observations. Production host
-lifecycle/time integrity and the final cross-origin Player shell remain out of scope.
+The current runtime implements blocking `wait`/`timer`, asynchronous timers, compact foreground interactions, and
+ADR 0018 `say` pacing. Timer lifecycle, interrupts, and Player clock recovery are defined under
+[Timers and scene time](#timers-and-scene-time).
+
+Runtime state retains persisted scene time, at most one active foreground action, background timers and at most
+one pacing gate, monotonic identities, bounded settlement replay, prepared output, and explicit time/completion
+operations. The Player reconstructs presentation from canonical state. Production cross-origin host wiring,
+server time integrity, and server persistence remain deferred.
 
 ## Owner-resolved future runtime semantics
 
 These owner decisions are independent of final Player visual tuning but are not implemented capability or accepted
 author-facing syntax. Exact schemas and APIs remain future work.
-
-### Time continuity across unavailability
-
-Session time remains continuous across browser unavailability, reload, reconnect, device sleep, and visibility changes.
-After restore, explicit time observation may settle due work, but recovery must not skip the first script event that
-should have executed during the absence or replay events already materialized in the selected valid checkpoint. Exact
-checkpoint selection, deadline recalculation, reconnect, repeating-timer, and server-authoritative time mechanics remain
-open.
 
 ### Long-lived Standard controls
 
@@ -419,13 +415,23 @@ lastSettlement:
     ActionSettlement | null
 ```
 
-A valid current `waiting` snapshot contains exactly one foreground delay, interaction, or `chatPacingGate` action.
-A foreground delay may coexist with one older background pacing gate; a foreground interaction or pacing gate may not.
-Non-waiting states contain no foreground action. `backgroundActions` is empty or contains one validated
-`chatPacingGate` with coherent identity, request sequence, deadline, ownership, and creation order.
+A valid current `waiting` snapshot contains exactly one active foreground delay, interaction, or `chatPacingGate`.
+Non-waiting states contain no active foreground action. `backgroundActions` may contain timer actions and at most
+one pacing gate. A background pacing gate may coexist with a foreground delay; it is consumed before a foreground
+interaction and cannot coexist with a foreground pacing gate.
 
-Delay creation time is no later than the persisted session coordinate and its deadline is strictly later; a due delay
-is settled only by an explicit time observation. An interaction retains its kind, ownership depths, call-frame identity,
+Timer interrupt state may retain one inert suspended foreground action. Its ownership, settlement, and restore
+rules are defined under [Timers and scene time](#timers-and-scene-time).
+
+Blocking `wait` and `timer` use the foreground-delay path. `wait` is hidden; `timer` carries `visible`, `mystery`, or
+`hidden` display and an evaluated label. Durations follow specification
+[§27](specifications/accepted-syntaxes-v30.md#27-timers). A whole-second range is drawn once when the delay starts and
+restore preserves the draw.
+
+Delay timing is validated on the persisted scene coordinate. Due and suspended delays follow the ordering and
+interrupt rules under [Timers and scene time](#timers-and-scene-time). Players present visible and mystery delays.
+
+An interaction retains its kind, ownership depths, call-frame identity,
 destination/result domain, Standard chat target, optional requesting speaker ID, validated UI payload, and request
 sequence. A waiting result destination must still be absent. Successful interaction completion commits the canonical
 typed value directly into that destination and leaves the snapshot at the local compiler-defined continuation. Snapshot
@@ -437,30 +443,120 @@ instruction, UI/accessibility/option shape, action, settlement, and snapshot fie
 
 `currentSessionTimeMs` is canonical runtime state. It preserves the nondecreasing session coordinate across checkpoint and restore. A fresh snapshot receives a validated initial coordinate; deterministic tests may use `0`.
 
-A blocking instruction evaluates its arguments, stores a complete JSON-safe action and continuation, advances to `waiting`, emits `actionRequested`, and stops. A validated completion stores its result and bounded `lastSettlement`, removes the matching action, emits `actionCompleted`, and leaves continuation or handler execution to the next runtime entry call.
+A blocking instruction evaluates its arguments, stores a complete JSON-safe action and continuation, advances to
+`waiting`, emits `actionRequested`, and stops. A validated replayable completion stores its result and bounded
+`lastSettlement`, removes the matching action, emits `actionCompleted`, and leaves continuation or handler execution to
+the next runtime entry. Timer lifecycle transitions and suspended-delay settlements emit completion events without
+replacing `lastSettlement`; see [Timers and scene time](#timers-and-scene-time).
 
 `wait 0` is deliberately immediate: its duration expression is still evaluated, but it allocates no action ID, creates no pending action or settlement, and emits neither action event. The next source instruction runs normally; if it was the terminal root instruction, ordinary natural completion emits one `complete` event. In contrast, a positive terminal root wait settles with `actionCompleted`; the following runtime entry consumes the canonical settled root-end transition and emits the sequenced `complete` event. Re-entering an already halted snapshot emits no further completion event.
 
-A duplicate delivery matching `lastSettlement` returns the same immutable canonical recorded settlement without another write, event, RNG advance, handler, or continuation. `lastSettlement` is bounded replay/idempotency data only: it does not own an expression temporary, prevent destination reuse, or block a later action. A newer settlement may replace it after the interaction result has already been atomically committed; the ordinary runtime value remains valid independently. Each delay settlement retains owning and continuation instruction positions.
+A duplicate delivery matching `lastSettlement` returns the same immutable canonical recorded settlement without another
+write, event, RNG advance, handler, or continuation. `lastSettlement` is bounded replay/idempotency data only: it does
+not own an expression temporary, prevent destination reuse, or block a later action. A newer replayable settlement may
+replace it after the interaction result has already been atomically committed; the ordinary runtime value remains valid
+independently. Each delay settlement retains owning and continuation instruction positions.
 
-Completion lookup always searches the active foreground action and all active background actions first. Only when no active action matches does the runtime compare `lastSettlement`, classify a lower previously issued ID as `staleAction`, or classify an unissued ID as `unknownAction`.
+Completion lookup checks active foreground/background actions and suspended foreground identity before settlement
+replay or stale/unknown classification. A completion targeting an interrupted action returns `suspendedAction`
+without mutation. Otherwise, an inactive ID matching `lastSettlement` is `alreadySettled`, an issued inactive ID is
+`staleAction`, and an unissued ID is `unknownAction`.
 
-Timed actions store an absolute deadline derived from `currentSessionTimeMs`. The runtime does not read browser or operating-system clocks directly. The player maps monotonic elapsed deltas onto the session coordinate, schedules wake-ups, and submits validated observations; tests use a fake clock and never sleep in real time.
+Running timed actions store an absolute deadline on the scene-time coordinate; paused timers retain remaining round
+time instead. The runtime does not read browser or operating-system clocks directly. The player maps monotonic elapsed
+deltas onto the session coordinate, schedules wake-ups, and submits validated observations; tests use a fake clock and
+never sleep in real time.
 
-A time observation updates the snapshot atomically:
+A snapshot carries two coordinates: `observedSessionTimeMs`, the latest observed time, and `currentSessionTimeMs`, the
+scene time at which execution stands. A time observation updates the snapshot atomically:
 
 ```text
-effectiveNow = max(snapshot.currentSessionTimeMs, suppliedNow)
-snapshot.currentSessionTimeMs = effectiveNow
-settle actions due at effectiveNow
+snapshot.observedSessionTimeMs = max(snapshot.observedSessionTimeMs, suppliedNow)
+unless the session has failed:
+  settle due work in (deadline, action ID) order, advancing currentSessionTimeMs toward observedSessionTimeMs
 ```
 
-No checkpoint may contain due-action processing performed against a newer observation while retaining the older session-time value.
+Scene time stands behind the observed time only while the script or an expiry block can execute; once execution
+waits or ends, catch-up continues and both coordinates are equal again. A failed session is terminal: later
+observations record the observed time but settle nothing and leave scene time unchanged. Catch-up is defined under
+[Timers and scene time](#timers-and-scene-time). No checkpoint may contain due-action processing performed against a
+newer time than its `currentSessionTimeMs`; a checkpoint taken while catch-up is held keeps both coordinates and the
+pending work.
 
-Blocking `wait` remains the first source-to-runtime slice. The generic interaction runtime is the second foreground use
-of ADR 0016. ADR 0018 `say` pacing now adds the first populated background-action slice through `chatPacingGate`,
-including background-to-foreground promotion, prepared output, typed/time settlement, `wait` coexistence, interaction
-consumption, and checkpoint/restore.
+Blocking `wait` and `timer`, foreground interactions, pacing gates, and asynchronous timers share ADR 0016 action,
+identity, observation, event, and checkpoint infrastructure. Their timer-specific composition is defined below.
+
+## Timers and scene time
+
+Timers and `wait` measure Player-executed scene time on the persisted session coordinate. The engine never reads a
+clock. A live Player maps a monotonic clock onto the session coordinate and submits explicit observations at the
+next deadline, before input continues the script, when the page's visibility changes, and on `pagehide`. Callbacks
+are only observation opportunities, so a throttled background callback catches up rather than losing elapsed time,
+and visibility changes never pause time. Restoring a checkpoint rebases the Player clock on the saved
+`observedSessionTimeMs`: new observations are `savedObservedSessionTimeMs + monotonicDeltaSinceRestore`, while held
+catch-up continues from the saved `currentSessionTimeMs`. The gap while no Player ran, including a device handoff,
+therefore does not consume timer time; a timer continues with its saved remaining time. Extreme platform suspension without any lifecycle opportunity is not covered. Absolute
+wall-clock deadlines belong to future scheduled events, not to timers.
+Presentation refresh cadence does not impose a minimum timer duration.
+
+A blocking `timer` is a foreground `delay` like `wait`, with its presentation (`visible`, `mystery`, or `hidden`) and
+evaluated label. An asynchronous timer is a background action of kind `timer`: it allocates an action ID and emits
+`actionRequested` when started and `actionCompleted` when it finishes naturally or through `stop()`; script-end and
+`exit` cleanup stop remaining timers without individual completion events. No Player completion can target
+it, so its settlement is not retained as `lastSettlement`. The action holds the timer record: state, presentation,
+label, repeat configuration, current-round length, and either its deadline (running) or remaining time (paused), plus
+accumulated elapsed time. A finished or stopped record moves to `settledTimers` so its opaque handle
+(`{ kind: "timerHandle", timerId }`) stays readable; `nextTimerId` allocates handle IDs.
+
+`observeTime` processes due work globally by `(deadline, action ID)`: foreground and suspended delays, pacing gates,
+and timer rounds. A round that expires naturally ends at its deadline and a repeating timer starts its next round
+there, drawing a repeating range from the session RNG; `remaining` reaching zero ends the round at the current scene
+time, as does pausing a round that is already due while its expiry waits behind a running block. An expired round
+with an expiry block is queued in `pendingTimerHandlers` in due order; consecutive expiries of one timer share an entry
+with a count. A fixed-length repeating timer computes each round's deadline from an anchor as
+`anchor + (anchoredRounds + 1) * repeatDuration` instead of accumulating it, so every observation schedule yields the
+same deadlines; a handler-free one skips silent rounds in one step, stopping before other work at the same deadline
+that has a lower action ID. Rounds shorter than the deadline's numeric resolution may end at the same time; an
+anchored timer finishes only when its round index is exhausted or its next deadline leaves the session range. A
+script change to the current round (`pause`, `resume`, `remaining`, or `repeatDuration`) starts a new anchor at the
+next full round. Observations after a runtime failure record the observed time but settle no further work.
+
+An observation records `observedSessionTimeMs`; `currentSessionTimeMs` is the scene time at which execution stands.
+Due work settles one deadline at a time, advancing scene time to each. Whenever the script or an expiry block can
+execute, catch-up pauses with scene time at the moment that work became due: the script continues after a `wait` or
+pacing gate at its deadline, a block starts at its expiry's deadline, and catch-up continues toward the observed time
+once execution waits or ends. Every settlement records the scene time at which it happened: a time-driven settlement
+records its deadline, and a pacing gate that is skipped, consumed, or superseded records the current scene time. A
+late observation therefore gives the same output, events, and snapshot as observing every deadline on time: a block
+can `stop()` a later timer before it expires, a timer it starts orders by its own deadline, and a handler-free
+repeating timer skips silent rounds only up to the next other due work.
+
+Time reaches waits and timers only through `observeTime`; a Player cannot complete them. Host input (an interaction
+answer or a pacing skip) happens at the observed time, so `completeAction` returns `executionPending` without changing
+anything while scene time is behind the observed time or a due expiry block can run. The Player then runs the engine
+and retries with the same action ID; if a block ended or replaced that action, the retry reports it as no longer
+active. A failed session accepts no host input: such a request is `invalidPayload`, and Players schedule no further
+observation for it.
+
+Expiry blocks compile to parameterless handler regions. A runtime entry starts the first queued block before
+executing the next instruction, including from `waiting`, unless a block is already running, a single-instruction
+commit window is open (released prepared `say` output, an interaction result handoff, or a settled terminal action),
+or a foreground pacing gate holds the chat. The block runs in an interrupt call frame that saves the interrupted
+position, temporaries, scope and loop depth, and the interrupted foreground delay or interaction. The interrupt
+frame may exceed `maxCallDepth` by one because it is not an author call. Expiry blocks run within the normal per-entry
+instruction budget, so extreme catch-up of handler-bearing rounds can exhaust it.
+
+The suspended foreground action is inert: a completion for it returns `suspendedAction` without mutation. A suspended
+delay settles in due-work order and publishes `actionCompleted`, without replacing `lastSettlement`; its continuation
+runs once when the block returns. A normal return restores the interrupted action with its original identity;
+returning to an interaction first consumes a pacing gate created by the block. `stop()` on an active timer cancels its
+unstarted queued blocks; on a finished or stopped timer it is a silent no-op. `exit` inside a block halts the session
+and discards the interrupted action. `exit` and script end stop every timer and drop queued blocks. A failed session
+clears its foreground action.
+
+Restore validation requires every issued timer ID to have exactly one active or settled record, handles to refer
+to issued IDs, queued blocks to belong to their timer, at most one interrupt frame, and suspended actions to be
+consistent with the interrupted context.
 
 ## Compiler and execution entry points
 
@@ -518,7 +614,9 @@ The low-level runtime entry points are:
 
 Each low-level runtime entry validates the instruction plan and runtime snapshot before executing or returning, including when the supplied snapshot is already halted or failed. Callers may also invoke `validateInstructionPlan(...)` and `validateRuntimeSnapshot(...)` explicitly. Invalid plan data produces `RuntimeDataError` `TSR100`; invalid snapshot data produces `RuntimeDataError` `TSR101`.
 
-These entry points stop cleanly at `waiting`. Separate validated operations submit time observations and typed action completions; ordinary execution entry points may not bypass a pending foreground action.
+Normal main-path execution stops at `waiting`; validated operations submit time observations and typed completions.
+An eligible queued timer handler may preempt a pending foreground action at runtime entry under
+[Timers and scene time](#timers-and-scene-time).
 
 ## Host values and capabilities
 
@@ -545,7 +643,12 @@ Under ADR 0017, Standard Library and package-library wrappers may call documente
 
 ## Visible text boundary
 
-Ordinary scalar visible-text conversion accepts strings, finite numbers, booleans, and `null` according to the current implemented subset. When the value is a list, the runtime selects exactly one item and then accepts only a string or finite number. Selected booleans, `null`, objects, sets, ranges, and nested collections fail with structured runtime error `TSR021`; the runtime does not recursively select or stringify them.
+Ordinary scalar visible-text conversion accepts strings, finite numbers, booleans, `null`, and elapsed duration values.
+Duration formatting is defined in specification
+[§35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-unix-time). When the value is a list, the
+runtime selects exactly one item and then accepts only a string or finite number. Selected booleans, `null`, objects,
+sets, ranges, and nested collections fail with structured runtime error `TSR021`; the runtime does not recursively
+select or stringify them.
 
 The earlier proposal for automatic chat pacing at 17 visible characters per second is superseded. ADR 0018 defines the
 accepted deterministic first-POC smart-autoplay and pacing-action contract. The current engine/compiler and playground
@@ -620,9 +723,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 22 | Message preparation accepts authored position and alignment only for prose. |
-| Runtime snapshot | 23 | Captured bubble presentations require null position and alignment; placement is Player-owned. |
-| Checkpoint | 31 | Updated the self-contained bundle for prose-only authored placement and bubble presentation validation. |
+| Instruction plan | 23 | Message preparation accepts authored position and alignment only for prose. Timer instructions: `wait` carries `command`, `display` (a literal, or an expression for a named `timer`), and `label`; `startTimer`; duration literals; timer-handler regions. |
+| Runtime snapshot | 24 | Captured bubble presentations require null position and alignment; placement is Player-owned. Timer state: delay `display`/`label`, background `timer` actions, `settledTimers`, `nextTimerId`, `pendingTimerHandlers`, interrupt frames, `observedSessionTimeMs`, and duration/timer-handle values. |
+| Checkpoint | 32 | Updated the self-contained bundle for prose-only authored placement, bubble presentation validation, and the timer plan and snapshot contracts. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
@@ -653,10 +756,8 @@ The exported TypeScript source frontend, source compiler, low-level runtime, sna
 
 ## Remaining runtime work
 
-- preserve blocking `wait`, generic interactions, and `chatPacingGate` while extending later runtime capabilities
+- preserve the implemented timer, interaction, and pacing contracts while extending later runtime capabilities
   through explicit versioned schema changes;
-- under ADR 0017, define the minimum background timed-work primitive and pause/resume/stop lifecycle for timers
-  separately from developer runtime pause;
 - define action-kind-specific media, advanced timeout, and detailed-result contracts without unnecessary independent state machines;
 - define broader text-output targets and involved-speaker/conversation provenance before multi-context LLM work;
 - stable package/plan identity and migration policy;

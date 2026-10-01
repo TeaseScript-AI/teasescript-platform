@@ -226,7 +226,7 @@ function runtimeOutcomeMessage(outcome: PlayerRuntimeControlResult["outcome"]): 
   if (outcome.kind === "staleAction" || outcome.kind === "unknownAction") {
     return "That Player action is no longer active.";
   }
-  if (outcome.kind === "notDue") return "That timed action is not due yet.";
+  if (outcome.kind === "executionPending") return "Time has moved on; try again.";
   return "";
 }
 

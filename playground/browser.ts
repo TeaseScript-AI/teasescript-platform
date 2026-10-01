@@ -456,7 +456,7 @@ function controlOutcomeMessage(outcome: WorkspaceControlResult["outcome"]): stri
   if (outcome.kind === "staleAction" || outcome.kind === "unknownAction") {
     return "That Player action is no longer active.";
   }
-  if (outcome.kind === "notDue") return "That timed action is not due yet.";
+  if (outcome.kind === "executionPending") return "Run the script to the current time first.";
   if (outcome.kind === "invalidObservation") return outcome.message;
   return "The Player operation completed.";
 }
