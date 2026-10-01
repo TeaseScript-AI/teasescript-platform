@@ -552,10 +552,19 @@ export function mediaPlayheadMs(media: RuntimeMediaSnapshot): number {
   }
   const passLength = end - media.startAtMs;
   if (passLength <= 0) return end;
-  // The pass `passes + laps` contains the progress: it ends at or after it, and the pass before ends before it.
-  let laps = Math.max(0, Math.ceil((progress - passEnd(passes)) / passLength));
-  while (laps > 0 && passEnd(passes + laps - 1) >= progress) laps -= 1;
-  while (passEnd(passes + laps) < progress) laps += 1;
+  // The pass `passes + laps` contains the progress: the first whose end reaches it, found by bisection over exactly
+  // countable pass ordinals. Beyond them only the position within a pass is meaningful.
+  const beyond = progress - passEnd(passes);
+  let high = Math.ceil(beyond / passLength) + 1;
+  if (!Number.isSafeInteger(passes + high) || passEnd(passes + high) < progress) {
+    return Math.min(end, media.startAtMs + (beyond % passLength));
+  }
+  let laps = 0;
+  while (laps < high) {
+    const middle = laps + Math.floor((high - laps) / 2);
+    if (passEnd(passes + middle) >= progress) high = middle;
+    else laps = middle + 1;
+  }
   if (progress === passEnd(passes + laps)) {
     // Playback that ends exactly at the end of a pass stays at that end; otherwise it wraps to the next pass.
     return progress === terminal ? end : media.startAtMs;
