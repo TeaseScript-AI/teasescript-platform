@@ -2149,6 +2149,44 @@ test("PR194 matrix: checkpoint boundaries preserve typed interaction results", (
       `${row.id}: final say`,
     );
     assert.equal(final.uninterrupted.snapshot.status, "halted", `${row.id}: final status`);
+
+    // The same typed result also resumes through a direct function return that consumes it.
+    const directReturn = injectInteraction(
+      'function prompt { let ignored = "__interaction_result__"\nreturn }\nprompt()\nsay "after"\nexit',
+      row.interactionKind,
+      row.ui,
+    );
+    const directPlan = replaceHandoffInstruction(directReturn, {
+      kind: "returnVoid",
+      span: handoffInstructionSpan(directReturn),
+    });
+    assert.equal(validateInstructionPlan(directPlan).valid, true, `${row.id}: direct return plan`);
+    const directCommitted = assertInteractionResumeEquivalent(
+      directPlan,
+      waiting(directPlan).snapshot,
+      (plan, snapshot) => completeTypedInteraction(plan, snapshot, row),
+      `${row.id}: direct return pending`,
+    ).uninterrupted.snapshot;
+    assert.equal(
+      temporaryValue(directCommitted, directReturn.destinationTemporary),
+      row.result,
+      `${row.id}: direct return committed result`,
+    );
+    const directFinal = assertInteractionResumeEquivalent(
+      directPlan,
+      directCommitted,
+      run,
+      `${row.id}: direct return committed`,
+    ).uninterrupted;
+    assert.equal(directFinal.snapshot.status, "halted", `${row.id}: direct return status`);
+    assert.deepEqual(directFinal.snapshot.callFrames, [], `${row.id}: direct return frames`);
+    assert.deepEqual(directFinal.snapshot.temporaries, [], `${row.id}: direct return temporaries`);
+    assert.deepEqual(
+      directFinal.events.filter((event) => event.kind === "say").map((event) => event.text),
+      ["after"],
+      `${row.id}: direct return output`,
+    );
+    assert.equal(validateRuntimeSnapshot(directFinal.snapshot, directPlan).valid, true, row.id);
   }
 });
 

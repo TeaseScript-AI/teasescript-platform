@@ -1174,28 +1174,12 @@ test("terminal button completion remains inspectable and continuation runs only 
   );
 });
 
-test("result-bearing interactions require an in-region continuation while function continuations cleanly halt", () => {
-  for (const [kind, ui, payload] of [
-    [
-      "text",
-      { kind: "text", hint: null, accessibleName: defaults.text },
-      { kind: "submittedText", submittedText: "value" },
-    ],
-    [
-      "number",
-      { kind: "number", hint: null, accessibleName: defaults.number },
-      { kind: "submittedText", submittedText: "1" },
-    ],
-    [
-      "choice",
-      {
-        kind: "choice",
-        labelType: "none",
-        options: [{ text: "One", label: null }],
-        accessibleName: defaults.choice,
-      },
-      { kind: "selectedText", selectedText: "One" },
-    ],
+// Typed results resuming through a direct function return are covered by the handoff typed-domain matrix.
+test("result-bearing interactions require an in-region continuation", () => {
+  for (const [kind, ui] of [
+    ["text", { kind: "text", hint: null, accessibleName: defaults.text }],
+    ["number", { kind: "number", hint: null, accessibleName: defaults.number }],
+    ["choice", choiceDomains.unlabelled],
   ] as const) {
     const root = interactionPlan(kind, ui);
     const terminalRoot = {
@@ -1205,42 +1189,6 @@ test("result-bearing interactions require an in-region continuation while functi
     };
     assert.equal(validateInstructionPlan(terminalRoot).valid, false, kind);
     assert.throws(() => run(terminalRoot, createFreshRuntimeSnapshot(terminalRoot)), kind);
-
-    const base = buttonPlanFromSource("function prompt { wait 1\nreturn }\nprompt()\nexit");
-    const interactionIndex = base.instructions.findIndex(
-      (instruction) => instruction.kind === "interaction",
-    );
-    const destinationTemporary = base.temporaryCount + 1;
-    const instruction: InteractionInstruction = {
-      kind: "interaction",
-      interactionKind: kind,
-      target: "standardChat",
-      speaker: null,
-      destinationTemporary,
-      expectedResult: kind === "number" ? "number" : "string",
-      ui,
-      span: base.instructions[interactionIndex]!.span,
-    };
-    const instructions = base.instructions.map((candidate, index) =>
-      index === interactionIndex ? instruction : candidate,
-    );
-    const functionPlan = { ...base, temporaryCount: destinationTemporary, instructions };
-    assert.equal(validateInstructionPlan(functionPlan).valid, true, kind);
-    const pending = waiting(functionPlan);
-    const completionRequest = {
-      actionId: pending.snapshot.foregroundAction!.actionId,
-      actionKind: "interaction",
-      interactionKind: kind,
-      payload,
-    } as const;
-    const completed = completeAction(functionPlan, pending.snapshot, completionRequest);
-    assert.equal(completed.outcome.kind, "completed", kind);
-    const restored = deserializeCheckpoint(
-      serializeCheckpoint(createCheckpoint(functionPlan, completed.snapshot)),
-    );
-    const halted = run(restored.plan, restored.snapshot).snapshot;
-    assert.equal(halted.status, "halted", kind);
-    assert.equal(validateRuntimeSnapshot(halted, functionPlan).valid, true, kind);
   }
 });
 
@@ -1348,10 +1296,13 @@ test("interaction plan and checkpoint boundaries reject malformed option domains
 });
 
 test("interaction ownership survives active call, scope, and loop frames", () => {
-  for (const plan of [
-    buttonPlanFromSource("function prompt { wait 1\nreturn }\nprompt()\nexit"),
-    buttonPlanFromSource("repeat 1 { wait 1 }\nexit"),
+  for (const source of [
+    'function prompt { showButton "Continue"\nreturn }\nprompt()\nexit',
+    'repeat 1 { showButton "Continue" }\nexit',
   ]) {
+    const compiled = compileSource(source);
+    assert.deepEqual(compiled.diagnostics, [], source);
+    const plan = compiled.plan!;
     const pending = waiting(plan);
     const action = pending.snapshot.foregroundAction!;
     if (pending.snapshot.callFrames.length > 0)
