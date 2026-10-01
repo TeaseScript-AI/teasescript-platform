@@ -388,3 +388,209 @@ test("lowers direct indexed assignment targets", () => {
   assert.deepEqual(program.diagnostics, []);
   assert.equal(emitTease(program), "let items = [1, 2]\nitems[1] = 9\n");
 });
+
+
+test("maps literal getSelectedValue options to zero-based numeric choice labels", () => {
+  const source = file([
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("selected"),
+      right: call(
+        "getSelectedValue",
+        constant("Choose one"),
+        { kind: "list", span, items: [constant("First"), constant("Second"), constant("Third")] },
+      ),
+    }),
+  ]);
+
+  const program = lowerParsedFile(source);
+  assert.deepEqual(program.diagnostics, []);
+  assert.equal(
+    emitTease(program),
+    [
+      'let selected = choose "Choose one" {',
+      '  0: "First"',
+      '  1: "Second"',
+      '  2: "Third"',
+      '}',
+      '',
+    ].join("\n"),
+  );
+});
+
+test("keeps dynamic getSelectedValue option lists explicit", () => {
+  const source = file([
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("selected"),
+      right: call("getSelectedValue", constant("Choose one"), variable("options")),
+    }),
+  ]);
+
+  const program = lowerParsedFile(source);
+  assert.ok(program.diagnostics.some((diagnostic) => diagnostic.code === "SX_DYNAMIC_CHOICE_OPTIONS"));
+});
+
+test("lowers simple C-style for loops through an equivalent while loop", () => {
+  const source = file([
+    {
+      kind: "for",
+      span,
+      variable: "forLoopDummyParameter",
+      collection: {
+        kind: "list",
+        span,
+        items: [
+          {
+            kind: "declaration",
+            span,
+            multipleAssignment: false,
+            left: variable("i"),
+            right: constant(0),
+          },
+          { kind: "binary", span, operator: "<", left: variable("i"), right: constant(3) },
+          { kind: "postfix", span, operator: "++", value: variable("i") },
+        ],
+      },
+      body: {
+        kind: "block",
+        span,
+        statements: [statement(call("show", variable("i")))],
+      },
+    },
+  ]);
+
+  const program = lowerParsedFile(source);
+  assert.deepEqual(program.diagnostics, []);
+  assert.equal(
+    emitTease(program),
+    ["let i = 0", "while i < 3 {", "  say i", "  i += 1", "}", ""].join("\n"),
+  );
+});
+
+test("keeps C-style for loops with current-loop continue explicit", () => {
+  const source = file([
+    {
+      kind: "for",
+      span,
+      variable: "forLoopDummyParameter",
+      collection: {
+        kind: "list",
+        span,
+        items: [
+          { kind: "binary", span, operator: "=", left: variable("i"), right: constant(0) },
+          { kind: "binary", span, operator: "<", left: variable("i"), right: constant(3) },
+          { kind: "postfix", span, operator: "++", value: variable("i") },
+        ],
+      },
+      body: {
+        kind: "block",
+        span,
+        statements: [{ kind: "continue", span }],
+      },
+    },
+  ]);
+
+  const program = lowerParsedFile(source);
+  assert.ok(program.diagnostics.some((diagnostic) => diagnostic.code === "SX_C_STYLE_CONTINUE"));
+});
+
+test("lowers Groovy each() on ranges and proven lists to TeaseScript for loops", () => {
+  const rangeEach: AstNode = {
+    kind: "methodCall",
+    span,
+    object: { kind: "range", span, from: constant(1), to: constant(3), inclusive: true },
+    method: constant("each"),
+    arguments: {
+      kind: "arguments",
+      span,
+      items: [{
+        kind: "closure",
+        span,
+        parameters: [],
+        parameterSpecified: false,
+        body: { kind: "block", span, statements: [statement(call("show", variable("it")))] },
+      }],
+    },
+    implicitThis: false,
+    safe: false,
+    spreadSafe: false,
+  };
+  const listEach: AstNode = {
+    kind: "methodCall",
+    span,
+    object: variable("items"),
+    method: constant("each"),
+    arguments: {
+      kind: "arguments",
+      span,
+      items: [{
+        kind: "closure",
+        span,
+        parameters: [],
+        parameterSpecified: false,
+        body: { kind: "block", span, statements: [statement(call("show", variable("it")))] },
+      }],
+    },
+    implicitThis: false,
+    safe: false,
+    spreadSafe: false,
+  };
+  const source = file([
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("items"),
+      right: { kind: "list", span, items: [constant("a"), constant("b")] },
+    }),
+    statement(rangeEach),
+    statement(listEach),
+  ]);
+
+  const program = lowerParsedFile(source);
+  assert.deepEqual(program.diagnostics, []);
+  assert.equal(
+    emitTease(program),
+    [
+      'let items = ["a", "b"]',
+      'for it in 1..=3 {',
+      '  say it',
+      '}',
+      'for it in items {',
+      '  say it',
+      '}',
+      '',
+    ].join("\n"),
+  );
+});
+
+test("keeps closure return inside Groovy each() explicit", () => {
+  const source = file([statement({
+    kind: "methodCall",
+    span,
+    object: { kind: "range", span, from: constant(1), to: constant(3), inclusive: true },
+    method: constant("each"),
+    arguments: {
+      kind: "arguments",
+      span,
+      items: [{
+        kind: "closure",
+        span,
+        parameters: [],
+        parameterSpecified: false,
+        body: { kind: "block", span, statements: [{ kind: "return", span, value: constant(null) }] },
+      }],
+    },
+    implicitThis: false,
+    safe: false,
+    spreadSafe: false,
+  })]);
+
+  const program = lowerParsedFile(source);
+  assert.ok(program.diagnostics.some((diagnostic) => diagnostic.code === "SX_EACH_RETURN"));
+});

@@ -80,6 +80,7 @@ export type IrExpression =
   | { kind: "index"; target: IrExpression; index: IrExpression }
   | { kind: "property"; target: IrExpression; name: string }
   | { kind: "methodCall"; target: IrExpression; name: string; arguments: IrExpression[] }
+  | { kind: "choice"; message: IrExpression; options: IrExpression[] }
   | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean }
   | { kind: "unary"; operator: "not" | "+" | "-"; value: IrExpression }
   | { kind: "binary"; operator: string; left: IrExpression; right: IrExpression }

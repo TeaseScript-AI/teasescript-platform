@@ -147,6 +147,12 @@ export function emitExpression(expression: IrExpression): string {
       return `${parenthesize(expression.target)}.${expression.name}`;
     case "methodCall":
       return `${parenthesize(expression.target)}.${expression.name}(${expression.arguments.map(emitExpression).join(", ")})`;
+    case "choice": {
+      const options = expression.options
+        .map((option, index) => `  ${index}: ${emitExpression(option)}`)
+        .join("\n");
+      return `choose ${emitExpression(expression.message)} {\n${options}\n}`;
+    }
     case "range":
       return `${parenthesize(expression.from)}${expression.inclusive ? "..=" : ".."}${parenthesize(expression.to)}`;
     case "unary":

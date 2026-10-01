@@ -254,6 +254,9 @@ function lowerPostfix(node: AstNode, span: SourceSpan | null, context: LowerCont
 
 function lowerCallStatement(node: AstNode, span: SourceSpan | null, context: LowerContext): IrStatement[] {
   const call = callParts(node);
+  if (call !== null && !call.inherited && call.name === "each") {
+    return lowerEachStatement(node, call.arguments, span, context);
+  }
   if (call === null || !call.inherited) {
     const expression = lowerExpression(node, context);
     return expression === null
@@ -305,6 +308,75 @@ function lowerCallStatement(node: AstNode, span: SourceSpan | null, context: Low
         : [{ kind: "expression", expression, span }];
     }
   }
+}
+
+
+function lowerEachStatement(
+  node: AstNode,
+  args: AstNode[],
+  span: SourceSpan | null,
+  context: LowerContext,
+): IrStatement[] {
+  const receiverNode = asNode(node.object);
+  if (receiverNode === null || args.length !== 1 || args[0]?.kind !== "closure") {
+    return [unsupportedStatement(context, node, "SX_EACH_SHAPE", "Groovy each() needs one inline closure for automatic migration.")];
+  }
+  if (receiverNode.kind !== "range" && !isKnownListExpression(receiverNode, context)) {
+    return [unsupportedStatement(
+      context,
+      node,
+      "SX_EACH_RECEIVER",
+      "Groovy each() is migrated automatically only for a proven list or numeric range receiver.",
+    )];
+  }
+
+  const closure = args[0];
+  const body = asNode(closure.body);
+  if (body?.kind !== "block") {
+    return [unsupportedStatement(context, node, "SX_EACH_BODY", "Groovy each() closure does not contain a normal block body.")];
+  }
+  if (containsReturnForCurrentClosure(body)) {
+    return [unsupportedStatement(
+      context,
+      node,
+      "SX_EACH_RETURN",
+      "Groovy return inside each() returns from the closure and needs a dedicated control-flow rewrite.",
+    )];
+  }
+
+  const parameterSpecified = closure.parameterSpecified === true;
+  const rawParameters = Array.isArray(closure.parameters) ? closure.parameters : [];
+  if (parameterSpecified && rawParameters.length !== 1) {
+    return [unsupportedStatement(context, node, "SX_EACH_PARAMETERS", "Only one-parameter list/range each() closures are migrated automatically.")];
+  }
+  let variable = "it";
+  if (parameterSpecified) {
+    const raw = rawParameters[0];
+    if (typeof raw !== "object" || raw === null || typeof (raw as Record<string, unknown>).name !== "string") {
+      return [unsupportedStatement(context, node, "SX_EACH_PARAMETERS", "Groovy each() closure parameter is invalid.")];
+    }
+    variable = String((raw as Record<string, unknown>).name);
+  }
+
+  const collection = lowerExpression(receiverNode, context);
+  if (collection === null) {
+    return [unsupportedStatement(context, node, "SX_EACH_RECEIVER", "Groovy each() receiver could not be migrated safely.")];
+  }
+  return [{ kind: "for", variable, collection, body: lowerBlock(body, context), span }];
+}
+
+function containsReturnForCurrentClosure(node: AstNode, root = true): boolean {
+  if (!root && node.kind === "closure") return false;
+  if (node.kind === "return") return true;
+  for (const value of Object.values(node)) {
+    if (isAstNode(value) && containsReturnForCurrentClosure(value, false)) return true;
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (isAstNode(item) && containsReturnForCurrentClosure(item, false)) return true;
+      }
+    }
+  }
+  return false;
 }
 
 function lowerBackgroundSound(args: AstNode[], node: AstNode, span: SourceSpan | null, context: LowerContext): IrStatement[] {
@@ -359,11 +431,73 @@ function lowerFor(node: AstNode, context: LowerContext): IrStatement[] {
   const variable = text(node.variable);
   const collectionNode = asNode(node.collection);
   const body = asNode(node.body);
+  if (variable === "forLoopDummyParameter" && collectionNode?.kind === "list") {
+    return lowerCStyleFor(node, collectionNode, body, context);
+  }
   const collection = collectionNode === null ? null : lowerExpression(collectionNode, context);
   if (variable === null || collection === null || body?.kind !== "block") {
     return [unsupportedStatement(context, node, "SX_UNSUPPORTED_FOR", "for loop could not be migrated safely.")];
   }
   return [{ kind: "for", variable, collection, body: lowerBlock(body, context), span: node.span }];
+}
+
+function lowerCStyleFor(
+  node: AstNode,
+  collection: AstNode,
+  body: AstNode | null,
+  context: LowerContext,
+): IrStatement[] {
+  const parts = nodeArray(collection.items);
+  if (parts.length !== 3 || body?.kind !== "block") {
+    return [unsupportedStatement(context, node, "SX_UNSUPPORTED_FOR", "C-style for loop shape is not supported.")];
+  }
+  if (containsContinueForCurrentLoop(body)) {
+    return [unsupportedStatement(
+      context,
+      node,
+      "SX_C_STYLE_CONTINUE",
+      "C-style for loop contains continue; its update step must run before continuing, so this loop needs a dedicated rewrite.",
+    )];
+  }
+
+  const [initial, conditionNode, update] = parts as [AstNode, AstNode, AstNode];
+  const initialStatements = lowerForControlExpression(initial, context);
+  const condition = lowerExpression(conditionNode, context);
+  const updateStatements = lowerForControlExpression(update, context);
+  if (condition === null || initialStatements === null || updateStatements === null) {
+    return [unsupportedStatement(context, node, "SX_UNSUPPORTED_FOR", "C-style for loop control expressions could not be migrated safely.")];
+  }
+
+  return [
+    ...initialStatements,
+    {
+      kind: "while",
+      condition,
+      body: [...lowerBlock(body, context), ...updateStatements],
+      span: node.span,
+    },
+  ];
+}
+
+function lowerForControlExpression(node: AstNode, context: LowerContext): IrStatement[] | null {
+  if (node.kind === "declaration") return lowerDeclaration(node, node.span, context);
+  if (node.kind === "binary") return lowerAssignment(node, node.span, context);
+  if (node.kind === "postfix") return lowerPostfix(node, node.span, context);
+  return null;
+}
+
+function containsContinueForCurrentLoop(node: AstNode, root = true): boolean {
+  if (!root && (node.kind === "for" || node.kind === "while")) return false;
+  if (node.kind === "continue") return true;
+  for (const value of Object.values(node)) {
+    if (isAstNode(value) && containsContinueForCurrentLoop(value, false)) return true;
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (isAstNode(item) && containsContinueForCurrentLoop(item, false)) return true;
+      }
+    }
+  }
+  return false;
 }
 
 function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
@@ -634,10 +768,37 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     case "getFloat":
       return unsupportedExpression(context, node, "SX_INPUT_DEFAULT_SEMANTICS", `${call.name}() has a pre-filled default value that the accepted TeaseScript input contract does not currently preserve.`);
     case "getSelectedValue":
-      return unsupportedExpression(context, node, "SX_CHOICE_STATEMENT_REWRITE", "getSelectedValue() needs a statement-level rewrite to preserve its zero-based result and question text.");
+      return lowerSelectedValue(node, call.arguments, context);
     default:
       return unsupportedExpression(context, node, "SX_UNSUPPORTED_SEXSCRIPT_EXPRESSION", `Unsupported SexScript expression call: ${call.name}`);
   }
+}
+
+function lowerSelectedValue(node: AstNode, args: AstNode[], context: LowerContext): IrExpression | null {
+  if (args.length !== 2) {
+    return unsupportedExpression(context, node, "SX_CHOICE_ARITY", "getSelectedValue() must have exactly two arguments.");
+  }
+  const message = lowerExpression(args[0]!, context);
+  if (message === null) return null;
+  const optionsNode = args[1]!;
+  if (optionsNode.kind !== "list") {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_DYNAMIC_CHOICE_OPTIONS",
+      "Dynamic getSelectedValue() option lists need a separate migration strategy.",
+    );
+  }
+  const options: IrExpression[] = [];
+  for (const item of nodeArray(optionsNode.items)) {
+    const option = lowerExpression(item, context);
+    if (option === null) return null;
+    options.push(option);
+  }
+  if (options.length === 0) {
+    return unsupportedExpression(context, node, "SX_EMPTY_CHOICE", "getSelectedValue() has no choices.");
+  }
+  return { kind: "choice", message, options };
 }
 
 function lowerArguments(args: AstNode[], context: LowerContext): IrExpression[] | null {
