@@ -170,6 +170,7 @@ test("prepared says retain contextual speaker identity across text and pacing ca
       text: '"${speaker.title} ${textValue()}"',
       pacing: "instant",
       expected: "Captain hello",
+      gateMs: null,
     },
     {
       name: "explicit speaker in text before a pacing-side call",
@@ -177,6 +178,7 @@ test("prepared says retain contextual speaker identity across text and pacing ca
       text: '"${speaker.title} hello"',
       pacing: "pace()",
       expected: "Captain hello",
+      gateMs: 1_000,
     },
     {
       name: "explicit speaker in pacing before a pacing-side call",
@@ -184,6 +186,7 @@ test("prepared says retain contextual speaker identity across text and pacing ca
       text: '"hello"',
       pacing: "speaker.delay + pace()",
       expected: "hello",
+      gateMs: 2_000,
     },
     {
       name: "default speaker in text before a text-side call",
@@ -191,6 +194,7 @@ test("prepared says retain contextual speaker identity across text and pacing ca
       text: '"${speaker.title} ${textValue()}"',
       pacing: "instant",
       expected: "Captain hello",
+      gateMs: null,
     },
     {
       name: "default speaker in pacing before a pacing-side call",
@@ -198,6 +202,7 @@ test("prepared says retain contextual speaker identity across text and pacing ca
       text: '"hello"',
       pacing: "speaker.delay + pace()",
       expected: "hello",
+      gateMs: 2_000,
     },
   ] as const;
 
@@ -216,6 +221,15 @@ test("prepared says retain contextual speaker identity across text and pacing ca
     assert.equal(output?.kind, "say", scenario.name);
     assert.equal(output?.text, scenario.expected, scenario.name);
     assert.equal(output?.speaker?.identifier, "vera", scenario.name);
+    // Exact pacing is in seconds: vera.delay is 1 and pace() returns 1; instant creates no gate.
+    const gates = [result.snapshot.foregroundAction, ...result.snapshot.backgroundActions].filter(
+      (action) => action?.kind === "chatPacingGate",
+    );
+    assert.deepEqual(
+      gates.map((gate) => gate.deadlineMs - gate.createdAtMs),
+      scenario.gateMs === null ? [] : [scenario.gateMs],
+      scenario.name,
+    );
   }
 
   const mutated = plan(
@@ -868,17 +882,25 @@ test("prepared output is emitted exactly once after checkpoint JSON restore", ()
   const restored = deserializeCheckpoint(
     serializeCheckpoint(createCheckpoint(compiled, waiting.snapshot)),
   );
-  const settled = completeAction(restored.plan, restored.snapshot, {
-    actionId: gate!.actionId,
-    actionKind: "chatPacingGate",
-    payload: { kind: "skip" },
-  });
-  const resumed = run(restored.plan, settled.snapshot);
-  assert.equal(
-    resumed.events.filter((event) => event.kind === "say" && event.text === preparedText).length,
-    1,
-  );
-  assert.equal(settled.snapshot.rng.state, preparedRng);
+  const paths = [
+    ["uninterrupted", { plan: compiled, snapshot: waiting.snapshot }],
+    ["restored", restored],
+  ] as const;
+  for (const [path, start] of paths) {
+    const settled = completeAction(start.plan, start.snapshot, {
+      actionId: gate!.actionId,
+      actionKind: "chatPacingGate",
+      payload: { kind: "skip" },
+    });
+    const resumed = run(start.plan, settled.snapshot);
+    assert.equal(
+      resumed.events.filter((event) => event.kind === "say" && event.text === preparedText).length,
+      1,
+      path,
+    );
+    // Emitting the prepared output reuses its earlier selection instead of drawing again.
+    assert.equal(resumed.snapshot.rng.state, preparedRng, path);
+  }
 });
 
 test("prepared pacing output has the same result with and without checkpoint restore", () => {
@@ -1485,25 +1507,35 @@ test("say instruction plans and public pacing failures stay at their validation 
   const baseline = JSON.stringify(pending.snapshot);
   const background = pending.snapshot.backgroundActions[0];
   const failures = [
-    completeAction(pacingPlan, pending.snapshot, {
-      actionId: background!.actionId,
-      actionKind: "delay",
-      payload: { kind: "time", currentSessionTimeMs: 0 },
-    }),
-    completeAction(pacingPlan, pending.snapshot, {
-      actionId: background!.actionId,
-      actionKind: "chatPacingGate",
-      payload: { kind: "wrong" },
-    }),
-    completeAction(pacingPlan, pending.snapshot, {
-      actionId: 0,
-      actionKind: "chatPacingGate",
-      payload: { kind: "skip" },
-    }),
-    observeTime(pacingPlan, pending.snapshot, Number.POSITIVE_INFINITY),
-    observeTime(pacingPlan, pending.snapshot, -1),
-  ];
-  for (const result of failures) {
+    [
+      "wrongActionKind",
+      completeAction(pacingPlan, pending.snapshot, {
+        actionId: background!.actionId,
+        actionKind: "delay",
+        payload: { kind: "time", currentSessionTimeMs: 0 },
+      }),
+    ],
+    [
+      "invalidPayload",
+      completeAction(pacingPlan, pending.snapshot, {
+        actionId: background!.actionId,
+        actionKind: "chatPacingGate",
+        payload: { kind: "wrong" },
+      }),
+    ],
+    [
+      "invalidPayload",
+      completeAction(pacingPlan, pending.snapshot, {
+        actionId: 0,
+        actionKind: "chatPacingGate",
+        payload: { kind: "skip" },
+      }),
+    ],
+    ["invalidObservation", observeTime(pacingPlan, pending.snapshot, Number.POSITIVE_INFINITY)],
+    ["invalidObservation", observeTime(pacingPlan, pending.snapshot, -1)],
+  ] as const;
+  for (const [kind, result] of failures) {
+    assert.equal(result.outcome.kind, kind);
     assert.deepEqual(result.events, []);
     assert.equal(JSON.stringify(result.snapshot), baseline);
   }

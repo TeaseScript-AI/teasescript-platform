@@ -65,10 +65,17 @@ test("nested object semantic diagnostics retain depth-first property order", () 
   const result = compileSource(source);
   assert.equal(result.plan, null);
   assert.deepEqual(
-    result.diagnostics.map((diagnostic) =>
+    result.diagnostics.map((diagnostic) => [
+      diagnostic.code,
       source.slice(diagnostic.span.start.offset, diagnostic.span.end.offset),
-    ),
-    ["missing", "x", "absent", "a", "unknown"],
+    ]),
+    [
+      ["TSV002", "missing"],
+      ["TSV007", "x"],
+      ["TSV002", "absent"],
+      ["TSV007", "a"],
+      ["TSV002", "unknown"],
+    ],
   );
 });
 

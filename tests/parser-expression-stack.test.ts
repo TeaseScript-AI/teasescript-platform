@@ -86,16 +86,14 @@ test("nested expression parsing preserves runtime order, grouping, interpolation
       "say value.child[1].nested",
       "say (10 - (3 - 2)) * 2",
       "say text",
-      "say order.length",
-      "say order[0]",
-      "say order[7]",
+      "for item in order { say item }",
       "exit",
     ].join("\n"),
     { scenarioName: "general expression parser continuations", seed: 42 },
   );
   assert.deepEqual(
     result.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["12", "18", "outer inner 15", "8", "1", "8"],
+    ["12", "18", "outer inner 15", "1", "2", "3", "4", "5", "6", "7", "8"],
   );
 });
 

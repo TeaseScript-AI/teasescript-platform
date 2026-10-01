@@ -56,6 +56,10 @@ function snapshotImmediatelyBeforeInteraction(
   return current;
 }
 
+function rootBinding(snapshot: ReturnType<typeof createFreshRuntimeSnapshot>, name: string) {
+  return snapshot.frames[0]?.bindings.find((binding) => binding.name === name)?.value;
+}
+
 test("compact interaction forms preserve immutable command, speaker, label, separator, option, and construct spans", () => {
   const source =
     'showButton as mistress "Ready"\nlet result = choose as mistress first: "Mystery",  second: "Again"';
@@ -402,23 +406,48 @@ test("interaction speaker references use the existing precise unknown-speaker di
   ]) {
     const result = compileSource(source);
     assert.equal(result.plan, null);
-    assert.ok(
-      result.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV005"),
+    const missing = source.indexOf("missing");
+    assert.deepEqual(
+      result.semanticDiagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.span.start.offset,
+        diagnostic.span.end.offset,
+      ]),
+      [["TSV005", missing, missing + "missing".length]],
       source,
     );
   }
 });
 
 test("choice diagnostics reject mixing and duplicates while labelled visible text may repeat", () => {
+  // `at` is the last source occurrence the diagnostic must span: the whole choice for mixing,
+  // the repeated label or visible text for duplicates, and the literal for non-finite labels.
   const rejected = [
-    'let x = choose first: "A", "B"',
-    'let x = choose first: "A", 2: "B"',
-    'let x = choose first: "A", first: "B"',
-    'let x = choose 1: "A", 1.0: "B"',
-    'let x = choose "Same", "Same"',
-    'let x = choose 1e999: "A"',
+    { source: 'let x = choose first: "A", "B"', code: "TSV029", at: 'choose first: "A", "B"' },
+    {
+      source: 'let x = choose first: "A", 2: "B"',
+      code: "TSV029",
+      at: 'choose first: "A", 2: "B"',
+    },
+    { source: 'let x = choose first: "A", first: "B"', code: "TSV030", at: "first" },
+    { source: 'let x = choose 1: "A", 1.0: "B"', code: "TSV030", at: "1.0" },
+    { source: 'let x = choose "Same", "Same"', code: "TSV030", at: '"Same"' },
+    { source: 'let x = choose 1e999: "A"', code: "TSC001", at: "1e999" },
   ];
-  for (const source of rejected) assert.equal(compileSource(source).plan, null, source);
+  for (const { source, code, at } of rejected) {
+    const result = compileSource(source);
+    assert.equal(result.plan, null, source);
+    const start = source.lastIndexOf(at);
+    assert.deepEqual(
+      result.diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.span.start.offset,
+        diagnostic.span.end.offset,
+      ]),
+      [[code, start, start + at.length]],
+      source,
+    );
+  }
   assert.notEqual(compileSource('let x = choose first: "Same", second: "Same"').plan, null);
   const sequential = compiled("let x = [askText, askNumber]");
   assert.equal(
@@ -812,20 +841,31 @@ test("requesting speaker is captured before payload side effects change the defa
 
 test("fixed-seed payload RNG is prepared once and restore does not reevaluate it", () => {
   const plan = compiled('let result = choose "A ${random()}", "B ${random()}"');
-  const pending = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1364229357 }));
+  const fresh = createFreshRuntimeSnapshot(plan, { seed: 1364229357 });
+  const freshRng = structuredClone(fresh.rng);
+  const pending = run(plan, fresh);
   const savedRng = pending.snapshot.rng;
+  assert.notDeepEqual(savedRng, freshRng);
   const restored = deserializeCheckpoint(
     serializeCheckpoint(createCheckpoint(plan, pending.snapshot)),
   );
   assert.deepEqual(restored.snapshot.rng, savedRng);
-  const action = restored.snapshot.foregroundAction;
+  const rerun = run(restored.plan, restored.snapshot);
+  assert.equal(rerun.snapshot.status, "waiting");
+  assert.deepEqual(rerun.snapshot.foregroundAction, pending.snapshot.foregroundAction);
+  assert.deepEqual(rerun.snapshot.rng, savedRng);
+  const action = rerun.snapshot.foregroundAction;
   assert.ok(action !== null && action.kind === "interaction" && action.ui.kind === "choice");
   const selected = action.ui.options[1]!.text;
-  const completed = completePending(restored.plan, restored.snapshot, "choice", {
+  const completed = completePending(restored.plan, rerun.snapshot, "choice", {
     kind: "selectedText",
     selectedText: selected,
   });
   assert.deepEqual(completed.snapshot.rng, savedRng);
+  const done = run(restored.plan, completed.snapshot);
+  assert.equal(done.snapshot.status, "halted");
+  assert.equal(rootBinding(done.snapshot, "result"), selected);
+  assert.deepEqual(done.snapshot.rng, savedRng);
 });
 
 test("dynamic rejection is atomic before action identity, pending state, or transcript allocation", () => {
@@ -891,7 +931,9 @@ test("blocking interactions resume through ordinary expression contexts and reje
     kind: "submittedText",
     submittedText: "2.5",
   });
-  assert.equal(run(pairPlan, secondCompleted.snapshot).snapshot.status, "halted");
+  const pairDone = run(pairPlan, secondCompleted.snapshot);
+  assert.equal(pairDone.snapshot.status, "halted");
+  assert.deepEqual(rootBinding(pairDone.snapshot, "pair"), createSerializableList(["alpha", 2.5]));
 
   const shortCircuit = compiled("let value = false and askText");
   const shortCircuitDone = run(shortCircuit, createFreshRuntimeSnapshot(shortCircuit));
@@ -915,6 +957,7 @@ test("interaction results resume through assignment and loop-owned source contex
       "let count = 0",
       "repeat 1 {",
       "  let answer = askText",
+      "  say answer, instant",
       "  count = count + 1",
       "}",
       "say count",
@@ -929,7 +972,10 @@ test("interaction results resume through assignment and loop-owned source contex
   });
   const loopDone = run(loopPlan, loopCompleted.snapshot);
   assert.equal(loopDone.snapshot.status, "halted");
-  assert.equal(loopDone.events.find((event) => event.kind === "say")?.text, "1");
+  assert.deepEqual(
+    loopDone.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["ok", "1"],
+  );
 });
 
 test("interaction expressions preserve function-argument source order across suspension", () => {
@@ -1017,21 +1063,25 @@ test("every compact interaction survives pending checkpoint restore and source-t
       source: 'showButton "Continue"',
       interactionKind: "button" as const,
       payload: { kind: "activate" as const },
+      result: undefined,
     },
     {
       source: 'let result = askText "Type here"',
       interactionKind: "text" as const,
       payload: { kind: "submittedText" as const, submittedText: "answer" },
+      result: "answer",
     },
     {
       source: 'let result = askNumber "Number"',
       interactionKind: "number" as const,
       payload: { kind: "submittedText" as const, submittedText: "2.5" },
+      result: 2.5,
     },
     {
       source: 'let result = choose first: "One", second: "Two"',
       interactionKind: "choice" as const,
       payload: { kind: "selectedLabel" as const, selectedLabel: "second" },
+      result: "second",
     },
   ];
 
@@ -1061,6 +1111,10 @@ test("every compact interaction survives pending checkpoint restore and source-t
 
     const uninterrupted = run(plan, uninterruptedCompletion.snapshot);
     const resumed = run(restored.plan, restoredCompletion.snapshot);
+    for (const done of [uninterrupted, resumed]) {
+      assert.equal(done.snapshot.status, "halted", scenario.source);
+      assert.equal(rootBinding(done.snapshot, "result"), scenario.result, scenario.source);
+    }
     assert.deepEqual(resumed.snapshot, uninterrupted.snapshot, scenario.source);
     assert.deepEqual(resumed.events, uninterrupted.events, scenario.source);
   }
@@ -1208,17 +1262,6 @@ test("dynamic settlement uses prepared UI provenance while available and intrins
     kind: "selectedText",
     selectedText: "One",
   });
-  const wrongChoice = structuredClone(choiceCompleted.snapshot);
-  assert.ok(wrongChoice.lastSettlement?.actionKind === "interaction");
-  assert.notEqual(wrongChoice.interactionResultHandoff, null);
-  // EVIDENCE: fixture mutates only the retained choice result to disagree with its destination value.
-  (wrongChoice.lastSettlement as { result: unknown }).result = "Two";
-  const wrongChoiceDestination = wrongChoice.temporaries.find(
-    (temporary) => temporary.id === wrongChoice.interactionResultHandoff?.destinationTemporary,
-  );
-  assert.ok(wrongChoiceDestination !== undefined);
-  wrongChoiceDestination.value = "Two";
-  assert.equal(validateRuntimeSnapshot(wrongChoice, choicePlan).valid, false);
   const choiceAfterCleanup = run(choicePlan, choiceCompleted.snapshot).snapshot;
   assert.equal(validateRuntimeSnapshot(choiceAfterCleanup, choicePlan).valid, true);
   const labelledPlan = compiled("let result = choose first: firstText, second: secondText", {
@@ -1234,6 +1277,24 @@ test("dynamic settlement uses prepared UI provenance while available and intrins
     kind: "selectedLabel",
     selectedLabel: "first",
   });
+  assert.equal(validateRuntimeSnapshot(labelledCompleted.snapshot, labelledPlan).valid, true);
+  // Result, destination and handoff stay the valid label `first`; only the retained transcript
+  // names the other prepared option, so the prepared label/text association must reject it.
+  const wrongTranscript = structuredClone(labelledCompleted.snapshot);
+  assert.ok(wrongTranscript.lastSettlement?.actionKind === "interaction");
+  assert.equal(wrongTranscript.interactionResultHandoff?.result, "first");
+  // EVIDENCE: fixture mutates only the retained transcript text to another prepared option text.
+  (wrongTranscript.lastSettlement as { transcriptText: string | null }).transcriptText = "Beta";
+  assert.equal(validateRuntimeSnapshot(wrongTranscript, labelledPlan).valid, false);
+  const wrongTranscriptCheckpoint = structuredClone(
+    createCheckpoint(labelledPlan, labelledCompleted.snapshot),
+  );
+  assert.ok(wrongTranscriptCheckpoint.snapshot.lastSettlement?.actionKind === "interaction");
+  // EVIDENCE: fixture mutates only the checkpoint transcript text to another prepared option text.
+  (
+    wrongTranscriptCheckpoint.snapshot.lastSettlement as { transcriptText: string | null }
+  ).transcriptText = "Beta";
+  assert.throws(() => deserializeCheckpoint(JSON.stringify(wrongTranscriptCheckpoint)));
   const labelledAfterCleanup = run(labelledPlan, labelledCompleted.snapshot).snapshot;
   const differentPossibleHistory = structuredClone(labelledAfterCleanup);
   assert.ok(differentPossibleHistory.lastSettlement?.actionKind === "interaction");
@@ -1309,6 +1370,8 @@ test("representative static and dynamic root/function choices complete through c
       name: "static-root",
       source: 'let result = choose first: "One", second: "Two", third: "Three"',
       payload: { kind: "selectedLabel" as const, selectedLabel: "second" },
+      binding: "result",
+      expected: "second",
     },
     {
       name: "static-function",
@@ -1320,6 +1383,8 @@ test("representative static and dynamic root/function choices complete through c
         "let output = prompt()",
       ].join("\n"),
       payload: { kind: "selectedLabel" as const, selectedLabel: "second" },
+      binding: "output",
+      expected: "second",
     },
     {
       name: "dynamic-root",
@@ -1328,6 +1393,8 @@ test("representative static and dynamic root/function choices complete through c
         'let result = choose "${prefix} A", "${prefix} B", "${prefix} C"',
       ].join("\n"),
       payload: { kind: "selectedText" as const, selectedText: "Option B" },
+      binding: "result",
+      expected: "Option B",
     },
     {
       name: "dynamic-function",
@@ -1339,6 +1406,8 @@ test("representative static and dynamic root/function choices complete through c
         'let output = prompt("Option")',
       ].join("\n"),
       payload: { kind: "selectedText" as const, selectedText: "Option B" },
+      binding: "output",
+      expected: "Option B",
     },
   ];
 
@@ -1371,6 +1440,14 @@ test("representative static and dynamic root/function choices complete through c
     );
     const uninterrupted = run(plan, completed.snapshot);
     const resumed = run(handoff.plan, handoff.snapshot);
+    for (const done of [uninterrupted, resumed]) {
+      assert.equal(done.snapshot.status, "halted", `${scenario.name}: halted`);
+      assert.equal(
+        rootBinding(done.snapshot, scenario.binding),
+        scenario.expected,
+        `${scenario.name}: ${scenario.binding}`,
+      );
+    }
     assert.deepEqual(resumed.events, uninterrupted.events, `${scenario.name}: events`);
     assert.deepEqual(resumed.snapshot, uninterrupted.snapshot, `${scenario.name}: snapshot`);
   }

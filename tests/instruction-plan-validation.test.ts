@@ -380,11 +380,18 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     temporaryCount: number;
   };
   forgedSpeaker.temporaryCount = 1;
+  assert.equal(validateInstructionPlan(forgedSpeaker).valid, true);
   const forgedSay = forgedSpeaker.instructions[secondSay];
   assert.ok(forgedSay?.kind === "say");
-  // EVIDENCE: fixture adds a prepared speaker temporary to an otherwise static say instruction.
-  (forgedSay as { speakerTemporary?: number }).speakerTemporary = 0;
-  assert.equal(validateInstructionPlan(forgedSpeaker).valid, false);
+  // EVIDENCE: fixture adds the newly allocated in-range temporary as a prepared speaker to an otherwise static say.
+  (forgedSay as { speakerTemporary?: number }).speakerTemporary = 1;
+  assert.ok(
+    validateInstructionPlan(forgedSpeaker).errors.some(
+      (error) =>
+        error.path === `$.instructions[${secondSay}].speakerTemporary` &&
+        error.message === "Prepared say speaker temporary lacks its canonical producer.",
+    ),
+  );
   assert.throws(
     () => run(forgedSpeaker, createFreshRuntimeSnapshot(ordinary)),
     (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR100",
@@ -422,15 +429,20 @@ test("rejects forged prepared say fields and lifetimes before any script event e
   assert.ok(pacingCall >= 0);
   assert.ok(pacingStore >= 0);
 
+  const forgedText = JSON.parse(JSON.stringify(prepared));
+  forgedText.temporaryCount += 1;
+  assert.equal(validateInstructionPlan(forgedText).valid, true);
+  forgedText.instructions[sayIndex].textTemporary = forgedText.temporaryCount;
+  assert.ok(
+    validateInstructionPlan(forgedText).errors.some(
+      (error) =>
+        error.path === `$.instructions[${sayIndex}].textTemporary` &&
+        error.message === "Prepared say text temporary lacks its canonical producer.",
+    ),
+  );
+
   // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture callbacks deliberately rewrite prepared-say producer, consumer, temporary, and control-flow fields into invalid combinations.
   const cases: Array<[string, (candidate: any) => void]> = [
-    [
-      "forged text temporary",
-      (candidate) => {
-        candidate.temporaryCount += 1;
-        candidate.instructions[sayIndex].textTemporary = candidate.temporaryCount - 1;
-      },
-    ],
     [
       "wrong producer kind",
       (candidate) => {

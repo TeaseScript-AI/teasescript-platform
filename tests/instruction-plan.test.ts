@@ -104,6 +104,21 @@ test("compiler-produced plans remain deeply frozen", () => {
   assert.equal(Object.isFrozen(instruction.value.properties), true);
   assert.equal(Object.isFrozen(instruction.value.properties[0]), true);
   assert.equal(Object.isFrozen(instruction.value.properties[0]!.value), true);
+  const list = instruction.value.properties[0]!.value;
+  const inner = list.kind === "list" ? list.elements[1] : undefined;
+  if (list.kind !== "list" || inner?.kind !== "object") {
+    assert.fail("Expected nested list and object plans.");
+  }
+  for (const node of [
+    list.elements,
+    list.elements[0],
+    inner,
+    inner.properties,
+    inner.properties[0],
+    inner.properties[0]?.value,
+  ]) {
+    assert.ok(typeof node === "object" && Object.isFrozen(node));
+  }
 });
 
 function findNonJsonValue(value: unknown, active = new Set<object>()): string | null {

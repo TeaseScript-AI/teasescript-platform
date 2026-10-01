@@ -4,6 +4,7 @@ import test from "node:test";
 import { compileSource } from "../src/compiler.js";
 import type { Instruction, InstructionPlan, PlayMediaInstruction } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
+import type { SourceSpan } from "../src/source.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
 function diagnostics(source: string): string[] {
@@ -269,12 +270,23 @@ test("cue positions may start with an object literal and continue like other exp
         (instruction): instruction is PlayMediaInstruction => instruction.kind === "playMedia",
       )
       .flatMap((instruction) => instruction.cues.map((cue) => cue.kind));
+  const firstError = (source: string) => {
+    const result = compileSource(source);
+    assert.equal(result.plan, null, source);
+    const diagnostic = result.diagnostics[0];
+    return (
+      diagnostic && [diagnostic.code, diagnostic.span.start.offset, diagnostic.span.end.offset]
+    );
+  };
   assert.deepEqual(offsets('playAudio "a" {\n  at { point: 1 s }.point { }\n}'), ["at"]);
   assert.deepEqual(
     offsets('playAudio "a" {\n  at 1 s +\n\n    2 s { }\n  beforeEnd (\n    1 s\n  ) { }\n}'),
     ["at", "beforeEnd"],
   );
-  assertRejected('playAudio "a" {\n  at { say "x" }\n}', "TSP", "");
+  // The leading `{` is an object literal, not a cue block: the line stays an ordinary statement.
+  const objectWithoutBlock = 'playAudio "a" {\n  at { say "x" }\n}';
+  const atOffset = objectWithoutBlock.indexOf("at {");
+  assert.deepEqual(firstError(objectWithoutBlock), ["TSP001", atOffset, atOffset + "at".length]);
   assert.deepEqual(offsets('playAudio "a" {\n  at askNumber """${\n    1\n  }""" { }\n}'), ["at"]);
   assert.deepEqual(
     offsets(
@@ -282,23 +294,37 @@ test("cue positions may start with an object literal and continue like other exp
     ),
     ["beforeEnd", "at"],
   );
-  assertRejected('let x = choose 1: "One" {\n}', "TSP", "");
+  // Only a cue position ends a choice option at `{`.
+  const choiceBeforeBrace = 'let x = choose 1: "One" {\n}';
+  const choiceBrace = choiceBeforeBrace.indexOf("{");
+  assert.deepEqual(firstError(choiceBeforeBrace), ["TSP031", choiceBrace, choiceBrace + 1]);
   // A block inside a cue position parses like any other block.
-  assertRejected(
-    'function point(x) {\n  return 1\n}\nplayAudio "a" {\n  at point(timer async 1 {\n    repeat choose 1: "Once", 2: "Twice" { }\n  }) { }\n}',
-    "TSP",
-    "",
-  );
+  const blockInPosition =
+    'function point(x) {\n  return 1\n}\nplayAudio "a" {\n  at point(timer async 1 {\n    repeat choose 1: "Once", 2: "Twice" { }\n  }) { }\n}';
+  const repeatBrace = blockInPosition.indexOf("{ }");
+  assert.deepEqual(firstError(blockInPosition), ["TSP031", repeatBrace, repeatBrace + 1]);
 });
 
 test("media parse errors recover at the end of the line and keep enclosing blocks", () => {
-  const result = compileSource(
-    'if true { hideImage() }\nsay "next"\nshowImage("a.jpg")\nsay "last"',
-  );
+  const source = 'if true { hideImage() }\nsay "next"\nshowImage("a.jpg")\nsay "last"';
+  const result = compileSource(source);
+  const text = (span: SourceSpan) => source.slice(span.start.offset, span.end.offset);
   assert.equal(result.plan, null);
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => diagnostic.code),
     ["TSP035", "TSP035"],
+  );
+  assert.deepEqual(
+    result.program.statements.map((statement) => [
+      statement.kind,
+      text(statement.span),
+      statement.kind === "sayStatement" ? text(statement.value.span) : null,
+    ]),
+    [
+      ["ifStatement", "if true { hideImage() }", null],
+      ["sayStatement", 'say "next"', '"next"'],
+      ["sayStatement", 'say "last"', '"last"'],
+    ],
   );
   assertRejected('playAudio(file: "a.mp3",)', "TSP012", "Expected an argument after ','");
 });

@@ -98,21 +98,27 @@ test("parses inline code atomically and suppresses nested markup", () => {
 });
 
 test("accepts every constrained extension value and normalizes hex colors", () => {
+  const weights = ["thin", "light", "normal", "medium", "semibold", "bold", "black"];
+  const sizes = ["small", "normal", "large", "x-large"];
   const source = [
     "[u]u[/u]",
     "[color=#Aa00Ff]c[/color]",
     "[bg=#123456]b[/bg]",
-    ...["thin", "light", "normal", "medium", "semibold", "bold", "black"].map(
-      (value) => `[weight=${value}]w[/weight]`,
-    ),
-    ...["small", "normal", "large", "x-large"].map((value) => `[size=${value}]s[/size]`),
+    ...weights.map((value) => `[weight=${value}]w[/weight]`),
+    ...sizes.map((value) => `[size=${value}]s[/size]`),
     "[spoiler]p[/spoiler]",
     "[u][/u]",
   ].join(" ");
   const spans = allSpans(parseMessageMarkup(source));
 
-  assert.equal(spans.filter((span) => span.kind === "weight").length, 7);
-  assert.equal(spans.filter((span) => span.kind === "size").length, 4);
+  assert.deepEqual(
+    spans.flatMap((span) => (span.kind === "weight" ? [span.value] : [])),
+    weights,
+  );
+  assert.deepEqual(
+    spans.flatMap((span) => (span.kind === "size" ? [span.value] : [])),
+    sizes,
+  );
   assert.equal(spans.filter((span) => span.kind === "underline").length, 2);
   assert.deepEqual(
     spans.flatMap((span) =>

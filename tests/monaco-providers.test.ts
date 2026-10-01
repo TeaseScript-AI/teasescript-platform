@@ -4,8 +4,10 @@ import {
   createTeaseScriptProviders,
   registerTeaseScriptProviders,
   type MonacoProviderModel,
+  type TeaseScriptProviders,
 } from "../src/editor/monaco-providers.js";
 import type { MonacoPosition, MonacoRange } from "../src/editor/monaco-mapping.js";
+import { compileSource } from "../src/index.js";
 
 const providers = createTeaseScriptProviders(
   (startLineNumber, startColumn, endLineNumber, endColumn) => ({
@@ -18,7 +20,7 @@ const providers = createTeaseScriptProviders(
 );
 
 test("Monaco registers usable completion, hover, signature, and formatting providers", () => {
-  const registered: Record<string, unknown> = {};
+  const registered: Partial<TeaseScriptProviders> = {};
   registerTeaseScriptProviders(
     {
       completion: (provider) => (registered.completion = provider),
@@ -35,25 +37,58 @@ test("Monaco registers usable completion, hover, signature, and formatting provi
     "signature",
   ]);
   assert.equal(registered.completion, providers.completion);
-  const completion = providers.completion.provideCompletionItems(model(""), position(1));
-  assert.ok(completion.suggestions.some((item) => item.label === "say" && item.kind === 2));
+  const { completion, hover, signature, formatting } = registered;
+  assert.ok(completion && hover && signature && formatting);
+  const suggestions = completion.provideCompletionItems(model(""), position(1)).suggestions;
+  assert.ok(suggestions.some((item) => item.label === "say" && item.kind === 2));
 
-  const hover = providers.hover.provideHover(model('say "Hello"'), position(2));
-  assert.match(hover?.contents[0]?.value ?? "", /say/u);
+  const hoverResult = hover.provideHover(model('say "Hello"'), position(2));
+  assert.match(hoverResult?.contents[0]?.value ?? "", /say/u);
+  assert.deepEqual(hoverResult?.range, {
+    startLineNumber: 1,
+    startColumn: 1,
+    endLineNumber: 1,
+    endColumn: 4,
+  });
 
-  const signature = providers.signature.provideSignatureHelp(
+  const signatureResult = signature.provideSignatureHelp(
     model("askText as mistress "),
     position("askText as mistress ".length + 1),
   );
-  assert.equal(signature?.value.activeParameter, 1);
-  assert.equal(signature?.value.signatures[0]?.parameters[1]?.label, "hint");
+  assert.equal(signatureResult?.value.activeParameter, 1);
+  assert.equal(signatureResult?.value.signatures[0]?.parameters[1]?.label, "hint");
 
-  const formatting = providers.formatting.provideDocumentFormattingEdits(
-    model('say    "Hello",instant'),
-  );
-  assert.ok(formatting.length > 0);
-  assert.ok(formatting.every((edit) => isRange(edit.range)));
+  const source = 'say    "Hello",instant';
+  const edits = formatting.provideDocumentFormattingEdits(model(source));
+  assert.notEqual(edits.length, 0);
+  const formatted = applyEdits(source, edits);
+  assert.equal(formatted, 'say "Hello", instant');
+  const compiled = compileSource(formatted);
+  assert.notEqual(compiled.plan, null);
+  assert.deepEqual(compiled.diagnostics, []);
+  assert.deepEqual(formatting.provideDocumentFormattingEdits(model(formatted)), []);
 });
+
+/** Applies Monaco edits through the model offset mapping, last edit first. */
+function applyEdits(text: string, edits: readonly { range: MonacoRange; text: string }[]): string {
+  const textModel = model(text);
+  const offsets = edits.map((edit) => ({
+    start: textModel.getOffsetAt({
+      lineNumber: edit.range.startLineNumber,
+      column: edit.range.startColumn,
+    }),
+    end: textModel.getOffsetAt({
+      lineNumber: edit.range.endLineNumber,
+      column: edit.range.endColumn,
+    }),
+    text: edit.text,
+  }));
+  offsets.sort((left, right) => right.start - left.start);
+  return offsets.reduce(
+    (current, edit) => current.slice(0, edit.start) + edit.text + current.slice(edit.end),
+    text,
+  );
+}
 
 function model(text: string): MonacoProviderModel {
   return {
@@ -68,8 +103,4 @@ function model(text: string): MonacoProviderModel {
 
 function position(column: number): MonacoPosition {
   return { lineNumber: 1, column };
-}
-
-function isRange(value: MonacoRange): boolean {
-  return value.startLineNumber >= 1 && value.endLineNumber >= value.startLineNumber;
 }

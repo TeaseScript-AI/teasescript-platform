@@ -45,12 +45,21 @@ test("restores a self-contained checkpoint from serialized JSON", () => {
   const restored = deserializeCheckpoint(
     serializeCheckpoint(createCheckpoint(compiled, first.snapshot)),
   );
+  assert.deepEqual(restored.plan, compiled);
+  assert.deepEqual(restored.snapshot, first.snapshot);
   const completed = run(restored.plan, restored.snapshot);
 
   assert.equal(completed.snapshot.status, "halted");
   assert.deepEqual(
-    completed.events.map((event) => event.sequence),
-    [1, 2],
+    completed.events.map((event) => [
+      event.sequence,
+      event.kind,
+      event.kind === "say" ? event.text : null,
+    ]),
+    [
+      [1, "say", "1"],
+      [2, "exit", null],
+    ],
   );
 });
 

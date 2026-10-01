@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { Expression } from "../src/ast.js";
 import { parse } from "../src/parser.js";
 
 test("deep malformed nesting retains structured parser diagnostics", () => {
@@ -92,7 +93,16 @@ test("mixed collection chains preserve kinds, spans, and the following statement
 
 test("deep collection chains retain ordinary innermost expressions", () => {
   const depth = 1_024;
-  for (const inner of ['"text"', "-1", "1 + 2", "sample()", "source[0]", "{ value: 1 }", "1, 2"]) {
+  const rows: readonly (readonly [string, readonly ExpressionShape[]])[] = [
+    ['"text"', [["string", "text"]]],
+    ["-1", [["-", 1]]],
+    ["1 + 2", [["+", 1, 2]]],
+    ["sample()", [["call", "sample"]]],
+    ["source[0]", [["index", "source", 0]]],
+    ["{ value: 1 }", [["object", ["value", 1]]]],
+    ["1, 2", [1, 2]],
+  ];
+  for (const [inner, innermostElements] of rows) {
     const expression = `${"[".repeat(depth)}${inner}${"]".repeat(depth)}`;
     const source = `let value = ${expression}\nexit`;
     const parsed = parse(source);
@@ -101,6 +111,24 @@ test("deep collection chains retain ordinary innermost expressions", () => {
       parsed.program.statements.map((statement) => statement.kind),
       ["letStatement", "exitStatement"],
       expression,
+    );
+    const statement = parsed.program.statements[0];
+    if (statement?.kind !== "letStatement") continue;
+    let current = statement.initializer;
+    let lists = 1;
+    while (
+      current.kind === "listLiteral" &&
+      current.elements.length === 1 &&
+      current.elements[0]!.kind === "listLiteral"
+    ) {
+      current = current.elements[0]!;
+      lists += 1;
+    }
+    assert.equal(lists, depth, inner);
+    assert.deepEqual(
+      current.kind === "listLiteral" ? current.elements.map(expressionShape) : current.kind,
+      innermostElements,
+      inner,
     );
   }
 });
@@ -136,3 +164,46 @@ test("malformed sibling-nested collections do not retry failed chain parsing", (
     ["TSP012", "TSP002"],
   );
 });
+
+type ExpressionShape = string | number | readonly ExpressionShape[];
+
+// Compact projection: identifiers by name, literals by value, operators and postfix forms with their operands.
+function expressionShape(expression: Expression): ExpressionShape {
+  switch (expression.kind) {
+    case "identifier":
+      return expression.name;
+    case "numberLiteral":
+      return expression.value;
+    case "stringLiteral":
+      return [
+        "string",
+        ...expression.parts.map((part) => (part.kind === "stringText" ? part.value : part.kind)),
+      ];
+    case "unaryExpression":
+      return [expression.operator, expressionShape(expression.operand)];
+    case "binaryExpression":
+      return [
+        expression.operator,
+        expressionShape(expression.left),
+        expressionShape(expression.right),
+      ];
+    case "callExpression":
+      return [
+        "call",
+        expressionShape(expression.callee),
+        ...expression.arguments.map((argument) => expressionShape(argument.value)),
+      ];
+    case "indexExpression":
+      return ["index", expressionShape(expression.object), expressionShape(expression.index)];
+    case "objectLiteral":
+      return [
+        "object",
+        ...expression.properties.map((property): ExpressionShape => [
+          property.name.name,
+          expressionShape(property.value),
+        ]),
+      ];
+    default:
+      return expression.kind;
+  }
+}

@@ -2638,92 +2638,111 @@ test("PR194 matrix: direct handoff forms resume equivalently", () => {
 test("PR194 matrix: invalid local handoff shapes reject without mutating plans", () => {
   const injected = injectTextInteraction('let answer = "__interaction_result__"\nsay answer\nexit');
   const span = injected.plan.instructions[injected.handoffInstruction]!.span;
-  const rows: readonly { readonly id: string; readonly mutate: (plan: ExternalRecord) => void }[] =
-    [
-      {
-        id: "PR194-jump-continuation",
-        mutate: (plan) => {
-          externalInstructions(plan)[injected.handoffInstruction] = {
-            kind: "jump",
-            target: injected.clearInstruction,
-            span,
-          };
-        },
+  assert.equal(validateInstructionPlan(injected.plan).valid, true);
+  // Compiler-produced instructions are valid on their own, so rows using them are invalid only
+  // through their local handoff position.
+  const bases = compileSource('wait 1\nsay "x", instant');
+  assert.deepEqual(bases.diagnostics, []);
+  const [validWait, validSay] = bases.plan!.instructions;
+  assert.ok(validWait?.kind === "wait" && validSay?.kind === "say");
+  const handoffPath = `$.instructions[${injected.handoffInstruction}]`;
+  const clearPath = `$.instructions[${injected.clearInstruction}]`;
+  const mustConsume = "Interaction result handoff must consume the destination immediately.";
+  const mustClear =
+    "Interaction result handoff must clear its transient destination immediately after transfer.";
+  const rows: readonly {
+    readonly id: string;
+    readonly mutate: (plan: ExternalRecord) => void;
+    readonly errors: readonly (readonly [path: string, message: string])[];
+  }[] = [
+    {
+      id: "PR194-jump-continuation",
+      mutate: (plan) => {
+        externalInstructions(plan)[injected.handoffInstruction] = {
+          kind: "jump",
+          target: injected.clearInstruction,
+          span,
+        };
       },
-      {
-        id: "PR194-second-blocking-action",
-        mutate: (plan) => {
-          externalInstructions(plan)[injected.handoffInstruction] = {
-            kind: "wait",
-            duration: { kind: "literal", value: 1, span },
-            unit: "ms",
-            span,
-          };
-        },
+      errors: [[handoffPath, mustConsume]],
+    },
+    {
+      id: "PR194-second-blocking-action",
+      mutate: (plan) => {
+        externalInstructions(plan)[injected.handoffInstruction] = { ...validWait, span };
       },
-      {
-        id: "PR194-consume-wrong-temporary",
-        mutate: (plan) => {
-          plan.temporaryCount = injected.plan.temporaryCount + 1;
-          externalRecord(externalInstructions(plan)[injected.handoffInstruction], "handoff").value =
-            { kind: "temporary", temporaryId: injected.destinationTemporary + 1, span };
-        },
+      errors: [[handoffPath, mustConsume]],
+    },
+    {
+      id: "PR194-consume-wrong-temporary",
+      mutate: (plan) => {
+        plan.temporaryCount = injected.plan.temporaryCount + 1;
+        externalRecord(externalInstructions(plan)[injected.handoffInstruction], "handoff").value = {
+          kind: "temporary",
+          temporaryId: injected.destinationTemporary + 1,
+          span,
+        };
       },
-      {
-        id: "PR194-missing-clear",
-        mutate: (plan) => {
-          externalInstructions(plan)[injected.clearInstruction] = {
-            kind: "say",
-            presentation: null,
-            speaker: null,
-            value: { kind: "literal", value: "x", span },
-            span,
-          };
-        },
+      errors: [[handoffPath, mustConsume]],
+    },
+    {
+      id: "PR194-missing-clear",
+      mutate: (plan) => {
+        externalInstructions(plan)[injected.clearInstruction] = { ...validSay, span };
       },
-      {
-        id: "PR194-wrong-clear",
-        mutate: (plan) => {
-          externalRecord(
-            externalInstructions(plan)[injected.clearInstruction],
-            "clear",
-          ).temporaryId = injected.destinationTemporary + 1;
-        },
+      errors: [[clearPath, mustClear]],
+    },
+    {
+      id: "PR194-wrong-clear",
+      mutate: (plan) => {
+        plan.temporaryCount = injected.plan.temporaryCount + 1;
+        externalRecord(externalInstructions(plan)[injected.clearInstruction], "clear").temporaryId =
+          injected.destinationTemporary + 1;
       },
-      {
-        id: "PR194-second-producer",
-        mutate: (plan) => {
-          externalInstructions(plan)[injected.clearInstruction] = {
-            kind: "storeTemporary",
-            temporaryId: injected.destinationTemporary,
-            value: { kind: "literal", value: "x", span },
-            expectBoolean: false,
-            span,
-          };
-        },
+      errors: [[clearPath, mustClear]],
+    },
+    {
+      id: "PR194-second-producer",
+      mutate: (plan) => {
+        externalInstructions(plan)[injected.clearInstruction] = {
+          kind: "storeTemporary",
+          temporaryId: injected.destinationTemporary,
+          value: { kind: "literal", value: "x", span },
+          expectBoolean: false,
+          span,
+        };
       },
-      {
-        id: "PR194-return-value-not-guaranteed",
-        mutate: (plan) => {
-          externalRecord(externalInstructions(plan)[injected.handoffInstruction], "handoff").value =
-            {
-              kind: "binary",
-              operator: "or",
-              left: { kind: "literal", value: true, span },
-              right: { kind: "temporary", temporaryId: injected.destinationTemporary, span },
-              span,
-            };
-        },
+      // Replacing the cleanup with a producer breaks both owner-only production and cleanup.
+      errors: [
+        [
+          `$.instructions[${injected.interactionInstruction}].destinationTemporary`,
+          "Canonical interaction result destinations must be produced only by their owning interaction.",
+        ],
+        [clearPath, mustClear],
+      ],
+    },
+    {
+      id: "PR194-return-value-not-guaranteed",
+      mutate: (plan) => {
+        externalRecord(externalInstructions(plan)[injected.handoffInstruction], "handoff").value = {
+          kind: "binary",
+          operator: "or",
+          left: { kind: "literal", value: true, span },
+          right: { kind: "temporary", temporaryId: injected.destinationTemporary, span },
+          span,
+        };
       },
-    ];
+      errors: [[handoffPath, mustConsume]],
+    },
+  ];
   for (const row of rows) {
     const plan = externalRecord(structuredClone(injected.plan), row.id);
     row.mutate(plan);
     const beforeValidation = structuredClone(plan);
     const validation = validateInstructionPlan(plan);
-    assert.equal(validation.valid, false, row.id);
-    assert.ok(
-      validation.errors.some((error) => error.code === "TSC002"),
+    assert.deepEqual(
+      validation.errors.map((error) => [error.code, error.path, error.message]),
+      row.errors.map(([path, message]) => ["TSC002", path, message]),
       row.id,
     );
     assert.deepEqual(plan, beforeValidation, row.id);
@@ -2842,6 +2861,7 @@ test("PR194 matrix: rejected completion and snapshot operations preserve canonic
         interactionKind: "text" as const,
         payload: { kind: "submittedText", submittedText: " \t" },
       },
+      expectedOutcome: "invalidPayload",
     },
     {
       id: "PR194-wrong-action-kind",
@@ -2850,11 +2870,13 @@ test("PR194 matrix: rejected completion and snapshot operations preserve canonic
         actionKind: "delay" as const,
         payload: { kind: "time", currentSessionTimeMs: 0 },
       },
+      expectedOutcome: "wrongActionKind",
     },
   ];
   for (const row of requests) {
     const before = structuredClone(pending.snapshot);
     const result = completeAction(injected.plan, pending.snapshot, row.request);
+    assert.equal(result.outcome.kind, row.expectedOutcome, row.id);
     assert.deepEqual(result.snapshot, before, row.id);
     assert.deepEqual(result.events, [], row.id);
   }

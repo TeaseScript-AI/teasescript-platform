@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after, before } from "node:test";
 
+import { PLAYGROUND_EXAMPLES } from "../playground/examples.js";
 import { createPlaygroundServer } from "../playground/server.js";
 
 const server = createPlaygroundServer();
@@ -107,9 +108,9 @@ test("serves required JavaScript and CSS assets", async () => {
 });
 
 test("serves every fixed repository playground example", async () => {
-  for (const name of ["basic", "main", "control-flow", "checkpoint-loop", "functions"]) {
-    const response = await get(`/examples/playground/${name}.tease`);
-    assert.equal(response.status, 200, name);
+  for (const { file } of Object.values(PLAYGROUND_EXAMPLES)) {
+    const response = await get(`/examples/playground/${file}`);
+    assert.equal(response.status, 200, file);
     assert.match(response.contentType, /^text\/plain/u);
   }
 });
@@ -155,44 +156,68 @@ test("rejects symlinks that escape an exposed static root", async (context) => {
   assert.match(response.body, /unsafe request path/u);
 });
 
-test("workspace automation stores revisions and returns compile and run results", async () => {
-  const uploaded = await api(
-    "PUT",
-    "/api/workspace/source",
-    'say "automation"',
-    "text/plain; charset=utf-8",
-  );
+test("workspace automation stores revisions and returns compile and run results", async (context) => {
+  const isolatedServer = createPlaygroundServer();
+  const isolatedPort = await listen(isolatedServer);
+  context.after(async () => close(isolatedServer));
+  const view = (response: HttpResult) => {
+    // EVIDENCE: integration fixture: every workspace route returns this JSON shape; the test asserts each field it reads.
+    return JSON.parse(response.body) as {
+      source?: string;
+      sourceRevision: number;
+      resultRevision: number | null;
+      stale: boolean;
+      result: { status: string; events: { kind: string; text?: string }[] } | null;
+    };
+  };
+  const call = (method: string, path: string, body?: string) =>
+    api(
+      method,
+      path,
+      body,
+      body === undefined ? undefined : "text/plain; charset=utf-8",
+      isolatedPort,
+    );
+
+  const initial = await call("GET", "/api/workspace");
+  assert.equal(initial.status, 200);
+  const initialRevision = view(initial).sourceRevision;
+
+  const uploaded = await call("PUT", "/api/workspace/source", 'say "automation"');
   assert.equal(uploaded.status, 200);
-  // EVIDENCE: integration fixture: the successful workspace-source route returns this documented response shape.
-  const workspace = JSON.parse(uploaded.body) as {
-    source: string;
-    sourceRevision: number;
-    stale: boolean;
-  };
+  const workspace = view(uploaded);
   assert.equal(workspace.source, 'say "automation"');
+  assert.equal(workspace.sourceRevision, initialRevision + 1);
   assert.equal(workspace.stale, true);
-  const compiled = await api("POST", "/api/workspace/compile");
+  const compiled = await call("POST", "/api/workspace/compile");
   assert.equal(compiled.status, 200);
-  // EVIDENCE: integration fixture: the successful compile route returns a result status.
-  assert.equal(
-    (JSON.parse(compiled.body) as { result: { status: string } }).result.status,
-    "ready",
-  );
-  const run = await api("POST", "/api/workspace/run");
-  // EVIDENCE: integration fixture: the successful run route returns status and event records asserted below.
-  const runBody = JSON.parse(run.body) as {
-    result: { status: string; events: { kind: string }[] };
-  };
+  assert.equal(view(compiled).result?.status, "ready");
+  assert.equal(view(compiled).resultRevision, initialRevision + 1);
+  const run = await call("POST", "/api/workspace/run");
   assert.equal(run.status, 200);
-  assert.equal(runBody.result.status, "halted");
+  const runBody = view(run);
+  assert.equal(runBody.result?.status, "halted");
   assert.deepEqual(
-    runBody.result.events.map((event) => event.kind),
+    runBody.result?.events.map((event) => event.kind),
     ["say", "actionRequested", "complete"],
   );
-  const result = await api("GET", "/api/workspace/result");
+  assert.equal(runBody.result?.events[0]?.text, "automation");
+  const result = await call("GET", "/api/workspace/result");
   assert.equal(result.status, 200);
-  // EVIDENCE: integration fixture: the successful result route returns the stale flag asserted here.
-  assert.equal((JSON.parse(result.body) as { stale: boolean }).stale, false);
+  assert.equal(view(result).stale, false);
+  assert.equal(view(result).resultRevision, initialRevision + 1);
+
+  const edited = await call("PUT", "/api/workspace/source", 'say "edited"');
+  assert.equal(edited.status, 200);
+  assert.equal(view(edited).sourceRevision, initialRevision + 2);
+  const staleResult = view(await call("GET", "/api/workspace/result"));
+  assert.equal(staleResult.stale, true);
+  assert.equal(staleResult.result, null);
+
+  const recompiled = view(await call("POST", "/api/workspace/compile"));
+  assert.equal(recompiled.result?.status, "ready");
+  assert.equal(recompiled.resultRevision, initialRevision + 2);
+  assert.equal(view(await call("GET", "/api/workspace/result")).stale, false);
 });
 
 test("workspace automation accepts source beyond the former local byte limit", async () => {

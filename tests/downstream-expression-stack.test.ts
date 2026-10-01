@@ -57,11 +57,14 @@ test("downstream expression frames traverse each public stage and resume on a co
       assert.ok(rejected.errors[0].path.endsWith('.kind'));
       assert.ok(rejected.errors[1].path.endsWith('.name'));
       const grouped=external(valid);assert.equal(validateInstructionPlan(grouped).valid,true);
-      assert.equal(run(grouped,createFreshRuntimeSnapshot(grouped)).snapshot.status,'halted');
+      const groupedRun=run(grouped,createFreshRuntimeSnapshot(grouped));
+      assert.equal(groupedRun.snapshot.status,'halted');
+      assert.equal(groupedRun.snapshot.frames[0].bindings.find(binding=>binding.name==='result').value,1);
       // Static choice analysis consumes the same accepted arithmetic trees.
       const choice=compileSource('let selected=choose '+Array(depth).fill('1').join('+')+', 2\\nexit');
       assert.deepEqual(choice.diagnostics,[]);
       const waiting=run(choice.plan,createFreshRuntimeSnapshot(choice.plan));assert.equal(waiting.snapshot.status,'waiting');
+      assert.deepEqual(waiting.snapshot.foregroundAction.ui.options.map(option=>option.text),[String(depth),'2']);
       deserializeCheckpoint(serializeCheckpoint(createCheckpoint(choice.plan,waiting.snapshot)));
     }
     console.log('all downstream stages and resume passed');
@@ -86,18 +89,22 @@ test("expression continuations preserve short circuit, references, RNG, and user
       "let skipped = false and mark(true)",
       "let kept = true or mark(false)",
       'let output = [mark(1), {nested: mark(2) + mark(3)}, "x${mark(4)}"]',
-      "say order.length",
-      "say order[0]",
+      "for item in order { say item }",
       "say output[1].nested",
       "say output[2]",
+      "say values[0].value[0]",
+      "say values[1].value[0]",
       "exit",
     ].join("\n"),
     { scenarioName: "expression frames and prepared references", seed: 42 },
   );
   assert.deepEqual(
     result.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["5", "7", "5", "x4"],
+    ["7", "1", "2", "3", "4", "5", "x4", "7", "2"],
   );
+  // One xorshift32 (13, 17, 5) step moves seed 42 to 11355432, and 11355432 / 2^32 < 0.5 makes
+  // `values.random` select the first object, so exactly one draw leaves this state.
+  assert.equal(result.finalSnapshot.rng.state, 11_355_432);
 });
 
 test("compiler continuations unwind suspended parent cleanup on a child failure", () => {

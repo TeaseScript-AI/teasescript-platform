@@ -24,9 +24,7 @@ from pathlib import Path
 project_root = Path(sys.argv[1])
 setup_source = Path(sys.argv[2]).read_text()
 system_prompt = Path(sys.argv[3]).read_text()
-workspace_setup = (project_root / "bin/setup-workspace.sh").read_text()
 tiktoken_installer = (project_root / "bin/install-tiktoken-offline.sh").read_text()
-ts_morph_installer = (project_root / "bin/install-ts-morph-offline.sh").read_text()
 manifest = json.loads((project_root / "MANIFEST.json").read_text())
 
 SYSTEM_PROMPT_MAX_CHARACTERS = 8_000
@@ -54,25 +52,8 @@ for key, value in expected_manifest.items():
 if manifest.get("normalEntryPoint") != "bin/prepare-agent-workspace.sh":
     raise SystemExit("tools manifest lacks the normal workspace entrypoint")
 
-if "optional-tools" in ts_morph_installer or "dependencies/ts-morph" not in ts_morph_installer:
-    raise SystemExit("ts-morph installer does not use the final dependency path")
-if "if ((with_ts_morph))" in workspace_setup or "ts-morph=required" not in workspace_setup:
-    raise SystemExit("workspace setup still models ts-morph as optional")
-if "npm cache verify" not in workspace_setup or "if ((debug_verify))" not in workspace_setup:
-    raise SystemExit("complete npm-cache verification is not bounded to debug mode")
-if "--no-index" not in tiktoken_installer or "--only-binary=:all:" not in tiktoken_installer:
-    raise SystemExit("TikToken installer lacks strict offline binary-only installation")
-if "--check-environment" not in tiktoken_installer or "refresh the runtime archive" not in tiktoken_installer:
-    raise SystemExit("TikToken installer lacks the required compatibility diagnostic")
-for required_offline_detail in (
-    "TIKTOKEN_CACHE_DIR",
-    "fb374d419588a4632f3f557e76b4b70aebbca790",
-    'tiktoken.get_encoding("o200k_base")',
-):
-    if required_offline_detail not in tiktoken_installer:
-        raise SystemExit(
-            f"TikToken installer lacks standard offline tokenizer support: {required_offline_detail}"
-        )
+if 'tiktoken.get_encoding("o200k_base")' not in tiktoken_installer:
+    raise SystemExit("TikToken installer lacks standard offline tokenizer support")
 if "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d" not in tiktoken_installer:
     raise SystemExit("TikToken installer lacks the official o200k_base vocabulary digest")
 
@@ -188,16 +169,50 @@ fi
   exit 1
 }
 
+# Synthetic CPython: runs the installer's real host probe against controlled host facts and records
+# installation, verification and runner calls.
 cat > "$tmp/python3.13" <<'PYTHON'
 #!/usr/bin/env bash
 set -euo pipefail
+record() {
+  [[ -z ${PYTHON_CALLS-} ]] || printf '%s\n' "$*" >> "$PYTHON_CALLS"
+}
 if [[ ${1-} == -S && ${2-} == - ]]; then
-  cat >/dev/null
-  printf 'cpython 3.13.0 on linux x86_64\n'
+  exec python3 -S -c '
+import os, sys, types
+version = os.environ.get("FAKE_PYTHON_VERSION", "3.13.0")
+sys.version_info = (*(int(part) for part in version.split(".")), "final", 0)
+sys.version = version + " (synthetic)"
+sys.implementation = types.SimpleNamespace(name=os.environ.get("FAKE_PYTHON_IMPLEMENTATION", "cpython"))
+sys.platform = os.environ.get("FAKE_PYTHON_PLATFORM", "linux")
+machine = os.environ.get("FAKE_PYTHON_MACHINE", "x86_64")
+os.uname = lambda: types.SimpleNamespace(machine=machine)
+exec(compile(sys.stdin.read(), "<installer host probe>", "exec"))
+'
+fi
+if [[ ${1-} == --version ]]; then
+  printf 'Python %s\n' "${FAKE_PYTHON_VERSION:-3.13.0}"
   exit 0
 fi
 if [[ ${1-} == -m && ${2-} == pip && ${3-} == --version ]]; then
   printf 'pip 25.0 from synthetic\n'
+  exit 0
+fi
+if [[ ${1-} == -m && ${2-} == pip && ${3-} == install ]]; then
+  record "$@"
+  while (($#)); do
+    [[ $1 != --target ]] || mkdir -p "$2"
+    shift
+  done
+  exit 0
+fi
+if [[ ${1-} == - ]]; then
+  cat >/dev/null
+  record "verify ${2-} ${3-} cache=${TIKTOKEN_CACHE_DIR-}"
+  exit 0
+fi
+if [[ ${1-} == runner-probe ]]; then
+  record "runner cache=${TIKTOKEN_CACHE_DIR-} tokenizer=${TEASESCRIPT_O200K_TOKENIZER-} path=${PYTHONPATH-}"
   exit 0
 fi
 printf 'unexpected synthetic Python invocation: %q\n' "$*" >&2
@@ -374,6 +389,172 @@ PYTHON_BIN="$tmp/python3.13" bash "$release/setup-chatgpt-project-agent.sh" \
   --target "$install" --replace >/dev/null
 [[ ! -e "$install/existing-marker" && -x "$install/bin/prepare-agent-workspace.sh" ]] || {
   printf 'test-chatgpt-project-agent: FAIL: successful replacement did not install the complete tree\n' >&2
+  exit 1
+}
+
+workspace_repo() {
+  local repo="$tmp/workspace-$1"
+  git init -q "$repo"
+  printf '{}\n' > "$repo/package.json"
+  printf '{}\n' > "$repo/package-lock.json"
+  printf '%s\n' "$repo"
+}
+
+# Run the installed setup-workspace.sh with recording npm/Node and a recording TikToken installer.
+workspace_bundle="$tmp/workspace-bundle"
+cp -a "$install" "$workspace_bundle"
+setup_workspace="$workspace_bundle/bin/setup-workspace.sh"
+setup_calls="$tmp/setup-calls"
+node_bin="$workspace_bundle/runtime/node-v24.18.0-linux-x64/bin"
+# Resolve the real executable first: a version-manager shim on PATH can loop once setup prepends node_bin.
+real_node=$(node -p 'process.execPath')
+cat > "$node_bin/node" <<NODE
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ \${1-} == --version ]]; then
+  printf 'v24.18.0\\n'
+  exit 0
+fi
+exec $(printf '%q' "$real_node") "\$@"
+NODE
+cat > "$node_bin/npm" <<'NPM'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'npm %s @%s cache=%s\n' "$*" "$PWD" "${npm_config_cache-}" >> "$CALLS"
+if [[ ${1-} == ci && -n ${FAKE_TS_MORPH_VERSION-} ]]; then
+  mkdir -p node_modules/ts-morph
+  printf '{"version":"%s"}\n' "$FAKE_TS_MORPH_VERSION" > node_modules/ts-morph/package.json
+fi
+NPM
+cat > "$workspace_bundle/bin/install-tiktoken-offline.sh" <<'STUB'
+#!/usr/bin/env bash
+printf 'tiktoken %s\n' "$*" >> "$CALLS"
+exit "${FAKE_TIKTOKEN_STATUS:-0}"
+STUB
+chmod +x "$node_bin/node" "$node_bin/npm" "$workspace_bundle/bin/install-tiktoken-offline.sh"
+
+run_setup() {
+  local repo=$1
+  shift
+  : > "$setup_calls"
+  (cd "$repo" && env CALLS="$setup_calls" "$@" >/dev/null 2>&1)
+}
+
+repo=$(workspace_repo normal)
+run_setup "$repo" FAKE_TS_MORPH_VERSION=28.0.0 bash "$setup_workspace" "$repo"
+npm_ci="npm ci --offline --no-audit --no-fund @$repo cache=$repo/.git/teasescript-agent/npm-cache"
+[[ "$(cat "$setup_calls")" == "$npm_ci"$'\n'"tiktoken $repo" ]] || {
+  printf 'test-chatgpt-project-agent: FAIL: normal setup did not run exactly the required offline operations\n' >&2
+  exit 1
+}
+
+repo=$(workspace_repo debug)
+run_setup "$repo" FAKE_TS_MORPH_VERSION=28.0.0 bash "$setup_workspace" --debug-verify-bootstrap "$repo"
+npm_ci="npm ci --offline --no-audit --no-fund @$repo cache=$repo/.git/teasescript-agent/npm-cache"
+npm_verify="npm cache verify @$repo cache=$repo/.git/teasescript-agent/npm-cache"
+[[ "$(cat "$setup_calls")" == "$npm_verify"$'\n'"$npm_ci"$'\n'"tiktoken $repo" ]] || {
+  printf 'test-chatgpt-project-agent: FAIL: debug setup did not verify the npm cache before installation\n' >&2
+  exit 1
+}
+
+# Without ts-morph the bundled fallback must run; its failure is fatal before TikToken.
+repo=$(workspace_repo missing-ts-morph)
+set +e
+run_setup "$repo" bash "$setup_workspace" "$repo"
+status=$?
+set -e
+[[ $status != 0 ]] &&
+  grep -F -- '--offline --ignore-scripts' "$setup_calls" |
+  grep -F "$workspace_bundle/dependencies/ts-morph/packages/ts-morph-28.0.0.tgz" >/dev/null &&
+  ! grep -q '^tiktoken' "$setup_calls" || {
+  printf 'test-chatgpt-project-agent: FAIL: missing ts-morph did not run the bundled fallback fatally\n' >&2
+  exit 1
+}
+
+repo=$(workspace_repo tiktoken-failure)
+set +e
+run_setup "$repo" FAKE_TS_MORPH_VERSION=28.0.0 FAKE_TIKTOKEN_STATUS=9 bash "$setup_workspace" "$repo"
+status=$?
+set -e
+[[ $status != 0 ]] || {
+  printf 'test-chatgpt-project-agent: FAIL: TikToken installation failure was not fatal\n' >&2
+  exit 1
+}
+
+# Run the installed TikToken installer with the recording interpreter.
+tiktoken_installer="$install/bin/install-tiktoken-offline.sh"
+tiktoken_payload="$install/dependencies/tiktoken-cp313-linux-x86_64"
+vocabulary="$tiktoken_payload/tokenizer/o200k_base.tiktoken"
+python_calls="$tmp/python-calls"
+# Fixture only: report the official o200k_base digest for the synthetic vocabulary bytes so the
+# successful path can run; the bad-vocabulary case below uses the real sha256sum.
+official_digest_bin="$tmp/official-digest-bin"
+mkdir -p "$official_digest_bin"
+cat > "$official_digest_bin/sha256sum" <<SHIM
+#!/usr/bin/env bash
+if [[ \$# == 1 ]] && cmp -s -- "\$1" $(printf '%q' "$vocabulary"); then
+  printf '%s  %s\\n' 446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d "\$1"
+  exit 0
+fi
+exec $(printf '%q' "$(command -v sha256sum)") "\$@"
+SHIM
+chmod +x "$official_digest_bin/sha256sum"
+
+run_tiktoken() {
+  : > "$python_calls"
+  env PYTHON_BIN="$tmp/python3.13" PYTHON_CALLS="$python_calls" "$@" \
+    bash "$tiktoken_installer" "$repo" >/dev/null 2>&1
+}
+
+# Each row breaks one host fact checked by the installer's own probe.
+for host in FAKE_PYTHON_VERSION=3.12.0 FAKE_PYTHON_IMPLEMENTATION=pypy \
+  FAKE_PYTHON_PLATFORM=darwin FAKE_PYTHON_MACHINE=aarch64; do
+  repo=$(workspace_repo "tiktoken-incompatible-${host%%=*}")
+  set +e
+  run_tiktoken PATH="$official_digest_bin:$PATH" "$host"
+  status=$?
+  set -e
+  [[ $status != 0 && ! -s "$python_calls" && ! -e "$repo/.git/teasescript-agent" ]] || {
+    printf 'test-chatgpt-project-agent: FAIL: incompatible host Python (%s) reached installation\n' "$host" >&2
+    exit 1
+  }
+done
+
+repo=$(workspace_repo tiktoken-bad-vocabulary)
+state="$repo/.git/teasescript-agent"
+set +e
+run_tiktoken
+status=$?
+set -e
+[[ $status != 0 && ! -s "$python_calls" && ! -e "$state/tiktoken-cache" && ! -e "$state/python-cp313" &&
+  ! -e "$state/run-python313" ]] || {
+  printf 'test-chatgpt-project-agent: FAIL: unofficial tokenizer vocabulary was accepted\n' >&2
+  exit 1
+}
+
+repo=$(workspace_repo tiktoken)
+state="$repo/.git/teasescript-agent"
+run_tiktoken PATH="$official_digest_bin:$PATH"
+pip_install=$(grep '^-m pip install ' "$python_calls")
+for required in --no-index --only-binary=:all: "--find-links $tiktoken_payload/wheels" tiktoken==0.13.0; do
+  [[ " $pip_install " == *" $required "* ]] || {
+    printf 'test-chatgpt-project-agent: FAIL: TikToken pip installation lacks %s\n' "$required" >&2
+    exit 1
+  }
+done
+# TikToken caches a vocabulary under the SHA-1 of its source URL.
+cache_key=$(printf '%s' https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken | sha1sum)
+cache_key=${cache_key%% *}
+cmp -s "$vocabulary" "$state/tiktoken-cache/$cache_key" &&
+  grep -Fx "verify $vocabulary 446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d cache=$state/tiktoken-cache" \
+    "$python_calls" >/dev/null || {
+  printf 'test-chatgpt-project-agent: FAIL: TikToken cache was not prepared and verified offline\n' >&2
+  exit 1
+}
+: > "$python_calls"
+env -u PYTHONPATH PYTHON_CALLS="$python_calls" "$state/run-python313" runner-probe
+[[ "$(cat "$python_calls")" == "runner cache=$state/tiktoken-cache tokenizer=$vocabulary path=$state/python-cp313" ]] || {
+  printf 'test-chatgpt-project-agent: FAIL: generated Python runner lacks the offline TikToken environment\n' >&2
   exit 1
 }
 

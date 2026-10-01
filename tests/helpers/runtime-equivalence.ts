@@ -68,9 +68,8 @@ export function assertRuntimeResumeEquivalent(
     `${scenario}: compiled plan must validate: ${formatValidationErrors(initialPlanValidation.errors)}`,
   );
 
-  const initial = createImmediatePacingRuntimeSnapshot(plan, {
-    seed: options.seed ?? DEFAULT_EQUIVALENCE_SEED,
-  });
+  const seed = options.seed ?? DEFAULT_EQUIVALENCE_SEED;
+  const initial = createImmediatePacingRuntimeSnapshot(plan, { seed });
   const initialSnapshotValidation = validateRuntimeSnapshot(initial, plan);
   assert.equal(
     initialSnapshotValidation.valid,
@@ -93,9 +92,17 @@ export function assertRuntimeResumeEquivalent(
   );
   assertMonotonicEventSequences(uninterrupted.events, `${scenario}: uninterrupted execution`);
 
+  // The stepping pass starts from its own fresh snapshot, so a baseline that mutated its input cannot hide boundaries.
+  const steppingInitial = createImmediatePacingRuntimeSnapshot(plan, { seed });
+  assert.deepEqual(
+    initial,
+    steppingInitial,
+    `${scenario}: uninterrupted execution must not change its initial snapshot`,
+  );
+
   const boundaries: RuntimeSnapshot[] = [];
   const accumulatedEvents: InterpreterEvent[] = [];
-  let boundarySnapshot = initial;
+  let boundarySnapshot = steppingInitial;
   let boundary = 0;
 
   while (boundarySnapshot.status !== "halted" && boundarySnapshot.status !== "failed") {
@@ -179,6 +186,10 @@ export function assertRuntimeResumeEquivalent(
 
     boundaries.push(boundarySnapshot);
   }
+  assert.ok(
+    plan.instructions.length === 0 || boundaries.length > 0,
+    `${scenario}: a nonempty plan must exercise at least one checkpoint boundary`,
+  );
 
   return Object.freeze({
     boundaries: Object.freeze([...boundaries]),
