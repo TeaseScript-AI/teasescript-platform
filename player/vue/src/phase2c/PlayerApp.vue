@@ -47,8 +47,12 @@ const contrast = computed({
   get: () => themeIntent.value.contrast,
   set: (value) => (themeIntent.value = { ...themeIntent.value, contrast: value }),
 });
+// Sync both ways: Settings and Theme Lab edit the intent; another tab edits storage.
 contrast.value = storedContrast.value;
 watch(contrast, (value) => (storedContrast.value = value));
+watch(storedContrast, (value) => {
+  if (contrast.value !== value) contrast.value = value;
+});
 const titlebarOption = usePlayerPreference("phase2c-titlebar-variant", ["left", "overlap"], "left");
 function toggleThemeMode() {
   themeIntent.value = {

@@ -21,7 +21,11 @@ function layout() {
   const railElement = rail.value;
   const playerElement = player.value;
   if (!railElement || !playerElement) return;
-  const columnRight = column.value?.getBoundingClientRect().right ?? -Infinity;
+  // The reading column includes its scrollbar gutter, which equals the conversation inset.
+  const columnRight = column.value
+    ? column.value.getBoundingClientRect().right +
+      (Number.parseFloat(getComputedStyle(column.value).getPropertyValue("--conversation-inline-inset")) || 0)
+    : -Infinity;
   fullHeight.value = columnRight <= railElement.getBoundingClientRect().left;
   const paneElement = pane.value?.$el as HTMLElement | undefined;
   if (!paneElement || !group.value) return;
@@ -89,6 +93,8 @@ useResizeObserver(
 .stage-right-rail[data-rail-extent="stage"] {
   bottom: auto;
   block-size: var(--stage-height);
+  /* Like the Stage itself, the fallback never spills over the conversation. */
+  overflow: clip;
 }
 
 .stage-right-rail[data-has-controls] {

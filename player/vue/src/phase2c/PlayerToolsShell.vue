@@ -803,7 +803,11 @@ async function updateSidebarVisibility(open: boolean) {
                       <Settings />
                     </MenuSidebarButton>
                   </DialogTrigger>
-                  <DialogContent data-tools-context @close-auto-focus="closeSettingsFocus">
+                  <DialogContent
+                    data-tools-context
+                    data-player-settings
+                    @close-auto-focus="closeSettingsFocus"
+                  >
                     <DialogHeader>
                       <DialogTitle>Player Settings</DialogTitle>
                       <DialogDescription>Preferences for the Player interface.</DialogDescription>

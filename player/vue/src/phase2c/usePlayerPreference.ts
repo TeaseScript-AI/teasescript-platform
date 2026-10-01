@@ -11,14 +11,19 @@ function browserStorage(): Storage | undefined {
 }
 
 // Player Settings are browser-local presentation preferences, not canonical runtime state.
-// Stored text is external input: an unknown value falls back to the default.
+// Stored text is external input, including writes from other tabs: every read maps an
+// unknown value to the default.
 export function usePlayerPreference<T extends string>(
   key: string,
   allowed: readonly T[],
   fallback: T,
 ): Ref<T> {
   const storage = browserStorage();
-  const value: Ref<T> = storage ? useStorage<T>(key, fallback, storage) : shallowRef(fallback);
-  if (!allowed.includes(value.value)) value.value = fallback;
-  return value;
+  if (!storage) return shallowRef(fallback);
+  return useStorage<T>(key, fallback, storage, {
+    serializer: {
+      read: (raw) => allowed.find((value) => value === raw) ?? fallback,
+      write: (value) => value,
+    },
+  });
 }

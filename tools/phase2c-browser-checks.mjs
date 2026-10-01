@@ -2066,18 +2066,19 @@ async function focusOffsetChecks(page) {
     await button.scrollIntoViewIfNeeded();
     const resting = await button.evaluate((el) => getComputedStyle(el).boxShadow);
     await page.evaluate(() => (document.documentElement.dataset.playerKeyboardFocus = "true"));
-    await button.evaluate((el) => el.focus({ focusVisible: true }));
-    // Settled styles: the outline must not animate in.
-    await page.waitForTimeout(250);
+    // Read styles in the same task as focus: an animated outline would still show its start value.
     const focused = await button.evaluate((el) => {
+      el.focus({ focusVisible: true });
       const style = getComputedStyle(el);
       return { width: style.outlineWidth, offset: style.outlineOffset, shadow: style.boxShadow };
     });
     // Owner decision: a 2px outline with 2px separation.
     if (focused.width !== "2px" || focused.offset !== "2px")
       throw new Error(`${label}: focus outline ${JSON.stringify(focused)}`);
-    // Only the outline marks focus; a component ring would fill the separation.
-    if (focused.shadow !== resting) throw new Error(`${label}: focus adds a box-shadow ring`);
+    // Only the outline marks focus; a component ring, once settled, would fill the separation.
+    await page.waitForTimeout(250);
+    const settledShadow = await button.evaluate((el) => getComputedStyle(el).boxShadow);
+    if (settledShadow !== resting) throw new Error(`${label}: focus adds a box-shadow ring`);
     await button.evaluate((el) => el.blur());
   }
   return "PASS focus outline is 2px wide with 2px separation and adds no ring";
@@ -2100,7 +2101,8 @@ async function backgroundControlPlacementChecks(page) {
         centreOffset: (group.top + group.bottom) / 2 - (player.top + player.height / 2),
         timerBottom: box(rail.querySelector(".stage-right-rail-timers")).bottom,
         railBottom: box(rail).bottom,
-        columnRight: box(document.querySelector("[data-conversation-overlay]")).right,
+        // The reading column plus its 8px scrollbar gutter.
+        columnRight: box(document.querySelector("[data-conversation-overlay]")).right + 8,
         railLeft: box(rail).left,
         scrolls: viewport.scrollHeight > viewport.clientHeight,
       };
@@ -2116,6 +2118,14 @@ async function backgroundControlPlacementChecks(page) {
   let state = await settle(1440, 900);
   if (state.extent !== "player" || Math.abs(state.centreOffset) > 1)
     throw new Error(`Group is not viewport-centred: ${JSON.stringify(state)}`);
+  // Near the threshold the full-height rail must also leave the transcript scrollbar gutter free.
+  for (const width of [1200, 1216, 1240, 1280]) {
+    state = await settle(width, 900);
+    if (state.extent === "player" && state.railLeft < state.columnRight)
+      throw new Error(
+        `Full-height rail covers the reading column at ${width}px: ${JSON.stringify(state)}`,
+      );
+  }
   // Shift only as needed to stay clear of the timer and inside the Player.
   state = await settle(1440, 420);
   if (state.top < state.timerBottom - 1 || state.bottom > state.railBottom + 1 || state.scrolls)
@@ -2128,6 +2138,23 @@ async function backgroundControlPlacementChecks(page) {
   state = await settle(800, 900);
   if (state.extent !== "stage" || state.columnRight <= state.railLeft)
     throw new Error(`Narrow layout must keep the Stage fallback: ${JSON.stringify(state)}`);
+  // A minimal Stage clips the fallback rail instead of letting the timer cover the transcript.
+  await settle(390, 430);
+  await page.getByRole("separator", { name: "Resize media and conversation" }).focus();
+  for (let step = 0; step < 20; step++) await page.keyboard.press("ArrowUp");
+  await page.waitForTimeout(300);
+  const covered = await page.evaluate(() => {
+    const stage = document.querySelector(".player-stage").getBoundingClientRect();
+    const rail = document.querySelector(".stage-right-rail").getBoundingClientRect();
+    const hits = [];
+    for (let y = stage.bottom + 4; y < stage.bottom + 80; y += 12)
+      hits.push(
+        !!document.elementFromPoint(rail.left + rail.width / 2, y)?.closest(".stage-right-rail"),
+      );
+    return { stageBottom: stage.bottom, railBottom: rail.bottom, hits };
+  });
+  if (covered.railBottom > covered.stageBottom + 1 || covered.hits.some(Boolean))
+    throw new Error(`Stage fallback rail spills over the conversation: ${JSON.stringify(covered)}`);
   await page.setViewportSize({ width: 1440, height: 900 });
   return "PASS background controls centre on the viewport, shift, scroll and keep the narrow Stage fallback";
 }
@@ -2206,11 +2233,55 @@ async function playerSettingsChecks(page) {
   )
     throw new Error("Invalid stored Player Settings did not fall back to the defaults");
   await closeSettings();
+  // Another tab's write arrives as a storage event; it must apply and stay validated.
+  const otherTab = (key, value) =>
+    page.evaluate(
+      ([key, value]) => {
+        localStorage.setItem(key, value);
+        window.dispatchEvent(
+          new StorageEvent("storage", { key, newValue: value, storageArea: localStorage }),
+        );
+      },
+      [key, value],
+    );
+  const beforeTab = await secondaryText();
+  await otherTab("phase2c-player-contrast", "high");
+  await page.waitForFunction(
+    (before) =>
+      document.documentElement.style.getPropertyValue("--theme-text-secondary") !== before,
+    beforeTab,
+  );
+  await otherTab("phase2c-titlebar-variant", "bogus");
+  await otherTab("phase2c-menu-label-mode", "bogus");
+  await openSettings();
+  if (
+    (await contrast.inputValue()) !== "high" ||
+    !(await page.getByRole("radio", { name: "A · Always visible, controls left" }).isChecked()) ||
+    (await page.locator('[data-tools-focus="label-mode"]').inputValue()) !== "icons"
+  )
+    throw new Error("Storage events did not apply validated Player Settings");
+  await closeSettings();
+
+  // A very short screen keeps the whole dialog reachable inside the viewport.
+  await page.setViewportSize({ width: 390, height: 260 });
+  await page.waitForTimeout(300);
+  // Focus returned from Settings keeps the narrow drawer open; otherwise open it.
+  const showSidebar = page.getByRole("button", { name: "Show sidebar", exact: true });
+  if (await showSidebar.isVisible()) await showSidebar.click();
+  await openSettings();
+  const dialog = page.getByRole("dialog", { name: "Player Settings" });
+  const bounds = await dialog.boundingBox();
+  if (bounds.y < 0 || bounds.y + bounds.height > 261)
+    throw new Error(`Player Settings exceeds a short viewport: ${JSON.stringify(bounds)}`);
+  await page.getByRole("radio", { name: "B · Auto-hide, controls right" }).check();
+  await closeSettings();
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(() => {
     localStorage.removeItem("phase2c-player-contrast");
     localStorage.removeItem("phase2c-titlebar-variant");
+    localStorage.setItem("phase2c-menu-label-mode", "icons");
   });
-  return "PASS Player Settings contrast and title-bar A/B apply, persist and validate stored values";
+  return "PASS Player Settings apply, persist, validate stored and cross-tab values, and fit short screens";
 }
 
 async function composerMouseFocusChecks(page) {

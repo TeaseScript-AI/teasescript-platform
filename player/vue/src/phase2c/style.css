@@ -439,3 +439,9 @@ html:fullscreen { background: var(--background); }
   inset: 0 0 0 auto;
   width: var(--player-resize-rail-size);
 }
+
+/* Player Settings stays reachable on very short screens: the dialog scrolls inside the viewport. */
+[data-player-settings] {
+  max-block-size: calc(100dvh - 2rem);
+  overflow-y: auto;
+}
