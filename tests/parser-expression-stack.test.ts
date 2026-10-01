@@ -165,7 +165,7 @@ test("nested malformed expressions retain root diagnostics, spans, and statement
     },
     {
       expression: "choose first:choose second:",
-      diagnostics: [["TSP030", 39, 39]],
+      diagnostics: [["TSP030", 40, 40]],
       statements: ["letStatement", "exitStatement"],
     },
     {

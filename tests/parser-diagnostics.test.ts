@@ -41,7 +41,7 @@ test("reports missing property names, colons, and strings at bounded lines", () 
   assert.deepEqual(compactDiagnostics(result), [
     ["TSP004", "error", [15, 1, 0, 15, 1, 0]],
     ["TSP005", "error", [39, 2, 12, 39, 2, 12]],
-    ["TSP006", "error", [56, 3, 6, 56, 3, 6]],
+    ["TSP006", "error", [57, 4, 0, 57, 4, 0]],
   ]);
   assert.deepEqual(statementKinds(result), ["speakerDeclaration", "exitStatement"]);
 });

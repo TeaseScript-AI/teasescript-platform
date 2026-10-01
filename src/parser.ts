@@ -403,6 +403,7 @@ class Parser {
       this.#synchronizeProperty();
       return null;
     }
+    this.#skipContinuationNewlines();
     const value = this.#parseExpression();
     if (value === null) {
       this.#reportInsertion(
@@ -2104,6 +2105,7 @@ class Parser {
       if (label !== null) {
         this.#advance();
         colonSpan = copySpan(this.#previous().span);
+        this.#skipContinuationNewlines();
       }
       const value = yield* parseChild(this.#parseOr());
       if (value === null) {
@@ -2136,6 +2138,7 @@ class Parser {
       if (separatorSpan === null) {
         if (
           !this.#isInteractionChoiceTerminator() &&
+          !this.#recoveredAtStatementBoundary &&
           !(this.#inCuePosition && this.#check(TokenKind.LeftBrace))
         ) {
           if (this.#check(TokenKind.KeywordAs)) {

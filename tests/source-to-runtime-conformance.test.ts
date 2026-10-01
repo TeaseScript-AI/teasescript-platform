@@ -90,6 +90,24 @@ test("executes source output, speaker provenance, collection copies, and control
   assert.equal(rootBinding(result.snapshot.frames[0]?.bindings ?? [], "total"), 4);
 });
 
+test("a speaker property continued after ':' runs like the single-line property", () => {
+  const speakers = [
+    'speaker vera { displayName: "Vera" }',
+    'speaker vera {\n    displayName:\n        "Vera"\n}',
+  ];
+  for (const declaration of speakers) {
+    const plan = compiled(`${declaration}\nsay as vera "Hi"`);
+    const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { seed: 7 }));
+    assert.equal(result.snapshot.status, "halted");
+    assert.deepEqual(
+      result.events
+        .filter((event) => event.kind === "say")
+        .map((event) => [event.text, event.speaker?.identifier, event.speaker?.displayName]),
+      [["Hi", "vera", "Vera"]],
+    );
+  }
+});
+
 test("executes explicit block newlines, dedent, escapes, and interpolation without text loss", () => {
   const plan = compiled(
     [
