@@ -155,7 +155,7 @@ test("allows the unapproved timer names as ordinary identifiers", () => {
 });
 
 test("does not treat deferred protected engine names as implemented built-ins", () => {
-  const result = compileSource("wait()\ngetDate()\nshowImage()");
+  const result = compileSource("wait()\ngetDate()\nshowBlur()");
 
   assert.equal(result.plan, null);
   assert.deepEqual(

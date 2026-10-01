@@ -207,6 +207,12 @@ checkpoint restore. Accepted forms and current limits are defined in specificati
 [§27](specifications/accepted-syntaxes-v30.md#27-timers) and
 [§35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-unix-time).
 
+Implemented media includes the persistent Stage image (`showImage`, `hideImage`), blocking and asynchronous
+`playAudio`/`playVideo` with playback ranges, repetition, volume, handles, seeks, timeline cues, the self-handle binding,
+and checkpoint restore. Player load and progress reports drive playback state; browser integration is tracked in #446
+and browser video playback is not implemented. Accepted forms are defined in specification
+[§22](specifications/accepted-syntaxes-v30.md#22-stage-image-audio-and-video).
+
 The current function subset includes:
 
 - top-level function declarations;

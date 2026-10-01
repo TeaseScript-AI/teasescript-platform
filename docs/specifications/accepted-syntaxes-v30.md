@@ -26,7 +26,7 @@ This table is generated from the current section order.
 - [19. Choices](#19-choices)
 - [20. Input functions](#20-input-functions)
 - [21. Blocking button](#21-blocking-button)
-- [22. Foreground and background media](#22-foreground-and-background-media)
+- [22. Stage image, audio, and video](#22-stage-image-audio-and-video)
 - [23. Loops](#23-loops)
 - [24. Comments](#24-comments)
 - [25. Persistent storage and keys](#25-persistent-storage-and-keys)
@@ -122,12 +122,10 @@ let result = calculateDamage(
     weapon
 )
 
-showImage(
-    image: photo,
-    x: 50,
-    y: 50,
-    width: 80,
-    duration: 10 seconds
+let music = playAudio(
+    file: "music/track.mp3",
+    async: true,
+    volume: 0.5
 )
 
 let toy = {
@@ -148,7 +146,7 @@ The same calls and objects may remain on one line:
 
 ```text
 let result = calculateDamage(player, weapon)
-showImage(image: photo, x: 50, y: 50, width: 80, duration: 10 seconds)
+let music = playAudio(file: "music/track.mp3", async: true, volume: 0.5)
 let toy = { type: "buttPlug", name: "Black plug", diameter: 4 cm }
 ```
 
@@ -682,7 +680,7 @@ say "Text with ${playerName}"
 say message
 say greetings
 wait 2
-playSound "door.mp3"
+playAudio "door.mp3"
 ```
 
 For `say`, an eligible list expression selects one random text value. Other commands do not gain this behavior unless their API explicitly defines the argument as a visible-text field.
@@ -756,7 +754,7 @@ With explicit parameter types and defaults:
 
 ```text
 function playClip(file: string, volume: number = 1) {
-    playSound file
+    playAudio(file: file, volume: volume)
 }
 ```
 
@@ -1629,68 +1627,179 @@ Rules:
 - When the timeout is reached, the returned value equals the timeout.
 - `showButton` belongs to the core language/runtime API, not specifically to the browser-picker API.
 
-## 22. Foreground and background media
-**Status:** Accepted
+## 22. Stage image, audio, and video
+**Status:** Accepted (Owner decisions on [#445](https://github.com/TeaseScript-AI/teasescript-platform/issues/445)). The
+parser, compiler, deterministic runtime, and checkpoint foundation for image, audio, and video is implemented; Player
+image and audio integration is tracked in #446, and browser video playback is planned.
 
-Foreground media:
-
-```text
-playSound "sounds/bell.mp3"
-playVideo "videos/scene.mp4"
-```
-
-Rules:
-
-- `playSound` waits until the sound finishes.
-- `playVideo` waits until the video finishes.
-- Only one video may be active at a time.
-- Starting a new video automatically stops the currently active video.
-- A video identifier is therefore not needed.
-
-Video control:
+### Stage image
 
 ```text
-stopVideo()
+showImage "images/room.jpg"
+hideImage
+showImage photo            // a file reference string, or null
 ```
 
-Background audio continues while the script proceeds and returns an identifier because multiple sounds may play at once:
+`showImage` sets the persistent Stage image; it stays until the next `showImage` or `hideImage`. `hideImage` takes no
+arguments and clears the Stage. `showImage null` also clears the Stage and reports developer warning `TSW011`
+([§34](#34-runtime-warnings-and-recoverable-values)). Both use command syntax only.
+
+### Audio and video
 
 ```text
-let soundId = playBackgroundSound("sounds/ambient.mp3")
+playAudio "sounds/bell.mp3"                         // waits until the sound ends
+playAudio async "sounds/door-creak.mp3"             // plays alongside; the script continues
+let music = playAudio async repeat "music/beat.mp3" // keeps a handle
+playVideo "videos/instructions.mp4"
+let fire = playVideo async repeat "videos/fireplace.mp4"
 ```
 
-Stop one specific background sound:
+`playAudio|playVideo [async] [repeat] <file> [{ block }]`: `async` and `repeat` are recognized only directly after the
+command; write `playAudio (async)` to use a variable of that name.
+
+- Plain media is blocking: the script continues when playback finishes, is stopped, or cannot play. Blocking media
+  returns no value; using it as a value is a compile error.
+- `async` media continues once the Player has reported the load result and evaluates to an opaque handle that may be
+  ignored; after a successful load its duration is known.
+- Several audio sources may play at once. The Stage shows one video at a time over the Stage image: a new `playVideo`,
+  `showImage`, or `hideImage` stops an active video (`stopped`, without `finish`), and the Stage image is visible again
+  when the video ends.
+
+The named form carries less common options:
 
 ```text
-stopBackgroundSound(soundId)
+let music = playAudio(
+    file: "music/track.mp3",
+    async: true,
+    repeat: true,
+    startAt: 2 min,
+    endAt: 8 min,
+    volume: 0.5
+)
 ```
 
-### Image layers
+`file` is required and evaluates to a reference string or `null`; `async` is the literal `true` or `false`. `startAt`,
+`endAt`, `at`, and `beforeEnd` accept non-negative durations or numbers of seconds. `startAt` and `endAt` default to the
+start and end of the file and define the active playback range; a supplied `endAt` must be later than `startAt`, and
+the effective end is limited to the source duration. `volume` is a number from `0` through `1` and defaults to `1`.
+Arguments evaluate in source order, followed by the cue positions in block order.
 
-The visual player has three distinct image roles. The names describe visual purpose rather than file format:
+Repeat:
+
+- `repeat` (short form) and `repeat: true` repeat the active range until the media is stopped or replaced;
+- `repeat: 3 times` plays three passes in total;
+- `repeat: 60 s` repeats for 60 seconds of active playback and may end mid-pass;
+- `repeat: false`, or no repeat, plays one pass.
+
+A count is a whole number of at least one and a duration is greater than zero. A plain number such as `repeat: 3` is
+an error; write `3 times` or a duration. Blocking media may use a count or a duration but not indefinite repetition.
+
+On the ordinary story path, `showImage`, `hideImage`, `playAudio`, `playVideo`, and statement-level media handle
+operations such as `music.pause()` or `music.position = 2 min` wait until the previous message's pacing has completed or
+been skipped, like a following `say`. `wait` and `timer` keep overlapping message pacing
+([§27](#27-timers)). Timer and cue blocks keep the canonical interrupt pacing and add no media wait.
+
+### Media handles
+
+```text
+music.pause()
+music.resume()
+music.stop()
+music.position = 2 min
+music.position += 5 s
+music.remaining = 10 s
+music.volume = 0.5
+if music.state == "running" { ... }
+say "${music.elapsed} of ${music.duration}"
+```
+
+- `position` is the playhead in the source; `remaining` is the time to the effective end of the current pass;
+  `duration` is the source duration; `elapsed` is the active playback time since the start across all passes, excluding
+  pauses and Player stalls; `volume` is the script volume.
+- Assignable properties are `position` and `remaining` (`=`, `+=`, `-=`, with durations) and `volume`. `duration`,
+  `elapsed`, and `state` are read-only. Media that could not be loaded reads `null` for `duration` and `remaining`.
+- `state` is `running`, `paused`, `finished`, or `stopped`. Idempotent calls, other operations on settled media, and
+  developer warning `TSW010` follow the timer handle rules.
+- An assignment to `position` or `remaining` is a seek. It is clamped to the active range and does not fire cues it
+  jumps across; a cue exactly at a new position before the end fires once playback proceeds from it. A seek to the end
+  of the range fires the cues there and completes the current pass at once, like a timer's `remaining = 0`, also while
+  paused, where the next pass stays paused. Seeks do not change `elapsed`.
+- After media finishes or stops, `position` and `elapsed` keep their final values; `remaining` is zero if the source
+  loaded and `null` otherwise.
+
+### Cues
+
+```text
+let music = playAudio async "music.mp3" {
+    at 30 s {
+        say "Thirty seconds."
+    }
+    beforeEnd 10 s {
+        say "Ten seconds left."
+    }
+    finish {
+        say "Finished."
+    }
+}
+
+playAudio async repeat "music/beat.mp3" {
+    say "Again."          // runs at the end of every pass
+}
+```
+
+- A block after a play command holds either ordinary statements or cue declarations. An ordinary block runs at the end
+  of every pass, like `beforeEnd 0 s`; it is not `finish`. `at`, `beforeEnd`, and `finish` are cue words only at the top
+  level of such a block. A cue position is an ordinary expression and may continue across lines as described in
+  [Statement termination](#1-statement-termination); its `{` follows the position on the same logical line.
+- `at <position>` is an absolute position in the source; `beforeEnd <offset>` is measured back from the effective end.
+  Both run on every natural passage through their point, including repeated passes. A cue outside the active range never
+  runs and reports developer warning `TSW012`.
+- `finish` runs once after the whole invocation finishes naturally, after the last pass or when a repeat duration ends.
+  It never runs after `stop()`, replacement, or a load failure, so it is a compile error on media that repeats
+  indefinitely. A block may declare `finish` at most once.
+- Blocks are allowed for blocking and async media. They run one at a time through the timer interrupt queue with the
+  same interruption and resumption rules as [timer expiry blocks](#expiry-blocks); cues due at the same point run in
+  source order. Media keeps playing while a block runs unless the block controls it. `stop()` cancels queued blocks of
+  that media that have not started.
+- A block sees top-level names and its own locals, not the locals of the code that started the media. In
+  `let NAME = playAudio async ... { ... }` every block also sees `NAME` as its own handle, including inside a function.
+  This narrow self-handle binding is not general closure capture, which is tracked by #449.
+
+### Failures, cleanup, and restore
+
+- When the Player cannot load a source, or the source leaves an empty playback range, the runtime reports developer
+  warning `TSW013`, the media becomes `stopped` without cues or `finish`, and the script continues. A `null` file plays
+  nothing, continues at once, and reports `TSW011`.
+- `exit` and the end of the script stop all media; the last Stage image stays.
+- Checkpoint and restore preserve the Stage image and media state; playback resumes from the persisted position, and
+  time without a running Player does not advance media. Restore does not imply cross-device handoff.
+
+### Superseded V30 media forms
+
+| V30 form | Replacement |
+| --- | --- |
+| `playSound x` | `playAudio x` |
+| `playBackgroundSound(x)` and `stopBackgroundSound(id)` | `let s = playAudio async x` and `s.stop()` |
+| `stopVideo()` | `v.stop()` on an async video, or `showImage` / `hideImage` |
+| `showBackgroundVideo(x, loop: true)` | `playVideo async repeat x` |
+| positioned or timed top-level `showImage(...)` and `hideImage(ref)` | `showImage <file>` and `hideImage` for the Stage image |
+
+### Future layered scene
+**Status:** Accepted V30 direction; not implemented. Background and overlay layers, their coordinate space, movement,
+blur, drawings, edited copies, and transitions remain separate from the Stage image and media foundation above, which
+supersedes the old positioned and timed top-level image. Points affected by the Stage image model must be reconciled
+before the layered scene is implemented.
 
 ```text
 showBackgroundImage backgroundFile
 showOverlayImage characterFile
-showImage displayFile
+showBackgroundColor "#000000"
+showOverlayVideo(characterVideo, loop: true)
 ```
 
 - `showBackgroundImage` controls the environment or fixed backdrop.
-- `showOverlayImage` places one or more characters or scene elements over the backdrop. Transparent source images are expected to be common here.
-- `showImage` displays a top-level instructional, object, result, edited, or webcam image above the composed scene.
-
-The background may also be a solid color:
-
-```text
-showBackgroundColor "#000000"
-```
-
-Background and overlay video use the same role distinction and may be looped:
-
-```text
-showBackgroundVideo(backgroundVideo, loop: true)
-showOverlayVideo(characterVideo, loop: true)
-```
+- `showOverlayImage` places one or more characters or scene elements over the backdrop. Transparent source images are
+  expected to be common here.
 
 #### Scene coordinate space
 
@@ -1724,7 +1833,6 @@ Rules:
 - Content outside the selected reference space is clipped.
 - Image aspect ratio is preserved unless stretching is requested explicitly.
 - Background fit accepts `"contain"`, `"cover"`, or `"stretch"`. The default is `"contain"`; cropping occurs only when `"cover"` is selected.
-- `showImage` is opaque by default, remains above every overlay, and accepts the same `relativeTo`, coordinate, size, anchor, and fit concepts with suitable top-image defaults.
 
 #### Multiple overlays and movement
 
@@ -1767,40 +1875,12 @@ Rules:
 - when multiple overlays are active, a specific overlay reference is required;
 - when no overlay is active, the player sees no warning. A statically detectable mistake may produce a compiler warning, while a runtime occurrence may be written to debug logging.
 
-#### Top-level displayed images
-
-A top-level `showImage` may have an optional visible duration. It disappears when that duration ends. A non-persistent top-level image also disappears when the current script flow reaches `end` or `exit`.
-
-```text
-let displayedPhoto = showImage(
-    image: webcamPhoto,
-    relativeTo: "viewport",
-    x: 50,
-    y: 50,
-    width: 80,
-    height: 80,
-    anchor: "center",
-    fit: "contain",
-    duration: 10 seconds
-)
-```
-
-`showImage` supports `relativeTo: "background"` when a photo must be positioned inside the scene, such as a webcam image placed into a picture frame. `x`, `y`, `width`, `height`, `anchor`, and `fit` are optional and have centered, aspect-ratio-preserving defaults.
-
-For v1, only one top-level displayed image is active at once. A new `showImage` replaces the previous one. Hide it manually with either form:
-
-```text
-hideImage()
-hideImage(displayedPhoto)
-```
-
 #### Blur, drawings, edited copies, and transitions
 
 Blur is a temporary, non-destructive visual layer. A blur may target:
 
 - the background;
 - a specific overlay reference;
-- a top-level displayed image;
 - a rectangular or elliptical region of one of those targets.
 
 ```text
@@ -1833,7 +1913,7 @@ Rectangles and ellipses may be filled, stroked, or both; this supports solid bla
 
 A script may create and save an edited copy that includes blur or drawings while preserving access to the original local encrypted image. The edited/original reference relationship must be explicit; filename suffix conventions alone are not the normative identity mechanism. The export API remains open.
 
-Replacing background, overlay, or displayed media may use:
+Replacing background or overlay media may use:
 
 ```text
 "none"
@@ -2089,6 +2169,31 @@ implemented in the current runtime.
 
 Blocks run one at a time in due order. A block may itself wait; later expiries queue behind it.
 
+### Timeline cues and self-handle (planned)
+**Status:** Accepted direction; not implemented. It follows the timer foundation separately.
+
+```text
+let t = timer async 60 s {
+    at 20 s {
+        say "Twenty seconds elapsed."
+    }
+    beforeEnd 10 s {
+        say "10"
+    }
+    finish {
+        say "Done."
+    }
+}
+```
+
+Timers will use the cue model of [§22](#22-stage-image-audio-and-video): a block holds either ordinary statements or
+cue declarations; `at` is measured from the start of a round and `beforeEnd` back from its end; both fire on every
+natural passage, including repeat rounds; `finish` runs once after the final round and never after `stop()`; an
+assignment to `remaining` that jumps over a cue does not fire it; and cue blocks run one at a time like expiry blocks.
+The existing compact block stays the per-round expiry block, like `beforeEnd 0 s`. A timer block of
+`let NAME = timer async ...` will likewise see `NAME` as its own handle; until then expiry blocks see no local of the
+code that started the timer.
+
 ### Time
 
 Timers and `wait` measure Player-executed scene time. Presentation and blocking do not change the clock. Time keeps
@@ -2326,22 +2431,10 @@ How the browser internally stores or resolves references, handles permissions, o
 
 Potentially nullable results produce compiler warnings when used without an explicit check, but they are not automatically hard compile errors.
 
-Example:
+Nullable-result compiler warnings are accepted future behavior and not yet implemented. Media commands accept `null`
+references at runtime; see the fallback below.
 
-```text
-let photo = takePhoto()
-showImage photo
-```
-
-Possible warning:
-
-```text
-Warning: `photo` may be null.
-Expected: string
-Possible value: null
-```
-
-Compatible built-ins may apply a safe fallback. For example, `showImage null` may display no image, report that no image is available, record the source location, and continue.
+Compatible built-ins may apply a safe fallback. For example, `showImage null` clears the Stage image, reports developer warning `TSW011` with the source location, and continues ([§22](#22-stage-image-audio-and-video)).
 
 When one replacement value can safely continue execution, the runtime may allow a replacement value to be supplied.
 
@@ -3305,6 +3398,10 @@ delete
 
 The same keyword may have more than one grammar form when the next token makes the form unambiguous. For example, `speaker identifier { ... }` declares a speaker, while `speaker identifier` sets the default speaker. A parser distinguishes these forms through normal lookahead; this is not an implementation problem.
 
+Modifier and block words such as `async`, `visible`, `mystery`, `hidden`, `times`, and the media cue words `at`,
+`beforeEnd`, and `finish` are contextual: they have their special meaning only in the positions documented in
+[§22](#22-stage-image-audio-and-video) and [§27](#27-timers) and otherwise remain ordinary identifiers.
+
 ### Protected type names
 
 ```text
@@ -3352,13 +3449,10 @@ wait
 timer
 showPermanentButton
 removePermanentButton
-playSound
+playAudio
 playVideo
-playBackgroundSound
-stopBackgroundSound
 showBackgroundColor
 showBackgroundImage
-showBackgroundVideo
 showOverlayImage
 showOverlayVideo
 showImage
@@ -3470,7 +3564,7 @@ resume
 stop
 ```
 
-They are not currently executable syntax. Existing specific controls such as `stopVideo()` and `stopBackgroundSound(...)` remain valid.
+They are not currently executable syntax. Media and timers are controlled through handle methods such as `music.stop()` ([§22](#22-stage-image-audio-and-video), [§27](#27-timers)).
 
 ### Reserved for later design
 
@@ -3485,10 +3579,10 @@ Resolved in this revision:
 - visible measurements use account-preferred unit systems, automatic readable scaling, an account decimal preference defaulting to two places, and per-call `format(unit: ..., decimals: ...)` overrides;
 - `relativeTo: "background" | "viewport"`, background `fit: "contain" | "cover" | "stretch"`, and `"contain"` as the default are accepted;
 - overlays use `hideOverlay`, asynchronous `moveOverlay` and `animateOverlay`, optional blocking behavior, and keyframe hold durations;
-- `showImage` supports coordinates, dimensions, reference space, fit, duration, and `hideImage`; one top-level displayed image is active at a time in v1;
+- `showImage <file>` and `hideImage` control the persistent Stage image; `playAudio` and `playVideo` are blocking by default, `async` returns a handle, and cues use `at`, `beforeEnd`, and `finish` ([§22](#22-stage-image-audio-and-video));
 - blur uses `showBlur` and `hideBlur` as a separate non-destructive visual layer;
 - drawing uses dedicated shape/text functions and removable references;
-- initial media transitions are `"none"`, `"fade"`, and `"crossfade"`;
+- initial layered-scene transitions are `"none"`, `"fade"`, and `"crossfade"` (accepted future direction; not implemented; see [§22](#22-stage-image-audio-and-video));
 - `account` is the read-only typed account reference;
 - account-change operations include `save`, `add`, `remove`, `removeAll`, `increase`, and `decrease`, while saving `[]` empties a list;
 - toys have server-generated IDs, may share visible names, can be disabled without script-driven deletion, and have common photos plus initial detailed schemas for butt plugs, dildos, chastity devices, and ball gags;

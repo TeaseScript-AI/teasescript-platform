@@ -79,7 +79,8 @@ export function cloneSettlement(
       deadlineMs: settlement.deadlineMs,
       completedAtMs: settlement.completedAtMs,
     };
-  if (settlement.actionKind === "chatPacingGate") return { ...settlement };
+  if (settlement.actionKind === "chatPacingGate" || settlement.actionKind === "mediaPlayback")
+    return { ...settlement };
   return {
     actionId: settlement.actionId,
     actionKind: "interaction",

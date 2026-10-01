@@ -9,20 +9,41 @@ import type {
   RuntimeChatPacingGateActionSnapshot,
   RuntimeDelayActionSnapshot,
   RuntimeTimerActionSnapshot,
+  RuntimeMediaActionSnapshot,
 } from "../actions/model.js";
 import type { ActionCompletedEvent, InterpreterEvent } from "../events.js";
 import { isValidSessionTime } from "../actions/delay.js";
 import type { PendingActionOperationResult, TimeObservationOutcome } from "./model.js";
 import { settleBackgroundPacingGate } from "./pacing-gate.js";
 import { skipSilentRounds } from "../timers.js";
+import {
+  nextMediaEvent,
+  pruneMediaPoints,
+  recordMediaProgress,
+  type MediaTimelineEvent,
+} from "../media.js";
+import { applyMediaEvent, mediaSpan } from "./media-lifecycle.js";
 import { expireTimerAction, timerHandlerDispatchable, timerSpan } from "./timer-lifecycle.js";
 import { terminalContinuationHandoffFor } from "./terminal-continuation.js";
 import { captureExecutableData, copySpan, pendingResult, takeSequence } from "./support.js";
 
+/** One Player sample of media playback: the active playback time of `segment` so far. */
+export interface MediaProgressReport {
+  readonly mediaId: number;
+  readonly segment: number;
+  readonly progressMs: number;
+}
+
+/**
+ * Observes scene time and, optionally, the playback progress of running media at that time. A running media without a
+ * report in an observation has made no known progress since its last sample. Reports for unknown, settled, or
+ * unloaded media, another segment, an earlier or equal time, or decreasing progress are ignored.
+ */
 export function observeTime(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   suppliedNowMs: unknown,
+  mediaReports: unknown = [],
 ): PendingActionOperationResult<TimeObservationOutcome> {
   const captured = captureExecutableData(plan, snapshot);
   const current = captured.snapshot;
@@ -31,7 +52,25 @@ export function observeTime(
       kind: "invalidObservation",
       message: `Time observation must be a finite number from 0 through ${MAX_RUNTIME_SESSION_TIME_MS}.`,
     });
+  const reports = parseMediaReports(mediaReports);
+  if (reports === null)
+    return pendingResult(current, [], {
+      kind: "invalidObservation",
+      message:
+        "Media progress reports must be a list of { mediaId, segment, progressMs } with a positive media ID, a non-negative segment, and a finite non-negative progress.",
+    });
   current.observedSessionTimeMs = Math.max(current.observedSessionTimeMs, suppliedNowMs);
+  if (current.status !== "failed") {
+    for (const report of reports) {
+      const action = current.backgroundActions.find(
+        (candidate): candidate is RuntimeMediaActionSnapshot =>
+          candidate.kind === "media" && candidate.media.mediaId === report.mediaId,
+      );
+      if (action !== undefined) {
+        recordMediaProgress(action.media, report.segment, report.progressMs, suppliedNowMs);
+      }
+    }
+  }
   const events: InterpreterEvent[] = [];
   processDueWork(captured.plan, current, events);
   return pendingResult(current, events, {
@@ -58,13 +97,20 @@ export function processDueWork(
     const due = nextDueWork(current);
     if (due === null) {
       current.currentSessionTimeMs = current.observedSessionTimeMs;
+      for (const action of current.backgroundActions) {
+        if (action.kind === "media") pruneMediaPoints(action.media, current.currentSessionTimeMs);
+      }
       return;
     }
     current.currentSessionTimeMs = Math.max(current.currentSessionTimeMs, due.deadlineMs);
     if (due.kind === "timer") {
       // Silent rounds may be skipped only up to the next other work, which could observe or change this timer.
       const boundary = nextOtherWork(current, due.actionId);
-      skipSilentRounds(due.action.timer, boundary.deadlineMs, due.actionId < boundary.actionId);
+      skipSilentRounds(
+        due.action.timer,
+        boundary.deadlineMs,
+        boundary.phase > 0 || due.actionId < boundary.actionId,
+      );
       current.currentSessionTimeMs = Math.max(
         current.currentSessionTimeMs,
         due.action.timer.deadlineMs!,
@@ -76,6 +122,10 @@ export function processDueWork(
         timerSpan(plan, due.action.owningInstruction),
         events,
       );
+    } else if (due.kind === "media") {
+      // One timeline event per iteration, so a queued cue block holds catch-up like a timer expiry.
+      const span = mediaSpan(plan, due.action.owningInstruction);
+      applyMediaEvent(plan, current, due.action, due.event, events, span);
     } else if (due.kind === "suspended") {
       settleSuspendedDelay(plan, current, due.frame, due.action, events);
     } else if (
@@ -109,6 +159,14 @@ type DueWork =
       readonly actionId: number;
     }
   | {
+      /** The next media timeline event that reported playback covers, due at its scene time. */
+      readonly kind: "media";
+      readonly action: RuntimeMediaActionSnapshot;
+      readonly event: MediaTimelineEvent;
+      readonly deadlineMs: number;
+      readonly actionId: number;
+    }
+  | {
       readonly kind: "suspended";
       readonly frame: RuntimeCallFrameSnapshot;
       readonly action: RuntimeDelayActionSnapshot;
@@ -116,10 +174,26 @@ type DueWork =
       readonly actionId: number;
     };
 
+/** Media departures happen after other work at the same scene time; everything else is phase 0. */
+function workPhase(work: DueWork): number {
+  return work.kind === "media" && work.event.kind === "departure" ? 1 : 0;
+}
+
+function precedes(
+  left: { readonly deadlineMs: number; readonly phase: number; readonly actionId: number },
+  right: { readonly deadlineMs: number; readonly phase: number; readonly actionId: number },
+): boolean {
+  return (
+    left.deadlineMs < right.deadlineMs ||
+    (left.deadlineMs === right.deadlineMs &&
+      (left.phase < right.phase || (left.phase === right.phase && left.actionId < right.actionId)))
+  );
+}
+
 /**
- * The earliest timed work due by the observed time, by `(deadline, action ID)`. A due foreground delay waits while an
- * expiry block that became due earlier is queued: the block interrupts that delay first, and the delay then settles
- * as suspended work.
+ * The earliest timed work due by the observed time, by `(deadline, phase, action ID)`. A due foreground delay waits
+ * while an expiry block that became due earlier is queued: the block interrupts that delay first, and the delay then
+ * settles as suspended work.
  */
 function nextDueWork(snapshot: RuntimeSnapshot): DueWork | null {
   let earliest: DueWork | null = null;
@@ -127,8 +201,10 @@ function nextDueWork(snapshot: RuntimeSnapshot): DueWork | null {
     if (candidate.deadlineMs > snapshot.observedSessionTimeMs) continue;
     if (
       earliest === null ||
-      candidate.deadlineMs < earliest.deadlineMs ||
-      (candidate.deadlineMs === earliest.deadlineMs && candidate.actionId < earliest.actionId)
+      precedes(
+        { ...candidate, phase: workPhase(candidate) },
+        { ...earliest, phase: workPhase(earliest) },
+      )
     ) {
       earliest = candidate;
     }
@@ -143,15 +219,12 @@ function nextDueWork(snapshot: RuntimeSnapshot): DueWork | null {
 function nextOtherWork(
   snapshot: RuntimeSnapshot,
   actionId: number,
-): { readonly deadlineMs: number; readonly actionId: number } {
-  let boundary = { deadlineMs: snapshot.observedSessionTimeMs, actionId: Infinity };
+): { readonly deadlineMs: number; readonly phase: number; readonly actionId: number } {
+  let boundary = { deadlineMs: snapshot.observedSessionTimeMs, phase: 0, actionId: Infinity };
   for (const candidate of timedWork(snapshot)) {
-    if (
-      candidate.actionId !== actionId &&
-      (candidate.deadlineMs < boundary.deadlineMs ||
-        (candidate.deadlineMs === boundary.deadlineMs && candidate.actionId < boundary.actionId))
-    ) {
-      boundary = { deadlineMs: candidate.deadlineMs, actionId: candidate.actionId };
+    const work = { ...candidate, phase: workPhase(candidate) };
+    if (candidate.actionId !== actionId && precedes(work, boundary)) {
+      boundary = { deadlineMs: work.deadlineMs, phase: work.phase, actionId: work.actionId };
     }
   }
   return boundary;
@@ -187,6 +260,17 @@ function timedWork(snapshot: RuntimeSnapshot): DueWork[] {
         deadlineMs: action.timer.deadlineMs,
         actionId: action.actionId,
       });
+    } else if (action.kind === "media") {
+      const event = nextMediaEvent(action.media);
+      if (event?.dueAtMs !== null && event?.dueAtMs !== undefined) {
+        candidates.push({
+          kind: "media",
+          action,
+          event,
+          deadlineMs: event.dueAtMs,
+          actionId: action.actionId,
+        });
+      }
     }
   }
   for (const frame of snapshot.callFrames) {
@@ -254,9 +338,10 @@ function settleForegroundTimedAction(
   if (action.kind === "chatPacingGate" && action.preparedOutput !== null) {
     snapshot.preparedSayOutput = action.preparedOutput;
     snapshot.nextInstruction = action.preparedOutput.owningInstruction;
-  } else {
+  } else if (action.kind === "delay") {
     snapshot.nextInstruction = action.continuationInstruction;
   }
+  // A gate promoted by a pacing barrier carries no prepared output; the barrier runs again and then advances.
   const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;
   const completionEvent: ActionCompletedEvent = Object.freeze({
     kind: "actionCompleted",
@@ -303,4 +388,30 @@ function createPacingSettlement(
     completedAtMs,
     releasedPreparedOutputInstruction: action.preparedOutput?.owningInstruction ?? null,
   });
+}
+
+function parseMediaReports(value: unknown): MediaProgressReport[] | null {
+  if (!Array.isArray(value)) return null;
+  const reports: MediaProgressReport[] = [];
+  const entries: readonly unknown[] = value;
+  for (const entry of entries) {
+    if (!isReportRecord(entry)) return null;
+    const { mediaId, segment, progressMs } = entry;
+    if (
+      typeof mediaId !== "number" ||
+      !Number.isSafeInteger(mediaId) ||
+      mediaId < 1 ||
+      typeof segment !== "number" ||
+      !Number.isSafeInteger(segment) ||
+      segment < 0 ||
+      !isValidSessionTime(progressMs)
+    )
+      return null;
+    reports.push({ mediaId, segment, progressMs });
+  }
+  return reports;
+}
+
+function isReportRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

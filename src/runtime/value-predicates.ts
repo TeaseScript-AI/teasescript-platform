@@ -7,6 +7,7 @@ import type {
   SerializableRuntimeValue,
   SerializableSpeakerReference,
   SerializableTimerHandle,
+  SerializableMediaHandle,
 } from "./serializable-values.js";
 
 export function isList(value: SerializableRuntimeValue): value is SerializableRuntimeList {
@@ -37,4 +38,8 @@ export function isDuration(value: SerializableRuntimeValue): value is Serializab
 
 export function isTimerHandle(value: SerializableRuntimeValue): value is SerializableTimerHandle {
   return typeof value === "object" && value !== null && value.kind === "timerHandle";
+}
+
+export function isMediaHandle(value: SerializableRuntimeValue): value is SerializableMediaHandle {
+  return typeof value === "object" && value !== null && value.kind === "mediaHandle";
 }

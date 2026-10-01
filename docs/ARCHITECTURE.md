@@ -91,7 +91,7 @@ JSON-safe after every instruction boundary does not mean serializing or persisti
 ## Deferred architecture
 
 The cross-origin host protocol, Standard Library linkage and packaging, deterministic library identity/version binding,
-generated editor metadata, privileged adapter boundaries, media handles, server checkpoint persistence, package
+generated editor metadata, privileged adapter boundaries, server checkpoint persistence, package
 identity/migrations, and continuous-personality scheduling remain later work.
 
 ## Implemented source-layout seams
@@ -109,9 +109,10 @@ cohesive stateful lowering pass.
 lowering.
 
 Serializable pending-action and settlement contracts live in
-`src/runtime/actions/model.ts`; action modules remain pure. The two atomic
-public transitions live in `src/runtime/operations/complete-action.ts` and
-`observe-time.ts`. Their small `model.ts` and `support.ts` companions hold
+`src/runtime/actions/model.ts`; action modules remain pure. The atomic public
+completion, time-observation, and media-load transitions live in
+`src/runtime/operations/complete-action.ts`, `observe-time.ts`, and
+`media-reports.ts`. Their small `model.ts` and `support.ts` companions hold
 shared operation results and common capture/sequence helpers so the engine can
 execute instructions without duplicating operation logic. Whole-snapshot
 construction, cloning, validation orchestration, and cross-state coordination

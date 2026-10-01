@@ -1,6 +1,7 @@
 import type {
   Expression,
   InteractionExpression,
+  MediaParts,
   Program,
   SayStatement,
   ShowButtonStatement,
@@ -8,6 +9,7 @@ import type {
   TimerParts,
 } from "./ast.js";
 import { compileSource } from "./compiler.js";
+import { mediaHandlerBlocks, mediaOperands } from "./expression-children.js";
 import type { Diagnostic } from "./diagnostics.js";
 import { lex } from "./lexer.js";
 import {
@@ -600,6 +602,13 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
     case "timerStatement":
       visitTimer(statement, children);
       return;
+    case "playMediaStatement":
+      visitMedia(statement, children);
+      return;
+    case "showImageStatement":
+      children.push({ kind: "expression", node: statement.image });
+      return;
+    case "hideImageStatement":
     case "speakerSetterStatement":
     case "waitStatement":
     case "exitStatement":
@@ -617,6 +626,12 @@ function visitTimer(timer: TimerParts, children: VisitItem[]): void {
   if (timer.label !== null) children.push({ kind: "expression", node: timer.label });
   for (const child of timer.handler?.statements ?? [])
     children.push({ kind: "statement", node: child });
+}
+
+function visitMedia(parts: MediaParts, children: VisitItem[]): void {
+  for (const operand of mediaOperands(parts)) children.push({ kind: "expression", node: operand });
+  for (const block of mediaHandlerBlocks(parts))
+    for (const child of block.statements) children.push({ kind: "statement", node: child });
 }
 
 function visitExpression(expression: Expression, visitor: Visitor, children: VisitItem[]): void {
@@ -670,6 +685,9 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
       return;
     case "timerExpression":
       visitTimer(expression, children);
+      return;
+    case "playMediaExpression":
+      visitMedia(expression, children);
       return;
     case "identifier":
     case "booleanLiteral":

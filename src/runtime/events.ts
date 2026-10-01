@@ -5,6 +5,7 @@ import type {
   RuntimeActionSettlementSnapshot,
   RuntimePendingActionSnapshot,
   RuntimeTimerSettlementSnapshot,
+  RuntimeMediaSettlementSnapshot,
 } from "./actions/model.js";
 
 export interface OutputSpeaker {
@@ -47,7 +48,10 @@ export interface ActionRequestedEvent {
 export interface ActionCompletedEvent {
   readonly kind: "actionCompleted";
   readonly sequence: number;
-  readonly settlement: RuntimeActionSettlementSnapshot | RuntimeTimerSettlementSnapshot;
+  readonly settlement:
+    | RuntimeActionSettlementSnapshot
+    | RuntimeTimerSettlementSnapshot
+    | RuntimeMediaSettlementSnapshot;
   readonly span: SourceSpan;
 }
 

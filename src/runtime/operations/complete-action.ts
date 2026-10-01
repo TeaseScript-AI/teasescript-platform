@@ -77,6 +77,12 @@ export function completeAction(
       message: "Waits and timers settle only through time observation and script operations.",
     });
   }
+  if (active.kind === "media" || active.kind === "mediaPlayback") {
+    return pendingResult(current, [], {
+      kind: "invalidPayload",
+      message: "Media settles only through media load and progress reports and script operations.",
+    });
+  }
   if (value.actionKind !== active.kind) {
     const receivedActionKind = validRequestedActionKind(value.actionKind)
       ? value.actionKind
@@ -147,11 +153,10 @@ function completePacingGate(
   current.foregroundAction = null;
   current.lastSettlement = settlement;
   current.status = "running";
+  // A gate promoted by a pacing barrier carries no prepared output; the barrier runs again and then advances.
   if (action.preparedOutput !== null) {
     current.preparedSayOutput = action.preparedOutput;
     current.nextInstruction = action.preparedOutput.owningInstruction;
-  } else {
-    current.nextInstruction = action.continuationInstruction;
   }
   const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;
   const completionEvent: ActionCompletedEvent = Object.freeze({

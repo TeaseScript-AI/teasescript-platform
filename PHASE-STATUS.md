@@ -25,6 +25,9 @@ accept syntax, architecture, or implementation details.
   labels, opaque handles, lifecycle control, repetition, queued expiry interrupts, and scene-time checkpoint/restore;
   protected compact interactions on one typed foreground family; and ADR 0018 resumable `say` pacing, prepared
   output, typed skip settlement, and interaction/timer composition.
+- **Stage image and media:** `showImage`/`hideImage` Stage state and blocking or asynchronous `playAudio`/`playVideo`
+  with playback ranges, repetition, volume, handles, seeks, timeline cues, Player load/progress observations, and
+  checkpoint restore at the language, compiler, and runtime level; Player browser integration is #446.
 - **Development and verification:** a standalone browser playground with Standard interaction and pacing controls; a
   modular production-oriented Player presentation POC with a verified, design-neutral Vue 3 Phase 1 foundation
   (Vue/Vite, Tailwind CSS 4, repository-owned local shadcn-vue source/config, the selected Reka primitive foundation,
@@ -44,8 +47,8 @@ contracts and boundaries.
 - complete V30 coverage, complete static typing, measurement units, date/time values, calendar durations,
   generalized duration ranges, and locale-aware duration presentation;
 - production cross-origin Player/host integration, richer editor support, and final browser acceptance coverage;
-- pending-action capabilities beyond the implemented timer, interaction, and pacing families; media actions,
-  camera lifecycle, and custom views;
+- pending-action capabilities beyond the implemented timer, interaction, pacing, and media families; browser media
+  playback in the Player (#446), browser video playback, the layered scene, camera lifecycle, and custom views;
 - the cross-origin player-host protocol and production browser security integration;
 - TypeScript library linkage, final Standard Library/package identity and compatibility, richer module selection, and
   community dependency resolution;

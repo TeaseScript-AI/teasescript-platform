@@ -42,6 +42,12 @@ export interface SerializableTimerHandle {
   readonly timerId: number;
 }
 
+/** An opaque script handle for one audio or video playback record. */
+export interface SerializableMediaHandle {
+  readonly kind: "mediaHandle";
+  readonly mediaId: number;
+}
+
 export interface SerializableRuntimeProperty {
   readonly name: string;
   value: SerializableRuntimeValue;
@@ -55,6 +61,7 @@ export type SerializableRuntimeValue =
   | SerializableRuntimeRange
   | SerializableRuntimeDuration
   | SerializableTimerHandle
+  | SerializableMediaHandle
   | SerializableSpeakerReference;
 
 export class SerializableValueError extends Error {
@@ -230,6 +237,7 @@ function cloneSerializableNode(value: SerializableRuntimeValue): SerializableRun
     case "speakerReference":
     case "duration":
     case "timerHandle":
+    case "mediaHandle":
       return { ...value };
     case "set":
       return { kind: "set", items: [...value.items] };
@@ -307,11 +315,16 @@ export function serializableEquals(
   if (left.kind === "timerHandle" && right.kind === "timerHandle") {
     return left.timerId === right.timerId;
   }
+  if (left.kind === "mediaHandle" && right.kind === "mediaHandle") {
+    return left.mediaId === right.mediaId;
+  }
   if (
     left.kind === "duration" ||
     right.kind === "duration" ||
     left.kind === "timerHandle" ||
-    right.kind === "timerHandle"
+    right.kind === "timerHandle" ||
+    left.kind === "mediaHandle" ||
+    right.kind === "mediaHandle"
   ) {
     return false;
   }
@@ -464,6 +477,16 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
         (current.timerId as number) < 1
       )
         return `${path()} contains a malformed timer handle.`;
+      continue;
+    }
+    if (current.kind === "mediaHandle") {
+      // EVIDENCE: validation: Number.isSafeInteger establishes the numeric media ID before comparison.
+      if (
+        !hasOnlyKeys(current, ["kind", "mediaId"]) ||
+        !Number.isSafeInteger(current.mediaId) ||
+        (current.mediaId as number) < 1
+      )
+        return `${path()} contains a malformed media handle.`;
       continue;
     }
     if (current.kind === "range") {
