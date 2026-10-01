@@ -358,10 +358,27 @@ test("accepts nested calls and short-circuit lowering inside defaults", () => {
     (instruction) => instruction.kind === "bindDefaultParameter",
   );
   const guard = compiled.instructions[guardIndex!];
-  assert.ok(guard?.kind === "jumpIfFalse");
+  const first = compiled.instructions[firstCall!];
+  assert.ok(guard?.kind === "jumpIfFalse" && first?.kind === "callFunction");
   // A false first operand skips the second call and still reaches the default binding.
   assert.ok(firstCall! < guardIndex! && guardIndex! < secondCall!);
   assert.ok(secondCall! < guard.target && guard.target <= bindIndex!);
+  // The guard reads the stored result of the first call, not an unrelated or constant value.
+  assert.ok(guard.condition.kind === "temporary");
+  const conditionTemporary = guard.condition.temporaryId;
+  const conditionStores = compiled.instructions
+    .slice(firstCall! + 1, guardIndex!)
+    .filter(
+      (instruction) =>
+        instruction.kind === "storeTemporary" && instruction.temporaryId === conditionTemporary,
+    );
+  assert.equal(conditionStores.length, 1);
+  const conditionStore = conditionStores[0];
+  assert.ok(conditionStore?.kind === "storeTemporary");
+  assert.equal(
+    conditionStore.value.kind === "temporary" ? conditionStore.value.temporaryId : null,
+    first.destinationTemporary,
+  );
 });
 
 test("function plans survive JSON round trips with preserved spans", () => {
