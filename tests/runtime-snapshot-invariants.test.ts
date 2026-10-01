@@ -107,13 +107,12 @@ test("keeps valid halted execution resume-equivalent", () => {
   );
 });
 
-test("validates allocator counters across the JavaScript safe-integer boundary", () => {
+test("validates allocator counters across the safe-integer domain at snapshot and checkpoint boundaries", () => {
   const compiled = plan("exit");
   const fields = ["nextEventSequence", "nextScopeId", "nextSpeakerId", "nextCallFrameId"] as const;
   const accepted = [1, MAX_SAFE - 1, MAX_SAFE];
   const rejected = [
-    { name: "MAX_SAFE_INTEGER + 1", value: MAX_SAFE + 1 },
-    { name: "2 ** 53", value: 2 ** 53 },
+    { name: "first unsafe integer", value: MAX_SAFE + 1 },
     { name: "NaN", value: Number.NaN },
     { name: "Infinity", value: Number.POSITIVE_INFINITY },
     { name: "fractional", value: 1.5 },
@@ -139,23 +138,11 @@ test("validates allocator counters across the JavaScript safe-integer boundary",
         `${field} should reject ${entry.name}`,
       );
     }
-  }
-});
 
-test("rejects unsafe counters through direct snapshot and checkpoint boundaries", () => {
-  const compiled = plan('say "one"\nsay "two"\nexit');
-  for (const field of [
-    "nextEventSequence",
-    "nextScopeId",
-    "nextSpeakerId",
-    "nextCallFrameId",
-  ] as const) {
     const checkpoint = mutableCheckpoint(
       createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled)),
     );
-    checkpoint.snapshot[field] = 2 ** 53;
-
-    assert.equal(validateRuntimeSnapshot(checkpoint.snapshot, compiled).valid, false, field);
+    checkpoint.snapshot[field] = MAX_SAFE + 1;
     assertCheckpointRejected(checkpoint, "TSK002");
   }
 });
