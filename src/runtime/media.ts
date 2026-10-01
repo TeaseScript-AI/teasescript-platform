@@ -73,6 +73,26 @@ export interface RuntimeMediaSnapshot {
   points: RuntimeMediaPointSnapshot[];
 }
 
+/** The parts of a media record that determine its timeline: range, repeat, cues, and the current segment's anchor. */
+export type MediaTimeline = Pick<
+  RuntimeMediaSnapshot,
+  | "durationMs"
+  | "startAtMs"
+  | "endAtMs"
+  | "repeat"
+  | "cues"
+  | "segmentPositionMs"
+  | "segmentPasses"
+  | "segmentElapsedMs"
+>;
+
+/** A timeline with its committed cursor. */
+export type MediaCursor = MediaTimeline &
+  Pick<RuntimeMediaSnapshot, "positionMs" | "committedProgressMs" | "passesCompleted">;
+
+/** A committed cursor with its pending start cues, as persisted. */
+export type PersistedMediaCursor = MediaCursor & Pick<RuntimeMediaSnapshot, "startCuesPending">;
+
 export interface MediaWarning {
   readonly code: "TSW010";
   readonly message: string;
@@ -114,22 +134,22 @@ export function isActiveMedia(media: RuntimeMediaSnapshot): boolean {
 }
 
 /** The effective end of the active range; only meaningful once loaded. */
-export function mediaEndMs(media: RuntimeMediaSnapshot): number {
+export function mediaEndMs(media: MediaTimeline): number {
   const duration = media.durationMs ?? 0;
   return media.endAtMs === null ? duration : Math.min(media.endAtMs, duration);
 }
 
 /** Cue point in the source; `beforeEnd` is relative to the effective end. */
-export function mediaCuePointMs(media: RuntimeMediaSnapshot, cue: RuntimeMediaCueSnapshot): number {
+export function mediaCuePointMs(media: MediaTimeline, cue: RuntimeMediaCueSnapshot): number {
   return cue.kind === "at" ? cue.offsetMs : mediaEndMs(media) - cue.offsetMs;
 }
 
-function inRange(media: RuntimeMediaSnapshot, point: number): boolean {
+function inRange(media: MediaTimeline, point: number): boolean {
   return point >= media.startAtMs && point <= mediaEndMs(media);
 }
 
 /** Function IDs of the cues exactly at `point`, in source order; points outside the active range never fire. */
-function cuesAt(media: RuntimeMediaSnapshot, point: number): number[] {
+function cuesAt(media: MediaTimeline, point: number): number[] {
   if (!inRange(media, point)) return [];
   return media.cues
     .filter((cue) => mediaCuePointMs(media, cue) === point)
@@ -137,7 +157,7 @@ function cuesAt(media: RuntimeMediaSnapshot, point: number): number[] {
 }
 
 /** The nearest cue point after `from` inside the active range, or `null`. */
-function nextCuePointAfter(media: RuntimeMediaSnapshot, from: number): number | null {
+function nextCuePointAfter(media: MediaTimeline, from: number): number | null {
   let next: number | null = null;
   for (const cue of media.cues) {
     const point = mediaCuePointMs(media, cue);
@@ -150,7 +170,7 @@ function nextCuePointAfter(media: RuntimeMediaSnapshot, from: number): number | 
  * Segment progress at which playback reaches `positionMs` in the pass after `passes` completed ones. Arrivals and the
  * terminal progress use only this calculation, never accumulated sums, so equal points compare equal exactly.
  */
-function progressTo(media: RuntimeMediaSnapshot, positionMs: number, passes: number): number {
+function progressTo(media: MediaTimeline, positionMs: number, passes: number): number {
   return segmentProgressMs(
     passes - media.segmentPasses,
     mediaEndMs(media) - media.startAtMs,
@@ -158,20 +178,16 @@ function progressTo(media: RuntimeMediaSnapshot, positionMs: number, passes: num
   );
 }
 
-/** The anchor formula shared with restore validation: whole passes since the anchor, then the distance within one. */
-export function segmentProgressMs(
-  passes: number,
-  passLengthMs: number,
-  distanceMs: number,
-): number {
+/** The anchor formula: whole passes since the anchor, then the distance within one. */
+function segmentProgressMs(passes: number, passLengthMs: number, distanceMs: number): number {
   return passes * passLengthMs + distanceMs;
 }
 
 /**
  * Where a repeat duration ending at `endProgressMs` stands, measured back from the target its stretch heads to, which
- * playback reaches at `targetProgressMs`. Shared with restore validation; nearby coordinates keep it stable.
+ * playback reaches at `targetProgressMs`; nearby coordinates keep it stable.
  */
-export function durationTailPositionMs(
+function durationTailPositionMs(
   targetMs: number,
   targetProgressMs: number,
   endProgressMs: number,
@@ -180,7 +196,7 @@ export function durationTailPositionMs(
 }
 
 /** Segment progress at which a repeat duration is used up; unlimited for other repeat forms. */
-function budgetEndProgressMs(media: RuntimeMediaSnapshot): number {
+function budgetEndProgressMs(media: MediaTimeline): number {
   return media.repeat.kind === "budget"
     ? media.repeat.milliseconds - media.segmentElapsedMs
     : Infinity;
@@ -209,7 +225,7 @@ function anotherPass(media: RuntimeMediaSnapshot): boolean {
 }
 
 /** Where the next arrival lies: the next cue point, the end of the pass, or the end of a repeat budget. */
-function nextArrival(media: RuntimeMediaSnapshot): { progressMs: number; positionMs: number } {
+function nextArrival(media: MediaCursor): { progressMs: number; positionMs: number } {
   const end = mediaEndMs(media);
   const from = media.positionMs;
   const target = from >= end ? end : (nextCuePointAfter(media, from) ?? end);
@@ -235,6 +251,147 @@ function nextArrival(media: RuntimeMediaSnapshot): { progressMs: number; positio
         ),
       }
     : { progressMs, positionMs: target };
+}
+
+/**
+ * Where the pass after `passes` completed ones starts in the current segment: at the anchor in the segment's first
+ * pass, otherwise at the range start, reached when the pass before ended.
+ */
+function passOrigin(
+  media: MediaTimeline,
+  passes: number,
+): { readonly positionMs: number; readonly progressMs: number } {
+  return passes === media.segmentPasses
+    ? { positionMs: media.segmentPositionMs, progressMs: 0 }
+    : { positionMs: media.startAtMs, progressMs: progressTo(media, mediaEndMs(media), passes - 1) };
+}
+
+/** The points an arrival can start from in a pass: its origin, then the cue points after it before the range end. */
+function passArrivalPoints(media: MediaTimeline, passes: number): number[] {
+  const origin = passOrigin(media, passes).positionMs;
+  const end = mediaEndMs(media);
+  const cues = media.cues
+    .map((cue) => mediaCuePointMs(media, cue))
+    .filter((point) => point > origin && point < end && inRange(media, point));
+  return [origin, ...new Set(cues)].sort((left, right) => left - right);
+}
+
+/** The progress committed when playback stands at arrival point `atMs` of the pass after `passes`. */
+function standingProgressMs(media: MediaTimeline, passes: number, atMs: number): number {
+  const origin = passOrigin(media, passes);
+  return atMs === origin.positionMs
+    ? origin.progressMs
+    : Math.max(origin.progressMs, progressTo(media, atMs, passes));
+}
+
+/** The arrival the runtime commits next when it stands at arrival point `fromMs` of the pass after `passes`. */
+function arrivalFrom(
+  media: MediaTimeline,
+  passes: number,
+  fromMs: number,
+): { progressMs: number; positionMs: number } {
+  return nextArrival({
+    ...media,
+    positionMs: fromMs,
+    committedProgressMs: standingProgressMs(media, passes, fromMs),
+    passesCompleted: passes,
+  });
+}
+
+/**
+ * The arrival points of a pass an arrival at `positionMs` can have started from: the last one before it, and itself.
+ * Playback continues from a cue arrival only while a repeat duration has not ended there.
+ */
+function predecessorsOf(media: MediaTimeline, passes: number, positionMs: number): number[] {
+  const origin = passOrigin(media, passes).positionMs;
+  const points = passArrivalPoints(media, passes).filter(
+    (point) =>
+      point === origin || standingProgressMs(media, passes, point) < budgetEndProgressMs(media),
+  );
+  const before = points.filter((point) => point < positionMs).at(-1);
+  return [
+    ...(before === undefined ? [] : [before]),
+    ...(points.includes(positionMs) ? [positionMs] : []),
+  ];
+}
+
+/**
+ * Whether the runtime itself reaches this committed cursor in its segment: an unfinished cursor stands at its pass's
+ * origin or on a cue arrival; a finished one at the arrival that ended the last pass or a repeat duration. Every
+ * arrival is recomputed with the runtime's own next-arrival step from its predecessor, so restore validation accepts
+ * exactly what the timeline produces.
+ */
+export function reachableMediaCursor(media: PersistedMediaCursor, finished: boolean): boolean {
+  const passes = media.passesCompleted;
+  if (passes < media.segmentPasses) return false;
+  // Start cues wait at the origin of a pass, where playback has committed nothing beyond it.
+  if (media.startCuesPending) {
+    const origin = passOrigin(media, passes);
+    if (
+      finished ||
+      media.positionMs !== origin.positionMs ||
+      media.committedProgressMs !== origin.progressMs ||
+      media.positionMs >= mediaEndMs(media) ||
+      cuesAt(media, media.positionMs).length === 0
+    )
+      return false;
+  }
+  const end = mediaEndMs(media);
+  const arrivesAt = (pass: number, positionMs: number, progressMs: number): boolean =>
+    predecessorsOf(media, pass, positionMs).some((from) => {
+      const arrival = arrivalFrom(media, pass, from);
+      return arrival.positionMs === positionMs && arrival.progressMs === progressMs;
+    });
+  // A later pass of the segment starts only when the pass before ended with an arrival at the range end and the
+  // repeat form continues, as when the runtime completes a pass.
+  const started = (pass: number): boolean => {
+    if (pass === media.segmentPasses) return true;
+    const ended = progressTo(media, end, pass - 1);
+    if (!arrivesAt(pass - 1, end, ended)) return false;
+    switch (media.repeat.kind) {
+      case "once":
+        return false;
+      case "indefinite":
+        return true;
+      case "count":
+        return pass < media.repeat.passes;
+      case "budget":
+        return ended < budgetEndProgressMs(media);
+    }
+  };
+  const position = media.positionMs;
+  const committed = media.committedProgressMs;
+  if (!finished) {
+    const origin = passOrigin(media, passes);
+    if (position === origin.positionMs) return committed === origin.progressMs && started(passes);
+    return position < end && started(passes) && arrivesAt(passes, position, committed);
+  }
+  if (
+    position === end &&
+    passes > media.segmentPasses &&
+    started(passes - 1) &&
+    arrivesAt(passes - 1, end, committed)
+  )
+    return true;
+  return (
+    media.repeat.kind === "budget" &&
+    committed >= budgetEndProgressMs(media) &&
+    started(passes) &&
+    arrivesAt(passes, position, committed)
+  );
+}
+
+/** Where a repeat duration ending at segment progress `endProgressMs` inside the pass after `passes` stands. */
+function durationEndPositionMs(
+  media: MediaTimeline,
+  passes: number,
+  endProgressMs: number,
+): number {
+  const from =
+    passArrivalPoints(media, passes)
+      .filter((point) => standingProgressMs(media, passes, point) < endProgressMs)
+      .at(-1) ?? passOrigin(media, passes).positionMs;
+  return arrivalFrom(media, passes, from).positionMs;
 }
 
 /**
@@ -398,19 +555,34 @@ function progressBefore(media: RuntimeMediaSnapshot, atMs: number): number {
  * Starts a new segment at scene time `atMs` from the position playback reached by then. The caller has committed the
  * events due by then.
  */
+/**
+ * Where playback stands at segment progress `progressMs`, at most the next uncommitted arrival: exactly on that arrival
+ * once reached, otherwise the committed position advanced by the progress since.
+ */
+function positionAtProgressMs(
+  media: RuntimeMediaSnapshot,
+  progressMs: number,
+): { readonly positionMs: number; readonly reachedArrival: boolean } {
+  if (progressMs > media.committedProgressMs) {
+    const arrival = nextArrival(media);
+    if (progressMs === arrival.progressMs)
+      return { positionMs: arrival.positionMs, reachedArrival: true };
+  }
+  return {
+    positionMs: media.positionMs + (progressMs - media.committedProgressMs),
+    reachedArrival: false,
+  };
+}
+
 function startSegment(media: RuntimeMediaSnapshot, atMs: number): void {
   const progress = progressBefore(media, atMs);
   if (progress > media.committedProgressMs) {
-    const arrival = nextArrival(media);
-    if (progress === arrival.progressMs) {
-      // Playback that reached an arrival whose turn has not come yet at this scene time stands exactly on it; cues
-      // there stay pending.
-      media.positionMs = arrival.positionMs;
-      if (media.positionMs < mediaEndMs(media)) {
-        media.startCuesPending = cuesAt(media, media.positionMs).length > 0;
-      }
-    } else {
-      media.positionMs += progress - media.committedProgressMs;
+    const reached = positionAtProgressMs(media, progress);
+    media.positionMs = reached.positionMs;
+    // Playback that reached an arrival whose turn has not come yet at this scene time stands exactly on it; cues
+    // there stay pending.
+    if (reached.reachedArrival && media.positionMs < mediaEndMs(media)) {
+      media.startCuesPending = cuesAt(media, media.positionMs).length > 0;
     }
     media.elapsedMs = elapsedAt(media, progress);
   }
@@ -529,17 +701,17 @@ export function mediaProperty(
     kind: "duration",
     milliseconds,
   });
-  const advanced = (): number => progressBefore(media, atMs) - media.committedProgressMs;
+  const progress = (): number => progressBefore(media, atMs);
+  const advanced = (): number => progress() - media.committedProgressMs;
+  const position = (): number => positionAtProgressMs(media, progress()).positionMs;
   switch (name) {
     case "position":
-      return duration(media.positionMs + advanced());
+      return duration(position());
     case "elapsed":
       return duration(media.elapsedMs + advanced());
     case "remaining":
       if (!media.loaded) return null;
-      return duration(
-        isActiveMedia(media) ? Math.max(0, mediaEndMs(media) - media.positionMs - advanced()) : 0,
-      );
+      return duration(isActiveMedia(media) ? Math.max(0, mediaEndMs(media) - position()) : 0);
     case "duration":
       return media.durationMs === null ? null : duration(media.durationMs);
     case "volume":
@@ -582,7 +754,10 @@ export function mediaPlayheadMs(media: RuntimeMediaSnapshot): number {
   const passes = media.passesCompleted;
   // Pass ends come from the anchor formula, so they agree exactly with the arrivals the timeline commits.
   const passEnd = (pass: number): number => progressTo(media, end, pass);
+  const durationEnded = progress === terminal && media.repeat.kind === "budget";
   if (progress < passEnd(passes)) {
+    // A repeat duration ends where the timeline will commit its end.
+    if (durationEnded) return durationEndPositionMs(media, passes, progress);
     return Math.min(end, media.positionMs + (progress - media.committedProgressMs));
   }
   const passLength = end - media.startAtMs;
@@ -607,6 +782,7 @@ export function mediaPlayheadMs(media: RuntimeMediaSnapshot): number {
     // Playback that ends exactly at the end of a pass stays at that end; otherwise it wraps to the next pass.
     return progress === terminal ? end : media.startAtMs;
   }
+  if (durationEnded) return durationEndPositionMs(media, passes + laps, progress);
   return laps === 0
     ? Math.min(end, media.positionMs + (progress - media.committedProgressMs))
     : Math.min(end, media.startAtMs + (progress - passEnd(passes + laps - 1)));

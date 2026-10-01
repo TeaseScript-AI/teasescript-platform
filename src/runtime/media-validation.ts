@@ -1,6 +1,10 @@
 import type { InstructionPlan } from "../plan/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
-import { durationTailPositionMs, segmentProgressMs } from "./media.js";
+import {
+  reachableMediaCursor,
+  type RuntimeMediaCueSnapshot,
+  type RuntimeMediaRepeatSnapshot,
+} from "./media.js";
 
 /** Restore validation for media playback records, their handles, queued cue blocks, and cue-block frames. */
 
@@ -159,23 +163,23 @@ function validMediaRecord(
     media.segmentPasses > media.passesCompleted ||
     media.elapsedMs !==
       elapsedAtCommitted(media, media.segmentElapsedMs, media.committedProgressMs) ||
-    !cursorMatchesAnchor({
-      finished: media.state === "finished",
-      durationEndMs:
-        isPlainRecord(media.repeat) &&
-        media.repeat.kind === "budget" &&
-        typeof media.repeat.milliseconds === "number"
-          ? media.repeat.milliseconds - media.segmentElapsedMs
-          : null,
-      cuePointsMs: cuePoints(media.cues, media.startAtMs, end),
-      startAtMs: media.startAtMs,
-      endMs: end,
-      positionMs: media.positionMs,
-      passesCompleted: media.passesCompleted,
-      committedProgressMs: media.committedProgressMs,
-      segmentPositionMs: media.segmentPositionMs,
-      segmentPasses: media.segmentPasses,
-    })
+    !reachableMediaCursor(
+      {
+        durationMs: media.durationMs,
+        startAtMs: media.startAtMs,
+        endAtMs: media.endAtMs,
+        repeat: media.repeat,
+        cues: media.cues,
+        segmentPositionMs: media.segmentPositionMs,
+        segmentPasses: media.segmentPasses,
+        segmentElapsedMs: media.segmentElapsedMs,
+        positionMs: media.positionMs,
+        committedProgressMs: media.committedProgressMs,
+        passesCompleted: media.passesCompleted,
+        startCuesPending: media.startCuesPending,
+      },
+      media.state === "finished",
+    )
   )
     return false;
   // A stop starts a final segment at the stop position.
@@ -224,89 +228,6 @@ function validMediaRecord(
     default:
       return false;
   }
-}
-
-/**
- * The cursor stands where the runtime's own arithmetic put it. Playing media stand on a reachable position: the
- * segment's anchor before anything is committed, the range start after a pass wrap, or a cue point reached by an
- * arrival. Committed progress is the anchor formula there; after a wrap it is the end of the pass before, which a cue
- * arrival in the new pass that rounding keeps short of it does not change. Media finished at the range end stand at the
- * end of their last pass, or of a repeat duration that ended there. Media finished inside the range ended a repeat
- * duration: exactly at a cue arrival, or at the unique tail position measured back from the next target, never past a
- * cue that the duration's end had already reached.
- */
-function cursorMatchesAnchor(cursor: {
-  readonly finished: boolean;
-  readonly durationEndMs: number | null;
-  readonly cuePointsMs: readonly number[];
-  readonly startAtMs: number;
-  readonly endMs: number;
-  readonly positionMs: number;
-  readonly passesCompleted: number;
-  readonly committedProgressMs: number;
-  readonly segmentPositionMs: number;
-  readonly segmentPasses: number;
-}): boolean {
-  const { positionMs: position, committedProgressMs: committed, endMs: end } = cursor;
-  const passLength = end - cursor.startAtMs;
-  const passes = cursor.passesCompleted - cursor.segmentPasses;
-  if (passes < 0) return false;
-  const progressAt = (point: number, pass: number): number =>
-    segmentProgressMs(pass, passLength, point - cursor.segmentPositionMs);
-  const isCue = (point: number): boolean => cursor.cuePointsMs.includes(point);
-  const wrapped = passes >= 1 && committed === progressAt(end, passes - 1);
-  if (!cursor.finished) {
-    if (passes === 0 && committed === 0 && position === cursor.segmentPositionMs) return true;
-    if (wrapped && position === cursor.startAtMs) return true;
-    if (!isCue(position)) return false;
-    if (committed === progressAt(position, passes))
-      return passes >= 1 || position > cursor.segmentPositionMs;
-    return wrapped && committed >= progressAt(position, passes);
-  }
-  if (position === end) {
-    if (passes < 1) return false;
-    if (wrapped) return true;
-    return (
-      committed === cursor.durationEndMs &&
-      committed < progressAt(end, passes - 1) &&
-      durationTailPositionMs(end, progressAt(end, passes - 1), committed) >= end
-    );
-  }
-  // Only a repeat duration finishes inside the range; one that ends exactly where a pass ends finishes at its end.
-  if (
-    committed !== cursor.durationEndMs ||
-    (passes >= 1 && committed <= progressAt(end, passes - 1))
-  )
-    return false;
-  // Cue points before the position were reached before the duration ended, also where the duration ends exactly at
-  // a cue arrival; a pass starts where the pass before ended. The next cue point, which the tail can round onto, is
-  // the target its stretch headed to.
-  const reachedAt = (point: number): number =>
-    passes >= 1 && point === cursor.startAtMs
-      ? progressAt(end, passes - 1)
-      : progressAt(point, passes);
-  if (cursor.cuePointsMs.some((point) => point < position && reachedAt(point) >= committed))
-    return false;
-  if (isCue(position) && committed === progressAt(position, passes)) return true;
-  const target = Math.min(end, ...cursor.cuePointsMs.filter((point) => point >= position));
-  const tail = durationTailPositionMs(target, progressAt(target, passes), committed);
-  if (position === Math.min(target, tail)) return true;
-  // Rounding below the stretch keeps the duration's end at the position where the stretch began.
-  const stretchStart =
-    isCue(position) ||
-    (passes >= 1 ? position === cursor.startAtMs : position === cursor.segmentPositionMs);
-  return stretchStart && tail < position;
-}
-
-/** Cue points inside the active range, as the runtime places them. */
-function cuePoints(cues: unknown, startAtMs: number, endMs: number): number[] {
-  if (!Array.isArray(cues)) return [];
-  return cues.flatMap((cue: unknown) => {
-    if (!isPlainRecord(cue) || typeof cue.offsetMs !== "number") return [];
-    const point =
-      cue.kind === "at" ? cue.offsetMs : cue.kind === "beforeEnd" ? endMs - cue.offsetMs : null;
-    return point !== null && point >= startAtMs && point <= endMs ? [point] : [];
-  });
 }
 
 /**
@@ -383,7 +304,7 @@ function isPointList(value: unknown): value is readonly { atMs: number; progress
   );
 }
 
-function validRepeat(value: unknown): boolean {
+function validRepeat(value: unknown): value is RuntimeMediaRepeatSnapshot {
   if (!isPlainRecord(value)) return false;
   switch (value.kind) {
     case "once":
@@ -402,7 +323,10 @@ function validRepeat(value: unknown): boolean {
   }
 }
 
-function validCues(value: unknown, plan: InstructionPlan | undefined): boolean {
+function validCues(
+  value: unknown,
+  plan: InstructionPlan | undefined,
+): value is RuntimeMediaCueSnapshot[] {
   return (
     isCanonicalJsonArray(value) &&
     value.every(

@@ -41,6 +41,9 @@ interface MutableMedia {
   segmentPasses: number;
   segmentElapsedMs: number;
   positionMs: number;
+  passesCompleted: number;
+  committedProgressMs: number;
+  startCuesPending: boolean;
 }
 
 function mediaOf(snapshot: MutableSnapshot, mediaId: number): MutableMedia {
@@ -1381,4 +1384,91 @@ test("restore validation never coerces media settlement enumerations to text", (
     // Without the plan, only the settlement's own shape rules apply.
     assert.equal(validateRuntimeSnapshot(corrupted).valid, false, `${field} without the plan`);
   }
+});
+
+test("restore validation accepts exactly the cursors the runtime's own arrivals produce", () => {
+  const corrupt = (session: Session, mutate: (media: MutableMedia) => void, name: string): void => {
+    assert.equal(validateRuntimeSnapshot(session.snapshot, session.plan).valid, true, name);
+    // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; each case applies one invalid mutation.
+    const corrupted = JSON.parse(JSON.stringify(session.snapshot)) as MutableSnapshot;
+    const media =
+      corrupted.backgroundActions.find((action) => action.media?.mediaId === 1)?.media ??
+      corrupted.settledMedia.find((candidate) => candidate.mediaId === 1);
+    assert.ok(media !== undefined, name);
+    mutate(media);
+    assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false, name);
+  };
+  const counted = (cue = "") =>
+    new Session(
+      `let m = playAudio(file: "a", async: true, endAt: 1000 ms, repeat: 3 times)${cue}\nwait 10`,
+    ).load(1, 1_000);
+  corrupt(counted(), (media) => (media.positionMs = 5), "anchor position");
+  corrupt(counted(), (media) => (media.passesCompleted = 1), "anchor passes");
+  corrupt(
+    counted().at(1_000, [1, 1_000]),
+    (media) => (media.committedProgressMs = 999),
+    "wrap progress",
+  );
+  corrupt(
+    counted(" {\n  at 500 ms { }\n}").at(1_000, [1, 1_000]),
+    (media) => (media.positionMs = 500),
+    "wrapped start moved to a cue",
+  );
+  const seek = new Session(
+    'let m = playAudio(file: "a", async: true, endAt: 1000 ms, repeat: 3 times)\nm.position = 0.01 ms\nwait 10',
+  ).load(1, 1_000);
+  corrupt(seek, (media) => (media.positionMs = 0), "seek anchor moved to the range start");
+  const duration = (cues: string) =>
+    new Session(
+      `let m = playAudio(file: "a", async: true, endAt: 1000 ms, repeat: 500 ms) {\n${cues}\n}\nwait 10`,
+    )
+      .load(1, 1_000)
+      .at(500, [1, 500]);
+  corrupt(duration("  at 600 ms { }"), (media) => (media.positionMs = 600), "unreached cue");
+  corrupt(duration("  at 400 ms { }"), (media) => (media.positionMs = 400), "earlier cue");
+  corrupt(duration("  at 0 ms { }"), (media) => (media.positionMs = 0), "start cue");
+  corrupt(
+    duration(""),
+    (media) => {
+      media.positionMs = 1_000;
+      media.passesCompleted = 1;
+    },
+    "duration moved to the range end",
+  );
+  corrupt(
+    new Session(
+      'let m = playAudio(file: "a", async: true, endAt: 10 ms, repeat: 2 times) {\n  at 5 ms { }\n}\nwait 10',
+    )
+      .load(1, 10)
+      .at(5, [1, 5]),
+    (media) => (media.startCuesPending = true),
+    "start cues pending at an interior cue",
+  );
+});
+
+test("position reads and the terminal playhead use the arrival the timeline commits", () => {
+  const read = new Session(
+    [
+      'timer async 3 ms { say "before ${m.position}", instant }',
+      'let m = playAudio(file: "m", async: true, startAt: 0 ms, endAt: 4503599627370496 ms, repeat: 1.125 ms) {',
+      '  at 0.1 ms { say "C ${m.position}", instant }',
+      '  finish { say "after ${m.position}", instant }',
+      "}",
+      "m.position = 4503599627370495 ms",
+      "wait 100 ms",
+    ].join("\n"),
+  );
+  read.load(1, 4_503_599_627_370_496).at(2, [1, 1]).at(4, [1, 1.25]);
+  assert.deepEqual(read.said(), ["C 0.1 ms", "before 0.1 ms", "after 0.1 ms"]);
+  const terminal = new Session(
+    'let m = playAudio(file: "a", async: true, startAt: 1.1 ms, endAt: 1000.3 ms, repeat: 2498 ms) {\n  at 1.1 ms { }\n}\nwait 10000 ms',
+  );
+  terminal.load(1, 2_000);
+  terminal.snapshot = observeTime(terminal.plan, terminal.snapshot, 2_499, [
+    { mediaId: 1, segment: 1, progressMs: 2_498 },
+  ]).snapshot;
+  const projected = mediaPlaybackProjection(terminal.snapshot)[0]!.playheadMs;
+  terminal.at(2_500);
+  assert.equal(terminal.media(1)?.state, "finished");
+  assert.equal(projected, terminal.media(1)?.positionMs);
 });
