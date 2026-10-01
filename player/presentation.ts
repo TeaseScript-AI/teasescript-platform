@@ -1,11 +1,15 @@
 import type { PlayerRightControlPresentation } from "./model.js";
 
-export function timerProgressPercent(remainingSeconds: number, totalSeconds: number): number {
+export function timerProgressRatio(remainingSeconds: number, totalSeconds: number): number {
   if (!Number.isFinite(remainingSeconds) || !Number.isFinite(totalSeconds) || totalSeconds <= 0) {
     return 0;
   }
   const remainingRatio = Math.min(1, Math.max(0, remainingSeconds / totalSeconds));
-  return Math.round((1 - remainingRatio) * 100);
+  return 1 - remainingRatio;
+}
+
+export function timerProgressPercent(remainingSeconds: number, totalSeconds: number): number {
+  return Math.round(timerProgressRatio(remainingSeconds, totalSeconds) * 100);
 }
 
 export function formatTimer(totalSeconds: number): string {

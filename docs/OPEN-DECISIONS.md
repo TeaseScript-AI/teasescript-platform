@@ -104,17 +104,18 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Advanced timeout, cancellation, and recovery policies beyond ADR 0018's mandatory basic interactions and the
   media playback contract in [`RUNTIME.md`](RUNTIME.md#stage-image-and-media-playback).
 - Stable text-output target handles beyond the first Standard chat target.
-- Exact author-facing theme schema/registration API and platform dark-theme token values. `ui/PLAYER-UI.md` fixes
+- Exact author-facing theme schema/registration API. `ui/PLAYER-UI.md` fixes the default light/dark theme intents,
   precedence, standalone/light/dark theme semantics, missing-variant fallback, and the no-arbitrary-CSS boundary.
 - Exact author-facing data/API form for supported Standard Player per-control base/fill colours. The Player already owns
   derived interaction styling and automatic readable black/white control-label text; syntax, serialization, and which
   Standard control kinds expose the colour input remain unresolved.
 - Remaining Standard Player accessibility policy beyond ADR 0018's accepted accessible-name/input rules, including
   readable scaling/zoom behavior, minimum control sizing, contrast thresholds, and browser/platform responsibility.
-- Player UI preference persistence: which panel/tool/theme/media-fit/text-display preferences survive reload or session
-  changes and whether restoration is automatic, explicit, or both.
-- Exact tuned thresholds/measurements for constraint-driven side-region dock/overlay decisions, compact geometry,
-  fixed tool width, stage height, readable conversation bounds, and composer growth.
+- Player UI preference persistence beyond Player Settings: which panel/tool/theme/media-fit/text-display preferences
+  survive reload or session changes, and whether account settings take over or synchronize the browser-local Player
+  Settings that `ui/PLAYER-UI.md` already keeps across reloads.
+- Exact tuned thresholds/measurements for constraint-driven dock/drawer decisions, compact geometry, per-tool width
+  presets, stage/conversation allocation, readable conversation bounds, and composer growth.
 - Temporary Player status/notification presentation for saved, paused, error, assignment, and similar platform state.
 - Exact developer-facing declaration for a Player-generated Standard tool that combines a title, ordered static
   content, and typed controls such as toggles, numeric/text fields, and selects, including value binding, updates,
