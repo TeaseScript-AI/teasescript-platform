@@ -36,14 +36,10 @@ test("reports source and IR counts separately instead of inventing a conversion 
           condition: {
             kind: "methodCall",
             span: child,
-            object: { kind: "variable", span: null, name: "this", type: "java.lang.Object" },
-            method: { kind: "constant", span: child, value: "loadBoolean" },
-            arguments: {
-              kind: "arguments",
-              span: child,
-              items: [{ kind: "constant", span: child, value: "missing" }],
-            },
-            implicitThis: true,
+            object: { kind: "variable", span: null, name: "helper", type: "java.lang.Object" },
+            method: { kind: "constant", span: child, value: "mystery" },
+            arguments: { kind: "arguments", span: child, items: [] },
+            implicitThis: false,
             safe: false,
             spreadSafe: false,
           },
@@ -59,14 +55,14 @@ test("reports source and IR counts separately instead of inventing a conversion 
   assert.equal(report.sourceStatementNodes, 1);
   assert.equal(report.migrationErrors, 2);
   assert.equal(report.rootMigrationErrors, 1);
-  assert.deepEqual(report.rootDiagnosticsByCode, { SX_STORAGE_MISSING_KEY_SEMANTICS: 1 });
+  assert.deepEqual(report.rootDiagnosticsByCode, { SX_DYNAMIC_OR_OBJECT_CALL: 1 });
   assert.equal(report.unsupportedPlaceholders, 1);
 });
 
 
 test("keeps independent semantic parent diagnostics when a child also fails", () => {
   const diagnostics: MigrationDiagnostic[] = [
-    { code: "SX_STORAGE_MISSING_KEY_SEMANTICS", severity: "error", message: "child", span: child },
+    { code: "SX_DYNAMIC_OR_OBJECT_CALL", severity: "error", message: "child", span: child },
     { code: "SX_SWITCH_FALLTHROUGH", severity: "error", message: "independent parent", span: parent },
   ];
 
