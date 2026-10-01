@@ -580,7 +580,10 @@ export function mediaPlayheadMs(media: RuntimeMediaSnapshot): number {
   const beyond = progress - passEnd(passes);
   let high = Math.ceil(beyond / passLength) + 1;
   if (!Number.isSafeInteger(passes + high) || passEnd(passes + high) < progress) {
-    return Math.min(end, media.startAtMs + (beyond % passLength));
+    const within = beyond % passLength;
+    // Counted playback ends at the end of its last pass, and so does a repeat duration that ends at a pass boundary.
+    if (progress === terminal && (media.repeat.kind !== "budget" || within === 0)) return end;
+    return Math.min(end, media.startAtMs + within);
   }
   let laps = 0;
   while (laps < high) {

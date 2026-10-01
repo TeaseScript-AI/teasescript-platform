@@ -1264,3 +1264,35 @@ test("anchor coherence follows the producing arithmetic exactly", () => {
     .load(1, 5_000)
     .at(16, [1, 0.7]);
 });
+
+test("crossings and reads use the exact reported values", () => {
+  const crossing = new Session(
+    'let clock = timer async 100 ms\nlet m = playAudio async "a" {\n  at 1.7 ms {\n    say "${clock.elapsed}", instant\n  }\n}\nwait 100 ms',
+  );
+  crossing.load(1, 100).at(3, [1, 5.1]);
+  assert.deepEqual(crossing.said(), ["2 ms"]);
+  const read = new Session(
+    'let m = playAudio async "a"\nwait 5 ms\nsay "${m.position} ${m.elapsed} ${m.remaining}", instant\nm.pause()\nwait 100 ms',
+  );
+  read.load(1, 100).at(6, [1, 0.6]);
+  assert.deepEqual(read.said(), ["0 s 0 s 100 ms"]);
+});
+
+test("a terminal playhead stays at the range end beyond exactly countable passes", () => {
+  for (const [endAt, repeat] of [
+    ["0.7 ms", "9007199254740991 times"],
+    ["0.00000000000001 ms", "9007199254740991 times"],
+    ["0.0625 ms", "1000000000000000 ms"],
+  ] as const) {
+    const session = new Session(
+      `let m = playAudio(file: "a", async: true, repeat: ${repeat}, endAt: ${endAt}) {\n  at 0 ms { }\n}\nwait 1000000`,
+    );
+    session.load(1, 100);
+    const terminal = mediaPlaybackProjection(session.snapshot)[0]!.terminalProgressMs!;
+    session.snapshot = observeTime(session.plan, session.snapshot, 1, [
+      { mediaId: 1, segment: 1, progressMs: terminal },
+    ]).snapshot;
+    const [media] = mediaPlaybackProjection(session.snapshot);
+    assert.equal(media?.playheadMs, media?.endMs, `${endAt} ${repeat}`);
+  }
+});
