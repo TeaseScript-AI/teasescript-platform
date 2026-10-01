@@ -103,8 +103,10 @@ native failure. Escalate uncertainty that cannot be bounded through a separately
 - **Design and maintenance:** ownership, coherent boundaries, ordering, state, persistence,
   compatibility, readability, debuggability, KISS, YAGNI, useful DRY, fragmentation, and dependency
   cost.
-- **Tests and evidence:** suitable layers, assertions, oracles, diagnostics, reproducibility,
-  negative paths, and proof of the claim rather than a green total.
+- **Tests and evidence:** suitable layers, assertions, independent or explicitly scoped oracles,
+  diagnostics, reproducibility, negative paths, and proof of the claim rather than a green total. Each new
+  or changed test protects a real obligation under
+  [`TESTING.md`](../TESTING.md#test-admission-and-consolidation), not temporary implementation state.
 - **Documentation and context:** correctness, canonical-source placement, lifecycle, routing, executable
   details, stale or competing text, consolidation, and safe, token-efficient compactness.
 - **Boundaries and cost:** reachable trust boundaries, realistic workloads, input-driven scaling,

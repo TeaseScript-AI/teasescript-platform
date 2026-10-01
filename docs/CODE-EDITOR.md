@@ -79,6 +79,8 @@ The first implementation should provide:
 
 The editor may preview the Player application's dynamic choice presentation, but button rows versus dropdown are not canonical runtime state. Buttons may use one or two rows; exact layout measurements and breakpoints remain Player UI work.
 
-Editor metadata must not imply that the first POC supports imports, package manifests, Standard Library replacement, or checkpoint migration.
-
-The advanced detailed-result option, `showButton` timeout/elapsed return, typing-indicator options, accessibility override field, concrete limit values, LLM interpretation options, and exact choice-layout thresholds remain deferred and must not appear as accepted completion suggestions before their contracts are approved.
+Completion, hover, and signature help follow accepted TeaseScript syntax, not only the subset the current POC executes;
+accepted syntax may appear before its implementation slice is complete. Help may describe implementation status
+honestly, but editor help and metadata must not claim that unimplemented behavior executes or imply that the first POC
+supports imports, package manifests, Standard Library replacement, or checkpoint migration. Current implementation
+completeness is not a negative completion contract.

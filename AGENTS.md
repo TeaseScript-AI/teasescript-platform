@@ -52,7 +52,9 @@ outside the repository.
 - Do not weaken tests to hide failures.
 - Do not record an experiment or inferred preference as accepted syntax or design. New syntax requires explicit Owner
   acceptance; after acceptance, synchronize the implementation and its canonical specification in the same change.
-- Do not use tests to turn unsettled behavior into an implicit requirement.
+- Do not use tests to turn unsettled behavior or temporary implementation state into an implicit requirement. An
+  accepted but unimplemented, deferred, or placeholder capability is not behavior to preserve; test what users rely on
+  meanwhile, not an inventory of what is absent.
 
 ## Requirements, simplicity, and review
 
@@ -112,8 +114,9 @@ action that unblocks the work.
 For supported parser, compiler, plan, runtime, action, state, checkpoint, or
 host behavior, verify through the real public or trusted path. New author-facing
 syntax and source-reachable observable behavior require representative
-source-to-runtime coverage. Follow `docs/TESTING.md`; do not add unrelated
-fuzzing infrastructure, dependencies, or production hooks.
+source-to-runtime coverage. Before adding, removing, or materially changing
+tests, read `docs/TESTING.md#test-admission-and-consolidation`. Do not add
+unrelated fuzzing infrastructure, dependencies, or production hooks.
 
 ## Verification and Git
 

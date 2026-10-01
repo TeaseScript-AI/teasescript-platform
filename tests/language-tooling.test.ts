@@ -33,15 +33,12 @@ test("language diagnostics are the canonical compilation diagnostics", () => {
   assert.deepEqual(languageDiagnostics(document), compileSource(document.text).diagnostics);
 });
 
-test("completion exposes accepted compact commands without deferred APIs", () => {
-  const deferred = ["timeout", "typingIndicator", "interpret", "import"];
+test("completion offers compact commands in statement and expression positions", () => {
   const statement = labels("");
   for (const expected of ["say", "showButton"]) assert.ok(statement.includes(expected), expected);
-  for (const unsupported of deferred) assert.ok(!statement.includes(unsupported), unsupported);
   const expression = labels("let answer = ");
   for (const expected of ["askText", "askNumber", "choose"])
     assert.ok(expression.includes(expected), expected);
-  for (const unsupported of deferred) assert.ok(!expression.includes(unsupported), unsupported);
 });
 
 test("completion exposes optional speaker and current say modifiers", () => {

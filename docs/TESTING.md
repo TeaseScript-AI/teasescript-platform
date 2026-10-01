@@ -83,10 +83,12 @@ published commit.
 
 ## Test admission and consolidation
 
-Give each maintained test family a distinct evidence obligation: accepted behavior, a real public/trusted boundary,
-confirmed regression, deterministic invariant, or material browser-only risk. Choose the cheapest layer that proves it;
-keep representative source-to-runtime integration where isolated tests cannot prove the connection. Browser tests own
-rendering, focus, input, scrolling and accessibility semantics, not repeated runtime normalization/checkpoint matrices.
+Admit a test only when it answers one question: what desirable behavior would regress if this test failed? "The code
+currently does this" is not sufficient. Give each maintained test family a distinct evidence obligation: accepted
+behavior, a real public/trusted boundary, confirmed regression, deterministic invariant, or material browser-only risk.
+Choose the cheapest layer that proves it; keep representative source-to-runtime integration where isolated tests cannot
+prove the connection. Browser tests own rendering, focus, input, scrolling and accessibility semantics, not repeated
+runtime normalization/checkpoint matrices.
 
 Use the smallest representative fixture; retain large inputs when scale itself caused the defect. Separate expensive
 setup from the boundary under test when a small integration case plus direct boundary evidence proves both obligations.
@@ -94,13 +96,20 @@ Measure changed suites and record revision, environment, command and timings in 
 measurements as permanent limits.
 
 Before removing or consolidating a family, record its obligation and remaining evidence in the issue/PR. Delete checks
-that only freeze provisional geometry, development-fixture content or private implementation details; preserve genuine
-regressions and browser risks exercised *through* fixtures. Replace numeric tuning assertions with observable behavior
-where possible. A POC check needs reassessment when its experiment changes or ends, not automatic repair to preserve an
-obsolete expectation. Repeated input/viewport cases need distinct failure modes, not merely different values.
+that only freeze provisional geometry, development-fixture content, private implementation details or temporary
+incompleteness; preserve genuine regressions and browser risks exercised *through* fixtures. An accepted but
+unimplemented, deferred, or placeholder capability is not behavior to preserve: do not assert that it is absent,
+unsuggested, or rejected merely because it has not landed. Test what users rely on meanwhile; when a real boundary must
+reject such input, assert that safe rejection (for example a structured diagnostic instead of silent acceptance), not an
+inventory of what is absent. Replace numeric tuning assertions with observable behavior where possible. A POC check
+needs reassessment when its experiment changes or ends, not automatic repair to preserve an obsolete expectation.
+Repeated input/viewport cases need distinct failure modes, not merely different values.
 
-Tests do not establish product policy. A numeric oracle tied to a current algorithm may detect regression without making
-that number a project-wide accessibility or performance requirement; identify that scope explicitly.
+Tests do not establish product policy. Derive expected values from accepted specifications or independent reasoning,
+such as hand derivation, an invariant, or an independent control, where possible. A value taken from the current
+implementation, such as a numeric oracle tied to a current algorithm, is acceptable only as an explicitly scoped
+regression oracle: it may detect regression without making that value product policy or a project-wide accessibility or
+performance requirement; identify that scope explicitly.
 
 ## Test layers
 
