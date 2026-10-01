@@ -5,17 +5,23 @@ import { compileSource } from "../src/compiler.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 import { sayTexts } from "./helpers/runtime-events.js";
 
-test("long prefix chains and parenthesis groups compile", () => {
+test("long prefix chains and parenthesis groups compile and keep their values", () => {
   const sources = [
-    ["not", `let value = ${"not ".repeat(10_000)}true\nexit`],
-    ["unary minus", `let value = ${"-".repeat(10_000)}1\nexit`],
-    ["parentheses", `let value = ${"(".repeat(500)}1${")".repeat(500)}\nexit`],
+    ["even not", `${"not ".repeat(10_000)}true`, true],
+    ["odd not", `${"not ".repeat(9_999)}true`, false],
+    ["even unary minus", `${"-".repeat(10_000)}1`, 1],
+    ["odd unary minus", `${"-".repeat(9_999)}1`, -1],
+    ["parentheses", `${"(".repeat(500)}1${")".repeat(500)}`, 1],
   ] as const;
 
-  for (const [name, source] of sources) {
-    const compiled = compileSource(source);
-    assert.deepEqual(compiled.diagnostics, [], name);
-    assert.notEqual(compiled.plan, null, name);
+  for (const [name, expression, expected] of sources) {
+    const result = runValidSource(`let value = ${expression}\nexit`);
+    assert.equal(result.snapshot.status, "halted", name);
+    assert.equal(
+      result.snapshot.frames[0]?.bindings.find((binding) => binding.name === "value")?.value,
+      expected,
+      name,
+    );
   }
 });
 

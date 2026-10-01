@@ -138,13 +138,16 @@ test("preserves unknown-name and protected-name semantic diagnostics", () => {
   );
 });
 
-test("scans a wide dedented block without text amplification", () => {
-  const line = `    ${"x".repeat(100_000)}`;
+test("preserves wide dedented block text without native failure", () => {
+  const wide = "x".repeat(100_000);
+  const line = `    ${wide}`;
   const source = ['"""', line, line, '"""'].join("\n");
   const result = lex(source);
   assert.deepEqual(result.diagnostics, []);
   const value = result.tokens.find((token) => token.kind === TokenKind.StringText);
-  assert.equal(tokenValue(value)?.length, 200_001);
+  const text = tokenValue(value);
+  // Compare without printing the 200,001-character values on failure.
+  assert.ok(text === `${wide}\n${wide}`, `decoded length ${text?.length}`);
 });
 
 function tokenValue(token: Token | undefined): string | undefined {

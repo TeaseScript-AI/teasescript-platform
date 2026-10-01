@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
-import { compileSource } from "../src/index.js";
+import { compileSource, createFreshRuntimeSnapshot, run } from "../src/index.js";
 
-test("large flat chains complete full compilation with source provenance", () => {
+test("large flat chains compile with source provenance and evaluate every term", () => {
   for (const termCount of [200, 1_600, 6_400, 12_800]) {
     const source = flatChain(termCount);
     const result = compileSource(source);
@@ -16,7 +16,14 @@ test("large flat chains complete full compilation with source provenance", () =>
       declaration === undefined ? null : [declaration.span.so, declaration.span.eo],
       [0, source.length],
     );
-    assert.equal(declaration?.kind === "declareBinding" ? declaration.value.kind : null, "binary");
+    const remainder = termCount % 10;
+    const finished = run(result.plan!, createFreshRuntimeSnapshot(result.plan!)).snapshot;
+    assert.equal(finished.status, "halted");
+    assert.equal(
+      finished.frames[0]?.bindings.find((binding) => binding.name === "value")?.value,
+      45 * Math.floor(termCount / 10) + (remainder * (remainder - 1)) / 2,
+      String(termCount),
+    );
   }
 });
 
@@ -140,6 +147,8 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
     ["--stack-size=256", "--input-type=module", "--eval", script],
     {
       encoding: "utf8",
+      timeout: 60_000,
+      maxBuffer: 256 * 1024,
       env: {
         ...process.env,
         TEASESCRIPT_STACK_SOURCE: source,
@@ -152,6 +161,7 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
     },
   );
 
+  assert.equal(child.error, undefined);
   assert.equal(child.status, 0, child.stderr);
   assert.equal(child.stderr, "");
   assert.deepEqual(JSON.parse(child.stdout), {

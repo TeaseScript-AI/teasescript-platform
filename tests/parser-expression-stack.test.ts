@@ -176,11 +176,13 @@ test("nested malformed expressions retain diagnostic codes, spans, and statement
     {
       expression: "{a:1,b:{x 2},c:2}",
       diagnostics: [["TSP005", 22, 22]],
+      outerProperties: ["a", "b", "c"],
       statements: ["letStatement", "exitStatement"],
     },
     {
       expression: "{a:1,b:{:2},c:2}",
       diagnostics: [["TSP004", 20, 20]],
+      outerProperties: ["a", "b", "c"],
       statements: ["letStatement", "exitStatement"],
     },
   ];
@@ -201,5 +203,18 @@ test("nested malformed expressions retain diagnostic codes, spans, and statement
       fixture.statements,
       fixture.expression,
     );
+    if (fixture.outerProperties !== undefined) {
+      // The inner object error must not consume the outer siblings.
+      const statement = parsed.program.statements[0];
+      assert.ok(
+        statement?.kind === "letStatement" && statement.initializer.kind === "objectLiteral",
+        fixture.expression,
+      );
+      assert.deepEqual(
+        statement.initializer.properties.map((property) => property.name.name),
+        fixture.outerProperties,
+        fixture.expression,
+      );
+    }
   }
 });

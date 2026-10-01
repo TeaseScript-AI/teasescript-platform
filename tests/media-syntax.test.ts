@@ -336,7 +336,7 @@ test("deeply nested media operands compile without native recursion", () => {
   assert.notEqual(result.plan, null);
 });
 
-test("media nested in cue positions parses each position once", () => {
+test("avoids exponential cue-position reparsing on nested source", () => {
   let play = 'playAudio async "a"';
   for (let level = 0; level < 40; level += 1) {
     play = `playAudio async "a" { at point(${play}) { } }`;
