@@ -14,6 +14,7 @@ import { stageFixtures } from "./stageFixtures";
 import StageRightRail from "./StageRightRail.vue";
 import ThemeLab from "./ThemeLab.vue";
 import TimerFixtureRegion from "./TimerFixtureRegion.vue";
+import TimerRegion from "./TimerRegion.vue";
 import { usePlayerSession } from "./usePlayerSession";
 import { defaultPlayerThemeIntents } from "./usePlayerTheme";
 
@@ -91,9 +92,13 @@ player.start(createPlayerRuntimeSession(openingScenario));
         </fieldset>
       </div>
     </template>
-    <template #right-rail>
+    <template #right-rail="{ timers }">
       <StageRightRail>
-        <template #timers>
+        <!-- Fixtures fill the rail only while no runtime timer is presented. -->
+        <template v-if="timers.length" #timers>
+          <TimerRegion :timers="timers" />
+        </template>
+        <template v-else #timers>
           <TimerFixtureRegion
             :kind="timerKind"
             :count="timerCount"

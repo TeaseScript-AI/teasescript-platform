@@ -12,6 +12,8 @@ import PlayerToolsShell, { type PlayerTool } from "./PlayerToolsShell.vue";
 import PlayerTopBar from "./PlayerTopBar.vue";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
 import Stage from "./Stage.vue";
+import StageRightRail from "./StageRightRail.vue";
+import TimerRegion from "./TimerRegion.vue";
 import { enhancedTranscriptContrast } from "./transcriptContrast";
 import { usePlayerKeyboardFocus } from "./usePlayerKeyboardFocus";
 import { usePlayerPreference } from "./usePlayerPreference";
@@ -146,7 +148,14 @@ async function toggleFullscreen() {
           <Stage ref="stage" :media="media" @media-aspect="mediaAspect = $event" />
         </template>
         <template #right-rail>
-          <slot name="right-rail" />
+          <!-- Runtime timers are runtime-owned content; the preview may add fixtures around them. -->
+          <slot name="right-rail" :timers="player.timers.value">
+            <StageRightRail v-if="player.timers.value.length">
+              <template #timers>
+                <TimerRegion :timers="player.timers.value" />
+              </template>
+            </StageRightRail>
+          </slot>
         </template>
 
         <RuntimeInteraction
@@ -156,6 +165,7 @@ async function toggleFullscreen() {
           :entries="transcript.entries"
           :speakers="transcript.speakers"
           :revision="transcript.revision"
+          :observe-time="player.observe"
           @update:session="player.update"
         />
       </PlayerComposition>

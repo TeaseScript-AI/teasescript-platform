@@ -29,6 +29,8 @@ const props = defineProps<{
   speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
   revision?: number;
   transcriptKey: string;
+  /** Brings scene time up to date before input and returns the published session. */
+  observeTime?: () => PlayerRuntimeSession | null;
 }>();
 const emit = defineEmits<{
   "update:session": [session: PlayerRuntimeSession];
@@ -119,6 +121,7 @@ watch(
 async function complete(
   operation: (session: PlayerRuntimeSession) => PlayerRuntimeControlResult | null,
   refocusInput = true,
+  target: "interaction" | "pacing" = "interaction",
 ) {
   if (!props.session || submitting.value) return;
   suppressComposerRefocus = !refocusInput;
@@ -127,7 +130,19 @@ async function complete(
     !!document.activeElement?.closest("[data-foreground-controls]");
   submitting.value = true;
   try {
-    const result = operation(props.session);
+    const targetId = (current: PlayerRuntimeSession) =>
+      target === "pacing"
+        ? playerRuntimePacingGate(current)?.actionId
+        : activePlayerRuntimeInteraction(current.snapshot)?.actionId;
+    const presented = targetId(props.session);
+    const session = props.observeTime?.() ?? props.session;
+    // Elapsed time may have ended or replaced the presented action; input never targets another action.
+    if (targetId(session) !== presented) {
+      // A skipped message that already finished needs no feedback.
+      if (target === "interaction") showFeedback("This interaction is no longer available.");
+      return;
+    }
+    const result = operation(session);
     if (!result) {
       showFeedback(
         foreground.value?.kind === "show-button"
@@ -145,7 +160,9 @@ async function complete(
       showFeedback(
         result.outcome.kind === "invalidPayload"
           ? result.outcome.message
-          : "This interaction is no longer available.",
+          : result.outcome.kind === "executionPending"
+            ? "The script moved on; try again."
+            : "This interaction is no longer available.",
       );
       if (refocusInput) focusInput();
     }
@@ -169,7 +186,7 @@ function textSelected() {
 }
 function skipPacing(refocusInput: boolean) {
   if (!pacing.value || textSelected()) return;
-  void complete(skipPlayerRuntimePacing, refocusInput);
+  void complete(skipPlayerRuntimePacing, refocusInput, "pacing");
 }
 let pacingGesture: { pointerId: number; x: number; y: number; target: Element } | null = null;
 useEventListener(document, "pointerdown", (event: PointerEvent) => {

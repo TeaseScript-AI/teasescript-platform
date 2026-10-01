@@ -8,8 +8,8 @@
   language, isolation, and persistence scope they decide. The temporary [Upstream contract integration](#upstream-contract-integration)
   section below records Owner-decided Player behavior that still needs synchronization into those upstream contracts.
 - **Implementation state:** The Player is the Phase 2C implementation under `player/vue/src/phase2c/`. Its implemented
-  transcript, foreground interaction, and pacing paths use the shared runtime adapter. Runtime timer/media integration,
-  production host integration, and several provisional presentation values remain incomplete.
+  transcript, foreground interaction, pacing, and runtime timer paths use the shared runtime adapter. Runtime media
+  integration, production host integration, and several provisional presentation values remain incomplete.
 
 This document may lead the implementation. A missing POC feature or an implementation bug does not redefine the desired
 Player contract. Conversely, behavior found only in current HTML/CSS/JavaScript is evidence rather than contract until it
@@ -57,7 +57,7 @@ specification may lead the implementation. The Phase 2C Player presents supporte
 and pacing behavior from canonical runtime state. Its development preview opens one runtime choice scenario and adds
 Visual Lab, Layout Debug, the Stage media picker, Theme Lab, and timer/background-button presentation fixtures. The
 default build mounts the Player without that preview; the development server or explicit `?dev` URL opt-in loads it.
-Runtime timer/media wiring and production host integration remain separate work. Values marked for retesting remain
+Runtime timers are wired; runtime media wiring and production host integration remain separate work. Values marked for retesting remain
 provisional tuning baselines.
 
 A current implementation detail is not a durable requirement merely because it exists. Owner-confirmed behavior here is
@@ -76,8 +76,8 @@ controlling source adopts it; remove this section and its router references when
 - **Timer presentation metadata:** the maintained timer section below defines visible/mystery/hidden presentation and
   optional labeling. Authored timers carry visible/mystery/hidden display and optional labels (see
   [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time)); `player/runtime-adapter.ts` derives presented timers and
-  observation deadlines from runtime state. The Phase 2C Player does not render runtime timers yet; its development
-  preview uses timer fixtures. Stable generic-label numbering across timer lifecycle changes remains unsynchronized.
+  observation deadlines from runtime state. The Phase 2C Player renders runtime timers in its right rail; its
+  development preview shows timer fixtures only while no runtime timer is presented. Stable generic-label numbering across timer lifecycle changes remains unsynchronized.
 
 ## Surface hierarchy
 
