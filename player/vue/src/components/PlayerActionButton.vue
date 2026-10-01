@@ -122,7 +122,8 @@ const material = computed(() =>
 }
 .player-action-button:focus-visible {
   outline: 2px solid var(--theme-accent-focus);
-  outline-offset: 3px;
+  /* Phase 2C sets the shared offset; the legacy Player keeps its 3px. */
+  outline-offset: var(--player-focus-offset, 3px);
 }
 @media (prefers-reduced-motion: reduce) {
   .player-action-button { transition: none; }

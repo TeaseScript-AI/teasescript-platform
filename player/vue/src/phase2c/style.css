@@ -173,6 +173,9 @@
 :root[data-phase2c-theme] :is(button, textarea:not([data-composer-input]), input, select, summary, a[href], [data-tools-focus^="title:"]):focus-visible {
   outline: 2px solid var(--theme-accent-focus);
   outline-offset: var(--player-focus-offset);
+  /* The outline is the only focus mark; vendored shadcn rings would fill its separation. */
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-ring-offset-shadow: 0 0 #0000;
 }
 /* Native :focus-visible includes mouse-focused text inputs. App's shared
    navigation modality keeps editing quiet, including body-portaled controls. */
