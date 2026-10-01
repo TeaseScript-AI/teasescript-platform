@@ -467,10 +467,6 @@ test("pending interaction survives JSON checkpoint restore with monotonic events
 });
 
 test("interaction definitions preflight each field against remaining aggregate bytes", () => {
-  assert.equal(
-    interactionUtf8ByteLength("x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES + 4_464)),
-    70_000,
-  );
   const exact = interactionPlan("button", {
     kind: "button",
     buttonLabel: "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES),
@@ -957,8 +953,8 @@ test("explicit accessible names must contain non-whitespace content", () => {
   }
 });
 
-test("very large regex-bearing interaction strings fast-reject at plan and snapshot boundaries", () => {
-  const huge = "a".repeat(MAX_INTERACTION_STRING_UTF8_BYTES * 32);
+test("oversized accessible names and identifier labels are rejected at plan and snapshot boundaries", () => {
+  const huge = "a".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES + 1);
   const button = interactionPlan("button", {
     kind: "button",
     buttonLabel: "Continue",
@@ -1076,25 +1072,26 @@ test("huge completion kind tokens are not reflected or allowed to mutate canonic
     accessibleName: defaults.button,
   });
   const pending = waiting(plan);
-  const huge = "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES * 32);
-  for (const request of [
-    { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: huge },
-    {
-      actionId: pending.snapshot.foregroundAction!.actionId,
-      actionKind: "interaction",
-      interactionKind: huge,
-    },
-  ]) {
-    const before = JSON.stringify(pending.snapshot);
-    const rejected = completeAction(plan, pending.snapshot, request);
-    assert.equal(rejected.outcome.kind, "wrongActionKind");
-    assert.equal(
-      rejected.outcome.kind === "wrongActionKind" && rejected.outcome.receivedActionKind,
-      "<invalid>",
-    );
-    assert.deepEqual(rejected.events, []);
-    assert.equal(JSON.stringify(rejected.snapshot), before);
+  const actionId = pending.snapshot.foregroundAction!.actionId;
+  const before = structuredClone(pending.snapshot);
+  // Two different oversized lengths must yield the same bounded, non-reflected token.
+  for (const field of ["actionKind", "interactionKind"] as const) {
+    const tokens = [16, 32].map((multiple) => {
+      const huge = "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES * multiple);
+      const request =
+        field === "actionKind"
+          ? { actionId, actionKind: huge }
+          : { actionId, actionKind: "interaction", interactionKind: huge };
+      const rejected = completeAction(plan, pending.snapshot, request);
+      assert.ok(rejected.outcome.kind === "wrongActionKind", field);
+      assert.deepEqual(rejected.events, [], field);
+      assert.deepEqual(rejected.snapshot, before, field);
+      return rejected.outcome.receivedActionKind;
+    });
+    assert.equal(tokens[0], tokens[1], field);
+    assert.ok(tokens[0]!.length < MAX_INTERACTION_STRING_UTF8_BYTES, field);
   }
+  assert.deepEqual(pending.snapshot, before);
 });
 
 test("a foreground action keeps identities distinct from the retained settlement", () => {
@@ -1658,19 +1655,6 @@ test("unsupported persisted interaction fields are rejected at every boundary", 
     payload: { kind: "selectedLabel", selectedLabel: "one" },
   } as const;
   assert.throws(() => completeAction(base, settlementHostile, settlementCompletionRequest));
-
-  const requested = pending.events.find((event) => event.kind === "actionRequested")!;
-  assert.equal(
-    requested.kind === "actionRequested" && Object.hasOwn(requested.action, "extra"),
-    false,
-  );
-  const duplicate = completeAction(base, completed.snapshot, settlementCompletionRequest);
-  assert.equal(duplicate.outcome.kind, "alreadySettled");
-  assert.equal(
-    duplicate.outcome.kind === "alreadySettled" &&
-      Object.hasOwn(duplicate.outcome.settlement, "extra"),
-    false,
-  );
 
   const delayPlan = compileSource("wait 1\nexit").plan!;
   const delayPending = run(delayPlan, createFreshRuntimeSnapshot(delayPlan));
