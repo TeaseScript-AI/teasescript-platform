@@ -1,7 +1,22 @@
+// Vue/clsx class maps use keys as classes and values as truthiness guards. CVA variant maps
+// are not class maps: their values are classes.
+function classMap(object) {
+  let node = object;
+  while (node.parent?.type === "ArrayExpression") node = node.parent;
+  const parent = node.parent;
+  if (parent?.type === "VExpressionContainer") return true;
+  return (
+    parent?.type === "CallExpression" &&
+    parent.callee.type === "Identifier" &&
+    ["cn", "clsx"].includes(parent.callee.name)
+  );
+}
 // Tailwind scans complete class names, not runtime string interpolation. Check direct
 // class expressions without pretending to resolve arbitrary helpers or runtime data.
 function classContext(node) {
   for (let child = node, parent = node.parent; parent; child = parent, parent = parent.parent) {
+    if (parent.type === "Property" && parent.value === child && classMap(parent.parent))
+      return false;
     if (parent.type === "ConditionalExpression" && parent.test === child) return false;
     if (parent.type === "LogicalExpression" && parent.operator === "&&" && parent.left === child)
       return false;
