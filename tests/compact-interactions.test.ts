@@ -121,25 +121,8 @@ test("compact interaction forms preserve immutable command, speaker, label, sepa
   assert.equal(Object.isFrozen(choice.options[0]), true);
 });
 
-test("all accepted compact forms parse and malformed forms recover at the next statement", () => {
-  const accepted = [
-    'showButton "Continue"',
-    'showButton as mistress "Ready"',
-    "let answer = askText",
-    'let answer = askText "Type here"',
-    "let answer = askText as mistress",
-    'let answer = askText as mistress "Type here"',
-    "let amount = askNumber",
-    'let amount = askNumber "Enter a number"',
-    "let amount = askNumber as mistress",
-    'let amount = askNumber as mistress "Enter a number"',
-    'let result = choose "Bratty", "Very submissive"',
-    'let result = choose as mistress "Bratty", "Very submissive"',
-    'let result = choose bratty: "Bratty", submissive: "Very submissive"',
-    'let result = choose as mistress first: "Mystery", second: "Mystery"',
-    'let result = choose 1: "Open the door", 2: "Walk away"',
-  ];
-  for (const source of accepted) assert.deepEqual(parse(source).diagnostics, [], source);
+// Accepted forms are covered with their spans by the variant matrix below.
+test("malformed compact interaction forms recover at the next statement", () => {
   for (const source of [
     "showButton",
     "let x = choose",
