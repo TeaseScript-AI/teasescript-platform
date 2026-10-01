@@ -8,10 +8,13 @@ import {
   speakerAvatarPalette,
 } from "../player/vue/src/phase2c/speakerAvatar.js";
 
-test("the twelve avatar colours have readable light and dark variants", () => {
-  assert.equal(speakerAvatarPalette.length, 12);
-  assert.equal(new Set(speakerAvatarPalette.map((pair) => pair.dark.background)).size, 12);
-  assert.deepEqual(speakerAvatarColors(12), speakerAvatarColors(0));
+// The palette size and values are provisional; the assignment rules are not.
+const paletteSize = speakerAvatarPalette.length;
+
+test("avatar colours are distinct, cycle, and have readable light and dark variants", () => {
+  assert.ok(paletteSize > 1);
+  assert.equal(new Set(speakerAvatarPalette.map((pair) => pair.dark.background)).size, paletteSize);
+  assert.deepEqual(speakerAvatarColors(paletteSize), speakerAvatarColors(0));
   for (const pair of speakerAvatarPalette) {
     for (const mode of ["light", "dark"] as const) {
       const background = authoredColorToOklch(pair[mode].background);
@@ -23,16 +26,16 @@ test("the twelve avatar colours have readable light and dark variants", () => {
 });
 
 test("new speakers get the colour used by the fewest messages, with stable ties", () => {
-  const counts = Array<number>(speakerAvatarPalette.length).fill(0);
-  const firstTwelve = [];
+  const counts = Array<number>(paletteSize).fill(0);
+  const firstRound = [];
   for (let speaker = 0; speaker < 100; speaker += 1) {
     const index = leastUsedAvatarColor(counts);
-    if (speaker < 12) firstTwelve.push(index);
+    if (speaker < paletteSize) firstRound.push(index);
     counts[index]! += 1;
   }
   assert.deepEqual(
-    firstTwelve,
-    Array.from({ length: 12 }, (_, index) => index),
+    firstRound,
+    Array.from({ length: paletteSize }, (_, index) => index),
   );
   assert.equal(Math.max(...counts) - Math.min(...counts), 1);
 
