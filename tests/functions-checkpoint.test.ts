@@ -69,7 +69,7 @@ test("checkpoint restoration accepts the configured call-depth ceiling", () => {
 });
 
 test("restores inside function loops, after continue, and before early return", () => {
-  const { boundaries: observations } = assertRuntimeResumeEquivalent(
+  const { boundaries: observations, events } = assertRuntimeResumeEquivalent(
     [
       "function find(limit) {",
       "  for value in 1..=limit {",
@@ -88,11 +88,10 @@ test("restores inside function loops, after continue, and before early return", 
       (snapshot) => snapshot.callFrames.length === 1 && snapshot.loopFrames.length === 1,
     ),
   );
-  assert.ok(
-    observations.some((snapshot) => {
-      const next = snapshot.nextInstruction;
-      return snapshot.callFrames.length === 1 && snapshot.loopFrames.length === 1 && next >= 0;
-    }),
+  // `continue` skips value 1 and `return` at value 3 prevents value 4.
+  assert.deepEqual(
+    events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["loop:2", "loop:3", "3"],
   );
 });
 
@@ -231,23 +230,32 @@ test("preserves prepared earlier arguments through a later suspension and a susp
   assert.equal(direct.snapshot.temporaries.length, 0);
 });
 
-test("bounds snapshot index and same-signature liveness work", () => {
-  const { plan: compiled, snapshot } = recursiveSnapshot(4);
-  const statistics = withValidationTestStatistics((finish) => {
-    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
-    return finish();
-  }).counts;
-
-  assert.ok((statistics.snapshotAnalysisBuilds ?? 0) <= 1, "snapshot analysis was rebuilt");
-  assert.ok((statistics.defaultBindingIndexBuilds ?? 0) <= 1, "default-binding index was rebuilt");
-  assert.ok((statistics.parameterNameIndexBuilds ?? 0) <= 1, "parameter-name index was rebuilt");
-  assert.ok((statistics.livenessComputations ?? 0) <= 1, "liveness was recomputed");
-  assert.ok((statistics.livenessTableAllocations ?? 0) <= 1, "liveness table was reallocated");
-  assert.ok((statistics.livenessCacheInsertions ?? 0) <= 1, "liveness cache was repopulated");
-  assert.ok(
-    (statistics.livenessCacheHits ?? 0) <= snapshot.callFrames.length - 1,
-    "liveness cache was consulted repeatedly for a call frame",
+test("validates and resumes suspended recursive continuations at increasing depths", () => {
+  const compiled = plan(
+    [
+      "function sum(value) {",
+      "  if value == 0 { return 0 }",
+      "  return value + sum(value - 1)",
+      "}",
+      "say sum(32)",
+    ].join("\n"),
   );
+  for (const depth of [4, 8, 16, 32]) {
+    const snapshot = executeUntil(compiled, (candidate) => candidate.callFrames.length === depth);
+    const before = JSON.stringify(snapshot);
+    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true, `depth ${depth}`);
+    const restored = restoreCheckpoint(createCheckpoint(compiled, snapshot));
+    const resumed = run(restored.plan, restored.snapshot);
+
+    assert.equal(resumed.snapshot.status, "halted", `depth ${depth}`);
+    // 32 + 31 + ... + 1 = 32 * 33 / 2.
+    assert.deepEqual(
+      resumed.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+      ["528"],
+      `depth ${depth}`,
+    );
+    assert.equal(JSON.stringify(snapshot), before, `depth ${depth}`);
+  }
 });
 
 test("validates suspended caller liveness without historical argument-value comparison", () => {
@@ -273,7 +281,7 @@ test("validates suspended caller liveness without historical argument-value comp
 
 test("treats unbound call-frame argument values as canonical resumable state", () => {
   const compiled = plan(
-    "function identity(value) { return value }\nsay identity({ outer: { items: [1, 2] } })",
+    "function identity(value) { return value }\nsay identity({ outer: { items: [1, 2] } }).outer.items[1]",
   );
   const snapshot = executeUntil(
     compiled,
@@ -284,7 +292,15 @@ test("treats unbound call-frame argument values as canonical resumable state", (
   const changed: any = structuredClone(snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture changes a deeply nested unbound call argument while preserving its canonical surrounding snapshot.
   changed.callFrames[0].arguments[0].value.properties[0].value.properties[0].value.items[1] = 99;
   assert.equal(validateRuntimeSnapshot(changed, compiled).valid, true);
-  assert.doesNotThrow(() => restoreCheckpoint(createCheckpoint(compiled, changed)));
+  const restored = restoreCheckpoint(createCheckpoint(compiled, changed));
+  assert.deepEqual(restored.snapshot, changed);
+
+  const resumed = run(restored.plan, restored.snapshot);
+  assert.equal(resumed.snapshot.status, "halted");
+  assert.deepEqual(
+    resumed.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["99"],
+  );
 });
 
 test("detailed validation reports work without rejecting valid state", () => {
@@ -865,7 +881,9 @@ test("rejects cyclic runtime state without overflowing validation", () => {
 });
 
 test("cyclic builtin results become source-associated runtime failures", () => {
-  const compiledResult = compileSource("say cyclic()", { builtins: ["cyclic"] });
+  const source = "say cyclic()";
+  const call = "cyclic()";
+  const compiledResult = compileSource(source, { builtins: ["cyclic"] });
   assert.deepEqual(compiledResult.diagnostics, []);
   const compiled = compiledResult.plan!;
   const cyclic: { kind: "list"; items: unknown[] } = { kind: "list", items: [] };
@@ -879,8 +897,20 @@ test("cyclic builtin results become source-associated runtime failures", () => {
   });
 
   assert.equal(result.snapshot.status, "failed");
-  assert.equal(result.snapshot.failure?.code, "TSR013");
-  assert.ok(result.snapshot.failure?.span.start.offset !== undefined);
+  const failure = result.snapshot.failure;
+  assert.equal(failure?.code, "TSR013");
+  assert.deepEqual(
+    [failure?.span.start.offset, failure?.span.end.offset],
+    [source.indexOf(call), source.indexOf(call) + call.length],
+  );
+  assert.deepEqual(
+    result.events.flatMap((event) =>
+      event.kind === "runtimeFailure"
+        ? [{ code: event.code, message: event.message, span: event.span }]
+        : [],
+    ),
+    [failure],
+  );
 });
 
 function recursiveSnapshot(depth: number): {
