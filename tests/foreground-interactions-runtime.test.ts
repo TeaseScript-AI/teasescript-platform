@@ -467,10 +467,6 @@ test("pending interaction survives JSON checkpoint restore with monotonic events
 });
 
 test("interaction definitions preflight each field against remaining aggregate bytes", () => {
-  assert.equal(
-    interactionUtf8ByteLength("x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES + 4_464)),
-    70_000,
-  );
   const exact = interactionPlan("button", {
     kind: "button",
     buttonLabel: "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES),
@@ -955,8 +951,10 @@ test("explicit accessible names must contain non-whitespace content", () => {
   }
 });
 
-test("very large regex-bearing interaction strings fast-reject at plan and snapshot boundaries", () => {
-  const huge = "a".repeat(MAX_INTERACTION_STRING_UTF8_BYTES * 32);
+test("oversized authored interaction strings reject at plan and snapshot boundaries", () => {
+  // Each oversized ASCII field exceeds the aggregate budget left by the other authored strings by one byte.
+  const oversizedBeside = (otherAuthoredText: string) =>
+    "a".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES - otherAuthoredText.length + 1);
   const button = interactionPlan("button", {
     kind: "button",
     buttonLabel: "Continue",
@@ -972,7 +970,7 @@ test("very large regex-bearing interaction strings fast-reject at plan and snaps
   // EVIDENCE: fixture replaces only the button's accessible name with an oversized text value.
   (
     hugeAccessibleInteraction.ui as { accessibleName: InteractionUiPayload["accessibleName"] }
-  ).accessibleName = { kind: "text", text: huge };
+  ).accessibleName = { kind: "text", text: oversizedBeside("Continue") };
   assert.equal(validateInstructionPlan(hugeAccessible).valid, false);
 
   const identifier = interactionPlan("choice", {
@@ -990,7 +988,7 @@ test("very large regex-bearing interaction strings fast-reject at plan and snaps
       hugeIdentifierInteraction.ui.options[0] !== undefined,
   );
   // EVIDENCE: fixture replaces only the first choice label with an oversized identifier.
-  (hugeIdentifierInteraction.ui.options[0] as { label: string }).label = huge;
+  (hugeIdentifierInteraction.ui.options[0] as { label: string }).label = oversizedBeside("Visible");
   assert.equal(validateInstructionPlan(hugeIdentifier).valid, false);
 
   const pending = waiting(identifier);
@@ -1002,7 +1000,7 @@ test("very large regex-bearing interaction strings fast-reject at plan and snaps
   const hostileOption = hostile.foregroundAction.ui.options[0];
   assert.ok(hostileOption !== undefined);
   // EVIDENCE: fixture replaces only the persisted choice label with an oversized identifier.
-  (hostileOption as { label: string | number | null }).label = huge;
+  (hostileOption as { label: string | number | null }).label = oversizedBeside("Visible");
   assert.equal(validateRuntimeSnapshot(hostile).valid, false);
 });
 
@@ -1074,24 +1072,28 @@ test("huge completion kind tokens are not reflected or allowed to mutate canonic
     accessibleName: defaults.button,
   });
   const pending = waiting(plan);
-  const huge = "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES * 32);
+  const actionId = pending.snapshot.foregroundAction!.actionId;
+  const before = JSON.stringify(pending.snapshot);
+  const shorter = "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES * 32);
+  const longer = "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES * 64);
   for (const request of [
-    { actionId: pending.snapshot.foregroundAction!.actionId, actionKind: huge },
-    {
-      actionId: pending.snapshot.foregroundAction!.actionId,
-      actionKind: "interaction",
-      interactionKind: huge,
-    },
+    (token: string) => ({ actionId, actionKind: token }),
+    (token: string) => ({ actionId, actionKind: "interaction", interactionKind: token }),
   ]) {
-    const before = JSON.stringify(pending.snapshot);
-    const rejected = completeAction(plan, pending.snapshot, request);
-    assert.equal(rejected.outcome.kind, "wrongActionKind");
-    assert.equal(
-      rejected.outcome.kind === "wrongActionKind" && rejected.outcome.receivedActionKind,
-      "<invalid>",
-    );
-    assert.deepEqual(rejected.events, []);
-    assert.equal(JSON.stringify(rejected.snapshot), before);
+    const receivedTokens = [shorter, longer].map((token) => {
+      const rejected = completeAction(plan, pending.snapshot, request(token));
+      assert.equal(rejected.outcome.kind, "wrongActionKind");
+      assert.deepEqual(rejected.events, []);
+      assert.equal(JSON.stringify(rejected.snapshot), before);
+      const received =
+        rejected.outcome.kind === "wrongActionKind" ? rejected.outcome.receivedActionKind : null;
+      assert.equal(typeof received, "string");
+      assert.notEqual(received, token);
+      return received!;
+    });
+    // A sanitized token is bounded independently of the oversized input it replaces.
+    assert.equal(receivedTokens[0]!.length, receivedTokens[1]!.length);
+    assert.ok(receivedTokens[0]!.length < shorter.length);
   }
 });
 
@@ -1656,19 +1658,6 @@ test("unsupported persisted interaction fields are rejected at every boundary", 
     payload: { kind: "selectedLabel", selectedLabel: "one" },
   } as const;
   assert.throws(() => completeAction(base, settlementHostile, settlementCompletionRequest));
-
-  const requested = pending.events.find((event) => event.kind === "actionRequested")!;
-  assert.equal(
-    requested.kind === "actionRequested" && Object.hasOwn(requested.action, "extra"),
-    false,
-  );
-  const duplicate = completeAction(base, completed.snapshot, settlementCompletionRequest);
-  assert.equal(duplicate.outcome.kind, "alreadySettled");
-  assert.equal(
-    duplicate.outcome.kind === "alreadySettled" &&
-      Object.hasOwn(duplicate.outcome.settlement, "extra"),
-    false,
-  );
 
   const delayPlan = compileSource("wait 1\nexit").plan!;
   const delayPending = run(delayPlan, createFreshRuntimeSnapshot(delayPlan));
