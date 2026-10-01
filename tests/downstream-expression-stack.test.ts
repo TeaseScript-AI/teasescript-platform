@@ -99,7 +99,8 @@ test("expression continuations preserve short circuit, references, RNG, and user
     ].join("\n"),
     { scenarioName: "expression frames and prepared references", seed: 42 },
   );
-  // A one-draw control with the same seed identifies the selected element and the RNG state after one draw.
+  // A one-draw control with the same seed identifies the selected element and the RNG state
+  // after exactly one draw.
   const control = runValidSource("say [0, 1].random\nexit", 42);
   const picked = control.events.find((event) => event.kind === "say")?.text;
   assert.ok(picked === "0" || picked === "1");

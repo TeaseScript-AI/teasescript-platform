@@ -4,6 +4,8 @@ import test from "node:test";
 import type { ExpressionPlan, InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
+import { runValidSource } from "./helpers/run-valid-source.js";
+import { sayTexts } from "./helpers/runtime-events.js";
 
 test("assigns deterministic function and temporary IDs", () => {
   const source = [
@@ -209,13 +211,16 @@ test("lowers property receivers and assignment targets in source order", () => {
 test("lowers calls in templates, conditions, loop conditions, and returns", () => {
   const compiled = plan(
     [
-      "function truth { return true }",
-      "function nested { return truth() }",
-      'if truth() { say "value ${nested()}" }',
-      "while truth() { break }",
+      "function ready { return true }",
+      "function again { return true }",
+      "function inner { return true }",
+      "function nested { return inner() }",
+      'if ready() { say "value ${nested()}" }',
+      "while again() { break }",
     ].join("\n"),
   );
 
+  // Each consumer has its own callee, so wiring it to another call's result changes the name.
   const nested = compiled.functions.find((definition) => definition.name === "nested")!;
   const consumers = compiled.instructions.flatMap(
     (instruction, index): [string, string | null][] => {
@@ -239,10 +244,10 @@ test("lowers calls in templates, conditions, loop conditions, and returns", () =
   );
 
   assert.deepEqual(consumers.sort(), [
-    ["if", "truth"],
-    ["nested return", "truth"],
+    ["if", "ready"],
+    ["nested return", "inner"],
     ["template", "nested"],
-    ["while", "truth"],
+    ["while", "again"],
   ]);
 });
 
@@ -323,6 +328,22 @@ test("accepts nested calls and short-circuit lowering inside defaults", () => {
   );
   assert.equal(bindings.length, 1);
   assert.ok(bindings[0]! >= guard.target);
+
+  // A false left operand skips the right call and binds false; a true one calls it.
+  const shortCircuit = runValidSource(
+    [
+      "let calls = []",
+      'function left(value) { calls.add("left")\nreturn value }',
+      'function right { calls.add("right")\nreturn true }',
+      "function sample(first, value = left(first) and right()) { return value }",
+      'say "${sample(false)}"',
+      'say "${sample(true)}"',
+      "for entry in calls { say entry }",
+      "exit",
+    ].join("\n"),
+  );
+  assert.equal(shortCircuit.snapshot.status, "halted");
+  assert.deepEqual(sayTexts(shortCircuit), ["false", "true", "left", "left", "right"]);
 });
 
 test("function plans survive JSON round trips with preserved spans", () => {
@@ -413,7 +434,8 @@ test("rejects malformed function regions and aliased call temporaries", () => {
     kind: "returnVoid",
     span: statementInDefault.instructions[clearIndex]!.span,
   };
-  assertInvalid(statementInDefault, `$.instructions[${clearIndex}]`);
+  // The replaced instruction also follows the binding, so the region rule needs its fragment.
+  assertInvalid(statementInDefault, `$.instructions[${clearIndex}]`, "default-expression region");
 
   const suppliedInBody = mutable(defaults);
   suppliedInBody.instructions[sample.bodyEntryInstruction] = {
@@ -553,12 +575,20 @@ function instructionPath(
   return `$.instructions[${index}]`;
 }
 
-/** Requires the structured plan error for the corrupted field rather than its message wording. */
-function assertInvalid(value: unknown, path: string): void {
+/**
+ * Requires the structured plan error for the corrupted field. A short message fragment is used
+ * only where two validation rules report the same code at the same path.
+ */
+function assertInvalid(value: unknown, path: string, fragment?: string): void {
   const validation = validateInstructionPlan(value);
   assert.equal(validation.valid, false);
   assert.ok(
-    validation.errors.some((error) => error.code === "TSC002" && error.path === path),
+    validation.errors.some(
+      (error) =>
+        error.code === "TSC002" &&
+        error.path === path &&
+        (fragment === undefined || error.message.includes(fragment)),
+    ),
     `${path}: ${JSON.stringify(validation.errors)}`,
   );
 }

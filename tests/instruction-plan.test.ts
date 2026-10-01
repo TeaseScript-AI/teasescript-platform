@@ -17,7 +17,7 @@ test("compiles deterministically to the same instruction plan", () => {
 
 test("compiles if and else to explicit validated jump targets", () => {
   const branches = (condition: string) =>
-    ["if " + condition + " {", '  say "yes"', "} else {", '  say "no"', "}"].join("\n");
+    [`if ${condition} {`, '  say "yes"', "} else {", '  say "no"', "}"].join("\n");
   const compiled = plan(branches("true"));
   const sayIndex = (text: string) =>
     compiled.instructions.findIndex(
@@ -41,8 +41,14 @@ test("compiles if and else to explicit validated jump targets", () => {
   assert.ok(skipElseIndex < condition.target && condition.target <= sayIndex("no"));
   assert.ok(skipElse.target > sayIndex("no"));
   assert.equal(validateInstructionPlan(compiled).valid, true);
-  assert.deepEqual(sayTexts(runValidSource(branches("true"))), ["yes"]);
-  assert.deepEqual(sayTexts(runValidSource(branches("false"))), ["no"]);
+  for (const [condition, text] of [
+    ["true", "yes"],
+    ["false", "no"],
+  ] as const) {
+    const result = runValidSource(branches(condition));
+    assert.equal(result.snapshot.status, "halted", condition);
+    assert.deepEqual(sayTexts(result), [text], condition);
+  }
 });
 
 test("preserves relevant statement and nested expression source spans", () => {
