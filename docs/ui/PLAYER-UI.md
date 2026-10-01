@@ -262,8 +262,9 @@ available in every build to every user. It currently offers:
   treatment and is kept when switching light/dark;
 - **Title bar on short screens · A/B test:** variant A or B above.
 
-Persisting these preferences across page loads is not yet implemented in production builds; the development server keeps
-the label preference.
+These are presentation preferences, not canonical runtime state. The Player keeps them in this browser's local storage
+across reloads, treats stored text as external input that falls back to the default when unknown, and works without
+storage when the host frame denies it. Account settings may later take over or synchronize them.
 
 ## Left tools area
 
@@ -841,8 +842,8 @@ ownership, and other Standard Player properties remain Player-owned unless a lat
 Authored speaker/rich-text/control colours that carry script meaning are content semantics, not theme defaults. User
 theme or accessibility preferences must preserve that meaning: for example, a story-defined red control cannot simply
 be recoloured blue. Accessibility treatment may add or alter non-semantic presentation while retaining the authored
-distinction. Theme API shape, preference persistence, exact authored-colour fallback
-mechanics, and numeric accessibility thresholds remain open; see [OPEN-DECISIONS.md](../OPEN-DECISIONS.md). Ordinary
+distinction. Theme API shape, preference persistence beyond [Player Settings](#player-settings), exact authored-colour
+fallback mechanics, and numeric accessibility thresholds remain open; see [OPEN-DECISIONS.md](../OPEN-DECISIONS.md). Ordinary
 transcript text does not accept unrestricted raw HTML. Fully custom HTML/CSS/TypeScript uses the separate custom
 view/tool/stage capability inside the accepted sandbox.
 

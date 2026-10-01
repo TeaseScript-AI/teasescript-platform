@@ -111,8 +111,9 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
   Standard control kinds expose the colour input remain unresolved.
 - Remaining Standard Player accessibility policy beyond ADR 0018's accepted accessible-name/input rules, including
   readable scaling/zoom behavior, minimum control sizing, contrast thresholds, and browser/platform responsibility.
-- Player UI preference persistence: which panel/tool/theme/media-fit/text-display preferences survive reload or session
-  changes and whether restoration is automatic, explicit, or both.
+- Player UI preference persistence beyond Player Settings: which panel/tool/theme/media-fit/text-display preferences
+  survive reload or session changes, and whether account settings take over or synchronize the browser-local Player
+  Settings that `ui/PLAYER-UI.md` already keeps across reloads.
 - Exact tuned thresholds/measurements for constraint-driven dock/drawer decisions, compact geometry, per-tool width
   presets, stage/conversation allocation, readable conversation bounds, and composer growth.
 - Temporary Player status/notification presentation for saved, paused, error, assignment, and similar platform state.

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, provide, ref } from "vue";
+import { computed, provide, ref, watch } from "vue";
 import { useEventListener, useResizeObserver } from "@vueuse/core";
 import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
@@ -14,6 +14,7 @@ import RuntimeInteraction from "./RuntimeInteraction.vue";
 import Stage from "./Stage.vue";
 import { enhancedTranscriptContrast } from "./transcriptContrast";
 import { usePlayerKeyboardFocus } from "./usePlayerKeyboardFocus";
+import { usePlayerPreference } from "./usePlayerPreference";
 import type { PlayerSessionHost } from "./usePlayerSession";
 import { defaultPlayerThemeIntents, usePlayerTheme } from "./usePlayerTheme";
 
@@ -39,12 +40,16 @@ provide(
 );
 usePlayerTheme(themeIntent);
 // Each mode starts from its own default palette; the contrast choice carries over.
-// Player Settings: contrast is part of the theme intent; the title-bar A/B defaults to A.
+// Player Settings persist in this browser. Contrast is part of the theme intent; the
+// title-bar A/B defaults to A.
+const storedContrast = usePlayerPreference("phase2c-player-contrast", ["standard", "high"], "standard");
 const contrast = computed({
   get: () => themeIntent.value.contrast,
   set: (value) => (themeIntent.value = { ...themeIntent.value, contrast: value }),
 });
-const titlebarOption = ref<"left" | "overlap">("left");
+contrast.value = storedContrast.value;
+watch(contrast, (value) => (storedContrast.value = value));
+const titlebarOption = usePlayerPreference("phase2c-titlebar-variant", ["left", "overlap"], "left");
 function toggleThemeMode() {
   themeIntent.value = {
     ...defaultPlayerThemeIntents[themeIntent.value.mode === "dark" ? "light" : "dark"],

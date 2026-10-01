@@ -2183,7 +2183,34 @@ async function playerSettingsChecks(page) {
     () => getComputedStyle(document.querySelector("[data-player-top-bar]")).opacity === "1",
   );
   await page.setViewportSize({ width: 1440, height: 900 });
-  return "PASS Player Settings contrast and title-bar A/B apply in the product Player";
+
+  // Settings are browser-local presentation preferences that survive a reload.
+  await page.reload();
+  await openSettings();
+  if (
+    (await contrast.inputValue()) !== "high" ||
+    !(await page.getByRole("radio", { name: "B · Auto-hide, controls right" }).isChecked())
+  )
+    throw new Error("Player Settings were not restored after reload");
+  await closeSettings();
+  // Stored text is external input: unknown values fall back to the defaults.
+  await page.evaluate(() => {
+    localStorage.setItem("phase2c-player-contrast", "bogus");
+    localStorage.setItem("phase2c-titlebar-variant", "bogus");
+  });
+  await page.reload();
+  await openSettings();
+  if (
+    (await contrast.inputValue()) !== "standard" ||
+    !(await page.getByRole("radio", { name: "A · Always visible, controls left" }).isChecked())
+  )
+    throw new Error("Invalid stored Player Settings did not fall back to the defaults");
+  await closeSettings();
+  await page.evaluate(() => {
+    localStorage.removeItem("phase2c-player-contrast");
+    localStorage.removeItem("phase2c-titlebar-variant");
+  });
+  return "PASS Player Settings contrast and title-bar A/B apply, persist and validate stored values";
 }
 
 async function composerMouseFocusChecks(page) {

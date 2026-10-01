@@ -15,6 +15,7 @@ import ToolPanelBody from "./ToolPanelBody.vue";
 import ResizeHandle from "./ResizeHandle.vue";
 import { toolPanelSizes } from "./toolPanelSizes";
 import { providePlayerConditions } from "./usePlayerConditions";
+import { usePlayerPreference } from "./usePlayerPreference";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
@@ -47,7 +48,7 @@ import {
   watch,
   type ComponentPublicInstance,
 } from "vue";
-import { onClickOutside, useResizeObserver, useStorage } from "@vueuse/core";
+import { onClickOutside, useResizeObserver } from "@vueuse/core";
 import { Settings, PanelLeftOpen, PanelRightOpen } from "@lucide/vue";
 
 // Own tool interaction, panel lifetime and dock/drawer composition together.
@@ -61,12 +62,8 @@ const props = defineProps<{
 // User-facing Player Settings: owned by PlayerApp and available in every build.
 const contrast = defineModel<"standard" | "high">("contrast", { required: true });
 const titlebarOption = defineModel<"left" | "overlap">("titlebarOption", { required: true });
-const isDevelopment = import.meta.env.DEV;
 type LabelMode = "icons" | "preview" | "labels";
-const labelMode = isDevelopment
-  ? useStorage<LabelMode>("phase2c-menu-label-mode", "icons")
-  : ref<LabelMode>("icons");
-if (!["icons", "preview", "labels"].includes(labelMode.value)) labelMode.value = "icons";
+const labelMode = usePlayerPreference<LabelMode>("phase2c-menu-label-mode", ["icons", "preview", "labels"], "icons");
 const hoverPreview = ref(false);
 const focusPreview = ref(false);
 const menuSidebar = ref<HTMLElement | null>(null);
