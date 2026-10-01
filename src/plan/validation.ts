@@ -405,7 +405,11 @@ function validateInstruction(
         errors.push(planError("TSC002", "A wait is hidden and unlabeled.", path));
       }
       if (!isDelayDisplay(value.display)) {
-        errors.push(planError("TSC002", "Wait display is invalid.", `${path}.display`));
+        if (value.command === "timer") {
+          validateExpression(value.display, `${path}.display`, errors, false, temporaryCount);
+        } else {
+          errors.push(planError("TSC002", "Wait display is invalid.", `${path}.display`));
+        }
       }
       validateExpression(value.duration, `${path}.duration`, errors, false, temporaryCount);
       if (value.label !== null) {

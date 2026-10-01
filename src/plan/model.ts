@@ -312,8 +312,9 @@ export interface WaitInstruction extends InstructionBase {
   readonly command: "wait" | "timer";
   readonly duration: ExpressionPlan;
   readonly unit: DurationUnitPlan | null;
-  readonly display: DelayDisplay;
-  /** Evaluated after the duration; always `null` for `wait`. */
+  /** Evaluated after the duration when it is an expression; always `"hidden"` for `wait`. */
+  readonly display: DelayDisplay | ExpressionPlan;
+  /** Evaluated after the duration and display; always `null` for `wait`. */
   readonly label: ExpressionPlan | null;
 }
 

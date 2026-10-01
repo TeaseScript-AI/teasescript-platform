@@ -567,6 +567,10 @@ function executePlannedInstruction(
     }
     case "wait": {
       const evaluated = evaluator.evaluate(instruction.duration);
+      const display =
+        typeof instruction.display === "string"
+          ? instruction.display
+          : timerDisplay(evaluator.evaluate(instruction.display), instruction.display.span);
       const label =
         instruction.label === null
           ? null
@@ -611,7 +615,7 @@ function executePlannedInstruction(
         createdAtMs: snapshot.currentSessionTimeMs,
         deadlineMs,
         expectedCompletion: "time" as const,
-        display: instruction.display,
+        display,
         label,
         requestEventSequence: sequence,
       });

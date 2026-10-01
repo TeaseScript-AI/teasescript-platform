@@ -1700,7 +1700,8 @@ function validForegroundActionOwnership(
   if (
     action.kind === "delay" &&
     (owner?.kind !== "wait" ||
-      owner.display !== action.display ||
+      // An evaluated display expression may give any valid display.
+      (typeof owner.display === "string" && owner.display !== action.display) ||
       (owner.label === null) !== (action.label === null))
   ) {
     return false;

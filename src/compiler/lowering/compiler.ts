@@ -532,20 +532,17 @@ export class InstructionCompiler {
     const plan = (operand: Expression): ExpressionPlan =>
       loweredBySource[sourceOrder.indexOf(operand)]!.plan;
     const temporaryIds = loweredBySource.flatMap((item) => item.temporaryIds);
-    // Semantic validation requires a literal display for a blocking timer; an async timer evaluates its expression.
+    // A display expression in the named form is evaluated after the duration, for blocking and async timers alike.
     const staticDisplay: DelayDisplay =
-      typeof timer.display === "string"
-        ? timer.display
-        : dynamicDisplay === null || timer.async
-          ? "visible"
-          : delayDisplay(staticVisibleText(dynamicDisplay));
+      typeof timer.display === "string" ? timer.display : "visible";
+    const display = dynamicDisplay === null ? staticDisplay : plan(dynamicDisplay);
     if (!timer.async) {
       this.instructions.push({
         kind: "wait",
         command: "timer",
         duration: plan(timer.duration),
         unit: timer.unit,
-        display: staticDisplay,
+        display,
         label: timer.label === null ? null : plan(timer.label),
         span: copySpan(timer.span),
       });
@@ -557,7 +554,7 @@ export class InstructionCompiler {
       kind: "startTimer",
       duration: plan(timer.duration),
       unit: timer.unit,
-      display: dynamicDisplay === null ? staticDisplay : plan(dynamicDisplay),
+      display,
       label: timer.label === null ? null : plan(timer.label),
       repeat: timer.repeat,
       persist: timer.persist,
@@ -1617,11 +1614,6 @@ function staticInteractionUi(
 
 function copySpan(span: SourceSpan): PlanSourceLocation {
   return sourceSpanToPlanLocation(span);
-}
-
-function delayDisplay(text: string | undefined): DelayDisplay {
-  if (text === "visible" || text === "mystery" || text === "hidden") return text;
-  throw new TypeError("A blocking timer reached lowering without a literal display.");
 }
 
 function assembleExpression(

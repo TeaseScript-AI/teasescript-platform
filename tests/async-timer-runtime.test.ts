@@ -204,6 +204,27 @@ test("short and named timer forms lower to blocking delays or async timer starts
   assert.equal(compiled.functions.length, 2);
 });
 
+test("a blocking timer evaluates a named display expression like an async timer", () => {
+  const blocking = new Session(
+    'let mode = "mystery"\ntimer(duration: 30 s, display: mode, label: "Hold")\nsay "done"',
+  );
+  const delay = blocking.snapshot.foregroundAction;
+  assert.equal(delay?.kind, "delay");
+  assert.equal(delay?.kind === "delay" ? delay.display : null, "mystery");
+  blocking.at(30_000);
+  assert.deepEqual(blocking.said(), ["done"]);
+
+  // Operands written out of order are still evaluated in source order.
+  const order = new Session(
+    'let log = ""\nfunction mode { log = "${log}display "\nreturn "hidden" }\nfunction seconds { log = "${log}duration "\nreturn 1 }\ntimer(display: mode(), duration: seconds())\nsay log',
+  );
+  order.at(1_000);
+  assert.deepEqual(order.said(), ["display duration "]);
+
+  const invalid = new Session('let mode = "loud"\ntimer(duration: 1, display: mode)');
+  assert.equal(invalid.snapshot.failure?.code, "TSR050");
+});
+
 test("timer forms reject invalid positions, members, and handler scope", () => {
   const cases: ReadonlyArray<readonly [string, string]> = [
     ["let t = timer 5", "TSV033 A blocking timer returns no handle"],
@@ -226,10 +247,7 @@ test("timer forms reject invalid positions, members, and handler scope", () => {
       "timer(duration: 1, async: true, repeat: true)\ntimer(duration: 0, async: true, repeat: true)",
       "TSV011 A repeating timer duration must be greater than zero.",
     ],
-    [
-      'let d = "hidden"\ntimer(duration: 1, display: d)',
-      "TSV033 A blocking timer needs a literal display",
-    ],
+    ["timer(duration: 1, display: 5)", "TSV033 Timer display must be"],
     ["let t = timer async 5\n(t).bogus()", "TSV034 Timer handles have no method 'bogus'"],
     [
       "let t = timer async 5\nt.remaining = 1",

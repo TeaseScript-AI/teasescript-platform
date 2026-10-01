@@ -233,18 +233,6 @@ class SemanticValidator {
     }
     this.#validateExpression(timer.duration, scope, null);
     if (timer.label !== null) this.#validateExpression(timer.label, scope, null);
-    if (
-      !timer.async &&
-      typeof timer.display === "object" &&
-      timer.display !== null &&
-      staticVisibleText(timer.display) === undefined
-    ) {
-      this.#report(
-        semanticCode.invalidTimer,
-        'A blocking timer needs a literal display such as "hidden".',
-        timer.display.span,
-      );
-    }
     if (!timer.async) {
       const invalid = timer.handler ?? (timer.repeat || timer.persist ? timer : null);
       if (invalid !== null) {

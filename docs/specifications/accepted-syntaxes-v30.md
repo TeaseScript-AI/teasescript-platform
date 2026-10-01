@@ -2017,7 +2017,8 @@ let beat = timer(duration: 1..=3, async: true, display: "mystery", label: "Beat"
 
 The named form carries the same fields plus `repeat` and `persist`. `async`, `repeat`, and `persist` are the
 literals `true` or `false`; `duration`, `display`, and `label` are expressions evaluated in source order. `display`
-defaults to `visible`; a blocking timer's explicit `display` must be a literal.
+defaults to `visible`, and an expression must evaluate to `"visible"`, `"mystery"`, or `"hidden"` for blocking and
+asynchronous timers alike.
 
 ### Blocking and asynchronous timers
 

@@ -723,7 +723,7 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 21 | Timer instructions: `wait` carries `command`, `display`, and `label`; `startTimer`; duration literals; timer-handler regions. |
+| Instruction plan | 21 | Timer instructions: `wait` carries `command`, `display` (a literal, or an expression for a named `timer`), and `label`; `startTimer`; duration literals; timer-handler regions. |
 | Runtime snapshot | 22 | Timer state: delay `display`/`label`, background `timer` actions, `settledTimers`, `nextTimerId`, `pendingTimerHandlers`, interrupt frames, `observedSessionTimeMs`, and duration/timer-handle values. |
 | Checkpoint | 30 | Updated the self-contained bundle for the timer plan and snapshot contracts. |
 
