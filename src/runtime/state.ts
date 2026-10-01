@@ -1,3 +1,4 @@
+import { isOneOf } from "../plan/validation-support.js";
 import type {
   RuntimeActionSettlementSnapshot,
   RuntimeDelayActionSnapshot,
@@ -907,7 +908,7 @@ function validateCapturedRuntimeSnapshotDetails(
   validateTimerState(value, plan, timerHandleIds, errors);
   validateInteractionResultHandoffState(value, plan, analysis, errors);
   validateTerminalContinuationHandoffState(value, plan, errors);
-  if (!["ready", "running", "waiting", "halted", "failed"].includes(String(value.status))) {
+  if (!isOneOf(value.status, ["ready", "running", "waiting", "halted", "failed"])) {
     errors.push("Runtime status is invalid.");
   }
   validateFailure(value.failure, value.status, errors);
@@ -1027,7 +1028,7 @@ function validateLoopFrames(
         frame.variable.length === 0 ||
         failure !== null ||
         !isPlainRecord(frame.source) ||
-        !["list", "set", "range"].includes(String(frame.source.kind)) ||
+        !isOneOf(frame.source.kind, ["list", "set", "range"]) ||
         !nonNegativeSafeInteger(frame.position) ||
         frame.position > iterationLength(frame.source)
       ) {
@@ -1459,7 +1460,7 @@ function preparedReferencePathResolves(
     if (step.kind === "index") {
       if (
         !isPlainRecord(current) ||
-        !["list", "set"].includes(String(current.kind)) ||
+        !isOneOf(current.kind, ["list", "set"]) ||
         !Array.isArray(current.items) ||
         step.index >= current.items.length
       ) {
@@ -1477,7 +1478,7 @@ function preparedReferencePathResolves(
     }
     if (
       isPlainRecord(current) &&
-      ["list", "set"].includes(String(current.kind)) &&
+      isOneOf(current.kind, ["list", "set"]) &&
       Array.isArray(current.items)
     ) {
       if (step.name !== "length") return false;
@@ -1999,7 +2000,7 @@ function validateParameterState(
 ): void {
   if (
     !isPlainRecord(value) ||
-    !["supplied", "defaults", "body"].includes(String(value.phase)) ||
+    !isOneOf(value.phase, ["supplied", "defaults", "body"]) ||
     !nonNegativeSafeInteger(value.parameterIndex) ||
     (definition !== undefined && value.parameterIndex > definition.parameters.length) ||
     (value.phase === "body" &&
@@ -2279,8 +2280,7 @@ function validateStatusConsistency(
   if (value.status === "waiting") {
     const hasForegroundAction = isPlainRecord(action);
     const hasAllowedActionKind =
-      hasForegroundAction &&
-      ["delay", "interaction", "chatPacingGate"].includes(String(action.kind));
+      hasForegroundAction && isOneOf(action.kind, ["delay", "interaction", "chatPacingGate"]);
     if (!hasAllowedActionKind) {
       errors.push("Waiting runtime state requires one foreground action.");
     }

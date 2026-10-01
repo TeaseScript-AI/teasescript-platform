@@ -1,5 +1,6 @@
 import { isNormalizedOpaqueColor, normalizeOpaqueColor } from "../color.js";
 import { capturedChoicePresentation } from "./interaction-presentation.js";
+import { isOneOf } from "../plan/validation-support.js";
 import { isMessagePresentation } from "../message-presentation.js";
 import type { Instruction, InstructionPlan, InteractionUiPayload } from "../plan/model.js";
 import {
@@ -215,7 +216,7 @@ function validSettlementShapeAndKind(
   analysis: ActionValidationAnalysis | undefined,
 ): boolean {
   return (
-    ["delay", "interaction", "chatPacingGate"].includes(String(settlement.actionKind)) &&
+    isOneOf(settlement.actionKind, ["delay", "interaction", "chatPacingGate"]) &&
     (settlement.actionKind === "chatPacingGate" || settlement.settlementKind === "completed") &&
     positiveSafeInteger(settlement.actionId) &&
     validSettlementProvenance(settlement, plan) &&
@@ -771,7 +772,7 @@ export function validateInteractionResultHandoffState(
     !positiveSafeInteger(snapshot.nextActionId) ||
     handoff.actionId >= snapshot.nextActionId ||
     snapshot.foregroundAction !== null ||
-    !["running", "failed"].includes(String(snapshot.status)) ||
+    !isOneOf(snapshot.status, ["running", "failed"]) ||
     snapshot.nextInstruction !== handoff.continuationInstruction
   ) {
     errors.push("Runtime interaction result handoff is malformed.");
@@ -1013,7 +1014,7 @@ function validInteractionAction(
   )
     return false;
   if (
-    !["button", "text", "number", "choice"].includes(String(action.interactionKind)) ||
+    !isOneOf(action.interactionKind, ["button", "text", "number", "choice"]) ||
     action.target !== "standardChat"
   )
     return false;
@@ -1289,7 +1290,7 @@ function validInteractionUiShape(
     !Array.isArray(value.options) ||
     value.options.length === 0 ||
     value.options.length > MAX_INTERACTION_OPTION_ENTRIES ||
-    !["none", "identifier", "number"].includes(String(value.labelType))
+    !isOneOf(value.labelType, ["none", "identifier", "number"])
   )
     return false;
   const labels = new Set<string | number>();
@@ -1401,7 +1402,7 @@ function validSettlementKindData(
   )
     return false;
   if (
-    !["button", "text", "number", "choice"].includes(String(settlement.interactionKind)) ||
+    !isOneOf(settlement.interactionKind, ["button", "text", "number", "choice"]) ||
     typeof settlement.transcriptText !== "string" ||
     !interactionStringFits(settlement.transcriptText) ||
     !positiveSafeInteger(settlement.requestEventSequence) ||

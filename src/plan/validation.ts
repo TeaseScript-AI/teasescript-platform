@@ -16,6 +16,7 @@ import {
   type PlanValidationError,
   hasExactKeys,
   isRecord,
+  isOneOf,
   nonNegativeSafeInteger,
   planError,
   positiveSafeInteger,
@@ -164,7 +165,7 @@ function validateInstruction(
       validateJumpTarget(value.target, `${path}.target`, instructionCount, errors);
       return;
     case "loopStart":
-      if (!["repeat", "for", "while"].includes(String(value.loopKind))) {
+      if (!isOneOf(value.loopKind, ["repeat", "for", "while"])) {
         errors.push(planError("TSC002", "Invalid loop kind.", `${path}.loopKind`));
       }
       requirePositiveSafeInteger(value.loopId, `${path}.loopId`, errors);
@@ -174,7 +175,7 @@ function validateInstruction(
       validateJumpTarget(value.target, `${path}.target`, instructionCount, errors);
       return;
     case "loopControl":
-      if (!["break", "continue"].includes(String(value.action))) {
+      if (!isOneOf(value.action, ["break", "continue"])) {
         errors.push(planError("TSC002", "Invalid loop-control action.", `${path}.action`));
       }
       requirePositiveSafeInteger(value.loopId, `${path}.loopId`, errors);
@@ -501,7 +502,7 @@ function validateInteractionInstruction(
     errors.push(planError("TSC002", "Interaction instruction contains unsupported fields.", path));
   }
   const kind = value.interactionKind;
-  if (!["button", "text", "number", "choice"].includes(String(kind))) {
+  if (!isOneOf(kind, ["button", "text", "number", "choice"])) {
     errors.push(planError("TSC002", "Interaction kind is invalid.", `${path}.interactionKind`));
   }
   if (value.target !== "standardChat")
@@ -646,7 +647,7 @@ function validateStaticInteractionUi(
   }
   if (kind === "choice") {
     const labelType = ui.labelType;
-    if (!["none", "identifier", "number"].includes(String(labelType))) {
+    if (!isOneOf(labelType, ["none", "identifier", "number"])) {
       errors.push(planError("TSC002", "Choice label type is invalid.", `${path}.labelType`));
     }
     if (
@@ -837,7 +838,7 @@ function validatePreparedInteractionUi(
     return;
   }
   if (kind !== "choice") return;
-  if (!["none", "identifier", "number"].includes(String(ui.labelType))) {
+  if (!isOneOf(ui.labelType, ["none", "identifier", "number"])) {
     errors.push(planError("TSC002", "Choice label type is invalid.", `${path}.labelType`));
   }
   addTemporary(ui.optionsTemporary, `${path}.optionsTemporary`);
@@ -1142,13 +1143,13 @@ function validateExpressionNode(
       pending.push({ value: value.callee, path: `${path}.callee`, assignmentTarget: false });
       return;
     case "unary":
-      if (!["+", "-", "not"].includes(String(value.operator))) {
+      if (!isOneOf(value.operator, ["+", "-", "not"])) {
         errors.push(planError("TSC002", "Invalid unary operator.", `${path}.operator`));
       }
       pending.push({ value: value.operand, path: `${path}.operand`, assignmentTarget: false });
       return;
     case "binary":
-      if (!binaryOperators.has(String(value.operator))) {
+      if (!(typeof value.operator === "string" && binaryOperators.has(value.operator))) {
         errors.push(planError("TSC002", "Invalid binary operator.", `${path}.operator`));
       }
       pending.push(
@@ -1258,7 +1259,7 @@ function validateCallArguments(
 }
 
 function validateDurationUnit(value: unknown, path: string, errors: PlanValidationError[]): void {
-  if (value !== null && !["ms", "s", "min", "h"].includes(String(value))) {
+  if (value !== null && !isOneOf(value, ["ms", "s", "min", "h"])) {
     errors.push(planError("TSC002", "Duration unit is invalid.", path));
   }
 }
