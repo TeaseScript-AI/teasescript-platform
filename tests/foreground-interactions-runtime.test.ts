@@ -1448,8 +1448,14 @@ test("interaction ownership and pending result destinations hold in root, functi
         );
         // An occupied destination is rejected before the request is created ...
         let beforeRequest = createFreshRuntimeSnapshot(plan);
-        while (plan.instructions[beforeRequest.nextInstruction]?.kind !== "interaction") {
+        for (
+          let step = 0;
+          plan.instructions[beforeRequest.nextInstruction]?.kind !== "interaction";
+          step += 1
+        ) {
+          assert.ok(step < plan.instructions.length, `${label}: reaches the interaction`);
           beforeRequest = executeInstruction(plan, beforeRequest).snapshot;
+          assert.equal(beforeRequest.status, "running", label);
         }
         beforeRequest.temporaries.push({ id: destination, value: "old" });
         const occupiedInput = structuredClone(beforeRequest);

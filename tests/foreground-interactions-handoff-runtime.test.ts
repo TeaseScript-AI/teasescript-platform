@@ -1416,6 +1416,14 @@ test("PR194 matrix: settlement and active handoff validation", () => {
     "PR194-resume-composite-final",
   ).uninterrupted.snapshot;
   assert.deepEqual(compositeFinal.lastSettlement, fixture.laterDelaySettlement);
+  // The source continues to its second delay and then says the transferred result.
+  const finalDelay = compositeFinal.foregroundAction;
+  assert.ok(finalDelay?.kind === "delay");
+  const finalDelaySettled = observeTime(injected.plan, compositeFinal, finalDelay.deadlineMs);
+  assert.equal(finalDelaySettled.outcome.kind, "observed");
+  const compositeHalted = run(injected.plan, finalDelaySettled.snapshot);
+  assert.equal(compositeHalted.snapshot.status, "halted");
+  assert.deepEqual(sayTexts(compositeHalted.events), ["committed"]);
 
   // The newer retained settlement makes the old interaction stale at every boundary, while the
   // retained delay itself still replays.
@@ -1794,26 +1802,27 @@ test("PR194 matrix: replay classifies changed duplicates, stale, and unknown req
   assert.equal(laterPending.foregroundAction?.actionId, 2);
 
   const rows: readonly ReplayRow[] = [
-    {
-      // The recorded settlement keeps the original result, not the changed duplicate payload.
-      id: "PR194-replay-changed-duplicate-payload",
+    // The recorded settlement keeps the original result, not the changed duplicate payload.
+    ...[completion.snapshot, halted].map((snapshot) => ({
+      id: `PR194-replay-changed-duplicate-payload-${snapshot.status}`,
       plan: injected.plan,
-      snapshot: halted,
+      snapshot,
       request: { ...request, payload: { kind: "submittedText", submittedText: "different" } },
-      expected: { kind: "alreadySettled" },
-    },
+      expected: { kind: "alreadySettled" } as const,
+    })),
     {
       id: "PR194-replay-older-action-while-newer-pending",
       plan: injected.plan,
       snapshot: laterPending,
-      request: { ...request, actionId: 1 },
+      // ID classification precedes payload validation, so no interaction payload is needed.
+      request: { actionId: 1, actionKind: "interaction" },
       expected: { kind: "staleAction", actionId: 1 },
     },
     {
       id: "PR194-replay-next-action-unknown",
       plan: injected.plan,
       snapshot: halted,
-      request: { ...request, actionId: halted.nextActionId },
+      request: { actionId: halted.nextActionId, actionKind: "interaction" },
       expected: { kind: "unknownAction", actionId: halted.nextActionId },
     },
   ];
