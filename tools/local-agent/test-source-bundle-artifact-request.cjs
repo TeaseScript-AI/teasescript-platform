@@ -819,6 +819,7 @@ async function testSpoofedRegistryCannotClaimAuthority() {
 }
 
 async function testRegistryEscapesUntrustedPullHeadRef() {
+  const hostileRef = "feature/x``</code><b>pwn</b>`tail";
   const entry = readyEntry({
     requestId: 500,
     sourceSha: PR_HEAD_SHA,
@@ -829,20 +830,27 @@ async function testRegistryEscapesUntrustedPullHeadRef() {
   Object.assign(entry, {
     selector: "pr:225",
     sourceRepository: "Contributor/teasescript-platform",
-    sourceRef: "feature/x`</code><b>pwn</b>",
+    sourceRef: hostileRef,
     pullNumber: 225,
     headRepository: "Contributor/teasescript-platform",
-    headRef: "feature/x`</code><b>pwn</b>",
+    headRef: hostileRef,
     baseSha: PR_BASE_SHA,
     mergeBaseSha: PR_MERGE_BASE_SHA,
   });
 
   const body = request.formatRegistryComment([entry]);
-  assert.match(body, /head ``Contributor\/teasescript-platform:feature\/x`<\/code><b>pwn<\/b>``/);
+  // CommonMark code span: an opening run of N backticks closes at the next run of exactly N.
+  const afterHead = body.slice(body.indexOf(" · head ") + " · head ".length);
+  const fence = afterHead.match(/^`+/)[0];
+  const closing = new RegExp(`(?<!\`)${fence}(?!\`)`, "g");
+  closing.lastIndex = fence.length;
+  const close = closing.exec(afterHead);
+  assert.ok(close, "head code span is closed");
   assert.equal(
-    request.formatInlineCode("feature/x`</code><b>pwn</b>"),
-    "``feature/x`</code><b>pwn</b>``",
+    afterHead.slice(fence.length, close.index),
+    `Contributor/teasescript-platform:${hostileRef}`,
   );
+  assert.deepEqual(request.parseRegistryComment(body), [entry]);
 }
 
 async function testEquivalentArtifactsDeduplicateAndPreserveRequestIds() {
