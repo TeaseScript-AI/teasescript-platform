@@ -7,7 +7,6 @@ import type {
   ExpressionPlan,
   Instruction,
   InstructionPlan,
-  InteractionAccessibleName,
   InteractionInstruction,
   InteractionUiPayload,
   PlanSourceLocation,
@@ -1980,75 +1979,14 @@ test("PR194 matrix: failed canonical continuations retain the handoff atomically
   }
 });
 
-interface TypedResultBoundaryBase {
+interface TypedResultBoundaryRow {
   readonly id: string;
+  readonly interactionKind: "text" | "number" | "choice";
+  readonly ui: InteractionUiPayload;
+  readonly payload: Readonly<Record<string, string | number>>;
+  readonly result: string | number;
   readonly transcript: string;
 }
-
-interface TextTypedResultBoundaryRow extends TypedResultBoundaryBase {
-  readonly interactionKind: "text";
-  readonly ui: {
-    readonly kind: "text";
-    readonly hint: string | null;
-    readonly accessibleName: InteractionAccessibleName;
-  };
-  readonly payload: { readonly kind: "submittedText"; readonly submittedText: string };
-  readonly result: string;
-}
-
-interface NumberTypedResultBoundaryRow extends TypedResultBoundaryBase {
-  readonly interactionKind: "number";
-  readonly ui: {
-    readonly kind: "number";
-    readonly hint: string | null;
-    readonly accessibleName: InteractionAccessibleName;
-  };
-  readonly payload: { readonly kind: "submittedText"; readonly submittedText: string };
-  readonly result: number;
-}
-
-interface VisibleChoiceTypedResultBoundaryRow extends TypedResultBoundaryBase {
-  readonly interactionKind: "choice";
-  readonly ui: {
-    readonly kind: "choice";
-    readonly labelType: "none";
-    readonly options: readonly { readonly text: string; readonly label: null }[];
-    readonly accessibleName: typeof defaults.choice;
-  };
-  readonly payload: { readonly kind: "selectedText"; readonly selectedText: string };
-  readonly result: string;
-}
-
-interface IdentifierChoiceTypedResultBoundaryRow extends TypedResultBoundaryBase {
-  readonly interactionKind: "choice";
-  readonly ui: {
-    readonly kind: "choice";
-    readonly labelType: "identifier";
-    readonly options: readonly { readonly text: string; readonly label: string }[];
-    readonly accessibleName: typeof defaults.choice;
-  };
-  readonly payload: { readonly kind: "selectedLabel"; readonly selectedLabel: string };
-  readonly result: string;
-}
-
-interface NumericChoiceTypedResultBoundaryRow extends TypedResultBoundaryBase {
-  readonly interactionKind: "choice";
-  readonly ui: {
-    readonly kind: "choice";
-    readonly labelType: "number";
-    readonly options: readonly { readonly text: string; readonly label: number }[];
-    readonly accessibleName: typeof defaults.choice;
-  };
-  readonly payload: { readonly kind: "selectedLabel"; readonly selectedLabel: number };
-  readonly result: number;
-}
-
-type TypedResultBoundaryRow =
-  | TextTypedResultBoundaryRow
-  | NumberTypedResultBoundaryRow
-  | VisibleChoiceTypedResultBoundaryRow
-  | IdentifierChoiceTypedResultBoundaryRow
-  | NumericChoiceTypedResultBoundaryRow;
 
 function completeTypedInteraction(
   plan: InstructionPlan,
