@@ -15,23 +15,21 @@ test("assigns deterministic function and temporary IDs", () => {
   const second = plan(source);
 
   assert.deepEqual(second, first);
+  assert.equal(validateInstructionPlan(first).valid, true);
+  const ids = first.functions.map((definition) => definition.id);
+  assert.equal(new Set(ids).size, ids.length);
   assert.deepEqual(
-    first.functions.map((definition) => [definition.id, definition.name]),
-    [
-      [1, "first"],
-      [2, "second"],
-    ],
+    first.functions.map((definition) => definition.name),
+    ["first", "second"],
   );
-  assert.equal(first.temporaryCount, 2);
+  const calls = first.instructions.filter((instruction) => instruction.kind === "callFunction");
   assert.deepEqual(
-    first.instructions
-      .filter((instruction) => instruction.kind === "callFunction")
-      .map((instruction) => [instruction.functionId, instruction.destinationTemporary]),
-    [
-      [1, 1],
-      [2, 2],
-    ],
+    calls.map((instruction) => functionName(first, instruction.functionId)),
+    ["first", "second"],
   );
+  // Both results are live at the addition, so they need independent destinations.
+  const destinations = calls.map((instruction) => instruction.destinationTemporary);
+  assert.equal(new Set(destinations).size, 2);
 });
 
 test("lowers nested calls and arguments in source order", () => {
@@ -47,8 +45,8 @@ test("lowers nested calls and arguments in source order", () => {
   const calls = root.filter((instruction) => instruction.kind === "callFunction");
 
   assert.deepEqual(
-    calls.map((instruction) => instruction.functionId),
-    [1, 2, 3],
+    calls.map((instruction) => functionName(compiled, instruction.functionId)),
+    ["first", "second", "outer"],
   );
   const outer = calls[2];
   assert.equal(outer?.kind, "callFunction");
@@ -146,7 +144,9 @@ test("materializes only arguments that must survive a later user call", () => {
   );
   const root = compiled.instructions.slice(0, compiled.rootEndInstruction);
   const outer = root.find(
-    (instruction) => instruction.kind === "callFunction" && instruction.functionId === 2,
+    (instruction) =>
+      instruction.kind === "callFunction" &&
+      instruction.functionId === functionId(compiled, "combine"),
   );
   assert.equal(outer?.kind, "callFunction");
   if (outer?.kind !== "callFunction") return;
@@ -168,23 +168,36 @@ test("materializes a complete composite argument that emits instructions", () =>
     ].join("\n"),
   );
   const root = compiled.instructions.slice(0, compiled.rootEndInstruction);
-  const outer = root.find(
-    (instruction) => instruction.kind === "callFunction" && instruction.functionId === 2,
-  );
-  assert.equal(outer?.kind, "callFunction");
-  if (outer?.kind !== "callFunction") return;
+  const callIndex = (name: string) =>
+    root.findIndex(
+      (instruction) =>
+        instruction.kind === "callFunction" &&
+        instruction.functionId === functionId(compiled, name),
+    );
+  const innerIndex = callIndex("inner");
+  const outerIndex = callIndex("outer");
+  const storeIndex = root.findIndex((instruction) => instruction.kind === "storeTemporary");
+  const inner = root[innerIndex];
+  const store = root[storeIndex];
+  const outer = root[outerIndex];
+  assert.ok(inner?.kind === "callFunction" && outer?.kind === "callFunction");
+  assert.ok(store?.kind === "storeTemporary");
 
-  assert.equal(outer.arguments[0]!.value.kind, "temporary");
+  // The whole `inner() + 1` is stored after the inner call and before the outer call.
+  assert.ok(innerIndex < storeIndex && storeIndex < outerIndex);
+  assert.ok(store.value.kind === "binary" && store.value.left.kind === "temporary");
+  assert.equal(store.value.left.temporaryId, inner.destinationTemporary);
+  const argument = outer.arguments[0]!.value;
+  assert.ok(argument.kind === "temporary");
+  assert.equal(argument.temporaryId, store.temporaryId);
+  // Both the inner result and the stored argument are released after the outer call.
+  const cleanup = root
+    .slice(outerIndex + 1)
+    .find((instruction) => instruction.kind === "clearTemporaries");
+  assert.ok(cleanup?.kind === "clearTemporaries");
   assert.deepEqual(
-    root.map((instruction) => instruction.kind),
-    [
-      "callFunction",
-      "storeTemporary",
-      "callFunction",
-      "clearTemporaries",
-      "evaluate",
-      "clearTemporary",
-    ],
+    [...cleanup.temporaryIds].sort((left, right) => left - right),
+    [inner.destinationTemporary, store.temporaryId].sort((left, right) => left - right),
   );
 });
 
@@ -203,9 +216,9 @@ test("lowers property receivers and assignment targets in source order", () => {
   const calls = compiled.instructions
     .slice(0, compiled.rootEndInstruction)
     .filter((instruction) => instruction.kind === "callFunction")
-    .map((instruction) => instruction.functionId);
+    .map((instruction) => functionName(compiled, instruction.functionId));
 
-  assert.deepEqual(calls, [1, 2, 3, 4]);
+  assert.deepEqual(calls, ["receiver", "argument", "indexFunction", "valueFunction"]);
 });
 
 test("lowers calls in templates, conditions, loop conditions, and returns", () => {
@@ -575,6 +588,14 @@ function prologueIndexes(
     if (predicate(compiled.instructions[index]!)) indexes.push(index);
   }
   return indexes;
+}
+
+function functionId(compiled: InstructionPlan, name: string): number | undefined {
+  return compiled.functions.find((definition) => definition.name === name)?.id;
+}
+
+function functionName(compiled: InstructionPlan, id: number): string | undefined {
+  return compiled.functions.find((definition) => definition.id === id)?.name;
 }
 
 function mutable(value: InstructionPlan): MutablePlan {
