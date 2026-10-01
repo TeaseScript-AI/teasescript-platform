@@ -380,7 +380,10 @@ export class Evaluator {
               } catch (error) {
                 throw this.#translateValueError(error, expression.elements[frame.index - 1]!.span);
               }
-            } else frame.results!.push(result);
+            } else
+              frame.results!.push(
+                result.owned ? result.value : cloneCapturedSerializableValue(result.value),
+              );
           }
           if (frame.index < childCount) {
             pending.push(
@@ -392,25 +395,16 @@ export class Evaluator {
             );
             continue;
           }
-          // Lists/objects capture borrowed children only after all siblings run.
-          // Fresh collection children transfer ownership without another deep copy.
+          // Children were captured when evaluated (ADR 0014), so the literal owns them.
           owned = true;
           if (expression.kind === "set") value = frame.set!;
-          else if (expression.kind === "list")
-            value = {
-              kind: "list",
-              items: frame.results!.map((item) =>
-                item.owned ? item.value : cloneCapturedSerializableValue(item.value),
-              ),
-            };
+          else if (expression.kind === "list") value = { kind: "list", items: frame.results! };
           else
             value = {
               kind: "object",
               properties: expression.properties.map((property, i) => ({
                 name: property.name,
-                value: frame.results![i]!.owned
-                  ? frame.results![i]!.value
-                  : cloneCapturedSerializableValue(frame.results![i]!.value),
+                value: frame.results![i]!,
               })),
             };
           break;
@@ -1650,7 +1644,7 @@ interface EvaluationFrame {
   stage: number;
   index: number;
   value: SerializableRuntimeValue;
-  results: EvaluatedExpression[] | null;
+  results: SerializableRuntimeValue[] | null;
   descriptor: PreparedReferenceDescriptor | null;
   epoch: number;
   text: string;
