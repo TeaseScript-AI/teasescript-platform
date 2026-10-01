@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
+import { ScrollAreaRoot, ScrollAreaViewport } from "reka-ui";
+import ScrollBar from "@/components/ui/scroll-area/ScrollBar.vue";
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { elementScroll, observeElementRect, useVirtualizer } from "@tanstack/vue-virtual";
 import { useResizeObserver } from "@vueuse/core";
@@ -53,6 +54,10 @@ watch(
 );
 const enhancedContrast = inject(enhancedTranscriptContrast, undefined);
 const scrollElement = ref<HTMLDivElement | null>(null);
+const scrollViewport = ref<InstanceType<typeof ScrollAreaViewport> | null>(null);
+watch(() => scrollViewport.value?.viewportElement, (element) => {
+  scrollElement.value = element instanceof HTMLDivElement ? element : null;
+}, { flush: "post" });
 const touching = ref(false);
 const viewportHeight = ref(0);
 const foregroundElement = ref<HTMLElement | null>(null);
@@ -223,34 +228,6 @@ function interruptFollow() {
 function onWheel(event: WheelEvent) {
   if (event.deltaY < 0) interruptFollow();
 }
-function scrollFromMargin(event: WheelEvent) {
-  const viewport = scrollElement.value;
-  if (
-    !viewport ||
-    event.ctrlKey ||
-    event.defaultPrevented ||
-    Math.abs(event.deltaX) > Math.abs(event.deltaY) ||
-    !event.deltaY ||
-    viewport.scrollHeight <= viewport.clientHeight
-  )
-    return;
-  // Wheel deltas can be pixels, text lines or pages depending on the input device.
-  const style = getComputedStyle(viewport);
-  const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2;
-  const unit =
-    event.deltaMode === WheelEvent.DOM_DELTA_LINE
-      ? lineHeight
-      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-        ? viewport.clientHeight
-        : 1;
-  event.preventDefault();
-  onWheel(event);
-  const delta = event.deltaY * unit;
-  // interruptFollow schedules its scroll write after Vue's DOM commit; apply
-  // this wheel movement after that cancellation, just like a native wheel.
-  void nextTick(() => viewport.scrollBy({ top: delta, behavior: "instant" }));
-}
-defineExpose({ scrollFromMargin });
 function onTouchStart() {
   touching.value = true;
   interruptFollow();
@@ -295,68 +272,64 @@ onMounted(() => {
   <section
     class="transcript"
     aria-label="Conversation"
+    @wheel.stop
     :style="{ '--transcript-bottom-inset': `${bottomInset ?? 0}px` }"
   >
-    <ScrollArea
-      type="scroll"
-      class="transcript-scroll-area"
-      viewport-class="transcript-scroll"
-      content-class="transcript-scroll-content"
-      @viewport="scrollElement = $event"
-      :viewport-attrs="{
-        'data-scrolled': scrolled,
-        role: 'region',
-        'aria-label': 'Transcript',
-        tabindex: 0,
-        onKeydown: onScrollKeydown,
-        onWheel: onWheel,
-        onScroll: releaseFollow,
-        onTouchstart: onTouchStart,
-        onTouchend: () => (touching = false),
-        onTouchcancel: () => (touching = false),
-      }"
-    >
-      <div class="transcript-history" :style="{ height: `${virtualizer.getTotalSize()}px` }">
-        <div role="list">
-          <article
-            v-for="{ item, entry, appearance } in rows"
-            :key="entry.id"
-            :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
-            :data-index="item.index"
-            :data-message-id="entry.id"
-            :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
-            role="listitem"
-            :aria-posinset="item.index + 1"
-            :aria-setsize="entries.length"
-            class="transcript-entry"
-            :data-continues="continues(item.index)"
-            :data-prose="appearance.placement !== null || undefined"
-            :style="{ transform: `translateY(${item.start}px)` }"
-          >
-            <TranscriptMessage
-              :entry="entry"
-              :speakers="speakers"
-              :avatar-ordinal="
-                entry.kind === 'message'
-                  ? avatarOrdinals.get(avatarIdentity(entry.speakerId))
-                  : undefined
-              "
-              :appearance="appearance"
-              :continues="continues(item.index)"
-              :continued="continued(item.index)"
-            />
-          </article>
+    <!-- Keep the overlay track inside the native viewport. The section stops
+         Reka's document wheel handler without cancelling native scrolling. -->
+    <ScrollAreaRoot type="scroll" class="transcript-scroll-area">
+      <ScrollAreaViewport ref="scrollViewport" class="transcript-scroll"
+        :data-scrolled="scrolled" role="region" aria-label="Transcript" :tabindex="0"
+        @keydown="onScrollKeydown" @wheel="onWheel" @scroll="releaseFollow"
+        @touchstart="onTouchStart" @touchend="touching = false" @touchcancel="touching = false">
+        <div class="transcript-scroll-content">
+          <div class="transcript-native-overlay">
+            <ScrollBar reveal-on-hover
+              :style="{ height: `${Math.max(0, viewportHeight - (bottomInset ?? 0))}px` }" />
+          </div>
+          <div class="transcript-history" :style="{ height: `${virtualizer.getTotalSize()}px` }">
+            <div role="list">
+              <article
+                v-for="{ item, entry, appearance } in rows"
+                :key="entry.id"
+                :ref="(element) => virtualizer.measureElement(element as HTMLElement | null)"
+                :data-index="item.index"
+                :data-message-id="entry.id"
+                :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
+                role="listitem"
+                :aria-posinset="item.index + 1"
+                :aria-setsize="entries.length"
+                class="transcript-entry"
+                :data-continues="continues(item.index)"
+                :data-prose="appearance.placement !== null || undefined"
+                :style="{ transform: `translateY(${item.start}px)` }"
+              >
+                <TranscriptMessage
+                  :entry="entry"
+                  :speakers="speakers"
+                  :avatar-ordinal="
+                    entry.kind === 'message'
+                      ? avatarOrdinals.get(avatarIdentity(entry.speakerId))
+                      : undefined
+                  "
+                  :appearance="appearance"
+                  :continues="continues(item.index)"
+                  :continued="continued(item.index)"
+                />
+              </article>
+            </div>
+            <div
+              ref="foregroundElement"
+              class="transcript-foreground"
+              :style="{ top: `${virtualizer.getTotalSize() - endInset}px` }"
+            >
+              <slot name="foreground" />
+            </div>
+          </div>
+          <p v-if="!entries.length" class="transcript-empty">No messages yet.</p>
         </div>
-        <div
-          ref="foregroundElement"
-          class="transcript-foreground"
-          :style="{ top: `${virtualizer.getTotalSize() - endInset}px` }"
-        >
-          <slot name="foreground" />
-        </div>
-      </div>
-      <p v-if="!entries.length" class="transcript-empty">No messages yet.</p>
-    </ScrollArea>
+      </ScrollAreaViewport>
+    </ScrollAreaRoot>
     <Button
       v-if="showLatest"
       variant="ghost"
@@ -380,12 +353,10 @@ onMounted(() => {
   --markup-link: light-dark(oklch(50% 0.17 254), oklch(79% 0.12 240));
   --transcript-typeface: ui-sans-serif, system-ui, sans-serif;
 }
-/* Keep clipping and the scrollbar in the existing conversation padding, outside
-   the reading column. This also preserves borders at fractional pixel positions. */
+/* One native viewport spans the reading column and both surrounding margins. */
 .transcript-scroll-area {
   height: 100%;
-  width: calc(100% + 2 * var(--conversation-inline-inset));
-  margin-inline: calc(-1 * var(--conversation-inline-inset));
+  width: 100%;
   --scroll-area-bottom-inset: var(--transcript-bottom-inset);
 }
 /* Keep the track inside the 8px reading gutter while retaining its 5px thumb. */
@@ -394,7 +365,7 @@ onMounted(() => {
   padding-inline: 1.5px;
 }
 :deep(.transcript-scroll-content) {
-  padding-inline: var(--conversation-inline-inset);
+  min-height: 100%;
 }
 :deep(.transcript-scroll) {
   height: 100%;
@@ -421,6 +392,13 @@ onMounted(() => {
     black max(var(--transcript-top-fade), calc(100% - var(--composer-top-from-bottom, 0px))),
     rgb(0 0 0 / 20%) calc(100% - var(--composer-bottom-from-bottom, 0px)),
     rgb(0 0 0 / 20%) 100%
+  ), linear-gradient(
+    /* The thumb retains full opacity inside its existing reading gutter. */
+    to right,
+    transparent calc(var(--conversation-offset) + var(--conversation-width) - 8px),
+    black calc(var(--conversation-offset) + var(--conversation-width) - 8px),
+    black calc(var(--conversation-offset) + var(--conversation-width)),
+    transparent calc(var(--conversation-offset) + var(--conversation-width))
   );
 }
 :deep(.transcript-scroll[data-scrolled="true"]) {
@@ -433,7 +411,16 @@ onMounted(() => {
 }
 .transcript-history {
   position: relative;
-  width: 100%;
+  width: calc(var(--conversation-width) - 2 * var(--conversation-inline-inset));
+  margin-inline-start: calc(var(--conversation-offset) + var(--conversation-inline-inset));
+}
+.transcript-native-overlay {
+  position: sticky;
+  top: 0;
+  height: 0;
+  width: var(--conversation-width);
+  margin-inline-start: var(--conversation-offset);
+  z-index: 1;
 }
 .transcript-entry {
   position: absolute;
@@ -449,6 +436,8 @@ onMounted(() => {
   padding-block: 1.75rem 0.75rem;
 }
 .transcript-empty {
+  width: calc(var(--conversation-width) - 2 * var(--conversation-inline-inset));
+  margin-inline-start: calc(var(--conversation-offset) + var(--conversation-inline-inset));
   padding: 1rem;
   font-size: 0.875rem;
   color: var(--muted-foreground);
@@ -456,7 +445,7 @@ onMounted(() => {
 .return-to-latest {
   position: absolute;
   bottom: calc(var(--transcript-bottom-inset, 0px) + 0.5rem);
-  right: 0.25rem;
+  right: calc(100% - var(--conversation-offset) - var(--conversation-width) + var(--conversation-inline-inset) + 0.25rem);
   width: 2.75rem;
   height: 2.75rem;
   border: 1px solid var(--border);

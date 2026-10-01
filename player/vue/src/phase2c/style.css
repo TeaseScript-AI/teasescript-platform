@@ -242,6 +242,14 @@
   --sidebar-width: calc(var(--launcher-space) + min(var(--tool-columns-width), var(--tool-space-limit)) + 1px) !important;
 }
 
+/* Both variants place the timer at the top; A moves titlebar actions left to clear it. */
+.phase2c-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .stage-right-rail {
+  padding-block-start: var(--player-edge-space);
+}
+.phase2c-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .stage-right-rail:has(.timer-region) {
+  padding-block-start: 12px;
+}
+
 .phase2c-sidebar[data-player-horizontal="comfortable"][data-sidebar-visible="true"] {
   --content-reserve: var(--sidebar-width);
 }
@@ -251,6 +259,11 @@
 /* A width transition creates temporary carousel overflow around full-width panels.
    Apply dock capacity immediately; retain the sidebar's slide in/out motion. */
 .phase2c-sidebar [data-slot="sidebar"] > .fixed { transition-property: left, right; }
+/* The Player toggle takes over while the departing surface becomes inert. */
+.phase2c-sidebar[data-sidebar-visible="false"] [data-tools-surface] [data-sidebar="trigger"] { visibility: hidden; transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .phase2c-sidebar [data-slot="sidebar"] > .fixed { transition: none; }
+}
 
 /* The shared Sidebar owns positioning and the layout reservation.  Phase 2C's
    menu and panels own the visible surfaces, so the shell itself must not paint

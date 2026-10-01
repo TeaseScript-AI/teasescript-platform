@@ -58,6 +58,9 @@ const props = defineProps<{
   mediaAspect: number;
   fullscreen: boolean;
 }>();
+// User-facing Player Settings: owned by PlayerApp and available in every build.
+const contrast = defineModel<"standard" | "high">("contrast", { required: true });
+const titlebarOption = defineModel<"left" | "overlap">("titlebarOption", { required: true });
 const isDevelopment = import.meta.env.DEV;
 type LabelMode = "icons" | "preview" | "labels";
 const labelMode = isDevelopment
@@ -187,6 +190,39 @@ watch(viewport, () => {
   remSize.value = parseFloat(getComputedStyle(document.documentElement).fontSize);
 });
 const sidebarVisible = ref(!narrow.value);
+const sidebarContentsPresent = ref(sidebarVisible.value);
+const playerSettingsOpen = ref(false);
+watch(
+  [sidebarVisible, narrow],
+  async ([open, isNarrow], _, onCleanup) => {
+    let cancelled = false;
+    onCleanup(() => { cancelled = true; });
+    if (open) {
+      sidebarContentsPresent.value = true;
+      return;
+    }
+    const restoreFocus = !!document.activeElement?.closest(
+      "[data-tools-surface], [data-tools-context]",
+    );
+    playerSettingsOpen.value = false;
+    if (isNarrow) sidebarContentsPresent.value = false;
+    await nextTick();
+    if (cancelled) return;
+    if (restoreFocus) focusToolsToggle();
+    if (isNarrow) return;
+    // Let the browser commit the new transition, including when reversing an
+    // opening transition in the same frame.
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    if (cancelled) return;
+    // Keep the visible surface intact until its own motion ends. Cancelling or
+    // disabling a transition also settles finished; reopening cancels this cleanup.
+    const dock = toolsSurface.value?.closest('[data-slot="sidebar"]')
+      ?.querySelector<HTMLElement>(":scope > .fixed");
+    await Promise.allSettled(dock?.getAnimations().map((animation) => animation.finished) ?? []);
+    if (!cancelled) sidebarContentsPresent.value = false;
+  },
+  { flush: "sync" },
+);
 let transitionFocusKey: string | null = null;
 watch(
   narrow,
@@ -207,8 +243,17 @@ watch(
 );
 function focusToolsToggle() {
   shellElement.value
-    ?.querySelector<HTMLButtonElement>("[data-sidebar=trigger]")
+    ?.querySelector<HTMLButtonElement>(
+      sidebarVisible.value
+        ? "[data-tools-surface] [data-sidebar=trigger]"
+        : "[data-player-top-bar] [data-sidebar=trigger]",
+    )
     ?.focus({ preventScroll: true });
+}
+function closeSettingsFocus(event: Event) {
+  if (sidebarVisible.value) return;
+  event.preventDefault();
+  focusToolsToggle();
 }
 function openDrawerFocus(event: Event) {
   event.preventDefault();
@@ -235,6 +280,16 @@ function setSidebarVisible(open: boolean) {
   clickPreview.value = null;
   hoverPreview.value = false;
   focusPreview.value = false;
+}
+function closeDrawerFromTooltip(event: KeyboardEvent) {
+  if (
+    !narrow.value ||
+    !sidebarVisible.value ||
+    !document.querySelector('[data-slot="tooltip-content"]')
+  ) return;
+  event.preventDefault();
+  event.stopPropagation();
+  setSidebarVisible(false);
 }
 type PanelSize = keyof typeof toolPanelSizes;
 const panelSizeNames = Object.keys(toolPanelSizes) as PanelSize[];
@@ -552,11 +607,12 @@ watch(
 
 async function updateSidebarVisibility(open: boolean) {
   const keepTriggerFocus =
-    shellElement.value?.querySelector("[data-sidebar=trigger]") === document.activeElement;
+    shellElement.value?.contains(document.activeElement) &&
+    document.activeElement?.matches("[data-sidebar=trigger]");
   setSidebarVisible(open);
   if (keepTriggerFocus) {
     await nextTick();
-    shellElement.value?.querySelector<HTMLButtonElement>("[data-sidebar=trigger]")?.focus();
+    focusToolsToggle();
   }
 }
 </script>
@@ -576,6 +632,9 @@ async function updateSidebarVisibility(open: boolean) {
   >
   <SidebarProvider
     id="phase2c-shell"
+    :tooltip-delay-duration="700"
+    :tooltip-skip-delay-duration="0"
+    :tooltip-ignore-non-keyboard-focus="true"
     :data-player-horizontal="narrow ? 'constrained' : 'comfortable'"
     :data-player-vertical="conditions.verticalConstrained.value ? 'constrained' : 'comfortable'"
     :data-player-touch="conditions.touchAvailable.value ? 'available' : 'unavailable'"
@@ -634,6 +693,7 @@ async function updateSidebarVisibility(open: boolean) {
         :class="narrow ? 'tools-drawer' : undefined"
         @open-auto-focus="openDrawerFocus"
         @close-auto-focus="closeDrawerFocus"
+        @keydown.esc.capture="closeDrawerFromTooltip"
       >
         <template v-if="narrow">
           <SheetTitle class="sr-only">Tools Sidebar</SheetTitle>
@@ -644,16 +704,21 @@ async function updateSidebarVisibility(open: boolean) {
         <div
           ref="toolsSurface"
           data-tools-surface
+          :inert="!sidebarVisible"
           class="relative flex h-full min-h-0"
           :class="{ 'flex-col': narrow }"
         >
           <div v-if="narrow" class="player-drawer-header flex shrink-0 items-center gap-2 border-b">
-            <SidebarTrigger
-              data-tools-focus="toggle"
-              class="player-control-square"
-              aria-label="Hide sidebar"
-              title="Hide sidebar"
-            />
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <SidebarTrigger
+                  data-tools-focus="toggle"
+                  class="player-control-square"
+                  aria-label="Hide sidebar"
+                />
+              </TooltipTrigger>
+              <TooltipContent side="right">Hide sidebar</TooltipContent>
+            </Tooltip>
             <Button
               v-if="!narrowMenuVisible"
               data-show-tools
@@ -666,7 +731,7 @@ async function updateSidebarVisibility(open: boolean) {
             </Button>
           </div>
           <div
-            v-if="sidebarVisible"
+            v-if="sidebarContentsPresent"
             v-show="!narrow || narrowMenuVisible"
             data-launcher-space
             class="relative flex shrink-0 bg-sidebar"
@@ -684,12 +749,16 @@ async function updateSidebarVisibility(open: boolean) {
               :class="{ 'flex-1': labelMode !== 'preview', 'border-r': labelMode === 'preview' }"
             >
               <SidebarHeader v-if="!narrow" class="player-edge-padding">
-                <SidebarTrigger
-                  class="player-control-square"
-                  data-tools-focus="toggle"
-                  aria-label="Hide sidebar"
-                  title="Hide sidebar"
-                />
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <SidebarTrigger
+                      class="player-control-square"
+                      data-tools-focus="toggle"
+                      aria-label="Hide sidebar"
+                    />
+                  </TooltipTrigger>
+                  <TooltipContent side="right">Hide sidebar</TooltipContent>
+                </Tooltip>
               </SidebarHeader>
               <div v-if="narrow && narrowTool && openTools.includes(narrowTool)" class="player-edge-padding">
                 <Tooltip>
@@ -727,7 +796,7 @@ async function updateSidebarVisibility(open: boolean) {
               </nav>
               </ScrollArea>
               <div class="mt-auto player-edge-padding">
-                <Dialog>
+                <Dialog v-model:open="playerSettingsOpen">
                   <DialogTrigger as-child>
                     <MenuSidebarButton
                       label="Settings"
@@ -737,7 +806,7 @@ async function updateSidebarVisibility(open: boolean) {
                       <Settings />
                     </MenuSidebarButton>
                   </DialogTrigger>
-                  <DialogContent data-tools-context>
+                  <DialogContent data-tools-context @close-auto-focus="closeSettingsFocus">
                     <DialogHeader>
                       <DialogTitle>Player Settings</DialogTitle>
                       <DialogDescription>Preferences for the Player interface.</DialogDescription>
@@ -754,6 +823,28 @@ async function updateSidebarVisibility(open: boolean) {
                         <option value="labels">Icons + labels</option>
                       </select>
                     </label>
+                    <label class="flex flex-col gap-2 text-sm">
+                      Contrast
+                      <select
+                        v-model="contrast"
+                        data-player-setting="contrast"
+                        class="rounded-md border bg-background p-2"
+                      >
+                        <option value="standard">Standard</option>
+                        <option value="high">High</option>
+                      </select>
+                    </label>
+                    <fieldset class="grid gap-2 border-t pt-4 text-sm" data-player-setting="titlebar">
+                      <legend class="font-medium">Title bar on short screens · A/B test</legend>
+                      <label class="flex items-start gap-2">
+                        <input v-model="titlebarOption" type="radio" name="titlebar-option" value="left" />
+                        A · Always visible, controls left
+                      </label>
+                      <label class="flex items-start gap-2">
+                        <input v-model="titlebarOption" type="radio" name="titlebar-option" value="overlap" />
+                        B · Auto-hide, controls right
+                      </label>
+                    </fieldset>
                   </DialogContent>
                 </Dialog>
               </div>
@@ -780,7 +871,7 @@ async function updateSidebarVisibility(open: boolean) {
             />
           </div>
           <ScrollArea
-            v-if="sidebarVisible"
+            v-if="sidebarContentsPresent"
             v-show="!narrow || !narrowMenuVisible"
             orientation="horizontal"
             class="flex-1"
@@ -800,11 +891,13 @@ async function updateSidebarVisibility(open: boolean) {
             >
               <div class="flex min-h-0 min-w-0 flex-1 flex-col">
                 <ToolPanelHeader
+                  :active="sidebarVisible"
                   :tool="tool"
                   :size="toolSize(tool)"
                   :pinned="pinnedTools.includes(tool)"
                   :can-move-left="openTools.indexOf(tool) > 0"
                   :can-move-right="openTools.indexOf(tool) < openTools.length - 1"
+                  @restore-focus="focusToolsToggle"
                   @resize="toolSizes[tool] = $event"
                   @pin="setPinned(tool, $event)"
                   @move="moveTool(tool, $event)"

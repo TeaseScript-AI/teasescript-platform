@@ -153,6 +153,186 @@ async function drawerWidthChecks(page) {
   return "PASS drawer preset width constrained by available space";
 }
 
+async function sidebarMotionChecks(page) {
+  const check = (condition, message) => {
+    if (!condition) throw new Error(message);
+  };
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "icons"));
+  await page.reload();
+  const launcher = page.locator("[data-launcher]");
+  const show = () => page.getByRole("button", { name: "Show sidebar", exact: true });
+  const hide = () => page.getByRole("button", { name: "Hide sidebar", exact: true });
+  async function expanded() {
+    await page.waitForFunction(() => {
+      const dock = document.querySelector('[data-slot="sidebar"] > .fixed');
+      return (
+        dock &&
+        Math.abs(dock.getBoundingClientRect().left) < 0.5 &&
+        !document.querySelector("[data-tools-surface]").inert
+      );
+    });
+  }
+  async function closeHalfway() {
+    await expanded();
+    const sample = await page.evaluate(async () => {
+      const dock = document.querySelector('[data-slot="sidebar"] > .fixed');
+      const width = dock.getBoundingClientRect().width;
+      const trigger = document.querySelector('[data-tools-surface] [data-sidebar="trigger"]');
+      trigger.focus();
+      trigger.click();
+      await Promise.resolve();
+      dock.getBoundingClientRect();
+      const animations = dock.getAnimations();
+      for (const animation of animations) {
+        animation.pause();
+        animation.currentTime = animation.effect.getTiming().duration / 2;
+      }
+      await new Promise(requestAnimationFrame);
+      const launcher = document.querySelector("[data-launcher]");
+      const currentTrigger = document.querySelector(
+        '[data-tools-surface] [data-sidebar="trigger"]',
+      );
+      return {
+        width,
+        right: dock.getBoundingClientRect().right,
+        animations: animations.length,
+        launcherRight: launcher?.getBoundingClientRect().right,
+        inert: document.querySelector("[data-tools-surface]").inert,
+        toggleHidden: currentTrigger && getComputedStyle(currentTrigger).visibility === "hidden",
+        focus: document.activeElement.getAttribute("aria-label"),
+        bodyStillInside:
+          !document.querySelector('[data-tool="Visual Lab"]') ||
+          !!document.querySelector('[data-tool="Visual Lab"] [data-tool-body]'),
+      };
+    });
+    check(
+      sample.animations > 0 && sample.right > 0 && sample.right < sample.width,
+      "Sidebar did not exercise a closing transition",
+    );
+    check(
+      Number.isFinite(sample.launcherRight) &&
+        sample.inert &&
+        sample.toggleHidden &&
+        sample.focus === "Show sidebar" &&
+        sample.bodyStillInside,
+      `Closing sidebar lost its contents, interaction boundary or focus: ${JSON.stringify(sample)}`,
+    );
+    return sample;
+  }
+  async function finishClose() {
+    await page.evaluate(() =>
+      document
+        .querySelector('[data-slot="sidebar"] > .fixed')
+        .getAnimations()
+        .forEach((animation) => animation.finish()),
+    );
+    await launcher.waitFor({ state: "detached" });
+    check(
+      await page.evaluate(
+        () => document.activeElement.getAttribute("aria-label") === "Show sidebar",
+      ),
+      "Sidebar close lost toggle focus",
+    );
+  }
+  const compact = await closeHalfway();
+  check(
+    Math.abs(compact.launcherRight - compact.right + 1) < 1,
+    "Launcher and sidebar border moved separately",
+  );
+  await finishClose();
+  await show().click();
+  await expanded();
+  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
+  await page.locator('[data-tool="Visual Lab"] [data-tool-body]').waitFor();
+  await page.locator('[data-tool="Visual Lab"] [data-tool-body]').evaluate((element) => {
+    window.sidebarMotionBody = element;
+    element.scrollTop = 120;
+    element.dispatchEvent(new Event("scroll"));
+    window.sidebarMotionScroll = element.scrollTop;
+  });
+  await closeHalfway();
+  await show().click();
+  await expanded();
+  check(
+    await page.evaluate(
+      () =>
+        document.querySelector('[data-tool="Visual Lab"] [data-tool-body]') ===
+        window.sidebarMotionBody,
+    ),
+    "Rapid reopening replaced the tool body",
+  );
+  await closeHalfway();
+  await finishClose();
+  await show().click();
+  await expanded();
+  check(
+    await page.evaluate(() => {
+      const body = document.querySelector('[data-tool="Visual Lab"] [data-tool-body]');
+      return body === window.sidebarMotionBody && body.scrollTop === window.sidebarMotionScroll;
+    }),
+    "Closing and reopening lost the tool body or its scroll position",
+  );
+
+  // Portalled popovers must close with the logical sidebar, not survive its exit.
+  await page
+    .locator('[data-tool="Visual Lab"]')
+    .getByRole("button", { name: "Panel settings", exact: true })
+    .click();
+  await page.getByRole("menu").waitFor();
+  await page.keyboard.press("Control+b");
+  await page.getByRole("menu").waitFor({ state: "hidden" });
+  await launcher.waitFor({ state: "detached" });
+  check(
+    await show().evaluate((element) => element === document.activeElement),
+    "Panel menu close lost toggle focus",
+  );
+  await show().click();
+  await expanded();
+  await page.locator("[data-settings-trigger]").click();
+  await page.getByRole("dialog", { name: "Player Settings" }).waitFor();
+  await page.keyboard.press("Control+b");
+  await page.getByRole("dialog", { name: "Player Settings" }).waitFor({ state: "hidden" });
+  await launcher.waitFor({ state: "detached" });
+  check(
+    await show().evaluate((element) => element === document.activeElement),
+    "Settings close lost toggle focus",
+  );
+
+  await show().click();
+  await expanded();
+  await closeHalfway();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await launcher.waitFor({ state: "detached" });
+  await show().click();
+  await expanded();
+  await hide().click();
+  await launcher.waitFor({ state: "detached" });
+  check(
+    await page.evaluate(
+      () => document.querySelector('[data-slot="sidebar"] > .fixed').getAnimations().length === 0,
+    ),
+    "Reduced motion retained a sidebar transition",
+  );
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await show().click();
+  await expanded();
+  await closeHalfway();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(
+    () => document.querySelector("#phase2c-shell").dataset.playerHorizontal === "constrained",
+  );
+  await launcher.waitFor({ state: "detached" });
+  await show().click();
+  await page.locator(".tools-drawer").waitFor();
+  await hide().click();
+  await page.locator(".tools-drawer").waitFor({ state: "hidden" });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await show().click();
+  await expanded();
+  return "PASS cohesive sidebar close, focus, tool retention, rapid reopen, reduced motion and breakpoint changes";
+}
+
 async function menuPreviewChecks(page) {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "preview"));
@@ -618,6 +798,87 @@ async function toolContentChecks(page) {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.locator('[data-tool="Layout Debug"] [data-tool-body]').waitFor();
   return "PASS responsive tool availability, menu return and dismissal focus";
+}
+
+async function transcriptNativeWheelChecks(page) {
+  const check = (condition, message) => {
+    if (!condition) throw new Error(message);
+  };
+  await page.setViewportSize({ width: 1800, height: 1000 });
+  await page.reload();
+  const viewport = page.locator(".transcript-scroll");
+  const track = page.locator('.transcript [data-slot="scroll-area-scrollbar"]');
+  await page.waitForFunction(() => document.querySelector(".transcript-scroll")?.scrollTop > 0);
+  // The reported browser emits a nested MouseEvent-shaped wheel with no deltas.
+  // Replay that packet alongside genuine browser input, including over the thumb.
+  await page.evaluate(() => {
+    window.addEventListener(
+      "wheel",
+      (event) => {
+        if (event.isTrusted)
+          event.target.dispatchEvent(new MouseEvent("wheel", { bubbles: true, cancelable: true }));
+      },
+      true,
+    );
+  });
+  const malformed = await track.evaluate((el) => {
+    const viewport = document.querySelector(".transcript-scroll");
+    viewport.scrollTop = 100;
+    const before = viewport.scrollTop;
+    el.dispatchEvent(new MouseEvent("wheel", { bubbles: true, cancelable: true }));
+    return { before, after: viewport.scrollTop };
+  });
+  check(malformed.before === malformed.after, "Malformed scrollbar wheel resets the viewport");
+
+  for (const zone of ["text", "track", "left-margin", "right-margin"]) {
+    const point = await page.evaluate((zone) => {
+      const viewport = document.querySelector(".transcript-scroll");
+      const track = document.querySelector('.transcript [data-slot="scroll-area-scrollbar"]');
+      const rect = (zone === "track" ? track : viewport).getBoundingClientRect();
+      const x =
+        rect.x +
+        (zone === "track"
+          ? 4
+          : zone === "left-margin"
+            ? 20
+            : zone === "right-margin"
+              ? rect.width - 20
+              : rect.width / 2);
+      const y = rect.y + 50;
+      return { x, y, nativeOwner: viewport.contains(document.elementFromPoint(x, y)) };
+    }, zone);
+    check(point.nativeOwner, `${zone} is outside the native transcript scroll owner`);
+    await page.mouse.move(point.x, point.y);
+    await viewport.evaluate((el) => {
+      el.scrollTop = 0;
+    });
+    await page.waitForTimeout(100);
+    for (let packet = 0; packet < 16; packet++) await page.mouse.wheel(0, 6);
+    await page.waitForFunction(
+      () => Math.abs(document.querySelector(".transcript-scroll").scrollTop - 96) <= 2,
+    );
+    await page.mouse.wheel(0, -1000);
+    await page.waitForFunction(() => document.querySelector(".transcript-scroll").scrollTop === 0);
+    await page.mouse.wheel(0, 1000);
+    await page.waitForFunction(() => {
+      const el = document.querySelector(".transcript-scroll");
+      return Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) <= 2;
+    });
+  }
+  // Keeping the thumb inside the native owner must preserve the existing drag.
+  const thumb = await page.locator('.transcript [data-slot="scroll-area-thumb"]').boundingBox();
+  const bounds = await track.boundingBox();
+  await page.mouse.move(thumb.x + thumb.width / 2, thumb.y + thumb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + 4, bounds.y, { steps: 6 });
+  await page.mouse.up();
+  await page.waitForFunction(() => document.querySelector(".transcript-scroll").scrollTop === 0);
+  await page.getByRole("button", { name: "Return to latest", exact: true }).click();
+  await page.waitForFunction(() => {
+    const el = document.querySelector(".transcript-scroll");
+    return Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) <= 2;
+  });
+  return "PASS native transcript wheel ownership across text, margins and thumb, malformed input, burst and drag";
 }
 
 async function timerChecks(page) {
@@ -1115,6 +1376,179 @@ async function topBarChecks(page) {
   return "PASS transparent top bar alignment, input, geometry and fullscreen";
 }
 
+async function tooltipDelayChecks(page) {
+  const check = (condition, message) => {
+    if (!condition) throw new Error(message);
+  };
+  await page.clock.install();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const theme = page.locator("[data-theme-mode-control]");
+  const fullscreen = page.locator("[data-fullscreen-control]");
+  const content = page.locator('[data-slot="tooltip-content"]');
+  const leave = async () => {
+    await page.mouse.move(500, 500);
+    await content.waitFor({ state: "detached" });
+    await page.clock.runFor(1);
+  };
+  const delayedHover = async (trigger) => {
+    await trigger.hover();
+    await page.clock.runFor(250);
+    check((await content.count()) === 0, "A new mouse hover opened a tooltip too soon");
+    await page.clock.runFor(500);
+    await content.waitFor({ state: "visible" });
+    check(
+      (await content.getAttribute("data-state")) === "delayed-open",
+      "Mouse tooltip skipped its delay",
+    );
+  };
+
+  await page.mouse.move(500, 500);
+  await delayedHover(theme);
+  await leave();
+  await delayedHover(fullscreen);
+  await leave();
+  await fullscreen.hover();
+  await page.clock.runFor(100);
+  await theme.hover();
+  await page.clock.runFor(100);
+  await page.mouse.move(500, 500);
+  await page.clock.runFor(800);
+  check((await content.count()) === 0, "Rapid cursor passing opened a tooltip");
+
+  await theme.click();
+  await page.clock.runFor(800);
+  check((await content.count()) === 0, "Clicking a control opened a mouse tooltip");
+  await leave();
+  await delayedHover(theme);
+  await leave();
+  await page.evaluate(() =>
+    document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined,
+  );
+  await page.keyboard.press("Tab");
+  await fullscreen.focus();
+  await content.waitFor({ state: "visible" });
+  check(
+    (await content.getAttribute("data-state")) === "instant-open",
+    "Keyboard focus tooltip was delayed",
+  );
+  return "PASS each Player mouse hover waits while keyboard focus remains immediate";
+}
+
+async function tooltipClickFocusChecks(page) {
+  const content = page.locator('[data-slot="tooltip-content"]');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  const show = page.getByRole("button", { name: "Show sidebar", exact: true });
+  const hide = page.getByRole("button", { name: "Hide sidebar", exact: true });
+  await show.waitFor({ state: "visible" });
+  await page.mouse.move(250, 400);
+  await show.hover();
+  await content.filter({ hasText: "Show sidebar" }).waitFor({ state: "visible" });
+  await show.click();
+  await hide.waitFor({ state: "visible" });
+  await page.waitForTimeout(350);
+  if (await content.count())
+    throw new Error("Pointer opening the drawer left a tooltip visible on the new Hide control");
+  await hide.click();
+  await show.waitFor({ state: "visible" });
+  await page.waitForTimeout(350);
+  if (await content.count())
+    throw new Error("Pointer closing the drawer left a tooltip visible on the Show control");
+
+  await page.mouse.move(250, 400);
+  await page.keyboard.press("Tab");
+  await show.focus();
+  await content.filter({ hasText: "Show sidebar" }).waitFor({ state: "visible" });
+  await page.keyboard.press("Enter");
+  await hide.waitFor({ state: "visible" });
+  await content.filter({ hasText: "Hide sidebar" }).waitFor({ state: "visible" });
+  if (
+    !(await hide.evaluate(
+      (element) => document.activeElement === element && element.matches(":focus-visible"),
+    ))
+  )
+    throw new Error("Keyboard opening the drawer lost visible focus on Hide sidebar");
+  return "PASS pointer sidebar clicks dismiss tooltips while keyboard focus retains its tooltip";
+}
+
+async function playerTooltipChecks(page) {
+  const tooltip = (label) =>
+    page.locator('[data-slot="tooltip-content"]').filter({ hasText: label });
+  const expectTooltip = async (trigger, label) => {
+    if (await trigger.getAttribute("title"))
+      throw new Error(`${label} still opens a native browser tooltip`);
+    await page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    });
+    await page.mouse.move(500, 500);
+    await trigger.hover();
+    await tooltip(label).waitFor({ state: "visible" });
+  };
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const hide = page.getByRole("button", { name: "Hide sidebar", exact: true });
+  await expectTooltip(hide, "Hide sidebar");
+  await hide.click();
+  await page.evaluate(async () => {
+    const dock = document.querySelector('[data-slot="sidebar"] > .fixed');
+    await Promise.allSettled(dock?.getAnimations().map((animation) => animation.finished) ?? []);
+  });
+  const show = page.getByRole("button", { name: "Show sidebar", exact: true });
+  await expectTooltip(show, "Show sidebar");
+  await page.mouse.move(500, 500);
+  await show.focus();
+  await tooltip("Show sidebar").waitFor({ state: "visible" });
+  await show.click();
+
+  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
+  const grip = page.locator('[data-tool="Visual Lab"] [data-panel-drag]');
+  await expectTooltip(grip, "Drag to reorder");
+  const separator = page.getByRole("separator", {
+    name: "Resize media and conversation",
+    exact: true,
+  });
+  await expectTooltip(separator, "Drag or use arrow keys to resize media and conversation");
+  await page.mouse.move(500, 500);
+  await separator.focus();
+  await tooltip("Drag or use arrow keys to resize media and conversation").waitFor({
+    state: "visible",
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const narrowShow = page.getByRole("button", { name: "Show sidebar", exact: true });
+  if (await narrowShow.isVisible()) await narrowShow.click();
+  const narrowHide = page.getByRole("button", { name: "Hide sidebar", exact: true });
+  if (await narrowHide.getAttribute("title"))
+    throw new Error("Narrow Hide sidebar still opens a native browser tooltip");
+  await page.keyboard.press("Tab");
+  await narrowHide.focus();
+  await tooltip("Hide sidebar").waitFor({ state: "visible" });
+  await page.keyboard.press("Escape");
+  await narrowShow.waitFor({ state: "visible" });
+  if (
+    !(await narrowShow.evaluate((element) => document.activeElement === element)) ||
+    (await page
+      .locator('[data-slot="tooltip-content"]')
+      .filter({ hasText: "Hide sidebar" })
+      .count())
+  )
+    throw new Error("One Escape must close the drawer, clear its tooltip and restore opener focus");
+  await narrowShow.click();
+  await page.keyboard.press("Tab");
+  await narrowHide.focus();
+  await tooltip("Hide sidebar").waitFor({ state: "visible" });
+  await page.locator('[data-slot="sheet-content"]').focus();
+  if (!(await tooltip("Hide sidebar").count()))
+    throw new Error("The drawer tooltip layer did not remain during focus handoff");
+  await page.keyboard.press("Escape");
+  await narrowShow.waitFor({ state: "visible" });
+  if (!(await narrowShow.evaluate((element) => document.activeElement === element)))
+    throw new Error(
+      "Escape during tooltip focus handoff must close the drawer and restore opener focus",
+    );
+  return "PASS Player sidebar and drag tooltips use shared styling on hover and keyboard focus";
+}
+
 async function contentAlignmentChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -1135,10 +1569,13 @@ async function contentAlignmentChecks(page) {
         viewportCenter: innerWidth / 2,
         stage: bounds(".player-stage"),
         media: bounds(".stage-media-frame"),
-        conversation: bounds(".player-conversation"),
+        // Measure the retained reading column; its viewport also owns the margins.
+        conversation: bounds(".transcript-native-overlay"),
         composer: bounds("[data-composer-shell]"),
         readingInset: Number.parseFloat(
-          getComputedStyle(document.querySelector(".player-conversation")).paddingLeft,
+          getComputedStyle(document.querySelector(".transcript-native-overlay")).getPropertyValue(
+            "--conversation-inline-inset",
+          ),
         ),
       };
     });
@@ -1695,6 +2132,60 @@ async function backgroundControlPlacementChecks(page) {
   return "PASS background controls centre on the viewport, shift, scroll and keep the narrow Stage fallback";
 }
 
+async function playerSettingsChecks(page) {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  const openSettings = async () => {
+    await page.locator("[data-settings-trigger]").click();
+    await page.getByRole("dialog", { name: "Player Settings" }).waitFor();
+  };
+  const closeSettings = async () => {
+    await page.keyboard.press("Escape");
+    await page.getByRole("dialog", { name: "Player Settings" }).waitFor({ state: "hidden" });
+  };
+  const secondaryText = () =>
+    page.evaluate(() => document.documentElement.style.getPropertyValue("--theme-text-secondary"));
+  // Owner decision: contrast and the title-bar A/B are user settings in every build.
+  await openSettings();
+  const contrast = page.locator('[data-player-setting="contrast"]');
+  if ((await contrast.inputValue()) !== "standard")
+    throw new Error("Contrast must default to Standard");
+  if (!(await page.getByRole("radio", { name: "A · Always visible, controls left" }).isChecked()))
+    throw new Error("The title-bar A/B must default to A");
+  const standard = await secondaryText();
+  await contrast.selectOption("high");
+  await page.waitForFunction(
+    (before) =>
+      document.documentElement.style.getPropertyValue("--theme-text-secondary") !== before,
+    standard,
+  );
+  await page.getByRole("radio", { name: "B · Auto-hide, controls right" }).check();
+  await closeSettings();
+  await page.getByRole("button", { name: "Switch to dark theme", exact: true }).click();
+  await openSettings();
+  if ((await contrast.inputValue()) !== "high") throw new Error("Switching theme reset contrast");
+  await closeSettings();
+  await page.getByRole("button", { name: "Switch to light theme", exact: true }).click();
+
+  // B hides the bar on short screens until the pointer enters it.
+  await page.setViewportSize({ width: 1440, height: 600 });
+  const bar = page.locator("[data-player-top-bar]");
+  await page.mouse.move(700, 400);
+  await page.locator("[data-composer-input]").focus();
+  await page.waitForFunction(
+    () => getComputedStyle(document.querySelector("[data-player-top-bar]")).opacity === "0",
+    null,
+    { timeout: 6000 },
+  );
+  const box = await bar.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.waitForFunction(
+    () => getComputedStyle(document.querySelector("[data-player-top-bar]")).opacity === "1",
+  );
+  await page.setViewportSize({ width: 1440, height: 900 });
+  return "PASS Player Settings contrast and title-bar A/B apply in the product Player";
+}
+
 async function composerMouseFocusChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -1864,8 +2355,12 @@ async function directDemoLatestChecks(page) {
 
 const groups = [
   topBarChecks,
+  tooltipDelayChecks,
+  tooltipClickFocusChecks,
+  playerTooltipChecks,
   checks,
   drawerWidthChecks,
+  sidebarMotionChecks,
   menuPreviewChecks,
   menuWidthChecks,
   menuCollapseChecks,
@@ -1876,10 +2371,12 @@ const groups = [
   composerMouseFocusChecks,
   composerSendFocusChecks,
   sidebarShortcutChecks,
+  playerSettingsChecks,
   focusOffsetChecks,
   backgroundControlPlacementChecks,
   directDemoLatestChecks,
   timerChecks,
+  transcriptNativeWheelChecks,
   contentAlignmentChecks,
   playerConditionChecks,
   zoomedViewportChecks,

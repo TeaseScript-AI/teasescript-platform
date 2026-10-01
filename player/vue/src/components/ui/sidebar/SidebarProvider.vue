@@ -16,9 +16,19 @@ const props = withDefaults(
     defaultOpen?: boolean;
     responsive?: boolean;
     open?: boolean | undefined;
+    tooltipDelayDuration?: number;
+    tooltipSkipDelayDuration?: number;
+    tooltipIgnoreNonKeyboardFocus?: boolean;
     class?: HTMLAttributes["class"];
   }>(),
-  { defaultOpen: true, open: undefined, responsive: true },
+  {
+    defaultOpen: true,
+    open: undefined,
+    responsive: true,
+    tooltipDelayDuration: 0,
+    tooltipSkipDelayDuration: 300,
+    tooltipIgnoreNonKeyboardFocus: false,
+  },
 );
 
 const emits = defineEmits<{ "update:open": [open: boolean] }>();
@@ -67,7 +77,11 @@ provideSidebarContext({ state, open, setOpen, isMobile, openMobile, setOpenMobil
 </script>
 
 <template>
-  <TooltipProvider :delay-duration="0">
+  <TooltipProvider
+    :delay-duration="props.tooltipDelayDuration"
+    :skip-delay-duration="props.tooltipSkipDelayDuration"
+    :ignore-non-keyboard-focus="props.tooltipIgnoreNonKeyboardFocus"
+  >
     <div
       data-slot="sidebar-wrapper"
       :style="{ '--sidebar-width': SIDEBAR_WIDTH, '--sidebar-width-icon': SIDEBAR_WIDTH_ICON }"

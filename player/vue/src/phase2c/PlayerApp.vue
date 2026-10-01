@@ -2,6 +2,9 @@
 import { computed, provide, ref } from "vue";
 import { useEventListener, useResizeObserver } from "@vueuse/core";
 import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
+import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
+import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
+import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 import type { PlayerSpeakerPresentation } from "../../../model.js";
 import type { PlayerThemeIntent } from "../../../theme/palette.js";
 import PlayerComposition from "./PlayerComposition.vue";
@@ -36,6 +39,12 @@ provide(
 );
 usePlayerTheme(themeIntent);
 // Each mode starts from its own default palette; the contrast choice carries over.
+// Player Settings: contrast is part of the theme intent; the title-bar A/B defaults to A.
+const contrast = computed({
+  get: () => themeIntent.value.contrast,
+  set: (value) => (themeIntent.value = { ...themeIntent.value, contrast: value }),
+});
+const titlebarOption = ref<"left" | "overlap">("left");
 function toggleThemeMode() {
   themeIntent.value = {
     ...defaultPlayerThemeIntents[themeIntent.value.mode === "dark" ? "light" : "dark"],
@@ -95,6 +104,8 @@ async function toggleFullscreen() {
     :stage-height="stageHeight"
     :media-aspect="mediaAspect"
     :fullscreen="fullscreen"
+    v-model:contrast="contrast"
+    v-model:titlebar-option="titlebarOption"
   >
     <template #tool="scope">
       <slot name="tool" v-bind="scope" />
@@ -108,11 +119,17 @@ async function toggleFullscreen() {
             :fullscreen-supported="fullscreenSupported"
             :fullscreen-error="fullscreenError"
             :theme-mode="themeIntent.mode"
+            :option="titlebarOption"
             @toggle-fullscreen="toggleFullscreen"
             @toggle-theme-mode="toggleThemeMode"
           >
             <template v-if="!sidebarVisible" #tools>
-              <SidebarTrigger class="size-8" aria-label="Show sidebar" title="Show sidebar" />
+              <Tooltip>
+                <TooltipTrigger as-child>
+                  <SidebarTrigger class="size-8" aria-label="Show sidebar" />
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Show sidebar</TooltipContent>
+              </Tooltip>
             </template>
           </PlayerTopBar>
         </template>

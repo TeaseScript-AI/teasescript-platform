@@ -186,7 +186,8 @@ baseline rather than a tuning control.
 
 Scrolling ownership:
 
-- transcript: vertical conversation scrolling;
+- transcript: vertical conversation scrolling, with one native browser scroll owner across the reading column, both
+  margins and its overlay thumb, so wheel units and motion match everywhere in the conversation region;
 - tool-panel strip: horizontal scrolling in the dock when the open panels exceed its allocation;
 - each tool body: its own vertical scrolling;
 - right background-control/status stack: vertical scrolling when needed;
@@ -234,15 +235,35 @@ becoming universal dimensions.
 
 The Player's top controls overlay the stage without reserving a separate title row. The surrounding bar is transparent;
 the title pill and individual control groups use shared translucent media-control material. The title truncates when
-space is constrained. Display controls include the light/dark toggle and the rightmost fullscreen control. Tools access
+space is constrained; a bar narrower than `200px` hides the title visually while keeping it for assistive technology.
+Display controls include the light/dark toggle and the rightmost fullscreen control. Tools access
 appears in the top controls when the sidebar is hidden and in the tools framework while it is open.
 
 The embedding caller supplies the title. The final host/package title-source contract remains open.
 
-The same top-control overlay serves normal and fullscreen presentation. Auto-hide and reveal on relevant pointer,
-touch, or focus activity are not yet implemented in Phase 2C. If used, tools access, fullscreen exit, and other critical
-global controls must remain discoverable and reachable. Timing and exact reveal zones remain implementation/tuning
-details.
+The same top-control overlay serves normal and fullscreen presentation. On short screens outside fullscreen, the
+title-bar A/B setting chooses the presentation:
+
+- **A · Always visible, controls left** (default): the bar stays visible and its controls move left of the timer rail;
+- **B · Auto-hide, controls right**: the bar hides and reveals on mouse entry, a tap on unused bar space, or keyboard
+  focus, then hides again 3 seconds after the pointer and focus leave. Hidden controls do not take pointer input;
+  reduced motion removes the fade.
+
+Tools access, fullscreen exit, and other critical global controls must remain discoverable and reachable in both
+variants. Timing and exact reveal zones remain tuning details.
+
+## Player Settings
+
+The settings control at the bottom of the tools menu opens Player Settings: user preferences for the Player interface,
+available in every build to every user. It currently offers:
+
+- **Menu Sidebar labels:** icons only, icons with a temporary label preview, or icons with labels;
+- **Contrast:** Standard or High, an accessibility preference that strengthens theme contrast and authored-colour
+  treatment and is kept when switching light/dark;
+- **Title bar on short screens · A/B test:** variant A or B above.
+
+Persisting these preferences across page loads is not yet implemented in production builds; the development server keeps
+the label preference.
 
 ## Left tools area
 
@@ -255,6 +276,12 @@ The tools sidebar starts visible on comfortable layouts and closed when constrai
 its visibility; the shortcut is ignored while focus is in the composer or another text-editing control.
 Resizing does not spontaneously reopen a closed sidebar. An open dock becoming a drawer stays open only when tools own
 the active focus, drag, or resize context; otherwise it closes to avoid covering the Player unexpectedly.
+
+Closing keeps the sidebar contents visible until its slide-out motion ends; reduced motion removes the slide and
+reopening cancels the pending cleanup. A closed sidebar is inert, open Player Settings or panel-settings popups close
+with it, and focus that was inside it returns to the visible sidebar toggle. Sidebar, splitter and reorder-grip hints
+use the shared tooltip after a `700ms` hover delay; keyboard focus shows the tooltip immediately, a mouse click does
+not leave a focus tooltip behind, and `Escape` still closes a narrow drawer while a tooltip is open.
 
 An open dock reserves horizontal space. A constrained layout presents an opaque tools drawer over the Player without
 shrinking the stage or conversation.
@@ -465,7 +492,7 @@ Player-generated surface follows the same rule. When an author supplies the bubb
 remains unchanged, including inline colours and high-contrast mode. Without an authored foreground, the Player chooses
 default black or white ink for that background. Authored text inside an inline background (including inherited message
 colour) also remains unchanged. Compile-time feedback for a poorly contrasting authored pair is tracked in #434.
-The experimental high-contrast theme setting gives one-sided colours stronger treatment.
+The High contrast setting in [Player Settings](#player-settings) gives one-sided colours stronger treatment.
 
 An authored typeface uses the theme font stack as its fallback. Font bundling is tracked in
 [`RELEASE-ROADMAP.md`](../planning/RELEASE-ROADMAP.md).

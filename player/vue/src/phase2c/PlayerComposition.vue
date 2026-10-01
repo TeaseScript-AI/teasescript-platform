@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { SplitterGroup, SplitterPanel, SplitterResizeHandle } from "reka-ui";
+import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
+import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
+import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 
 withDefaults(defineProps<{ initialStageSize?: number }>(), { initialStageSize: 60 });
 const hitAreaMargins = { fine: 0, coarse: 0 };
@@ -12,11 +15,15 @@ const hitAreaMargins = { fine: 0, coarse: 0 };
       <SplitterPanel :default-size="initialStageSize" :min-size="20" class="flex min-h-0 flex-col">
         <slot name="stage" />
       </SplitterPanel>
-      <SplitterResizeHandle class="conversation-resize" aria-label="Resize media and conversation"
-        title="Drag or use arrow keys to resize media and conversation"
-        :hit-area-margins="hitAreaMargins">
-        <span aria-hidden="true" />
-      </SplitterResizeHandle>
+      <Tooltip>
+        <TooltipTrigger as-child>
+          <SplitterResizeHandle class="conversation-resize" aria-label="Resize media and conversation"
+            :hit-area-margins="hitAreaMargins">
+            <span aria-hidden="true" />
+          </SplitterResizeHandle>
+        </TooltipTrigger>
+        <TooltipContent side="top">Drag or use arrow keys to resize media and conversation</TooltipContent>
+      </Tooltip>
       <SplitterPanel :default-size="100 - initialStageSize" :min-size="20" class="flex min-h-0 flex-col">
         <slot />
       </SplitterPanel>

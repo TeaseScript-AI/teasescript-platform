@@ -1,22 +1,82 @@
 <script setup lang="ts">
+import { onBeforeUnmount, ref } from "vue";
 import { Maximize, Minimize, Moon, Sun } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
 
-defineProps<{
+defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
+
+const topBar = ref<HTMLElement | null>(null);
+const revealed = ref(false);
+const props = defineProps<{
   title: string;
   fullscreen: boolean;
   fullscreenSupported: boolean;
   fullscreenError: string;
   themeMode: "light" | "dark";
+  option: "left" | "overlap";
 }>();
-defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
+let pointerInside = false;
+let hideTimer: ReturnType<typeof setTimeout> | undefined;
+
+function autoHideActive() {
+  const shell = topBar.value?.closest("[data-player-vertical]");
+  return props.option === "overlap" && shell?.getAttribute("data-player-vertical") === "constrained" &&
+    shell.getAttribute("data-player-fullscreen") === "inactive";
+}
+
+function cancelHide() {
+  if (hideTimer) clearTimeout(hideTimer);
+  hideTimer = undefined;
+}
+
+function hideLater() {
+  cancelHide();
+  if (pointerInside || topBar.value?.contains(document.activeElement)) return;
+  hideTimer = setTimeout(() => { revealed.value = false; }, 3000);
+}
+
+function show() {
+  if (!autoHideActive()) return;
+  revealed.value = true;
+  hideLater();
+}
+
+function enter(event: PointerEvent) {
+  if (event.pointerType !== "mouse") return;
+  pointerInside = true;
+  show();
+}
+
+function leave(event: PointerEvent) {
+  if (event.pointerType !== "mouse") return;
+  pointerInside = false;
+  hideLater();
+}
+
+function tap(event: MouseEvent) {
+  if (event.target instanceof Element && event.target.closest("button, input, select, textarea, a")) return;
+  show();
+}
+
+onBeforeUnmount(cancelHide);
 </script>
 
 <template>
-  <header data-player-top-bar class="player-top-bar">
+  <header
+    ref="topBar"
+    data-player-top-bar
+    :data-placement="option"
+    :data-revealed="revealed || undefined"
+    class="player-top-bar"
+    @pointerenter="enter"
+    @pointerleave="leave"
+    @click="tap"
+    @focusin="show"
+    @focusout="hideLater"
+  >
     <div v-if="$slots.tools" class="player-top-bar-tools"><slot name="tools" /></div>
     <h1 class="player-top-bar-title">
       <span v-if="title"><span class="player-top-bar-title-text">{{ title }}</span></span>
@@ -63,6 +123,7 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
 <style scoped>
 /* Overlay only: the composition's Stage and conversation tracks retain all space. */
 .player-top-bar {
+  container: player-titlebar / inline-size;
   position: absolute;
   z-index: 20;
   inset: 0 0 auto;
@@ -135,6 +196,17 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+@container player-titlebar (max-width: 200px) {
+  .player-top-bar-title {
+    position: absolute;
+    flex: none;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
 .player-top-bar-error {
   position: absolute;
   top: calc(100% + 0.5rem);
@@ -143,6 +215,10 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
   font-size: 0.75rem;
   color: var(--foreground);
   background: var(--surface-component);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-top-bar { transition: none; }
 }
 </style>
 
@@ -177,6 +253,29 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
 :root[data-phase2c-theme] [data-player-top-bar] button:disabled {
   background: transparent;
   color: var(--theme-media-text-disabled);
+}
+
+/* A keeps the bar visible and moves its controls left of the timer. */
+.phase2c-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .player-top-bar[data-placement="left"] {
+  right: calc(var(--player-timer-rail-width) + var(--player-edge-space));
+}
+
+/* B keeps the controls right-aligned and hides the bar until revealed. */
+.phase2c-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .player-top-bar[data-placement="overlap"] {
+  opacity: 0;
+  pointer-events: auto;
+  transition: opacity 150ms ease;
+}
+.phase2c-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .player-top-bar[data-placement="overlap"]:is([data-revealed], :focus-within) {
+  opacity: 1;
+}
+.phase2c-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .player-top-bar[data-placement="overlap"]:not([data-revealed]):not(:focus-within) button {
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .phase2c-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .player-top-bar[data-placement="overlap"] {
+    transition: none;
+  }
 }
 
 </style>

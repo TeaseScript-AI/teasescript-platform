@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from "vue";
+import { onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { Pin, ChevronDown, Ellipsis, GripVertical } from "@lucide/vue";
 import { toolPanelSizes, type ToolPanelSize } from "./toolPanelSizes";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,8 @@ import DropdownMenuSub from "@/components/ui/dropdown-menu/DropdownMenuSub.vue";
 import DropdownMenuSubTrigger from "@/components/ui/dropdown-menu/DropdownMenuSubTrigger.vue";
 import DropdownMenuSubContent from "@/components/ui/dropdown-menu/DropdownMenuSubContent.vue";
 
-defineProps<{
+const props = defineProps<{
+  active: boolean;
   tool: string;
   size: ToolPanelSize;
   pinned: boolean;
@@ -28,8 +29,18 @@ const emit = defineEmits<{
   resize: [size: ToolPanelSize];
   pin: [pinned: boolean];
   move: [direction: -1 | 1];
+  restoreFocus: [];
 }>();
 const panelSizeNames = Object.keys(toolPanelSizes) as ToolPanelSize[];
+const settingsOpen = ref(false);
+watch(() => props.active, (active) => {
+  if (!active) settingsOpen.value = false;
+});
+function closeSettingsFocus(event: Event) {
+  if (props.active) return;
+  event.preventDefault();
+  emit("restoreFocus");
+}
 function selectSize(value: unknown) {
   const size = panelSizeNames.find((size) => size === value);
   if (size) emit("resize", size);
@@ -88,14 +99,18 @@ onBeforeUnmount(() => observer?.disconnect());
     :data-compact-settings="compactSettings"
     class="tool-panel-header flex items-center justify-between gap-2 border-b"
   >
-    <span
-      data-panel-drag
-      class="inline-flex shrink-0 cursor-grab touch-none select-none items-center self-stretch rounded-sm px-0.5 hover:bg-accent active:cursor-grabbing"
-      aria-hidden="true"
-      title="Drag to reorder"
-    >
-      <GripVertical class="size-4" />
-    </span>
+    <Tooltip>
+      <TooltipTrigger as-child>
+        <span
+          data-panel-drag
+          class="inline-flex shrink-0 cursor-grab touch-none select-none items-center self-stretch rounded-sm px-0.5 hover:bg-accent active:cursor-grabbing"
+          aria-hidden="true"
+        >
+          <GripVertical class="size-4" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">Drag to reorder</TooltipContent>
+    </Tooltip>
     <Tooltip :disabled="!truncatedTitle">
       <TooltipTrigger as-child>
         <h2
@@ -112,7 +127,7 @@ onBeforeUnmount(() => observer?.disconnect());
       <Tooltip :disabled="!compactSettings">
         <TooltipTrigger as-child>
           <span class="inline-flex">
-            <DropdownMenu>
+            <DropdownMenu v-model:open="settingsOpen">
               <DropdownMenuTrigger as-child>
                 <Button
                   variant="ghost"
@@ -132,7 +147,7 @@ onBeforeUnmount(() => observer?.disconnect());
                   <Ellipsis class="panel-settings-compact size-4" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent data-tools-context align="end">
+              <DropdownMenuContent data-tools-context align="end" @close-auto-focus="closeSettingsFocus">
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger>Width</DropdownMenuSubTrigger>
                   <DropdownMenuSubContent data-tools-context>

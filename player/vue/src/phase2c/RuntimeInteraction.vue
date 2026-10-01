@@ -42,7 +42,6 @@ const pacing = computed(() => {
   return gate?.skippable ? gate : null;
 });
 const root = ref<HTMLElement | null>(null);
-const transcript = ref<InstanceType<typeof Transcript> | null>(null);
 const composer = ref<InstanceType<typeof Composer> | null>(null);
 const draft = ref("");
 const feedback = ref("");
@@ -211,10 +210,9 @@ function submit(source: "input" | "button") {
 
 <template>
   <div ref="root" data-runtime-interaction class="contents">
-    <ConversationSurface @margin-wheel="transcript?.scrollFromMargin($event)">
+    <ConversationSurface>
       <template #default="{ bottomInset }">
         <Transcript
-          ref="transcript"
           :key="transcriptKey"
           :entries="entries"
           :speakers="speakers"

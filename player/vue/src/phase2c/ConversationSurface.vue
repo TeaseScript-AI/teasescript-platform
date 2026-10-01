@@ -3,11 +3,6 @@ import { ref } from "vue";
 import { useResizeObserver } from "@vueuse/core";
 import { usePlayerConditions } from "./usePlayerConditions";
 
-const emit = defineEmits<{ "margin-wheel": [event: WheelEvent] }>();
-function scrollMargin(event: WheelEvent) {
-  // Only empty margins belong here; nested controls keep their native scrolling.
-  if (event.target === event.currentTarget) emit("margin-wheel", event);
-}
 const overlay = ref<HTMLElement | null>(null);
 const bottomInset = ref(0);
 const container = ref<HTMLElement | null>(null);
@@ -28,7 +23,7 @@ useResizeObserver(overlay, () => {
 </script>
 
 <template>
-  <div class="conversation-region" @wheel="scrollMargin">
+  <div class="conversation-region">
   <section ref="container" class="player-conversation conversation-surface"
     :style="{ '--composer-input-limit': `${Math.max(40, availableHeight * 0.45)}px`, '--composer-top-from-bottom': `${composerEdges.top}px`, '--composer-bottom-from-bottom': `${composerEdges.bottom}px` }">
     <slot :bottom-inset="bottomInset" />
@@ -41,14 +36,17 @@ useResizeObserver(overlay, () => {
 
 <style scoped>
 .conversation-region { flex: 1; display: flex; min-width: 0; min-height: 0; }
-.conversation-surface { position: relative; display: flex; min-height: 0; padding-inline: var(--conversation-inline-inset); }
+.conversation-surface { position: relative; display: flex; min-height: 0; padding-inline: 0; width: 100%; margin-inline-start: 0; }
 .conversation-overlay {
   --composer-inline-gutter: var(--conversation-inline-inset);
   position: absolute;
   inset: auto max(var(--composer-inline-gutter), env(safe-area-inset-right, 0px)) 0
     max(var(--composer-inline-gutter), env(safe-area-inset-left, 0px));
   z-index: 2; pointer-events: none;
-  max-inline-size: var(--conversation-content-max-width); margin-inline: auto;
+  inset-inline-start: calc(var(--conversation-offset) + max(var(--composer-inline-gutter), env(safe-area-inset-left, 0px)));
+  inset-inline-end: auto;
+  width: calc(var(--conversation-width) - max(var(--composer-inline-gutter), env(safe-area-inset-left, 0px)) - max(var(--composer-inline-gutter), env(safe-area-inset-right, 0px)));
+  max-inline-size: var(--conversation-content-max-width); margin-inline: 0;
   padding-top: 12px; padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
 }
 .conversation-overlay.edge-clearance {
