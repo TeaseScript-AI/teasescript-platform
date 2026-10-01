@@ -406,15 +406,21 @@ function lowerIf(node: AstNode, context: LowerContext): IrStatement[] {
   const thenNode = asNode(node.then);
   const elseNode = asNode(node.else);
   const condition = conditionNode === null ? null : lowerExpression(conditionNode, context);
-  if (condition === null || thenNode?.kind !== "block") {
+  if (condition === null || thenNode === null || thenNode.kind === "empty") {
     return [unsupportedStatement(context, node, "SX_UNSUPPORTED_IF", "if condition or body could not be migrated safely.")];
   }
-  const elseStatements = elseNode === null || elseNode.kind === "empty"
-    ? []
-    : elseNode.kind === "block"
-      ? lowerBlock(elseNode, context)
-      : lowerStatement(elseNode, context);
-  return [{ kind: "if", condition, then: lowerBlock(thenNode, context), else: elseStatements, span: node.span }];
+  return [{
+    kind: "if",
+    condition,
+    then: lowerBranch(thenNode, context),
+    else: elseNode === null ? [] : lowerBranch(elseNode, context),
+    span: node.span,
+  }];
+}
+
+function lowerBranch(node: AstNode, context: LowerContext): IrStatement[] {
+  if (node.kind === "empty") return [];
+  return node.kind === "block" ? lowerBlock(node, context) : lowerStatement(node, context);
 }
 
 function lowerWhile(node: AstNode, context: LowerContext): IrStatement[] {

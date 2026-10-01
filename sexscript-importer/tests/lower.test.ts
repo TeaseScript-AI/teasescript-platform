@@ -594,3 +594,40 @@ test("keeps closure return inside Groovy each() explicit", () => {
   const program = lowerParsedFile(source);
   assert.ok(program.diagnostics.some((diagnostic) => diagnostic.code === "SX_EACH_RETURN"));
 });
+
+
+test("lowers single-statement if, else, and else-if bodies", () => {
+  const source = file([
+    {
+      kind: "if",
+      span,
+      condition: variable("first"),
+      then: statement({ kind: "binary", span, operator: "=", left: variable("value"), right: constant(1) }),
+      else: {
+        kind: "if",
+        span,
+        condition: variable("second"),
+        then: { kind: "return", span, value: constant(null) },
+        else: statement({ kind: "binary", span, operator: "=", left: variable("value"), right: constant(2) }),
+      },
+    },
+  ]);
+
+  const program = lowerParsedFile(source);
+  assert.deepEqual(program.diagnostics, []);
+  assert.equal(
+    emitTease(program),
+    [
+      "if first {",
+      "  value = 1",
+      "} else {",
+      "  if second {",
+      "    end",
+      "  } else {",
+      "    value = 2",
+      "  }",
+      "}",
+      "",
+    ].join("\n"),
+  );
+});
