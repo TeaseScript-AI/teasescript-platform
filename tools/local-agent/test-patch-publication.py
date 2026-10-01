@@ -475,6 +475,11 @@ class PatchPublicationTests(unittest.TestCase):
                 self.assertIn(expected, completed.stderr)
 
     def test_part_size_hash_and_utf8_errors_name_the_part(self) -> None:
+        classification = {
+            "size": "size mismatch",
+            "hash": "SHA-256 mismatch",
+            "utf8": "not UTF-8",
+        }
         for kind in ("size", "hash", "utf8"):
             with self.subTest(kind=kind):
                 if kind == "utf8":
@@ -494,18 +499,18 @@ class PatchPublicationTests(unittest.TestCase):
                     )
                     git(manifest.parents[1], "add", str(manifest.relative_to(manifest.parents[1])))
                     git(manifest.parents[1], "commit", "-q", "-m", f"Corrupt {kind}")
+                output = self.root / f"bad-{kind}.patch"
                 completed = run(
-                    self.materialize_command(
-                        manifest, transfer_ref, self.root / f"bad-{kind}.patch"
-                    ),
+                    self.materialize_command(manifest, transfer_ref, output),
                     cwd=self.repo,
                     check=False,
                 )
                 self.assertEqual(completed.returncode, 1)
-                self.assertIn(
-                    parts[1].relative_to(manifest.parents[1]).as_posix(),
-                    completed.stderr,
-                )
+                part_path = parts[1].relative_to(manifest.parents[1]).as_posix()
+                self.assertIn(classification[kind], completed.stderr)
+                self.assertIn(part_path, completed.stderr)
+                self.assertFalse(output.exists())
+                self.assertEqual(list(self.root.glob(f".{output.name}.*")), [])
 
     def test_final_digest_and_canonical_order_fail_closed(self) -> None:
         manifest, transfer_ref, _parts = self.create_transfer_payload()
