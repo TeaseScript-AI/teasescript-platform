@@ -1,6 +1,6 @@
 import type { InstructionPlan } from "../plan/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
-import { segmentProgressMs } from "./media.js";
+import { segmentPositionAtMs, segmentProgressMs } from "./media.js";
 
 /** Restore validation for media playback records, their handles, queued cue blocks, and cue-block frames. */
 
@@ -159,21 +159,23 @@ function validMediaRecord(
     media.segmentPasses > media.passesCompleted ||
     media.elapsedMs !==
       elapsedAtCommitted(media, media.segmentElapsedMs, media.committedProgressMs) ||
-    !cursorMatchesAnchor(
-      {
-        finishedAtEnd: media.state === "finished" && media.positionMs >= end,
-        finishedByDuration:
-          media.state === "finished" &&
-          isPlainRecord(media.repeat) &&
-          media.repeat.kind === "budget",
-        positionMs: media.positionMs,
-        passesCompleted: media.passesCompleted,
-        committedProgressMs: media.committedProgressMs,
-        segmentPositionMs: media.segmentPositionMs,
-        segmentPasses: media.segmentPasses,
-      },
-      end - media.startAtMs,
-    )
+    !cursorMatchesAnchor({
+      finished: media.state === "finished",
+      durationEndMs:
+        isPlainRecord(media.repeat) &&
+        media.repeat.kind === "budget" &&
+        typeof media.repeat.milliseconds === "number"
+          ? media.repeat.milliseconds - media.segmentElapsedMs
+          : null,
+      cuePointsMs: cuePoints(media.cues, media.startAtMs, end),
+      startAtMs: media.startAtMs,
+      endMs: end,
+      positionMs: media.positionMs,
+      passesCompleted: media.passesCompleted,
+      committedProgressMs: media.committedProgressMs,
+      segmentPositionMs: media.segmentPositionMs,
+      segmentPasses: media.segmentPasses,
+    })
   )
     return false;
   // A stop starts a final segment at the stop position.
@@ -225,44 +227,77 @@ function validMediaRecord(
 }
 
 /**
- * The committed progress is where the anchor formula places the current position and pass: the runtime commits
- * arrivals calculated by it, and a pass wrap moves to the start of the next pass at the same progress. Media finished at
- * the end of their last pass stand at the end of the pass before the count. Within a segment the formula rounds only
- * at the magnitude of segment progress, so a monotonic clamp differs from it by a few units of that magnitude's last
- * place, as in timer validation; only media finished by a repeat duration derive their position by arithmetic, which
- * adds rounding at the magnitude of the position. Larger differences are incoherent.
+ * The committed progress agrees exactly with the arithmetic that produced it. An arrival commits the anchor formula at
+ * its position; a pass wrap keeps the end of the pass before at the range start, also where rounding puts the start of
+ * the new pass apart from it, and a cue arrival in the new pass that rounding keeps short of it stops there; media finished at the range end stand at the end of their last pass, or of a repeat
+ * duration that ended there; media finished inside the range ended a repeat duration, at the position the inverse
+ * formula gives, at an arrival whose progress is exactly that duration's end, or at a cue point that rounding carried
+ * the inverse formula past.
  */
-function cursorMatchesAnchor(
-  cursor: {
-    readonly finishedAtEnd: boolean;
-    readonly finishedByDuration: boolean;
-    readonly positionMs: number;
-    readonly passesCompleted: number;
-    readonly committedProgressMs: number;
-    readonly segmentPositionMs: number;
-    readonly segmentPasses: number;
-  },
-  passLengthMs: number,
-): boolean {
-  const passes = cursor.passesCompleted - (cursor.finishedAtEnd ? 1 : 0) - cursor.segmentPasses;
+function cursorMatchesAnchor(cursor: {
+  readonly finished: boolean;
+  readonly durationEndMs: number | null;
+  readonly cuePointsMs: readonly number[];
+  readonly startAtMs: number;
+  readonly endMs: number;
+  readonly positionMs: number;
+  readonly passesCompleted: number;
+  readonly committedProgressMs: number;
+  readonly segmentPositionMs: number;
+  readonly segmentPasses: number;
+}): boolean {
+  const passLength = cursor.endMs - cursor.startAtMs;
+  const passes = cursor.passesCompleted - cursor.segmentPasses;
   if (passes < 0) return false;
-  const expected = segmentProgressMs(
-    passes,
-    passLengthMs,
-    cursor.positionMs - cursor.segmentPositionMs,
-  );
-  const progressMagnitude = Math.max(
-    passes * passLengthMs,
-    Math.abs(expected),
-    cursor.committedProgressMs,
-  );
-  const positionMagnitude = cursor.finishedByDuration
-    ? Math.max(cursor.positionMs, cursor.segmentPositionMs)
-    : 0;
+  const committed = cursor.committedProgressMs;
+  const progressAt = (position: number, pass: number): number =>
+    segmentProgressMs(pass, passLength, position - cursor.segmentPositionMs);
+  const positionAt = (progress: number, pass: number): number =>
+    segmentPositionAtMs(pass, passLength, progress, cursor.segmentPositionMs);
+  if (cursor.finished) {
+    if (cursor.positionMs === cursor.endMs) {
+      if (passes < 1) return false;
+      if (committed === progressAt(cursor.endMs, passes - 1)) return true;
+      return (
+        committed === cursor.durationEndMs &&
+        committed < progressAt(cursor.endMs, passes - 1) &&
+        positionAt(committed, passes - 1) >= cursor.endMs
+      );
+    }
+    // A duration that ends exactly where a pass ends finishes at the range end instead.
+    if (
+      committed !== cursor.durationEndMs ||
+      (passes >= 1 && committed <= progressAt(cursor.endMs, passes - 1))
+    )
+      return false;
+    const reached = positionAt(committed, passes);
+    return (
+      cursor.positionMs === reached ||
+      committed === progressAt(cursor.positionMs, passes) ||
+      (cursor.cuePointsMs.includes(cursor.positionMs) &&
+        reached >= cursor.positionMs &&
+        committed < progressAt(cursor.positionMs, passes))
+    );
+  }
+  if (committed === progressAt(cursor.positionMs, passes)) return true;
   return (
-    Math.abs(expected - cursor.committedProgressMs) <=
-    Number.EPSILON * (4 * progressMagnitude + 2 * positionMagnitude)
+    passes >= 1 &&
+    committed === progressAt(cursor.endMs, passes - 1) &&
+    (cursor.positionMs === cursor.startAtMs ||
+      (cursor.cuePointsMs.includes(cursor.positionMs) &&
+        committed >= progressAt(cursor.positionMs, passes)))
   );
+}
+
+/** Cue points inside the active range, as the runtime places them. */
+function cuePoints(cues: unknown, startAtMs: number, endMs: number): number[] {
+  if (!Array.isArray(cues)) return [];
+  return cues.flatMap((cue: unknown) => {
+    if (!isPlainRecord(cue) || typeof cue.offsetMs !== "number") return [];
+    const point =
+      cue.kind === "at" ? cue.offsetMs : cue.kind === "beforeEnd" ? endMs - cue.offsetMs : null;
+    return point !== null && point >= startAtMs && point <= endMs ? [point] : [];
+  });
 }
 
 /**

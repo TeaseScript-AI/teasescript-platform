@@ -167,6 +167,16 @@ export function segmentProgressMs(
   return passes * passLengthMs + distanceMs;
 }
 
+/** The inverse anchor formula shared with restore validation: the position that segment progress reaches. */
+export function segmentPositionAtMs(
+  passes: number,
+  passLengthMs: number,
+  progressMs: number,
+  anchorPositionMs: number,
+): number {
+  return anchorPositionMs + (progressMs - passes * passLengthMs);
+}
+
 /** Segment progress at which a repeat duration is used up; unlimited for other repeat forms. */
 function budgetEndProgressMs(media: RuntimeMediaSnapshot): number {
   return media.repeat.kind === "budget"
@@ -210,7 +220,15 @@ function nextArrival(media: RuntimeMediaSnapshot): { progressMs: number; positio
   return budgetEnd < progressMs
     ? {
         progressMs: budgetEnd,
-        positionMs: Math.min(target, from + (budgetEnd - media.committedProgressMs)),
+        positionMs: Math.min(
+          target,
+          segmentPositionAtMs(
+            media.passesCompleted - media.segmentPasses,
+            end - media.startAtMs,
+            budgetEnd,
+            media.segmentPositionMs,
+          ),
+        ),
       }
     : { progressMs, positionMs: target };
 }

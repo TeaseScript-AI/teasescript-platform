@@ -27,6 +27,7 @@ interface MutableSnapshot {
   pendingTimerHandlers: Record<string, unknown>[];
   nextMediaId: number;
   callFrames: { timerInterruption: { mediaId?: number } | null }[];
+  settledMedia: MutableMedia[];
 }
 
 interface MutableMedia {
@@ -39,6 +40,7 @@ interface MutableMedia {
   segmentPositionMs: number;
   segmentPasses: number;
   segmentElapsedMs: number;
+  positionMs: number;
 }
 
 function mediaOf(snapshot: MutableSnapshot, mediaId: number): MutableMedia {
@@ -1219,4 +1221,46 @@ test("a load report waits for a due block even when scene time has caught up", (
   const accepted = reportMediaLoad(compiled, snapshot, 1, { kind: "loaded", durationMs: 2_000 });
   assert.deepEqual(accepted.outcome, { kind: "accepted" });
   assert.equal(validateRuntimeSnapshot(accepted.snapshot, compiled).valid, true);
+});
+
+test("anchor coherence follows the producing arithmetic exactly", () => {
+  const corrupt = (session: Session, mutate: (media: MutableMedia) => void, name: string): void => {
+    assert.equal(validateRuntimeSnapshot(session.snapshot, session.plan).valid, true, name);
+    // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; each case applies one invalid mutation.
+    const corrupted = JSON.parse(JSON.stringify(session.snapshot)) as MutableSnapshot;
+    const media =
+      corrupted.backgroundActions.find((action) => action.media?.mediaId === 1)?.media ??
+      corrupted.settledMedia.find((candidate) => candidate.mediaId === 1);
+    assert.ok(media !== undefined, name);
+    mutate(media);
+    assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false, name);
+  };
+  const large = new Session(
+    'let m = playAudio(file: "a", async: true, endAt: 8000000000001000 ms) {\n  at 8000000000000000 ms { }\n  at 8000000000000100 ms { }\n}\nwait 9000000000000000 ms',
+  );
+  large.load(1, 8_000_000_000_002_000).at(8_000_000_000_000_000, [1, 8_000_000_000_000_000]);
+  corrupt(large, (media) => (media.segmentPositionMs = 1), "large progress anchor");
+  const duration = new Session(
+    'let m = playAudio(file: "a", async: true, startAt: 8000000000000000 ms, endAt: 8000000000001000 ms, repeat: 500 ms)\nwait 10',
+  );
+  duration.load(1, 8_000_000_000_002_000).at(500, [1, 500]);
+  corrupt(duration, (media) => (media.positionMs += 1), "duration finish position");
+  for (const repeat of ["false", "3 times"]) {
+    const counted = new Session(
+      `let m = playAudio(file: "a", async: true, endAt: 1000 ms, repeat: ${repeat})\nwait 10`,
+    );
+    const end = repeat === "false" ? 1_000 : 3_000;
+    counted.load(1, 1_000).at(end, [1, end]);
+    corrupt(counted, (media) => (media.positionMs = 0), `finished ${repeat} at the start`);
+  }
+  // Genuine states at rounding edges stay valid: a wrapped start beyond the previous pass end, and a repeat duration
+  // that ends exactly at a cue arrival.
+  new Session('let m = playAudio(file: "a", async: true, repeat: 7 times, endAt: 1.1 ms)\nwait 10')
+    .load(1, 100)
+    .at(1, [1, 6.6]);
+  new Session(
+    'let m = playAudio(file: "m", async: true, startAt: 0.1 ms, endAt: 0.3 ms, repeat: 0.7 ms) {\n  at 0.2 ms { }\n}\nwait 10',
+  )
+    .load(1, 5_000)
+    .at(16, [1, 0.7]);
 });
