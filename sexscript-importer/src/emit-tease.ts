@@ -25,6 +25,9 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
     case "wait":
       lines.push(`${pad}${statement.visible ? "timer" : "wait"} ${emitExpression(statement.duration)}`);
       return;
+    case "showButton":
+      lines.push(`${pad}showButton ${emitExpression(statement.label)}`);
+      return;
     case "showPopup":
       lines.push(`${pad}showPopup ${emitExpression(statement.message)}`);
       return;
