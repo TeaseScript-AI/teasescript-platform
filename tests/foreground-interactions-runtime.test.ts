@@ -3,7 +3,6 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import {
-  interactionUtf8ByteLength,
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
   MAX_INTERACTION_OPTION_ENTRIES,
   MAX_INTERACTION_STRING_UTF8_BYTES,
@@ -476,9 +475,10 @@ test("pending interaction survives JSON checkpoint restore with monotonic events
 });
 
 test("interaction definitions preflight each field against remaining aggregate bytes", () => {
+  // The label is the button's only authored definition string.
   const exact = interactionPlan("button", {
     kind: "button",
-    buttonLabel: "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES),
+    buttonLabel: "x".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES),
     accessibleName: defaults.button,
   });
   assert.equal(validateInstructionPlan(exact).valid, true);
@@ -492,7 +492,7 @@ test("interaction definitions preflight each field against remaining aggregate b
       tooLongInteraction.ui.kind === "button",
   );
   const tooLongUi = tooLongInteraction.ui;
-  // EVIDENCE: fixture extends only the button label beyond its accepted byte limit.
+  // EVIDENCE: fixture extends only the button label beyond the aggregate byte limit.
   (tooLongUi as { buttonLabel: string }).buttonLabel += "x";
   assert.equal(validateInstructionPlan(tooLong).valid, false);
 
@@ -996,6 +996,34 @@ test("oversized authored interaction strings reject at plan and snapshot boundar
   assert.equal(validateRuntimeSnapshot(hostile).valid, false);
 });
 
+/** Counts UTF-8 measurements while rejecting these choice options in a plan and a planless snapshot. */
+function exhaustedMeasurementCounts(
+  base: InstructionPlan,
+  options: Extract<InteractionUiPayload, { kind: "choice" }>["options"],
+) {
+  const plan = structuredClone(base);
+  const interaction = plan.instructions[0];
+  assert.ok(interaction?.kind === "interaction" && "ui" in interaction);
+  // EVIDENCE: fixture replaces only the choice options of the validated plan.
+  Object.assign(interaction.ui, { options });
+  const planStats = withValidationTestStatistics((finish) => {
+    assert.equal(validateInstructionPlan(plan).valid, false);
+    return finish();
+  });
+  const snapshot = structuredClone(waiting(base).snapshot);
+  assert.ok(snapshot.foregroundAction?.kind === "interaction");
+  // EVIDENCE: fixture replaces only the persisted choice options of the pending action.
+  Object.assign(snapshot.foregroundAction.ui, { options });
+  const snapshotStats = withValidationTestStatistics((finish) => {
+    assert.equal(validateRuntimeSnapshot(snapshot).valid, false);
+    return finish();
+  });
+  return {
+    plan: planStats.counts.interactionUtf8Measurements,
+    snapshot: snapshotStats.counts.interactionUtf8Measurements,
+  };
+}
+
 test("interaction validation measures each accepted field once and stops after aggregate exhaustion", () => {
   const accepted = interactionPlan("choice", {
     kind: "choice",
@@ -1018,43 +1046,16 @@ test("interaction validation measures each accepted field once and stops after a
   });
   assert.equal(acceptedSnapshotStats.counts.interactionUtf8Measurements, 4);
 
-  const exhausted = structuredClone(accepted);
-  const exhaustedInteraction = exhausted.instructions[0];
-  assert.ok(
-    exhaustedInteraction?.kind === "interaction" &&
-      "ui" in exhaustedInteraction &&
-      exhaustedInteraction.ui.kind === "choice",
+  // The text fills half the aggregate, the label exceeds the remaining half by one byte, and the
+  // later sentinel option is not measured.
+  const half = MAX_INTERACTION_AGGREGATE_UTF8_BYTES / 2;
+  assert.deepEqual(
+    exhaustedMeasurementCounts(accepted, [
+      { text: "a".repeat(half), label: "b".repeat(half + 1) },
+      { text: "later", label: "later" },
+    ]),
+    { plan: 2, snapshot: 2 },
   );
-  // EVIDENCE: fixture replaces only the choice options with aggregate-byte exhaustion data.
-  Object.assign(exhaustedInteraction.ui, {
-    options: [
-      { text: "a".repeat(40_000), label: "b".repeat(30_000) },
-      ...Array.from({ length: 128 }, (_, index) => ({
-        text: `text${index}`,
-        label: `label${index}`,
-      })),
-    ],
-  });
-  const exhaustedPlanStats = withValidationTestStatistics((finish) => {
-    assert.equal(validateInstructionPlan(exhausted).valid, false);
-    return finish();
-  });
-  assert.equal(exhaustedPlanStats.counts.interactionUtf8Measurements, 2);
-
-  const pending = waiting(accepted);
-  const hostile = structuredClone(pending.snapshot);
-  assert.ok(
-    hostile.foregroundAction?.kind === "interaction" &&
-      hostile.foregroundAction.ui.kind === "choice",
-  );
-  // EVIDENCE: fixture copies the oversized validated-plan option array into persisted interaction UI.
-  (hostile.foregroundAction.ui as { options: typeof exhaustedInteraction.ui.options }).options =
-    exhaustedInteraction.ui.options;
-  const exhaustedSnapshotStats = withValidationTestStatistics((finish) => {
-    assert.equal(validateRuntimeSnapshot(hostile).valid, false);
-    return finish();
-  });
-  assert.equal(exhaustedSnapshotStats.counts.interactionUtf8Measurements, 2);
 });
 
 test("huge completion kind tokens are not reflected or allowed to mutate canonical state", () => {
@@ -1338,51 +1339,24 @@ test("interaction ownership survives active call, scope, and loop frames", () =>
   }
 });
 
-test("one multibyte per-string failure stops all later interaction UTF-8 measurement", () => {
+test("one multibyte field exhausting the aggregate stops all later interaction UTF-8 measurement", () => {
   const base = interactionPlan("choice", {
     kind: "choice",
     labelType: "none",
     options: [{ text: "ok", label: null }],
     accessibleName: defaults.choice,
   });
-  const overLimit = "\u20ac".repeat(30_000);
-  assert.ok(overLimit.length <= MAX_INTERACTION_STRING_UTF8_BYTES);
-  assert.ok(interactionUtf8ByteLength(overLimit) > MAX_INTERACTION_STRING_UTF8_BYTES);
-  const hostile = structuredClone(base);
-  const hostileInteraction = hostile.instructions[0];
-  assert.ok(
-    hostileInteraction?.kind === "interaction" &&
-      "ui" in hostileInteraction &&
-      hostileInteraction.ui.kind === "choice",
+  // Each euro sign is three UTF-8 bytes, so this exceeds the aggregate while its UTF-16 length
+  // passes the constant-time length precheck and must be measured once.
+  const overLimit = "\u20ac".repeat(Math.floor(MAX_INTERACTION_AGGREGATE_UTF8_BYTES / 3) + 1);
+  assert.ok(overLimit.length <= MAX_INTERACTION_AGGREGATE_UTF8_BYTES);
+  assert.deepEqual(
+    exhaustedMeasurementCounts(base, [
+      { text: overLimit, label: null },
+      { text: "later", label: null },
+    ]),
+    { plan: 1, snapshot: 1 },
   );
-  // EVIDENCE: fixture replaces only the choice options with per-string oversized values.
-  Object.assign(hostileInteraction.ui, {
-    options: Array.from({ length: MAX_INTERACTION_OPTION_ENTRIES }, () => ({
-      text: overLimit,
-      label: null,
-    })),
-  });
-  const planStats = withValidationTestStatistics((finish) => {
-    assert.equal(validateInstructionPlan(hostile).valid, false);
-    return finish();
-  });
-  assert.equal(planStats.counts.interactionUtf8Measurements, 1);
-
-  const pending = waiting(base);
-  const hostileSnapshot = structuredClone(pending.snapshot);
-  assert.ok(
-    hostileSnapshot.foregroundAction?.kind === "interaction" &&
-      hostileSnapshot.foregroundAction.ui.kind === "choice",
-  );
-  // EVIDENCE: fixture copies the oversized option array into persisted interaction UI.
-  (
-    hostileSnapshot.foregroundAction.ui as { options: typeof hostileInteraction.ui.options }
-  ).options = hostileInteraction.ui.options;
-  const snapshotStats = withValidationTestStatistics((finish) => {
-    assert.equal(validateRuntimeSnapshot(hostileSnapshot).valid, false);
-    return finish();
-  });
-  assert.equal(snapshotStats.counts.interactionUtf8Measurements, 1);
 });
 
 test("pending actions reserve their complete event sequence capacity", () => {

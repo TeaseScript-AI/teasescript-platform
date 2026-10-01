@@ -138,13 +138,15 @@ test("preserves unknown-name and protected-name semantic diagnostics", () => {
   );
 });
 
-test("scans a wide dedented block without text amplification", () => {
-  const line = `    ${"x".repeat(100_000)}`;
+test("preserves wide dedented block text without native failure", () => {
+  const text = "x".repeat(100_000);
+  const line = `    ${text}`;
   const source = ['"""', line, line, '"""'].join("\n");
   const result = lex(source);
   assert.deepEqual(result.diagnostics, []);
   const value = result.tokens.find((token) => token.kind === TokenKind.StringText);
-  assert.equal(tokenValue(value)?.length, 200_001);
+  // The shared four-space indentation is removed from both lines.
+  assert.equal(tokenValue(value), `${text}\n${text}`);
 });
 
 function tokenValue(token: Token | undefined): string | undefined {

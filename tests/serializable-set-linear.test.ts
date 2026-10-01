@@ -23,7 +23,11 @@ test("serializable-set validation does not impose the removed capture-work thres
   const accepted = Array.from({ length: acceptedSize }, (_, index) => index);
 
   assert.equal(validateSerializableValue({ kind: "set", items: accepted }), null);
-  assert.equal(createSerializableSet(accepted).items.length, acceptedSize);
+  const constructed = createSerializableSet(accepted).items;
+  assert.equal(constructed.length, acceptedSize);
+  for (let index = 0; index < acceptedSize; index += 1) {
+    assert.equal(constructed[index], index, `item ${index}`);
+  }
 });
 
 test("serializable-set validation rejects early and late duplicates consistently", () => {
@@ -54,6 +58,8 @@ test("serializable set mutation ignores existing values and appends new values i
   const membership = new Set<SerializableRuntimeScalar>(set.items);
   assert.equal(addSerializableSetValue(set, 2, membership), false);
   assert.equal(addSerializableSetValue(set, 3, membership), true);
+  assert.deepEqual(set.items, [1, 2, 3]);
 
+  assert.equal(addSerializableSetValue(set, 3, membership), false);
   assert.deepEqual(set.items, [1, 2, 3]);
 });

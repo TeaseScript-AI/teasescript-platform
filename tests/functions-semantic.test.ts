@@ -111,7 +111,7 @@ test("function scopes access globals but keep parameters and locals isolated", (
   assert.ok(escaped.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV002"));
 });
 
-test("rejects all accepted V30 protected names in declarations", () => {
+test("rejects representative protected names across function, parameter and local declarations", () => {
   const protectedFunction = compileSource("function wait { return 1 }");
   assert.equal(protectedFunction.plan, null);
   assert.ok(

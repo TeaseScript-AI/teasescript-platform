@@ -175,8 +175,17 @@ test("rejects exhausted scope, speaker, and call-frame allocators before collisi
 
   const callPlan = plan("function value { return 1 }\nvalue()");
   let callSnapshot = createFreshRuntimeSnapshot(callPlan);
-  while (callPlan.instructions[callSnapshot.nextInstruction]?.kind !== "callFunction") {
+  for (
+    let steps = 0;
+    callPlan.instructions[callSnapshot.nextInstruction]?.kind !== "callFunction";
+    steps += 1
+  ) {
+    assert.ok(steps < callPlan.instructions.length, "fixture did not reach its call instruction");
     callSnapshot = executeInstruction(callPlan, callSnapshot).snapshot;
+    assert.ok(
+      callSnapshot.status === "running",
+      `unexpected ${callSnapshot.status} before the call`,
+    );
   }
   callSnapshot.nextCallFrameId = MAX_SAFE;
   assert.throws(() => executeInstruction(callPlan, callSnapshot), isAllocatorError);

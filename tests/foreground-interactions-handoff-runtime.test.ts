@@ -1724,6 +1724,20 @@ test("PR194 matrix: settlement and active handoff validation", () => {
     retainedSettlementCounter,
     "counter: PR194-retained-newer-settlement-counter",
   );
+
+  // With a newer retained settlement, the handoff alone still authorizes the destination value.
+  const newerSettlementForgedDestination = externalRecord(
+    structuredClone(validatedCompositeWithNewerSettlement),
+    "newer settlement forged destination",
+  );
+  externalTemporary(newerSettlementForgedDestination, injected.destinationTemporary).value =
+    "forged";
+  assertRejectedSettlementHandoffSnapshot(
+    injected.plan,
+    validatedCompositeWithNewerSettlement,
+    newerSettlementForgedDestination,
+    "destination: PR194-newer-settlement-handoff-destination-forged",
+  );
 });
 
 interface TextInteractionCompletionRequest {

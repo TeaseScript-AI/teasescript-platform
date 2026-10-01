@@ -312,7 +312,7 @@ test("serializable-value APIs reject accessors and consume stable proxy arrays",
   assert.equal(counts.ownKeys, 1);
 });
 
-test("low-level builtin results are captured once and invalid accessors fail as TSR013", () => {
+test("invalid accessor builtin results fail as TSR013 without invocation", () => {
   const compiled = plan("let value = unstable()\nexit", ["unstable"]);
   const initial = createFreshRuntimeSnapshot(compiled);
   const before = structuredClone(initial);
