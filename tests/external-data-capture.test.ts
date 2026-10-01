@@ -81,6 +81,55 @@ function addBinding(snapshot: RuntimeSnapshot, value: unknown): void {
   });
 }
 
+function deepBindingValue(snapshot: RuntimeSnapshot): SerializableRuntimeValue | undefined {
+  const matches = snapshot.frames
+    .flatMap((frame) => frame.bindings)
+    .filter((binding) => binding.name === "deep");
+  assert.equal(matches.length, 1);
+  return matches[0]?.value;
+}
+
+function withoutDeepBinding(snapshot: RuntimeSnapshot): RuntimeSnapshot {
+  return {
+    ...snapshot,
+    frames: snapshot.frames.map((frame) => ({
+      ...frame,
+      bindings: frame.bindings.filter((binding) => binding.name !== "deep"),
+    })),
+  };
+}
+
+// Walks single-item list envelopes iteratively so deep values never need recursive comparison.
+function assertDeepList(
+  value: SerializableRuntimeValue | undefined,
+  depth: number,
+): SerializableRuntimeValue[] {
+  let current = value;
+  let innermostItems: SerializableRuntimeValue[] = [];
+  for (let level = 0; level < depth; level += 1) {
+    assert.ok(typeof current === "object" && current?.kind === "list", `list level ${level}`);
+    assert.equal(current.items.length, 1, `list level ${level}`);
+    innermostItems = current.items;
+    current = current.items[0];
+  }
+  assert.equal(current, "leaf");
+  return innermostItems;
+}
+
+// Walks single-item arrays iteratively, mirroring deepArray without recursive comparison.
+function assertDeepArray(value: unknown, depth: number): unknown[] {
+  let current = value;
+  let innermost: unknown[] = [];
+  for (let level = 0; level < depth; level += 1) {
+    assert.ok(Array.isArray(current), `array level ${level}`);
+    assert.equal(current.length, 1, `array level ${level}`);
+    innermost = current;
+    current = innermost[0];
+  }
+  assert.equal(current, 0);
+  return innermost;
+}
+
 function checkpoint(plan: InstructionPlan, snapshot: RuntimeSnapshot): RuntimeCheckpoint {
   // EVIDENCE: JSON round-trips a checkpoint created from the supplied validated plan and snapshot.
   return JSON.parse(JSON.stringify(createCheckpoint(plan, snapshot))) as RuntimeCheckpoint;
@@ -96,10 +145,17 @@ function assertCheckpointError(operation: () => void, message: string, path?: st
   });
 }
 
+interface ProxyArrayAccess {
+  gets: number;
+  lengthDescriptors: number;
+  indexedDescriptors: number;
+}
+
 function proxyArray(
   length: number,
   keys: readonly string[],
   values: Readonly<Record<string, unknown>> = {},
+  access: ProxyArrayAccess = { gets: 0, lengthDescriptors: 0, indexedDescriptors: 0 },
 ): unknown[] {
   return new Proxy([], {
     ownKeys() {
@@ -107,14 +163,17 @@ function proxyArray(
     },
     getOwnPropertyDescriptor(_target, key) {
       if (key === "length") {
+        access.lengthDescriptors += 1;
         return { value: length, writable: true, enumerable: false, configurable: false };
       }
+      access.indexedDescriptors += 1;
       if (typeof key === "string" && key in values) {
         return { value: values[key], writable: true, enumerable: true, configurable: true };
       }
       return undefined;
     },
     get() {
+      access.gets += 1;
       throw new Error("capture must not invoke array getters");
     },
   });
@@ -403,6 +462,18 @@ test("checkpoint restore and JSON deserialize preserve deeply nested valid state
   addBinding(live.snapshot, deepList(5_000));
   const restored = restoreCheckpoint(live);
   assert.equal(validateRuntimeSnapshot(restored.snapshot, restored.plan).valid, true);
+  assertDeepList(deepBindingValue(restored.snapshot), 5_000);
+  assert.deepEqual(withoutDeepBinding(restored.snapshot), createFreshRuntimeSnapshot(plan));
+  assert.ok("padding" in restored.plan);
+  const { padding: restoredPadding, ...restoredPlan } = restored.plan;
+  assertDeepArray(restoredPadding, 512);
+  assert.deepEqual(restoredPlan, plan);
+
+  // Any node shared with the caller would expose these innermost rewrites through the restored graph.
+  assertDeepList(deepBindingValue(live.snapshot), 5_000)[0] = "changed";
+  assertDeepArray(live.plan.padding, 512)[0] = 1;
+  assertDeepList(deepBindingValue(restored.snapshot), 5_000);
+  assertDeepArray(restoredPadding, 512);
 
   const serializedSnapshot = mutableSnapshot(plan);
   addBinding(serializedSnapshot, "__DEEP_VALUE__");
@@ -412,6 +483,9 @@ test("checkpoint restore and JSON deserialize preserve deeply nested valid state
   );
   const deserialized = deserializeCheckpoint(json);
   assert.equal(validateRuntimeSnapshot(deserialized.snapshot, deserialized.plan).valid, true);
+  assertDeepList(deepBindingValue(deserialized.snapshot), 5_000);
+  assert.deepEqual(withoutDeepBinding(deserialized.snapshot), createFreshRuntimeSnapshot(plan));
+  assert.deepEqual(deserialized.plan, plan);
 });
 
 test("runtime entry points accept valid deep plan and snapshot data without mutating the caller", () => {
@@ -426,7 +500,14 @@ test("runtime entry points accept valid deep plan and snapshot data without muta
     const snapshot = mutableSnapshot(validPlan);
     addBinding(snapshot, deepList(512));
     const before = structuredClone(snapshot);
-    assert.doesNotThrow(() => operation(extendedPlan, snapshot));
+    const result = operation(extendedPlan, snapshot);
+    assert.deepEqual(
+      result.events.map((event) => event.kind),
+      ["exit"],
+    );
+    assert.equal(result.snapshot.status, "halted");
+    assert.equal(result.snapshot.failure, null);
+    assertDeepList(deepBindingValue(result.snapshot), 512);
     assert.deepEqual(snapshot, before);
   }
 });
@@ -468,10 +549,14 @@ test("external capture measures broad descriptor work without rejecting it", () 
 });
 
 test("external capture rejects non-canonical proxy arrays before indexed traversal", () => {
-  assert.deepEqual(captureExternalData(proxyArray(2, ["1", "length"], { "1": "present" })), {
-    ok: false,
-    failure: { kind: "nonJsonSafeValue", path: "$" },
-  });
+  const access = { gets: 0, lengthDescriptors: 0, indexedDescriptors: 0 };
+  assert.deepEqual(
+    captureExternalData(proxyArray(2, ["1", "length"], { "1": "present" }, access)),
+    { ok: false, failure: { kind: "nonJsonSafeValue", path: "$" } },
+  );
+  assert.equal(access.gets, 0);
+  assert.equal(access.indexedDescriptors, 0);
+  assert.ok(access.lengthDescriptors > 0);
 });
 
 test("external capture rejects proxy indexes that conflict with validated array length", () => {
@@ -570,11 +655,22 @@ test("serializable cloning rejects huge sparse arrays as non-canonical", () => {
 
 test("serializable cloning accepts broad dense arrays and rejects sparse arrays", () => {
   const acceptedCount = 100_001;
-  const accepted = new Array<SerializableRuntimeValue>(acceptedCount).fill(null);
+  const expectedItem = (index: number): SerializableRuntimeValue => {
+    if (index === 0) return "first";
+    if (index === acceptedCount - 1) return "last";
+    if (index % 4 === 0) return index;
+    if (index % 4 === 1) return `item ${index}`;
+    return index % 4 === 2 ? index % 8 === 2 : null;
+  };
+  const accepted = Array.from({ length: acceptedCount }, (_, index) => expectedItem(index));
   const cloned = cloneSerializableValue({ kind: "list", items: accepted });
-  assert.equal(typeof cloned === "object" && cloned?.kind === "list", true);
-  if (typeof cloned === "object" && cloned?.kind === "list") {
-    assert.equal(cloned.items.length, acceptedCount);
+  assert.ok(typeof cloned === "object" && cloned?.kind === "list");
+  assert.notEqual(cloned.items, accepted);
+  assert.equal(cloned.items.length, acceptedCount);
+  accepted[1] = "changed";
+  for (let index = 0; index < acceptedCount; index += 1) {
+    assert.ok(Object.hasOwn(cloned.items, index), `missing item ${index}`);
+    assert.equal(cloned.items[index], expectedItem(index), `item ${index}`);
   }
 
   const extended = new Array<SerializableRuntimeValue>(acceptedCount + 1).fill(null);
