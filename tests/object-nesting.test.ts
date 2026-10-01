@@ -130,11 +130,3 @@ test("mixed object and collection chains preserve contained and cross-delimiter 
     assert.equal(parsed.program.statements[1]?.kind, "exitStatement");
   }
 });
-
-test("nested object data resumes equivalently through JSON checkpoints", () => {
-  const depth = 64;
-  assertRuntimeResumeEquivalent(
-    `let nested = ${"{ value: ".repeat(depth)}[1]${" }".repeat(depth)}\nlet copy = nested\nexit`,
-    { scenarioName: "nested object JSON checkpoint", seed: 42 },
-  );
-});

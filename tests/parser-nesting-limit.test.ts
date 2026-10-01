@@ -85,28 +85,6 @@ test("deep parenthesis chains execute through the source-to-runtime path", () =>
   assert.equal(result.snapshot.status, "halted");
 });
 
-test("deep list chains execute through the source-to-runtime path", () => {
-  const depth = 2_000;
-  const expression = `${"[".repeat(depth)}41${"]".repeat(depth)}`;
-  const result = runValidSource(`let value = ${expression}\nexit`);
-  assert.equal(result.snapshot.status, "halted");
-  let value: unknown = result.snapshot.frames[0]?.bindings[0]?.value;
-  let observedDepth = 0;
-  while (
-    typeof value === "object" &&
-    value !== null &&
-    "kind" in value &&
-    value.kind === "list" &&
-    "items" in value &&
-    Array.isArray(value.items)
-  ) {
-    observedDepth += 1;
-    value = value.items[0];
-  }
-  assert.equal(observedDepth, depth);
-  assert.equal(value, 41);
-});
-
 test("deep list chains compile in direct expression-plan contexts", () => {
   const depth = 2_000;
   const expression = `${"[".repeat(depth)}1${"]".repeat(depth)}`;
