@@ -45,8 +45,9 @@ edits the session-local theme intent. See the [component map](vue/src/phase2c/RE
 `theme/palette.ts` resolves Material-based light/dark roles; `theme/material.ts` isolates MCU's tonal palettes;
 `theme/color.ts` isolates Color.js conversion, gamut mapping and contrast. `usePlayerTheme.ts` applies the generated
 roles to the document root, including body-portaled controls, and restores previous inline values on unmount.
-Theme Lab edits session-local intent: accent, surface hue/tint, maximum chroma, monochrome and contrast. Zero tint
-is achromatic; accent remains independent. High contrast increases tone separation rather than saturation.
+Theme Lab edits session-local intent: accent, surface hue/tint, maximum chroma and monochrome. Contrast is shared
+with Player Settings and kept browser-locally like the other Player Settings. Zero tint is achromatic; accent remains
+independent. High contrast increases tone separation rather than saturation.
 Colour-pair presets change surface/accent inputs without changing mode or contrast; they do not register themes.
 
 Surface roles drive canvas ambience, containers and neutral interaction states; accent drives primary actions,
@@ -58,8 +59,9 @@ they do not certify translucent overlays or perceptual state distinction.
 The generator consumes resolved platform intent. User/package precedence, authored-theme registration and
 missing-variant fallback are not yet implemented; see the
 [theme boundary](../docs/ui/PLAYER-UI.md#theme-and-customization-boundary). It does not convert authored custom themes
-or scene/speaker colours. Final generator adoption, preference persistence and palette/contrast policy remain Owner
-decisions.
+or scene/speaker colours. The generated system and its default light/dark intents are adopted
+([default themes](../docs/ui/PLAYER-UI.md#default-themes)); preference persistence beyond Player Settings and
+palette/contrast policy remain Owner decisions.
 
 MCU (Apache-2.0) and Color.js (MIT) replace local colour-science implementations while leaving product role choices
 explicit. Versions are pinned in the package manifest/lockfile. They add browser bundle size and dependency-update
