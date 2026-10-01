@@ -40,7 +40,7 @@ colours retain separate ownership. The maintained presentation contract and inte
 ## Experimental dynamic theme evaluation
 
 The Player currently renders generated light/dark theme roles. In the development preview, Visual Lab → Theme Lab
-edits the session-local theme intent. See the [component map](vue/src/phase2c/README.md).
+edits the live theme intent. See the [component map](vue/src/phase2c/README.md).
 
 `theme/palette.ts` resolves Material-based light/dark roles; `theme/material.ts` isolates MCU's tonal palettes;
 `theme/color.ts` isolates Color.js conversion, gamut mapping and contrast. `usePlayerTheme.ts` applies the generated
