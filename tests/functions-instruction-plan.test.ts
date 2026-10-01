@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { InstructionPlan } from "../src/plan/model.js";
+import type { ExpressionPlan, Instruction, InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
@@ -65,6 +65,19 @@ test("lowers nested calls and arguments in source order", () => {
   ) {
     assert.ok(outer.arguments[0]!.value.temporaryId < outer.arguments[1]!.value.temporaryId);
   }
+  const destinationOf = (name: string) => {
+    const id = compiled.functions.find((definition) => definition.name === name)?.id;
+    const call = calls.find(
+      (instruction) => instruction.kind === "callFunction" && instruction.functionId === id,
+    );
+    return call?.kind === "callFunction" ? call.destinationTemporary : null;
+  };
+  assert.deepEqual(
+    outer.arguments.map((argument) =>
+      argument.value.kind === "temporary" ? argument.value.temporaryId : null,
+    ),
+    [destinationOf("first"), destinationOf("second")],
+  );
 });
 
 test("embeds synchronous call arguments without preparation instructions", () => {
@@ -204,20 +217,48 @@ test("lowers calls in templates, conditions, loop conditions, and returns", () =
       "while truth() { break }",
     ].join("\n"),
   );
-
-  assert.ok(compiled.instructions.some((instruction) => instruction.kind === "jumpIfFalse"));
-  assert.ok(compiled.instructions.some((instruction) => instruction.kind === "loopStart"));
-  assert.ok(compiled.instructions.some((instruction) => instruction.kind === "returnValue"));
-  assert.ok(
-    compiled.instructions.some(
+  const { instructions } = compiled;
+  // Names the function whose earlier call writes the temporary that the consumer reads.
+  const calledFor = (consumer: number, value: ExpressionPlan) => {
+    const callIndex = instructions.findIndex(
       (instruction) =>
-        instruction.kind === "say" &&
-        instruction.value.kind === "template" &&
-        instruction.value.parts.some(
-          (part) => part.kind === "expression" && part.expression.kind === "temporary",
-        ),
-    ),
-  );
+        instruction.kind === "callFunction" &&
+        value.kind === "temporary" &&
+        instruction.destinationTemporary === value.temporaryId,
+    );
+    const call = instructions[callIndex];
+    return callIndex < consumer && call?.kind === "callFunction"
+      ? compiled.functions.find((definition) => definition.id === call.functionId)?.name
+      : null;
+  };
+  const nested = compiled.functions.find((definition) => definition.name === "nested")!;
+  const consumers = instructions.flatMap((instruction, index) => {
+    switch (instruction.kind) {
+      case "jumpIfFalse":
+        return [["condition", calledFor(index, instruction.condition)]];
+      case "loopStart":
+        return [["loop", calledFor(index, instruction.expression)]];
+      case "say":
+        return instruction.value.kind === "template"
+          ? instruction.value.parts.flatMap((part) =>
+              part.kind === "expression" ? [["template", calledFor(index, part.expression)]] : [],
+            )
+          : [];
+      case "returnValue":
+        return index >= nested.entryInstruction && index < nested.endInstruction
+          ? [["return", calledFor(index, instruction.value)]]
+          : [];
+      default:
+        return [];
+    }
+  });
+
+  assert.deepEqual(consumers, [
+    ["condition", "truth"],
+    ["template", "nested"],
+    ["loop", "truth"],
+    ["return", "truth"],
+  ]);
 });
 
 test("compiles defaults as executable prologues and inserts implicit returns", () => {
@@ -228,7 +269,8 @@ test("compiles defaults as executable prologues and inserts implicit returns", (
       "sample(1)",
     ].join("\n"),
   );
-  const sample = compiled.functions[1]!;
+  const sample = compiled.functions.find((definition) => definition.name === "sample")!;
+  const helper = compiled.functions.find((definition) => definition.name === "helper")!;
   const prologue = compiled.instructions.slice(
     sample.entryInstruction,
     sample.bodyEntryInstruction,
@@ -243,6 +285,40 @@ test("compiles defaults as executable prologues and inserts implicit returns", (
   assert.ok(prologue.some((instruction) => instruction.kind === "callFunction"));
   assert.ok(prologue.some((instruction) => instruction.kind === "bindDefaultParameter"));
   assert.equal(compiled.instructions[sample.implicitReturnInstruction]?.kind, "returnVoid");
+
+  const optional = sample.parameters.findIndex((parameter) => parameter.name === "optional");
+  const [guardIndex] = prologueIndexes(
+    compiled,
+    sample,
+    (instruction) =>
+      instruction.kind === "prepareParameterDefault" && instruction.parameterIndex === optional,
+  );
+  const [callIndex] = prologueIndexes(
+    compiled,
+    sample,
+    (instruction) => instruction.kind === "callFunction" && instruction.functionId === helper.id,
+  );
+  const [bindIndex] = prologueIndexes(
+    compiled,
+    sample,
+    (instruction) =>
+      instruction.kind === "bindDefaultParameter" && instruction.parameterIndex === optional,
+  );
+  const guard = compiled.instructions[guardIndex!];
+  const call = compiled.instructions[callIndex!];
+  const bind = compiled.instructions[bindIndex!];
+  assert.ok(
+    guard?.kind === "prepareParameterDefault" &&
+      call?.kind === "callFunction" &&
+      bind?.kind === "bindDefaultParameter",
+  );
+  // An omitted argument runs the default call and binding; a supplied one jumps past both.
+  assert.ok(guardIndex! < callIndex! && callIndex! < bindIndex! && bindIndex! < guard.target);
+  assert.ok(guard.target <= sample.bodyEntryInstruction);
+  assert.equal(
+    bind.value.kind === "temporary" ? bind.value.temporaryId : null,
+    call.destinationTemporary,
+  );
 });
 
 test("accepts nested calls and short-circuit lowering inside defaults", () => {
@@ -265,6 +341,27 @@ test("accepts nested calls and short-circuit lowering inside defaults", () => {
     prologue.filter((instruction) => instruction.kind === "bindDefaultParameter").length,
     1,
   );
+  const truth = compiled.functions.find((definition) => definition.name === "truth")!;
+  const [firstCall, secondCall] = prologueIndexes(
+    compiled,
+    sample,
+    (instruction) => instruction.kind === "callFunction" && instruction.functionId === truth.id,
+  );
+  const [guardIndex] = prologueIndexes(
+    compiled,
+    sample,
+    (instruction) => instruction.kind === "jumpIfFalse",
+  );
+  const [bindIndex] = prologueIndexes(
+    compiled,
+    sample,
+    (instruction) => instruction.kind === "bindDefaultParameter",
+  );
+  const guard = compiled.instructions[guardIndex!];
+  assert.ok(guard?.kind === "jumpIfFalse");
+  // A false first operand skips the second call and still reaches the default binding.
+  assert.ok(firstCall! < guardIndex! && guardIndex! < secondCall!);
+  assert.ok(secondCall! < guard.target && guard.target <= bindIndex!);
 });
 
 test("function plans survive JSON round trips with preserved spans", () => {
@@ -446,6 +543,22 @@ type Mutable<Value> = Value extends readonly (infer Item)[]
     : Value;
 
 type MutablePlan = Mutable<InstructionPlan>;
+
+function prologueIndexes(
+  compiled: InstructionPlan,
+  definition: InstructionPlan["functions"][number],
+  predicate: (instruction: Instruction) => boolean,
+): number[] {
+  const indexes: number[] = [];
+  for (
+    let index = definition.entryInstruction;
+    index < definition.bodyEntryInstruction;
+    index += 1
+  ) {
+    if (predicate(compiled.instructions[index]!)) indexes.push(index);
+  }
+  return indexes;
+}
 
 function mutable(value: InstructionPlan): MutablePlan {
   // EVIDENCE: fixture: JSON round-trip preserves the plan shape while removing readonly ownership for malformed-field tests.
