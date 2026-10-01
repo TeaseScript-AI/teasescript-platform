@@ -419,11 +419,11 @@ test("rejects malformed function metadata, targets, and temporaries", () => {
 
   const duplicateId = mutable(original);
   duplicateId.functions.push({ ...duplicateId.functions[0]! });
-  assertInvalid(duplicateId, /Function IDs|ranges/u);
+  assertInvalid(duplicateId, `$.functions[${duplicateId.functions.length - 1}].id`, "unique");
 
   const badEntry = mutable(original);
   badEntry.functions[0]!.entryInstruction = 999;
-  assertInvalid(badEntry, /range|entry/u);
+  assertInvalid(badEntry, "$.functions[0]");
 
   const badTemporary = mutable(original);
   const declaration = badTemporary.instructions.find(
@@ -434,13 +434,19 @@ test("rejects malformed function metadata, targets, and temporaries", () => {
     // EVIDENCE: fixture: expose the compiler-produced temporary reference for malformed-ID validation.
     (declaration.value as { temporaryId: number }).temporaryId = 999;
   }
-  assertInvalid(badTemporary, /Temporary/u);
+  assertInvalid(
+    badTemporary,
+    `$.instructions[${firstIndex(badTemporary, "declareBinding")}].value.temporaryId`,
+  );
 
   const badReturn = mutable(original);
   const call = badReturn.instructions.find((instruction) => instruction.kind === "callFunction");
   assert.ok(call?.kind === "callFunction");
   if (call?.kind === "callFunction") call.returnInstruction += 1;
-  assertInvalid(badReturn, /return target/u);
+  assertInvalid(
+    badReturn,
+    `$.instructions[${firstIndex(badReturn, "callFunction")}].returnInstruction`,
+  );
 
   const unknownFunction = mutable(original);
   const unknownCall = unknownFunction.instructions.find(
@@ -448,7 +454,10 @@ test("rejects malformed function metadata, targets, and temporaries", () => {
   );
   assert.ok(unknownCall?.kind === "callFunction");
   if (unknownCall?.kind === "callFunction") unknownCall.functionId = 999;
-  assertInvalid(unknownFunction, /unknown function/u);
+  assertInvalid(
+    unknownFunction,
+    `$.instructions[${firstIndex(unknownFunction, "callFunction")}].functionId`,
+  );
 
   const malformedPrologue = mutable(original);
   const prepare = malformedPrologue.instructions.find(
@@ -457,7 +466,7 @@ test("rejects malformed function metadata, targets, and temporaries", () => {
   assert.ok(prepare?.kind === "beginFunctionDefaults");
   const malformedPrepare: { kind: string } = prepare;
   malformedPrepare.kind = "enterFunctionBody";
-  assertInvalid(malformedPrologue, /prologue|entry/u);
+  assertInvalid(malformedPrologue, "$.functions[0].entryInstruction");
 });
 
 test("rejects malformed function regions and aliased call temporaries", () => {
@@ -482,7 +491,7 @@ test("rejects malformed function regions and aliased call temporaries", () => {
     kind: "returnVoid",
     span: statementInDefault.instructions[clearIndex]!.span,
   };
-  assertInvalid(statementInDefault, /default-expression region/u);
+  assertInvalid(statementInDefault, `$.instructions[${clearIndex}]`, "default-expression region");
 
   const suppliedInBody = mutable(defaults);
   suppliedInBody.instructions[sample.bodyEntryInstruction] = {
@@ -491,7 +500,7 @@ test("rejects malformed function regions and aliased call temporaries", () => {
     parameterIndex: 0,
     span: suppliedInBody.instructions[sample.bodyEntryInstruction]!.span,
   };
-  assertInvalid(suppliedInBody, /prologue instruction.*body/u);
+  assertInvalid(suppliedInBody, `$.instructions[${sample.bodyEntryInstruction}]`);
 
   const returnBeforeBody = mutable(defaults);
   const bindIndex = returnBeforeBody.instructions.findIndex(
@@ -508,7 +517,7 @@ test("rejects malformed function regions and aliased call temporaries", () => {
     value: bind.value,
     span: bind.span,
   };
-  assertInvalid(returnBeforeBody, /default-expression region|default/u);
+  assertInvalid(returnBeforeBody, `$.instructions[${bindIndex}]`);
 
   const calls = plan("function pair(left, right) { return left + right }\nsay pair(1, 2)");
   const aliasedDestination = mutable(calls);
@@ -520,14 +529,20 @@ test("rejects malformed function regions and aliased call temporaries", () => {
     temporaryId: aliasedCall.destinationTemporary,
     span: aliasedCall.arguments[0]!.value.span,
   };
-  assertInvalid(aliasedDestination, /must not alias/u);
+  assertInvalid(
+    aliasedDestination,
+    `$.instructions[${firstIndex(aliasedDestination, "callFunction")}].destinationTemporary`,
+  );
 
   const duplicateArgument = mutable(calls);
   const duplicateCall = duplicateArgument.instructions.find(
     (instruction) => instruction.kind === "callFunction",
   )!;
   duplicateCall.arguments[1]!.parameterName = duplicateCall.arguments[0]!.parameterName;
-  assertInvalid(duplicateArgument, /more than once/u);
+  assertInvalid(
+    duplicateArgument,
+    `$.instructions[${firstIndex(duplicateArgument, "callFunction")}].arguments[1].parameterName`,
+  );
 
   const callsWithCleanup = plan(
     [
@@ -541,21 +556,30 @@ test("rejects malformed function regions and aliased call temporaries", () => {
     (instruction) => instruction.kind === "clearTemporaries",
   )!;
   emptyBatch.temporaryIds = [];
-  assertInvalid(emptyCleanup, /non-empty array/u);
+  assertInvalid(
+    emptyCleanup,
+    `$.instructions[${firstIndex(emptyCleanup, "clearTemporaries")}].temporaryIds`,
+  );
 
   const duplicateCleanup = mutable(callsWithCleanup);
   const duplicateBatch = duplicateCleanup.instructions.find(
     (instruction) => instruction.kind === "clearTemporaries",
   )!;
   duplicateBatch.temporaryIds.push(duplicateBatch.temporaryIds[0]!);
-  assertInvalid(duplicateCleanup, /must not contain duplicates/u);
+  assertInvalid(
+    duplicateCleanup,
+    `$.instructions[${firstIndex(duplicateCleanup, "clearTemporaries")}].temporaryIds[${duplicateBatch.temporaryIds.length - 1}]`,
+  );
 
   const unknownCleanup = mutable(callsWithCleanup);
   const unknownBatch = unknownCleanup.instructions.find(
     (instruction) => instruction.kind === "clearTemporaries",
   )!;
   unknownBatch.temporaryIds[0] = unknownCleanup.temporaryCount + 1;
-  assertInvalid(unknownCleanup, /Temporary/u);
+  assertInvalid(
+    unknownCleanup,
+    `$.instructions[${firstIndex(unknownCleanup, "clearTemporaries")}].temporaryIds[0]`,
+  );
 
   const unpreparedAssignment = mutable(plan("let items = [0]\nitems[0] = 1"));
   const assignment = unpreparedAssignment.instructions.find(
@@ -563,7 +587,10 @@ test("rejects malformed function regions and aliased call temporaries", () => {
   );
   assert.ok(assignment?.kind === "assign" && assignment.target.kind === "index");
   assignment.target.index = { kind: "literal", value: 0, span: assignment.target.index.span };
-  assertInvalid(unpreparedAssignment, /indexes must be prepared/u);
+  assertInvalid(
+    unpreparedAssignment,
+    `$.instructions[${firstIndex(unpreparedAssignment, "assign")}].target.index`,
+  );
 });
 
 type Mutable<Value> = Value extends readonly (infer Item)[]
@@ -603,11 +630,24 @@ function mutable(value: InstructionPlan): MutablePlan {
   return JSON.parse(JSON.stringify(value)) as MutablePlan;
 }
 
-function assertInvalid(value: unknown, message: RegExp): void {
+function firstIndex(value: MutablePlan, kind: Instruction["kind"]): number {
+  return value.instructions.findIndex((instruction) => instruction.kind === kind);
+}
+
+/**
+ * Plan errors share TSC002, so the affected path identifies the rule; a short
+ * fragment is added only where two rules report the same path.
+ */
+function assertInvalid(value: unknown, path: string, fragment?: string): void {
   const validation = validateInstructionPlan(value);
   assert.equal(validation.valid, false);
   assert.ok(
-    validation.errors.some((error) => message.test(error.message)),
-    JSON.stringify(validation.errors),
+    validation.errors.some(
+      (error) =>
+        error.code === "TSC002" &&
+        error.path === path &&
+        (fragment === undefined || error.message.includes(fragment)),
+    ),
+    `${path}: ${JSON.stringify(validation.errors)}`,
   );
 }
