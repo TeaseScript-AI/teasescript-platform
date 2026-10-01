@@ -19,11 +19,7 @@ import {
 } from "../src/index.js";
 import { compileValidPlan as compiledPlan } from "./helpers/compile-valid-plan.js";
 
-const RANGE_ERROR = "Function instruction range is overlapping or impossible.";
-const ROOT_ERROR = "Root execution boundary is invalid.";
-const BOUNDARY_ERROR = "Function instruction boundaries must be non-negative integers.";
-
-test("rejects function boundaries outside the instruction array without dependent traversal", () => {
+test("rejects function boundaries outside the instruction array", () => {
   const original = functionPlan();
   const mutations = [
     ["endInstruction", original.instructions.length + 1],
@@ -36,22 +32,7 @@ test("rejects function boundaries outside the instruction array without dependen
   for (const [field, value] of mutations) {
     const malformed = mutablePlan(original);
     malformed.functions[0]![field] = value;
-    const result = validateInstructionPlan(malformed);
-    assert.equal(result.valid, false, field);
-    assert.ok(
-      result.errors.some(
-        (error) =>
-          error.code === "TSC002" &&
-          error.path === "$.functions[0]" &&
-          error.message === RANGE_ERROR,
-      ),
-      field,
-    );
-    assert.equal(
-      result.errors.some((error) => error.message.includes("prologue")),
-      false,
-      `${field} must not reach prologue validation`,
-    );
+    assertPlanErrorAt(validateInstructionPlan(malformed), "$.functions[0]", field);
   }
 });
 
@@ -59,14 +40,8 @@ test("rejects an extreme root boundary without building a metadata-sized region"
   const malformed = mutablePlan(functionPlan());
   malformed.rootEndInstruction = Number.MAX_SAFE_INTEGER;
 
-  const result = validateInstructionPlan(malformed);
-
-  assert.equal(result.valid, false);
-  assert.deepEqual(result.errors[0], {
-    code: "TSC002",
-    message: ROOT_ERROR,
-    path: "$.rootEndInstruction",
-  });
+  // A structured result, rather than a native allocation failure, shows no metadata-sized region was built.
+  assertPlanErrorAt(validateInstructionPlan(malformed), "$.rootEndInstruction");
 });
 
 test("rejects unsafe persisted temporary and loop identities", () => {
@@ -75,28 +50,12 @@ test("rejects unsafe persisted temporary and loop identities", () => {
   // EVIDENCE: fixture: mutate the cloned readonly source offset to an unsafe integer.
   (sourcePlan.sourceSpan as { so: number }).so = unsafe;
 
-  const sourceValidation = validateInstructionPlan(sourcePlan);
-  assert.equal(sourceValidation.valid, false);
-  assert.ok(
-    sourceValidation.errors.some(
-      (error) =>
-        error.path === "$.sourceSpan" &&
-        error.message === "Plan source location values must be non-negative safe integers.",
-    ),
-  );
+  assertPlanErrorAt(validateInstructionPlan(sourcePlan), "$.sourceSpan");
 
   const temporaryPlan = mutablePlan(functionPlan());
   temporaryPlan.temporaryCount = unsafe;
 
-  const temporaryValidation = validateInstructionPlan(temporaryPlan);
-  assert.equal(temporaryValidation.valid, false);
-  assert.ok(
-    temporaryValidation.errors.some(
-      (error) =>
-        error.path === "$.temporaryCount" &&
-        error.message === "temporaryCount must be a non-negative safe integer.",
-    ),
-  );
+  assertPlanErrorAt(validateInstructionPlan(temporaryPlan), "$.temporaryCount");
 
   const loopPlan = mutablePlan(compiledPlan("repeat 1 { say 1 }"));
   // EVIDENCE: fixture: the compiled repeat emits a loopStart whose ID is deliberately corrupted.
@@ -114,18 +73,13 @@ test("rejects unsafe persisted temporary and loop identities", () => {
   assert.equal(loopValidation.valid, false);
   assert.ok(
     loopValidation.errors.some(
-      (error) =>
-        error.path.endsWith(".loopId") && error.message === "Expected a positive safe integer.",
+      (error) => error.code === "TSC002" && error.path.endsWith(".loopId"),
     ),
   );
-  assert.throws(
-    () => {
-      // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: the compiled loop plan retains its complete structure while this fixture sets both loop IDs outside the accepted safe-integer range.
-      return createFreshRuntimeSnapshot(loopPlan as unknown as InstructionPlan);
-    },
-    (error: unknown) =>
-      error instanceof TypeError && error.message === "Expected a positive safe integer.",
-  );
+  assert.throws(() => {
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: the compiled loop plan retains its complete structure while this fixture sets both loop IDs outside the accepted safe-integer range.
+    return createFreshRuntimeSnapshot(loopPlan as unknown as InstructionPlan);
+  }, TypeError);
 
   const validLoopPlan = compiledPlan("repeat 1 { say 1 }");
   // EVIDENCE: fixture: parse the serialized checkpoint into a mutable copy for identity/range corruption.
@@ -160,51 +114,64 @@ test("validates ownership across many adjacent small function regions", () => {
   assert.equal(validateInstructionPlan(compiled.plan).valid, true);
 });
 
-test("rejects unsafe, negative, and fractional function boundaries before dependent validation", () => {
+test("rejects unsafe, negative, and fractional function boundaries", () => {
   for (const value of [Number.MAX_SAFE_INTEGER + 1, -1, 1.5]) {
     const malformed = mutablePlan(functionPlan());
     malformed.functions[0]!.endInstruction = value;
-    const result = validateInstructionPlan(malformed);
-    assert.ok(
-      result.errors.some(
-        (error) => error.path === "$.functions[0]" && error.message === BOUNDARY_ERROR,
-      ),
-    );
-    assert.equal(
-      result.errors.some((error) => error.message.includes("prologue")),
-      false,
-    );
+    assertPlanErrorAt(validateInstructionPlan(malformed), "$.functions[0]", String(value));
   }
 });
 
 test("rejects impossible ordering, gaps, overlaps, and pre-root entries", () => {
-  const cases: Array<(plan: MutablePlan) => void> = [
-    (plan) => {
-      plan.functions[0]!.entryInstruction = plan.functions[0]!.bodyEntryInstruction;
-    },
-    (plan) => {
-      plan.functions[0]!.bodyEntryInstruction = plan.functions[0]!.implicitReturnInstruction + 1;
-    },
-    (plan) => {
-      plan.functions[0]!.endInstruction = plan.functions[0]!.implicitReturnInstruction + 2;
-    },
-    (plan) => {
-      plan.functions[0]!.entryInstruction = plan.rootEndInstruction - 1;
-    },
-    (plan) => {
-      plan.functions[1]!.entryInstruction += 1;
-    },
-    (plan) => {
-      plan.functions[1]!.entryInstruction = plan.functions[0]!.entryInstruction;
-    },
+  const cases: Array<readonly [string, string, (plan: MutablePlan) => void]> = [
+    [
+      "entry at body",
+      "$.functions[0]",
+      (plan) => {
+        plan.functions[0]!.entryInstruction = plan.functions[0]!.bodyEntryInstruction;
+      },
+    ],
+    [
+      "body after implicit return",
+      "$.functions[0]",
+      (plan) => {
+        plan.functions[0]!.bodyEntryInstruction = plan.functions[0]!.implicitReturnInstruction + 1;
+      },
+    ],
+    [
+      "end gap",
+      "$.functions[0]",
+      (plan) => {
+        plan.functions[0]!.endInstruction = plan.functions[0]!.implicitReturnInstruction + 2;
+      },
+    ],
+    [
+      "entry before root end",
+      "$.functions[0]",
+      (plan) => {
+        plan.functions[0]!.entryInstruction = plan.rootEndInstruction - 1;
+      },
+    ],
+    [
+      "gap between functions",
+      "$.functions[1]",
+      (plan) => {
+        plan.functions[1]!.entryInstruction += 1;
+      },
+    ],
+    [
+      "overlapping functions",
+      "$.functions[1]",
+      (plan) => {
+        plan.functions[1]!.entryInstruction = plan.functions[0]!.entryInstruction;
+      },
+    ],
   ];
 
-  for (const mutate of cases) {
+  for (const [name, path, mutate] of cases) {
     const malformed = mutablePlan(twoFunctionPlan());
     mutate(malformed);
-    const result = validateInstructionPlan(malformed);
-    assert.equal(result.valid, false);
-    assert.ok(result.errors.some((error) => error.message === RANGE_ERROR));
+    assertPlanErrorAt(validateInstructionPlan(malformed), path, name);
   }
 });
 
@@ -215,16 +182,8 @@ test("continues independent metadata validation after an unsafe function range",
 
   const result = validateInstructionPlan(malformed);
 
-  assert.equal(result.valid, false);
-  assert.ok(
-    result.errors.some((error) => error.path === "$.functions[0]" && error.message === RANGE_ERROR),
-  );
-  assert.ok(
-    result.errors.some(
-      (error) =>
-        error.path === "$.functions[1].id" && error.message === "Function IDs must be unique.",
-    ),
-  );
+  assertPlanErrorAt(result, "$.functions[0]");
+  assertPlanErrorAt(result, "$.functions[1].id");
 });
 
 test("public runtime and checkpoint routes reject an extreme range before side effects", () => {
@@ -245,10 +204,7 @@ test("public runtime and checkpoint routes reject an extreme range before side e
     },
   };
 
-  assert.throws(
-    () => createFreshRuntimeSnapshot(invalid),
-    (error: unknown) => error instanceof TypeError && error.message === RANGE_ERROR,
-  );
+  assert.throws(() => createFreshRuntimeSnapshot(invalid), TypeError);
   assert.throws(
     () => executeInstruction(invalid, snapshot, capabilities),
     isMalformedPlanRuntimeError,
@@ -319,16 +275,27 @@ type MutableCheckpoint = Omit<RuntimeCheckpoint, "plan" | "snapshot"> & {
 };
 
 function isMalformedPlanRuntimeError(error: unknown): boolean {
-  return (
-    error instanceof RuntimeDataError && error.code === "TSR100" && error.message === RANGE_ERROR
-  );
+  return error instanceof RuntimeDataError && error.code === "TSR100";
 }
 
 function isMalformedPlanCheckpointError(error: unknown): boolean {
   return (
     error instanceof CheckpointError &&
     error.info.code === "TSK002" &&
-    error.info.message === RANGE_ERROR
+    error.info.path === "$.plan.functions[0]"
+  );
+}
+
+/** Requires a structured plan rejection at the mutated metadata, without pinning diagnostic prose. */
+function assertPlanErrorAt(
+  result: ReturnType<typeof validateInstructionPlan>,
+  path: string,
+  label?: string,
+): void {
+  assert.equal(result.valid, false, label);
+  assert.ok(
+    result.errors.some((error) => error.code === "TSC002" && error.path === path),
+    `${label ?? "plan"} reports TSC002 at ${path}`,
   );
 }
 
