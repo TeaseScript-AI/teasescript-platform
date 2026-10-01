@@ -595,7 +595,8 @@ function buttonCompletion(snapshot: RuntimeSnapshot): {
 }
 
 function assertValidSnapshot(plan: InstructionPlan, snapshot: RuntimeSnapshot): void {
-  assert.equal(validateRuntimeSnapshot(snapshot, plan).valid, true);
+  const validation = validateRuntimeSnapshot(snapshot, plan);
+  assert.equal(validation.valid, true, validation.errors.join("; "));
 }
 
 function validateConfig(config: PropertyCampaignConfig): void {
