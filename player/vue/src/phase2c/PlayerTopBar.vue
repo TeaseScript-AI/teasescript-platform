@@ -19,7 +19,7 @@ defineEmits<{ toggleFullscreen: []; toggleThemeMode: [] }>();
   <header data-player-top-bar class="player-top-bar">
     <div v-if="$slots.tools" class="player-top-bar-tools"><slot name="tools" /></div>
     <h1 class="player-top-bar-title">
-      <span><span class="player-top-bar-title-text">{{ title }}</span></span>
+      <span v-if="title"><span class="player-top-bar-title-text">{{ title }}</span></span>
     </h1>
     <div class="player-top-bar-actions" role="group" aria-label="Player display controls">
       <Tooltip>

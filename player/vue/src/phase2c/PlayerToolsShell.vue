@@ -1,3 +1,12 @@
+<script lang="ts">
+import type { Component } from "vue";
+
+export interface PlayerTool {
+  readonly name: string;
+  readonly icon: Component;
+}
+</script>
+
 <script setup lang="ts">
 import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
 import Sortable from "sortablejs";
@@ -39,19 +48,16 @@ import {
   type ComponentPublicInstance,
 } from "vue";
 import { onClickOutside, useResizeObserver, useStorage } from "@vueuse/core";
-import {
-  FlaskConical,
-  Settings,
-  ScanLine,
-  Activity,
-  SlidersHorizontal,
-  PanelLeftOpen,
-  PanelRightOpen,
-} from "@lucide/vue";
+import { Settings, PanelLeftOpen, PanelRightOpen } from "@lucide/vue";
 
 // Own tool interaction, panel lifetime and dock/drawer composition together.
-// Callers supply tool contents and the Player composition through slots.
-defineProps<{ stageHeight: number; mediaAspect: number; fullscreen: boolean }>();
+// Callers supply the tool list, tool contents and the Player composition through props/slots.
+const props = defineProps<{
+  tools: readonly PlayerTool[];
+  stageHeight: number;
+  mediaAspect: number;
+  fullscreen: boolean;
+}>();
 const isDevelopment = import.meta.env.DEV;
 type LabelMode = "icons" | "preview" | "labels";
 const labelMode = isDevelopment
@@ -131,20 +137,9 @@ function clickMenuSpace(event: MouseEvent) {
     return;
   clickPreview.value = clickPreview.value !== true;
 }
-const tools = [
-  { name: "Visual Lab", icon: FlaskConical, developmentOnly: false },
-  { name: "Layout Debug", icon: ScanLine, developmentOnly: false },
-  { name: "Playback Diagnostics", icon: Activity, developmentOnly: true },
-  { name: "Media Playback Configuration", icon: SlidersHorizontal, developmentOnly: true },
-] as const;
-type Tool = (typeof tools)[number]["name"];
-const launcherTools = tools.filter((tool) => isDevelopment || !tool.developmentOnly);
-const toolSizes = ref<Record<Tool, keyof typeof toolPanelSizes>>({
-  "Visual Lab": "Medium",
-  "Layout Debug": "Medium",
-  "Playback Diagnostics": "Medium",
-  "Media Playback Configuration": "Medium",
-});
+type Tool = string;
+const toolSizes = ref<Record<Tool, keyof typeof toolPanelSizes>>({});
+const toolSize = (tool: Tool) => toolSizes.value[tool] ?? "Medium";
 // Preview measures content; the permanent label width is a session-only rem choice.
 const menuRuler = ref<HTMLElement | null>(null);
 const measuredMenuWidth = ref(0);
@@ -252,7 +247,7 @@ function startResize(event: PointerEvent, tool?: Tool) {
   const edge = event.currentTarget as HTMLElement;
   const startX = event.clientX;
   const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
-  const initialSize = tool ? toolSizes.value[tool] : null;
+  const initialSize = tool ? toolSize(tool) : null;
   const initialMenuMode = labelMode.value;
   const initialMenuWidth = menuWidthRem.value;
   // A capped preset must shrink from its visible edge, not the stored preset width.
@@ -339,7 +334,7 @@ function resizePanelKey(event: KeyboardEvent, tool: Tool) {
       ? 0
       : event.key === "End"
         ? panelSizeNames.length - 1
-        : panelSizeNames.indexOf(toolSizes.value[tool]) + (event.key === "ArrowRight" ? 1 : -1);
+        : panelSizeNames.indexOf(toolSize(tool)) + (event.key === "ArrowRight" ? 1 : -1);
   const size = panelSizeNames[index];
   if (size) toolSizes.value[tool] = size;
 }
@@ -417,7 +412,7 @@ async function revealTool(tool: Tool) {
 }
 
 const toolColumnsWidth = computed(() =>
-  openTools.value.reduce((width, tool) => width + toolPanelSizes[toolSizes.value[tool]], 0),
+  openTools.value.reduce((width, tool) => width + toolPanelSizes[toolSize(tool)], 0),
 );
 
 function cancelPendingClose() {
@@ -593,7 +588,7 @@ async function updateSidebarVisibility(open: boolean) {
     :data-menu-visible="narrowMenuVisible"
     :style="{
       '--media-aspect': mediaAspect,
-      '--active-tool-width': `${toolPanelSizes[narrowTool ? toolSizes[narrowTool] : 'Medium']}rem`,
+      '--active-tool-width': `${toolPanelSizes[narrowTool ? toolSize(narrowTool) : 'Medium']}rem`,
       '--player-reserve': `${protectedPlayerWidth}px`,
       '--tool-columns-width': `${toolColumnsWidth}rem`,
       '--permanent-menu-width': `${menuWidthRem}rem`,
@@ -610,7 +605,7 @@ async function updateSidebarVisibility(open: boolean) {
   >
     <div ref="compactMenuRuler" class="player-menu-compact-ruler" aria-hidden="true" />
     <div ref="menuRuler" class="menu-width-ruler" aria-hidden="true">
-      <span v-for="tool in launcherTools" :key="tool.name">{{ tool.name }}</span>
+      <span v-for="tool in tools" :key="tool.name">{{ tool.name }}</span>
       <span>Settings</span>
     </div>
     <div ref="toolContentParking" hidden inert />
@@ -716,7 +711,7 @@ async function updateSidebarVisibility(open: boolean) {
               <ScrollArea class="min-h-0" :viewport-attrs="{ 'aria-label': 'Tools' }">
               <nav aria-label="Tools" class="player-edge-padding player-tool-menu">
                 <SidebarMenu>
-                  <SidebarMenuItem v-for="tool in launcherTools" :key="tool.name">
+                  <SidebarMenuItem v-for="tool in tools" :key="tool.name">
                     <MenuSidebarButton
                       :label="tool.name"
                       :data-tools-focus="`launcher:${tool.name}`"
@@ -800,13 +795,13 @@ async function updateSidebarVisibility(open: boolean) {
               v-show="!narrow || tool === narrowTool"
               :data-tool="tool"
               :aria-label="`${tool} panel`"
-              :style="{ width: `${toolPanelSizes[toolSizes[tool]]}rem` }"
+              :style="{ width: `${toolPanelSizes[toolSize(tool)]}rem` }"
               class="relative flex min-h-0 shrink-0 bg-card"
             >
               <div class="flex min-h-0 min-w-0 flex-1 flex-col">
                 <ToolPanelHeader
                   :tool="tool"
-                  :size="toolSizes[tool]"
+                  :size="toolSize(tool)"
                   :pinned="pinnedTools.includes(tool)"
                   :can-move-left="openTools.indexOf(tool) > 0"
                   :can-move-right="openTools.indexOf(tool) < openTools.length - 1"
@@ -825,13 +820,13 @@ async function updateSidebarVisibility(open: boolean) {
                 :data-active="resizing === tool ? '' : undefined"
                 :aria-valuemin="toolPanelSizes.Small"
                 :aria-valuemax="toolPanelSizes['Extra Large']"
-                :aria-valuenow="toolPanelSizes[toolSizes[tool]]"
-                :aria-valuetext="toolSizes[tool]"
+                :aria-valuenow="toolPanelSizes[toolSize(tool)]"
+                :aria-valuetext="toolSize(tool)"
                 @pointerdown="startResize($event, tool)"
                 @keydown="resizePanelKey($event, tool)"
               >
                 <span v-if="resizing === tool" class="resize-size-label">{{
-                  toolSizes[tool]
+                  toolSize(tool)
                 }}</span>
               </ResizeHandle>
             </section>

@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { ESLint } from "eslint";
 
 const eslint = new ESLint({ overrideConfigFile: "eslint.design.config.mjs" });
-const vueFile = "player/vue/src/phase2c/App.vue";
+const vueFile = "player/vue/src/phase2c/PlayerApp.vue";
 const tsFile = "player/vue/src/components/ui/button/index.ts";
 const vue = (body) =>
   `<script setup lang="ts">import { Button } from '@/components/ui/button';</script><template>${body}</template>`;
