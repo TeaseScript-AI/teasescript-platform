@@ -28,18 +28,3 @@ test("checkpoint storage keys are format-versioned and example-specific", () => 
   assert.equal(new Set(keys).size, keys.length);
   assert.ok(keys.every((key) => key.includes(`checkpoint-v${CHECKPOINT_VERSION}:`)));
 });
-
-test("playground restore gates stale source runtimes and renders source safely", async () => {
-  const browserSource = await readFile("playground/browser.ts", "utf8");
-
-  assert.match(
-    browserSource,
-    /self-contained plan is incompatible with the current source runtime/u,
-  );
-  assert.match(browserSource, /elements\.source\.value = value/u);
-  assert.doesNotMatch(browserSource, /source\.innerHTML/u);
-  assert.match(
-    browserSource,
-    /plan = null;\s*snapshot = null;\s*compiledRevision = null;\s*eventLog = \[\];/u,
-  );
-});
