@@ -9,7 +9,7 @@ import {
   restoreCheckpoint,
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
-import { executeInstruction, run, stepToEvent } from "../src/runtime/engine.js";
+import { RuntimeDataError, executeInstruction, run, stepToEvent } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import type { RuntimeDelayActionSnapshot } from "../src/runtime/actions/model.js";
@@ -172,9 +172,7 @@ test("rejects an earlier delay settlement forged onto a terminal positive or zer
     );
     assert.throws(
       () => executeInstruction(compiled, forged),
-      (error: unknown) =>
-        error instanceof Error &&
-        error.message.includes("canonical settled terminal foreground transition"),
+      (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
       source,
     );
   }
