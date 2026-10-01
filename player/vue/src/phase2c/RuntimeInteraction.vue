@@ -105,8 +105,12 @@ watch(
     await nextTick();
     // Progression may restore composer focus, but must not steal it from Tools/dialogs.
     if ((ownedFocus || returnToChoice || unownedFocus) && foreground.value) {
-      if (wasEditing || unownedFocus) focusInput();
-      else if (keyboardNavigation)
+      if (wasEditing) focusInput();
+      else if (unownedFocus) {
+        // Default focus is not keyboard navigation, so it must not reveal a navigation outline.
+        document.documentElement.dataset.playerKeyboardFocus = "false";
+        focusInput();
+      } else if (keyboardNavigation)
         root.value
           ?.querySelector<HTMLButtonElement>("[data-foreground-controls] button")
           ?.focus({ preventScroll: true });
