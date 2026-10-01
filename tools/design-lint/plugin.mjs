@@ -2,7 +2,13 @@
 // are not class maps: their values are classes.
 function classMap(object) {
   let node = object;
-  while (node.parent?.type === "ArrayExpression") node = node.parent;
+  // Arrays and conditional/logical results still pass the map itself to the class binding.
+  while (
+    node.parent?.type === "ArrayExpression" ||
+    (node.parent?.type === "ConditionalExpression" && node.parent.test !== node) ||
+    (node.parent?.type === "LogicalExpression" && node.parent.right === node)
+  )
+    node = node.parent;
   const parent = node.parent;
   if (parent?.type === "VExpressionContainer") return true;
   return (

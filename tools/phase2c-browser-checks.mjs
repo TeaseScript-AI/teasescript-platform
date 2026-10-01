@@ -1516,6 +1516,10 @@ async function composerNoticeChecks(page) {
       return (
         !!document.querySelector(".composer-notice-arrow") &&
         getComputedStyle(noticeElement).backgroundColor !== "rgba(0, 0, 0, 0)" &&
+        // Error treatment: a clearly red border; exact tones remain provisional.
+        (([r, g, b]) => r > g + 40 && r > b + 40)(
+          getComputedStyle(noticeElement).borderTopColor.match(/\d+/g).map(Number),
+        ) &&
         notice.left >= 0 &&
         notice.right <= innerWidth &&
         Math.abs(composer.top - notice.bottom - 8) < 1 &&
@@ -1554,6 +1558,9 @@ async function composerNoticeChecks(page) {
         return (
           document.documentElement.dataset.phase2cTheme === "dark" &&
           getComputedStyle(notice).backgroundColor !== lightNotice &&
+          (([r, g, b]) => r > g + 40 && r > b + 40)(
+            getComputedStyle(notice).borderTopColor.match(/\d+/g).map(Number),
+          ) &&
           bounds.left >= 0 &&
           bounds.right <= innerWidth &&
           document.documentElement.scrollWidth <= innerWidth &&

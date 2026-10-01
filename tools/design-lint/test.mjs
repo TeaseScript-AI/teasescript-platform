@@ -79,6 +79,7 @@ test("native and component bindings reject direct class fragments", async () => 
       "tone + '-500'",
       "`hover:${token}`",
       "{ [`bg-${tone}`]: active }",
+      "active ? { [`bg-${tone}`]: active } : {}",
     ]) {
       await rejects(vue(`<${element} :class="${expression}" />`), "design/no-fragmented-classes");
     }
@@ -100,6 +101,8 @@ const active = true;
 <div :class="['bg-primary', { 'text-foreground': active }]" />
 <div :class="{ 'bg-primary': active && \`state-\${placement()}\` === 'state-mt-4' }" />
 <div :class="cn({ 'bg-muted': 'mode-' + active })" />
+<div :class="active ? { 'bg-primary': 'mode-' + active } : {}" />
+<div :class="active && { 'bg-primary': 'mode-' + active }" />
 <div :class="\`mt-4 \${placement()}\`" />
 <div :class="'mt-4 ' + placement()" />
 <div :class="'mt-4' + ' mb-4'" />
