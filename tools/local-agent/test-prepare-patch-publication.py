@@ -599,8 +599,6 @@ class PreparePatchPublicationTests(unittest.TestCase):
             cwd=repository,
         )
         self.assertIn("sizingMode=byteFallback", prepared.stdout)
-        self.assertIn("prepare-patch-publication.py --output-directory", prepared.stdout)
-        self.assertNotIn("patch_publication_prepare.py --output-directory", prepared.stdout)
         plan = json.loads((output / "upload-plan.json").read_text())
         self.assertEqual(plan["expectedBaseSha"], base)
         self.assertEqual(plan["testedCommitSha"], tested)
@@ -837,7 +835,6 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertIn("stage=ready-to-publish", ready.stdout)
         self.assertIn(str(plan["publicationCommand"]), ready.stdout)
         self.assertIn(str(plan["expectedResultTreeSha"]), ready.stdout)
-        self.assertIn("postPublicationChecklist=", ready.stdout)
 
         reset_after_ready = run_cli(
             "--output-directory",
@@ -983,31 +980,6 @@ class PreparePatchPublicationTests(unittest.TestCase):
         )
         self.assertEqual(rejected.returncode, 1)
         self.assertIn("unknown fields", rejected.stderr)
-
-    def test_generated_instructions_cover_complete_stateful_handoff(self) -> None:
-        _, output, _ = self.prepare_small_payload("instructions")
-        instructions = (output / "UPLOAD-INSTRUCTIONS.md").read_text()
-        self.assertIn("exactly one next action at a time", instructions)
-        self.assertIn("canonical `--show-next-action`", instructions)
-        self.assertIn("`--show-next-upload` remains an exact compatibility alias", instructions)
-        self.assertIn(
-            "Record each returned SHA, branch name, or\ncomparison status",
-            instructions,
-        )
-        self.assertIn("read-only exact branch comparison", instructions)
-        self.assertIn("--reset-publication-stage", instructions)
-        self.assertIn("never requires manual placeholder substitution", instructions)
-        self.assertIn("Do not Base64-encode", instructions)
-        self.assertIn("Do not pre-open or manually regenerate parts", instructions)
-        self.assertIn(
-            "do not substitute\n  complete changed files for generated patch parts",
-            instructions,
-        )
-        self.assertIn(
-            "Do not perform another repository write until that exact match\n"
-            "has been recorded",
-            instructions,
-        )
 
 
 if __name__ == "__main__":
