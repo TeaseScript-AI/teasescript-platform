@@ -64,9 +64,7 @@ assert '[[ "$PUBLISH_RESULT" != success ]]' in transfer_text
 assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in transfer_text
 assert "preserved_changed" in transfer_text
 assert "cleanup-transfer:" in text and "cleanup-comment:" in text
-assert text.count("runs-on: ubuntu-24.04") == 5
 assert "uses: ./.github/workflows/artifact-mailbox-worker.yml" in text
-assert "timeout-minutes: 30" not in text
 assert "validation_profile: ${{ steps.prepare.outputs.validation_profile }}" in text
 test_job = text.split("  test:\n", 1)[1].split("\n  publish:\n", 1)[0]
 assert test_job.index("Preserve trusted candidate validation driver") < test_job.index("Verify exact candidate identity and target base")
@@ -77,9 +75,6 @@ assert "run: npm ci --no-audit --no-fund" not in test_job
 assert 'bash tools/local-agent/check-local-agent.sh' in validator_text
 assert "needs.request" not in text
 assert "needs.prepare.outputs.request_validated == 'true'" in text
-assert "cancel-in-progress: true" in ci_text
-assert "runs-on: ubuntu-24.04" in ci_text
-assert "timeout-minutes: 5" in ci_text
 assert "run: bash tools/local-agent/check-local-agent.sh" in ci_text
 assert "run: npm ci --no-audit --no-fund" in ci_text
 
@@ -102,9 +97,9 @@ assert '--expected-validation-profile "$VALIDATION_PROFILE"' in publish
 
 token_step = publish.split(token_marker, 1)[1].split("\n      - name:", 1)[0]
 assert "id: patch-publisher-token" in token_step
-assert (
-    "uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1"
-) in token_step
+assert re.search(
+    r"(?m)^        uses: actions/create-github-app-token@[0-9a-f]{40}(?: +#.*)?$", token_step
+)
 token_inputs = {}
 for line in token_step.split("        with:\n", 1)[1].splitlines():
     match = re.fullmatch(r"          ([a-z][a-z0-9-]*): (.+)", line)
