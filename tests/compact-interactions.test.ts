@@ -5,7 +5,6 @@ import { compileSource } from "../src/compiler.js";
 import {
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
   MAX_INTERACTION_OPTION_ENTRIES,
-  MAX_INTERACTION_STRING_UTF8_BYTES,
 } from "../src/interaction-limits.js";
 import { parse } from "../src/parser.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
@@ -857,7 +856,7 @@ test("dynamic rejection is atomic before action identity, pending state, or tran
   const over = run(
     overPlan,
     createFreshRuntimeSnapshot(overPlan, {
-      globals: { payload: "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES + 1) },
+      globals: { payload: "x".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES + 1) },
     }),
   );
   assert.equal(over.snapshot.status, "failed");
@@ -1294,7 +1293,7 @@ test("dynamic settlement uses prepared UI provenance while available and intrins
 });
 
 test("static compact source delegates current interaction guards to plan validation instead of semantic source limits", () => {
-  const oversizedButton = `showButton "${"x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES + 1)}"`;
+  const oversizedButton = `showButton "${"x".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES + 1)}"`;
   const buttonResult = compileSource(oversizedButton);
   assert.deepEqual(buttonResult.semanticDiagnostics, []);
   assert.equal(buttonResult.plan, null);

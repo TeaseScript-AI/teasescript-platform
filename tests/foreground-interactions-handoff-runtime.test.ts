@@ -1695,6 +1695,20 @@ test("PR194 matrix: settlement and active handoff validation", () => {
     );
   }
 
+  // The newer retained settlement does not replace the handoff's own destination check.
+  const newerSettlementForgedDestination = externalRecord(
+    structuredClone(validatedCompositeWithNewerSettlement),
+    "newer settlement forged destination",
+  );
+  externalTemporary(newerSettlementForgedDestination, injected.destinationTemporary).value =
+    "forged";
+  assertRejectedSettlementHandoffSnapshot(
+    injected.plan,
+    validatedCompositeWithNewerSettlement,
+    newerSettlementForgedDestination,
+    "handoff disagreement: PR194-newer-settlement-destination-forged",
+  );
+
   const retainedSettlementCounter = externalRecord(
     structuredClone(validatedCompositeWithNewerSettlement),
     "retained newer settlement counter",
