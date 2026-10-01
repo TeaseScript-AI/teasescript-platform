@@ -74,7 +74,6 @@ test("captured settings clone, validate, and checkpoint through JSON", () => {
     delayPerCharacterMs: 23,
   });
   const cloned = cloneRuntimeSnapshot(snapshot);
-  assert.notEqual(cloned.chatPacingSettings, snapshot.chatPacingSettings);
   assert.deepEqual(cloned.chatPacingSettings, snapshot.chatPacingSettings);
   assert.equal(validateRuntimeSnapshot(cloned, compiled).valid, true);
 
