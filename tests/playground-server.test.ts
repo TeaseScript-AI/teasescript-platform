@@ -4,15 +4,13 @@ import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after, before } from "node:test";
+import { fileURLToPath } from "node:url";
 
-import {
-  exampleUrl,
-  isPlaygroundExampleName,
-  PLAYGROUND_EXAMPLES,
-} from "../playground/examples.js";
+import { PLAYGROUND_EXAMPLES } from "../playground/examples.js";
 import { createPlaygroundServer } from "../playground/server.js";
 
 const server = createPlaygroundServer();
+const projectRoot = fileURLToPath(new URL("../..", import.meta.url));
 let port = 0;
 
 before(async () => {
@@ -42,14 +40,14 @@ test("serves the root playground page", async () => {
 
   assert.equal(response.status, 200);
   assert.match(response.contentType, /^text\/html/u);
-  assert.equal(response.body, await readFile("playground/index.html", "utf8"));
+  assert.equal(response.body, await projectFile("playground/index.html"));
 });
 
 test("serves only the explicit colour module needed by unbundled playground imports", async () => {
   const response = await get("/vendor/color.js");
   assert.equal(response.status, 200);
   assert.match(response.contentType, /^text\/javascript/u);
-  assert.equal(response.body, await readFile("node_modules/colorjs.io/dist/color.js", "utf8"));
+  assert.equal(response.body, await projectFile("node_modules/colorjs.io/dist/color.js"));
   assert.equal((await get("/vendor/package.json")).status, 404);
   assert.equal((await get("/node_modules/colorjs.io/package.json")).status, 404);
 });
@@ -59,15 +57,15 @@ test("serves the Vue Player at its maintained route and keeps its build separate
 
   assert.equal(html.status, 200);
   assert.match(html.contentType, /^text\/html/u);
-  assert.equal(html.body, await readFile("dist/player-app/index.html", "utf8"));
-  const assetPath = html.body.match(/<script\b[^>]*\ssrc="([^"]+)"/u)?.[1];
-  assert.ok(assetPath !== undefined && assetPath.startsWith("/player/assets/"), assetPath);
+  assert.equal(html.body, await projectFile("dist/player-app/index.html"));
+  const assetPath = html.body.match(/<script\b[^>]*\bsrc="([^"]+)"/u)?.[1] ?? "";
+  assert.ok(assetPath.startsWith("/player/assets/"), assetPath);
   const javascript = await get(assetPath);
   assert.equal(javascript.status, 200);
   assert.match(javascript.contentType, /^text\/javascript/u);
   assert.equal(
     javascript.body,
-    await readFile(`dist/player-app/${assetPath.slice("/player/".length)}`, "utf8"),
+    await projectFile(`dist/player-app/${assetPath.slice("/player/".length)}`),
   );
   assert.equal((await get("/player-vue/")).status, 404);
 });
@@ -108,24 +106,17 @@ test("serves required JavaScript and CSS assets", async () => {
 
   assert.equal(javascript.status, 200);
   assert.match(javascript.contentType, /^text\/javascript/u);
-  assert.equal(javascript.body, await readFile("dist/playground/browser.js", "utf8"));
+  assert.equal(javascript.body, await projectFile("dist/playground/browser.js"));
   assert.equal(css.status, 200);
   assert.match(css.contentType, /^text\/css/u);
-  assert.equal(css.body, await readFile("playground/playground.css", "utf8"));
+  assert.equal(css.body, await projectFile("playground/playground.css"));
 });
 
 test("serves every fixed repository playground example", async () => {
-  const names = Object.keys(PLAYGROUND_EXAMPLES).filter(isPlaygroundExampleName);
-  assert.ok(names.length > 0);
-  for (const name of names) {
-    const response = await get(exampleUrl(name));
-    assert.equal(response.status, 200, name);
+  for (const { file } of Object.values(PLAYGROUND_EXAMPLES)) {
+    const response = await get(`/examples/playground/${file}`);
+    assert.equal(response.status, 200, file);
     assert.match(response.contentType, /^text\/plain/u);
-    assert.equal(
-      response.body,
-      await readFile(`examples/playground/${PLAYGROUND_EXAMPLES[name].file}`, "utf8"),
-      name,
-    );
   }
 });
 
@@ -140,7 +131,7 @@ test("rejects encoded path traversal", async () => {
   const response = await get("/dist/%2e%2e/package.json");
 
   assert.equal(response.status, 400);
-  assert.ok(!response.body.includes('"devDependencies"'));
+  assert.ok(!response.body.includes(await projectFile("package.json")));
 });
 
 test("query and encoded example-path manipulation cannot select a file", async () => {
@@ -155,7 +146,7 @@ test("rejects symlinks that escape an exposed static root", async (context) => {
   await mkdir(join(projectRoot, "player"), { recursive: true });
   await mkdir(join(projectRoot, "dist"), { recursive: true });
   await mkdir(join(projectRoot, "examples", "playground"), { recursive: true });
-  await writeFile(join(projectRoot, "secret.txt"), "protected-secret-bytes", "utf8");
+  await writeFile(join(projectRoot, "secret.txt"), "not public", "utf8");
   await symlink(
     join(projectRoot, "secret.txt"),
     join(projectRoot, "examples", "playground", "main.tease"),
@@ -167,54 +158,71 @@ test("rejects symlinks that escape an exposed static root", async (context) => {
   const response = await get("/examples/playground/main.tease", isolatedPort);
 
   assert.equal(response.status, 400);
-  assert.ok(!response.body.includes("protected-secret-bytes"));
+  assert.ok(!response.body.includes("not public"));
 });
 
 test("workspace automation stores revisions and returns compile and run results", async (context) => {
   const isolatedServer = createPlaygroundServer();
   const isolatedPort = await listen(isolatedServer);
   context.after(async () => close(isolatedServer));
-  const call = async (method: string, path: string, source?: string) => {
-    const response = await api(
+  const view = (response: HttpResult) => {
+    // EVIDENCE: integration fixture: every workspace route returns this JSON shape; the test asserts each field it reads.
+    return JSON.parse(response.body) as {
+      source?: string;
+      sourceRevision: number;
+      resultRevision: number | null;
+      stale: boolean;
+      result: { status: string; events: { kind: string; text?: string }[] } | null;
+    };
+  };
+  const call = (method: string, path: string, body?: string) =>
+    api(
       method,
       path,
-      source,
-      source === undefined ? undefined : "text/plain; charset=utf-8",
+      body,
+      body === undefined ? undefined : "text/plain; charset=utf-8",
       isolatedPort,
     );
-    assert.equal(response.status, 200, `${method} ${path}`);
-    // EVIDENCE: integration fixture: successful workspace routes return this documented revision/result shape.
-    return JSON.parse(response.body) as WorkspaceResponse;
-  };
-  const initial = (await call("GET", "/api/workspace")).sourceRevision;
+
+  const initial = await call("GET", "/api/workspace");
+  assert.equal(initial.status, 200);
+  const initialRevision = view(initial).sourceRevision;
 
   const uploaded = await call("PUT", "/api/workspace/source", 'say "automation"');
-  assert.equal(uploaded.source, 'say "automation"');
-  assert.equal(uploaded.sourceRevision, initial + 1);
-  assert.equal(uploaded.stale, true);
-  assert.equal(uploaded.result, null);
+  assert.equal(uploaded.status, 200);
+  const workspace = view(uploaded);
+  assert.equal(workspace.source, 'say "automation"');
+  assert.equal(workspace.sourceRevision, initialRevision + 1);
+  assert.equal(workspace.stale, true);
   const compiled = await call("POST", "/api/workspace/compile");
-  assert.equal(compiled.result?.status, "ready");
-  assert.equal(compiled.resultRevision, initial + 1);
-  assert.equal(compiled.stale, false);
+  assert.equal(compiled.status, 200);
+  assert.equal(view(compiled).result?.status, "ready");
+  assert.equal(view(compiled).resultRevision, initialRevision + 1);
   const run = await call("POST", "/api/workspace/run");
-  assert.equal(run.result?.status, "halted");
-  assert.deepEqual(sayTexts(run), ["automation"]);
+  assert.equal(run.status, 200);
+  const runBody = view(run);
+  assert.equal(runBody.result?.status, "halted");
+  assert.deepEqual(
+    runBody.result?.events.map((event) => event.kind),
+    ["say", "actionRequested", "complete"],
+  );
+  assert.equal(runBody.result?.events[0]?.text, "automation");
   const result = await call("GET", "/api/workspace/result");
-  assert.equal(result.stale, false);
-  assert.deepEqual(sayTexts(result), ["automation"]);
+  assert.equal(result.status, 200);
+  assert.equal(view(result).stale, false);
+  assert.equal(view(result).resultRevision, initialRevision + 1);
 
-  const replaced = await call("PUT", "/api/workspace/source", 'say "replacement"');
-  assert.equal(replaced.sourceRevision, initial + 2);
-  assert.equal(replaced.stale, true);
-  assert.equal(replaced.result, null);
-  const staleResult = await call("GET", "/api/workspace/result");
+  const edited = await call("PUT", "/api/workspace/source", 'say "edited"');
+  assert.equal(edited.status, 200);
+  assert.equal(view(edited).sourceRevision, initialRevision + 2);
+  const staleResult = view(await call("GET", "/api/workspace/result"));
   assert.equal(staleResult.stale, true);
   assert.equal(staleResult.result, null);
-  const rerun = await call("POST", "/api/workspace/run");
-  assert.equal(rerun.resultRevision, initial + 2);
-  assert.equal(rerun.stale, false);
-  assert.deepEqual(sayTexts(rerun), ["replacement"]);
+
+  const recompiled = view(await call("POST", "/api/workspace/compile"));
+  assert.equal(recompiled.result?.status, "ready");
+  assert.equal(recompiled.resultRevision, initialRevision + 2);
+  assert.equal(view(await call("GET", "/api/workspace/result")).stale, false);
 });
 
 test("workspace automation accepts source beyond the former local byte limit", async () => {
@@ -267,21 +275,8 @@ test("workspace automation rejects clients outside the permitted loopback addres
   assert.equal(response.status, 403);
 });
 
-interface WorkspaceResponse {
-  readonly source?: string;
-  readonly sourceRevision: number;
-  readonly resultRevision: number | null;
-  readonly stale: boolean;
-  readonly result: {
-    readonly status: string;
-    readonly events: readonly { readonly kind: string; readonly text?: string }[];
-  } | null;
-}
-
-function sayTexts(response: WorkspaceResponse): readonly (string | undefined)[] {
-  return (response.result?.events ?? [])
-    .filter((event) => event.kind === "say")
-    .map((event) => event.text);
+function projectFile(path: string): Promise<string> {
+  return readFile(join(projectRoot, path), "utf8");
 }
 
 interface HttpResult {

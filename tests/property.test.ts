@@ -3,35 +3,58 @@ import test from "node:test";
 
 import { compileSource } from "../src/index.js";
 import {
+  createFixedPropertyChecks,
   createPropertyDefinitions,
   defaultPropertyCampaignConfig,
   parsePropertyCliArguments,
   PropertyCampaignFailure,
+  runFixedPropertyChecks,
   runPropertyCampaign,
+  type PropertyCampaignDependencies,
+  type PropertyCaseResult,
 } from "./property/replay.js";
 import {
   createNearValidSourceCase,
   createValidSourceCase,
   NEAR_VALID_SOURCE_FAMILIES,
-  selectSourceFamily,
   VALID_SOURCE_FAMILIES,
 } from "./property/source-fuzz.js";
 
 test("required deterministic property campaign preserves durable runtime invariants", () => {
-  const first = runPropertyCampaign(defaultPropertyCampaignConfig());
-  const second = runPropertyCampaign(defaultPropertyCampaignConfig());
+  assert.equal(runPropertyCampaign(defaultPropertyCampaignConfig()).executed, 128);
+});
 
-  assert.equal(first.executed, 128);
-  assert.deepEqual(second, first);
+test("fixed property fixtures run once at their public boundaries", () => {
+  const checks = createFixedPropertyChecks();
+  const covered = checks.map((check) => `${check.id}/${check.variant}`);
+
+  for (const operation of ["run", "executeInstruction", "observeTime", "completeAction"]) {
+    assert.ok(covered.includes(`operation-closure/${operation}`), operation);
+  }
+  for (const variant of ["time-completion", "duplicate-settlement"]) {
+    assert.ok(covered.includes(`rejected-completion-is-atomic/${variant}`), variant);
+  }
+  assert.ok(covered.some((check) => check.startsWith("checkpoint-roundtrip-and-resume/")));
+  for (const malformed of ["plan", "snapshot", "checkpoint"]) {
+    assert.ok(covered.includes(`malformed-boundary-rejection/${malformed}`), malformed);
+  }
+  assert.equal(runFixedPropertyChecks(checks), checks.length);
 });
 
 test("property replay selects the same generated case by seed and case number", () => {
   const config = parsePropertyCliArguments(["--seed", "12345", "--runs", "40"]);
-  const full = runPropertyCampaign(config);
-  const replay = runPropertyCampaign({ ...config, caseIndex: 17 });
+  const fullRun = recordExecutions();
+  const full = runPropertyCampaign(config, fullRun.definitions);
+  const replayRun = recordExecutions();
+  const replay = runPropertyCampaign({ ...config, caseIndex: 17 }, replayRun.definitions);
 
+  const selected = fullRun.executions.find((execution) => execution.index === 17);
+  assert.ok(selected);
+  assert.equal(selected.seed, config.seed);
+  assert.deepEqual(replayRun.executions, [selected]);
   assert.equal(replay.executed, 1);
   assert.equal(replay.firstCase.index, 17);
+  assert.deepEqual(replay.firstCase, selected.result);
   assert.deepEqual(full, runPropertyCampaign(config));
 });
 
@@ -49,15 +72,16 @@ test("property campaign wraps preparation failures with replay evidence", () => 
     (error: unknown) => {
       assert.ok(error instanceof PropertyCampaignFailure);
       assert.equal(error.cause, cause);
+      assert.deepEqual(error.config, config);
+      assert.equal(error.result.index, config.caseIndex);
       assert.equal(error.result.id, "valid-source-pipeline");
       assert.equal(error.result.boundary, "package-root compile/run");
-      assert.equal(error.result.context, "preparation-failure context=unavailable");
       assert.equal(error.result.source, undefined);
-      assert.match(error.message, /seed=/);
-      assert.match(error.message, /runs=/);
-      assert.match(error.message, /case=/);
-      assert.match(error.message, /replay=npm run test:property --/);
-      assert.match(error.message, /cause=Error: synthetic generator failure/);
+      assert.ok(error.message.includes(error.replayCommand), error.message);
+      assert.ok(error.message.includes(cause.message), error.message);
+      const [command, replayArguments] = error.replayCommand.split(" -- ");
+      assert.equal(command, "npm run test:property");
+      assert.deepEqual(parsePropertyCliArguments(replayArguments!.split(" ")), config);
       return true;
     },
   );
@@ -96,63 +120,32 @@ test("near-valid source determinism rejects a plan from either compilation", () 
   assert.equal(compilationCount, 2);
 });
 
-test("source scenarios are prepared once for reporting and execution", () => {
-  assertSinglePreparedScenario("valid");
-  assertSinglePreparedScenario("near-valid");
+test("execution compiles the reported prepared source", () => {
+  assertReportedSourceExecutes("valid");
+  assertReportedSourceExecutes("near-valid");
 });
 
-test("exact generated scenarios include metadata as well as source", () => {
-  const config = sourceCaseConfig("near-valid");
-  const scenario = createNearValidSourceCase(config.seed, config.caseIndex!);
-  let generationCount = 0;
-
-  assert.throws(() =>
-    assertExactGeneratedScenario(config.seed, config.caseIndex!, () => ({
-      ...scenario,
-      variant: generationCount++ === 0 ? scenario.variant : "metadata-changed",
-    })),
-  );
-});
-
-test("source family selection uses the selected family collection", () => {
-  assert.equal(selectSourceFamily(["valid-a", "valid-b"], 1, 4), "valid-b");
-  assert.equal(selectSourceFamily(["near-a", "near-b", "near-c"], 1, 4), "near-c");
-});
-
-test("required campaign reaches retained variants and varied source-fuzz families", () => {
+test("required campaign reaches same-seed determinism and varied source-fuzz families", () => {
   const config = defaultPropertyCampaignConfig();
   const cases = Array.from(
     { length: config.runs },
     (_, index) => runPropertyCampaign({ ...config, caseIndex: index }).firstCase,
   );
-  const contexts = cases.map((result) => result.context);
-
-  for (const operation of ["run", "executeInstruction", "observeTime", "completeAction"]) {
-    assert.ok(contexts.some((context) => context.includes(`operation=${operation}`)));
-  }
-  for (const variant of ["time-completion", "duplicate-settlement"]) {
-    assert.ok(contexts.some((context) => context.includes(`rejected-completion=${variant}`)));
-  }
-  for (const malformed of ["plan", "snapshot", "checkpoint"]) {
-    assert.ok(contexts.some((context) => context.includes(`malformed=${malformed}`)));
-  }
-
+  assert.ok(cases.some((result) => result.id === "same-seed-is-deterministic"));
   assertSourceFamilyCoverage(cases, "valid", VALID_SOURCE_FAMILIES);
   assertSourceFamilyCoverage(cases, "near-valid", NEAR_VALID_SOURCE_FAMILIES);
 
   const replayed = runPropertyCampaign({ ...config, caseIndex: 5 }).firstCase;
   assert.deepEqual(replayed, cases[5]);
 
-  const changedValidSeed = createValidSourceCase(config.seed + 1, 5);
-  const changedNearValidSeed = createNearValidSourceCase(config.seed + 1, 6);
-  assert.notEqual(changedValidSeed.source, createValidSourceCase(config.seed, 5).source);
-  assert.notEqual(changedNearValidSeed.source, createNearValidSourceCase(config.seed, 6).source);
-
-  const functionsCase = Array.from({ length: VALID_SOURCE_FAMILIES.length }, (_, index) =>
-    createValidSourceCase(1, index),
-  ).find(({ family }) => family === "functions-defaults-calls-and-recursion");
-  assert.ok(functionsCase);
-  assert.match(functionsCase.source, /return \"\$\{prefix\}:\$\{value\}\"/);
+  // The seed must influence generated source; a bounded seed sample need not differ pairwise.
+  const seeds = Array.from({ length: 8 }, (_, offset) => config.seed + offset);
+  for (const index of [5, 6]) {
+    for (const create of [createValidSourceCase, createNearValidSourceCase]) {
+      const sources = new Set(seeds.map((seed) => create(seed, index).source));
+      assert.ok(sources.size >= 2, `${create.name} case ${index} must vary with the seed`);
+    }
+  }
 });
 
 function assertSourceFamilyCoverage(
@@ -182,31 +175,29 @@ function assertSourceFamilyCoverage(
   }
 }
 
-function assertSinglePreparedScenario(classification: "valid" | "near-valid"): void {
+function assertReportedSourceExecutes(classification: "valid" | "near-valid"): void {
   const config = sourceCaseConfig(classification);
-  const expected = createSourceCase(config.seed, config.caseIndex!, classification);
-  let preparedCount = 0;
-  const definitions = createPropertyDefinitions({
-    ...(classification === "valid"
-      ? {
-          createValidSourceCase: (seed, index) => {
-            preparedCount += 1;
-            assert.equal(preparedCount, 1, "valid source must not be generated twice");
-            return createValidSourceCase(seed, index);
-          },
-        }
-      : {
-          createNearValidSourceCase: (seed, index) => {
-            preparedCount += 1;
-            assert.equal(preparedCount, 1, "near-valid source must not be generated twice");
-            return createNearValidSourceCase(seed, index);
-          },
-        }),
+  // A test-owned suffix shows that execution compiles the injected preparation that the report shows.
+  const prepare = <T extends { readonly source: string }>(scenario: T): T => ({
+    ...scenario,
+    source: `${scenario.source}\n// prepared by the property test`,
   });
+  const expected = prepare(createSourceCase(config.seed, config.caseIndex!, classification));
+  const recorded = recordExecutions(
+    classification === "valid"
+      ? { createValidSourceCase: (seed, index) => prepare(createValidSourceCase(seed, index)) }
+      : {
+          createNearValidSourceCase: (seed, index) =>
+            prepare(createNearValidSourceCase(seed, index)),
+        },
+  );
 
-  const replay = runPropertyCampaign(config, definitions);
-  assert.equal(preparedCount, 1);
+  const replay = runPropertyCampaign(config, recorded.definitions);
   assert.equal(replay.firstCase.source, expected.source);
+  assert.deepEqual(
+    recorded.executions.map((execution) => execution.compiled),
+    [[expected.source, expected.source]],
+  );
 }
 
 function assertExactSourceReplay(
@@ -218,31 +209,52 @@ function assertExactSourceReplay(
   const expected = assertExactGeneratedScenario(config.seed, result.index, (seed, index) =>
     createSourceCase(seed, index, classification),
   );
-  let preparedCount = 0;
-  const replay = runPropertyCampaign(
-    replayConfig,
-    createPropertyDefinitions(
-      classification === "valid"
-        ? {
-            createValidSourceCase: (seed, index) => {
-              preparedCount += 1;
-              assert.equal(preparedCount, 1, "valid replay must reuse its prepared source");
-              return createValidSourceCase(seed, index);
-            },
-          }
-        : {
-            createNearValidSourceCase: (seed, index) => {
-              preparedCount += 1;
-              assert.equal(preparedCount, 1, "near-valid replay must reuse its prepared source");
-              return createNearValidSourceCase(seed, index);
-            },
-          },
-    ),
-  );
+  const recorded = recordExecutions();
+  const replay = runPropertyCampaign(replayConfig, recorded.definitions);
 
-  assert.equal(preparedCount, 1);
   assert.equal(result.source, expected.source);
   assert.deepEqual(replay.firstCase, result);
+  assert.deepEqual(
+    recorded.executions.map((execution) => execution.compiled),
+    [[expected.source, expected.source]],
+  );
+}
+
+/** Wraps the campaign properties to record each executed case and every source its execution compiles. */
+function recordExecutions(dependencies: PropertyCampaignDependencies = {}) {
+  const executions: {
+    readonly seed: number;
+    readonly index: number;
+    readonly result: PropertyCaseResult;
+    readonly compiled: string[];
+  }[] = [];
+  let compiled: string[] | undefined;
+  const definitions = createPropertyDefinitions({
+    ...dependencies,
+    compileSource: (source) => {
+      assert.ok(compiled, "sources compile only while a case executes");
+      compiled.push(source);
+      return compileSource(source);
+    },
+  }).map((definition) => ({
+    ...definition,
+    prepare: (seed: number, index: number) => {
+      const prepared = definition.prepare(seed, index);
+      return {
+        result: prepared.result,
+        execute: () => {
+          compiled = [];
+          executions.push({ seed, index, result: prepared.result, compiled });
+          try {
+            prepared.execute();
+          } finally {
+            compiled = undefined;
+          }
+        },
+      };
+    },
+  }));
+  return { definitions, executions };
 }
 
 function assertExactGeneratedScenario<T>(

@@ -14,26 +14,37 @@ test("compiles deterministically to the same instruction plan", () => {
 });
 
 test("compiles if and else to explicit validated jump targets", () => {
-  const compiled = plan(["if true {", '  say "yes"', "} else {", '  say "no"', "}"].join("\n"));
+  const branchSource = (condition: string) =>
+    [`if ${condition} {`, '  say "yes"', "} else {", '  say "no"', "}"].join("\n");
+  const compiled = plan(branchSource("true"));
+  const { instructions } = compiled;
+  const conditional = instructions.findIndex((instruction) => instruction.kind === "jumpIfFalse");
+  const skipElse = instructions.findIndex((instruction) => instruction.kind === "jump");
+  const conditionalJump = instructions[conditional];
+  const skipElseJump = instructions[skipElse];
 
-  assert.deepEqual(
-    compiled.instructions.map((instruction) =>
-      instruction.kind === "jump" || instruction.kind === "jumpIfFalse"
-        ? [instruction.kind, instruction.target]
-        : instruction.kind,
-    ),
-    [
-      ["jumpIfFalse", 5],
-      "enterScope",
-      "say",
-      "leaveScope",
-      ["jump", 8],
-      "enterScope",
-      "say",
-      "leaveScope",
-    ],
-  );
+  assert.equal(conditionalJump?.kind, "jumpIfFalse");
+  assert.equal(skipElseJump?.kind, "jump");
+  if (conditionalJump?.kind !== "jumpIfFalse" || skipElseJump?.kind !== "jump") return;
+  assert.ok(conditional < skipElse);
+  // The false edge lands on the first else instruction, directly after the then-branch exit.
+  assert.equal(conditionalJump.target, skipElse + 1);
+  // The then-branch exit skips the complete else branch to the end of the plan.
+  assert.equal(skipElseJump.target, instructions.length);
   assert.equal(validateInstructionPlan(compiled).valid, true);
+
+  for (const [condition, expected] of [
+    ["true", ["yes"]],
+    ["false", ["no"]],
+  ] as const) {
+    const branchPlan = plan(branchSource(condition));
+    const result = run(branchPlan, createFreshRuntimeSnapshot(branchPlan));
+    assert.deepEqual(
+      result.events.filter((event) => event.kind === "say").map((event) => event.text),
+      expected,
+      condition,
+    );
+  }
 });
 
 test("preserves relevant statement and nested expression source spans", () => {
@@ -65,18 +76,26 @@ test("survives JSON stringify and parse as an equivalent executable plan", () =>
   );
 });
 
-test("rejects malformed instructions and out-of-range jumps", () => {
+test("rejects an out-of-range jumpIfFalse target", () => {
   // EVIDENCE: fixture: parse a compiler-produced plan into a mutable instruction dictionary for malformed jump injection.
   const malformed = JSON.parse(JSON.stringify(plan("if true { exit }"))) as {
     instructions: Array<Record<string, unknown>>;
   };
-  const jump = malformed.instructions.find((instruction) => instruction.kind === "jumpIfFalse");
+  const jumpIndex = malformed.instructions.findIndex(
+    (instruction) => instruction.kind === "jumpIfFalse",
+  );
+  const jump = malformed.instructions[jumpIndex];
   assert.ok(jump !== undefined);
   jump.target = 999;
 
   const validation = validateInstructionPlan(malformed);
   assert.equal(validation.valid, false);
-  assert.match(validation.errors[0]?.message ?? "", /Jump target/u);
+  assert.deepEqual(
+    validation.errors
+      .filter((error) => error.path === `$.instructions[${jumpIndex}].target`)
+      .map((error) => error.code),
+    ["TSC002"],
+  );
 });
 
 test("contains no non-JSON-safe values and rejects them when supplied", () => {
@@ -104,6 +123,21 @@ test("compiler-produced plans remain deeply frozen", () => {
   assert.equal(Object.isFrozen(instruction.value.properties), true);
   assert.equal(Object.isFrozen(instruction.value.properties[0]), true);
   assert.equal(Object.isFrozen(instruction.value.properties[0]!.value), true);
+  const list = instruction.value.properties[0]!.value;
+  const inner = list.kind === "list" ? list.elements[1] : undefined;
+  if (list.kind !== "list" || inner?.kind !== "object") {
+    assert.fail("Expected nested list and object plans.");
+  }
+  for (const node of [
+    list.elements,
+    list.elements[0],
+    inner,
+    inner.properties,
+    inner.properties[0],
+    inner.properties[0]?.value,
+  ]) {
+    assert.ok(typeof node === "object" && Object.isFrozen(node));
+  }
 });
 
 function findNonJsonValue(value: unknown, active = new Set<object>()): string | null {

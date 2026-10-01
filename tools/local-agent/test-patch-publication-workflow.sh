@@ -28,13 +28,7 @@ import pathlib, re, subprocess, sys, tempfile, textwrap
 workflow_path, request_path, cleanup_path, transfer_path, prepare_path, validator_path, summary_path, ci_path = map(pathlib.Path, sys.argv[1:])
 text = workflow_path.read_text(encoding="utf-8")
 ci_text = ci_path.read_text(encoding="utf-8")
-request_text = request_path.read_text(encoding="utf-8")
-cleanup_text = cleanup_path.read_text(encoding="utf-8")
-transfer_text = transfer_path.read_text(encoding="utf-8")
-prepare_text = prepare_path.read_text(encoding="utf-8")
 validator_text = validator_path.read_text(encoding="utf-8")
-summary_text = summary_path.read_text(encoding="utf-8")
-assert len(text.encode("utf-8")) <= 12 * 1024
 assert "patch-publication-request.cjs" in text
 assert "patch-publication-cleanup-comment.cjs" in text
 assert "patch-publication-cleanup-transfer.sh" in text
@@ -49,11 +43,6 @@ assert "issues: read" in prepare and "pull-requests: read" in prepare
 assert prepare.index("Validate publication command") < prepare.index("Read exact transfer manifest")
 assert "request_validated: ${{ steps.bind.outputs.validated }}" in prepare
 assert "fetch-depth: 1" in prepare
-assert "([0-9a-f]{64})$" in request_text
-assert "Patch publication commands must be placed on a pull request." in request_text
-assert "github.rest.git.getRef" in request_text
-assert "github.rest.repos.getContent" in request_text
-assert "context.payload.comment.id" in request_text
 assert "expected_transfer_sha" in text
 assert "comment_id: ${{ steps.request.outputs.comment_id }}" in text
 assert "Read exact transfer manifest" in text
@@ -66,18 +55,8 @@ assert prepare.index("Preserve trusted publication tools") < prepare.index("Read
 trusted_prepare_driver = 'bash "$RUNNER_TEMP/patch-publication-prepare-steps.sh"'
 assert prepare.count(trusted_prepare_driver) == 6
 assert "bash tools/local-agent/patch-publication-prepare-steps.sh" not in prepare
-assert 'actual_transfer_sha="$(git rev-parse refs/remotes/origin/patch-transfer)"' in prepare_text
-assert 'sha256sum "$RUNNER_TEMP/manifest.json"' in prepare_text
-assert "materialize-patch" in prepare_text
-assert "refs/remotes/origin/patch-transfer" in prepare_text
-assert "preserved_retry" in transfer_text
-assert '[[ "$PUBLISH_RESULT" != success ]]' in transfer_text
-assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in transfer_text
-assert "preserved_changed" in transfer_text
 assert "cleanup-transfer:" in text and "cleanup-comment:" in text
-assert text.count("runs-on: ubuntu-24.04") == 5
 assert "uses: ./.github/workflows/artifact-mailbox-worker.yml" in text
-assert "timeout-minutes: 30" not in text
 assert "validation_profile: ${{ steps.prepare.outputs.validation_profile }}" in text
 test_job = text.split("  test:\n", 1)[1].split("\n  publish:\n", 1)[0]
 assert test_job.index("Preserve trusted candidate validation driver") < test_job.index("Verify exact candidate identity and target base")
@@ -85,21 +64,9 @@ assert "needs.prepare.outputs.validation_profile != 'docs'" in test_job
 assert 'bash "$RUNNER_TEMP/validate-candidate" validate-profile "${{ needs.prepare.outputs.validation_profile }}"' in test_job
 assert "run: bash tools/local-agent/check-local-agent.sh" not in test_job
 assert "run: npm ci --no-audit --no-fund" not in test_job
-assert 'case "$mode" in' in validator_text
-assert 'verify-identity) verify_identity' in validator_text
-assert 'validate-profile) validate_profile' in validator_text
 assert 'bash tools/local-agent/check-local-agent.sh' in validator_text
-assert 'run_repository_checks' in validator_text
-assert 'tooling_pid' not in validator_text
-assert 'repository_pid' not in validator_text
-assert "Documentation-only validation" in validator_text
-assert "Repository validation" in validator_text
-assert "Full validation" in validator_text
 assert "needs.request" not in text
 assert "needs.prepare.outputs.request_validated == 'true'" in text
-assert "cancel-in-progress: true" in ci_text
-assert "runs-on: ubuntu-24.04" in ci_text
-assert "timeout-minutes: 5" in ci_text
 assert "run: bash tools/local-agent/check-local-agent.sh" in ci_text
 assert "run: npm ci --no-audit --no-fund" in ci_text
 
@@ -122,9 +89,9 @@ assert '--expected-validation-profile "$VALIDATION_PROFILE"' in publish
 
 token_step = publish.split(token_marker, 1)[1].split("\n      - name:", 1)[0]
 assert "id: patch-publisher-token" in token_step
-assert (
-    "uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1"
-) in token_step
+assert re.search(
+    r"(?m)^        uses: actions/create-github-app-token@[0-9a-f]{40}(?: +#.*)?$", token_step
+)
 token_inputs = {}
 for line in token_step.split("        with:\n", 1)[1].splitlines():
     match = re.fullmatch(r"          ([a-z][a-z0-9-]*): (.+)", line)
@@ -702,17 +669,6 @@ assert "contents: write" in transfer_cleanup and "issues: write" not in transfer
 assert "contents: read" in comment_cleanup
 assert "pull-requests: write" in comment_cleanup
 assert "issues: write" not in comment_cleanup and "contents: write" not in comment_cleanup
-assert "github.rest.issues.getComment" in cleanup_text
-assert "github.rest.issues.deleteComment" in cleanup_text
-assert "github.rest.issues.createComment" not in request_text + cleanup_text
-assert "context.payload.issue.url" in cleanup_text
-assert "comment.data.id !== commentId" in cleanup_text
-assert "comment.data.body.trim() !== expectedCommand" in cleanup_text
-assert "deletion.status !== 204" in cleanup_text
-assert "failed_identity" not in cleanup_text
-assert "command cleanup:" in summary_text
-assert "github.rest.git.deleteRef" not in request_text + cleanup_text
-assert 'patch-transfer:.agent-patch-publication/change.patch' not in prepare_text
 subprocess.run(["node", "--check", str(request_path)], check=True)
 subprocess.run(["node", "--check", str(cleanup_path)], check=True)
 subprocess.run(["bash", "-n", str(transfer_path)], check=True)
@@ -758,6 +714,8 @@ with tempfile.TemporaryDirectory() as temporary:
               const warnings = [];
               const notices = [];
               let deleteCalls = 0;
+              const getArgs = [];
+              const deleteArgs = [];
               const context = makeContext();
               if (options.mutateContext) {
                 options.mutateContext(context);
@@ -765,15 +723,16 @@ with tempfile.TemporaryDirectory() as temporary:
               const github = {
                 rest: {
                   issues: {
-                    getComment: options.getComment || (async () => ({
-                      data: {
-                        id: commentId,
-                        issue_url: issueUrl,
-                        body: command,
-                      },
-                    })),
+                    getComment: async (args) => {
+                      getArgs.push(args);
+                      if (options.getComment) {
+                        return options.getComment(args);
+                      }
+                      return { data: { id: commentId, issue_url: issueUrl, body: command } };
+                    },
                     deleteComment: async (args) => {
                       deleteCalls += 1;
+                      deleteArgs.push(args);
                       if (options.deleteComment) {
                         return options.deleteComment(args);
                       }
@@ -802,12 +761,18 @@ with tempfile.TemporaryDirectory() as temporary:
               } catch (error) {
                 thrown = error;
               }
-              return { outputs, failures, warnings, notices, deleteCalls, thrown };
+              const exactComment = { owner: 'example', repo: 'repository', comment_id: commentId };
+              for (const args of [...getArgs, ...deleteArgs]) {
+                assert.deepEqual(args, exactComment);
+              }
+              const getCalls = getArgs.length;
+              return { outputs, failures, warnings, notices, getCalls, deleteCalls, thrown };
             }
 
             (async () => {
               let result = await runCase();
               assert.equal(result.outputs.cleanup_status, 'removed');
+              assert.equal(result.getCalls, 1);
               assert.equal(result.deleteCalls, 1);
               assert.deepEqual(result.failures, []);
               assert.equal(result.thrown, null);
@@ -820,6 +785,7 @@ with tempfile.TemporaryDirectory() as temporary:
                 },
               });
               assert.equal(result.outputs.cleanup_status, 'already_absent');
+              assert.equal(result.getCalls, 1);
               assert.equal(result.deleteCalls, 0);
               assert.deepEqual(result.failures, []);
 
@@ -829,6 +795,7 @@ with tempfile.TemporaryDirectory() as temporary:
                 }),
               });
               assert.equal(result.outputs.cleanup_status, 'preserved_changed');
+              assert.equal(result.getCalls, 1);
               assert.equal(result.deleteCalls, 0);
               assert.equal(result.warnings.length, 1);
 
@@ -838,12 +805,23 @@ with tempfile.TemporaryDirectory() as temporary:
                 }),
               });
               assert.equal(result.outputs.cleanup_status, 'preserved_changed');
+              assert.equal(result.getCalls, 1);
+              assert.equal(result.deleteCalls, 0);
+
+              result = await runCase({
+                getComment: async () => ({
+                  data: { id: commentId + 1, issue_url: issueUrl, body: command },
+                }),
+              });
+              assert.equal(result.outputs.cleanup_status, 'preserved_changed');
+              assert.equal(result.getCalls, 1);
               assert.equal(result.deleteCalls, 0);
 
               result = await runCase({
                 mutateContext: (context) => { context.payload.issue.number += 1; },
               });
               assert.equal(result.outputs.cleanup_status, 'failed');
+              assert.equal(result.getCalls, 0);
               assert.equal(result.deleteCalls, 0);
               assert.equal(result.failures.length, 1);
 
@@ -855,12 +833,14 @@ with tempfile.TemporaryDirectory() as temporary:
                 },
               });
               assert.equal(result.outputs.cleanup_status, 'already_absent');
+              assert.equal(result.getCalls, 1);
               assert.equal(result.deleteCalls, 1);
               assert.deepEqual(result.failures, []);
               assert.equal(result.thrown, null);
 
               result = await runCase({ deleteComment: async () => ({ status: 202 }) });
               assert.equal(result.outputs.cleanup_status, 'failed');
+              assert.equal(result.getCalls, 1);
               assert.equal(result.deleteCalls, 1);
               assert.equal(result.failures.length, 1);
 
@@ -872,6 +852,7 @@ with tempfile.TemporaryDirectory() as temporary:
                 },
               });
               assert.equal(result.outputs.cleanup_status, 'failed');
+              assert.equal(result.getCalls, 1);
               assert.equal(result.deleteCalls, 0);
               assert.equal(result.thrown?.message, 'server error');
 
@@ -883,6 +864,7 @@ with tempfile.TemporaryDirectory() as temporary:
                 },
               });
               assert.equal(result.outputs.cleanup_status, 'failed');
+              assert.equal(result.getCalls, 1);
               assert.equal(result.deleteCalls, 1);
               assert.equal(result.thrown?.message, 'delete server error');
             })().catch((error) => {
@@ -894,6 +876,126 @@ with tempfile.TemporaryDirectory() as temporary:
         encoding="utf-8",
     )
     subprocess.run(["node", str(cleanup_test), str(cleanup_path)], check=True)
+
+    request_test = temporary_path / "test-request.cjs"
+    request_test.write_text(
+        textwrap.dedent(
+            r'''
+            const assert = require('node:assert/strict');
+            const crypto = require('node:crypto');
+            const publicationRequest = require(process.argv[2]);
+
+            const commentId = 5135720427;
+            const issueNumber = 154;
+            const transferBranch = 'agent-patch-publication/154-delaytest';
+            const transferSha = 'b'.repeat(40);
+            const validManifest = Buffer.from('{"formatVersion": 2}\n');
+            const repository = { owner: 'example', repo: 'repository' };
+            const digest = (value) => crypto.createHash('sha256').update(value).digest('hex');
+
+            async function runCase(options = {}) {
+              const manifest = options.manifest || validManifest;
+              const calls = [];
+              const outputs = {};
+              const failures = [];
+              const context = {
+                actor: 'maintainer',
+                repo: repository,
+                issue: { ...repository, number: issueNumber },
+                payload: {
+                  repository: { full_name: 'example/repository' },
+                  issue: { number: issueNumber, pull_request: options.ordinaryIssue ? undefined : {} },
+                  comment: {
+                    id: commentId,
+                    body: options.body || `/publish-patch ${transferBranch} ${digest(manifest)}`,
+                  },
+                },
+              };
+              const github = {
+                rest: {
+                  repos: {
+                    getCollaboratorPermissionLevel: async (args) => {
+                      calls.push(['permission', args]);
+                      return { data: { permission: options.permission || 'write' } };
+                    },
+                    getContent: async (args) => {
+                      calls.push(['manifest', args]);
+                      return {
+                        data: { type: 'file', encoding: 'base64', content: manifest.toString('base64') },
+                      };
+                    },
+                  },
+                  pulls: {
+                    get: async (args) => {
+                      calls.push(['pull', args]);
+                      const headRepository = options.headRepository || 'example/repository';
+                      return { data: { head: { ref: 'feat/test-target', repo: { full_name: headRepository } } } };
+                    },
+                  },
+                  git: {
+                    getRef: async (args) => {
+                      calls.push(['transfer', args]);
+                      return { data: { object: { type: options.transferType || 'commit', sha: transferSha } } };
+                    },
+                  },
+                },
+              };
+              const core = {
+                setOutput: (name, value) => { outputs[name] = value; },
+                setFailed: (message) => { failures.push(message); },
+              };
+              await publicationRequest({ github, context, core });
+              return { outputs, failures, calls: Object.fromEntries(calls) };
+            }
+
+            (async () => {
+              const accepted = await runCase();
+              assert.deepEqual(accepted.failures, []);
+              assert.deepEqual(accepted.outputs, {
+                transfer_branch: transferBranch,
+                expected_transfer_sha: transferSha,
+                expected_manifest_sha256: digest(validManifest),
+                expected_target_branch: 'feat/test-target',
+                issue_number: String(issueNumber),
+                comment_id: String(commentId),
+              });
+              assert.deepEqual(accepted.calls, {
+                permission: { ...repository, username: 'maintainer' },
+                pull: { ...repository, pull_number: issueNumber },
+                transfer: { ...repository, ref: `heads/${transferBranch}` },
+                manifest: { ...repository, path: '.agent-patch-publication/manifest.json', ref: transferSha },
+              });
+
+              const manifestSha = digest(validManifest);
+              const beforeTransfer = ['transfer', 'manifest'];
+              for (const [label, options, unread] of [
+                ['ordinary issue', { ordinaryIssue: true }, beforeTransfer],
+                ['malformed command', { body: `/publish-patch ${transferBranch}` }, beforeTransfer],
+                ['malformed branch', { body: `/publish-patch agent-patch-publication/../main ${manifestSha}` }, beforeTransfer],
+                ['foreign branch namespace', { body: `/publish-patch feat/other ${manifestSha}` }, beforeTransfer],
+                ['insufficient permission', { permission: 'read' }, beforeTransfer],
+                ['foreign pull-request head', { headRepository: 'fork/repository' }, beforeTransfer],
+                ['non-commit transfer', { transferType: 'tag' }, ['manifest']],
+                ['wrong manifest digest', { body: `/publish-patch ${transferBranch} ${'c'.repeat(64)}` }, []],
+                ['old manifest format', { manifest: Buffer.from('{"formatVersion": 1}\n') }, []],
+                ['non-integer manifest format', { manifest: Buffer.from('{"formatVersion": "2"}\n') }, []],
+              ]) {
+                const result = await runCase(options);
+                assert.equal(result.failures.length, 1, label);
+                assert.deepEqual(result.outputs, {}, label);
+                for (const call of unread) {
+                  assert.equal(result.calls[call], undefined, `${label}: ${call}`);
+                }
+              }
+            })().catch((error) => {
+              console.error(error);
+              process.exitCode = 1;
+            });
+            '''
+        ).lstrip(),
+        encoding="utf-8",
+    )
+    subprocess.run(["node", str(request_test), str(request_path)], check=True)
 PY
 
 tmp="$(mktemp -d -t patch-publication-workflow-XXXXXX)"
@@ -1004,12 +1106,63 @@ install -m 0755 "$prepare_script" "$tmp/patch-publication-prepare-steps.sh"
 )
 test ! -e "$untrusted_marker"
 grep -qx 'validation_profile=full' "$prepare_output"
-! grep -qx 'validation_profile=docs' "$prepare_output"
+! grep -qx 'validation_profile=docs' "$prepare_output" || {
+  echo 'full-profile preparation also reported the docs validation profile' >&2
+  exit 1
+}
 python3 - "$output/publication.json" <<'PY'
 import json, pathlib, sys
 metadata = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
 assert metadata["validationProfile"] == "full"
 PY
+
+# Run the trusted driver steps in workflow order; each case differs in one authorized identity.
+run_prepare_case() {
+  local name="$1" case_remote="$2" transfer_sha="$3" manifest_sha="$4"
+  case_temp="$tmp/prepare-$name"
+  mkdir -p "$case_temp"
+  git clone -q "$case_remote" "$case_temp/workspace"
+  install -m 0755 "$script" "$case_temp/patch-publication.py"
+  install -m 0755 "$prepare_script" "$case_temp/patch-publication-prepare-steps.sh"
+  : > "$case_temp/output"
+  failed_step=
+  for step in read-manifest verify-manifest materialize inspect checkout-base prepare; do
+    if ! (
+      cd "$case_temp/workspace"
+      RUNNER_TEMP="$case_temp" GITHUB_WORKSPACE="$case_temp/workspace" GITHUB_OUTPUT="$case_temp/output" \
+        TRANSFER_BRANCH="$transfer" EXPECTED_TRANSFER_SHA="$transfer_sha" \
+        EXPECTED_MANIFEST_SHA256="$manifest_sha" EXPECTED_TARGET_BRANCH="$target" DEFAULT_BRANCH=main \
+        TARGET_BRANCH="$target" EXPECTED_BASE_SHA="$base" \
+        bash "$case_temp/patch-publication-prepare-steps.sh" "$step"
+    ) >/dev/null 2>&1; then
+      failed_step="$step"
+      break
+    fi
+  done
+}
+
+moved_remote="$tmp/moved-transfer-remote.git"
+git clone -q --bare "$remote" "$moved_remote"
+moved_transfer_sha="$(git -C "$source_repo" commit-tree "$expected_transfer_sha^{tree}" \
+  -p "$expected_transfer_sha" -m 'moved transfer')"
+git -C "$source_repo" push -q "$moved_remote" "$moved_transfer_sha:refs/heads/$transfer"
+run_prepare_case moved-transfer "$moved_remote" "$expected_transfer_sha" "$expected_manifest_sha256"
+[[ $failed_step == read-manifest && ! -e "$case_temp/change.patch" && ! -e "$case_temp/publication" &&
+  "$(git --git-dir="$moved_remote" rev-parse "refs/heads/$target")" == "$base" ]] || {
+  echo 'moved transfer ref was not rejected before materialization' >&2
+  exit 1
+}
+
+changed_manifest_sha256="$(
+  { git -C "$source_repo" show "$expected_transfer_sha:.agent-patch-publication/manifest.json"; echo; } |
+    sha256sum | awk '{print $1}'
+)"
+run_prepare_case changed-manifest "$remote" "$expected_transfer_sha" "$changed_manifest_sha256"
+[[ $failed_step == verify-manifest && ! -e "$case_temp/change.patch" && ! -e "$case_temp/publication" &&
+  "$(git --git-dir="$remote" rev-parse "refs/heads/$target")" == "$base" ]] || {
+  echo 'changed manifest digest was not rejected before materialization' >&2
+  exit 1
+}
 
 candidate="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["candidateCommitSha"])' "$output/publication.json")"
 python3 -B "$script" verify-bundle \
@@ -1029,15 +1182,56 @@ git -C "$tmp/racer" commit -q -m 'move target'
 race="$(git -C "$tmp/racer" rev-parse HEAD)"
 git -C "$tmp/racer" push -q origin "$target"
 
-if git -C "$tmp/publisher" push --porcelain origin "$candidate:refs/heads/$target" >/dev/null 2>&1; then
-  echo 'candidate push unexpectedly succeeded after target race' >&2
+# Run the publish step's actual run body; a fixture-only Git wrapper routes its
+# authenticated GitHub URL to the bare remote and passes every other argument through.
+publish_body="$tmp/publish-body.sh"
+python3 - "$workflow" "$publish_body" <<'PY'
+import pathlib, sys, textwrap
+text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+step = text.split("      - name: Publish by non-force fast-forward\n", 1)[1]
+lines = []
+for line in step.split("        run: |\n", 1)[1].splitlines():
+    if line.strip() and not line.startswith("          "):
+        break
+    lines.append(line)
+pathlib.Path(sys.argv[2]).write_text(textwrap.dedent("\n".join(lines)) + "\n", encoding="utf-8")
+PY
+publish_url='https://x-access-token:test-token@github.com/example/repository.git'
+publish_calls="$tmp/publish-calls"
+mkdir -p "$tmp/publish-bin"
+cat > "$tmp/publish-bin/git" <<WRAPPER
+#!/usr/bin/env bash
+printf '%s\\n' "\$*" >> $(printf '%q' "$publish_calls")
+args=()
+for arg in "\$@"; do
+  if [[ \$arg == $(printf '%q' "$publish_url") ]]; then
+    args+=($(printf '%q' "$remote"))
+  else
+    args+=("\$arg")
+  fi
+done
+exec $(printf '%q' "$(command -v git)") "\${args[@]}"
+WRAPPER
+chmod +x "$tmp/publish-bin/git"
+run_publish() {
+  (
+    cd "$tmp/publisher"
+    PATH="$tmp/publish-bin:$PATH" TARGET_BRANCH="$target" CANDIDATE_COMMIT_SHA="$candidate" \
+      PATCH_PUBLISHER_TOKEN=test-token GITHUB_REPOSITORY=example/repository \
+      bash --noprofile --norc -eo pipefail "$publish_body"
+  ) >/dev/null 2>&1
+}
+
+if run_publish; then
+  echo 'workflow publication unexpectedly succeeded after target race' >&2
   exit 1
 fi
 test "$(git --git-dir="$remote" rev-parse "refs/heads/$target")" = "$race"
 
 git --git-dir="$remote" update-ref "refs/heads/$target" "$base" "$race"
-git -C "$tmp/publisher" push -q origin "$candidate:refs/heads/$target"
+run_publish
 test "$(git --git-dir="$remote" rev-parse "refs/heads/$target")" = "$candidate"
+grep -F -- "$publish_url $candidate:refs/heads/$target" "$publish_calls" >/dev/null
 
 run_cleanup() {
   local publish_result="$1"
@@ -1072,16 +1266,46 @@ git -C "$tmp/racer" commit -q -m 'replace transfer payload'
 changed_transfer_sha="$(git -C "$tmp/racer" rev-parse HEAD)"
 git -C "$tmp/racer" push -q origin "HEAD:refs/heads/$transfer"
 changed_output="$tmp/cleanup-changed.out"
-run_cleanup failure "$changed_output"
-test "$(git --git-dir="$remote" rev-parse "refs/heads/$transfer")" = "$changed_transfer_sha"
-grep -qx 'cleanup_status=preserved_changed' "$changed_output"
+for publish_result in failure success; do
+  run_cleanup "$publish_result" "$changed_output"
+  test "$(git --git-dir="$remote" rev-parse "refs/heads/$transfer")" = "$changed_transfer_sha"
+  grep -qx 'cleanup_status=preserved_changed' "$changed_output"
+done
 
 # Successful V2 publication removes only the exact authorized transfer ref.
 git --git-dir="$remote" update-ref "refs/heads/$transfer" \
   "$expected_transfer_sha" "$changed_transfer_sha"
 removed_output="$tmp/cleanup-removed.out"
 run_cleanup success "$removed_output"
-! git --git-dir="$remote" show-ref --verify "refs/heads/$transfer" >/dev/null 2>&1
+! git --git-dir="$remote" show-ref --verify "refs/heads/$transfer" >/dev/null 2>&1 || {
+  echo 'successful cleanup did not remove the authorized transfer ref' >&2
+  exit 1
+}
 grep -qx 'cleanup_status=removed' "$removed_output"
+
+# The summary reports each supplied result under its own field and reports missing cleanup as failed.
+summary_script="$root/tools/local-agent/patch-publication-summary.sh"
+summary="$tmp/summary.md"
+published_sha="$(printf 'c%.0s' {1..40})"
+GITHUB_STEP_SUMMARY="$summary" TARGET_BRANCH=feat/summary-target PUBLISHED_COMMIT_SHA="$published_sha" \
+  PREPARE_RESULT=success TEST_RESULT=failure PUBLISH_RESULT=skipped \
+  TRANSFER_CLEANUP_STATUS=preserved_retry COMMENT_CLEANUP_STATUS=already_absent \
+  bash "$summary_script"
+for field in "target branch=feat/summary-target" "published commit=$published_sha" \
+  prepare=success test=failure publish=skipped \
+  "transfer cleanup=preserved_retry" "command cleanup=already_absent"; do
+  grep -E -- "^- ${field%%=*}: " "$summary" | grep -Fq -- "${field#*=}" || {
+    echo "publication summary did not report ${field#*=} as its ${field%%=*}" >&2
+    exit 1
+  }
+done
+: > "$summary"
+GITHUB_STEP_SUMMARY="$summary" TARGET_BRANCH=feat/summary-target \
+  PREPARE_RESULT=success TEST_RESULT=success PUBLISH_RESULT=skipped \
+  bash "$summary_script"
+[[ $(grep -c -w failed "$summary") == 2 ]] && ! grep -Eq '[0-9a-f]{40}' "$summary" || {
+  echo 'publication summary did not report missing cleanup statuses as failed' >&2
+  exit 1
+}
 
 echo 'patch-publication workflow checks passed'

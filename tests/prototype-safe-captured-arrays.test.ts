@@ -99,11 +99,13 @@ test("inherited numeric getters are never invoked across captured-data boundarie
 });
 
 test("dense captured arrays install ordinary own elements without inherited setters", () => {
+  const payload = "captured-array payload sentinel";
   let setterCalls = 0;
   withArrayPrototypeIndex(
     {
       set(this: unknown[], value: unknown) {
-        if (Object.getPrototypeOf(this) !== Array.prototype) {
+        // Only the capture payload is observed, so unrelated harness arrays may still assign index 0.
+        if (value === payload) {
           setterCalls += 1;
           throw new Error("captured-array numeric setter must not run");
         }
@@ -116,13 +118,13 @@ test("dense captured arrays install ordinary own elements without inherited sett
       },
     },
     () => {
-      const result = captureExternalData(["captured"]);
+      const result = captureExternalData([payload]);
       assert.ok(result.ok);
       const captured = result.value;
       assert.ok(Array.isArray(captured));
-      assert.equal(captured[0], "captured");
+      assert.equal(captured[0], payload);
       assert.deepEqual(Reflect.getOwnPropertyDescriptor(captured, "0"), {
-        value: "captured",
+        value: payload,
         writable: true,
         enumerable: true,
         configurable: true,

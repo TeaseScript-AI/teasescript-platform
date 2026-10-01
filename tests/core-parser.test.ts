@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { Expression } from "../src/ast.js";
+import type { Expression, Statement } from "../src/ast.js";
 import { parse } from "../src/parser.js";
 
 test("parses and normalizes all accepted milestone numeric literals", () => {
@@ -64,23 +64,14 @@ test("parses true, false, and null literals", () => {
 });
 
 test("builds V30 precedence with comparison stronger than not", () => {
-  const expression = initializerOf("let result = 1 + 2 * 3 == 7 and not false or false");
-
-  assert.equal(expression.kind, "binaryExpression");
-  if (expression.kind !== "binaryExpression") return;
-  assert.equal(expression.operator, "or");
-  assert.equal(expression.left.kind, "binaryExpression");
-  if (expression.left.kind !== "binaryExpression") return;
-  assert.equal(expression.left.operator, "and");
-  assert.equal(expression.left.left.kind, "binaryExpression");
-  assert.equal(expression.left.right.kind, "unaryExpression");
-
-  const notComparison = initializerOf("let result = not score == 5");
-  assert.equal(notComparison.kind, "unaryExpression");
-  if (notComparison.kind === "unaryExpression") {
-    assert.equal(notComparison.operator, "not");
-    assert.equal(notComparison.operand.kind, "binaryExpression");
-  }
+  assert.deepEqual(
+    expressionShape(initializerOf("let result = 1 + 2 * 3 == 7 and not false or false")),
+    ["or", ["and", ["==", ["+", 1, ["*", 2, 3]], 7], ["not", false]], false],
+  );
+  assert.deepEqual(expressionShape(initializerOf("let result = not score == 5")), [
+    "not",
+    ["==", "score", 5],
+  ]);
 });
 
 test("associates arithmetic left and unary operators right", () => {
@@ -99,14 +90,10 @@ test("associates arithmetic left and unary operators right", () => {
 });
 
 test("parses left-associated property, index, and call postfix operations", () => {
-  const expression = initializerOf("let result = player.toys[0].name.trim()");
-
-  assert.equal(expression.kind, "callExpression");
-  if (expression.kind !== "callExpression") return;
-  assert.equal(expression.callee.kind, "propertyAccessExpression");
-  if (expression.callee.kind !== "propertyAccessExpression") return;
-  assert.equal(expression.callee.property.name, "trim");
-  assert.equal(expression.callee.object.kind, "propertyAccessExpression");
+  assert.deepEqual(expressionShape(initializerOf("let result = player.toys[0].name.trim()")), [
+    "call",
+    [".", [".", ["index", [".", "player", "toys"], 0], "name"], "trim"],
+  ]);
 });
 
 test("parses positional and named arguments and rejects mixing", () => {
@@ -159,7 +146,9 @@ test("accepts every keyword as a property name in unambiguous property positions
       `invoke(${keyword}: 1)`,
     ];
     for (const source of sources) {
-      assert.deepEqual(parse(source).diagnostics, [], source);
+      const result = parse(source);
+      assert.deepEqual(result.diagnostics, [], source);
+      assert.deepEqual(propertyPositionNames(result.program.statements[0]), [keyword], source);
     }
   }
 });
@@ -308,4 +297,58 @@ function initializerFromResult(result: ReturnType<typeof parse>): Expression {
 
 function typeShape(name: string, collection: "list" | "set" | null, optional: boolean) {
   return { name, collection, optional };
+}
+
+type ExpressionShape = string | number | boolean | readonly ExpressionShape[];
+
+// Compact projection: identifiers by name, literals by value, operators and postfix forms with their operands.
+function expressionShape(expression: Expression): ExpressionShape {
+  switch (expression.kind) {
+    case "identifier":
+      return expression.name;
+    case "numberLiteral":
+    case "booleanLiteral":
+      return expression.value;
+    case "unaryExpression":
+      return [expression.operator, expressionShape(expression.operand)];
+    case "binaryExpression":
+      return [
+        expression.operator,
+        expressionShape(expression.left),
+        expressionShape(expression.right),
+      ];
+    case "propertyAccessExpression":
+      return [".", expressionShape(expression.object), expression.property.name];
+    case "indexExpression":
+      return ["index", expressionShape(expression.object), expressionShape(expression.index)];
+    case "callExpression":
+      return [
+        "call",
+        expressionShape(expression.callee),
+        ...expression.arguments.map((argument) => expressionShape(argument.value)),
+      ];
+    default:
+      return expression.kind;
+  }
+}
+
+function propertyPositionNames(statement: Statement | undefined): readonly string[] | string {
+  switch (statement?.kind) {
+    case "speakerDeclaration":
+      return statement.properties.map((property) => property.name.name);
+    case "letStatement":
+      if (statement.initializer.kind === "objectLiteral") {
+        return statement.initializer.properties.map((property) => property.name.name);
+      }
+      if (statement.initializer.kind === "propertyAccessExpression") {
+        return [statement.initializer.property.name];
+      }
+      return statement.initializer.kind;
+    case "expressionStatement":
+      return statement.expression.arguments.map((argument) =>
+        argument.kind === "namedArgument" ? argument.name.name : argument.kind,
+      );
+    default:
+      return String(statement?.kind);
+  }
 }

@@ -41,7 +41,7 @@ export const DEMO_PRESENTATION: PlayerPresentation = {
   },
 
   timer: {
-    id: "demo-timer",
+    id: "warm-up",
     kind: "visible",
     name: "Warm-up",
     remainingSeconds: 161,

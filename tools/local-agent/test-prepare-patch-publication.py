@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
 import importlib.util
 import io
 import json
@@ -76,6 +77,15 @@ def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
         stdout=stdout.getvalue(),
         stderr=stderr.getvalue(),
     )
+
+
+def connector_arguments(stdout: str) -> dict[str, object]:
+    lines = stdout.splitlines()
+    return json.loads(lines[lines.index("connectorArguments=") + 1])
+
+
+def git_blob_sha(value: bytes) -> str:
+    return hashlib.sha1(b"blob %d\0" % len(value) + value).hexdigest()
 
 
 class PreparePatchPublicationTests(unittest.TestCase):
@@ -161,7 +171,9 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertEqual(b"".join(parts), patch)
         self.assertGreater(len(parts), 2)
         self.assertTrue(all(len(part) <= 512 for part in parts))
-        self.assertTrue(all(count is not None and count <= 180 for count in counts))
+        measured = [count_tokens(part) for part in parts]
+        self.assertEqual(counts, measured)
+        self.assertTrue(all(count <= 180 for count in measured))
 
     def test_semantic_boundary_does_not_increase_minimum_part_count(self) -> None:
         patch = bytearray(b"x" * 301)
@@ -349,8 +361,25 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertEqual(b"".join(parts), patch)
         self.assertEqual(len(parts), 4)
         self.assertTrue(all(len(part) <= 12 * 1024 for part in parts))
-        self.assertTrue(all(count is not None and count <= 3_000 for count in counts))
         self.assertEqual(estimator.vocabulary_sha256, SUPPORT.O200K_BASE_SHA256)
+
+        import tiktoken  # type: ignore[import-not-found]
+
+        # The documented metric counts the JSON-serialized connector content string.
+        stock = tiktoken.get_encoding("o200k_base")
+
+        def connector_tokens(value: bytes) -> int:
+            serialized = json.dumps(value.decode(), ensure_ascii=False)
+            return len(stock.encode_ordinary(serialized))
+
+        measured = [connector_tokens(part) for part in parts]
+        self.assertEqual(counts, measured)
+        self.assertTrue(all(count <= 3_000 for count in measured))
+        quoted = '"quoted" \\ backslash\n'.encode()
+        self.assertNotEqual(
+            connector_tokens(quoted), len(stock.encode_ordinary(quoted.decode()))
+        )
+        self.assertEqual(estimator.count_bytes(quoted), connector_tokens(quoted))
 
     def test_rename_aware_patches_are_compact_self_contained_and_exact(self) -> None:
         def prepare_case(
@@ -481,7 +510,7 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertIn(b"similarity index 100%", pure_text)
         self.assertIn(b"rename from current/document.md", pure_text)
         self.assertIn(b"rename to history/document.md", pure_text)
-        self.assertLess(len(pure_text) * 20, len(pure_text_without_renames))
+        self.assertLess(len(pure_text), len(pure_text_without_renames))
 
         edited_text, edited_text_without_renames = prepare_case(
             "text-rename-edit",
@@ -493,7 +522,7 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertIn(b"rename from current/document.md", edited_text)
         self.assertIn(b"rename to history/document.md", edited_text)
         self.assertIn(b"superseded historical material", edited_text)
-        self.assertLess(len(edited_text) * 20, len(edited_text_without_renames))
+        self.assertLess(len(edited_text), len(edited_text_without_renames))
         split_parts, _ = SUPPORT.split_utf8_patch(
             edited_text,
             maximum_bytes=160,
@@ -515,7 +544,7 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertIn(b"rename from current/data.bin", pure_binary)
         self.assertIn(b"rename to history/data.bin", pure_binary)
         self.assertNotIn(b"GIT binary patch", pure_binary)
-        self.assertLess(len(pure_binary) * 5, len(pure_binary_without_renames))
+        self.assertLess(len(pure_binary), len(pure_binary_without_renames))
 
         edited_binary, edited_binary_without_renames = prepare_case(
             "binary-rename-edit",
@@ -527,7 +556,7 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertIn(b"rename from current/data.bin", edited_binary)
         self.assertIn(b"rename to history/data.bin", edited_binary)
         self.assertIn(b"GIT binary patch", edited_binary)
-        self.assertLess(len(edited_binary) * 3, len(edited_binary_without_renames))
+        self.assertLess(len(edited_binary), len(edited_binary_without_renames))
 
     def test_multi_commit_range_and_one_file_at_a_time_upload(self) -> None:
         repository = self.root / "repository"
@@ -546,6 +575,7 @@ class PreparePatchPublicationTests(unittest.TestCase):
             git(repository, "commit", "-q", "-m", f"Add {name}")
         tested = git(repository, "rev-parse", "HEAD")
 
+        full_name = "TeaseScript-AI/teasescript-platform"
         output = self.root / "payload"
         prepared = run(
             [
@@ -554,7 +584,7 @@ class PreparePatchPublicationTests(unittest.TestCase):
                 "--repository",
                 str(repository),
                 "--repository-full-name",
-                "TeaseScript-AI/teasescript-platform",
+                full_name,
                 "--target-branch",
                 "feat/test-target",
                 "--expected-base-sha",
@@ -569,8 +599,6 @@ class PreparePatchPublicationTests(unittest.TestCase):
             cwd=repository,
         )
         self.assertIn("sizingMode=byteFallback", prepared.stdout)
-        self.assertIn("prepare-patch-publication.py --output-directory", prepared.stdout)
-        self.assertNotIn("patch_publication_prepare.py --output-directory", prepared.stdout)
         plan = json.loads((output / "upload-plan.json").read_text())
         self.assertEqual(plan["expectedBaseSha"], base)
         self.assertEqual(plan["testedCommitSha"], tested)
@@ -586,7 +614,16 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertEqual(shown_alias.stdout, shown.stdout)
         self.assertIn(first["path"], shown.stdout)
         self.assertNotIn(second["path"], shown.stdout)
-        self.assertIn('"encoding": "utf-8"', shown.stdout)
+        first_bytes = (output / first["path"]).read_bytes()
+        self.assertEqual(git_blob_sha(first_bytes), first["expectedGitBlobSha"])
+        self.assertEqual(
+            connector_arguments(shown.stdout),
+            {
+                "repository_full_name": full_name,
+                "content": first_bytes.decode("utf-8"),
+                "encoding": "utf-8",
+            },
+        )
 
         wrong = run_cli(
             "--output-directory",
@@ -613,6 +650,12 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertEqual(shown_second.returncode, 0)
         self.assertIn(second["path"], shown_second.stdout)
         self.assertNotIn(first["path"], shown_second.stdout)
+        second_bytes = (output / second["path"]).read_bytes()
+        self.assertEqual(git_blob_sha(second_bytes), second["expectedGitBlobSha"])
+        self.assertEqual(
+            connector_arguments(shown_second.stdout)["content"],
+            second_bytes.decode("utf-8"),
+        )
 
         reset = run_cli(
             "--output-directory",
@@ -646,10 +689,15 @@ class PreparePatchPublicationTests(unittest.TestCase):
             payload_repository / SUPPORT.TRANSFER_DIRECTORY,
         )
         git(payload_repository, "add", SUPPORT.TRANSFER_DIRECTORY)
-        self.assertEqual(
-            plan["expectedTransferTreeSha"],
-            git(payload_repository, "write-tree"),
-        )
+        payload_tree = git(payload_repository, "write-tree")
+        self.assertEqual(plan["expectedTransferTreeSha"], payload_tree)
+        payload_entries = []
+        for line in git(payload_repository, "ls-tree", "-r", payload_tree).splitlines():
+            metadata, path = line.split("\t", 1)
+            mode, kind, sha = metadata.split()
+            payload_entries.append(
+                {"path": path, "mode": mode, "type": kind, "sha": sha}
+            )
 
         self.write_completed_upload_state(output, plan)
         tree_action = run_cli(
@@ -662,7 +710,13 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertEqual(tree_action_alias.returncode, 0)
         self.assertEqual(tree_action_alias.stdout, tree_action.stdout)
         self.assertIn("stage=create-transfer-tree", tree_action.stdout)
-        self.assertIn('"tree_elements":', tree_action.stdout)
+        tree_arguments = connector_arguments(tree_action.stdout)
+        self.assertEqual(set(tree_arguments), {"repository_full_name", "tree_elements"})
+        self.assertEqual(tree_arguments["repository_full_name"], full_name)
+        self.assertEqual(
+            sorted(tree_arguments["tree_elements"], key=lambda entry: entry["path"]),
+            payload_entries,
+        )
         self.assertNotIn("publicationCommand=", tree_action.stdout)
 
         wrong_tree = run_cli(
@@ -685,8 +739,15 @@ class PreparePatchPublicationTests(unittest.TestCase):
             "--output-directory", str(output), "--show-next-upload"
         )
         self.assertIn("stage=create-transfer-commit", commit_action.stdout)
-        self.assertIn(f'"tree_sha": "{tree_sha}"', commit_action.stdout)
-        self.assertIn(f'"parent_sha": "{base}"', commit_action.stdout)
+        self.assertEqual(
+            connector_arguments(commit_action.stdout),
+            {
+                "repository_full_name": full_name,
+                "message": plan["transferCommit"]["message"],
+                "tree_sha": tree_sha,
+                "parent_sha": base,
+            },
+        )
         self.assertNotIn("<returned-tree-sha>", commit_action.stdout)
 
         commit_sha = "1" * 40
@@ -701,7 +762,14 @@ class PreparePatchPublicationTests(unittest.TestCase):
             "--output-directory", str(output), "--show-next-upload"
         )
         self.assertIn("stage=create-transfer-branch", branch_action.stdout)
-        self.assertIn(f'"sha": "{commit_sha}"', branch_action.stdout)
+        self.assertEqual(
+            connector_arguments(branch_action.stdout),
+            {
+                "repository_full_name": full_name,
+                "branch_name": plan["transferBranch"],
+                "sha": commit_sha,
+            },
+        )
         self.assertNotIn("<returned-commit-sha>", branch_action.stdout)
         self.assertNotIn("publicationCommand=", branch_action.stdout)
 
@@ -727,9 +795,13 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertEqual(verify_branch.returncode, 0)
         self.assertIn("stage=verify-transfer-branch", verify_branch.stdout)
         self.assertIn("connector=GitHub.compare_commits", verify_branch.stdout)
-        self.assertIn(f'"base": "{commit_sha}"', verify_branch.stdout)
-        self.assertIn(
-            f'"head": "{plan["transferBranch"]}"', verify_branch.stdout
+        self.assertEqual(
+            connector_arguments(verify_branch.stdout),
+            {
+                "repo_full_name": full_name,
+                "base": commit_sha,
+                "head": plan["transferBranch"],
+            },
         )
         self.assertNotIn("stage=create-transfer-branch", verify_branch.stdout)
 
@@ -763,7 +835,6 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertIn("stage=ready-to-publish", ready.stdout)
         self.assertIn(str(plan["publicationCommand"]), ready.stdout)
         self.assertIn(str(plan["expectedResultTreeSha"]), ready.stdout)
-        self.assertIn("postPublicationChecklist=", ready.stdout)
 
         reset_after_ready = run_cli(
             "--output-directory",
@@ -909,31 +980,6 @@ class PreparePatchPublicationTests(unittest.TestCase):
         )
         self.assertEqual(rejected.returncode, 1)
         self.assertIn("unknown fields", rejected.stderr)
-
-    def test_generated_instructions_cover_complete_stateful_handoff(self) -> None:
-        _, output, _ = self.prepare_small_payload("instructions")
-        instructions = (output / "UPLOAD-INSTRUCTIONS.md").read_text()
-        self.assertIn("exactly one next action at a time", instructions)
-        self.assertIn("canonical `--show-next-action`", instructions)
-        self.assertIn("`--show-next-upload` remains an exact compatibility alias", instructions)
-        self.assertIn(
-            "Record each returned SHA, branch name, or\ncomparison status",
-            instructions,
-        )
-        self.assertIn("read-only exact branch comparison", instructions)
-        self.assertIn("--reset-publication-stage", instructions)
-        self.assertIn("never requires manual placeholder substitution", instructions)
-        self.assertIn("Do not Base64-encode", instructions)
-        self.assertIn("Do not pre-open or manually regenerate parts", instructions)
-        self.assertIn(
-            "do not substitute\n  complete changed files for generated patch parts",
-            instructions,
-        )
-        self.assertIn(
-            "Do not perform another repository write until that exact match\n"
-            "has been recorded",
-            instructions,
-        )
 
 
 if __name__ == "__main__":

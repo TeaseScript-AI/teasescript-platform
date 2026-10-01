@@ -236,16 +236,16 @@ class PrepareSourceReviewTests(unittest.TestCase):
 
     def test_missing_and_extra_payload_files(self) -> None:
         entries = self.valid_entries()
-        path = self.root / "shape.zip"
-        self.write_zip(
-            path,
-            [
-                ("manifest.json", entries["manifest.json"], None),
-                ("repository.bundle", entries["repository.bundle"], None),
-                ("extra.txt", b"extra", None),
-            ],
-        )
-        self.assert_failure(self.invoke(path), "unexpected artifact payload")
+        valid = [(name, value, None) for name, value in entries.items()]
+        cases = {
+            "missing": [entry for entry in valid if entry[0] != "SHA256SUMS"],
+            "extra": [*valid, ("extra.txt", b"extra", None)],
+        }
+        for name, values in cases.items():
+            with self.subTest(name):
+                path = self.root / f"shape-{name}.zip"
+                self.write_zip(path, values)
+                self.assert_failure(self.invoke(path), "unexpected artifact payload")
 
     def test_unsupported_zip_compression_is_compact_failure(self) -> None:
         path = self.root / "unsupported-compression.zip"
@@ -277,11 +277,8 @@ class PrepareSourceReviewTests(unittest.TestCase):
         self.assert_failure(completed, "head mismatch")
 
     def test_merge_base_absent_from_bundle_history(self) -> None:
-        completed = self.invoke(merge_base="2" * 40)
-        self.assert_failure(completed, "expected merge base is absent from bundle history")
-
-    def test_advanced_base_tip_uses_merge_base_from_compare(self) -> None:
-        advanced_tip = run(
+        # A real sibling tip of the base exists locally but is not in the bundle.
+        unbundled_sibling_tip = run(
             [
                 "git",
                 "commit-tree",
@@ -293,12 +290,17 @@ class PrepareSourceReviewTests(unittest.TestCase):
             ],
             cwd=self.repository,
         )
-        failed = self.invoke(merge_base=advanced_tip)
-        self.assert_failure(failed, "expected merge base is absent from bundle history")
-
-        output = self.root / "advanced-base-review"
-        completed = self.invoke(output=output, merge_base=self.base)
-        self.assertEqual(completed.returncode, 0, completed.stderr)
+        for name, merge_base in (
+            ("fabricated", "2" * 40),
+            ("unbundled-sibling-tip", unbundled_sibling_tip),
+        ):
+            with self.subTest(name):
+                completed = self.invoke(
+                    output=self.root / f"review-{name}", merge_base=merge_base
+                )
+                self.assert_failure(
+                    completed, "expected merge base is absent from bundle history"
+                )
 
     def test_unrelated_bundled_commit_is_not_accepted_as_merge_base(self) -> None:
         unrelated = run(
@@ -422,11 +424,16 @@ class PrepareSourceReviewTests(unittest.TestCase):
         self.assertNotIn("Traceback", completed.stderr)
 
     def test_failure_does_not_expose_output_or_leave_temporary_checkout(self) -> None:
+        # The tree mismatch is detected only after extraction, bundle verification and cloning.
+        path = self.root / "late-failure.zip"
+        manifest = dict(self.manifest)
+        manifest["treeSha"] = "3" * 40
+        self.write_valid_artifact(path, manifest=self.manifest_bytes(manifest))
         output = self.root / "atomic-review"
-        completed = self.invoke(output=output, digest="0" * 64)
-        self.assertEqual(completed.returncode, 1)
+        inventory = sorted(entry.name for entry in self.root.iterdir())
+        self.assert_failure(self.invoke(path, output=output), "cloned tree mismatch")
         self.assertFalse(output.exists())
-        self.assertEqual(list(self.root.glob(f".{output.name}.tmp-*")), [])
+        self.assertEqual(sorted(entry.name for entry in self.root.iterdir()), inventory)
 
     def test_dangling_symlink_output_is_rejected(self) -> None:
         output = self.root / "dangling-output"

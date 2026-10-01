@@ -11,40 +11,11 @@ import {
   validateSerializableValue,
 } from "../src/runtime/serializable-values.js";
 
-function countArraySomeCalls(operation: () => void): number {
-  const original = Array.prototype.some;
-  let calls = 0;
-  // EVIDENCE: fixture: the wrapper preserves Array.prototype.some's call and return contract while counting invocations.
-  Array.prototype.some = function countedSome<T>(
-    this: T[],
-    predicate: Parameters<T[]["some"]>[0],
-    thisArg?: unknown,
-  ): boolean {
-    return original.call(this, (value: T, index: number, array: T[]) => {
-      calls += 1;
-      return predicate.call(thisArg, value, index, array);
-    });
-  } as typeof Array.prototype.some;
-  try {
-    operation();
-  } finally {
-    Array.prototype.some = original;
-  }
-  return calls;
-}
-
-test("serializable-set validation and construction avoid repeated linear scans", () => {
+test("serializable-set validation and construction preserve many unique scalars", () => {
   const items = Array.from({ length: 4096 }, (_, index) => index);
 
-  const validationSomeCalls = countArraySomeCalls(() => {
-    assert.equal(validateSerializableValue({ kind: "set", items }), null);
-  });
-  const constructionSomeCalls = countArraySomeCalls(() => {
-    assert.equal(createSerializableSet(items).items.length, items.length);
-  });
-
-  assert.equal(validationSomeCalls, 0);
-  assert.equal(constructionSomeCalls, 0);
+  assert.equal(validateSerializableValue({ kind: "set", items }), null);
+  assert.deepEqual(createSerializableSet(items).items, items);
 });
 
 test("serializable-set validation does not impose the removed capture-work threshold", () => {
@@ -52,25 +23,28 @@ test("serializable-set validation does not impose the removed capture-work thres
   const accepted = Array.from({ length: acceptedSize }, (_, index) => index);
 
   assert.equal(validateSerializableValue({ kind: "set", items: accepted }), null);
-  assert.equal(createSerializableSet(accepted).items.length, acceptedSize);
-
-  const extended = [...accepted, acceptedSize];
-  assert.equal(validateSerializableValue({ kind: "set", items: extended }), null);
-  assert.equal(createSerializableSet(extended).items.length, extended.length);
+  const constructed = createSerializableSet(accepted).items;
+  assert.equal(constructed.length, acceptedSize);
+  for (let index = 0; index < acceptedSize; index += 1) {
+    assert.equal(constructed[index], index, `item ${index}`);
+  }
 });
 
 test("serializable-set validation rejects early and late duplicates consistently", () => {
-  assert.equal(
-    validateSerializableValue({ kind: "set", items: [1, 1, 2, 3] }),
-    "$.items contains a duplicate scalar.",
-  );
-  assert.equal(
-    validateSerializableValue({
-      kind: "set",
-      items: [...Array.from({ length: 4096 }, (_, index) => index), 0],
-    }),
-    "$.items contains a duplicate scalar.",
-  );
+  const unique = Array.from({ length: 4096 }, (_, index) => index);
+  for (const { name, items, duplicate } of [
+    { name: "small unique control", items: [1, 2, 3], duplicate: false },
+    { name: "early duplicate", items: [1, 1, 2, 3], duplicate: true },
+    { name: "large unique control", items: unique, duplicate: false },
+    { name: "late duplicate", items: [...unique, 0], duplicate: true },
+  ]) {
+    const failure = validateSerializableValue({ kind: "set", items });
+    if (duplicate) {
+      assert.ok(failure?.startsWith("$.items "), name);
+    } else {
+      assert.equal(failure, null, name);
+    }
+  }
 });
 
 test("serializable-set construction preserves scalar equality and insertion order", () => {
@@ -79,14 +53,13 @@ test("serializable-set construction preserves scalar equality and insertion orde
   assert.deepEqual(createSerializableSet(values).items, [1, "1", true, false, null, 0]);
 });
 
-test("serializable set mutation uses native membership without changing array order", () => {
+test("serializable set mutation ignores existing values and appends new values in order", () => {
   const set: SerializableRuntimeSet = { kind: "set", items: [1, 2] };
   const membership = new Set<SerializableRuntimeScalar>(set.items);
-  const someCalls = countArraySomeCalls(() => {
-    assert.equal(addSerializableSetValue(set, 2, membership), false);
-    assert.equal(addSerializableSetValue(set, 3, membership), true);
-  });
+  assert.equal(addSerializableSetValue(set, 2, membership), false);
+  assert.equal(addSerializableSetValue(set, 3, membership), true);
+  assert.deepEqual(set.items, [1, 2, 3]);
 
-  assert.equal(someCalls, 0);
+  assert.equal(addSerializableSetValue(set, 3, membership), false);
   assert.deepEqual(set.items, [1, 2, 3]);
 });

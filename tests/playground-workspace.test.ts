@@ -14,59 +14,75 @@ import {
   serializeWorkspaceCheckpoint,
   skipWorkspacePacing,
   submitWorkspaceComposer,
-  type WorkspaceControlResult,
 } from "../playground/workspace/controller.js";
-import { compileSource, type InstructionPlan, type RuntimeSnapshot } from "../src/index.js";
+import {
+  compileSource,
+  type InstructionPlan,
+  type InterpreterEvent,
+  type RuntimeSnapshot,
+} from "../src/index.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
 import { MAX_INTERACTION_STRING_UTF8_BYTES } from "../src/interaction-limits.js";
 
 test("workspace helper exposes production say pacing and returns JSON-safe data", () => {
+  const compiled = compileWorkspaceSource('say "Hello"');
+  assert.ok(compiled.plan);
   const result = executeWorkspaceSource('say "Hello"');
   assert.equal(result.status, "halted");
-  assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
+  assert.deepEqual(
+    result.events.map((event) => event.kind),
+    ["say", "actionRequested", "complete"],
+  );
   const [say, requested] = result.events;
   assert.equal(say?.kind === "say" ? say.text : null, "Hello");
-  assert.equal(requested?.kind, "actionRequested");
-  if (requested?.kind !== "actionRequested") return;
-  assert.equal(requested.action.kind, "chatPacingGate");
-  assert.ok(requested.action.deadlineMs > requested.action.createdAtMs, "smart pacing waits");
-  assert.deepEqual(result.snapshot?.backgroundActions, [requested.action]);
+  // Default `say` pacing is smart (not instant) and skippable unless a modifier or speaker says otherwise.
+  const pacing = requested?.kind === "actionRequested" ? requested.action : null;
+  assert.ok(pacing?.kind === "chatPacingGate");
+  assert.equal(pacing.skippable, true);
+  assert.ok(pacing.deadlineMs > pacing.createdAtMs);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
 });
 
 test("workspace helper reports parser and semantic diagnostics", () => {
   for (const source of ["let =", "missing = 1"]) {
-    const canonical = compileSource(source).diagnostics;
-    assert.ok(canonical.length > 0, source);
     const result = compileWorkspaceSource(source);
     assert.equal(result.status, "compileError", source);
-    assert.equal(result.plan, null, source);
-    assert.equal(result.snapshot, null, source);
+    assert.equal(result.plan, null);
+    assert.equal(result.snapshot, null);
+    // Workspace diagnostics are the canonical diagnostics with one-based line/column locations.
+    const canonical = compileSource(source).diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      line: diagnostic.span.start.line + 1,
+      column: diagnostic.span.start.column + 1,
+      length: diagnostic.span.end.offset - diagnostic.span.start.offset,
+    }));
+    assert.notEqual(canonical.length, 0, source);
     assert.deepEqual(
       result.diagnostics.map(({ code, line, column, length }) => ({ code, line, column, length })),
-      canonical.map((diagnostic) => ({
-        code: diagnostic.code,
-        line: diagnostic.span.start.line + 1,
-        column: diagnostic.span.start.column + 1,
-        length: diagnostic.span.end.offset - diagnostic.span.start.offset,
-      })),
-      source,
+      canonical,
     );
   }
 });
 
 test("workspace compilation reuses the compiler-validated plan", () => {
-  const small = 'say "Hello"';
-  const large = Array.from({ length: 100 }, () => small).join("\n");
-  for (const operation of [compileWorkspaceSource, executeWorkspaceSource]) {
-    const smallWork = validationWork(() => assert.ok(operation(small).plan));
-    const largeWork = validationWork(() => assert.ok(operation(large).plan));
-    assert.equal(largeWork("instructionPlanCaptureCalls"), 0, operation.name);
-    assert.equal(largeWork("runtimeSnapshotCaptureCalls"), 0, operation.name);
-    assert.equal(
-      largeWork("externalCaptureVisits"),
-      smallWork("externalCaptureVisits"),
-      `${operation.name} captures no plan-sized external data`,
+  const source = (statements: number) =>
+    Array.from({ length: statements }, () => 'say "Hello"').join("\n");
+  const compileWork = (statements: number) =>
+    captureWork(() => assert.ok(compileWorkspaceSource(source(statements)).plan));
+  const executeWork = (statements: number) =>
+    captureWork(() =>
+      assert.ok(
+        executeWorkspaceSource(source(statements)).events.some(({ kind }) => kind === "say"),
+      ),
     );
+
+  // Recapturing the plan or snapshot would add capture calls and grow visits with the plan size.
+  for (const work of [compileWork, executeWork]) {
+    const small = work(1);
+    const large = work(100);
+    assert.equal(small.planCaptures, 0);
+    assert.equal(small.snapshotCaptures, 0);
+    assert.deepEqual(large, small);
   }
 });
 
@@ -84,15 +100,13 @@ test("validated workspace execution clones state without hostile-data recapture"
   assert.ok(compiled.plan);
   assert.ok(compiled.snapshot);
   const before = JSON.stringify(compiled.snapshot);
-  const work = validationWork(() => {
+  const work = captureWork(() => {
     const result = executeValidatedWorkspaceSnapshot(compiled.plan!, compiled.snapshot!, "run");
     assert.equal(result.status, "halted");
   });
 
   assert.equal(JSON.stringify(compiled.snapshot), before);
-  assert.equal(work("instructionPlanCaptureCalls"), 0);
-  assert.equal(work("runtimeSnapshotCaptureCalls"), 0);
-  assert.equal(work("externalCaptureVisits"), 0);
+  assert.deepEqual(work, { planCaptures: 0, snapshotCaptures: 0, externalVisits: 0 });
 });
 
 test("workspace helper accepts source beyond the former local byte limit", () => {
@@ -121,36 +135,55 @@ test("workspace import decoding accepts large UTF-8 source and rejects malformed
 });
 
 test("workspace player controls delegate interaction families and preserve presentation", () => {
-  const text = waitingWorkspace('let answer = askText "Answer"\nsay answer, instant');
-  assert.equal(text.snapshot.foregroundAction?.kind, "interaction");
-  const before = JSON.stringify(text.snapshot);
-  const presentation = inspectWorkspacePlayerPresentation(text.snapshot);
+  const text = compileWorkspaceSource('let answer = askText "Answer"\nsay answer, instant');
+  assert.ok(text.plan && text.snapshot);
+  const waiting = executeValidatedWorkspaceSnapshot(text.plan, text.snapshot, "run");
+  assert.ok(waiting.snapshot);
+  const waitingSnapshot = waiting.snapshot;
+  assert.equal(waiting.status, "waiting");
+  assert.equal(waiting.snapshot.foregroundAction?.kind, "interaction");
+  const before = JSON.stringify(waiting.snapshot);
+  const presentation = inspectWorkspacePlayerPresentation(waitingSnapshot);
   const presentationBefore = JSON.stringify(presentation);
   assert.ok(presentation.activeInteraction);
   Reflect.set(presentation.activeInteraction, "actionId", -1);
-  assert.equal(JSON.stringify(text.snapshot), before);
+  Reflect.set(presentation.activeInteraction.ui, "kind", "edited");
+  assert.equal(JSON.stringify(waitingSnapshot), before);
   assert.equal(
-    JSON.stringify(inspectWorkspacePlayerPresentation(text.snapshot)),
+    JSON.stringify(inspectWorkspacePlayerPresentation(waitingSnapshot)),
     presentationBefore,
   );
-  assertDelivered(
-    text,
-    (plan, snapshot) => submitWorkspaceComposer(plan, snapshot, "hello"),
-    "hello",
-    "hello",
+  const completed = submitWorkspaceComposer(text.plan, waitingSnapshot, "hello");
+  assert.equal(completed.outcome.kind, "completed");
+  assert.equal(completed.events[0]?.kind, "playerTranscript");
+  assert.deepEqual(transcriptTexts(completed.events), ["hello"]);
+  assert.notEqual(JSON.stringify(completed.snapshot), before);
+  assert.equal(JSON.stringify(waitingSnapshot), before);
+  assert.deepEqual(resumedSayTexts(text.plan, completed.snapshot), ["hello"]);
+
+  const button = compileWorkspaceSource('showButton "Continue"');
+  assert.ok(button.plan && button.snapshot);
+  const buttonWaiting = executeValidatedWorkspaceSnapshot(button.plan, button.snapshot, "run");
+  assert.ok(buttonWaiting.snapshot);
+  const buttonDone = activateWorkspaceButton(button.plan, buttonWaiting.snapshot);
+  assert.equal(buttonDone.outcome.kind, "completed");
+
+  const choice = compileWorkspaceSource(
+    'let answer = choose first: "First", second: "Second"\nsay answer, instant',
   );
-  assertDelivered(
-    waitingWorkspace('showButton "Continue"\nsay "after", instant'),
-    activateWorkspaceButton,
-    "Continue",
-    "after",
-  );
-  assertDelivered(
-    waitingWorkspace('let answer = choose first: "First", second: "Second"\nsay answer, instant'),
-    (plan, snapshot) => selectWorkspaceChoice(plan, snapshot, { kind: "label", value: "second" }),
-    "Second",
-    "second",
-  );
+  assert.ok(choice.plan && choice.snapshot);
+  const choiceWaiting = executeValidatedWorkspaceSnapshot(choice.plan, choice.snapshot, "run");
+  assert.ok(choiceWaiting.snapshot);
+  const choiceBefore = JSON.stringify(choiceWaiting.snapshot);
+  const choiceDone = selectWorkspaceChoice(choice.plan, choiceWaiting.snapshot, {
+    kind: "label",
+    value: "second",
+  });
+  assert.equal(choiceDone.outcome.kind, "completed");
+  assert.equal(JSON.stringify(choiceWaiting.snapshot), choiceBefore);
+  // A labelled choice returns its label; the transcript shows the selected option's visible text.
+  assert.deepEqual(transcriptTexts(choiceDone.events), ["Second"]);
+  assert.deepEqual(resumedSayTexts(choice.plan, choiceDone.snapshot), ["second"]);
 });
 
 test("workspace pacing and checkpoint controls are explicit and restore without time mutation", () => {
@@ -159,28 +192,25 @@ test("workspace pacing and checkpoint controls are explicit and restore without 
   const running = executeValidatedWorkspaceSnapshot(compiled.plan, compiled.snapshot, "run");
   assert.ok(running.snapshot);
   const runningSnapshot = running.snapshot;
-  const gate = inspectWorkspacePlayerPresentation(runningSnapshot).pacingGate;
-  assert.ok(gate);
   const before = JSON.stringify(runningSnapshot);
-
+  const presentation = inspectWorkspacePlayerPresentation(runningSnapshot);
+  const gate = presentation.pacingGate;
+  assert.ok(gate);
+  const skipped = skipWorkspacePacing(compiled.plan, runningSnapshot);
+  assert.equal(skipped.outcome.kind, "completed");
+  assert.deepEqual(settledActionIds(skipped.events), [gate.actionId]);
+  assert.equal(skipped.presentation.pacingGate, null);
   const checkpoint = serializeWorkspaceCheckpoint(compiled.plan, runningSnapshot);
   const restored = restoreWorkspaceCheckpoint(checkpoint.outcome.json);
   assert.deepEqual(restored.outcome.plan, compiled.plan);
   assert.deepEqual(restored.snapshot, runningSnapshot);
-  assert.deepEqual(restored.presentation, inspectWorkspacePlayerPresentation(runningSnapshot));
-
-  const skipped = skipWorkspacePacing(compiled.plan, runningSnapshot);
-  assert.equal(skipped.outcome.kind, "completed");
-  assert.deepEqual(settlements(skipped), [{ actionId: gate.actionId, settlementKind: "skipped" }]);
-  assert.equal(skipped.presentation.pacingGate, null);
-  assert.equal(skipped.snapshot.currentSessionTimeMs, runningSnapshot.currentSessionTimeMs);
-
+  assert.deepEqual(restored.presentation, presentation);
+  assert.equal(JSON.stringify(runningSnapshot), before);
+  assert.ok(gate.deadlineMs <= 1_000_000);
   const observed = observeWorkspaceTime(compiled.plan, runningSnapshot, 1_000_000);
-  assert.deepEqual(observed.outcome, { kind: "observed", currentSessionTimeMs: 1_000_000 });
+  assert.equal(observed.outcome.kind, "observed");
   assert.equal(observed.snapshot.currentSessionTimeMs, 1_000_000);
-  assert.deepEqual(settlements(observed), [
-    { actionId: gate.actionId, settlementKind: "completed" },
-  ]);
+  assert.deepEqual(settledActionIds(observed.events), [gate.actionId]);
   assert.equal(observed.presentation.pacingGate, null);
   assert.equal(JSON.stringify(runningSnapshot), before);
 });
@@ -197,30 +227,39 @@ test("workspace control rejection clones unchanged state", () => {
 });
 
 test("workspace controls preserve number input and authored choice order", () => {
-  assertDelivered(
-    waitingWorkspace('let amount = askNumber "Amount"\nsay amount * 2, instant'),
-    (plan, snapshot) => submitWorkspaceComposer(plan, snapshot, " 12.5 "),
-    "12.5",
-    "25",
-  );
+  const number = compileWorkspaceSource('let amount = askNumber "Amount"\nsay amount, instant');
+  assert.ok(number.plan && number.snapshot);
+  const waiting = executeValidatedWorkspaceSnapshot(number.plan, number.snapshot, "run");
+  assert.ok(waiting.snapshot);
+  const before = JSON.stringify(waiting.snapshot);
+  const completed = submitWorkspaceComposer(number.plan, waiting.snapshot, " 12.5 ");
+  assert.equal(completed.outcome.kind, "completed");
+  assert.equal(JSON.stringify(waiting.snapshot), before);
+  // The transcript keeps the trimmed submitted text; the script receives the number 12.5.
+  assert.deepEqual(transcriptTexts(completed.events), ["12.5"]);
+  assert.deepEqual(resumedSayTexts(number.plan, completed.snapshot), ["12.5"]);
 
-  const choice = waitingWorkspace('let selected = choose "Alpha", "Beta"\nsay selected, instant');
-  const interaction = inspectWorkspacePlayerPresentation(choice.snapshot).activeInteraction;
-  assert.equal(interaction?.interactionKind, "choice");
-  assert.ok(interaction?.ui.kind === "choice");
+  const choice = compileWorkspaceSource(
+    'let selected = choose "Alpha", "Beta"\nsay selected, instant',
+  );
+  assert.ok(choice.plan && choice.snapshot);
+  const choiceWaiting = executeValidatedWorkspaceSnapshot(choice.plan, choice.snapshot, "run");
+  assert.ok(choiceWaiting.snapshot);
+  const choiceBefore = JSON.stringify(choiceWaiting.snapshot);
+  const ui = inspectWorkspacePlayerPresentation(choiceWaiting.snapshot).activeInteraction?.ui;
+  assert.equal(ui?.kind, "choice");
   assert.deepEqual(
-    interaction.ui.options.map(({ label, text }) => ({ label, text })),
-    [
-      { label: null, text: "Alpha" },
-      { label: null, text: "Beta" },
-    ],
+    ui.options.map((option) => option.text),
+    ["Alpha", "Beta"],
   );
-  assertDelivered(
-    choice,
-    (plan, snapshot) => selectWorkspaceChoice(plan, snapshot, { kind: "text", value: "Beta" }),
-    "Beta",
-    "Beta",
-  );
+  const selected = selectWorkspaceChoice(choice.plan, choiceWaiting.snapshot, {
+    kind: "text",
+    value: "Beta",
+  });
+  assert.equal(selected.outcome.kind, "completed");
+  assert.equal(JSON.stringify(choiceWaiting.snapshot), choiceBefore);
+  assert.deepEqual(transcriptTexts(selected.events), ["Beta"]);
+  assert.deepEqual(resumedSayTexts(choice.plan, selected.snapshot), ["Beta"]);
 });
 
 test("labelled composer text remains engine-owned and rejects ambiguous visible text", () => {
@@ -260,69 +299,56 @@ test("workspace controls preserve engine pacing and completion rejection outcome
   assert.deepEqual(duplicate.events, []);
   assert.deepEqual(duplicate.snapshot, completed.snapshot);
 
-  const text = waitingWorkspace("let answer = askText");
-  const textBefore = JSON.stringify(text.snapshot);
+  const text = compileWorkspaceSource("let answer = askText");
+  assert.ok(text.plan && text.snapshot);
+  const textWaiting = executeValidatedWorkspaceSnapshot(text.plan, text.snapshot, "run");
+  assert.ok(textWaiting.snapshot);
+  const textBefore = JSON.stringify(textWaiting.snapshot);
   const oversized = submitWorkspaceComposer(
     text.plan,
-    text.snapshot,
+    textWaiting.snapshot,
     "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES + 1),
   );
   assert.equal(oversized.outcome.kind, "invalidPayload");
   assert.deepEqual(oversized.events, []);
-  assert.deepEqual(oversized.snapshot, text.snapshot);
-  assert.equal(JSON.stringify(text.snapshot), textBefore);
+  assert.equal(
+    oversized.snapshot.foregroundAction?.actionId,
+    textWaiting.snapshot.foregroundAction?.actionId,
+  );
+  assert.equal(JSON.stringify(oversized.snapshot), textBefore);
+  assert.equal(JSON.stringify(textWaiting.snapshot), textBefore);
 });
 
-/** Returns a reader for validation work counters; an unrecorded counter means no work. */
-function validationWork(operation: () => void): (counter: string) => number {
+/** Counts capture work during `operation`; counters absent from the statistics count as zero. */
+function captureWork(operation: () => void): {
+  planCaptures: number;
+  snapshotCaptures: number;
+  externalVisits: number;
+} {
   const counts = withValidationTestStatistics((finish) => {
     operation();
     return finish();
   }).counts;
-  return (counter) => counts[counter] ?? 0;
+  return {
+    planCaptures: counts.instructionPlanCaptureCalls ?? 0,
+    snapshotCaptures: counts.runtimeSnapshotCaptureCalls ?? 0,
+    externalVisits: counts.externalCaptureVisits ?? 0,
+  };
 }
 
-interface WaitingWorkspace {
-  readonly plan: InstructionPlan;
-  readonly snapshot: RuntimeSnapshot;
+function transcriptTexts(events: readonly InterpreterEvent[]): string[] {
+  return events.flatMap((event) => (event.kind === "playerTranscript" ? [event.text] : []));
 }
 
-function waitingWorkspace(source: string): WaitingWorkspace {
-  const compiled = compileWorkspaceSource(source);
-  assert.ok(compiled.plan && compiled.snapshot, source);
-  const waiting = executeValidatedWorkspaceSnapshot(compiled.plan, compiled.snapshot, "run");
-  assert.equal(waiting.status, "waiting", source);
-  assert.ok(waiting.snapshot, source);
-  return { plan: compiled.plan, snapshot: waiting.snapshot };
-}
-
-/** Asserts the control leaves its input untouched and the script resumes with the delivered value. */
-function assertDelivered(
-  waiting: WaitingWorkspace,
-  control: (plan: InstructionPlan, snapshot: RuntimeSnapshot) => WorkspaceControlResult,
-  transcriptText: string,
-  resumedSay: string,
-): void {
-  const before = JSON.stringify(waiting.snapshot);
-  const completed = control(waiting.plan, waiting.snapshot);
-  assert.equal(completed.outcome.kind, "completed");
-  assert.deepEqual(
-    completed.events.flatMap((event) => (event.kind === "playerTranscript" ? [event.text] : [])),
-    [transcriptText],
+function settledActionIds(events: readonly InterpreterEvent[]): number[] {
+  return events.flatMap((event) =>
+    event.kind === "actionCompleted" ? [event.settlement.actionId] : [],
   );
-  const resumed = executeValidatedWorkspaceSnapshot(waiting.plan, completed.snapshot, "run");
-  assert.equal(resumed.status, "halted");
-  assert.deepEqual(
-    resumed.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
-    [resumedSay],
-  );
-  assert.equal(JSON.stringify(waiting.snapshot), before);
 }
 
-function settlements(result: WorkspaceControlResult) {
-  return result.events.flatMap((event) =>
-    event.kind === "actionCompleted"
-      ? [{ actionId: event.settlement.actionId, settlementKind: event.settlement.settlementKind }]
-      : [],
+/** Resumes through the workspace controller and returns the visible text of each emitted `say`. */
+function resumedSayTexts(plan: InstructionPlan, snapshot: RuntimeSnapshot): string[] {
+  return executeValidatedWorkspaceSnapshot(plan, snapshot, "run").events.flatMap((event) =>
+    event.kind === "say" ? [event.text] : [],
   );
 }

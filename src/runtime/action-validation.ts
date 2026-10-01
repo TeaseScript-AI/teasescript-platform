@@ -1,3 +1,5 @@
+import { isNormalizedOpaqueColor, normalizeOpaqueColor } from "../color.js";
+import { capturedChoicePresentation } from "./interaction-presentation.js";
 import { isOneOf } from "../plan/validation-support.js";
 import { isMessagePresentation } from "../message-presentation.js";
 import type { Instruction, InstructionPlan, InteractionUiPayload } from "../plan/model.js";
@@ -1063,7 +1065,7 @@ function validInteractionResultForInstruction(
       isPlainRecord(raw) &&
       raw.kind === "list" &&
       Array.isArray(raw.items) &&
-      raw.items.some((text) => text === result)
+      raw.items.some((value) => capturedChoicePresentation(value)?.text === result)
     );
   }
   return (
@@ -1223,7 +1225,13 @@ function preparedInteractionUiMatchesAction(
   )
     return false;
   if (prepared.kind === "button") {
-    return runtimeTemporaryValue(temporaries, prepared.buttonLabelTemporary) === actual.buttonLabel;
+    return (
+      runtimeTemporaryValue(temporaries, prepared.buttonLabelTemporary) === actual.buttonLabel &&
+      (prepared.backgroundTemporary === undefined
+        ? actual.background === undefined
+        : normalizeOpaqueColor(runtimeTemporaryValue(temporaries, prepared.backgroundTemporary)) ===
+          actual.background)
+    );
   }
   if (prepared.kind === "text" || prepared.kind === "number") {
     const hint =
@@ -1248,12 +1256,14 @@ function preparedInteractionUiMatchesAction(
     return false;
   const options = actual.options;
   const labels = prepared.labelType === "none" ? null : prepared.labels;
-  return raw.items.every((text, index) => {
+  return raw.items.every((value, index) => {
+    const presentation = capturedChoicePresentation(value);
     const option = options[index];
     return (
-      typeof text === "string" &&
+      presentation !== null &&
       isPlainRecord(option) &&
-      option.text === text &&
+      option.text === presentation.text &&
+      option.background === presentation.background &&
       option.label === (labels?.[index] ?? null)
     );
   });
@@ -1305,7 +1315,7 @@ function validInteractionUiShape(
     return false;
   const expectedUiKeys =
     kind === "button"
-      ? ["kind", "buttonLabel", "accessibleName"]
+      ? ["kind", "buttonLabel", "accessibleName", ...("background" in value ? ["background"] : [])]
       : kind === "text" || kind === "number"
         ? ["kind", "hint", "accessibleName"]
         : ["kind", "labelType", "options", "accessibleName"];
@@ -1352,7 +1362,11 @@ function validInteractionUiShape(
   )
     return false;
   if (kind === "button") {
-    return count(value.buttonLabel) && !measurementExhausted;
+    return (
+      count(value.buttonLabel) &&
+      !measurementExhausted &&
+      (!("background" in value) || isNormalizedOpaqueColor(value.background))
+    );
   }
   if (kind === "text" || kind === "number") {
     return (value.hint === null || count(value.hint)) && !measurementExhausted;
@@ -1367,9 +1381,13 @@ function validInteractionUiShape(
   const labels = new Set<string | number>();
   const texts = new Set<string>();
   for (const option of value.options) {
-    if (!isPlainRecord(option) || !hasExactKeys(option, ["text", "label"])) {
+    if (
+      !isPlainRecord(option) ||
+      !hasExactKeys(option, ["text", "label", ...("background" in option ? ["background"] : [])])
+    ) {
       return false;
     }
+    if ("background" in option && !isNormalizedOpaqueColor(option.background)) return false;
     const optionText = option.text;
     const textValid = count(optionText);
     if (!textValid && !measurementExhausted) return false;
@@ -1408,7 +1426,8 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
   if (expected.accessibleName.kind === "text") {
     if (actual.accessibleName.text !== expected.accessibleName.text) return false;
   } else if (actual.accessibleName.key !== expected.accessibleName.key) return false;
-  if (expected.kind === "button") return actual.buttonLabel === expected.buttonLabel;
+  if (expected.kind === "button")
+    return actual.buttonLabel === expected.buttonLabel && actual.background === expected.background;
   if (expected.kind === "text" || expected.kind === "number") return actual.hint === expected.hint;
   if (expected.kind !== "choice") return false;
   if (actual.labelType !== expected.labelType) return false;
@@ -1418,7 +1437,10 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
   return expected.options.every((option, index) => {
     const candidate = options[index];
     return (
-      isPlainRecord(candidate) && candidate.text === option.text && candidate.label === option.label
+      isPlainRecord(candidate) &&
+      candidate.text === option.text &&
+      candidate.label === option.label &&
+      candidate.background === option.background
     );
   });
 }
@@ -1703,9 +1725,14 @@ function preparedInteractionSettlementMatches(
     raw.items.length !== prepared.optionCount
   )
     return false;
-  return raw.items.some(
-    (text, index) => text === transcriptText && (labels?.[index] ?? text) === result,
-  );
+  return raw.items.some((value, index) => {
+    const presentation = capturedChoicePresentation(value);
+    return (
+      presentation !== null &&
+      presentation.text === transcriptText &&
+      (labels?.[index] ?? presentation.text) === result
+    );
+  });
 }
 
 function validInteractionSettlementOwner(

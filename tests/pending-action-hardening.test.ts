@@ -9,7 +9,7 @@ import {
   restoreCheckpoint,
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
-import { executeInstruction, run, stepToEvent } from "../src/runtime/engine.js";
+import { executeInstruction, run, RuntimeDataError, stepToEvent } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import type { RuntimeDelayActionSnapshot } from "../src/runtime/actions/model.js";
@@ -171,9 +171,7 @@ test("rejects an earlier delay settlement forged onto a terminal positive or zer
     );
     assert.throws(
       () => executeInstruction(compiled, forged),
-      (error: unknown) =>
-        error instanceof Error &&
-        error.message.includes("canonical settled terminal foreground transition"),
+      (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
       source,
     );
   }
@@ -278,12 +276,21 @@ test("#79 validates every settlement relationship and preserves valid replay", (
     assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)), checkpointError, name);
   }
 
+  // An independent baseline taken before the replay, so a mutated caller cannot hide changes.
+  const beforeReplay = structuredClone(active);
   const replay = completeAction(compiled, active, {
-    actionId: active.lastSettlement!.actionId,
+    actionId: beforeReplay.lastSettlement!.actionId,
     actionKind: "delay",
-    payload: { kind: "time", currentSessionTimeMs: active.currentSessionTimeMs },
+    payload: { kind: "time", currentSessionTimeMs: beforeReplay.currentSessionTimeMs },
   });
-  assert.equal(replay.outcome.kind, "alreadySettled");
+  assert.deepEqual(replay.outcome, {
+    kind: "alreadySettled",
+    settlement: beforeReplay.lastSettlement,
+  });
+  assert.deepEqual(replay.snapshot, beforeReplay);
+  assert.deepEqual(active, beforeReplay);
+  assert.deepEqual(replay.events, []);
+  assert.equal(replay.instructionsExecuted, 0);
 });
 
 test("#81 keeps representable fractional waits and rejects precision-losing deadlines before an action request", () => {
@@ -316,6 +323,24 @@ test("#81 keeps representable fractional waits and rejects precision-losing dead
       compiled,
       createFreshRuntimeSnapshot(compiled, { initialSessionTimeMs: start }),
     );
+    const failure = result.snapshot.failure;
+    assert.equal(result.snapshot.status, "failed", source);
+    assert.equal(failure?.code, "TSR050", source);
+    // The failure points at the authored duration operand after `wait `.
+    assert.deepEqual(
+      [failure?.span.start.offset, failure?.span.end.offset],
+      ["wait ".length, source.length],
+      source,
+    );
+    assert.deepEqual(
+      result.events.map((event) =>
+        event.kind === "runtimeFailure"
+          ? { kind: event.kind, code: event.code, span: event.span }
+          : { kind: event.kind },
+      ),
+      [{ kind: "runtimeFailure", code: "TSR050", span: failure?.span }],
+      source,
+    );
     assert.equal(result.snapshot.foregroundAction, null, source);
     assert.equal(result.snapshot.nextActionId, 1, source);
     assert.ok(!result.events.some((event) => event.kind === "actionRequested"), source);
@@ -343,7 +368,7 @@ test("#81 keeps representable fractional waits and rejects precision-losing dead
   assert.equal(observeTime(restored.plan, restored.snapshot, 2 ** 52).snapshot.status, "running");
 });
 
-test("#82 uses the wait keyword path and rejects forged ownership, missing wait temporaries, and hostile completion fields", () => {
+test("#82 uses the wait keyword path and rejects forged ownership, missing wait temporaries, and an arbitrary claimed kind at a delay", () => {
   assert.equal(compileSource("wait(1)").plan, null);
   assert.equal(compileSource("wait 1 - 2").plan, null);
   assert.equal(compileSource("wait (1 + 2)").diagnostics.length, 0);
@@ -375,24 +400,22 @@ test("#82 uses the wait keyword path and rejects forged ownership, missing wait 
 
   // EVIDENCE: fixture: Object.create(null) supplies the property dictionary used as a hostile completion request.
   const hostileKind = Object.create(null) as Record<string, unknown>;
-  assert.doesNotThrow(() =>
-    completeAction(temporaryWait.compiled, temporaryWait.snapshot, {
-      actionId: temporaryWait.snapshot.foregroundAction!.actionId,
-      actionKind: hostileKind,
-      payload: { kind: "time", currentSessionTimeMs: 1 },
-    }),
-  );
+  const callerBefore = structuredClone(temporaryWait.snapshot);
   const completion = completeAction(temporaryWait.compiled, temporaryWait.snapshot, {
     actionId: temporaryWait.snapshot.foregroundAction!.actionId,
     actionKind: hostileKind,
     payload: { kind: "time", currentSessionTimeMs: 1 },
   });
-  // A wait accepts no host completion at all, whatever the request claims.
+  // A delay accepts no host completion at all, whatever kind the request claims.
   assert.equal(completion.outcome.kind, "invalidPayload");
+  assert.deepEqual(completion.events, []);
+  assert.deepEqual(completion.snapshot, callerBefore);
+  assert.deepEqual(temporaryWait.snapshot, callerBefore);
 });
 
 test("#82 allocates the final safe action identity and then fails without reuse", () => {
-  const compiled = plan("wait 1 ms\nwait 1 ms\nexit");
+  const source = "wait 1 ms\nwait 1 ms\nexit";
+  const compiled = plan(source);
   const initial = createFreshRuntimeSnapshot(compiled);
   initial.nextActionId = Number.MAX_SAFE_INTEGER - 1;
   const first = run(compiled, initial);
@@ -400,6 +423,22 @@ test("#82 allocates the final safe action identity and then fails without reuse"
   assert.equal(first.snapshot.nextActionId, Number.MAX_SAFE_INTEGER);
   const settled = observeTime(compiled, first.snapshot, 1).snapshot;
   const second = executeInstruction(compiled, settled);
+  const failure = second.snapshot.failure;
+  const secondWait = source.indexOf("wait 1 ms", 1);
+  assert.equal(second.snapshot.status, "failed");
+  assert.equal(failure?.code, "TSR051");
+  assert.deepEqual(
+    [failure?.span.start.offset, failure?.span.end.offset],
+    [secondWait, secondWait + "wait 1 ms".length],
+  );
+  assert.deepEqual(
+    second.events.map((event) =>
+      event.kind === "runtimeFailure"
+        ? { kind: event.kind, code: event.code, span: event.span }
+        : { kind: event.kind },
+    ),
+    [{ kind: "runtimeFailure", code: "TSR051", span: failure?.span }],
+  );
   assert.equal(second.snapshot.foregroundAction, null);
   assert.equal(second.snapshot.nextActionId, Number.MAX_SAFE_INTEGER);
   assert.ok(!second.events.some((event) => event.kind === "actionRequested"));

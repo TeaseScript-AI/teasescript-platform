@@ -15,7 +15,10 @@ import {
   serializeCheckpoint,
   validateInstructionPlan,
   validateRuntimeSnapshot,
+  type ActionCompletionOutcome,
   type InstructionPlan,
+  type PendingActionOperationResult,
+  type RuntimeOperationResult,
   type RuntimeSnapshot,
 } from "../../src/index.js";
 import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
@@ -62,6 +65,14 @@ export interface PropertyDefinition {
   readonly id: string;
   readonly boundary: string;
   readonly prepare: (seed: number, index: number) => PreparedPropertyCase;
+}
+
+/** A seed-independent fixture that runs once rather than in generated campaign slots. */
+export interface FixedPropertyCheck {
+  readonly id: string;
+  readonly boundary: string;
+  readonly variant: string;
+  readonly execute: () => void;
 }
 
 export interface PropertyCampaignDependencies {
@@ -123,34 +134,10 @@ export function createPropertyDefinitions(
 
   return [
     ordinaryProperty(
-      "operation-closure",
-      "public runtime operation",
-      describeOperationClosure,
-      assertOperationClosure,
-    ),
-    ordinaryProperty(
-      "rejected-completion-is-atomic",
-      "completeAction",
-      describeRejectedCompletion,
-      assertRejectedCompletionIsAtomic,
-    ),
-    ordinaryProperty(
-      "checkpoint-roundtrip-and-resume",
-      "checkpoint/restore",
-      describeCheckpointRoundTrip,
-      assertCheckpointRoundTripAndResume,
-    ),
-    ordinaryProperty(
       "same-seed-is-deterministic",
       "compile/run",
       describeSameSeed,
       assertSameSeedIsDeterministic,
-    ),
-    ordinaryProperty(
-      "malformed-boundary-rejection",
-      "external/persistence validation",
-      describeMalformedBoundary,
-      assertMalformedBoundaryRejection,
     ),
     sourceProperty(
       "valid-source-pipeline",
@@ -166,6 +153,60 @@ export function createPropertyDefinitions(
       (scenario) => assertNearValidSourceDiagnostics(scenario, dependencies.compileSource),
     ),
   ];
+}
+
+/** Fixed operation, rejection, checkpoint and malformed-input fixtures consume no RNG. */
+export function createFixedPropertyChecks(): readonly FixedPropertyCheck[] {
+  return [
+    ...OPERATION_VARIANTS.map((variant) => ({
+      id: "operation-closure",
+      boundary: "public runtime operation",
+      variant,
+      execute: () => assertOperationClosure(variant),
+    })),
+    ...REJECTION_VARIANTS.map((variant) => ({
+      id: "rejected-completion-is-atomic",
+      boundary: "completeAction",
+      variant,
+      execute: () => assertRejectedCompletionIsAtomic(variant),
+    })),
+    {
+      id: "checkpoint-roundtrip-and-resume",
+      boundary: "checkpoint/restore",
+      variant: "wait-checkpoint-json-restore-resume",
+      execute: assertCheckpointRoundTripAndResume,
+    },
+    ...MALFORMED_VARIANTS.map((variant) => ({
+      id: "malformed-boundary-rejection",
+      boundary: "external/persistence validation",
+      variant,
+      execute: () => assertMalformedBoundaryRejection(variant),
+    })),
+  ];
+}
+
+/** Runs every fixed check once and returns how many ran; a failure names its check. */
+export function runFixedPropertyChecks(
+  checks: readonly FixedPropertyCheck[] = createFixedPropertyChecks(),
+): number {
+  for (const check of checks) {
+    try {
+      check.execute();
+    } catch (error) {
+      const causeText = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      throw new Error(
+        [
+          "Fixed property check failed.",
+          `property=${check.id}`,
+          `boundary=${check.boundary}`,
+          `variant=${check.variant}`,
+          `cause=${causeText}`,
+        ].join("\n"),
+        { cause: error },
+      );
+    }
+  }
+  return checks.length;
 }
 
 export function defaultPropertyCampaignConfig(): PropertyCampaignConfig {
@@ -264,7 +305,12 @@ export function createReplayCommand(
 
 export function runPropertyCli(argv: readonly string[]): number {
   try {
-    const result = runPropertyCampaign(parsePropertyCliArguments(argv));
+    const config = parsePropertyCliArguments(argv);
+    if (config.caseIndex === undefined) {
+      const checks = runFixedPropertyChecks();
+      process.stdout.write(`fixed property checks passed executed=${checks}\n`);
+    }
+    const result = runPropertyCampaign(config);
     process.stdout.write(
       `property campaign passed seed=${result.seed} runs=${result.runs} executed=${result.executed}\n`,
     );
@@ -338,10 +384,9 @@ function fallbackPropertyCaseResult(
   });
 }
 
-function assertOperationClosure(seed: number, index: number): void {
+function assertOperationClosure(variant: (typeof OPERATION_VARIANTS)[number]): void {
   const plan = compilePlan('showButton "Go"\nwait 1 ms\nexit');
-  const snapshot = createFreshRuntimeSnapshot(plan, { seed: caseSeed(seed, index) });
-  const variant = OPERATION_VARIANTS[index % OPERATION_VARIANTS.length]!;
+  const snapshot = createFreshRuntimeSnapshot(plan);
   const result = runOperationVariant(plan, snapshot, variant);
   assertValidSnapshot(plan, result.snapshot);
 }
@@ -350,38 +395,87 @@ function runOperationVariant(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   variant: (typeof OPERATION_VARIANTS)[number],
-) {
+): RuntimeOperationResult {
   switch (variant) {
     case "run":
-      return run(plan, snapshot);
-    case "executeInstruction":
-      return executeInstruction(plan, snapshot);
+      return assertButtonRequested(withUnchangedInput(snapshot, () => run(plan, snapshot)));
+    case "executeInstruction": {
+      const result = withUnchangedInput(snapshot, () => executeInstruction(plan, snapshot));
+      assert.equal(result.instructionsExecuted, 1);
+      return assertButtonRequested(result);
+    }
     case "observeTime": {
-      const waiting = run(plan, snapshot).snapshot;
-      return observeTime(plan, waiting, 1);
+      const waiting = assertButtonRequested(run(plan, snapshot)).snapshot;
+      const result = withUnchangedInput(waiting, () => observeTime(plan, waiting, 1));
+      // Nothing is due while the button waits, so scene time reaches the observed time.
+      assert.deepEqual(result.outcome, { kind: "observed", currentSessionTimeMs: 1 });
+      assert.equal(result.snapshot.observedSessionTimeMs, 1);
+      assert.equal(result.snapshot.currentSessionTimeMs, 1);
+      assert.deepEqual(result.snapshot.foregroundAction, waiting.foregroundAction);
+      assert.deepEqual(result.events, []);
+      return result;
     }
     case "completeAction": {
-      const waiting = run(plan, snapshot).snapshot;
-      return completeAction(plan, waiting, buttonCompletion(waiting));
+      const waiting = assertButtonRequested(run(plan, snapshot)).snapshot;
+      const request = buttonCompletion(waiting);
+      const result = withUnchangedInput(waiting, () => completeAction(plan, waiting, request));
+      assertButtonCompleted(result, waiting);
+      return result;
     }
   }
 }
 
-function describeOperationClosure(_seed: number, index: number): PropertyCaseContext {
-  const variant = OPERATION_VARIANTS[index % OPERATION_VARIANTS.length]!;
-  return { description: `operation=${variant} source=repository-authored` };
+function withUnchangedInput<T>(snapshot: RuntimeSnapshot, operation: () => T): T {
+  const before = structuredClone(snapshot);
+  const result = operation();
+  assert.deepEqual(snapshot, before);
+  return result;
 }
 
-function assertRejectedCompletionIsAtomic(seed: number, index: number): void {
-  const variant = REJECTION_VARIANTS[index % REJECTION_VARIANTS.length]!;
+/** The fixture's first instruction requests its button and then waits for it. */
+function assertButtonRequested<T extends RuntimeOperationResult>(result: T): T {
+  const action = result.snapshot.foregroundAction;
+  assert.equal(result.snapshot.status, "waiting");
+  assert.ok(action?.kind === "interaction" && action.interactionKind === "button");
+  assert.deepEqual(
+    result.events.map((event) => (event.kind === "actionRequested" ? event.action : event.kind)),
+    [action],
+  );
+  return result;
+}
+
+/** A valid activation settles exactly the waiting button and releases execution to its continuation. */
+function assertButtonCompleted(
+  result: PendingActionOperationResult<ActionCompletionOutcome>,
+  waiting: RuntimeSnapshot,
+): void {
+  const action = waiting.foregroundAction;
+  assert.ok(action?.kind === "interaction" && action.interactionKind === "button");
+  assert.equal(result.outcome.kind, "completed");
+  const { settlement } = result.outcome;
+  assert.equal(settlement.actionId, action.actionId);
+  assert.equal(settlement.actionKind, "interaction");
+  assert.equal(settlement.interactionKind, "button");
+  assert.equal(settlement.settlementKind, "completed");
+  assert.equal(settlement.owningInstruction, action.owningInstruction);
+  assert.equal(settlement.continuationInstruction, action.continuationInstruction);
+  assert.equal(settlement.requestEventSequence, action.requestEventSequence);
+  assert.deepEqual(result.snapshot.lastSettlement, settlement);
+  assert.equal(result.snapshot.foregroundAction, null);
+  assert.equal(result.snapshot.status, "running");
+  assert.equal(result.snapshot.nextInstruction, action.continuationInstruction);
+  const completed = result.events.at(-1);
+  assert.ok(completed?.kind === "actionCompleted");
+  assert.equal(completed.sequence, settlement.completionEventSequence);
+  assert.deepEqual(completed.settlement, settlement);
+}
+
+function assertRejectedCompletionIsAtomic(variant: (typeof REJECTION_VARIANTS)[number]): void {
   // Time reaches a wait only through observation; a button can be completed only once.
   const plan = compilePlan(
     variant === "time-completion" ? "wait 10 ms\nexit" : 'showButton "Go"\nexit',
   );
-  const waiting = run(
-    plan,
-    createFreshRuntimeSnapshot(plan, { seed: caseSeed(seed, index) }),
-  ).snapshot;
+  const waiting = run(plan, createFreshRuntimeSnapshot(plan)).snapshot;
   const waitingBefore = structuredClone(waiting);
   const request =
     variant === "time-completion"
@@ -391,28 +485,30 @@ function assertRejectedCompletionIsAtomic(seed: number, index: number): void {
           payload: { kind: "time", currentSessionTimeMs: 10 },
         }
       : buttonCompletion(waiting);
-  const input =
-    variant === "time-completion" ? waiting : completeAction(plan, waiting, request).snapshot;
+  const settled =
+    variant === "duplicate-settlement" ? completeAction(plan, waiting, request) : undefined;
+  if (settled !== undefined) {
+    assertButtonCompleted(settled, waiting);
+    assertValidSnapshot(plan, settled.snapshot);
+  }
+  const input = settled?.snapshot ?? waiting;
   const inputBefore = structuredClone(input);
   const result = completeAction(plan, input, request);
 
-  assert.ok(["invalidPayload", "alreadySettled"].includes(result.outcome.kind));
+  if (settled === undefined) {
+    assert.equal(result.outcome.kind, "invalidPayload");
+  } else {
+    // The duplicate reports the settlement its first completion recorded.
+    assert.deepEqual(result.outcome, { ...settled.outcome, kind: "alreadySettled" });
+  }
   assert.deepEqual(result.snapshot, inputBefore);
   assert.deepEqual(result.events, []);
   assert.deepEqual(waiting, waitingBefore);
 }
 
-function describeRejectedCompletion(_seed: number, index: number): PropertyCaseContext {
-  const variant = REJECTION_VARIANTS[index % REJECTION_VARIANTS.length]!;
-  return { description: `rejected-completion=${variant} source=repository-authored` };
-}
-
-function assertCheckpointRoundTripAndResume(seed: number, index: number): void {
+function assertCheckpointRoundTripAndResume(): void {
   const plan = compilePlan('wait 1 ms\nsay "done"\nexit');
-  const waiting = run(
-    plan,
-    createFreshRuntimeSnapshot(plan, { seed: caseSeed(seed, index) }),
-  ).snapshot;
+  const waiting = run(plan, createFreshRuntimeSnapshot(plan)).snapshot;
   const checkpoint = createCheckpoint(plan, waiting);
   const restored = deserializeCheckpoint(serializeCheckpoint(checkpoint));
 
@@ -429,10 +525,6 @@ function assertCheckpointRoundTripAndResume(seed: number, index: number): void {
   );
 }
 
-function describeCheckpointRoundTrip(): PropertyCaseContext {
-  return { description: "wait-checkpoint-json-restore-resume source=repository-authored" };
-}
-
 function assertSameSeedIsDeterministic(seed: number, index: number): void {
   const plan = compilePlan('let value = randomInteger(1..=100)\nsay "\${value}"\nexit');
   const runtimeSeed = caseSeed(seed, index);
@@ -447,10 +539,9 @@ function describeSameSeed(): PropertyCaseContext {
   return { description: "randomInteger same-source same-seed source=repository-authored" };
 }
 
-function assertMalformedBoundaryRejection(seed: number, index: number): void {
+function assertMalformedBoundaryRejection(variant: (typeof MALFORMED_VARIANTS)[number]): void {
   const plan = compilePlan("exit");
-  const snapshot = createFreshRuntimeSnapshot(plan, { seed: caseSeed(seed, index) });
-  const variant = MALFORMED_VARIANTS[(seed + index) % MALFORMED_VARIANTS.length]!;
+  const snapshot = createFreshRuntimeSnapshot(plan);
 
   switch (variant) {
     case "plan":
@@ -463,11 +554,6 @@ function assertMalformedBoundaryRejection(seed: number, index: number): void {
       assert.throws(() => restoreCheckpoint({}), CheckpointError);
       break;
   }
-}
-
-function describeMalformedBoundary(seed: number, index: number): PropertyCaseContext {
-  const variant = MALFORMED_VARIANTS[(seed + index) % MALFORMED_VARIANTS.length]!;
-  return { description: `malformed=${variant} fixture=deliberately-mutated-external-data` };
 }
 
 function assertValidSourcePipeline(
@@ -574,7 +660,8 @@ function buttonCompletion(snapshot: RuntimeSnapshot): {
 }
 
 function assertValidSnapshot(plan: InstructionPlan, snapshot: RuntimeSnapshot): void {
-  assert.equal(validateRuntimeSnapshot(snapshot, plan).valid, true);
+  const validation = validateRuntimeSnapshot(snapshot, plan);
+  assert.equal(validation.valid, true, validation.errors.join("\n"));
 }
 
 function validateConfig(config: PropertyCampaignConfig): void {

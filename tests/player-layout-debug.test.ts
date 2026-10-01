@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import test from "node:test";
 
 import {
@@ -9,6 +11,7 @@ import {
   buildDiagnosticCardLines,
   captureRect,
   captureScrollMetrics,
+  LAYOUT_DEBUG_SELECTORS,
   parseGridTracks,
   type LayoutDebugSnapshot,
 } from "../player/vue/src/devtools/layoutDebugMeasurement.js";
@@ -26,8 +29,8 @@ test("Layout Debug options retain individual layers while the master is toggled"
   assert.equal(defaults.grid, true);
 });
 
-test("Layout Debug pure measurement helpers preserve rectangles, overflow, and grid tracks", () => {
-  const rect = {
+test("Layout Debug measurement helpers preserve rectangle fields, overflow, and grid tracks", () => {
+  const geometry = {
     x: 10.25,
     y: 20.5,
     width: 320.75,
@@ -37,7 +40,7 @@ test("Layout Debug pure measurement helpers preserve rectangles, overflow, and g
     bottom: 200.75,
     left: 10.25,
   };
-  assert.deepEqual(captureRect(rect), rect);
+  assert.deepEqual(captureRect(geometry), geometry);
 
   assert.deepEqual(
     captureScrollMetrics({
@@ -146,4 +149,33 @@ test("Layout Debug card is screenshot-focused and excludes noisy composer and co
   assert.match(card, /composer focus yes/u);
   assert.match(card, /tool-body-1 scroll/u);
   assert.doesNotMatch(card, /secure|placeholder|composer value|secret draft/iu);
+});
+
+test("Layout Debug uses the rendered Vue tool-body contract and declarative overlay ownership", async () => {
+  assert.equal(LAYOUT_DEBUG_SELECTORS.toolBodies, ".tool-column-body");
+  assert.equal(LAYOUT_DEBUG_SELECTORS.toolColumn, ".tool-column");
+  assert.equal(LAYOUT_DEBUG_SELECTORS.rightTimerList, "#rightZone .timer-list");
+  assert.equal(LAYOUT_DEBUG_SELECTORS.rightActions, "#rightZone .action-scroll");
+  assert.doesNotMatch(JSON.stringify(LAYOUT_DEBUG_SELECTORS), /"\.tool-body"/u);
+
+  const root = process.cwd();
+  const [measurement, overlay, lifecycle] = await Promise.all([
+    readFile(resolve(root, "player/vue/src/devtools/layoutDebugMeasurement.ts"), "utf8"),
+    readFile(resolve(root, "player/vue/src/devtools/PlayerLayoutDebugOverlay.vue"), "utf8"),
+    readFile(resolve(root, "player/vue/src/devtools/usePlayerLayoutDebug.ts"), "utf8"),
+  ]);
+  assert.match(measurement, /querySelectorAll<HTMLElement>\(LAYOUT_DEBUG_SELECTORS\.toolBodies\)/u);
+  assert.match(measurement, /"right-timer-list"/u);
+  assert.match(measurement, /"right-actions"/u);
+  assert.match(overlay, /current\.regions\.transcript\?\.width/u);
+  assert.match(overlay, /regions\.toolColumn\?\.width/u);
+  assert.match(overlay, /regions\.input\?\.height/u);
+  assert.match(overlay, /constraints\.toolColumnWidth/u);
+  assert.match(overlay, /constraints\.rightRailWidth/u);
+  assert.doesNotMatch(measurement, /\.tool-body["']/u);
+  assert.doesNotMatch(overlay, /appendChild|append\(|replaceChildren|innerHTML/u);
+  assert.match(overlay, /pointer-events:\s*none/u);
+  assert.match(lifecycle, /resizeObserver\?\.disconnect\(\)/u);
+  assert.match(lifecycle, /mutationObserver\?\.disconnect\(\)/u);
+  assert.match(lifecycle, /cancelAnimationFrame/u);
 });

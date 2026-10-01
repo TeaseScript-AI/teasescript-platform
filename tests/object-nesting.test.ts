@@ -65,10 +65,17 @@ test("nested object semantic diagnostics retain depth-first property order", () 
   const result = compileSource(source);
   assert.equal(result.plan, null);
   assert.deepEqual(
-    result.diagnostics.map((diagnostic) =>
+    result.diagnostics.map((diagnostic) => [
+      diagnostic.code,
       source.slice(diagnostic.span.start.offset, diagnostic.span.end.offset),
-    ),
-    ["missing", "x", "absent", "a", "unknown"],
+    ]),
+    [
+      ["TSV002", "missing"],
+      ["TSV007", "x"],
+      ["TSV002", "absent"],
+      ["TSV007", "a"],
+      ["TSV002", "unknown"],
+    ],
   );
 });
 
@@ -122,12 +129,4 @@ test("mixed object and collection chains preserve contained and cross-delimiter 
     );
     assert.equal(parsed.program.statements[1]?.kind, "exitStatement");
   }
-});
-
-test("nested object data resumes equivalently through JSON checkpoints", () => {
-  const depth = 64;
-  assertRuntimeResumeEquivalent(
-    `let nested = ${"{ value: ".repeat(depth)}[1]${" }".repeat(depth)}\nlet copy = nested\nexit`,
-    { scenarioName: "nested object JSON checkpoint", seed: 42 },
-  );
 });

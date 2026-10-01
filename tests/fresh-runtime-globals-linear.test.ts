@@ -7,7 +7,7 @@ import {
   type SerializableRuntimeValue,
 } from "../src/index.js";
 
-test("fresh global initialization does not rescan previously constructed bindings", () => {
+test("fresh global initialization binds every external global in order", () => {
   const compiled = compileSource("exit");
   assert.deepEqual(compiled.diagnostics, []);
   assert.notEqual(compiled.plan, null);
@@ -18,35 +18,33 @@ test("fresh global initialization does not rescan previously constructed binding
     globals[`global${index}`] = index;
   }
 
-  const originalSome = Array.prototype.some;
-  let bindingComparisons = 0;
-  Array.prototype.some = function <T>(
-    this: T[],
-    predicate: Parameters<T[]["some"]>[0],
-    thisArg?: unknown,
-  ): boolean {
-    return originalSome.call(this, (value: T, index: number, array: T[]) => {
-      if (
-        value !== null &&
-        typeof value === "object" &&
-        Object.hasOwn(value, "name") &&
-        Object.hasOwn(value, "value")
-      ) {
-        bindingComparisons += 1;
-      }
-      return predicate.call(thisArg, value, index, array);
-    });
+  const snapshot = createFreshRuntimeSnapshot(compiled.plan!, { globals });
+  assert.deepEqual(
+    snapshot.frames[0]?.bindings,
+    Array.from({ length: count }, (_, index) => ({ name: `global${index}`, value: index })),
+  );
+});
+
+test("fresh global initialization preserves imported value kinds in binding order", () => {
+  const compiled = compileSource("exit");
+  assert.notEqual(compiled.plan, null);
+  const globals: Record<string, SerializableRuntimeValue> = {
+    title: "Session",
+    count: 3,
+    enabled: false,
+    missing: null,
+    tags: { kind: "list", items: ["a", 1] },
+    profile: { kind: "object", properties: [{ name: "level", value: 2 }] },
   };
-  try {
-    const snapshot = createFreshRuntimeSnapshot(compiled.plan!, { globals });
-    assert.equal(snapshot.frames[0]?.bindings.length, count);
-    assert.deepEqual(
-      snapshot.frames[0]?.bindings.slice(0, 3).map((binding) => binding.name),
-      ["global0", "global1", "global2"],
-    );
-    assert.equal(snapshot.frames[0]?.bindings.at(-1)?.name, `global${count - 1}`);
-  } finally {
-    Array.prototype.some = originalSome;
-  }
-  assert.equal(bindingComparisons, 0);
+
+  const snapshot = createFreshRuntimeSnapshot(compiled.plan!, { globals });
+
+  assert.deepEqual(snapshot.frames[0]?.bindings, [
+    { name: "title", value: "Session" },
+    { name: "count", value: 3 },
+    { name: "enabled", value: false },
+    { name: "missing", value: null },
+    { name: "tags", value: { kind: "list", items: ["a", 1] } },
+    { name: "profile", value: { kind: "object", properties: [{ name: "level", value: 2 }] } },
+  ]);
 });

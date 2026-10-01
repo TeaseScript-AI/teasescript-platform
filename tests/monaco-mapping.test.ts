@@ -15,7 +15,6 @@ import {
   toMonacoSignatureHelp,
   toMonacoTextEdits,
 } from "../src/editor/monaco-mapping.js";
-import type { LanguageCompletionKind } from "../src/language-tooling.js";
 
 test("Monaco mapping preserves canonical multiline half-open ranges exactly", () => {
   assert.deepEqual(toMonacoPosition(createSourcePosition(2, 1, 8)), { lineNumber: 2, column: 9 });
@@ -50,68 +49,54 @@ test("Monaco markers retain canonical diagnostic code, severity, and range", () 
 });
 
 test("Monaco providers receive presentation-only completion, hover, and signature shapes", () => {
-  const suppliedRange = { startLineNumber: 7, startColumn: 3, endLineNumber: 7, endColumn: 3 };
+  const sourceRange = createSourceSpan(
+    createSourcePosition(4, 1, 2),
+    createSourcePosition(9, 2, 3),
+  );
+  const range = { startLineNumber: 2, startColumn: 3, endLineNumber: 3, endColumn: 4 };
   assert.deepEqual(
     toMonacoCompletions(
-      [{ label: "label-a", kind: "command", detail: "detail-a", insertText: "insert-a" }],
-      suppliedRange,
+      [{ label: "label-a", kind: "command", detail: "detail-b", insertText: "insert-c" }],
+      range,
       { Keyword: 1, Function: 2, Variable: 3, Value: 4 },
     ),
-    [
-      {
-        label: "label-a",
-        kind: 2,
-        detail: "detail-a",
-        insertText: "insert-a",
-        range: suppliedRange,
-      },
-    ],
+    [{ label: "label-a", kind: 2, detail: "detail-b", insertText: "insert-c", range }],
   );
-  const hoverRange = createSourceSpan(
-    createSourcePosition(4, 0, 4),
-    createSourcePosition(13, 1, 2),
-  );
-  assert.deepEqual(toMonacoHover({ range: hoverRange, contents: ["one", "two"] }), {
-    range: { startLineNumber: 1, startColumn: 5, endLineNumber: 2, endColumn: 3 },
+  assert.deepEqual(toMonacoHover({ range: sourceRange, contents: ["one", "two"] }), {
+    range,
     contents: [{ value: "one" }, { value: "two" }],
   });
-  assert.deepEqual(
-    toMonacoSignatureHelp({
-      label: "signature-label",
-      documentation: "signature-documentation",
-      activeParameter: 1,
-      parameters: ["first-slot", "second-slot"],
-    }).value,
-    {
-      signatures: [
-        {
-          label: "signature-label",
-          documentation: "signature-documentation",
-          parameters: [{ label: "first-slot" }, { label: "second-slot" }],
-        },
-      ],
-      activeSignature: 0,
-      activeParameter: 1,
-    },
-  );
-});
-
-test("Monaco completion kinds map every canonical kind to the supplied enum", () => {
-  const kinds = { Keyword: 17, Function: 1, Variable: 4, Value: 13 };
-  const table: readonly (readonly [LanguageCompletionKind, number])[] = [
-    ["command", kinds.Function],
+  const kinds = { Keyword: 11, Function: 12, Variable: 13, Value: 14 };
+  const kindRows = [
     ["keyword", kinds.Keyword],
     ["modifier", kinds.Keyword],
+    ["command", kinds.Function],
     ["speaker", kinds.Variable],
     ["value", kinds.Value],
-  ];
-  const range = { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 };
+  ] as const;
   assert.deepEqual(
     toMonacoCompletions(
-      table.map(([kind]) => ({ label: kind, kind, detail: kind, insertText: kind })),
+      kindRows.map(([kind]) => ({ label: kind, kind, detail: "", insertText: kind })),
       range,
       kinds,
-    ).map((item) => item.kind),
-    table.map(([, monacoKind]) => monacoKind),
+    ).map((item) => [item.label, item.kind]),
+    kindRows,
   );
+  const signature = toMonacoSignatureHelp({
+    label: "signature-label",
+    documentation: "signature-docs",
+    activeParameter: 1,
+    parameters: ["first-slot", "second-slot"],
+  });
+  assert.deepEqual(signature.value, {
+    signatures: [
+      {
+        label: "signature-label",
+        documentation: "signature-docs",
+        parameters: [{ label: "first-slot" }, { label: "second-slot" }],
+      },
+    ],
+    activeSignature: 0,
+    activeParameter: 1,
+  });
 });

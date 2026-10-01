@@ -37,7 +37,9 @@ test("parses one string AST family at both nesting levels", () => {
   const statement = result.program.statements[0];
   assert.deepEqual(result.diagnostics, []);
   assert.equal(statement?.kind, "sayStatement");
-  if (statement?.kind !== "sayStatement" || statement.value.kind !== "stringLiteral") return;
+  if (statement?.kind !== "sayStatement") return;
+  assert.equal(statement.value.kind, "stringLiteral");
+  if (statement.value.kind !== "stringLiteral") return;
   assert.equal(statement.value.form, "singleLine");
   const outerInterpolation = statement.value.parts[1];
   assert.equal(outerInterpolation?.kind, "stringInterpolation");
@@ -64,7 +66,9 @@ test("supports a nested multiline block inside an outer block", () => {
   assert.deepEqual(parsed.diagnostics, []);
   const statement = parsed.program.statements[0];
   assert.equal(statement?.kind, "sayStatement");
-  if (statement?.kind !== "sayStatement" || statement.value.kind !== "stringLiteral") return;
+  if (statement?.kind !== "sayStatement") return;
+  assert.equal(statement.value.kind, "stringLiteral");
+  if (statement.value.kind !== "stringLiteral") return;
   assert.equal(statement.value.form, "block");
   const interpolation = statement.value.parts[1];
   assert.equal(interpolation?.kind, "stringInterpolation");

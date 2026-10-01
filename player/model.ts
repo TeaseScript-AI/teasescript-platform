@@ -41,8 +41,12 @@ export interface PlayerTimerPresentation {
 export interface PlayerSpeakerPresentation {
   readonly name: string;
   readonly accent: string;
+  /** Letter glyph shown when no authored avatar image is available or it fails to load. */
   readonly avatar: string;
+  /** Authored speaker `avatar` image reference. */
+  readonly avatarImage?: string;
   readonly fontFamily: string;
+  readonly identityId?: string;
 }
 
 export interface PlayerMessagePresentation {
@@ -52,6 +56,8 @@ export interface PlayerMessagePresentation {
   readonly text: string;
   /** Present only for authored runtime output; player-authored entries remain plain text. */
   readonly content?: MessageMarkup;
+  /** Completed choice/button, distinct from a free-text or numeric response. */
+  readonly responseKind?: "choice" | "button";
   readonly presentation?: MessagePresentation;
 }
 

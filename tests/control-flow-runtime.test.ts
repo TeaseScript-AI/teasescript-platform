@@ -4,7 +4,7 @@ import test from "node:test";
 import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
-import { CheckpointError, createCheckpoint, restoreCheckpoint } from "../src/runtime/checkpoint.js";
+import { createCheckpoint, restoreCheckpoint } from "../src/runtime/checkpoint.js";
 import { run, stepToEvent } from "../src/runtime/engine.js";
 import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
@@ -78,21 +78,39 @@ test("uses one deterministic RNG for random, chance, and randomInteger", () => {
 });
 
 test("invalid random built-in arguments fail with source-associated errors", () => {
-  for (const source of [
-    "say chance(101)",
-    "say randomInteger(1.5..=3)",
-    "say randomInteger(3..3)",
-  ]) {
-    const compiled = compileSource(source);
-    if (compiled.plan === null) {
-      assert.ok(compiled.diagnostics.length > 0);
-      continue;
-    }
-    const result = run(compiled.plan, createImmediatePacingRuntimeSnapshot(compiled.plan));
-    assert.equal(result.snapshot.status, "failed");
-    assert.equal(result.events.at(-1)?.kind, "runtimeFailure");
-    assert.ok(result.snapshot.failure?.span.start.offset !== undefined);
+  for (const [source, call] of [
+    ["say chance(101)", "chance(101)"],
+    // A fractional bound held in a variable reaches the runtime; a literal one is rejected statically below.
+    ["let low = 1.5\nsay randomInteger(low..=3)", "randomInteger(low..=3)"],
+    ["say randomInteger(3..3)", "randomInteger(3..3)"],
+  ] as const) {
+    const compiled = plan(source);
+    const result = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
+    const start = source.indexOf(call);
+    assert.equal(result.snapshot.status, "failed", source);
+    assert.equal(result.events.at(-1)?.kind, "runtimeFailure", source);
+    assert.equal(result.snapshot.failure?.code, "TSR012", source);
+    assert.deepEqual(
+      [result.snapshot.failure.span.start.offset, result.snapshot.failure.span.end.offset],
+      [start, start + call.length],
+      source,
+    );
   }
+
+  const staticSource = "say randomInteger(1.5..=3)";
+  const staticRange = "1.5..=3";
+  const rejected = compileSource(staticSource);
+  assert.equal(rejected.plan, null);
+  assert.deepEqual(
+    rejected.diagnostics.map(({ code, span }) => [code, span.start.offset, span.end.offset]),
+    [
+      [
+        "TSV010",
+        staticSource.indexOf(staticRange),
+        staticSource.indexOf(staticRange) + staticRange.length,
+      ],
+    ],
+  );
 });
 
 test("instruction budget stops an infinite while loop", () => {
@@ -140,7 +158,7 @@ test("runtime instruction budgets use the positive safe-integer domain", () => {
         { instructionBudget: maximum + 1 },
       ),
   ]) {
-    assert.throws(operation, /positive safe integer/);
+    assert.throws(operation, RangeError);
   }
 });
 
@@ -264,14 +282,7 @@ test("checkpoint restore accepts range loop-position length and rejects length +
     // completed range position one step beyond the runtime-produced boundary.
     const beyondEnd = structuredClone(checkpoint);
     beyondEnd.snapshot.loopFrames[0]!.position = values.length + 1;
-    assert.throws(
-      () => restoreCheckpoint(beyondEnd),
-      (error: unknown) =>
-        error instanceof CheckpointError &&
-        error.info.code === "TSK002" &&
-        error.info.message === "Runtime for-loop iterator state is malformed.",
-      name,
-    );
+    assertCheckpointRejected(beyondEnd, "TSK002");
   }
 });
 

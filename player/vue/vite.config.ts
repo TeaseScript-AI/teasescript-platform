@@ -10,7 +10,7 @@ export default defineConfig({
     cssMinify: false,
     emptyOutDir: true,
     outDir: fileURLToPath(new URL("../../dist/player-app", import.meta.url)),
-    sourcemap: true,
+    sourcemap: process.env.BUILD_SOURCEMAPS !== "0",
   },
   plugins: [tailwindcss(), vue()],
   publicDir: false,
