@@ -1583,6 +1583,7 @@ test("a control at the end of a pass leaves pending start cues at the start unti
     session.load(1, 100).at(50, [1, 50]);
     const media = session.media(1)!;
     assert.equal(media.positionMs, 1.1, control);
+    if (control === "m.pause()") assert.equal(media.startCuesPending, true, control);
     assert.equal(validateRuntimeSnapshot(session.snapshot, session.plan).valid, true, control);
   }
 });
