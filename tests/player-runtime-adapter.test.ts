@@ -5,7 +5,14 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { deserializeCheckpoint } from "../src/index.js";
+import {
+  compileSource,
+  createFreshRuntimeSnapshot,
+  run,
+  createCheckpoint,
+  serializeCheckpoint,
+  deserializeCheckpoint,
+} from "../src/index.js";
 
 import {
   activatePlayerRuntimeButton,
@@ -48,6 +55,25 @@ showButton "Continue"
   assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
 });
 
+test("speaker identity remains stable when authored presentation changes", () => {
+  const session = createPlayerRuntimeSession(`
+speaker guide { displayName: "Guide" }
+say as guide "First", instant
+guide.displayName = "Captain"
+say as guide "Second", instant
+exit
+`);
+  const entries = session.transcriptEntries;
+  const first = entries[0];
+  const second = entries[1];
+  if (first?.kind !== "message" || second?.kind !== "message") {
+    throw new Error("Expected two runtime messages.");
+  }
+  assert.notEqual(first.speakerId, second.speakerId);
+  assert.equal(session.speakers[first.speakerId]?.identityId, "guide");
+  assert.equal(session.speakers[second.speakerId]?.identityId, "guide");
+});
+
 test("runtime adapter preserves omitted alignment separately from explicit center through restore", () => {
   const session = createPlayerRuntimeSession(`
 say "Default bubble", instant
@@ -66,6 +92,29 @@ showButton "Continue"
   ]);
   const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
   assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
+});
+
+test("runtime adapter separates authored avatar images from the letter fallback", () => {
+  const session = createPlayerRuntimeSession(`
+speaker vera {
+  firstName: "Vera"
+  avatar: "avatars/vera.jpg"
+}
+speaker guide { title: "guide" }
+say as vera "Hello.", instant
+say as guide "Welcome.", instant
+exit
+`);
+  const speakers = session.transcriptEntries.map((entry) =>
+    entry.kind === "message" ? session.speakers[entry.speakerId] : undefined,
+  );
+  assert.deepEqual(
+    speakers.map((speaker) => [speaker?.avatar, speaker?.avatarImage]),
+    [
+      ["V", "avatars/vera.jpg"],
+      ["G", undefined],
+    ],
+  );
 });
 
 test("runtime adapter delegates interaction normalization, transcript, and continuation to the engine", () => {
@@ -90,6 +139,7 @@ exit
   if (firstEntry?.kind !== "message") throw new Error("Expected a runtime message.");
   const guide = session.speakers[firstEntry.speakerId];
   assert.deepEqual(guide, {
+    identityId: "guide",
     name: "Guide",
     accent: normalizeColor("#b784ff"),
     avatar: "G",
@@ -104,10 +154,19 @@ exit
   );
 
   const buttonSnapshot = structuredClone(session.snapshot);
-  assert.equal(submitPlayerRuntimeComposer(session, "Continue"), null);
+  assert.equal(submitPlayerRuntimeComposer(session, "continue"), null);
+  assert.equal(submitPlayerRuntimeComposer(session, "Continue "), null);
+  assert.equal(submitPlayerRuntimeComposer(session, ""), null);
   assert.deepEqual(session.snapshot, buttonSnapshot);
-  const button = activatePlayerRuntimeButton(session);
+  const buttonRestorePoint = createPlayerRuntimeRestorePoint(session);
+  const button = submitPlayerRuntimeComposer(session, "Continue");
   assert.equal(button?.outcome.kind, "completed");
+  const clickedButton = activatePlayerRuntimeButton(
+    restorePlayerRuntimeSession(buttonRestorePoint),
+  );
+  assert.deepEqual(button?.outcome, clickedButton?.outcome);
+  assert.deepEqual(button?.session.snapshot, clickedButton?.session.snapshot);
+  assert.deepEqual(button?.session.transcriptEntries, clickedButton?.session.transcriptEntries);
   session = button!.session;
 
   const invalidText = submitPlayerRuntimeComposer(session, " \t ");
@@ -234,20 +293,35 @@ test("runtime checkpoint restore reconstructs presentation without replay or com
   assert.equal(restored.events.length, restorePoint.events.length);
 });
 
-test("runtime checkpoint restore handles retained event histories above the native spread limit", () => {
-  let session = createPlayerRuntimeSession('repeat 42002 { say "x" }');
-  for (let skipCount = 0; skipCount < 41_999; skipCount += 1) {
-    const skipped = skipPlayerRuntimePacing(session);
-    assert.equal(skipped?.outcome.kind, "completed");
-    session = skipped!.session;
-  }
+test("runtime checkpoint restore preserves a paced history and its continuation", () => {
+  let session = createPlayerRuntimeSession('repeat 4 { say "x" }');
+  for (let index = 0; index < 2; index++) session = skipPlayerRuntimePacing(session)!.session;
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
+  assert.deepEqual(restored.events, session.events);
+  assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
+  const resumed = skipPlayerRuntimePacing(restored)!.session;
+  const direct = skipPlayerRuntimePacing(session)!.session;
+  assert.deepEqual(resumed.snapshot, direct.snapshot);
+  assert.deepEqual(resumed.transcriptEntries, direct.transcriptEntries);
+});
 
-  const restorePoint = createPlayerRuntimeRestorePoint(session);
-  assert.equal(restorePoint.events.length, 125_999);
-  const restored = restorePlayerRuntimeSession(restorePoint);
-  assert.equal(restored.events.length, restorePoint.events.length);
-  assert.equal(restored.transcriptEntries.length, session.transcriptEntries.length);
-  assert.deepEqual(restored.snapshot, session.snapshot);
+test("runtime checkpoint restore handles retained event histories above the native spread limit", () => {
+  // Size is the regression input: spreading this many arguments exceeded the supported Node stack.
+  const count = 150_000;
+  const { plan } = compileSource(`repeat ${count} { say "x", instant }`);
+  assert.ok(plan);
+  const result = run(plan, createFreshRuntimeSnapshot(plan), {}, { instructionBudget: count * 20 });
+  assert.equal(result.snapshot.status, "halted");
+  const restored = restorePlayerRuntimeSession({
+    checkpointJson: serializeCheckpoint(createCheckpoint(plan, result.snapshot)),
+    events: result.events,
+  });
+  assert.deepEqual(restored.events, result.events);
+  assert.equal(restored.transcriptEntries.length, count);
+  assert.equal(new Set(restored.transcriptEntries.map((entry) => entry.id)).size, count);
+  assert.equal(restored.transcriptEntries[0]?.text, "x");
+  assert.equal(restored.transcriptEntries.at(-1)?.text, "x");
+  assert.deepEqual(restored.snapshot, result.snapshot);
 });
 
 test("runtime development scenarios compile through the real Player adapter", async () => {
@@ -294,6 +368,27 @@ say "[color=red][bg=ivory]outer [color=\${bad}][bg=\${bad}]inner **bold**[/bg][/
     assert.equal(piece.style.backgroundColor, normalizeColor("ivory"));
   }
   assert.deepEqual(pieces.at(-1)?.style, {});
+});
+
+test("response presentation distinguishes choices and buttons from typed answers after restore", () => {
+  let session = createPlayerRuntimeSession(`
+let reply = askText "Reply"
+let answer = choose left: "Left", right: "Right"
+showButton "Continue"
+exit
+`);
+  session = submitPlayerRuntimeComposer(session, "Hello")!.session;
+  session = submitPlayerRuntimeComposer(session, "Left")!.session;
+  session = activatePlayerRuntimeButton(session)!.session;
+  const kinds = (value: typeof session) =>
+    value.transcriptEntries.map((entry) =>
+      entry.kind === "message" ? entry.responseKind : undefined,
+    );
+  assert.deepEqual(kinds(session), [undefined, "choice", "button"]);
+  assert.deepEqual(
+    kinds(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session))),
+    kinds(session),
+  );
 });
 
 test("blocking timer scenario presents runtime timers, hides waits, and restores the same draw", async () => {

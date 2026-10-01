@@ -10,6 +10,7 @@ import VisualLabTool from "./components/VisualLabTool.vue";
 import LayoutDebugTool from "./devtools/LayoutDebugTool.vue";
 import { createLayoutDebugOptions, type LayoutDebugOptions } from "./devtools/layoutDebug.js";
 import type { PlayerDevelopmentOptions } from "./devtools/playerDevelopment.js";
+import playerControlsSource from "../../../examples/playground/player-controls.tease?raw";
 import {
   createVisualLabState,
   resetVisualLabState,
@@ -201,18 +202,7 @@ async function loadRuntimeSource(): Promise<string | null> {
   if (fixture === "runtime-message-markup") {
     return 'say "# Heading\\n- **Bold** [spoiler]Keyboard[/spoiler] [spoiler]Pointer[/spoiler] [Docs](https://example.com) <img src=x onerror=alert(1)>\\n1. Ordered", instant';
   }
-  try {
-    const response = await fetch("/examples/playground/player-controls.tease", {
-      cache: "no-store",
-    });
-    if (!response.ok)
-      throw new Error(`Runtime source request failed with HTTP ${response.status}.`);
-    return await response.text();
-  } catch (error) {
-    runtimeStatus.value =
-      error instanceof Error ? error.message : "Runtime source could not be loaded.";
-    return null;
-  }
+  return playerControlsSource;
 }
 
 async function loadDemoMedia(): Promise<{
