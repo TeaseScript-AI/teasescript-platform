@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import { compileSource } from "../src/index.js";
+import { runValidSource } from "./helpers/run-valid-source.js";
 
 test("large flat chains complete full compilation with source provenance", () => {
   for (const termCount of [200, 1_600, 6_400, 12_800]) {
@@ -16,7 +17,15 @@ test("large flat chains complete full compilation with source provenance", () =>
       declaration === undefined ? null : [declaration.span.so, declaration.span.eo],
       [0, source.length],
     );
-    assert.equal(declaration?.kind === "declareBinding" ? declaration.value.kind : null, "binary");
+    // Terms cycle through 0..9: each full cycle adds 45, the partial one 0 + ... + (r - 1).
+    const remainder = termCount % 10;
+    const executed = runValidSource(source);
+    assert.equal(executed.snapshot.status, "halted");
+    assert.equal(
+      executed.snapshot.frames[0]?.bindings.find((binding) => binding.name === "value")?.value,
+      45 * Math.floor(termCount / 10) + (remainder * (remainder - 1)) / 2,
+      String(termCount),
+    );
   }
 });
 
