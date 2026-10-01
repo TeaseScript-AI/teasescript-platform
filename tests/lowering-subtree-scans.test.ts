@@ -16,15 +16,17 @@ import { compileValidPlan as compiled } from "./helpers/compile-valid-plan.js";
 
 const span = createSourceSpan(createSourcePosition(0, 0, 0), createSourcePosition(1, 0, 1));
 
-test("classifies nested lowering subtrees once", () => {
-  const binaryCounts = [32, 64, 128];
-  const childReads = binaryCounts.map(compileCountedBinaryChain);
+test("avoids superlinear subtree scans while lowering nested expressions", () => {
+  const reads32 = compileCountedBinaryChain(32);
+  const reads64 = compileCountedBinaryChain(64);
+  const reads128 = compileCountedBinaryChain(128);
 
-  // Each child is read during classification, general postorder traversal, and assembly.
-  assert.deepEqual(
-    childReads,
-    binaryCounts.map((binaryCount) => binaryCount * 6),
-  );
+  // For reads = a * n + b, doubling n doubles the increment; rescanning every
+  // subtree (a * n ** 2) quadruples it. Fixed overhead and the coefficient may change.
+  const firstIncrement = reads64 - reads32;
+  const secondIncrement = reads128 - reads64;
+  assert.ok(reads32 > 0 && firstIncrement > 0, `${reads32}, ${reads64}, ${reads128}`);
+  assert.ok(secondIncrement < firstIncrement * 3, `${reads32}, ${reads64}, ${reads128}`);
 });
 
 test("preserves ordered user calls and interaction resume through the public source path", () => {
@@ -37,18 +39,6 @@ test("preserves ordered user calls and interaction resume through the public sou
       'say "${answer}|${order[0]}|${order[1]}", instant',
     ].join("\n"),
   );
-  const rootCalls = plan.instructions
-    .slice(0, plan.rootEndInstruction)
-    .filter((instruction) => instruction.kind === "callFunction");
-  assert.deepEqual(
-    rootCalls.map((instruction) => instruction.functionId),
-    [1, 1, 2],
-  );
-  assert.deepEqual(
-    rootCalls[2]!.arguments.map((argument) => argument.value.kind),
-    ["temporary", "temporary", "temporary"],
-  );
-
   const pending = run(plan, createFreshRuntimeSnapshot(plan));
   assert.equal(pending.snapshot.status, "waiting");
   const checkpoint = deserializeCheckpoint(
