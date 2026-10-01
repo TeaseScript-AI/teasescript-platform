@@ -402,23 +402,48 @@ test("interaction speaker references use the existing precise unknown-speaker di
   ]) {
     const result = compileSource(source);
     assert.equal(result.plan, null);
-    assert.ok(
-      result.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV005"),
+    const missing = source.indexOf("missing");
+    assert.deepEqual(
+      result.semanticDiagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.span.start.offset,
+        diagnostic.span.end.offset,
+      ]),
+      [["TSV005", missing, missing + "missing".length]],
       source,
     );
   }
 });
 
 test("choice diagnostics reject mixing and duplicates while labelled visible text may repeat", () => {
+  // `at` is the last source occurrence the diagnostic must span: the whole choice for mixing,
+  // the repeated label or visible text for duplicates, and the literal for non-finite labels.
   const rejected = [
-    'let x = choose first: "A", "B"',
-    'let x = choose first: "A", 2: "B"',
-    'let x = choose first: "A", first: "B"',
-    'let x = choose 1: "A", 1.0: "B"',
-    'let x = choose "Same", "Same"',
-    'let x = choose 1e999: "A"',
+    { source: 'let x = choose first: "A", "B"', code: "TSV029", at: 'choose first: "A", "B"' },
+    {
+      source: 'let x = choose first: "A", 2: "B"',
+      code: "TSV029",
+      at: 'choose first: "A", 2: "B"',
+    },
+    { source: 'let x = choose first: "A", first: "B"', code: "TSV030", at: "first" },
+    { source: 'let x = choose 1: "A", 1.0: "B"', code: "TSV030", at: "1.0" },
+    { source: 'let x = choose "Same", "Same"', code: "TSV030", at: '"Same"' },
+    { source: 'let x = choose 1e999: "A"', code: "TSC001", at: "1e999" },
   ];
-  for (const source of rejected) assert.equal(compileSource(source).plan, null, source);
+  for (const { source, code, at } of rejected) {
+    const result = compileSource(source);
+    assert.equal(result.plan, null, source);
+    const start = source.lastIndexOf(at);
+    assert.deepEqual(
+      result.diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.span.start.offset,
+        diagnostic.span.end.offset,
+      ]),
+      [[code, start, start + at.length]],
+      source,
+    );
+  }
   assert.notEqual(compileSource('let x = choose first: "Same", second: "Same"').plan, null);
   const sequential = compiled("let x = [askText, askNumber]");
   assert.equal(
