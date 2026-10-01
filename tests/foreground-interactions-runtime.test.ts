@@ -1454,122 +1454,83 @@ test("pending actions reserve their complete event sequence capacity", () => {
 });
 
 test("unsupported persisted interaction fields are rejected at every boundary", () => {
-  const huge = "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES * 16);
+  // The key, not its size, is unsupported; large-input non-reflection is covered by the
+  // completion-kind token test.
+  interface ExtraFieldTarget {
+    extra?: string;
+  }
+  const addExtra = (target: ExtraFieldTarget | null) => {
+    assert.ok(target !== null);
+    target.extra = "x";
+  };
   const base = interactionPlan("choice", {
     kind: "choice",
     labelType: "identifier",
     options: [{ text: "One", label: "one" }],
     accessibleName: defaults.choice,
   });
-  // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture callbacks add unsupported fields at the interaction, UI, accessible-name, and option levels.
-  const planMutations: Array<(instruction: any) => void> = [
-    (instruction) => {
-      instruction.extra = huge;
-    },
-    (instruction) => {
-      instruction.ui.extra = huge;
-    },
-    (instruction) => {
-      instruction.ui.accessibleName.extra = huge;
-    },
-    (instruction) => {
-      instruction.ui.options[0].extra = huge;
-    },
-  ];
-  for (const mutate of planMutations) {
+  // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: targets select nested interaction instruction records to receive an unsupported field.
+  const instructionTargets: Record<string, (instruction: any) => ExtraFieldTarget> = {
+    instruction: (instruction) => instruction,
+    ui: (instruction) => instruction.ui,
+    accessibleName: (instruction) => instruction.ui.accessibleName,
+    option: (instruction) => instruction.ui.options[0],
+  };
+  for (const [name, target] of Object.entries(instructionTargets)) {
     const hostile = structuredClone(base);
-    mutate(hostile.instructions[0]);
-    assert.equal(validateInstructionPlan(hostile).valid, false);
-    assert.throws(() => run(hostile, createFreshRuntimeSnapshot(base)));
+    addExtra(target(hostile.instructions[0]));
+    assert.equal(validateInstructionPlan(hostile).valid, false, name);
+    assert.throws(() => run(hostile, createFreshRuntimeSnapshot(base)), name);
   }
 
-  const pending = waiting(base);
-  // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture callbacks add unsupported persisted fields at the action, UI, accessible-name, and option levels.
-  const snapshotMutations: Array<(snapshot: any) => void> = [
-    (snapshot) => {
-      snapshot.foregroundAction.extra = huge;
-    },
-    (snapshot) => {
-      snapshot.foregroundAction.ui.extra = huge;
-    },
-    (snapshot) => {
-      snapshot.foregroundAction.ui.accessibleName.extra = huge;
-    },
-    (snapshot) => {
-      snapshot.foregroundAction.ui.options[0].extra = huge;
-    },
-  ];
-  for (const mutate of snapshotMutations) {
-    const hostile = structuredClone(pending.snapshot);
-    mutate(hostile);
-    assert.equal(validateRuntimeSnapshot(hostile, base).valid, false);
-    assert.throws(() =>
-      restoreCheckpoint({ ...createCheckpoint(base, pending.snapshot), snapshot: hostile }),
-    );
-    const completionRequest = {
-      actionId: pending.snapshot.foregroundAction!.actionId,
-      actionKind: "interaction",
-      interactionKind: "choice",
-      payload: { kind: "selectedLabel", selectedLabel: "one" },
-    } as const;
-    assert.throws(() => completeAction(base, hostile, completionRequest));
-  }
-
+  const pending = waiting(base).snapshot;
   const completed = complete(base, { kind: "selectedLabel", selectedLabel: "one" }, "choice");
-  const settlementHostile = structuredClone(completed.snapshot);
-  assert.ok(settlementHostile.lastSettlement?.actionKind === "interaction");
-  // EVIDENCE: fixture adds one unsupported field to a completed interaction settlement.
-  (
-    settlementHostile.lastSettlement as typeof settlementHostile.lastSettlement & { extra?: string }
-  ).extra = huge;
-  assert.equal(validateRuntimeSnapshot(settlementHostile, base).valid, false);
-  assert.throws(() =>
-    restoreCheckpoint({
-      ...createCheckpoint(base, completed.snapshot),
-      snapshot: settlementHostile,
-    }),
-  );
-  const settlementCompletionRequest = {
-    actionId: completed.snapshot.lastSettlement!.actionId,
-    actionKind: "interaction",
-    interactionKind: "choice",
-    payload: { kind: "selectedLabel", selectedLabel: "one" },
-  } as const;
-  assert.throws(() => completeAction(base, settlementHostile, settlementCompletionRequest));
-
   const delayPlan = compileSource("wait 1\nexit").plan!;
-  const delayPending = run(delayPlan, createFreshRuntimeSnapshot(delayPlan));
-  const delayActionHostile = structuredClone(delayPending.snapshot);
-  assert.ok(delayActionHostile.foregroundAction?.kind === "delay");
-  // EVIDENCE: fixture adds one unsupported field to a pending delay action.
-  (
-    delayActionHostile.foregroundAction as typeof delayActionHostile.foregroundAction & {
-      extra?: string;
+  const delayPending = run(delayPlan, createFreshRuntimeSnapshot(delayPlan)).snapshot;
+  const delayCompleted = observeTime(delayPlan, delayPending, 1_000).snapshot;
+  assert.equal(delayPending.foregroundAction?.kind, "delay");
+  assert.equal(delayCompleted.lastSettlement?.actionKind, "delay");
+  const snapshotTargets: Record<
+    string,
+    readonly [
+      InstructionPlan,
+      RuntimeSnapshot,
+      // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: targets select nested persisted records to receive an unsupported field.
+      (snapshot: any) => ExtraFieldTarget,
+      completes: boolean,
+    ]
+  > = {
+    action: [base, pending, (snapshot) => snapshot.foregroundAction, true],
+    actionUi: [base, pending, (snapshot) => snapshot.foregroundAction.ui, true],
+    actionAccessibleName: [
+      base,
+      pending,
+      (snapshot) => snapshot.foregroundAction.ui.accessibleName,
+      true,
+    ],
+    actionOption: [base, pending, (snapshot) => snapshot.foregroundAction.ui.options[0], true],
+    settlement: [base, completed.snapshot, (snapshot) => snapshot.lastSettlement, true],
+    delayAction: [delayPlan, delayPending, (snapshot) => snapshot.foregroundAction, false],
+    delaySettlement: [delayPlan, delayCompleted, (snapshot) => snapshot.lastSettlement, false],
+  };
+  for (const [name, [plan, valid, target, completes]] of Object.entries(snapshotTargets)) {
+    const hostile = structuredClone(valid);
+    addExtra(target(hostile));
+    assert.equal(validateRuntimeSnapshot(hostile, plan).valid, false, name);
+    assert.throws(
+      () => restoreCheckpoint({ ...createCheckpoint(plan, valid), snapshot: hostile }),
+      name,
+    );
+    if (completes) {
+      const request = {
+        actionId: valid.foregroundAction?.actionId ?? valid.lastSettlement!.actionId,
+        actionKind: "interaction",
+        interactionKind: "choice",
+        payload: { kind: "selectedLabel", selectedLabel: "one" },
+      };
+      assert.throws(() => completeAction(plan, hostile, request), name);
     }
-  ).extra = huge;
-  assert.equal(validateRuntimeSnapshot(delayActionHostile, delayPlan).valid, false);
-  assert.throws(() =>
-    restoreCheckpoint({
-      ...createCheckpoint(delayPlan, delayPending.snapshot),
-      snapshot: delayActionHostile,
-    }),
-  );
-  const delayCompleted = observeTime(delayPlan, delayPending.snapshot, 1_000);
-  const delaySettlementHostile = structuredClone(delayCompleted.snapshot);
-  assert.ok(delaySettlementHostile.lastSettlement?.actionKind === "delay");
-  // EVIDENCE: fixture adds one unsupported field to a completed delay settlement.
-  (
-    delaySettlementHostile.lastSettlement as typeof delaySettlementHostile.lastSettlement & {
-      extra?: string;
-    }
-  ).extra = huge;
-  assert.equal(validateRuntimeSnapshot(delaySettlementHostile, delayPlan).valid, false);
-  assert.throws(() =>
-    restoreCheckpoint({
-      ...createCheckpoint(delayPlan, delayCompleted.snapshot),
-      snapshot: delaySettlementHostile,
-    }),
-  );
+  }
 });
 
 test("accepted text completions perform one bounded UTF-8 measurement before normalization", () => {
