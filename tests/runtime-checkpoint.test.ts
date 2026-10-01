@@ -591,3 +591,30 @@ function assertDeserializedCheckpointError(
     },
   );
 }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+test("checkpoint and plan validation never coerce non-string enumerated fields to text", () => {
+  const compiled = plan('let n = 1\nwait n s\nshowButton "Go"');
+  const fresh = createFreshRuntimeSnapshot(compiled);
+  const waiting = run(compiled, fresh).snapshot;
+  for (const snapshot of [fresh, waiting]) {
+    const json: unknown = JSON.parse(serializeCheckpoint(createCheckpoint(compiled, snapshot)));
+    assert.ok(isRecord(json) && isRecord(json.snapshot));
+    // A one-element array stringifies to its element, so only an exact type check rejects it.
+    json.snapshot.status = [json.snapshot.status];
+    assert.equal(validateRuntimeSnapshot(json.snapshot, compiled).valid, false);
+    assert.throws(() => deserializeCheckpoint(JSON.stringify(json)), CheckpointError);
+  }
+
+  const index = compiled.instructions.findIndex((instruction) => instruction.kind === "wait");
+  const forged: unknown = structuredClone(compiled);
+  assert.ok(isRecord(forged) && Array.isArray(forged.instructions));
+  const wait: unknown = forged.instructions[index];
+  assert.ok(isRecord(wait) && wait.unit === "s");
+  assert.equal(validateInstructionPlan(forged).valid, true);
+  wait.unit = ["s"];
+  assert.equal(validateInstructionPlan(forged).valid, false);
+});
