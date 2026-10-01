@@ -1,5 +1,6 @@
 import type { InstructionPlan } from "../plan/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
+import { segmentProgressMs } from "./media.js";
 
 /** Restore validation for media playback records, their handles, queued cue blocks, and cue-block frames. */
 
@@ -156,7 +157,19 @@ function validMediaRecord(
     media.segmentPositionMs < media.startAtMs ||
     media.segmentPositionMs > end ||
     media.segmentPasses > media.passesCompleted ||
-    media.elapsedMs !== elapsedAtCommitted(media, media.segmentElapsedMs, media.committedProgressMs)
+    media.elapsedMs !==
+      elapsedAtCommitted(media, media.segmentElapsedMs, media.committedProgressMs) ||
+    !cursorMatchesAnchor(
+      {
+        finishedAtEnd: media.state === "finished" && media.positionMs >= end,
+        positionMs: media.positionMs,
+        passesCompleted: media.passesCompleted,
+        committedProgressMs: media.committedProgressMs,
+        segmentPositionMs: media.segmentPositionMs,
+        segmentPasses: media.segmentPasses,
+      },
+      end - media.startAtMs,
+    )
   )
     return false;
   // A stop starts a final segment at the stop position.
@@ -164,14 +177,22 @@ function validMediaRecord(
     media.segmentPositionMs === media.positionMs &&
     media.segmentPasses === media.passesCompleted &&
     media.segmentElapsedMs === media.elapsedMs;
-  // The first retained sample precedes current scene time, unless it is the anchor of a segment that a load report
-  // started while catch-up was held.
+  // The first retained sample precedes current scene time, unless it is the anchor of the first segment, which a load
+  // report started at observed time while catch-up was held; nothing of it has played yet. Script operations anchor
+  // their segments at current scene time.
   const head = points[0];
   if (
     head !== undefined &&
     typeof snapshot.currentSessionTimeMs === "number" &&
     head.atMs > snapshot.currentSessionTimeMs &&
-    (head.progressMs !== 0 || media.committedProgressMs !== 0)
+    !(
+      media.segment === 1 &&
+      head.progressMs === 0 &&
+      media.committedProgressMs === 0 &&
+      media.passesCompleted === 0 &&
+      media.positionMs === media.startAtMs &&
+      unanchored
+    )
   )
     return false;
   const reportedProgress = points.at(-1)?.progressMs ?? 0;
@@ -207,6 +228,40 @@ function validMediaRecord(
     default:
       return false;
   }
+}
+
+/**
+ * The committed progress is where the anchor formula places the current position and pass: the runtime commits
+ * arrivals calculated by it, and a pass wrap moves to the start of the next pass at the same progress. Media finished at
+ * the end of their last pass stand at the end of the pass before the count. Positions derived from a repeat-duration
+ * end or a monotonic clamp differ from the formula by rounding only, so the comparison allows a few units of the
+ * magnitude's last place, as timer validation does.
+ */
+function cursorMatchesAnchor(
+  cursor: {
+    readonly finishedAtEnd: boolean;
+    readonly positionMs: number;
+    readonly passesCompleted: number;
+    readonly committedProgressMs: number;
+    readonly segmentPositionMs: number;
+    readonly segmentPasses: number;
+  },
+  passLengthMs: number,
+): boolean {
+  const passes = cursor.passesCompleted - (cursor.finishedAtEnd ? 1 : 0) - cursor.segmentPasses;
+  if (passes < 0) return false;
+  const expected = segmentProgressMs(
+    passes,
+    passLengthMs,
+    cursor.positionMs - cursor.segmentPositionMs,
+  );
+  const magnitude = Math.max(
+    passes * passLengthMs,
+    cursor.positionMs,
+    cursor.segmentPositionMs,
+    cursor.committedProgressMs,
+  );
+  return Math.abs(expected - cursor.committedProgressMs) <= Number.EPSILON * 16 * magnitude;
 }
 
 /**

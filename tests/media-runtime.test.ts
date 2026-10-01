@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   completeAction,
   createFreshRuntimeSnapshot,
+  executeInstruction,
   mediaPlaybackProjection,
   observeTime,
   reportMediaLoad,
@@ -31,9 +32,11 @@ interface MutableMedia {
   mediaId: number;
   loaded: boolean;
   durationMs: number | null;
-  points: unknown[];
+  points: { atMs: number }[];
   segment: number;
   finishFunctionId: number | null;
+  segmentPositionMs: number;
+  segmentPasses: number;
 }
 
 function mediaOf(snapshot: MutableSnapshot, mediaId: number): MutableMedia {
@@ -929,4 +932,48 @@ test("reporting the projected terminal progress ends fractional ranges, also aft
     controlled.at(2_000, [1, terminal(controlled)]);
     assert.equal(controlled.media(1)?.state, "finished", endAt);
   }
+});
+
+test("restore validation relates segment anchors to the committed cursor and current scene time", () => {
+  const corrupt = (
+    compiled: InstructionPlan,
+    snapshot: RuntimeSnapshot,
+    mutate: (media: MutableMedia) => void,
+    name: string,
+  ): void => {
+    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true, name);
+    // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; each case applies one invalid mutation.
+    const corrupted = JSON.parse(JSON.stringify(snapshot)) as MutableSnapshot;
+    mutate(mediaOf(corrupted, 1));
+    assert.equal(validateRuntimeSnapshot(corrupted, compiled).valid, false, name);
+  };
+  const budget = new Session(
+    'let m = playAudio(file: "a", async: true, repeat: 1500 ms) {\n  at 500 ms { }\n}\nwait 10',
+  );
+  budget.load(1, 1_000).at(500, [1, 500]);
+  corrupt(budget.plan, budget.snapshot, (media) => (media.segmentPositionMs = 100), "position");
+  const counted = new Session(
+    'let m = playAudio(file: "a", async: true, repeat: 3 times)\nwait 10',
+  );
+  counted.load(1, 1_000).at(1_000, [1, 1_000]);
+  corrupt(counted.plan, counted.snapshot, (media) => (media.segmentPasses = 1), "passes");
+  // A seek during catch-up anchors its segment at the current scene time, before the observed time.
+  const held = new Session(
+    'timer async 500 ms {\n  b.position = 600 ms\n}\nlet b = playAudio async "b"\nwait 2 s',
+  );
+  held.load(1, 2_000);
+  let snapshot = observeTime(held.plan, held.snapshot, 1_000, [
+    { mediaId: 1, segment: 1, progressMs: 1_000 },
+  ]).snapshot;
+  while (held.media(1)?.segment === 1 && snapshot.status !== "halted") {
+    snapshot = executeInstruction(held.plan, snapshot).snapshot;
+    held.snapshot = snapshot;
+  }
+  assert.equal(snapshot.currentSessionTimeMs, 500);
+  corrupt(
+    held.plan,
+    snapshot,
+    (media) => (media.points[0]!.atMs = 900),
+    "future sample after a seek",
+  );
 });

@@ -150,10 +150,20 @@ function nextCuePointAfter(media: RuntimeMediaSnapshot, from: number): number | 
  * terminal progress use only this calculation, never accumulated sums, so equal points compare equal exactly.
  */
 function progressTo(media: RuntimeMediaSnapshot, positionMs: number, passes: number): number {
-  return (
-    (passes - media.segmentPasses) * (mediaEndMs(media) - media.startAtMs) +
-    (positionMs - media.segmentPositionMs)
+  return segmentProgressMs(
+    passes - media.segmentPasses,
+    mediaEndMs(media) - media.startAtMs,
+    positionMs - media.segmentPositionMs,
   );
+}
+
+/** The anchor formula shared with restore validation: whole passes since the anchor, then the distance within one. */
+export function segmentProgressMs(
+  passes: number,
+  passLengthMs: number,
+  distanceMs: number,
+): number {
+  return passes * passLengthMs + distanceMs;
 }
 
 /** Segment progress at which a repeat duration is used up; unlimited for other repeat forms. */

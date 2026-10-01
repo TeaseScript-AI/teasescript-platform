@@ -629,9 +629,11 @@ settlements outside a running block record the observation.
 
 **Script operations.** Handle reads use the progress interpolated at current scene time, capped at the next
 uncommitted arrival. Before `pause()`, `resume()`, `stop()`, a seek, or a Stage replacement changes a segment, the
-media's events due before current scene time are committed; events due exactly now keep their catch-up order, so cues
-at the point where the media stops stay pending until it plays on. After a seek, a pass that the seek completed is
-committed at once. `stop()` and replacement drop the media's queued, not yet started cue blocks. Author-visible seek,
+media's events due strictly before current scene time are committed; events due exactly now keep their global
+catch-up order. While paused, an already-reached arrival at a range end or repeat-duration limit still commits and can
+wrap or finish; other uncommitted cues at the pause position wait until playback proceeds. After a seek, a pass that
+the seek completed is committed at once, also while paused, where the next pass stays paused. `stop()` and replacement
+drop the media's queued, not yet started cue blocks. Author-visible seek,
 lifecycle, cue, and handle behavior is defined in specification §22.
 
 **Cue blocks.** Cue, compact, and `finish` blocks compile to parameterless handler regions (`handler: "media"`),
@@ -641,8 +643,9 @@ queue and interrupt machinery above; interrupt frames record `mediaId` instead o
 **Cleanup and restore.** `exit` and script end stop all media without events and drop queued blocks; the Stage image
 stays. Checkpoints carry the complete media state, including unprocessed samples, and restore does not advance or
 rewrite it. Restore validation requires issued media IDs to have exactly one active or settled record, handles to refer
-to issued IDs, queued and running cue blocks to belong to their media's own blocks, at most one active video, and
-waits to refer to their active media. Cross-device handoff is not part of this contract.
+to issued IDs, queued and running cue blocks to belong to their media's own blocks, at most one active video,
+waits to refer to their active media, and each media's position, passes, committed progress, and total playback to
+agree with its segment anchor, whose first sample lies after current scene time only for a load during held catch-up. Cross-device handoff is not part of this contract.
 
 **Player projection.** `mediaPlaybackProjection(snapshot)` exposes each active media's identity, source, `loaded`,
 state, `segment`, active range, `volume`, `playheadMs` (the source position that the reported progress reaches),
