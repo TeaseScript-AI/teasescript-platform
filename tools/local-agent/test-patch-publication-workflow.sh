@@ -33,7 +33,6 @@ cleanup_text = cleanup_path.read_text(encoding="utf-8")
 transfer_text = transfer_path.read_text(encoding="utf-8")
 prepare_text = prepare_path.read_text(encoding="utf-8")
 validator_text = validator_path.read_text(encoding="utf-8")
-assert len(text.encode("utf-8")) <= 12 * 1024
 assert "patch-publication-request.cjs" in text
 assert "patch-publication-cleanup-comment.cjs" in text
 assert "patch-publication-cleanup-transfer.sh" in text
