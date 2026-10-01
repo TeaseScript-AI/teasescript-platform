@@ -1,4 +1,3 @@
-import { recordValidationTestWork } from "../validation-testing.js";
 import {
   type PlanValidationError,
   isRecord,
@@ -259,7 +258,6 @@ function createPlanValidationIndex(
   rootEndInstruction: number | null,
   functions: readonly ValidatedFunctionRange[],
 ): PlanValidationIndex | null {
-  recordValidationTestWork("planOwnerIndexBuilds");
   if (rootEndInstruction === null) return null;
   const owners: Array<InstructionExecutionRegion | undefined> = new Array(instructions.length);
   const root: InstructionExecutionRegion = {

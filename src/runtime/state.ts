@@ -2176,7 +2176,6 @@ interface SnapshotValidationAnalysis {
 }
 
 function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValidationAnalysis {
-  recordValidationTestWork("snapshotAnalysisBuilds");
   const functionsById = new Map<number, InstructionPlan["functions"][number]>();
   const regionEnds = new Array<number>(plan.instructions.length).fill(plan.rootEndInstruction);
   const functionIdsByInstruction = new Array<number | null>(plan.instructions.length).fill(null);
@@ -2188,7 +2187,6 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
     }
   }
   const defaultBindingPositions = new Map<string, number>();
-  recordValidationTestWork("defaultBindingIndexBuilds");
   for (let index = 0; index < plan.instructions.length; index += 1) {
     const instruction = plan.instructions[index];
     if (instruction?.kind === "bindDefaultParameter") {
@@ -2205,7 +2203,6 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
       ]),
     ]),
   );
-  recordValidationTestWork("parameterNameIndexBuilds");
   return {
     plan,
     functionsById,
@@ -2246,13 +2243,8 @@ function requiredContinuationTemporaries(
   let liveIn = analysis.continuationLiveness.get(loopSignature);
   if (liveIn === undefined) {
     recordDetailedValidationWork(analysis.plan.instructions.length);
-    recordValidationTestWork("livenessComputations");
-    recordValidationTestWork("livenessTableAllocations");
     liveIn = computeContinuationLiveness(analysis, loopFrames);
     analysis.continuationLiveness.set(loopSignature, liveIn);
-    recordValidationTestWork("livenessCacheInsertions");
-  } else {
-    recordValidationTestWork("livenessCacheHits");
   }
   return liveIn[startInstruction] ?? new Set<number>();
 }
