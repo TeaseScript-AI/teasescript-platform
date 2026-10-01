@@ -444,4 +444,6 @@ html:fullscreen { background: var(--background); }
 [data-player-settings] {
   max-block-size: calc(100dvh - 2rem);
   overflow-y: auto;
+  /* Focus scrolling keeps the outline and its separation inside the clip. */
+  scroll-padding-block: calc(2px + var(--player-focus-offset));
 }
