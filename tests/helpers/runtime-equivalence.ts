@@ -5,14 +5,17 @@ import {
   createCheckpoint,
   deserializeCheckpoint,
   executeInstruction,
+  observeTime,
   run,
   serializeCheckpoint,
   validateRuntimeSnapshot,
   validateInstructionPlan,
+  type InstructionPlan,
   type InterpreterEvent,
   type RuntimeSnapshot,
 } from "../../src/index.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
+import { timerHandlerDispatchable } from "../../src/runtime/operations/timer-lifecycle.js";
 
 const DEFAULT_EQUIVALENCE_SEED = 0x1234_5678;
 const DEFAULT_INSTRUCTION_GUARD = 2_000;
@@ -66,7 +69,7 @@ export function assertRuntimeResumeEquivalent(
     `${scenario}: fresh snapshot must validate: ${initialSnapshotValidation.errors.join("; ")}`,
   );
 
-  const uninterrupted = run(plan, initial, {}, { instructionBudget: instructionGuard });
+  const uninterrupted = runServicingDelays(plan, initial, instructionGuard, scenario);
   assert.equal(
     uninterrupted.snapshot.status,
     "halted",
@@ -85,12 +88,21 @@ export function assertRuntimeResumeEquivalent(
       `${scenario}: instruction-boundary execution exceeded guard ${instructionGuard}`,
     );
 
-    const operation = executeInstruction(plan, boundarySnapshot);
-    assert.equal(
-      operation.instructionsExecuted,
-      1,
-      `${scenario}: boundary ${boundary + 1} must execute exactly one instruction`,
-    );
+    let operation: {
+      readonly snapshot: RuntimeSnapshot;
+      readonly events: readonly InterpreterEvent[];
+    };
+    if (awaitsTime(boundarySnapshot)) {
+      operation = observeDueDelay(plan, boundarySnapshot, `${scenario}: boundary ${boundary + 1}`);
+    } else {
+      const executed = executeInstruction(plan, boundarySnapshot);
+      assert.equal(
+        executed.instructionsExecuted,
+        1,
+        `${scenario}: boundary ${boundary + 1} must execute exactly one instruction`,
+      );
+      operation = executed;
+    }
     boundarySnapshot = operation.snapshot;
     accumulatedEvents.push(...operation.events);
     boundary += 1;
@@ -118,12 +130,7 @@ export function assertRuntimeResumeEquivalent(
       `${context}: restored snapshot changed during JSON roundtrip`,
     );
 
-    const resumed = run(
-      restored.plan,
-      restored.snapshot,
-      {},
-      { instructionBudget: instructionGuard },
-    );
+    const resumed = runServicingDelays(restored.plan, restored.snapshot, instructionGuard, context);
     assert.equal(
       resumed.snapshot.status,
       "halted",
@@ -151,6 +158,71 @@ export function assertRuntimeResumeEquivalent(
     events: uninterrupted.events,
     finalSnapshot: uninterrupted.snapshot,
   });
+}
+
+/**
+ * Runs to completion, observing time at the next deadline whenever execution waits: a foreground or interrupted
+ * delay (`wait` or blocking `timer`) or a running async timer. Blocking behavior is preserved: nothing settles
+ * without an observation.
+ */
+function runServicingDelays(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  instructionGuard: number,
+  context: string,
+): { readonly snapshot: RuntimeSnapshot; readonly events: readonly InterpreterEvent[] } {
+  const events: InterpreterEvent[] = [];
+  let current = snapshot;
+  for (let observations = 0; ; observations += 1) {
+    assert.ok(observations <= instructionGuard, `${context}: delay servicing exceeded guard`);
+    if (awaitsTime(current)) {
+      const observed = observeDueDelay(plan, current, context);
+      events.push(...observed.events);
+      current = observed.snapshot;
+      continue;
+    }
+    const operation = run(plan, current, {}, { instructionBudget: instructionGuard });
+    events.push(...operation.events);
+    current = operation.snapshot;
+    if (current.status !== "waiting") return { snapshot: current, events };
+  }
+}
+
+/**
+ * Waiting with nothing runnable: only a time observation can make progress. A queued expiry block held behind pacing
+ * or a running block is not runnable.
+ */
+function awaitsTime(snapshot: RuntimeSnapshot): boolean {
+  return snapshot.status === "waiting" && !timerHandlerDispatchable(snapshot);
+}
+
+function observeDueDelay(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  context: string,
+): { readonly snapshot: RuntimeSnapshot; readonly events: readonly InterpreterEvent[] } {
+  const deadlines: number[] = [];
+  for (const action of [
+    snapshot.foregroundAction,
+    ...snapshot.backgroundActions,
+    ...snapshot.callFrames.map((frame) => frame.timerInterruption?.suspendedAction ?? null),
+  ]) {
+    if (action?.kind === "delay" || action?.kind === "chatPacingGate") {
+      deadlines.push(action.deadlineMs);
+    }
+    if (action?.kind === "timer" && action.timer.deadlineMs !== null) {
+      deadlines.push(action.timer.deadlineMs);
+    }
+  }
+  assert.ok(deadlines.length > 0, `${context}: only delays, pacing, and timers can be serviced`);
+  const observed = observeTime(plan, snapshot, Math.min(...deadlines));
+  assert.equal(observed.outcome.kind, "observed", `${context}: delay observation must succeed`);
+  assert.notDeepEqual(
+    observed.snapshot,
+    snapshot,
+    `${context}: the observation must make progress`,
+  );
+  return observed;
 }
 
 function assertMonotonicEventSequences(events: readonly InterpreterEvent[], context: string): void {

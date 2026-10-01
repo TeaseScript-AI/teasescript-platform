@@ -70,7 +70,7 @@ The first implementation should provide:
 - diagnostics for mixed labelled and unlabelled choices, mixed label types, duplicate labels, and duplicate unlabelled visible text;
 - diagnostics for negative, non-finite, unsupported-magnitude, or overflowing explicit pacing values;
 - documentation that input text is a Standard UI hint rather than an automatic speaker transcript message;
-- documentation of exact text/number normalization, simple return types, and permanent non-cancellation;
+- documentation of exact text/number normalization, simple return types, and mandatory interactions with no player cancellation result (timer expiry blocks may still discard an interrupted interaction; see [`RUNTIME.md`](RUNTIME.md#timers-and-scene-time));
 - formatting that preserves the accepted compact order and keeps compact `choose` options in one statement;
 - source-span preservation from compact syntax through fully lowered plan instructions;
 - debugger/simulator inspection of pending interaction kind, requesting speaker, normalized completion, prepared output, pacing deadline, action location, and skip policy;

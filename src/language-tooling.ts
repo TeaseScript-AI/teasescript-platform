@@ -5,6 +5,7 @@ import type {
   SayStatement,
   ShowButtonStatement,
   Statement,
+  TimerParts,
 } from "./ast.js";
 import { compileSource } from "./compiler.js";
 import type { Diagnostic } from "./diagnostics.js";
@@ -509,62 +510,93 @@ interface Visitor {
   readonly say: (node: SayStatement) => void;
 }
 
+type VisitItem =
+  | { readonly kind: "statement"; readonly node: Statement }
+  | { readonly kind: "expression"; readonly node: Expression };
+
+/**
+ * Visits the program in source order with an explicit work stack, so deeply nested source that compiles does not
+ * depend on the host call stack.
+ */
 function visitProgram(program: Program, visitor: Visitor): void {
-  for (const statement of program.statements) visitStatement(statement, visitor);
+  const stack: VisitItem[] = [];
+  const pushInOrder = (items: readonly VisitItem[]): void => {
+    for (let index = items.length - 1; index >= 0; index -= 1) stack.push(items[index]!);
+  };
+  pushInOrder(program.statements.map((node) => ({ kind: "statement", node })));
+  for (let item = stack.pop(); item !== undefined; item = stack.pop()) {
+    const children: VisitItem[] = [];
+    if (item.kind === "statement") visitStatement(item.node, visitor, children);
+    else visitExpression(item.node, visitor, children);
+    pushInOrder(children);
+  }
 }
 
-function visitStatement(statement: Statement, visitor: Visitor): void {
+function visitStatement(statement: Statement, visitor: Visitor, children: VisitItem[]): void {
   switch (statement.kind) {
     case "showButtonStatement":
       visitor.showButton(statement);
-      visitExpression(statement.label, visitor);
+      children.push({ kind: "expression", node: statement.label });
       return;
     case "sayStatement":
       visitor.say(statement);
-      if (statement.presentation !== null) visitExpression(statement.presentation, visitor);
-      visitExpression(statement.value, visitor);
+      if (statement.presentation !== null)
+        children.push({ kind: "expression", node: statement.presentation });
+      children.push({ kind: "expression", node: statement.value });
       if (statement.pacing !== null && statement.pacing !== "instant")
-        visitExpression(statement.pacing, visitor);
+        children.push({ kind: "expression", node: statement.pacing });
       return;
     case "letStatement":
-      visitExpression(statement.initializer, visitor);
+      children.push({ kind: "expression", node: statement.initializer });
       return;
     case "assignmentStatement":
-      visitExpression(statement.target, visitor);
-      visitExpression(statement.value, visitor);
+      children.push({ kind: "expression", node: statement.target });
+      children.push({ kind: "expression", node: statement.value });
       return;
     case "expressionStatement":
-      visitExpression(statement.expression, visitor);
+      children.push({ kind: "expression", node: statement.expression });
       return;
     case "speakerDeclaration":
-      for (const property of statement.properties) visitExpression(property.value, visitor);
+      for (const property of statement.properties)
+        children.push({ kind: "expression", node: property.value });
       return;
     case "ifStatement":
-      visitExpression(statement.condition, visitor);
-      for (const child of statement.thenBlock.statements) visitStatement(child, visitor);
+      children.push({ kind: "expression", node: statement.condition });
+      for (const child of statement.thenBlock.statements)
+        children.push({ kind: "statement", node: child });
       if (statement.elseBlock?.kind === "block")
-        for (const child of statement.elseBlock.statements) visitStatement(child, visitor);
-      else if (statement.elseBlock !== null) visitStatement(statement.elseBlock, visitor);
+        for (const child of statement.elseBlock.statements)
+          children.push({ kind: "statement", node: child });
+      else if (statement.elseBlock !== null)
+        children.push({ kind: "statement", node: statement.elseBlock });
       return;
     case "repeatStatement":
-      visitExpression(statement.count, visitor);
-      for (const child of statement.body.statements) visitStatement(child, visitor);
+      children.push({ kind: "expression", node: statement.count });
+      for (const child of statement.body.statements)
+        children.push({ kind: "statement", node: child });
       return;
     case "forStatement":
-      visitExpression(statement.iterable, visitor);
-      for (const child of statement.body.statements) visitStatement(child, visitor);
+      children.push({ kind: "expression", node: statement.iterable });
+      for (const child of statement.body.statements)
+        children.push({ kind: "statement", node: child });
       return;
     case "whileStatement":
-      visitExpression(statement.condition, visitor);
-      for (const child of statement.body.statements) visitStatement(child, visitor);
+      children.push({ kind: "expression", node: statement.condition });
+      for (const child of statement.body.statements)
+        children.push({ kind: "statement", node: child });
       return;
     case "functionDeclaration":
       for (const parameter of statement.parameters)
-        if (parameter.defaultValue !== null) visitExpression(parameter.defaultValue, visitor);
-      for (const child of statement.body.statements) visitStatement(child, visitor);
+        if (parameter.defaultValue !== null)
+          children.push({ kind: "expression", node: parameter.defaultValue });
+      for (const child of statement.body.statements)
+        children.push({ kind: "statement", node: child });
       return;
     case "returnStatement":
-      if (statement.value !== null) visitExpression(statement.value, visitor);
+      if (statement.value !== null) children.push({ kind: "expression", node: statement.value });
+      return;
+    case "timerStatement":
+      visitTimer(statement, children);
       return;
     case "speakerSetterStatement":
     case "waitStatement":
@@ -575,55 +607,73 @@ function visitStatement(statement: Statement, visitor: Visitor): void {
   }
 }
 
-function visitExpression(expression: Expression, visitor: Visitor): void {
+function visitTimer(timer: TimerParts, children: VisitItem[]): void {
+  if (typeof timer.display === "object" && timer.display !== null) {
+    children.push({ kind: "expression", node: timer.display });
+  }
+  children.push({ kind: "expression", node: timer.duration });
+  if (timer.label !== null) children.push({ kind: "expression", node: timer.label });
+  for (const child of timer.handler?.statements ?? [])
+    children.push({ kind: "statement", node: child });
+}
+
+function visitExpression(expression: Expression, visitor: Visitor, children: VisitItem[]): void {
   switch (expression.kind) {
     case "interactionExpression":
       visitor.interaction(expression);
-      if (expression.hint !== null) visitExpression(expression.hint, visitor);
-      for (const option of expression.options) visitExpression(option.value, visitor);
+      if (expression.hint !== null) children.push({ kind: "expression", node: expression.hint });
+      for (const option of expression.options)
+        children.push({ kind: "expression", node: option.value });
       return;
     case "parenthesizedExpression":
-      visitExpression(expression.expression, visitor);
+      children.push({ kind: "expression", node: expression.expression });
       return;
     case "listLiteral":
-      for (const item of expression.elements) visitExpression(item, visitor);
+      for (const item of expression.elements) children.push({ kind: "expression", node: item });
       return;
     case "setLiteral":
-      for (const item of expression.elements) visitExpression(item, visitor);
+      for (const item of expression.elements) children.push({ kind: "expression", node: item });
       return;
     case "objectLiteral":
-      for (const property of expression.properties) visitExpression(property.value, visitor);
+      for (const property of expression.properties)
+        children.push({ kind: "expression", node: property.value });
       return;
     case "propertyAccessExpression":
-      visitExpression(expression.object, visitor);
+      children.push({ kind: "expression", node: expression.object });
       return;
     case "indexExpression":
-      visitExpression(expression.object, visitor);
-      visitExpression(expression.index, visitor);
+      children.push({ kind: "expression", node: expression.object });
+      children.push({ kind: "expression", node: expression.index });
       return;
     case "callExpression":
-      visitExpression(expression.callee, visitor);
-      for (const argument of expression.arguments) visitExpression(argument.value, visitor);
+      children.push({ kind: "expression", node: expression.callee });
+      for (const argument of expression.arguments)
+        children.push({ kind: "expression", node: argument.value });
       return;
     case "unaryExpression":
-      visitExpression(expression.operand, visitor);
+      children.push({ kind: "expression", node: expression.operand });
       return;
     case "binaryExpression":
-      visitExpression(expression.left, visitor);
-      visitExpression(expression.right, visitor);
+      children.push({ kind: "expression", node: expression.left });
+      children.push({ kind: "expression", node: expression.right });
       return;
     case "rangeExpression":
-      visitExpression(expression.start, visitor);
-      visitExpression(expression.end, visitor);
+      children.push({ kind: "expression", node: expression.start });
+      children.push({ kind: "expression", node: expression.end });
       return;
     case "stringLiteral":
       for (const part of expression.parts)
-        if (part.kind === "stringInterpolation") visitExpression(part.expression, visitor);
+        if (part.kind === "stringInterpolation")
+          children.push({ kind: "expression", node: part.expression });
+      return;
+    case "timerExpression":
+      visitTimer(expression, children);
       return;
     case "identifier":
     case "booleanLiteral":
     case "nullLiteral":
     case "numberLiteral":
+    case "durationLiteral":
       return;
   }
   expression satisfies never;

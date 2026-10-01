@@ -29,7 +29,12 @@ import type {
   InteractionExpression,
   InteractionChoiceOption,
   WaitStatement,
+  TimerStatement,
+  TimerParts,
+  TimerDisplay,
+  DurationUnit,
   ListLiteral,
+  NumberLiteral,
   RepeatStatement,
   ReturnStatement,
   SetLiteral,
@@ -47,6 +52,7 @@ import type {
 } from "./ast.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { lex } from "./lexer.js";
+import { elapsedDurationUnit, isCalendarDurationUnit } from "./duration.js";
 import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
 import { TokenKind, type Token } from "./token.js";
 
@@ -87,6 +93,8 @@ const parserDiagnosticCode = {
   expectedChoiceOption: "TSP030",
   expectedChoiceSeparator: "TSP031",
   unsupportedInteractionForm: "TSP032",
+  unsupportedDurationUnit: "TSP033",
+  invalidTimerForm: "TSP034",
 } as const;
 
 /** Parses the accepted core-language milestone. */
@@ -139,6 +147,9 @@ class Parser {
   *#parseStatement(): ParseTask<Statement | null> {
     if (this.#checkIdentifier("showButton")) {
       return this.#parseShowButtonStatement();
+    }
+    if (this.#checkIdentifier("timer")) {
+      return yield* parseChild(this.#parseTimerStatement());
     }
     if (
       this.#check(TokenKind.KeywordWait) &&
@@ -568,30 +579,196 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
-    let unit: WaitStatement["unit"] = null;
-    if (this.#check(TokenKind.Identifier)) {
-      const token = this.#advance();
-      if (
-        token.lexeme === "ms" ||
-        token.lexeme === "s" ||
-        token.lexeme === "min" ||
-        token.lexeme === "h"
-      ) {
-        unit = token.lexeme;
-      } else {
-        this.#reportToken(
-          parserDiagnosticCode.expectedStatementEnd,
-          "Expected wait unit 'ms', 's', 'min', or 'h'.",
-          token,
-        );
-      }
-    }
+    const unit = this.#parseTrailingDurationUnit("wait");
     return Object.freeze({
       kind: "waitStatement",
       duration,
       unit,
       span: spanFrom(keyword.span, duration.span),
     });
+  }
+
+  *#parseTimerStatement(): ParseTask<TimerStatement | null> {
+    const parts = yield* parseChild(this.#parseTimerParts());
+    return parts === null ? null : Object.freeze({ kind: "timerStatement", ...parts });
+  }
+
+  /**
+   * Parses `timer [async] [visible|mystery|hidden] <duration> [unit] ["label"] [{ ... }]` or
+   * `timer(name: value, ...) [{ ... }]`. The modifiers are contextual words directly after `timer`.
+   */
+  *#parseTimerParts(): ParseTask<TimerParts | null> {
+    const command = this.#advance();
+    if (
+      this.#check(TokenKind.LeftParenthesis) &&
+      this.#peek().span.start.offset === command.span.end.offset
+    ) {
+      return yield* parseChild(this.#parseNamedTimer(command));
+    }
+    const async = this.#checkIdentifier("async");
+    if (async) this.#advance();
+    let display: TimerDisplay | null = null;
+    for (const candidate of ["visible", "mystery", "hidden"] as const) {
+      if (this.#checkIdentifier(candidate)) {
+        this.#advance();
+        display = candidate;
+        break;
+      }
+    }
+    let duration = this.#parseExpression();
+    if (duration === null) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedExpression,
+        "Expected a timer duration such as '10', '30 s', or '5..10' after 'timer'.",
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    let end = duration.span;
+    let unit: DurationUnit | null;
+    // In `timer 5..10 s` the unit belongs to the whole range, not only to its end bound.
+    if (duration.kind === "rangeExpression" && duration.end.kind === "durationLiteral") {
+      unit = duration.end.unit;
+      end = duration.end.span;
+      duration = Object.freeze({
+        ...duration,
+        end: duration.end.amount,
+        span: spanFrom(duration.start.span, duration.end.amount.span),
+      });
+    } else {
+      unit = this.#parseTrailingDurationUnit("timer");
+      if (unit !== null) end = this.#previous().span;
+    }
+    let label: Expression | null = null;
+    if (this.#match(TokenKind.StringStart)) {
+      label = yield* parseChild(this.#parseStringLiteral(this.#previous()));
+      if (label === null) return null;
+      end = label.span;
+    }
+    const handler = yield* parseChild(this.#parseTimerHandler());
+    if (handler === false) return null;
+    return {
+      form: "short",
+      async,
+      display,
+      duration,
+      unit,
+      label,
+      repeat: false,
+      persist: false,
+      handler,
+      commandSpan: copySpan(command.span),
+      span: spanFrom(command.span, handler?.span ?? end),
+    };
+  }
+
+  *#parseNamedTimer(command: Token): ParseTask<TimerParts | null> {
+    const call = yield* parseChild(this.#finishCall(this.#identifier(command), this.#advance()));
+    let duration: Expression | null = null;
+    let display: Expression | null = null;
+    let label: Expression | null = null;
+    const flags = { async: false, repeat: false, persist: false };
+    let valid = true;
+    const seen = new Set<string>();
+    for (const argument of call.arguments) {
+      if (argument.kind !== "namedArgument") {
+        this.#reportSpan(
+          parserDiagnosticCode.invalidTimerForm,
+          "The parenthesized timer form uses named arguments, such as 'timer(duration: 10 s)'.",
+          argument.span,
+        );
+        valid = false;
+        continue;
+      }
+      const name = argument.name.name;
+      if (seen.has(name)) {
+        this.#reportSpan(
+          parserDiagnosticCode.invalidTimerForm,
+          `Duplicate timer argument '${name}'.`,
+          argument.name.span,
+        );
+        valid = false;
+        continue;
+      }
+      seen.add(name);
+      switch (name) {
+        case "duration":
+          duration = argument.value;
+          break;
+        case "display":
+          display = argument.value;
+          break;
+        case "label":
+          label = argument.value;
+          break;
+        case "async":
+        case "repeat":
+        case "persist":
+          if (argument.value.kind !== "booleanLiteral") {
+            this.#reportSpan(
+              parserDiagnosticCode.invalidTimerForm,
+              `Timer argument '${name}' must be the literal true or false.`,
+              argument.value.span,
+            );
+            valid = false;
+          } else {
+            flags[name] = argument.value.value;
+          }
+          break;
+        default:
+          this.#reportSpan(
+            parserDiagnosticCode.invalidTimerForm,
+            `Unknown timer argument '${name}'; use duration, async, display, label, repeat, or persist.`,
+            argument.name.span,
+          );
+          valid = false;
+      }
+    }
+    if (duration === null && valid) {
+      this.#reportSpan(
+        parserDiagnosticCode.invalidTimerForm,
+        "The parenthesized timer form requires a 'duration' argument.",
+        call.span,
+      );
+    }
+    const handler = yield* parseChild(this.#parseTimerHandler());
+    if (handler === false || duration === null || !valid) return null;
+    return {
+      form: "named",
+      async: flags.async,
+      display,
+      duration,
+      unit: null,
+      label,
+      repeat: flags.repeat,
+      persist: flags.persist,
+      handler,
+      commandSpan: copySpan(command.span),
+      span: spanFrom(command.span, handler?.span ?? call.span),
+    };
+  }
+
+  /** Parses an optional expiry block on the same line; `false` reports an already diagnosed failure. */
+  *#parseTimerHandler(): ParseTask<Block | null | false> {
+    if (!this.#check(TokenKind.LeftBrace)) return null;
+    const block = yield* parseChild(this.#parseBlock());
+    return block ?? false;
+  }
+
+  /** A trailing `ms`, `s`, `min`, or `h` after a `wait` or short `timer` duration expression. */
+  #parseTrailingDurationUnit(command: "wait" | "timer"): DurationUnit | null {
+    if (!this.#check(TokenKind.Identifier)) return null;
+    const token = this.#advance();
+    const unit = elapsedDurationUnit(token.lexeme);
+    if (unit !== undefined) return unit;
+    this.#reportToken(
+      isCalendarDurationUnit(token.lexeme)
+        ? parserDiagnosticCode.unsupportedDurationUnit
+        : parserDiagnosticCode.expectedStatementEnd,
+      `Expected ${command} unit 'ms', 's', 'min', or 'h' (or their long forms).`,
+      token,
+    );
+    return null;
   }
 
   #parseLetStatement(): LetStatement | null {
@@ -954,7 +1131,18 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
-    if (this.#match(TokenKind.Equal)) {
+    if (
+      this.#match(TokenKind.Equal) ||
+      this.#match(TokenKind.PlusEqual) ||
+      this.#match(TokenKind.MinusEqual)
+    ) {
+      const operatorKind = this.#previous().kind;
+      const operator: AssignmentStatement["operator"] =
+        operatorKind === TokenKind.PlusEqual
+          ? "+="
+          : operatorKind === TokenKind.MinusEqual
+            ? "-="
+            : "=";
       this.#skipContinuationNewlines();
       const value = this.#parseRequiredExpression();
       if (value === null) {
@@ -971,6 +1159,7 @@ class Parser {
       }
       return Object.freeze({
         kind: "assignmentStatement",
+        operator,
         target: expression,
         value,
         span: spanFrom(expression.span, value.span),
@@ -1323,6 +1512,32 @@ class Parser {
     });
   }
 
+  /** A unit identifier directly after a number literal on the same line forms a duration literal. */
+  #parseDurationUnit(amount: NumberLiteral): Expression {
+    if (!this.#check(TokenKind.Identifier)) return amount;
+    const token = this.#peek();
+    const unit = elapsedDurationUnit(token.lexeme);
+    if (unit === undefined) {
+      if (isCalendarDurationUnit(token.lexeme)) {
+        this.#advance();
+        this.#reportToken(
+          parserDiagnosticCode.unsupportedDurationUnit,
+          `Calendar duration unit '${token.lexeme}' is not implemented yet; use ms, s, min, or h.`,
+          token,
+        );
+      }
+      return amount;
+    }
+    this.#advance();
+    return Object.freeze({
+      kind: "durationLiteral",
+      amount,
+      unit,
+      unitSpan: copySpan(token.span),
+      span: spanFrom(amount.span, token.span),
+    });
+  }
+
   *#parsePrimary(): ParseTask<Expression | null> {
     const token = this.#peek();
     if (
@@ -1332,14 +1547,19 @@ class Parser {
     ) {
       return yield* parseChild(this.#parseInteractionExpression());
     }
+    if (this.#checkIdentifier("timer")) {
+      const parts = yield* parseChild(this.#parseTimerParts());
+      return parts === null ? null : Object.freeze({ kind: "timerExpression", ...parts });
+    }
     if (this.#match(TokenKind.NumberLiteral)) {
-      return Object.freeze({
+      const amount: NumberLiteral = Object.freeze({
         kind: "numberLiteral",
         raw: token.lexeme,
         value: Number(token.lexeme),
         numericType: /[.eE]/u.test(token.lexeme) ? "number" : "integer",
         span: copySpan(token.span),
       });
+      return this.#parseDurationUnit(amount);
     }
     if (this.#match(TokenKind.KeywordTrue)) {
       return Object.freeze({ kind: "booleanLiteral", value: true, span: copySpan(token.span) });

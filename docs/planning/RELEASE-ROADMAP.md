@@ -50,13 +50,11 @@ architecture may change substantially while correctness and the basic model are 
   - **Reference:** [ADR 0018](../decisions/0018-first-standard-library-poc-contract.md), [`RUNTIME.md`](../RUNTIME.md),
     [`LIBRARIES.md`](../LIBRARIES.md), [`CODE-EDITOR.md`](../CODE-EDITOR.md), and [`DEBUGGER.md`](../DEBUGGER.md).
 
-- [ ] **Foreground and background timers**
-  - **Outcome:** Let scripts use foreground timers that block script progress and background timers that continue while
-    other script work proceeds, with explicit lifecycle control and deterministic save/resume behavior. Keep exact handle,
-    syntax, repetition, and presentation decisions in the timer planning and accepted runtime/library sources.
-  - **Reference:** [`TIMER-AND-RECOVERY-FOLLOW-UPS.md`](TIMER-AND-RECOVERY-FOLLOW-UPS.md),
-    [ADR 0016](../decisions/0016-resumable-pending-action-runtime-contract.md), [`RUNTIME.md`](../RUNTIME.md), and
-    [`LIBRARIES.md`](../LIBRARIES.md).
+- [x] **Foreground and background timers**
+  - **Outcome:** Authored blocking and asynchronous timers have lifecycle control, expiry interrupts, Player
+    presentation data, and deterministic scene-time save/resume.
+  - **Reference:** [Accepted timer syntax](../specifications/accepted-syntaxes-v30.md#27-timers),
+    [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time), and [`PLAYER-UI.md`](../ui/PLAYER-UI.md#timer-presentation).
 
 - [ ] **Player UI**
   - **Outcome:** Replace the technical playground presentation with a practical Player interface for transcript output,

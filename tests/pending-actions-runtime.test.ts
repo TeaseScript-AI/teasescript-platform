@@ -71,46 +71,39 @@ test("negative static waits fail compilation and backward observations never mov
   assert.equal(observation.snapshot.currentSessionTimeMs, 10);
 });
 
-test("typed completion is idempotent and classifies invalid, early, stale, and unknown IDs", () => {
-  const compiled = plan("wait 10 ms\nwait 10 ms\nexit");
-  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
-  const actionId = waiting.snapshot.foregroundAction!.actionId;
-  const early = completeAction(compiled, waiting.snapshot, {
-    actionId,
-    actionKind: "delay",
-    payload: { kind: "time", currentSessionTimeMs: 9 },
-  });
-  assert.equal(early.outcome.kind, "notDue");
-  const settled = completeAction(compiled, waiting.snapshot, {
-    actionId,
+test("typed completion is idempotent and classifies time-driven, stale, and unknown IDs", () => {
+  const timed = plan("wait 10 ms\nexit");
+  const waiting = run(timed, createFreshRuntimeSnapshot(timed));
+  const delay = completeAction(timed, waiting.snapshot, {
+    actionId: waiting.snapshot.foregroundAction!.actionId,
     actionKind: "delay",
     payload: { kind: "time", currentSessionTimeMs: 10 },
   });
+  assert.equal(
+    delay.outcome.kind,
+    "invalidPayload",
+    "time reaches a wait only through observation",
+  );
+  assert.deepEqual(delay.snapshot, waiting.snapshot);
+
+  const compiled = plan('showButton "A"\nshowButton "B"\nexit');
+  const first = run(compiled, createFreshRuntimeSnapshot(compiled));
+  const actionId = first.snapshot.foregroundAction!.actionId;
+  const press = (snapshot: typeof first.snapshot, id: number) =>
+    completeAction(compiled, snapshot, {
+      actionId: id,
+      actionKind: "interaction",
+      interactionKind: "button",
+      payload: { kind: "activate" },
+    });
+  const settled = press(first.snapshot, actionId);
   assert.equal(settled.outcome.kind, "completed");
-  const duplicate = completeAction(compiled, settled.snapshot, {
-    actionId,
-    actionKind: "delay",
-    payload: { kind: "time", currentSessionTimeMs: 10 },
-  });
+  const duplicate = press(settled.snapshot, actionId);
   assert.equal(duplicate.outcome.kind, "alreadySettled");
   assert.deepEqual(duplicate.events, []);
   const secondWaiting = run(compiled, settled.snapshot);
   const secondId = secondWaiting.snapshot.foregroundAction!.actionId;
-  const secondSettled = completeAction(compiled, secondWaiting.snapshot, {
-    actionId: secondId,
-    actionKind: "delay",
-    payload: { kind: "time", currentSessionTimeMs: 20 },
-  });
-  const stale = completeAction(compiled, secondSettled.snapshot, {
-    actionId,
-    actionKind: "delay",
-    payload: { kind: "time", currentSessionTimeMs: 20 },
-  });
-  assert.equal(stale.outcome.kind, "staleAction");
-  const unknown = completeAction(compiled, secondSettled.snapshot, {
-    actionId: secondId + 1,
-    actionKind: "delay",
-    payload: { kind: "time", currentSessionTimeMs: 20 },
-  });
-  assert.equal(unknown.outcome.kind, "unknownAction");
+  const secondSettled = press(secondWaiting.snapshot, secondId);
+  assert.equal(press(secondSettled.snapshot, actionId).outcome.kind, "staleAction");
+  assert.equal(press(secondSettled.snapshot, secondId + 1).outcome.kind, "unknownAction");
 });

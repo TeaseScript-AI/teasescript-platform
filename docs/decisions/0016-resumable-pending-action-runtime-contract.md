@@ -29,7 +29,8 @@ This ADR defines the reusable runtime contract. It does not implement syntax, th
 3. Use one discriminated JSON-safe pending-action union instead of unrelated hidden state per feature.
 4. Persist the current nondecreasing session-time coordinate in every version-4 runtime snapshot.
 5. Allocate monotonic runtime action IDs from a persisted safe-integer counter.
-6. Retain one bounded canonical settlement record so an immediately retried completion receives the same recorded result without unbounded history.
+6. Retain one bounded canonical replayable settlement record so an immediately retried replayable completion
+   receives the same recorded result without unbounded history.
 7. Persist absolute deadlines on the injected session-time coordinate. The runtime never reads `Date.now()` or `performance.now()` directly.
 8. Complete actions only through validated runtime operations carrying an action ID and typed payload or time observation.
 9. Resolve completion IDs against active foreground and background actions before applying settled, stale, or unknown classifications.
@@ -99,7 +100,10 @@ The first implementation slice includes `backgroundActions` in the version-4 sch
 
 ### Last settlement
 
-`lastSettlement` stores only the most recently completed action settlement. It contains enough bounded JSON-safe data to return the canonical recorded outcome when the same completion message is delivered again.
+`lastSettlement` stores the most recent replayable action settlement. It contains bounded JSON-safe data for
+returning the canonical outcome when the same completion message is delivered again. Timer lifecycle transitions
+and suspended-delay settlements emit completion events without replacing this record; their rules are maintained
+in [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time).
 
 Conceptually it includes:
 
@@ -111,7 +115,9 @@ recorded result, when the action produced one
 completion event sequence
 ```
 
-Completing a newer action replaces the previous record. A duplicate for the current `lastSettlement` returns `alreadySettled` plus that recorded settlement. An older issued but inactive action is `staleAction`.
+A newer replayable completion replaces the previous record. A duplicate for the current `lastSettlement` returns
+`alreadySettled` plus that recorded settlement. An older issued action that is neither active nor suspended is
+`staleAction`.
 
 An active action may have an ID lower than `lastSettlement.actionId`; active lookup therefore always occurs before settled or stale classification.
 
@@ -165,7 +171,7 @@ A valid completion performs these steps atomically:
 1. Resolve the action ID using the active-first lookup order.
 2. Validate the action kind, payload, timing, and policy.
 3. Store the result where required.
-4. Create or replace `lastSettlement`.
+4. Create or replace `lastSettlement` when the action's completion is replayable.
 5. Remove the matching foreground or background action.
 6. Restore status `running` when a foreground action was cleared.
 7. Emit `actionCompleted` and record its sequence in the settlement.
@@ -179,7 +185,7 @@ A subsequent `executeInstruction(...)`, `stepToEvent(...)`, or `run(...)` call e
 |---|---|---|---|
 | `running` | blocking action created | `waiting` | action stored; `actionRequested` emitted |
 | `waiting` | valid foreground completion | `running` | result and settlement stored; action cleared; `actionCompleted` emitted |
-| any valid state | valid background completion | unchanged foreground status | result and settlement stored; background action removed; handler becomes eligible later |
+| any valid state | valid background completion | unchanged foreground status | result stored when applicable; replayable settlement retained when applicable; action removed or advanced to its next round; handler becomes eligible later |
 | `waiting` | checkpoint and restore | `waiting` | same action, session time, IDs, and settlement remain stored |
 | any | invalid or wrong-type response | unchanged | structured rejection; no state mutation |
 | any | duplicate of `lastSettlement` | unchanged | `alreadySettled` with recorded settlement; no duplicate event |
@@ -204,7 +210,8 @@ Cancellation and timeout remain action-kind policies rather than one universal s
 
 Action creation and counter advancement are atomic. An operation that would increment `Number.MAX_SAFE_INTEGER` fails before allocating or reusing an identity.
 
-Action IDs are internal runtime/player correlation IDs. They are distinct from future TeaseScript-visible handles returned for background timers, permanent buttons, media resources, or scheduled work.
+Action IDs are internal runtime/player correlation IDs. They are distinct from TeaseScript timer handles and
+future handles for permanent buttons, media resources, or scheduled work.
 
 ### Action-ID lookup order
 
@@ -213,9 +220,10 @@ A completion or cancellation request uses this exact order after validating that
 1. Search `foregroundAction`.
 2. Search every active entry in `backgroundActions`.
 3. If an active action matches, validate and process that active action.
-4. Otherwise, if `lastSettlement.actionId` matches, return `alreadySettled` with the recorded settlement.
-5. Otherwise, if the ID is lower than `nextActionId`, return `staleAction`.
-6. Otherwise, return `unknownAction`.
+4. Otherwise, if the ID identifies an interrupted foreground action, return `suspendedAction` without mutation.
+5. Otherwise, if `lastSettlement.actionId` matches, return `alreadySettled` with the recorded settlement.
+6. Otherwise, if the ID is lower than `nextActionId`, return `staleAction`.
+7. Otherwise, return `unknownAction`.
 
 This order is required because a long-running background action may have an older ID than a newer action that has already settled.
 
@@ -238,12 +246,13 @@ A completion operation distinguishes at least:
 
 ```text
 completed
+suspendedAction
 alreadySettled
 unknownAction
 staleAction
 wrongActionKind
 invalidPayload
-notDue
+executionPending
 ```
 
 Rules:
@@ -253,10 +262,15 @@ Rules:
 - a repeated delivery matching `lastSettlement` returns `alreadySettled` with the same canonical settlement;
 - neither repeated delivery produces another result write, event, RNG advance, handler, or continuation;
 - an active action is never classified as stale solely because its ID is older than `lastSettlement`;
-- an ID that is not active, does not match `lastSettlement`, and is lower than `nextActionId` is `staleAction`;
+- an ID that is neither active nor suspended, does not match `lastSettlement`, and is lower than `nextActionId`
+  is `staleAction`;
 - an ID at or above `nextActionId` is `unknownAction`;
 - a response for another action kind is rejected;
-- a timed action submitted before its deadline is `notDue`;
+- waits and timers accept no host completion: time reaches them only through `observeTime`, and a completion request
+  for one is `invalidPayload`;
+- a failed session accepts no host completion; a request for a still-recorded action is `invalidPayload`;
+- host input for an active action is `executionPending` while scene time is behind the observed time or a due timer
+  expiry block can run; the host runs the engine and retries with the same action ID if it is still active;
 - a late response after timeout, cancellation, or replacement does not revive the action.
 
 ## Time model
@@ -280,12 +294,15 @@ The canonical persisted coordinate is not raw `performance.now()`, because that 
 Conceptually:
 
 ```text
-sessionNow = persistedOrServerAnchor + monotonicDeltaSinceAnchor
+sessionNow = savedObservedSessionTimeMs + monotonicDeltaSinceAnchor
 ```
 
-During an active page, monotonic deltas advance the coordinate. At reload, reconnect, restore, visibility return, or another lifecycle boundary, the player obtains or reconstructs a new anchor for the same coordinate, preferably from server-observed time.
+During a live Player execution, elapsed observations advance scene time, including ordinary background throttling.
+A new Player execution rebases its clock on the persisted observed time (`observedSessionTimeMs`); genuine
+unavailability does not consume timer duration. Visibility changes provide observation opportunities and do not pause a live Player.
 
-Local wall-clock time may be used only as a marked fallback. It is not the sole authority for manipulation-sensitive or server-backed deadlines.
+Absolute wall-clock targets and server-authoritative deadlines are separate scheduling concerns. The Player
+observation and restore contract is maintained in [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time).
 
 ### Atomic time observation
 
@@ -295,29 +312,37 @@ Local wall-clock time may be used only as a marked fallback. It is not the sole 
 2. Calculate:
 
    ```text
-   effectiveNow = max(snapshot.currentSessionTimeMs, suppliedNow)
+   effectiveNow = max(snapshot.observedSessionTimeMs, suppliedNow)
    ```
 
-3. Persist `snapshot.currentSessionTimeMs = effectiveNow`.
+3. Persist `snapshot.observedSessionTimeMs = effectiveNow`.
 4. Determine which timed foreground and background actions are due at `effectiveNow`.
-5. Settle due actions according to the accepted deterministic ordering.
+5. Unless the session has failed, settle due actions according to the accepted deterministic ordering, advancing
+   `snapshot.currentSessionTimeMs` to each settled deadline and finally to `effectiveNow`. While the script or a
+   timer expiry block can execute, `currentSessionTimeMs` stands at the moment that work became due until execution
+   waits or ends; see [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time).
 6. Return the updated validated snapshot and structured outcomes.
 
-No checkpoint may expose due-action processing performed against a newer time while retaining the older `currentSessionTimeMs` value.
+No checkpoint may expose due-action processing performed against a newer time than its `currentSessionTimeMs`
+value.
 
-A backward clock adjustment therefore does not extend an active wait. Restore itself does not read a clock and has no hidden completion side effect. After restore, the player submits an explicit observation; the persisted coordinate then prevents time from moving backwards.
+A backward clock adjustment therefore does not extend an active wait. Restore itself does not read a clock and has no hidden completion side effect. After restore, the player submits an explicit observation; the persisted observed time then prevents time from moving backwards.
 
 ### Timed actions
 
-Timed actions persist one absolute deadline on the session coordinate. They may also retain creation time when required for elapsed-time return values or diagnostics.
+Running timed actions persist a deadline on the scene coordinate. Paused asynchronous timers retain remaining
+round time instead; deadline and remaining time are not competing canonical values. Timer elapsed-state and
+lifecycle validation are maintained in [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time).
 
-Persisting only duration remaining is rejected because it loses sleep, reload, and offline time unless every lifecycle transition first mutates the snapshot.
+Remaining-only countdown updates are unsuitable for running actions because delayed observations must recover
+elapsed scene time independently of callback frequency.
 
 Persisting both remaining time and deadline is rejected as duplicate canonical state that can disagree.
 
 ### Active browser and future server time
 
-For an active browser session, the player should use a monotonic browser clock as its primary elapsed source and anchor it to server-observed time at suitable lifecycle or existing communication boundaries.
+For a live Player execution, the Player maps monotonic elapsed observations onto persisted scene time.
+Server-authoritative absolute deadlines require a separate scheduling contract.
 
 Time-integrity anomalies may be recorded as typed diagnostics. This ADR does not define an author hook and does not automatically label an anomaly as cheating.
 
@@ -347,7 +372,8 @@ Rules:
 - a negative runtime result is a structured runtime failure;
 - `NaN`, infinity, unsupported magnitude, and deadline overflow are rejected;
 - there is no additional arbitrary product maximum below the technical numeric boundary;
-- browser suspension, sleep, reload, and restart count when the next trusted observation shows that the deadline passed.
+- delayed observations during a live Player execution catch up elapsed scene time; a newly restored execution
+  excludes the genuinely unavailable gap.
 
 ## Runtime/player responsibility boundary
 
@@ -469,13 +495,9 @@ Every implemented pending-action kind requires shared state-machine coverage plu
 
 ### Deterministic background ordering
 
-When multiple background deadlines are introduced, due actions are ordered by:
-
-1. earliest deadline;
-2. creation sequence;
-3. action ID as the final tie-breaker.
-
-Handlers run one at a time.
+Due timed work is ordered by deadline, then action ID. Handlers run one at a time without nesting.
+Timer interruption and suspended-delay processing are maintained in
+[`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time).
 
 ## Implementation sequence
 
@@ -544,7 +566,8 @@ Rejected. A snapshot may have no timed action, and a later action created after 
 
 ### Duration remaining
 
-Rejected because sleep, reload, and restore cannot be represented correctly without mutating state at every lifecycle transition.
+Rejected as the sole representation for running timed actions because delayed observations must recover elapsed
+scene time independently of callback frequency. Paused timer rounds may retain remaining time.
 
 ### Absolute deadline plus remaining duration
 

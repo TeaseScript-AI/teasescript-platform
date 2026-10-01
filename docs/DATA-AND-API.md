@@ -64,7 +64,8 @@ ADR 0016 defines one canonical runtime-owned contract for waits, timers, choices
 
 The runtime owns:
 
-- persisted `currentSessionTimeMs` and nondecreasing time updates;
+- the persisted observation horizon (`observedSessionTimeMs`), scene time (`currentSessionTimeMs`), and nondecreasing
+  time updates;
 - foreground and background action state;
 - action and event identities;
 - expected response types;
@@ -86,12 +87,13 @@ The player/controller owns:
 
 The future host/player protocol must expose typed operations equivalent to observing time and completing, cancelling, or reporting a capability outcome for one action ID. The host supplies observations but may not directly mutate `currentSessionTimeMs`, arbitrary snapshot fields, or continuation state.
 
-Time observation is one atomic runtime transition: validate the supplied coordinate, persist `max(currentSessionTimeMs, suppliedNow)`, then settle due actions against that stored value.
+Time observation is one atomic runtime transition: validate the supplied coordinate, persist `max(observedSessionTimeMs, suppliedNow)` as the observed time, then, unless the session has failed, settle due work in order while `currentSessionTimeMs` advances toward it; see [`RUNTIME.md`](RUNTIME.md#timers-and-scene-time).
 
 Completion correlation uses the accepted order:
 
 ```text
 active foreground/background action
+-> suspended foreground action: suspendedAction
 -> matching lastSettlement
 -> issued inactive stale action
 -> unknown unissued action

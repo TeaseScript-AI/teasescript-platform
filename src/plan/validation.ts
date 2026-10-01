@@ -393,10 +393,72 @@ function validateInstruction(
       }
       return;
     case "wait":
-      if (value.unit !== null && !["ms", "s", "min", "h"].includes(String(value.unit))) {
-        errors.push(planError("TSC002", "Wait unit is invalid.", `${path}.unit`));
+      if (
+        !hasExactKeys(value, ["kind", "command", "duration", "unit", "display", "label", "span"])
+      ) {
+        errors.push(planError("TSC002", "Wait instruction has an invalid shape.", path));
+      }
+      validateDurationUnit(value.unit, `${path}.unit`, errors);
+      if (value.command !== "wait" && value.command !== "timer") {
+        errors.push(planError("TSC002", "Wait command is invalid.", `${path}.command`));
+      } else if (value.command === "wait" && (value.display !== "hidden" || value.label !== null)) {
+        errors.push(planError("TSC002", "A wait is hidden and unlabeled.", path));
+      }
+      if (!isDelayDisplay(value.display)) {
+        if (value.command === "timer") {
+          validateExpression(value.display, `${path}.display`, errors, false, temporaryCount);
+        } else {
+          errors.push(planError("TSC002", "Wait display is invalid.", `${path}.display`));
+        }
       }
       validateExpression(value.duration, `${path}.duration`, errors, false, temporaryCount);
+      if (value.label !== null) {
+        validateExpression(value.label, `${path}.label`, errors, false, temporaryCount);
+      }
+      return;
+    case "startTimer":
+      if (
+        !hasExactKeys(value, [
+          "kind",
+          "duration",
+          "unit",
+          "display",
+          "label",
+          "repeat",
+          "persist",
+          "handlerFunctionId",
+          "destinationTemporary",
+          "span",
+        ]) ||
+        typeof value.repeat !== "boolean" ||
+        typeof value.persist !== "boolean"
+      ) {
+        errors.push(planError("TSC002", "Start-timer instruction has an invalid shape.", path));
+      }
+      validateDurationUnit(value.unit, `${path}.unit`, errors);
+      validateExpression(value.duration, `${path}.duration`, errors, false, temporaryCount);
+      if (!isDelayDisplay(value.display)) {
+        validateExpression(value.display, `${path}.display`, errors, false, temporaryCount);
+      }
+      if (value.label !== null) {
+        validateExpression(value.label, `${path}.label`, errors, false, temporaryCount);
+      }
+      if (value.handlerFunctionId !== null) {
+        validateFunctionId(
+          value.handlerFunctionId,
+          `${path}.handlerFunctionId`,
+          functionIds,
+          errors,
+        );
+      }
+      if (value.destinationTemporary !== null) {
+        validateTemporaryId(
+          value.destinationTemporary,
+          `${path}.destinationTemporary`,
+          temporaryCount,
+          errors,
+        );
+      }
       return;
     case "interaction":
       validateInteractionInstruction(value, path, temporaryCount, errors);
@@ -991,6 +1053,15 @@ function validateExpressionNode(
         );
       }
       return;
+    case "duration":
+      if (
+        !hasExactKeys(value, ["kind", "milliseconds", "span"]) ||
+        typeof value.milliseconds !== "number" ||
+        !Number.isFinite(value.milliseconds)
+      ) {
+        errors.push(planError("TSC002", "Duration literal plan is invalid.", path));
+      }
+      return;
     case "identifier":
       requireString(value.name, `${path}.name`, errors);
       return;
@@ -1162,6 +1233,16 @@ function validateCallArguments(
     validateExpression(argument.value, `${argumentPath}.value`, errors, false, temporaryCount);
     validateSpan(argument.span, `${argumentPath}.span`, errors);
   });
+}
+
+function validateDurationUnit(value: unknown, path: string, errors: PlanValidationError[]): void {
+  if (value !== null && !["ms", "s", "min", "h"].includes(String(value))) {
+    errors.push(planError("TSC002", "Duration unit is invalid.", path));
+  }
+}
+
+function isDelayDisplay(value: unknown): boolean {
+  return value === "hidden" || value === "visible" || value === "mystery";
 }
 
 function validateTemporaryId(

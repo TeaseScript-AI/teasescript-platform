@@ -23,7 +23,8 @@ This ADR was accepted as documentation and design. Its generic foreground-intera
 6. The Platform Standard Library is an automatic default prelude. Its selected names are directly callable, protected from ordinary script shadowing, and cannot be disabled or replaced in the first POC.
 7. The selected resumable Standard Library behavior is fully lowered into versioned JSON-safe plan instructions. Restore never resolves against an implicit latest library.
 8. The first POC uses one Standard chat target with stable optional speaker provenance. Broader involved-speaker and conversation identity remain deferred.
-9. `askText`, `askNumber`, `choose`, and `showButton` are mandatory foreground interactions. They cannot be cancelled and do not return `null`.
+9. `askText`, `askNumber`, `choose`, and `showButton` are mandatory foreground interactions with no cancellation
+   result. Timer interrupts may suspend them; handler `exit` discards the interrupted instruction without a value.
 10. Interaction definitions and completions are bounded, typed, JSON-safe data. Over-limit data is rejected deterministically without truncation or partial state mutation.
 11. The Standard Player application uses one focused chat composer for typed answers. Choice controls may render as
     buttons or a dropdown without changing semantics; `showButton` completes only through its rendered button.
@@ -320,7 +321,7 @@ Retries are built into the interaction contract. An ordinary author does not nee
 
 ## Mandatory completion and pause policy
 
-`askText`, `askNumber`, `choose`, and `showButton` are permanently non-cancellable public interactions:
+`askText`, `askNumber`, `choose`, and `showButton` expose no public cancellation result:
 
 - they never complete with `null`;
 - closing or hiding a control does not complete it;
@@ -328,9 +329,16 @@ Retries are built into the interaction contract. An ordinary author does not nee
 - package exit or fatal runtime/player failure is cleanup or failure, not an author-visible cancelled value;
 - a future `showButton` timeout is normal timeout completion, not cancellation.
 
+Timer interrupts may suspend an interaction. Normal handler return restores it; handler `exit` discards the
+interrupted action and source instruction without synthesizing a result or binding. See specification
+[§27](../specifications/accepted-syntaxes-v30.md#27-timers) and
+[`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time).
+
 The normal Player application has no player-facing pause control and TeaseScript gains no author-facing pause command through this decision. Developer mode may expose Pause alongside Run, Step, checkpoint, restore, and debugger controls. Developer pause is tooling and does not establish player-initiated pause semantics.
 
-Reload or reconnect resumes the exact validated saved state. Time behavior during browser unavailability, reload, reconnect, device sleep, or visibility changes remains a separate lifecycle/time-integrity decision.
+Reload or reconnect resumes validated saved state. Timer scene-time observation and restore rebasing are defined in
+[`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time); production host lifecycle and server time integrity remain
+separate.
 
 ## Standard chat composer and choice presentation
 
@@ -672,7 +680,7 @@ This ADR intentionally defers:
 - involved-speaker collections, conversation identity, LLM context assembly, memory, summaries, and model selection;
 - camera, files, image input, media, custom views, background timers, and permanent buttons;
 - final package manifests, imports, lockfiles, community dependency resolution, Standard Library replacement, and migration policy;
-- browser-unavailability, reload, reconnect, device-sleep, and visibility-change time-integrity policy;
+- production host lifecycle and time-integrity policy beyond the current scene-time observation/restore contract;
 - author recovery-point rollback.
 
 A player-facing pause command is not deferred; it is excluded by this accepted contract. Developer pause remains tooling.

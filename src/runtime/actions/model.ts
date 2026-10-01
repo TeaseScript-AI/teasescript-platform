@@ -1,6 +1,11 @@
 import type { MessagePresentation } from "../../message-presentation.js";
-import type { InteractionResultDomain, InteractionUiPayload } from "../../plan/model.js";
+import type {
+  DelayDisplay,
+  InteractionResultDomain,
+  InteractionUiPayload,
+} from "../../plan/model.js";
 import type { MessageMarkup } from "../../message-markup.js";
+import type { RuntimeTimerSnapshot } from "../timers.js";
 
 /** Shared serializable pending-action and settlement contracts. */
 export interface RuntimeDelayActionSnapshot {
@@ -14,6 +19,10 @@ export interface RuntimeDelayActionSnapshot {
   readonly createdAtMs: number;
   readonly deadlineMs: number;
   readonly expectedCompletion: "time";
+  /** Copied from the owning instruction; Players present only `visible` delays. */
+  readonly display: DelayDisplay;
+  /** Evaluated once from a blocking timer's label; always `null` for `wait`. */
+  readonly label: string | null;
   readonly requestEventSequence: number;
 }
 
@@ -60,16 +69,53 @@ export interface RuntimeChatPacingGateActionSnapshot {
   readonly preparedOutput: RuntimePreparedSayOutputSnapshot | null;
 }
 
-export type RuntimePendingActionSnapshot =
+/**
+ * One running or paused asynchronous timer as background timed work. Its action identity spans every round; the
+ * script-visible handle uses the separate `timerId`. Only time and script operations settle it; the Player cannot.
+ */
+export interface RuntimeTimerActionSnapshot {
+  readonly kind: "timer";
+  readonly actionId: number;
+  /** The `startTimer` instruction, for provenance and source location. */
+  readonly owningInstruction: number;
+  readonly createdAtMs: number;
+  readonly requestEventSequence: number;
+  readonly timer: RuntimeTimerSnapshot;
+}
+
+/** Timers are background work only; they never block the foreground path. */
+export type RuntimeForegroundActionSnapshot =
   | RuntimeDelayActionSnapshot
   | RuntimeInteractionActionSnapshot
   | RuntimeChatPacingGateActionSnapshot;
 
+export type RuntimePendingActionSnapshot =
+  | RuntimeDelayActionSnapshot
+  | RuntimeInteractionActionSnapshot
+  | RuntimeChatPacingGateActionSnapshot
+  | RuntimeTimerActionSnapshot;
+
 /** Completion events that an active action must still be able to publish. */
 export function requiredActionCompletionEvents(action: { readonly kind?: unknown } | null): number {
   if (action?.kind === "interaction") return 2;
-  if (action?.kind === "delay" || action?.kind === "chatPacingGate") return 1;
+  if (action?.kind === "delay" || action?.kind === "chatPacingGate" || action?.kind === "timer")
+    return 1;
   return 0;
+}
+
+/**
+ * Published with `actionCompleted` when a timer finishes or stops. It is not retained as `lastSettlement` because no
+ * Player completion can target a timer, so there is nothing to replay.
+ */
+export interface RuntimeTimerSettlementSnapshot {
+  readonly actionId: number;
+  readonly actionKind: "timer";
+  readonly settlementKind: "finished" | "stopped";
+  readonly timerId: number;
+  readonly owningInstruction: number;
+  readonly requestEventSequence: number;
+  readonly completionEventSequence: number;
+  readonly completedAtMs: number;
 }
 
 export interface RuntimeDelayActionSettlementSnapshot {

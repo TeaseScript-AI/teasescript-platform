@@ -2,6 +2,7 @@ import type { ExpressionPlan } from "./model.js";
 export function expressionPlanChildren(expression: ExpressionPlan): readonly ExpressionPlan[] {
   switch (expression.kind) {
     case "literal":
+    case "duration":
     case "identifier":
     case "temporary":
     case "preparedReference":

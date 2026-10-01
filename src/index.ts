@@ -247,6 +247,7 @@ export type {
   SayStatement,
   ShowButtonStatement,
   WaitStatement,
+  TimerStatement,
   SetLiteral,
   SpeakerDeclaration,
   SpeakerProperty,

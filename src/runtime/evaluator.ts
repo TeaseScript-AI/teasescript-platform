@@ -34,12 +34,14 @@ import {
   serializableSetContains,
   SerializableValueError,
   setCapturedSerializableProperty,
+  type SerializableRuntimeDuration,
   type SerializableRuntimeList,
   type SerializableRuntimeObject,
   type SerializableRuntimeRange,
   type SerializableRuntimeSet,
   type SerializableRuntimeScalar,
   type SerializableRuntimeValue,
+  type SerializableTimerHandle,
 } from "./serializable-values.js";
 import type {
   RuntimeBindingSnapshot,
@@ -47,7 +49,33 @@ import type {
   RuntimeSpeakerSnapshot,
   RuntimeTemporarySnapshot,
 } from "./state.js";
-import { isList, isObject, isRange, isSet, isSpeakerReference } from "./value-predicates.js";
+import {
+  isDuration,
+  isList,
+  isObject,
+  isRange,
+  isSet,
+  isSpeakerReference,
+  isTimerHandle,
+} from "./value-predicates.js";
+import {
+  pauseTimer,
+  resumeTimer,
+  setTimerDisplay,
+  setTimerRemaining,
+  setTimerRepeatDuration,
+  timerProperty,
+  type RuntimeTimerSnapshot,
+  type TimerWarning,
+} from "./timers.js";
+import {
+  activeTimerAction,
+  expireTimerAction,
+  stopTimerAction,
+  timerRecord,
+} from "./operations/timer-lifecycle.js";
+import { isValidSessionTime } from "./actions/delay.js";
+import { formatDuration } from "../duration.js";
 
 export interface RuntimeCapabilityCall {
   readonly positional: readonly SerializableRuntimeValue[];
@@ -113,12 +141,14 @@ export class Evaluator {
   #evaluateLeaf(
     expression: Extract<
       ExpressionPlan,
-      { kind: "literal" | "identifier" | "temporary" | "preparedReference" }
+      { kind: "literal" | "duration" | "identifier" | "temporary" | "preparedReference" }
     >,
   ): SerializableRuntimeValue {
     switch (expression.kind) {
       case "literal":
         return expression.value;
+      case "duration":
+        return { kind: "duration", milliseconds: expression.milliseconds };
       case "identifier": {
         if (expression.name === "speaker" && this.snapshot.contextualSpeaker !== null) {
           const speaker = this.speakerById(this.snapshot.contextualSpeaker, expression.span);
@@ -291,6 +321,7 @@ export class Evaluator {
       let owned = false;
       switch (expression.kind) {
         case "literal":
+        case "duration":
         case "identifier":
         case "temporary":
         case "preparedReference":
@@ -429,6 +460,14 @@ export class Evaluator {
             if (typeof result.value !== "boolean")
               throw fault("TSR026", "Expected a boolean value.", expression.operand.span);
             value = !result.value;
+          } else if (isDuration(result.value)) {
+            value = {
+              kind: "duration",
+              milliseconds:
+                expression.operator === "+"
+                  ? result.value.milliseconds
+                  : 0 - result.value.milliseconds,
+            };
           } else {
             const number = this.#number(result.value, expression.operand.span);
             value = this.#finite(expression.operator === "+" ? number : -number, expression.span);
@@ -567,7 +606,15 @@ export class Evaluator {
         );
         return;
       }
-      throw fault("TSR003", "Only objects and speakers have assignable properties.", target.span);
+      if (isTimerHandle(object)) {
+        this.#assignTimerProperty(object, target.name, value, target.span);
+        return;
+      }
+      throw fault(
+        "TSR003",
+        "Only objects, speakers, and timer handles have assignable properties.",
+        target.span,
+      );
     }
     if (isSet(object)) throw fault("TSR004", "Sets are not indexable.", target.span);
     if (!isList(object))
@@ -597,8 +644,12 @@ export class Evaluator {
     if (target.kind === "identifier") return;
     const object = this.evaluate(target.object);
     if (target.kind === "property") {
-      if (!isObject(object) && !isSpeakerReference(object)) {
-        throw fault("TSR003", "Only objects and speakers have assignable properties.", target.span);
+      if (!isObject(object) && !isSpeakerReference(object) && !isTimerHandle(object)) {
+        throw fault(
+          "TSR003",
+          "Only objects, speakers, and timer handles have assignable properties.",
+          target.span,
+        );
       }
       return;
     }
@@ -615,6 +666,12 @@ export class Evaluator {
     method: string,
     span: SourceSpan,
   ): void {
+    if (isTimerHandle(receiver)) {
+      if (!["pause", "resume", "stop"].includes(method)) {
+        throw fault("TSR016", `Timer handles have no method '${method}'.`, span);
+      }
+      return;
+    }
     if (!isList(receiver) && !isSet(receiver)) {
       throw fault("TSR016", `Unsupported method '${method}'.`, span);
     }
@@ -768,6 +825,7 @@ export class Evaluator {
       return String(Object.is(value, -0) ? 0 : value);
     if (typeof value === "boolean") return value ? "true" : "false";
     if (value === null) return "null";
+    if (isDuration(value)) return formatDuration(value.milliseconds);
     throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
   }
 
@@ -790,6 +848,7 @@ export class Evaluator {
         throw this.#translateValueError(error, expression.span);
       }
     }
+    if (isDuration(left) || isDuration(right)) return this.#durationBinary(expression, left, right);
     if (["<", "<=", ">", ">="].includes(expression.operator)) {
       if (
         (typeof left !== "number" || typeof right !== "number") &&
@@ -822,6 +881,46 @@ export class Evaluator {
       default:
         throw fault("TSR035", "Unsupported binary operation.", expression.span);
     }
+  }
+
+  /** V30 §35 exact-duration arithmetic and comparison; mixing with plain numbers is explicit only. */
+  #durationBinary(
+    expression: BinaryExpressionPlan,
+    left: SerializableRuntimeValue,
+    right: SerializableRuntimeValue,
+  ): SerializableRuntimeValue {
+    const duration = (milliseconds: number): SerializableRuntimeDuration => ({
+      kind: "duration",
+      milliseconds: this.#finite(milliseconds, expression.span),
+    });
+    if (isDuration(left) && isDuration(right)) {
+      switch (expression.operator) {
+        case "+":
+          return duration(left.milliseconds + right.milliseconds);
+        case "-":
+          return duration(left.milliseconds - right.milliseconds);
+        case "/":
+          return this.#finite(left.milliseconds / right.milliseconds, expression.span);
+        case "<":
+          return left.milliseconds < right.milliseconds;
+        case "<=":
+          return left.milliseconds <= right.milliseconds;
+        case ">":
+          return left.milliseconds > right.milliseconds;
+        case ">=":
+          return left.milliseconds >= right.milliseconds;
+      }
+    } else if (isDuration(left) && typeof right === "number") {
+      if (expression.operator === "*") return duration(left.milliseconds * right);
+      if (expression.operator === "/") return duration(left.milliseconds / right);
+    } else if (typeof left === "number" && isDuration(right) && expression.operator === "*") {
+      return duration(left * right.milliseconds);
+    }
+    throw fault(
+      "TSR009",
+      `Operator '${expression.operator}' is not supported for these duration operands; add durations to durations and multiply or divide durations by numbers.`,
+      expression.span,
+    );
   }
 
   #call(
@@ -890,6 +989,9 @@ export class Evaluator {
         }
         throw error;
       }
+    }
+    if (expression.callee.kind === "property" && isTimerHandle(receiver)) {
+      return this.#callTimer(receiver, expression.callee.name, positional, named, expression.span);
     }
     if (expression.callee.kind === "property") {
       return this.#callCollection(
@@ -1016,6 +1118,100 @@ export class Evaluator {
     }
   }
 
+  #timer(handle: SerializableTimerHandle, span: SourceSpan): RuntimeTimerSnapshot {
+    const timer = timerRecord(this.snapshot, handle.timerId);
+    if (timer === undefined) throw fault("TSR053", "Timer handle refers to no timer.", span);
+    return timer;
+  }
+
+  /** `pause()`, `resume()`, and `stop()`; repeated calls in the reached state are silent no-ops. */
+  #callTimer(
+    handle: SerializableTimerHandle,
+    name: string,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): null {
+    if (!["pause", "resume", "stop"].includes(name)) {
+      throw fault("TSR016", `Timer handles have no method '${name}'.`, span);
+    }
+    if (positional.length !== 0 || Object.keys(named).length !== 0) {
+      throw fault("TSR028", `Timer ${name}() takes no arguments.`, span);
+    }
+    const timer = this.#timer(handle, span);
+    const action = activeTimerAction(this.snapshot, handle.timerId);
+    const now = this.snapshot.currentSessionTimeMs;
+    if (name === "stop") {
+      if (action !== undefined) stopTimerAction(this.snapshot, action, span, this.events);
+      return null;
+    }
+    if (name === "resume" && timer.state === "paused") {
+      assertRepresentableRound(now, timer.remainingMs!, span);
+    }
+    const warning = name === "pause" ? pauseTimer(timer, now) : resumeTimer(timer, now);
+    if (warning !== null) this.#warn(warning.code, warning.message, span);
+    // A round that is already due while its expiry work waits behind a block ends now, like `remaining = 0`.
+    if (action !== undefined && timer.state === "paused" && timer.remainingMs === 0) {
+      expireTimerAction(this.snapshot, action, now, span, this.events);
+    }
+    return null;
+  }
+
+  /** Assignment to `remaining`, `display`, or `repeatDuration` of a timer handle. */
+  #assignTimerProperty(
+    handle: SerializableTimerHandle,
+    name: string,
+    value: SerializableRuntimeValue,
+    span: SourceSpan,
+  ): void {
+    const timer = this.#timer(handle, span);
+    const now = this.snapshot.currentSessionTimeMs;
+    let warning: TimerWarning | "expired" | null;
+    if (name === "display") {
+      warning = setTimerDisplay(timer, timerDisplayValue(value, span));
+    } else if (name === "remaining" || name === "repeatDuration") {
+      if (!isDuration(value)) {
+        throw fault("TSR050", `Timer ${name} must be assigned a duration such as 10 s.`, span);
+      }
+      if (name === "remaining") {
+        if (timer.state === "running" || timer.state === "paused") {
+          assertRepresentableRound(now, Math.max(0, value.milliseconds), span);
+        }
+        warning = setTimerRemaining(timer, value.milliseconds, now);
+      } else {
+        if (
+          !(value.milliseconds > 0) ||
+          !isValidSessionTime(now + value.milliseconds) ||
+          now + value.milliseconds <= now
+        ) {
+          throw fault(
+            "TSR050",
+            "Timer repeatDuration must be a positive representable duration.",
+            span,
+          );
+        }
+        warning = setTimerRepeatDuration(timer, value.milliseconds, now);
+      }
+    } else {
+      throw fault(
+        "TSR003",
+        `Timer handle property '${name}' cannot be assigned; assign remaining, display, or repeatDuration.`,
+        span,
+      );
+    }
+    if (warning === "expired") {
+      expireTimerAction(
+        this.snapshot,
+        activeTimerAction(this.snapshot, handle.timerId)!,
+        now,
+        span,
+        this.events,
+      );
+    } else if (warning !== null) {
+      this.#warn(warning.code, warning.message, span);
+    }
+  }
+
   #warn(code: string, message: string, span: SourceSpan): void {
     this.events.push(
       Object.freeze({
@@ -1104,12 +1300,21 @@ export class Evaluator {
     if (!isRange(range)) {
       throw fault("TSR040", "randomInteger(range) requires a range value.", call.span);
     }
-    assertIntegerRange(range, call.span);
+    return this.randomIntegerInRange(range, call.span, "randomInteger(range)");
+  }
+
+  /** Draws one whole number from a non-empty integer range with the session RNG. */
+  public randomIntegerInRange(
+    range: SerializableRuntimeRange,
+    span: SourceSpan,
+    subject: string,
+  ): number {
+    assertIntegerRange(range, span);
     const length = rangeLength(range);
     if (length < 1) {
-      throw fault("TSR041", "randomInteger(range) requires a non-empty range.", call.span);
+      throw fault("TSR041", `${subject} requires a non-empty range.`, span);
     }
-    return range.start + Math.floor(this.#findRandom(call.span) * length);
+    return range.start + Math.floor(this.#findRandom(span) * length);
   }
 
   #escapeMarkupBuiltin(call: RuntimeCapabilityCall): string {
@@ -1164,6 +1369,16 @@ export class Evaluator {
       return this.#getSpeakerProperty(this.speakerById(value.speakerId, span), name, span);
     }
     if (isList(value) || isSet(value)) return this.#getCollectionProperty(value, name, span);
+    if (isTimerHandle(value)) {
+      const property = timerProperty(
+        this.#timer(value, span),
+        name,
+        this.snapshot.currentSessionTimeMs,
+      );
+      if (property === undefined)
+        throw fault("TSR017", `Timer handles have no property '${name}'.`, span);
+      return property;
+    }
     throw fault("TSR017", `Value has no property '${name}'.`, span);
   }
 
@@ -1197,6 +1412,26 @@ export class Evaluator {
     }
     throw error;
   }
+}
+
+/** A running round must end at a supported session time strictly after a positive remaining time starts. */
+function assertRepresentableRound(nowMs: number, remainingMs: number, span: SourceSpan): void {
+  const deadlineMs = nowMs + remainingMs;
+  if (!isValidSessionTime(deadlineMs) || (remainingMs > 0 && deadlineMs <= nowMs)) {
+    throw fault(
+      "TSR050",
+      "Timer remaining time is outside the supported session-time range.",
+      span,
+    );
+  }
+}
+
+function timerDisplayValue(
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+): "visible" | "mystery" | "hidden" {
+  if (value === "visible" || value === "mystery" || value === "hidden") return value;
+  throw fault("TSR050", 'Timer display must be "visible", "mystery", or "hidden".', span);
 }
 
 function optionalSpeakerString(

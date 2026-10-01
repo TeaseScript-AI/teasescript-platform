@@ -91,7 +91,10 @@ let amount = askNumber as mistress "Enter a number"
 
 For `askText` and `askNumber`, the optional string is Standard UI field text or a hint. It is not automatically spoken into the transcript. The normal question is a preceding `say`.
 
-All four basic interactions are mandatory and blocking. They do not return `null` and cannot be cancelled. `askText` returns `string`; `askNumber` returns `number`; the first `showButton` slice has no useful script return value and no timeout.
+All four basic interactions are mandatory and blocking, with no cancellation result. `askText` returns `string`;
+`askNumber` returns `number`; the first `showButton` slice has no useful script return value and no timeout.
+Timer interrupts may suspend an interaction; handler `exit` discards its instruction without producing a result
+or binding. See [timer semantics](specifications/accepted-syntaxes-v30.md#27-timers).
 
 `askText` normalizes line endings to `LF`, otherwise preserves submitted text, and rejects whitespace-only input. It does not automatically trim, change case, or apply Unicode normalization.
 
@@ -195,7 +198,14 @@ The exact syntax for detailed result objects, advanced accessibility overrides, 
 
 ## Currently implemented language subset
 
-The repository includes core values, variables, assignments, speakers, output, collections, expressions, comments, ranges, deterministic random built-ins, conditionals, loops, and loop control.
+The repository includes core values, variables, assignments including `+=`/`-=`, speakers, output, collections,
+expressions, comments, ranges, deterministic random built-ins, conditionals, loops, and loop control.
+
+Implemented timing includes exact elapsed duration literals/values, cross-unit comparisons, blocking `wait`/`timer`,
+and asynchronous timers with display, labels, handles, lifecycle control, repetition, expiry interrupts, and
+checkpoint restore. Accepted forms and current limits are defined in specification
+[§27](specifications/accepted-syntaxes-v30.md#27-timers) and
+[§35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-unix-time).
 
 The current function subset includes:
 

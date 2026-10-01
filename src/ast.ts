@@ -12,6 +12,7 @@ export type Statement =
   | SayStatement
   | ShowButtonStatement
   | WaitStatement
+  | TimerStatement
   | ExitStatement
   | LetStatement
   | AssignmentStatement
@@ -78,6 +79,37 @@ export interface WaitStatement {
   readonly span: SourceSpan;
 }
 
+export type TimerDisplay = "visible" | "mystery" | "hidden";
+
+/**
+ * Shared data of the short form `timer [async] [display] <duration> [unit] ["label"] [{ ... }]` and the named form
+ * `timer(duration:, async:, display:, label:, repeat:, persist:) [{ ... }]`.
+ */
+export interface TimerParts {
+  readonly form: "short" | "named";
+  readonly async: boolean;
+  /** A short-form modifier is a static display; the named form may use any expression. */
+  readonly display: TimerDisplay | Expression | null;
+  readonly duration: Expression;
+  readonly unit: DurationUnit | null;
+  readonly label: Expression | null;
+  readonly repeat: boolean;
+  readonly persist: boolean;
+  readonly handler: Block | null;
+  readonly commandSpan: SourceSpan;
+  readonly span: SourceSpan;
+}
+
+/** A blocking timer, or an asynchronous timer whose handle is ignored. */
+export interface TimerStatement extends TimerParts {
+  readonly kind: "timerStatement";
+}
+
+/** An asynchronous timer used as a value; it evaluates to its handle. */
+export interface TimerExpression extends TimerParts {
+  readonly kind: "timerExpression";
+}
+
 export interface ExitStatement {
   readonly kind: "exitStatement";
   readonly span: SourceSpan;
@@ -106,6 +138,8 @@ export type AssignmentTarget = Identifier | PropertyAccessExpression | IndexExpr
 
 export interface AssignmentStatement {
   readonly kind: "assignmentStatement";
+  /** `+=` and `-=` read the target once, then assign `target + value` or `target - value`. */
+  readonly operator: "=" | "+=" | "-=";
   readonly target: AssignmentTarget;
   readonly value: Expression;
   readonly span: SourceSpan;
@@ -185,6 +219,7 @@ export type Expression =
   | BooleanLiteral
   | NullLiteral
   | NumberLiteral
+  | DurationLiteral
   | StringLiteral
   | ListLiteral
   | ObjectLiteral
@@ -196,7 +231,8 @@ export type Expression =
   | UnaryExpression
   | BinaryExpression
   | RangeExpression
-  | InteractionExpression;
+  | InteractionExpression
+  | TimerExpression;
 
 export interface InteractionExpression {
   readonly kind: "interactionExpression";
@@ -247,6 +283,17 @@ export interface NumberLiteral {
   readonly raw: string;
   readonly value: number;
   readonly numericType: "integer" | "number";
+  readonly span: SourceSpan;
+}
+
+export type DurationUnit = "ms" | "s" | "min" | "h";
+
+/** A V30 exact elapsed-duration literal such as `30 s` or `2 minutes`. */
+export interface DurationLiteral {
+  readonly kind: "durationLiteral";
+  readonly amount: NumberLiteral;
+  readonly unit: DurationUnit;
+  readonly unitSpan: SourceSpan;
   readonly span: SourceSpan;
 }
 
