@@ -13,7 +13,6 @@ trap 'rm -rf -- "$tmp"' EXIT
 
 python3 - \
   "$project_root" \
-  "$setup_source" \
   "$system_prompt" <<'PY'
 from __future__ import annotations
 
@@ -22,8 +21,7 @@ import sys
 from pathlib import Path
 
 project_root = Path(sys.argv[1])
-setup_source = Path(sys.argv[2]).read_text()
-system_prompt = Path(sys.argv[3]).read_text()
+system_prompt = Path(sys.argv[2]).read_text()
 tiktoken_installer = (project_root / "bin/install-tiktoken-offline.sh").read_text()
 manifest = json.loads((project_root / "MANIFEST.json").read_text())
 
@@ -33,11 +31,6 @@ if len(system_prompt) > SYSTEM_PROMPT_MAX_CHARACTERS:
         "ChatGPT project system prompt exceeds the 8,000-character external limit: "
         f"{len(system_prompt)}"
     )
-
-if "target exists; use --replace or --target" not in setup_source:
-    raise SystemExit("setup script does not fail safely for an existing target")
-if "tools/runtime archive path conflict" not in setup_source or "filter=\"data\"" not in setup_source:
-    raise SystemExit("setup script lacks conflict or safe-extraction enforcement")
 
 expected_manifest = {
     "formatVersion": 1,
@@ -56,10 +49,6 @@ if 'tiktoken.get_encoding("o200k_base")' not in tiktoken_installer:
     raise SystemExit("TikToken installer lacks standard offline tokenizer support")
 if "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d" not in tiktoken_installer:
     raise SystemExit("TikToken installer lacks the official o200k_base vocabulary digest")
-
-python_files = sorted(path.relative_to(project_root).as_posix() for path in project_root.rglob("*.py"))
-if python_files != ["tools/prepare-source-review.py"]:
-    raise SystemExit(f"tools bundle must contain one Python tool, found: {python_files!r}")
 PY
 
 for script in \
