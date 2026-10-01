@@ -368,7 +368,8 @@ class Parser {
       if (
         !this.#check(TokenKind.Newline) &&
         !this.#check(TokenKind.RightBrace) &&
-        !this.#check(TokenKind.EndOfFile)
+        !this.#check(TokenKind.EndOfFile) &&
+        !(property === null && this.#isRecoveredTopLevelStatement())
       ) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedPropertyEnd,
@@ -410,7 +411,8 @@ class Parser {
         parserDiagnosticCode.expectedString,
         "Expected a string for the speaker property.",
       );
-      this.#synchronizeProperty();
+      // A continued colon may reach the next statement; leave it for the missing '}' recovery.
+      if (!this.#isRecoveredTopLevelStatement()) this.#synchronizeProperty();
       return null;
     }
     return Object.freeze({
@@ -540,7 +542,7 @@ class Parser {
           break;
         }
         this.#skipContinuationNewlines();
-        const value = this.#parseExpression();
+        const value = this.#parseRequiredExpression();
         if (value === null) break;
         properties.push({
           kind: "objectProperty",

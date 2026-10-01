@@ -228,6 +228,22 @@ test("compact choice keys without a value keep the focused diagnostic", () => {
       statements,
     );
   }
+
+  const block = parse('if true {\n    let r = choose coast:\n    say "recovered"\n}\nexit');
+  assert.deepEqual(
+    block.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSP030"],
+  );
+  const statement = block.program.statements[0];
+  assert.equal(statement?.kind, "ifStatement");
+  assert.deepEqual(
+    statement?.thenBlock.statements.map((child) => child.kind),
+    ["letStatement", "sayStatement"],
+  );
+  assert.deepEqual(
+    block.program.statements.map((child) => child.kind),
+    ["ifStatement", "exitStatement"],
+  );
 });
 
 test("nested compact choices report missing options once per affected invocation", () => {

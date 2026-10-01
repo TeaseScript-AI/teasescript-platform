@@ -132,6 +132,29 @@ test("rejects invalid constant colours and presentation options at compile time"
   assert.notEqual(compileSource('say "`[color=invalid]literal[/color]`"').plan, null);
 });
 
+test("a presentation option without a value is reported instead of dropped", () => {
+  for (const [source, offset] of [
+    ['say prose(background:) "Text"', 21],
+    ['say prose(background:\n) "Text", 0', 22],
+  ] as const) {
+    const result = compileSource(source);
+    assert.equal(result.plan, null, source);
+    assert.deepEqual(
+      result.parserDiagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.message,
+        diagnostic.span.start.offset,
+      ]),
+      [["TSP012", "Expected an expression.", offset]],
+      source,
+    );
+  }
+  assert.notEqual(
+    compileSource('say prose(\n    background:\n        "ivory"\n) "Text"').plan,
+    null,
+  );
+});
+
 test("invalid computed colours use inherited or theme defaults without failing the story", () => {
   const plan = compileValidPlan(`
 let invalid = "not a colour"
