@@ -138,7 +138,8 @@ function executeCapturedInstruction(
   const executed = executeInstructionBoundary(plan, snapshot, context);
   if (
     snapshot.status !== "failed" &&
-    snapshot.currentSessionTimeMs < snapshot.observedSessionTimeMs &&
+    // Work due exactly at the observed time also settles once execution waits or ends.
+    snapshot.currentSessionTimeMs <= snapshot.observedSessionTimeMs &&
     !executionRunnable(snapshot)
   ) {
     processDueWork(plan, snapshot, context.events);

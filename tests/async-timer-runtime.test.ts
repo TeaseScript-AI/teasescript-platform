@@ -19,6 +19,16 @@ import { timerProperty } from "../src/runtime/timers.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
+import {
+  activePlayerRuntimePacingGate,
+  playerRuntimeDeadlines,
+} from "../player/runtime-adapter.js";
+
+function playerRuntimeDeadlinesDue(snapshot: RuntimeSnapshot): boolean {
+  return playerRuntimeDeadlines(snapshot).some(
+    (deadline) => deadline <= snapshot.observedSessionTimeMs,
+  );
+}
 
 /** Drives a session with explicit time observations and completions, round-tripping every checkpoint. */
 class Session {
@@ -948,6 +958,58 @@ test("pacing consumed or skipped during catch-up and terminal completions keep q
   assert.equal(pressed.outcome.kind, "completed");
   const ended = run(button.plan, pressed.snapshot);
   assert.equal(ended.snapshot.status, "halted");
+});
+
+test("work due exactly at the observed time settles once execution waits or ends", () => {
+  const cases: readonly (readonly [string, readonly number[]])[] = [
+    // A block's pacing is due when the script ends at the same deadline.
+    ['timer async 1 { say "block", 1 }\nwait 2', [1_000, 2_000]],
+    // A nested timer is due when the script resumes and waits again at the same deadline.
+    [
+      'timer async 0.5 { timer async 0.5 { say "nested", instant } }\nwait 1\nwait 1\nsay "main", instant',
+      [500, 1_000, 2_000],
+    ],
+    [
+      'timer async 0.5 { timer async 0.5 { say "nested", instant } }\nwait 1\nshowButton "Go"',
+      [500, 1_000],
+    ],
+    // A waiting block with another timer due at its wait's deadline.
+    [
+      'timer async 1 { wait 1 }\ntimer async 2 { say "second", instant }\nwait 5',
+      [1_000, 2_000, 5_000],
+    ],
+  ];
+  for (const [source, onTimeSchedule] of cases) {
+    const horizon = onTimeSchedule.at(-1)!;
+    // Session round-trips a checkpoint after every operation, so an invalid state fails here.
+    const exact = new Session(source, { pacing: true });
+    for (const nowMs of onTimeSchedule) exact.at(nowMs);
+    const late = new Session(source, { pacing: true }).at(horizon);
+    assert.deepEqual(late.events, exact.events, source);
+    assert.deepEqual(late.snapshot, exact.snapshot, source);
+    assert.equal(
+      playerRuntimeDeadlinesDue(exact.snapshot),
+      false,
+      `nothing due at the horizon remains: ${source}`,
+    );
+  }
+});
+
+test("a failed session accepts no host input and schedules no further observation", () => {
+  const failed = new Session('say "first", 10\nlet x = 1 / 0', { pacing: true });
+  assert.equal(failed.snapshot.status, "failed");
+  const observed = observeTime(failed.plan, failed.snapshot, 5_000).snapshot;
+  const gate = observed.backgroundActions.find((action) => action.kind === "chatPacingGate");
+  assert.ok(gate !== undefined);
+  const skipped = completeAction(failed.plan, observed, {
+    actionId: gate.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+  assert.equal(skipped.outcome.kind, "invalidPayload");
+  assert.deepEqual(skipped.snapshot, observed);
+  assert.deepEqual(playerRuntimeDeadlines(observed), []);
+  assert.equal(activePlayerRuntimePacingGate(observed), null);
 });
 
 test("host input waits for scene-time catch-up and for an expiry block due at the same time", () => {

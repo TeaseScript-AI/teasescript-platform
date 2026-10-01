@@ -167,9 +167,10 @@ export function playerRuntimeTimers(
   );
 }
 
-/** Session-time deadlines at which the Player must observe time again. */
+/** Session-time deadlines at which the Player must observe time again. A failed session settles nothing further. */
 export function playerRuntimeDeadlines(snapshot: RuntimeSnapshot): readonly number[] {
   const deadlines: number[] = [];
+  if (snapshot.status === "failed") return deadlines;
   for (const action of [
     snapshot.foregroundAction,
     ...snapshot.backgroundActions,
@@ -199,6 +200,7 @@ export function activePlayerRuntimeInteraction(
 export function activePlayerRuntimePacingGate(
   snapshot: RuntimeSnapshot,
 ): RuntimeChatPacingGateActionSnapshot | null {
+  if (snapshot.status === "failed") return null;
   const foreground = snapshot.foregroundAction;
   if (foreground?.kind === "chatPacingGate") return foreground;
   return snapshot.backgroundActions.find((action) => action.kind === "chatPacingGate") ?? null;

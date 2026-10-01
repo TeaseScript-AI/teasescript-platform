@@ -88,6 +88,12 @@ export function completeAction(
       receivedActionKind,
     });
   }
+  if (current.status === "failed") {
+    return pendingResult(current, [], {
+      kind: "invalidPayload",
+      message: "The session has failed and accepts no further input.",
+    });
+  }
   // Host input happens at the observed time: scene time must have caught up, and a due expiry block runs first.
   if (
     current.currentSessionTimeMs < current.observedSessionTimeMs ||

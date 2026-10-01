@@ -266,8 +266,9 @@ Rules:
   is `staleAction`;
 - an ID at or above `nextActionId` is `unknownAction`;
 - a response for another action kind is rejected;
-- waits, timers, and other timed actions accept no completion: time reaches them only through `observeTime`, and a
-  completion request for one is `invalidPayload`;
+- waits and timers accept no host completion: time reaches them only through `observeTime`, and a completion request
+  for one is `invalidPayload`;
+- a failed session accepts no host completion; a request for a still-recorded action is `invalidPayload`;
 - host input for an active action is `executionPending` while scene time is behind the observed time or a due timer
   expiry block can run; the host runs the engine and retries with the same action ID if it is still active;
 - a late response after timeout, cancellation, or replacement does not revive the action.

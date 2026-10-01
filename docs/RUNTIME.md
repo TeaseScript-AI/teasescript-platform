@@ -535,7 +535,8 @@ Time reaches waits and timers only through `observeTime`; a Player cannot comple
 answer or a pacing skip) happens at the observed time, so `completeAction` returns `executionPending` without changing
 anything while scene time is behind the observed time or a due expiry block can run. The Player then runs the engine
 and retries with the same action ID; if a block ended or replaced that action, the retry reports it as no longer
-active.
+active. A failed session accepts no host input: such a request is `invalidPayload`, and Players schedule no further
+observation for it.
 
 Expiry blocks compile to parameterless handler regions. A runtime entry starts the first queued block before
 executing the next instruction, including from `waiting`, unless a block is already running, a single-instruction
