@@ -20,7 +20,7 @@ import {
   restoreCheckpoint,
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
-import { run } from "../src/runtime/engine.js";
+import { executeInstruction, run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import {
@@ -31,6 +31,7 @@ import {
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
+import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 
 type Mutable<T> = T extends readonly (infer Item)[]
   ? Array<Mutable<Item>>
@@ -1366,32 +1367,6 @@ test("interaction plan and checkpoint boundaries reject malformed option domains
   assert.equal(invoked, false);
 });
 
-test("interaction ownership survives active call, scope, and loop frames", () => {
-  for (const plan of [
-    buttonPlanFromSource("function prompt { wait 1\nreturn }\nprompt()\nexit"),
-    buttonPlanFromSource("repeat 1 { wait 1 }\nexit"),
-  ]) {
-    const pending = waiting(plan);
-    const action = pending.snapshot.foregroundAction!;
-    if (pending.snapshot.callFrames.length > 0)
-      assert.equal(action.ownerCallFrameId, pending.snapshot.callFrames.at(-1)!.id);
-    assert.equal(action.scopeDepth, pending.snapshot.frames.length);
-    assert.equal(action.loopDepth, pending.snapshot.loopFrames.length);
-    const restored = deserializeCheckpoint(
-      serializeCheckpoint(createCheckpoint(plan, pending.snapshot)),
-    );
-    const completionRequest = {
-      actionId: action.actionId,
-      actionKind: "interaction",
-      interactionKind: "button",
-      payload: { kind: "activate" },
-    } as const;
-    const completed = completeAction(restored.plan, restored.snapshot, completionRequest);
-    assert.equal(completed.outcome.kind, "completed");
-    assert.equal(run(restored.plan, completed.snapshot).snapshot.status, "halted");
-  }
-});
-
 test("one multibyte per-string failure stops all later interaction UTF-8 measurement", () => {
   const base = interactionPlan("choice", {
     kind: "choice",
@@ -1691,81 +1666,122 @@ test("unsupported persisted interaction fields are rejected at every boundary", 
   );
 });
 
-test("pending result destinations are absent in root, function, and loop execution", () => {
-  const root = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
-  const rootInteraction = root.instructions[0];
-  assert.ok(rootInteraction?.kind === "interaction" && "ui" in rootInteraction);
-  const functionPlan = (() => {
-    const plan = buttonPlanFromSource("function prompt { wait 1\nreturn }\nprompt()\nexit");
-    const index = plan.instructions.findIndex((instruction) => instruction.kind === "interaction");
-    const destinationTemporary = plan.temporaryCount + 1;
-    const replacement = (instruction: (typeof plan.instructions)[number]) => ({
-      ...rootInteraction,
-      span: instruction.span,
-      destinationTemporary,
-    });
-    const instructions = plan.instructions.map((instruction, instructionIndex) =>
-      instructionIndex === index ? replacement(instruction) : instruction,
-    );
-    // EVIDENCE: replacement preserves every plan field and substitutes one typed interaction instruction.
-    return { ...plan, temporaryCount: destinationTemporary, instructions } as InstructionPlan;
-  })();
-  const loopPlan = (() => {
-    const plan = buttonPlanFromSource("repeat 1 { wait 1 }\nexit");
-    const index = plan.instructions.findIndex((instruction) => instruction.kind === "interaction");
-    const replacement = (instruction: (typeof plan.instructions)[number]) => ({
-      ...rootInteraction,
-      span: instruction.span,
-    });
-    const instructions = plan.instructions.map((instruction, instructionIndex) =>
-      instructionIndex === index ? replacement(instruction) : instruction,
-    );
-    const result = structuredClone({ ...plan, temporaryCount: 1, instructions });
-    const interactionAtIndex = result.instructions[index];
-    assert.ok(interactionAtIndex !== undefined);
-    result.instructions.splice(index + 1, 0, {
-      kind: "clearTemporary",
-      temporaryId: 1,
-      span: interactionAtIndex.span,
-    });
-    result.rootEndInstruction += 1;
-    const rootEntry = result.instructions[0];
-    assert.ok(rootEntry !== undefined && "target" in rootEntry);
-    // EVIDENCE: fixture shifts only the root control-flow target after inserting one instruction.
-    (rootEntry as { target: number }).target += 1;
-    // EVIDENCE: result preserves the source plan and adds one typed clearTemporary after its interaction.
-    return result as InstructionPlan;
-  })();
-  for (const plan of [root, functionPlan, loopPlan]) {
-    assert.equal(
-      validateInstructionPlan(plan).valid,
-      true,
-      JSON.stringify(validateInstructionPlan(plan).errors),
-    );
-    const pending = waiting(plan);
-    assert.ok(pending.snapshot.foregroundAction?.kind === "interaction");
-    const destination = pending.snapshot.foregroundAction.destinationTemporary;
-    assert.ok(destination !== null);
-    const hostile = structuredClone(pending.snapshot);
-    hostile.temporaries.push({ id: destination, value: "old" });
-    assert.equal(validateRuntimeSnapshot(hostile).valid, false);
-    assert.equal(validateRuntimeSnapshot(hostile, plan).valid, false);
-    assert.throws(() =>
-      restoreCheckpoint({ ...createCheckpoint(plan, pending.snapshot), snapshot: hostile }),
-    );
-    const completionRequest = {
-      actionId: pending.snapshot.foregroundAction!.actionId,
-      actionKind: "interaction",
-      interactionKind: "text",
-      payload: { kind: "submittedText", submittedText: "new" },
-    } as const;
-    const completed = completeAction(plan, pending.snapshot, completionRequest);
-    assert.equal(completed.outcome.kind, "completed");
-    assert.equal(
-      completed.snapshot.temporaries.find((temporary) => temporary.id === destination)?.value,
-      "new",
-    );
+test("interaction ownership and pending result destinations hold in root, function, and loop frames", () => {
+  const contexts = [
+    { name: "root", text: "let before = 1\nlet answer = askText", button: 'showButton "Continue"' },
+    {
+      name: "function",
+      text: "function prompt { let answer = askText\nreturn answer }\nlet result = prompt()",
+      button: 'function prompt { showButton "Continue"\nreturn }\nprompt()',
+    },
+    {
+      name: "loop",
+      text: "repeat 1 { let answer = askText }",
+      button: 'repeat 1 { showButton "Continue" }',
+    },
+  ] as const;
+  for (const context of contexts) {
+    for (const [interactionKind, source] of [
+      ["text", context.text],
+      ["button", context.button],
+    ] as const) {
+      const label = `${context.name} ${interactionKind}`;
+      const plan = compileValidPlan(source);
+      const pending = waiting(plan);
+      const action = pending.snapshot.foregroundAction;
+      assert.ok(action?.kind === "interaction", label);
+      assert.equal(pending.snapshot.callFrames.length, context.name === "function" ? 1 : 0, label);
+      assert.equal(pending.snapshot.loopFrames.length, context.name === "loop" ? 1 : 0, label);
+      assert.equal(action.ownerCallFrameId, pending.snapshot.callFrames.at(-1)?.id ?? null, label);
+      assert.equal(action.scopeDepth, pending.snapshot.frames.length, label);
+      assert.equal(action.loopDepth, pending.snapshot.loopFrames.length, label);
+
+      const destination = action.destinationTemporary;
+      if (interactionKind === "button") {
+        assert.equal(destination, null, label);
+      } else {
+        assert.ok(destination !== null, label);
+        assert.equal(
+          pending.snapshot.temporaries.some((temporary) => temporary.id === destination),
+          false,
+          `${label}: pending destination`,
+        );
+        // An occupied destination is rejected before the request is created ...
+        let beforeRequest = createFreshRuntimeSnapshot(plan);
+        while (plan.instructions[beforeRequest.nextInstruction]?.kind !== "interaction") {
+          beforeRequest = executeInstruction(plan, beforeRequest).snapshot;
+        }
+        beforeRequest.temporaries.push({ id: destination, value: "old" });
+        const occupiedInput = structuredClone(beforeRequest);
+        assert.equal(validateRuntimeSnapshot(beforeRequest, plan).valid, false, label);
+        assert.throws(() => run(plan, beforeRequest), label);
+        assert.deepEqual(beforeRequest, occupiedInput, `${label}: occupied input`);
+        // ... and while the request is pending.
+        const occupiedPending = structuredClone(pending.snapshot);
+        occupiedPending.temporaries.push({ id: destination, value: "old" });
+        assert.equal(validateRuntimeSnapshot(occupiedPending).valid, false, label);
+        assert.equal(validateRuntimeSnapshot(occupiedPending, plan).valid, false, label);
+        assert.throws(
+          () =>
+            restoreCheckpoint({
+              ...createCheckpoint(plan, pending.snapshot),
+              snapshot: occupiedPending,
+            }),
+          label,
+        );
+      }
+
+      const restored = deserializeCheckpoint(
+        serializeCheckpoint(createCheckpoint(plan, pending.snapshot)),
+      );
+      assert.deepEqual(restored.snapshot, pending.snapshot, label);
+      const completed = completeAction(restored.plan, restored.snapshot, {
+        actionId: action.actionId,
+        actionKind: "interaction",
+        interactionKind,
+        payload:
+          interactionKind === "text"
+            ? { kind: "submittedText", submittedText: "new" }
+            : { kind: "activate" },
+      });
+      assert.equal(completed.outcome.kind, "completed", label);
+      if (destination !== null) {
+        assert.equal(
+          completed.snapshot.temporaries.find((temporary) => temporary.id === destination)?.value,
+          "new",
+          label,
+        );
+      }
+      assert.equal(run(restored.plan, completed.snapshot).snapshot.status, "halted", label);
+    }
   }
+
+  // A second producer of the destination before the request is rejected at the plan boundary.
+  const rootPlan = compileValidPlan(contexts[0].text);
+  const interactionIndex = rootPlan.instructions.findIndex(
+    (instruction) => instruction.kind === "interaction",
+  );
+  const interaction = rootPlan.instructions[interactionIndex];
+  assert.ok(interaction?.kind === "interaction" && interaction.destinationTemporary !== null);
+  assert.ok(interactionIndex > 0);
+  const occupiedPlan: InstructionPlan = {
+    ...rootPlan,
+    instructions: rootPlan.instructions.map((instruction, index) =>
+      index === 0
+        ? {
+            kind: "storeTemporary",
+            temporaryId: interaction.destinationTemporary!,
+            value: { kind: "literal", value: "old", span: instruction.span },
+            expectBoolean: false,
+            span: instruction.span,
+          }
+        : instruction,
+    ),
+  };
+  assert.deepEqual(
+    validateInstructionPlan(occupiedPlan).errors.map((error) => [error.code, error.path]),
+    [["TSC002", `$.instructions[${interactionIndex}].destinationTemporary`]],
+  );
 });
 
 test("accepted text completions perform one bounded UTF-8 measurement before normalization", () => {

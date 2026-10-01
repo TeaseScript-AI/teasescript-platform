@@ -92,44 +92,6 @@ function waiting(plan: InstructionPlan) {
   return result;
 }
 
-test("result interactions reject occupied destinations before pending-action creation", () => {
-  const base = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
-  const span = base.instructions[0]!.span;
-  const occupiedPlan: InstructionPlan = {
-    ...base,
-    rootEndInstruction: 4,
-    instructions: [
-      {
-        kind: "storeTemporary",
-        temporaryId: 1,
-        value: { kind: "literal", value: "old", span },
-        expectBoolean: false,
-        span,
-      },
-      base.instructions[0]!,
-      { kind: "clearTemporary", temporaryId: 1, span },
-      base.instructions[1]!,
-    ],
-  };
-  const planValidation = validateInstructionPlan(occupiedPlan);
-  assert.equal(planValidation.valid, false);
-  assert.ok(
-    planValidation.errors.some((error) =>
-      error.message.includes("produced only by their owning interaction"),
-    ),
-  );
-
-  const hostileSnapshot = createFreshRuntimeSnapshot(base);
-  hostileSnapshot.temporaries.push({ id: 1, value: "old" });
-  const before = structuredClone(hostileSnapshot);
-  assert.equal(validateRuntimeSnapshot(hostileSnapshot, base).valid, false);
-  assert.throws(() => run(base, hostileSnapshot));
-  assert.deepEqual(hostileSnapshot, before);
-  assert.equal(hostileSnapshot.foregroundAction, null);
-  assert.equal(hostileSnapshot.nextActionId, before.nextActionId);
-  assert.equal(hostileSnapshot.nextEventSequence, before.nextEventSequence);
-});
-
 test("transferred interaction result is independent of the cleanup temporary", () => {
   const injected = injectTextInteraction('let answer = "__interaction_result__"\nsay answer\nexit');
   const pending = waiting(injected.plan);
