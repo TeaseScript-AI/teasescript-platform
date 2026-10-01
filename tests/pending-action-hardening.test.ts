@@ -276,13 +276,19 @@ test("#79 validates every settlement relationship and preserves valid replay", (
     assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)), checkpointError, name);
   }
 
+  // An independent baseline taken before the replay, so a mutated caller cannot hide changes.
+  const beforeReplay = structuredClone(active);
   const replay = completeAction(compiled, active, {
-    actionId: active.lastSettlement!.actionId,
+    actionId: beforeReplay.lastSettlement!.actionId,
     actionKind: "delay",
-    payload: { kind: "time", currentSessionTimeMs: active.currentSessionTimeMs },
+    payload: { kind: "time", currentSessionTimeMs: beforeReplay.currentSessionTimeMs },
   });
-  assert.deepEqual(replay.outcome, { kind: "alreadySettled", settlement: active.lastSettlement });
-  assert.deepEqual(replay.snapshot, active);
+  assert.deepEqual(replay.outcome, {
+    kind: "alreadySettled",
+    settlement: beforeReplay.lastSettlement,
+  });
+  assert.deepEqual(replay.snapshot, beforeReplay);
+  assert.deepEqual(active, beforeReplay);
   assert.deepEqual(replay.events, []);
   assert.equal(replay.instructionsExecuted, 0);
 });
