@@ -119,25 +119,8 @@ test("compact interaction forms preserve immutable command, speaker, label, sepa
   assert.equal(Object.isFrozen(choice.options[0]), true);
 });
 
-test("all accepted compact forms parse and malformed forms recover at the next statement", () => {
-  const accepted = [
-    'showButton "Continue"',
-    'showButton as mistress "Ready"',
-    "let answer = askText",
-    'let answer = askText "Type here"',
-    "let answer = askText as mistress",
-    'let answer = askText as mistress "Type here"',
-    "let amount = askNumber",
-    'let amount = askNumber "Enter a number"',
-    "let amount = askNumber as mistress",
-    'let amount = askNumber as mistress "Enter a number"',
-    'let result = choose "Bratty", "Very submissive"',
-    'let result = choose as mistress "Bratty", "Very submissive"',
-    'let result = choose bratty: "Bratty", submissive: "Very submissive"',
-    'let result = choose as mistress first: "Mystery", second: "Mystery"',
-    'let result = choose 1: "Open the door", 2: "Walk away"',
-  ];
-  for (const source of accepted) assert.deepEqual(parse(source).diagnostics, [], source);
+// Accepted compact forms are enumerated with their spans by the variant matrix below.
+test("malformed compact interaction forms recover at the next statement", () => {
   for (const source of [
     "showButton",
     "let x = choose",
@@ -1001,6 +984,30 @@ test("interaction expressions preserve function-argument source order across sus
   assert.deepEqual(marks, ["before", "after"]);
   assert.equal(done.snapshot.status, "halted");
   assert.equal(done.events.find((event) => event.kind === "say")?.text, "received answer");
+
+  // User-defined calls on both sides of a direct interaction argument keep the same order.
+  const userPlan = compiled(
+    [
+      'function foo { say "foo", instant\nreturn "first" }',
+      'function bar { say "bar", instant\nreturn "third" }',
+      'function send(first, answer, third) { say "${first}:${answer}:${third}", instant\nreturn }',
+      "send(foo(), askText, bar())",
+    ].join("\n"),
+  );
+  const saidTexts = (events: readonly { readonly kind: string; readonly text?: string }[]) =>
+    events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
+  const userPending = run(userPlan, createFreshRuntimeSnapshot(userPlan));
+  assert.equal(userPending.snapshot.status, "waiting");
+  assert.deepEqual(saidTexts(userPending.events), ["foo"]);
+  const userCompleted = completePending(userPlan, userPending.snapshot, "text", {
+    kind: "submittedText",
+    submittedText: "middle",
+  });
+  assert.equal(userCompleted.outcome.kind, "completed");
+  assert.deepEqual(saidTexts(userCompleted.events), []);
+  const userDone = run(userPlan, userCompleted.snapshot);
+  assert.equal(userDone.snapshot.status, "halted");
+  assert.deepEqual(saidTexts(userDone.events), ["bar", "first:middle:third"]);
 });
 
 test("real source completes, retries invalid input, records provenance, and resumes at top level", () => {

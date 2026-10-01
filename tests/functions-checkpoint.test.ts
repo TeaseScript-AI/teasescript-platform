@@ -230,7 +230,7 @@ test("preserves prepared earlier arguments through a later suspension and a susp
   assert.equal(direct.snapshot.temporaries.length, 0);
 });
 
-test("validates and resumes suspended recursive continuations at increasing depths", () => {
+test("validates, measures, and resumes suspended recursive continuations at increasing depths", () => {
   const compiled = plan(
     [
       "function sum(value) {",
@@ -243,17 +243,23 @@ test("validates and resumes suspended recursive continuations at increasing dept
   for (const depth of [4, 8, 16, 32]) {
     const snapshot = executeUntil(compiled, (candidate) => candidate.callFrames.length === depth);
     const before = JSON.stringify(snapshot);
-    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true, `depth ${depth}`);
-    const restored = restoreCheckpoint(createCheckpoint(compiled, snapshot));
-    const resumed = run(restored.plan, restored.snapshot);
+    const { value: completions, counts } = withValidationTestStatistics((finish) => {
+      assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true, `depth ${depth}`);
+      const restored = restoreCheckpoint(createCheckpoint(compiled, snapshot));
+      const value = [run(compiled, snapshot), run(restored.plan, restored.snapshot)];
+      return { value, counts: finish().counts };
+    });
 
-    assert.equal(resumed.snapshot.status, "halted", `depth ${depth}`);
-    // 32 + 31 + ... + 1 = 32 * 33 / 2.
-    assert.deepEqual(
-      resumed.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
-      ["528"],
-      `depth ${depth}`,
-    );
+    for (const completion of completions) {
+      assert.equal(completion.snapshot.status, "halted", `depth ${depth}`);
+      // 32 + 31 + ... + 1 = 32 * 33 / 2.
+      assert.deepEqual(
+        completion.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+        ["528"],
+        `depth ${depth}`,
+      );
+    }
+    assert.ok((counts.detailedWorkConsumed ?? 0) > 0, `depth ${depth}`);
     assert.equal(JSON.stringify(snapshot), before, `depth ${depth}`);
   }
 });
@@ -301,21 +307,6 @@ test("treats unbound call-frame argument values as canonical resumable state", (
     resumed.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
     ["99"],
   );
-});
-
-test("detailed validation reports work without rejecting valid state", () => {
-  const { plan: compiled, snapshot } = recursiveSnapshot(3);
-  const checkpoint = createCheckpoint(compiled, snapshot);
-  const snapshotBefore = JSON.stringify(snapshot);
-  const statistics = withValidationTestStatistics((finish) => {
-    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
-    assert.doesNotThrow(() => run(compiled, snapshot));
-    assert.doesNotThrow(() => restoreCheckpoint(checkpoint));
-    return finish();
-  }).counts;
-
-  assert.equal(JSON.stringify(snapshot), snapshotBefore);
-  assert.ok((statistics.detailedWorkConsumed ?? 0) > 0);
 });
 
 test("checkpoint creation defensively isolates the supplied plan", () => {

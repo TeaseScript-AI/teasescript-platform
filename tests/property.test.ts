@@ -3,10 +3,12 @@ import test from "node:test";
 
 import { compileSource } from "../src/index.js";
 import {
+  createFixedPropertyChecks,
   createPropertyDefinitions,
   defaultPropertyCampaignConfig,
   parsePropertyCliArguments,
   PropertyCampaignFailure,
+  runFixedPropertyChecks,
   runPropertyCampaign,
   type PropertyCampaignDependencies,
   type PropertyCaseResult,
@@ -19,11 +21,24 @@ import {
 } from "./property/source-fuzz.js";
 
 test("required deterministic property campaign preserves durable runtime invariants", () => {
-  const first = runPropertyCampaign(defaultPropertyCampaignConfig());
-  const second = runPropertyCampaign(defaultPropertyCampaignConfig());
+  assert.equal(runPropertyCampaign(defaultPropertyCampaignConfig()).executed, 128);
+});
 
-  assert.equal(first.executed, 128);
-  assert.deepEqual(second, first);
+test("fixed property fixtures run once at their public boundaries", () => {
+  const checks = createFixedPropertyChecks();
+  const covered = checks.map((check) => `${check.id}/${check.variant}`);
+
+  for (const operation of ["run", "executeInstruction", "observeTime", "completeAction"]) {
+    assert.ok(covered.includes(`operation-closure/${operation}`), operation);
+  }
+  for (const variant of ["time-completion", "duplicate-settlement"]) {
+    assert.ok(covered.includes(`rejected-completion-is-atomic/${variant}`), variant);
+  }
+  assert.ok(covered.some((check) => check.startsWith("checkpoint-roundtrip-and-resume/")));
+  for (const malformed of ["plan", "snapshot", "checkpoint"]) {
+    assert.ok(covered.includes(`malformed-boundary-rejection/${malformed}`), malformed);
+  }
+  assert.equal(runFixedPropertyChecks(checks), checks.length);
 });
 
 test("property replay selects the same generated case by seed and case number", () => {
@@ -110,24 +125,13 @@ test("execution compiles the reported prepared source", () => {
   assertReportedSourceExecutes("near-valid");
 });
 
-test("required campaign reaches retained variants and varied source-fuzz families", () => {
+test("required campaign reaches same-seed determinism and varied source-fuzz families", () => {
   const config = defaultPropertyCampaignConfig();
   const cases = Array.from(
     { length: config.runs },
     (_, index) => runPropertyCampaign({ ...config, caseIndex: index }).firstCase,
   );
-  const contexts = cases.map((result) => result.context);
-
-  for (const operation of ["run", "executeInstruction", "observeTime", "completeAction"]) {
-    assert.ok(contexts.some((context) => context.includes(`operation=${operation}`)));
-  }
-  for (const variant of ["time-completion", "duplicate-settlement"]) {
-    assert.ok(contexts.some((context) => context.includes(`rejected-completion=${variant}`)));
-  }
-  for (const malformed of ["plan", "snapshot", "checkpoint"]) {
-    assert.ok(contexts.some((context) => context.includes(`malformed=${malformed}`)));
-  }
-
+  assert.ok(cases.some((result) => result.id === "same-seed-is-deterministic"));
   assertSourceFamilyCoverage(cases, "valid", VALID_SOURCE_FAMILIES);
   assertSourceFamilyCoverage(cases, "near-valid", NEAR_VALID_SOURCE_FAMILIES);
 

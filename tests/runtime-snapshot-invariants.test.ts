@@ -107,17 +107,16 @@ test("keeps valid halted execution resume-equivalent", () => {
   );
 });
 
-test("validates allocator counters across the JavaScript safe-integer boundary", () => {
-  const compiled = plan("exit");
+test("validates allocator counters across the safe-integer boundary at snapshot and checkpoint entry", () => {
+  const compiled = plan('say "one"\nsay "two"\nexit');
   const fields = ["nextEventSequence", "nextScopeId", "nextSpeakerId", "nextCallFrameId"] as const;
   const accepted = [1, MAX_SAFE - 1, MAX_SAFE];
   const rejected = [
-    { name: "MAX_SAFE_INTEGER + 1", value: MAX_SAFE + 1 },
-    { name: "2 ** 53", value: 2 ** 53 },
-    { name: "NaN", value: Number.NaN },
-    { name: "Infinity", value: Number.POSITIVE_INFINITY },
-    { name: "fractional", value: 1.5 },
-    { name: "negative", value: -1 },
+    { name: "first unsafe integer", value: MAX_SAFE + 1, checkpoint: true },
+    { name: "NaN", value: Number.NaN, checkpoint: false },
+    { name: "Infinity", value: Number.POSITIVE_INFINITY, checkpoint: false },
+    { name: "fractional", value: 1.5, checkpoint: false },
+    { name: "negative", value: -1, checkpoint: false },
   ];
 
   for (const field of fields) {
@@ -131,32 +130,17 @@ test("validates allocator counters across the JavaScript safe-integer boundary",
       );
     }
     for (const entry of rejected) {
-      const snapshot = createFreshRuntimeSnapshot(compiled);
-      snapshot[field] = entry.value;
+      const checkpoint = mutableCheckpoint(
+        createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled)),
+      );
+      checkpoint.snapshot[field] = entry.value;
       assert.equal(
-        validateRuntimeSnapshot(snapshot, compiled).valid,
+        validateRuntimeSnapshot(checkpoint.snapshot, compiled).valid,
         false,
         `${field} should reject ${entry.name}`,
       );
+      if (entry.checkpoint) assertCheckpointRejected(checkpoint, "TSK002");
     }
-  }
-});
-
-test("rejects unsafe counters through direct snapshot and checkpoint boundaries", () => {
-  const compiled = plan('say "one"\nsay "two"\nexit');
-  for (const field of [
-    "nextEventSequence",
-    "nextScopeId",
-    "nextSpeakerId",
-    "nextCallFrameId",
-  ] as const) {
-    const checkpoint = mutableCheckpoint(
-      createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled)),
-    );
-    checkpoint.snapshot[field] = 2 ** 53;
-
-    assert.equal(validateRuntimeSnapshot(checkpoint.snapshot, compiled).valid, false, field);
-    assertCheckpointRejected(checkpoint, "TSK002");
   }
 });
 

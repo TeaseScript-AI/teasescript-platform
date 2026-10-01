@@ -852,24 +852,6 @@ async function testRegistryEscapesUntrustedPullHeadRef() {
   assert.deepEqual(request.parseRegistryComment(body), [entry]);
 }
 
-async function testEquivalentArtifactsDeduplicateAndPreserveRequestIds() {
-  const first = readyEntry({
-    requestId: 501,
-    artifactId: 8201,
-    runId: 9201,
-    updatedAt: "2026-08-04T10:00:00.000Z",
-  });
-  const second = { ...first, requestCommentIds: [502], updatedAt: "2026-08-04T10:01:00.000Z" };
-  const merged = request.mergeRegistryEntries([first], second, new Date("2026-08-04T10:02:00Z"));
-  assert.equal(merged.length, 1);
-  assert.deepEqual(merged[0].requestCommentIds, [502, 501]);
-  const body = request.formatRegistryComment(merged);
-  assert.match(body, /requests 502, 501/);
-  assert.match(body, /`GitHub\.download_workflow_artifact`/);
-  assert.equal(request.findRegistryEntry(merged, 501).artifactId, 8201);
-  assert.equal(request.findRegistryEntry(merged, 502).artifactId, 8201);
-}
-
 async function testDifferentResolvedIdentitiesDoNotDeduplicate() {
   const pull = readyEntry({
     requestId: 503,
@@ -1315,6 +1297,8 @@ async function testSequentialSameShaRequestsReuseArtifactAndUpdateOneRegistry() 
   const entries = request.parseRegistryComment(registryComment.body);
   assert.equal(entries.length, 1);
   assert.deepEqual(entries[0].requestCommentIds, [502, 501]);
+  assert.equal(request.findRegistryEntry(entries, 501).artifactId, artifactId);
+  assert.equal(request.findRegistryEntry(entries, 502).artifactId, artifactId);
 }
 
 async function main() {
@@ -1335,7 +1319,6 @@ async function main() {
   await testMissingCommandBeforeFirstTerminalPublicationFailsClosed();
   await testSpoofedRegistryCannotClaimAuthority();
   await testRegistryEscapesUntrustedPullHeadRef();
-  await testEquivalentArtifactsDeduplicateAndPreserveRequestIds();
   await testDifferentResolvedIdentitiesDoNotDeduplicate();
   await testSerializedDistinctUpdatesPreserveBothEntries();
   await testRegistryPrunesExpiryOrdersNewestAndBoundsTen();

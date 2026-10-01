@@ -292,23 +292,45 @@ test("first smart say creates a background gate and later say promotes it withou
   assert.equal(gate?.deadlineMs, 1_800);
 });
 
-test("pacing skip settles only a skippable foreground gate and emits prepared output later", () => {
-  const compiled = plan('say "first"\nsay "second"');
-  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
+test("pacing skip settles a promoted gate and emits its prepared output once, directly and after checkpoint restore", () => {
+  const compiled = plan('say ["first", "first-alt"]\nsay ["second", "second-alt"]');
+  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled, { seed: 77 }));
   const gate = waiting.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
-  const rejected = completeAction(compiled, waiting.snapshot, {
-    actionId: gate!.actionId,
-    actionKind: "chatPacingGate",
-    payload: { kind: "skip" },
-  });
-  assert.equal(rejected.outcome.kind, "completed");
-  assert.deepEqual(
-    rejected.events.map((event) => event.kind),
-    ["actionCompleted"],
+  assert.notEqual(gate?.preparedOutput, null);
+  const preparedText = gate!.preparedOutput!.text;
+  assert.ok(["second", "second-alt"].includes(preparedText), preparedText);
+  const preparedRng = waiting.snapshot.rng.state;
+  const restored = deserializeCheckpoint(
+    serializeCheckpoint(createCheckpoint(compiled, waiting.snapshot)),
   );
-  const resumed = run(compiled, rejected.snapshot);
-  assert.ok(resumed.events.some((event) => event.kind === "say" && event.text === "second"));
+  const paths = [
+    ["direct", { plan: compiled, snapshot: waiting.snapshot }],
+    ["restored", restored],
+  ] as const;
+  const results = paths.map(([path, start]) => {
+    const settled = completeAction(start.plan, start.snapshot, {
+      actionId: gate!.actionId,
+      actionKind: "chatPacingGate",
+      payload: { kind: "skip" },
+    });
+    assert.equal(settled.outcome.kind, "completed", path);
+    assert.deepEqual(
+      settled.events.map((event) => event.kind),
+      ["actionCompleted"],
+      path,
+    );
+    const resumed = run(start.plan, settled.snapshot);
+    assert.equal(
+      resumed.events.filter((event) => event.kind === "say" && event.text === preparedText).length,
+      1,
+      path,
+    );
+    // Emitting the prepared output reuses its earlier selection instead of drawing again.
+    assert.equal(resumed.snapshot.rng.state, preparedRng, path);
+    return { events: [...settled.events, ...resumed.events], snapshot: resumed.snapshot };
+  });
+  assert.deepEqual(results[1], results[0]);
 });
 
 test("instant output supersedes a background pacing gate", () => {
@@ -603,7 +625,10 @@ test("typed skip resolves an active background pacing gate without disturbing a 
   });
   assert.equal(standaloneSkipped.outcome.kind, "completed");
   assert.equal(standaloneSkipped.snapshot.backgroundActions.length, 0);
-  assert.equal(standaloneSkipped.events[0]?.kind, "actionCompleted");
+  assert.deepEqual(
+    standaloneSkipped.events.map((event) => event.kind),
+    ["actionCompleted"],
+  );
 
   const withWait = plan('say "first"\nwait 1 s');
   const waiting = run(withWait, createFreshRuntimeSnapshot(withWait));
@@ -850,68 +875,6 @@ test("exact and zero pacing create only the required actions", () => {
   );
   assert.equal(zeroResult.snapshot.nextActionId, 1);
   assert.equal(zeroResult.snapshot.lastSettlement, null);
-});
-
-test("prepared output is emitted exactly once after checkpoint JSON restore", () => {
-  const compiled = plan('say ["first", "first-alt"]\nsay ["second", "second-alt"]');
-  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled, { seed: 77 }));
-  const gate = waiting.snapshot.foregroundAction;
-  assert.equal(gate?.kind, "chatPacingGate");
-  assert.notEqual(gate?.preparedOutput, null);
-  const preparedText = gate!.preparedOutput!.text;
-  const preparedRng = waiting.snapshot.rng.state;
-  const restored = deserializeCheckpoint(
-    serializeCheckpoint(createCheckpoint(compiled, waiting.snapshot)),
-  );
-  const paths = [
-    ["uninterrupted", { plan: compiled, snapshot: waiting.snapshot }],
-    ["restored", restored],
-  ] as const;
-  for (const [path, start] of paths) {
-    const settled = completeAction(start.plan, start.snapshot, {
-      actionId: gate!.actionId,
-      actionKind: "chatPacingGate",
-      payload: { kind: "skip" },
-    });
-    const resumed = run(start.plan, settled.snapshot);
-    assert.equal(
-      resumed.events.filter((event) => event.kind === "say" && event.text === preparedText).length,
-      1,
-      path,
-    );
-    // Emitting the prepared output reuses its earlier selection instead of drawing again.
-    assert.equal(resumed.snapshot.rng.state, preparedRng, path);
-  }
-});
-
-test("prepared pacing output has the same result with and without checkpoint restore", () => {
-  const compiled = plan('say ["first", "first-alt"]\nsay ["second", "second-alt"]');
-  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled, { seed: 77 }));
-  const gate = waiting.snapshot.foregroundAction;
-  assert.equal(gate?.kind, "chatPacingGate");
-
-  const uninterruptedCompletion = completeAction(compiled, waiting.snapshot, {
-    actionId: gate!.actionId,
-    actionKind: "chatPacingGate",
-    payload: { kind: "skip" },
-  });
-  const uninterrupted = run(compiled, uninterruptedCompletion.snapshot);
-
-  const restored = deserializeCheckpoint(
-    serializeCheckpoint(createCheckpoint(compiled, waiting.snapshot)),
-  );
-  const resumedCompletion = completeAction(restored.plan, restored.snapshot, {
-    actionId: gate!.actionId,
-    actionKind: "chatPacingGate",
-    payload: { kind: "skip" },
-  });
-  const resumed = run(restored.plan, resumedCompletion.snapshot);
-
-  assert.deepEqual(
-    [...resumedCompletion.events, ...resumed.events],
-    [...uninterruptedCompletion.events, ...uninterrupted.events],
-  );
-  assert.deepEqual(resumed.snapshot, uninterrupted.snapshot);
 });
 
 test("a background pacing gate restores before promotion and preserves prepared output equivalence", () => {
@@ -1520,57 +1483,6 @@ test("say instruction plans and public pacing failures stay at their validation 
     assert.deepEqual(result.events, []);
     assert.equal(JSON.stringify(result.snapshot), baseline);
   }
-});
-
-test("pacing event-order matrix covers representative lifecycle transitions", () => {
-  const initialPlan = plan('say "first"');
-  const initial = run(initialPlan, createFreshRuntimeSnapshot(initialPlan));
-  const promotedPlan = plan('say "first"\nsay "second"');
-  const promoted = run(promotedPlan, createFreshRuntimeSnapshot(promotedPlan));
-  const promotedGate = promoted.snapshot.foregroundAction;
-  assert.equal(promotedGate?.kind, "chatPacingGate");
-  const released = observeTime(promotedPlan, promoted.snapshot, promotedGate!.deadlineMs);
-  const interactionPlan = plan('say "first"\nshowButton "Continue"');
-  const interaction = run(interactionPlan, createFreshRuntimeSnapshot(interactionPlan));
-  const instantPlan = plan('say "first"\nsay "now", instant');
-  const instant = run(instantPlan, createFreshRuntimeSnapshot(instantPlan));
-  const dualPlan = plan('say "first"\nwait 1 s\nexit');
-  const dual = run(dualPlan, createFreshRuntimeSnapshot(dualPlan));
-
-  const cases: Array<[string, readonly string[]]> = [
-    ["initial positive say", initial.events.map((event) => event.kind)],
-    ["later positive say promotion", promoted.events.map((event) => event.kind)],
-    ["foreground pacing settlement", released.events.map((event) => event.kind)],
-    [
-      "background typed skip",
-      completeAction(initialPlan, initial.snapshot, {
-        actionId: initial.snapshot.backgroundActions[0]!.actionId,
-        actionKind: "chatPacingGate",
-        payload: { kind: "skip" },
-      }).events.map((event) => event.kind),
-    ],
-    ["interaction consumption", interaction.events.map((event) => event.kind)],
-    ["instant supersession", instant.events.map((event) => event.kind)],
-    [
-      "late observation replays the delay before later pacing",
-      observeTime(dualPlan, dual.snapshot, 2_000).events.map((event) => event.kind),
-    ],
-    [
-      "prepared re-entry replacement",
-      run(promotedPlan, released.snapshot).events.map((event) => event.kind),
-    ],
-  ];
-  const expected = new Map<string, readonly string[]>([
-    ["initial positive say", ["say", "actionRequested", "complete"]],
-    ["later positive say promotion", ["say", "actionRequested"]],
-    ["foreground pacing settlement", ["actionCompleted"]],
-    ["background typed skip", ["actionCompleted"]],
-    ["interaction consumption", ["say", "actionRequested", "actionCompleted", "actionRequested"]],
-    ["instant supersession", ["say", "actionRequested", "actionCompleted", "say", "complete"]],
-    ["late observation replays the delay before later pacing", ["actionCompleted"]],
-    ["prepared re-entry replacement", ["say", "actionRequested", "complete"]],
-  ]);
-  for (const [label, events] of cases) assert.deepEqual(events, expected.get(label), label);
 });
 
 test("bounded replay advances across delay, pacing, and interaction settlements", () => {

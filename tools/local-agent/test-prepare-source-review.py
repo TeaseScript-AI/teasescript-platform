@@ -277,11 +277,8 @@ class PrepareSourceReviewTests(unittest.TestCase):
         self.assert_failure(completed, "head mismatch")
 
     def test_merge_base_absent_from_bundle_history(self) -> None:
-        completed = self.invoke(merge_base="2" * 40)
-        self.assert_failure(completed, "expected merge base is absent from bundle history")
-
-    def test_advanced_base_tip_uses_merge_base_from_compare(self) -> None:
-        advanced_tip = run(
+        # A real sibling tip of the base exists locally but is not in the bundle.
+        unbundled_sibling_tip = run(
             [
                 "git",
                 "commit-tree",
@@ -293,12 +290,17 @@ class PrepareSourceReviewTests(unittest.TestCase):
             ],
             cwd=self.repository,
         )
-        failed = self.invoke(merge_base=advanced_tip)
-        self.assert_failure(failed, "expected merge base is absent from bundle history")
-
-        output = self.root / "advanced-base-review"
-        completed = self.invoke(output=output, merge_base=self.base)
-        self.assertEqual(completed.returncode, 0, completed.stderr)
+        for name, merge_base in (
+            ("fabricated", "2" * 40),
+            ("unbundled-sibling-tip", unbundled_sibling_tip),
+        ):
+            with self.subTest(name):
+                completed = self.invoke(
+                    output=self.root / f"review-{name}", merge_base=merge_base
+                )
+                self.assert_failure(
+                    completed, "expected merge base is absent from bundle history"
+                )
 
     def test_unrelated_bundled_commit_is_not_accepted_as_merge_base(self) -> None:
         unrelated = run(

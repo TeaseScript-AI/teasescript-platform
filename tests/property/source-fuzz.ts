@@ -275,8 +275,9 @@ function countCall(
   }
 }
 
+/** Mixed rather than linear selection, so a campaign stride cannot alias with the family count. */
 function selectSourceFamily<T>(families: readonly T[], seed: number, index: number): T {
-  return families[(seed + index) % families.length]!;
+  return families[mixSeed(seed, index) % families.length]!;
 }
 
 class SourceChoices {

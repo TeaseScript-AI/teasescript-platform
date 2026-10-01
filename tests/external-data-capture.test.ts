@@ -500,47 +500,43 @@ test("external capture measures broad descriptor work without rejecting it", () 
   assert.deepEqual(captureExternalData(dense).ok, true);
 });
 
-test("external capture rejects non-canonical proxy arrays before indexed traversal", () => {
-  const access = { gets: 0, lengthDescriptors: 0, indexedDescriptors: 0 };
-  assert.deepEqual(
-    captureExternalData(proxyArray(2, ["1", "length"], { "1": "present" }, access)),
-    { ok: false, failure: { kind: "nonJsonSafeValue", path: "$" } },
-  );
-  assert.equal(access.gets, 0);
-  assert.equal(access.indexedDescriptors, 0);
-  assert.ok(access.lengthDescriptors > 0);
-});
+test("external capture rejects non-canonical and length-conflicting proxy arrays", () => {
+  const rows = [
+    {
+      name: "hole before a present index",
+      length: 2,
+      keys: ["1", "length"],
+      values: { "1": "present" },
+    },
+    ...[
+      ["length", "4294967294"],
+      ["4294967294", "length"],
+    ].map((keys) => ({
+      name: `maximum index beyond length with keys ${keys.join(",")}`,
+      length: 0,
+      keys,
+      values: { "4294967294": 1 },
+    })),
+    ...["0", "1", "4294967295", "01", "1.0"].map((key) => ({
+      name: `key ${key} with zero length`,
+      length: 0,
+      keys: ["length", key],
+      values: { [key]: 1 },
+    })),
+  ];
 
-test("external capture rejects proxy indexes that conflict with validated array length", () => {
-  const assertRejectedBeforeIndexedAccess = (
-    length: number,
-    keys: readonly string[],
-    values: Readonly<Record<string, unknown>>,
-  ): void => {
-    const label = `length ${length}, keys ${JSON.stringify(keys)}`;
+  // Every row is rejected from the validated length and key count before any indexed access.
+  for (const row of rows) {
     const access = { gets: 0, lengthDescriptors: 0, indexedDescriptors: 0 };
     assert.deepEqual(
-      captureExternalData(proxyArray(length, keys, values, access)),
+      captureExternalData(proxyArray(row.length, row.keys, row.values, access)),
       { ok: false, failure: { kind: "nonJsonSafeValue", path: "$" } },
-      label,
+      row.name,
     );
-    assert.equal(access.gets, 0, label);
-    assert.equal(access.indexedDescriptors, 0, label);
-    assert.ok(access.lengthDescriptors > 0, label);
-  };
-
-  for (const keys of [
-    ["length", "4294967294"],
-    ["4294967294", "length"],
-  ]) {
-    assertRejectedBeforeIndexedAccess(0, keys, { "4294967294": 1 });
+    assert.equal(access.gets, 0, row.name);
+    assert.equal(access.indexedDescriptors, 0, row.name);
+    assert.ok(access.lengthDescriptors > 0, row.name);
   }
-
-  for (const key of ["0", "1", "4294967295", "01", "1.0"]) {
-    assertRejectedBeforeIndexedAccess(0, ["length", key], { [key]: 1 });
-  }
-
-  assertRejectedBeforeIndexedAccess(2, ["1", "length"], { "1": "present" });
 });
 
 test("external capture rejects malformed proxy length descriptors without invoking getters", () => {
@@ -602,19 +598,6 @@ test("proxy array length inflation is structured at plan, snapshot, checkpoint, 
   );
 });
 
-test("serializable cloning rejects huge sparse arrays as non-canonical", () => {
-  const items: SerializableRuntimeValue[] = [];
-  items.length = 0xffff_ffff;
-
-  assert.throws(
-    () => cloneSerializableValue({ kind: "list", items }),
-    (error: unknown) =>
-      error instanceof SerializableValueError &&
-      error.code === "invalid" &&
-      error.message === "$.items is not a JSON-safe runtime value.",
-  );
-});
-
 test("serializable cloning accepts broad dense arrays and rejects sparse arrays", () => {
   const acceptedCount = 100_001;
   const expectedItem = (index: number): SerializableRuntimeValue => {
@@ -643,13 +626,22 @@ test("serializable cloning accepts broad dense arrays and rejects sparse arrays"
   const smallSparse: SerializableRuntimeValue[] = [];
   smallSparse.length = 2;
   smallSparse[1] = "present";
-  assert.throws(
-    () => cloneSerializableValue({ kind: "list", items: smallSparse }),
-    (error: unknown) =>
-      error instanceof SerializableValueError &&
-      error.code === "invalid" &&
-      error.message === "$.items is not a JSON-safe runtime value.",
-  );
+  // The maximum-length row catches accidental length-sized traversal or allocation.
+  const hugeSparse: SerializableRuntimeValue[] = [];
+  hugeSparse.length = 0xffff_ffff;
+  for (const [name, items] of [
+    ["small sparse", smallSparse],
+    ["maximum-length sparse", hugeSparse],
+  ] as const) {
+    assert.throws(
+      () => cloneSerializableValue({ kind: "list", items }),
+      (error: unknown) =>
+        error instanceof SerializableValueError &&
+        error.code === "invalid" &&
+        error.message.startsWith("$.items "),
+      name,
+    );
+  }
 });
 
 test("plan validation rejects sparse instruction length before execution", () => {

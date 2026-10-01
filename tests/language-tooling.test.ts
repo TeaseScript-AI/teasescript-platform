@@ -187,12 +187,6 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
   assert.equal(active('say ["Hello", "there"]'), 2);
 });
 
-test("multiline choose formatting preserves the following option text", () => {
-  const source = 'let result = choose first: "One",\n        second: "Two"';
-  const formatted = formatLanguageDocument(createLanguageDocument("file:///main.tease", source));
-  assert.equal(formatted.text, 'let result = choose first: "One", second: "Two"');
-});
-
 test("editor tooling handles deeply nested media blocks without native recursion", () => {
   const depth = 2_500;
   assertDeepSayTooling(

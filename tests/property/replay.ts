@@ -67,6 +67,14 @@ export interface PropertyDefinition {
   readonly prepare: (seed: number, index: number) => PreparedPropertyCase;
 }
 
+/** A seed-independent fixture that runs once rather than in generated campaign slots. */
+export interface FixedPropertyCheck {
+  readonly id: string;
+  readonly boundary: string;
+  readonly variant: string;
+  readonly execute: () => void;
+}
+
 export interface PropertyCampaignDependencies {
   readonly compileSource?: typeof compileSource;
   readonly createValidSourceCase?: typeof createValidSourceCase;
@@ -126,34 +134,10 @@ export function createPropertyDefinitions(
 
   return [
     ordinaryProperty(
-      "operation-closure",
-      "public runtime operation",
-      describeOperationClosure,
-      assertOperationClosure,
-    ),
-    ordinaryProperty(
-      "rejected-completion-is-atomic",
-      "completeAction",
-      describeRejectedCompletion,
-      assertRejectedCompletionIsAtomic,
-    ),
-    ordinaryProperty(
-      "checkpoint-roundtrip-and-resume",
-      "checkpoint/restore",
-      describeCheckpointRoundTrip,
-      assertCheckpointRoundTripAndResume,
-    ),
-    ordinaryProperty(
       "same-seed-is-deterministic",
       "compile/run",
       describeSameSeed,
       assertSameSeedIsDeterministic,
-    ),
-    ordinaryProperty(
-      "malformed-boundary-rejection",
-      "external/persistence validation",
-      describeMalformedBoundary,
-      assertMalformedBoundaryRejection,
     ),
     sourceProperty(
       "valid-source-pipeline",
@@ -169,6 +153,60 @@ export function createPropertyDefinitions(
       (scenario) => assertNearValidSourceDiagnostics(scenario, dependencies.compileSource),
     ),
   ];
+}
+
+/** Fixed operation, rejection, checkpoint and malformed-input fixtures consume no RNG. */
+export function createFixedPropertyChecks(): readonly FixedPropertyCheck[] {
+  return [
+    ...OPERATION_VARIANTS.map((variant) => ({
+      id: "operation-closure",
+      boundary: "public runtime operation",
+      variant,
+      execute: () => assertOperationClosure(variant),
+    })),
+    ...REJECTION_VARIANTS.map((variant) => ({
+      id: "rejected-completion-is-atomic",
+      boundary: "completeAction",
+      variant,
+      execute: () => assertRejectedCompletionIsAtomic(variant),
+    })),
+    {
+      id: "checkpoint-roundtrip-and-resume",
+      boundary: "checkpoint/restore",
+      variant: "wait-checkpoint-json-restore-resume",
+      execute: assertCheckpointRoundTripAndResume,
+    },
+    ...MALFORMED_VARIANTS.map((variant) => ({
+      id: "malformed-boundary-rejection",
+      boundary: "external/persistence validation",
+      variant,
+      execute: () => assertMalformedBoundaryRejection(variant),
+    })),
+  ];
+}
+
+/** Runs every fixed check once and returns how many ran; a failure names its check. */
+export function runFixedPropertyChecks(
+  checks: readonly FixedPropertyCheck[] = createFixedPropertyChecks(),
+): number {
+  for (const check of checks) {
+    try {
+      check.execute();
+    } catch (error) {
+      const causeText = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      throw new Error(
+        [
+          "Fixed property check failed.",
+          `property=${check.id}`,
+          `boundary=${check.boundary}`,
+          `variant=${check.variant}`,
+          `cause=${causeText}`,
+        ].join("\n"),
+        { cause: error },
+      );
+    }
+  }
+  return checks.length;
 }
 
 export function defaultPropertyCampaignConfig(): PropertyCampaignConfig {
@@ -267,7 +305,12 @@ export function createReplayCommand(
 
 export function runPropertyCli(argv: readonly string[]): number {
   try {
-    const result = runPropertyCampaign(parsePropertyCliArguments(argv));
+    const config = parsePropertyCliArguments(argv);
+    if (config.caseIndex === undefined) {
+      const checks = runFixedPropertyChecks();
+      process.stdout.write(`fixed property checks passed executed=${checks}\n`);
+    }
+    const result = runPropertyCampaign(config);
     process.stdout.write(
       `property campaign passed seed=${result.seed} runs=${result.runs} executed=${result.executed}\n`,
     );
@@ -341,10 +384,9 @@ function fallbackPropertyCaseResult(
   });
 }
 
-function assertOperationClosure(seed: number, index: number): void {
+function assertOperationClosure(variant: (typeof OPERATION_VARIANTS)[number]): void {
   const plan = compilePlan('showButton "Go"\nwait 1 ms\nexit');
-  const snapshot = createFreshRuntimeSnapshot(plan, { seed: caseSeed(seed, index) });
-  const variant = OPERATION_VARIANTS[index % OPERATION_VARIANTS.length]!;
+  const snapshot = createFreshRuntimeSnapshot(plan);
   const result = runOperationVariant(plan, snapshot, variant);
   assertValidSnapshot(plan, result.snapshot);
 }
@@ -428,21 +470,12 @@ function assertButtonCompleted(
   assert.deepEqual(completed.settlement, settlement);
 }
 
-function describeOperationClosure(_seed: number, index: number): PropertyCaseContext {
-  const variant = OPERATION_VARIANTS[index % OPERATION_VARIANTS.length]!;
-  return { description: `operation=${variant} source=repository-authored` };
-}
-
-function assertRejectedCompletionIsAtomic(seed: number, index: number): void {
-  const variant = REJECTION_VARIANTS[index % REJECTION_VARIANTS.length]!;
+function assertRejectedCompletionIsAtomic(variant: (typeof REJECTION_VARIANTS)[number]): void {
   // Time reaches a wait only through observation; a button can be completed only once.
   const plan = compilePlan(
     variant === "time-completion" ? "wait 10 ms\nexit" : 'showButton "Go"\nexit',
   );
-  const waiting = run(
-    plan,
-    createFreshRuntimeSnapshot(plan, { seed: caseSeed(seed, index) }),
-  ).snapshot;
+  const waiting = run(plan, createFreshRuntimeSnapshot(plan)).snapshot;
   const waitingBefore = structuredClone(waiting);
   const request =
     variant === "time-completion"
@@ -473,17 +506,9 @@ function assertRejectedCompletionIsAtomic(seed: number, index: number): void {
   assert.deepEqual(waiting, waitingBefore);
 }
 
-function describeRejectedCompletion(_seed: number, index: number): PropertyCaseContext {
-  const variant = REJECTION_VARIANTS[index % REJECTION_VARIANTS.length]!;
-  return { description: `rejected-completion=${variant} source=repository-authored` };
-}
-
-function assertCheckpointRoundTripAndResume(seed: number, index: number): void {
+function assertCheckpointRoundTripAndResume(): void {
   const plan = compilePlan('wait 1 ms\nsay "done"\nexit');
-  const waiting = run(
-    plan,
-    createFreshRuntimeSnapshot(plan, { seed: caseSeed(seed, index) }),
-  ).snapshot;
+  const waiting = run(plan, createFreshRuntimeSnapshot(plan)).snapshot;
   const checkpoint = createCheckpoint(plan, waiting);
   const restored = deserializeCheckpoint(serializeCheckpoint(checkpoint));
 
@@ -500,10 +525,6 @@ function assertCheckpointRoundTripAndResume(seed: number, index: number): void {
   );
 }
 
-function describeCheckpointRoundTrip(): PropertyCaseContext {
-  return { description: "wait-checkpoint-json-restore-resume source=repository-authored" };
-}
-
 function assertSameSeedIsDeterministic(seed: number, index: number): void {
   const plan = compilePlan('let value = randomInteger(1..=100)\nsay "\${value}"\nexit');
   const runtimeSeed = caseSeed(seed, index);
@@ -518,10 +539,9 @@ function describeSameSeed(): PropertyCaseContext {
   return { description: "randomInteger same-source same-seed source=repository-authored" };
 }
 
-function assertMalformedBoundaryRejection(seed: number, index: number): void {
+function assertMalformedBoundaryRejection(variant: (typeof MALFORMED_VARIANTS)[number]): void {
   const plan = compilePlan("exit");
-  const snapshot = createFreshRuntimeSnapshot(plan, { seed: caseSeed(seed, index) });
-  const variant = MALFORMED_VARIANTS[(seed + index) % MALFORMED_VARIANTS.length]!;
+  const snapshot = createFreshRuntimeSnapshot(plan);
 
   switch (variant) {
     case "plan":
@@ -534,11 +554,6 @@ function assertMalformedBoundaryRejection(seed: number, index: number): void {
       assert.throws(() => restoreCheckpoint({}), CheckpointError);
       break;
   }
-}
-
-function describeMalformedBoundary(seed: number, index: number): PropertyCaseContext {
-  const variant = MALFORMED_VARIANTS[(seed + index) % MALFORMED_VARIANTS.length]!;
-  return { description: `malformed=${variant} fixture=deliberately-mutated-external-data` };
 }
 
 function assertValidSourcePipeline(
