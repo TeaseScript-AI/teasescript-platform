@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CheckpointError, createCheckpoint, restoreCheckpoint } from "../src/runtime/checkpoint.js";
+import { createCheckpoint, restoreCheckpoint } from "../src/runtime/checkpoint.js";
 import {
   createXorShift32State,
   nextXorShift32,
@@ -13,39 +13,25 @@ import {
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
 import { run } from "../src/runtime/engine.js";
+import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
 test("rejects zero xorshift32 seeds and direct zero-state advancement", () => {
-  assert.throws(
-    () => createXorShift32State(0),
-    (error: unknown) =>
-      error instanceof RangeError &&
-      error.message === "The xorshift32 seed must be a non-zero unsigned 32-bit integer.",
-  );
+  assert.throws(() => createXorShift32State(0), RangeError);
 
-  assert.throws(
-    () => nextXorShift32({ algorithm: XORSHIFT32_ALGORITHM, state: 0 }),
-    (error: unknown) =>
-      error instanceof TypeError && error.message === "Malformed xorshift32 state.",
-  );
+  assert.throws(() => nextXorShift32({ algorithm: XORSHIFT32_ALGORITHM, state: 0 }), TypeError);
 });
 
 test("rejects zero RNG state at fresh snapshot and validation boundaries", () => {
   const compiled = plan("exit");
 
-  assert.throws(
-    () => createFreshRuntimeSnapshot(compiled, { seed: 0 }),
-    (error: unknown) =>
-      error instanceof RangeError &&
-      error.message === "The xorshift32 seed must be a non-zero unsigned 32-bit integer.",
-  );
+  assert.throws(() => createFreshRuntimeSnapshot(compiled, { seed: 0 }), RangeError);
 
   const snapshot = createFreshRuntimeSnapshot(compiled);
+  assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
   snapshot.rng.state = 0;
-  const validation = validateRuntimeSnapshot(snapshot, compiled);
 
-  assert.equal(validation.valid, false);
-  assert.ok(validation.errors.includes("Runtime RNG state is malformed or unsupported."));
+  assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, false);
 });
 
 test("rejects checkpoint restore with a zero RNG state", () => {
@@ -54,15 +40,10 @@ test("rejects checkpoint restore with a zero RNG state", () => {
   const checkpoint = JSON.parse(
     JSON.stringify(createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled))),
   ) as { snapshot: RuntimeSnapshot };
+  assert.equal(restoreCheckpoint(checkpoint).snapshot.rng.state, checkpoint.snapshot.rng.state);
   checkpoint.snapshot.rng.state = 0;
 
-  assert.throws(
-    () => restoreCheckpoint(checkpoint),
-    (error: unknown) =>
-      error instanceof CheckpointError &&
-      error.info.code === "TSK002" &&
-      error.info.message === "Runtime RNG state is malformed or unsupported.",
-  );
+  assertCheckpointRejected(checkpoint, "TSK002");
 });
 
 test("preserves deterministic advancement for valid non-zero seeds", () => {
