@@ -91,7 +91,9 @@ Its type package is development-only; versions live in the manifest/lockfile. Ve
 ## Development-only behavior
 
 `DevelopmentPreview.vue` opens one runtime choice scenario and supplies Visual Lab's Owner A/B presentation settings:
-Theme Lab, the Stage media picker, and timer/background-button fixtures. Visual Lab and Layout Debug are development
+Theme Lab, the Stage media picker, and timer/background-button fixtures. As the scenario's development host, it
+resolves the scenario's Stage images to the development illustrations and its chime to a generated tone; the picker's
+"Runtime" option shows the scenario's own Stage image, and a fixture overrides it. Visual Lab and Layout Debug are development
 surfaces, not Standard Player product tools or runtime/package/host APIs. Fixture timer/control values remain local;
 the opening scenario still uses the shared canonical runtime adapter.
 

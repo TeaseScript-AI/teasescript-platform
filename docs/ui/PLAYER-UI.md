@@ -8,8 +8,9 @@
   language, isolation, and persistence scope they decide. The temporary [Upstream contract integration](#upstream-contract-integration)
   section below records Owner-decided Player behavior that still needs synchronization into those upstream contracts.
 - **Implementation state:** The Player is the Phase 2C implementation under `player/vue/src/phase2c/`. Its implemented
-  transcript, foreground interaction, pacing, and runtime timer paths use the shared runtime adapter. Runtime media
-  integration, production host integration, and several provisional presentation values remain incomplete.
+  transcript, foreground interaction, pacing, runtime timer, Stage image, and audio paths use the shared runtime
+  adapter. Browser video playback, production host integration, and several provisional presentation values remain
+  incomplete.
 
 This document may lead the implementation. A missing POC feature or an implementation bug does not redefine the desired
 Player contract. Conversely, behavior found only in current HTML/CSS/JavaScript is evidence rather than contract until it
@@ -57,8 +58,8 @@ specification may lead the implementation. The Phase 2C Player presents supporte
 and pacing behavior from canonical runtime state. Its development preview opens one runtime choice scenario and adds
 Visual Lab, Layout Debug, the Stage media picker, Theme Lab, and timer/background-button presentation fixtures. The
 default build mounts the Player without that preview; the development server or explicit `?dev` URL opt-in loads it.
-Runtime timers are wired; runtime media wiring and production host integration remain separate work. Values marked for retesting remain
-provisional tuning baselines.
+Runtime timers, the Stage image, and audio are wired; browser video playback and production host integration remain
+separate work. Values marked for retesting remain provisional tuning baselines.
 
 A current implementation detail is not a durable requirement merely because it exists. Owner-confirmed behavior here is
 the target unless higher authority conflicts with it.
@@ -376,8 +377,10 @@ execution resumes. The player's activation of that control is the user activatio
 relies on, so scripts may play audio from their first statement without a separate unlock step.
 
 If the browser still refuses required audible playback, the Player surfaces a deliberate activation/retry control. It
-does not silently substitute muted playback or report the audio as played. The Start/Continue activation controls are
-not yet implemented in Phase 2C.
+does not silently substitute muted playback or report the audio as played: refused audio reports no progress, so its
+cues and settlement wait, and an **Enable audio** control retries playback from the user's click. In Phase 2C the
+session is created only when Start is activated; the Continue path applies to a session the host restores. Durable
+checkpoint storage and automatic resume across page reloads are tracked in #469.
 
 ## Stage and media presentation
 
@@ -401,8 +404,12 @@ disagree with the canonical timeline. A progress indicator may extrapolate betwe
 users may ever control playback is open; if accepted, such controls send typed host input to the runtime rather than
 acting on the media element ([`RUNTIME.md`](../RUNTIME.md#stage-image-and-media-playback)).
 
-Runtime Stage image and media presentation, media-derived ambience, explicit transitions, and custom stage rendering
-are not yet implemented in Phase 2C; the development preview supplies image fixtures and theme-derived ambience.
+The trusted host resolves authored package-relative references, such as `sounds/bell.mp3`, to playable sources; the
+runtime keeps them opaque, and arbitrary external URLs are not resolved. An audio reference the host cannot resolve is
+reported as a failed load; an unresolvable Stage image leaves the Stage empty. Phase 2C plays audio; a `playVideo` request is reported as a failed load ("Video playback
+is not supported by this Player yet."), so the script continues with the runtime's warning. An authored Stage image
+has no alternative text yet. Media-derived ambience, explicit transitions, and custom stage rendering are not yet
+implemented in Phase 2C; the development preview's Stage media picker can override the Stage for layout comparison.
 
 Standard image/video-like presentation:
 

@@ -13,6 +13,7 @@ import {
   type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
 } from "../../../runtime-adapter.js";
+import PlayerActionButton from "@/components/PlayerActionButton.vue";
 import Composer from "./Composer.vue";
 import ConversationSurface from "./ConversationSurface.vue";
 import Transcript from "./Transcript.vue";
@@ -31,14 +32,35 @@ const props = defineProps<{
   transcriptKey: string;
   /** Brings scene time up to date before input and returns the published session. */
   observeTime?: () => PlayerRuntimeSession | null;
+  /** The browser refused audible playback; offer a deliberate retry above the composer. */
+  audioBlocked?: boolean;
 }>();
 const emit = defineEmits<{
   "update:session": [session: PlayerRuntimeSession];
+  retryAudio: [];
 }>();
-const foreground = computed(() => (props.session ? playerRuntimeForeground(props.session) : null));
 const actionId = computed(() =>
   props.session ? activePlayerRuntimeInteraction(props.session.snapshot)?.actionId : undefined,
 );
+// An interaction's presentation is fixed for its lifetime. Keep one object per action so frequent time and media
+// observations do not re-render, and re-measure, the controls on every update.
+// Action IDs restart per session; the plan and the host's reset count identify which session an ID belongs to.
+let presented: {
+  readonly plan: PlayerRuntimeSession["plan"];
+  readonly reset: number;
+  readonly actionId: number;
+  readonly value: ReturnType<typeof playerRuntimeForeground>;
+} | null = null;
+const foreground = computed(() => {
+  const session = props.session;
+  if (!session) return null;
+  const id = actionId.value;
+  if (presented?.plan === session.plan && presented.reset === props.reset && presented.actionId === id)
+    return presented.value;
+  const value = playerRuntimeForeground(session);
+  presented = id === undefined ? null : { plan: session.plan, reset: props.reset, actionId: id, value };
+  return value;
+});
 const pacing = computed(() => {
   const gate = props.session ? playerRuntimePacingGate(props.session) : null;
   return gate?.skippable ? gate : null;
@@ -254,6 +276,10 @@ function submit(source: "input" | "button") {
         </Transcript>
       </template>
       <template #interaction>
+        <p v-if="audioBlocked" class="audio-retry" role="status">
+          <span>The browser blocked audio.</span>
+          <PlayerActionButton data-audio-retry @click="emit('retryAudio')">Enable audio</PlayerActionButton>
+        </p>
         <Composer
           ref="composer"
           v-model="draft"
@@ -273,3 +299,15 @@ function submit(source: "input" | "button") {
     </ConversationSurface>
   </div>
 </template>
+
+<style scoped>
+.audio-retry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  margin: 0 0 8px;
+  pointer-events: auto;
+}
+</style>

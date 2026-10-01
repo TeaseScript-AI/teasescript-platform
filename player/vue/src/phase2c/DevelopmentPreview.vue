@@ -9,6 +9,7 @@ import BackgroundControlsFixture from "./BackgroundControlsFixture.vue";
 import LayoutDebug from "./LayoutDebug.vue";
 import PlayerApp from "./PlayerApp.vue";
 import type { PlayerTool } from "./PlayerToolsShell.vue";
+import { resolveDevelopmentAsset } from "./developmentMedia";
 import { openingScenario } from "./runtimeScenario";
 import { stageFixtures } from "./stageFixtures";
 import StageRightRail from "./StageRightRail.vue";
@@ -27,7 +28,8 @@ const tools: readonly PlayerTool[] = [
   { name: "Playback Diagnostics", icon: Activity },
   { name: "Media Playback Configuration", icon: SlidersHorizontal },
 ];
-const mediaFixture = ref<keyof typeof stageFixtures>("Landscape");
+// "Runtime" shows the scenario's own Stage image; a fixture overrides it for layout comparison.
+const mediaFixture = ref<keyof typeof stageFixtures | "Runtime">("Runtime");
 const timerKind = ref<PlayerTimerKind>("visible");
 const timerCount = ref(1);
 const timerReset = ref(0);
@@ -35,8 +37,8 @@ const timerPaused = ref(true);
 const backgroundControlsReset = ref(0);
 const themeIntent = ref<PlayerThemeIntent>(defaultPlayerThemeIntents.light);
 
-const player = usePlayerSession();
-player.start(createPlayerRuntimeSession(openingScenario));
+const player = usePlayerSession({ resolveAsset: resolveDevelopmentAsset });
+player.prepare(() => createPlayerRuntimeSession(openingScenario));
 </script>
 
 <template>
@@ -45,7 +47,7 @@ player.start(createPlayerRuntimeSession(openingScenario));
     :player="player"
     :tools="tools"
     title="Evening by the coast"
-    :media="stageFixtures[mediaFixture]"
+    :media="mediaFixture === 'Runtime' ? undefined : stageFixtures[mediaFixture]"
   >
     <template #tool="{ tool, player: playerElement }">
       <LayoutDebug v-if="tool === 'Layout Debug' && playerElement" :player="playerElement" />
@@ -54,6 +56,7 @@ player.start(createPlayerRuntimeSession(openingScenario));
         <label class="grid gap-2">
           Stage media fixture
           <select v-model="mediaFixture" class="min-w-0 rounded border bg-card p-2">
+            <option>Runtime</option>
             <option v-for="(_, name) in stageFixtures" :key="name">{{ name }}</option>
           </select>
         </label>

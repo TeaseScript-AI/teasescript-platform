@@ -547,8 +547,11 @@ Media coverage starts with real `.tease` source and exercises accepted and rejec
 blocking and asynchronous waits including terminal ones, bounded and indefinite repetition, seeks and endpoint cues,
 `elapsed` excluding pauses and stalls, one-late versus many-small progress observations, same-time ordering across
 media and timers, cue blocks with self-handles, Stage replacement, pacing barriers, playback projections, JSON
-checkpoint/restore equivalence with a simulated Player, and rejection of malformed media state. Browser Stage
-rendering, audible playback, and Start/Continue/retry verification belong to #446.
+checkpoint/restore equivalence with a simulated Player, and rejection of malformed media state.
+`tests/player-media-device.test.ts` drives the Player's media device against real sessions with deterministic element
+stand-ins: single load reports, stalls, range repetition and terminal stop, pause/resume/seek repositioning, refused
+playback and retry, failed video and unavailable sources, and restore reconnection without repeated cues. The Phase 2C
+browser checks cover Start activation, the runtime Stage image, and actually played audio.
 
 ## Local browser smoke and future host E2E gate
 

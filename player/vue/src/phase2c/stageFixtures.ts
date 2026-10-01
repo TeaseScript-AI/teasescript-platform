@@ -21,5 +21,4 @@ export const stageFixtures = {
   Dusk: scene(1600, 900, true),
   Portrait: scene(800, 1200, true),
   Square: scene(1000, 1000),
-  Empty: undefined,
 };

@@ -5,8 +5,8 @@
 `player/runtime-adapter.ts` is the framework-independent Player adapter shared by the Player and the
 playground's action lookup/completion path. It maps validated pending actions and runtime events to Player presentation,
 submits typed interactions, pacing/time observations, media load reports, and media progress, projects the Stage and
-active media for playback, and uses the canonical runtime checkpoint operations. Authored image and audio browser
-wiring is pending in #446; browser video playback remains deferred.
+active media for playback, and uses the canonical runtime checkpoint operations. The Phase 2C Player plays the
+projected audio through `player/media-device.ts` and shows the Stage image; browser video playback remains deferred.
 `playground/workspace/controller.ts` retains the DOM-free compiler/execution and development-automation workspace
 facade. Neither adapter normalizes answers, matches choices, derives canonical transcript text, or retains an
 independent action lifecycle.

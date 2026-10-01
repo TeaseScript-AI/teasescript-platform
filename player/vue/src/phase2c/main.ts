@@ -1,4 +1,4 @@
-import { createApp } from "vue";
+import { createApp, h } from "vue";
 import PlayerApp from "./PlayerApp.vue";
 import { usePlayerSession } from "./usePlayerSession";
 import "./style.css";
@@ -9,5 +9,11 @@ const developmentPreview =
   import.meta.env.DEV || new URLSearchParams(window.location.search).has("dev");
 const app = developmentPreview
   ? createApp((await import("./DevelopmentPreview.vue")).default)
-  : createApp(PlayerApp, { player: usePlayerSession() });
+  : // The session host lives in a component scope, so unmounting stops its media, clock and listeners.
+    createApp({
+      setup: () => {
+        const player = usePlayerSession();
+        return () => h(PlayerApp, { player });
+      },
+    });
 app.mount("#app");

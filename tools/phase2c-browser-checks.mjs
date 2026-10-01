@@ -2300,6 +2300,65 @@ async function playerSettingsChecks(page) {
   return "PASS Player Settings apply, persist, validate stored and cross-tab values, and fit short screens";
 }
 
+async function mediaPlaybackChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  // Observe the Player's audio elements; the first play() is refused, as a browser without activation would.
+  await page.addInitScript(() => {
+    window.__played = [];
+    const play = HTMLMediaElement.prototype.play;
+    let refused = false;
+    HTMLMediaElement.prototype.play = function () {
+      if (!refused) {
+        refused = true;
+        return Promise.reject(new DOMException("Refused", "NotAllowedError"));
+      }
+      window.__played.push(this);
+      return play.call(this);
+    };
+  });
+  page.phase2cKeepActivation = true;
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  // Nothing runs before explicit Start: no transcript, no Stage image, no audio.
+  const start = page.getByRole("button", { name: "Start", exact: true });
+  await start.waitFor();
+  check((await page.locator(".transcript-entry").count()) === 0, "The script ran before Start");
+  check((await page.locator(".stage-media").count()) === 0, "The Stage showed media before Start");
+  await start.click();
+  // The authored Stage image comes from the runtime and the host's asset resolution.
+  await page.locator(".stage-media").waitFor();
+  const firstImage = await page.locator(".stage-media").getAttribute("src");
+  // Refused audio offers a deliberate retry and reports no progress until it plays.
+  const retry = page.getByRole("button", { name: "Enable audio", exact: true });
+  await retry.waitFor();
+  check(
+    await page.evaluate(() => window.__played.length === 0),
+    "Refused audio was reported as playing",
+  );
+  await retry.click();
+  await page.waitForFunction(() => window.__played[0]?.currentTime > 0.2);
+  await retry.waitFor({ state: "hidden" });
+  check(
+    await page.evaluate(() => !window.__played[0].muted && window.__played[0].volume > 0),
+    "Audio must play audibly, not muted",
+  );
+  // The runtime settles playback from measured progress and the Player releases the element.
+  await page.waitForFunction(() => !window.__played[0].getAttribute("src"), null, {
+    timeout: 5000,
+  });
+  // A later showImage replaces the Stage image.
+  await page.getByRole("button", { name: "Stay by the water", exact: true }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.waitForFunction(
+    (previous) => document.querySelector(".stage-media")?.getAttribute("src") !== previous,
+    firstImage,
+  );
+  page.phase2cKeepActivation = false;
+  return "PASS Start gating, runtime Stage image, refused-audio retry and measured audio playback";
+}
+
 async function composerMouseFocusChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -2488,6 +2547,7 @@ const groups = [
   playerSettingsChecks,
   focusOffsetChecks,
   backgroundControlPlacementChecks,
+  mediaPlaybackChecks,
   directDemoLatestChecks,
   timerChecks,
   transcriptNativeWheelChecks,
@@ -2509,6 +2569,11 @@ async function runGroup(browserPage, run, url, artifacts) {
       pagePrototype[name] = async function (...args) {
         const response = await navigate.apply(this, args);
         await this.waitForSelector("#phase2c-shell", { state: "attached" });
+        // The Player runs no script before explicit Start; groups other than the activation checks start it here.
+        if (!this.phase2cKeepActivation) {
+          const start = this.locator("[data-session-activation] button");
+          if (await start.count()) await start.click();
+        }
         return response;
       };
     }
