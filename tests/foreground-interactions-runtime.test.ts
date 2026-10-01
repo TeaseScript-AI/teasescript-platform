@@ -133,6 +133,23 @@ function complete(
   });
 }
 
+/** A runtime-produced completion after its handoff was consumed, so no handoff or destination remains. */
+function consumedCompletion(
+  plan: InstructionPlan,
+  payload: unknown,
+  interactionKind: InteractionInstruction["interactionKind"],
+): RuntimeSnapshot {
+  const completed = complete(plan, payload, interactionKind);
+  assert.equal(completed.outcome.kind, "completed");
+  const consumed = run(plan, completed.snapshot).snapshot;
+  assert.equal(consumed.interactionResultHandoff, null);
+  assert.deepEqual(consumed.temporaries, []);
+  assert.equal(consumed.lastSettlement?.actionKind, "interaction");
+  assert.equal(validateRuntimeSnapshot(consumed).valid, true);
+  assert.equal(validateRuntimeSnapshot(consumed, plan).valid, true);
+  return consumed;
+}
+
 test("button and text complete through one interaction family with canonical transcript ordering", () => {
   const buttonPlan = interactionPlan("button", {
     kind: "button",
@@ -361,51 +378,65 @@ test("duplicate, stale, unknown, wrong-kind, and over-limit completion preserve 
   const plan = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
   const pending = waiting(plan);
   const actionId = pending.snapshot.foregroundAction!.actionId;
-  const wrong = completeAction(plan, pending.snapshot, {
-    actionId,
-    actionKind: "delay",
-    payload: { kind: "time", currentSessionTimeMs: 1 },
-  });
-  assert.equal(wrong.outcome.kind, "wrongActionKind");
-  assert.deepEqual(wrong.snapshot, pending.snapshot);
-  const over = completeAction(plan, pending.snapshot, {
-    actionId,
-    actionKind: "interaction",
-    interactionKind: "text",
-    payload: {
-      kind: "submittedText",
-      submittedText: "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES + 1),
+  const assertUnchanged = (snapshot: RuntimeSnapshot, request: unknown, expected: string) => {
+    const before = structuredClone(snapshot);
+    const result = completeAction(plan, snapshot, request);
+    assert.equal(result.outcome.kind, expected);
+    assert.deepEqual(result.events, [], expected);
+    assert.deepEqual(result.snapshot, before, expected);
+    assert.deepEqual(snapshot, before, `${expected}: input`);
+    return result.outcome;
+  };
+  assertUnchanged(
+    pending.snapshot,
+    { actionId, actionKind: "delay", payload: { kind: "time", currentSessionTimeMs: 1 } },
+    "wrongActionKind",
+  );
+  assertUnchanged(
+    pending.snapshot,
+    {
+      actionId,
+      actionKind: "interaction",
+      interactionKind: "text",
+      payload: {
+        kind: "submittedText",
+        submittedText: "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES + 1),
+      },
     },
-  });
-  assert.equal(over.outcome.kind, "invalidPayload");
-  assert.deepEqual(over.snapshot, pending.snapshot);
+    "invalidPayload",
+  );
   const done = completeAction(plan, pending.snapshot, {
     actionId,
     actionKind: "interaction",
     interactionKind: "text",
     payload: { kind: "submittedText", submittedText: "ok" },
   });
-  const duplicate = completeAction(plan, done.snapshot, {
-    actionId,
-    actionKind: "interaction",
-    interactionKind: "text",
-    payload: { kind: "submittedText", submittedText: "different" },
-  });
-  assert.equal(duplicate.outcome.kind, "alreadySettled");
-  assert.deepEqual(duplicate.events, []);
+  assert.equal(done.outcome.kind, "completed");
+  const duplicate = assertUnchanged(
+    done.snapshot,
+    {
+      actionId,
+      actionKind: "interaction",
+      interactionKind: "text",
+      payload: { kind: "submittedText", submittedText: "different" },
+    },
+    "alreadySettled",
+  );
+  assert.ok(duplicate.kind === "alreadySettled");
+  assert.deepEqual(duplicate.settlement, done.snapshot.lastSettlement);
+  assert.equal(
+    duplicate.settlement.actionKind === "interaction" && duplicate.settlement.result,
+    "ok",
+  );
   const seeded = createFreshRuntimeSnapshot(plan);
   seeded.nextActionId = 2;
   const laterPending = run(plan, seeded);
-  const stale = completeAction(plan, laterPending.snapshot, {
-    actionId: 1,
-    actionKind: "interaction",
-  });
-  assert.equal(stale.outcome.kind, "staleAction");
-  const unknown = completeAction(plan, done.snapshot, {
-    actionId: done.snapshot.nextActionId,
-    actionKind: "interaction",
-  });
-  assert.equal(unknown.outcome.kind, "unknownAction");
+  assertUnchanged(laterPending.snapshot, { actionId: 1, actionKind: "interaction" }, "staleAction");
+  assertUnchanged(
+    done.snapshot,
+    { actionId: done.snapshot.nextActionId, actionKind: "interaction" },
+    "unknownAction",
+  );
 });
 
 test("pending interaction survives JSON checkpoint restore with monotonic events and speaker provenance", () => {
@@ -645,20 +676,20 @@ test("planless pending result interactions require positive destination temporar
 });
 
 test("planless interaction settlements enforce intrinsic transcript and result semantics", () => {
+  // Consumed snapshots have no handoff or destination left to disagree with the mutated settlement.
   const textPlan = interactionPlan("text", {
     kind: "text",
     hint: null,
     accessibleName: defaults.text,
   });
-  const text = complete(
+  const text = consumedCompletion(
     textPlan,
     { kind: "submittedText", submittedText: "answer" },
     "text",
-  ).snapshot;
+  );
   assert.equal(validateRuntimeSnapshot(JSON.parse(JSON.stringify(text))).valid, true);
-  const wrongText: any = structuredClone(text); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture makes the retained text result and destination disagree with the canonical transcript.
+  const wrongText: any = structuredClone(text); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture makes only the retained text result disagree with the canonical transcript.
   wrongText.lastSettlement.result = "different";
-  wrongText.temporaries[0].value = "different";
   assert.equal(validateRuntimeSnapshot(wrongText).valid, false);
 
   const numberPlan = interactionPlan("number", {
@@ -666,22 +697,22 @@ test("planless interaction settlements enforce intrinsic transcript and result s
     hint: null,
     accessibleName: defaults.number,
   });
-  const number = complete(
+  const number = consumedCompletion(
     numberPlan,
     { kind: "submittedText", submittedText: "1e1" },
     "number",
-  ).snapshot;
+  );
   assert.equal(validateRuntimeSnapshot(JSON.parse(JSON.stringify(number))).valid, true);
   for (const [result, transcript] of [
     [10, "nonsense"],
-    [10, "1\u2028"],
+    [16, "0x10"],
+    [1, "1\u2028"],
     [11, "1e1"],
     [-0, "-0"],
   ] as const) {
-    const hostile: any = structuredClone(number); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture corrupts a numeric settlement, transcript, and destination with the supplied invalid result.
+    const hostile: any = structuredClone(number); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture corrupts a numeric settlement result and transcript with the supplied invalid pair.
     hostile.lastSettlement.result = result;
     hostile.lastSettlement.transcriptText = transcript;
-    hostile.temporaries[0].value = result;
     assert.equal(validateRuntimeSnapshot(hostile).valid, false, transcript);
   }
 });
@@ -1451,15 +1482,14 @@ test("numeric settlement destinations distinguish canonical zero from negative z
 
 test("completed text settlements retain only canonical non-whitespace LF text", () => {
   const plan = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
-  const completed = complete(
+  const completed = consumedCompletion(
     plan,
     { kind: "submittedText", submittedText: "value" },
     "text",
-  ).snapshot;
+  );
   for (const text of ["", " \t\n", "\rvalue", "value\r\n"]) {
     const hostile = structuredClone(completed);
     assert.ok(hostile.lastSettlement?.actionKind === "interaction");
-    assert.ok(hostile.temporaries[0] !== undefined);
     // EVIDENCE: fixture replaces only the retained text result and transcript with the candidate malformed text.
     const hostileSettlement = hostile.lastSettlement as {
       result: string | number | null;
@@ -1467,7 +1497,6 @@ test("completed text settlements retain only canonical non-whitespace LF text", 
     };
     hostileSettlement.result = text;
     hostileSettlement.transcriptText = text;
-    hostile.temporaries[0].value = text;
     assert.equal(validateRuntimeSnapshot(hostile).valid, false, JSON.stringify(text));
     assert.equal(validateRuntimeSnapshot(hostile, plan).valid, false, JSON.stringify(text));
     assert.throws(
