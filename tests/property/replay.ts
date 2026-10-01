@@ -15,7 +15,10 @@ import {
   serializeCheckpoint,
   validateInstructionPlan,
   validateRuntimeSnapshot,
+  type ActionCompletionOutcome,
   type InstructionPlan,
+  type PendingActionOperationResult,
+  type RuntimeOperationResult,
   type RuntimeSnapshot,
 } from "../../src/index.js";
 import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
@@ -350,21 +353,79 @@ function runOperationVariant(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   variant: (typeof OPERATION_VARIANTS)[number],
-) {
+): RuntimeOperationResult {
   switch (variant) {
     case "run":
-      return run(plan, snapshot);
-    case "executeInstruction":
-      return executeInstruction(plan, snapshot);
+      return assertButtonRequested(withUnchangedInput(snapshot, () => run(plan, snapshot)));
+    case "executeInstruction": {
+      const result = withUnchangedInput(snapshot, () => executeInstruction(plan, snapshot));
+      assert.equal(result.instructionsExecuted, 1);
+      return assertButtonRequested(result);
+    }
     case "observeTime": {
-      const waiting = run(plan, snapshot).snapshot;
-      return observeTime(plan, waiting, 1);
+      const waiting = assertButtonRequested(run(plan, snapshot)).snapshot;
+      const result = withUnchangedInput(waiting, () => observeTime(plan, waiting, 1));
+      // Nothing is due while the button waits, so scene time reaches the observed time.
+      assert.deepEqual(result.outcome, { kind: "observed", currentSessionTimeMs: 1 });
+      assert.equal(result.snapshot.observedSessionTimeMs, 1);
+      assert.equal(result.snapshot.currentSessionTimeMs, 1);
+      assert.deepEqual(result.snapshot.foregroundAction, waiting.foregroundAction);
+      assert.deepEqual(result.events, []);
+      return result;
     }
     case "completeAction": {
-      const waiting = run(plan, snapshot).snapshot;
-      return completeAction(plan, waiting, buttonCompletion(waiting));
+      const waiting = assertButtonRequested(run(plan, snapshot)).snapshot;
+      const request = buttonCompletion(waiting);
+      const result = withUnchangedInput(waiting, () => completeAction(plan, waiting, request));
+      assertButtonCompleted(result, waiting);
+      return result;
     }
   }
+}
+
+function withUnchangedInput<T>(snapshot: RuntimeSnapshot, operation: () => T): T {
+  const before = structuredClone(snapshot);
+  const result = operation();
+  assert.deepEqual(snapshot, before);
+  return result;
+}
+
+/** The fixture's first instruction requests its button and then waits for it. */
+function assertButtonRequested<T extends RuntimeOperationResult>(result: T): T {
+  const action = result.snapshot.foregroundAction;
+  assert.equal(result.snapshot.status, "waiting");
+  assert.ok(action?.kind === "interaction" && action.interactionKind === "button");
+  assert.deepEqual(
+    result.events.map((event) => (event.kind === "actionRequested" ? event.action : event.kind)),
+    [action],
+  );
+  return result;
+}
+
+/** A valid activation settles exactly the waiting button and releases execution to its continuation. */
+function assertButtonCompleted(
+  result: PendingActionOperationResult<ActionCompletionOutcome>,
+  waiting: RuntimeSnapshot,
+): void {
+  const action = waiting.foregroundAction;
+  assert.ok(action?.kind === "interaction" && action.interactionKind === "button");
+  assert.equal(result.outcome.kind, "completed");
+  const { settlement } = result.outcome;
+  assert.equal(settlement.actionId, action.actionId);
+  assert.equal(settlement.actionKind, "interaction");
+  assert.equal(settlement.interactionKind, "button");
+  assert.equal(settlement.settlementKind, "completed");
+  assert.equal(settlement.owningInstruction, action.owningInstruction);
+  assert.equal(settlement.continuationInstruction, action.continuationInstruction);
+  assert.equal(settlement.requestEventSequence, action.requestEventSequence);
+  assert.deepEqual(result.snapshot.lastSettlement, settlement);
+  assert.equal(result.snapshot.foregroundAction, null);
+  assert.equal(result.snapshot.status, "running");
+  assert.equal(result.snapshot.nextInstruction, action.continuationInstruction);
+  const completed = result.events.at(-1);
+  assert.ok(completed?.kind === "actionCompleted");
+  assert.equal(completed.sequence, settlement.completionEventSequence);
+  assert.deepEqual(completed.settlement, settlement);
 }
 
 function describeOperationClosure(_seed: number, index: number): PropertyCaseContext {
@@ -391,12 +452,22 @@ function assertRejectedCompletionIsAtomic(seed: number, index: number): void {
           payload: { kind: "time", currentSessionTimeMs: 10 },
         }
       : buttonCompletion(waiting);
-  const input =
-    variant === "time-completion" ? waiting : completeAction(plan, waiting, request).snapshot;
+  const settled =
+    variant === "duplicate-settlement" ? completeAction(plan, waiting, request) : undefined;
+  if (settled !== undefined) {
+    assertButtonCompleted(settled, waiting);
+    assertValidSnapshot(plan, settled.snapshot);
+  }
+  const input = settled?.snapshot ?? waiting;
   const inputBefore = structuredClone(input);
   const result = completeAction(plan, input, request);
 
-  assert.ok(["invalidPayload", "alreadySettled"].includes(result.outcome.kind));
+  if (settled === undefined) {
+    assert.equal(result.outcome.kind, "invalidPayload");
+  } else {
+    // The duplicate reports the settlement its first completion recorded.
+    assert.deepEqual(result.outcome, { ...settled.outcome, kind: "alreadySettled" });
+  }
   assert.deepEqual(result.snapshot, inputBefore);
   assert.deepEqual(result.events, []);
   assert.deepEqual(waiting, waitingBefore);
