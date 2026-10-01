@@ -1130,7 +1130,10 @@ install -m 0755 "$prepare_script" "$tmp/patch-publication-prepare-steps.sh"
 )
 test ! -e "$untrusted_marker"
 grep -qx 'validation_profile=full' "$prepare_output"
-! grep -qx 'validation_profile=docs' "$prepare_output"
+! grep -qx 'validation_profile=docs' "$prepare_output" || {
+  echo 'full-profile preparation also reported the docs validation profile' >&2
+  exit 1
+}
 python3 - "$output/publication.json" <<'PY'
 import json, pathlib, sys
 metadata = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
@@ -1298,7 +1301,10 @@ git --git-dir="$remote" update-ref "refs/heads/$transfer" \
   "$expected_transfer_sha" "$changed_transfer_sha"
 removed_output="$tmp/cleanup-removed.out"
 run_cleanup success "$removed_output"
-! git --git-dir="$remote" show-ref --verify "refs/heads/$transfer" >/dev/null 2>&1
+! git --git-dir="$remote" show-ref --verify "refs/heads/$transfer" >/dev/null 2>&1 || {
+  echo 'successful cleanup did not remove the authorized transfer ref' >&2
+  exit 1
+}
 grep -qx 'cleanup_status=removed' "$removed_output"
 
 # The summary records each supplied result on its own line and reports missing cleanup as failed.
