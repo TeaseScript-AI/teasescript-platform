@@ -94,13 +94,19 @@ Measure changed suites and record revision, environment, command and timings in 
 measurements as permanent limits.
 
 Before removing or consolidating a family, record its obligation and remaining evidence in the issue/PR. Delete checks
-that only freeze provisional geometry, development-fixture content or private implementation details; preserve genuine
+that only freeze provisional geometry, development-fixture content, private implementation details, or temporary
+incompleteness (for example an accepted or intended capability being absent, unsuggested, disabled, or represented by a
+placeholder); preserve genuine
 regressions and browser risks exercised *through* fixtures. Replace numeric tuning assertions with observable behavior
 where possible. A POC check needs reassessment when its experiment changes or ends, not automatic repair to preserve an
 obsolete expectation. Repeated input/viewport cases need distinct failure modes, not merely different values.
 
-Tests do not establish product policy. A numeric oracle tied to a current algorithm may detect regression without making
-that number a project-wide accessibility or performance requirement; identify that scope explicitly.
+Tests do not establish product policy. Each test must identify the desirable behavior that would regress if it failed;
+"the code currently does this" is not enough. Derive expected values from specification or independent reasoning where
+possible. A value captured from the current implementation is acceptable only as an explicitly scoped regression oracle
+and does not by itself make that value a broader product requirement. For example, a numeric oracle tied to a current
+algorithm may detect regression without making that number a project-wide accessibility or performance requirement;
+identify that scope explicitly.
 
 ## Test layers
 
