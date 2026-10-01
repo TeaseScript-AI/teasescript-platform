@@ -1,24 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { compileSource } from "../src/index.js";
 import {
   createTeaseScriptProviders,
   registerTeaseScriptProviders,
   type MonacoProviderModel,
+  type TeaseScriptProviders,
 } from "../src/editor/monaco-providers.js";
 import type { MonacoPosition, MonacoRange } from "../src/editor/monaco-mapping.js";
 
-const providers = createTeaseScriptProviders(
-  (startLineNumber, startColumn, endLineNumber, endColumn) => ({
-    startLineNumber,
-    startColumn,
-    endLineNumber,
-    endColumn,
-  }),
-  { Keyword: 1, Function: 2, Variable: 3, Value: 4 },
-);
-
 test("Monaco registers usable completion, hover, signature, and formatting providers", () => {
-  const registered: Record<string, unknown> = {};
+  const registered: Partial<TeaseScriptProviders> = {};
   registerTeaseScriptProviders(
     {
       completion: (provider) => (registered.completion = provider),
@@ -26,33 +18,41 @@ test("Monaco registers usable completion, hover, signature, and formatting provi
       signature: (provider) => (registered.signature = provider),
       formatting: (provider) => (registered.formatting = provider),
     },
-    providers,
+    createTeaseScriptProviders(
+      (startLineNumber, startColumn, endLineNumber, endColumn) => ({
+        startLineNumber,
+        startColumn,
+        endLineNumber,
+        endColumn,
+      }),
+      { Keyword: 1, Function: 2, Variable: 3, Value: 4 },
+    ),
   );
-  assert.deepEqual(Object.keys(registered).sort(), [
-    "completion",
-    "formatting",
-    "hover",
-    "signature",
-  ]);
-  assert.equal(registered.completion, providers.completion);
-  const completion = providers.completion.provideCompletionItems(model(""), position(1));
-  assert.ok(completion.suggestions.some((item) => item.label === "say" && item.kind === 2));
+  const { completion, hover, signature, formatting } = registered;
+  assert.ok(completion && hover && signature && formatting);
 
-  const hover = providers.hover.provideHover(model('say "Hello"'), position(2));
-  assert.match(hover?.contents[0]?.value ?? "", /say/u);
+  const completions = completion.provideCompletionItems(model(""), position(1));
+  assert.ok(completions.suggestions.some((item) => item.label === "say" && item.kind === 2));
 
-  const signature = providers.signature.provideSignatureHelp(
+  assert.deepEqual(hover.provideHover(model('say "Hello"'), position(2))?.range, {
+    startLineNumber: 1,
+    startColumn: 1,
+    endLineNumber: 1,
+    endColumn: 4,
+  });
+
+  const help = signature.provideSignatureHelp(
     model("askText as mistress "),
     position("askText as mistress ".length + 1),
   );
-  assert.equal(signature?.value.activeParameter, 1);
-  assert.equal(signature?.value.signatures[0]?.parameters[1]?.label, "hint");
+  assert.equal(help?.value.activeParameter, 1);
+  assert.equal(help?.value.signatures[0]?.parameters[1]?.label, "hint");
 
-  const formatting = providers.formatting.provideDocumentFormattingEdits(
-    model('say    "Hello",instant'),
-  );
-  assert.ok(formatting.length > 0);
-  assert.ok(formatting.every((edit) => isRange(edit.range)));
+  const source = 'say    "Hello",instant';
+  const formatted = applyEdits(source, formatting.provideDocumentFormattingEdits(model(source)));
+  assert.equal(formatted, 'say "Hello", instant');
+  assert.deepEqual(compileSource(formatted).diagnostics, []);
+  assert.deepEqual(formatting.provideDocumentFormattingEdits(model(formatted)), []);
 });
 
 function model(text: string): MonacoProviderModel {
@@ -70,6 +70,26 @@ function position(column: number): MonacoPosition {
   return { lineNumber: 1, column };
 }
 
-function isRange(value: MonacoRange): boolean {
-  return value.startLineNumber >= 1 && value.endLineNumber >= value.startLineNumber;
+/** Applies Monaco edits through the model's offset mapping, as the editor does. */
+function applyEdits(
+  text: string,
+  edits: readonly { readonly range: MonacoRange; readonly text: string }[],
+): string {
+  const offsets = edits.map((edit) => ({
+    start: model(text).getOffsetAt({
+      lineNumber: edit.range.startLineNumber,
+      column: edit.range.startColumn,
+    }),
+    end: model(text).getOffsetAt({
+      lineNumber: edit.range.endLineNumber,
+      column: edit.range.endColumn,
+    }),
+    text: edit.text,
+  }));
+  return offsets
+    .sort((left, right) => right.start - left.start)
+    .reduce(
+      (result, edit) => result.slice(0, edit.start) + edit.text + result.slice(edit.end),
+      text,
+    );
 }

@@ -67,12 +67,9 @@ test("context, hover, and signature help describe current compact semantics", ()
 
 test("hover and formatting handle deeply nested source inside a timer expiry block", () => {
   const depth = 4_000;
-  const source = `timer async 1 {\n${"if true {\n".repeat(depth)}say "deep"\n${"}\n".repeat(depth)}}\n`;
-  assert.equal(compileSource(source).plan !== null, true);
-  const document = createLanguageDocument("file:///main.tease", source);
-  const position = languagePositionAt(document, source.indexOf("say"));
-  assert.match(languageHover(document, position)?.contents.join(" ") ?? "", /say/u);
-  assert.doesNotThrow(() => formatLanguageDocument(document));
+  const nested = (say: string) =>
+    `timer async 1 {\n${"if true {\n".repeat(depth)}${say}\n${"}\n".repeat(depth)}}\n`;
+  assertDeepSayTooling(nested('say    "deep",instant'), nested('say "deep", instant'));
 });
 
 test("number and choice help reflects current result rules", () => {
@@ -111,19 +108,17 @@ test("formatter normalizes compact owned whitespace and is idempotent", () => {
 });
 
 test("formatter preserves strings, escapes, interpolation, comments, and choice order", () => {
+  const unchanged = ["// keep  comment spacing", 'let prefix = "x  y"'];
   const source = [
-    "// keep  comment spacing",
-    'let prefix = "x  y"',
-    'let result = choose first: "A  ${prefix}", second: "B\\n  C"',
+    ...unchanged,
+    'let result = choose   first :   "A  ${prefix}"  ,   second:"B\\n  C"',
   ].join("\n");
-  const formatted = formatLanguageDocument(
-    createLanguageDocument("file:///main.tease", source),
-  ).text;
-  assert.ok(formatted.includes("// keep  comment spacing"));
-  assert.ok(formatted.includes('"x  y"'));
-  assert.ok(formatted.includes('"A  ${prefix}"'));
-  assert.ok(formatted.includes('"B\\n  C"'));
-  assert.ok(formatted.indexOf("first:") < formatted.indexOf("second:"));
+  const formatted = formatLanguageDocument(createLanguageDocument("file:///main.tease", source));
+  assert.ok(formatted.edits.length > 0);
+  assert.equal(
+    formatted.text,
+    [...unchanged, 'let result = choose first: "A  ${prefix}", second: "B\\n  C"'].join("\n"),
+  );
 });
 
 test("formatter preserves block-string values and is idempotent", () => {
@@ -201,12 +196,22 @@ test("multiline choose formatting preserves the following option text", () => {
 
 test("editor tooling handles deeply nested media blocks without native recursion", () => {
   const depth = 2_500;
-  const source = `${'playAudio async "a" {\n'.repeat(depth)}say "deep"\n${"}\n".repeat(depth)}`;
+  const nested = (say: string) =>
+    `${'playAudio async "a" {\n'.repeat(depth)}${say}\n${"}\n".repeat(depth)}`;
+  assertDeepSayTooling(nested('say    "deep",instant'), nested('say "deep", instant'));
+});
+
+/** Formats the one irregular `say` at the bottom of a deep nest and locates it for hover. */
+function assertDeepSayTooling(source: string, expected: string): void {
   assert.notEqual(compileSource(source).plan, null);
   const document = createLanguageDocument("file:///main.tease", source);
-  const position = languagePositionAt(document, source.indexOf('say "deep"') + 2);
-  assert.notEqual(formatLanguageDocument(document), null);
-  languageHover(document, position);
-  assert.notEqual(languageSignatureHelp(document, position), null);
-  languageContextHelp(document, position);
-});
+  const formatted = formatLanguageDocument(document);
+  assert.ok(formatted.edits.length > 0);
+  assert.equal(formatted.text, expected);
+  const sayOffset = source.indexOf("say");
+  const hover = languageHover(document, languagePositionAt(document, sayOffset + 1));
+  assert.deepEqual(
+    [hover?.range.start.offset, hover?.range.end.offset],
+    [sayOffset, sayOffset + 3],
+  );
+}

@@ -55,6 +55,7 @@ async function main() {
       await setViewport(cdp, 390, 844);
       await selectPlayerExample(cdp);
       await narrowScenario(cdp);
+      await staleSourceScenario(cdp, origin);
       await vueRuntimeScenario(cdp, origin);
       await vueDevelopmentToolsScenario(cdp, origin);
       await vueTranscriptScenario(cdp, origin);
@@ -628,6 +629,97 @@ async function narrowScenario(cdp) {
     `const select=document.querySelector('.choice-select'); select.value='1'; select.dispatchEvent(new Event('change', {bubbles:true}))`,
   );
   await waitFor(cdp, `document.querySelector('#runtime-status')?.textContent === 'halted'`);
+}
+
+async function staleSourceScenario(cdp, origin) {
+  const saved = 'showButton "First"\nsay "Between", instant\nshowButton "Second"';
+  await replaceSourceAndRun(cdp, saved);
+  await click(cdp, "#interaction-controls button");
+  await waitFor(
+    cdp,
+    `document.querySelector('#interaction-controls button')?.textContent === 'Second'`,
+  );
+  await click(cdp, "#save-checkpoint");
+  const savedCheckpoints = await storedCheckpoints(cdp);
+
+  await evaluate(
+    cdp,
+    `const input=document.querySelector('#source-code'); input.value += '\\n'; input.dispatchEvent(new Event('input', {bubbles:true}))`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `['#run', '#step', '#save-checkpoint', '#restore-checkpoint'].every((selector) => document.querySelector(selector).disabled)`,
+    ),
+    true,
+    "a source edit must disable execution and checkpoint controls",
+  );
+  assertEqual(
+    await value(cdp, `JSON.parse(document.querySelector('#runtime-state').textContent)`),
+    null,
+    "a source edit must discard the runtime snapshot",
+  );
+  assertEqual(
+    JSON.stringify(await transcriptTexts(cdp)),
+    "[]",
+    "a source edit must clear the transcript",
+  );
+
+  await replaceSourceAndRun(cdp, 'showButton "Other"');
+  const otherRuntime = await value(cdp, `document.querySelector('#runtime-state').textContent`);
+  await click(cdp, "#restore-checkpoint");
+  assertEqual(
+    await value(cdp, `document.querySelector('#runtime-state').textContent`),
+    otherRuntime,
+    "a checkpoint for an incompatible plan must not replace the current runtime",
+  );
+  assertEqual(
+    await storedCheckpoints(cdp),
+    savedCheckpoints,
+    "a refused restore must keep the saved checkpoint",
+  );
+
+  await replaceSourceAndRun(cdp, saved);
+  await click(cdp, "#restore-checkpoint");
+  assertEqual(
+    await value(cdp, `document.querySelector('#interaction-controls button')?.textContent`),
+    "Second",
+    "the same plan must restore the saved checkpoint",
+  );
+
+  const htmlText = "<b data-source-injected>bold</b>";
+  const htmlSource = `say ${JSON.stringify(htmlText)}, instant`;
+  await evaluate(
+    cdp,
+    `const input=document.querySelector('#source-code'); input.value=${JSON.stringify(htmlSource)}; input.dispatchEvent(new Event('input', {bubbles:true}))`,
+  );
+  await navigate(cdp, `${origin}/`);
+  await waitFor(
+    cdp,
+    `document.querySelector('#source-code')?.value === ${JSON.stringify(htmlSource)}`,
+  );
+  await evaluate(
+    cdp,
+    `document.querySelector('#compile').click(); document.querySelector('#run').click()`,
+  );
+  await waitFor(cdp, `document.querySelector('#runtime-status')?.textContent === 'halted'`);
+  assertEqual(
+    JSON.stringify(await transcriptTexts(cdp)),
+    JSON.stringify([htmlText]),
+    "HTML-like source text must render literally",
+  );
+  assertEqual(
+    await value(cdp, `document.querySelector('[data-source-injected]') === null`),
+    true,
+    "restored and executed source text must not create DOM elements",
+  );
+}
+
+async function storedCheckpoints(cdp) {
+  return value(
+    cdp,
+    `JSON.stringify(Object.entries(localStorage).filter(([key]) => key.includes('checkpoint')).sort())`,
+  );
 }
 
 async function vueRuntimeScenario(cdp, origin) {

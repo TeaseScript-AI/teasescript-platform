@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after, before } from "node:test";
 
+import {
+  exampleUrl,
+  isPlaygroundExampleName,
+  PLAYGROUND_EXAMPLES,
+} from "../playground/examples.js";
 import { createPlaygroundServer } from "../playground/server.js";
 
 const server = createPlaygroundServer();
@@ -107,10 +112,17 @@ test("serves required JavaScript and CSS assets", async () => {
 });
 
 test("serves every fixed repository playground example", async () => {
-  for (const name of ["basic", "main", "control-flow", "checkpoint-loop", "functions"]) {
-    const response = await get(`/examples/playground/${name}.tease`);
+  const names = Object.keys(PLAYGROUND_EXAMPLES).filter(isPlaygroundExampleName);
+  assert.ok(names.length > 0);
+  for (const name of names) {
+    const response = await get(exampleUrl(name));
     assert.equal(response.status, 200, name);
     assert.match(response.contentType, /^text\/plain/u);
+    assert.equal(
+      response.body,
+      await readFile(`examples/playground/${PLAYGROUND_EXAMPLES[name].file}`, "utf8"),
+      name,
+    );
   }
 });
 
@@ -155,44 +167,51 @@ test("rejects symlinks that escape an exposed static root", async (context) => {
   assert.match(response.body, /unsafe request path/u);
 });
 
-test("workspace automation stores revisions and returns compile and run results", async () => {
-  const uploaded = await api(
-    "PUT",
-    "/api/workspace/source",
-    'say "automation"',
-    "text/plain; charset=utf-8",
-  );
-  assert.equal(uploaded.status, 200);
-  // EVIDENCE: integration fixture: the successful workspace-source route returns this documented response shape.
-  const workspace = JSON.parse(uploaded.body) as {
-    source: string;
-    sourceRevision: number;
-    stale: boolean;
+test("workspace automation stores revisions and returns compile and run results", async (context) => {
+  const isolatedServer = createPlaygroundServer();
+  const isolatedPort = await listen(isolatedServer);
+  context.after(async () => close(isolatedServer));
+  const call = async (method: string, path: string, source?: string) => {
+    const response = await api(
+      method,
+      path,
+      source,
+      source === undefined ? undefined : "text/plain; charset=utf-8",
+      isolatedPort,
+    );
+    assert.equal(response.status, 200, `${method} ${path}`);
+    // EVIDENCE: integration fixture: successful workspace routes return this documented revision/result shape.
+    return JSON.parse(response.body) as WorkspaceResponse;
   };
-  assert.equal(workspace.source, 'say "automation"');
-  assert.equal(workspace.stale, true);
-  const compiled = await api("POST", "/api/workspace/compile");
-  assert.equal(compiled.status, 200);
-  // EVIDENCE: integration fixture: the successful compile route returns a result status.
-  assert.equal(
-    (JSON.parse(compiled.body) as { result: { status: string } }).result.status,
-    "ready",
-  );
-  const run = await api("POST", "/api/workspace/run");
-  // EVIDENCE: integration fixture: the successful run route returns status and event records asserted below.
-  const runBody = JSON.parse(run.body) as {
-    result: { status: string; events: { kind: string }[] };
-  };
-  assert.equal(run.status, 200);
-  assert.equal(runBody.result.status, "halted");
-  assert.deepEqual(
-    runBody.result.events.map((event) => event.kind),
-    ["say", "actionRequested", "complete"],
-  );
-  const result = await api("GET", "/api/workspace/result");
-  assert.equal(result.status, 200);
-  // EVIDENCE: integration fixture: the successful result route returns the stale flag asserted here.
-  assert.equal((JSON.parse(result.body) as { stale: boolean }).stale, false);
+  const initial = (await call("GET", "/api/workspace")).sourceRevision;
+
+  const uploaded = await call("PUT", "/api/workspace/source", 'say "automation"');
+  assert.equal(uploaded.source, 'say "automation"');
+  assert.equal(uploaded.sourceRevision, initial + 1);
+  assert.equal(uploaded.stale, true);
+  assert.equal(uploaded.result, null);
+  const compiled = await call("POST", "/api/workspace/compile");
+  assert.equal(compiled.result?.status, "ready");
+  assert.equal(compiled.resultRevision, initial + 1);
+  assert.equal(compiled.stale, false);
+  const run = await call("POST", "/api/workspace/run");
+  assert.equal(run.result?.status, "halted");
+  assert.deepEqual(sayTexts(run), ["automation"]);
+  const result = await call("GET", "/api/workspace/result");
+  assert.equal(result.stale, false);
+  assert.deepEqual(sayTexts(result), ["automation"]);
+
+  const replaced = await call("PUT", "/api/workspace/source", 'say "replacement"');
+  assert.equal(replaced.sourceRevision, initial + 2);
+  assert.equal(replaced.stale, true);
+  assert.equal(replaced.result, null);
+  const staleResult = await call("GET", "/api/workspace/result");
+  assert.equal(staleResult.stale, true);
+  assert.equal(staleResult.result, null);
+  const rerun = await call("POST", "/api/workspace/run");
+  assert.equal(rerun.resultRevision, initial + 2);
+  assert.equal(rerun.stale, false);
+  assert.deepEqual(sayTexts(rerun), ["replacement"]);
 });
 
 test("workspace automation accepts source beyond the former local byte limit", async () => {
@@ -244,6 +263,23 @@ test("workspace automation rejects clients outside the permitted loopback addres
   );
   assert.equal(response.status, 403);
 });
+
+interface WorkspaceResponse {
+  readonly source?: string;
+  readonly sourceRevision: number;
+  readonly resultRevision: number | null;
+  readonly stale: boolean;
+  readonly result: {
+    readonly status: string;
+    readonly events: readonly { readonly kind: string; readonly text?: string }[];
+  } | null;
+}
+
+function sayTexts(response: WorkspaceResponse): readonly (string | undefined)[] {
+  return (response.result?.events ?? [])
+    .filter((event) => event.kind === "say")
+    .map((event) => event.text);
+}
 
 interface HttpResult {
   readonly status: number;

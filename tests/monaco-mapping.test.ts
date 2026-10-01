@@ -49,29 +49,48 @@ test("Monaco markers retain canonical diagnostic code, severity, and range", () 
 });
 
 test("Monaco providers receive presentation-only completion, hover, and signature shapes", () => {
-  const sourceRange = createSourceSpan(
-    createSourcePosition(0, 0, 0),
-    createSourcePosition(3, 0, 3),
-  );
-  const range = toMonacoRange(sourceRange);
-  assert.equal(
+  const suppliedRange = { startLineNumber: 7, startColumn: 3, endLineNumber: 7, endColumn: 3 };
+  assert.deepEqual(
     toMonacoCompletions(
-      [{ label: "say", kind: "command", detail: "command", insertText: "say" }],
-      range,
+      [{ label: "label-a", kind: "command", detail: "detail-a", insertText: "insert-a" }],
+      suppliedRange,
       { Keyword: 1, Function: 2, Variable: 3, Value: 4 },
-    )[0]?.kind,
-    2,
+    ),
+    [
+      {
+        label: "label-a",
+        kind: 2,
+        detail: "detail-a",
+        insertText: "insert-a",
+        range: suppliedRange,
+      },
+    ],
   );
-  assert.deepEqual(toMonacoHover({ range: sourceRange, contents: ["one", "two"] }).contents, [
-    { value: "one" },
-    { value: "two" },
-  ]);
-  const signature = toMonacoSignatureHelp({
-    label: "askText [hint]",
-    documentation: "help",
-    activeParameter: 1,
-    parameters: ["speaker", "hint"],
+  const hoverRange = createSourceSpan(
+    createSourcePosition(4, 0, 4),
+    createSourcePosition(13, 1, 2),
+  );
+  assert.deepEqual(toMonacoHover({ range: hoverRange, contents: ["one", "two"] }), {
+    range: { startLineNumber: 1, startColumn: 5, endLineNumber: 2, endColumn: 3 },
+    contents: [{ value: "one" }, { value: "two" }],
   });
-  assert.equal(signature.value.activeSignature, 0);
-  assert.equal(signature.value.activeParameter, 1);
+  assert.deepEqual(
+    toMonacoSignatureHelp({
+      label: "signature-label",
+      documentation: "signature-documentation",
+      activeParameter: 1,
+      parameters: ["first-slot", "second-slot"],
+    }).value,
+    {
+      signatures: [
+        {
+          label: "signature-label",
+          documentation: "signature-documentation",
+          parameters: [{ label: "first-slot" }, { label: "second-slot" }],
+        },
+      ],
+      activeSignature: 0,
+      activeParameter: 1,
+    },
+  );
 });
