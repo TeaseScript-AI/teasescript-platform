@@ -66,6 +66,15 @@ explicit. Versions are pinned in the package manifest/lockfile. They add browser
 review, without a network service or new data access. MCU 0.4.0's extensionless internal ESM imports require the Vite
 bundler here: direct Node ESM execution of the adapter fails. No package patch or custom loader is installed.
 
+The Phase 2C components follow the shadcn-vue structure and use four further pinned browser packages. `@lucide/vue`
+supplies the shared SVG icons; the alternative is locally maintained SVGs. `@vueuse/core` supplies lifecycle-aware
+events, observers, media queries, storage and textarea autosizing; the alternative is local browser-API composables.
+`class-variance-authority` expresses the shared component variants that the design lint checks; the alternative is
+computed class maps. `tw-animate-css` supplies the overlay enter/exit animation utilities used by the shadcn-vue
+components; the alternative is maintained CSS keyframes. They add browser code/CSS and dependency-update review, without
+a network service, data access or host boundary. On upgrades, verify icons, focus/autosizing, variants and overlay
+animations.
+
 ## Demo-only behavior
 
 The Phase 2C Tool Panel strip uses SortableJS for mouse/touch reordering and edge autoscroll. The binding restores
