@@ -147,6 +147,8 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
     ["--stack-size=256", "--input-type=module", "--eval", script],
     {
       encoding: "utf8",
+      timeout: 60_000,
+      maxBuffer: 256 * 1024,
       env: {
         ...process.env,
         TEASESCRIPT_STACK_SOURCE: source,
@@ -159,6 +161,7 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
     },
   );
 
+  assert.equal(child.error, undefined);
   assert.equal(child.status, 0, child.stderr);
   assert.equal(child.stderr, "");
   assert.deepEqual(JSON.parse(child.stdout), {
