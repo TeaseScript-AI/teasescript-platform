@@ -422,8 +422,6 @@ function replaceLiteralMarker(
   );
 }
 
-// Phase 1 deliberately retains the earlier focused regressions above.  These
-// tables make the local handoff boundary explicit without replacing them.
 type CanonicalHandoffKind =
   | "clearTemporary"
   | "exit"
@@ -1445,22 +1443,35 @@ test("PR194 matrix: settlement and active handoff validation", () => {
     assert.deepEqual(row.snapshot, before, row.id);
   }
 
-  const beforeContinuation = structuredClone(validatedCompositeWithNewerSettlement);
-  const continued = executeInstruction(injected.plan, validatedCompositeWithNewerSettlement);
+  // The accepted composite consumes, cleans up and finishes equivalently after JSON restore while
+  // keeping the newer retained settlement.
+  const continued = assertInteractionResumeEquivalent(
+    injected.plan,
+    validatedCompositeWithNewerSettlement,
+    executeInstruction,
+    "PR194-newer-settlement-consume",
+  ).uninterrupted;
   assert.equal(continued.snapshot.interactionResultHandoff, null, "PR194-newer-settlement-consume");
   assert.equal(bindingValue(continued.snapshot, "answer"), "committed");
   assert.deepEqual(continued.snapshot.lastSettlement, fixture.laterDelaySettlement);
-  assert.deepEqual(validatedCompositeWithNewerSettlement, beforeContinuation);
-  const cleaned = executeInstruction(injected.plan, continued.snapshot);
+  const cleaned = assertInteractionResumeEquivalent(
+    injected.plan,
+    continued.snapshot,
+    executeInstruction,
+    "PR194-newer-settlement-cleanup",
+  ).uninterrupted;
   assert.equal(
     cleaned.snapshot.temporaries.some((entry) => entry.id === injected.destinationTemporary),
     false,
   );
   assert.deepEqual(cleaned.snapshot.lastSettlement, fixture.laterDelaySettlement);
-  assert.deepEqual(
-    checkpointJsonRoundTrip(injected.plan, cleaned.snapshot).snapshot,
+  const final = assertInteractionResumeEquivalent(
+    injected.plan,
     cleaned.snapshot,
-  );
+    run,
+    "PR194-newer-settlement-final",
+  ).uninterrupted;
+  assert.deepEqual(final.snapshot.lastSettlement, fixture.laterDelaySettlement);
 
   const rows: readonly RejectedSettlementHandoffRow[] = [
     {
@@ -1715,7 +1726,6 @@ test("PR194 matrix: settlement and active handoff validation", () => {
   );
 });
 
-// Retained focused replay regression until phase-2 consolidation.
 interface TextInteractionCompletionRequest {
   readonly actionId: number;
   readonly actionKind: "interaction";
@@ -1796,6 +1806,7 @@ test("PR194 matrix: bounded replay classifies an older interaction as stale afte
     settlementFixture.injected.plan,
     compositeConsumed,
   ).snapshot;
+  const compositeAfterRun = run(settlementFixture.injected.plan, compositeCleaned).snapshot;
   const newerDelayRequest = {
     actionId: settlementFixture.laterDelaySettlement.actionId,
     actionKind: "delay" as const,
@@ -1837,6 +1848,13 @@ test("PR194 matrix: bounded replay classifies an older interaction as stale afte
       id: "PR194-replay-old-interaction-cleanup-roundtrip",
       plan: settlementFixture.injected.plan,
       snapshot: checkpointJsonRoundTrip(settlementFixture.injected.plan, compositeCleaned).snapshot,
+      request: oldRequest,
+      expected: { kind: "staleAction", actionId: oldRequest.actionId },
+    },
+    {
+      id: "PR194-replay-old-interaction-after-run",
+      plan: settlementFixture.injected.plan,
+      snapshot: compositeAfterRun,
       request: oldRequest,
       expected: { kind: "staleAction", actionId: oldRequest.actionId },
     },
@@ -2497,55 +2515,6 @@ test("PR194 matrix: ownership contexts resume from pending and committed boundar
     assert.equal(final.snapshot.status, "halted", `${row.id}: final status`);
     row.assertFinal(final.snapshot, final.events);
   }
-});
-
-test("PR194 matrix: validated composite persisted state resumes equivalently", () => {
-  const fixture = settledHandoffFixture();
-  // This is a validator-accepted persisted-state composite, not a state claimed
-  // to be produced by one uninterrupted runtime path.
-  const composite = fixture.validatedCompositeWithNewerSettlement;
-  const oldHandoff = composite.interactionResultHandoff;
-  assert.ok(oldHandoff !== null);
-  const oldRequest: TextInteractionCompletionRequest = {
-    actionId: oldHandoff.actionId,
-    actionKind: "interaction",
-    interactionKind: "text",
-    payload: { kind: "submittedText", submittedText: "committed" },
-  };
-  const consumed = assertInteractionResumeEquivalent(
-    fixture.injected.plan,
-    composite,
-    executeInstruction,
-    "PR194-resume-composite-consume",
-  ).uninterrupted.snapshot;
-  assert.equal(bindingValue(consumed, "answer"), "committed");
-  assert.equal(consumed.interactionResultHandoff, null);
-  assert.deepEqual(consumed.lastSettlement, fixture.laterDelaySettlement);
-  const cleaned = assertInteractionResumeEquivalent(
-    fixture.injected.plan,
-    consumed,
-    executeInstruction,
-    "PR194-resume-composite-cleanup",
-  ).uninterrupted.snapshot;
-  assert.equal(
-    cleaned.temporaries.some((temporary) => temporary.id === oldHandoff.destinationTemporary),
-    false,
-  );
-  assert.deepEqual(cleaned.lastSettlement, fixture.laterDelaySettlement);
-  const final = assertInteractionResumeEquivalent(
-    fixture.injected.plan,
-    cleaned,
-    run,
-    "PR194-resume-composite-final",
-  ).uninterrupted;
-  assert.deepEqual(final.snapshot.lastSettlement, fixture.laterDelaySettlement);
-  assertReplayRow({
-    id: "PR194-resume-composite-old-replay-after",
-    plan: fixture.injected.plan,
-    snapshot: final.snapshot,
-    request: oldRequest,
-    expected: { kind: "staleAction", actionId: oldRequest.actionId },
-  });
 });
 
 test("PR194 matrix: later settlement preserves ordinary result and makes old replay stale", () => {
