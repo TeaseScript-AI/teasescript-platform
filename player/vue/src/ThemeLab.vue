@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { Button } from "@/components/ui/button";
 import { computed } from "vue";
-import { oklchCss, oklchToPickerHex, pickerHexToOklch, type OklchColor } from "../../../theme/color.js";
-import { generatePlayerTheme, type PlayerThemeIntent } from "../../../theme/palette.js";
+import { oklchCss, oklchToPickerHex, pickerHexToOklch, type OklchColor } from "../../theme/color.js";
+import { generatePlayerTheme, type PlayerThemeIntent } from "../../theme/palette.js";
 import { defaultPlayerThemeIntents } from "./usePlayerTheme";
 
 const props = defineProps<{ intent: PlayerThemeIntent }>();
@@ -53,7 +53,7 @@ function displayColor(color: OklchColor) {
 <template>
   <section class="theme-lab grid gap-3" aria-label="Experimental Theme Lab">
     <h2 class="font-semibold">Theme Lab · experimental</h2>
-    <p>Applies live to this Phase 2C Player. Palette values and contrast targets are provisional, not an accessibility certification.</p>
+    <p>Applies live to this Player. Palette values and contrast targets are provisional, not an accessibility certification.</p>
     <p>Material palette · light and dark</p>
     <fieldset class="grid gap-1">
       <legend>Development colour pairs</legend>

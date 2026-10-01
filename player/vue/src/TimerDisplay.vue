@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { PlayerTimerKind, PlayerTimerPresentation } from "../../../model.js";
-import { formatTimer, timerProgressRatio } from "../../../presentation.js";
+import type { PlayerTimerKind, PlayerTimerPresentation } from "../../model.js";
+import { formatTimer, timerProgressRatio } from "../../presentation.js";
 
 const props = defineProps<{
   timer: PlayerTimerPresentation;

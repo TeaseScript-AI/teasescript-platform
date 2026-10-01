@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import type {
   PlayerTranscriptEntryPresentation,
   PlayerSpeakerPresentation,
-} from "../../../model.js";
+} from "../../model.js";
 import TranscriptMessage from "./TranscriptMessage.vue";
 import { recordSpeakerAvatarMessage, speakerAvatarPalette } from "./speakerAvatar";
 import { backdropBehind, resolveColour } from "./messageContrast";
@@ -151,7 +151,7 @@ onMounted(() => {
   paletteObserver = new MutationObserver(readPalette);
   paletteObserver.observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ["style", "class", "data-phase2c-theme"],
+    attributeFilter: ["style", "class", "data-player-theme"],
   });
 });
 onBeforeUnmount(() => {

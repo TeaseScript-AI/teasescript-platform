@@ -1,12 +1,12 @@
 import { computed, ref, watch, type ShallowRef } from "vue";
 import { tryOnScopeDispose, useEventListener, useIntervalFn } from "@vueuse/core";
-import type { MediaProgressReport } from "../../../../src/index.js";
+import type { MediaProgressReport } from "../../../src/index.js";
 import {
   observePlayerRuntimeTime,
   playerRuntimeDeadlines,
   playerRuntimeTimers,
   type PlayerRuntimeSession,
-} from "../../../runtime-adapter.js";
+} from "../../runtime-adapter.js";
 
 const DISPLAY_REFRESH_MS = 250;
 // Browsers fire longer `setTimeout` delays immediately; a later wake-up re-schedules the rest.

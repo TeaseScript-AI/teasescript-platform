@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { MessageMarkup } from "../../../../src/message-markup.js";
-import { preparePlayerMessageMarkup } from "../../../message-markup.js";
+import type { MessageMarkup } from "../../../src/message-markup.js";
+import { preparePlayerMessageMarkup } from "../../message-markup.js";
 import TranscriptLine from "./TranscriptLine.vue";
 
 const props = defineProps<{

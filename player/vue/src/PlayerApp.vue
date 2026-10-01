@@ -5,12 +5,12 @@ import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
 import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
-import type { PlayerSpeakerPresentation } from "../../../model.js";
-import type { PlayerThemeIntent } from "../../../theme/palette.js";
+import type { PlayerSpeakerPresentation } from "../../model.js";
+import type { PlayerThemeIntent } from "../../theme/palette.js";
 import PlayerComposition from "./PlayerComposition.vue";
 import PlayerToolsShell, { type PlayerTool } from "./PlayerToolsShell.vue";
 import PlayerTopBar from "./PlayerTopBar.vue";
-import { playerRuntimeMedia } from "../../../runtime-adapter.js";
+import { playerRuntimeMedia } from "../../runtime-adapter.js";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
 import SessionActivation from "./SessionActivation.vue";
 import Stage from "./Stage.vue";
@@ -48,7 +48,7 @@ usePlayerTheme(themeIntent);
 // Each mode starts from its own default palette; the contrast choice carries over.
 // Player Settings persist in this browser. Contrast is part of the theme intent; the
 // title-bar A/B defaults to A.
-const storedContrast = usePlayerPreference("phase2c-player-contrast", ["standard", "high"], "standard");
+const storedContrast = usePlayerPreference("player-contrast", ["standard", "high"], "standard");
 const contrast = computed({
   get: () => themeIntent.value.contrast,
   set: (value) => (themeIntent.value = { ...themeIntent.value, contrast: value }),
@@ -59,7 +59,7 @@ watch(contrast, (value) => (storedContrast.value = value));
 watch(storedContrast, (value) => {
   if (contrast.value !== value) contrast.value = value;
 });
-const titlebarOption = usePlayerPreference("phase2c-titlebar-variant", ["left", "overlap"], "left");
+const titlebarOption = usePlayerPreference("player-titlebar-variant", ["left", "overlap"], "left");
 function toggleThemeMode() {
   themeIntent.value = {
     ...defaultPlayerThemeIntents[themeIntent.value.mode === "dark" ? "light" : "dark"],

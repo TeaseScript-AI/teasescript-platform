@@ -1,10 +1,10 @@
-import { storyChoiceVariables } from "../../../theme/story-choice.js";
+import { storyChoiceVariables } from "../../theme/story-choice.js";
 import { onBeforeUnmount, watchEffect, type Ref } from "vue";
 import {
   generatePlayerTheme,
   themeCssVariables,
   type PlayerThemeIntent,
-} from "../../../theme/palette.js";
+} from "../../theme/palette.js";
 
 // Default palette per mode: warm rose light and cool blue dark.
 export const defaultPlayerThemeIntents: Readonly<Record<"light" | "dark", PlayerThemeIntent>> =
@@ -43,8 +43,8 @@ export function usePlayerTheme(intent: Ref<PlayerThemeIntent>) {
       else root.style.removeProperty(property);
     }
     previousThemeProperties.clear();
-    if (previousThemeMode === null) root.removeAttribute("data-phase2c-theme");
-    else root.setAttribute("data-phase2c-theme", previousThemeMode);
+    if (previousThemeMode === null) root.removeAttribute("data-player-theme");
+    else root.setAttribute("data-player-theme", previousThemeMode);
     themeApplied = false;
   }
   function applyGeneratedTheme(update: {
@@ -53,7 +53,7 @@ export function usePlayerTheme(intent: Ref<PlayerThemeIntent>) {
   }) {
     const root = document.documentElement;
     if (!themeApplied) {
-      previousThemeMode = root.getAttribute("data-phase2c-theme");
+      previousThemeMode = root.getAttribute("data-player-theme");
       themeApplied = true;
     }
     for (const [property, value] of Object.entries(update.variables)) {
@@ -64,7 +64,7 @@ export function usePlayerTheme(intent: Ref<PlayerThemeIntent>) {
         });
       root.style.setProperty(property, value);
     }
-    root.dataset.phase2cTheme = update.mode;
+    root.dataset.playerTheme = update.mode;
   }
   watchEffect(() => {
     const theme = generatePlayerTheme(intent.value);

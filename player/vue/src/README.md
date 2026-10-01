@@ -6,7 +6,7 @@ that own Player presentation.
 
 ## Design lint
 
-The required [Player design lint](../../../../docs/LINTING.md#player-design-lint) checks these Player components,
+The required [Player design lint](../../../docs/LINTING.md#player-design-lint) checks these Player components,
 shared UI definitions and the story-button wrapper. `components.json` selects `phase2c/style.css` for utility
 resolution; the component and theme boundaries remain defined by the Player implementation and its maintained UI
 specification.
@@ -14,7 +14,7 @@ specification.
 ## Responsibility boundaries
 
 - `PlayerApp.vue` composes the product Player from props and slots. It installs `usePlayerKeyboardFocus.ts`
-  once, including for body-portaled controls; the [focus contract](../../../../docs/ui/PLAYER-UI.md#input-growth-focus-and-keyboard-behavior)
+  once, including for body-portaled controls; the [focus contract](../../../docs/ui/PLAYER-UI.md#input-growth-focus-and-keyboard-behavior)
   defines input modality and composer/Send focus.
 - `usePlayerSession.ts` hosts the canonical adapter session for presentation: starting a session remounts the
   transcript and resets interaction-local state. Vue derives everything else from that session. Its
@@ -22,7 +22,7 @@ specification.
   deadline, before input (`RuntimeInteraction.vue` rejects input when the presented interaction changed), before a
   checkpoint capture, and on `visibilitychange`, `pagehide`, and `pageshow`; hidden pages keep running. Starting or
   restoring a session rebases the clock so no gap is consumed; see
-  [timers and scene time](../../../../docs/RUNTIME.md#timers-and-scene-time). The host prepares a new session for
+  [timers and scene time](../../../docs/RUNTIME.md#timers-and-scene-time). The host prepares a new session for
   the explicit Start control (`SessionActivation.vue`) and creates it only on that click; a restored session waits for
   Continue. The host also owns the framework-independent `player/media-device.ts`: it reconciles the session's media
   projection onto `Audio` elements, reports loading through the adapter, and contributes measured progress to every
@@ -42,7 +42,7 @@ specification.
 - `usePlayerConditions.ts` owns the five independent Player conditions: horizontal and vertical space, touch/hover
   capability, raised keyboard, and composer edge clearance. The shell exposes these as `data-player-*` attributes;
   descendants consume the provided signals. Keep feature-specific fit calculations with their layout owner and use
-  actual pointer events for hybrid mouse/touch interactions. See [Player conditions](../../../../docs/ui/PLAYER-UI.md#player-conditions)
+  actual pointer events for hybrid mouse/touch interactions. See [Player conditions](../../../docs/ui/PLAYER-UI.md#player-conditions)
   before adding a responsive rule.
 - `ResizeHandle.vue` supplies the separator, marker and tooltip for menu/panel widths. Panel handles sit outside
   scrolling content; menu handles share existing right padding. Dotted grips move entire panels.
@@ -57,11 +57,11 @@ specification.
   height to the end inset. Message rendering and contrast are split into `TranscriptMessage.vue`, `TranscriptMarkup.vue`,
   `TranscriptLine.vue`, `transcriptPresentation.ts` and `messageContrast.ts`.
 - `RuntimeInteraction.vue` composes `Composer.vue` and `ForegroundControls.vue` and alone submits runtime actions,
-  including [pacing skips](../../../../docs/ui/PLAYER-UI.md#composer-and-foreground-interactions), with shared
+  including [pacing skips](../../../docs/ui/PLAYER-UI.md#composer-and-foreground-interactions), with shared
   submission guards and focus handling. The composer uses shadcn Textarea/Button and VueUse autosizing;
   foreground controls use `components/PlayerActionButton.vue` in the transcript's trailing slot.
   `playerRuntimeForeground` maps authored backgrounds from live/restored actions; `player/theme/story-choice.ts`
-  supplies theme/authored button material. See [ADR 0018](../../../../docs/decisions/0018-first-standard-library-poc-contract.md)
+  supplies theme/authored button material. See [ADR 0018](../../../docs/decisions/0018-first-standard-library-poc-contract.md)
   for syntax and completion semantics.
 - `usePlayerTheme.ts` applies/restores document variables; `player/theme` calculates colours and Theme Lab edits intent.
   See [theme evaluation](../../../README.md#experimental-dynamic-theme-evaluation).
@@ -75,10 +75,10 @@ The development preview opens with one runtime choice scenario. Composer dimensi
 trials.
 
 Story-button ink and transcript readability follow the current Player treatment in
-[Player UI](../../../../docs/ui/PLAYER-UI.md); Visual Lab does not offer contrast-method switches.
+[Player UI](../../../docs/ui/PLAYER-UI.md); Visual Lab does not offer contrast-method switches.
 
 Shared chrome geometry lives in `style.css`; the
-[Player geometry contract](../../../../docs/ui/PLAYER-UI.md#global-geometry-and-overflow) records dimensions and their tuning status.
+[Player geometry contract](../../../docs/ui/PLAYER-UI.md#global-geometry-and-overflow) records dimensions and their tuning status.
 Top controls, menu and tool headers share edge/control tokens. The menu width ruler avoids a second JavaScript formula;
 its resize target shares right padding. The right rail derives top clearance from header height. Timer diameter and rail
 width are selected separately from the shared space conditions, independently of root font size; no outside halo space

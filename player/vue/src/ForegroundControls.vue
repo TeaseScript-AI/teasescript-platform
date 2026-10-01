@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { useResizeObserver } from "@vueuse/core";
 import { computed, nextTick, ref, watch } from "vue";
-import PlayerActionButton from "../components/PlayerActionButton.vue";
-import type { PlayerForegroundPresentation } from "../../../model.js";
+import PlayerActionButton from "./components/PlayerActionButton.vue";
+import type { PlayerForegroundPresentation } from "../../model.js";
 const props = defineProps<{ foreground: PlayerForegroundPresentation | null; disabled: boolean }>();
 const emit = defineEmits<{ activate: [optionId: string | null] }>();
 const group = ref<HTMLElement | null>(null);

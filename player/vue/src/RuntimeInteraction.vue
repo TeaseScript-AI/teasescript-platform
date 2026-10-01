@@ -12,7 +12,7 @@ import {
   submitPlayerRuntimeComposer,
   type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
-} from "../../../runtime-adapter.js";
+} from "../../runtime-adapter.js";
 import PlayerActionButton from "@/components/PlayerActionButton.vue";
 import Composer from "./Composer.vue";
 import ConversationSurface from "./ConversationSurface.vue";
@@ -21,7 +21,7 @@ import { usePlayerConditions } from "./usePlayerConditions";
 import type {
   PlayerTranscriptEntryPresentation,
   PlayerSpeakerPresentation,
-} from "../../../model.js";
+} from "../../model.js";
 
 const props = defineProps<{
   session: PlayerRuntimeSession | null;

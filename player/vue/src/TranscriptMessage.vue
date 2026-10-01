@@ -6,7 +6,7 @@ import { Message, MessageAvatar, MessageContent, MessageHeader } from "@/compone
 import type {
   PlayerSpeakerPresentation,
   PlayerTranscriptEntryPresentation,
-} from "../../../model.js";
+} from "../../model.js";
 import TranscriptMarkup from "./TranscriptMarkup.vue";
 import { nameOf, resolveAppearance } from "./transcriptPresentation";
 import { speakerAvatarColors, speakerAvatarSource } from "./speakerAvatar";

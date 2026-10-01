@@ -1,5 +1,5 @@
 import { createApp, h } from "vue";
-import { createPlayerRuntimeSession } from "../../../runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../../runtime-adapter.js";
 import { demoSource, resolveDemoAsset } from "./demoHost";
 import PlayerApp from "./PlayerApp.vue";
 import { usePlayerSession } from "./usePlayerSession";

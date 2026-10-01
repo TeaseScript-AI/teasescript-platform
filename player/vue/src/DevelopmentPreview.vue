@@ -2,9 +2,9 @@
 import { ref } from "vue";
 import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import type { PlayerTimerKind } from "../../../model.js";
-import { createPlayerRuntimeSession } from "../../../runtime-adapter.js";
-import type { PlayerThemeIntent } from "../../../theme/palette.js";
+import type { PlayerTimerKind } from "../../model.js";
+import { createPlayerRuntimeSession } from "../../runtime-adapter.js";
+import type { PlayerThemeIntent } from "../../theme/palette.js";
 import BackgroundControlsFixture from "./BackgroundControlsFixture.vue";
 import LayoutDebug from "./LayoutDebug.vue";
 import PlayerApp from "./PlayerApp.vue";

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
-import type { PlayerTimerPresentation } from "../../../model.js";
+import type { PlayerTimerPresentation } from "../../model.js";
 import TimerDisplay from "./TimerDisplay.vue";
 
 // Every entry is presented; hidden timers have no entry, and each timer carries its own kind.

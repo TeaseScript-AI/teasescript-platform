@@ -114,7 +114,7 @@
 
 /* The development Theme Lab resolves canonical roles; this adapter lets the
    standalone Player and its body-portaled controls act as the live preview. */
-:root[data-phase2c-theme] {
+:root[data-player-theme] {
   --background: var(--theme-surface-canvas);
   --foreground: var(--theme-text-primary);
   --sidebar: var(--theme-surface-chrome);
@@ -132,9 +132,9 @@
   --player-ambient: var(--theme-ambient-wash);
   accent-color: var(--theme-accent-solid);
 }
-:root[data-phase2c-theme="light"] { color-scheme: light; }
-:root[data-phase2c-theme="dark"] { color-scheme: dark; }
-:root[data-phase2c-theme] :is([data-slot="dialog-content"], [data-slot="sheet-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="popover-content"]) {
+:root[data-player-theme="light"] { color-scheme: light; }
+:root[data-player-theme="dark"] { color-scheme: dark; }
+:root[data-player-theme] :is([data-slot="dialog-content"], [data-slot="sheet-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="popover-content"]) {
   --component-hover: var(--theme-floating-hover);
   --component-pressed: var(--theme-floating-pressed);
   color: var(--theme-text-primary);
@@ -142,35 +142,35 @@
   border-color: var(--theme-border-floating);
   box-shadow: 0 12px 28px -6px var(--theme-floating-shadow), 0 2px 6px -2px var(--theme-floating-shadow);
 }
-:root[data-phase2c-theme] :is([data-slot="dialog-overlay"], [data-slot="sheet-overlay"]) {
+:root[data-player-theme] :is([data-slot="dialog-overlay"], [data-slot="sheet-overlay"]) {
   background: var(--theme-structural-scrim);
 }
-:root[data-phase2c-theme] :is(button, textarea, input, select):disabled {
+:root[data-player-theme] :is(button, textarea, input, select):disabled {
   color: var(--theme-text-disabled);
   background: var(--theme-surface-disabled);
   border-color: var(--theme-border-disabled);
   opacity: 1;
 }
 /* The tools Sheet is relocated chrome, not a floating menu surface. */
-:root[data-phase2c-theme] .tools-drawer {
+:root[data-player-theme] .tools-drawer {
   --component-hover: var(--theme-surface-hover);
   --component-pressed: var(--theme-surface-pressed);
   background: var(--theme-surface-chrome);
 }
-:root[data-phase2c-theme] .tool-panel-strip:focus-visible {
+:root[data-player-theme] .tool-panel-strip:focus-visible {
   outline-color: var(--theme-accent-focus);
 }
 
 /* Native controls and Reka menu items share the same semantic states. */
-:root[data-phase2c-theme] select { background: var(--theme-surface-control); }
+:root[data-player-theme] select { background: var(--theme-surface-control); }
 @media (any-hover: hover) {
-  :root[data-phase2c-theme] :is(select, textarea, input):enabled:hover { border-color: var(--theme-border-default); }
+  :root[data-player-theme] :is(select, textarea, input):enabled:hover { border-color: var(--theme-border-default); }
 }
-:root[data-phase2c-theme] [role^="menuitem"]:active:not([data-disabled]) { background: var(--component-pressed); }
-:root[data-phase2c-theme] [role^="menuitem"][data-disabled] { color: var(--theme-text-disabled); opacity: 1; }
+:root[data-player-theme] [role^="menuitem"]:active:not([data-disabled]) { background: var(--component-pressed); }
+:root[data-player-theme] [role^="menuitem"][data-disabled] { color: var(--theme-text-disabled); opacity: 1; }
 
-:root[data-phase2c-theme] :is(textarea, input)::placeholder { color: var(--theme-text-secondary); }
-:root[data-phase2c-theme] :is(button, textarea:not([data-composer-input]), input, select, summary, a[href], [data-tools-focus^="title:"]):focus-visible {
+:root[data-player-theme] :is(textarea, input)::placeholder { color: var(--theme-text-secondary); }
+:root[data-player-theme] :is(button, textarea:not([data-composer-input]), input, select, summary, a[href], [data-tools-focus^="title:"]):focus-visible {
   outline: 2px solid var(--theme-accent-focus);
   outline-offset: var(--player-focus-offset);
   /* The outline is the only focus mark; vendored shadcn rings would fill its separation. */
@@ -209,7 +209,7 @@
     var(--background);
 }
 
-.phase2c-sidebar {
+.player-sidebar {
   /* The Player's usable rectangle begins below the browser's top obstruction. */
   --player-top-safe-space: env(safe-area-inset-top, 0px);
   --player-content-top: calc(var(--viewport-top) + var(--player-top-safe-space));
@@ -243,66 +243,66 @@
 }
 
 /* Both variants place the timer at the top; A moves titlebar actions left to clear it. */
-.phase2c-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .stage-right-rail {
+.player-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .stage-right-rail {
   padding-block-start: var(--player-edge-space);
 }
-.phase2c-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .stage-right-rail:has(.timer-region) {
+.player-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .stage-right-rail:has(.timer-region) {
   padding-block-start: 12px;
 }
 
-.phase2c-sidebar[data-player-horizontal="comfortable"][data-sidebar-visible="true"] {
+.player-sidebar[data-player-horizontal="comfortable"][data-sidebar-visible="true"] {
   --content-reserve: var(--sidebar-width);
 }
 
 /* Reserve the final Player layout immediately; only the visible sidebar transitions. */
-.phase2c-sidebar [data-slot="sidebar-gap"] { transition: none; }
+.player-sidebar [data-slot="sidebar-gap"] { transition: none; }
 /* A width transition creates temporary carousel overflow around full-width panels.
    Apply dock capacity immediately; retain the sidebar's slide in/out motion. */
-.phase2c-sidebar [data-slot="sidebar"] > .fixed { transition-property: left, right; }
+.player-sidebar [data-slot="sidebar"] > .fixed { transition-property: left, right; }
 /* The Player toggle takes over while the departing surface becomes inert. */
-.phase2c-sidebar[data-sidebar-visible="false"] [data-tools-surface] [data-sidebar="trigger"] { visibility: hidden; transition: none; }
+.player-sidebar[data-sidebar-visible="false"] [data-tools-surface] [data-sidebar="trigger"] { visibility: hidden; transition: none; }
 @media (prefers-reduced-motion: reduce) {
-  .phase2c-sidebar [data-slot="sidebar"] > .fixed { transition: none; }
+  .player-sidebar [data-slot="sidebar"] > .fixed { transition: none; }
 }
 
-/* The shared Sidebar owns positioning and the layout reservation.  Phase 2C's
+/* The shared Sidebar owns positioning and the layout reservation.  The Player's
    menu and panels own the visible surfaces, so the shell itself must not paint
    a second full-width background while the dock changes size. */
-.phase2c-sidebar [data-sidebar="sidebar"] { background: transparent; }
-.phase2c-sidebar [data-sidebar="trigger"] { border-radius: var(--player-top-control-radius); }
+.player-sidebar [data-sidebar="sidebar"] { background: transparent; }
+.player-sidebar [data-sidebar="trigger"] { border-radius: var(--player-top-control-radius); }
 
-.phase2c-sidebar[data-tools-open="true"] [data-slot="sidebar"][data-state="expanded"] > .fixed {
+.player-sidebar[data-tools-open="true"] [data-slot="sidebar"][data-state="expanded"] > .fixed {
   box-shadow: 6px 0 14px -6px var(--theme-structural-shadow, rgb(0 0 0 / 18%));
 }
 
-.phase2c-sidebar[data-labels-visible="true"] {
+.player-sidebar[data-labels-visible="true"] {
   --launcher-width: clamp(13rem, var(--measured-menu-width), 16rem);
 }
 
-.phase2c-sidebar[data-labels="labels"] {
+.player-sidebar[data-labels="labels"] {
   --launcher-width: var(--permanent-menu-width);
   --launcher-space: var(--permanent-menu-width);
 }
 
 [data-launcher-space] { width: var(--launcher-space); }
 [data-launcher] { width: var(--launcher-width); max-width: min(24rem, 40dvw); z-index: 30; }
-.phase2c-sidebar[data-labels="labels"] [data-launcher] { max-width: none; }
+.player-sidebar[data-labels="labels"] [data-launcher] { max-width: none; }
 [data-launcher-label] { display: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.phase2c-sidebar[data-labels-visible="true"] [data-launcher-label] { display: block; }
+.player-sidebar[data-labels-visible="true"] [data-launcher-label] { display: block; }
 
 /* Animate only the preview overlay; its reserved icon-strip width stays fixed. */
-.phase2c-sidebar[data-labels="preview"] [data-launcher] {
+.player-sidebar[data-labels="preview"] [data-launcher] {
   flex-shrink: 0;
   overflow: hidden;
   transition: width 200ms ease-out;
 }
-.phase2c-sidebar[data-labels="preview"] [data-launcher-label] {
+.player-sidebar[data-labels="preview"] [data-launcher-label] {
   display: block;
   opacity: 0;
 }
-.phase2c-sidebar[data-labels="preview"][data-labels-visible="true"] [data-launcher-label] { opacity: 1; }
+.player-sidebar[data-labels="preview"][data-labels-visible="true"] [data-launcher-label] { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
-  .phase2c-sidebar[data-labels="preview"] [data-launcher] { transition: none; }
+  .player-sidebar[data-labels="preview"] [data-launcher] { transition: none; }
 }
 
 [data-panel-drag]:active { background: var(--component-pressed); }
@@ -342,50 +342,50 @@ body:has(> .tool-panel-dragging) [data-slot="tooltip-content"] { visibility: hid
 /* Use final dock capacity, not its animated width: hiding must not reflow tool bodies.
    Multiple panels still scroll and snap horizontally. */
 .tool-panel-content > [data-tool] { max-width: var(--tool-space-limit); min-width: 0; scroll-snap-align: start; isolation: isolate; }
-.tool-panel-strip[data-reordering], .phase2c-sidebar[data-resizing="true"] .tool-panel-strip { scroll-snap-type: none; }
+.tool-panel-strip[data-reordering], .player-sidebar[data-resizing="true"] .tool-panel-strip { scroll-snap-type: none; }
 .resize-size-label { position: absolute; right: 8px; top: 3.5rem; white-space: nowrap; border: 1px solid var(--border); border-radius: 4px; background: var(--background); padding: 2px 6px; font-size: 0.75rem; }
-.phase2c-sidebar[data-resizing="true"], .phase2c-sidebar[data-resizing="true"] * { cursor: col-resize !important; user-select: none; }
-body:has(.phase2c-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] { visibility: hidden; }
+.player-sidebar[data-resizing="true"], .player-sidebar[data-resizing="true"] * { cursor: col-resize !important; user-select: none; }
+body:has(.player-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] { visibility: hidden; }
 /* Pointer resizing already owns the geometry; do not trail it with a dock transition. */
-.phase2c-sidebar[data-resizing="true"] [data-slot="sidebar"] > .fixed { transition: none; }
+.player-sidebar[data-resizing="true"] [data-slot="sidebar"] > .fixed { transition: none; }
 
 /* The Sheet portal stays in the shell so menu width/preview tokens have one owner. */
-.phase2c-sidebar { top: var(--player-content-top); height: var(--player-content-height); min-height: 0; }
-.phase2c-sidebar [data-slot="sidebar"] > .fixed {
+.player-sidebar { top: var(--player-content-top); height: var(--player-content-height); min-height: 0; }
+.player-sidebar [data-slot="sidebar"] > .fixed {
   top: var(--player-content-top);
   bottom: auto;
   height: var(--player-content-height);
 }
-.phase2c-sidebar[data-player-horizontal="constrained"] {
+.player-sidebar[data-player-horizontal="constrained"] {
   --sidebar-width: min(var(--active-tool-width), calc(var(--usable-width) * 0.9)) !important;
 }
 /* Reserve the broad drawer only for a tool, not empty space beside its launcher. */
-.phase2c-sidebar[data-player-horizontal="constrained"][data-menu-visible="true"] {
+.player-sidebar[data-player-horizontal="constrained"][data-menu-visible="true"] {
   --sidebar-width: min(calc(var(--launcher-space) + 1px), calc(var(--usable-width) * 0.9)) !important;
 }
-.phase2c-sidebar .tools-drawer {
+.player-sidebar .tools-drawer {
   left: var(--viewport-left); top: var(--player-content-top); bottom: auto;
   height: var(--player-content-height); width: var(--sidebar-width); max-width: none;
   padding: 0; gap: 0; background: var(--sidebar); z-index: 40;
   transition: none; animation-duration: 200ms;
 }
 .tools-drawer > button { display: none; }
-.phase2c-sidebar > [data-slot="sheet-overlay"] { z-index: 39; background: var(--theme-structural-scrim, rgb(0 0 0 / 25%)); }
-.phase2c-sidebar[data-player-horizontal="constrained"] [data-sidebar="trigger"] { flex-shrink: 0; }
-.phase2c-sidebar[data-player-horizontal="constrained"] > [data-sidebar="trigger"] { top: calc(var(--player-content-top) + 0.5rem); left: calc(var(--viewport-left) + 0.5rem); }
-.phase2c-sidebar[data-player-horizontal="constrained"] [data-launcher] { max-width: min(24rem, calc(var(--usable-width) * 0.9)); }
+.player-sidebar > [data-slot="sheet-overlay"] { z-index: 39; background: var(--theme-structural-scrim, rgb(0 0 0 / 25%)); }
+.player-sidebar[data-player-horizontal="constrained"] [data-sidebar="trigger"] { flex-shrink: 0; }
+.player-sidebar[data-player-horizontal="constrained"] > [data-sidebar="trigger"] { top: calc(var(--player-content-top) + 0.5rem); left: calc(var(--viewport-left) + 0.5rem); }
+.player-sidebar[data-player-horizontal="constrained"] [data-launcher] { max-width: min(24rem, calc(var(--usable-width) * 0.9)); }
 /* Narrow only caps presentation; the user-selected wide width remains untouched. */
-.phase2c-sidebar[data-player-horizontal="constrained"][data-labels="labels"] {
+.player-sidebar[data-player-horizontal="constrained"][data-labels="labels"] {
   --launcher-width: min(var(--permanent-menu-width), calc(var(--usable-width) * 0.9));
   --launcher-space: var(--launcher-width);
 }
 
 /* The active tool fills the drawer; its selected preset is capped by available space. */
-.phase2c-sidebar[data-player-horizontal="constrained"] [data-launcher-space] { flex: 1; min-height: 0; }
-.phase2c-sidebar[data-player-horizontal="constrained"] .tool-panel-strip { min-height: 0; overflow-x: hidden; scroll-snap-type: none; }
-.phase2c-sidebar[data-player-horizontal="constrained"] .tool-panel-content > [data-tool] { width: 100% !important; max-width: 100%; min-width: 0; }
-.phase2c-sidebar[data-player-horizontal="constrained"] [data-panel-drag],
-.phase2c-sidebar[data-player-horizontal="constrained"] [data-panel-resize] { display: none; }
+.player-sidebar[data-player-horizontal="constrained"] [data-launcher-space] { flex: 1; min-height: 0; }
+.player-sidebar[data-player-horizontal="constrained"] .tool-panel-strip { min-height: 0; overflow-x: hidden; scroll-snap-type: none; }
+.player-sidebar[data-player-horizontal="constrained"] .tool-panel-content > [data-tool] { width: 100% !important; max-width: 100%; min-width: 0; }
+.player-sidebar[data-player-horizontal="constrained"] [data-panel-drag],
+.player-sidebar[data-player-horizontal="constrained"] [data-panel-resize] { display: none; }
 
 .player-conversation {
   width: var(--conversation-width);
@@ -396,12 +396,12 @@ html:fullscreen { background: var(--background); }
 
 /* Firefox Android can draw through a camera cutout while reporting zero inset.
    The Player shell owns the fullscreen clearance for a touch-first display edge. */
-.phase2c-sidebar[data-player-fullscreen="active"][data-player-touch-edge="protected"] {
+.player-sidebar[data-player-fullscreen="active"][data-player-touch-edge="protected"] {
   --player-top-safe-space: max(env(safe-area-inset-top, 0px), 32px);
 }
 
 /* Native text editing keeps its browser scrollport; match the overlay thumb. */
-.phase2c-sidebar textarea { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.player-sidebar textarea { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 
 
 /* Shared Player chrome geometry; content panels keep their own content spacing. */
@@ -434,7 +434,7 @@ html:fullscreen { background: var(--background); }
 
 
 /* The menu resize target shares the existing edge padding, not layout width. */
-.phase2c-sidebar [data-launcher-space] > .menu-resize-edge {
+.player-sidebar [data-launcher-space] > .menu-resize-edge {
   position: absolute;
   inset: 0 0 0 auto;
   width: var(--player-resize-rail-size);

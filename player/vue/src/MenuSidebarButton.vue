@@ -8,7 +8,7 @@ import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
 
 defineOptions({ inheritAttrs: false });
 defineProps<{ label: string }>();
-const labelsVisible = inject<ComputedRef<boolean>>("phase2c-menu-labels-visible");
+const labelsVisible = inject<ComputedRef<boolean>>("player-menu-labels-visible");
 const labelElement = ref<HTMLElement | null>(null);
 const truncated = ref(false);
 useResizeObserver(labelElement, () => {

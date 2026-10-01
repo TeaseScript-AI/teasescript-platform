@@ -1,11 +1,11 @@
 import { computed, ref, shallowRef, watch } from "vue";
 import { tryOnScopeDispose, useIntervalFn } from "@vueuse/core";
-import { MediaDevice, MediaLoadQueue } from "../../../media-device.js";
+import { MediaDevice, MediaLoadQueue } from "../../media-device.js";
 import {
   playerRuntimeMedia,
   reportPlayerRuntimeMediaLoad,
   type PlayerRuntimeSession,
-} from "../../../runtime-adapter.js";
+} from "../../runtime-adapter.js";
 import { useRuntimeSceneClock } from "./useRuntimeSceneClock";
 
 // Media progress is sampled this often while media loads or plays; cues fire at this resolution.

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { h, inject } from "vue";
-import type { PlayerMarkupPiece } from "../../../message-markup.js";
+import type { PlayerMarkupPiece } from "../../message-markup.js";
 import { readabilityFor } from "./messageContrast";
 import { enhancedTranscriptContrast } from "./transcriptContrast";
 

@@ -250,30 +250,30 @@ onBeforeUnmount(cancelHide);
   background: var(--media-surface);
   color: var(--media-text);
 }
-:root[data-phase2c-theme] [data-player-top-bar] button:disabled {
+:root[data-player-theme] [data-player-top-bar] button:disabled {
   background: transparent;
   color: var(--theme-media-text-disabled);
 }
 
 /* A keeps the bar visible and moves its controls left of the timer. */
-.phase2c-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .player-top-bar[data-placement="left"] {
+.player-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .player-top-bar[data-placement="left"] {
   right: calc(var(--player-timer-rail-width) + var(--player-edge-space));
 }
 
 /* B keeps the controls right-aligned and hides the bar until revealed. */
-.phase2c-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .player-top-bar[data-placement="overlap"] {
+.player-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .player-top-bar[data-placement="overlap"] {
   opacity: 0;
   pointer-events: auto;
   transition: opacity 150ms ease;
 }
-.phase2c-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .player-top-bar[data-placement="overlap"]:is([data-revealed], :focus-within) {
+.player-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .player-top-bar[data-placement="overlap"]:is([data-revealed], :focus-within) {
   opacity: 1;
 }
-.phase2c-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .player-top-bar[data-placement="overlap"]:not([data-revealed]):not(:focus-within) button {
+.player-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .player-top-bar[data-placement="overlap"]:not([data-revealed]):not(:focus-within) button {
   pointer-events: none;
 }
 @media (prefers-reduced-motion: reduce) {
-  .phase2c-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .player-top-bar[data-placement="overlap"] {
+  .player-sidebar[data-player-vertical="constrained"][data-player-fullscreen="inactive"] .player-top-bar[data-placement="overlap"] {
     transition: none;
   }
 }

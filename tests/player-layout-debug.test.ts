@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { captureRect, parseGridTracks } from "../player/vue/src/phase2c/layoutDebugMeasurement.js";
+import { captureRect, parseGridTracks } from "../player/vue/src/layoutDebugMeasurement.js";
 
 test("Layout Debug measurement helpers preserve rectangle fields and grid tracks", () => {
   const geometry = {

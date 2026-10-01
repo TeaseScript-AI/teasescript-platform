@@ -1,9 +1,9 @@
-import demoSource from "../../../../examples/demo/demo.tease?raw";
+import demoSource from "../../../examples/demo/demo.tease?raw";
 import { chime, roomTone } from "./generatedAudio";
 
 // The trusted host for the repository demo package in `examples/demo/`: it supplies the source and resolves the
 // package-relative references the script uses. Images are package files; the sounds are synthesized on first use.
-const images = import.meta.glob<string>("../../../../examples/demo/{images,avatars}/*.svg", {
+const images = import.meta.glob<string>("../../../examples/demo/{images,avatars}/*.svg", {
   query: "?url",
   import: "default",
   eager: true,
@@ -19,7 +19,7 @@ export { demoSource };
 export function resolveDemoAsset(path: string): string | null {
   let url = resolved.get(path);
   if (url === undefined) {
-    url = images[`../../../../examples/demo/${path}`] ?? sounds[path]?.() ?? null;
+    url = images[`../../../examples/demo/${path}`] ?? sounds[path]?.() ?? null;
     resolved.set(path, url);
   }
   return url;

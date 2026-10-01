@@ -63,7 +63,7 @@ const props = defineProps<{
 const contrast = defineModel<"standard" | "high">("contrast", { required: true });
 const titlebarOption = defineModel<"left" | "overlap">("titlebarOption", { required: true });
 type LabelMode = "icons" | "preview" | "labels";
-const labelMode = usePlayerPreference<LabelMode>("phase2c-menu-label-mode", ["icons", "preview", "labels"], "icons");
+const labelMode = usePlayerPreference<LabelMode>("player-menu-label-mode", ["icons", "preview", "labels"], "icons");
 const hoverPreview = ref(false);
 const focusPreview = ref(false);
 const menuSidebar = ref<HTMLElement | null>(null);
@@ -77,7 +77,7 @@ const labelsVisible = computed(
       (clickPreview.value === true ||
         (clickPreview.value !== false && (hoverPreview.value || focusPreview.value)))),
 );
-provide("phase2c-menu-labels-visible", labelsVisible);
+provide("player-menu-labels-visible", labelsVisible);
 
 let hoverPreviewTimer: ReturnType<typeof setTimeout> | undefined;
 function updateHoverPreview(event: PointerEvent) {
@@ -632,7 +632,7 @@ async function updateSidebarVisibility(open: boolean) {
     }"
   >
   <SidebarProvider
-    id="phase2c-shell"
+    id="player-shell"
     :tooltip-delay-duration="700"
     :tooltip-skip-delay-duration="0"
     :tooltip-ignore-non-keyboard-focus="true"
@@ -658,7 +658,7 @@ async function updateSidebarVisibility(open: boolean) {
     :data-labels="labelMode"
     :data-tools-open="openTools.length > 0"
     :data-labels-visible="labelsVisible"
-    class="phase2c-sidebar fixed inset-x-0 min-h-0 overflow-hidden"
+    class="player-sidebar fixed inset-x-0 min-h-0 overflow-hidden"
     :open="sidebarVisible"
     :responsive="false"
     @update:open="updateSidebarVisibility"
@@ -690,7 +690,7 @@ async function updateSidebarVisibility(open: boolean) {
         side="left"
         variant="sidebar"
         collapsible="offcanvas"
-        :portal-target="narrow ? '#phase2c-shell' : undefined"
+        :portal-target="narrow ? '#player-shell' : undefined"
         :class="narrow ? 'tools-drawer' : undefined"
         @open-auto-focus="openDrawerFocus"
         @close-auto-focus="closeDrawerFocus"

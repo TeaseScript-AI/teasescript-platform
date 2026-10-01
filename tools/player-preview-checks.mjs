@@ -1,14 +1,14 @@
-// Requires Playwright CLI and a running Phase 2C development preview.
-// npm run test:player:phase2c-browser -- https://agents.home.arpa:5173/phase2c/
+// Requires Playwright CLI and a running Player development preview (`npm run dev:player`).
+// npm run test:player:preview -- http://agents.home.arpa:5173/player/
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const url = process.argv[2];
-if (!url) throw new Error("Pass the Phase 2C development preview URL.");
-const scratch = mkdtempSync(join(tmpdir(), "phase2c-browser-"));
-const session = `phase2c-check-${process.pid}`;
+if (!url) throw new Error("Pass the Player development preview URL.");
+const scratch = mkdtempSync(join(tmpdir(), "player-preview-"));
+const session = `player-preview-${process.pid}`;
 function cli(...args) {
   const result = spawnSync("playwright-cli", [`-s=${session}`, ...args], {
     cwd: scratch,
@@ -26,7 +26,7 @@ async function checks(page) {
     if (!value) throw new Error(message);
   };
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "icons"));
+  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "icons"));
   await page.reload();
   const launcher = (name) => page.locator("[data-launcher] button").filter({ hasText: name });
   const panel = (name) => page.locator(`[data-tool="${name}"]`);
@@ -101,7 +101,7 @@ async function checks(page) {
   check(closedWide.width > docked.width, "Wide dock must reserve Player width");
   await page.setViewportSize({ width: 390, height: 700 });
   await page.waitForFunction(
-    () => document.querySelector("#phase2c-shell").dataset.playerHorizontal === "constrained",
+    () => document.querySelector("#player-shell").dataset.playerHorizontal === "constrained",
   );
   const closedNarrow = await page.locator(".player-stage").boundingBox();
   await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
@@ -117,7 +117,7 @@ async function checks(page) {
   await page.getByRole("button", { name: "Show sidebar", exact: true }).waitFor();
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.waitForFunction(
-    () => document.querySelector("#phase2c-shell").dataset.playerHorizontal === "comfortable",
+    () => document.querySelector("#player-shell").dataset.playerHorizontal === "comfortable",
   );
   await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
   await expectState(expected);
@@ -158,7 +158,7 @@ async function sidebarMotionChecks(page) {
     if (!condition) throw new Error(message);
   };
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "icons"));
+  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "icons"));
   await page.reload();
   const launcher = page.locator("[data-launcher]");
   const show = () => page.getByRole("button", { name: "Show sidebar", exact: true });
@@ -320,7 +320,7 @@ async function sidebarMotionChecks(page) {
   await closeHalfway();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForFunction(
-    () => document.querySelector("#phase2c-shell").dataset.playerHorizontal === "constrained",
+    () => document.querySelector("#player-shell").dataset.playerHorizontal === "constrained",
   );
   await launcher.waitFor({ state: "detached" });
   await show().click();
@@ -335,12 +335,12 @@ async function sidebarMotionChecks(page) {
 
 async function menuPreviewChecks(page) {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "preview"));
+  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "preview"));
   await page.reload();
   const labels = async (visible) =>
     page.waitForFunction(
       (visible) =>
-        document.querySelector("#phase2c-shell").dataset.labelsVisible === String(visible),
+        document.querySelector("#player-shell").dataset.labelsVisible === String(visible),
       visible,
     );
   const menu = page.locator("[data-launcher]");
@@ -415,10 +415,10 @@ async function menuPreviewChecks(page) {
   await labels(false);
   await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
   await cdp.detach();
-  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "labels"));
+  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "labels"));
   await page.reload();
   await labels(true);
-  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "icons"));
+  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "icons"));
   await page.reload();
   await labels(false);
   return "PASS menu preview mouse, touch and keyboard ownership";
@@ -429,13 +429,13 @@ async function menuWidthChecks(page) {
     if (!value) throw new Error(message);
   };
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "labels"));
+  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "labels"));
   await page.reload();
   const menu = page.locator("[data-launcher]");
   const edge = page.getByRole("separator", { name: "Menu Sidebar width", exact: true });
   const width = async () =>
     menu.evaluate((element) => {
-      const shell = element.closest("#phase2c-shell");
+      const shell = element.closest("#player-shell");
       // Include the separate resize rail in the selected menu width.
       return (
         shell.dataset.labels === "preview" ? element : element.parentElement
@@ -478,7 +478,7 @@ async function menuWidthChecks(page) {
   await mode("preview");
   await page.mouse.move(24, 330);
   await page.waitForFunction(
-    () => document.querySelector("#phase2c-shell").dataset.labelsVisible === "true",
+    () => document.querySelector("#player-shell").dataset.labelsVisible === "true",
   );
   await menu.click({ trial: true, position: { x: 24, y: 330 } });
   check(
@@ -518,7 +518,7 @@ async function menuWidthChecks(page) {
     "Reduced motion must disable preview animation",
   );
   await page.emulateMedia({ reducedMotion: "no-preference" });
-  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "icons"));
+  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "icons"));
   return "PASS menu preview bounds and permanent rem sizing";
 }
 
@@ -527,14 +527,14 @@ async function menuCollapseChecks(page) {
     if (!value) throw new Error(message);
   };
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "labels"));
+  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "labels"));
   await page.reload();
-  const shell = page.locator("#phase2c-shell");
+  const shell = page.locator("#player-shell");
   const edge = page.getByRole("separator", { name: "Menu Sidebar width", exact: true });
   const menu = page.locator("[data-launcher]");
   const width = async () =>
     menu.evaluate((element) => {
-      const shell = element.closest("#phase2c-shell");
+      const shell = element.closest("#player-shell");
       // Include the separate resize rail in the selected menu width.
       return (
         shell.dataset.labels === "preview" ? element : element.parentElement
@@ -616,7 +616,7 @@ async function menuCollapseChecks(page) {
     (await mode()) === "labels" && (await width()) === minimumWidth,
     "Pointer cancellation must restore the label width",
   );
-  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "icons"));
+  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "icons"));
   return "PASS menu drag collapse, expansion and cancellation";
 }
 
@@ -627,7 +627,7 @@ async function panelResizeChecks(page) {
     [1440, "icons", true],
   ]) {
     await page.setViewportSize({ width, height: 650 });
-    await page.evaluate((mode) => localStorage.setItem("phase2c-menu-label-mode", mode), mode);
+    await page.evaluate((mode) => localStorage.setItem("player-menu-label-mode", mode), mode);
     await page.reload();
     const launcher = (name) => page.locator("[data-launcher] button").filter({ hasText: name });
     if (multiple) {
@@ -703,13 +703,13 @@ async function panelResizeChecks(page) {
       );
     }, maximum);
   }
-  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "icons"));
+  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "icons"));
   return "PASS panel width cap, resize, restoration and cancellation";
 }
 
 async function carouselChecks(page) {
   await page.setViewportSize({ width: 900, height: 420 });
-  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "icons"));
+  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "icons"));
   await page.reload();
   for (const name of ["Layout Debug", "Visual Lab"]) {
     await page.locator("[data-launcher] button").filter({ hasText: name }).click();
@@ -1148,7 +1148,7 @@ async function buttonInkChecks(page) {
   const backgrounds = [];
   const accentHues = [];
   for (const mode of ["light", "dark"]) {
-    if ((await page.locator("html").getAttribute("data-phase2c-theme")) !== mode) {
+    if ((await page.locator("html").getAttribute("data-player-theme")) !== mode) {
       await page.getByRole("button", { name: `Switch to ${mode} theme`, exact: true }).click();
     }
     accentHues.push(
@@ -1264,8 +1264,8 @@ async function topBarChecks(page) {
         const now = document
           .querySelector('[data-sidebar="header"] button')
           .getBoundingClientRect().height;
-        const settled = now === window.phase2cPreviousControlHeight;
-        window.phase2cPreviousControlHeight = now;
+        const settled = now === window.previousControlHeight;
+        window.previousControlHeight = now;
         return now > height && settled;
       },
       controlHeight,
@@ -1608,7 +1608,7 @@ async function contentAlignmentChecks(page) {
   };
 
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.evaluate(() => localStorage.setItem("phase2c-menu-label-mode", "icons"));
+  await page.evaluate(() => localStorage.setItem("player-menu-label-mode", "icons"));
   await page.reload();
   const compact = await verify("compact menu, landscape", true);
   await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
@@ -1630,7 +1630,7 @@ async function contentAlignmentChecks(page) {
   await page.waitForFunction(
     () =>
       Number.parseFloat(
-        document.querySelector("#phase2c-shell").style.getPropertyValue("--media-aspect"),
+        document.querySelector("#player-shell").style.getPropertyValue("--media-aspect"),
       ) < 1,
   );
   const portrait = await verify("open tool, portrait", false);
@@ -1669,18 +1669,18 @@ async function playerConditionChecks(page) {
     await page.setViewportSize({ width, height: 768 });
     await page.waitForFunction(
       ({ horizontal, timer }) =>
-        document.querySelector(".phase2c-sidebar")?.dataset.playerHorizontal === horizontal &&
+        document.querySelector(".player-sidebar")?.dataset.playerHorizontal === horizontal &&
         document.querySelector(".timer-display")?.getBoundingClientRect().width === timer,
       { horizontal: expectedHorizontal, timer: expectedTimer },
     );
   }
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForFunction(
-    () => document.querySelector(".phase2c-sidebar")?.dataset.playerHorizontal === "constrained",
+    () => document.querySelector(".player-sidebar")?.dataset.playerHorizontal === "constrained",
   );
   check(
     await page.evaluate(() => {
-      const shell = document.querySelector(".phase2c-sidebar");
+      const shell = document.querySelector(".player-sidebar");
       const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
       return (
         shell.dataset.playerHorizontal === "constrained" &&
@@ -1705,7 +1705,7 @@ async function playerConditionChecks(page) {
     await hybrid.goto(page.url().split("?")[0]);
     check(
       await hybrid.evaluate(() => {
-        const shell = document.querySelector(".phase2c-sidebar");
+        const shell = document.querySelector(".player-sidebar");
         const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
         return (
           shell.dataset.playerTouch === "available" &&
@@ -1733,7 +1733,7 @@ async function playerConditionChecks(page) {
     await mobile.goto(page.url().split("?")[0]);
     const state = () =>
       mobile.evaluate(() => {
-        const shell = document.querySelector(".phase2c-sidebar");
+        const shell = document.querySelector(".player-sidebar");
         const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
         return {
           horizontal: shell.dataset.playerHorizontal,
@@ -1759,7 +1759,7 @@ async function playerConditionChecks(page) {
     await mobile.locator("[data-composer-input]").focus();
     await mobile.setViewportSize({ width: 390, height: 544 });
     await mobile.waitForFunction(
-      () => document.querySelector(".phase2c-sidebar")?.dataset.playerKeyboard === "raised",
+      () => document.querySelector(".player-sidebar")?.dataset.playerKeyboard === "raised",
     );
     const raised = await state();
     check(
@@ -1770,7 +1770,7 @@ async function playerConditionChecks(page) {
     );
     await mobile.setViewportSize({ width: 390, height: 844 });
     await mobile.waitForFunction(
-      () => document.querySelector(".phase2c-sidebar")?.dataset.playerKeyboard === "closed",
+      () => document.querySelector(".player-sidebar")?.dataset.playerKeyboard === "closed",
     );
     const restored = await state();
     check(
@@ -1778,7 +1778,7 @@ async function playerConditionChecks(page) {
       "Closing the keyboard did not restore the edge clearance",
     );
     const beforeTop = await mobile.evaluate(() => {
-      const shell = document.querySelector(".phase2c-sidebar").getBoundingClientRect();
+      const shell = document.querySelector(".player-sidebar").getBoundingClientRect();
       const stage = document.querySelector(".player-stage").getBoundingClientRect();
       const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
       const control = document.querySelector("[data-fullscreen-control]").getBoundingClientRect();
@@ -1795,19 +1795,19 @@ async function playerConditionChecks(page) {
     await mobile.locator("[data-fullscreen-control]").click();
     await mobile.waitForFunction(() => document.fullscreenElement === document.documentElement);
     await mobile.waitForFunction(
-      () => document.querySelector(".phase2c-sidebar")?.dataset.playerFullscreen === "active",
+      () => document.querySelector(".player-sidebar")?.dataset.playerFullscreen === "active",
     );
     const top = await mobile.evaluate(() => {
       const bar = document.querySelector("[data-player-top-bar]");
       const canvas = document.querySelector(".player-viewport-canvas");
-      const shell = document.querySelector(".phase2c-sidebar").getBoundingClientRect();
+      const shell = document.querySelector(".player-sidebar").getBoundingClientRect();
       const canvasBounds = canvas.getBoundingClientRect();
       const stage = document.querySelector(".player-stage").getBoundingClientRect();
       const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
       const control = bar.querySelector("[data-fullscreen-control]").getBoundingClientRect();
       const timer = document.querySelector(".timer-display").getBoundingClientRect();
       return {
-        fullscreen: document.querySelector(".phase2c-sidebar").dataset.playerFullscreen,
+        fullscreen: document.querySelector(".player-sidebar").dataset.playerFullscreen,
         padding: parseFloat(getComputedStyle(bar).paddingTop),
         shellTop: shell.top,
         shellBottom: shell.bottom,
@@ -1835,7 +1835,7 @@ async function playerConditionChecks(page) {
       "Touch-first fullscreen did not move the complete Player below the cutout",
     );
     const topWithSecondaryHover = await mobile.evaluate(() => {
-      const shell = document.querySelector(".phase2c-sidebar");
+      const shell = document.querySelector(".player-sidebar");
       const previous = shell.dataset.playerHover;
       shell.dataset.playerHover = "available";
       const top = shell.getBoundingClientRect().top;
@@ -1859,14 +1859,14 @@ async function playerConditionChecks(page) {
     await mobile.locator("[data-fullscreen-control]").click();
     await mobile.waitForFunction(() => !document.fullscreenElement);
     await mobile.waitForFunction(
-      () => document.querySelector(".phase2c-sidebar")?.dataset.playerFullscreen === "inactive",
+      () => document.querySelector(".player-sidebar")?.dataset.playerFullscreen === "inactive",
     );
     const afterTop = await mobile.evaluate(() => {
       const bar = document.querySelector("[data-player-top-bar]");
-      const shell = document.querySelector(".phase2c-sidebar").getBoundingClientRect();
+      const shell = document.querySelector(".player-sidebar").getBoundingClientRect();
       const control = bar.querySelector("[data-fullscreen-control]").getBoundingClientRect();
       return {
-        fullscreen: document.querySelector(".phase2c-sidebar").dataset.playerFullscreen,
+        fullscreen: document.querySelector(".player-sidebar").dataset.playerFullscreen,
         padding: parseFloat(getComputedStyle(bar).paddingTop),
         shellTop: shell.top,
         controlTop: control.top,
@@ -1908,7 +1908,7 @@ async function zoomedViewportChecks(page) {
     await mobile.waitForFunction(() => window.visualViewport?.pageTop > 100);
     await mobile.waitForFunction(() => {
       const visual = window.visualViewport;
-      const shell = document.querySelector(".phase2c-sidebar").getBoundingClientRect();
+      const shell = document.querySelector(".player-sidebar").getBoundingClientRect();
       const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
       return (
         Math.abs(shell.top - visual.offsetTop) <= 1 &&
@@ -1918,7 +1918,7 @@ async function zoomedViewportChecks(page) {
     });
     const bounds = await mobile.evaluate(() => {
       const visual = window.visualViewport;
-      const shell = document.querySelector(".phase2c-sidebar").getBoundingClientRect();
+      const shell = document.querySelector(".player-sidebar").getBoundingClientRect();
       const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
       return {
         visibleTop: visual.offsetTop,
@@ -2006,7 +2006,7 @@ async function composerNoticeChecks(page) {
         const notice = document.querySelector(".composer-notice");
         const bounds = notice.getBoundingClientRect();
         return (
-          document.documentElement.dataset.phase2cTheme === "dark" &&
+          document.documentElement.dataset.playerTheme === "dark" &&
           getComputedStyle(notice).backgroundColor !== lightNotice &&
           (([r, g, b]) => r > g + 40 && r > b + 40)(
             getComputedStyle(notice).borderTopColor.match(/\d+/g).map(Number),
@@ -2222,8 +2222,8 @@ async function playerSettingsChecks(page) {
   await closeSettings();
   // Stored text is external input: unknown values fall back to the defaults.
   await page.evaluate(() => {
-    localStorage.setItem("phase2c-player-contrast", "bogus");
-    localStorage.setItem("phase2c-titlebar-variant", "bogus");
+    localStorage.setItem("player-contrast", "bogus");
+    localStorage.setItem("player-titlebar-variant", "bogus");
   });
   await page.reload();
   await openSettings();
@@ -2245,14 +2245,14 @@ async function playerSettingsChecks(page) {
       [key, value],
     );
   const beforeTab = await secondaryText();
-  await otherTab("phase2c-player-contrast", "high");
+  await otherTab("player-contrast", "high");
   await page.waitForFunction(
     (before) =>
       document.documentElement.style.getPropertyValue("--theme-text-secondary") !== before,
     beforeTab,
   );
-  await otherTab("phase2c-titlebar-variant", "bogus");
-  await otherTab("phase2c-menu-label-mode", "bogus");
+  await otherTab("player-titlebar-variant", "bogus");
+  await otherTab("player-menu-label-mode", "bogus");
   await openSettings();
   if (
     (await contrast.inputValue()) !== "high" ||
@@ -2293,9 +2293,9 @@ async function playerSettingsChecks(page) {
   await closeSettings();
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(() => {
-    localStorage.removeItem("phase2c-player-contrast");
-    localStorage.removeItem("phase2c-titlebar-variant");
-    localStorage.setItem("phase2c-menu-label-mode", "icons");
+    localStorage.removeItem("player-contrast");
+    localStorage.removeItem("player-titlebar-variant");
+    localStorage.setItem("player-menu-label-mode", "icons");
   });
   return "PASS Player Settings apply, persist, validate stored and cross-tab values, and fit short screens";
 }
@@ -2318,7 +2318,7 @@ async function mediaPlaybackChecks(page) {
       return play.call(this);
     };
   });
-  page.phase2cKeepActivation = true;
+  page.keepActivation = true;
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload();
   // Nothing runs before explicit Start: no transcript, no Stage image, no audio.
@@ -2355,7 +2355,7 @@ async function mediaPlaybackChecks(page) {
     (previous) => document.querySelector(".stage-media")?.getAttribute("src") !== previous,
     firstImage,
   );
-  page.phase2cKeepActivation = false;
+  page.keepActivation = false;
   return "PASS Start gating, runtime Stage image, refused-audio retry and measured audio playback";
 }
 
@@ -2562,15 +2562,15 @@ async function runGroup(browserPage, run, url, artifacts) {
   // The Player mounts after its async root chunk loads, which can follow the load event.
   // Every navigation therefore waits for the mounted shell, including pages that groups open.
   const pagePrototype = Object.getPrototypeOf(browserPage);
-  if (!pagePrototype.phase2cWaitsForMount) {
-    pagePrototype.phase2cWaitsForMount = true;
+  if (!pagePrototype.playerWaitsForMount) {
+    pagePrototype.playerWaitsForMount = true;
     for (const name of ["goto", "reload"]) {
       const navigate = pagePrototype[name];
       pagePrototype[name] = async function (...args) {
         const response = await navigate.apply(this, args);
-        await this.waitForSelector("#phase2c-shell", { state: "attached" });
+        await this.waitForSelector("#player-shell", { state: "attached" });
         // The Player runs no script before explicit Start; groups other than the activation checks start it here.
-        if (!this.phase2cKeepActivation) {
+        if (!this.keepActivation) {
           const start = this.locator("[data-session-activation] button");
           if (await start.count()) await start.click();
         }
@@ -2620,14 +2620,14 @@ try {
   );
   cli("open", url, "--config", config);
   for (const group of groups) {
-    console.log(`phase2c-browser-checks: RUN ${group.name}`);
+    console.log(`player-preview-checks: RUN ${group.name}`);
     const output = cli(
       "run-code",
       `async page => (${runGroup.toString()})(page, ${group.toString()}, ${JSON.stringify(url)}, ${JSON.stringify(join(scratch, group.name))})`,
     );
     const result = output.match(/^### Result\r?\n"(PASS [^"\n]+)"$/mu)?.[1];
     if (!result) throw new Error(output);
-    console.log(`phase2c-browser-checks: ${result}`);
+    console.log(`player-preview-checks: ${result}`);
   }
   passed = true;
 } finally {
@@ -2635,6 +2635,6 @@ try {
     cli("close");
   } finally {
     if (passed) rmSync(scratch, { recursive: true, force: true });
-    else console.error(`phase2c-browser-checks: failure artifacts retained at ${scratch}`);
+    else console.error(`player-preview-checks: failure artifacts retained at ${scratch}`);
   }
 }

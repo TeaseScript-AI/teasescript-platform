@@ -151,7 +151,7 @@ defineExpose({ focusInput });
   --composer-notice-border: #c75452;
   --composer-notice-text: #762421;
 }
-:global(:root[data-phase2c-theme="dark"] .composer-container) {
+:global(:root[data-player-theme="dark"] .composer-container) {
   --composer-notice-surface: #3a2323;
   --composer-notice-border: #e98780;
   --composer-notice-text: #ffd4d1;
@@ -199,7 +199,7 @@ defineExpose({ focusInput });
   outline: none;
   box-shadow: none;
 }
-:global(:root[data-phase2c-theme] [data-composer-input]:disabled) {
+:global(:root[data-player-theme] [data-composer-input]:disabled) {
   background: transparent;
   color: var(--theme-text-disabled);
 }
