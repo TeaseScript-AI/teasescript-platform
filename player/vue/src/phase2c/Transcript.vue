@@ -323,10 +323,10 @@ onMounted(() => {
               class="transcript-foreground"
               :style="{ top: `${virtualizer.getTotalSize() - endInset}px` }"
             >
+              <p v-if="!entries.length" class="transcript-empty">No messages yet.</p>
               <slot name="foreground" />
             </div>
           </div>
-          <p v-if="!entries.length" class="transcript-empty">No messages yet.</p>
         </div>
       </ScrollAreaViewport>
     </ScrollAreaRoot>
@@ -436,8 +436,6 @@ onMounted(() => {
   padding-block: 1.75rem 0.75rem;
 }
 .transcript-empty {
-  width: calc(var(--conversation-width) - 2 * var(--conversation-inline-inset));
-  margin-inline-start: calc(var(--conversation-offset) + var(--conversation-inline-inset));
   padding: 1rem;
   font-size: 0.875rem;
   color: var(--muted-foreground);
