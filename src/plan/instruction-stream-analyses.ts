@@ -1595,7 +1595,11 @@ function validateFunctionPrologue(
     instructionIndex += 1
   ) {
     const instruction = instructions[instructionIndex];
-    if (isRecord(instruction) && prologueOnly.has(String(instruction.kind))) {
+    if (
+      isRecord(instruction) &&
+      typeof instruction.kind === "string" &&
+      prologueOnly.has(instruction.kind)
+    ) {
       errors.push(
         planError(
           "TSC002",

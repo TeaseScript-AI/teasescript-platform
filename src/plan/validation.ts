@@ -1127,7 +1127,7 @@ function validateExpressionNode(
       pending.push({ value: value.operand, path: `${path}.operand`, assignmentTarget: false });
       return;
     case "binary":
-      if (!binaryOperators.has(String(value.operator))) {
+      if (!(typeof value.operator === "string" && binaryOperators.has(value.operator))) {
         errors.push(planError("TSC002", "Invalid binary operator.", `${path}.operator`));
       }
       pending.push(

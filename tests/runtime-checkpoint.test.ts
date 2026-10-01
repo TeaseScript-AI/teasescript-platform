@@ -617,4 +617,13 @@ test("checkpoint and plan validation never coerce non-string enumerated fields t
   assert.equal(validateInstructionPlan(forged).valid, true);
   wait.unit = ["s"];
   assert.equal(validateInstructionPlan(forged).valid, false);
+
+  const sum = plan("let n = 1 + 2\nexit");
+  const forgedSum: unknown = structuredClone(sum);
+  assert.ok(isRecord(forgedSum) && Array.isArray(forgedSum.instructions));
+  const binding: unknown = forgedSum.instructions[0];
+  assert.ok(isRecord(binding) && isRecord(binding.value) && binding.value.operator === "+");
+  assert.equal(validateInstructionPlan(forgedSum).valid, true);
+  binding.value.operator = ["+"];
+  assert.equal(validateInstructionPlan(forgedSum).valid, false);
 });
