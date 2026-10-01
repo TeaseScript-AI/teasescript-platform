@@ -34,6 +34,7 @@ interface IrBase {
 export type IrStatement =
   | (IrBase & { kind: "say"; value: IrExpression })
   | (IrBase & { kind: "wait"; duration: IrExpression; visible: boolean })
+  | (IrBase & { kind: "showButton"; label: IrExpression })
   | (IrBase & { kind: "showPopup"; message: IrExpression })
   | (IrBase & { kind: "showImage"; file: IrExpression })
   | (IrBase & { kind: "hideImage" })
