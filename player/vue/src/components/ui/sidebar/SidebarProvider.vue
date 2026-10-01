@@ -3,7 +3,7 @@ import type { HTMLAttributes, Ref } from "vue";
 import { useEventListener, useMediaQuery, useVModel } from "@vueuse/core";
 import { TooltipProvider } from "reka-ui";
 import { computed, ref } from "vue";
-import { cn } from "@/lib/utils";
+import { cn, isTextEditingTarget } from "@/lib/utils";
 import {
   provideSidebarContext,
   SIDEBAR_KEYBOARD_SHORTCUT,
@@ -48,7 +48,12 @@ function toggleSidebar() {
 }
 
 useEventListener("keydown", (event: KeyboardEvent) => {
-  if (event.key === SIDEBAR_KEYBOARD_SHORTCUT && (event.metaKey || event.ctrlKey)) {
+  // Typing in the composer or another text field must not toggle the sidebar.
+  if (
+    event.key === SIDEBAR_KEYBOARD_SHORTCUT &&
+    (event.metaKey || event.ctrlKey) &&
+    !isTextEditingTarget(event.target)
+  ) {
     event.preventDefault();
     toggleSidebar();
   }

@@ -101,7 +101,7 @@ onBeforeUnmount(() => observer?.disconnect());
         <h2
           :data-tools-focus="`title:${tool}`"
           :tabindex="truncatedTitle ? 0 : undefined"
-          class="mr-auto min-w-0 truncate rounded-sm text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2"
+          class="mr-auto min-w-0 truncate rounded-sm text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-(--player-focus-offset)"
         >
           {{ tool }}
         </h2>

@@ -166,7 +166,7 @@ defineExpose({ focusInput });
 }
 :global(:root[data-player-keyboard-focus="true"] [data-composer-shell]:has(textarea:focus)) {
   outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+  outline-offset: var(--player-focus-offset);
 }
 @supports (backdrop-filter: blur(1px)) {
   .conversation-glass {

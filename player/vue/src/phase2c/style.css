@@ -35,6 +35,8 @@
 :root {
   /* Player edge layout is fixed; controls grow only with their icon/text size. */
   --player-edge-space: 8px;
+  /* Visual Lab compares 1px and 2px focus-outline separation. */
+  --player-focus-offset: 2px;
   --player-control-padding: 8px;
   --player-top-control-radius: 0.75rem;
   --player-title-font-size: 0.875rem;
@@ -170,7 +172,7 @@
 :root[data-phase2c-theme] :is(textarea, input)::placeholder { color: var(--theme-text-secondary); }
 :root[data-phase2c-theme] :is(button, textarea:not([data-composer-input]), input, select, summary, a[href], [data-tools-focus^="title:"]):focus-visible {
   outline: 2px solid var(--theme-accent-focus);
-  outline-offset: 2px;
+  outline-offset: var(--player-focus-offset);
 }
 /* Native :focus-visible includes mouse-focused text inputs. App's shared
    navigation modality keeps editing quiet, including body-portaled controls. */

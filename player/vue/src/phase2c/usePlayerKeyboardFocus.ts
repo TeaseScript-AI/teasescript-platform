@@ -1,5 +1,6 @@
 import { onScopeDispose } from "vue";
 import { useEventListener } from "@vueuse/core";
+import { isTextEditingTarget } from "@/lib/utils";
 
 // App owns one navigation modality for the Player and its body-portaled tools.
 // Like React Aria's text-input policy, editing keys do not reveal focus rings:
@@ -25,13 +26,7 @@ export function usePlayerKeyboardFocus() {
         event.altKey
       )
         return;
-      const target = event.target;
-      const textInput =
-        target instanceof HTMLTextAreaElement ||
-        (target instanceof HTMLInputElement &&
-          ["text", "search", "email", "url", "tel", "password", "number"].includes(target.type)) ||
-        (target instanceof HTMLElement && target.isContentEditable);
-      if (!textInput || event.key === "Tab" || event.key === "Escape")
+      if (!isTextEditingTarget(event.target) || event.key === "Tab" || event.key === "Escape")
         root.setAttribute(attribute, "true");
     },
     { capture: true },

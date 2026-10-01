@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { onScopeDispose, ref, watchEffect } from "vue";
 import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type { PlayerTimerKind } from "../../../model.js";
@@ -15,7 +15,7 @@ import StageRightRail from "./StageRightRail.vue";
 import ThemeLab from "./ThemeLab.vue";
 import TimerFixtureRegion from "./TimerFixtureRegion.vue";
 import { usePlayerSession } from "./usePlayerSession";
-import { defaultPlayerThemeIntent } from "./usePlayerTheme";
+import { defaultPlayerThemeIntents } from "./usePlayerTheme";
 
 // Development preview root; main.ts loads it on the development server or with `?dev`.
 // Visual Lab holds temporary Owner A/B settings only; runtime content comes from a real script.
@@ -32,7 +32,12 @@ const timerCount = ref(1);
 const timerReset = ref(0);
 const timerPaused = ref(true);
 const backgroundControlsReset = ref(0);
-const themeIntent = ref<PlayerThemeIntent>(defaultPlayerThemeIntent);
+const themeIntent = ref<PlayerThemeIntent>(defaultPlayerThemeIntents.light);
+const focusOffset = ref<"1px" | "2px">("2px");
+watchEffect(() =>
+  document.documentElement.style.setProperty("--player-focus-offset", focusOffset.value),
+);
+onScopeDispose(() => document.documentElement.style.removeProperty("--player-focus-offset"));
 
 const player = usePlayerSession();
 player.start(createPlayerRuntimeSession(openingScenario));
@@ -50,6 +55,17 @@ player.start(createPlayerRuntimeSession(openingScenario));
       <LayoutDebug v-if="tool === 'Layout Debug' && playerElement" :player="playerElement" />
       <div v-if="tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
         <ThemeLab v-model:intent="themeIntent" />
+        <label class="grid gap-2">
+          Focus outline offset
+          <select
+            v-model="focusOffset"
+            data-focus-offset-fixture
+            class="min-w-0 rounded border bg-card p-2"
+          >
+            <option value="2px">2px (default)</option>
+            <option value="1px">1px</option>
+          </select>
+        </label>
         <label class="grid gap-2">
           Stage media fixture
           <select v-model="mediaFixture" class="min-w-0 rounded border bg-card p-2">

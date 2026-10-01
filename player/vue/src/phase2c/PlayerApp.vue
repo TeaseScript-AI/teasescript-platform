@@ -12,7 +12,7 @@ import Stage from "./Stage.vue";
 import { enhancedTranscriptContrast } from "./transcriptContrast";
 import { usePlayerKeyboardFocus } from "./usePlayerKeyboardFocus";
 import type { PlayerSessionHost } from "./usePlayerSession";
-import { defaultPlayerThemeIntent, usePlayerTheme } from "./usePlayerTheme";
+import { defaultPlayerThemeIntents, usePlayerTheme } from "./usePlayerTheme";
 
 // Product Player composition. The development preview supplies tools, Stage media and the right
 // rail only through these props and slots; production builds do not import it.
@@ -26,7 +26,7 @@ const props = withDefaults(
   { title: "", tools: () => [] },
 );
 const themeIntent = defineModel<PlayerThemeIntent>("themeIntent", {
-  default: () => defaultPlayerThemeIntent,
+  default: () => defaultPlayerThemeIntents.light,
 });
 
 usePlayerKeyboardFocus();
@@ -35,10 +35,11 @@ provide(
   computed(() => themeIntent.value.contrast === "high"),
 );
 usePlayerTheme(themeIntent);
+// Each mode starts from its own default palette; the contrast choice carries over.
 function toggleThemeMode() {
   themeIntent.value = {
-    ...themeIntent.value,
-    mode: themeIntent.value.mode === "dark" ? "light" : "dark",
+    ...defaultPlayerThemeIntents[themeIntent.value.mode === "dark" ? "light" : "dark"],
+    contrast: themeIntent.value.contrast,
   };
 }
 

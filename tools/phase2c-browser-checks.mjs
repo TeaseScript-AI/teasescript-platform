@@ -885,10 +885,20 @@ async function buttonInkChecks(page) {
       return Array.from(context.getImageData(0, 0, 1, 1).data).join(",");
     });
   const backgrounds = [];
+  const accentHues = [];
   for (const mode of ["light", "dark"]) {
     if ((await page.locator("html").getAttribute("data-phase2c-theme")) !== mode) {
       await page.getByRole("button", { name: `Switch to ${mode} theme`, exact: true }).click();
     }
+    accentHues.push(
+      await page.evaluate(() =>
+        Number(
+          /\s([\d.]+)\)$/.exec(
+            document.documentElement.style.getPropertyValue("--theme-accent-solid"),
+          )?.[1],
+        ),
+      ),
+    );
     backgrounds.push(
       await Promise.all(
         ["Wait for sunset", "Follow the lights"].map((label) =>
@@ -917,11 +927,14 @@ async function buttonInkChecks(page) {
       }
     }
   }
+  // Owner default: warm rose light theme, cool blue dark theme.
+  if (!(accentHues[0] < 30 && accentHues[1] > 220 && accentHues[1] < 300))
+    throw new Error(`Default light/dark accent hues are not rose/blue: ${accentHues.join(", ")}`);
   if (backgrounds[0][0] === backgrounds[1][0])
     throw new Error("Uncoloured choice must follow the light/dark theme");
   if (backgrounds[0][1] !== backgrounds[1][1])
     throw new Error("Authored choice fill must stay fixed across theme changes");
-  return "PASS theme-following default and authored button ink across light/dark, hover and press";
+  return "PASS rose/blue default themes and theme-following default and authored button ink across light/dark, hover and press";
 }
 
 async function topBarChecks(page) {
@@ -1586,6 +1599,27 @@ async function composerNoticeChecks(page) {
   return "PASS single composer notice, outside dismissal, stationary choices, and narrow dark styling";
 }
 
+async function sidebarShortcutChecks(page) {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  const hide = page.getByRole("button", { name: "Hide sidebar", exact: true });
+  const show = page.getByRole("button", { name: "Show sidebar", exact: true });
+  await hide.waitFor();
+  // Owner decision: Ctrl/Meta+B stays global but never fires from text editing.
+  await page.locator("[data-composer-input]").focus();
+  for (const shortcut of ["Control+b", "Meta+b"]) {
+    await page.keyboard.press(shortcut);
+    if (!(await hide.isVisible()))
+      throw new Error(`${shortcut} in the composer toggled the sidebar`);
+  }
+  await page.locator("[data-composer-input]").blur();
+  await page.keyboard.press("Control+b");
+  await show.waitFor();
+  await page.keyboard.press("Meta+b");
+  await hide.waitFor();
+  return "PASS Ctrl/Meta+B toggles the sidebar outside text editing only";
+}
+
 async function composerMouseFocusChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -1766,6 +1800,7 @@ const groups = [
   composerNoticeChecks,
   composerMouseFocusChecks,
   composerSendFocusChecks,
+  sidebarShortcutChecks,
   directDemoLatestChecks,
   timerChecks,
   contentAlignmentChecks,

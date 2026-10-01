@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { computed } from "vue";
 import { oklchCss, oklchToPickerHex, pickerHexToOklch, type OklchColor } from "../../../theme/color.js";
 import { generatePlayerTheme, type PlayerThemeIntent } from "../../../theme/palette.js";
+import { defaultPlayerThemeIntents } from "./usePlayerTheme";
 
 const props = defineProps<{ intent: PlayerThemeIntent }>();
 const emit = defineEmits<{
@@ -39,14 +40,10 @@ function setSurfaceTint(event: Event) {
 function pickAccent(event: Event) {
   if (event.target instanceof HTMLInputElement) patchIntent({ accentSeed: pickerHexToOklch(event.target.value) });
 }
-function comparePair(pair: "warm" | "cool") {
-  patchIntent({
-    surfaceHue: pair === "warm" ? 70 : 240,
-    surfaceTint: 0.5,
-    surfaceMaxChroma: 8.5,
-    monochrome: false,
-    accentSeed: pickerHexToOklch(pair === "warm" ? "#d63b61" : "#2255ee"),
-  });
+// Apply one mode's default palette without changing the current mode or contrast.
+function comparePair(pair: "light" | "dark") {
+  const { surfaceHue, surfaceTint, surfaceMaxChroma, monochrome, accentSeed } = defaultPlayerThemeIntents[pair];
+  patchIntent({ surfaceHue, surfaceTint, surfaceMaxChroma, monochrome, accentSeed });
 }
 function displayColor(color: OklchColor) {
   return `oklch(${(color.l * 100).toFixed(2)}% ${color.c.toFixed(4)} ${color.h.toFixed(2)})`;
@@ -61,8 +58,8 @@ function displayColor(color: OklchColor) {
     <fieldset class="grid gap-1">
       <legend>Development colour pairs</legend>
       <div class="flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" @click="comparePair('warm')">Warm · rose</Button>
-        <Button variant="outline" size="sm" @click="comparePair('cool')">Cool · blue</Button>
+        <Button variant="outline" size="sm" @click="comparePair('light')">Warm · rose (light default)</Button>
+        <Button variant="outline" size="sm" @click="comparePair('dark')">Cool · blue (dark default)</Button>
       </div>
     </fieldset>
     <label class="grid gap-1">Theme contrast

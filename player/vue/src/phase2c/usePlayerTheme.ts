@@ -6,15 +6,28 @@ import {
   type PlayerThemeIntent,
 } from "../../../theme/palette.js";
 
-export const defaultPlayerThemeIntent: PlayerThemeIntent = Object.freeze({
-  mode: "light",
-  contrast: "standard",
-  surfaceHue: 70,
-  surfaceTint: 0.5,
-  surfaceMaxChroma: 8.5,
-  monochrome: false,
-  accentSeed: Object.freeze({ l: 0.59208, c: 0.19138, h: 11.08 }),
-});
+// Default palette per mode: warm rose light and cool blue dark.
+export const defaultPlayerThemeIntents: Readonly<Record<"light" | "dark", PlayerThemeIntent>> =
+  Object.freeze({
+    light: Object.freeze({
+      mode: "light",
+      contrast: "standard",
+      surfaceHue: 70,
+      surfaceTint: 0.5,
+      surfaceMaxChroma: 8.5,
+      monochrome: false,
+      accentSeed: Object.freeze({ l: 0.59208, c: 0.19138, h: 11.08 }),
+    }),
+    dark: Object.freeze({
+      mode: "dark",
+      contrast: "standard",
+      surfaceHue: 240,
+      surfaceTint: 0.5,
+      surfaceMaxChroma: 8.5,
+      monochrome: false,
+      accentSeed: Object.freeze({ l: 0.52227, c: 0.23546, h: 264.72 }),
+    }),
+  });
 
 export function usePlayerTheme(intent: Ref<PlayerThemeIntent>) {
   // The standalone Player owns root tokens so body-portaled Reka surfaces share the theme.
