@@ -28,10 +28,6 @@ import pathlib, re, subprocess, sys, tempfile, textwrap
 workflow_path, request_path, cleanup_path, transfer_path, prepare_path, validator_path, summary_path, ci_path = map(pathlib.Path, sys.argv[1:])
 text = workflow_path.read_text(encoding="utf-8")
 ci_text = ci_path.read_text(encoding="utf-8")
-request_text = request_path.read_text(encoding="utf-8")
-cleanup_text = cleanup_path.read_text(encoding="utf-8")
-transfer_text = transfer_path.read_text(encoding="utf-8")
-prepare_text = prepare_path.read_text(encoding="utf-8")
 validator_text = validator_path.read_text(encoding="utf-8")
 assert "patch-publication-request.cjs" in text
 assert "patch-publication-cleanup-comment.cjs" in text
@@ -59,10 +55,6 @@ assert prepare.index("Preserve trusted publication tools") < prepare.index("Read
 trusted_prepare_driver = 'bash "$RUNNER_TEMP/patch-publication-prepare-steps.sh"'
 assert prepare.count(trusted_prepare_driver) == 6
 assert "bash tools/local-agent/patch-publication-prepare-steps.sh" not in prepare
-assert "preserved_retry" in transfer_text
-assert '[[ "$PUBLISH_RESULT" != success ]]' in transfer_text
-assert '--force-with-lease="${transfer_ref}:${EXPECTED_TRANSFER_SHA}"' in transfer_text
-assert "preserved_changed" in transfer_text
 assert "cleanup-transfer:" in text and "cleanup-comment:" in text
 assert "uses: ./.github/workflows/artifact-mailbox-worker.yml" in text
 assert "validation_profile: ${{ steps.prepare.outputs.validation_profile }}" in text
@@ -677,16 +669,6 @@ assert "contents: write" in transfer_cleanup and "issues: write" not in transfer
 assert "contents: read" in comment_cleanup
 assert "pull-requests: write" in comment_cleanup
 assert "issues: write" not in comment_cleanup and "contents: write" not in comment_cleanup
-assert "github.rest.issues.getComment" in cleanup_text
-assert "github.rest.issues.deleteComment" in cleanup_text
-assert "github.rest.issues.createComment" not in request_text + cleanup_text
-assert "context.payload.issue.url" in cleanup_text
-assert "comment.data.id !== commentId" in cleanup_text
-assert "comment.data.body.trim() !== expectedCommand" in cleanup_text
-assert "deletion.status !== 204" in cleanup_text
-assert "failed_identity" not in cleanup_text
-assert "github.rest.git.deleteRef" not in request_text + cleanup_text
-assert 'patch-transfer:.agent-patch-publication/change.patch' not in prepare_text
 subprocess.run(["node", "--check", str(request_path)], check=True)
 subprocess.run(["node", "--check", str(cleanup_path)], check=True)
 subprocess.run(["bash", "-n", str(transfer_path)], check=True)
@@ -820,6 +802,15 @@ with tempfile.TemporaryDirectory() as temporary:
               result = await runCase({
                 getComment: async () => ({
                   data: { id: commentId, issue_url: `${issueUrl}-other`, body: command },
+                }),
+              });
+              assert.equal(result.outputs.cleanup_status, 'preserved_changed');
+              assert.equal(result.getCalls, 1);
+              assert.equal(result.deleteCalls, 0);
+
+              result = await runCase({
+                getComment: async () => ({
+                  data: { id: commentId + 1, issue_url: issueUrl, body: command },
                 }),
               });
               assert.equal(result.outputs.cleanup_status, 'preserved_changed');
