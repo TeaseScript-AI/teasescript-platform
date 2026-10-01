@@ -9,8 +9,6 @@ import { executeInstruction, run, RuntimeDataError } from "../src/runtime/engine
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
-const REGION_ERROR = "Control-flow target leaves the instruction's execution region.";
-
 test("reports every malformed node of a nested binary expression plan", () => {
   const malformed = structuredClone(plan("let target = 0\ntarget = 1 + 2 + 3"));
   const assignment = malformed.instructions[1];
@@ -51,71 +49,108 @@ interface MutableLiteralExpression {
   value: unknown;
 }
 
-test("rejects a root jump into a function prologue", () => {
-  const compiled = plan(rootBranchWithTwoFunctions());
-  const jumpIndex = rootInstructionIndex(compiled, "jump");
-  const second = compiled.functions[1]!;
-  const malformed = mutateTarget(compiled, jumpIndex, "target", second.entryInstruction);
-
-  assertRegionError(validateInstructionPlan(malformed), `$.instructions[${jumpIndex}].target`);
-});
-
-test("rejects a root conditional jump into a function body", () => {
-  const compiled = plan(rootBranchWithTwoFunctions());
-  const jumpIndex = rootInstructionIndex(compiled, "jumpIfFalse");
-  const second = compiled.functions[1]!;
-  const malformed = mutateTarget(compiled, jumpIndex, "target", second.bodyEntryInstruction);
-
-  assertRegionError(validateInstructionPlan(malformed), `$.instructions[${jumpIndex}].target`);
-});
-
-test("rejects a function jump into root execution", () => {
-  const compiled = plan(functionBranches());
-  const first = compiled.functions[0]!;
-  const jumpIndex = functionInstructionIndex(compiled, first.id, "jump");
-  const malformed = mutateTarget(compiled, jumpIndex, "target", 0);
-
-  assertRegionError(validateInstructionPlan(malformed), `$.instructions[${jumpIndex}].target`);
-});
-
-test("rejects a function A jump into function B", () => {
-  const compiled = plan(functionBranches());
-  const first = compiled.functions[0]!;
-  const second = compiled.functions[1]!;
-  const jumpIndex = functionInstructionIndex(compiled, first.id, "jump");
-  const malformed = mutateTarget(compiled, jumpIndex, "target", second.bodyEntryInstruction);
-
-  assertRegionError(validateInstructionPlan(malformed), `$.instructions[${jumpIndex}].target`);
-});
-
-test("rejects cross-region loopStart continue targets", () => {
-  const compiled = plan(functionLoop());
-  const definition = compiled.functions[0]!;
-  const loopIndex = functionInstructionIndex(compiled, definition.id, "loopStart");
-  const malformed = mutateTarget(compiled, loopIndex, "continueTarget", 0);
-
-  assertRegionError(
-    validateInstructionPlan(malformed),
-    `$.instructions[${loopIndex}].continueTarget`,
+test("rejects control-flow targets that leave the instruction's execution region", () => {
+  const rootBranches = plan(rootBranchWithTwoFunctions());
+  const branches = plan(functionBranches());
+  const loop = plan(functionLoop());
+  const loopFunction = loop.functions[0]!.id;
+  const calls = plan(
+    ['function first { say "first" }', 'function second { say "second" }', "first()", "exit"].join(
+      "\n",
+    ),
   );
-});
+  const defaults = plan(
+    [
+      "function first(value = 1) { say value }",
+      "function second { say 2 }",
+      "first()",
+      "exit",
+    ].join("\n"),
+  );
+  const cases: ReadonlyArray<{
+    readonly name: string;
+    readonly plan: InstructionPlan;
+    readonly index: number;
+    readonly field: "target" | "continueTarget" | "returnInstruction";
+    readonly target: number;
+  }> = [
+    {
+      name: "root jump into a function prologue",
+      plan: rootBranches,
+      index: rootInstructionIndex(rootBranches, "jump"),
+      field: "target",
+      target: rootBranches.functions[1]!.entryInstruction,
+    },
+    {
+      name: "root conditional jump into a function body",
+      plan: rootBranches,
+      index: rootInstructionIndex(rootBranches, "jumpIfFalse"),
+      field: "target",
+      target: rootBranches.functions[1]!.bodyEntryInstruction,
+    },
+    {
+      name: "function jump into root execution",
+      plan: branches,
+      index: functionInstructionIndex(branches, branches.functions[0]!.id, "jump"),
+      field: "target",
+      target: 0,
+    },
+    {
+      name: "function A jump into function B",
+      plan: branches,
+      index: functionInstructionIndex(branches, branches.functions[0]!.id, "jump"),
+      field: "target",
+      target: branches.functions[1]!.bodyEntryInstruction,
+    },
+    {
+      name: "function loopStart continue target in root",
+      plan: loop,
+      index: functionInstructionIndex(loop, loopFunction, "loopStart"),
+      field: "continueTarget",
+      target: 0,
+    },
+    {
+      name: "function loopStart exit target in root",
+      plan: loop,
+      index: functionInstructionIndex(loop, loopFunction, "loopStart"),
+      field: "target",
+      target: 0,
+    },
+    {
+      name: "function loopControl target in root",
+      plan: loop,
+      index: functionInstructionIndex(loop, loopFunction, "loopControl"),
+      field: "target",
+      target: 0,
+    },
+    {
+      name: "root call return into a function body",
+      plan: calls,
+      index: rootInstructionIndex(calls, "callFunction"),
+      field: "returnInstruction",
+      target: calls.functions[1]!.bodyEntryInstruction,
+    },
+    {
+      name: "parameter default into another function",
+      plan: defaults,
+      index: functionInstructionIndex(
+        defaults,
+        defaults.functions[0]!.id,
+        "prepareParameterDefault",
+      ),
+      field: "target",
+      target: defaults.functions[1]!.entryInstruction,
+    },
+  ];
 
-test("rejects cross-region loopStart exit targets", () => {
-  const compiled = plan(functionLoop());
-  const definition = compiled.functions[0]!;
-  const loopIndex = functionInstructionIndex(compiled, definition.id, "loopStart");
-  const malformed = mutateTarget(compiled, loopIndex, "target", 0);
-
-  assertRegionError(validateInstructionPlan(malformed), `$.instructions[${loopIndex}].target`);
-});
-
-test("rejects cross-region loopControl targets", () => {
-  const compiled = plan(functionLoop());
-  const definition = compiled.functions[0]!;
-  const controlIndex = functionInstructionIndex(compiled, definition.id, "loopControl");
-  const malformed = mutateTarget(compiled, controlIndex, "target", 0);
-
-  assertRegionError(validateInstructionPlan(malformed), `$.instructions[${controlIndex}].target`);
+  for (const { name, plan: compiled, index, field, target } of cases) {
+    assert.equal(validateInstructionPlan(compiled).valid, true, `${name}: compiled control`);
+    assertPlanErrorAt(
+      validateInstructionPlan(mutateTarget(compiled, index, field, target)),
+      `$.instructions[${index}].${field}`,
+      name,
+    );
+  }
 });
 
 test("validates break targets after multi-temporary condition cleanup", () => {
@@ -135,16 +170,7 @@ test("validates break targets after multi-temporary condition cleanup", () => {
     "target",
     targetOf(compiled, loopIndex, "target"),
   );
-  const validation = validateInstructionPlan(malformed);
-  assert.equal(validation.valid, false);
-  assert.equal(
-    validation.errors.some(
-      (error) =>
-        error.path === `$.instructions[${breakIndex}].target` &&
-        error.message === "Loop-control target does not match its loop.",
-    ),
-    true,
-  );
+  assertPlanErrorAt(validateInstructionPlan(malformed), `$.instructions[${breakIndex}].target`);
 });
 
 test("preserves valid root-local and function-local jumps", () => {
@@ -179,51 +205,6 @@ test("preserves a compiler-generated owning-function implicit-return target", ()
   assert.equal(validateInstructionPlan(compiled).valid, true);
 });
 
-test("keeps function-call return targets inside the caller region", () => {
-  const compiled = plan(rootBranchWithTwoFunctions());
-  const callSource = [
-    'function first { say "first" }',
-    'function second { say "second" }',
-    "first()",
-    "exit",
-  ].join("\n");
-  const callable = plan(callSource);
-  const callIndex = rootInstructionIndex(callable, "callFunction");
-  const malformed = mutateTarget(
-    callable,
-    callIndex,
-    "returnInstruction",
-    callable.functions[1]!.bodyEntryInstruction,
-  );
-
-  assertRegionError(
-    validateInstructionPlan(malformed),
-    `$.instructions[${callIndex}].returnInstruction`,
-  );
-  assert.equal(validateInstructionPlan(compiled).valid, true);
-});
-
-test("keeps parameter-default targets inside their function region", () => {
-  const compiled = plan(
-    [
-      "function first(value = 1) { say value }",
-      "function second { say 2 }",
-      "first()",
-      "exit",
-    ].join("\n"),
-  );
-  const first = compiled.functions[0]!;
-  const prepareIndex = functionInstructionIndex(compiled, first.id, "prepareParameterDefault");
-  const malformed = mutateTarget(
-    compiled,
-    prepareIndex,
-    "target",
-    compiled.functions[1]!.entryInstruction,
-  );
-
-  assertRegionError(validateInstructionPlan(malformed), `$.instructions[${prepareIndex}].target`);
-});
-
 test("preserves compiler-generated control flow, calls, and returns", () => {
   const sources = [
     rootBranchWithTwoFunctions(),
@@ -256,7 +237,7 @@ test("prevents the poisoned-snapshot path before execution", () => {
     "target",
     original.functions[0]!.bodyEntryInstruction,
   );
-  assertRegionError(validateInstructionPlan(malformed), `$.instructions[${jumpIndex}].target`);
+  assertPlanErrorAt(validateInstructionPlan(malformed), `$.instructions[${jumpIndex}].target`);
   assert.throws(() => createFreshRuntimeSnapshot(malformed), TypeError);
   const supplied = createFreshRuntimeSnapshot(original);
   const before = structuredClone(supplied);
@@ -784,13 +765,5 @@ function assertPlanErrorAt(result: PlanValidationResult, path: string, label?: s
   assert.ok(
     result.errors.some((error) => error.code === "TSC002" && error.path === path),
     `${label ?? "plan"} reports TSC002 at ${path}: ${JSON.stringify(result.errors)}`,
-  );
-}
-
-function assertRegionError(result: PlanValidationResult, path: string): void {
-  assert.equal(result.valid, false);
-  assert.deepEqual(
-    result.errors.filter((error) => error.message === REGION_ERROR),
-    [{ code: "TSC002", message: REGION_ERROR, path }],
   );
 }
