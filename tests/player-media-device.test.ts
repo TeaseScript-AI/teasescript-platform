@@ -306,6 +306,18 @@ test("an element error after loading stalls progress instead of inventing playba
   assert.equal(player.loads.length, 1);
 });
 
+test("a media error clears the refused-playback state it can no longer retry", async () => {
+  const player = harness('let music = playAudio async "music.mp3"\nwait 30');
+  player.start();
+  const [element] = player.elements;
+  element!.refuse = true;
+  element!.metadata(10);
+  await settle();
+  assert.equal(player.blocked, true);
+  element!.emit("error");
+  assert.equal(player.blocked, false);
+});
+
 test("a retry never plays audio the script has paused", async () => {
   const player = harness(
     'let music = playAudio async "music.mp3"\nwait 0.1\nmusic.pause()\nwait 10',

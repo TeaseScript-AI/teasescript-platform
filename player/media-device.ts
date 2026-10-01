@@ -168,6 +168,9 @@ export class MediaDevice {
       // Before loading this is the canonical failure; after it no protocol exists, so progress simply stalls.
       entry.failed = true;
       element.pause();
+      // A failed element cannot be retried, so it no longer counts as refused playback.
+      entry.blocked = false;
+      this.#updateBlocked();
       if (!entry.projection.loaded)
         this.#reportLoad(entry, { kind: "failed", message: LOAD_FAILED_MESSAGE });
     });

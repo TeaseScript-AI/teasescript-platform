@@ -78,7 +78,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     (active) => (active ? sampling.resume() : sampling.pause()),
     { immediate: true },
   );
-  tryOnScopeDispose(() => device.reset());
+  tryOnScopeDispose(() => {
+    loads.clear();
+    device.reset();
+  });
 
   // Starts or restores a session; its scene time continues from the persisted observation, so a
   // gap while no Player ran is not consumed.
