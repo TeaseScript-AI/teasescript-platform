@@ -69,7 +69,7 @@ exceptions; the plugin's lexical analysis does not prove cross-file type safety 
 CVA variants), and `PlayerActionButton.vue`. `eslint.design.config.mjs` owns the executable scope and
 contracts. The command and `npm run test:lint:design` are required by `npm run check`, including CI.
 Selected rules are errors; warnings fail the command. This scope does not cover the editor or every
-maintained Player component, and does not select Phase 2C as the production Player.
+shared Player source file; the lint configuration remains the executable scope owner.
 
 Use semantic theme utilities and complete class names. Shared components own their appearance;
 choose their variants instead of adding padding, color, shape or typography overrides at call sites.

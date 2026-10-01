@@ -112,8 +112,8 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
   readable scaling/zoom behavior, minimum control sizing, contrast thresholds, and browser/platform responsibility.
 - Player UI preference persistence: which panel/tool/theme/media-fit/text-display preferences survive reload or session
   changes and whether restoration is automatic, explicit, or both.
-- Exact tuned thresholds/measurements for constraint-driven side-region dock/overlay decisions, compact geometry,
-  fixed tool width, stage height, readable conversation bounds, and composer growth.
+- Exact tuned thresholds/measurements for constraint-driven dock/drawer decisions, compact geometry, per-tool width
+  presets, stage/conversation allocation, readable conversation bounds, and composer growth.
 - Temporary Player status/notification presentation for saved, paused, error, assignment, and similar platform state.
 - Exact developer-facing declaration for a Player-generated Standard tool that combines a title, ordered static
   content, and typed controls such as toggles, numeric/text fields, and selects, including value binding, updates,

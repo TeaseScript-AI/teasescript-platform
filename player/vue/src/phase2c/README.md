@@ -1,25 +1,27 @@
-# Phase 2C Player preview
+# Phase 2C Player
 
-This is the Greenfield preview, not the production Player entry point.
-Keep experimental fixtures separate from the components that own settled behavior.
+This is the Player implementation. Its current `/phase2c/` inspection route is separate from the legacy `/player/`
+reference; final demo boot and route integration belong to #448. Keep development fixtures separate from the components
+that own Player presentation.
 
 ## Design lint
 
-The required [Player design lint](../../../../docs/LINTING.md#player-design-lint) checks this preview,
-shared UI definitions and the story-button wrapper. `components.json` selects the preview theme for
-utility resolution; it does not change the maintained Player theme or select a production UI.
+The required [Player design lint](../../../../docs/LINTING.md#player-design-lint) checks these Player components,
+shared UI definitions and the story-button wrapper. `components.json` selects `phase2c/style.css` for utility
+resolution; the component and theme boundaries remain defined by the Player implementation and its maintained UI
+specification.
 
 ## Responsibility boundaries
 
 - `PlayerApp.vue` composes the product Player from props and slots. It installs `usePlayerKeyboardFocus.ts`
   once, including for body-portaled controls; the [focus contract](../../../../docs/ui/PLAYER-UI.md#input-growth-focus-and-keyboard-behavior)
   defines input modality and composer/Send focus.
-- `usePlayerSession.ts` hosts the canonical adapter session for presentation: starting or restoring a session resets
-  interaction-local state, and a new session remounts the transcript. Vue derives everything else from that session.
-- `DevelopmentPreview.vue` supplies fixtures, Visual Lab, Layout Debug, runtime scenarios and the fixture right rail.
-  `main.ts` loads it as a separate chunk on the development server, or in a build only with the `?dev` URL opt-in; the
-  default build mounts `PlayerApp.vue` with runtime-owned content only. Integration code supplies sessions through
-  `usePlayerSession.ts`, not through fixtures.
+- `usePlayerSession.ts` hosts the canonical adapter session for presentation: starting a session remounts the
+  transcript and resets interaction-local state. Vue derives everything else from that session.
+- `DevelopmentPreview.vue` opens one runtime choice scenario and supplies Visual Lab's Theme Lab, Stage media picker,
+  and timer/background-button presentation fixtures, plus Layout Debug. `main.ts` loads it as a separate chunk on the
+  development server, or in a build only with the `?dev` URL opt-in. The default build mounts `PlayerApp.vue` with
+  runtime-owned content only; integration supplies sessions through `usePlayerSession.ts`.
 - `PlayerToolsShell.vue` receives its tool list from the root and owns tool selection, pinning, order, resizing, retained content and dock/drawer focus.
   Its tool slot supplies content; its default slot supplies the Player. Closing a visited panel retains its content.
   Tool bodies scroll vertically; the outer carousel handles overflow between panels. Shared shadcn-vue/Reka
@@ -52,20 +54,13 @@ utility resolution; it does not change the maintained Player theme or select a p
   for syntax and completion semantics.
 - `usePlayerTheme.ts` applies/restores document variables; `player/theme` calculates colours and Theme Lab edits intent.
   See [theme evaluation](../../../README.md#experimental-dynamic-theme-evaluation).
-- `StageRightRail.vue` owns the rail, `TimerRegion.vue` its timer collection and `TimerDisplay.vue` individual timers.
-  `BackgroundControlsFixture.vue` shows action, toggle, and disabled button states using the shared action material.
-  Its action buttons have no scripted handler, so clicking them adds no text or local feedback. Timer allocation and the
-  toggle remain experimental, without runtime wiring.
+- `StageRightRail.vue` owns the stage-overlay rail, `TimerRegion.vue` its timer collection and `TimerDisplay.vue`
+  individual timers. The development preview supplies fixture timers and `BackgroundControlsFixture.vue` samples of
+  action, local-toggle and disabled states. The sample actions have no scripted handlers or canonical history; runtime
+  timer/background-control wiring remains separate work.
 
-The development preview opens with choices. Visual Lab restarts that scenario, selects text/number/choice interaction,
-loads an authored avatar sample (one image, one unavailable image with its letter fallback), loads a pacing sample
-whose skippable and unskippable gates wait without the scene clock, or loads a spacing sample with grouped guide bubbles, a player reply, another speaker, and active choices. Separate messages and
-choices have a 12px gap; grouped bubbles remain 3px apart.
-The `?spacing-sample` preview URL opens that sample directly with a 45/55 stage/conversation split so all messages and
-choices can be compared together. Transcript fixtures detach the runtime session and use local preview replies. Composer dimensions and
-height caps remain visual trials.
-The development preview `?feedback-demo=composer` URL opens the sample directly. Submit text that does not exactly match a
-choice to see the standard red validation notice beside the composer input.
+The development preview opens with one runtime choice scenario. Composer dimensions and height caps remain visual
+trials.
 
 Story-button ink and transcript readability follow the current Player treatment in
 [Player UI](../../../../docs/ui/PLAYER-UI.md); Visual Lab does not offer contrast-method switches.

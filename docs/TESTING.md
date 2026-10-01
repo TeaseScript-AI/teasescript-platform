@@ -136,9 +136,10 @@ browser behavior, including layout, focus, input, scrolling, overlays, and acces
 DevTools smoke route has no browser-automation package dependency. For the Phase 2C development preview, run
 `npm run test:player:phase2c-browser -- <preview-url>` against a running `npm run dev:player:phase2c` server; it requires
 `playwright-cli` on `PATH` and an available Chromium browser. Both run outside `npm run check` and are not a final
-cross-browser or production-host E2E suite. Each Phase 2C group uses a fresh browser context; history checks explicitly
-load their fixtures through Visual Lab instead of depending on the opening demo. On failure the runner reports a
-retained scratch directory with a screenshot and Playwright trace for the failing group; delete it after diagnosis.
+cross-browser or production-host E2E suite. Retained Phase 2C groups use fresh browser contexts. Checks that depended
+on removed development fixtures are replaced by the `demo.tease` end-to-end path after runtime integration. On failure
+the runner reports a retained scratch directory with a screenshot and Playwright trace for the failing group; delete
+it after diagnosis.
 `npm test` separately checks that the default Phase 2C build does not statically load development preview content.
 
 After every visible UI change, the implementer must also open the affected flow with interactive browser tooling
@@ -532,19 +533,16 @@ through public validation/restore paths.
 
 ## Local browser smoke and future host E2E gate
 
-The local Standard Player POC has a reproducible Chromium smoke route after `npm run build`:
+The playground and legacy Vue reference have a reproducible Chromium smoke route after `npm run build`:
 
 ```shell
 node tools/player-browser-smoke.mjs
 ```
 
-It drives the real playground and runtime-backed Vue Player at representative desktop
-and 390 × 844 CSS-pixel viewports. The Vue runtime scenario covers interactions, pacing, focus, transcript chronology,
-checkpoint/restore, and responsive behavior. The development-only route
-`/player/?fixture=transcript-stress` retains 2,000 entries while asserting bounded rendered DOM, variable-height
-measurement, stable keyed prepend/append anchoring, pinned and scroll-away resize behavior, and
-follow-latest/scroll-away return-to-latest behavior. An unavailable Chromium executable is an explicit skip; an
-available browser must pass these checks.
+This covers the technical playground and legacy `/player/` reference pending #448. It does not establish Phase 2C
+Player presentation coverage; use the [Player browser verification route](#player-browser-and-visual-verification) for
+that implementation. An unavailable Chromium executable is an explicit skip; an available browser must pass the
+configured smoke checks.
 
 Production browser E2E coverage becomes required after the cross-origin host shell and player exist. It should then
 include:

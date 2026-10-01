@@ -1,47 +1,46 @@
-# Player POC implementation
+# Player implementation
 
-This directory contains the current browser presentation implementation for the Standard Player POC. The canonical
-observable UI contract is [`docs/ui/PLAYER-UI.md`](../docs/ui/PLAYER-UI.md). Do not infer new product requirements
-from HTML structure, CSS selectors, TypeScript helpers, demo data, or other implementation details here.
+The Player implementation is under `vue/src/phase2c/`. The canonical observable UI contract is
+[`docs/ui/PLAYER-UI.md`](../docs/ui/PLAYER-UI.md). Do not infer new product requirements from HTML structure, CSS
+selectors, TypeScript helpers, demo data, or other implementation details here.
 
 General cross-surface UI engineering/design guidance lives in
 [`docs/ui/UI-DESIGN-AND-ENGINEERING.md`](../docs/ui/UI-DESIGN-AND-ENGINEERING.md); narrow tasks use its focused reading
 route. Accepted runtime, interaction, security, and custom-view semantics remain in their controlling specifications and
 ADRs.
 
-For local inspection, `npm run playground` serves the maintained Vue Player at `/player/` through the existing development
-server. This development route is not a public Player/host protocol and owns the development-only Visual Lab, Layout
-Debug, and Runtime Session tools.
+For local inspection, run `npm run dev:player:phase2c -- --host 0.0.0.0` and open `/phase2c/`. The development server
+loads the development preview; the default build mounts the Player without preview fixtures unless `?dev` is selected.
+This is a local inspection route, not the production cross-origin Player/host protocol.
+
+The old Vue Player outside `vue/src/phase2c/`, served at `/player/`, is a legacy reference pending #448.
 
 ## Implementation seams
 
-- `runtime-adapter.ts` contains the framework-independent runtime-to-Player translation and shared action helpers used
-  by the Vue Player and playground workspace controller.
-- `vue/` contains the maintained Vue Player and its Vite build.
-- `model.ts` contains presentation-only POC data shapes.
-- `presentation.ts` contains framework-independent presentation ordering, formatting, matching, and colour helpers.
-- `panel-state.ts` and `tool-columns.ts` keep the current local UI state transitions separate from rendering.
-- Vue development diagnostics live under `vue/src/devtools/`.
-- `styles/` separates reset, layout/theme ownership, components, effects, and responsive composition through cascade
-  layers.
-- `demo-session.ts` and `demo-media/` are presentation fixtures, not runtime/package APIs.
+- `runtime-adapter.ts` contains framework-independent runtime-to-Player translation and shared action helpers used by
+  the Player and playground workspace controller.
+- `vue/src/phase2c/` contains the Player composition, components, shared layout/theme CSS, and development preview;
+  its [component map](vue/src/phase2c/README.md) records responsibility boundaries.
+- `model.ts` and `presentation.ts` contain shared presentation shapes and ordering, formatting, matching, and colour
+  helpers.
+- `theme/` owns theme generation and authored action-button material.
 
 Browser-native CSS remains responsible for layout and responsive composition. Vue 3 owns rendering and local
-presentation state in the common reference; Tailwind CSS 4 is integrated through Vite as a foundation layer,
+presentation state in the Player; Tailwind CSS 4 is integrated through Vite as a foundation layer,
 repository-owned shadcn-vue source/config provides local component seams, Reka is the selected accessible
 primitive/positioning/focus layer when interactive components need it, and TanStack Vue Virtual is the single
 transcript windowing/scroll-anchoring owner. The engine and shared presentation contracts remain framework-independent
 as required by ADR 0020.
 
-`styles/layout.css` currently owns the concrete light-theme palette values and semantic token mapping used by the
-source. Those values are also maintained as observable Player contract in `docs/ui/PLAYER-UI.md`; component CSS should
-consume semantic roles rather than raw application-palette primitives. Speaker, package-accent, media, and technical
-mask colours remain separate presentation data.
+`vue/src/phase2c/style.css` owns shared Player geometry and semantic token mapping; `theme/` generates the currently
+applied light/dark roles. Components consume semantic roles. Speaker, authored control, media, and technical mask
+colours retain separate ownership. The maintained presentation contract and intended theme boundaries live in
+[`docs/ui/PLAYER-UI.md`](../docs/ui/PLAYER-UI.md); provisional generator values do not settle final palette policy.
 
 ## Experimental dynamic theme evaluation
 
-Run `npm run dev:player:phase2c -- --host 0.0.0.0` and open `/phase2c/`, then Visual Lab → Theme Lab.
-See the [preview component map](vue/src/phase2c/README.md) for composition and interaction responsibilities.
+The Player currently renders generated light/dark theme roles. In the development preview, Visual Lab → Theme Lab
+edits the session-local theme intent. See the [component map](vue/src/phase2c/README.md).
 
 `theme/palette.ts` resolves Material-based light/dark roles; `theme/material.ts` isolates MCU's tonal palettes;
 `theme/color.ts` isolates Color.js conversion, gamut mapping and contrast. `usePlayerTheme.ts` applies the generated
@@ -57,16 +56,19 @@ content. Exact provisional tones and effects live in the implementation. Diagnos
 they do not certify translucent overlays or perceptual state distinction.
 
 The generator consumes resolved platform intent. User/package precedence, authored-theme registration and
-missing-variant fallback remain outside this preview; see the
+missing-variant fallback are not yet implemented; see the
 [theme boundary](../docs/ui/PLAYER-UI.md#theme-and-customization-boundary). It does not convert authored custom themes
-or scene/speaker colours. Production adoption, persistence and final palette/contrast policy remain Owner decisions.
+or scene/speaker colours. Final generator adoption, preference persistence and palette/contrast policy remain Owner
+decisions.
 
 MCU (Apache-2.0) and Color.js (MIT) replace local colour-science implementations while leaving product role choices
 explicit. Versions are pinned in the package manifest/lockfile. They add browser bundle size and dependency-update
 review, without a network service or new data access. MCU 0.4.0's extensionless internal ESM imports require the Vite
 bundler here: direct Node ESM execution of the adapter fails. No package patch or custom loader is installed.
 
-The Phase 2C components follow the shadcn-vue structure and use four further pinned browser packages. `@lucide/vue`
+## Component dependencies
+
+The Player components follow the shadcn-vue structure and use four further pinned browser packages. `@lucide/vue`
 supplies the shared SVG icons; the alternative is locally maintained SVGs. `@vueuse/core` supplies lifecycle-aware
 events, observers, media queries, storage and textarea autosizing; the alternative is local browser-API composables.
 `class-variance-authority` expresses the shared component variants that the design lint checks; the alternative is
@@ -75,7 +77,7 @@ components; the alternative is maintained CSS keyframes. They add browser code/C
 a network service, data access or host boundary. On upgrades, verify icons, focus/autosizing, variants and overlay
 animations.
 
-## Demo-only behavior
+## Tool panel ordering
 
 The Phase 2C Tool Panel strip uses SortableJS for mouse/touch reordering and edge autoscroll. The binding restores
 Sortable's DOM move before updating Vue's authoritative order; pinning and widths remain independent. Reka menu
@@ -84,38 +86,13 @@ and drop has weaker touch support, and Pointer Events would require custom sorti
 SortableJS adds browser code and dependency maintenance, but no network service, runtime data access or host boundary.
 Its type package is development-only; versions live in the manifest/lockfile. Verify sorting and scrolling on updates.
 
-The local playground server may select a supported image from `player/demo-media/` when the Player opens. Visual Lab,
-Layout Debug, Runtime Session, their fixture content, local tuning/inspection controls, and the demo-media endpoint are
-development-only presentation tools, not Standard Library, runtime, package, or host APIs.
+## Development-only behavior
 
-Runtime Session restores canonical runtime/checkpoint state plus same-session runtime-event history; Visual Lab settings,
-tool columns, and fixture-only right-rail/composer history remain local.
+`DevelopmentPreview.vue` opens one runtime choice scenario and supplies Visual Lab's Owner A/B presentation settings:
+Theme Lab, the Stage media picker, and timer/background-button fixtures. Visual Lab and Layout Debug are development
+surfaces, not Standard Player product tools or runtime/package/host APIs. Fixture timer/control values remain local;
+the opening scenario still uses the shared canonical runtime adapter.
 
-`/player/?fixture=transcript-stress` is a development-only browser-verification route. It retains 2,000 transcript
-entries in presentation data while TanStack-owned windowing bounds rendered DOM, and exercises variable-height
-measurement, keyed prepend/append anchoring, resize behavior, scroll-away preservation, and return-to-latest follow.
-It is not a runtime, package, or host API.
-
-Browser automation can open `/player/?layout-debug=1` to start the Vue Layout Debug overlay enabled; the ordinary
-`/player/` route starts with diagnostics disabled.
-
-The default Vue development route compiles real `player-controls.tease` source and drives `say`, canonical
-`playerTranscript` output, foreground interactions, chat pacing, time observation, checkpoint, and restore through
-`runtime-adapter.ts`. Engine operations remain authoritative for action identity, validation, normalization, choice
-matching, transcript derivation, settlement, and continuation. The checkpoint's companion transcript-event history is
-presentation-owned and retained only for same-session development restore; it does not alter the canonical runtime
-checkpoint or define the deferred production persistence/host payload.
-
-Demo media, timers, rendered right-rail controls, tool content, and the transcript stress route remain explicitly
-fixture-backed. Accepted Standard interaction behavior remains controlled by ADR 0018 and the runtime contracts; the
-maintained placement/presentation boundary is described in `docs/ui/PLAYER-UI.md`.
-
-Current Visual Lab fixtures deliberately exercise several presentation questions without promoting their fixture state
-to runtime or product semantics:
-
-- the timer starts with the authored-label example; generic labels, mystery presentation, hidden presentation, and
-  multiple-timer pressure remain selectable;
-- the pacing-gate fixture reveals a short message sequence over time, with Player-background/empty-composer Space
-  skipping available only in the skippable variant;
-- script-initiated control changes add a neutral event to transcript history and compare toast, local highlight, and
-  toast-plus-highlight as transient feedback. The final transient treatment remains a playtest decision.
+Run retained presentation checks through `npm run test:player:phase2c-browser -- <preview-url>`; see
+[`docs/TESTING.md`](../docs/TESTING.md#player-browser-and-visual-verification) for prerequisites. Coverage that depended
+on removed development fixtures is replaced by the `demo.tease` end-to-end path after runtime integration.

@@ -1,15 +1,15 @@
 # Standard Player UI specification
 
 - **Status:** Provisional maintained normative specification for the intended Standard Player presentation.
-- **Purpose:** Define what the Standard Player should present when completed: observable layout, responsive behavior,
-  interaction presentation, visual states, and the approved light-theme baseline, independently of the current
-  HTML/CSS/JavaScript implementation.
+- **Purpose:** Define the intended Standard Player presentation built on the Phase 2C Player: observable layout,
+  responsive behavior, interaction presentation, and visual states, independently of the current HTML/CSS/JavaScript
+  implementation.
 - **Authority:** Accepted ADRs and accepted specifications remain higher authority for the exact architecture, runtime,
   language, isolation, and persistence scope they decide. The temporary [Upstream contract integration](#upstream-contract-integration)
   section below records Owner-decided Player behavior that still needs synchronization into those upstream contracts.
-- **Implementation state:** The production-oriented Player presentation POC exists under `player/`; the implemented
-  interaction/pacing slice is runtime-backed in the Vue reference, while production host integration, unsupported
-  capability families, and several visual measurements remain incomplete or deliberate tuning baselines.
+- **Implementation state:** The Player is the Phase 2C implementation under `player/vue/src/phase2c/`. Its implemented
+  transcript, foreground interaction, and pacing paths use the shared runtime adapter. Runtime timer/media integration,
+  production host integration, and several provisional presentation values remain incomplete.
 
 This document may lead the implementation. A missing POC feature or an implementation bug does not redefine the desired
 Player contract. Conversely, behavior found only in current HTML/CSS/JavaScript is evidence rather than contract until it
@@ -52,13 +52,13 @@ ADR 0001 fixes the responsive PWA direction; exact offline, storage, cache, and 
 ## Current maturity boundary
 
 Current implementation status belongs in [`PHASE-STATUS.md`](../../PHASE-STATUS.md);
-[`player/README.md`](../../player/README.md) records POC seams and demo-only behavior. This specification may lead the
-implementation. The current Vue reference connects implemented Standard interactions, transcript output, pacing, time
-observation, checkpoint, and restore to canonical runtime state. Production host wiring remains incomplete; `Visual
-Lab`, `Layout Debug`, placeholder content, demo media, timers, and right-rail controls are development fixtures rather
-than Standard Player product content. The default Phase 2C build excludes them; its development preview loads on the
-development server or through the explicit `?dev` URL opt-in. Values explicitly marked for retesting remain provisional
-tuning baselines.
+[`player/README.md`](../../player/README.md) records implementation seams and development-only behavior. This
+specification may lead the implementation. The Phase 2C Player presents supported transcript, foreground interaction,
+and pacing behavior from canonical runtime state. Its development preview opens one runtime choice scenario and adds
+Visual Lab, Layout Debug, the Stage media picker, Theme Lab, and timer/background-button presentation fixtures. The
+default build mounts the Player without that preview; the development server or explicit `?dev` URL opt-in loads it.
+Runtime timer/media wiring and production host integration remain separate work. Values marked for retesting remain
+provisional tuning baselines.
 
 A current implementation detail is not a durable requirement merely because it exists. Owner-confirmed behavior here is
 the target unless higher authority conflicts with it.
@@ -76,8 +76,8 @@ controlling source adopts it; remove this section and its router references when
 - **Timer presentation metadata:** the maintained timer section below defines visible/mystery/hidden presentation and
   optional labeling. Authored timers carry visible/mystery/hidden display and optional labels (see
   [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time)); `player/runtime-adapter.ts` derives presented timers and
-  observation deadlines from runtime state. No maintained Player view renders runtime timers yet, and stable
-  generic-label numbering across timer lifecycle changes remains unsynchronized.
+  observation deadlines from runtime state. The Phase 2C Player does not render runtime timers yet; its development
+  preview uses timer fixtures. Stable generic-label numbering across timer lifecycle changes remains unsynchronized.
 
 ## Surface hierarchy
 
@@ -87,17 +87,13 @@ rules, but changing a backing surface must not implicitly delete unrelated contr
 
 ```text
 +-----------------------------------------------------------------------+
-| title / Player chrome                                                 |
-+----------------------+--------------------------------+---------------+
-|                      |                                | timer +       |
-| tools                | stage                          | background    |
-|                      |                                | controls /    |
-|                      +--------------------------------+ status        |
-|                      | transcript                     |               |
-|                      +--------------------------------+               |
-|                      | foreground controls when any   |               |
-|                      | composer                       |               |
-+----------------------+--------------------------------+---------------+
+| tools menu / panels | Stage                                            |
+|                     | top title / global controls overlay             |
+|                     | timer / background-control overlay at the right |
+|                     +-------------------------------------------------+
+|                     | transcript, including foreground controls       |
+|                     | composer overlay at the bottom                  |
++---------------------+-------------------------------------------------+
 ```
 
 `stage` is the structural name. Standard image/video/media presentation is one kind of stage content; later canvas,
@@ -106,28 +102,30 @@ surrounding Player geometry to change.
 
 ### Visual hierarchy
 
-- **Canvas surface:** transcript and composer-area background.
-- **Chrome surface:** title bar and opaque docked side regions.
-- **Component surface:** tool columns, input/control surfaces, timer, and ordinary Standard controls.
-- **Stage surface:** visually separate content region; media may fill the Player's usable rectangle up to its edges.
+- **Canvas surface:** the continuous Player background, including stage and conversation ambience.
+- **Chrome surface:** the tools menu and opaque tools drawer.
+- **Component surface:** tool panels, composer, and ordinary Standard controls.
+- **Media-control surface:** translucent title/global controls and timer material over the stage.
+- **Stage surface:** the structural primary-content region; media may use its available rectangle.
 - **Content identity:** speaker, authored control, theme, and media-derived colours remain distinct from unrelated
   application chrome roles.
 
-The title, tools, right rail, stage, transcript, foreground controls, and composer are structural peers. The normal
-vertical middle-column order is stage, transcript, foreground controls when active, then composer. The stage and
-transcript remain present in the Standard Player even when empty.
+The tools framework sits beside the primary stage/conversation composition on comfortable layouts and becomes an
+overlay drawer when constrained. Title/global controls and the timer/background rail overlay the stage. Foreground
+controls belong to the transcript scroll surface; the composer overlays its bottom. The stage and transcript remain
+present even when empty.
 
 ## Player conditions
 
-The Player combines independent conditions rather than choosing a phone, tablet, or desktop mode. The Phase 2C preview
-exposes them on the Player shell; [`usePlayerConditions.ts`](../../player/vue/src/phase2c/usePlayerConditions.ts)
-owns their shared browser signals. Add a new responsive rule to the condition that describes its actual constraint;
-do not infer device identity or add a separate width breakpoint for touch or rounded corners.
+The Player combines independent conditions rather than choosing a phone, tablet, or desktop mode. The Phase 2C Player
+exposes them on its shell; [`usePlayerConditions.ts`](../../player/vue/src/phase2c/usePlayerConditions.ts) owns their
+shared browser signals. Add a responsive rule to the condition that describes its actual constraint; do not infer device
+identity or add a separate width breakpoint for touch or rounded corners.
 
 | Condition | Signal | Current behavior |
 | --- | --- | --- |
 | Horizontal space | Usable visual-viewport width compared with the greater of `900px` and the complete minimum dock composition, including the chosen menu width | The tool owner switches between a dock and an overlay drawer. A narrow desktop window can use the drawer; wider menu labels may require more than `900px`. |
-| Vertical space | Usable visual-viewport height; `<= 700px` selects compact presentation | The timer follows this shared compact condition. The separate titlebar comparison may use the same signal; fullscreen behavior remains a separate decision. |
+| Vertical space | Usable visual-viewport height; `<= 700px` is the current compact baseline | Timers use compact presentation when either the horizontal or vertical condition is constrained. Fullscreen is a separate state. |
 | Touch and hover | `any-pointer: coarse` and `any-hover: hover`, independently; each pointer event still identifies the pointer actually used | Touch taps, mouse hover, and keyboard focus retain their distinct menu behavior, including on hybrid devices. Primary coarse input without hover identifies the fallback corner-clearance case. |
 | Raised software keyboard | Composer input focused while the visual viewport shrinks by more than the current `120px` detection allowance on a touch-capable browser | The composer uses the normal reading width above the keyboard; Send keeps the existing focus behavior. |
 | Composer edge clearance | Browser safe-area inset; when it reports zero, a touch-first viewport spans the screen width and the composer is at the bottom near its sides | Only the composer receives up to `32px` side clearance. A narrow browser window on a touchscreen laptop keeps the normal composer width. This does not change the transcript, tool layout, or bottom spacing. |
@@ -162,15 +160,15 @@ content. Major numerical values below are POC reconstruction/tuning baselines un
 | --- | --- |
 | Player viewport | full viewport width and currently usable visual-viewport height; `100dvh` is the CSS baseline and the outer document is not the normal scroll owner |
 | Player chrome outer spacing | fixed `8px` for top controls, menu edges and right rail; independent of root font size |
-| Player chrome control size | compact controls use `calc(1rem + 16px)`; top-row controls grow together when the title's text line plus 8px needs more height |
-| title bar row | derived control size plus 8px outer padding above and below; do not separately hardcode the height |
+| Player chrome control size | compact controls use `calc(1rem + 16px)`; top controls share a size derived from icon/text size and padding |
+| top-control overlay | shared control size plus `8px` outer spacing above and below; it does not reserve a separate title row in the stage/conversation split |
 | content below top controls | one 16px visible gap from the controls' lower edge to the first tool-menu control or timer; no separate outer timer-halo space is reserved |
-| stage/conversation allocation | user-adjustable split; see [Stage and media presentation](#stage-and-media-presentation). The existing `/player/` reference uses `55dvh` normal and `64dvh` overlay-chrome stage-row baselines |
-| tool column | fixed `300px` default; individual columns do not shrink to hide their content |
+| stage/conversation allocation | user-adjustable split, currently starting at 60% stage / 40% conversation; the starting ratio and panel minimums remain provisional. See [Stage and media presentation](#stage-and-media-presentation) |
+| tool panel | independent width presets, currently `14rem`, `18rem`, `24rem`, and `32rem`, with `18rem` as the default; available dock/drawer space may cap the rendered width. These values remain provisional |
 | readable conversation maximum | current `880px` reading width inside a `896px` outer column; keep a cap for ultrawide readability and visually retest, including browser zoom |
-| protected conversation minimum | current `380px` baseline; remeasure after tool-width/right-rail simplification |
+| protected primary content | the current fit calculation protects a `380px` conversation baseline plus surrounding chrome/gutters; remeasure with the complete dock composition |
 | normal conversation side gap | current `8px` on each side of the reading width; the narrow composer has separate edge clearance |
-| narrow tools drawer | grows from one complete `300px` tool plus strip gutters when more columns are open, capped at `90vw`; the remaining outside area dismisses the drawer |
+| constrained tools drawer | shows the menu or one active tool; the active tool's selected width is capped at `90%` of usable viewport width. Its saved wide-layout width is preserved |
 
 Keeping the stage roughly square when practical is a design goal, not a hard 1:1 layout invariant. The goal exists so
 both portrait and landscape media remain useful. Side panels should not casually crush the stage into a narrow strip,
@@ -180,19 +178,18 @@ set of layout constraints.
 Current dynamic safe-area insets reported by the browser affect Player chrome and controls. The bottom composer has the
 limited touch-first side-clearance fallback described above because browsers can report zero beside rounded corners;
 viewport width comparisons tolerate small browser rounding and scrollbar differences. The whole Player viewport has a
-scoped touch-first top minimum in fullscreen when a browser reports zero despite drawing through a camera cutout.
-Do not infer a device model or apply that fallback to a narrow desktop window, including one with touch input. A maximized
-touch-first rectangular screen can still qualify because the web platform cannot report its corner shape. Stage/media remains allowed
-to occupy its complete visual region rather than receiving identical safe-area padding by default. During the POC,
-`Visual Lab` may
-temporarily override stage
-heights, fixed tool width, conversation bounds, and composer line/viewport caps; Reset removes those development-only
-overrides. The shared `2px` focus outline is the accepted Player baseline rather than a tuning control.
+scoped touch-first top minimum in fullscreen when a browser reports zero despite drawing through a camera cutout. Do not
+infer a device model or apply that fallback to a narrow desktop window, including one with touch input. A maximized
+touch-first rectangular screen can still qualify because the web platform cannot report its corner shape. Stage/media
+remains allowed to occupy its complete visual region rather than receiving identical safe-area padding by default.
+Development-only Visual Lab controls live in the Phase 2C development preview. Their fixture content and provisional
+presentation values do not redefine this specification. The shared `2px` focus outline remains the accepted Player
+baseline rather than a tuning control.
 
 Scrolling ownership:
 
 - transcript: vertical conversation scrolling;
-- tool-column strip: native horizontal scrolling, with carousel navigation only while content actually overflows;
+- tool-panel strip: horizontal scrolling in the dock when the open panels exceed its allocation;
 - each tool body: its own vertical scrolling;
 - right background-control/status stack: vertical scrolling when needed;
 - composer input: internal vertical scrolling after its constraint-based growth limit;
@@ -214,23 +211,22 @@ size therefore scales ordinary text, headings, and authored size spans together 
 | --- | --- |
 | UI font stack | `"Inter Tight", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif` |
 | title | `14px`, weight `500` |
-| speaker name | `9px`, weight `700`, line-height `1.2` |
+| speaker name | current bubble attribution uses `0.75rem`, weight `500`; this remains a visual baseline |
 | speaker message and loose prose | shared reading size `1rem` (16px at the current browser base), line-height `1em + 8px`; authored speaker font may replace the UI font |
 | player-authored message | shared reading size, following the same transcript rhythm |
 | normal composer text / Send | composer uses the shared reading size; Send remains `14px`, weight `700` |
 | narrow composer text | composer keeps the shared reading size; Send remains `14px` |
-| normal timer | `18px`, weight `700`, tabular numerals |
-| compact timer | current smaller timer values remain a visual-tuning baseline rather than a final `<= 480px` contract |
+| timer time/value | tabular numerals; size follows timer diameter, with smaller text for visible times of one hour or more. Mystery typography does not expose duration; exact type proportions remain provisional |
 | Player action button label | `0.875rem` (14px at the current browser base), weight `600`, line-height `1.3` |
-| global icon control | `34px` square, `6px` corner radius |
-| tool column | fixed width from the maintained global-geometry baseline; column radius `8px` |
-| tool-column header | minimum `44px` high; selector/add/close controls are `30px` high; add/close are `30px` square; controls use `6px` radius |
+| global controls | shared derived top-control size and rounding; the title is a truncating pill and display controls share a translucent group |
+| tool panel | per-tool width presets capped by available allocation; see the global geometry table |
+| tool-panel header | shared chrome spacing/control sizes; a title, reordering grip, Panel settings, and pin control. Panel settings uses a compact trigger when its full label does not fit |
 | integrated composer shell (POC tuning candidate) | `42px` high for one line at the current reading size, `24px` corner radius, `2px` vertical padding, and `8px`/`4px` start/end padding |
 | composer input / Send (POC tuning candidate) | `36px` minimum height at the current reading size; input has `6px` vertical padding and grows upward for longer text; Send keeps its full button bounds while its fill is inset `2px` vertically |
-| right background control | current maximum `156px` wide and `6px` radius remain the POC baseline; final sizing is visually reviewable |
+| right background control | wraps inside the current stage-rail allocation and uses the shared Player action-button material; exact rail sizing remains provisional |
 
-Tool-column header and body use one continuous `surface-component` background. The header separator does not introduce
-a second chrome-colour band; selector/add/close controls provide the header's raised hierarchy.
+Tool-panel header and body share one component surface. The header separator and shared controls provide hierarchy
+without adding a second chrome-colour band.
 
 The shared UI guide adopts the current `1px` border, moderate-radius, visible-focus, and interaction-state
 vocabulary as a shared starting baseline. Player-specific widths, heights, and spacing remain owned here rather than
@@ -238,41 +234,37 @@ becoming universal dimensions.
 
 ## Title and global panel controls
 
-The normal title bar uses the chrome surface and spans the Player width. It contains:
+The Player's top controls overlay the stage without reserving a separate title row. The surrounding bar is transparent;
+the title pill and individual control groups use shared translucent media-control material. The title truncates when
+space is constrained. Display controls include the light/dark toggle and the rightmost fullscreen control. Tools access
+appears in the top controls when the sidebar is hidden and in the tools framework while it is open.
 
-- the left tools toggle;
-- the Player title area;
-- a fullscreen control in the completed Standard Player;
-- room for other genuinely global Player controls as the product grows.
+The embedding caller supplies the title. The final host/package title-source contract remains open.
 
-The current POC title text is `TeaseScript Player`; the future title source remains a host/package contract question.
-
-In normal composition the title bar is a fixed Standard Player part. In overlay chrome mode, including fullscreen, the
-same chrome may auto-hide and return on relevant pointer/touch/focus activity rather than creating a second title
-implementation. Required tools access, fullscreen exit, and other critical global controls must remain discoverable and
-reachable. Auto-hide timing and exact reveal zones are implementation/tuning details unless later promoted.
+The same top-control overlay serves normal and fullscreen presentation. Auto-hide and reveal on relevant pointer,
+touch, or focus activity are not yet implemented in Phase 2C. If used, tools access, fullscreen exit, and other critical
+global controls must remain discoverable and reachable. Timing and exact reveal zones remain implementation/tuning
+details.
 
 ## Left tools area
 
-The Standard Player owns the tools framework: panel open/close state, column chrome, selector, `+`, close control,
-horizontal carousel behavior, responsive drawer behavior, and surrounding layout. A tool owns only its body content.
+The Standard Player owns the tools menu, sidebar visibility, temporary/pinned panels, shared headers, panel order and
+width, horizontal dock overflow, and responsive drawer composition. A tool owns its body content.
 
 ### Panel state
 
-The left tools area has `auto`, explicit `open`, and explicit `closed` presentation states. `auto` opens/reserves on wide
-layouts and closes on narrow layouts under the current baseline. The tools toggle changes `auto` to the opposite of the
-current responsive default and thereafter toggles explicit state. Rotation/resizing preserves the user's closed intent;
-an open tool region remains open across composition changes only while it owns the active interaction/focus context, so
-a newly overlaid drawer does not unexpectedly cover the Player while the user is working elsewhere.
+The tools sidebar starts visible on comfortable layouts and closed when constrained. The toggle changes its visibility.
+Resizing does not spontaneously reopen a closed sidebar. An open dock becoming a drawer stays open only when tools own
+the active focus, drag, or resize context; otherwise it closes to avoid covering the Player unexpectedly.
 
-On wide layouts an open tools area reserves horizontal space. On narrow layouts it becomes an opaque chrome-surface
-drawer rather than shrinking the main Player content.
+An open dock reserves horizontal space. A constrained layout presents an opaque tools drawer over the Player without
+shrinking the stage or conversation.
 
 ### Narrow drawer behavior
 
 The narrow drawer:
 
-- uses the current drawer-width baseline from the geometry table;
+- shows the tools menu or one active tool, using the constrained-width baseline in the geometry table;
 - remains opaque so stage/transcript content does not bleed through;
 - leaves a visible outside area covered by a scrim;
 - intercepts outside pointer input so activation does not pass through to underlying Player controls;
@@ -280,34 +272,23 @@ The narrow drawer:
 - closes on `Escape` and returns keyboard focus to the tools toggle;
 - remains below critical/global chrome in z-order.
 
-### Tool columns and lifecycle
+### Tool panels and lifecycle
 
-This column model describes the existing `/player/` reference. The Phase 2C preview instead opens tools from the menu as
-temporary or pinned panels with one retained instance per tool; see its
-[component README](../../player/vue/src/phase2c/README.md).
+Tools open from the Player-owned menu. The dock can contain pinned panels and one temporary panel. Opening another
+temporary tool replaces the previous temporary panel in its visual position. Pinning retains a panel when other tools
+are selected; unpinning makes it the temporary panel. Pin state and visual order are independent.
 
-The tools framework always retains at least one presentation column internally. Each column has one Player-owned header
-row containing:
+Each tool has at most one panel instance. No tool is selected automatically merely because the menu exists, and closing
+all panels leaves the menu available. Selecting an open tool can close its panel; double-clicking its menu entry toggles
+pinning. The header provides the title, Panel settings, pin control, and reordering grip. Panel settings offers width
+presets and Move left/right; pointer/touch dragging provides another way to reorder panels.
 
-1. a tool selector;
-2. a local `+` control that appends another column to the right;
-3. a close control.
+A tool mounts when first visited and retains its body state and scroll position until the Player unmounts. Closing,
+replacing, hiding, reordering, or moving it between dock and drawer does not reset that retained body. This does not
+define reload persistence or alter canonical runtime/tool data.
 
-If no tool has ever been selected, the single initial column automatically selects the first available tool. Pressing
-`+` appends a column and selects the first tool in the fixed selector order that is not already open in another column.
-If every available tool is already open at least once, `+` still appends a deliberately blank/unselected column; that
-blank state is the natural signal that no unused tool remains. The user may explicitly select a duplicate tool through
-the selector when duplicates are useful.
-
-With multiple columns, close removes only that presentation column. Closing the only remaining column collapses the
-entire tools area instead of deleting the internal final column; reopening restores that column and its selected tool.
-Closing a column or switching its selected tool does not erase underlying settings or canonical tool data. Temporary
-presentation-instance state such as scroll position, an unsubmitted field draft, or arbitrary DOM state need not survive
-a tool switch in the POC unless the tool explicitly stores it in its own supported state.
-
-Tool selectors may list platform tools and developer-provided/custom tools. Tool display name is required by the
-selector; an icon may be supplied where supported. A tool cannot replace or restyle the shared header/selector/`+`/close
-chrome directly. A separate permitted theme API may affect global Player styling, but that is not tool ownership.
+The menu may expose platform and custom tools. Display names identify tools; icons may accompany them. A tool cannot
+replace or restyle the shared menu/header controls. Global theme APIs remain separate from tool-body ownership.
 
 ### Standard tool controls
 
@@ -332,21 +313,18 @@ is tracked in [OPEN-DECISIONS.md](../OPEN-DECISIONS.md).
 
 ### Tool body isolation and scrolling
 
-The selected tool body occupies the remaining column height and owns vertical overflow. The tool name is not repeated as
-another body heading merely because it already appears in the selector. A fully custom tool body is confined to its
-assigned surface; Shadow DOM is the preferred isolation candidate when custom CSS/DOM is allowed so package styles do
-not escape into Player chrome.
+The active tool body occupies the remaining panel height and owns vertical overflow. Its title is not repeated as a body
+heading merely because it already appears in the shared header. A fully custom tool body is confined to its assigned
+surface; Shadow DOM remains the preferred isolation candidate when custom CSS/DOM is allowed. Custom-body isolation
+is not yet implemented in Phase 2C.
 
-The complete strip is a horizontal browser-native carousel/scroll surface. Prefer native horizontal scrolling and CSS
-Scroll Snap rather than bespoke swipe physics. In effectively single-tool narrow layouts, proximity snapping near a tool
-boundary should settle a nearly completed swipe cleanly onto the adjacent tool. When the viewport can usefully display
-more than one tool or partial views of multiple tools, do not force page-like snapping; positions such as two tools each
-roughly 75% visible remain valid. Previous/next arrow controls may advance by logical tool columns without creating a
-second carousel state model. Arrows and scroll markers appear only when the strip actually overflows; strip gutters are
-part of its visible allocation and must not create a false overflow state at the final column. Native horizontal
-wheel/trackpad, touch-pan, and keyboard scrolling remain the fallback where enhanced CSS carousel controls are not
-supported. A gesture that became a pan/scroll must not accidentally fire a child button click, and navigation markers
-must never activate the tool/control whose position they reveal.
+Open docked panels share one horizontal scroll surface when they exceed the dock allocation; each body keeps its own
+vertical scrolling. Native pointer/trackpad/touch and keyboard scrolling remain available. Proximity snapping helps
+settle panel boundaries without creating a second carousel state model. Snapping is suspended while reordering or
+resizing. In the constrained drawer, the menu and active-tool views replace multi-panel horizontal browsing.
+
+A gesture that becomes a pan/scroll must not also activate a child control. Panel movement has a keyboard/non-drag
+alternative through Panel settings.
 
 Compact explanatory copy for Visual Lab-style options may be disclosed without permanently consuming every row. The
 complete title/copy area reveals its information on pointer hover and toggles it on tap/click; a visible information
@@ -356,13 +334,13 @@ not a requirement that every custom tool use the same explanatory-copy component
 
 ### Wide sizing direction
 
-Tool growth must protect useful primary content, but a hard 1:1 stage boundary is not the layout algorithm. Use the full
-constraint set: stage usefulness, readable conversation width, right-side reservation, available height, and the fixed
-POC tool width. The maintained conversation bounds and stage-shape goal remain visual/tuning inputs rather than hidden
-additional responsive modes.
+The dock protects useful primary content before allocating additional panel space. The menu width and minimum complete
+dock composition determine whether the tools framework uses a dock or drawer. Extra open panels scroll inside the dock;
+individual panels are capped by available allocation while retaining their chosen width preset. Conversation bounds and
+the stage-shape goal remain provisional visual inputs, not additional device modes.
 
-`Visual Lab`, `Layout Debug`, and `Runtime Session` remain development fixtures, not Standard Player tools. A real Debugger is a future platform
-tool described in [DEBUGGER.md](../DEBUGGER.md).
+`Visual Lab` and `Layout Debug` are Phase 2C development-preview tools, not Standard Player product tools. A real
+platform Debugger remains future work described in [DEBUGGER.md](../DEBUGGER.md).
 
 ## Stage and media presentation
 
@@ -370,9 +348,13 @@ The stage is a dedicated structural surface above the transcript in the main con
 when no media is active. An empty stage shows its normal background/ambience rather than collapsing and expanding the
 transcript into that space.
 
-The Greenfield preview currently starts with a 60% stage / 40% conversation split. A keyboard-accessible horizontal handle
-lets the user adjust that division; only the compact centered grip starts a drag, not the full-width boundary. The composer grows inside the conversation allocation. The chosen split survives
-viewport resizing for the current mount. The starting ratio and 20% minimum per panel remain visual trials.
+The Player currently starts with a 60% stage / 40% conversation split. A keyboard-accessible horizontal handle lets the
+user adjust the division; only its compact centered grip starts a drag. The composer grows inside the conversation
+allocation. The chosen split survives viewport resizing for the current mount. The starting ratio and 20% minimum per
+panel remain provisional visual baselines.
+
+Runtime-authored media, media-derived ambience, video, explicit transitions, and custom stage rendering are not yet
+implemented in Phase 2C; the development preview supplies image fixtures and theme-derived ambience.
 
 Standard image/video-like presentation:
 
@@ -383,7 +365,7 @@ Standard image/video-like presentation:
 - shares one continuous background field with the transcript beneath it. The media-derived ambience covers the stage,
   continues across the stage/transcript boundary, and fades out before the foreground lane and composer, so the scene
   colour reads as one surface rather than meeting a hard seam. The field stays inside the middle content column, so
-  tool columns, the right rail, and Player chrome keep their own application surfaces. Stage and transcript remain
+  tool panels and Player controls retain their own materials. Stage and transcript remain
   separate regions with separate content and scrolling ownership;
 - clips the vignette to the stage and keeps decorative effects pointer-neutral;
 - uses a direct replacement as the Standard default transition; accepted explicit media transitions such as V30
@@ -405,7 +387,7 @@ has been destroyed. Exact retention and LLM context policy remain upstream work.
 The transcript:
 
 - uses the canvas surface, continuous with the stage background above it;
-- owns a stable horizontal center shared by the stage media and composer: all remain centered in the Player viewport until a docked left tool consumes the reading column's free margin, then move together to stay visible; changing media or resizing the stage vertically does not move or narrow the reading column, while media fits within the remaining space around that center;
+- owns a stable horizontal center shared by the stage media and composer: all remain centered in the Player viewport until the docked tools framework consumes the reading column's free margin, then move together to stay visible; changing media or resizing the stage vertically does not move or narrow the reading column, while media fits within the remaining space around that center;
 - keeps the maintained ultrawide readability cap pending visual retuning;
 - places one viewport of empty scroll space before the messages, so even a single message can be scrolled; at the latest
   position, messages and active controls sit above the composer and new messages grow the conversation upward;
@@ -481,6 +463,7 @@ momentary action is shown as a player-authored transcript action; toggle/select 
 when shown, uses a neutral session-event presentation rather than implying spoken prose. Programmatic control updates
 are not user activations and use the same neutral event family with their script origin identified. Visual markers must
 not become canonical punctuation; their exact appearance remains tuning work.
+Long-lived control activation/update history is not yet implemented in Phase 2C.
 
 The POC's letter-glyph avatars use twelve fixed colour families, with a light fill and dark letter in light mode and the
 inverse in dark mode. On a speaker's first bubble, the Player assigns the colour used by the fewest messages so far;
@@ -521,6 +504,9 @@ growth may reduce the visible transcript viewport but must never push or resize 
 and the composer may never grow larger than the conversation area available beneath the stage. The composer row must
 contain the complete measured input and Send control; a growing textarea may not paint beyond that row or beneath the
 visual-viewport/keyboard boundary.
+
+The following fullscreen keyboard-geometry and allocation behavior is intended but not yet fully implemented in Phase
+2C.
 
 The Player re-evaluates during and after keyboard/orientation transitions. Normal browser presentation uses the visual
 viewport that the browser already resizes. Fullscreen uses feature-detected software-keyboard geometry when available,
@@ -581,6 +567,9 @@ This is distinct from a skippable `say` pacing gate: when no foreground interact
 click/tap on Player background/unused space or Space with the empty focused composer may settle that gate under ADR 0018.
 Actual interactive controls always take precedence and must not also fire the viewport-wide pacing shortcut.
 
+Constraint-driven dropdown presentation under ADR 0018 is not yet implemented in Phase 2C; it currently uses wrapping
+buttons.
+
 A `showButton` is the one-option presentation of the same Standard foreground-control vocabulary. Controls share
 the transcript's reading width, grow with their labels, and allow long labels to wrap. The group centers its
 buttons and wraps onto additional rows rather than scrolling horizontally. It adds no inline padding beyond the
@@ -612,9 +601,9 @@ invent a competing inline-error semantic merely because the current POC lacks th
 
 ## Right timer and background rail
 
-The right region is a Standard Player presentation area for visible timers and long-lived background controls/status. It
-is not another tool column. Timer/control presence, rail backing surface, and layout reservation are separate concerns.
-Changing the backing mode must not swap component instances or change their normal appearance.
+The Player's right timer/background rail overlays the stage and is not another tool panel. Timer and background-control
+content have separate overflow owners. Presentation remains separate from runtime action/lifecycle ownership; fixture
+content in the development preview does not create a second runtime model.
 
 ### Timer presentation
 
@@ -639,17 +628,15 @@ Normal timer text is:
 - below one hour: `m:ss`;
 - one hour or more: `h:mm:ss`.
 
-The determinate ring represents elapsed fraction. In the current Player presentation, the existing horizontal and
-vertical space conditions select compact timer presentation together: if either reports insufficient room, the timer is
-`96px`. When both have enough room, the timer is `192px` from `2240px` of usable viewport width and `128px` below that.
-The right presentation column is `156px` in compact and ordinary
-layouts and `192px` with the large timer. Timer diameter and column width are separate layout values; neither restores
-the removed outside halo shadow or its `12px` reservation. These values are visual presentation rules, independent of
-authored timer labels and of the number of timers or controls. In overlay chrome mode the timer may use the current
-compact title-height presentation; exact compact size remains visually tuneable. Multiple compact timers use one
-horizontally scrollable row rather than consuming additional Action height. A timer disappears when its underlying
-visible timer action/lifecycle has completed and no longer requires presentation. The package/theme accent treatment
-remains the POC visual baseline.
+The determinate ring represents elapsed fraction. Current horizontal and vertical space conditions select the compact
+timer together: either constrained condition uses `96px`. With comfortable space, usable viewport widths from `2240px`
+use `192px`; other comfortable widths use `128px`. The rail is `156px` wide with compact/ordinary timers and `192px`
+with the large timer. Diameter and rail width are separate provisional layout values; no outside halo shadow or its
+former reservation is restored.
+
+Timers currently form a vertical collection in the stage overlay, including compact presentation. Their typography and
+material remain visual baselines. A timer disappears when its visible action/lifecycle no longer requires presentation;
+runtime lifecycle wiring is separate from the development fixtures.
 
 When exactly one visible timer exists, its timer pane never presents a scrollbar; the complete ring fits and stays fixed
 while the background-control/status list scrolls independently beneath it. When multiple visible timers exist, the timer
@@ -659,6 +646,9 @@ hard-clipped; with one fixed timer the upper action fade carries scrolling contr
 region.
 
 ### Background controls and status
+
+Runtime-backed long-lived controls/status are not yet implemented in Phase 2C; the development preview demonstrates
+only local button/toggle/disabled presentation.
 
 The Standard rail presentation supports:
 
@@ -681,8 +671,7 @@ disabled/inert presentation. Programmatic updates visibly change the same contro
 script-initiated rather than user input. They add a neutral session event to transcript history rather than a speaker
 message. Momentary buttons do not generate explanatory text on their own; narrative responses come from the script.
 Feedback for programmatic updates is transient and must not add permanent text to the control or change rail geometry.
-The Visual Lab currently compares toast, local highlight, and toast-plus-highlight; this fixture intentionally does not
-select the final transient paint treatment. Explicit removal is a separate lifecycle operation.
+Explicit removal is a separate lifecycle operation.
 
 Ordering is stable and deterministic at the presentation level:
 
@@ -701,13 +690,12 @@ Recorded background-control activation history follows the transcript provenance
 With one timer, the control/status group targets the Player viewport centre while all items fit, yielding downward only
 when the fixed timer would otherwise collide with it. A software keyboard reduces the usable space for this calculation.
 Once the control/status list no longer fits, only that list scrolls and the timer remains fixed. With multiple timers,
-the timer pane owns timer overflow and the action pane continues to own action overflow; compact timers use a horizontal
-row so timer count does not unnecessarily consume vertical Action space.
+the timer pane owns vertical timer overflow and the action pane continues to own action overflow.
 
 ### Right background mode
 
-The Phase 2C preview currently overlays its timer/action rail within the Stage; it provides neither this backing toggle
-nor a reserved right-hand track, and its rail dimensions remain provisional.
+The Phase 2C Player currently places its timer/background rail over the stage, without a backing toggle or separately
+reserved right-hand track. Rail dimensions remain provisional.
 
 The right presentation has two independent state axes: **control geometry** (`rail` or stage overlay) and **backing
 paint** (docked surface or transparent overlay). The compact toggle changes only the backing preference; it never moves
@@ -774,6 +762,8 @@ browser scroll behavior with matching scrollbar colors.
 
 ## Z-order, overlays, and click-through
 
+The complete blocking/custom-overlay and critical-global-control hierarchy is not yet implemented in Phase 2C.
+
 The maintained relative layering direction is:
 
 1. ordinary Standard Player content;
@@ -833,7 +823,8 @@ default. A package may select a default but cannot force it against a user overr
 Custom themes are standalone, light, or dark. A developer may provide one or a light/dark pair; both variants are not
 required. A standalone theme is used as authored. A mode-qualified theme uses the variant matching the effective
 light/dark mode; a missing variant falls back to the corresponding platform theme. Do not synthesize or auto-convert it.
-Exact author-facing schema/names remain upstream API work.
+Exact author-facing schema/names remain upstream API work. Theme registration, user/package precedence, and
+missing-variant fallback are not yet implemented in Phase 2C.
 
 Standard theming covers defined semantic colour roles, not arbitrary CSS. Geometry, fonts, spacing, DOM/chrome
 ownership, and other Standard Player properties remain Player-owned unless a later explicit capability says otherwise.
@@ -886,8 +877,7 @@ An equivalent implementation may freely change:
 - internal presentation data types and demo bootstrap seams;
 - exact local measurement code used to obtain intrinsic tool-strip preference, provided the observable sizing contract
   is preserved;
-- fixture tool names/content, placeholder messages, demo timer values, local media-discovery endpoint, and demo action
-  labels.
+- development fixture tool names/content, placeholder messages, timer values, sample media, and action labels.
 
 Do not preserve an implementation technique merely because the current POC uses it. Preserve the observable behavior,
 authoritative upstream semantics, and explicitly recorded geometry/state/theme contracts instead.

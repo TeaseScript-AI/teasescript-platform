@@ -117,8 +117,8 @@ ownership.
 Use the Radix twelve-step role-band model as the default palette structure for TeaseScript UI surfaces without taking a
 Radix dependency: steps 1–2 are backgrounds, 3–5 component states, 6–8 borders, 9–10 solid accent, and 11–12 text.
 The values are project-owned; do not copy Radix palette values mechanically and do not invent intermediate values solely
-to fill all twelve positions. A maintained surface specification owns its exact approved palette. For the current
-Player palette, see [`PLAYER-UI.md`](PLAYER-UI.md).
+to fill all twelve positions. A maintained surface specification owns its approved palette and theme boundaries. For
+the Player's intended contract and provisional theme treatment, see [`PLAYER-UI.md`](PLAYER-UI.md).
 
 ### Shared control baseline
 
