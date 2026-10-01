@@ -19,6 +19,7 @@ import {
   avatarScenario,
   buttonScenario,
   interactionScenario,
+  pacingScenario,
   runtimeScenario,
   spacingScenario,
 } from "./runtimeScenario";
@@ -218,6 +219,9 @@ function prependTranscript() {
           >
           <Button class="min-w-0" variant="outline" @click="startRuntime(avatarScenario)"
             >Start avatar sample</Button
+          >
+          <Button class="min-w-0" variant="outline" @click="startRuntime(pacingScenario)"
+            >Start pacing sample</Button
           >
           <template v-if="runtimeSession">
             <Button

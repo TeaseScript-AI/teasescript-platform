@@ -67,3 +67,13 @@ say as keeper "The lighthouse is lit.", instant
 say as guide "Then we can find our way back.", instant
 exit
 `;
+
+// Without the scene clock, paced messages wait until skipped; the last gate cannot be skipped.
+export const pacingScenario = `
+speaker guide { title: "Coastal Guide" }
+say as guide skippable "The tide is turning.", 10
+say as guide skippable "Listen to the waves.", 10
+say as guide unskippable "Wait for the light.", 10
+say as guide "The light is on.", 2
+exit
+`;

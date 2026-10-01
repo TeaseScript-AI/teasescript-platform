@@ -14,6 +14,8 @@ const props = withDefaults(
     accessibleName?: string;
     inputMode?: "text" | "decimal";
     feedback?: string;
+    /** A skippable pacing gate is waiting; Space in the empty input settles it. */
+    pacing?: boolean;
   }>(),
   {
     disabled: false,
@@ -22,12 +24,14 @@ const props = withDefaults(
     accessibleName: "Response",
     inputMode: "text",
     feedback: "",
+    pacing: false,
   },
 );
 
 const emit = defineEmits<{
   "update:modelValue": [value: string];
   submit: [source: "input" | "button"];
+  skip: [];
 }>();
 
 const textarea = ref<InstanceType<typeof Textarea> | null>(null);
@@ -56,6 +60,16 @@ function handleKeydown(event: KeyboardEvent): void {
     event.preventDefault();
     emit("submit", "input");
     return;
+  }
+  const element = input.value;
+  if (
+    event.key === " " &&
+    props.pacing &&
+    props.modelValue === "" &&
+    element?.selectionStart === element?.selectionEnd
+  ) {
+    event.preventDefault();
+    emit("skip");
   }
 }
 

@@ -44,7 +44,8 @@ utility resolution; it does not change the maintained Player theme or select a p
   height to the end inset. Message rendering and contrast are split into `TranscriptMessage.vue`, `TranscriptMarkup.vue`,
   `TranscriptLine.vue`, `transcriptPresentation.ts` and `messageContrast.ts`.
 - `RuntimeInteraction.vue` composes `Composer.vue` and `ForegroundControls.vue` and alone submits runtime actions,
-  with shared submission guards and focus handling. The composer uses shadcn Textarea/Button and VueUse autosizing;
+  including [pacing skips](../../../../docs/ui/PLAYER-UI.md#composer-and-foreground-interactions), with shared
+  submission guards and focus handling. The composer uses shadcn Textarea/Button and VueUse autosizing;
   foreground controls use `components/PlayerActionButton.vue` in the transcript's trailing slot.
   `playerRuntimeForeground` maps authored backgrounds from live/restored actions; `player/theme/story-choice.ts`
   supplies theme/authored button material. See [ADR 0018](../../../../docs/decisions/0018-first-standard-library-poc-contract.md)
@@ -57,7 +58,8 @@ utility resolution; it does not change the maintained Player theme or select a p
   toggle remain experimental, without runtime wiring.
 
 The development preview opens with choices. Visual Lab restarts that scenario, selects text/number/choice interaction,
-loads an authored avatar sample (one image, one unavailable image with its letter fallback), or loads a spacing sample with grouped guide bubbles, a player reply, another speaker, and active choices. Separate messages and
+loads an authored avatar sample (one image, one unavailable image with its letter fallback), loads a pacing sample
+whose skippable and unskippable gates wait without the scene clock, or loads a spacing sample with grouped guide bubbles, a player reply, another speaker, and active choices. Separate messages and
 choices have a 12px gap; grouped bubbles remain 3px apart.
 The `?spacing-sample` preview URL opens that sample directly with a 45/55 stage/conversation split so all messages and
 choices can be compared together. Transcript fixtures detach the runtime session and use local preview replies. Composer dimensions and

@@ -6,7 +6,9 @@ import {
   activePlayerRuntimeInteraction,
   activatePlayerRuntimeButton,
   playerRuntimeForeground,
+  playerRuntimePacingGate,
   selectPlayerRuntimeChoice,
+  skipPlayerRuntimePacing,
   submitPlayerRuntimeComposer,
   type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
@@ -37,6 +39,10 @@ const foreground = computed(() => (props.session ? playerRuntimeForeground(props
 const actionId = computed(() =>
   props.session ? activePlayerRuntimeInteraction(props.session.snapshot)?.actionId : undefined,
 );
+const pacing = computed(() => {
+  const gate = props.session ? playerRuntimePacingGate(props.session) : null;
+  return gate?.skippable ? gate : null;
+});
 const root = ref<HTMLElement | null>(null);
 const transcript = ref<InstanceType<typeof Transcript> | null>(null);
 const composer = ref<InstanceType<typeof Composer> | null>(null);
@@ -149,6 +155,48 @@ async function complete(
     suppressComposerRefocus = false;
   }
 }
+// The skippable pacing gate settles from Space in the empty composer or a stationary primary
+// click/tap on unused Player space. Controls, message text and selections keep their own behavior.
+const pacingSkipExclusions = [
+  "button, a, input, textarea, select, label, summary, [contenteditable]",
+  "[role=button], [role=link], [role=menuitem], [role=separator], [role=slider], [role=tab]",
+  "[data-slot=bubble], .prose, .session-event, [data-slot=scroll-area-scrollbar]",
+].join(", ");
+function textSelected() {
+  const selection = document.getSelection();
+  return !!selection && !selection.isCollapsed;
+}
+function skipPacing(refocusInput: boolean) {
+  if (!pacing.value || textSelected()) return;
+  void complete(skipPlayerRuntimePacing, refocusInput);
+}
+let pacingGesture: { pointerId: number; x: number; y: number; target: Element } | null = null;
+useEventListener(document, "pointerdown", (event: PointerEvent) => {
+  const composition = root.value?.closest(".player-composition");
+  pacingGesture =
+    pacing.value &&
+    event.button === 0 &&
+    event.isPrimary &&
+    event.target instanceof Element &&
+    composition?.contains(event.target) &&
+    !event.target.closest(pacingSkipExclusions)
+      ? { pointerId: event.pointerId, x: event.clientX, y: event.clientY, target: event.target }
+      : null;
+});
+useEventListener(document, "pointermove", (event: PointerEvent) => {
+  if (
+    pacingGesture?.pointerId === event.pointerId &&
+    Math.hypot(event.clientX - pacingGesture.x, event.clientY - pacingGesture.y) > 4
+  )
+    pacingGesture = null;
+});
+useEventListener(document, "pointercancel", () => (pacingGesture = null));
+useEventListener(document, "pointerup", (event: PointerEvent) => {
+  const gesture = pacingGesture;
+  pacingGesture = null;
+  if (gesture?.pointerId === event.pointerId && gesture.target.isConnected) skipPacing(false);
+});
+
 function submit(source: "input" | "button") {
   const refocusInput = source === "input";
   if (!props.session && props.preview) {
@@ -200,7 +248,8 @@ function submit(source: "input" | "button") {
         <Composer
           ref="composer"
           v-model="draft"
-          :disabled="!foreground && !(preview && !session)"
+          :disabled="!foreground && !pacing && !(preview && !session)"
+          :pacing="!foreground && !!pacing"
           :submitting="submitting"
           :placeholder="
             foreground && 'hint' in foreground ? foreground.hint : 'Type your response…'
@@ -209,6 +258,7 @@ function submit(source: "input" | "button") {
           :input-mode="foreground?.kind === 'ask-number' ? 'decimal' : 'text'"
           :feedback="feedback"
           @submit="submit"
+          @skip="skipPacing(true)"
         />
       </template>
     </ConversationSurface>

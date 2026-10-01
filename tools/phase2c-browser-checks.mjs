@@ -1596,6 +1596,46 @@ async function transcriptSpacingChecks(page) {
   return "PASS grouped 3px and fixed 12px transcript and choice spacing";
 }
 
+async function pacingSkipChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  await page.getByRole("button", { name: "Visual Lab", exact: true }).click();
+  await page.getByRole("button", { name: "Start pacing sample", exact: true }).click();
+  const messages = page.locator(".transcript-entry");
+  const expectMessages = async (count, message) => {
+    try {
+      await page.waitForFunction(
+        (count) => document.querySelectorAll(".transcript-entry").length === count,
+        count,
+        { timeout: 2000 },
+      );
+    } catch {
+      throw new Error(`${message} (${await messages.count()} messages)`);
+    }
+  };
+  await expectMessages(1, "The pacing sample did not wait at its first gate");
+  // Controls take precedence over the background gesture.
+  const themeControl = page.locator("[data-theme-mode-control]");
+  await themeControl.click();
+  await themeControl.click();
+  await expectMessages(1, "Activating a control also skipped pacing");
+  await page.locator('.transcript-entry [data-slot="bubble"]').first().click();
+  await expectMessages(1, "Clicking message text skipped pacing");
+  const stage = await page.locator(".player-stage").boundingBox();
+  await page.mouse.click(stage.x + 8, stage.y + stage.height - 8);
+  await expectMessages(2, "A primary click on unused Player space did not skip pacing");
+  const input = page.locator("[data-runtime-interaction] textarea");
+  await input.focus();
+  await page.keyboard.press("Space");
+  await expectMessages(3, "Space in the empty composer did not skip pacing");
+  check((await input.inputValue()) === "", "The skipping Space was typed into the composer");
+  await page.mouse.click(stage.x + 8, stage.y + stage.height - 8);
+  await page.waitForTimeout(200);
+  await expectMessages(3, "An unskippable pacing gate was skipped");
+  return "PASS pacing skip from unused space and empty composer, with control precedence";
+}
+
 async function avatarImageChecks(page) {
   await page.getByRole("button", { name: "Visual Lab", exact: true }).click();
   await page.getByRole("button", { name: "Start avatar sample", exact: true }).click();
@@ -2925,6 +2965,7 @@ const groups = [
   actionButtonGeometryChecks,
   transcriptSpacingChecks,
   avatarImageChecks,
+  pacingSkipChecks,
   buttonInkChecks,
   authoredPresentationChecks,
   listContrastChecks,
