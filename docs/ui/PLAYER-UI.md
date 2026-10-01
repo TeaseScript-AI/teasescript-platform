@@ -55,9 +55,8 @@ Current implementation status belongs in [`PHASE-STATUS.md`](../../PHASE-STATUS.
 [`player/README.md`](../../player/README.md) records implementation seams and development-only behavior. This
 specification may lead the implementation. The Phase 2C Player presents supported transcript, foreground interaction,
 and pacing behavior from canonical runtime state. Its development preview opens one runtime choice scenario and adds
-Visual Lab, Layout Debug, the Stage media picker, Theme Lab, a focus-offset A/B choice, and timer/background-button
-presentation fixtures. The default build mounts the Player without that preview; the development server or explicit
-`?dev` URL opt-in loads it.
+Visual Lab, Layout Debug, the Stage media picker, Theme Lab, and timer/background-button presentation fixtures. The
+default build mounts the Player without that preview; the development server or explicit `?dev` URL opt-in loads it.
 Runtime timer/media wiring and production host integration remain separate work. Values marked for retesting remain
 provisional tuning baselines.
 
@@ -729,8 +728,8 @@ Ordinary neutral controls use the shared progression without geometric movement:
 1. default: quiet control surface with `border-subtle`;
 2. hover: `border-default` plus `surface-hover` fill;
 3. pressed/active: `border-strong` plus `surface-pressed` fill;
-4. keyboard focus: use the shared `2px` accent-outline width with `2px` visible separation and no layout shift. Visual
-   Lab offers a temporary `1px` separation candidate, matching the shared UI baseline, for comparison with that default;
+4. keyboard focus: a `2px` accent outline with `2px` visible separation and no layout shift. The outline is the only
+   focus mark; components add no separate focus ring. The Player's `2px` separation replaces the shared `1px` baseline;
 5. disabled: dedicated readable disabled surface/border/text roles and non-interactive semantics/cursor behavior.
 
 A non-interactive status item is a separate semantic/visual class, not a disabled control.

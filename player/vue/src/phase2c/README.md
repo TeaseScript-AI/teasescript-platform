@@ -19,7 +19,7 @@ specification.
 - `usePlayerSession.ts` hosts the canonical adapter session for presentation: starting a session remounts the
   transcript and resets interaction-local state. Vue derives everything else from that session.
 - `DevelopmentPreview.vue` opens one runtime choice scenario and supplies Visual Lab's Theme Lab, Stage media picker,
-  focus-offset A/B choice, and timer/background-button presentation fixtures, plus Layout Debug. `main.ts` loads it as a separate chunk on the
+  and timer/background-button presentation fixtures, plus Layout Debug. `main.ts` loads it as a separate chunk on the
   development server, or in a build only with the `?dev` URL opt-in. The default build mounts `PlayerApp.vue` with
   runtime-owned content only; integration supplies sessions through `usePlayerSession.ts`.
 - `PlayerToolsShell.vue` receives its tool list from the root and owns tool selection, pinning, order, resizing, retained content and dock/drawer focus.

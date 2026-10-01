@@ -1624,29 +1624,26 @@ async function focusOffsetChecks(page) {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload();
   await page.locator('[data-launcher] button[aria-label="Visual Lab"]').click();
-  const offset = page.locator("[data-focus-offset-fixture]");
   for (const label of ["Reset timers", "Stay by the water"]) {
     const button = page.getByRole("button", { name: label, exact: true });
     await button.scrollIntoViewIfNeeded();
     const resting = await button.evaluate((el) => getComputedStyle(el).boxShadow);
-    for (const value of ["1px", "2px"]) {
-      await offset.selectOption(value);
-      await page.evaluate(() => (document.documentElement.dataset.playerKeyboardFocus = "true"));
-      await button.evaluate((el) => el.focus({ focusVisible: true }));
-      // Settled styles: the outline must not animate in.
-      await page.waitForTimeout(250);
-      const focused = await button.evaluate((el) => {
-        const style = getComputedStyle(el);
-        return { width: style.outlineWidth, offset: style.outlineOffset, shadow: style.boxShadow };
-      });
-      if (focused.width !== "2px" || focused.offset !== value)
-        throw new Error(`${label}: focus outline ${JSON.stringify(focused)} for ${value}`);
-      // Only the outline marks focus; a component ring would fill the separation.
-      if (focused.shadow !== resting) throw new Error(`${label}: focus adds a box-shadow ring`);
-      await button.evaluate((el) => el.blur());
-    }
+    await page.evaluate(() => (document.documentElement.dataset.playerKeyboardFocus = "true"));
+    await button.evaluate((el) => el.focus({ focusVisible: true }));
+    // Settled styles: the outline must not animate in.
+    await page.waitForTimeout(250);
+    const focused = await button.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return { width: style.outlineWidth, offset: style.outlineOffset, shadow: style.boxShadow };
+    });
+    // Owner decision: a 2px outline with 2px separation.
+    if (focused.width !== "2px" || focused.offset !== "2px")
+      throw new Error(`${label}: focus outline ${JSON.stringify(focused)}`);
+    // Only the outline marks focus; a component ring would fill the separation.
+    if (focused.shadow !== resting) throw new Error(`${label}: focus adds a box-shadow ring`);
+    await button.evaluate((el) => el.blur());
   }
-  return "PASS focus outline keeps 2px width, follows the 1px/2px offset and adds no ring";
+  return "PASS focus outline is 2px wide with 2px separation and adds no ring";
 }
 
 async function composerMouseFocusChecks(page) {

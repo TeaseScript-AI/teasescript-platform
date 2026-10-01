@@ -35,7 +35,7 @@
 :root {
   /* Player edge layout is fixed; controls grow only with their icon/text size. */
   --player-edge-space: 8px;
-  /* Visual Lab compares 1px and 2px focus-outline separation. */
+  /* Owner-selected focus-outline separation for every Player control. */
   --player-focus-offset: 2px;
   --player-control-padding: 8px;
   --player-top-control-radius: 0.75rem;

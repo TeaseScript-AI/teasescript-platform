@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onScopeDispose, ref, watchEffect } from "vue";
+import { ref } from "vue";
 import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type { PlayerTimerKind } from "../../../model.js";
@@ -33,11 +33,6 @@ const timerReset = ref(0);
 const timerPaused = ref(true);
 const backgroundControlsReset = ref(0);
 const themeIntent = ref<PlayerThemeIntent>(defaultPlayerThemeIntents.light);
-const focusOffset = ref<"1px" | "2px">("2px");
-watchEffect(() =>
-  document.documentElement.style.setProperty("--player-focus-offset", focusOffset.value),
-);
-onScopeDispose(() => document.documentElement.style.removeProperty("--player-focus-offset"));
 
 const player = usePlayerSession();
 player.start(createPlayerRuntimeSession(openingScenario));
@@ -55,17 +50,6 @@ player.start(createPlayerRuntimeSession(openingScenario));
       <LayoutDebug v-if="tool === 'Layout Debug' && playerElement" :player="playerElement" />
       <div v-if="tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
         <ThemeLab v-model:intent="themeIntent" />
-        <label class="grid gap-2">
-          Focus outline offset
-          <select
-            v-model="focusOffset"
-            data-focus-offset-fixture
-            class="min-w-0 rounded border bg-card p-2"
-          >
-            <option value="2px">2px (default)</option>
-            <option value="1px">1px</option>
-          </select>
-        </label>
         <label class="grid gap-2">
           Stage media fixture
           <select v-model="mediaFixture" class="min-w-0 rounded border bg-card p-2">
