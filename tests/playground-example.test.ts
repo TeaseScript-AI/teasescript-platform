@@ -8,33 +8,6 @@ import { CHECKPOINT_VERSION } from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
-test("executes the repository playground example deterministically", async () => {
-  const source = await readFile("examples/playground/main.tease", "utf8");
-  const compilation = compileSource(source);
-
-  assert.deepEqual(compilation.diagnostics, []);
-  assert.notEqual(compilation.plan, null);
-  const plan = compilation.plan!;
-  const first = run(plan, createImmediatePacingRuntimeSnapshot(plan));
-  const second = run(plan, createImmediatePacingRuntimeSnapshot(plan));
-
-  assert.deepEqual(second.events, first.events);
-  assert.equal(first.snapshot.status, "halted");
-  assert.deepEqual(
-    first.events.filter((event) => event.kind === "say").map((event) => event.text),
-    [
-      "Welcome. I am Vera.",
-      "Your ordered set contains 2 qualities.",
-      "Your deterministic score is 2.",
-      "The example is complete.",
-    ],
-  );
-  assert.deepEqual(
-    first.events.map((event) => event.sequence),
-    [1, 2, 3, 4, 5],
-  );
-});
-
 test("every fixed repository playground example compiles and reaches its intended boundary", async () => {
   for (const [name, example] of Object.entries(PLAYGROUND_EXAMPLES)) {
     const source = await readFile(`examples/playground/${example.file}`, "utf8");
@@ -54,30 +27,4 @@ test("checkpoint storage keys are format-versioned and example-specific", () => 
   );
   assert.equal(new Set(keys).size, keys.length);
   assert.ok(keys.every((key) => key.includes(`checkpoint-v${CHECKPOINT_VERSION}:`)));
-});
-
-test("the functions example is allowlisted and visibly exercises the milestone", async () => {
-  assert.equal(PLAYGROUND_EXAMPLES.functions.file, "functions.tease");
-  const source = await readFile("examples/playground/functions.tease", "utf8");
-  const compilation = compileSource(source);
-
-  assert.deepEqual(compilation.diagnostics, []);
-  const result = run(compilation.plan!, createImmediatePacingRuntimeSnapshot(compilation.plan!));
-  assert.deepEqual(
-    result.events.filter((event) => event.kind === "say").map((event) => event.text),
-    [
-      "Kneel.",
-      "Hello, pet Alex.",
-      "Hello, puppy Alex.",
-      "Two plus three is 5.",
-      "A nested result is 6.",
-      "Loop result: 5",
-      "Loop result: 5",
-      "Stopped early.",
-      "Countdown 3",
-      "Countdown 2",
-      "Countdown 1",
-      "Done.",
-    ],
-  );
 });

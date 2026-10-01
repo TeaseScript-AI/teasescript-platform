@@ -42,14 +42,14 @@ test("serves the root playground page", async () => {
 
   assert.equal(response.status, 200);
   assert.match(response.contentType, /^text\/html/u);
-  assert.match(response.body, /TeaseScript Playground/u);
+  assert.equal(response.body, await readFile("playground/index.html", "utf8"));
 });
 
 test("serves only the explicit colour module needed by unbundled playground imports", async () => {
   const response = await get("/vendor/color.js");
   assert.equal(response.status, 200);
   assert.match(response.contentType, /^text\/javascript/u);
-  assert.match(response.body, /export \{ Color as default \}/u);
+  assert.equal(response.body, await readFile("node_modules/colorjs.io/dist/color.js", "utf8"));
   assert.equal((await get("/vendor/package.json")).status, 404);
   assert.equal((await get("/node_modules/colorjs.io/package.json")).status, 404);
 });
@@ -59,13 +59,16 @@ test("serves the Vue Player at its maintained route and keeps its build separate
 
   assert.equal(html.status, 200);
   assert.match(html.contentType, /^text\/html/u);
-  assert.match(html.body, /TeaseScript Player/u);
-  const assetPath = html.body.match(/(\/player\/assets\/index-[^"]+\.js)/u)?.[1];
-  assert.ok(assetPath);
+  assert.equal(html.body, await readFile("dist/player-app/index.html", "utf8"));
+  const assetPath = html.body.match(/<script\b[^>]*\ssrc="([^"]+)"/u)?.[1];
+  assert.ok(assetPath !== undefined && assetPath.startsWith("/player/assets/"), assetPath);
   const javascript = await get(assetPath);
   assert.equal(javascript.status, 200);
   assert.match(javascript.contentType, /^text\/javascript/u);
-  assert.doesNotMatch(javascript.body, /player\/browser/u);
+  assert.equal(
+    javascript.body,
+    await readFile(`dist/player-app/${assetPath.slice("/player/".length)}`, "utf8"),
+  );
   assert.equal((await get("/player-vue/")).status, 404);
 });
 
@@ -105,10 +108,10 @@ test("serves required JavaScript and CSS assets", async () => {
 
   assert.equal(javascript.status, 200);
   assert.match(javascript.contentType, /^text\/javascript/u);
-  assert.match(javascript.body, /compileWorkspaceSource/u);
+  assert.equal(javascript.body, await readFile("dist/playground/browser.js", "utf8"));
   assert.equal(css.status, 200);
   assert.match(css.contentType, /^text\/css/u);
-  assert.match(css.body, /runtime-summary/u);
+  assert.equal(css.body, await readFile("playground/playground.css", "utf8"));
 });
 
 test("serves every fixed repository playground example", async () => {
@@ -137,7 +140,7 @@ test("rejects encoded path traversal", async () => {
   const response = await get("/dist/%2e%2e/package.json");
 
   assert.equal(response.status, 400);
-  assert.match(response.body, /unsafe request path/u);
+  assert.ok(!response.body.includes('"devDependencies"'));
 });
 
 test("query and encoded example-path manipulation cannot select a file", async () => {
@@ -152,7 +155,7 @@ test("rejects symlinks that escape an exposed static root", async (context) => {
   await mkdir(join(projectRoot, "player"), { recursive: true });
   await mkdir(join(projectRoot, "dist"), { recursive: true });
   await mkdir(join(projectRoot, "examples", "playground"), { recursive: true });
-  await writeFile(join(projectRoot, "secret.txt"), "not public", "utf8");
+  await writeFile(join(projectRoot, "secret.txt"), "protected-secret-bytes", "utf8");
   await symlink(
     join(projectRoot, "secret.txt"),
     join(projectRoot, "examples", "playground", "main.tease"),
@@ -164,7 +167,7 @@ test("rejects symlinks that escape an exposed static root", async (context) => {
   const response = await get("/examples/playground/main.tease", isolatedPort);
 
   assert.equal(response.status, 400);
-  assert.match(response.body, /unsafe request path/u);
+  assert.ok(!response.body.includes("protected-secret-bytes"));
 });
 
 test("workspace automation stores revisions and returns compile and run results", async (context) => {

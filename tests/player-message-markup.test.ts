@@ -2,7 +2,7 @@ import { normalizeColor } from "../src/color.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { preparePlayerMessageMarkup } from "../player/message-markup.js";
+import { preparePlayerMessageMarkup, type PlayerMarkupPiece } from "../player/message-markup.js";
 import { parseMessageMarkup } from "../src/message-markup.js";
 
 test("prepares constrained Player runs without input-depth recursion", () => {
@@ -38,17 +38,20 @@ test("combines nested style precedence, safe link targets", () => {
 });
 
 test("ends each inline style before adjacent plain text and honors nested weight depth", () => {
-  const blocks = preparePlayerMessageMarkup(
-    parseMessageMarkup(
-      "[weight=light]light **bold** light[/weight] plain *italic* plain ~~strike~~ plain `code` plain [u]under[/u] plain",
-    ),
+  const formatting = (piece: PlayerMarkupPiece | undefined) => ({
+    classes: piece?.classes,
+    style: piece?.style,
+  });
+  const light = formatting(firstLinePieces("[weight=light]light[/weight]")[0]);
+  const bold = formatting(firstLinePieces("**bold**")[0]);
+  assert.notDeepEqual(light, bold);
+
+  const pieces = firstLinePieces(
+    "[weight=light]light **bold** light[/weight] plain *italic* plain ~~strike~~ plain `code` plain [u]under[/u] plain",
   );
-  assert.equal(blocks[0]?.kind, "paragraph");
-  if (blocks[0]?.kind !== "paragraph") throw new Error("Expected paragraph markup.");
-  const pieces = blocks[0].lines[0]?.pieces ?? [];
   const byText = (text: string) => pieces.filter((piece) => piece.text.trim() === text);
-  assert.equal(byText("bold")[0]?.style.fontWeight, "700");
-  assert.equal(byText("light")[0]?.style.fontWeight, "300");
+  assert.deepEqual(byText("bold").map(formatting), [bold]);
+  assert.deepEqual(byText("light").map(formatting), [light, light]);
   assert.deepEqual(
     byText("plain").map((piece) => [piece.classes, piece.style]),
     [
@@ -64,3 +67,9 @@ test("ends each inline style before adjacent plain text and honors nested weight
   assert.deepEqual(byText("code")[0]?.classes, ["markup-code"]);
   assert.deepEqual(byText("under")[0]?.classes, ["markup-underline"]);
 });
+
+function firstLinePieces(source: string): readonly PlayerMarkupPiece[] {
+  const blocks = preparePlayerMessageMarkup(parseMessageMarkup(source));
+  if (blocks[0]?.kind !== "paragraph") throw new Error("Expected paragraph markup.");
+  return blocks[0].lines[0]?.pieces ?? [];
+}

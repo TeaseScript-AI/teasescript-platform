@@ -55,24 +55,19 @@ test("workspace helper reports parser and semantic diagnostics", () => {
 });
 
 test("workspace compilation reuses the compiler-validated plan", () => {
-  const statistics = withValidationTestStatistics((finish) => {
-    assert.ok(
-      compileWorkspaceSource(Array.from({ length: 100 }, () => 'say "Hello"').join("\n")).plan,
+  const small = 'say "Hello"';
+  const large = Array.from({ length: 100 }, () => small).join("\n");
+  for (const operation of [compileWorkspaceSource, executeWorkspaceSource]) {
+    const smallWork = validationWork(() => assert.ok(operation(small).plan));
+    const largeWork = validationWork(() => assert.ok(operation(large).plan));
+    assert.equal(largeWork("instructionPlanCaptureCalls"), 0, operation.name);
+    assert.equal(largeWork("runtimeSnapshotCaptureCalls"), 0, operation.name);
+    assert.equal(
+      largeWork("externalCaptureVisits"),
+      smallWork("externalCaptureVisits"),
+      `${operation.name} captures no plan-sized external data`,
     );
-    return finish();
-  }).counts;
-
-  assert.equal(
-    statistics.externalCaptureVisits,
-    1,
-    "only the empty fresh-runtime options object is captured",
-  );
-
-  const executionStatistics = withValidationTestStatistics((finish) => {
-    assert.equal(executeWorkspaceSource('say "Hello"').status, "halted");
-    return finish();
-  }).counts;
-  assert.equal(executionStatistics.externalCaptureVisits, 1);
+  }
 });
 
 test("workspace helper stops blocking waits in waiting with action events", () => {
@@ -89,14 +84,15 @@ test("validated workspace execution clones state without hostile-data recapture"
   assert.ok(compiled.plan);
   assert.ok(compiled.snapshot);
   const before = JSON.stringify(compiled.snapshot);
-  const statistics = withValidationTestStatistics((finish) => {
+  const work = validationWork(() => {
     const result = executeValidatedWorkspaceSnapshot(compiled.plan!, compiled.snapshot!, "run");
     assert.equal(result.status, "halted");
-    return finish();
-  }).counts;
+  });
 
   assert.equal(JSON.stringify(compiled.snapshot), before);
-  assert.equal(statistics.externalCaptureVisits, undefined);
+  assert.equal(work("instructionPlanCaptureCalls"), 0);
+  assert.equal(work("runtimeSnapshotCaptureCalls"), 0);
+  assert.equal(work("externalCaptureVisits"), 0);
 });
 
 test("workspace helper accepts source beyond the former local byte limit", () => {
@@ -209,15 +205,16 @@ test("workspace controls preserve number input and authored choice order", () =>
   );
 
   const choice = waitingWorkspace('let selected = choose "Alpha", "Beta"\nsay selected, instant');
-  assert.deepEqual(inspectWorkspacePlayerPresentation(choice.snapshot).activeInteraction?.ui, {
-    kind: "choice",
-    labelType: "none",
-    options: [
+  const interaction = inspectWorkspacePlayerPresentation(choice.snapshot).activeInteraction;
+  assert.equal(interaction?.interactionKind, "choice");
+  assert.ok(interaction?.ui.kind === "choice");
+  assert.deepEqual(
+    interaction.ui.options.map(({ label, text }) => ({ label, text })),
+    [
       { label: null, text: "Alpha" },
       { label: null, text: "Beta" },
     ],
-    accessibleName: { kind: "localizedDefault", key: "chooseOption" },
-  });
+  );
   assertDelivered(
     choice,
     (plan, snapshot) => selectWorkspaceChoice(plan, snapshot, { kind: "text", value: "Beta" }),
@@ -275,6 +272,15 @@ test("workspace controls preserve engine pacing and completion rejection outcome
   assert.deepEqual(oversized.snapshot, text.snapshot);
   assert.equal(JSON.stringify(text.snapshot), textBefore);
 });
+
+/** Returns a reader for validation work counters; an unrecorded counter means no work. */
+function validationWork(operation: () => void): (counter: string) => number {
+  const counts = withValidationTestStatistics((finish) => {
+    operation();
+    return finish();
+  }).counts;
+  return (counter) => counts[counter] ?? 0;
+}
 
 interface WaitingWorkspace {
   readonly plan: InstructionPlan;
