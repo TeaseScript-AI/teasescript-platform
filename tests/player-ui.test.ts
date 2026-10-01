@@ -87,16 +87,15 @@ test("Player right-rail allocation preserves small panes and shares contention f
   assert.deepEqual(allocateRightRailPaneHeights(300, 240, 180), { timers: 150, actions: 150 });
 });
 
-test("Vue Player keeps shared CSS layers and the maintained route contract", async () => {
+test("legacy Vue Player keeps shared CSS layers and its route contract", async () => {
   const root = process.cwd();
-  const [main, vite, layout, responsive, media, rightControls, readme] = await Promise.all([
+  const [main, vite, layout, responsive, media, rightControls] = await Promise.all([
     readFile(resolve(root, "player/vue/src/main.ts"), "utf8"),
     readFile(resolve(root, "player/vue/vite.config.ts"), "utf8"),
     readFile(resolve(root, "player/styles/layout.css"), "utf8"),
     readFile(resolve(root, "player/styles/responsive.css"), "utf8"),
     readFile(resolve(root, "player/styles/components-media.css"), "utf8"),
     readFile(resolve(root, "player/styles/components-right-controls.css"), "utf8"),
-    readFile(resolve(root, "player/README.md"), "utf8"),
   ]);
   assert.match(vite, /base: "\/player\/"/u);
   assert.match(vite, /outDir:.*dist\/player-app/u);
@@ -109,8 +108,6 @@ test("Vue Player keeps shared CSS layers and the maintained route contract", asy
     rightControls,
     /\.action-button[\s\S]*border: 1px solid var\(--color-border-default\)/u,
   );
-  assert.match(readme, /maintained Vue Player at `\/player\//u);
-  assert.doesNotMatch(readme, /manual\/vanilla legacy implementation/u);
 });
 
 test("Vue Player shared CSS retains the responsive composition contracts", async () => {
