@@ -210,4 +210,21 @@ test("a showButton background continues after its colon, as in #453", () => {
     missing.parserDiagnostics.map((diagnostic) => diagnostic.message),
     ["Expected a button background colour."],
   );
+  // A missing value must not swallow the statement that continuation reached.
+  for (const source of [
+    'showButton "Continue", background:\nsay "recovered"\nexit',
+    'showButton "Continue", background:\n\nsay "recovered"\nexit',
+  ]) {
+    const recovered = compileSource(source);
+    assert.deepEqual(
+      recovered.program.statements.map((statement) => statement.kind),
+      ["sayStatement", "exitStatement"],
+      source,
+    );
+    assert.deepEqual(
+      recovered.parserDiagnostics.map((diagnostic) => diagnostic.message),
+      ["Expected a button background colour."],
+      source,
+    );
+  }
 });

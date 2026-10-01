@@ -290,6 +290,8 @@ class Parser {
           parserDiagnosticCode.expectedInteractionText,
           "Expected a button background colour.",
         );
+        // Continuation may have reached the next statement; keep it, as for choice values.
+        if (isStatementStart(this.#peek().kind)) this.#recoveredAtStatementBoundary = true;
         return null;
       }
     }
