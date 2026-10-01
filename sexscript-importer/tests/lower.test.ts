@@ -94,28 +94,54 @@ test("maps Groovy inclusive ranges and removes terminal switch breaks", () => {
   );
 });
 
-test("does not invent a TeaseScript default for nullable legacy storage", () => {
-  const condition: AstNode = {
-    kind: "binary",
-    span,
-    operator: "==",
-    left: call("loadBoolean", constant("feature.enabled")),
-    right: constant(false),
-  };
+test("lowers nullable legacy scalar storage reads to read-only TeaseScript load", () => {
   const source = file([
-    {
-      kind: "if",
+    statement({
+      kind: "declaration",
       span,
-      condition,
-      then: { kind: "block", span, statements: [statement(call("show", constant("off")))] },
-      else: { kind: "empty", span },
-    },
+      multipleAssignment: false,
+      left: variable("enabled"),
+      right: call("loadBoolean", constant("feature.enabled")),
+    }),
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("raw"),
+      right: call("load", constant("legacy.raw")),
+    }),
   ]);
 
   const program = lowerParsedFile(source);
-  assert.ok(program.diagnostics.some((diagnostic) => diagnostic.code === "SX_STORAGE_MISSING_KEY_SEMANTICS"));
-  assert.match(emitTease(program), /MIGRATION INCOMPLETE/);
-  assert.match(emitTease(program), /TODO SX_UNSUPPORTED_IF/);
+  assert.deepEqual(program.diagnostics, []);
+  assert.equal(
+    emitTease(program),
+    ['let enabled = load "feature.enabled"', 'let raw = load "legacy.raw"', ""].join("\n"),
+  );
+});
+
+test("keeps specialized legacy storage helpers explicit", () => {
+  const mapProgram = lowerParsedFile(file([
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("map"),
+      right: call("loadMap", constant("legacy.map")),
+    }),
+  ]));
+  assert.ok(mapProgram.diagnostics.some((diagnostic) => diagnostic.code === "SX_STORAGE_MAP_SEMANTICS"));
+
+  const firstTrueProgram = lowerParsedFile(file([
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("winner"),
+      right: call("loadFirstTrue", constant("a"), constant("b")),
+    }),
+  ]));
+  assert.ok(firstTrueProgram.diagnostics.some((diagnostic) => diagnostic.code === "SX_STORAGE_FIRST_TRUE_SEMANTICS"));
 });
 
 test("extracts static setInfos metadata instead of emitting runtime code", () => {

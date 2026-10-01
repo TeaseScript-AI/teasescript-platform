@@ -25,14 +25,12 @@ interface LowerContext {
   functionDepth: number;
 }
 
-const STORAGE_LOADS = new Set([
+const DIRECT_STORAGE_LOADS = new Set([
   "load",
   "loadBoolean",
   "loadFloat",
   "loadInteger",
-  "loadMap",
   "loadString",
-  "loadFirstTrue",
 ]);
 
 export function lowerParsedFile(file: ParsedGroovyFile): MigrationProgram {
@@ -831,12 +829,27 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     const args = lowerArguments(call.arguments, context);
     return args === null ? null : { kind: "call", name: call.name, positional: args, named: {} };
   }
-  if (STORAGE_LOADS.has(call.name)) {
+  if (DIRECT_STORAGE_LOADS.has(call.name)) {
+    if (call.arguments.length !== 1) {
+      return unsupportedExpression(context, node, "SX_STORAGE_LOAD_ARITY", `${call.name}() must have exactly one key argument.`);
+    }
+    const key = lowerExpression(call.arguments[0]!, context);
+    return key === null ? null : { kind: "load", key };
+  }
+  if (call.name === "loadMap") {
     return unsupportedExpression(
       context,
       node,
-      "SX_STORAGE_MISSING_KEY_SEMANTICS",
-      `${call.name}() returns null for a missing legacy key, while TeaseScript load requires and stores a default.`,
+      "SX_STORAGE_MAP_SEMANTICS",
+      "Legacy loadMap() filters the loaded value to Map-or-null; automatic object/map migration is not proven safe yet.",
+    );
+  }
+  if (call.name === "loadFirstTrue") {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_STORAGE_FIRST_TRUE_SEMANTICS",
+      "Legacy loadFirstTrue() searches keys in order and returns the first key whose stored boolean is true.",
     );
   }
 

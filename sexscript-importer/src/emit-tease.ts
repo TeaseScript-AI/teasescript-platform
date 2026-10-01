@@ -147,6 +147,8 @@ export function emitExpression(expression: IrExpression): string {
       return `${parenthesize(expression.target)}.${expression.name}`;
     case "methodCall":
       return `${parenthesize(expression.target)}.${expression.name}(${expression.arguments.map(emitExpression).join(", ")})`;
+    case "load":
+      return `load ${parenthesize(expression.key)}`;
     case "choice": {
       const options = expression.options
         .map((option, index) => `  ${index}: ${emitExpression(option)}`)

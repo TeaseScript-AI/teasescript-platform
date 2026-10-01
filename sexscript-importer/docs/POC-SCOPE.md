@@ -40,6 +40,18 @@ Target ordinary authored flow first:
 
 The POC should preserve readable source structure rather than mechanically reproduce Groovy syntax.
 
+## Target storage semantics
+
+Owner decision (2026-10-02):
+
+- `load "key"` returns `null` when the key is missing;
+- `load "key" default value` returns the supplied value when the key is missing;
+- neither form writes storage;
+- only `save` writes storage.
+
+The current canonical V30 storage text still describes older default-and-write behavior. The importer records the
+owner-selected target semantics here without modifying core TeaseScript documentation from this isolated subproject.
+
 ## Required diagnostics
 
 Do not silently approximate behavior when the source depends on:
