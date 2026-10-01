@@ -1,5 +1,6 @@
 import { computed, ref, watch, type ShallowRef } from "vue";
 import { tryOnScopeDispose, useEventListener, useIntervalFn } from "@vueuse/core";
+import type { MediaProgressReport } from "../../../../src/index.js";
 import {
   observePlayerRuntimeTime,
   playerRuntimeDeadlines,
@@ -15,9 +16,13 @@ const MAX_TIMEOUT_MS = 2 ** 31 - 1;
  * Maps monotonic browser time onto the session's persisted scene time. The engine reads no clock: this Player
  * observes time at the next deadline, before input, before a checkpoint capture, and at page lifecycle changes.
  * Scene time continues while the page is hidden; a new or restored session is rebased so an unavailable gap is not
- * consumed.
+ * consumed. Every observation carries the media progress `mediaReports` measures, so media cues follow what was
+ * actually played.
  */
-export function useRuntimeSceneClock(session: ShallowRef<PlayerRuntimeSession | null>) {
+export function useRuntimeSceneClock(
+  session: ShallowRef<PlayerRuntimeSession | null>,
+  mediaReports: () => readonly MediaProgressReport[] = () => [],
+) {
   let origin = performance.now();
   const displayTimeMs = ref(0);
 
@@ -37,7 +42,7 @@ export function useRuntimeSceneClock(session: ShallowRef<PlayerRuntimeSession | 
   function observe(): PlayerRuntimeSession | null {
     const current = session.value;
     if (!current) return null;
-    const result = observePlayerRuntimeTime(current, sceneTimeMs(current));
+    const result = observePlayerRuntimeTime(current, sceneTimeMs(current), mediaReports());
     if (result.outcome.kind === "observed") session.value = result.session;
     return session.value;
   }

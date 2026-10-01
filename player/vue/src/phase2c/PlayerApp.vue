@@ -10,7 +10,9 @@ import type { PlayerThemeIntent } from "../../../theme/palette.js";
 import PlayerComposition from "./PlayerComposition.vue";
 import PlayerToolsShell, { type PlayerTool } from "./PlayerToolsShell.vue";
 import PlayerTopBar from "./PlayerTopBar.vue";
+import { playerRuntimeMedia } from "../../../runtime-adapter.js";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
+import SessionActivation from "./SessionActivation.vue";
 import Stage from "./Stage.vue";
 import StageRightRail from "./StageRightRail.vue";
 import TimerRegion from "./TimerRegion.vue";
@@ -20,8 +22,8 @@ import { usePlayerPreference } from "./usePlayerPreference";
 import type { PlayerSessionHost } from "./usePlayerSession";
 import { defaultPlayerThemeIntents, usePlayerTheme } from "./usePlayerTheme";
 
-// Product Player composition. The development preview supplies tools, Stage media and the right
-// rail only through these props and slots; production builds do not import it.
+// Product Player composition. The development preview supplies tools, a Stage media override and the
+// right rail only through these props and slots; production builds do not import it.
 const props = withDefaults(
   defineProps<{
     player: PlayerSessionHost;
@@ -75,6 +77,19 @@ const transcript = computed(() =>
       }
     : { key: "empty", entries: [], speakers: noSpeakers, revision: 0 },
 );
+
+// The Stage shows the runtime's Stage image; an authored image has no alternative text yet. A development
+// override replaces it for layout comparison only.
+const stageSource = computed(() => {
+  const image = session.value ? playerRuntimeMedia(session.value.snapshot).stage.image : null;
+  return image === null ? null : props.player.resolveAsset(image);
+});
+// Derived from the source string, so frequent observations keep the same object and the Stage does not reset its
+// measured media aspect.
+const runtimeStageMedia = computed(() =>
+  stageSource.value === null ? undefined : { src: stageSource.value, alt: "" },
+);
+const stageMedia = computed(() => props.media ?? runtimeStageMedia.value);
 
 const stage = ref<InstanceType<typeof Stage> | null>(null);
 const stageHeight = ref(0);
@@ -145,7 +160,15 @@ async function toggleFullscreen() {
           </PlayerTopBar>
         </template>
         <template #stage>
-          <Stage ref="stage" :media="media" @media-aspect="mediaAspect = $event" />
+          <Stage ref="stage" :media="stageMedia" @media-aspect="mediaAspect = $event" />
+        </template>
+        <template #overlay>
+          <SessionActivation
+            :activation="player.activation.value"
+            :audio-blocked="player.audioBlocked.value"
+            @activate="player.activate"
+            @retry-audio="player.retryAudio"
+          />
         </template>
         <template #right-rail>
           <!-- Runtime timers are runtime-owned content; the preview may add fixtures around them. -->

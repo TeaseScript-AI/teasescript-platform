@@ -35,10 +35,26 @@ const props = defineProps<{
 const emit = defineEmits<{
   "update:session": [session: PlayerRuntimeSession];
 }>();
-const foreground = computed(() => (props.session ? playerRuntimeForeground(props.session) : null));
 const actionId = computed(() =>
   props.session ? activePlayerRuntimeInteraction(props.session.snapshot)?.actionId : undefined,
 );
+// An interaction's presentation is fixed for its lifetime. Keep one object per action so frequent time and media
+// observations do not re-render, and re-measure, the controls on every update.
+// Action IDs restart per session, so the session's plan identifies which session an ID belongs to.
+let presented: {
+  readonly plan: PlayerRuntimeSession["plan"];
+  readonly actionId: number;
+  readonly value: ReturnType<typeof playerRuntimeForeground>;
+} | null = null;
+const foreground = computed(() => {
+  const session = props.session;
+  if (!session) return null;
+  const id = actionId.value;
+  if (presented?.plan === session.plan && presented.actionId === id) return presented.value;
+  const value = playerRuntimeForeground(session);
+  presented = id === undefined ? null : { plan: session.plan, actionId: id, value };
+  return value;
+});
 const pacing = computed(() => {
   const gate = props.session ? playerRuntimePacingGate(props.session) : null;
   return gate?.skippable ? gate : null;

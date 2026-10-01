@@ -2509,6 +2509,11 @@ async function runGroup(browserPage, run, url, artifacts) {
       pagePrototype[name] = async function (...args) {
         const response = await navigate.apply(this, args);
         await this.waitForSelector("#phase2c-shell", { state: "attached" });
+        // The Player runs no script before explicit Start; groups other than the activation checks start it here.
+        if (!this.phase2cKeepActivation) {
+          const start = this.locator("[data-session-activation] button");
+          if (await start.count()) await start.click();
+        }
         return response;
       };
     }
