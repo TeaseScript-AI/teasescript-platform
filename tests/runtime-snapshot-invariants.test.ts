@@ -179,10 +179,11 @@ test("rejects exhausted scope, speaker, and call-frame allocators before collisi
   assert.equal(speakerSnapshot.nextSpeakerId, MAX_SAFE);
 
   const callPlan = plan("function value { return 1 }\nvalue()");
-  let callSnapshot = createFreshRuntimeSnapshot(callPlan);
-  while (callPlan.instructions[callSnapshot.nextInstruction]?.kind !== "callFunction") {
-    callSnapshot = executeInstruction(callPlan, callSnapshot).snapshot;
-  }
+  const callSnapshot = executeUntil(
+    callPlan,
+    createFreshRuntimeSnapshot(callPlan),
+    (snapshot) => callPlan.instructions[snapshot.nextInstruction]?.kind === "callFunction",
+  );
   callSnapshot.nextCallFrameId = MAX_SAFE;
   assert.throws(() => executeInstruction(callPlan, callSnapshot), allocatorError);
   assert.deepEqual(callSnapshot.callFrames, []);

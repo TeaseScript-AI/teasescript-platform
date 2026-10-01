@@ -346,7 +346,7 @@ test("#81 keeps representable fractional waits and rejects precision-losing dead
   assert.equal(observeTime(restored.plan, restored.snapshot, 2 ** 52).snapshot.status, "running");
 });
 
-test("#82 uses the wait keyword path and rejects forged ownership, missing wait temporaries, and hostile completion fields", () => {
+test("#82 uses the wait keyword path and rejects forged ownership, missing wait temporaries, and host delay completion", () => {
   assert.equal(compileSource("wait(1)").plan, null);
   assert.equal(compileSource("wait 1 - 2").plan, null);
   assert.equal(compileSource("wait (1 + 2)").diagnostics.length, 0);
@@ -376,22 +376,18 @@ test("#82 uses the wait keyword path and rejects forged ownership, missing wait 
   missingTemporary.temporaries.length = 0;
   assert.equal(validateRuntimeSnapshot(missingTemporary, temporaryWait.compiled).valid, false);
 
-  // EVIDENCE: fixture: Object.create(null) supplies the property dictionary used as a hostile completion request.
-  const hostileKind = Object.create(null) as Record<string, unknown>;
-  assert.doesNotThrow(() =>
-    completeAction(temporaryWait.compiled, temporaryWait.snapshot, {
-      actionId: temporaryWait.snapshot.foregroundAction!.actionId,
-      actionKind: hostileKind,
-      payload: { kind: "time", currentSessionTimeMs: 1 },
-    }),
-  );
+  // A wait accepts no host completion at all, whatever action kind the request claims; the
+  // arbitrary claimed kind is refused at the delay, before any action-kind comparison.
+  // EVIDENCE: fixture: Object.create(null) supplies the property dictionary used as an arbitrary claimed action kind.
+  const arbitraryKind = Object.create(null) as Record<string, unknown>;
   const completion = completeAction(temporaryWait.compiled, temporaryWait.snapshot, {
     actionId: temporaryWait.snapshot.foregroundAction!.actionId,
-    actionKind: hostileKind,
+    actionKind: arbitraryKind,
     payload: { kind: "time", currentSessionTimeMs: 1 },
   });
-  // A wait accepts no host completion at all, whatever the request claims.
   assert.equal(completion.outcome.kind, "invalidPayload");
+  assert.deepEqual(completion.snapshot, temporaryWait.snapshot);
+  assert.deepEqual(completion.events, []);
 });
 
 test("#82 allocates the final safe action identity and then fails without reuse", () => {
