@@ -631,3 +631,68 @@ test("lowers single-statement if, else, and else-if bodies", () => {
     ].join("\n"),
   );
 });
+
+test("recognizes GroovyClassLoader boilerplate as legacy helper setup", () => {
+  const classLoader: AstNode = {
+    kind: "constructorCall",
+    span,
+    type: "groovy.lang.GroovyClassLoader",
+    arguments: args(),
+  };
+  const source = file([
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("cl"),
+      right: classLoader,
+    }),
+    statement({
+      kind: "methodCall",
+      span,
+      object: variable("cl"),
+      method: constant("addClasspath"),
+      arguments: args(constant("scripts/Domme3/")),
+      implicitThis: false,
+      safe: false,
+      spreadSafe: false,
+    }),
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("Domme3"),
+      right: {
+        kind: "methodCall",
+        span,
+        object: variable("cl"),
+        method: constant("loadClass"),
+        arguments: args(constant("Domme3Class")),
+        implicitThis: false,
+        safe: false,
+        spreadSafe: false,
+      },
+    }),
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("chance"),
+      right: {
+        kind: "methodCall",
+        span,
+        object: variable("Domme3"),
+        method: constant("percentChance"),
+        arguments: args(variable("this"), constant(50)),
+        implicitThis: false,
+        safe: false,
+        spreadSafe: false,
+      },
+    }),
+  ]);
+
+  const program = lowerParsedFile(source);
+  assert.equal(program.diagnostics.filter((diagnostic) => diagnostic.severity === "info").length, 3);
+  assert.ok(program.diagnostics.some((diagnostic) => diagnostic.code === "SX_LEGACY_HELPER_CALL"));
+  assert.ok(!program.diagnostics.some((diagnostic) => diagnostic.code === "SX_DYNAMIC_OR_OBJECT_CALL"));
+});

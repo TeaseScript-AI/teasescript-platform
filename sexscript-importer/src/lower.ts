@@ -20,6 +20,8 @@ interface LowerContext {
   metadata: LegacyMetadata | null;
   functions: Map<string, ClosureInfo>;
   listVariables: Set<string>;
+  classLoaderVariables: Set<string>;
+  legacyHelperClasses: Map<string, string>;
   functionDepth: number;
 }
 
@@ -34,7 +36,15 @@ const STORAGE_LOADS = new Set([
 ]);
 
 export function lowerParsedFile(file: ParsedGroovyFile): MigrationProgram {
-  const context: LowerContext = { diagnostics: [], metadata: null, functions: new Map(), listVariables: new Set(), functionDepth: 0 };
+  const context: LowerContext = {
+    diagnostics: [],
+    metadata: null,
+    functions: new Map(),
+    listVariables: new Set(),
+    classLoaderVariables: new Set(),
+    legacyHelperClasses: new Map(),
+    functionDepth: 0,
+  };
   if (file.diagnostics.length > 0 || file.root === null) {
     for (const diagnostic of file.diagnostics) {
       context.diagnostics.push({
@@ -49,9 +59,11 @@ export function lowerParsedFile(file: ParsedGroovyFile): MigrationProgram {
 
   if (file.root.kind !== "scriptBody") {
     context.diagnostics.push({
-      code: "SX_UNIT_LOWERING_DEFERRED",
+      code: file.root.kind === "compilationUnit" ? "SX_LEGACY_HELPER_UNIT" : "SX_UNIT_LOWERING_DEFERRED",
       severity: "error",
-      message: "Auxiliary Groovy classes are parsed but not lowered by the first script-body slice.",
+      message: file.root.kind === "compilationUnit"
+        ? "Auxiliary Groovy class source requires helper-library migration; it is not part of the runtime package output."
+        : "Non-script Groovy input is parsed but not lowered by the script-body importer.",
       span: file.root.span,
     });
     return { sourceName: file.sourceName, metadata: null, statements: [], diagnostics: context.diagnostics };
@@ -61,6 +73,9 @@ export function lowerParsedFile(file: ParsedGroovyFile): MigrationProgram {
   if (body?.kind === "block") {
     context.functions = collectClosureInfo(body);
     context.listVariables = collectListVariables(body);
+    const helpers = collectLegacyHelperBindings(body);
+    context.classLoaderVariables = helpers.classLoaders;
+    context.legacyHelperClasses = helpers.helperClasses;
   }
   const statements = body?.kind === "block" ? lowerBlock(body, context) : [];
   if (body?.kind !== "block") {
@@ -130,6 +145,15 @@ function lowerDeclaration(node: AstNode, span: SourceSpan | null, context: Lower
     return [unsupportedStatement(context, node, "SX_UNSUPPORTED_DECLARATION", "Only single-variable declarations are supported.")];
   }
   if (right.kind === "closure") return lowerClosureDeclaration(name, right, span, context);
+  if (context.classLoaderVariables.has(name) && isGroovyClassLoaderConstructor(right)) {
+    addDiagnostic(context, "SX_LEGACY_HELPER_SETUP", "info", `Removed GroovyClassLoader setup variable ${name}; helper source is migrated separately.`, span);
+    return [];
+  }
+  const helperClass = context.legacyHelperClasses.get(name);
+  if (helperClass !== undefined && isLegacyLoadClassCall(right, context.classLoaderVariables)) {
+    addDiagnostic(context, "SX_LEGACY_HELPER_SETUP", "info", `Removed loadClass setup for ${helperClass}; helper calls remain explicit migration candidates.`, span);
+    return [];
+  }
   if (context.functions.has(name)) {
     return [unsupportedStatement(
       context,
@@ -256,6 +280,11 @@ function lowerCallStatement(node: AstNode, span: SourceSpan | null, context: Low
   const call = callParts(node);
   if (call !== null && !call.inherited && call.name === "each") {
     return lowerEachStatement(node, call.arguments, span, context);
+  }
+  const receiverName = variableName(node.object);
+  if (call !== null && receiverName !== null && context.classLoaderVariables.has(receiverName) && call.name === "addClasspath") {
+    addDiagnostic(context, "SX_LEGACY_HELPER_SETUP", "info", "Removed GroovyClassLoader classpath setup; helper source is migrated separately.", span);
+    return [];
   }
   if (call === null || !call.inherited) {
     const expression = lowerExpression(node, context);
@@ -692,6 +721,16 @@ function lowerObjectMethodCallExpression(
   context: LowerContext,
 ): IrExpression | null {
   const targetNode = asNode(node.object);
+  const receiverName = targetNode === null ? null : variableName(targetNode);
+  const helperClass = receiverName === null ? undefined : context.legacyHelperClasses.get(receiverName);
+  if (helperClass !== undefined) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_LEGACY_HELPER_CALL",
+      `Legacy helper ${helperClass}.${name}() requires helper-library migration.`,
+    );
+  }
   if (targetNode === null || !isKnownListExpression(targetNode, context)) {
     return unsupportedExpression(context, node, "SX_DYNAMIC_OR_OBJECT_CALL", "Object/dynamic Groovy method calls are not lowered by the first slice.");
   }
@@ -861,6 +900,43 @@ function callParts(node: AstNode): { name: string; inherited: boolean; arguments
   const inherited = node.implicitThis === true || objectName === "main";
   const argsNode = asNode(node.arguments);
   return { name, inherited, arguments: argsNode === null ? [] : nodeArray(argsNode.items) };
+}
+
+interface LegacyHelperBindings {
+  classLoaders: Set<string>;
+  helperClasses: Map<string, string>;
+}
+
+function collectLegacyHelperBindings(body: AstNode): LegacyHelperBindings {
+  const classLoaders = new Set<string>();
+  walkAst(body, (node) => {
+    if (node.kind !== "declaration") return;
+    const name = variableName(node.left);
+    const value = asNode(node.right);
+    if (name !== null && value !== null && isGroovyClassLoaderConstructor(value)) classLoaders.add(name);
+  });
+
+  const helperClasses = new Map<string, string>();
+  walkAst(body, (node) => {
+    if (node.kind !== "declaration") return;
+    const name = variableName(node.left);
+    const value = asNode(node.right);
+    if (name === null || value === null || !isLegacyLoadClassCall(value, classLoaders)) return;
+    const argsNode = asNode(value.arguments);
+    const className = argsNode === null ? null : constantString(nodeArray(argsNode.items)[0]);
+    if (className !== null) helperClasses.set(name, className);
+  });
+  return { classLoaders, helperClasses };
+}
+
+function isGroovyClassLoaderConstructor(node: AstNode): boolean {
+  return node.kind === "constructorCall" && node.type === "groovy.lang.GroovyClassLoader";
+}
+
+function isLegacyLoadClassCall(node: AstNode, classLoaders: Set<string>): boolean {
+  if (node.kind !== "methodCall" || constantString(node.method) !== "loadClass") return false;
+  const receiver = variableName(node.object);
+  return receiver !== null && classLoaders.has(receiver);
 }
 
 function collectListVariables(body: AstNode): Set<string> {
