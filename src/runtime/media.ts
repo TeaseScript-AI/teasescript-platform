@@ -1,3 +1,4 @@
+import { interpolateCeilMs, interpolateRoundMs } from "./exact-interpolation.js";
 import type { SerializableRuntimeValue } from "./serializable-values.js";
 
 /**
@@ -214,12 +215,11 @@ function nextArrival(media: RuntimeMediaSnapshot): { progressMs: number; positio
     : { progressMs, positionMs: target };
 }
 
-/** Interpolated scene times and progress are canonical in whole milliseconds. */
-function roundMs(value: number): number {
-  return Math.round(value);
-}
-
-/** Scene time at which reported playback reached `progressMs`, or `null` if not yet. */
+/**
+ * Scene time at which reported playback reached `progressMs`, or `null` if not yet: the exact crossing rounded up to a
+ * whole millisecond, so an observation at that time has always reported the crossing. Progress zero is reached at
+ * the segment's anchor.
+ */
 function arrivalTime(
   points: readonly RuntimeMediaPointSnapshot[],
   progressMs: number,
@@ -227,12 +227,17 @@ function arrivalTime(
   const index = points.findIndex((point) => point.progressMs >= progressMs);
   if (index < 0) return null;
   const after = points[index]!;
-  if (index === 0 || after.progressMs === progressMs) return after.atMs;
+  if (index === 0 && after.progressMs === 0) return after.atMs;
+  // A pruned first sample that already covers the progress lies in the crossing's whole millisecond: an earlier
+  // millisecond would have made the arrival due before the samples before it were pruned.
+  if (index === 0 || after.progressMs === progressMs) return Math.ceil(after.atMs);
   const before = points[index - 1]!;
-  return roundMs(
-    before.atMs +
-      ((progressMs - before.progressMs) * (after.atMs - before.atMs)) /
-        (after.progressMs - before.progressMs),
+  return interpolateCeilMs(
+    before.progressMs,
+    before.atMs,
+    after.progressMs,
+    after.atMs,
+    progressMs,
   );
 }
 
@@ -253,20 +258,20 @@ function departureTime(
   return arrivalTime(points, progressMs);
 }
 
-/** Reported segment progress at scene time `atMs`, interpolated and rounded to whole milliseconds; never extrapolated. */
+/**
+ * Reported segment progress at scene time `atMs`, interpolated exactly and rounded to whole milliseconds; never
+ * extrapolated.
+ */
 function progressAt(points: readonly RuntimeMediaPointSnapshot[], atMs: number): number {
   let index = -1;
   for (let candidate = 0; candidate < points.length; candidate += 1) {
     if (points[candidate]!.atMs <= atMs) index = candidate;
   }
-  if (index < 0) return roundMs(points[0]?.progressMs ?? 0);
+  if (index < 0) return Math.round(points[0]?.progressMs ?? 0);
   const before = points[index]!;
   const after = points[index + 1];
-  if (after === undefined) return roundMs(before.progressMs);
-  return roundMs(
-    before.progressMs +
-      ((atMs - before.atMs) * (after.progressMs - before.progressMs)) / (after.atMs - before.atMs),
-  );
+  if (after === undefined) return Math.round(before.progressMs);
+  return interpolateRoundMs(before.atMs, before.progressMs, after.atMs, after.progressMs, atMs);
 }
 
 /**

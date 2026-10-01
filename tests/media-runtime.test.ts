@@ -1156,3 +1156,32 @@ test(
     }
   },
 );
+
+test("crossings never become due before an on-time observation could report them", () => {
+  // A control at 10 ms on the curve progress = time does not reach a 10.1 ms range end, however late it is observed.
+  const control = [
+    "timer async 10 ms {",
+    "  m.pause()",
+    "}",
+    'let m = playAudio(file: "m", async: true, endAt: 10.1 ms, repeat: 3 times) {',
+    "  beforeEnd 0 ms {",
+    '    say "end"',
+    "  }",
+    "}",
+    "wait 100 ms",
+  ].join("\n");
+  const fine = new Session(control).load(1, 20).at(10, [1, 10]).at(20);
+  const late = new Session(control).load(1, 20).at(20, [1, 20]);
+  assert.deepEqual(late.said(), fine.said());
+  assert.deepEqual(
+    [late.media(1)?.elapsedMs, late.media(1)?.passesCompleted],
+    [fine.media(1)?.elapsedMs, fine.media(1)?.passesCompleted],
+  );
+  // An exact sample at a fractional time and an interpolation of the same curve give the same cue time.
+  for (const q of [10, 10.1, 10.5, 10.9]) {
+    const source = `let clock = timer async 100 ms\nlet m = playAudio(file: "m", async: true, endAt: ${q} ms, repeat: 3 times) {\n  beforeEnd 0 ms {\n    say "\${clock.elapsed}"\n  }\n}\nwait 100 ms`;
+    const exact = new Session(source).load(1, 30).at(q, [1, q]).at(20, [1, 20]);
+    const interpolated = new Session(source).load(1, 30).at(20, [1, 20]);
+    assert.deepEqual(interpolated.said(), exact.said(), String(q));
+  }
+});
