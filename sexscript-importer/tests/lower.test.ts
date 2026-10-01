@@ -142,6 +142,7 @@ test("extracts static setInfos metadata instead of emitting runtime code", () =>
   assert.equal(emitTease(program), "end\n");
 });
 
+
 test("does not silently discard legacy showButton timeout/result semantics", () => {
   const timeoutSource = file([statement(call("showButton", constant("Quick"), constant(3)))]);
   const timeoutProgram = lowerParsedFile(timeoutSource);
