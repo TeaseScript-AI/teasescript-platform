@@ -15,6 +15,7 @@ import {
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
 import { executeInstruction, run, stepToEvent } from "../src/runtime/engine.js";
+import type { InterpreterEvent } from "../src/runtime/events.js";
 import type {
   SerializableRuntimeObject,
   SerializableRuntimeSet,
@@ -183,21 +184,21 @@ test("keeps same-named speakers in sibling lexical scopes as distinct state", ()
   const compiled = plan(
     [
       "if true {",
-      "  speaker voice {}",
+      '  speaker voice { displayName: "First voice" }',
       '  say as voice "First"',
       "}",
       "if true {",
-      "  speaker voice {}",
+      '  speaker voice { displayName: "Second voice" }',
       '  say as voice "Second"',
       "}",
       "exit",
     ].join("\n"),
   );
   const first = stepToEvent(compiled, createImmediatePacingRuntimeSnapshot(compiled));
-  assert.deepEqual(sayTexts(first), ["First"]);
+  assert.deepEqual(sayOutput(first), [["voice", "First voice", "First"]]);
   const firstSpeaker = visibleSpeakerId(first.snapshot, "voice");
   const second = stepToEvent(compiled, first.snapshot);
-  assert.deepEqual(sayTexts(second), ["Second"]);
+  assert.deepEqual(sayOutput(second), [["voice", "Second voice", "Second"]]);
   const secondSpeaker = visibleSpeakerId(second.snapshot, "voice");
   assert.ok(Number.isSafeInteger(firstSpeaker) && Number.isSafeInteger(secondSpeaker));
   assert.notEqual(firstSpeaker, secondSpeaker);
@@ -535,6 +536,15 @@ function assertDeserializedCheckpointError(
       assert.deepEqual({ code: error.info.code, path: error.info.path }, expected);
       return true;
     },
+  );
+}
+
+/** Each say event's speaker identifier, speaker display name, and text. */
+function sayOutput(result: { readonly events: readonly InterpreterEvent[] }): unknown[][] {
+  return result.events.flatMap((event) =>
+    event.kind === "say"
+      ? [[event.speaker?.identifier, event.speaker?.displayName, event.text]]
+      : [],
   );
 }
 

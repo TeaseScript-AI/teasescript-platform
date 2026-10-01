@@ -152,13 +152,13 @@ test("rejects event-sequence exhaustion before emitting a duplicate sequence", (
   const snapshot = createImmediatePacingRuntimeSnapshot(compiled);
   snapshot.nextEventSequence = MAX_SAFE;
   assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
+  const before = structuredClone(snapshot);
 
   assert.throws(
     () => executeInstruction(compiled, snapshot),
     (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
   );
-  assert.equal(snapshot.nextEventSequence, MAX_SAFE);
-  assert.equal(snapshot.status, "ready");
+  assert.deepEqual(snapshot, before);
 });
 
 test("rejects exhausted scope, speaker, and call-frame allocators before collision", () => {

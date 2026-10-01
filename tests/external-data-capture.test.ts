@@ -202,14 +202,19 @@ function assertSteppedOrHalted(snapshot: RuntimeSnapshot): void {
   );
 }
 
-/** Bounded caller-state view: every ordinary field plus the sparse frames' length and own entries. */
+/**
+ * Bounded caller-state view: own descriptors of every snapshot field and of the sparse frames
+ * array (its length and own entries), without iterating the sparse length.
+ */
 function sparseSnapshotState(snapshot: RuntimeSnapshot) {
-  const { frames, ...ordinary } = snapshot;
-  return {
-    ordinary: structuredClone(ordinary),
-    framesLength: frames.length,
-    frameEntries: Object.keys(frames).map((key) => [key, structuredClone(frames[Number(key)])]),
-  };
+  const ownDescriptors = (value: RuntimeSnapshot | readonly unknown[], skip?: string) =>
+    Object.entries(Object.getOwnPropertyDescriptors(value))
+      .filter(([key]) => key !== skip)
+      .map(([key, descriptor]) => [
+        key,
+        { ...descriptor, value: structuredClone(descriptor.value) },
+      ]);
+  return { fields: ownDescriptors(snapshot, "frames"), frames: ownDescriptors(snapshot.frames) };
 }
 
 function deepBindingValue(snapshot: RuntimeSnapshot): SerializableRuntimeValue | undefined {
@@ -770,7 +775,9 @@ test("snapshot and checkpoint paths reject sparse arrays as malformed data", () 
 
   const malformedCheckpoint = checkpoint(plan, createFreshRuntimeSnapshot(plan));
   malformedCheckpoint.snapshot.frames.length = 0xffff_ffff;
+  const checkpointSnapshotBefore = sparseSnapshotState(malformedCheckpoint.snapshot);
   assertCheckpointError(() => restoreCheckpoint(malformedCheckpoint), "$.snapshot");
+  assert.deepEqual(sparseSnapshotState(malformedCheckpoint.snapshot), checkpointSnapshotBefore);
 });
 
 test("cycles, non-plain objects, non-finite numbers, and malformed kinds remain rejected", () => {

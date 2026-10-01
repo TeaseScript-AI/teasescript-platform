@@ -277,14 +277,19 @@ test("#79 validates every settlement relationship and preserves valid replay", (
     assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)), checkpointError, name);
   }
 
+  const expectedActive = structuredClone(active);
   const replay = completeAction(compiled, active, {
     actionId: active.lastSettlement!.actionId,
     actionKind: "delay",
     payload: { kind: "time", currentSessionTimeMs: active.currentSessionTimeMs },
   });
-  assert.deepEqual(replay.outcome, { kind: "alreadySettled", settlement: active.lastSettlement });
+  assert.deepEqual(replay.outcome, {
+    kind: "alreadySettled",
+    settlement: expectedActive.lastSettlement,
+  });
   // Replaying the first settlement leaves the second wait pending and the continuation unadvanced.
-  assert.deepEqual(replay.snapshot, active);
+  assert.deepEqual(replay.snapshot, expectedActive);
+  assert.deepEqual(active, expectedActive);
   assert.deepEqual(replay.events, []);
 });
 
@@ -380,13 +385,15 @@ test("#82 uses the wait keyword path and rejects forged ownership, missing wait 
   // arbitrary claimed kind is refused at the delay, before any action-kind comparison.
   // EVIDENCE: fixture: Object.create(null) supplies the property dictionary used as an arbitrary claimed action kind.
   const arbitraryKind = Object.create(null) as Record<string, unknown>;
+  const expectedWaiting = structuredClone(temporaryWait.snapshot);
   const completion = completeAction(temporaryWait.compiled, temporaryWait.snapshot, {
     actionId: temporaryWait.snapshot.foregroundAction!.actionId,
     actionKind: arbitraryKind,
     payload: { kind: "time", currentSessionTimeMs: 1 },
   });
   assert.equal(completion.outcome.kind, "invalidPayload");
-  assert.deepEqual(completion.snapshot, temporaryWait.snapshot);
+  assert.deepEqual(completion.snapshot, expectedWaiting);
+  assert.deepEqual(temporaryWait.snapshot, expectedWaiting);
   assert.deepEqual(completion.events, []);
 });
 
