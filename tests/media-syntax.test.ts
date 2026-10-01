@@ -283,6 +283,12 @@ test("cue positions may start with an object literal and continue like other exp
     ["beforeEnd", "at"],
   );
   assertRejected('let x = choose 1: "One" {\n}', "TSP", "");
+  // A block inside a cue position parses like any other block.
+  assertRejected(
+    'function point(x) {\n  return 1\n}\nplayAudio "a" {\n  at point(timer async 1 {\n    repeat choose 1: "Once", 2: "Twice" { }\n  }) { }\n}',
+    "TSP",
+    "",
+  );
 });
 
 test("media parse errors recover at the end of the line and keep enclosing blocks", () => {

@@ -1486,7 +1486,16 @@ class Parser {
     });
   }
 
+  /** A statement block; statements inside it are not part of an enclosing cue position. */
   *#parseBlock(): ParseTask<Block | null> {
+    const enclosingCuePosition = this.#inCuePosition;
+    this.#inCuePosition = false;
+    const block = yield* parseChild(this.#parseBlockStatements());
+    this.#inCuePosition = enclosingCuePosition;
+    return block;
+  }
+
+  *#parseBlockStatements(): ParseTask<Block | null> {
     if (!this.#match(TokenKind.LeftBrace)) {
       this.#reportInsertion(parserDiagnosticCode.expectedBlock, "Expected '{' to start the block.");
       return null;
