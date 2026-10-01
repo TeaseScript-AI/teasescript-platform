@@ -162,6 +162,10 @@ function validMediaRecord(
     !cursorMatchesAnchor(
       {
         finishedAtEnd: media.state === "finished" && media.positionMs >= end,
+        finishedByDuration:
+          media.state === "finished" &&
+          isPlainRecord(media.repeat) &&
+          media.repeat.kind === "budget",
         positionMs: media.positionMs,
         passesCompleted: media.passesCompleted,
         committedProgressMs: media.committedProgressMs,
@@ -223,13 +227,15 @@ function validMediaRecord(
 /**
  * The committed progress is where the anchor formula places the current position and pass: the runtime commits
  * arrivals calculated by it, and a pass wrap moves to the start of the next pass at the same progress. Media finished at
- * the end of their last pass stand at the end of the pass before the count. Positions derived from a repeat-duration
- * end or a monotonic clamp differ from the formula by rounding only, so the comparison allows a few units of the
- * magnitude's last place, as timer validation does.
+ * the end of their last pass stand at the end of the pass before the count. Within a segment the formula rounds only
+ * at the magnitude of segment progress, so a monotonic clamp differs from it by a few units of that magnitude's last
+ * place, as in timer validation; only media finished by a repeat duration derive their position by arithmetic, which
+ * adds rounding at the magnitude of the position. Larger differences are incoherent.
  */
 function cursorMatchesAnchor(
   cursor: {
     readonly finishedAtEnd: boolean;
+    readonly finishedByDuration: boolean;
     readonly positionMs: number;
     readonly passesCompleted: number;
     readonly committedProgressMs: number;
@@ -245,13 +251,18 @@ function cursorMatchesAnchor(
     passLengthMs,
     cursor.positionMs - cursor.segmentPositionMs,
   );
-  const magnitude = Math.max(
+  const progressMagnitude = Math.max(
     passes * passLengthMs,
-    cursor.positionMs,
-    cursor.segmentPositionMs,
+    Math.abs(expected),
     cursor.committedProgressMs,
   );
-  return Math.abs(expected - cursor.committedProgressMs) <= Number.EPSILON * 16 * magnitude;
+  const positionMagnitude = cursor.finishedByDuration
+    ? Math.max(cursor.positionMs, cursor.segmentPositionMs)
+    : 0;
+  return (
+    Math.abs(expected - cursor.committedProgressMs) <=
+    Number.EPSILON * (4 * progressMagnitude + 2 * positionMagnitude)
+  );
 }
 
 /**

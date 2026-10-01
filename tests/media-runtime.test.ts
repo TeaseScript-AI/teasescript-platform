@@ -1111,3 +1111,23 @@ test("fractional controls, budget ends, and terminal playheads agree with the ar
   assert.equal(held?.reportedProgressMs, end);
   assert.equal(held?.playheadMs, 1000.1);
 });
+
+test("anchor coherence tolerates rounding only at the magnitude of segment progress", () => {
+  const corrupt = (session: Session, mutate: (media: MutableMedia) => void, name: string): void => {
+    assert.equal(validateRuntimeSnapshot(session.snapshot, session.plan).valid, true, name);
+    // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; each case applies one invalid mutation.
+    const corrupted = JSON.parse(JSON.stringify(session.snapshot)) as MutableSnapshot;
+    mutate(mediaOf(corrupted, 1));
+    assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false, name);
+  };
+  const far = new Session(
+    'let m = playAudio(file: "a", async: true, startAt: 1000000000000000 ms, endAt: 1000000000001000 ms) {\n  at 1000000000000500 ms { }\n}\nwait 10',
+  );
+  far.load(1, 1_000_000_000_002_000).at(500, [1, 500]);
+  corrupt(far, (media) => (media.segmentPositionMs += 1), "far anchor position");
+  const passes = new Session(
+    'let m = playAudio(file: "a", async: true, repeat: 3 times, startAt: 8000000000000000 ms, endAt: 8000000000000010 ms)\nwait 10',
+  );
+  passes.load(1, 8_000_000_000_000_100).at(10, [1, 10]);
+  corrupt(passes, (media) => (media.segmentPasses = 1), "far anchor passes");
+});
