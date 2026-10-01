@@ -3,10 +3,12 @@
 **Status:** Accepted
 
 Ordinary TeaseScript data uses deep value-copy semantics for variable
-declarations and direct assignments. Scalars copy as values. Lists, sets, and
-ordinary script objects become independent recursive copies, including nested
-lists, sets, and objects. Set copies preserve insertion order. Mutating a copy
-must not mutate the original.
+declarations, direct assignments, list elements, and object fields. Scalars copy
+as values. Lists, sets, and ordinary script objects become independent recursive
+copies, including nested lists, sets, and objects. Set copies preserve insertion
+order. Mutating a copy must not mutate the original. A composite value captured
+as a list element or object field is copied at the evaluation step that produces
+it, so later evaluation in the same literal cannot change it.
 
 Cyclic script values are not supported. An attempted copy of a cyclic value
 produces a structured runtime error instead of recursing indefinitely. Future

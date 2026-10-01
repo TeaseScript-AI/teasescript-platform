@@ -60,23 +60,26 @@ test("recursively deep-copies nested lists", () => {
   ]);
 });
 
-test("list literals capture sibling values after their evaluations finish", () => {
+test("list elements and object fields copy composite values when each is evaluated", () => {
   const captured: unknown[] = [];
   const result = executeSource(
     [
       "let source = [1]",
-      "let value = [source, source.add(2)]",
-      "source.add(3)",
+      "let list = [source, source.add(2)]",
+      "let object = { first: source, second: source.add(3) }",
+      "source.add(4)",
       "capture(source)",
-      "capture(value)",
+      "capture(list)",
+      "capture(object.first)",
     ],
     { capture: captureInto(captured) },
   );
 
   assert.deepEqual(result.errors, []);
   assert.deepEqual(captured, [
-    [1, 2, 3],
-    [[1, 2], null],
+    [1, 2, 3, 4],
+    [[1], null],
+    [1, 2],
   ]);
 });
 
