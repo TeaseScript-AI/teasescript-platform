@@ -275,6 +275,14 @@ test("cue positions may start with an object literal and continue like other exp
     ["at", "beforeEnd"],
   );
   assertRejected('playAudio "a" {\n  at { say "x" }\n}', "TSP", "");
+  assert.deepEqual(offsets('playAudio "a" {\n  at askNumber """${\n    1\n  }""" { }\n}'), ["at"]);
+  assert.deepEqual(
+    offsets(
+      'playAudio "a" {\n  beforeEnd choose 1: "One",\n\n    2: "Two" { }\n  at choose 3: "Three" { }\n}',
+    ),
+    ["beforeEnd", "at"],
+  );
+  assertRejected('let x = choose 1: "One" {\n}', "TSP", "");
 });
 
 test("media parse errors recover at the end of the line and keep enclosing blocks", () => {

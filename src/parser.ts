@@ -124,6 +124,8 @@ class Parser {
   readonly #diagnostics: Diagnostic[] = [];
   #current = 0;
   #recoveredAtStatementBoundary = false;
+  /** Inside a media cue position, whose block `{` ends a compact choice. */
+  #inCuePosition = false;
 
   public constructor(private readonly tokens: readonly Token[]) {}
 
@@ -1000,6 +1002,14 @@ class Parser {
    */
   *#parseMediaHandlers(): ParseTask<MediaHandlers | null | false> {
     if (!this.#check(TokenKind.LeftBrace)) return null;
+    const enclosingCuePosition = this.#inCuePosition;
+    this.#inCuePosition = false;
+    const handlers = yield* parseChild(this.#parseMediaHandlerBlock());
+    this.#inCuePosition = enclosingCuePosition;
+    return handlers;
+  }
+
+  *#parseMediaHandlerBlock(): ParseTask<MediaHandlers | false> {
     const leftBrace = this.#advance();
     this.#skipNewlines();
     const cueMode = this.#isMediaCueStart();
@@ -1086,13 +1096,15 @@ class Parser {
       if (
         kind === TokenKind.LeftParenthesis ||
         kind === TokenKind.LeftBracket ||
-        kind === TokenKind.LeftBrace
+        kind === TokenKind.LeftBrace ||
+        kind === TokenKind.InterpolationStart
       ) {
         depth += 1;
       } else if (
         kind === TokenKind.RightParenthesis ||
         kind === TokenKind.RightBracket ||
-        kind === TokenKind.RightBrace
+        kind === TokenKind.RightBrace ||
+        kind === TokenKind.InterpolationEnd
       ) {
         depth = Math.max(0, depth - 1);
       }
@@ -1106,7 +1118,10 @@ class Parser {
       keyword.lexeme === "at" ? "at" : keyword.lexeme === "beforeEnd" ? "beforeEnd" : "finish";
     let offset: Expression | null = null;
     if (kind !== "finish") {
+      const enclosing = this.#inCuePosition;
+      this.#inCuePosition = true;
       offset = yield* parseChild(this.#parseOr());
+      this.#inCuePosition = enclosing;
       if (offset === null) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedExpression,
@@ -2084,7 +2099,10 @@ class Parser {
         }),
       );
       if (separatorSpan === null) {
-        if (!this.#isInteractionChoiceTerminator()) {
+        if (
+          !this.#isInteractionChoiceTerminator() &&
+          !(this.#inCuePosition && this.#check(TokenKind.LeftBrace))
+        ) {
           if (this.#check(TokenKind.KeywordAs)) {
             this.#reportSpan(
               parserDiagnosticCode.unsupportedInteractionForm,
@@ -2665,10 +2683,11 @@ function isAssignmentTarget(expression: Expression): expression is AssignmentTar
   );
 }
 
-/** Operators after which the expression parser skips newlines. */
+/** Tokens after which the expression parser skips newlines: binary operators and the comma of a compact choice. */
 function continuesExpression(kind: TokenKind): boolean {
   return (
     isComparisonKind(kind) ||
+    kind === TokenKind.Comma ||
     kind === TokenKind.KeywordOr ||
     kind === TokenKind.KeywordAnd ||
     kind === TokenKind.KeywordNot ||
