@@ -1365,3 +1365,20 @@ test("restore validation accepts only positions the runtime can stand on", () =>
   tail.load(1, 1_000_000_000_000_000.1).at(6_700_000_000_000_001, [1, 6_700_000_000_000_001]);
   corrupt(tail, (media) => (media.positionMs += 0.125), "duration tail alias");
 });
+
+test("restore validation never coerces media settlement enumerations to text", () => {
+  const session = new Session('let a = playAudio async "a.mp3"\nwait 10').load(1, 1_000);
+  const settlement = session.snapshot.lastSettlement;
+  assert.equal(settlement?.actionKind, "mediaPlayback");
+  for (const field of ["outcome", "actionKind"] as const) {
+    // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; each case applies one invalid mutation.
+    const corrupted = JSON.parse(JSON.stringify(session.snapshot)) as {
+      lastSettlement: Record<string, unknown>;
+    };
+    // A one-element array stringifies to its element, so only an exact type check rejects it.
+    corrupted.lastSettlement[field] = [corrupted.lastSettlement[field]];
+    assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false, field);
+    // Without the plan, only the settlement's own shape rules apply.
+    assert.equal(validateRuntimeSnapshot(corrupted).valid, false, `${field} without the plan`);
+  }
+});

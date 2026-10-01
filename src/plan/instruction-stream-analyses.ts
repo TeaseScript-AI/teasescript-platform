@@ -2,6 +2,7 @@ import { recordValidationTestWork } from "../validation-testing.js";
 import {
   type PlanValidationError,
   isRecord,
+  isOneOf,
   nonNegativeSafeInteger,
   planError,
   positiveSafeInteger,
@@ -932,7 +933,7 @@ function validateCanonicalInteractionResultHandoffs(
     }
     if (handoff.kind === "returnValue") return;
     if (
-      ![
+      !isOneOf(handoff.kind, [
         "declareBinding",
         "assign",
         "evaluate",
@@ -940,7 +941,7 @@ function validateCanonicalInteractionResultHandoffs(
         "say",
         "setDeclaredSpeakerProperty",
         "prepareReference",
-      ].includes(String(handoff.kind))
+      ])
     ) {
       errors.push(
         planError(
@@ -1290,7 +1291,7 @@ function validateFunctionDefinitions(
       ownerRegion?.kind === "function"
         ? index?.functionsById.get(ownerRegion.functionId)
         : undefined;
-    const functionOnly = [
+    const functionOnly = isOneOf(instruction.kind, [
       "bindSuppliedParameter",
       "beginFunctionDefaults",
       "prepareParameterDefault",
@@ -1298,7 +1299,7 @@ function validateFunctionDefinitions(
       "enterFunctionBody",
       "returnValue",
       "returnVoid",
-    ].includes(String(instruction.kind));
+    ]);
     if (functionOnly && owner === undefined) {
       errors.push(
         planError(
@@ -1518,7 +1519,7 @@ function validateFunctionPrologue(
         continue;
       }
       if (
-        ![
+        !isOneOf(nested.kind, [
           "storeTemporary",
           "prepareReference",
           "clearTemporary",
@@ -1527,7 +1528,7 @@ function validateFunctionPrologue(
           "validateCallReceiver",
           "jumpIfFalse",
           "jump",
-        ].includes(String(nested.kind))
+        ])
       ) {
         errors.push(
           planError(
@@ -1631,7 +1632,11 @@ function validateFunctionPrologue(
     instructionIndex += 1
   ) {
     const instruction = instructions[instructionIndex];
-    if (isRecord(instruction) && prologueOnly.has(String(instruction.kind))) {
+    if (
+      isRecord(instruction) &&
+      typeof instruction.kind === "string" &&
+      prologueOnly.has(instruction.kind)
+    ) {
       errors.push(
         planError(
           "TSC002",
