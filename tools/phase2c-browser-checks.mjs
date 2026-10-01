@@ -1596,6 +1596,35 @@ async function transcriptSpacingChecks(page) {
   return "PASS grouped 3px and fixed 12px transcript and choice spacing";
 }
 
+async function avatarImageChecks(page) {
+  await page.getByRole("button", { name: "Visual Lab", exact: true }).click();
+  await page.getByRole("button", { name: "Start avatar sample", exact: true }).click();
+  const avatars = () =>
+    Array.from(document.querySelectorAll(".transcript-entry"), (row) => {
+      const image = row.querySelector('[data-slot="avatar-image"]');
+      return {
+        image:
+          image instanceof HTMLImageElement && image.naturalWidth > 0 && image.checkVisibility(),
+        fallback: row.querySelector('[data-slot="avatar-fallback"]')?.textContent?.trim() ?? null,
+      };
+    });
+  const expected = JSON.stringify([
+    { image: true, fallback: null },
+    { image: false, fallback: "C" },
+  ]);
+  let actual = "";
+  for (let attempt = 0; attempt < 50 && actual !== expected; attempt += 1) {
+    if (attempt > 0) await page.waitForTimeout(100);
+    actual = JSON.stringify(await page.evaluate(avatars));
+  }
+  if (actual !== expected) {
+    throw new Error(
+      `Authored avatar images must render, with a letter fallback when unavailable: ${actual}`,
+    );
+  }
+  return "PASS authored avatar image and unavailable-image fallback";
+}
+
 async function buttonInkChecks(page) {
   if (!(await page.evaluate(() => matchMedia("(any-hover: hover)").matches))) {
     throw new Error("Button ink regression requires a hover-capable desktop context");
@@ -2862,6 +2891,7 @@ const groups = [
   typographyChecks,
   actionButtonGeometryChecks,
   transcriptSpacingChecks,
+  avatarImageChecks,
   buttonInkChecks,
   authoredPresentationChecks,
   listContrastChecks,

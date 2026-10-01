@@ -41,7 +41,10 @@ export interface PlayerTimerPresentation {
 export interface PlayerSpeakerPresentation {
   readonly name: string;
   readonly accent: string;
+  /** Letter glyph shown when no authored avatar image is available or it fails to load. */
   readonly avatar: string;
+  /** Authored speaker `avatar` image reference. */
+  readonly avatarImage?: string;
   readonly fontFamily: string;
   readonly identityId?: string;
 }

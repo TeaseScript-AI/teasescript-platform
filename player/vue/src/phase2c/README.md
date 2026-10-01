@@ -11,10 +11,16 @@ utility resolution; it does not change the maintained Player theme or select a p
 
 ## Responsibility boundaries
 
-- `App.vue` composes the Player, development scenarios and tool contents. It installs `usePlayerKeyboardFocus.ts`
+- `PlayerApp.vue` composes the product Player from props and slots. It installs `usePlayerKeyboardFocus.ts`
   once, including for body-portaled controls; the [focus contract](../../../../docs/ui/PLAYER-UI.md#input-growth-focus-and-keyboard-behavior)
   defines input modality and composer/Send focus.
-- `PlayerToolsShell.vue` owns tool selection, pinning, order, resizing, retained content and dock/drawer focus.
+- `usePlayerSession.ts` hosts the canonical adapter session for presentation: starting or restoring a session resets
+  interaction-local state, and a new session remounts the transcript. Vue derives everything else from that session.
+- `DevelopmentPreview.vue` supplies fixtures, Visual Lab, Layout Debug, runtime scenarios and the fixture right rail.
+  `main.ts` loads it as a separate chunk on the development server, or in a build only with the `?dev` URL opt-in; the
+  default build mounts `PlayerApp.vue` with runtime-owned content only. Integration code supplies sessions through
+  `usePlayerSession.ts`, not through fixtures.
+- `PlayerToolsShell.vue` receives its tool list from the root and owns tool selection, pinning, order, resizing, retained content and dock/drawer focus.
   Its tool slot supplies content; its default slot supplies the Player. Closing a visited panel retains its content.
   Tool bodies scroll vertically; the outer carousel handles overflow between panels. Shared shadcn-vue/Reka
   `components/ui/scroll-area` supports per-location visibility without reserving width. The transcript currently
@@ -50,13 +56,13 @@ utility resolution; it does not change the maintained Player theme or select a p
   Its action buttons have no scripted handler, so clicking them adds no text or local feedback. Timer allocation and the
   toggle remain experimental, without runtime wiring.
 
-The preview opens with choices. Visual Lab restarts that scenario, selects text/number/choice interaction, or loads a
-spacing sample with grouped guide bubbles, a player reply, another speaker, and active choices. Separate messages and
+The development preview opens with choices. Visual Lab restarts that scenario, selects text/number/choice interaction,
+loads an authored avatar sample (one image, one unavailable image with its letter fallback), or loads a spacing sample with grouped guide bubbles, a player reply, another speaker, and active choices. Separate messages and
 choices have a 12px gap; grouped bubbles remain 3px apart.
 The `?spacing-sample` preview URL opens that sample directly with a 45/55 stage/conversation split so all messages and
-choices can be compared together. Transcript fixtures switch App back to local preview replies. Composer dimensions and
+choices can be compared together. Transcript fixtures detach the runtime session and use local preview replies. Composer dimensions and
 height caps remain visual trials.
-The development-only `?feedback-demo=composer` URL opens the sample directly. Submit text that does not exactly match a
+The development preview `?feedback-demo=composer` URL opens the sample directly. Submit text that does not exactly match a
 choice to see the standard red validation notice beside the composer input.
 
 Story-button ink and transcript readability follow the current Player treatment in

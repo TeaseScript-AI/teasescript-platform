@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Message, MessageAvatar, MessageContent, MessageHeader } from "@/components/ui/message";
 import type {
@@ -20,6 +20,7 @@ const props = defineProps<{
   avatarOrdinal: number | undefined;
 }>();
 const player = props.entry.kind === "message" && props.entry.speakerId === "user";
+const speaker = props.entry.kind === "message" ? props.speakers[props.entry.speakerId] : undefined;
 const name = !player && !props.continues ? nameOf(props.speakers, props.entry) : "";
 const avatarColors = computed(() => speakerAvatarColors(props.avatarOrdinal ?? 0));
 const avatarStyle = computed(() => ({
@@ -58,9 +59,11 @@ const avatarStyle = computed(() => ({
   </div>
   <Message v-else :align="player ? 'end' : 'start'">
     <MessageAvatar v-if="!player" class="self-start" :class="continues ? 'invisible' : ''">
-      <Avatar>
+      <!-- The visible speaker name identifies the message; the avatar is decorative. -->
+      <Avatar aria-hidden="true">
+        <AvatarImage v-if="speaker?.avatarImage" :src="speaker.avatarImage" alt="" />
         <AvatarFallback data-speaker-avatar class="text-xs font-semibold" :style="avatarStyle">
-          {{ entry.kind === "message" ? speakers[entry.speakerId]?.avatar : "" }}
+          {{ speaker?.avatar }}
         </AvatarFallback>
       </Avatar>
     </MessageAvatar>

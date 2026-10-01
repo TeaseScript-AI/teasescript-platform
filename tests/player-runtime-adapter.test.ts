@@ -92,6 +92,29 @@ showButton "Continue"
   assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
 });
 
+test("runtime adapter separates authored avatar images from the letter fallback", () => {
+  const session = createPlayerRuntimeSession(`
+speaker vera {
+  firstName: "Vera"
+  avatar: "avatars/vera.jpg"
+}
+speaker guide { title: "guide" }
+say as vera "Hello.", instant
+say as guide "Welcome.", instant
+exit
+`);
+  const speakers = session.transcriptEntries.map((entry) =>
+    entry.kind === "message" ? session.speakers[entry.speakerId] : undefined,
+  );
+  assert.deepEqual(
+    speakers.map((speaker) => [speaker?.avatar, speaker?.avatarImage]),
+    [
+      ["V", "avatars/vera.jpg"],
+      ["G", undefined],
+    ],
+  );
+});
+
 test("runtime adapter delegates interaction normalization, transcript, and continuation to the engine", () => {
   let session = createPlayerRuntimeSession(`
 speaker guide {

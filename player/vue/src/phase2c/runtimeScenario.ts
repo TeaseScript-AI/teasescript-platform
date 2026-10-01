@@ -49,3 +49,21 @@ say as guide "Where would you like to go?", instant
 let direction = choose as guide shore: "Walk by the water", light: "Visit the lighthouse", harbour: "Return to the harbour"
 exit
 `;
+
+// One loadable authored avatar image and one unavailable reference that must fall back to its letter.
+const lighthouseAvatar = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path fill="#1f4e5f" d="M0 0h64v64H0z"/><path fill="#f5dcb0" d="M26 14h12l4 40H22z"/><path fill="#c8553d" d="M24 26h16v6H24zm-1 12h18v6H23z"/></svg>',
+)}`;
+export const avatarScenario = `
+speaker keeper {
+  title: "Harbour Keeper"
+  avatar: "${lighthouseAvatar}"
+}
+speaker guide {
+  title: "Coastal Guide"
+  avatar: "avatars/unavailable-guide.png"
+}
+say as keeper "The lighthouse is lit.", instant
+say as guide "Then we can find our way back.", instant
+exit
+`;
