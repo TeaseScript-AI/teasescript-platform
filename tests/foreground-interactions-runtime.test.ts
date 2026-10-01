@@ -603,7 +603,7 @@ test("interaction definitions preflight each field against remaining aggregate b
   assert.deepEqual(huge.snapshot, hugePending.snapshot);
 });
 
-test("malformed interaction snapshot and settlement data are rejected", () => {
+test("malformed pending interaction snapshot data is rejected", () => {
   const plan = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
   const pending = waiting(plan);
   // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture callbacks corrupt interaction kind, destination, speaker identity, and UI kind fields with incompatible values.
@@ -626,20 +626,8 @@ test("malformed interaction snapshot and settlement data are rejected", () => {
     mutate(malformed);
     assert.equal(validateRuntimeSnapshot(malformed, plan).valid, false);
   }
-  const done = complete(plan, { kind: "submittedText", submittedText: "ok" }, "text");
-  const malformedSettlement: any = structuredClone(done.snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture replaces a text settlement result with a number for rejection.
-  malformedSettlement.lastSettlement.result = 1;
-  assert.equal(validateRuntimeSnapshot(malformedSettlement, plan).valid, false);
-  const wrongTranscript: any = structuredClone(done.snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture makes retained transcript text disagree with the completed interaction result.
-  wrongTranscript.lastSettlement.transcriptText = "different";
-  assert.equal(validateRuntimeSnapshot(wrongTranscript, plan).valid, false);
-  // EVIDENCE: structuredClone preserves the runtime snapshot shape while this fixture changes one temporary value.
-  const wrongDestination = structuredClone(done.snapshot) as Mutable<RuntimeSnapshot>;
-  const wrongTemporary = wrongDestination.temporaries.find((temporary) => temporary.id === 1);
-  assert.ok(wrongTemporary);
-  wrongTemporary.value = "other";
-  assert.equal(validateRuntimeSnapshot(wrongDestination, plan).valid, false);
-
+  // Settlement result, transcript and destination disagreements are rejected with complete
+  // boundary evidence by the handoff settlement matrix.
   const standaloneUi: any = structuredClone(pending.snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture adds an unsupported accessible-name key to persisted UI data.
   standaloneUi.foregroundAction.ui.accessibleName.key = "continue";
   assert.equal(validateRuntimeSnapshot(standaloneUi).valid, false);
