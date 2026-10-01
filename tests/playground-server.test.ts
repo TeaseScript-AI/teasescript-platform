@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after, before } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { PLAYGROUND_EXAMPLES } from "../playground/examples.js";
 import { createPlaygroundServer } from "../playground/server.js";
 
 const server = createPlaygroundServer();
+const projectRoot = fileURLToPath(new URL("../..", import.meta.url));
 let port = 0;
 
 before(async () => {
@@ -38,14 +40,14 @@ test("serves the root playground page", async () => {
 
   assert.equal(response.status, 200);
   assert.match(response.contentType, /^text\/html/u);
-  assert.match(response.body, /TeaseScript Playground/u);
+  assert.equal(response.body, await projectFile("playground/index.html"));
 });
 
 test("serves only the explicit colour module needed by unbundled playground imports", async () => {
   const response = await get("/vendor/color.js");
   assert.equal(response.status, 200);
   assert.match(response.contentType, /^text\/javascript/u);
-  assert.match(response.body, /export \{ Color as default \}/u);
+  assert.equal(response.body, await projectFile("node_modules/colorjs.io/dist/color.js"));
   assert.equal((await get("/vendor/package.json")).status, 404);
   assert.equal((await get("/node_modules/colorjs.io/package.json")).status, 404);
 });
@@ -55,13 +57,16 @@ test("serves the Vue Player at its maintained route and keeps its build separate
 
   assert.equal(html.status, 200);
   assert.match(html.contentType, /^text\/html/u);
-  assert.match(html.body, /TeaseScript Player/u);
-  const assetPath = html.body.match(/(\/player\/assets\/index-[^"]+\.js)/u)?.[1];
-  assert.ok(assetPath);
+  assert.equal(html.body, await projectFile("dist/player-app/index.html"));
+  const assetPath = html.body.match(/<script\b[^>]*\bsrc="([^"]+)"/u)?.[1] ?? "";
+  assert.ok(assetPath.startsWith("/player/assets/"), assetPath);
   const javascript = await get(assetPath);
   assert.equal(javascript.status, 200);
   assert.match(javascript.contentType, /^text\/javascript/u);
-  assert.doesNotMatch(javascript.body, /player\/browser/u);
+  assert.equal(
+    javascript.body,
+    await projectFile(`dist/player-app/${assetPath.slice("/player/".length)}`),
+  );
   assert.equal((await get("/player-vue/")).status, 404);
 });
 
@@ -101,10 +106,10 @@ test("serves required JavaScript and CSS assets", async () => {
 
   assert.equal(javascript.status, 200);
   assert.match(javascript.contentType, /^text\/javascript/u);
-  assert.match(javascript.body, /compileWorkspaceSource/u);
+  assert.equal(javascript.body, await projectFile("dist/playground/browser.js"));
   assert.equal(css.status, 200);
   assert.match(css.contentType, /^text\/css/u);
-  assert.match(css.body, /runtime-summary/u);
+  assert.equal(css.body, await projectFile("playground/playground.css"));
 });
 
 test("serves every fixed repository playground example", async () => {
@@ -126,7 +131,7 @@ test("rejects encoded path traversal", async () => {
   const response = await get("/dist/%2e%2e/package.json");
 
   assert.equal(response.status, 400);
-  assert.match(response.body, /unsafe request path/u);
+  assert.ok(!response.body.includes(await projectFile("package.json")));
 });
 
 test("query and encoded example-path manipulation cannot select a file", async () => {
@@ -153,7 +158,7 @@ test("rejects symlinks that escape an exposed static root", async (context) => {
   const response = await get("/examples/playground/main.tease", isolatedPort);
 
   assert.equal(response.status, 400);
-  assert.match(response.body, /unsafe request path/u);
+  assert.ok(!response.body.includes("not public"));
 });
 
 test("workspace automation stores revisions and returns compile and run results", async (context) => {
@@ -269,6 +274,10 @@ test("workspace automation rejects clients outside the permitted loopback addres
   );
   assert.equal(response.status, 403);
 });
+
+function projectFile(path: string): Promise<string> {
+  return readFile(join(projectRoot, path), "utf8");
+}
 
 interface HttpResult {
   readonly status: number;
