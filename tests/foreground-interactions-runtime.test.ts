@@ -111,6 +111,37 @@ const defaults = {
   choice: { kind: "localizedDefault", key: "chooseOption" },
 } as const;
 
+// One fixture per choice result domain; the labelled options share visible text on purpose.
+const choiceDomains: Record<"unlabelled" | "identifier" | "numeric", InteractionUiPayload> = {
+  unlabelled: {
+    kind: "choice",
+    labelType: "none",
+    options: [
+      { text: "Alpha", label: null },
+      { text: "Beta", label: null },
+    ],
+    accessibleName: defaults.choice,
+  },
+  identifier: {
+    kind: "choice",
+    labelType: "identifier",
+    options: [
+      { text: "Same", label: "first" },
+      { text: "Same", label: "second" },
+    ],
+    accessibleName: defaults.choice,
+  },
+  numeric: {
+    kind: "choice",
+    labelType: "number",
+    options: [
+      { text: "One", label: 1 },
+      { text: "Two", label: 2 },
+    ],
+    accessibleName: defaults.choice,
+  },
+};
+
 function waiting(plan: InstructionPlan) {
   const result = run(plan, createFreshRuntimeSnapshot(plan));
   assert.equal(result.snapshot.status, "waiting");
@@ -226,15 +257,7 @@ test("number accepts TeaseScript decimal/scientific text and preserves its trimm
 });
 
 test("choice supports unlabelled, identifier, numeric, exact typed, and ambiguous labelled behavior", () => {
-  const unlabelled = interactionPlan("choice", {
-    kind: "choice",
-    labelType: "none",
-    options: [
-      { text: "Alpha", label: null },
-      { text: "Beta", label: null },
-    ],
-    accessibleName: defaults.choice,
-  });
+  const unlabelled = interactionPlan("choice", choiceDomains.unlabelled);
   assert.equal(
     complete(unlabelled, { kind: "selectedText", selectedText: "Beta" }, "choice").snapshot
       .temporaries[0]?.value,
@@ -246,15 +269,7 @@ test("choice supports unlabelled, identifier, numeric, exact typed, and ambiguou
     "Alpha",
   );
 
-  const labelled = interactionPlan("choice", {
-    kind: "choice",
-    labelType: "identifier",
-    options: [
-      { text: "Same", label: "first" },
-      { text: "Same", label: "second" },
-    ],
-    accessibleName: defaults.choice,
-  });
+  const labelled = interactionPlan("choice", choiceDomains.identifier);
   const ambiguous = waiting(labelled);
   const before = JSON.stringify(ambiguous.snapshot);
   const rejected = completeAction(labelled, ambiguous.snapshot, {
@@ -270,15 +285,7 @@ test("choice supports unlabelled, identifier, numeric, exact typed, and ambiguou
   const choiceTranscript = selected.events[0]!;
   assert.equal(choiceTranscript.kind === "playerTranscript" && choiceTranscript.text, "Same");
 
-  const numeric = interactionPlan("choice", {
-    kind: "choice",
-    labelType: "number",
-    options: [
-      { text: "One", label: 1 },
-      { text: "Two", label: 2 },
-    ],
-    accessibleName: defaults.choice,
-  });
+  const numeric = interactionPlan("choice", choiceDomains.numeric);
   const numericCompleted = complete(numeric, { kind: "selectedLabel", selectedLabel: 2 }, "choice");
   assert.equal(numericCompleted.snapshot.temporaries[0]?.value, 2);
   assert.equal(validateRuntimeSnapshot(numericCompleted.snapshot, numeric).valid, true);
@@ -291,29 +298,14 @@ test("choice supports unlabelled, identifier, numeric, exact typed, and ambiguou
 
 test("choice completion snapshots validate without a plan for every result domain", () => {
   const cases = [
-    interactionPlan("choice", {
-      kind: "choice",
-      labelType: "none",
-      options: [{ text: "Visible", label: null }],
-      accessibleName: defaults.choice,
-    }),
-    interactionPlan("choice", {
-      kind: "choice",
-      labelType: "identifier",
-      options: [{ text: "Visible", label: "named" }],
-      accessibleName: defaults.choice,
-    }),
-    interactionPlan("choice", {
-      kind: "choice",
-      labelType: "number",
-      options: [{ text: "Visible", label: 1 }],
-      accessibleName: defaults.choice,
-    }),
+    interactionPlan("choice", choiceDomains.unlabelled),
+    interactionPlan("choice", choiceDomains.identifier),
+    interactionPlan("choice", choiceDomains.numeric),
   ] as const;
   const payloads = [
-    { kind: "selectedText", selectedText: "Visible" },
-    { kind: "selectedLabel", selectedLabel: "named" },
-    { kind: "selectedLabel", selectedLabel: 1 },
+    { kind: "selectedText", selectedText: "Beta" },
+    { kind: "selectedLabel", selectedLabel: "second" },
+    { kind: "selectedLabel", selectedLabel: 2 },
   ] as const;
   for (let index = 0; index < cases.length; index += 1) {
     const completed = complete(cases[index]!, payloads[index], "choice");
@@ -338,37 +330,58 @@ test("choice completion snapshots validate without a plan for every result domai
   assert.equal(validateRuntimeSnapshot(wrongChoiceDestination, cases[1]).valid, false);
 });
 
-test("numeric choice rejects negative-zero labels and stores JSON-stable zero results", () => {
-  const valid = interactionPlan("choice", {
+test("numeric interactions reject negative-zero labels and keep canonical zero results", () => {
+  const zeroChoice = interactionPlan("choice", {
     kind: "choice",
     labelType: "number",
     options: [{ text: "Zero", label: 0 }],
     accessibleName: defaults.choice,
   });
-  const negativeZeroPlan: any = structuredClone(valid); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture injects negative zero into a numeric choice label rejected by plan validation.
+  const negativeZeroPlan: any = structuredClone(zeroChoice); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture injects negative zero into a numeric choice label rejected by plan validation.
   negativeZeroPlan.instructions[0].ui.options[0].label = -0;
   assert.equal(validateInstructionPlan(negativeZeroPlan).valid, false);
 
-  const pending = waiting(valid);
+  const pending = waiting(zeroChoice);
   const negativeZeroAction: any = structuredClone(pending.snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture injects negative zero into persisted choice UI data rejected by snapshot validation.
   negativeZeroAction.foregroundAction.ui.options[0].label = -0;
   assert.equal(validateRuntimeSnapshot(negativeZeroAction).valid, false);
-  assert.equal(validateRuntimeSnapshot(negativeZeroAction, valid).valid, false);
+  assert.equal(validateRuntimeSnapshot(negativeZeroAction, zeroChoice).valid, false);
 
-  for (const payload of [
-    { kind: "selectedLabel", selectedLabel: -0 },
-    { kind: "submittedText", submittedText: "Zero" },
-  ]) {
-    const completed = complete(valid, payload, "choice");
-    assert.ok(completed.snapshot.lastSettlement?.actionKind === "interaction");
-    assert.equal(Object.is(completed.snapshot.lastSettlement.result, -0), false);
-    assert.equal(validateRuntimeSnapshot(completed.snapshot, valid).valid, true);
-    const restored = deserializeCheckpoint(
-      serializeCheckpoint(createCheckpoint(valid, completed.snapshot)),
+  const askNumber = interactionPlan("number", {
+    kind: "number",
+    hint: null,
+    accessibleName: defaults.number,
+  });
+  for (const [plan, payload, kind] of [
+    [askNumber, { kind: "submittedText", submittedText: "-0" }, "number"],
+    [zeroChoice, { kind: "selectedLabel", selectedLabel: -0 }, "choice"],
+    [zeroChoice, { kind: "submittedText", submittedText: "Zero" }, "choice"],
+  ] as const) {
+    const label = `${kind} ${JSON.stringify(payload)}`;
+    const completed = complete(plan, payload, kind);
+    assert.ok(completed.snapshot.lastSettlement?.actionKind === "interaction", label);
+    assert.equal(Object.is(completed.snapshot.lastSettlement.result, -0), false, label);
+    assert.equal(Object.is(completed.snapshot.temporaries[0]?.value, -0), false, label);
+    assert.equal(validateRuntimeSnapshot(completed.snapshot, plan).valid, true, label);
+
+    // Only a negative-zero destination differs from the canonical zero result.
+    const hostile = structuredClone(completed.snapshot);
+    assert.ok(hostile.temporaries[0] !== undefined, label);
+    hostile.temporaries[0].value = -0;
+    assert.equal(validateRuntimeSnapshot(hostile, plan).valid, false, label);
+    assert.throws(() => createCheckpoint(plan, hostile), label);
+    assert.throws(
+      () => restoreCheckpoint({ ...createCheckpoint(plan, completed.snapshot), snapshot: hostile }),
+      label,
     );
-    assert.ok(restored.snapshot.lastSettlement?.actionKind === "interaction");
-    assert.equal(Object.is(restored.snapshot.lastSettlement.result, -0), false);
-    assert.equal(run(restored.plan, restored.snapshot).snapshot.status, "halted");
+
+    const roundTrip = deserializeCheckpoint(
+      serializeCheckpoint(createCheckpoint(plan, completed.snapshot)),
+    );
+    assert.ok(roundTrip.snapshot.lastSettlement?.actionKind === "interaction", label);
+    assert.equal(Object.is(roundTrip.snapshot.lastSettlement.result, -0), false, label);
+    assert.equal(Object.is(roundTrip.snapshot.temporaries[0]?.value, -0), false, label);
+    assert.equal(run(roundTrip.plan, roundTrip.snapshot).snapshot.status, "halted", label);
   }
 });
 
@@ -1440,44 +1453,6 @@ test("one multibyte per-string failure stops all later interaction UTF-8 measure
     return finish();
   });
   assert.equal(snapshotStats.counts.interactionUtf8Measurements, 1);
-});
-
-test("numeric settlement destinations distinguish canonical zero from negative zero", () => {
-  for (const [plan, payload, kind] of [
-    [
-      interactionPlan("number", { kind: "number", hint: null, accessibleName: defaults.number }),
-      { kind: "submittedText", submittedText: "-0" },
-      "number",
-    ],
-    [
-      interactionPlan("choice", {
-        kind: "choice",
-        labelType: "number",
-        options: [{ text: "Zero", label: 0 }],
-        accessibleName: defaults.choice,
-      }),
-      { kind: "selectedLabel", selectedLabel: 0 },
-      "choice",
-    ],
-  ] as const) {
-    const completed = complete(plan, payload, kind);
-    assert.equal(Object.is(completed.snapshot.temporaries[0]?.value, -0), false);
-    assert.equal(validateRuntimeSnapshot(completed.snapshot, plan).valid, true);
-    const hostile = structuredClone(completed.snapshot);
-    assert.ok(hostile.temporaries[0] !== undefined);
-    hostile.temporaries[0].value = -0;
-    assert.equal(validateRuntimeSnapshot(hostile, plan).valid, false);
-    assert.throws(() => createCheckpoint(plan, hostile));
-    assert.throws(() =>
-      restoreCheckpoint({ ...createCheckpoint(plan, completed.snapshot), snapshot: hostile }),
-    );
-
-    const roundTrip = deserializeCheckpoint(
-      serializeCheckpoint(createCheckpoint(plan, completed.snapshot)),
-    );
-    assert.equal(Object.is(roundTrip.snapshot.temporaries[0]?.value, -0), false);
-    assert.equal(run(roundTrip.plan, roundTrip.snapshot).snapshot.status, "halted");
-  }
 });
 
 test("completed text settlements retain only canonical non-whitespace LF text", () => {
