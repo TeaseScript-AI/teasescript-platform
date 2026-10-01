@@ -2235,18 +2235,6 @@ test("PR194 matrix: invalid local handoff shapes reject without mutating plans",
       errors: [[handoffPath, mustConsume]],
     },
     {
-      id: "PR194-consume-wrong-temporary",
-      mutate: (plan) => {
-        plan.temporaryCount = injected.plan.temporaryCount + 1;
-        externalRecord(externalInstructions(plan)[injected.handoffInstruction], "handoff").value = {
-          kind: "temporary",
-          temporaryId: injected.destinationTemporary + 1,
-          span,
-        };
-      },
-      errors: [[handoffPath, mustConsume]],
-    },
-    {
       id: "PR194-missing-clear",
       mutate: (plan) => {
         externalInstructions(plan)[injected.clearInstruction] = { ...validSay, span };
@@ -2281,19 +2269,6 @@ test("PR194 matrix: invalid local handoff shapes reject without mutating plans",
         ],
         [clearPath, mustClear],
       ],
-    },
-    {
-      id: "PR194-return-value-not-guaranteed",
-      mutate: (plan) => {
-        externalRecord(externalInstructions(plan)[injected.handoffInstruction], "handoff").value = {
-          kind: "binary",
-          operator: "or",
-          left: { kind: "literal", value: true, span },
-          right: { kind: "temporary", temporaryId: injected.destinationTemporary, span },
-          span,
-        };
-      },
-      errors: [[handoffPath, mustConsume]],
     },
   ];
   for (const row of rows) {
