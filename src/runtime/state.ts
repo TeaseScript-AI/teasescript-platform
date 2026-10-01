@@ -2,6 +2,7 @@ import { isOneOf } from "../plan/validation-support.js";
 import type {
   RuntimeActionSettlementSnapshot,
   RuntimeDelayActionSnapshot,
+  RuntimeMediaPlaybackActionSnapshot,
   RuntimeForegroundActionSnapshot,
   RuntimeInteractionActionSnapshot,
   RuntimePendingActionSnapshot,
@@ -45,15 +46,21 @@ import {
 } from "./serializable-values.js";
 import { recordValidationTestWork } from "../validation-testing.js";
 import { validateTimerState } from "./timer-validation.js";
+import { validateMediaState } from "./media-validation.js";
 import {
   cloneTimer,
   type RuntimeTimerHandlerInvocationSnapshot,
   type RuntimeTimerSnapshot,
 } from "./timers.js";
+import {
+  cloneMedia,
+  type RuntimeMediaCueInvocationSnapshot,
+  type RuntimeMediaSnapshot,
+} from "./media.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 22;
+export const RUNTIME_SNAPSHOT_VERSION = 23;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -92,6 +99,9 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "settledTimers",
   "nextTimerId",
   "pendingTimerHandlers",
+  "stageImage",
+  "settledMedia",
+  "nextMediaId",
   "maxCallDepth",
   "status",
   "failure",
@@ -168,11 +178,24 @@ export interface RuntimeParameterStateSnapshot {
  * An expiry block running as an interrupt. The interrupted foreground delay or interaction is inert here and is
  * restored, or settled when its deadline has passed, when the block returns normally.
  */
-export interface RuntimeTimerInterruptionSnapshot {
-  readonly timerId: number;
-  readonly dueAtMs: number;
-  readonly suspendedAction: RuntimeDelayActionSnapshot | RuntimeInteractionActionSnapshot | null;
-}
+export type RuntimeTimerInterruptionSnapshot =
+  | {
+      readonly timerId: number;
+      readonly dueAtMs: number;
+      readonly suspendedAction: RuntimeInterruptibleActionSnapshot | null;
+    }
+  /** A media cue block owned by a media record instead of a timer. */
+  | {
+      readonly mediaId: number;
+      readonly dueAtMs: number;
+      readonly suspendedAction: RuntimeInterruptibleActionSnapshot | null;
+    };
+
+/** Foreground actions that an interrupt block can suspend. */
+export type RuntimeInterruptibleActionSnapshot =
+  | RuntimeDelayActionSnapshot
+  | RuntimeInteractionActionSnapshot
+  | RuntimeMediaPlaybackActionSnapshot;
 
 export interface RuntimeCallFrameSnapshot {
   readonly id: number;
@@ -208,7 +231,7 @@ export interface RuntimeInteractionResultHandoffSnapshot {
  */
 export interface RuntimeTerminalContinuationHandoffSnapshot {
   readonly actionId: number;
-  readonly actionKind: "delay" | "interaction";
+  readonly actionKind: "delay" | "interaction" | "mediaPlayback";
   readonly owningInstruction: number;
   readonly continuationInstruction: number;
 }
@@ -254,8 +277,18 @@ export interface RuntimeSnapshot {
   /** Finished or stopped timers, retained so their handles stay readable. Active timers are background actions. */
   readonly settledTimers: RuntimeTimerSnapshot[];
   nextTimerId: number;
-  /** Expired rounds whose expiry blocks run one at a time in `(dueAtMs, timerId)` order. */
-  readonly pendingTimerHandlers: RuntimeTimerHandlerInvocationSnapshot[];
+  /**
+   * Queued interrupt blocks: timer expiry blocks and media cue blocks. They run one at a time in due order; entries
+   * with equal due times keep their queue order.
+   */
+  readonly pendingTimerHandlers: (
+    RuntimeTimerHandlerInvocationSnapshot | RuntimeMediaCueInvocationSnapshot
+  )[];
+  /** The persistent Stage image reference, or `null` for an empty Stage. */
+  stageImage: string | null;
+  /** Finished or stopped media, retained so their handles stay readable. Active media are background actions. */
+  readonly settledMedia: RuntimeMediaSnapshot[];
+  nextMediaId: number;
   readonly maxCallDepth: number;
   status: RuntimeStatus;
   failure: RuntimeFailureSnapshot | null;
@@ -374,6 +407,9 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     settledTimers: [],
     nextTimerId: 1,
     pendingTimerHandlers: [],
+    stageImage: null,
+    settledMedia: [],
+    nextMediaId: 1,
     maxCallDepth,
     status: plan.rootEndInstruction === 0 ? "halted" : "ready",
     failure: null,
@@ -435,16 +471,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
       returnInstruction: frame.returnInstruction,
       destinationTemporary: frame.destinationTemporary,
       timerInterruption:
-        frame.timerInterruption === null
-          ? null
-          : {
-              timerId: frame.timerInterruption.timerId,
-              dueAtMs: frame.timerInterruption.dueAtMs,
-              suspendedAction:
-                frame.timerInterruption.suspendedAction === null
-                  ? null
-                  : cloneForegroundAction(frame.timerInterruption.suspendedAction),
-            },
+        frame.timerInterruption === null ? null : cloneInterruption(frame.timerInterruption),
       callerTemporaries: frame.callerTemporaries.map(cloneTemporary),
       scopeBaseDepth: frame.scopeBaseDepth,
       loopBaseDepth: frame.loopBaseDepth,
@@ -487,6 +514,9 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     settledTimers: snapshot.settledTimers.map(cloneTimer),
     nextTimerId: snapshot.nextTimerId,
     pendingTimerHandlers: snapshot.pendingTimerHandlers.map((invocation) => ({ ...invocation })),
+    stageImage: snapshot.stageImage,
+    settledMedia: snapshot.settledMedia.map(cloneMedia),
+    nextMediaId: snapshot.nextMediaId,
     maxCallDepth: snapshot.maxCallDepth,
     status: snapshot.status,
     failure:
@@ -498,6 +528,18 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
             span: copySpan(snapshot.failure.span),
           },
   };
+}
+
+function cloneInterruption(
+  interruption: RuntimeTimerInterruptionSnapshot,
+): RuntimeTimerInterruptionSnapshot {
+  const suspendedAction =
+    interruption.suspendedAction === null
+      ? null
+      : cloneForegroundAction(interruption.suspendedAction);
+  return "mediaId" in interruption
+    ? { mediaId: interruption.mediaId, dueAtMs: interruption.dueAtMs, suspendedAction }
+    : { timerId: interruption.timerId, dueAtMs: interruption.dueAtMs, suspendedAction };
 }
 
 function cloneInteractionResultHandoff(
@@ -546,6 +588,8 @@ function cloneForegroundAction<T extends RuntimeForegroundActionSnapshot>(action
 
 function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendingActionSnapshot {
   if (action.kind === "timer") return { ...action, timer: cloneTimer(action.timer) };
+  if (action.kind === "media") return { ...action, media: cloneMedia(action.media) };
+  if (action.kind === "mediaPlayback") return { ...action };
   if (action.kind === "delay")
     return {
       kind: "delay",
@@ -627,7 +671,8 @@ function cloneSettlement(
       deadlineMs: settlement.deadlineMs,
       completedAtMs: settlement.completedAtMs,
     };
-  if (settlement.actionKind === "chatPacingGate") return { ...settlement };
+  if (settlement.actionKind === "chatPacingGate" || settlement.actionKind === "mediaPlayback")
+    return { ...settlement };
   return {
     actionId: settlement.actionId,
     actionKind: "interaction",
@@ -792,7 +837,7 @@ function validateCapturedRuntimeSnapshotDetails(
     value,
     errors,
   );
-  const timerHandleIds = validateSpeakerReferences(
+  const handleIds = validateSpeakerReferences(
     value.frames,
     value.speakers,
     value.loopFrames,
@@ -895,7 +940,11 @@ function validateCapturedRuntimeSnapshotDetails(
     errors.push("Runtime maxCallDepth is outside the supported range.");
   }
   validatePendingActionState(value, plan, analysis, errors);
-  validateTimerState(value, plan, timerHandleIds, errors);
+  validateTimerState(value, plan, handleIds.timer, errors);
+  validateMediaState(value, plan, handleIds.media, errors);
+  if (value.stageImage !== null && typeof value.stageImage !== "string") {
+    errors.push("Runtime stageImage must be a string or null.");
+  }
   validateInteractionResultHandoffState(value, plan, analysis, errors);
   validateTerminalContinuationHandoffState(value, plan, errors);
   if (!isOneOf(value.status, ["ready", "running", "waiting", "halted", "failed"])) {
@@ -1574,7 +1623,7 @@ function validateCallFrames(
     if (
       !Object.hasOwn(frame, "timerInterruption") ||
       (interruption !== null && !isPlainRecord(interruption)) ||
-      (definition !== undefined && definition.timerHandler !== (interruption !== null))
+      (definition !== undefined && (definition.handler !== null) !== (interruption !== null))
     ) {
       errors.push("Runtime call frame does not match its function kind.");
     }
@@ -1797,9 +1846,10 @@ function validateTimerHandlerFrame(
   errors: string[],
 ): void {
   const now = snapshotValue.currentSessionTimeMs;
+  const owner = Object.hasOwn(interruption, "mediaId") ? "mediaId" : "timerId";
   if (
-    !hasExactKeys(interruption, ["timerId", "dueAtMs", "suspendedAction"]) ||
-    !positiveSafeInteger(interruption.timerId) ||
+    !hasExactKeys(interruption, [owner, "dueAtMs", "suspendedAction"]) ||
+    !positiveSafeInteger(interruption[owner]) ||
     !validSessionTime(interruption.dueAtMs) ||
     !validSessionTime(now) ||
     interruption.dueAtMs > now ||
@@ -1839,6 +1889,7 @@ function validateTimerHandlerFrame(
     plan,
     errors,
   );
+  validateSelfHandleBinding(frame, interruption, frames, plan, errors);
   const action = interruption.suspendedAction;
   if (action === null) return;
   const view = {
@@ -1853,10 +1904,49 @@ function validateTimerHandlerFrame(
   };
   if (
     !isPlainRecord(action) ||
-    (action.kind !== "delay" && action.kind !== "interaction") ||
+    (action.kind !== "delay" && action.kind !== "interaction" && action.kind !== "mediaPlayback") ||
     !validForegroundActionState(action, view, plan, true)
   ) {
     errors.push("Runtime suspended foreground action is malformed.");
+  }
+}
+
+/**
+ * Until a media block's body starts, its self-handle local holds exactly its own media's handle; afterwards the
+ * block may reassign it like any local.
+ */
+function validateSelfHandleBinding(
+  frame: Record<string, unknown>,
+  interruption: Record<string, unknown>,
+  frames: unknown,
+  plan: InstructionPlan | undefined,
+  errors: string[],
+): void {
+  if (plan === undefined || !nonNegativeSafeInteger(frame.functionId)) return;
+  const definition = plan.functions[frame.functionId - 1];
+  if (
+    definition?.selfHandle == null ||
+    !isPlainRecord(frame.parameterState) ||
+    frame.parameterState.phase === "body"
+  )
+    return;
+  const scope =
+    Array.isArray(frames) && nonNegativeSafeInteger(frame.scopeBaseDepth)
+      ? frames[frame.scopeBaseDepth]
+      : undefined;
+  const binding =
+    isPlainRecord(scope) && Array.isArray(scope.bindings)
+      ? scope.bindings.find(
+          (candidate) => isPlainRecord(candidate) && candidate.name === definition.selfHandle,
+        )
+      : undefined;
+  const value = isPlainRecord(binding) ? binding.value : undefined;
+  if (
+    !isPlainRecord(value) ||
+    value.kind !== "mediaHandle" ||
+    value.mediaId !== interruption.mediaId
+  ) {
+    errors.push("Runtime media block self-handle binding is malformed.");
   }
 }
 
@@ -2095,10 +2185,14 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
       defaultBindingPositions.set(`${instruction.functionId}:${instruction.parameterIndex}`, index);
     }
   }
+  // A media block's self-handle is bound on entry, like a parameter.
   const parameterNames = new Map(
     plan.functions.map((definition) => [
       definition.id,
-      new Set(definition.parameters.map((parameter) => parameter.name)),
+      new Set([
+        ...definition.parameters.map((parameter) => parameter.name),
+        ...(definition.selfHandle === null ? [] : [definition.selfHandle]),
+      ]),
     ]),
   );
   recordValidationTestWork("parameterNameIndexBuilds");
@@ -2242,6 +2336,7 @@ function instructionKilledTemporaries(instruction: Instruction): ReadonlySet<num
       return new Set([instruction.destinationTemporary]);
     case "interaction":
     case "startTimer":
+    case "playMedia":
       return instruction.destinationTemporary === null
         ? new Set<number>()
         : new Set([instruction.destinationTemporary]);
@@ -2270,7 +2365,8 @@ function validateStatusConsistency(
   if (value.status === "waiting") {
     const hasForegroundAction = isPlainRecord(action);
     const hasAllowedActionKind =
-      hasForegroundAction && isOneOf(action.kind, ["delay", "interaction", "chatPacingGate"]);
+      hasForegroundAction &&
+      isOneOf(action.kind, ["delay", "interaction", "chatPacingGate", "mediaPlayback"]);
     if (!hasAllowedActionKind) {
       errors.push("Waiting runtime state requires one foreground action.");
     }
@@ -2578,6 +2674,21 @@ function requiredInstructionTemporaries(
       if (typeof instruction.display === "object") collect(instruction.display);
       if (instruction.label !== null) collect(instruction.label);
       break;
+    case "pacingBarrier":
+      if (instruction.receiver !== null) collect(instruction.receiver);
+      break;
+    case "showImage":
+      if (instruction.image !== null) collect(instruction.image);
+      break;
+    case "playMedia":
+      collect(instruction.file);
+      if (instruction.repeat.kind === "value") collect(instruction.repeat.value);
+      if (instruction.repeat.kind === "times") collect(instruction.repeat.count);
+      for (const operand of [instruction.startAt, instruction.endAt, instruction.volume]) {
+        if (operand !== null) collect(operand);
+      }
+      for (const cue of instruction.cues) collect(cue.offset);
+      break;
     case "interaction":
       if ("preparedUi" in instruction) {
         output.add(instruction.speakerTemporary);
@@ -2710,7 +2821,7 @@ function validateSpeakerReferences(
   callFrames: unknown,
   speakerIds: ReadonlySet<number>,
   errors: string[],
-): Set<number> {
+): { readonly timer: Set<number>; readonly media: Set<number> } {
   const values: unknown[] = [];
   if (Array.isArray(frames)) {
     for (const frame of frames) {
@@ -2756,22 +2867,22 @@ function validateSpeakerReferences(
     }
   }
   const referencedIds = new Set<number>();
-  const timerHandleIds = new Set<number>();
-  for (const value of values) collectSpeakerReferenceIds(value, referencedIds, timerHandleIds);
+  const handleIds = { timer: new Set<number>(), media: new Set<number>() };
+  for (const value of values) collectSpeakerReferenceIds(value, referencedIds, handleIds);
   for (const id of referencedIds) {
     if (!speakerIds.has(id)) {
       errors.push("Runtime value refers to an unknown speaker ID.");
       break;
     }
   }
-  return timerHandleIds;
+  return handleIds;
 }
 
-/** Collects speaker references and, in the same traversal, timer handle IDs. */
+/** Collects speaker references and, in the same traversal, timer and media handle IDs. */
 function collectSpeakerReferenceIds(
   value: unknown,
   output: Set<number>,
-  timerHandleIds: Set<number>,
+  handleIds: { readonly timer: Set<number>; readonly media: Set<number> },
 ): void {
   const work: unknown[] = [value];
   while (work.length > 0) {
@@ -2782,7 +2893,11 @@ function collectSpeakerReferenceIds(
       continue;
     }
     if (current.kind === "timerHandle" && nonNegativeSafeInteger(current.timerId)) {
-      timerHandleIds.add(current.timerId);
+      handleIds.timer.add(current.timerId);
+      continue;
+    }
+    if (current.kind === "mediaHandle" && nonNegativeSafeInteger(current.mediaId)) {
+      handleIds.media.add(current.mediaId);
       continue;
     }
     if (current.kind === "list" && Array.isArray(current.items)) {

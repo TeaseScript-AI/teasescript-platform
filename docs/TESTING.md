@@ -495,6 +495,13 @@ Player adapter coverage derives presented timers and observation deadlines from 
 late observations, and restores the same timer state from a checkpoint. Malformed timer, handler, suspended-action, and handle-reference state is rejected
 through public validation/restore paths.
 
+Media coverage starts with real `.tease` source and exercises accepted and rejected forms, load/failure transitions,
+blocking and asynchronous waits including terminal ones, bounded and indefinite repetition, seeks and endpoint cues,
+`elapsed` excluding pauses and stalls, one-late versus many-small progress observations, same-time ordering across
+media and timers, cue blocks with self-handles, Stage replacement, pacing barriers, playback projections, JSON
+checkpoint/restore equivalence with a simulated Player, and rejection of malformed media state. Browser Stage
+rendering, audible playback, and Start/Continue/retry verification belong to #446.
+
 ## Local browser smoke and future host E2E gate
 
 The local Standard Player POC has a reproducible Chromium smoke route after `npm run build`:

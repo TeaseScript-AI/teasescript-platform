@@ -2,6 +2,7 @@ import type {
   Block,
   Expression,
   TimerParts,
+  MediaParts,
   FunctionDeclaration,
   ListLiteral,
   ObjectLiteral,
@@ -19,6 +20,7 @@ import type {
   DelayDisplay,
   Instruction,
   JumpIfFalseInstruction,
+  MediaCuePlan,
   JumpInstruction,
   LoopControlInstruction,
   LoopStartInstruction,
@@ -34,7 +36,10 @@ import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 import { staticVisibleText } from "../../static-evaluation.js";
 import { durationLiteralMilliseconds } from "../../duration.js";
 import { runCompileTask, compileChild, type CompileTask } from "../continuation.js";
-import { expressionChildren as instructionEmissionChildren } from "../../expression-children.js";
+import {
+  expressionChildren as instructionEmissionChildren,
+  mediaOperands,
+} from "../../expression-children.js";
 
 export class InstructionCompiler {
   public readonly instructions: Instruction[] = [];
@@ -78,12 +83,23 @@ export class InstructionCompiler {
       this.#compileFunction(declaration);
     }
     // Handlers found while compiling a handler are appended and compiled in ID order.
-    for (let index = 0; index < this.#timerHandlers.length; index += 1) {
-      this.#compileTimerHandler(this.#timerHandlers[index]!, this.declarations.length + index + 1);
+    for (let index = 0; index < this.#handlers.length; index += 1) {
+      this.#compileHandler(this.#handlers[index]!, this.declarations.length + index + 1);
     }
   }
 
-  readonly #timerHandlers: Block[] = [];
+  /** Timer expiry blocks and media cue blocks, compiled after the user functions in registration order. */
+  readonly #handlers: {
+    readonly block: Block;
+    readonly owner: "timer" | "media";
+    readonly selfHandle: string | null;
+  }[] = [];
+
+  /** A statement-level media control call whose receiver waits at a pacing barrier once it is evaluated. */
+  #barrierCall: Expression | null = null;
+
+  /** The `let` name that a media initializer binds in its own blocks. */
+  readonly #selfHandleByInitializer = new Map<MediaParts, string>();
 
   public compileStatements(statements: readonly Statement[]): void {
     runCompileTask(this.#compileStatements(statements));
@@ -279,10 +295,32 @@ export class InstructionCompiler {
       case "timerStatement":
         yield* compileChild(this.#lowerTimerTask(statement, false));
         return;
+      case "playMediaStatement":
+        yield* compileChild(this.#lowerMediaTask(statement, false));
+        return;
+      case "showImageStatement": {
+        this.#emitPacingBarrier(null, statement.span);
+        const lowered = this.#lowerExpression(statement.image);
+        this.instructions.push({
+          kind: "showImage",
+          image: lowered.plan,
+          span: copySpan(statement.span),
+        });
+        this.#emitTemporaryCleanup(lowered.temporaryIds, statement.span);
+        return;
+      }
+      case "hideImageStatement":
+        this.#emitPacingBarrier(null, statement.span);
+        this.instructions.push({ kind: "showImage", image: null, span: copySpan(statement.span) });
+        return;
       case "exitStatement":
         this.instructions.push({ kind: "exit", span: copySpan(statement.span) });
         return;
       case "letStatement": {
+        const initializer = unwrapParentheses(statement.initializer);
+        if (initializer.kind === "playMediaExpression") {
+          this.#selfHandleByInitializer.set(initializer, statement.name.name);
+        }
         const lowered = this.#lowerExpression(statement.initializer);
         this.instructions.push({
           kind: "declareBinding",
@@ -295,6 +333,10 @@ export class InstructionCompiler {
       }
       case "assignmentStatement": {
         const target = this.#lowerAssignmentTarget(statement.target);
+        // The target object is already prepared once; the barrier waits when it holds a media handle.
+        if (target.plan.kind === "property" && MEDIA_ASSIGNABLE_PROPERTIES.has(target.plan.name)) {
+          this.#emitPacingBarrier(target.plan.object, statement.span);
+        }
         if (target.plan.kind !== "identifier") {
           this.instructions.push({
             kind: "validateAssignmentTarget",
@@ -334,6 +376,14 @@ export class InstructionCompiler {
         return;
       }
       case "expressionStatement": {
+        const call = unwrapParentheses(statement.expression);
+        if (
+          call.kind === "callExpression" &&
+          call.callee.kind === "propertyAccessExpression" &&
+          MEDIA_CONTROL_METHODS.has(call.callee.property.name)
+        ) {
+          this.#barrierCall = call;
+        }
         const lowered = this.#lowerExpression(statement.expression);
         this.instructions.push({
           kind: "evaluate",
@@ -558,7 +608,8 @@ export class InstructionCompiler {
       label: timer.label === null ? null : plan(timer.label),
       repeat: timer.repeat,
       persist: timer.persist,
-      handlerFunctionId: timer.handler === null ? null : this.#registerTimerHandler(timer.handler),
+      handlerFunctionId:
+        timer.handler === null ? null : this.#registerHandler(timer.handler, "timer", null),
       destinationTemporary,
       span: copySpan(timer.span),
     });
@@ -575,14 +626,122 @@ export class InstructionCompiler {
         };
   }
 
+  /**
+   * Lowers a play command. A pacing barrier comes first, so main-story media waits for the previous message's
+   * pacing; operands then evaluate in source order.
+   */
+  *#lowerMediaTask(media: MediaParts, value: boolean): CompileTask<LoweredExpression | null> {
+    this.#emitPacingBarrier(null, media.span);
+    const repeatOperand =
+      media.repeat === null || media.repeat.kind === "indefinite"
+        ? null
+        : media.repeat.kind === "times"
+          ? media.repeat.count
+          : media.repeat.value;
+    const cues = media.handlers?.kind === "cues" ? media.handlers.cues : [];
+    // The instruction's evaluation order; `mediaOperands` gives the source order.
+    const operands = [
+      media.file,
+      repeatOperand,
+      media.startAt,
+      media.endAt,
+      media.volume,
+      ...cues.map((cue) => cue.offset),
+    ].filter((operand): operand is Expression => operand !== null);
+    const sourceOrder = mediaOperands(media);
+    const reordered = sourceOrder.some((operand, index) => operand !== operands[index]);
+    const lowered = yield* compileChild(this.#lowerOrderedExpressionsTask(sourceOrder));
+    const loweredByOperand = new Map<Expression, LoweredExpression>();
+    sourceOrder.forEach((operand, index) => {
+      const item = lowered[index]!;
+      loweredByOperand.set(
+        operand,
+        reordered && item.plan.kind !== "temporary"
+          ? this.#materializeExpression(item, operand.span)
+          : item,
+      );
+    });
+    const plan = (operand: Expression): ExpressionPlan => loweredByOperand.get(operand)!.plan;
+    const temporaryIds = [...loweredByOperand.values()].flatMap((item) => item.temporaryIds);
+    const selfHandle = media.async ? (this.#selfHandleByInitializer.get(media) ?? null) : null;
+    const register = (block: Block): number => this.#registerHandler(block, "media", selfHandle);
+    const cuePlans: MediaCuePlan[] = [];
+    let finishFunctionId: number | null = null;
+    if (media.handlers?.kind === "compact") {
+      cuePlans.push({
+        kind: "beforeEnd",
+        offset: { kind: "duration", milliseconds: 0, span: copySpan(media.handlers.body.span) },
+        functionId: register(media.handlers.body),
+      });
+    }
+    for (const cue of cues) {
+      if (cue.kind === "finish") finishFunctionId = register(cue.body);
+      else
+        cuePlans.push({
+          kind: cue.kind,
+          offset: plan(cue.offset!),
+          functionId: register(cue.body),
+        });
+    }
+    const destinationTemporary = value ? this.#allocateTemporary() : null;
+    this.instructions.push({
+      kind: "playMedia",
+      media: media.media,
+      async: media.async,
+      file: plan(media.file),
+      repeat:
+        media.repeat === null
+          ? { kind: "once" }
+          : media.repeat.kind === "indefinite"
+            ? { kind: "indefinite" }
+            : media.repeat.kind === "times"
+              ? { kind: "times", count: plan(media.repeat.count) }
+              : { kind: "value", value: plan(media.repeat.value) },
+      startAt: media.startAt === null ? null : plan(media.startAt),
+      endAt: media.endAt === null ? null : plan(media.endAt),
+      volume: media.volume === null ? null : plan(media.volume),
+      cues: cuePlans,
+      finishFunctionId,
+      destinationTemporary,
+      span: copySpan(media.span),
+    });
+    this.#emitTemporaryCleanup(temporaryIds, media.span);
+    return destinationTemporary === null
+      ? null
+      : {
+          plan: {
+            kind: "temporary",
+            temporaryId: destinationTemporary,
+            span: copySpan(media.span),
+          },
+          temporaryIds: [destinationTemporary],
+        };
+  }
+
+  /**
+   * Main-story media presentation waits for the previous message's pacing. A handle operation passes its already
+   * evaluated receiver; the barrier then waits only for a media handle.
+   */
+  #emitPacingBarrier(receiver: ExpressionPlan | null, span: SourceSpan): void {
+    this.instructions.push({ kind: "pacingBarrier", receiver, span: copySpan(span) });
+  }
+
   /** Reserves the next function ID; the region is compiled after all user functions. */
-  #registerTimerHandler(handler: Block): number {
-    const id = this.declarations.length + this.#timerHandlers.length + 1;
-    this.#timerHandlers.push(handler);
+  #registerHandler(block: Block, owner: "timer" | "media", selfHandle: string | null): number {
+    const id = this.declarations.length + this.#handlers.length + 1;
+    this.#handlers.push({ block, owner, selfHandle });
     return id;
   }
 
-  #compileTimerHandler(handler: Block, id: number): void {
+  #compileHandler(
+    registered: {
+      readonly block: Block;
+      readonly owner: "timer" | "media";
+      readonly selfHandle: string | null;
+    },
+    id: number,
+  ): void {
+    const handler = registered.block;
     const entryInstruction = this.instructions.length;
     this.instructions.push({
       kind: "beginFunctionDefaults",
@@ -600,8 +759,9 @@ export class InstructionCompiler {
     this.instructions.push({ kind: "returnVoid", span: copySpan(handler.span) });
     this.functions.push({
       id,
-      timerHandler: true,
-      name: "timer expiry",
+      handler: registered.owner,
+      selfHandle: registered.selfHandle,
+      name: registered.owner === "timer" ? "timer expiry" : "media cue",
       declarationSpan: copySpan(handler.span),
       parameters: [],
       entryInstruction,
@@ -666,7 +826,8 @@ export class InstructionCompiler {
     const endInstruction = this.instructions.length;
     this.functions.push({
       id: registered.id,
-      timerHandler: false,
+      handler: null,
+      selfHandle: null,
       name: declaration.name.name,
       declarationSpan: copySpan(declaration.span),
       parameters: declaration.parameters.map((parameter, index) => ({
@@ -690,7 +851,11 @@ export class InstructionCompiler {
 
   *#lowerExpressionTask(expression: Expression): CompileTask<LoweredExpression> {
     expression = unwrapParentheses(expression);
-    if (this.#contextualSpeakerTemporary === null && !this.#containsUserCall(expression))
+    if (
+      this.#contextualSpeakerTemporary === null &&
+      expression !== this.#barrierCall &&
+      !this.#containsUserCall(expression)
+    )
       return { plan: compileExpression(expression), temporaryIds: [] };
     if (expression.kind === "interactionExpression") {
       return yield* compileChild(this.#lowerInteractionTask(expression));
@@ -698,6 +863,11 @@ export class InstructionCompiler {
     if (expression.kind === "timerExpression") {
       const lowered = yield* compileChild(this.#lowerTimerTask(expression, true));
       if (lowered === null) throw new TypeError("A blocking timer reached value lowering.");
+      return lowered;
+    }
+    if (expression.kind === "playMediaExpression") {
+      const lowered = yield* compileChild(this.#lowerMediaTask(expression, true));
+      if (lowered === null) throw new TypeError("Blocking media reached value lowering.");
       return lowered;
     }
     if (
@@ -798,6 +968,14 @@ export class InstructionCompiler {
         let callee: LoweredExpression;
         if (expression.callee.kind === "propertyAccessExpression") {
           let receiver = yield* compileChild(this.#lowerExpressionTask(expression.callee.object));
+          if (expression === this.#barrierCall) {
+            this.#barrierCall = null;
+            // The receiver is evaluated once; the barrier and the call then use that value.
+            if (receiver.plan.kind !== "temporary" && receiver.plan.kind !== "preparedReference") {
+              receiver = this.#prepareReferenceExpression(receiver, expression.callee.object.span);
+            }
+            this.#emitPacingBarrier(receiver.plan, expression.span);
+          }
           if (expression.arguments.some((argument) => this.#containsUserCall(argument.value))) {
             receiver = this.#prepareReferenceExpression(receiver, expression.callee.object.span);
             this.instructions.push({
@@ -1467,7 +1645,8 @@ export class InstructionCompiler {
 
       if (
         current.expression.kind === "interactionExpression" ||
-        current.expression.kind === "timerExpression"
+        current.expression.kind === "timerExpression" ||
+        current.expression.kind === "playMediaExpression"
       ) {
         this.#instructionEmissionByExpression.set(current.expression, true);
         continue;
@@ -1616,6 +1795,13 @@ function copySpan(span: SourceSpan): PlanSourceLocation {
   return sourceSpanToPlanLocation(span);
 }
 
+const MEDIA_CONTROL_METHODS: ReadonlySet<string> = new Set(["pause", "resume", "stop"]);
+const MEDIA_ASSIGNABLE_PROPERTIES: ReadonlySet<string> = new Set([
+  "position",
+  "remaining",
+  "volume",
+]);
+
 function assembleExpression(
   expression: Expression,
   child: (expression: Expression) => ExpressionPlan,
@@ -1739,8 +1925,9 @@ function assembleExpression(
       };
     case "interactionExpression":
     case "timerExpression":
+    case "playMediaExpression":
       throw new TypeError(
-        "Interactions and timers must be lowered before expression-plan compilation.",
+        "Interactions, timers, and media must be lowered before expression-plan compilation.",
       );
   }
 }

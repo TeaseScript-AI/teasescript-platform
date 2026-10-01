@@ -14,8 +14,10 @@ import {
   observePlayerRuntimeTime,
   playerRuntimeDeadlines,
   playerRuntimeForeground,
+  playerRuntimeMedia,
   playerRuntimePacingGate,
   playerRuntimeTimers,
+  reportPlayerRuntimeMediaLoad,
   restorePlayerRuntimeSession,
   selectPlayerRuntimeChoice,
   skipPlayerRuntimePacing,
@@ -431,4 +433,51 @@ test("authored timers scenario presents concurrent timers and interrupts the una
   unanswered = activatePlayerRuntimeButton(unanswered)!.session;
   assert.equal(unanswered.snapshot.status, "halted");
   assert.deepEqual(playerRuntimeTimers(unanswered.snapshot, 20_000), []);
+});
+
+test("runtime adapter forwards media reports, projects a live seek, and restores pending samples", () => {
+  let session = createPlayerRuntimeSession(
+    [
+      'showImage "images/room.jpg"',
+      'let music = playAudio async "music.mp3" {',
+      "  at 1 s {",
+      "    music.position = 3 s",
+      "  }",
+      "}",
+      "wait 10",
+      'say "done ${music.position} ${music.elapsed}", instant',
+    ].join("\n"),
+  );
+  assert.deepEqual(playerRuntimeMedia(session.snapshot).stage, {
+    image: "images/room.jpg",
+    videoMediaId: null,
+  });
+  assert.equal(playerRuntimeMedia(session.snapshot).media[0]?.loaded, false);
+  const loaded = reportPlayerRuntimeMediaLoad(session, 1, { kind: "loaded", durationMs: 10_000 });
+  assert.equal(loaded.outcome.kind, "accepted");
+  session = observePlayerRuntimeTime(loaded.session, 1_500, [
+    { mediaId: 1, segment: 1, progressMs: 1_500 },
+  ]).session;
+  // The cue at 1 s seeked to 3 s: a new segment starts there.
+  let [media] = playerRuntimeMedia(session.snapshot).media;
+  assert.deepEqual(
+    { segment: media?.segment, playheadMs: media?.playheadMs, reported: media?.reportedProgressMs },
+    { segment: 2, playheadMs: 3_000, reported: 0 },
+  );
+  session = observePlayerRuntimeTime(session, 2_000, [
+    { mediaId: 1, segment: 2, progressMs: 500 },
+  ]).session;
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
+  assert.deepEqual(playerRuntimeMedia(restored.snapshot), playerRuntimeMedia(session.snapshot));
+  [media] = playerRuntimeMedia(restored.snapshot).media;
+  assert.deepEqual(
+    { playheadMs: media?.playheadMs, reported: media?.reportedProgressMs },
+    { playheadMs: 3_500, reported: 500 },
+  );
+  const finished = observePlayerRuntimeTime(restored, 10_000, [
+    { mediaId: 1, segment: 2, progressMs: 8_500 },
+  ]).session;
+  assert.equal(finished.snapshot.status, "halted");
+  const last = finished.transcriptEntries.at(-1);
+  assert.equal(last?.kind === "message" ? last.text : undefined, "done 10 s 8 s");
 });

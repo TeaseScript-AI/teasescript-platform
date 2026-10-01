@@ -4,13 +4,21 @@ import {
   createCheckpoint,
   createFreshRuntimeSnapshot,
   deserializeCheckpoint,
+  mediaPlaybackProjection,
   observeTime,
+  reportMediaLoad,
+  stageProjection,
   run,
   serializeCheckpoint,
   type ActionCompletionOutcome,
   type InstructionPlan,
   type InteractionAccessibleName,
   type InterpreterEvent,
+  type MediaLoadReport,
+  type MediaPlaybackProjection,
+  type MediaProgressReport,
+  type MediaReportOutcome,
+  type StageProjection,
   type PendingActionOperationResult,
   type RuntimeInteractionActionSnapshot,
   type RuntimeSnapshot,
@@ -270,11 +278,16 @@ export function skipPlayerRuntimePacing(
   return completePlayerAction(session, action, { kind: "skip" });
 }
 
+/**
+ * Observes scene time and the playback progress of the running media the Player plays. Include a report for every
+ * running media: an omitted report means no progress since its last one.
+ */
 export function observePlayerRuntimeTime(
   session: PlayerRuntimeSession,
   currentSessionTimeMs: number,
+  mediaReports: readonly MediaProgressReport[] = [],
 ): PlayerRuntimeControlResult<TimeObservationOutcome> {
-  const operation = observeTime(session.plan, session.snapshot, currentSessionTimeMs);
+  const operation = observeTime(session.plan, session.snapshot, currentSessionTimeMs, mediaReports);
   const observed = appendRuntimeEvents(
     { ...session, snapshot: operation.snapshot },
     operation.events,
@@ -283,6 +296,34 @@ export function observePlayerRuntimeTime(
   return Object.freeze({
     session: operation.outcome.kind === "observed" ? continuePlayerRuntime(observed) : observed,
     outcome: operation.outcome,
+  });
+}
+
+/** Reports whether the Player could load a media source, and its duration when it could. */
+export function reportPlayerRuntimeMediaLoad(
+  session: PlayerRuntimeSession,
+  mediaId: number,
+  report: MediaLoadReport,
+): PlayerRuntimeControlResult<MediaReportOutcome> {
+  const operation = reportMediaLoad(session.plan, session.snapshot, mediaId, report);
+  const reported = appendRuntimeEvents(
+    { ...session, snapshot: operation.snapshot },
+    operation.events,
+  );
+  return Object.freeze({
+    session: operation.outcome.kind === "accepted" ? continuePlayerRuntime(reported) : reported,
+    outcome: operation.outcome,
+  });
+}
+
+/** The Stage image and active media the Player presents and plays; see `MediaPlaybackProjection`. */
+export function playerRuntimeMedia(snapshot: RuntimeSnapshot): {
+  readonly stage: StageProjection;
+  readonly media: readonly MediaPlaybackProjection[];
+} {
+  return Object.freeze({
+    stage: stageProjection(snapshot),
+    media: mediaPlaybackProjection(snapshot),
   });
 }
 

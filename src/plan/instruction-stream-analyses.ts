@@ -997,7 +997,8 @@ function producedTemporaryId(instruction: Record<string, unknown>): number | nul
     instruction.kind === "prepareReference" ||
     instruction.kind === "callFunction" ||
     instruction.kind === "interaction" ||
-    instruction.kind === "startTimer"
+    instruction.kind === "startTimer" ||
+    instruction.kind === "playMedia"
   ) {
     value = instruction.destinationTemporary;
   }
@@ -1166,13 +1167,25 @@ function validateFunctionDefinitions(
     }
     requirePositiveInteger(definition.id, `${path}.id`, errors);
     requireString(definition.name, `${path}.name`, errors);
-    if (typeof definition.timerHandler !== "boolean") {
-      errors.push(planError("TSC002", "Function timer-handler flag must be boolean.", path));
+    if (
+      definition.handler !== null &&
+      definition.handler !== "timer" &&
+      definition.handler !== "media"
+    ) {
+      errors.push(planError("TSC002", "Function handler kind is invalid.", path));
     } else if (
-      definition.timerHandler &&
+      definition.handler !== null &&
       (!Array.isArray(definition.parameters) || definition.parameters.length !== 0)
     ) {
-      errors.push(planError("TSC002", "A timer handler has no parameters.", path));
+      errors.push(planError("TSC002", "A timer or media handler has no parameters.", path));
+    }
+    if (
+      definition.selfHandle !== null &&
+      (definition.handler !== "media" ||
+        typeof definition.selfHandle !== "string" ||
+        definition.selfHandle.length === 0)
+    ) {
+      errors.push(planError("TSC002", "Only a media handler may bind a self-handle name.", path));
     }
     validateSpan(definition.declarationSpan, `${path}.declarationSpan`, errors);
     validateSpan(definition.bodySpan, `${path}.bodySpan`, errors);
@@ -1187,7 +1200,7 @@ function validateFunctionDefinitions(
       }
       ids.add(definition.id);
     }
-    if (typeof definition.name === "string" && definition.timerHandler !== true) {
+    if (typeof definition.name === "string" && definition.handler === null) {
       if (names.has(definition.name)) {
         errors.push(planError("TSC002", "Function names must be unique.", `${path}.name`));
       }
@@ -1322,16 +1335,40 @@ function validateFunctionDefinitions(
           ? instruction.functionId
           : instruction.handlerFunctionId) as number,
       )?.definition;
-      if (target !== undefined && target.timerHandler !== (instruction.kind === "startTimer")) {
+      if (
+        target !== undefined &&
+        target.handler !== (instruction.kind === "startTimer" ? "timer" : null)
+      ) {
         errors.push(
           planError(
             "TSC002",
             instruction.kind === "startTimer"
               ? "A timer must refer to a timer-handler region."
-              : "A call must not enter a timer-handler region.",
+              : "A call must not enter a handler region.",
             `$.instructions[${instructionIndex}]`,
           ),
         );
+      }
+    }
+    if (instruction.kind === "playMedia") {
+      const handlerIds = [
+        ...(Array.isArray(instruction.cues)
+          ? instruction.cues.map((cue: unknown) => (isRecord(cue) ? cue.functionId : undefined))
+          : []),
+        instruction.finishFunctionId,
+      ];
+      for (const id of handlerIds) {
+        if (typeof id !== "number") continue;
+        const target = index?.functionsById.get(id)?.definition;
+        if (target !== undefined && target.handler !== "media") {
+          errors.push(
+            planError(
+              "TSC002",
+              "Media cues must refer to media-handler regions.",
+              `$.instructions[${instructionIndex}]`,
+            ),
+          );
+        }
       }
     }
     if (instruction.kind === "callFunction" && typeof instruction.functionId === "number") {

@@ -12,6 +12,7 @@ import { isMessageMarkup } from "../message-markup.js";
 import type { RuntimeChatPacingGateSettlementSnapshot } from "./actions/model.js";
 import { requiredActionCompletionEvents } from "./actions/model.js";
 import { recordValidationTestWork } from "../validation-testing.js";
+import { validMediaAction } from "./media-validation.js";
 import { validTimerAction } from "./timer-validation.js";
 
 interface ActionValidationAnalysis {
@@ -156,6 +157,8 @@ function validBackgroundPacingActions(
     if (!isPlainRecord(action)) return false;
     if (action.kind === "timer") {
       if (!validTimerAction(action, snapshot, plan)) return false;
+    } else if (action.kind === "media") {
+      if (!validMediaAction(action, snapshot, plan)) return false;
     } else {
       pacingGates += 1;
       if (pacingGates > 1 || !validPacingGateAction(action, snapshot, plan, false)) return false;
@@ -193,6 +196,12 @@ function validForegroundActionKind(
       hasEventSequenceCapacity(snapshot.nextEventSequence, 1)
     );
   }
+  if (action.kind === "mediaPlayback") {
+    return (
+      validMediaPlaybackAction(action, snapshot) &&
+      hasEventSequenceCapacity(snapshot.nextEventSequence, 1)
+    );
+  }
   return false;
 }
 
@@ -214,7 +223,7 @@ function validSettlementShapeAndKind(
   analysis: ActionValidationAnalysis | undefined,
 ): boolean {
   return (
-    isOneOf(settlement.actionKind, ["delay", "interaction", "chatPacingGate"]) &&
+    isOneOf(settlement.actionKind, ["delay", "interaction", "chatPacingGate", "mediaPlayback"]) &&
     (settlement.actionKind === "chatPacingGate" || settlement.settlementKind === "completed") &&
     positiveSafeInteger(settlement.actionId) &&
     validSettlementProvenance(settlement, plan) &&
@@ -342,7 +351,9 @@ export function catchUpPaused(snapshot: Record<string, unknown>): boolean {
   return (
     foreground === null ||
     (isPlainRecord(foreground) &&
-      (foreground.kind === "delay" || foreground.kind === "interaction"))
+      (foreground.kind === "delay" ||
+        foreground.kind === "interaction" ||
+        foreground.kind === "mediaPlayback"))
   );
 }
 
@@ -438,6 +449,67 @@ function validActionCreatedAfterSettlement(
   );
 }
 
+/** An async play's wait ends with its load result; a blocking play's wait ends with its media. */
+function validMediaWaitOutcome(
+  settlement: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+): boolean {
+  if (plan === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return true;
+  const owner = plan.instructions[settlement.owningInstruction];
+  if (owner?.kind !== "playMedia") return false;
+  return owner.async
+    ? settlement.outcome === "loaded" || settlement.outcome === "failed"
+    : settlement.outcome !== "loaded";
+}
+
+/**
+ * A script waiting on media: an async play waits for its unloaded media's load result, a blocking play for its active
+ * media to end. The media record is validated with the media state.
+ */
+function validMediaPlaybackAction(
+  action: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+): boolean {
+  if (
+    !hasExactKeys(action, [
+      "kind",
+      "actionId",
+      "owningInstruction",
+      "continuationInstruction",
+      "ownerCallFrameId",
+      "scopeDepth",
+      "loopDepth",
+      "createdAtMs",
+      "mediaId",
+      "until",
+      "requestEventSequence",
+    ]) ||
+    (action.until !== "loaded" && action.until !== "ended") ||
+    !positiveSafeInteger(action.mediaId) ||
+    !validSessionTime(action.createdAtMs) ||
+    !validSessionTime(snapshot.currentSessionTimeMs) ||
+    action.createdAtMs > snapshot.currentSessionTimeMs ||
+    !Array.isArray(snapshot.backgroundActions)
+  )
+    return false;
+  const media = snapshot.backgroundActions.find(
+    (candidate) =>
+      isPlainRecord(candidate) &&
+      candidate.kind === "media" &&
+      isPlainRecord(candidate.media) &&
+      candidate.media.mediaId === action.mediaId,
+  );
+  // A play creates its media action and then its wait, so the wait belongs to the media action just before it.
+  return (
+    isPlainRecord(media) &&
+    isPlainRecord(media.media) &&
+    media.owningInstruction === action.owningInstruction &&
+    positiveSafeInteger(media.actionId) &&
+    media.actionId + 1 === action.actionId &&
+    (action.until === "ended" || media.media.loaded === false)
+  );
+}
+
 function validForegroundActionBase(
   action: unknown,
   snapshot: Record<string, unknown>,
@@ -478,6 +550,14 @@ function validPacingGateAction(
   if (!validPacingGateTiming(action, snapshot)) return false;
   if (!validPacingGateCreationProvenance(action, snapshot, plan)) return false;
   if (!foreground) return action.preparedOutput === null;
+  // A pacing barrier promotes the gate without prepared output and waits at the barrier instruction.
+  if (action.preparedOutput === null) {
+    return (
+      plan === undefined ||
+      (nonNegativeSafeInteger(snapshot.nextInstruction) &&
+        plan.instructions[snapshot.nextInstruction]?.kind === "pacingBarrier")
+    );
+  }
   return validPreparedSayOutput(action.preparedOutput, snapshot, plan);
 }
 
@@ -878,7 +958,9 @@ export function validateTerminalContinuationHandoffState(
       "continuationInstruction",
     ]) ||
     !positiveSafeInteger(handoff.actionId) ||
-    (handoff.actionKind !== "delay" && handoff.actionKind !== "interaction") ||
+    (handoff.actionKind !== "delay" &&
+      handoff.actionKind !== "interaction" &&
+      handoff.actionKind !== "mediaPlayback") ||
     !nonNegativeSafeInteger(handoff.owningInstruction) ||
     !nonNegativeSafeInteger(handoff.continuationInstruction) ||
     !positiveSafeInteger(snapshot.nextActionId) ||
@@ -899,6 +981,9 @@ export function validateTerminalContinuationHandoffState(
     snapshot.nextInstruction === plan.rootEndInstruction &&
     handoff.owningInstruction + 1 === handoff.continuationInstruction &&
     ((handoff.actionKind === "delay" && instruction?.kind === "wait") ||
+      (handoff.actionKind === "mediaPlayback" &&
+        instruction?.kind === "playMedia" &&
+        instruction.destinationTemporary === null) ||
       (handoff.actionKind === "interaction" &&
         instruction?.kind === "interaction" &&
         instruction.interactionKind === "button" &&
@@ -1361,6 +1446,30 @@ function validSettlementKindData(
       ]) && validSettlementChronology(settlement, snapshot)
     );
   }
+  if (settlement.actionKind === "mediaPlayback") {
+    return (
+      hasExactKeys(settlement, [
+        "actionId",
+        "actionKind",
+        "settlementKind",
+        "outcome",
+        "mediaId",
+        "owningInstruction",
+        "continuationInstruction",
+        "requestEventSequence",
+        "completionEventSequence",
+        "completedAtMs",
+      ]) &&
+      isOneOf(settlement.outcome, ["loaded", "finished", "stopped", "failed"]) &&
+      positiveSafeInteger(settlement.mediaId) &&
+      positiveSafeInteger(snapshot.nextMediaId) &&
+      settlement.mediaId < snapshot.nextMediaId &&
+      validMediaWaitOutcome(settlement, plan) &&
+      validSessionTime(settlement.completedAtMs) &&
+      validSessionTime(snapshot.currentSessionTimeMs) &&
+      settlement.completedAtMs <= snapshot.currentSessionTimeMs
+    );
+  }
   if (
     !hasExactKeys(settlement, [
       "actionId",
@@ -1661,7 +1770,9 @@ function validSettlementProvenance(
       ? "wait"
       : settlement.actionKind === "interaction"
         ? "interaction"
-        : "say";
+        : settlement.actionKind === "mediaPlayback"
+          ? "playMedia"
+          : "say";
   if (plan.instructions[owningInstruction]?.kind !== expectedKind) return false;
   const definition = plan.functions.find(
     (candidate) =>
@@ -1694,10 +1805,18 @@ function validForegroundActionOwnership(
     snapshot.nextInstruction !== owningInstruction ||
     owningInstruction >= plan.instructions.length ||
     continuationInstruction !== owningInstruction + 1 ||
-    !["wait", "interaction", "say"].includes(plan.instructions[owningInstruction]?.kind ?? "")
+    !["wait", "interaction", "say", "playMedia"].includes(
+      plan.instructions[owningInstruction]?.kind ?? "",
+    )
   )
     return false;
   const owner = plan.instructions[owningInstruction];
+  if (
+    (action.kind === "mediaPlayback") !== (owner?.kind === "playMedia") ||
+    (owner?.kind === "playMedia" && (action.until === "loaded") !== owner.async)
+  ) {
+    return false;
+  }
   if (
     action.kind === "delay" &&
     (owner?.kind !== "wait" ||

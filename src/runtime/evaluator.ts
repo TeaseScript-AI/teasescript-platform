@@ -42,6 +42,7 @@ import {
   type SerializableRuntimeScalar,
   type SerializableRuntimeValue,
   type SerializableTimerHandle,
+  type SerializableMediaHandle,
 } from "./serializable-values.js";
 import type {
   RuntimeBindingSnapshot,
@@ -57,7 +58,24 @@ import {
   isSet,
   isSpeakerReference,
   isTimerHandle,
+  isMediaHandle,
 } from "./value-predicates.js";
+import {
+  mediaEndMs,
+  mediaProperty,
+  pauseMedia,
+  resumeMedia,
+  seekMedia,
+  setMediaVolume,
+  type MediaWarning,
+  type RuntimeMediaSnapshot,
+} from "./media.js";
+import {
+  activeMediaAction,
+  drainMediaEvents,
+  mediaRecord,
+  stopMediaAction,
+} from "./operations/media-lifecycle.js";
 import {
   pauseTimer,
   resumeTimer,
@@ -610,9 +628,13 @@ export class Evaluator {
         this.#assignTimerProperty(object, target.name, value, target.span);
         return;
       }
+      if (isMediaHandle(object)) {
+        this.#assignMediaProperty(object, target.name, value, target.span);
+        return;
+      }
       throw fault(
         "TSR003",
-        "Only objects, speakers, and timer handles have assignable properties.",
+        "Only objects, speakers, timer handles, and media handles have assignable properties.",
         target.span,
       );
     }
@@ -644,10 +666,15 @@ export class Evaluator {
     if (target.kind === "identifier") return;
     const object = this.evaluate(target.object);
     if (target.kind === "property") {
-      if (!isObject(object) && !isSpeakerReference(object) && !isTimerHandle(object)) {
+      if (
+        !isObject(object) &&
+        !isSpeakerReference(object) &&
+        !isTimerHandle(object) &&
+        !isMediaHandle(object)
+      ) {
         throw fault(
           "TSR003",
-          "Only objects, speakers, and timer handles have assignable properties.",
+          "Only objects, speakers, timer handles, and media handles have assignable properties.",
           target.span,
         );
       }
@@ -666,9 +693,13 @@ export class Evaluator {
     method: string,
     span: SourceSpan,
   ): void {
-    if (isTimerHandle(receiver)) {
+    if (isTimerHandle(receiver) || isMediaHandle(receiver)) {
       if (!["pause", "resume", "stop"].includes(method)) {
-        throw fault("TSR016", `Timer handles have no method '${method}'.`, span);
+        throw fault(
+          "TSR016",
+          `${isTimerHandle(receiver) ? "Timer" : "Media"} handles have no method '${method}'.`,
+          span,
+        );
       }
       return;
     }
@@ -993,6 +1024,9 @@ export class Evaluator {
     if (expression.callee.kind === "property" && isTimerHandle(receiver)) {
       return this.#callTimer(receiver, expression.callee.name, positional, named, expression.span);
     }
+    if (expression.callee.kind === "property" && isMediaHandle(receiver)) {
+      return this.#callMedia(receiver, expression.callee.name, positional, named, expression.span);
+    }
     if (expression.callee.kind === "property") {
       return this.#callCollection(
         receiver!,
@@ -1212,6 +1246,80 @@ export class Evaluator {
     }
   }
 
+  #media(handle: SerializableMediaHandle, span: SourceSpan): RuntimeMediaSnapshot {
+    const media = mediaRecord(this.snapshot, handle.mediaId);
+    if (media === undefined) throw fault("TSR053", "Media handle refers to no media.", span);
+    return media;
+  }
+
+  /** `pause()`, `resume()`, and `stop()`; repeated calls in the reached state are silent no-ops. */
+  #callMedia(
+    handle: SerializableMediaHandle,
+    name: string,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): null {
+    if (!["pause", "resume", "stop"].includes(name)) {
+      throw fault("TSR016", `Media handles have no method '${name}'.`, span);
+    }
+    if (positional.length !== 0 || Object.keys(named).length !== 0) {
+      throw fault("TSR028", `Media ${name}() takes no arguments.`, span);
+    }
+    const media = this.#media(handle, span);
+    const action = activeMediaAction(this.snapshot, handle.mediaId);
+    if (name === "stop") {
+      if (action !== undefined) stopMediaAction(null, this.snapshot, action, this.events, span);
+      return null;
+    }
+    // Playback already reached by now is committed before its segment changes.
+    if (action !== undefined) drainMediaEvents(null, this.snapshot, action, this.events, span);
+    const now = this.snapshot.currentSessionTimeMs;
+    this.#mediaWarning(name === "pause" ? pauseMedia(media, now) : resumeMedia(media, now), span);
+    return null;
+  }
+
+  /** Assignment to `position`, `remaining`, or `volume` of a media handle. */
+  #assignMediaProperty(
+    handle: SerializableMediaHandle,
+    name: string,
+    value: SerializableRuntimeValue,
+    span: SourceSpan,
+  ): void {
+    const media = this.#media(handle, span);
+    if (name === "volume") {
+      if (typeof value !== "number" || !(value >= 0 && value <= 1)) {
+        throw fault("TSR050", "Media volume must be a number from 0 through 1.", span);
+      }
+      this.#mediaWarning(setMediaVolume(media, value), span);
+      return;
+    }
+    if (name !== "position" && name !== "remaining") {
+      throw fault(
+        "TSR003",
+        `Media handle property '${name}' cannot be assigned; assign position, remaining, or volume.`,
+        span,
+      );
+    }
+    if (!isDuration(value) || !Number.isFinite(value.milliseconds)) {
+      throw fault("TSR050", `Media ${name} must be assigned a duration such as 10 s.`, span);
+    }
+    const action = activeMediaAction(this.snapshot, handle.mediaId);
+    // Playback already reached by now is committed before the seek starts a new segment.
+    if (action !== undefined) drainMediaEvents(null, this.snapshot, action, this.events, span);
+    const target =
+      name === "position" ? value.milliseconds : mediaEndMs(media) - value.milliseconds;
+    this.#mediaWarning(seekMedia(media, target, this.snapshot.currentSessionTimeMs, name), span);
+    // A seek to the end of the range completes the pass at once, like a timer's `remaining = 0`.
+    if (action !== undefined) {
+      drainMediaEvents(null, this.snapshot, action, this.events, span, true);
+    }
+  }
+
+  #mediaWarning(warning: MediaWarning | null, span: SourceSpan): void {
+    if (warning !== null) this.#warn(warning.code, warning.message, span);
+  }
+
   #warn(code: string, message: string, span: SourceSpan): void {
     this.events.push(
       Object.freeze({
@@ -1369,6 +1477,16 @@ export class Evaluator {
       return this.#getSpeakerProperty(this.speakerById(value.speakerId, span), name, span);
     }
     if (isList(value) || isSet(value)) return this.#getCollectionProperty(value, name, span);
+    if (isMediaHandle(value)) {
+      const property = mediaProperty(
+        this.#media(value, span),
+        name,
+        this.snapshot.currentSessionTimeMs,
+      );
+      if (property === undefined)
+        throw fault("TSR017", `Media handles have no property '${name}'.`, span);
+      return property;
+    }
     if (isTimerHandle(value)) {
       const property = timerProperty(
         this.#timer(value, span),

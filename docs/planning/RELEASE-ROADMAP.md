@@ -79,9 +79,10 @@ architecture may change substantially while correctness and the basic model are 
     [`WISHES.xml` W-031](../../WISHES.xml).
 
 - [ ] **Audio and video playback**
-  - **Outcome:** Support real Player audio and video playback for the POC, including blocking/foreground and background
-    use, simultaneous identified resources, and targeted lifecycle control. Keep exact media APIs and persistence details
-    in the runtime/library design rather than defining them in the roadmap.
+  - **Outcome:** Support real Player audio playback and the Stage image for the POC, including blocking and background
+    use, simultaneous identified resources, and targeted lifecycle control. The video authoring API is defined with
+    audio; browser video playback may follow the POC (#445, #446). Keep exact media APIs and persistence details in the
+    runtime/specification rather than defining them in the roadmap.
   - **Reference:** [`RUNTIME.md`](../RUNTIME.md), [`LIBRARIES.md`](../LIBRARIES.md), and
     [`WISHES.xml` W-044](../../WISHES.xml).
 

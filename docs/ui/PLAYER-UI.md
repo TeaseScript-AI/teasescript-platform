@@ -348,11 +348,32 @@ additional responsive modes.
 `Visual Lab`, `Layout Debug`, and `Runtime Session` remain development fixtures, not Standard Player tools. A real Debugger is a future platform
 tool described in [DEBUGGER.md](../DEBUGGER.md).
 
+## Session start and user activation
+
+The Player does not run a script on page load. Before the first runtime entry of a new session, it shows an explicit
+Start control; after a page load that restores an existing session, it shows an explicit Continue control before
+execution resumes. The player's activation of that control is the user activation that later audible media playback
+relies on, so scripts may play audio from their first statement without a separate unlock step.
+
+If the browser still refuses required audible playback, the Player surfaces a deliberate activation/retry control. It
+does not silently substitute muted playback or report the audio as played.
+
 ## Stage and media presentation
 
 The stage is a dedicated structural surface above the transcript in the main content column and remains present even
 when no media is active. An empty stage shows its normal background/ambience rather than collapsing and expanding the
 transcript into that space.
+
+The Stage shows the persistent Stage image set by `showImage`, or its empty look after `hideImage`. An active Stage
+video temporarily occupies the Stage over that image; when the video ends or is stopped, the image is visible again
+([§22](../specifications/accepted-syntaxes-v30.md#22-stage-image-audio-and-video)). Presentation follows canonical
+runtime Stage and media state; browser media callbacks are observations reported to the runtime, not settlement.
+
+Media playback is script-controlled. Audio and video elements show no native browser controls, and the Player offers
+no seek, scrub, pause, or skip control of its own: playback the runtime did not command would make reported progress
+disagree with the canonical timeline. A progress indicator may extrapolate between reports for display only. Whether
+users may ever control playback is open; if accepted, such controls send typed host input to the runtime rather than
+acting on the media element ([`RUNTIME.md`](../RUNTIME.md#stage-image-and-media-playback)).
 
 Standard image/video-like presentation:
 
@@ -366,8 +387,8 @@ Standard image/video-like presentation:
   tool columns, the right rail, and Player chrome keep their own application surfaces. Stage and transcript remain
   separate regions with separate content and scrolling ownership;
 - clips the vignette to the stage and keeps decorative effects pointer-neutral;
-- uses a direct replacement as the Standard default transition; accepted explicit media transitions such as V30
-  `fade`/`crossfade` remain author-requested behavior;
+- uses a direct replacement as the Standard default transition; V30 `fade`/`crossfade` belong to the future layered
+  scene and are not part of the Stage image and media foundation;
 - does not add duplicate filename, fit, or scene-information captions merely because those values exist elsewhere.
 
 Accepted future background/foreground/overlay media, canvas, and custom stage rendering should replace stage content

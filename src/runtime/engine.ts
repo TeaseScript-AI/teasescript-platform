@@ -79,6 +79,8 @@ import type {
   RuntimeInteractionActionSnapshot,
   RuntimePreparedSayOutputSnapshot,
   RuntimeTimerActionSnapshot,
+  RuntimeMediaActionSnapshot,
+  RuntimeMediaPlaybackActionSnapshot,
 } from "./actions/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import {
@@ -93,6 +95,13 @@ import {
   timerHandlerDispatchable,
 } from "./operations/timer-handlers.js";
 import { expireTimerAction, stopAllTimersForSessionEnd } from "./operations/timer-lifecycle.js";
+import {
+  emitDeveloperWarning,
+  stopAllMediaForSessionEnd,
+  stopMediaAction,
+  stopStageVideo,
+} from "./operations/media-lifecycle.js";
+import { cloneMedia, type RuntimeMediaRepeatSnapshot } from "./media.js";
 import { executionRunnable, processDueWork } from "./operations/observe-time.js";
 import { cloneTimer } from "./timers.js";
 import {
@@ -101,6 +110,7 @@ import {
   isObject,
   isRange,
   isSet,
+  isMediaHandle,
   isSpeakerReference,
 } from "./value-predicates.js";
 import { DURATION_UNIT_MILLISECONDS } from "../duration.js";
@@ -168,6 +178,7 @@ function executeInstructionBoundary(
       return 1;
     }
     stopAllTimersForSessionEnd(snapshot);
+    stopAllMediaForSessionEnd(snapshot);
     const completeEventAndFutureCompletions = requiredEventSequencesForRootCompletion(snapshot);
     assertEventSequenceCapacity(snapshot, completeEventAndFutureCompletions);
     snapshot.terminalContinuationHandoff = null;
@@ -193,10 +204,12 @@ function executeInstructionBoundary(
       snapshot.status === "running" &&
       snapshot.callFrames.length === 0 &&
       snapshot.nextInstruction === plan.rootEndInstruction &&
-      // Expiry blocks queued before the script ends still run first.
-      !timerHandlerDispatchable(snapshot)
+      // Blocks queued before the script ends still run first, also behind a terminal commit window.
+      !timerHandlerDispatchable(snapshot) &&
+      !(snapshot.terminalContinuationHandoff !== null && snapshot.pendingTimerHandlers.length > 0)
     ) {
       stopAllTimersForSessionEnd(snapshot);
+      stopAllMediaForSessionEnd(snapshot);
       snapshot.terminalContinuationHandoff = null;
       snapshot.status = "halted";
       const completeEventAndFutureCompletions = requiredEventSequencesForRootCompletion(snapshot);
@@ -728,6 +741,7 @@ function executePlannedInstruction(
       return;
     case "exit":
       stopAllTimersForSessionEnd(snapshot);
+      stopAllMediaForSessionEnd(snapshot);
       snapshot.backgroundActions.length = 0;
       snapshot.preparedSayOutput = null;
       if (
@@ -755,6 +769,15 @@ function executePlannedInstruction(
           span: copySpan(instruction.span),
         } satisfies ExitEvent),
       );
+      return;
+    case "pacingBarrier":
+      executePacingBarrier(instruction, snapshot, evaluator);
+      return;
+    case "showImage":
+      showImage(plan, instruction, snapshot, evaluator, events);
+      return;
+    case "playMedia":
+      startMedia(plan, instruction, snapshot, evaluator, events);
       return;
   }
   instruction satisfies never;
@@ -1982,6 +2005,276 @@ function startTimer(
       copySpan(instruction.span),
       events,
     );
+  }
+  advance(snapshot);
+}
+
+/**
+ * `showImage` sets the persistent Stage image and `hideImage` clears it; `null` clears it with a developer warning.
+ * Either replaces an active Stage video, which stops.
+ */
+function showImage(
+  plan: InstructionPlan,
+  instruction: Extract<Instruction, { kind: "showImage" }>,
+  snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
+  events: InterpreterEvent[],
+): void {
+  const image = instruction.image === null ? null : evaluator.evaluate(instruction.image);
+  if (image !== null && typeof image !== "string") {
+    throw fault("TSR050", "showImage needs an image file reference or null.", instruction.span);
+  }
+  if (instruction.image !== null && image === null) {
+    emitDeveloperWarning(
+      snapshot,
+      events,
+      "TSW011",
+      "showImage received null; the Stage shows no image.",
+      instruction.span,
+    );
+  }
+  stopStageVideo(plan, snapshot, events, instruction.span);
+  snapshot.stageImage = image;
+  advance(snapshot);
+}
+
+/** A media position or duration: a duration value or a number of seconds, finite and not negative. */
+function mediaMilliseconds(
+  value: SerializableRuntimeValue,
+  subject: string,
+  span: SourceSpan,
+): number {
+  const milliseconds = isDuration(value)
+    ? value.milliseconds
+    : typeof value === "number"
+      ? value * 1_000
+      : Number.NaN;
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) {
+    throw fault(
+      "TSR050",
+      `Media ${subject} must be a non-negative duration or number of seconds.`,
+      span,
+    );
+  }
+  return milliseconds;
+}
+
+function mediaRepeat(
+  instruction: Extract<Instruction, { kind: "playMedia" }>,
+  value: SerializableRuntimeValue,
+): RuntimeMediaRepeatSnapshot {
+  const repeat = instruction.repeat;
+  if (repeat.kind === "once" || repeat.kind === "indefinite") return { kind: repeat.kind };
+  if (repeat.kind === "times") {
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+      throw fault(
+        "TSR050",
+        "A media repeat count must be a whole number of at least 1.",
+        repeat.count.span,
+      );
+    }
+    return { kind: "count", passes: value };
+  }
+  if (value === true) return { kind: "indefinite" };
+  if (value === false) return { kind: "once" };
+  if (isDuration(value) && Number.isFinite(value.milliseconds) && value.milliseconds > 0) {
+    return { kind: "budget", milliseconds: value.milliseconds };
+  }
+  throw fault(
+    "TSR050",
+    "Media repeat must be true, false, a count such as '3 times', or a positive duration.",
+    repeat.value.span,
+  );
+}
+
+/**
+ * Starts audio or video. Operands are evaluated in plan order and validated before any state changes. The script then
+ * waits: an async play until the Player reports the load result, a blocking play until the media ends. A new video
+ * replaces an active Stage video. A `null` file plays nothing, with a developer warning.
+ */
+function startMedia(
+  plan: InstructionPlan,
+  instruction: Extract<Instruction, { kind: "playMedia" }>,
+  snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
+  events: InterpreterEvent[],
+): void {
+  const file = evaluator.evaluate(instruction.file);
+  const repeatValue =
+    instruction.repeat.kind === "value"
+      ? evaluator.evaluate(instruction.repeat.value)
+      : instruction.repeat.kind === "times"
+        ? evaluator.evaluate(instruction.repeat.count)
+        : null;
+  const startAt = instruction.startAt === null ? null : evaluator.evaluate(instruction.startAt);
+  const endAt = instruction.endAt === null ? null : evaluator.evaluate(instruction.endAt);
+  const volume = instruction.volume === null ? null : evaluator.evaluate(instruction.volume);
+  const offsets = instruction.cues.map((cue) => evaluator.evaluate(cue.offset));
+  if (file !== null && typeof file !== "string") {
+    throw fault("TSR050", "Media file must be a file reference or null.", instruction.file.span);
+  }
+  const repeat = mediaRepeat(instruction, repeatValue);
+  if (!instruction.async && repeat.kind === "indefinite") {
+    throw fault("TSR050", "Blocking media cannot repeat indefinitely.", instruction.span);
+  }
+  if (repeat.kind === "indefinite" && instruction.finishFunctionId !== null) {
+    throw fault(
+      "TSR050",
+      "'finish' never runs for media that repeats indefinitely; stop() does not run it.",
+      instruction.span,
+    );
+  }
+  // A supplied option is validated even when it evaluates to null; only an omitted option takes its default.
+  const startAtMs =
+    instruction.startAt === null
+      ? 0
+      : mediaMilliseconds(startAt, "startAt", instruction.startAt.span);
+  const endAtMs =
+    instruction.endAt === null ? null : mediaMilliseconds(endAt, "endAt", instruction.endAt.span);
+  if (instruction.endAt !== null && endAtMs !== null && endAtMs <= startAtMs) {
+    throw fault("TSR050", "Media endAt must be later than startAt.", instruction.endAt.span);
+  }
+  if (
+    instruction.volume !== null &&
+    (typeof volume !== "number" || !(volume >= 0 && volume <= 1))
+  ) {
+    throw fault(
+      "TSR050",
+      "Media volume must be a number from 0 through 1.",
+      instruction.volume.span,
+    );
+  }
+  const cues = instruction.cues.map((cue, index) => ({
+    kind: cue.kind,
+    offsetMs: mediaMilliseconds(offsets[index]!, `${cue.kind} position`, cue.offset.span),
+    functionId: cue.functionId,
+  }));
+  if (
+    !Number.isSafeInteger(snapshot.nextActionId) ||
+    snapshot.nextActionId >= Number.MAX_SAFE_INTEGER - 1
+  ) {
+    throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+  }
+  assertCounterCanAdvance(snapshot.nextMediaId, "nextMediaId");
+  // Two requests, their eventual completions, a possible warning, and the other active actions' completions.
+  assertEventSequenceCapacity(
+    snapshot,
+    5 + requiredFutureActionCompletionEvents(snapshot),
+    instruction.span,
+  );
+  if (instruction.media === "video") stopStageVideo(plan, snapshot, events, instruction.span);
+  const mediaId = snapshot.nextMediaId;
+  const mediaSequence = takeSequence(snapshot);
+  const action: RuntimeMediaActionSnapshot = {
+    kind: "media",
+    actionId: snapshot.nextActionId,
+    owningInstruction: snapshot.nextInstruction,
+    createdAtMs: snapshot.currentSessionTimeMs,
+    requestEventSequence: mediaSequence,
+    media: {
+      mediaId,
+      media: instruction.media,
+      source: file ?? "",
+      state: "running",
+      loaded: false,
+      durationMs: null,
+      startAtMs,
+      endAtMs,
+      volume: typeof volume === "number" ? volume : 1,
+      repeat,
+      cues,
+      finishFunctionId: instruction.finishFunctionId,
+      segment: 0,
+      committedProgressMs: 0,
+      positionMs: startAtMs,
+      elapsedMs: 0,
+      passesCompleted: 0,
+      segmentPositionMs: startAtMs,
+      segmentPasses: 0,
+      segmentElapsedMs: 0,
+      startCuesPending: false,
+      points: [],
+    },
+  };
+  snapshot.nextActionId += 1;
+  snapshot.nextMediaId += 1;
+  snapshot.backgroundActions.push(action);
+  if (instruction.destinationTemporary !== null) {
+    setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, {
+      kind: "mediaHandle",
+      mediaId,
+    });
+  }
+  events.push(
+    Object.freeze({
+      kind: "actionRequested",
+      sequence: mediaSequence,
+      action: { ...action, media: cloneMedia(action.media) },
+      span: copySpan(instruction.span),
+    } satisfies ActionRequestedEvent),
+  );
+  if (file === null) {
+    emitDeveloperWarning(
+      snapshot,
+      events,
+      "TSW011",
+      `${instruction.media === "audio" ? "playAudio" : "playVideo"} received null; nothing plays.`,
+      instruction.span,
+    );
+    stopMediaAction(plan, snapshot, action, events, instruction.span);
+    advance(snapshot);
+    return;
+  }
+  const waitSequence = takeSequence(snapshot);
+  const wait: RuntimeMediaPlaybackActionSnapshot = Object.freeze({
+    kind: "mediaPlayback",
+    actionId: snapshot.nextActionId,
+    owningInstruction: snapshot.nextInstruction,
+    continuationInstruction: snapshot.nextInstruction + 1,
+    ownerCallFrameId: snapshot.callFrames.at(-1)?.id ?? null,
+    scopeDepth: snapshot.frames.length,
+    loopDepth: snapshot.loopFrames.length,
+    createdAtMs: snapshot.currentSessionTimeMs,
+    mediaId,
+    until: instruction.async ? "loaded" : "ended",
+    requestEventSequence: waitSequence,
+  });
+  snapshot.nextActionId += 1;
+  snapshot.foregroundAction = wait;
+  snapshot.status = "waiting";
+  events.push(
+    Object.freeze({
+      kind: "actionRequested",
+      sequence: waitSequence,
+      action: { ...wait },
+      span: copySpan(instruction.span),
+    } satisfies ActionRequestedEvent),
+  );
+}
+
+/**
+ * Main-story media presentation waits for the previous message's pacing, like a later `say`: an active background
+ * pacing gate becomes the foreground action without prepared output, and this barrier runs again once it settles.
+ * A barrier with a receiver waits only when that receiver is a media handle. Interrupt blocks, and functions they
+ * call, keep the canonical interrupt pacing behavior, so a barrier never waits while one runs.
+ */
+function executePacingBarrier(
+  instruction: Extract<Instruction, { kind: "pacingBarrier" }>,
+  snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
+): void {
+  const gate = snapshot.backgroundActions.find(
+    (action): action is RuntimeChatPacingGateActionSnapshot => action.kind === "chatPacingGate",
+  );
+  if (
+    gate !== undefined &&
+    !snapshot.callFrames.some((frame) => frame.timerInterruption !== null) &&
+    (instruction.receiver === null || isMediaHandle(evaluator.evaluate(instruction.receiver)))
+  ) {
+    snapshot.backgroundActions.splice(snapshot.backgroundActions.indexOf(gate), 1);
+    snapshot.foregroundAction = Object.freeze({ ...gate, preparedOutput: null });
+    snapshot.status = "waiting";
+    return;
   }
   advance(snapshot);
 }

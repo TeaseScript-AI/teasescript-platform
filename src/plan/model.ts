@@ -1,5 +1,5 @@
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 21;
+export const INSTRUCTION_PLAN_VERSION = 22;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -37,8 +37,13 @@ export interface CompiledFunctionParameter {
 
 export interface CompiledFunctionDefinition {
   readonly id: number;
-  /** A parameterless expiry-block region; it is entered only by the runtime, never by `callFunction`. */
-  readonly timerHandler: boolean;
+  /**
+   * A parameterless timer expiry block or media cue block; it is entered only by the runtime as an interrupt, never by
+   * `callFunction`. `null` for a user function.
+   */
+  readonly handler: "timer" | "media" | null;
+  /** For a media block of `let NAME = play... async`, the local name bound to its own handle on entry. */
+  readonly selfHandle: string | null;
   readonly name: string;
   readonly declarationSpan: PlanSourceLocation;
   readonly parameters: readonly CompiledFunctionParameter[];
@@ -83,6 +88,9 @@ export type Instruction =
   | SayInstruction
   | WaitInstruction
   | StartTimerInstruction
+  | PacingBarrierInstruction
+  | ShowImageInstruction
+  | PlayMediaInstruction
   | InteractionInstruction
   | ExitInstruction;
 
@@ -335,6 +343,54 @@ export interface StartTimerInstruction extends InstructionBase {
   /** A compiled timer-handler region, or `null` when the timer has no expiry block. */
   readonly handlerFunctionId: number | null;
   /** Receives the handle when the timer is used as a value. */
+  readonly destinationTemporary: number | null;
+}
+
+/**
+ * Waits for the previous message's pacing before main-story media presentation. With a `receiver`, it waits only
+ * when that side-effect-free expression evaluates to a media handle.
+ */
+export interface PacingBarrierInstruction extends InstructionBase {
+  readonly kind: "pacingBarrier";
+  readonly receiver: ExpressionPlan | null;
+}
+
+/** `showImage <image>`, or `hideImage` when `image` is `null`. */
+export interface ShowImageInstruction extends InstructionBase {
+  readonly kind: "showImage";
+  readonly image: ExpressionPlan | null;
+}
+
+export type MediaRepeatPlan =
+  | { readonly kind: "once" }
+  | { readonly kind: "indefinite" }
+  /** `repeat: <value>`: `true`, `false`, or a duration budget. */
+  | { readonly kind: "value"; readonly value: ExpressionPlan }
+  | { readonly kind: "times"; readonly count: ExpressionPlan };
+
+/** A timeline cue; a compact block is a `beforeEnd` cue at offset zero. */
+export interface MediaCuePlan {
+  readonly kind: "at" | "beforeEnd";
+  readonly offset: ExpressionPlan;
+  readonly functionId: number;
+}
+
+/**
+ * Starts audio or video playback. Operands are evaluated as file, repeat, startAt, endAt, volume, then cue offsets;
+ * the compiler materializes them first when source order differs.
+ */
+export interface PlayMediaInstruction extends InstructionBase {
+  readonly kind: "playMedia";
+  readonly media: "audio" | "video";
+  readonly async: boolean;
+  readonly file: ExpressionPlan;
+  readonly repeat: MediaRepeatPlan;
+  readonly startAt: ExpressionPlan | null;
+  readonly endAt: ExpressionPlan | null;
+  readonly volume: ExpressionPlan | null;
+  readonly cues: readonly MediaCuePlan[];
+  readonly finishFunctionId: number | null;
+  /** Receives the handle when async playback is used as a value. */
   readonly destinationTemporary: number | null;
 }
 

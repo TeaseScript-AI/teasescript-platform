@@ -28,7 +28,8 @@ Current constraints: [`RUNTIME.md`](RUNTIME.md), [`ARCHITECTURE.md`](ARCHITECTUR
   semantics.
 - Host/global representation for future opaque engine references beyond speakers.
 - Server-versus-browser authoritative checkpoint ownership and conflict resolution.
-- Minimal engine primitive families for future media capabilities under ADR 0017.
+- Engine primitive contracts for deferred layered-scene and camera capabilities beyond the specification §22 playback
+  foundation, under ADR 0017.
 - Serializable lowering or engine-managed continuation representation for resumable library workflows not covered by
   ADR 0018's full-lowering choice.
 - Recovery and missed-event ordering for absolute scheduled events/deadlines, including local/offline versus
@@ -100,8 +101,8 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Exact Player presentation for absolute deadlines and long/upcoming scheduled events; see specification §36 and
   [`planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md`](planning/TIMER-AND-RECOVERY-FOLLOW-UPS.md).
 - Cross-origin parent/player message schemas, capability negotiation, sandbox flags, and Content Security Policy.
-- Action-kind-specific media completion, advanced timeout, cancellation, and recovery policies beyond ADR 0018's
-  mandatory basic interactions.
+- Advanced timeout, cancellation, and recovery policies beyond ADR 0018's mandatory basic interactions and the
+  media playback contract in [`RUNTIME.md`](RUNTIME.md#stage-image-and-media-playback).
 - Stable text-output target handles beyond the first Standard chat target.
 - Exact author-facing theme schema/registration API and platform dark-theme token values. `ui/PLAYER-UI.md` fixes
   precedence, standalone/light/dark theme semantics, missing-variant fallback, and the no-arbitrary-CSS boundary.
@@ -129,7 +130,12 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Camera UI and lifecycle around accepted `askImage(...)` and nullable `takePhoto(...)`, including preview, countdown,
   retake, permission, and restore behavior.
 - Motion detection, sampling, camera resource limits, and scene ownership.
-- Media layering, concurrent ownership, cleanup, recovery, and resource handles.
+- User control of media playback: whether players may seek, pause, or skip script media, whether authors can allow or
+  forbid it per media, and its Player UI. The Player currently offers no media controls; accepted controls would enter
+  the runtime as typed host input like script seeks
+  ([`RUNTIME.md`](RUNTIME.md#stage-image-and-media-playback)).
+- Layered-scene media (backgrounds, overlays, blur, drawings, transitions) and its reconciliation with the Stage image
+  model of specification §22.
 - Persistent media identity, labels, timestamps, retrieval, privacy, retention, encryption, export, and quotas.
 - Exact PWA offline, storage, cache, and update lifecycle under
   [ADR 0001](decisions/0001-browser-first.md): asset/media/data boundaries, persistent-storage requests, offline session

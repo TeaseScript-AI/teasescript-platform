@@ -452,7 +452,12 @@ function toNative(value: SerializableRuntimeValue): NativeValue {
     return value.items.map(toNative);
   }
   if (value.kind === "speakerReference") return value.identifier;
-  if (value.kind === "range" || value.kind === "duration" || value.kind === "timerHandle") {
+  if (
+    value.kind === "range" ||
+    value.kind === "duration" ||
+    value.kind === "timerHandle" ||
+    value.kind === "mediaHandle"
+  ) {
     return { ...value };
   }
   return Object.fromEntries(

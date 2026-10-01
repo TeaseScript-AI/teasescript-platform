@@ -51,7 +51,7 @@ ADR 0016 adds these requirements:
 
 - Canonical `currentSessionTimeMs`, pending-action state, IDs, deadlines, continuation positions, expected result types, and `lastSettlement` remain runtime-owned.
 - The player may report a typed time observation or typed capability result, but may not mutate arbitrary snapshot fields, directly replace `currentSessionTimeMs`, or select a continuation.
-- A time observation is validated and applied atomically: persist `max(currentSessionTimeMs, suppliedNow)` before settling actions due at that effective value.
+- A time observation, including any media progress reports, is validated and applied atomically: persist `observedSessionTimeMs = max(observedSessionTimeMs, suppliedNow)` and the accepted progress samples, then settle due work toward that horizon as defined in `RUNTIME.md`; a malformed observation changes nothing.
 - Every completion is correlated to one persisted action ID and is validated before any state mutation, result storage, event emission, RNG use, handler, or continuation.
 - Completion lookup searches active foreground and background actions before matching `lastSettlement`, classifying an issued inactive ID as stale, or classifying an unissued ID as unknown.
 - An older active background action may not be rejected merely because a newer action has already settled.
