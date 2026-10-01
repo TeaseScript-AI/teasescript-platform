@@ -93,7 +93,7 @@ function waiting(plan: InstructionPlan) {
   return result;
 }
 
-test("result interactions reject occupied destinations before pending-action creation", () => {
+test("result interaction destinations are produced only by the interaction and absent while pending", () => {
   const base = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
   const span = base.instructions[0]!.span;
   const occupiedPlan: InstructionPlan = {
@@ -112,23 +112,62 @@ test("result interactions reject occupied destinations before pending-action cre
       base.instructions[1]!,
     ],
   };
-  const planValidation = validateInstructionPlan(occupiedPlan);
-  assert.equal(planValidation.valid, false);
-  assert.ok(
-    planValidation.errors.some((error) =>
-      error.message.includes("produced only by their owning interaction"),
-    ),
+  assert.deepEqual(
+    validateInstructionPlan(occupiedPlan).errors.map((error) => [error.code, error.path]),
+    [["TSC002", "$.instructions[1].destinationTemporary"]],
   );
 
-  const hostileSnapshot = createFreshRuntimeSnapshot(base);
-  hostileSnapshot.temporaries.push({ id: 1, value: "old" });
-  const before = structuredClone(hostileSnapshot);
-  assert.equal(validateRuntimeSnapshot(hostileSnapshot, base).valid, false);
-  assert.throws(() => run(base, hostileSnapshot));
-  assert.deepEqual(hostileSnapshot, before);
-  assert.equal(hostileSnapshot.foregroundAction, null);
-  assert.equal(hostileSnapshot.nextActionId, before.nextActionId);
-  assert.equal(hostileSnapshot.nextEventSequence, before.nextEventSequence);
+  for (const [owner, source] of [
+    ["root", "let answer = askText\nexit"],
+    ["function", "function prompt { let answer = askText\nreturn }\nprompt()\nexit"],
+    ["loop", "repeat 1 { let answer = askText }\nexit"],
+  ] as const) {
+    const compiled = compileSource(source);
+    assert.deepEqual(compiled.diagnostics, [], owner);
+    const plan = compiled.plan!;
+    let beforeInteraction = createImmediatePacingRuntimeSnapshot(plan);
+    while (plan.instructions[beforeInteraction.nextInstruction]?.kind !== "interaction") {
+      beforeInteraction = executeInstruction(plan, beforeInteraction).snapshot;
+    }
+    const interaction = plan.instructions[beforeInteraction.nextInstruction];
+    assert.ok(interaction?.kind === "interaction" && interaction.destinationTemporary !== null);
+
+    // An occupied destination is rejected before the interaction creates its pending action.
+    const occupied = structuredClone(beforeInteraction);
+    occupied.temporaries.push({ id: interaction.destinationTemporary, value: "old" });
+    const occupiedBefore = structuredClone(occupied);
+    assert.equal(validateRuntimeSnapshot(occupied, plan).valid, false, owner);
+    assert.throws(() => run(plan, occupied), owner);
+    assert.deepEqual(occupied, occupiedBefore, owner);
+
+    const pending = run(plan, beforeInteraction);
+    assert.equal(pending.snapshot.status, "waiting", owner);
+    const action = pending.snapshot.foregroundAction;
+    assert.ok(action?.kind === "interaction" && action.destinationTemporary !== null, owner);
+    const destination = action.destinationTemporary;
+    assert.equal(
+      pending.snapshot.temporaries.some((temporary) => temporary.id === destination),
+      false,
+      owner,
+    );
+    const hostile = structuredClone(pending.snapshot);
+    hostile.temporaries.push({ id: destination, value: "old" });
+    assert.equal(validateRuntimeSnapshot(hostile).valid, false, owner);
+    assert.equal(validateRuntimeSnapshot(hostile, plan).valid, false, owner);
+    assert.throws(
+      () => restoreCheckpoint({ ...createCheckpoint(plan, pending.snapshot), snapshot: hostile }),
+      owner,
+    );
+
+    const completed = completeAction(plan, pending.snapshot, {
+      actionId: action.actionId,
+      actionKind: "interaction",
+      interactionKind: "text",
+      payload: { kind: "submittedText", submittedText: "new" },
+    });
+    assert.equal(completed.outcome.kind, "completed", owner);
+    assert.equal(temporaryValue(completed.snapshot, destination), "new", owner);
+  }
 });
 
 test("completion stops at the handoff before ordinary continuation execution", () => {
