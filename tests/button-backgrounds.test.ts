@@ -190,3 +190,51 @@ test("option objects retain static and dynamic unlabelled uniqueness rules", () 
     playerRuntimeForeground(plain),
   );
 });
+
+test("a showButton background continues after its colon like the single-line form", () => {
+  const singleLine = createPlayerRuntimeSession('showButton "Continue", background: "gold"');
+  for (const source of [
+    'showButton "Continue", background:\n    "gold"',
+    'showButton "Continue",\n    background:\n\n    // fill\n    "gold"',
+  ]) {
+    const session = createPlayerRuntimeSession(source);
+    assert.equal(session.snapshot.status, "waiting", source);
+    assert.deepEqual(playerRuntimeForeground(session), playerRuntimeForeground(singleLine), source);
+    assert.deepEqual(
+      activatePlayerRuntimeButton(session)!.session.snapshot.status,
+      activatePlayerRuntimeButton(singleLine)!.session.snapshot.status,
+      source,
+    );
+  }
+});
+
+test("a missing continued showButton background keeps the statement on the next line", () => {
+  for (const [source, statements] of [
+    ['showButton "Continue", background:\n', []],
+    [
+      'showButton "Continue", background:\nsay "recovered"\nexit',
+      ["sayStatement", "exitStatement"],
+    ],
+    [
+      'showButton "Continue", background:\n\nsay "recovered"\nexit',
+      ["sayStatement", "exitStatement"],
+    ],
+    [
+      'showButton "Continue", background:\nspeaker bob {}\nexit',
+      ["speakerDeclaration", "exitStatement"],
+    ],
+  ] as const) {
+    const result = compileSource(source);
+    assert.equal(result.plan, null, source);
+    assert.deepEqual(
+      result.program.statements.map((statement) => statement.kind),
+      statements,
+      source,
+    );
+    assert.deepEqual(
+      result.parserDiagnostics.map((diagnostic) => diagnostic.code),
+      ["TSP028"],
+      source,
+    );
+  }
+});

@@ -40,6 +40,27 @@ test("parses a speaker declaration with exact nested spans", () => {
   );
 });
 
+test("continues a speaker property across a newline after ':'", () => {
+  const source = 'speaker vera {\n    displayName:\n\n        // continued\n        "Vera"\n}';
+  const result = parse(source);
+  const valueStart = source.indexOf('"Vera"');
+
+  assert.deepEqual(result.diagnostics, []);
+  assert.deepEqual(result.program.statements[0], {
+    kind: "speakerDeclaration",
+    name: { kind: "identifier", name: "vera", span: sourceSpan(source, 8, 12) },
+    properties: [
+      {
+        kind: "speakerProperty",
+        name: { kind: "identifier", name: "displayName", span: sourceSpan(source, 19, 30) },
+        value: stringNode(source, valueStart, valueStart + 6, "Vera"),
+        span: sourceSpan(source, 19, valueStart + 6),
+      },
+    ],
+    span: sourceSpan(source, 0, source.length),
+  });
+});
+
 test("distinguishes a speaker setter from a declaration using lookahead", () => {
   const source = "speaker mistressVera\nspeaker cashier {}";
   const result = parse(source);

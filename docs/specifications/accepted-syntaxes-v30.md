@@ -112,6 +112,7 @@ A statement continues across a newline when the parser can see that it is not co
 - inside `()` and `[]`;
 - inside object literals;
 - after `=`, a comma, or a binary operator;
+- after the `:` of a named argument, option, property, or choice key, before its value;
 - before the closing delimiter of a multiline call, list, or object.
 
 Examples:
@@ -140,6 +141,9 @@ let total = score +
 
 let result =
     calculateDamage(player, weapon)
+
+let answer = choose stay:
+    "Stay", leave: "Leave"
 ```
 
 The same calls and objects may remain on one line:

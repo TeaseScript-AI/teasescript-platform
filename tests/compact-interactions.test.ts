@@ -185,6 +185,67 @@ test("compact choose reports a missing continued option and recovers at the foll
   );
 });
 
+test("compact choice keys continue across a newline after ':'", () => {
+  const options = (source: string) => {
+    const parsed = parse(source);
+    assert.deepEqual(parsed.diagnostics, []);
+    const statement = parsed.program.statements[0];
+    assert.equal(statement?.kind, "letStatement");
+    assert.equal(statement?.initializer.kind, "interactionExpression");
+    return statement?.initializer.options.map((option) => [
+      option.label?.kind === "identifier" ? option.label.name : null,
+      option.value.kind === "stringLiteral" && option.value.parts[0]?.kind === "stringText"
+        ? option.value.parts[0].value
+        : null,
+    ]);
+  };
+  const singleLine = options('let r = choose coast: "Stay", b: "B"');
+  assert.deepEqual(singleLine, [
+    ["coast", "Stay"],
+    ["b", "B"],
+  ]);
+  assert.deepEqual(options('let r = choose coast:\n    "Stay", b: "B"'), singleLine);
+  assert.deepEqual(
+    options('let r = choose coast:\n\n    // why\n    "Stay", b:\n    "B"'),
+    singleLine,
+  );
+});
+
+test("compact choice keys without a value keep the focused diagnostic", () => {
+  const cases = [
+    ["let r = choose coast:", ["letStatement"]],
+    ["let r = choose coast:\n", ["letStatement"]],
+    ['let r = choose coast:\n\nsay "recovered"', ["letStatement", "sayStatement"]],
+  ] as const;
+  for (const [source, statements] of cases) {
+    const parsed = parse(source);
+    assert.deepEqual(
+      parsed.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message]),
+      [["TSP030", "Expected a choice option expression after ':'."]],
+    );
+    assert.deepEqual(
+      parsed.program.statements.map((statement) => statement.kind),
+      statements,
+    );
+  }
+
+  const block = parse('if true {\n    let r = choose coast:\n    say "recovered"\n}\nexit');
+  assert.deepEqual(
+    block.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSP030"],
+  );
+  const statement = block.program.statements[0];
+  assert.equal(statement?.kind, "ifStatement");
+  assert.deepEqual(
+    statement?.thenBlock.statements.map((child) => child.kind),
+    ["letStatement", "sayStatement"],
+  );
+  assert.deepEqual(
+    block.program.statements.map((child) => child.kind),
+    ["ifStatement", "exitStatement"],
+  );
+});
+
 test("nested compact choices report missing options once per affected invocation", () => {
   const insertionDiagnostics = (source: string) =>
     parse(source).diagnostics.map((diagnostic) => [
@@ -205,6 +266,21 @@ test("nested compact choices report missing options once per affected invocation
     ["TSP030", separator, separator],
     ["TSP030", nestedAndOuter.length, nestedAndOuter.length],
   ]);
+
+  for (const source of [
+    'let result = choose first: choose second:\nsay "recovered"',
+    'let result = choose first: choose "A",\nsay "recovered"',
+  ]) {
+    const continued = parse(source);
+    assert.deepEqual(
+      continued.diagnostics.map((diagnostic) => diagnostic.code),
+      ["TSP030"],
+    );
+    assert.deepEqual(
+      continued.program.statements.map((statement) => statement.kind),
+      ["letStatement", "sayStatement"],
+    );
+  }
 });
 
 test("parenthesized advanced interaction-call forms are rejected with a focused diagnostic and exact span", () => {
@@ -1136,6 +1212,12 @@ test("real source preserves button transcript and all choice result domains", ()
     },
     {
       source: 'let result = choose first: "Same", second: "Same"',
+      payload: { kind: "selectedLabel", selectedLabel: "second" },
+      result: "second",
+      text: "Same",
+    },
+    {
+      source: 'let result = choose first:\n    "Same", second:\n\n    // continued\n    "Same"',
       payload: { kind: "selectedLabel", selectedLabel: "second" },
       result: "second",
       text: "Same",
