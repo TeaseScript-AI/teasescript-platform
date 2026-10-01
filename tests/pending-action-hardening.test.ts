@@ -283,7 +283,10 @@ test("#79 validates every settlement relationship and preserves valid replay", (
     actionKind: "delay",
     payload: { kind: "time", currentSessionTimeMs: active.currentSessionTimeMs },
   });
-  assert.equal(replay.outcome.kind, "alreadySettled");
+  assert.deepEqual(replay.outcome, { kind: "alreadySettled", settlement: active.lastSettlement });
+  assert.deepEqual(replay.snapshot, active);
+  assert.deepEqual(replay.events, []);
+  assert.equal(replay.instructionsExecuted, 0);
 });
 
 test("#81 keeps representable fractional waits and rejects precision-losing deadlines before an action request", () => {
@@ -315,6 +318,24 @@ test("#81 keeps representable fractional waits and rejects precision-losing dead
     const result = executeInstruction(
       compiled,
       createFreshRuntimeSnapshot(compiled, { initialSessionTimeMs: start }),
+    );
+    const failure = result.snapshot.failure;
+    assert.equal(result.snapshot.status, "failed", source);
+    assert.equal(failure?.code, "TSR050", source);
+    // The failure points at the authored duration operand after `wait `.
+    assert.deepEqual(
+      [failure?.span.start.offset, failure?.span.end.offset],
+      ["wait ".length, source.length],
+      source,
+    );
+    assert.deepEqual(
+      result.events.map((event) =>
+        event.kind === "runtimeFailure"
+          ? { kind: event.kind, code: event.code, span: event.span }
+          : { kind: event.kind },
+      ),
+      [{ kind: "runtimeFailure", code: "TSR050", span: failure?.span }],
+      source,
     );
     assert.equal(result.snapshot.foregroundAction, null, source);
     assert.equal(result.snapshot.nextActionId, 1, source);
@@ -392,7 +413,8 @@ test("#82 uses the wait keyword path and rejects forged ownership, missing wait 
 });
 
 test("#82 allocates the final safe action identity and then fails without reuse", () => {
-  const compiled = plan("wait 1 ms\nwait 1 ms\nexit");
+  const source = "wait 1 ms\nwait 1 ms\nexit";
+  const compiled = plan(source);
   const initial = createFreshRuntimeSnapshot(compiled);
   initial.nextActionId = Number.MAX_SAFE_INTEGER - 1;
   const first = run(compiled, initial);
@@ -400,6 +422,22 @@ test("#82 allocates the final safe action identity and then fails without reuse"
   assert.equal(first.snapshot.nextActionId, Number.MAX_SAFE_INTEGER);
   const settled = observeTime(compiled, first.snapshot, 1).snapshot;
   const second = executeInstruction(compiled, settled);
+  const failure = second.snapshot.failure;
+  const secondWait = source.indexOf("wait 1 ms", 1);
+  assert.equal(second.snapshot.status, "failed");
+  assert.equal(failure?.code, "TSR051");
+  assert.deepEqual(
+    [failure?.span.start.offset, failure?.span.end.offset],
+    [secondWait, secondWait + "wait 1 ms".length],
+  );
+  assert.deepEqual(
+    second.events.map((event) =>
+      event.kind === "runtimeFailure"
+        ? { kind: event.kind, code: event.code, span: event.span }
+        : { kind: event.kind },
+    ),
+    [{ kind: "runtimeFailure", code: "TSR051", span: failure?.span }],
+  );
   assert.equal(second.snapshot.foregroundAction, null);
   assert.equal(second.snapshot.nextActionId, Number.MAX_SAFE_INTEGER);
   assert.ok(!second.events.some((event) => event.kind === "actionRequested"));
