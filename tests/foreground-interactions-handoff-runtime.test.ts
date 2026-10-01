@@ -249,43 +249,6 @@ test("removed lifecycle fields are rejected structurally", () => {
   assert.throws(() => createCheckpoint(plan, oldLifecycle));
 });
 
-test("compiler-shaped foo, interaction, bar source order remains exact", () => {
-  const injected = injectTextInteraction(
-    [
-      'function foo { say "foo"\nreturn "first" }',
-      'function bar { say "bar"\nreturn "third" }',
-      'function send(first, answer, third) { say "${first}:${answer}:${third}"\nreturn }',
-      'send(foo(), "__interaction_result__", bar())',
-      "exit",
-    ].join("\n"),
-  );
-  const beforeInteraction = run(injected.plan, createImmediatePacingRuntimeSnapshot(injected.plan));
-  assert.equal(beforeInteraction.snapshot.status, "waiting");
-  assert.deepEqual(
-    beforeInteraction.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["foo"],
-  );
-
-  const completed = completeAction(injected.plan, beforeInteraction.snapshot, {
-    actionId: beforeInteraction.snapshot.foregroundAction!.actionId,
-    actionKind: "interaction",
-    interactionKind: "text",
-    payload: { kind: "submittedText", submittedText: "middle" },
-  });
-  assert.equal(
-    completed.events.some((event) => event.kind === "say" && event.text === "bar"),
-    false,
-  );
-
-  const final = run(injected.plan, completed.snapshot);
-  assert.deepEqual(
-    final.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["bar", "first:middle:third"],
-  );
-  assert.equal(final.snapshot.status, "halted");
-  assert.equal(validateRuntimeSnapshot(final.snapshot, injected.plan).valid, true);
-});
-
 interface InjectedInteractionPlan {
   readonly plan: InstructionPlan;
   readonly destinationTemporary: number;

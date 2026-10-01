@@ -984,6 +984,30 @@ test("interaction expressions preserve function-argument source order across sus
   assert.deepEqual(marks, ["before", "after"]);
   assert.equal(done.snapshot.status, "halted");
   assert.equal(done.events.find((event) => event.kind === "say")?.text, "received answer");
+
+  // User-defined calls on both sides of a direct interaction argument keep the same order.
+  const userPlan = compiled(
+    [
+      'function foo { say "foo", instant\nreturn "first" }',
+      'function bar { say "bar", instant\nreturn "third" }',
+      'function send(first, answer, third) { say "${first}:${answer}:${third}", instant\nreturn }',
+      "send(foo(), askText, bar())",
+    ].join("\n"),
+  );
+  const saidTexts = (events: readonly { readonly kind: string; readonly text?: string }[]) =>
+    events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
+  const userPending = run(userPlan, createFreshRuntimeSnapshot(userPlan));
+  assert.equal(userPending.snapshot.status, "waiting");
+  assert.deepEqual(saidTexts(userPending.events), ["foo"]);
+  const userCompleted = completePending(userPlan, userPending.snapshot, "text", {
+    kind: "submittedText",
+    submittedText: "middle",
+  });
+  assert.equal(userCompleted.outcome.kind, "completed");
+  assert.deepEqual(saidTexts(userCompleted.events), []);
+  const userDone = run(userPlan, userCompleted.snapshot);
+  assert.equal(userDone.snapshot.status, "halted");
+  assert.deepEqual(saidTexts(userDone.events), ["bar", "first:middle:third"]);
 });
 
 test("real source completes, retries invalid input, records provenance, and resumes at top level", () => {
