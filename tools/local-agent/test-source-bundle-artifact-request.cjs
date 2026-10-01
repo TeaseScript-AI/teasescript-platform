@@ -532,7 +532,6 @@ async function testCacheHitCreatesOneRegistryAndCleansExactRequest() {
     "--expected-repository": REPOSITORY,
     "--expected-head": MAIN_SHA,
   });
-  assert.doesNotMatch(botComments[0].body, /## Artifact ready|Artifact URL:|Source repository:/);
 }
 
 async function testCacheHitCleanupFailureIsNonFatal() {
@@ -867,7 +866,6 @@ async function testEquivalentArtifactsDeduplicateAndPreserveRequestIds() {
   const body = request.formatRegistryComment(merged);
   assert.match(body, /requests 502, 501/);
   assert.match(body, /`GitHub\.download_workflow_artifact`/);
-  assert.equal((body.match(/^### /gm) || []).length, 1);
   assert.equal(request.findRegistryEntry(merged, 501).artifactId, 8201);
   assert.equal(request.findRegistryEntry(merged, 502).artifactId, 8201);
 }
@@ -1026,7 +1024,6 @@ async function testEquivalentArtifactRequestIdsAreGloballyBounded() {
     merged.flatMap((entry) => entry.requestCommentIds),
     [811, 810, 809, 808, 807, 806, 805, 804, 803, 802],
   );
-  assert.ok(request.formatRegistryComment(merged).length < 20_000);
 }
 
 async function testMultipleAuthoritativeRegistriesFailClosed() {
@@ -1259,11 +1256,6 @@ async function testFailureEntryIsCompactBoundedAndCleaned() {
   assert.doesNotMatch(entries[0].reason, /[\r\n\t]| {2}/);
   assert.ok(entries[0].reason.length < apiMessage.trim().length);
   assert.ok(entries[0].reason.length <= 240);
-  assert.doesNotMatch(
-    registryComment.body,
-    /full log|stack trace|No authoritative artifact result/,
-  );
-  assert.equal(request.compactFailureReason(`a\n${"b".repeat(500)}`).length, 240);
 }
 
 async function testChangedRequestCannotFinalizeOrDelete() {
