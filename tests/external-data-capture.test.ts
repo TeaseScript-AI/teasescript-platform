@@ -560,25 +560,35 @@ test("external capture rejects non-canonical proxy arrays before indexed travers
 });
 
 test("external capture rejects proxy indexes that conflict with validated array length", () => {
+  const assertRejectedBeforeIndexedAccess = (
+    length: number,
+    keys: readonly string[],
+    values: Readonly<Record<string, unknown>>,
+  ): void => {
+    const label = `length ${length}, keys ${JSON.stringify(keys)}`;
+    const access = { gets: 0, lengthDescriptors: 0, indexedDescriptors: 0 };
+    assert.deepEqual(
+      captureExternalData(proxyArray(length, keys, values, access)),
+      { ok: false, failure: { kind: "nonJsonSafeValue", path: "$" } },
+      label,
+    );
+    assert.equal(access.gets, 0, label);
+    assert.equal(access.indexedDescriptors, 0, label);
+    assert.ok(access.lengthDescriptors > 0, label);
+  };
+
   for (const keys of [
     ["length", "4294967294"],
     ["4294967294", "length"],
   ]) {
-    assert.deepEqual(captureExternalData(proxyArray(0, keys, { "4294967294": 1 })), {
-      ok: false,
-      failure: { kind: "nonJsonSafeValue", path: "$" },
-    });
+    assertRejectedBeforeIndexedAccess(0, keys, { "4294967294": 1 });
   }
 
   for (const key of ["0", "1", "4294967295", "01", "1.0"]) {
-    assert.equal(
-      captureExternalData(proxyArray(0, ["length", key], { [key]: 1 })).ok,
-      false,
-      `Expected ${key} to be rejected.`,
-    );
+    assertRejectedBeforeIndexedAccess(0, ["length", key], { [key]: 1 });
   }
 
-  assert.equal(captureExternalData(proxyArray(2, ["1", "length"], { "1": "present" })).ok, false);
+  assertRejectedBeforeIndexedAccess(2, ["1", "length"], { "1": "present" });
 });
 
 test("external capture rejects malformed proxy length descriptors without invoking getters", () => {
