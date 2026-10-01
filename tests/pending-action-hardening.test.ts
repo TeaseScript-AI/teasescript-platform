@@ -13,6 +13,7 @@ import { executeInstruction, run, stepToEvent } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import type { RuntimeDelayActionSnapshot } from "../src/runtime/actions/model.js";
+import type { InterpreterEvent } from "../src/runtime/events.js";
 import {
   MAX_RUNTIME_SESSION_TIME_MS,
   createFreshRuntimeSnapshot,
@@ -283,7 +284,10 @@ test("#79 validates every settlement relationship and preserves valid replay", (
     actionKind: "delay",
     payload: { kind: "time", currentSessionTimeMs: active.currentSessionTimeMs },
   });
-  assert.equal(replay.outcome.kind, "alreadySettled");
+  assert.deepEqual(replay.outcome, { kind: "alreadySettled", settlement: active.lastSettlement });
+  // Replaying the first settlement leaves the second wait pending and the continuation unadvanced.
+  assert.deepEqual(replay.snapshot, active);
+  assert.deepEqual(replay.events, []);
 });
 
 test("#81 keeps representable fractional waits and rejects precision-losing deadlines before an action request", () => {
@@ -316,9 +320,10 @@ test("#81 keeps representable fractional waits and rejects precision-losing dead
       compiled,
       createFreshRuntimeSnapshot(compiled, { initialSessionTimeMs: start }),
     );
+    // The failure points at the authored duration, from its amount through its unit.
+    assertRuntimeFailure(result, "TSR050", "wait ".length, source.length, source);
     assert.equal(result.snapshot.foregroundAction, null, source);
     assert.equal(result.snapshot.nextActionId, 1, source);
-    assert.ok(!result.events.some((event) => event.kind === "actionRequested"), source);
   }
 
   const sequential = plan("wait 0.1 ms\nwait 0.2 ms\nexit");
@@ -392,7 +397,8 @@ test("#82 uses the wait keyword path and rejects forged ownership, missing wait 
 });
 
 test("#82 allocates the final safe action identity and then fails without reuse", () => {
-  const compiled = plan("wait 1 ms\nwait 1 ms\nexit");
+  const source = "wait 1 ms\nwait 1 ms\nexit";
+  const compiled = plan(source);
   const initial = createFreshRuntimeSnapshot(compiled);
   initial.nextActionId = Number.MAX_SAFE_INTEGER - 1;
   const first = run(compiled, initial);
@@ -400,11 +406,36 @@ test("#82 allocates the final safe action identity and then fails without reuse"
   assert.equal(first.snapshot.nextActionId, Number.MAX_SAFE_INTEGER);
   const settled = observeTime(compiled, first.snapshot, 1).snapshot;
   const second = executeInstruction(compiled, settled);
+  const secondWaitStart = source.indexOf("wait", 1);
+  assertRuntimeFailure(second, "TSR051", secondWaitStart, secondWaitStart + "wait 1 ms".length);
   assert.equal(second.snapshot.foregroundAction, null);
   assert.equal(second.snapshot.nextActionId, Number.MAX_SAFE_INTEGER);
-  assert.ok(!second.events.some((event) => event.kind === "actionRequested"));
 });
 
 function checkpointError(error: unknown): boolean {
   return error instanceof CheckpointError && error.info.code === "TSK002";
+}
+
+/** Requires a failed session whose only event is the matching source-associated runtime failure. */
+function assertRuntimeFailure(
+  result: { readonly snapshot: RuntimeSnapshot; readonly events: readonly InterpreterEvent[] },
+  code: string,
+  startOffset: number,
+  endOffset: number,
+  label?: string,
+): void {
+  assert.equal(result.snapshot.status, "failed", label);
+  const failure = result.snapshot.failure;
+  assert.ok(failure !== null, label);
+  assert.equal(failure.code, code, label);
+  assert.deepEqual(
+    [failure.span.start.offset, failure.span.end.offset],
+    [startOffset, endOffset],
+    label,
+  );
+  assert.equal(result.events.length, 1, label);
+  const [event] = result.events;
+  assert.ok(event?.kind === "runtimeFailure", label);
+  assert.equal(event.code, code, label);
+  assert.deepEqual(event.span, failure.span, label);
 }

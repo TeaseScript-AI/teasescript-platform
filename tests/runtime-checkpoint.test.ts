@@ -28,6 +28,7 @@ import {
 } from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
+import { sayTexts } from "./helpers/runtime-events.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
 test("runtime snapshots survive JSON stringify and parse validation", () => {
@@ -45,9 +46,13 @@ test("restores a self-contained checkpoint from serialized JSON", () => {
   const restored = deserializeCheckpoint(
     serializeCheckpoint(createCheckpoint(compiled, first.snapshot)),
   );
+  assert.deepEqual(restored.plan, compiled);
+  assert.deepEqual(restored.snapshot, first.snapshot);
   const completed = run(restored.plan, restored.snapshot);
 
   assert.equal(completed.snapshot.status, "halted");
+  // The resumed say reads the score declared before the checkpoint.
+  assert.deepEqual(sayTexts(completed), ["1"]);
   assert.deepEqual(
     completed.events.map((event) => event.sequence),
     [1, 2],
