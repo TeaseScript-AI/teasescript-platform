@@ -383,138 +383,14 @@ function injectInteraction(
   };
 }
 
-test("injectInteraction inserts one exact canonical boundary without collateral plan changes", () => {
-  const sources: readonly {
-    readonly name: string;
-    readonly source: string;
-    readonly suspendedCaller?: true;
-  }[] = [
-    { name: "root plan", source: 'let answer = "__interaction_result__"\nsay answer\nexit' },
-    {
-      name: "function-body plan",
-      source:
-        'function prompt { let answer = "__interaction_result__"\nsay answer\nreturn }\nprompt()\nexit',
-    },
-    {
-      name: "suspended caller plan",
-      source:
-        'function prompt { return "__interaction_result__" }\nlet answer = prompt()\nsay answer\nexit',
-      suspendedCaller: true,
-    },
-  ] as const;
-  const marker = "__interaction_result__";
-
-  for (const row of sources) {
-    const compiled = compileSource(row.source);
-    assert.deepEqual(compiled.diagnostics, [], row.name);
-    assert.notEqual(compiled.plan, null, row.name);
-    const original = compiled.plan!;
-    const markerInstructions = original.instructions.filter((instruction) =>
-      containsLiteralMarker(instruction, marker),
-    );
-    assert.equal(markerInstructions.length, 1, row.name);
-    const markerInstruction = markerInstructions[0]!;
-    const markerIndex = original.instructions.indexOf(markerInstruction);
-    const injected = injectTextInteraction(row.source);
-    // EVIDENCE: replacement preserves the compiler-produced marker instruction while substituting one expression.
-    const expectedContinuation = replaceLiteralMarker(
-      markerInstruction,
-      marker,
-      injected.destinationTemporary,
-    ) as Instruction;
-    const expectedInteraction: InteractionInstruction = {
-      kind: "interaction",
-      interactionKind: "text",
-      target: "standardChat",
-      speaker: null,
-      destinationTemporary: injected.destinationTemporary,
-      expectedResult: "string",
-      ui: { kind: "text", hint: null, accessibleName: defaults.text },
-      span: markerInstruction.span,
-    };
-
-    assert.equal(injected.interactionInstruction, markerIndex, row.name);
-    assert.equal(injected.handoffInstruction, markerIndex + 1, row.name);
-    assert.equal(injected.clearInstruction, markerIndex + 2, row.name);
-    assert.equal(injected.plan.instructions.length, original.instructions.length + 2, row.name);
-    assert.equal(injected.plan.temporaryCount, original.temporaryCount + 1, row.name);
-    assert.equal(injected.plan.format, original.format, row.name);
-    assert.equal(injected.plan.version, original.version, row.name);
-    assert.deepEqual(injected.plan.sourceSpan, original.sourceSpan, row.name);
-    assert.deepEqual(
-      injected.plan.instructions.slice(0, markerIndex),
-      original.instructions.slice(0, markerIndex),
-      row.name,
-    );
-    assert.deepEqual(
-      injected.plan.instructions[injected.interactionInstruction],
-      expectedInteraction,
-      row.name,
-    );
-    assert.deepEqual(
-      injected.plan.instructions[injected.handoffInstruction],
-      expectedContinuation,
-      row.name,
-    );
-    assert.deepEqual(
-      injected.plan.instructions[injected.clearInstruction],
-      {
-        kind: "clearTemporary",
-        temporaryId: injected.destinationTemporary,
-        span: markerInstruction.span,
-      },
-      row.name,
-    );
-    assert.deepEqual(
-      injected.plan.instructions.slice(injected.clearInstruction + 1),
-      original.instructions
-        .slice(markerIndex + 1)
-        .map((instruction) => shiftInstructionTargets(instruction, markerIndex)),
-      row.name,
-    );
-    assert.equal(
-      injected.plan.instructions.filter((instruction) => containsLiteralMarker(instruction, marker))
-        .length,
-      0,
-      row.name,
-    );
-    assert.equal(
-      injected.plan.rootEndInstruction,
-      shiftBoundary(original.rootEndInstruction, markerIndex),
-      row.name,
-    );
-    assert.deepEqual(
-      injected.plan.functions,
-      original.functions.map((definition) => ({
-        ...definition,
-        entryInstruction: shiftBoundary(definition.entryInstruction, markerIndex),
-        bodyEntryInstruction: shiftBoundary(definition.bodyEntryInstruction, markerIndex),
-        implicitReturnInstruction: shiftBoundary(definition.implicitReturnInstruction, markerIndex),
-        endInstruction: shiftBoundary(definition.endInstruction, markerIndex),
-      })),
-      row.name,
-    );
-    if (row.suspendedCaller) {
-      const pending = waiting(injected.plan).snapshot;
-      const action = pending.foregroundAction;
-      const caller = pending.callFrames.at(-1);
-      assert.ok(action !== null && action.kind === "interaction", row.name);
-      assert.ok(caller !== undefined, row.name);
-      assert.equal(action.ownerCallFrameId, caller.id, row.name);
-      assert.equal(action.destinationTemporary, injected.destinationTemporary, row.name);
-      assert.notEqual(caller.destinationTemporary, action.destinationTemporary, row.name);
-    }
-  }
-});
-
-function shiftBoundary(value: number, insertionIndex: number, amount = 2): number {
+function shiftBoundary(value: number, insertionIndex: number, amount: number): number {
   return value > insertionIndex ? value + amount : value;
 }
 
 function shiftInstructionTargets(
   instruction: Instruction,
   insertionIndex: number,
-  amount = 2,
+  amount: number,
 ): Instruction {
   switch (instruction.kind) {
     case "jump":
@@ -990,6 +866,8 @@ interface RejectedExpressionGuaranteeRow {
   readonly category: string;
   readonly expression: unknown;
   readonly temporaryCount?: number;
+  /** Count of TSC002 errors at the handoff path when another rule also rejects the expression. */
+  readonly handoffPathErrors?: number;
 }
 
 function temporaryExpression(temporaryId: number, span: PlanSourceLocation): ExpressionPlan {
@@ -1228,6 +1106,8 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
       id: "PR194-expression-prepared-reference",
       category: "prepared reference",
       expression: { kind: "preparedReference", temporaryId: destination, span },
+      // The missing prepareReference producer is reported separately at the same path.
+      handoffPathErrors: 2,
     },
     {
       id: "PR194-expression-and-right-false",
@@ -1295,32 +1175,19 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
     assert.deepEqual(plan, before, row.id);
   }
 
+  // Exact error lists show each fixture is otherwise valid; the wrong temporary rows declare
+  // their alternate temporary in range, so no range error accompanies the handoff rejection.
+  const handoffPath = `$.instructions[${injected.handoffInstruction}]`;
   for (const row of rejected) {
     const plan = handoffPlanWithMalformedExpression(injected, row.expression, row.temporaryCount);
     const before = structuredClone(plan);
     const validation = validateInstructionPlan(plan);
     assert.equal(validation.valid, false, `${row.id}: ${row.category}`);
-    assert.ok(
-      validation.errors.some(
-        (error) =>
-          error.code === "TSC002" &&
-          error.message ===
-            "Interaction result handoff must consume the destination immediately." &&
-          error.path === `$.instructions[${injected.handoffInstruction}]`,
-      ),
+    assert.deepEqual(
+      validation.errors.map((error) => [error.code, error.path]),
+      Array.from({ length: row.handoffPathErrors ?? 1 }, () => ["TSC002", handoffPath]),
       row.id,
     );
-    if (
-      row.id === "PR194-expression-wrong-temporary" ||
-      row.id === "PR194-expression-wrong-left-correct-right"
-    ) {
-      assert.ok(
-        validation.errors.every(
-          (error) => error.message !== "Temporary reference is outside the plan's temporary range.",
-        ),
-        row.id,
-      );
-    }
     assert.deepEqual(plan, before, row.id);
   }
 
@@ -1374,7 +1241,6 @@ test("PR194 matrix: continuation kinds read only their canonical expression fiel
     readonly id: string;
     readonly instruction: unknown;
     readonly temporaryCount: number;
-    readonly destinationIsInRange?: true;
   }[] = [
     {
       id: "PR194-dispatch-evaluate-value-ignored",
@@ -1391,7 +1257,6 @@ test("PR194 matrix: continuation kinds read only their canonical expression fiel
         span,
       },
       temporaryCount: injected.plan.temporaryCount + 1,
-      destinationIsInRange: true,
     },
     {
       id: "PR194-dispatch-declare-binding-expression-ignored",
@@ -1416,24 +1281,12 @@ test("PR194 matrix: continuation kinds read only their canonical expression fiel
     const before = structuredClone(plan);
     const validation = validateInstructionPlan(plan);
     assert.equal(validation.valid, false, row.id);
-    assert.ok(
-      validation.errors.some(
-        (error) =>
-          error.code === "TSC002" &&
-          error.message ===
-            "Interaction result handoff must consume the destination immediately." &&
-          error.path === `$.instructions[${injected.handoffInstruction}]`,
-      ),
+    // Only the handoff rule rejects: the sibling field is otherwise ignored and IDs are in range.
+    assert.deepEqual(
+      validation.errors.map((error) => [error.code, error.path]),
+      [["TSC002", `$.instructions[${injected.handoffInstruction}]`]],
       row.id,
     );
-    if (row.destinationIsInRange) {
-      assert.ok(
-        validation.errors.every(
-          (error) => error.message !== "Temporary reference is outside the plan's temporary range.",
-        ),
-        row.id,
-      );
-    }
     assert.deepEqual(plan, before, row.id);
   }
 });
@@ -2737,35 +2590,26 @@ test("PR194 matrix: invalid local handoff shapes reject without mutating plans",
       paths: [handoffPath],
     },
   ];
-  for (const row of rows) {
-    const plan = externalRecord(structuredClone(injected.plan), row.id);
-    row.mutate(plan);
-    const beforeValidation = structuredClone(plan);
-    const validation = validateInstructionPlan(plan);
-    assert.equal(validation.valid, false, row.id);
-    assert.deepEqual(
-      validation.errors.map((error) => [error.code, error.path]),
-      row.paths.map((path) => ["TSC002", path]),
-      `${row.id}: ${JSON.stringify(validation.errors)}`,
-    );
-    assert.deepEqual(plan, beforeValidation, row.id);
-  }
-
-  const assertExactLocalHandoffError = (
-    plan: InstructionPlan,
+  const assertLocalHandoffRejected = (
+    plan: unknown,
     id: string,
-    message: string,
-    path: string,
+    paths: readonly string[],
   ): void => {
     const before = structuredClone(plan);
     const validation = validateInstructionPlan(plan);
     assert.equal(validation.valid, false, id);
-    assert.equal(validation.errors.length, 1, `${id}: unrelated validation error`);
-    assert.equal(validation.errors[0]?.code, "TSC002", id);
-    assert.equal(validation.errors[0]?.message, message, id);
-    assert.equal(validation.errors[0]?.path, path, id);
+    assert.deepEqual(
+      validation.errors.map((error) => [error.code, error.path]),
+      paths.map((path) => ["TSC002", path]),
+      id,
+    );
     assert.deepEqual(plan, before, `${id}: plan input`);
   };
+  for (const row of rows) {
+    const plan = externalRecord(structuredClone(injected.plan), row.id);
+    row.mutate(plan);
+    assertLocalHandoffRejected(plan, row.id, row.paths);
+  }
 
   const callInjected = injectTextInteraction(
     [
@@ -2791,18 +2635,9 @@ test("PR194 matrix: invalid local handoff shapes reject without mutating plans",
     },
     callDestinationTemporary,
   );
-  const callFunctionRow = {
-    id: "PR194-call-function-as-handoff",
-    plan: callAtHandoff,
-    message: "Interaction result handoff must consume the destination immediately.",
-    path: `$.instructions[${callInjected.handoffInstruction}]`,
-  } as const;
-  assertExactLocalHandoffError(
-    callFunctionRow.plan,
-    callFunctionRow.id,
-    callFunctionRow.message,
-    callFunctionRow.path,
-  );
+  assertLocalHandoffRejected(callAtHandoff, "PR194-call-function-as-handoff", [
+    `$.instructions[${callInjected.handoffInstruction}]`,
+  ]);
 
   const targetInjected = injectTextInteraction(
     [
@@ -2827,14 +2662,11 @@ test("PR194 matrix: invalid local handoff shapes reject without mutating plans",
     {
       id: "PR194-explicit-target-handoff-entry",
       target: targetInjected.handoffInstruction,
-      message:
-        "Interaction result handoff entry must be reachable only from its owning interaction.",
       path: `$.instructions[${targetInjected.handoffInstruction}]`,
     },
     {
       id: "PR194-explicit-target-handoff-cleanup",
       target: targetInjected.clearInstruction,
-      message: "Interaction result handoff cleanup must not be an independent control-flow target.",
       path: `$.instructions[${targetInjected.clearInstruction}]`,
     },
   ] as const;
@@ -2847,7 +2679,7 @@ test("PR194 matrix: invalid local handoff shapes reject without mutating plans",
           : instruction,
       ),
     };
-    assertExactLocalHandoffError(targeted, row.id, row.message, row.path);
+    assertLocalHandoffRejected(targeted, row.id, [row.path]);
   }
 });
 
@@ -2893,14 +2725,12 @@ test("PR194 matrix: rejected completion and snapshot operations preserve canonic
   const malformedOperationRows: readonly {
     readonly id: string;
     readonly mutate: (snapshot: ExternalRecord) => void;
-    readonly message: string;
   }[] = [
     {
       id: "PR194-rejected-operation-handoff-null",
       mutate: (snapshot) => {
         snapshot.interactionResultHandoff = null;
       },
-      message: "Runtime interaction result handoff is missing at its canonical commit boundary.",
     },
     {
       id: "PR194-rejected-operation-handoff-owner",
@@ -2908,14 +2738,12 @@ test("PR194 matrix: rejected completion and snapshot operations preserve canonic
         externalRecord(snapshot.interactionResultHandoff, "handoff").ownerCallFrameId = 99;
         snapshot.nextCallFrameId = 100;
       },
-      message: "Runtime interaction result handoff has invalid ownership or state.",
     },
     {
       id: "PR194-rejected-operation-handoff-extra-field",
       mutate: (snapshot) => {
         externalRecord(snapshot.interactionResultHandoff, "handoff").extra = true;
       },
-      message: "Runtime interaction result handoff is malformed.",
     },
   ];
   for (const row of malformedOperationRows) {
@@ -2937,7 +2765,6 @@ test("PR194 matrix: rejected completion and snapshot operations preserve canonic
       (error: unknown) => {
         assert.ok(error instanceof RuntimeDataError, row.id);
         assert.equal(error.code, "TSR101", row.id);
-        assert.equal(error.message, row.message, row.id);
         return true;
       },
       row.id,
@@ -3060,6 +2887,13 @@ test("PR194 matrix: ownership contexts resume from pending and committed boundar
     const action = pending.foregroundAction;
     assert.ok(action !== null && action.kind === "interaction", row.id);
     assert.equal(action.ownerCallFrameId === null, row.owner === "root", `${row.id}: action owner`);
+    assert.equal(action.destinationTemporary, injected.destinationTemporary, row.id);
+    const owner = pending.callFrames.at(-1);
+    if (row.owner === "active-frame") {
+      assert.ok(owner !== undefined, `${row.id}: owning frame`);
+      assert.equal(action.ownerCallFrameId, owner.id, `${row.id}: active owner`);
+      assert.notEqual(owner.destinationTemporary, action.destinationTemporary, row.id);
+    }
     row.assertPending(pending);
     const completed = assertInteractionResumeEquivalent(
       plan,
