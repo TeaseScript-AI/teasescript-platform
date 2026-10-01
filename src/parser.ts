@@ -366,10 +366,10 @@ class Parser {
         lastSpan = property.span;
       }
       if (
+        property !== null &&
         !this.#check(TokenKind.Newline) &&
         !this.#check(TokenKind.RightBrace) &&
-        !this.#check(TokenKind.EndOfFile) &&
-        !(property === null && this.#isRecoveredTopLevelStatement())
+        !this.#check(TokenKind.EndOfFile)
       ) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedPropertyEnd,
@@ -404,15 +404,14 @@ class Parser {
       this.#synchronizeProperty();
       return null;
     }
-    this.#skipContinuationNewlines();
-    const value = this.#parseExpression();
+    const value = runParse(this.#parseColonValueTask(false));
     if (value === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedString,
         "Expected a string for the speaker property.",
       );
-      // A continued colon may reach the next statement; leave it for the missing '}' recovery.
-      if (!this.#isRecoveredTopLevelStatement()) this.#synchronizeProperty();
+      // At the start of a continued line, the declaration recovers at the token left there.
+      if (this.#previous().kind !== TokenKind.Newline) this.#synchronizeProperty();
       return null;
     }
     return Object.freeze({
@@ -541,8 +540,7 @@ class Parser {
           );
           break;
         }
-        this.#skipContinuationNewlines();
-        const value = this.#parseRequiredExpression();
+        const value = runParse(this.#parseColonValueTask(true));
         if (value === null) break;
         properties.push({
           kind: "objectProperty",
@@ -930,8 +928,7 @@ class Parser {
       } else {
         const name = this.#identifier(this.#advance());
         this.#advance();
-        this.#skipContinuationNewlines();
-        const value = yield* parseChild(this.#parseRequiredExpressionTask());
+        const value = yield* parseChild(this.#parseColonValueTask(true));
         if (value === null) {
           valid = false;
           break;
@@ -1638,6 +1635,45 @@ class Parser {
     return expression;
   }
 
+  /**
+   * Parses the value after a `:` that requires one. Newlines after the colon continue the statement unless the next
+   * line plainly starts something else; the value is then missing, and the token stays for the enclosing recovery.
+   */
+  *#parseColonValueTask(required: boolean): ParseTask<Expression | null> {
+    if (this.#check(TokenKind.Newline)) {
+      this.#skipContinuationNewlines();
+      if (this.#startsNonValueLine()) {
+        if (required) {
+          this.#reportInsertion(parserDiagnosticCode.expectedExpression, "Expected an expression.");
+        }
+        return null;
+      }
+    }
+    return yield* parseChild(required ? this.#parseRequiredExpressionTask() : this.#parseOr());
+  }
+
+  /** A statement, a property or choice key, a closing delimiter, or the end of the file. */
+  #startsNonValueLine(): boolean {
+    const token = this.#peek();
+    const next = this.#peek(1).kind;
+    if (
+      (isPropertyName(token) || token.kind === TokenKind.NumberLiteral) &&
+      next === TokenKind.Colon
+    )
+      return true;
+    switch (token.kind) {
+      case TokenKind.EndOfFile:
+      case TokenKind.RightBrace:
+      case TokenKind.RightParenthesis:
+      case TokenKind.RightBracket:
+        return true;
+      case TokenKind.KeywordSpeaker:
+        return next === TokenKind.Identifier;
+      default:
+        return isStatementStart(token.kind);
+    }
+  }
+
   *#parseOr(): ParseTask<Expression | null> {
     let expression = yield* parseChild(this.#parseAnd());
     while (expression !== null && this.#match(TokenKind.KeywordOr)) {
@@ -1888,8 +1924,7 @@ class Parser {
       if (isPropertyName(this.#peek()) && this.#peek(1).kind === TokenKind.Colon) {
         const name = this.#identifier(this.#advance());
         this.#advance();
-        this.#skipContinuationNewlines();
-        const value = yield* parseChild(this.#parseRequiredExpressionTask());
+        const value = yield* parseChild(this.#parseColonValueTask(true));
         if (value !== null) {
           argument = Object.freeze({
             kind: "namedArgument",
@@ -2107,9 +2142,10 @@ class Parser {
       if (label !== null) {
         this.#advance();
         colonSpan = copySpan(this.#previous().span);
-        this.#skipContinuationNewlines();
       }
-      const value = yield* parseChild(this.#parseOr());
+      const value = yield* parseChild(
+        label === null ? this.#parseOr() : this.#parseColonValueTask(false),
+      );
       if (value === null) {
         missingChoiceOptionWasReported = true;
         this.#reportInsertion(
@@ -2294,8 +2330,7 @@ class Parser {
         this.#synchronizeDelimited(TokenKind.RightBrace);
         break;
       }
-      this.#skipContinuationNewlines();
-      const value = yield* parseChild(this.#parseRequiredExpressionTask());
+      const value = yield* parseChild(this.#parseColonValueTask(true));
       if (value === null) break;
       properties.push(
         Object.freeze({
