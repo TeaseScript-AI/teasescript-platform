@@ -63,6 +63,17 @@ useResizeObserver(foregroundElement, () => {
 // Include the live controls in the same measured scroll extent and follow target.
 const endInset = computed(() => (props.bottomInset ?? 0) + foregroundHeight.value);
 const latestThreshold = 24;
+// TanStack rebuilds every measurement when the key callback changes identity, so keep one
+// callback per entries array instead of one per option update (for example composer growth).
+let keyedEntries: readonly PlayerTranscriptEntryPresentation[] | null = null;
+let entryKey = (_index: number): string => "";
+function itemKeyFor(entries: readonly PlayerTranscriptEntryPresentation[]) {
+  if (entries !== keyedEntries) {
+    keyedEntries = entries;
+    entryKey = (index) => entries[index]!.id;
+  }
+  return entryKey;
+}
 const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
   computed(() => {
     // Capture the supplied list so replacing fixtures retains the previous key mapping on prepend.
@@ -71,7 +82,7 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
     return {
       count: entries.length,
       getScrollElement: () => scrollElement.value,
-      getItemKey: (index: number) => entries[index]!.id,
+      getItemKey: itemKeyFor(entries),
       estimateSize: () => 140,
       overscan: 5,
       // A viewport of leading space keeps even a single message scrollable.
