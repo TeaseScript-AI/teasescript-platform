@@ -10,7 +10,7 @@ import {
 import type { MediaLoadReport } from "../../src/index.js";
 
 // A deterministic stand-in for HTMLAudioElement: tests move `position` to simulate what was actually played.
-export class FakeElement implements MediaDeviceElement {
+class FakeElement implements MediaDeviceElement {
   src = "";
   preload = "";
   volume = 1;

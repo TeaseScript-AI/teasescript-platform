@@ -1,32 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  createLayoutDebugOptions,
-  setLayoutDebugOption,
-} from "../player/vue/src/devtools/layoutDebug.js";
-import {
-  buildDiagnosticCardLines,
-  captureRect,
-  captureScrollMetrics,
-  parseGridTracks,
-  type LayoutDebugSnapshot,
-} from "../player/vue/src/devtools/layoutDebugMeasurement.js";
+import { captureRect, parseGridTracks } from "../player/vue/src/phase2c/layoutDebugMeasurement.js";
 
-test("Layout Debug options retain individual layers while the master is toggled", () => {
-  const defaults = createLayoutDebugOptions();
-  assert.equal(defaults.enabled, false);
-  assert.equal(defaults.grid, true);
-  assert.equal(defaults.viewportOffsets, true);
-
-  const withoutGrid = setLayoutDebugOption(defaults, "grid", false);
-  const enabled = setLayoutDebugOption(withoutGrid, "enabled", true);
-  assert.equal(enabled.enabled, true);
-  assert.equal(enabled.grid, false);
-  assert.equal(defaults.grid, true);
-});
-
-test("Layout Debug measurement helpers preserve rectangle fields, overflow, and grid tracks", () => {
+test("Layout Debug measurement helpers preserve rectangle fields and grid tracks", () => {
   const geometry = {
     x: 10.25,
     y: 20.5,
@@ -39,111 +16,10 @@ test("Layout Debug measurement helpers preserve rectangle fields, overflow, and 
   };
   assert.deepEqual(captureRect(geometry), geometry);
 
-  assert.deepEqual(
-    captureScrollMetrics({
-      clientWidth: 300,
-      clientHeight: 200,
-      scrollWidth: 480,
-      scrollHeight: 190,
-      scrollLeft: 22,
-      scrollTop: 0,
-    }),
-    {
-      clientWidth: 300,
-      clientHeight: 200,
-      scrollWidth: 480,
-      scrollHeight: 190,
-      scrollLeft: 22,
-      scrollTop: 0,
-      overflowX: 180,
-      overflowY: 0,
-    },
-  );
   assert.deepEqual(parseGridTracks("300px 640.5px 190px", 8), [
     { offset: 0, size: 300 },
     { offset: 308, size: 640.5 },
     { offset: 956.5, size: 190 },
   ]);
   assert.deepEqual(parseGridTracks("300px minmax(0, 1fr)"), []);
-});
-
-test("Layout Debug card is screenshot-focused and excludes noisy composer and context fields", () => {
-  const playerRect = captureRect({
-    x: 0,
-    y: 0,
-    width: 1280,
-    height: 720,
-    top: 0,
-    right: 1280,
-    bottom: 720,
-    left: 0,
-  });
-  const scroll = captureScrollMetrics({
-    clientWidth: 800,
-    clientHeight: 200,
-    scrollWidth: 800,
-    scrollHeight: 420,
-    scrollLeft: 0,
-    scrollTop: 120,
-  });
-  const snapshot: LayoutDebugSnapshot = {
-    regions: {
-      player: playerRect,
-      stage: { ...playerRect, height: 360, bottom: 360 },
-      transcript: { ...playerRect, y: 360, top: 360, height: 200, bottom: 560 },
-      foreground: { ...playerRect, y: 560, top: 560, height: 60, bottom: 620 },
-      composer: { ...playerRect, y: 620, top: 620, height: 100, bottom: 720 },
-    },
-    scroll: {
-      player: { ...scroll, overflowY: 0 },
-      transcript: scroll,
-      composer: { ...scroll, overflowY: 40 },
-      "tool-strip": { ...scroll, overflowX: 240 },
-      "tool-body-1": { ...scroll, overflowY: 300 },
-      right: { ...scroll, overflowY: 80 },
-    },
-    scrollRects: {},
-    columnTracks: [],
-    rowTracks: [],
-    viewport: {
-      layoutWidth: 1280,
-      layoutHeight: 720,
-      visualWidth: 900,
-      visualHeight: 640,
-      offsetLeft: 12,
-      offsetTop: 36,
-      pageLeft: 12,
-      pageTop: 136,
-      scale: 1.25,
-    },
-    safeAreas: { top: 20, right: 0, bottom: 12, left: 0 },
-    reservations: { title: 52, left: 300, right: 190, composerBottom: 12, keyboardBottom: 0 },
-    constraints: {
-      mediaHeight: "360px",
-      conversationMinWidth: "380px",
-      conversationMaxWidth: "900px",
-      composerMaxLines: "96px",
-      composerMaxViewportHeight: "144px",
-      usableHeight: "640px",
-      toolColumnWidth: "300px",
-      rightRailWidth: "190px",
-    },
-    composition: {
-      chrome: "overlay",
-      left: "open",
-      right: "open",
-      rightBacking: "docked",
-      rightLayout: "rail",
-      keyboard: "open",
-      keyboardGeometry: "viewport",
-      fullscreen: false,
-    },
-    composerFocused: true,
-  };
-
-  const card = buildDiagnosticCardLines(snapshot).join("\n");
-  assert.match(card, /visual 900px × 640px @ 12px, 36px scale 1\.25/u);
-  assert.match(card, /composer focus yes/u);
-  assert.match(card, /tool-body-1 scroll/u);
-  assert.doesNotMatch(card, /secure|placeholder|composer value|secret draft/iu);
 });

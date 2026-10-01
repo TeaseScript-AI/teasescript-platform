@@ -3,13 +3,13 @@ import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import test from "node:test";
 
-// Requires `npm run build:player:phase2c` (part of `npm run build`).
-const buildRoot = resolve(import.meta.dirname, "../player-phase2c");
+// Requires `npm run build:player` (part of `npm run build`).
+const buildRoot = resolve(import.meta.dirname, "../player-app");
 const developmentMarkers = ["Stage media fixture", "Coastal Guide", "development illustration"];
 
 test("the default Phase 2C build statically loads no development preview content", async () => {
-  const html = await readFile(resolve(buildRoot, "phase2c/index.html"), "utf8");
-  const entry = /<script type="module"[^>]* src="\/assets\/([^"]+\.js)"/u.exec(html)?.[1];
+  const html = await readFile(resolve(buildRoot, "index.html"), "utf8");
+  const entry = /<script type="module"[^>]* src="\/player\/assets\/([^"]+\.js)"/u.exec(html)?.[1];
   assert.ok(entry, "The Phase 2C build has no module entry");
 
   // Follow only static imports: the development preview must stay behind its dynamic `?dev` import.
