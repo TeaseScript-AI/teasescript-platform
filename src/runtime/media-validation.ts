@@ -177,22 +177,12 @@ function validMediaRecord(
     media.segmentPositionMs === media.positionMs &&
     media.segmentPasses === media.passesCompleted &&
     media.segmentElapsedMs === media.elapsedMs;
-  // The first retained sample precedes current scene time, unless it is the anchor of the first segment, which a load
-  // report started at observed time while catch-up was held; nothing of it has played yet. Script operations anchor
-  // their segments at current scene time.
+  // Segments start at current scene time, so no retained sample lies after it.
   const head = points[0];
   if (
     head !== undefined &&
     typeof snapshot.currentSessionTimeMs === "number" &&
-    head.atMs > snapshot.currentSessionTimeMs &&
-    !(
-      media.segment === 1 &&
-      head.progressMs === 0 &&
-      media.committedProgressMs === 0 &&
-      media.passesCompleted === 0 &&
-      media.positionMs === media.startAtMs &&
-      unanchored
-    )
+    head.atMs > snapshot.currentSessionTimeMs
   )
     return false;
   const reportedProgress = points.at(-1)?.progressMs ?? 0;

@@ -1467,8 +1467,8 @@ function validSettlementKindData(
       settlement.mediaId < snapshot.nextMediaId &&
       validMediaWaitOutcome(settlement, plan) &&
       validSessionTime(settlement.completedAtMs) &&
-      validSessionTime(snapshot.observedSessionTimeMs) &&
-      settlement.completedAtMs <= snapshot.observedSessionTimeMs
+      validSessionTime(snapshot.currentSessionTimeMs) &&
+      settlement.completedAtMs <= snapshot.currentSessionTimeMs
     );
   }
   if (

@@ -977,3 +977,43 @@ test("restore validation relates segment anchors to the committed cursor and cur
     "future sample after a seek",
   );
 });
+
+test("a load report waits for catch-up like host input and anchors at the observed time", () => {
+  const compiled = plan(
+    'timer async 500 ms {\n  let x = 1\n}\nlet a = playAudio async "a.mp3"\nwait 10',
+  );
+  let snapshot = run(compiled, createImmediatePacingRuntimeSnapshot(compiled)).snapshot;
+  snapshot = observeTime(compiled, snapshot, 1_000).snapshot;
+  assert.equal(snapshot.currentSessionTimeMs, 500);
+  const pending = reportMediaLoad(compiled, snapshot, 1, { kind: "loaded", durationMs: 2_000 });
+  assert.deepEqual(pending.outcome, { kind: "executionPending", mediaId: 1 });
+  assert.deepEqual(pending.snapshot, snapshot);
+  assert.deepEqual(pending.events, []);
+  snapshot = run(compiled, snapshot).snapshot;
+  assert.equal(snapshot.currentSessionTimeMs, 1_000);
+  const accepted = reportMediaLoad(compiled, snapshot, 1, { kind: "loaded", durationMs: 2_000 });
+  assert.deepEqual(accepted.outcome, { kind: "accepted" });
+  const media = accepted.snapshot.backgroundActions.find(
+    (action): action is RuntimeMediaActionSnapshot => action.kind === "media",
+  )?.media;
+  assert.deepEqual(media?.points, [{ atMs: 1_000, progressMs: 0 }]);
+  assert.equal(validateRuntimeSnapshot(accepted.snapshot, compiled).valid, true);
+});
+
+test("the main path reads and stops media at scene time however late playback is observed", () => {
+  const source = [
+    'let music = playAudio async "a.mp3"',
+    "wait 1",
+    'say "${music.position}", instant',
+    "music.stop()",
+    "wait 1",
+    'say "${music.elapsed}", instant',
+  ].join("\n");
+  const fine = new Session(source).load(1, 10_000);
+  fine.at(1_000, [1, 1_000]).at(5_000, [1, 5_000]);
+  const late = new Session(source).load(1, 10_000);
+  late.at(5_000, [1, 5_000]);
+  assert.deepEqual(late.said(), ["1 s", "1 s"]);
+  assert.deepEqual(late.said(), fine.said());
+  assert.deepEqual(late.media(1)?.positionMs, fine.media(1)?.positionMs);
+});

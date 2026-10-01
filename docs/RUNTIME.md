@@ -601,8 +601,10 @@ each active unloaded media with `reportMediaLoad(plan, snapshot, mediaId, report
 records the source duration and starts the first playback segment when the effective range is non-empty; an empty
 range reports `TSW013` and stops without cues or `finish`, keeping the duration readable. `{ kind: "failed",
 message? }` reports `TSW013`, stops the media without cues or `finish`, and releases any wait; its handle reads `null`
-for `duration` and `remaining`. Reports for loaded or settled media are `ignored`, unissued IDs are `unknownMedia`,
-and malformed input is `invalidReport`. The runtime defines no load timeout and no post-load playback failure; a Player
+for `duration` and `remaining`. Like host input, a load result applies at the observed time: while scene time is
+behind it or a due block can run, the report is `executionPending` without changing anything, and the Player runs the
+engine and retries. Reports for loaded or settled media are `ignored`, unissued IDs are `unknownMedia`, and malformed
+input is `invalidReport`. The runtime defines no load timeout and no post-load playback failure; a Player
 that gives up before loading reports `failed`.
 
 **Progress observations.** Playback progress enters only through validated observations:
@@ -650,7 +652,7 @@ stays. Checkpoints carry the complete media state, including unprocessed samples
 rewrite it. Restore validation requires issued media IDs to have exactly one active or settled record, handles to refer
 to issued IDs, queued and running cue blocks to belong to their media's own blocks, at most one active video,
 waits to refer to their active media, and each media's position, passes, committed progress, and total playback to
-agree with its segment anchor, whose first sample lies after current scene time only for a load during held catch-up. Cross-device handoff is not part of this contract.
+agree with its segment anchor, whose first sample does not lie after current scene time. Cross-device handoff is not part of this contract.
 
 **Player projection.** `mediaPlaybackProjection(snapshot)` exposes each active media's identity, source, `loaded`,
 state, `segment`, active range, `volume`, `playheadMs` (the source position that the reported progress reaches),

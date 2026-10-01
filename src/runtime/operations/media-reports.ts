@@ -13,6 +13,7 @@ import {
 } from "./media-lifecycle.js";
 import type { PendingActionOperationResult } from "./model.js";
 import { processDueWork } from "./observe-time.js";
+import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 import { captureExecutableData, pendingResult } from "./support.js";
 
 /** The Player's load result for one media ID. */
@@ -26,10 +27,12 @@ export type MediaReportOutcome =
   /** The media is not active, already loaded, or the report names an older segment or no new progress. */
   | { readonly kind: "ignored" }
   | { readonly kind: "unknownMedia"; readonly mediaId: number }
+  /** Scene time has not caught up with the observed time, or a due block runs first; run the engine and retry. */
+  | { readonly kind: "executionPending"; readonly mediaId: number }
   | { readonly kind: "invalidReport"; readonly message: string };
 
 /**
- * Records the Player's load result. A loaded source makes duration-dependent state authoritative and releases an
+ * Records the Player's load result at the observed time, once execution has caught up with it. A loaded source makes duration-dependent state authoritative and releases an
  * async play; a failure reports a developer warning, stops the media without cues or `finish`, and releases any wait.
  */
 export function reportMediaLoad(
@@ -55,6 +58,13 @@ export function reportMediaLoad(
   if (current.status === "failed" || action === undefined || action.media.loaded) {
     return pendingResult(current, [], { kind: "ignored" });
   }
+  // A load result is host input at the observed time: scene time must have caught up, and a due block runs first.
+  if (
+    current.currentSessionTimeMs < current.observedSessionTimeMs ||
+    timerHandlerDispatchable(current)
+  ) {
+    return pendingResult(current, [], { kind: "executionPending", mediaId });
+  }
   const events: InterpreterEvent[] = [];
   const span = mediaSpan(captured.plan, action.owningInstruction);
   if (parsed.kind === "failed") {
@@ -67,7 +77,7 @@ export function reportMediaLoad(
     );
     stopMediaAction(captured.plan, current, action, events, span);
   } else {
-    const emptyRange = loadMedia(action.media, parsed.durationMs, current.observedSessionTimeMs);
+    const emptyRange = loadMedia(action.media, parsed.durationMs, current.currentSessionTimeMs);
     if (emptyRange !== null) {
       emitDeveloperWarning(current, events, "TSW013", emptyRange, span);
       stopMediaAction(captured.plan, current, action, events, span);
