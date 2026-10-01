@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 
 const request = require("./source-bundle-artifact-request.cjs");
 
@@ -65,6 +66,7 @@ function makeGithub(context, overrides = {}) {
     deletedCommentIds: [],
     selectorCalls: 0,
     permissionCalls: 0,
+    permissionLookups: [],
     operations: [],
     createCommentError: overrides.createCommentError || null,
     updateCommentError: overrides.updateCommentError || null,
@@ -131,8 +133,9 @@ function makeGithub(context, overrides = {}) {
           state.selectorCalls += 1;
           return { data: { default_branch: "main" } };
         },
-        async getCollaboratorPermissionLevel() {
+        async getCollaboratorPermissionLevel(input) {
           state.permissionCalls += 1;
+          state.permissionLookups.push(input);
           if (overrides.permissionError) throw overrides.permissionError;
           return { data: { permission: overrides.permission || "write" } };
         },
@@ -320,6 +323,21 @@ function authoritativeRegistry(entries, id = 900) {
   return { id, body: request.formatRegistryComment(entries), user: { ...RESULT_BOT_USER } };
 }
 
+function registryBlock(body, language) {
+  const match = new RegExp(`\`\`\`${language}\n([\\s\\S]*?)\n\`\`\``).exec(body);
+  assert.ok(match, `registry body has no ${language} block`);
+  return match[1];
+}
+
+function commandOptions(command) {
+  const [executable, ...tokens] = command.replace(/\\\n/g, " ").trim().split(/\s+/);
+  const options = {};
+  for (let index = 0; index < tokens.length; index += 2) {
+    options[tokens[index]] = tokens[index + 1];
+  }
+  return { executable, options };
+}
+
 async function testCommandGrammar() {
   assert.deepEqual(request.parseCommand("/artifact source main"), {
     selector: "main",
@@ -361,20 +379,65 @@ async function testCommandsOutsideMailboxCreateNothing() {
 }
 
 async function testSelectorResolutionAndMissOutputs() {
+  const noPull = {
+    pull_number: "",
+    head_repository: "",
+    head_ref: "",
+    base_sha: "",
+    merge_base_sha: "",
+  };
   for (const [body, expected] of [
-    ["/artifact source main", { sha: MAIN_SHA, type: "main" }],
-    ["/artifact source pr:225", { sha: PR_HEAD_SHA, type: "pr" }],
-    [`/artifact source sha:${EXACT_SHA}`, { sha: EXACT_SHA, type: "sha" }],
+    [
+      "/artifact source main",
+      {
+        selector: "main",
+        selector_type: "main",
+        source_sha: MAIN_SHA,
+        source_repository: REPOSITORY,
+        source_ref: "main",
+        ...noPull,
+      },
+    ],
+    [
+      "/artifact source pr:225",
+      {
+        selector: "pr:225",
+        selector_type: "pr",
+        source_sha: PR_HEAD_SHA,
+        source_repository: "Contributor/teasescript-platform",
+        source_ref: "feature/source-bundle",
+        pull_number: "225",
+        head_repository: "Contributor/teasescript-platform",
+        head_ref: "feature/source-bundle",
+        base_sha: PR_BASE_SHA,
+        merge_base_sha: PR_MERGE_BASE_SHA,
+      },
+    ],
+    [
+      `/artifact source sha:${EXACT_SHA}`,
+      {
+        selector: `sha:${EXACT_SHA}`,
+        selector_type: "sha",
+        source_sha: EXACT_SHA,
+        source_repository: REPOSITORY,
+        source_ref: EXACT_SHA,
+        ...noPull,
+      },
+    ],
   ]) {
     const context = makeContext(body);
     const github = makeGithub(context);
     const core = makeCore();
     await request.resolveRequest({ github, context, core });
     assert.deepEqual(core.failures, []);
-    assert.equal(core.outputs.resolved, "true");
-    assert.equal(core.outputs.cache_hit, "false");
-    assert.equal(core.outputs.source_sha, expected.sha);
-    assert.equal(core.outputs.selector_type, expected.type);
+    assert.deepEqual(core.outputs, {
+      resolved: "true",
+      cache_hit: "false",
+      request_comment_id: "501",
+      request_author: "Dropje97",
+      request_body_sha256: crypto.createHash("sha256").update(body).digest("hex"),
+      ...expected,
+    });
     assert.deepEqual(github.state.deletedCommentIds, []);
     assert.equal(github.state.createdComments, 0);
   }
@@ -409,6 +472,11 @@ async function testAuthorizationFailureIsRegisteredAndCleaned() {
   await request.resolveRequest({ github, context, core });
 
   assert.equal(core.failures.length, 1);
+  assert.deepEqual(github.state.permissionLookups, [
+    { owner: "TeaseScript-AI", repo: "teasescript-platform", username: "Dropje97" },
+  ]);
+  assert.equal(github.state.selectorCalls, 0);
+  assert.equal(core.outputs.resolved, "false");
   assert.equal(github.state.createdComments, 1);
   assert.deepEqual(github.state.deletedCommentIds, [501]);
   const registry = request.parseRegistryComment(github.state.comments.at(-1).body);
@@ -445,9 +513,25 @@ async function testCacheHitCreatesOneRegistryAndCleansExactRequest() {
   assert.equal(entries[0].state, "ready");
   assert.deepEqual(entries[0].requestCommentIds, [501]);
   assert.equal(entries[0].artifactId, artifactId);
-  assert.match(botComments[0].body, /"artifact_id":8101/);
-  assert.match(botComments[0].body, /request-501\.zip/);
-  assert.match(botComments[0].body, /prepare-agent-workspace\.sh/);
+  const download = JSON.parse(registryBlock(botComments[0].body, "json"));
+  assert.deepEqual(download, {
+    repo_full_name: REPOSITORY,
+    artifact_id: artifactId,
+    file_name: `teasescript-source-${MAIN_SHA}-request-501.zip`,
+  });
+  const preparation = commandOptions(registryBlock(botComments[0].body, "shell"));
+  assert.equal(
+    preparation.executable,
+    "/mnt/data/chatgpt-project-agent/bin/prepare-agent-workspace.sh",
+  );
+  const { "--output": workspace, ...verified } = preparation.options;
+  assert.match(workspace, /^\/mnt\/data\/[^/]+$/);
+  assert.deepEqual(verified, {
+    "--artifact": `/mnt/data/${download.file_name}`,
+    "--artifact-sha256": DIGEST,
+    "--expected-repository": REPOSITORY,
+    "--expected-head": MAIN_SHA,
+  });
   assert.doesNotMatch(botComments[0].body, /## Artifact ready|Artifact URL:|Source repository:/);
 }
 
@@ -688,29 +772,50 @@ async function testMissingCommandBeforeFirstTerminalPublicationFailsClosed() {
 }
 
 async function testSpoofedRegistryCannotClaimAuthority() {
+  // The documented authoritative registry author is github-actions[bot] with user ID 41898282.
+  const documentedBotId = 41898282;
   const artifactId = 8121;
   const runId = 9121;
   const fixture = artifactFixture({ artifactId, runId, sourceSha: MAIN_SHA });
   const context = makeContext("/artifact source main");
-  const spoof = {
-    id: 800,
-    body: `${request.REGISTRY_MARKER}\nspoofed`,
-    user: { login: "unrelated-app[bot]", id: 99001, type: "Bot" },
-  };
+  const spoofedBody = request.formatRegistryComment([
+    readyEntry({
+      requestId: 400,
+      artifactId: 8120,
+      runId: 9120,
+      updatedAt: "2026-08-04T09:00:00.000Z",
+    }),
+  ]);
+  const spoofs = [
+    {
+      id: 800,
+      body: spoofedBody,
+      user: { login: "unrelated-app[bot]", id: documentedBotId, type: "Bot" },
+    },
+    { id: 801, body: spoofedBody, user: { login: "github-actions[bot]", id: 99001, type: "Bot" } },
+  ];
   const github = makeGithub(context, {
-    comments: [spoof],
+    comments: spoofs,
     statuses: [{ context: request.STATUS_CONTEXT, state: "success", target_url: fixture.url }],
     artifacts: [[artifactId, fixture.artifact]],
     runs: [[runId, fixture.run]],
   });
-  await request.resolveRequest({ github, context, core: makeCore() });
+  const core = makeCore();
+  await request.resolveRequest({ github, context, core });
 
-  assert.equal(spoof.body, `${request.REGISTRY_MARKER}\nspoofed`);
+  assert.deepEqual(core.failures, []);
+  assert.equal(github.state.updatedComments, 0);
+  for (const spoof of spoofs) assert.equal(spoof.body, spoofedBody);
   const authoritative = github.state.comments.filter(
-    (comment) => comment.user?.login === request.RESULT_BOT_LOGIN,
+    (comment) =>
+      comment.user?.id === documentedBotId && comment.user?.login === "github-actions[bot]",
   );
   assert.equal(authoritative.length, 1);
-  assert.equal(authoritative[0].user.id, request.RESULT_BOT_ID);
+  const entries = request.parseRegistryComment(authoritative[0].body);
+  assert.deepEqual(
+    entries.map((entry) => entry.requestCommentIds),
+    [[501]],
+  );
 }
 
 async function testRegistryEscapesUntrustedPullHeadRef() {
@@ -796,6 +901,22 @@ async function testDifferentResolvedIdentitiesDoNotDeduplicate() {
   assert.equal(request.findRegistryEntry(merged, 503).pullNumber, 225);
   assert.equal(request.findRegistryEntry(merged, 503).mergeBaseSha, PR_MERGE_BASE_SHA);
   assert.equal(request.findRegistryEntry(merged, 504).pullNumber, null);
+
+  // The same PR head and artifact after the base branch advanced; the merge base is unchanged.
+  const advancedBase = {
+    ...pull,
+    requestCommentIds: [505],
+    baseSha: "6".repeat(40),
+    updatedAt: "2026-08-04T10:01:00.000Z",
+  };
+  const mergedBase = request.mergeRegistryEntries(
+    [pull],
+    advancedBase,
+    new Date("2026-08-04T10:02:00Z"),
+  );
+  assert.equal(mergedBase.length, 2);
+  assert.deepEqual(request.findRegistryEntry(mergedBase, 503), pull);
+  assert.deepEqual(request.findRegistryEntry(mergedBase, 505), advancedBase);
 }
 
 async function testSerializedDistinctUpdatesPreserveBothEntries() {
@@ -858,7 +979,11 @@ async function testRegistryPrunesExpiryOrdersNewestAndBoundsTen() {
     updatedAt: "2026-08-04T11:00:00.000Z",
   });
   const merged = request.mergeRegistryEntries(entries, incoming, new Date("2026-08-04T11:00:00Z"));
-  assert.equal(merged.length, request.REGISTRY_LIMIT);
+  assert.equal(merged.length, 10);
+  assert.deepEqual(
+    merged.flatMap((entry) => entry.requestCommentIds),
+    [700, 610, 609, 608, 607, 606, 605, 604, 603, 602],
+  );
   assert.equal(merged[0].requestCommentIds[0], 700);
   assert.equal(request.findRegistryEntry(merged, 999), null);
   for (let index = 1; index < merged.length; index += 1) {
@@ -866,27 +991,33 @@ async function testRegistryPrunesExpiryOrdersNewestAndBoundsTen() {
   }
   assert.equal(
     merged.reduce((count, entry) => count + entry.requestCommentIds.length, 0),
-    request.REGISTRY_LIMIT,
+    10,
   );
 }
 
 async function testEquivalentArtifactRequestIdsAreGloballyBounded() {
-  const existing = readyEntry({
-    requestId: 800,
-    artifactId: 9800,
-    runId: 10800,
-    updatedAt: "2026-08-04T10:00:00.000Z",
-  });
-  existing.requestCommentIds = Array.from({ length: 100 }, (_, index) => 800 + index);
-  const incoming = { ...existing, requestCommentIds: [999], updatedAt: "2026-08-04T10:01:00.000Z" };
-  const merged = request.mergeRegistryEntries(
-    [existing],
-    incoming,
-    new Date("2026-08-04T10:02:00Z"),
+  // Requests 801-806 deduplicate into one artifact entry and 807-811 into another.
+  let merged = [];
+  for (let requestId = 801; requestId <= 811; requestId += 1) {
+    const second = requestId > 806;
+    const minute = String(requestId - 800).padStart(2, "0");
+    merged = request.mergeRegistryEntries(
+      merged,
+      readyEntry({
+        requestId,
+        sourceSha: second ? EXACT_SHA : MAIN_SHA,
+        artifactId: second ? 9801 : 9800,
+        runId: second ? 10801 : 10800,
+        updatedAt: `2026-08-04T10:${minute}:00.000Z`,
+      }),
+      new Date(`2026-08-04T10:${minute}:30Z`),
+    );
+  }
+  assert.equal(merged.length, 2);
+  assert.deepEqual(
+    merged.flatMap((entry) => entry.requestCommentIds),
+    [811, 810, 809, 808, 807, 806, 805, 804, 803, 802],
   );
-  assert.equal(merged.length, 1);
-  assert.equal(merged[0].requestCommentIds.length, request.REGISTRY_LIMIT);
-  assert.equal(merged[0].requestCommentIds[0], 999);
   assert.ok(request.formatRegistryComment(merged).length < 20_000);
 }
 
@@ -929,6 +1060,15 @@ async function testCompletionPublishesRegistryThenCleanupThenStatus() {
   assert.deepEqual(github.state.operations, ["create-comment", "delete-comment", "create-status"]);
   assert.deepEqual(github.state.deletedCommentIds, [501]);
   assert.equal(github.state.createdStatuses.length, 1);
+  const { description: _description, ...status } = github.state.createdStatuses[0];
+  assert.deepEqual(status, {
+    owner: "TeaseScript-AI",
+    repo: "teasescript-platform",
+    sha: PR_HEAD_SHA,
+    state: "success",
+    context: "source-bundle/artifact-v1",
+    target_url: fixture.url,
+  });
   const registryComment = github.state.comments.find(
     (comment) => comment.user?.login === request.RESULT_BOT_LOGIN,
   );
@@ -1070,35 +1210,46 @@ async function testCleanupFailureNeverOverwritesUsableReadyEntry() {
   await request.resolveRequest({ github, context, core });
   const input = inputFromCore(core, context, artifactId, fixture.url);
   await request.completeRequest({ github, context, core, input });
-  const readyBody = github.state.comments.find(
-    (comment) => comment.user?.login === request.RESULT_BOT_LOGIN,
-  ).body;
-  assert.match(readyBody, /· ready ·/);
+  const entries = request.parseRegistryComment(
+    github.state.comments.find((comment) => comment.user?.login === request.RESULT_BOT_LOGIN).body,
+  );
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].state, "ready");
+  assert.deepEqual(entries[0].requestCommentIds, [501]);
+  assert.equal(entries[0].artifactId, artifactId);
+  assert.equal(entries[0].producerRunId, context.runId);
+  assert.equal(entries[0].artifactUrl, fixture.url);
+  assert.deepEqual(github.state.deletedCommentIds, []);
   assert.equal(github.state.createdStatuses.length, 1);
+  assert.equal(github.state.createdStatuses[0].state, "success");
+  assert.equal(github.state.createdStatuses[0].sha, MAIN_SHA);
+  assert.equal(github.state.createdStatuses[0].target_url, fixture.url);
   assert.equal(core.warnings.length, 1);
   assert.match(core.warnings[0], /cleanup failed/);
-
-  const after = github.state.comments.find(
-    (comment) => comment.user?.login === request.RESULT_BOT_LOGIN,
-  ).body;
-  assert.equal(after, readyBody);
-  assert.doesNotMatch(after, /· failed ·/);
 }
 
 async function testFailureEntryIsCompactBoundedAndCleaned() {
-  const context = makeContext("/artifact source pr:0");
-  const github = makeGithub(context);
+  const context = makeContext("/artifact source main");
+  const apiMessage = `Permission service\r\n\tunavailable:   retry later\n${"upstream detail ".repeat(40)}`;
+  const github = makeGithub(context, { permissionError: httpError(502, apiMessage) });
   const core = makeCore();
   await request.resolveRequest({ github, context, core });
 
   assert.equal(core.failures.length, 1);
   assert.deepEqual(github.state.operations, ["create-comment", "delete-comment"]);
+  assert.deepEqual(github.state.deletedCommentIds, [501]);
   const registryComment = github.state.comments.find(
     (comment) => comment.user?.login === request.RESULT_BOT_LOGIN,
   );
   const entries = request.parseRegistryComment(registryComment.body);
   assert.equal(entries[0].state, "failed");
   assert.equal(entries[0].requestCommentIds[0], 501);
+  assert.equal(entries[0].runUrl, `https://github.com/${REPOSITORY}/actions/runs/7001`);
+  assert.ok(
+    entries[0].reason.startsWith("Permission service unavailable: retry later upstream detail"),
+  );
+  assert.doesNotMatch(entries[0].reason, /[\r\n\t]| {2}/);
+  assert.ok(entries[0].reason.length < apiMessage.trim().length);
   assert.ok(entries[0].reason.length <= 240);
   assert.doesNotMatch(
     registryComment.body,
