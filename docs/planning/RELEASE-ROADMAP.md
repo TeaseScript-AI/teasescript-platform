@@ -62,8 +62,8 @@ architecture may change substantially while correctness and the basic model are 
     debug controls secondary to the actual Player experience.
   - **Reference:** [`PRODUCT.md`](../PRODUCT.md), [`DEBUGGER.md`](../DEBUGGER.md),
     [`PLAYER-UI.md`](../ui/PLAYER-UI.md), and [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md). The Phase 2C Player is the
-    selected direction; its foundation landed in #418, with timers in #444, Stage image/audio in #446, and the
-    single-script demo and legacy Player retirement in #448.
+    selected direction; its foundation landed in #418 and its runtime timers in #444, with Stage image/audio in #446
+    and the single-script demo and legacy Player retirement in #448.
 
 - [ ] **Iframe development host and virtual viewport**
   - **Outcome:** Run the Player through a small local host shell using the product's iframe boundary without requiring a
