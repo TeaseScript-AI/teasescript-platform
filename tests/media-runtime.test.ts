@@ -1528,3 +1528,49 @@ test("restore validation ties start cues and queued cue counts to playback since
   pausing.load(1, 10).at(1, [1, 1]);
   assert.equal(pausing.media(1)?.state, "paused");
 });
+
+test("held projections and reads at an arrival use the position the timeline commits there", () => {
+  // A held nonterminal cue arrival projects the exact cue position.
+  const cue = new Session(
+    [
+      "timer async 5 ms {",
+      "  let x = 1",
+      "}",
+      'let m = playAudio(file: "a", async: true, startAt: 0.2 ms, endAt: 10.3 ms, repeat: 3 times) {',
+      "  at 0.9 ms { }",
+      "}",
+      "wait 1000 ms",
+    ].join("\n"),
+  );
+  cue.load(1, 100);
+  cue.snapshot = observeTime(cue.plan, cue.snapshot, 5, [
+    { mediaId: 1, segment: 1, progressMs: 0.7 },
+  ]).snapshot;
+  assert.equal(mediaPlaybackProjection(cue.snapshot)[0]!.playheadMs, 0.9);
+  // A held first-pass duration end at a cue projects that cue exactly.
+  const terminal = new Session(
+    'let m = playAudio(file: "m", async: true, startAt: 1.1 ms, endAt: 10.3 ms, repeat: 2.3000000000000007 ms) {\n  at 1.1 ms { }\n  at 3.4000000000000004 ms { }\n}\nwait 100 ms',
+  );
+  terminal.load(1, 100);
+  terminal.snapshot = observeTime(terminal.plan, terminal.snapshot, 5, [
+    { mediaId: 1, segment: 1, progressMs: 2.3000000000000007 },
+  ]).snapshot;
+  assert.equal(mediaPlaybackProjection(terminal.snapshot)[0]!.playheadMs, 3.4000000000000004);
+  // `remaining` read just before a duration arrival agrees with the position committed there.
+  const remaining = new Session(
+    [
+      "let saved = 0 ms",
+      "timer async 2498 ms {",
+      "  saved = m.remaining",
+      "}",
+      'let m = playAudio(file: "a", async: true, startAt: 1.1 ms, endAt: 1000.3 ms, repeat: 2498 ms) {',
+      "  finish {",
+      '    say "${saved == 1000.3 ms - m.position}", instant',
+      "  }",
+      "}",
+      "wait 10000 ms",
+    ].join("\n"),
+  );
+  remaining.load(1, 2_000).at(2_498, [1, 2_498]);
+  assert.deepEqual(remaining.said(), ["true"]);
+});

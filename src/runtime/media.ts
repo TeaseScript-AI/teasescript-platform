@@ -755,10 +755,22 @@ export function mediaPlayheadMs(media: RuntimeMediaSnapshot): number {
   // Pass ends come from the anchor formula, so they agree exactly with the arrivals the timeline commits.
   const passEnd = (pass: number): number => progressTo(media, end, pass);
   const durationEnded = progress === terminal && media.repeat.kind === "budget";
+  // Progress that reaches an arrival point of its pass stands exactly where the timeline commits that arrival.
+  const withinPass = (pass: number): number => {
+    const from = pass === passes ? media.positionMs : media.startAtMs;
+    if (pass === passes && progress === media.committedProgressMs) return from;
+    const arrival = passArrivalPoints(media, pass).find(
+      (point) => point > from && standingProgressMs(media, pass, point) === progress,
+    );
+    if (arrival !== undefined) return arrival;
+    return pass === passes
+      ? Math.min(end, media.positionMs + (progress - media.committedProgressMs))
+      : Math.min(end, media.startAtMs + (progress - passEnd(pass - 1)));
+  };
   if (progress < passEnd(passes)) {
     // A repeat duration ends where the timeline will commit its end.
     if (durationEnded) return durationEndPositionMs(media, passes, progress);
-    return Math.min(end, media.positionMs + (progress - media.committedProgressMs));
+    return withinPass(passes);
   }
   const passLength = end - media.startAtMs;
   if (passLength <= 0) return end;
@@ -783,9 +795,7 @@ export function mediaPlayheadMs(media: RuntimeMediaSnapshot): number {
     return progress === terminal ? end : media.startAtMs;
   }
   if (durationEnded) return durationEndPositionMs(media, passes + laps, progress);
-  return laps === 0
-    ? Math.min(end, media.positionMs + (progress - media.committedProgressMs))
-    : Math.min(end, media.startAtMs + (progress - passEnd(passes + laps - 1)));
+  return withinPass(passes + laps);
 }
 
 function settledWarning(media: RuntimeMediaSnapshot, operation: string): MediaWarning {
