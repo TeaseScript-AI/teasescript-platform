@@ -12,7 +12,7 @@ import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
-import { sayTexts } from "./helpers/runtime-events.js";
+import { assertFailedAt, sayTexts } from "./helpers/runtime-events.js";
 
 test("executes exclusive and inclusive integer ranges", () => {
   assert.deepEqual(sayTexts(runSource("for value in 1..4 { say value }")), ["1", "2", "3"]);
@@ -78,21 +78,33 @@ test("uses one deterministic RNG for random, chance, and randomInteger", () => {
 });
 
 test("invalid random built-in arguments fail with source-associated errors", () => {
-  for (const source of [
-    "say chance(101)",
-    "say randomInteger(1.5..=3)",
-    "say randomInteger(3..3)",
-  ]) {
-    const compiled = compileSource(source);
-    if (compiled.plan === null) {
-      assert.ok(compiled.diagnostics.length > 0);
-      continue;
-    }
-    const result = run(compiled.plan, createImmediatePacingRuntimeSnapshot(compiled.plan));
-    assert.equal(result.snapshot.status, "failed");
-    assert.equal(result.events.at(-1)?.kind, "runtimeFailure");
-    assert.ok(result.snapshot.failure?.span.start.offset !== undefined);
+  // Each invalid call has a valid neighbour, so the failure comes from the rejected argument.
+  for (const [source, call, valid] of [
+    ["say chance(101)", "chance(101)", "say chance(100)"],
+    [
+      "let low = 1.5\nsay randomInteger(low..=3)",
+      "randomInteger(low..=3)",
+      "let low = 1\nsay randomInteger(low..=3)",
+    ],
+    ["say randomInteger(3..3)", "randomInteger(3..3)", "say randomInteger(3..=3)"],
+  ] as const) {
+    assert.equal(runSource(valid).snapshot.status, "halted", valid);
+    assertFailedAt(runSource(source), source, "TSR012", call);
   }
+
+  // A literal fractional bound is rejected before execution, at the range.
+  const literalSource = "say randomInteger(1.5..=3)";
+  const literal = compileSource(literalSource);
+  const rangeStart = literalSource.indexOf("1.5..=3");
+  assert.equal(literal.plan, null);
+  assert.deepEqual(
+    literal.diagnostics.map((diagnostic) => [
+      diagnostic.code,
+      diagnostic.span.start.offset,
+      diagnostic.span.end.offset,
+    ]),
+    [["TSV010", rangeStart, rangeStart + "1.5..=3".length]],
+  );
 });
 
 test("instruction budget stops an infinite while loop", () => {
@@ -195,19 +207,20 @@ test("loop plans are deterministic, JSON-safe, and reject malformed targets", ()
 });
 
 test("checkpoint restore in every loop kind matches uninterrupted events", () => {
-  for (const source of [
-    'repeat 3 { say "repeat" }',
-    'for value in ["a", "b", "c"] { say value }',
-    'for value in set["a", "b", "c"] { say value }',
-    "for value in 1..=3 { say value }",
-    "let value = 0\nwhile value < 3 { value = value + 1\nsay value }",
-    "for value in 1..=3 {\n  if value == 1 { continue }\n  say value\n}",
-  ]) {
-    const { boundaries } = assertRuntimeResumeEquivalent(source, {
+  for (const [source, expected] of [
+    ['repeat 3 { say "repeat" }', ["repeat", "repeat", "repeat"]],
+    ['for value in ["a", "b", "c"] { say value }', ["a", "b", "c"]],
+    ['for value in set["a", "b", "c"] { say value }', ["a", "b", "c"]],
+    ["for value in 1..=3 { say value }", ["1", "2", "3"]],
+    ["let value = 0\nwhile value < 3 { value = value + 1\nsay value }", ["1", "2", "3"]],
+    ["for value in 1..=3 {\n  if value == 1 { continue }\n  say value\n}", ["2", "3"]],
+  ] as const) {
+    const result = assertRuntimeResumeEquivalent(source, {
       scenarioName: `loop checkpoint corpus: ${source.split("\n")[0]}`,
       seed: 9,
     });
-    assert.ok(boundaries.some((snapshot) => snapshot.loopFrames.length > 0));
+    assert.deepEqual(sayTexts(result), expected, source);
+    assert.ok(result.boundaries.some((snapshot) => snapshot.loopFrames.length > 0));
   }
 });
 

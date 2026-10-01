@@ -19,7 +19,7 @@ import {
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { runValidSource as runSource } from "./helpers/run-valid-source.js";
-import { sayTexts } from "./helpers/runtime-events.js";
+import { assertFailedAt, sayTexts } from "./helpers/runtime-events.js";
 
 test("executes positional and named function calls with returned values", () => {
   const result = runSource(
@@ -367,31 +367,29 @@ test("keeps a prepared collection receiver attached through argument side effect
 });
 
 test("fails an invalid prepared receiver before evaluating a user-call argument", () => {
-  const result = runSource(
-    [
-      "let order = []",
-      "let scalar = 1",
-      'function argument { order.add("argument")\nreturn 2 }',
-      "scalar.add(argument())",
-    ].join("\n"),
-  );
+  const source = [
+    "let order = []",
+    "let scalar = 1",
+    'function argument { order.add("argument")\nreturn 2 }',
+    "scalar.add(argument())",
+  ].join("\n");
+  const result = runSource(source);
 
-  assert.equal(result.snapshot.status, "failed");
+  assertFailedAt(result, source, "TSR016", "scalar.add");
   // EVIDENCE: source fixture initializes order as a list before the failing function call.
   assert.deepEqual((rootValue(result.snapshot, "order") as SerializableRuntimeList).items, []);
 });
 
 test("fails an earlier ordinary expression before a later user-call side effect", () => {
-  const result = runSource(
-    [
-      "let order = []",
-      'function later { order.add("later")\nreturn 1 }',
-      "let values = [randomInteger(1..1), later()]",
-    ].join("\n"),
-  );
+  const source = [
+    "let order = []",
+    'function later { order.add("later")\nreturn 1 }',
+    "let values = [randomInteger(1..1), later()]",
+  ].join("\n");
+  const result = runSource(source);
 
-  assert.equal(result.snapshot.status, "failed");
-  // EVIDENCE: source fixture initializes order as a list before the failing recursive call.
+  assertFailedAt(result, source, "TSR012", "randomInteger(1..1)");
+  // EVIDENCE: source fixture initializes order as a list before the failing builtin call.
   assert.deepEqual((rootValue(result.snapshot, "order") as SerializableRuntimeList).items, []);
 });
 

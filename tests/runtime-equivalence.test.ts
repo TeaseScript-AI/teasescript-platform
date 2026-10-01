@@ -72,7 +72,13 @@ test("resume equivalence preserves deterministic random advancement", () => {
     { scenarioName: "deterministic random corpus", seed: 0x2468_ace1 },
   );
 
-  assert.equal(result.events.filter((event) => event.kind === "say").length, 4);
+  const [selected, fraction, integer, chance] = result.events.flatMap((event) =>
+    event.kind === "say" ? [event.text] : [],
+  );
+  assert.ok(["a", "b", "c", "d"].includes(selected!), selected);
+  assert.ok(Number(fraction) >= 0 && Number(fraction) < 1, fraction);
+  assert.ok(["1", "2", "3", "4", "5", "6"].includes(integer!), integer);
+  assert.ok(["true", "false"].includes(chance!), chance);
   assert.ok(new Set(result.boundaries.map((snapshot) => snapshot.rng.state)).size > 1);
   assert.notEqual(result.finalSnapshot.rng.state, 0);
 });

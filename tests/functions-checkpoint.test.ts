@@ -27,9 +27,11 @@ import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js"
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
+import { assertFailedAt, sayTexts } from "./helpers/runtime-events.js";
+import { runValidSource } from "./helpers/run-valid-source.js";
 
 test("restores every instruction boundary during defaults and nested calls", () => {
-  const { boundaries: observations } = assertRuntimeResumeEquivalent(
+  const result = assertRuntimeResumeEquivalent(
     [
       "let count = 0",
       'function next(value) { count = count + 1\nreturn "${value}:${count}" }',
@@ -37,7 +39,9 @@ test("restores every instruction boundary during defaults and nested calls", () 
       'say describe("pet")',
     ].join("\n"),
   );
+  const observations = result.boundaries;
 
+  assert.deepEqual(sayTexts(result), ["inside:pet:1", "pet:1"]);
   assert.ok(
     observations.some(
       (snapshot) =>
@@ -69,7 +73,7 @@ test("checkpoint restoration accepts the configured call-depth ceiling", () => {
 });
 
 test("restores inside function loops, after continue, and before early return", () => {
-  const { boundaries: observations } = assertRuntimeResumeEquivalent(
+  const result = assertRuntimeResumeEquivalent(
     [
       "function find(limit) {",
       "  for value in 1..=limit {",
@@ -84,20 +88,16 @@ test("restores inside function loops, after continue, and before early return", 
   );
 
   assert.ok(
-    observations.some(
+    result.boundaries.some(
       (snapshot) => snapshot.callFrames.length === 1 && snapshot.loopFrames.length === 1,
     ),
   );
-  assert.ok(
-    observations.some((snapshot) => {
-      const next = snapshot.nextInstruction;
-      return snapshot.callFrames.length === 1 && snapshot.loopFrames.length === 1 && next >= 0;
-    }),
-  );
+  // continue skips 1 and the early return prevents 4.
+  assert.deepEqual(sayTexts(result), ["loop:2", "loop:3", "3"]);
 });
 
 test("restores direct and mutual recursion at every instruction boundary", () => {
-  const { boundaries: direct } = assertRuntimeResumeEquivalent(
+  const direct = assertRuntimeResumeEquivalent(
     [
       "function factorial(value) {",
       "  if value <= 1 { return 1 }",
@@ -106,17 +106,19 @@ test("restores direct and mutual recursion at every instruction boundary", () =>
       "say factorial(5)",
     ].join("\n"),
   );
-  assert.ok(direct.some((snapshot) => snapshot.callFrames.length >= 4));
+  assert.deepEqual(sayTexts(direct), ["120"]);
+  assert.ok(direct.boundaries.some((snapshot) => snapshot.callFrames.length >= 4));
 
-  const { boundaries: mutual } = assertRuntimeResumeEquivalent(
+  const mutual = assertRuntimeResumeEquivalent(
     [
       "function even(value) { if value == 0 { return true }\nreturn odd(value - 1) }",
       "function odd(value) { if value == 0 { return false }\nreturn even(value - 1) }",
       "say even(5)",
     ].join("\n"),
   );
+  assert.deepEqual(sayTexts(mutual), ["false"]);
   assert.ok(
-    mutual.some(
+    mutual.boundaries.some(
       (snapshot) =>
         snapshot.callFrames.some((frame) => frame.functionName === "even") &&
         snapshot.callFrames.some((frame) => frame.functionName === "odd"),
@@ -125,7 +127,7 @@ test("restores direct and mutual recursion at every instruction boundary", () =>
 });
 
 test("restores between nested calls and around say events without duplicates", () => {
-  const { boundaries: observations } = assertRuntimeResumeEquivalent(
+  const result = assertRuntimeResumeEquivalent(
     [
       'function first { say "first"\nreturn 1 }',
       'function second { say "second"\nreturn 2 }',
@@ -133,8 +135,9 @@ test("restores between nested calls and around say events without duplicates", (
     ].join("\n"),
   );
 
+  assert.deepEqual(sayTexts(result), ["first", "second", "3"]);
   assert.ok(
-    observations.some(
+    result.boundaries.some(
       (snapshot) =>
         snapshot.callFrames.length === 0 &&
         snapshot.temporaries.length > 0 &&
@@ -144,16 +147,23 @@ test("restores between nested calls and around say events without duplicates", (
 });
 
 test("restores exact RNG state through nested calls", () => {
-  const { boundaries: observations } = assertRuntimeResumeEquivalent(
+  const seed = 0x1234_5678;
+  const result = assertRuntimeResumeEquivalent(
     [
       "function roll { return randomInteger(1..=6) }",
       "function pair { return roll() + roll() }",
       "say pair()",
       "say roll()",
     ].join("\n"),
+    { seed },
   );
 
-  assert.ok(new Set(observations.map((snapshot) => snapshot.rng.state)).size > 1);
+  // The same seed drawing three flat randomInteger(1..=6) values gives the expected rolls.
+  const [first, second, third] = sayTexts(
+    runValidSource("repeat 3 { say randomInteger(1..=6) }", seed),
+  ).map(Number);
+  assert.deepEqual(sayTexts(result), [String(first! + second!), String(third)]);
+  assert.ok(new Set(result.boundaries.map((snapshot) => snapshot.rng.state)).size > 1);
 });
 
 test("preserves prepared earlier arguments through a later suspension and a suspended callee", () => {
@@ -231,23 +241,32 @@ test("preserves prepared earlier arguments through a later suspension and a susp
   assert.equal(direct.snapshot.temporaries.length, 0);
 });
 
-test("bounds snapshot index and same-signature liveness work", () => {
-  const { plan: compiled, snapshot } = recursiveSnapshot(4);
-  const statistics = withValidationTestStatistics((finish) => {
-    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
-    return finish();
-  }).counts;
+test("suspended recursive continuations validate, restore, and resume at increasing depths", () => {
+  const work: number[] = [];
+  for (const depth of [4, 8, 16, 32]) {
+    // Every suspended caller keeps `n` live across its call, so all frames need the same continuation liveness.
+    const compiled = plan(
+      `function total(n) {\n  if n == 0 { return 0 }\n  return n + total(n - 1)\n}\nsay total(${depth})`,
+    );
+    const snapshot = executeUntil(compiled, (candidate) => candidate.callFrames.length === depth);
+    const before = JSON.stringify(snapshot);
+    const consumed = withValidationTestStatistics((finish) => {
+      const validation = validateRuntimeSnapshot(snapshot, compiled);
+      assert.equal(validation.valid, true, validation.errors.join("; "));
+      return finish();
+    }).counts.detailedWorkConsumed;
+    assert.ok(consumed !== undefined && consumed > 0, `depth ${depth}: liveness was not checked`);
+    work.push(consumed);
 
-  assert.ok((statistics.snapshotAnalysisBuilds ?? 0) <= 1, "snapshot analysis was rebuilt");
-  assert.ok((statistics.defaultBindingIndexBuilds ?? 0) <= 1, "default-binding index was rebuilt");
-  assert.ok((statistics.parameterNameIndexBuilds ?? 0) <= 1, "parameter-name index was rebuilt");
-  assert.ok((statistics.livenessComputations ?? 0) <= 1, "liveness was recomputed");
-  assert.ok((statistics.livenessTableAllocations ?? 0) <= 1, "liveness table was reallocated");
-  assert.ok((statistics.livenessCacheInsertions ?? 0) <= 1, "liveness cache was repopulated");
-  assert.ok(
-    (statistics.livenessCacheHits ?? 0) <= snapshot.callFrames.length - 1,
-    "liveness cache was consulted repeatedly for a call frame",
-  );
+    const restored = restoreCheckpoint(createCheckpoint(compiled, snapshot));
+    assert.deepEqual(restored.snapshot, snapshot);
+    const resumed = run(restored.plan, restored.snapshot);
+    assert.equal(resumed.snapshot.status, "halted");
+    assert.deepEqual(sayTexts(resumed), [String((depth * (depth + 1)) / 2)]);
+    assert.equal(JSON.stringify(snapshot), before);
+  }
+  // Scaling evidence, not a capacity contract: eight times as many same-signature frames must not multiply the work.
+  assert.ok(work.at(-1)! < 2 * work[0]!, `validation work by depth: ${work.join(", ")}`);
 });
 
 test("validates suspended caller liveness without historical argument-value comparison", () => {
@@ -273,7 +292,7 @@ test("validates suspended caller liveness without historical argument-value comp
 
 test("treats unbound call-frame argument values as canonical resumable state", () => {
   const compiled = plan(
-    "function identity(value) { return value }\nsay identity({ outer: { items: [1, 2] } })",
+    "function second(value) { return value.outer.items[1] }\nsay second({ outer: { items: [1, 2] } })",
   );
   const snapshot = executeUntil(
     compiled,
@@ -281,25 +300,15 @@ test("treats unbound call-frame argument values as canonical resumable state", (
       candidate.callFrames.at(-1)?.parameterState.phase === "supplied" &&
       candidate.callFrames.at(-1)?.parameterState.parameterIndex === 0,
   );
+  assert.deepEqual(sayTexts(run(compiled, snapshot)), ["2"]);
   const changed: any = structuredClone(snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture changes a deeply nested unbound call argument while preserving its canonical surrounding snapshot.
   changed.callFrames[0].arguments[0].value.properties[0].value.properties[0].value.items[1] = 99;
   assert.equal(validateRuntimeSnapshot(changed, compiled).valid, true);
-  assert.doesNotThrow(() => restoreCheckpoint(createCheckpoint(compiled, changed)));
-});
-
-test("detailed validation reports work without rejecting valid state", () => {
-  const { plan: compiled, snapshot } = recursiveSnapshot(3);
-  const checkpoint = createCheckpoint(compiled, snapshot);
-  const snapshotBefore = JSON.stringify(snapshot);
-  const statistics = withValidationTestStatistics((finish) => {
-    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
-    assert.doesNotThrow(() => run(compiled, snapshot));
-    assert.doesNotThrow(() => restoreCheckpoint(checkpoint));
-    return finish();
-  }).counts;
-
-  assert.equal(JSON.stringify(snapshot), snapshotBefore);
-  assert.ok((statistics.detailedWorkConsumed ?? 0) > 0);
+  const restored = restoreCheckpoint(createCheckpoint(compiled, changed));
+  assert.deepEqual(restored.snapshot, changed);
+  const resumed = run(restored.plan, restored.snapshot);
+  assert.equal(resumed.snapshot.status, "halted");
+  assert.deepEqual(sayTexts(resumed), ["99"], "the stored argument value governs resumption");
 });
 
 test("checkpoint creation defensively isolates the supplied plan", () => {
@@ -421,7 +430,7 @@ test("rejects a missing temporary required by the next instruction", () => {
 });
 
 test("restores between assignment-target and right-hand call evaluation", () => {
-  const { boundaries: observations } = assertRuntimeResumeEquivalent(
+  const result = assertRuntimeResumeEquivalent(
     [
       "let order = []",
       "let items = [0]",
@@ -434,8 +443,9 @@ test("restores between assignment-target and right-hand call evaluation", () => 
     ].join("\n"),
   );
 
+  assert.deepEqual(sayTexts(result), ["index:value:7"]);
   assert.ok(
-    observations.some(
+    result.boundaries.some(
       (snapshot) =>
         snapshot.callFrames.at(-1)?.functionName === "valueFunction" &&
         snapshot.callFrames.at(-1)!.callerTemporaries.length > 0,
@@ -444,7 +454,7 @@ test("restores between assignment-target and right-hand call evaluation", () => 
 });
 
 test("restores mixed ordinary and user-call evaluation at every instruction boundary", () => {
-  const { boundaries: observations } = assertRuntimeResumeEquivalent(
+  const result = assertRuntimeResumeEquivalent(
     [
       "let order = []",
       "let first = { nested: [0] }",
@@ -464,8 +474,10 @@ test("restores mixed ordinary and user-call evaluation at every instruction boun
     ].join("\n"),
   );
 
+  // target holds copies, so first and second never change; the later add extends the copy of second.
+  assert.deepEqual(sayTexts(result), ["0:0:2:7"]);
   assert.ok(
-    observations.some(
+    result.boundaries.some(
       (snapshot) =>
         snapshot.temporaries.some(
           (temporary) =>
@@ -482,7 +494,7 @@ test("restores mixed ordinary and user-call evaluation at every instruction boun
 });
 
 test("restores prepared speaker aliases before and after nested identity mutations", () => {
-  const { boundaries: observations } = assertRuntimeResumeEquivalent(
+  const result = assertRuntimeResumeEquivalent(
     [
       "speaker vera {",
       "  config: { value: 0 }",
@@ -497,8 +509,10 @@ test("restores prepared speaker aliases before and after nested identity mutatio
     ].join("\n"),
   );
 
+  // Prepared targets detached by the alias mutations do not retarget (see functions-runtime).
+  assert.deepEqual(sayTexts(result), ["2:1"]);
   assert.ok(
-    observations.some((snapshot) =>
+    result.boundaries.some((snapshot) =>
       [
         ...snapshot.temporaries,
         ...snapshot.callFrames.flatMap((frame) => frame.callerTemporaries),
@@ -512,7 +526,7 @@ test("restores prepared speaker aliases before and after nested identity mutatio
 });
 
 test("restores retained prepared list items across structural index shifts", () => {
-  const { boundaries: observations } = assertRuntimeResumeEquivalent(
+  const result = assertRuntimeResumeEquivalent(
     [
       "let direct = [0, 1, { value: 2 }]",
       "speaker vera { items: [{ value: 0 }, { value: 1 }] }",
@@ -525,8 +539,10 @@ test("restores retained prepared list items across structural index shifts", () 
     ].join("\n"),
   );
 
+  // Retained items follow their index shifts (see functions-runtime).
+  assert.deepEqual(sayTexts(result), ["8:9"]);
   assert.ok(
-    observations.some((snapshot) =>
+    result.boundaries.some((snapshot) =>
       [
         ...snapshot.temporaries,
         ...snapshot.callFrames.flatMap((frame) => frame.callerTemporaries),
@@ -865,7 +881,8 @@ test("rejects cyclic runtime state without overflowing validation", () => {
 });
 
 test("cyclic builtin results become source-associated runtime failures", () => {
-  const compiledResult = compileSource("say cyclic()", { builtins: ["cyclic"] });
+  const source = "say cyclic()";
+  const compiledResult = compileSource(source, { builtins: ["cyclic"] });
   assert.deepEqual(compiledResult.diagnostics, []);
   const compiled = compiledResult.plan!;
   const cyclic: { kind: "list"; items: unknown[] } = { kind: "list", items: [] };
@@ -878,9 +895,7 @@ test("cyclic builtin results become source-associated runtime failures", () => {
     builtins: { cyclic: builtin },
   });
 
-  assert.equal(result.snapshot.status, "failed");
-  assert.equal(result.snapshot.failure?.code, "TSR013");
-  assert.ok(result.snapshot.failure?.span.start.offset !== undefined);
+  assertFailedAt(result, source, "TSR013", "cyclic()");
 });
 
 function recursiveSnapshot(depth: number): {
