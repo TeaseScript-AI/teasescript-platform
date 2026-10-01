@@ -102,7 +102,7 @@ watch(
     // Completion releases the disabled guard after publishing the session.
     await nextTick();
     // Progression may restore composer focus, but must not steal it from Tools/dialogs.
-    if ((ownedFocus || returnToChoice || unownedFocus) && foreground.value) {
+    if ((ownedFocus || returnToChoice || unownedFocus) && (foreground.value || pacing.value)) {
       if (wasEditing) focusInput();
       else if (unownedFocus) {
         // Default focus is not keyboard navigation, so it must not reveal a navigation outline.
@@ -192,7 +192,9 @@ useEventListener(document, "pointermove", (event: PointerEvent) => {
   )
     pacingGesture = null;
 });
-useEventListener(document, "pointercancel", () => (pacingGesture = null));
+// Scrolling while the button is held is reading, not a skip.
+for (const type of ["pointercancel", "wheel", "scroll"] as const)
+  useEventListener(document, type, () => (pacingGesture = null), { capture: true, passive: true });
 useEventListener(document, "pointerup", (event: PointerEvent) => {
   const gesture = pacingGesture;
   pacingGesture = null;
