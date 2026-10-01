@@ -106,12 +106,31 @@ test("say preparation resumes exactly once across an instruction-call pacing che
   const log = (snapshot: RuntimeSnapshot) =>
     snapshot.frames[0]?.bindings.find((binding) => binding.name === "log")?.value;
 
-  // Step to the boundary after the text call returned and before the pacing call runs.
+  const pace = compiled.functions.find((definition) => definition.name === "pace");
+  const prepareText = compiled.instructions.find(
+    (instruction) => instruction.kind === "prepareSayText",
+  );
+  assert.ok(pace !== undefined && prepareText?.kind === "prepareSayText");
+
+  // Checkpoint inside the pacing call, after the text was prepared and saved as a caller temporary.
   let snapshot = createFreshRuntimeSnapshot(compiled, { seed: 77 });
-  while (!(log(snapshot) === "text" && snapshot.frames.length === 1)) {
+  for (
+    let step = 0;
+    step < compiled.instructions.length * 4 && snapshot.callFrames.at(-1)?.functionId !== pace.id;
+    step += 1
+  ) {
     assert.ok(["ready", "running"].includes(snapshot.status) && log(snapshot) !== "textpace");
     snapshot = executeInstruction(compiled, snapshot).snapshot;
   }
+  const paceFrame = snapshot.callFrames.at(-1);
+  assert.equal(paceFrame?.functionId, pace.id, "the pacing call must be reached");
+  assert.equal(log(snapshot), "text");
+  assert.deepEqual(
+    paceFrame.callerTemporaries.filter(
+      (temporary) => temporary.id === prepareText.destinationTemporary,
+    ),
+    [{ id: prepareText.destinationTemporary, value: "hello" }],
+  );
   const preparedRng = snapshot.rng.state;
   assert.notEqual(preparedRng, createFreshRuntimeSnapshot(compiled, { seed: 77 }).rng.state);
 
