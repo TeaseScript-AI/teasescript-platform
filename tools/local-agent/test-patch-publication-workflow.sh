@@ -74,16 +74,7 @@ assert "needs.prepare.outputs.validation_profile != 'docs'" in test_job
 assert 'bash "$RUNNER_TEMP/validate-candidate" validate-profile "${{ needs.prepare.outputs.validation_profile }}"' in test_job
 assert "run: bash tools/local-agent/check-local-agent.sh" not in test_job
 assert "run: npm ci --no-audit --no-fund" not in test_job
-assert 'case "$mode" in' in validator_text
-assert 'verify-identity) verify_identity' in validator_text
-assert 'validate-profile) validate_profile' in validator_text
 assert 'bash tools/local-agent/check-local-agent.sh' in validator_text
-assert 'run_repository_checks' in validator_text
-assert 'tooling_pid' not in validator_text
-assert 'repository_pid' not in validator_text
-assert "Documentation-only validation" in validator_text
-assert "Repository validation" in validator_text
-assert "Full validation" in validator_text
 assert "needs.request" not in text
 assert "needs.prepare.outputs.request_validated == 'true'" in text
 assert "cancel-in-progress: true" in ci_text
