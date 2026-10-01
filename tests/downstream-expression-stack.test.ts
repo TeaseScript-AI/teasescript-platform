@@ -52,10 +52,11 @@ test("downstream expression frames traverse each public stage and resume on a co
       for(let level=0;level<depth;level++) {invalid={kind:'group',expression:invalid,span};valid={kind:'group',expression:valid,span};}
       const external=value=>({...base,instructions:[{...base.instructions[0],value},...base.instructions.slice(1)]});
       const rejected=validateInstructionPlan(external({kind:'property',object:invalid,name:7,span}));
-      assert.equal(rejected.valid,false);assert.equal(rejected.errors.length,2);
-      assert.equal(rejected.errors[0].message,"Unknown expression kind 'unsupported'.");
-      assert.ok(rejected.errors[0].path.endsWith('.kind'));
-      assert.ok(rejected.errors[1].path.endsWith('.name'));
+      assert.equal(rejected.valid,false);
+      assert.deepEqual(rejected.errors.map(error=>[error.code,error.path]),[
+        ['TSC002','$.instructions[0].value.object'+'.expression'.repeat(depth)+'.kind'],
+        ['TSC002','$.instructions[0].value.name'],
+      ]);
       const grouped=external(valid);assert.equal(validateInstructionPlan(grouped).valid,true);
       const groupedRun=run(grouped,createFreshRuntimeSnapshot(grouped));
       assert.equal(groupedRun.snapshot.status,'halted');
