@@ -1283,24 +1283,22 @@ run_cleanup success "$removed_output"
 }
 grep -qx 'cleanup_status=removed' "$removed_output"
 
-# The summary records each supplied result on its own line and reports missing cleanup as failed.
+# The summary reports each supplied result under its own field and reports missing cleanup as failed.
 summary_script="$root/tools/local-agent/patch-publication-summary.sh"
 summary="$tmp/summary.md"
 published_sha="$(printf 'c%.0s' {1..40})"
-summary_values=(feat/summary-target "$published_sha" success failure skipped preserved_retry already_absent)
 GITHUB_STEP_SUMMARY="$summary" TARGET_BRANCH=feat/summary-target PUBLISHED_COMMIT_SHA="$published_sha" \
   PREPARE_RESULT=success TEST_RESULT=failure PUBLISH_RESULT=skipped \
   TRANSFER_CLEANUP_STATUS=preserved_retry COMMENT_CLEANUP_STATUS=already_absent \
   bash "$summary_script"
-summary_lines=()
-for value in "${summary_values[@]}"; do
-  summary_lines+=("$(grep -n -F -- "$value" "$summary" | cut -d: -f1 || true)")
+for field in "target branch=feat/summary-target" "published commit=$published_sha" \
+  prepare=success test=failure publish=skipped \
+  "transfer cleanup=preserved_retry" "command cleanup=already_absent"; do
+  grep -E -- "^- ${field%%=*}: " "$summary" | grep -Fq -- "${field#*=}" || {
+    echo "publication summary did not report ${field#*=} as its ${field%%=*}" >&2
+    exit 1
+  }
 done
-[[ $(printf '%s\n' "${summary_lines[@]}" | grep -c .) == 7 &&
-  $(printf '%s\n' "${summary_lines[@]}" | sort -u | wc -l) == 7 ]] || {
-  echo 'publication summary did not preserve each supplied result on its own line' >&2
-  exit 1
-}
 : > "$summary"
 GITHUB_STEP_SUMMARY="$summary" TARGET_BRANCH=feat/summary-target \
   PREPARE_RESULT=success TEST_RESULT=success PUBLISH_RESULT=skipped \

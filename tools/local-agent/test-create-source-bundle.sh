@@ -228,16 +228,44 @@ for step in worker:
         else:
             expected = f"${{{{ steps.resolve.outputs.{name.lower()} }}}}"
         assert value == expected, line
-for step in (finalize, report):
+# Each request call receives exactly the inputs its role requires, specified here independently of
+# the workflow, and every input is supplied through a declared environment entry.
+request_inputs = {
+    "requestCommentId": "REQUEST_COMMENT_ID",
+    "requestAuthor": "REQUEST_AUTHOR",
+    "requestBodySha256": "REQUEST_BODY_SHA256",
+    "issueNumber": "ISSUE_NUMBER",
+    "selector": "SELECTOR",
+    "sourceSha": "SOURCE_SHA",
+}
+required_inputs = (
+    (
+        finalize,
+        {
+            **request_inputs,
+            "selectorType": "SELECTOR_TYPE",
+            "sourceRepository": "SOURCE_REPOSITORY",
+            "sourceRef": "SOURCE_REF",
+            "pullNumber": "PULL_NUMBER",
+            "headRepository": "HEAD_REPOSITORY",
+            "headRef": "HEAD_REF",
+            "baseSha": "BASE_SHA",
+            "mergeBaseSha": "MERGE_BASE_SHA",
+            "artifactId": "ARTIFACT_ID",
+            "artifactUrl": "ARTIFACT_URL",
+            "artifactDigest": "ARTIFACT_DIGEST",
+        },
+    ),
+    (report, request_inputs),
+)
+for step, expected in required_inputs:
     inputs = dict(
         re.fullmatch(r"(\w+): process\.env\.(\w+),", line).groups()
         for line in step["with"]
         if "process.env." in line
     )
-    assert set(inputs.values()) == {line.split(":", 1)[0] for line in step["env"]}, step["name"]
-    for key, name in inputs.items():
-        first, *rest = name.lower().split("_")
-        assert key == first + "".join(part.title() for part in rest), (key, name)
+    assert inputs == expected, step["name"]
+    assert {line.split(":", 1)[0] for line in step["env"]} == set(expected.values()), step["name"]
 assert artifact_request.count("persist-credentials: false") == 2
 assert "source-bundle-artifact-request.cjs" in artifact_request
 assert "request.resolveRequest" in artifact_request

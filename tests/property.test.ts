@@ -179,16 +179,25 @@ function assertReportedSourceExecutes(classification: "valid" | "near-valid"): v
     source: `${scenario.source}\n// prepared by the property test`,
   });
   const expected = prepare(createSourceCase(config.seed, config.caseIndex!, classification));
+  let preparations = 0;
   const recorded = recordExecutions(
     classification === "valid"
-      ? { createValidSourceCase: (seed, index) => prepare(createValidSourceCase(seed, index)) }
+      ? {
+          createValidSourceCase: (seed, index) => {
+            preparations += 1;
+            return prepare(createValidSourceCase(seed, index));
+          },
+        }
       : {
-          createNearValidSourceCase: (seed, index) =>
-            prepare(createNearValidSourceCase(seed, index)),
+          createNearValidSourceCase: (seed, index) => {
+            preparations += 1;
+            return prepare(createNearValidSourceCase(seed, index));
+          },
         },
   );
 
   const replay = runPropertyCampaign(config, recorded.definitions);
+  assert.equal(preparations, 1);
   assert.equal(replay.firstCase.source, expected.source);
   assert.deepEqual(
     recorded.executions.map((execution) => execution.compiled),

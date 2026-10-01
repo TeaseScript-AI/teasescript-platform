@@ -169,7 +169,8 @@ fi
   exit 1
 }
 
-# Synthetic CPython: answers the host probe and records installation, verification and runner calls.
+# Synthetic CPython: runs the installer's real host probe against controlled host facts and records
+# installation, verification and runner calls.
 cat > "$tmp/python3.13" <<'PYTHON'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -177,14 +178,17 @@ record() {
   [[ -z ${PYTHON_CALLS-} ]] || printf '%s\n' "$*" >> "$PYTHON_CALLS"
 }
 if [[ ${1-} == -S && ${2-} == - ]]; then
-  cat >/dev/null
-  version=${FAKE_PYTHON_VERSION:-3.13.0}
-  if [[ $version != 3.13.* ]]; then
-    printf 'found cpython %s on linux x86_64; bundled wheels require CPython 3.13 (cp313)\n' "$version"
-    exit 1
-  fi
-  printf 'cpython %s on linux x86_64\n' "$version"
-  exit 0
+  exec python3 -S -c '
+import os, sys, types
+version = os.environ.get("FAKE_PYTHON_VERSION", "3.13.0")
+sys.version_info = (*(int(part) for part in version.split(".")), "final", 0)
+sys.version = version + " (synthetic)"
+sys.implementation = types.SimpleNamespace(name=os.environ.get("FAKE_PYTHON_IMPLEMENTATION", "cpython"))
+sys.platform = os.environ.get("FAKE_PYTHON_PLATFORM", "linux")
+machine = os.environ.get("FAKE_PYTHON_MACHINE", "x86_64")
+os.uname = lambda: types.SimpleNamespace(machine=machine)
+exec(compile(sys.stdin.read(), "<installer host probe>", "exec"))
+'
 fi
 if [[ ${1-} == --version ]]; then
   printf 'Python %s\n' "${FAKE_PYTHON_VERSION:-3.13.0}"
@@ -402,6 +406,8 @@ cp -a "$install" "$workspace_bundle"
 setup_workspace="$workspace_bundle/bin/setup-workspace.sh"
 setup_calls="$tmp/setup-calls"
 node_bin="$workspace_bundle/runtime/node-v24.18.0-linux-x64/bin"
+# Resolve the real executable first: a version-manager shim on PATH can loop once setup prepends node_bin.
+real_node=$(node -p 'process.execPath')
 cat > "$node_bin/node" <<NODE
 #!/usr/bin/env bash
 set -euo pipefail
@@ -409,7 +415,7 @@ if [[ \${1-} == --version ]]; then
   printf 'v24.18.0\\n'
   exit 0
 fi
-exec $(printf '%q' "$(command -v node)") "\$@"
+exec $(printf '%q' "$real_node") "\$@"
 NODE
 cat > "$node_bin/npm" <<'NPM'
 #!/usr/bin/env bash
@@ -500,15 +506,19 @@ run_tiktoken() {
     bash "$tiktoken_installer" "$repo" >/dev/null 2>&1
 }
 
-repo=$(workspace_repo tiktoken-incompatible)
-set +e
-run_tiktoken PATH="$official_digest_bin:$PATH" FAKE_PYTHON_VERSION=3.12.0
-status=$?
-set -e
-[[ $status != 0 && ! -s "$python_calls" && ! -e "$repo/.git/teasescript-agent" ]] || {
-  printf 'test-chatgpt-project-agent: FAIL: incompatible host Python reached installation\n' >&2
-  exit 1
-}
+# Each row breaks one host fact checked by the installer's own probe.
+for host in FAKE_PYTHON_VERSION=3.12.0 FAKE_PYTHON_IMPLEMENTATION=pypy \
+  FAKE_PYTHON_PLATFORM=darwin FAKE_PYTHON_MACHINE=aarch64; do
+  repo=$(workspace_repo "tiktoken-incompatible-${host%%=*}")
+  set +e
+  run_tiktoken PATH="$official_digest_bin:$PATH" "$host"
+  status=$?
+  set -e
+  [[ $status != 0 && ! -s "$python_calls" && ! -e "$repo/.git/teasescript-agent" ]] || {
+    printf 'test-chatgpt-project-agent: FAIL: incompatible host Python (%s) reached installation\n' "$host" >&2
+    exit 1
+  }
+done
 
 repo=$(workspace_repo tiktoken-bad-vocabulary)
 state="$repo/.git/teasescript-agent"

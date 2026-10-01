@@ -14,9 +14,31 @@ function isForbiddenToolingSpecifier(specifier: string): boolean {
   );
 }
 
-// Syntax-aware scan of static, re-export, side-effect, and literal dynamic imports; comments and strings are ignored.
+// Reads static, re-export, side-effect, and literal dynamic imports from syntax nodes, so comments, strings,
+// and regular expressions cannot pose as imports.
 function moduleSpecifiers(javascript: string): string[] {
-  return ts.preProcessFile(javascript, true, true).importedFiles.map((file) => file.fileName);
+  const source = ts.createSourceFile("module.js", javascript, ts.ScriptTarget.Latest);
+  const specifiers: string[] = [];
+  const pending: ts.Node[] = [source];
+  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+    if (
+      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+      node.moduleSpecifier !== undefined &&
+      ts.isStringLiteral(node.moduleSpecifier)
+    ) {
+      specifiers.push(node.moduleSpecifier.text);
+    } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      const [argument] = node.arguments;
+      if (argument !== undefined && ts.isStringLiteralLike(argument))
+        specifiers.push(argument.text);
+    }
+    const children: ts.Node[] = [];
+    ts.forEachChild(node, (child) => {
+      children.push(child);
+    });
+    for (let index = children.length - 1; index >= 0; index -= 1) pending.push(children[index]!);
+  }
+  return specifiers;
 }
 
 // Walks emitted JavaScript, where type-only imports are already erased, through its real local module files.
@@ -51,6 +73,7 @@ test("module specifier scanning finds executable imports but not erased types or
     ),
     [],
   );
+  assert.deepEqual(moduleSpecifiers('const pattern = /import("typescript")/;'), []);
   const erased = ts.transpileModule(
     'import type { Node } from "typescript";\nexport const value: Node | null = null;',
     { compilerOptions: { module: ts.ModuleKind.ESNext } },
