@@ -2,7 +2,7 @@
 import { computed, provide, ref } from "vue";
 import { useEventListener, useResizeObserver } from "@vueuse/core";
 import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
-import type { PlayerSpeakerPresentation, PlayerTranscriptEntryPresentation } from "../../../model.js";
+import type { PlayerSpeakerPresentation } from "../../../model.js";
 import type { PlayerThemeIntent } from "../../../theme/palette.js";
 import PlayerComposition from "./PlayerComposition.vue";
 import PlayerToolsShell, { type PlayerTool } from "./PlayerToolsShell.vue";
@@ -14,8 +14,8 @@ import { usePlayerKeyboardFocus } from "./usePlayerKeyboardFocus";
 import type { PlayerSessionHost } from "./usePlayerSession";
 import { defaultPlayerThemeIntent, usePlayerTheme } from "./usePlayerTheme";
 
-// Product Player composition. Development fixtures supply content only through these props and
-// slots from DevelopmentPreview.vue, which production builds do not import.
+// Product Player composition. The development preview supplies tools, Stage media and the right
+// rail only through these props and slots; production builds do not import it.
 const props = withDefaults(
   defineProps<{
     player: PlayerSessionHost;
@@ -23,15 +23,9 @@ const props = withDefaults(
     media?: { src: string; alt: string } | undefined;
     tools?: readonly PlayerTool[];
     initialStageSize?: number;
-    // Session-free transcript content whose composer replies are emitted as `preview-submit`.
-    previewTranscript?: {
-      readonly entries: readonly PlayerTranscriptEntryPresentation[];
-      readonly speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
-    };
   }>(),
   { title: "", tools: () => [], initialStageSize: 60 },
 );
-defineEmits<{ "preview-submit": [text: string] }>();
 const themeIntent = defineModel<PlayerThemeIntent>("themeIntent", {
   default: () => defaultPlayerThemeIntent,
 });
@@ -59,12 +53,7 @@ const transcript = computed(() =>
         speakers: session.value.speakers,
         revision: session.value.transcriptRevision,
       }
-    : {
-        key: "preview",
-        entries: props.previewTranscript?.entries ?? [],
-        speakers: props.previewTranscript?.speakers ?? noSpeakers,
-        revision: 0,
-      },
+    : { key: "empty", entries: [], speakers: noSpeakers, revision: 0 },
 );
 
 const stage = ref<InstanceType<typeof Stage> | null>(null);
@@ -138,13 +127,11 @@ async function toggleFullscreen() {
         <RuntimeInteraction
           :session="session"
           :reset="player.interactionReset.value"
-          :preview="!!previewTranscript"
           :transcript-key="transcript.key"
           :entries="transcript.entries"
           :speakers="transcript.speakers"
           :revision="transcript.revision"
           @update:session="player.update"
-          @preview-submit="$emit('preview-submit', $event)"
         />
       </PlayerComposition>
     </template>

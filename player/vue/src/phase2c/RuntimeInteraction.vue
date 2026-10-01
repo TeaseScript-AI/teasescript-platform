@@ -25,7 +25,6 @@ import type {
 const props = defineProps<{
   session: PlayerRuntimeSession | null;
   reset: number;
-  preview?: boolean;
   entries: readonly PlayerTranscriptEntryPresentation[];
   speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
   revision?: number;
@@ -33,7 +32,6 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   "update:session": [session: PlayerRuntimeSession];
-  "preview-submit": [text: string];
 }>();
 const foreground = computed(() => (props.session ? playerRuntimeForeground(props.session) : null));
 const actionId = computed(() =>
@@ -202,20 +200,10 @@ useEventListener(document, "pointerup", (event: PointerEvent) => {
 });
 
 function submit(source: "input" | "button") {
-  const refocusInput = source === "input";
-  if (!props.session && props.preview) {
-    if (!draft.value.trim()) {
-      showFeedback("Enter a response before sending.");
-      if (refocusInput) focusInput();
-      return;
-    }
-    emit("preview-submit", draft.value);
-    draft.value = "";
-    clearFeedback();
-    if (refocusInput) focusInput();
-    return;
-  }
-  void complete((session) => submitPlayerRuntimeComposer(session, draft.value), refocusInput);
+  void complete(
+    (session) => submitPlayerRuntimeComposer(session, draft.value),
+    source === "input",
+  );
 }
 </script>
 
@@ -252,7 +240,7 @@ function submit(source: "input" | "button") {
         <Composer
           ref="composer"
           v-model="draft"
-          :disabled="!foreground && !pacing && !(preview && !session)"
+          :disabled="!foreground && !pacing"
           :pacing="!foreground && !!pacing"
           :submitting="submitting"
           :placeholder="

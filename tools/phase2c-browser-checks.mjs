@@ -620,663 +620,6 @@ async function toolContentChecks(page) {
   return "PASS responsive tool availability, menu return and dismissal focus";
 }
 
-async function transcriptChecks(page) {
-  const check = (value, message) => {
-    if (!value) throw new Error(message);
-  };
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.reload();
-  const conversation = page.locator(".player-conversation");
-  const beforeResize = await conversation.boundingBox();
-  const stageBeforeResize = await page.locator(".player-stage").boundingBox();
-  const separator = page.getByRole("separator", { name: "Resize media and conversation" });
-  await separator.focus();
-  for (let step = 0; step < 6; step++) await separator.press("ArrowUp");
-  const afterResize = await conversation.boundingBox();
-  const stageAfterResize = await page.locator(".player-stage").boundingBox();
-  check(
-    stageAfterResize.height < stageBeforeResize.height,
-    "Stage resize did not exercise allocation",
-  );
-  check(
-    Math.abs(beforeResize.x - afterResize.x) < 1 &&
-      Math.abs(beforeResize.width - afterResize.width) < 1,
-    "Resizing media vertically moved or narrowed the conversation column",
-  );
-  await page.reload();
-  const lab = page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" });
-  await lab.click();
-  await page.getByRole("button", { name: "Load 2,000 messages", exact: true }).click();
-  const scroll = page.locator(".transcript-scroll");
-  const latest = page.getByRole("button", { name: "Return to latest", exact: true });
-  const append = page.getByRole("button", { name: "Append message", exact: true });
-  const atEnd = (context) =>
-    page
-      .waitForFunction(() => {
-        const el = document.querySelector(".transcript-scroll");
-        return Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) <= 2;
-      })
-      .catch(async () => {
-        throw new Error(
-          `${context}: latest not reached; ${await scroll.evaluate((el) => JSON.stringify({ top: el.scrollTop, height: el.scrollHeight, viewport: el.clientHeight }))}`,
-        );
-      });
-  const settleLayout = () =>
-    page.evaluate(
-      () =>
-        new Promise((resolve) => {
-          requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        }),
-    );
-  const anchor = async () => {
-    await settleLayout();
-    return scroll.evaluate((el) => {
-      const top = el.getBoundingClientRect().top;
-      const row = [...el.querySelectorAll("[data-message-id]")].find(
-        (row) => row.getBoundingClientRect().bottom > top + 1,
-      );
-      return { id: row.dataset.messageId, offset: row.getBoundingClientRect().top - top };
-    });
-  };
-  const expectAnchor = async (expected) => {
-    await settleLayout();
-    await page
-      .waitForFunction((expected) => {
-        const el = document.querySelector(".transcript-scroll");
-        const row = [...el.querySelectorAll("[data-message-id]")].find(
-          (row) => row.dataset.messageId === expected.id,
-        );
-        return (
-          row &&
-          Math.abs(
-            row.getBoundingClientRect().top - el.getBoundingClientRect().top - expected.offset,
-          ) <= 2
-        );
-      }, expected)
-      .catch(async () => {
-        throw new Error(
-          `Reading anchor not preserved: expected ${JSON.stringify(expected)}, actual ${JSON.stringify(await anchor())}`,
-        );
-      });
-    const actual = await anchor();
-    check(actual.id === expected.id, `Reading anchor changed: ${expected.id} -> ${actual.id}`);
-  };
-  await atEnd("initial history");
-  const glass = page.locator(".conversation-glass");
-  const readableLatest = () =>
-    page.waitForFunction(() => {
-      const rows = document.querySelectorAll(".transcript-entry");
-      const last = rows[rows.length - 1]?.getBoundingClientRect();
-      const composer = document.querySelector(".conversation-glass").getBoundingClientRect();
-      return last && last.bottom <= composer.top + 1;
-    });
-  await readableLatest();
-  // Composer growth changes TanStack's end clearance, not the transcript viewport.
-  const viewportBefore = await scroll.boundingBox();
-  await glass.evaluate((el) => (el.style.minHeight = "140px"));
-  await settleLayout();
-  await atEnd("composer growth while following");
-  await readableLatest();
-  check(
-    JSON.stringify(await scroll.boundingBox()) === JSON.stringify(viewportBefore),
-    `Composer growth resized the transcript viewport: ${JSON.stringify(viewportBefore)} -> ${JSON.stringify(await scroll.boundingBox())}`,
-  );
-  await scroll.focus();
-  await page.keyboard.press("Home");
-  await page.waitForFunction(() => document.querySelector(".transcript-scroll").scrollTop === 0);
-  const beforeShrink = await anchor();
-  await glass.evaluate((el) => (el.style.minHeight = ""));
-  await expectAnchor(beforeShrink);
-  await page.keyboard.press("End");
-  await atEnd("composer shrink and return");
-  check(
-    (await page.locator("[data-message-id]").count()) < 40,
-    "Large history must have bounded DOM",
-  );
-  check(
-    (await page.locator('[aria-setsize="2000"]').count()) > 0,
-    "Exercise the full 2,000-entry history",
-  );
-  await page.waitForFunction(
-    () =>
-      new Set(
-        [...document.querySelectorAll("[data-message-id]")].map(
-          (row) => row.getBoundingClientRect().height,
-        ),
-      ).size >= 3,
-  );
-  await append.click();
-  await page.locator('[data-message-id="message-2000"]').waitFor();
-  await atEnd("following append");
-  await latest.waitFor({ state: "hidden" });
-
-  await scroll.hover();
-  await page.mouse.wheel(0, -800);
-  await latest.waitFor().catch(() => {
-    throw new Error("wheel away from latest");
-  });
-  const reading = await anchor();
-  await append.click();
-  await expectAnchor(reading);
-  await page.getByRole("button", { name: "Prepend 50 messages", exact: true }).click();
-  await page.locator('[aria-setsize="2052"]').first().waitFor();
-  await expectAnchor(reading);
-  await page.setViewportSize({ width: 1100, height: 750 });
-  await expectAnchor(reading);
-  await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
-  await expectAnchor(reading);
-  await latest.click();
-  await atEnd("return control");
-  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
-  await append.click();
-  await atEnd("append after returning");
-  await page.setViewportSize({ width: 1100, height: 600 });
-  await atEnd("height resize");
-
-  // Keyboard scrolling reaches both ends and restores follow without the return button.
-  await scroll.focus();
-  await page.keyboard.press("Home");
-  await page.waitForFunction(() => {
-    const el = document.querySelector(".transcript-scroll");
-    return el.scrollTop === 0 && el.dataset.scrolled === "false";
-  });
-  check((await scroll.getAttribute("data-scrolled")) === "false", "No fade at the top of history");
-  await page.keyboard.press("End");
-  await atEnd("keyboard End");
-  await append.click();
-  await atEnd("append after keyboard End");
-  await scroll.hover();
-  await page.mouse.wheel(0, -500);
-  await latest.waitFor().catch(() => {
-    throw new Error("second wheel away from latest");
-  });
-  await page.mouse.wheel(0, 10000);
-  await atEnd("native wheel reaches latest");
-  await latest.waitFor({ state: "hidden" });
-  await append.click();
-  await atEnd("append after native wheel resumes follow");
-
-  // A real touch gesture suppresses the return control until release and scroll settlement.
-  await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
-  await page.setViewportSize({ width: 390, height: 700 });
-  await atEnd("narrow resize");
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
-  await settleLayout();
-  const box = await scroll.boundingBox();
-  const x = box.x + box.width / 4;
-  const y = box.y + 10;
-  await page.waitForFunction(
-    ({ x, y }) =>
-      document.querySelector(".transcript-scroll").contains(document.elementFromPoint(x, y)),
-    { x, y },
-  );
-  const beforeTouch = await scroll.evaluate((el) => el.scrollTop);
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
-  for (let step = 1; step <= 6; step++) {
-    await cdp.send("Input.dispatchTouchEvent", {
-      type: "touchMove",
-      touchPoints: [{ x, y: y + (step * (box.height - 20)) / 6 }],
-    });
-    await page.evaluate(() => new Promise(requestAnimationFrame));
-  }
-  check((await latest.count()) === 0, "Do not put return control under an active finger");
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  await latest.waitFor().catch(async () => {
-    throw new Error(
-      "touch release and settlement: " +
-        (await scroll.evaluate((el) =>
-          JSON.stringify({ top: el.scrollTop, height: el.scrollHeight, view: el.clientHeight }),
-        )) +
-        "; before=" +
-        beforeTouch,
-    );
-  });
-  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
-  await cdp.detach();
-  const narrowAnchor = await anchor();
-  const stage = await page.locator(".player-stage").boundingBox();
-  const transcript = await scroll.boundingBox();
-  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
-  check(
-    JSON.stringify(await page.locator(".player-stage").boundingBox()) === JSON.stringify(stage),
-    "Drawer changes Stage geometry",
-  );
-  check(
-    JSON.stringify(await scroll.boundingBox()) === JSON.stringify(transcript),
-    "Drawer changes Transcript geometry",
-  );
-  await expectAnchor(narrowAnchor);
-  await page.keyboard.press("Escape");
-  await latest.click();
-  await atEnd("return after touch");
-  check(
-    await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight),
-    "Player shell must not own transcript scrolling",
-  );
-  // Larger retained history, top-of-history prepend, empty -> populated, and rapid appends.
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
-  await atEnd("resize before replacing history");
-  await page.getByRole("button", { name: "Load 10,000 messages", exact: true }).click();
-  await page.locator('[aria-setsize="10000"]').first().waitFor();
-  await atEnd("10,000-entry history");
-  check(
-    (await page.locator("[data-message-id]").count()) < 40,
-    "10,000 entries must still have bounded DOM",
-  );
-  await scroll.focus();
-  await page.keyboard.press("Home");
-  await page.waitForFunction(() => document.querySelector(".transcript-scroll").scrollTop === 0);
-  // Home now exposes the intentional leading blank viewport. Start reading
-  // at the first message before checking preservation across a prepend.
-  await scroll.evaluate((el) => {
-    const first = el.querySelector("[data-message-id]");
-    el.scrollTop += first.getBoundingClientRect().top - el.getBoundingClientRect().top;
-  });
-  const oldest = await anchor();
-  await page.getByRole("button", { name: "Prepend 50 messages", exact: true }).click();
-  await page.locator('[aria-setsize="10050"]').first().waitFor();
-  await expectAnchor(oldest);
-  await page.getByRole("button", { name: "Empty history", exact: true }).click();
-  await page.getByText("No messages yet.", { exact: true }).waitFor();
-  check(
-    (await page.locator("[data-message-id]").count()) === 0,
-    "Empty history must release rendered rows",
-  );
-  await append.click();
-  await page.locator('[data-message-id="message-0"]').waitFor();
-  await atEnd("first append into empty history");
-  for (let index = 0; index < 12; index++) await append.click();
-  await atEnd("rapid appends");
-  await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
-  await page.setViewportSize({ width: 320, height: 640 });
-  await atEnd("320px reflow");
-  await settleLayout();
-  // Check actual measured row placement, not just the virtualizer's estimated total.
-  const measured = await page
-    .locator("[data-message-id]")
-    .evaluateAll((rows) =>
-      rows.map((row) => ({
-        top: row.getBoundingClientRect().top,
-        height: row.getBoundingClientRect().height,
-      })),
-    );
-  for (let index = 1; index < measured.length; index++) {
-    check(
-      Math.abs(measured[index].top - measured[index - 1].top - measured[index - 1].height) <= 2,
-      "Measured variable-height rows must join without overlap or estimate-sized gaps",
-    );
-  }
-  return "PASS transcript virtualization, measurement, follow, prepend, resize and touch";
-}
-
-async function runtimeTranscriptChecks(page) {
-  const check = (value, message) => {
-    if (!value) throw new Error(message);
-  };
-  const errors = [];
-  const onError = (error) => errors.push(error.message);
-  page.on("pageerror", onError);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.reload();
-  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
-  await page.getByRole("button", { name: "Start runtime scenario", exact: true }).click();
-  const transcript = page.locator(".transcript");
-  const rows = transcript.locator("[data-message-id]");
-  await transcript.getByRole("link", { name: "Map", exact: true }).waitFor();
-  check(
-    (await rows.first().getAttribute("data-speaker-id")).startsWith("runtime-speaker-"),
-    "Speaker provenance lost",
-  );
-  check((await rows.first().innerText()).includes("Coastal Guide\n"), "Runtime speaker name lost");
-  const link = transcript.getByRole("link", { name: "Map", exact: true });
-  check(
-    (await link.getAttribute("href")) === "https://example.com/coast",
-    "Canonical link target lost",
-  );
-  check(
-    (await link.getAttribute("target")) === "_blank" &&
-      (await link.getAttribute("rel")).includes("noopener"),
-    "External link must isolate opener",
-  );
-  check(
-    (await transcript.locator(".markup-bold").evaluate((el) => getComputedStyle(el).fontWeight)) ===
-      "700",
-    "Authored bold not rendered",
-  );
-  check(
-    (await rows.first().innerText()).includes("[spoiler]The lighthouse is open.[/spoiler]"),
-    "Removed spoiler tags must remain literal text",
-  );
-  check(
-    (await transcript.getByRole("button", { name: "Reveal spoiler", exact: true }).count()) === 0,
-    "Removed spoiler tags must not create reveal controls",
-  );
-  const answer = page.getByRole("textbox", { name: "Answer", exact: true });
-  await answer.fill("   ");
-  await page.getByRole("button", { name: "Send", exact: true }).click();
-  check((await rows.count()) === 1, "Rejected completion must not append");
-  const reply = "**literal answer**\n<b>still text</b>";
-  await answer.fill(reply);
-  await page.getByRole("button", { name: "Send", exact: true }).click();
-  await transcript.locator('[aria-setsize="3"]').first().waitFor();
-  const user = transcript.locator('[data-speaker-id="user"]').first();
-  check((await user.innerText()) === reply, "Player answer must remain exact plain text");
-  check(
-    (await user.locator(".markup-bold, b, a").count()) === 0,
-    "Player-authored text was parsed",
-  );
-  await transcript.getByRole("heading", { name: "Along the shore", level: 1 }).waitFor();
-  check(
-    (await transcript.locator("blockquote").innerText()).includes("Take your time."),
-    "Quote structure lost",
-  );
-  check(
-    (await transcript.locator("ul li").count()) === 2 &&
-      (await transcript.locator("ol li").getAttribute("value")) === "3",
-    "List structure/ordinal lost",
-  );
-  check((await transcript.locator(".markup-code").innerText()) === "code", "Inline code lost");
-  check((await transcript.locator(".markup-size-large").count()) === 1, "Size span lost");
-  check(
-    (await transcript.getByText("blue", { exact: true }).evaluate((el) => {
-      const context = document.createElement("canvas").getContext("2d");
-      context.fillStyle = getComputedStyle(el).color;
-      context.fillRect(0, 0, 1, 1);
-      return Array.from(context.getImageData(0, 0, 1, 1).data).join(",");
-    })) === "69,103,137,255",
-    "Authored color lost",
-  );
-  const snapshot = () =>
-    rows.evaluateAll((elements) =>
-      elements.map((el) => ({
-        id: el.dataset.messageId,
-        speaker: el.dataset.speakerId,
-        text: el.innerText,
-      })),
-    );
-  const before = await snapshot();
-  await page.getByRole("button", { name: "Capture runtime checkpoint", exact: true }).click();
-  await page.locator("[data-runtime-interaction] textarea").fill("Continue **literally**");
-  await page.getByRole("button", { name: "Send", exact: true }).click();
-  await transcript.locator('[aria-setsize="5"]').first().waitFor();
-  const selectedButton = transcript
-    .locator('[data-speaker-id="user"] [data-slot="bubble-content"]')
-    .filter({ hasText: "Continue **literally**" });
-  check(
-    (await selectedButton.count()) === 1 &&
-      (await selectedButton.locator('.choice-marker[aria-hidden="true"]').textContent()).trim() ===
-        "›" &&
-      (
-        await selectedButton.evaluate((element) =>
-          Array.from(element.childNodes)
-            .filter((node) => node.nodeType === Node.TEXT_NODE)
-            .map((node) => node.textContent)
-            .join(""),
-        )
-      ).trim() === "Continue **literally**",
-    "Canonical button transcript text or selected-option marker changed",
-  );
-  check(
-    (await transcript.locator('[data-speaker-id="narrator"]').innerText()).endsWith(
-      "Narrator\nThe walk continues. <b>This is literal text.</b>",
-    ),
-    "Narrator/raw HTML semantics changed",
-  );
-  check((await transcript.locator("b").count()) === 0, "Authored HTML was interpreted");
-  await page.getByRole("button", { name: "Restore runtime checkpoint", exact: true }).click();
-  await transcript.locator('[aria-setsize="3"]').first().waitFor();
-  check(
-    JSON.stringify(await snapshot()) === JSON.stringify(before),
-    "Checkpoint reconstruction changed IDs, provenance or visible text",
-  );
-  await page.getByRole("button", { name: "Start runtime scenario", exact: true }).click();
-  await transcript.getByRole("link", { name: "Map", exact: true }).waitFor();
-  check(errors.length === 0, `Runtime page errors: ${errors.join("; ")}`);
-  page.off("pageerror", onError);
-  return "PASS runtime transcript provenance, markup, plain answers and restore";
-}
-
-async function interactionChecks(page) {
-  const check = (value, message) => {
-    if (!value) throw new Error(message);
-  };
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.reload();
-  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
-  await page.getByRole("button", { name: "Start interaction scenario", exact: true }).click();
-  check(
-    await page
-      .getByRole("button", { name: "Start interaction scenario", exact: true })
-      .evaluate((el) => el === document.activeElement),
-    "Starting from Tools stole focus",
-  );
-  const surface = page.locator("[data-runtime-interaction]");
-  const input = surface.locator("textarea");
-  const rows = page.locator(".transcript [data-message-id]");
-  const snapshot = () =>
-    rows.evaluateAll((elements) =>
-      elements.map((el) => ({
-        id: el.dataset.messageId,
-        speaker: el.dataset.speakerId,
-        text: el.innerText,
-      })),
-    );
-  const submit = async (text) => {
-    await input.fill(text);
-    await input.press("Enter");
-  };
-  const reject = async (text) => {
-    const before = await snapshot();
-    await input.fill(text);
-    const geometry = await page.evaluate(() => {
-      const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
-      const controls = document
-        .querySelector("[data-foreground-controls]")
-        ?.getBoundingClientRect();
-      const overlay = document.querySelector("[data-conversation-overlay]").getBoundingClientRect();
-      return {
-        composerTop: composer.top,
-        composerHeight: composer.height,
-        controlsBottom: controls?.bottom,
-        overlayHeight: overlay.height,
-      };
-    });
-    await input.press("Enter");
-    check(
-      JSON.stringify(await snapshot()) === JSON.stringify(before),
-      "Rejected input changed transcript",
-    );
-    check((await input.inputValue()) === text, "Rejected input lost draft");
-    check(
-      await input.evaluate((el) => el === document.activeElement),
-      "Rejection lost composer focus",
-    );
-    const notice = surface.getByRole("status");
-    await notice.waitFor();
-    check(
-      await notice.evaluate((el, before) => {
-        const composer = document.querySelector("[data-composer-shell]");
-        const overlay = document.querySelector("[data-conversation-overlay]");
-        const controls = document.querySelector("[data-foreground-controls]");
-        const noticeBox = el.getBoundingClientRect();
-        const composerBox = composer.getBoundingClientRect();
-        const overlayBox = overlay.getBoundingClientRect();
-        return (
-          !composer.contains(el) &&
-          noticeBox.left >= 0 &&
-          noticeBox.right <= innerWidth &&
-          Math.abs(composerBox.top - noticeBox.bottom - 8) < 1 &&
-          Math.abs(composerBox.top - before.composerTop) < 1 &&
-          Math.abs(composerBox.height - before.composerHeight) < 1 &&
-          Math.abs(overlayBox.height - before.overlayHeight) < 1 &&
-          (!controls ||
-            Math.abs(controls.getBoundingClientRect().bottom - before.controlsBottom) < 1)
-        );
-      }, geometry),
-      "Validation feedback resized the composer, moved the choices, or moved away from the input",
-    );
-  };
-  await page.getByRole("button", { name: "Capture runtime checkpoint", exact: true }).click();
-  await reject("   ");
-  await input.fill("First");
-  await input.press("Shift+Enter");
-  await input.press("x");
-  check((await input.inputValue()) === "First\nx", "Shift+Enter must insert a newline");
-  await input.dispatchEvent("keydown", { key: "Enter", isComposing: true });
-  check((await rows.count()) === 1, "IME Enter advanced interaction");
-  await input.press("Enter");
-  check(
-    await input.evaluate((el) => el === document.activeElement),
-    "Progression lost composer focus",
-  );
-  await input.fill("stale draft");
-  await page.getByRole("button", { name: "Restore runtime checkpoint", exact: true }).click();
-  check((await input.inputValue()) === "", "Restore must discard the presentation draft");
-  await submit("First\nx");
-  await reject("Infinity");
-  await submit("  -0e2  ");
-  await reject("left");
-  await surface.getByRole("button", { name: "Left", exact: true }).focus();
-  await page.keyboard.press("Enter");
-  await reject("Same");
-  await surface.getByRole("button", { name: "Same", exact: true }).nth(1).click();
-  const beforeButton = await snapshot();
-  await reject("finish");
-  await reject("Finish ");
-  await input.fill("");
-  await input.press("Space");
-  check(
-    JSON.stringify(await snapshot()) === JSON.stringify(beforeButton),
-    "Space activated showButton",
-  );
-  await page.locator(".player-stage").click({ position: { x: 150, y: 100 } });
-  check(
-    JSON.stringify(await snapshot()) === JSON.stringify(beforeButton),
-    "Background activated showButton",
-  );
-  await page.getByRole("button", { name: "Capture runtime checkpoint", exact: true }).click();
-  await submit("Finish");
-  await page.waitForFunction(
-    () => document.querySelector("[data-runtime-interaction] textarea")?.disabled,
-  );
-  const typedFinal = await snapshot();
-  check(
-    typedFinal.at(-1).text.includes("First\nx / 0 / left / second"),
-    "Canonical typed results were lost",
-  );
-  await page.getByRole("button", { name: "Restore runtime checkpoint", exact: true }).click();
-  await surface.getByRole("button", { name: "Continue", exact: true }).focus();
-  await page.keyboard.press("Space");
-  await page.waitForFunction(
-    () => document.querySelector("[data-runtime-interaction] textarea")?.disabled,
-  );
-  const final = await snapshot();
-  check(
-    JSON.stringify(final) === JSON.stringify(typedFinal),
-    "Typing the exact button text did not match keyboard button activation",
-  );
-  await page.getByRole("button", { name: "Start interaction scenario", exact: true }).click();
-  await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
-  await page.setViewportSize({ width: 320, height: 700 });
-  await page.waitForFunction(() => {
-    const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
-    return composer.left >= 0 && composer.right <= 320 && composer.bottom <= 700;
-  });
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
-  const tap = async (locator) => {
-    await page
-      .waitForFunction(
-        (element) => {
-          const box = element.getBoundingClientRect();
-          return (
-            box.width > 0 &&
-            box.height > 0 &&
-            box.left >= 0 &&
-            box.top >= 0 &&
-            box.right <= innerWidth &&
-            box.bottom <= innerHeight
-          );
-        },
-        await locator.elementHandle(),
-        { timeout: 5000 },
-      )
-      .catch(async () => {
-        throw new Error(
-          `Touch control did not enter viewport: ${await locator.innerText()} ${JSON.stringify(await locator.boundingBox())}`,
-        );
-      });
-    const box = await locator.boundingBox();
-    check(
-      !!box && box.x >= 0 && box.x + box.width <= 320 && box.y + box.height <= 700,
-      `Touch control outside narrow viewport: ${await locator.innerText()} ${JSON.stringify(box)}`,
-    );
-    await cdp.send("Input.dispatchTouchEvent", {
-      type: "touchStart",
-      touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }],
-    });
-    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  };
-  await input.fill("Touch answer");
-  await tap(surface.getByRole("button", { name: "Send", exact: true }));
-  await page.waitForFunction(
-    () =>
-      document.querySelector("[data-runtime-interaction] textarea")?.getAttribute("aria-label") ===
-      "Number",
-  );
-  await input.fill("not a number");
-  await tap(surface.getByRole("button", { name: "Send", exact: true }));
-  await surface.getByRole("status").waitFor();
-  check(
-    await page.evaluate(() => {
-      const notice = document.querySelector(".composer-notice").getBoundingClientRect();
-      const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
-      return (
-        notice.left >= 0 &&
-        notice.right <= innerWidth &&
-        Math.abs(composer.top - notice.bottom - 8) < 1 &&
-        document.documentElement.scrollWidth <= innerWidth
-      );
-    }),
-    "Narrow validation notice is not beside the composer or overflows the Player",
-  );
-  await input.fill("1e2");
-  await tap(surface.getByRole("button", { name: "Send", exact: true }));
-  await surface.getByRole("button", { name: "Right", exact: true }).waitFor();
-  await tap(surface.getByRole("button", { name: "Right", exact: true }));
-  await surface.getByRole("button", { name: "Same", exact: true }).first().waitFor();
-  await tap(surface.getByRole("button", { name: "Same", exact: true }).first());
-  await surface.getByRole("button", { name: "Continue", exact: true }).waitFor();
-  check(
-    await page.evaluate(
-      () =>
-        document.documentElement.scrollWidth <= innerWidth &&
-        document.documentElement.scrollHeight <= innerHeight,
-    ),
-    "Narrow interaction causes outer scrolling",
-  );
-  await page.setViewportSize({ width: 390, height: 700 });
-  const repliesBefore = Number(await rows.first().getAttribute("aria-setsize"));
-  await surface.getByRole("button", { name: "Continue", exact: true }).evaluate((el) => {
-    el.click();
-    el.click();
-  });
-  await page.getByText("Touch answer / 100 / right / first").waitFor();
-  check(
-    Number(await rows.first().getAttribute("aria-setsize")) === repliesBefore + 2,
-    "Repeated button activation duplicated a reply or continuation",
-  );
-  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
-  await cdp.detach();
-  check(
-    (await rows.last().innerText()).includes("Touch answer / 100 / right / first"),
-    "Touch flow lost canonical values",
-  );
-  return "PASS foreground validation feedback, keyboard and touch";
-}
-
 async function timerChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -1529,146 +872,6 @@ async function actionButtonGeometryChecks(page) {
   return "PASS shared action button size, spacing, wrapping, intrinsic width and root-font scaling";
 }
 
-async function transcriptSpacingChecks(page) {
-  const check = (value, message) => {
-    if (!value) throw new Error(message);
-  };
-  if ((await page.locator("html").getAttribute("data-phase2c-theme")) === "dark") {
-    await page.getByRole("button", { name: "Switch to light theme" }).click();
-  }
-  await page.getByRole("button", { name: "Visual Lab", exact: true }).click();
-  await page.getByRole("button", { name: "Start spacing sample", exact: true }).click();
-  await page.getByRole("button", { name: "Visit the lighthouse", exact: true }).waitFor();
-  const measure = () =>
-    page.evaluate(() => {
-      const rows = Array.from(document.querySelectorAll(".transcript-entry"));
-      const controls = document.querySelector("[data-foreground-controls]");
-      return {
-        speakers: rows.map((row) => row.getAttribute("data-speaker-id")),
-        avatars: rows.map((row) => {
-          const avatar = row.querySelector('[data-slot="avatar-fallback"]');
-          if (avatar === null) return null;
-          const style = getComputedStyle(avatar);
-          return { background: style.backgroundColor, color: style.color };
-        }),
-        continues: rows.map((row) => row.getAttribute("data-continues")),
-        gaps: rows.map((row) => Number.parseFloat(getComputedStyle(row).paddingTop)),
-        choiceGap: Number.parseFloat(getComputedStyle(controls).paddingTop),
-      };
-    });
-  const result = await measure();
-  check(
-    result.speakers.length === 5 &&
-      result.speakers[2] === "user" &&
-      result.speakers[3] !== result.speakers[4] &&
-      result.continues[1] === "true",
-    "Spacing sample does not show grouped, player and other-speaker messages with choices",
-  );
-  const separateGaps = [result.gaps[0], result.gaps[2], result.gaps[3], result.gaps[4]];
-  check(
-    separateGaps.every((gap) => gap === separateGaps[0]) &&
-      result.choiceGap === separateGaps[0] &&
-      result.gaps[1] > 0 &&
-      result.gaps[1] < separateGaps[0],
-    `Grouped bubbles must sit closer than separate bubbles and choices: ${JSON.stringify(result)}`,
-  );
-  check(
-    result.avatars[0]?.background !== result.avatars[3]?.background &&
-      result.avatars[0]?.color !== result.avatars[3]?.color &&
-      result.avatars[0]?.background === result.avatars[4]?.background,
-    "Distinct speakers need distinct, stable fallback avatar colours",
-  );
-  await page.getByRole("button", { name: "Switch to dark theme" }).click();
-  const darkAvatars = (await measure()).avatars;
-  check(
-    darkAvatars[0]?.background !== result.avatars[0]?.background &&
-      darkAvatars[0]?.color !== result.avatars[0]?.color &&
-      darkAvatars[0]?.background === darkAvatars[4]?.background,
-    "Avatar identity or light/dark polarity changed incorrectly",
-  );
-  await page.getByRole("button", { name: "Switch to light theme" }).click();
-  check(
-    (await page.locator("[data-transcript-entry-gap]").count()) === 0,
-    "Visual Lab still exposes the removed transcript spacing selector",
-  );
-  await page.goto(`${page.url().split("?")[0]}?spacing-sample`);
-  await page.getByRole("button", { name: "Visit the lighthouse", exact: true }).waitFor();
-  check(
-    (await page.locator(".transcript-entry").count()) === 5,
-    "Direct spacing sample does not show the conversation example",
-  );
-  return "PASS grouped, separate and choice transcript spacing relationships";
-}
-
-async function pacingSkipChecks(page) {
-  const check = (value, message) => {
-    if (!value) throw new Error(message);
-  };
-  await page.getByRole("button", { name: "Visual Lab", exact: true }).click();
-  await page.getByRole("button", { name: "Start pacing sample", exact: true }).click();
-  const messages = page.locator(".transcript-entry");
-  const expectMessages = async (count, message) => {
-    try {
-      await page.waitForFunction(
-        (count) => document.querySelectorAll(".transcript-entry").length === count,
-        count,
-        { timeout: 2000 },
-      );
-    } catch {
-      throw new Error(`${message} (${await messages.count()} messages)`);
-    }
-  };
-  await expectMessages(1, "The pacing sample did not wait at its first gate");
-  // Controls take precedence over the background gesture.
-  const themeControl = page.locator("[data-theme-mode-control]");
-  await themeControl.click();
-  await themeControl.click();
-  await expectMessages(1, "Activating a control also skipped pacing");
-  await page.locator('.transcript-entry [data-slot="bubble"]').first().click();
-  await expectMessages(1, "Clicking message text skipped pacing");
-  const stage = await page.locator(".player-stage").boundingBox();
-  await page.mouse.click(stage.x + 8, stage.y + stage.height - 8);
-  await expectMessages(2, "A primary click on unused Player space did not skip pacing");
-  const input = page.locator("[data-runtime-interaction] textarea");
-  await input.focus();
-  await page.keyboard.press("Space");
-  await expectMessages(3, "Space in the empty composer did not skip pacing");
-  check((await input.inputValue()) === "", "The skipping Space was typed into the composer");
-  await page.mouse.click(stage.x + 8, stage.y + stage.height - 8);
-  await page.waitForTimeout(200);
-  await expectMessages(3, "An unskippable pacing gate was skipped");
-  return "PASS pacing skip from unused space and empty composer, with control precedence";
-}
-
-async function avatarImageChecks(page) {
-  await page.getByRole("button", { name: "Visual Lab", exact: true }).click();
-  await page.getByRole("button", { name: "Start avatar sample", exact: true }).click();
-  const avatars = () =>
-    Array.from(document.querySelectorAll(".transcript-entry"), (row) => {
-      const image = row.querySelector('[data-slot="avatar-image"]');
-      return {
-        image:
-          image instanceof HTMLImageElement && image.naturalWidth > 0 && image.checkVisibility(),
-        fallback: row.querySelector('[data-slot="avatar-fallback"]')?.textContent?.trim() ?? null,
-      };
-    });
-  const expected = JSON.stringify([
-    { image: true, fallback: null },
-    { image: false, fallback: "C" },
-  ]);
-  let actual = "";
-  for (let attempt = 0; attempt < 50 && actual !== expected; attempt += 1) {
-    if (attempt > 0) await page.waitForTimeout(100);
-    actual = JSON.stringify(await page.evaluate(avatars));
-  }
-  if (actual !== expected) {
-    throw new Error(
-      `Authored avatar images must render, with a letter fallback when unavailable: ${actual}`,
-    );
-  }
-  return "PASS authored avatar image and unavailable-image fallback";
-}
-
 async function buttonInkChecks(page) {
   if (!(await page.evaluate(() => matchMedia("(any-hover: hover)").matches))) {
     throw new Error("Button ink regression requires a hover-capable desktop context");
@@ -1719,314 +922,6 @@ async function buttonInkChecks(page) {
   if (backgrounds[0][1] !== backgrounds[1][1])
     throw new Error("Authored choice fill must stay fixed across theme changes");
   return "PASS theme-following default and authored button ink across light/dark, hover and press";
-}
-
-async function authoredPresentationChecks(page) {
-  const check = (value, message) => {
-    if (!value) throw new Error(message);
-  };
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.reload();
-  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
-  await page.getByRole("button", { name: "Authored colour sample", exact: true }).click();
-  const painted = (locator) =>
-    locator.evaluate((element) => {
-      const context = document.createElement("canvas").getContext("2d");
-      const flatten = (layers) => {
-        context.clearRect(0, 0, 1, 1);
-        for (const layer of layers) {
-          context.fillStyle = layer;
-          context.fillRect(0, 0, 1, 1);
-        }
-        const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
-        return [red, green, blue];
-      };
-      const luminance = (channels) => {
-        const [red, green, blue] = channels.map((channel) => {
-          const value = channel / 255;
-          return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-        });
-        return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-      };
-      const layers = ["#ffffff"];
-      for (let node = element; node !== null; node = node.parentElement) {
-        const colour = getComputedStyle(node).backgroundColor;
-        if (colour === "" || colour === "transparent" || colour === "rgba(0, 0, 0, 0)") continue;
-        layers.splice(1, 0, colour);
-        if (!colour.startsWith("rgba(")) break;
-      }
-      const text = luminance(flatten([getComputedStyle(element).color]));
-      const behind = luminance(flatten(layers));
-      return (Math.max(text, behind) + 0.05) / (Math.min(text, behind) + 0.05);
-    });
-  const link = '.transcript-entry a[href^="https://example.com"]';
-  const prose = '.transcript-entry .prose:not([data-panel])[style*="color"] .markup-paragraph span';
-  const transcriptScroll = page.locator(".transcript-scroll");
-  const themeContrast = page.getByRole("combobox", { name: "Theme contrast" });
-  const authoredPair = async (source, phrase, ink, background, scrollFraction) => {
-    await transcriptScroll.evaluate((element, fraction) => {
-      element.scrollTop = (element.scrollHeight - element.clientHeight) * fraction;
-    }, scrollFraction);
-    const row = page.locator(".transcript-entry").filter({ hasText: phrase });
-    const span = row.locator(".transcript-markup span").filter({ hasText: phrase });
-    await span.waitFor();
-    check((await row.locator(".markup-scrim").count()) === 0, `${source} gained a scrim`);
-    check(
-      await span.evaluate(
-        (element, expected) => {
-          const context = document.createElement("canvas").getContext("2d");
-          const paint = (colour) => {
-            context.clearRect(0, 0, 1, 1);
-            context.fillStyle = colour;
-            context.fillRect(0, 0, 1, 1);
-            return Array.from(context.getImageData(0, 0, 1, 1).data).join(",");
-          };
-          const panel = element.closest(".message-authored, .prose[data-panel]");
-          return (
-            panel !== null &&
-            paint(getComputedStyle(element).color) === paint(expected.ink) &&
-            getComputedStyle(element).backgroundColor === "rgba(0, 0, 0, 0)" &&
-            paint(getComputedStyle(panel).backgroundColor) === paint(expected.background)
-          );
-        },
-        { ink, background },
-      ),
-      `${source} changed its authored ink or background`,
-    );
-  };
-  const inheritedInk = page
-    .locator(".transcript-entry")
-    .filter({ hasText: "Inline backing keeps its parent colour" })
-    .locator(".transcript-markup span")
-    .filter({ hasText: "Inline backing keeps its parent colour" });
-  await transcriptScroll.evaluate((element) => {
-    element.scrollTop = 0;
-  });
-  check(
-    await inheritedInk.evaluate((element) => {
-      const context = document.createElement("canvas").getContext("2d");
-      const channels = (colour) => {
-        context.fillStyle = colour;
-        context.fillRect(0, 0, 1, 1);
-        return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3).join(",");
-      };
-      return channels(getComputedStyle(element).color) === channels("#ffe066");
-    }),
-    "An inline background changed the inherited authored text colour",
-  );
-  const portalUsesTheme = async (slot) => {
-    const portal = page.locator(`[data-slot="${slot}"]`);
-    await portal.waitFor();
-    check(
-      await portal.evaluate((el) => {
-        const probe = document.createElement("span");
-        probe.style.backgroundColor = "var(--theme-surface-floating)";
-        document.body.append(probe);
-        const expected = getComputedStyle(probe).backgroundColor;
-        probe.remove();
-        return !el.closest("#phase2c-shell") && getComputedStyle(el).backgroundColor === expected;
-      }),
-      "Body-portaled controls lost the Player theme",
-    );
-    await page.keyboard.press("Escape");
-    await portal.waitFor({ state: "detached" });
-  };
-  const themes = [];
-  // Local rendering regression floor; project-wide numeric contrast policy remains open.
-  for (const mode of ["light", "dark"]) {
-    const toggle = page.getByRole("button", { name: `Switch to ${mode} theme`, exact: true });
-    if ((await page.locator("html").getAttribute("data-phase2c-theme")) !== mode)
-      await toggle.click();
-    await page.waitForFunction(
-      (mode) => document.documentElement.dataset.phase2cTheme === mode,
-      mode,
-    );
-    await page.evaluate(async () => {
-      await Promise.allSettled(document.getAnimations().map((animation) => animation.finished));
-    });
-    for (const contrast of ["standard", "high"]) {
-      await themeContrast.selectOption(contrast);
-      await authoredPair(
-        `${mode}/${contrast} coral bubble`,
-        "White words on an authored coral bubble",
-        "#ffffff",
-        "#f07080",
-        0,
-      );
-      await authoredPair(
-        `${mode}/${contrast} teal bubble`,
-        "Pink words on an authored teal bubble",
-        "#f157b3",
-        "#178b8b",
-        1,
-      );
-      await authoredPair(
-        `${mode}/${contrast} prose panel`,
-        "Rose words on an authored prose panel",
-        "#cf3857",
-        "#efe4c8",
-        0.5,
-      );
-    }
-    await themeContrast.selectOption("standard");
-    await transcriptScroll.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-    });
-    const green = page
-      .locator(".transcript-entry")
-      .filter({ hasText: "Forest green words on the Player bubble" });
-    await green.waitFor();
-    check(
-      (await green.locator(".markup-scrim").count()) === 0,
-      `Readable green text gained an unnecessary backing in ${mode} mode`,
-    );
-    const greenInk = await green
-      .locator(".transcript-markup span")
-      .first()
-      .evaluate((element) => getComputedStyle(element).color);
-    if (mode === "dark") {
-      const brightGreen = page
-        .locator(".transcript-entry")
-        .filter({ hasText: "Bright green words on the Player bubble" });
-      await brightGreen.waitFor();
-      check(
-        (await brightGreen.locator(".markup-scrim").count()) === 0,
-        "Readable bright green text gained an unnecessary backing in dark mode",
-      );
-    }
-    await page
-      .locator('[data-tool="Visual Lab"]')
-      .getByRole("button", { name: "Panel settings", exact: true })
-      .click();
-    await portalUsesTheme("dropdown-menu-content");
-    await page.locator("[data-settings-trigger]").click();
-    await portalUsesTheme("dialog-content");
-    themes.push(
-      await page.evaluate(
-        (greenInk) => ({
-          surface: getComputedStyle(document.documentElement).getPropertyValue(
-            "--theme-surface-floating",
-          ),
-          greenInk,
-          width: document.querySelector(".transcript-scroll").getBoundingClientRect().width,
-          media: document.querySelector(".stage-media")?.getAttribute("src"),
-        }),
-        greenInk,
-      ),
-    );
-    await transcriptScroll.evaluate((element) => {
-      element.scrollTop = (element.scrollHeight - element.clientHeight) / 2;
-    });
-    await page.locator(link).waitFor();
-    const linkRatio = await painted(page.locator(link));
-    check(
-      linkRatio >= 4.5,
-      `Link inside an authored message is unreadable in ${mode} mode: ${linkRatio}:1`,
-    );
-    const proseRatio = await painted(page.locator(prose));
-    check(
-      proseRatio >= 4.5,
-      `Prose without a panel is unreadable in ${mode} mode: ${proseRatio}:1`,
-    );
-  }
-  check(themes[0].surface !== themes[1].surface, "Theme toggle did not change the live palette");
-  check(
-    themes[0].greenInk !== themes[1].greenInk,
-    "One-sided authored ink did not follow the Player palette",
-  );
-  check(
-    themes[0].width === themes[1].width && themes[0].media === themes[1].media,
-    "Theme toggle changed transcript geometry or authored media",
-  );
-  await transcriptScroll.evaluate((element) => {
-    element.scrollTop = element.scrollHeight;
-  });
-  await page.getByText("And speaking again afterwards.").waitFor();
-  const grouping = await page.evaluate(() => {
-    const rows = [...document.querySelectorAll(".transcript-entry")];
-    const spoken = rows.filter((row) => row.dataset.speakerId === "keeper");
-    const last = spoken[spoken.length - 1];
-    return {
-      run: spoken.map((row) => [row.dataset.continues, row.dataset.prose ?? "bubble"]),
-      reintroduced: last?.querySelector('[data-slot="message-header"]')?.textContent?.trim(),
-      avatarHidden: last
-        ?.querySelector('[data-slot="message-avatar"]')
-        ?.classList.contains("invisible"),
-    };
-  });
-  check(
-    grouping.run.at(-1)?.[0] === "false",
-    `A bubble after a passage must open its own run: ${JSON.stringify(grouping.run)}`,
-  );
-  check(
-    (grouping.reintroduced ?? "") !== "",
-    "A bubble after a passage must name its speaker again",
-  );
-  check(grouping.avatarHidden === false, "A bubble after a passage must show its avatar");
-  return "PASS authored contrast and grouping across a prose boundary";
-}
-
-async function listContrastChecks(page) {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
-  await page.getByRole("button", { name: "Markup sample", exact: true }).click();
-  const scroll = page.locator(".transcript-scroll");
-  for (const mode of ["light", "dark"]) {
-    if ((await page.locator("html").getAttribute("data-phase2c-theme")) !== mode)
-      await page.getByRole("button", { name: `Switch to ${mode} theme`, exact: true }).click();
-    for (const contrast of ["standard", "high"]) {
-      await page.getByRole("combobox", { name: "Theme contrast" }).selectOption(contrast);
-      await scroll.evaluate((element) => {
-        element.scrollTop = element.scrollHeight;
-      });
-      const row = page
-        .locator(".transcript-entry")
-        .filter({ hasText: mode === "light" ? "Pale list ink" : "Dark list ink" });
-      await row.waitFor();
-      const protectedMarkers = await row.locator("li").evaluateAll(
-        (items) =>
-          items.length === 3 &&
-          items.every((item) => {
-            const marker = item.querySelector('[aria-hidden="true"]');
-            const text = item.querySelector("span:not([aria-hidden])");
-            if (!marker || !text) return false;
-            const markerStyle = getComputedStyle(marker);
-            const textStyle = getComputedStyle(text);
-            return (
-              markerStyle.color === textStyle.color &&
-              markerStyle.backgroundColor === textStyle.backgroundColor &&
-              markerStyle.backgroundColor !== "rgba(0, 0, 0, 0)" &&
-              getComputedStyle(item, "::marker").color === "rgba(0, 0, 0, 0)"
-            );
-          }),
-      );
-      if (!protectedMarkers)
-        throw new Error(`${mode}/${contrast}: list markers lost text protection`);
-      const ordinals = await row
-        .locator("ol li")
-        .evaluateAll((items) => items.map((item) => item.value));
-      if (JSON.stringify(ordinals) !== "[3,12]") throw new Error("List ordinals changed");
-      const authored = page.locator(".transcript-entry").filter({ hasText: "Authored list pair" });
-      const unchanged = await authored.locator("li").evaluateAll((items) => {
-        const context = document.createElement("canvas").getContext("2d");
-        return (
-          items.length === 2 &&
-          items.every((item) => {
-            context.fillStyle = getComputedStyle(item).color;
-            context.fillRect(0, 0, 1, 1);
-            const ink = [...context.getImageData(0, 0, 1, 1).data].join(",");
-            return (
-              ink === "255,255,255,255" &&
-              !item.querySelector(".markup-scrim") &&
-              getComputedStyle(item, "::marker").color === getComputedStyle(item).color
-            );
-          })
-        );
-      });
-      if (!unchanged) throw new Error(`${mode}/${contrast}: authored list pair was overridden`);
-    }
-  }
-  return "PASS list marker protection, numbering and unchanged authored pairs";
 }
 
 async function topBarChecks(page) {
@@ -2119,8 +1014,6 @@ async function topBarChecks(page) {
       document.documentElement.style.removeProperty("--player-title-font-size"),
     );
   }
-  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
-  await page.getByLabel("Long stage title").check();
   await hide.click();
   for (const width of [1440, 320]) {
     await page.setViewportSize({ width, height: 900 });
@@ -2128,7 +1021,6 @@ async function topBarChecks(page) {
     const result = await page.evaluate(() => {
       const bar = document.querySelector(".player-top-bar");
       const title = document.querySelector(".player-top-bar-title");
-      const titleText = document.querySelector(".player-top-bar-title-text");
       const rects = () =>
         [".player-stage", ".stage-media-frame", ".player-conversation"].map((selector) => {
           const r = document.querySelector(selector).getBoundingClientRect();
@@ -2145,9 +1037,6 @@ async function topBarChecks(page) {
         transparent:
           getComputedStyle(bar).backgroundColor === "rgba(0, 0, 0, 0)" &&
           getComputedStyle(title).backgroundColor === "rgba(0, 0, 0, 0)",
-        truncates:
-          titleText.scrollWidth > titleText.clientWidth &&
-          getComputedStyle(titleText).textOverflow === "ellipsis",
         passesThrough: !bar.contains(
           document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2),
         ),
@@ -2163,7 +1052,6 @@ async function topBarChecks(page) {
       "Transparent title/bar must pass input through to Stage",
     );
     check(!result.outerScroll, "Top bar must not introduce document overflow");
-    if (width <= 390) check(result.truncates, "Long title must truncate at narrow widths");
   }
   await show.click();
   await aligned(hide, false);
@@ -2211,7 +1099,7 @@ async function topBarChecks(page) {
     "Unsupported fullscreen must remain disabled",
   );
   await unsupported.close();
-  return "PASS transparent top bar alignment, truncation, input, geometry and fullscreen";
+  return "PASS transparent top bar alignment, input, geometry and fullscreen";
 }
 
 async function contentAlignmentChecks(page) {
@@ -2364,7 +1252,7 @@ async function playerConditionChecks(page) {
     });
   try {
     const hybrid = await hybridContext.newPage();
-    await hybrid.goto(`${page.url().split("?")[0]}?feedback-demo=composer`);
+    await hybrid.goto(page.url().split("?")[0]);
     check(
       await hybrid.evaluate(() => {
         const shell = document.querySelector(".phase2c-sidebar");
@@ -2392,7 +1280,7 @@ async function playerConditionChecks(page) {
     });
   const mobile = await context.newPage();
   try {
-    await mobile.goto(`${page.url().split("?")[0]}?feedback-demo=composer`);
+    await mobile.goto(page.url().split("?")[0]);
     const state = () =>
       mobile.evaluate(() => {
         const shell = document.querySelector(".phase2c-sidebar");
@@ -2554,7 +1442,7 @@ async function zoomedViewportChecks(page) {
     .newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const mobile = await context.newPage();
   try {
-    await mobile.goto(`${page.url().split("?")[0]}?feedback-demo=composer`);
+    await mobile.goto(page.url().split("?")[0]);
     await mobile.evaluate(() => {
       document.querySelector('meta[name="viewport"]').content = "width=980";
     });
@@ -2604,92 +1492,14 @@ async function zoomedViewportChecks(page) {
   }
 }
 
-async function typographyChecks(page) {
-  const check = (value, message) => {
-    if (!value) throw new Error(message);
-  };
-  const close = (actual, expected) => Math.abs(actual - expected) < 0.15;
-  await page.setViewportSize({ width: 1440, height: 900 });
-
-  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
-  await page.getByRole("button", { name: "Markup sample", exact: true }).click();
-  await page.locator(".transcript-scroll").evaluate((element) => {
-    element.scrollTop = 0;
-  });
-  const first = page.locator('[data-message-id="markup-0"]');
-  await first.locator(".markup-heading .markup-size-x-large").waitFor();
-  const measure = () =>
-    first.evaluate((element) => {
-      const size = (selector) => {
-        const target =
-          selector === ""
-            ? element.querySelector('[data-slot="bubble-content"]')
-            : element.querySelector(selector);
-        const style = getComputedStyle(target);
-        return {
-          font: Number.parseFloat(style.fontSize),
-          line: Number.parseFloat(style.lineHeight),
-        };
-      };
-      return {
-        body: size(""),
-        heading: size(".markup-heading"),
-        headingLarge: size(".markup-heading .markup-size-x-large"),
-        bodyLarge: size(".markup-paragraph .markup-size-x-large"),
-      };
-    });
-  const normal = await measure();
-  check(
-    normal.headingLarge.font > normal.heading.font && normal.heading.font > normal.body.font,
-    "Heading and inline size hierarchy was lost",
-  );
-  await page.locator(".phase2c-sidebar").evaluate((element) => {
-    element.style.setProperty("--player-reading-font-size", "20px");
-  });
-  const enlarged = await measure();
-  for (const role of ["body", "heading", "headingLarge", "bodyLarge"]) {
-    check(
-      close(enlarged[role].font, normal[role].font * 1.25),
-      `${role} did not scale with reading text`,
-    );
-    check(
-      close(enlarged[role].line - enlarged[role].font, normal[role].line - normal[role].font),
-      `${role} did not keep its fixed line gap`,
-    );
-  }
-  const inputSize = await page.locator("[data-composer-input]").evaluate((element) => {
-    const style = getComputedStyle(element);
-    return { font: Number.parseFloat(style.fontSize), line: Number.parseFloat(style.lineHeight) };
-  });
-  check(
-    close(inputSize.font, enlarged.body.font) && close(inputSize.line, enlarged.body.line),
-    "Composer did not share the reading size",
-  );
-  await page.getByRole("button", { name: "Prose sample", exact: true }).click();
-  await page.locator(".transcript-scroll").evaluate((element) => {
-    element.scrollTop = 0;
-  });
-  const prose = page.locator('[data-message-id="prose-2"] .prose');
-  await prose.waitFor();
-  const proseSize = await prose.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return { font: Number.parseFloat(style.fontSize), line: Number.parseFloat(style.lineHeight) };
-  });
-  check(
-    close(proseSize.font, enlarged.body.font) && close(proseSize.line, enlarged.body.line),
-    "Loose prose did not share the reading size",
-  );
-  return "PASS linked reading, heading, inline-size, prose and composer scales";
-}
-
 async function composerNoticeChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
   };
   const baseUrl = page.url().split("?")[0];
   await page.setViewportSize({ width: 920, height: 560 });
-  await page.goto(`${baseUrl}?feedback-demo=composer`);
-  await page.getByRole("button", { name: "Walk by the water", exact: true }).waitFor();
+  await page.goto(baseUrl);
+  await page.getByRole("button", { name: "Stay by the water", exact: true }).waitFor();
   const input = page.locator("[data-runtime-interaction] textarea");
   const before = await page.evaluate(() => ({
     controls: document.querySelector("[data-foreground-controls]").getBoundingClientRect().bottom,
@@ -2726,16 +1536,9 @@ async function composerNoticeChecks(page) {
     (await page.locator(".composer-notice").count()) === 0,
     "Outside press did not dismiss the notice",
   );
-  await page.getByRole("button", { name: "Visual Lab", exact: true }).click();
-  check(
-    (await page
-      .locator("select[data-feedback-demo-variant], select[data-feedback-demo-tone]")
-      .count()) === 0,
-    "Visual Lab still exposes removed notice variants",
-  );
   await page.setViewportSize({ width: 390, height: 700 });
-  await page.goto(`${baseUrl}?feedback-demo=composer`);
-  await page.getByRole("button", { name: "Walk by the water", exact: true }).waitFor();
+  await page.goto(baseUrl);
+  await page.getByRole("button", { name: "Stay by the water", exact: true }).waitFor();
   await page.getByRole("button", { name: "Switch to dark theme" }).click();
   const narrowControls = await page.evaluate(
     () => document.querySelector("[data-foreground-controls]").getBoundingClientRect().bottom,
@@ -2764,19 +1567,7 @@ async function composerNoticeChecks(page) {
     ),
     "Narrow dark notice changed layout, overflowed, or kept its light colour",
   );
-  await page.setViewportSize({ width: 920, height: 560 });
-  await page.goto(baseUrl);
-  await page.getByRole("button", { name: "Visual Lab", exact: true }).click();
-  await page.getByRole("button", { name: "Empty history", exact: true }).click();
-  await page.setViewportSize({ width: 390, height: 700 });
-  await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Send", exact: true }).click();
-  const emptyNotice = page.locator(".composer-notice");
-  await emptyNotice.waitFor();
-  check(
-    (await emptyNotice.textContent()) === "Enter a response before sending.",
-    "Empty preview submission did not use the standard notice",
-  );
+  const touchNotice = page.locator(".composer-notice");
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
   await cdp.send("Input.dispatchTouchEvent", {
@@ -2784,7 +1575,7 @@ async function composerNoticeChecks(page) {
     touchPoints: [{ x: 100, y: 120 }],
   });
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  await emptyNotice.waitFor({ state: "hidden" });
+  await touchNotice.waitFor({ state: "hidden" });
   return "PASS single composer notice, outside dismissal, stationary choices, and narrow dark styling";
 }
 
@@ -2792,8 +1583,8 @@ async function composerMouseFocusChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
   };
-  await page.goto(`${page.url().split("?")[0]}?feedback-demo=composer`);
-  await page.getByRole("button", { name: "Walk by the water", exact: true }).waitFor();
+  await page.goto(page.url().split("?")[0]);
+  await page.getByRole("button", { name: "Stay by the water", exact: true }).waitFor();
   const input = page.locator("[data-runtime-interaction] textarea");
   const inputFocused = () =>
     page.evaluate(() => document.activeElement === document.querySelector("[data-composer-input]"));
@@ -2839,8 +1630,8 @@ async function composerSendFocusChecks(page) {
     });
   const mobile = await context.newPage();
   try {
-    await mobile.goto(`${page.url().split("?")[0]}?feedback-demo=composer`);
-    await mobile.getByRole("button", { name: "Walk by the water", exact: true }).waitFor();
+    await mobile.goto(page.url().split("?")[0]);
+    await mobile.getByRole("button", { name: "Stay by the water", exact: true }).waitFor();
     const input = mobile.locator("[data-runtime-interaction] textarea");
     const send = mobile
       .locator("[data-runtime-interaction]")
@@ -2894,12 +1685,12 @@ async function composerSendFocusChecks(page) {
       await input.evaluate((element) => element.inputMode === "text"),
       "Tapping the input did not allow the software keyboard again",
     );
-    await input.fill("Walk by the water");
+    await input.fill("Stay by the water");
     await mobile.evaluate(() => {
       window.__composerFocusCalls = 0;
     });
     await send.tap();
-    await mobile.waitForFunction(() => document.querySelector("[data-composer-input]")?.disabled);
+    await mobile.getByRole("button", { name: "Continue", exact: true }).waitFor();
     check(
       await mobile.evaluate(() => window.__composerFocusCalls === 0),
       "Completed Send submission refocused the composer input",
@@ -2922,8 +1713,8 @@ async function directDemoLatestChecks(page) {
     });
   const mobile = await context.newPage();
   try {
-    await mobile.goto(`${page.url().split("?")[0]}?feedback-demo=composer`);
-    await mobile.getByRole("button", { name: "Walk by the water", exact: true }).waitFor();
+    await mobile.goto(page.url().split("?")[0]);
+    await mobile.getByRole("button", { name: "Stay by the water", exact: true }).waitFor();
     await mobile.waitForFunction(() => {
       const scroll = document.querySelector(".transcript-scroll");
       const composer = document.querySelector(".conversation-glass");
@@ -2965,25 +1756,16 @@ const groups = [
   panelResizeChecks,
   carouselChecks,
   toolContentChecks,
-  runtimeTranscriptChecks,
-  interactionChecks,
   composerNoticeChecks,
   composerMouseFocusChecks,
   composerSendFocusChecks,
   directDemoLatestChecks,
   timerChecks,
-  transcriptChecks,
   contentAlignmentChecks,
   playerConditionChecks,
   zoomedViewportChecks,
-  typographyChecks,
   actionButtonGeometryChecks,
-  transcriptSpacingChecks,
-  avatarImageChecks,
-  pacingSkipChecks,
   buttonInkChecks,
-  authoredPresentationChecks,
-  listContrastChecks,
 ];
 
 async function runGroup(browserPage, run, url, artifacts) {

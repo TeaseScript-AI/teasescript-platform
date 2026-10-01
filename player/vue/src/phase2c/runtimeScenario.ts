@@ -1,79 +1,11 @@
-// Development source, compiled and completed through the canonical runtime adapter.
-export const runtimeScenario = `
-speaker guide {
-  title: "Coastal Guide"
-}
-say as guide "Welcome to the **coast**. [Map](https://example.com/coast) [spoiler]The lighthouse is open.[/spoiler]", instant
-let answer = askText as guide "Your reply"
-say as guide "# Along the shore\\n> Take your time.\\n- Listen to the sea\\n- Watch the light\\n3. Follow the path\\n\\n*Quiet* \`code\` ~~rush~~ [u]waves[/u] [color=#456789]blue[/color] [bg=#ffee88]sun[/bg] [weight=light]soft[/weight] [size=large]horizon[/size]", instant
-showButton as guide "Continue **literally**"
-say "The walk continues. <b>This is literal text.</b>", instant
-exit
-`;
-
-// Exercises all foreground kinds without adding completion controls to Visual Lab.
-export const interactionScenario = `
-speaker guide {
-  title: "Coastal Guide"
-}
-say as guide "Try the foreground interactions.", instant
-let answer = askText as guide "Your reply"
-let amount = askNumber as guide "Your number"
-let direction = choose as guide left: "Left", right: "Right"
-let duplicate = choose as guide first: "Same", second: "Same"
-showButton as guide "Finish"
-say as guide "${"${answer}"} / ${"${amount}"} / ${"${direction}"} / ${"${duplicate}"}", instant
-exit
-`;
-
-// Direct visual entry point; the all-interactions fixture remains available separately.
-export const buttonScenario = `
+// Development opening content, compiled and completed through the canonical runtime adapter until a real
+// demo script replaces it.
+export const openingScenario = `
 speaker guide { title: "Coastal Guide" }
 say as guide "Where would you like to go?", instant
 let answer = choose as guide coast: { text: "Stay by the water", background: "seagreen" }, lights: { text: "Follow the lights", background: "gold" }, harbour: { text: "Explore the old harbour", background: "hsl(265 45% 50%)" }, sunset: "Wait for sunset", long: "Take the longer path along the water so we can finish our conversation before reaching the lighthouse."
 showButton as guide "Continue", background: "seagreen"
 let next = choose as guide stay: "Stay a little longer", walk: "Walk together"
 showButton as guide "Finish"
-exit
-`;
-
-// A completed reply keeps the player bubble, speaker changes and active choices visible together.
-export const spacingScenario = `
-speaker guide { title: "Coastal Guide" }
-speaker keeper { title: "Harbour Keeper" }
-say as guide "The path splits just beyond the dunes.", instant
-say as guide "We can still hear the water from here.", instant
-let reply = askText as guide "Your reply"
-say as keeper "The lighthouse path is open tonight.", instant
-say as guide "Where would you like to go?", instant
-let direction = choose as guide shore: "Walk by the water", light: "Visit the lighthouse", harbour: "Return to the harbour"
-exit
-`;
-
-// One loadable authored avatar image and one unavailable reference that must fall back to its letter.
-const lighthouseAvatar = `data:image/svg+xml,${encodeURIComponent(
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path fill="#1f4e5f" d="M0 0h64v64H0z"/><path fill="#f5dcb0" d="M26 14h12l4 40H22z"/><path fill="#c8553d" d="M24 26h16v6H24zm-1 12h18v6H23z"/></svg>',
-)}`;
-export const avatarScenario = `
-speaker keeper {
-  title: "Harbour Keeper"
-  avatar: "${lighthouseAvatar}"
-}
-speaker guide {
-  title: "Coastal Guide"
-  avatar: "avatars/unavailable-guide.png"
-}
-say as keeper "The lighthouse is lit.", instant
-say as guide "Then we can find our way back.", instant
-exit
-`;
-
-// Without the scene clock, paced messages wait until skipped; the last gate cannot be skipped.
-export const pacingScenario = `
-speaker guide { title: "Coastal Guide" }
-say as guide skippable "The tide is turning.", 10
-say as guide skippable "Listen to the waves.", 10
-say as guide unskippable "Wait for the light.", 10
-say as guide "The light is on.", 2
 exit
 `;

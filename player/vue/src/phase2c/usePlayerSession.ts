@@ -1,15 +1,11 @@
 import { computed, ref, shallowRef } from "vue";
-import {
-  restorePlayerRuntimeSession,
-  type PlayerRuntimeRestorePoint,
-  type PlayerRuntimeSession,
-} from "../../../runtime-adapter.js";
+import type { PlayerRuntimeSession } from "../../../runtime-adapter.js";
 
 // Presentation lifecycle around the canonical runtime session. The adapter session stays the only
 // Player state; this host only records which session is shown and when presentation must reset.
 export function usePlayerSession() {
   const session = shallowRef<PlayerRuntimeSession | null>(null);
-  // A new session remounts the transcript; any session change resets interaction-local state.
+  // A new session remounts the transcript and resets interaction-local state.
   const generation = ref(0);
   const interactionReset = ref(0);
 
@@ -18,16 +14,9 @@ export function usePlayerSession() {
     interactionReset.value++;
     session.value = next;
   }
-  function restore(point: PlayerRuntimeRestorePoint) {
-    interactionReset.value++;
-    session.value = restorePlayerRuntimeSession(point);
-  }
   // Publishes the result of a completed runtime action.
   function update(next: PlayerRuntimeSession) {
     session.value = next;
-  }
-  function clear() {
-    session.value = null;
   }
 
   return {
@@ -35,9 +24,7 @@ export function usePlayerSession() {
     generation: computed(() => generation.value),
     interactionReset: computed(() => interactionReset.value),
     start,
-    restore,
     update,
-    clear,
   };
 }
 
