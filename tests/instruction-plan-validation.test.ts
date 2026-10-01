@@ -375,6 +375,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     (instruction, index) => index > 0 && instruction.kind === "say",
   );
   assert.ok(secondSay >= 0);
+  assert.equal(ordinary.temporaryCount, 0);
   // EVIDENCE: JSON preserves the compiler-produced plan before the fixture forges a prepared speaker temporary.
   const forgedSpeaker = JSON.parse(JSON.stringify(ordinary)) as InstructionPlan & {
     temporaryCount: number;
@@ -382,9 +383,13 @@ test("rejects forged prepared say fields and lifetimes before any script event e
   forgedSpeaker.temporaryCount = 1;
   const forgedSay = forgedSpeaker.instructions[secondSay];
   assert.ok(forgedSay?.kind === "say");
+  // The newly allocated ID 1 is in range, so the rejection is its missing producer.
   // EVIDENCE: fixture adds a prepared speaker temporary to an otherwise static say instruction.
-  (forgedSay as { speakerTemporary?: number }).speakerTemporary = 0;
-  assert.equal(validateInstructionPlan(forgedSpeaker).valid, false);
+  (forgedSay as { speakerTemporary?: number }).speakerTemporary = 1;
+  assertPlanErrorAt(
+    validateInstructionPlan(forgedSpeaker),
+    `$.instructions[${secondSay}].speakerTemporary`,
+  );
   assert.throws(
     () => run(forgedSpeaker, createFreshRuntimeSnapshot(ordinary)),
     (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR100",
@@ -422,15 +427,18 @@ test("rejects forged prepared say fields and lifetimes before any script event e
   assert.ok(pacingCall >= 0);
   assert.ok(pacingStore >= 0);
 
+  // A newly allocated, otherwise unused temporary has no prepared-text producer.
+  const forgedText = JSON.parse(JSON.stringify(prepared));
+  forgedText.temporaryCount += 1;
+  forgedText.instructions[sayIndex].textTemporary = forgedText.temporaryCount;
+  assertPlanErrorAt(
+    validateInstructionPlan(forgedText),
+    `$.instructions[${sayIndex}].textTemporary`,
+    "forged text temporary",
+  );
+
   // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture callbacks deliberately rewrite prepared-say producer, consumer, temporary, and control-flow fields into invalid combinations.
   const cases: Array<[string, (candidate: any) => void]> = [
-    [
-      "forged text temporary",
-      (candidate) => {
-        candidate.temporaryCount += 1;
-        candidate.instructions[sayIndex].textTemporary = candidate.temporaryCount - 1;
-      },
-    ],
     [
       "wrong producer kind",
       (candidate) => {
@@ -829,6 +837,15 @@ function targetOf(
   assert.equal(typeof target, "number");
   // EVIDENCE: the immediately preceding assertion narrows the selected control-flow target to number.
   return target as number;
+}
+
+/** Requires a structured plan rejection at the mutated field, without pinning diagnostic prose. */
+function assertPlanErrorAt(result: PlanValidationResult, path: string, label?: string): void {
+  assert.equal(result.valid, false, label);
+  assert.ok(
+    result.errors.some((error) => error.code === "TSC002" && error.path === path),
+    `${label ?? "plan"} reports TSC002 at ${path}: ${JSON.stringify(result.errors)}`,
+  );
 }
 
 function assertRegionError(result: PlanValidationResult, path: string): void {

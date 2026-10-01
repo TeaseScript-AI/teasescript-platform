@@ -183,22 +183,18 @@ test("runtime execution uses the captured proxy plan rather than proxy get resul
 
 test("runtime snapshots reject accessors before clone, execution, events, or RNG", () => {
   const compiled = plan("say random()\nexit");
-  // EVIDENCE: the runtime-produced snapshot is extended only with accessor-bearing padding for rejection.
-  const snapshot = structuredClone(createFreshRuntimeSnapshot(compiled)) as RuntimeSnapshot & {
-    padding?: unknown;
-  };
+  const canonical = createFreshRuntimeSnapshot(compiled);
+  assert.equal(validateRuntimeSnapshot(canonical, compiled).valid, true);
+  const snapshot = structuredClone(canonical);
   let reads = 0;
-  Object.defineProperty(snapshot, "padding", {
-    enumerable: true,
-    get() {
-      reads += 1;
-      return 0;
-    },
-  });
+  const readRng = () => {
+    reads += 1;
+    return canonical.rng;
+  };
+  // Only the required rng field changes: it becomes an accessor yielding the canonical value.
+  Object.defineProperty(snapshot, "rng", { enumerable: true, configurable: true, get: readRng });
 
   assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, false);
-  const beforeSequence = snapshot.nextEventSequence;
-  const beforeRng = snapshot.rng.state;
   let randomCalls = 0;
   assert.throws(
     () =>
@@ -214,8 +210,17 @@ test("runtime snapshots reject accessors before clone, execution, events, or RNG
   );
   assert.equal(reads, 0);
   assert.equal(randomCalls, 0);
-  assert.equal(snapshot.nextEventSequence, beforeSequence);
-  assert.equal(snapshot.rng.state, beforeRng);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(snapshot, "rng"), {
+    get: readRng,
+    set: undefined,
+    enumerable: true,
+    configurable: true,
+  });
+  assert.deepEqual(Object.keys(snapshot), Object.keys(canonical));
+  // EVIDENCE: Object.keys of the runtime-produced snapshot lists only RuntimeSnapshot fields.
+  for (const key of Object.keys(canonical) as (keyof RuntimeSnapshot)[]) {
+    if (key !== "rng") assert.deepEqual(snapshot[key], canonical[key], key);
+  }
 });
 
 test("runtime execution consumes a stable captured proxy snapshot", () => {

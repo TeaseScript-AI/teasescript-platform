@@ -212,50 +212,66 @@ test("rejects exhausted scope, speaker, and call-frame allocators before collisi
   assert.equal(callSnapshot.nextCallFrameId, MAX_SAFE);
 });
 
-test("requires safe integers for nested runtime identities, positions, and progress", () => {
+test("rejects unsafe source-span positions independently of span order", () => {
+  const failedPlan = plan("let value = []\nsay value.first\nexit");
+  const failed = run(failedPlan, createFreshRuntimeSnapshot(failedPlan)).snapshot;
+  assert.equal(failed.status, "failed");
+  assert.equal(validateRuntimeSnapshot(failed, failedPlan).valid, true);
+
+  for (const field of ["offset", "line", "column"] as const) {
+    const candidate = structuredClone(failed);
+    // EVIDENCE: fixture: only this end-position field leaves the safe-integer domain; the end stays after the start.
+    (candidate.failure!.span.end as Record<typeof field, number>)[field] = MAX_SAFE + 1;
+    assert.equal(validateRuntimeSnapshot(candidate, failedPlan).valid, false, field);
+  }
+
+  const reversed = structuredClone(failed);
+  // EVIDENCE: fixture: expose the readonly failure start; a safe start after the end reverses the span.
+  (reversed.failure!.span.start as { offset: number }).offset = failed.failure!.span.end.offset + 1;
+  assert.equal(validateRuntimeSnapshot(reversed, failedPlan).valid, false, "reversed span");
+});
+
+test("rejects nested identities at their allocators and parameter progress beyond the parameters", () => {
   const speakerPlan = plan('speaker vera {}\nsay as vera "hello"\nexit');
   const declared = executeInstruction(
     speakerPlan,
     createFreshRuntimeSnapshot(speakerPlan),
   ).snapshot;
+  assert.equal(validateRuntimeSnapshot(declared, speakerPlan).valid, true);
   const speakerSnapshot = structuredClone(declared);
-  // EVIDENCE: fixture: expose the readonly speaker ID on a cloned snapshot for unsafe-integer validation.
+  // EVIDENCE: fixture: expose the readonly speaker ID; an oversized ID is not below nextSpeakerId.
   (speakerSnapshot.speakers[0] as { id: number }).id = 2 ** 53;
   assert.equal(validateRuntimeSnapshot(speakerSnapshot, speakerPlan).valid, false);
 
   const scopePlan = plan('if true {\n  say "inside"\n}\nexit');
-  let enteredScope = createFreshRuntimeSnapshot(scopePlan);
-  enteredScope = executeInstruction(scopePlan, enteredScope).snapshot;
-  enteredScope = executeInstruction(scopePlan, enteredScope).snapshot;
-  // EVIDENCE: fixture: expose the readonly scope ID on an active snapshot for unsafe-integer validation.
+  const enteredScope = executeUntil(
+    scopePlan,
+    createFreshRuntimeSnapshot(scopePlan),
+    (snapshot) => snapshot.frames.length === 2,
+  );
+  assert.equal(validateRuntimeSnapshot(enteredScope, scopePlan).valid, true);
+  // EVIDENCE: fixture: expose the readonly scope ID; an oversized ID is not below nextScopeId.
   (enteredScope.frames[1] as { id: number }).id = 2 ** 53;
   enteredScope.nextScopeId = MAX_SAFE;
   assert.equal(validateRuntimeSnapshot(enteredScope, scopePlan).valid, false);
 
   const callPlan = plan("function value(input = 1) { return input }\nvalue()");
-  let activeCall = createFreshRuntimeSnapshot(callPlan);
-  while (activeCall.callFrames.length === 0) {
-    activeCall = executeInstruction(callPlan, activeCall).snapshot;
-  }
-  // EVIDENCE: fixture: expose the readonly call-frame ID on an active snapshot for unsafe-integer validation.
-  (activeCall.callFrames[0] as { id: number }).id = 2 ** 53;
-  activeCall.nextCallFrameId = MAX_SAFE;
-  assert.equal(validateRuntimeSnapshot(activeCall, callPlan).valid, false);
+  const activeCall = executeUntil(
+    callPlan,
+    createFreshRuntimeSnapshot(callPlan),
+    (snapshot) => snapshot.callFrames.length === 1,
+  );
+  assert.equal(validateRuntimeSnapshot(activeCall, callPlan).valid, true);
+  const oversizedCall = structuredClone(activeCall);
+  // EVIDENCE: fixture: expose the readonly call-frame ID; an oversized ID is not below nextCallFrameId.
+  (oversizedCall.callFrames[0] as { id: number }).id = 2 ** 53;
+  oversizedCall.nextCallFrameId = MAX_SAFE;
+  assert.equal(validateRuntimeSnapshot(oversizedCall, callPlan).valid, false);
 
   const parameterSnapshot = structuredClone(activeCall);
-  // EVIDENCE: fixture: expose the readonly call-frame ID to isolate malformed parameter-state validation.
-  (parameterSnapshot.callFrames[0] as { id: number }).id = 1;
-  parameterSnapshot.nextCallFrameId = 2;
+  // The function declares one parameter, so progress beyond it is malformed.
   parameterSnapshot.callFrames[0]!.parameterState.parameterIndex = 2 ** 53;
   assert.equal(validateRuntimeSnapshot(parameterSnapshot, callPlan).valid, false);
-
-  const failedPlan = plan("let value = []\nsay value.first\nexit");
-  const failed = run(failedPlan, createFreshRuntimeSnapshot(failedPlan)).snapshot;
-  assert.equal(failed.status, "failed");
-  const spanSnapshot = structuredClone(failed);
-  // EVIDENCE: fixture: expose the readonly failure offset for unsafe source-span validation.
-  (spanSnapshot.failure!.span.start as { offset: number }).offset = 2 ** 53;
-  assert.equal(validateRuntimeSnapshot(spanSnapshot, failedPlan).valid, false);
 });
 
 test("emits only safe, unique, strictly increasing event sequences", () => {
@@ -269,6 +285,24 @@ test("emits only safe, unique, strictly increasing event sequences", () => {
     assert.ok(sequences[index]! > sequences[index - 1]!);
   }
 });
+
+/** Executes ordinary instructions until the target state, failing instead of looping on an unexpected path. */
+function executeUntil(
+  compiled: InstructionPlan,
+  initial: RuntimeSnapshot,
+  reached: (snapshot: RuntimeSnapshot) => boolean,
+): RuntimeSnapshot {
+  let snapshot = initial;
+  for (let step = 0; step < 32; step += 1) {
+    if (reached(snapshot)) return snapshot;
+    assert.ok(
+      snapshot.status === "ready" || snapshot.status === "running",
+      `runtime ${snapshot.status} before reaching the target state`,
+    );
+    snapshot = executeInstruction(compiled, snapshot).snapshot;
+  }
+  assert.fail("runtime did not reach the target state within 32 instructions");
+}
 
 function allocatorError(field: string): (error: unknown) => boolean {
   return (error: unknown) =>
