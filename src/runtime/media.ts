@@ -460,7 +460,6 @@ function progressAt(points: readonly RuntimeMediaPointSnapshot[], atMs: number):
  */
 export function nextMediaEvent(media: RuntimeMediaSnapshot): MediaTimelineEvent | null {
   if (!media.loaded || !isActiveMedia(media)) return null;
-  const atEnd = media.positionMs >= mediaEndMs(media);
   if (media.state === "paused") {
     const reached = nextArrival(media);
     return reached.progressMs === media.committedProgressMs
@@ -472,8 +471,7 @@ export function nextMediaEvent(media: RuntimeMediaSnapshot): MediaTimelineEvent 
         }
       : null;
   }
-  // A repeat duration already used up ends before playback departs again.
-  if (media.startCuesPending && !atEnd && budgetEndProgressMs(media) > media.committedProgressMs) {
+  if (departsNext(media)) {
     return {
       kind: "departure",
       progressMs: media.committedProgressMs,
@@ -539,11 +537,25 @@ function finishMedia(media: RuntimeMediaSnapshot, event: MediaTimelineEvent): vo
 }
 
 /**
- * Segment progress at scene time `atMs`, never beyond the next uncommitted arrival. An arrival due by then is reached
- * exactly, so reads and segment changes agree with the arrival's due time; other progress is in whole milliseconds.
+ * Whether the next event is the departure of pending start cues; a repeat duration already used up ends before
+ * playback departs again.
+ */
+function departsNext(media: RuntimeMediaSnapshot): boolean {
+  return (
+    media.startCuesPending &&
+    media.positionMs < mediaEndMs(media) &&
+    budgetEndProgressMs(media) > media.committedProgressMs
+  );
+}
+
+/**
+ * Segment progress at scene time `atMs`, never beyond the next uncommitted event: playback stands at pending start
+ * cues until they depart, and an arrival due by then is reached exactly, so reads and segment changes agree with the
+ * arrival's due time; other progress is in whole milliseconds.
  */
 function progressBefore(media: RuntimeMediaSnapshot, atMs: number): number {
-  if (media.state !== "running" || !media.loaded) return media.committedProgressMs;
+  if (media.state !== "running" || !media.loaded || departsNext(media))
+    return media.committedProgressMs;
   const arrival = nextArrival(media);
   const dueAtMs = arrivalTime(media.points, arrival.progressMs);
   if (dueAtMs !== null && dueAtMs <= atMs) return arrival.progressMs;

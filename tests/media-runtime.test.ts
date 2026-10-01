@@ -1574,3 +1574,15 @@ test("held projections and reads at an arrival use the position the timeline com
   remaining.load(1, 2_000).at(2_498, [1, 2_498]);
   assert.deepEqual(remaining.said(), ["true"]);
 });
+
+test("a control at the end of a pass leaves pending start cues at the start until playback departs", () => {
+  for (const control of ["m.pause()", "m.stop()"]) {
+    const session = new Session(
+      `let m = playAudio(file: "a", async: true, startAt: 1.1 ms, endAt: 3.4000000000000004 ms, repeat: 3 times) {\n  at 1.1 ms { say "start", instant }\n  beforeEnd 0 ms { ${control} }\n}\nwait 100 ms`,
+    );
+    session.load(1, 100).at(50, [1, 50]);
+    const media = session.media(1)!;
+    assert.equal(media.positionMs, 1.1, control);
+    assert.equal(validateRuntimeSnapshot(session.snapshot, session.plan).valid, true, control);
+  }
+});
