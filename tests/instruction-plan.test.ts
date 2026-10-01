@@ -6,6 +6,8 @@ import { validateInstructionPlan } from "../src/plan/validation.js";
 import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 import { run } from "../src/runtime/engine.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
+import { runValidSource } from "./helpers/run-valid-source.js";
+import { sayTexts } from "./helpers/runtime-events.js";
 
 test("compiles deterministically to the same instruction plan", () => {
   const source = 'let score = 1\nscore = score + 1\nsay "${score}"\nexit';
@@ -14,26 +16,33 @@ test("compiles deterministically to the same instruction plan", () => {
 });
 
 test("compiles if and else to explicit validated jump targets", () => {
-  const compiled = plan(["if true {", '  say "yes"', "} else {", '  say "no"', "}"].join("\n"));
-
-  assert.deepEqual(
-    compiled.instructions.map((instruction) =>
-      instruction.kind === "jump" || instruction.kind === "jumpIfFalse"
-        ? [instruction.kind, instruction.target]
-        : instruction.kind,
-    ),
-    [
-      ["jumpIfFalse", 5],
-      "enterScope",
-      "say",
-      "leaveScope",
-      ["jump", 8],
-      "enterScope",
-      "say",
-      "leaveScope",
-    ],
+  const branches = (condition: string) =>
+    ["if " + condition + " {", '  say "yes"', "} else {", '  say "no"', "}"].join("\n");
+  const compiled = plan(branches("true"));
+  const sayIndex = (text: string) =>
+    compiled.instructions.findIndex(
+      (instruction) =>
+        instruction.kind === "say" &&
+        instruction.value.kind === "literal" &&
+        instruction.value.value === text,
+    );
+  const conditionIndex = compiled.instructions.findIndex(
+    (instruction) => instruction.kind === "jumpIfFalse",
   );
+  const skipElseIndex = compiled.instructions.findIndex(
+    (instruction, index) => index > sayIndex("yes") && instruction.kind === "jump",
+  );
+  const condition = compiled.instructions[conditionIndex];
+  const skipElse = compiled.instructions[skipElseIndex];
+  assert.ok(condition?.kind === "jumpIfFalse" && skipElse?.kind === "jump");
+
+  // The false edge enters the else branch after the then branch's exit jump, which skips past it.
+  assert.ok(conditionIndex < sayIndex("yes") && sayIndex("yes") < skipElseIndex);
+  assert.ok(skipElseIndex < condition.target && condition.target <= sayIndex("no"));
+  assert.ok(skipElse.target > sayIndex("no"));
   assert.equal(validateInstructionPlan(compiled).valid, true);
+  assert.deepEqual(sayTexts(runValidSource(branches("true"))), ["yes"]);
+  assert.deepEqual(sayTexts(runValidSource(branches("false"))), ["no"]);
 });
 
 test("preserves relevant statement and nested expression source spans", () => {
@@ -65,18 +74,25 @@ test("survives JSON stringify and parse as an equivalent executable plan", () =>
   );
 });
 
-test("rejects malformed instructions and out-of-range jumps", () => {
+test("rejects an out-of-range jump target", () => {
   // EVIDENCE: fixture: parse a compiler-produced plan into a mutable instruction dictionary for malformed jump injection.
   const malformed = JSON.parse(JSON.stringify(plan("if true { exit }"))) as {
     instructions: Array<Record<string, unknown>>;
   };
-  const jump = malformed.instructions.find((instruction) => instruction.kind === "jumpIfFalse");
-  assert.ok(jump !== undefined);
-  jump.target = 999;
+  const jumpIndex = malformed.instructions.findIndex(
+    (instruction) => instruction.kind === "jumpIfFalse",
+  );
+  assert.ok(jumpIndex >= 0);
+  malformed.instructions[jumpIndex]!.target = 999;
 
   const validation = validateInstructionPlan(malformed);
   assert.equal(validation.valid, false);
-  assert.match(validation.errors[0]?.message ?? "", /Jump target/u);
+  assert.ok(
+    validation.errors.some(
+      (error) => error.code === "TSC002" && error.path === `$.instructions[${jumpIndex}].target`,
+    ),
+    JSON.stringify(validation.errors),
+  );
 });
 
 test("contains no non-JSON-safe values and rejects them when supplied", () => {

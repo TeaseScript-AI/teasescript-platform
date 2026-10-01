@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { Statement } from "../src/ast.js";
 import { parse } from "../src/parser.js";
 
 test("parses an empty immutable program", () => {
@@ -61,23 +62,17 @@ test("parses say, say as, and exit statements", () => {
   const result = parse(source);
 
   assert.deepEqual(result.diagnostics, []);
-  assert.deepEqual(result.program.statements, [
+  assert.deepEqual(result.program.statements.map(sayCore), [
     {
       kind: "sayStatement",
-      presentation: null,
       speaker: null,
-      skipPolicy: null,
       value: stringNode(source, 4, 12, "Kneel."),
-      pacing: null,
       span: sourceSpan(source, 0, 12),
     },
     {
       kind: "sayStatement",
-      presentation: null,
       speaker: { kind: "identifier", name: "cashier", span: sourceSpan(source, 20, 27) },
-      skipPolicy: null,
       value: stringNode(source, 28, 55, "Your total is five euros."),
-      pacing: null,
       span: sourceSpan(source, 13, 55),
     },
     { kind: "exitStatement", span: sourceSpan(source, 56, 60) },
@@ -163,12 +158,12 @@ test("treats say skip words as modifiers only when the existing expression canno
 });
 
 test("rejects missing say pacing expressions", () => {
-  const result = parse('say "later",');
+  const source = 'say "later",';
+  const result = parse(source);
   assert.equal(result.program.statements.length, 0);
-  assert.ok(
-    result.diagnostics.some(
-      (diagnostic) => diagnostic.message === "Expected a pacing value after ','.",
-    ),
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.span]),
+    [["TSP012", sourceSpan(source, source.length, source.length)]],
   );
 });
 
@@ -177,11 +172,9 @@ test("preserves template text and identifier interpolation", () => {
   const result = parse(source);
 
   assert.deepEqual(result.diagnostics, []);
-  assert.deepEqual(result.program.statements[0], {
+  assert.deepEqual(sayCore(result.program.statements[0]), {
     kind: "sayStatement",
-    presentation: null,
     speaker: null,
-    skipPolicy: null,
     value: {
       kind: "stringLiteral",
       form: "singleLine",
@@ -196,7 +189,6 @@ test("preserves template text and identifier interpolation", () => {
       ],
       span: sourceSpan(source, 4, 22),
     },
-    pacing: null,
     span: sourceSpan(source, 0, 22),
   });
 });
@@ -296,6 +288,13 @@ test("preserves decoded block values and forms", () => {
     "three\nfour",
   );
 });
+
+/** Keeps the say fields under test, leaving optional presentation, skip, and pacing syntax to their own tests. */
+function sayCore(statement: Statement | undefined) {
+  if (statement?.kind !== "sayStatement") return statement;
+  const { kind, speaker, value, span } = statement;
+  return { kind, speaker, value, span };
+}
 
 function stringNode(source: string, start: number, end: number, value: string) {
   return {

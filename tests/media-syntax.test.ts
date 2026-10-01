@@ -6,22 +6,8 @@ import type { Instruction, InstructionPlan, PlayMediaInstruction } from "../src/
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
-function diagnostics(source: string): string[] {
-  const result = compileSource(source);
-  assert.equal(result.plan, null, `${JSON.stringify(source)} must not compile`);
-  return result.diagnostics.map((diagnostic) => `${diagnostic.code} ${diagnostic.message}`);
-}
-
-function assertRejected(source: string, code: string, fragment: string): void {
-  const found = diagnostics(source);
-  assert.ok(
-    found.some((entry) => entry.startsWith(code) && entry.includes(fragment)),
-    `${JSON.stringify(source)} should report ${code} containing ${JSON.stringify(fragment)}; got ${JSON.stringify(found)}`,
-  );
-}
-
-/** Requires `code` on the source text `text` that directly follows the unique `before` context. */
-function assertRejectedAt(source: string, code: string, before: string, text: string): void {
+/** Requires `code` on the offending source `text`, located at its first occurrence after `before`. */
+function assertRejectedAt(source: string, code: string, text: string, before = ""): void {
   const result = compileSource(source);
   assert.equal(result.plan, null, `${JSON.stringify(source)} must not compile`);
   const offset = source.indexOf(before + text) + before.length;
@@ -159,7 +145,7 @@ test("a media block may use its own handle, also inside a function, but not othe
       "scene()",
     ].join("\n"),
   );
-  assertRejected(
+  assertRejectedAt(
     [
       "function scene {",
       "  let level = 0.2",
@@ -172,13 +158,14 @@ test("a media block may use its own handle, also inside a function, but not othe
       "scene()",
     ].join("\n"),
     "TSV002",
-    "Unknown variable 'level'",
+    "level",
+    "= ",
   );
   // Without a let declaration there is no self-handle.
-  assertRejected(
+  assertRejectedAt(
     'function scene {\n  playAudio async "a.mp3" {\n    music.stop()\n  }\n}\nscene()',
     "TSV002",
-    "Unknown variable 'music'",
+    "music",
   );
 });
 
@@ -201,53 +188,41 @@ test("cue words stay ordinary identifiers outside cue positions", () => {
 });
 
 test("invalid media forms are rejected with focused diagnostics", () => {
-  const cases: readonly (readonly [string, string, string])[] = [
-    ['let s = playAudio "bell.mp3"', "TSV036", "Blocking media returns no handle"],
-    ['playAudio repeat "beat.mp3"', "TSV036", "cannot repeat indefinitely"],
-    ['playVideo(file: "a.mp4", repeat: true)', "TSV036", "cannot repeat indefinitely"],
-    ['playAudio(file: "a.mp3", repeat: 3)', "TSV036", "'times'"],
-    ['playAudio(file: "a.mp3", repeat: 0 times)', "TSV036", "at least 1"],
-    ['playAudio(file: "a.mp3", repeat: 1.5 times)', "TSV036", "at least 1"],
-    ['playAudio(file: "a.mp3", repeat: 0 s)', "TSV036", "greater than zero"],
-    ['playAudio(file: "a.mp3", repeat: "often")', "TSV036", "Repeat must be"],
-    ['playAudio(file: "a.mp3", startAt: -1 s)', "TSV036", "startAt must not be negative"],
-    ['playAudio(file: "a.mp3", startAt: 10 s, endAt: 5 s)', "TSV036", "endAt must be later"],
-    ['playAudio(file: "a.mp3", startAt: "x")', "TSV036", "startAt must be a duration"],
-    ['playAudio(file: "a.mp3", volume: 2)', "TSV036", "Volume must be"],
-    [
-      'playAudio async "a.mp3" {\n  finish {\n  }\n  finish {\n  }\n}',
-      "TSV036",
-      "'finish' only once",
-    ],
-    ['playAudio async repeat "a.mp3" {\n  finish {\n  }\n}', "TSV036", "'finish' never runs"],
-    ['playAudio async "a.mp3" {\n  at -1 s {\n  }\n}', "TSV036", "at must not be negative"],
-    [
-      'playAudio async "a.mp3" {\n  say "x"\n  at 1 s {\n  }\n}',
-      "TSP035",
-      "either cue declarations",
-    ],
-    ['playAudio(file: "a.mp3", loop: true)', "TSP035", "Unknown playAudio argument 'loop'"],
-    ['playAudio(file: "a.mp3", file: "b.mp3")', "TSP035", "Duplicate playAudio argument"],
-    ['let yes = true\nplayAudio(file: "a.mp3", async: yes)', "TSP035", "literal true or false"],
-    ['playAudio("a.mp3")', "TSP035", "uses named arguments"],
-    ["playAudio(async: true)", "TSP035", "requires a 'file' argument"],
-    ["hideImage()", "TSP035", "hideImage takes no arguments"],
-    ['showImage("a.jpg")', "TSP035", "showImage uses command syntax"],
-    ["showImage 3", "TSV036", "image file reference or null"],
-    ['let m = playAudio async "a.mp3"\nm.loop = true', "TSV037", "cannot be assigned"],
-    ['let m = playAudio async "a.mp3"\nsay "${m.played}"', "TSV037", "no property 'played'"],
-    ['let m = playAudio async "a.mp3"\nm.rewind()', "TSV037", "no method 'rewind'"],
-    ['let m = playAudio async "a.mp3"\nm.stop(1)', "TSV037", "takes no arguments"],
-    ['let m = playAudio async "a.mp3"\nm.volume = 1.5', "TSV037", "from 0 through 1"],
-    [
-      'let m = playAudio async "a.mp3"\nm.position = "start"',
-      "TSV037",
-      "must be assigned a duration",
-    ],
-    ['let m = playAudio async "a.mp3"\nm.remaining = 10', "TSV037", "must be assigned a duration"],
-    ['playAudio async "a.mp3" {\n  return 1\n}', "TSV033", "only without a value"],
+  const cases: readonly (readonly [string, string, string, string?])[] = [
+    ['let s = playAudio "bell.mp3"', "TSV036", 'playAudio "bell.mp3"'],
+    ['playAudio repeat "beat.mp3"', "TSV036", "repeat"],
+    ['playVideo(file: "a.mp4", repeat: true)', "TSV036", "true"],
+    ['playAudio(file: "a.mp3", repeat: 3)', "TSV036", "3", "repeat: "],
+    ['playAudio(file: "a.mp3", repeat: 0 times)', "TSV036", "0"],
+    ['playAudio(file: "a.mp3", repeat: 1.5 times)', "TSV036", "1.5"],
+    ['playAudio(file: "a.mp3", repeat: 0 s)', "TSV036", "0 s"],
+    ['playAudio(file: "a.mp3", repeat: "often")', "TSV036", '"often"'],
+    ['playAudio(file: "a.mp3", startAt: -1 s)', "TSV036", "-1 s"],
+    ['playAudio(file: "a.mp3", startAt: 10 s, endAt: 5 s)', "TSV036", "5 s"],
+    ['playAudio(file: "a.mp3", startAt: "x")', "TSV036", '"x"'],
+    ['playAudio(file: "a.mp3", volume: 2)', "TSV036", "2"],
+    ['playAudio async "a.mp3" {\n  finish {\n  }\n  finish {\n  }\n}', "TSV036", "finish", "}\n  "],
+    ['playAudio async repeat "a.mp3" {\n  finish {\n  }\n}', "TSV036", "finish"],
+    ['playAudio async "a.mp3" {\n  at -1 s {\n  }\n}', "TSV036", "-1 s"],
+    ['playAudio async "a.mp3" {\n  say "x"\n  at 1 s {\n  }\n}', "TSP035", "at"],
+    ['playAudio(file: "a.mp3", loop: true)', "TSP035", "loop"],
+    ['playAudio(file: "a.mp3", file: "b.mp3")', "TSP035", "file", '", '],
+    ['let yes = true\nplayAudio(file: "a.mp3", async: yes)', "TSP035", "yes", "async: "],
+    ['playAudio("a.mp3")', "TSP035", '"a.mp3"'],
+    ["playAudio(async: true)", "TSP035", "(async: true)"],
+    ["hideImage()", "TSP035", "("],
+    ['showImage("a.jpg")', "TSP035", "("],
+    ["showImage 3", "TSV036", "3"],
+    ['let m = playAudio async "a.mp3"\nm.loop = true', "TSV037", "loop"],
+    ['let m = playAudio async "a.mp3"\nsay "${m.played}"', "TSV037", "played"],
+    ['let m = playAudio async "a.mp3"\nm.rewind()', "TSV037", "rewind"],
+    ['let m = playAudio async "a.mp3"\nm.stop(1)', "TSV037", "stop"],
+    ['let m = playAudio async "a.mp3"\nm.volume = 1.5', "TSV037", "volume"],
+    ['let m = playAudio async "a.mp3"\nm.position = "start"', "TSV037", "position"],
+    ['let m = playAudio async "a.mp3"\nm.remaining = 10', "TSV037", "remaining"],
+    ['playAudio async "a.mp3" {\n  return 1\n}', "TSV033", "1"],
   ];
-  for (const [source, code, fragment] of cases) assertRejected(source, code, fragment);
+  for (const [source, code, text, before] of cases) assertRejectedAt(source, code, text, before);
 });
 
 test("statement-level media handle operations get a receiver barrier; reads do not", () => {
@@ -271,7 +246,7 @@ test("statement-level media handle operations get a receiver barrier; reads do n
 
 test("cue detection needs a complete position and block; indexed and called uses stay ordinary", () => {
   plan(["let at = [0]", 'playAudio async "a.mp3" {', "  at[0] = 1", "}"].join("\n"));
-  assertRejected('playAudio async "a.mp3" {\n  at 1 s\n}', "TSP001", "Expected a supported");
+  assertRejectedAt('playAudio async "a.mp3" {\n  at 1 s\n}', "TSP001", "at");
   plan(
     [
       "function at(x) {",
@@ -299,7 +274,7 @@ test("cue positions may start with an object literal and continue like other exp
   );
   // A leading `{` belongs to an object-literal position; with no block after it, `at` starts an
   // ordinary statement, which is unsupported here.
-  assertRejectedAt('playAudio "a" {\n  at { say "x" }\n}', "TSP001", "{\n  ", "at");
+  assertRejectedAt('playAudio "a" {\n  at { say "x" }\n}', "TSP001", "at");
   assert.deepEqual(offsets('playAudio "a" {\n  at askNumber """${\n    1\n  }""" { }\n}'), ["at"]);
   assert.deepEqual(
     offsets(
@@ -308,13 +283,13 @@ test("cue positions may start with an object literal and continue like other exp
     ["beforeEnd", "at"],
   );
   // Outside cue positions a block cannot follow choice options.
-  assertRejectedAt('let x = choose 1: "One" {\n}', "TSP031", '"One" ', "{");
+  assertRejectedAt('let x = choose 1: "One" {\n}', "TSP031", "{");
   // A block inside a cue position parses like any other block, with the same error.
   assertRejectedAt(
     'function point(x) {\n  return 1\n}\nplayAudio "a" {\n  at point(timer async 1 {\n    repeat choose 1: "Once", 2: "Twice" { }\n  }) { }\n}',
     "TSP031",
-    '"Twice" ',
     "{",
+    '"Twice" ',
   );
 });
 
@@ -337,14 +312,14 @@ test("media parse errors recover at the end of the line and keep enclosing block
       ["sayStatement", 'say "last"'],
     ],
   );
-  assertRejected('playAudio(file: "a.mp3",)', "TSP012", "Expected an argument after ','");
+  assertRejectedAt('playAudio(file: "a.mp3",)', "TSP012", "", ",");
 });
 
 test("media playback is rejected in function parameter defaults", () => {
-  assertRejected(
+  assertRejectedAt(
     'function f(m = playAudio async "a.mp3") {\n  m.stop()\n}',
     "TSV032",
-    "Media playback is not supported in function parameter defaults",
+    'playAudio async "a.mp3"',
   );
 });
 
@@ -376,17 +351,17 @@ test("media nested in cue positions parses each position once", () => {
 });
 
 test("statically evident invalid media values are compile errors", () => {
-  const cases: readonly (readonly [string, string, string])[] = [
-    ["playAudio 3", "TSV036", "media file reference"],
-    ["showImage -1", "TSV036", "image file reference"],
-    ['playAudio(file: "a", endAt: 0 s)', "TSV036", "endAt must be later"],
-    ['let m = playAudio async "a"\nm.position += "x"', "TSV037", "duration"],
-    ['let m = playAudio async "a"\nm.remaining -= true', "TSV037", "duration"],
-    ['let m = playAudio async "a"\nm.position += 3', "TSV037", "duration"],
+  const cases: readonly (readonly [string, string, string, string?])[] = [
+    ["playAudio 3", "TSV036", "3"],
+    ["showImage -1", "TSV036", "-1"],
+    ['playAudio(file: "a", endAt: 0 s)', "TSV036", "0 s"],
+    ['let m = playAudio async "a"\nm.position += "x"', "TSV037", "position"],
+    ['let m = playAudio async "a"\nm.remaining -= true', "TSV037", "remaining"],
+    ['let m = playAudio async "a"\nm.position += 3', "TSV037", "position"],
     ['let m = playAudio async "a"\nm.volume += 1 s', "TSV037", "volume"],
-    ['playAudio(file: "a", repeat: 9007199254740992 times)', "TSV036", "at least 1"],
+    ['playAudio(file: "a", repeat: 9007199254740992 times)', "TSV036", "9007199254740992"],
   ];
-  for (const [source, code, fragment] of cases) assertRejected(source, code, fragment);
+  for (const [source, code, text, before] of cases) assertRejectedAt(source, code, text, before);
   plan('let m = playAudio async "a"\nm.volume += 0.5\nm.volume -= 2');
 });
 
