@@ -139,6 +139,18 @@ function validMediaRecord(
     );
   }
   if (media.positionMs < media.startAtMs || media.positionMs > end) return false;
+  // Total playback includes the current segment's committed playback.
+  if (media.elapsedMs < media.committedProgressMs) return false;
+  // The first retained sample precedes current scene time, unless it is the anchor of a segment that a load report
+  // started while catch-up was held.
+  const head = points[0];
+  if (
+    head !== undefined &&
+    typeof snapshot.currentSessionTimeMs === "number" &&
+    head.atMs > snapshot.currentSessionTimeMs &&
+    (head.progressMs !== 0 || media.committedProgressMs !== 0)
+  )
+    return false;
   const reportedProgress = points.at(-1)?.progressMs ?? 0;
   const segmentStart = points.length === 1 && points[0]!.progressMs === 0;
   switch (media.state) {

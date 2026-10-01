@@ -218,7 +218,7 @@ test("cues fire on every natural pass; the compact block is a per-pass end; fini
   assert.deepEqual(compact.said(), ["again", "again", "again"]);
 });
 
-test("stop() and Stage replacement never run finish and drop queued cue blocks", () => {
+test("stop() never runs finish; stopping again is silent and other controls warn", () => {
   const session = new Session(
     [
       'let music = playAudio async "music.mp3" {',
@@ -454,7 +454,7 @@ test("main-story media waits for message pacing, but not inside interrupt blocks
   assert.equal(interrupt.snapshot.stageImage, "images/now.jpg");
 });
 
-test("the projection tells a Player where to play after load, a seek, and restore", () => {
+test("the projection reports load state, playhead, and terminal progress of repeated media", () => {
   const session = new Session(
     'let m = playAudio(file: "a.mp3", async: true, repeat: 3 times, startAt: 1 s)\nwait 10\nm.position = 2 s\nwait 10',
   );
@@ -737,4 +737,164 @@ test("pausing media exactly where its repeat duration runs out still finishes it
   session.load(1, 1_000).load(2, 1_000).at(1_000, [1, 1_000], [2, 1_000]);
   assert.equal(session.media(2)?.state, "finished");
   assert.deepEqual(session.said(), ["b finished 500 ms"]);
+});
+
+test("cues at one point run in source order, also when written differently, before finish", () => {
+  const session = new Session(
+    [
+      'playAudio "a.mp3" {',
+      "  beforeEnd 1500 ms {",
+      '    say "first"',
+      "  }",
+      "  at 500 ms {",
+      '    say "second"',
+      "  }",
+      "  finish {",
+      '    say "finish"',
+      "  }",
+      "}",
+    ].join("\n"),
+  );
+  session.load(1, 2_000).at(2_000, [1, 2_000]);
+  assert.deepEqual(session.said(), ["first", "second", "finish"]);
+});
+
+test("malformed media reports are rejected atomically without changing state or input", () => {
+  const compiled = plan('let m = playAudio async "a.mp3"\nwait 10');
+  let snapshot = run(compiled, createImmediatePacingRuntimeSnapshot(compiled)).snapshot;
+  snapshot = reportMediaLoad(compiled, snapshot, 1, { kind: "loaded", durationMs: 5_000 }).snapshot;
+  snapshot = run(compiled, snapshot).snapshot;
+  const before = structuredClone(snapshot);
+  const valid = { mediaId: 1, segment: 1, progressMs: 500 };
+  for (const reports of [
+    [{ mediaId: 1, segment: 1, progressMs: -1 }],
+    [{ mediaId: 1, segment: 1 }],
+    [valid, { mediaId: 0, segment: 1, progressMs: 500 }],
+    [{ mediaId: 1, segment: -1, progressMs: 500 }, valid],
+    "not a list",
+  ]) {
+    const input = structuredClone(reports);
+    const result = observeTime(compiled, snapshot, 1_000, reports);
+    assert.equal(result.outcome.kind, "invalidObservation", JSON.stringify(reports));
+    assert.deepEqual(result.events, []);
+    assert.deepEqual(result.snapshot, before);
+    assert.deepEqual(reports, input, "caller input stays unchanged");
+  }
+  for (const report of [
+    { kind: "loaded", durationMs: -1 },
+    { kind: "loaded" },
+    { kind: "paused" },
+    null,
+  ]) {
+    const result = reportMediaLoad(compiled, snapshot, 1, report);
+    assert.equal(result.outcome.kind, "invalidReport", JSON.stringify(report));
+    assert.deepEqual(result.events, []);
+    assert.deepEqual(result.snapshot, before);
+  }
+  assert.equal(
+    reportMediaLoad(compiled, snapshot, 2, { kind: "failed" }).outcome.kind,
+    "unknownMedia",
+  );
+  assert.equal(
+    reportMediaLoad(compiled, snapshot, 1, { kind: "loaded", durationMs: 1 }).outcome.kind,
+    "ignored",
+  );
+});
+
+test("restore validation rejects a queued cue owned by another media", () => {
+  const session = new Session(
+    [
+      'let a = playAudio async "a.mp3" {',
+      "  at 500 ms {",
+      '    say "a"',
+      "  }",
+      "}",
+      'let b = playAudio async "b.mp3"',
+      "timer async 0 s {",
+      '  say "hold"',
+      "  wait 5",
+      "}",
+      "wait 10",
+    ].join("\n"),
+  );
+  session.load(1, 1_000).load(2, 1_000).at(1_000, [1, 1_000], [2, 1_000]);
+  const queued = session.snapshot.pendingTimerHandlers.find((entry) => "mediaId" in entry);
+  assert.ok(queued !== undefined, "a cue block waits behind the running timer block");
+  assert.equal(validateRuntimeSnapshot(session.snapshot, session.plan).valid, true);
+  // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; the case moves one cue owner.
+  const corrupted = JSON.parse(JSON.stringify(session.snapshot)) as MutableSnapshot;
+  const entry = corrupted.pendingTimerHandlers.find((candidate) => "mediaId" in candidate)!;
+  entry.mediaId = 2;
+  assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false);
+});
+
+test("root completion keeps the terminal instruction's span however late the media is observed", () => {
+  const source =
+    'let m = playAudio async "m.mp3" {\n  at 100 ms {\n    say "cue"\n  }\n}\nwait 1 s';
+  const completion = (session: Session) => {
+    const event = session.events.find((candidate) => candidate.kind === "complete");
+    assert.ok(event !== undefined);
+    return event.span;
+  };
+  const fine = new Session(source).load(1, 1_000).at(100, [1, 100]).at(1_000, [1, 1_000]);
+  const late = new Session(source).load(1, 1_000).at(1_000, [1, 1_000]);
+  assert.deepEqual(completion(late), completion(fine));
+});
+
+test("stop() cancels a cue block that is queued and not yet started", () => {
+  const session = new Session(
+    [
+      'let m = playAudio async "m.mp3" {',
+      "  at 500 ms {",
+      '    say "never"',
+      "  }",
+      "}",
+      "timer async 400 ms {",
+      "  wait 200 ms",
+      "  m.stop()",
+      '  say "stopped"',
+      "}",
+      "wait 2",
+    ].join("\n"),
+  );
+  // The timer block waits from 400 ms to 600 ms; the cue at 500 ms queues behind it and is dropped by stop().
+  session.load(1, 1_000).at(1_000, [1, 1_000]);
+  assert.deepEqual(session.said(), ["stopped"]);
+  assert.equal(session.snapshot.pendingTimerHandlers.length, 0);
+});
+
+test("restore validation keeps elapsed and sample history coherent with scene time", () => {
+  const compiled = plan(
+    'let m = playAudio async "m.mp3" {\n  at 500 ms {\n    say "cue"\n  }\n}\nwait 10',
+  );
+  let snapshot = run(compiled, createImmediatePacingRuntimeSnapshot(compiled)).snapshot;
+  snapshot = reportMediaLoad(compiled, snapshot, 1, { kind: "loaded", durationMs: 5_000 }).snapshot;
+  snapshot = run(compiled, snapshot).snapshot;
+  // The cue at 500 ms holds catch-up there while the later sample stays retained.
+  snapshot = observeTime(compiled, snapshot, 1_000, [
+    { mediaId: 1, segment: 1, progressMs: 1_000 },
+  ]).snapshot;
+  assert.equal(snapshot.currentSessionTimeMs, 500);
+  assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
+  const corrupt = (mutate: (media: { elapsedMs: number; points: { atMs: number }[] }) => void) => {
+    // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; the case changes one media field.
+    const copy = JSON.parse(JSON.stringify(snapshot)) as {
+      backgroundActions: {
+        kind: string;
+        media?: { elapsedMs: number; points: { atMs: number }[] };
+      }[];
+    };
+    mutate(copy.backgroundActions.find((action) => action.kind === "media")!.media!);
+    return validateRuntimeSnapshot(copy, compiled).valid;
+  };
+  assert.equal(
+    corrupt((media) => (media.elapsedMs = 0)),
+    false,
+    "elapsed below committed progress",
+  );
+  assert.equal(
+    corrupt((media) => (media.points[0]!.atMs = 501)),
+    false,
+    "no retained sample at or before current scene time",
+  );
 });

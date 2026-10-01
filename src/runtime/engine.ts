@@ -216,7 +216,11 @@ function executeInstructionBoundary(
       snapshot.status = "halted";
       const completeEventAndFutureCompletions = requiredEventSequencesForRootCompletion(snapshot);
       assertEventSequenceCapacity(snapshot, completeEventAndFutureCompletions);
-      context.events.push(createCompleteEvent(snapshot, instruction.span));
+      // Root completion belongs to the terminal root instruction, also when a block's return reaches it.
+      const terminalInstruction = plan.instructions[plan.rootEndInstruction - 1];
+      context.events.push(
+        createCompleteEvent(snapshot, terminalInstruction?.span ?? instruction.span),
+      );
     }
   } catch (error) {
     if (!(error instanceof RuntimeFault)) throw error;
