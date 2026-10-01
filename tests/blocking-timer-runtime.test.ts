@@ -243,7 +243,7 @@ test("zero timers are immediate and create no action", () => {
   );
 });
 
-test("unsupported and invalid timer forms fail with structured diagnostics", () => {
+test("unsupported and invalid timer forms, members, and handler scope fail with located diagnostics", () => {
   const cases: ReadonlyArray<readonly [source: string, code: string, subject: string]> = [
     ["timer", "TSP012", ""],
     ["timer(10)", "TSP034", "10"],
@@ -264,6 +264,23 @@ test("unsupported and invalid timer forms fail with structured diagnostics", () 
     ["timer 5..5", "TSV010", "5..5"],
     ["timer 6..=5", "TSV010", "6..=5"],
     ["let timer = 1", "TSV001", "timer"],
+    // Async handle members, handler scope, and repeating-timer rules.
+    ["let t = timer async 5\nsay t.nope", "TSV034", "nope"],
+    ["let t = timer async 5\nt.elapsed = 1 s", "TSV034", "elapsed"],
+    ["let t = timer async 5\nt.restart()", "TSV034", "restart"],
+    ['function f {\n  let local = 1\n  timer async 1 { say "${local}" }\n}', "TSV002", "local"],
+    ["timer async 1 { return 5 }", "TSV033", "5"],
+    [
+      "timer(duration: 1, async: true, repeat: true)\ntimer(duration: 0, async: true, repeat: true)",
+      "TSV011",
+      "0",
+    ],
+    ["timer(duration: 1, display: 5)", "TSV033", "5"],
+    ["let t = timer async 5\n(t).bogus()", "TSV034", "bogus"],
+    ["let t = timer async 5\nt.remaining = 1", "TSV034", "remaining"],
+    ["let t = timer async 5\nt.display = 1", "TSV034", "display"],
+    ["let t = timer async 5\nt.pause(1)", "TSV034", "pause"],
+    ["timer(duration: 0..2, async: true, repeat: true)", "TSV010", "0..2"],
   ];
   for (const [source, code, subject] of cases) {
     const found = diagnostics(source);
