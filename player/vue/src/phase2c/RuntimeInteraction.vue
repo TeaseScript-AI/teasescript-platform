@@ -14,6 +14,7 @@ import {
 import Composer from "./Composer.vue";
 import ConversationSurface from "./ConversationSurface.vue";
 import Transcript from "./Transcript.vue";
+import { usePlayerConditions } from "./usePlayerConditions";
 import type {
   PlayerTranscriptEntryPresentation,
   PlayerSpeakerPresentation,
@@ -78,28 +79,35 @@ function focusInput() {
   composer.value?.focusInput();
 }
 
-watch([actionId, () => props.reset], async () => {
-  const active = document.activeElement;
-  const ownedFocus = !!active && !!root.value?.contains(active);
-  const wasEditing = active instanceof HTMLTextAreaElement && !suppressComposerRefocus;
-  suppressComposerRefocus = false;
-  const returnToChoice = restoreChoiceFocus;
-  restoreChoiceFocus = false;
-  const keyboardNavigation = document.documentElement.dataset.playerKeyboardFocus === "true";
-  draft.value = "";
-  clearFeedback();
-  await nextTick();
-  // Completion releases the disabled guard after publishing the session.
-  await nextTick();
-  // Progression may restore composer focus, but must not steal it from Tools/dialogs.
-  if ((ownedFocus || returnToChoice) && foreground.value) {
-    if (wasEditing) focusInput();
-    else if (keyboardNavigation)
-      root.value
-        ?.querySelector<HTMLButtonElement>("[data-foreground-controls] button")
-        ?.focus({ preventScroll: true });
-  }
-});
+const { hoverAvailable } = usePlayerConditions();
+watch(
+  [actionId, () => props.reset],
+  async () => {
+    const active = document.activeElement;
+    const ownedFocus = !!active && !!root.value?.contains(active);
+    // Default composer focus when nothing else owns it; touch-only devices would raise a keyboard.
+    const unownedFocus = (!active || active === document.body) && hoverAvailable.value;
+    const wasEditing = active instanceof HTMLTextAreaElement && !suppressComposerRefocus;
+    suppressComposerRefocus = false;
+    const returnToChoice = restoreChoiceFocus;
+    restoreChoiceFocus = false;
+    const keyboardNavigation = document.documentElement.dataset.playerKeyboardFocus === "true";
+    draft.value = "";
+    clearFeedback();
+    await nextTick();
+    // Completion releases the disabled guard after publishing the session.
+    await nextTick();
+    // Progression may restore composer focus, but must not steal it from Tools/dialogs.
+    if ((ownedFocus || returnToChoice || unownedFocus) && foreground.value) {
+      if (wasEditing || unownedFocus) focusInput();
+      else if (keyboardNavigation)
+        root.value
+          ?.querySelector<HTMLButtonElement>("[data-foreground-controls] button")
+          ?.focus({ preventScroll: true });
+    }
+  },
+  { immediate: true },
+);
 
 async function complete(
   operation: (session: PlayerRuntimeSession) => PlayerRuntimeControlResult | null,

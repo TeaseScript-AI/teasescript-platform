@@ -69,6 +69,11 @@ function preserveEditingFocus(event: PointerEvent): void {
   event.preventDefault();
 }
 
+// Mouse focus moves on mousedown, which pointerdown cancellation does not prevent.
+function keepMouseEditingFocus(event: MouseEvent): void {
+  if (document.activeElement === input.value) event.preventDefault();
+}
+
 function allowSoftwareKeyboard(): void {
   if (!suppressSoftwareKeyboard.value) return;
   suppressSoftwareKeyboard.value = false;
@@ -115,6 +120,7 @@ defineExpose({ focusInput });
           class="composer-send"
           :disabled="disabled || submitting"
           @pointerdown="preserveEditingFocus"
+          @mousedown="keepMouseEditingFocus"
         >
           Send
         </Button>

@@ -2737,6 +2737,38 @@ async function composerNoticeChecks(page) {
   return "PASS single composer notice, outside dismissal, stationary choices, and narrow dark styling";
 }
 
+async function composerMouseFocusChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  await page.goto(`${page.url().split("?")[0]}?feedback-demo=composer`);
+  await page.getByRole("button", { name: "Walk by the water", exact: true }).waitFor();
+  const input = page.locator("[data-runtime-interaction] textarea");
+  const inputFocused = () =>
+    page.evaluate(() => document.activeElement === document.querySelector("[data-composer-input]"));
+  await page
+    .waitForFunction(
+      () => document.activeElement === document.querySelector("[data-composer-input]"),
+      undefined,
+      { timeout: 2000 },
+    )
+    .catch(() => {});
+  check(await inputFocused(), "The composer did not receive default focus");
+  await input.fill("Not an option");
+  await page
+    .locator("[data-runtime-interaction]")
+    .getByRole("button", { name: "Send", exact: true })
+    .click();
+  await page.locator(".composer-notice").waitFor();
+  check(await inputFocused(), "Mouse Send moved editing focus away from the composer");
+  await page.keyboard.type(" again");
+  check(
+    (await input.inputValue()).endsWith(" again"),
+    "Typing after mouse Send did not reach the composer",
+  );
+  return "PASS default composer focus and mouse Send keeps editing focus";
+}
+
 async function composerSendFocusChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -2881,6 +2913,7 @@ const groups = [
   runtimeTranscriptChecks,
   interactionChecks,
   composerNoticeChecks,
+  composerMouseFocusChecks,
   composerSendFocusChecks,
   directDemoLatestChecks,
   timerChecks,
