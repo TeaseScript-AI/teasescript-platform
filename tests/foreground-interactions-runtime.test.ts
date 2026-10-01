@@ -385,7 +385,7 @@ test("numeric interactions reject negative-zero labels and keep canonical zero r
   }
 });
 
-test("duplicate, stale, unknown, wrong-kind, and over-limit completion preserve ADR 0016 classification", () => {
+test("changed duplicate, stale, wrong-kind, and over-limit completion preserve ADR 0016 classification", () => {
   const plan = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
   const planBefore = structuredClone(plan);
   const pending = waiting(plan);
@@ -437,19 +437,17 @@ test("duplicate, stale, unknown, wrong-kind, and over-limit completion preserve 
   assert.equal(duplicate.outcome.kind, "alreadySettled");
   assert.deepEqual(duplicate.outcome.settlement, doneBefore.lastSettlement);
   assertUnchanged(duplicate, done.snapshot, doneBefore, "duplicate");
+  // Unknown and same-payload replay are classified at every handoff boundary in the handoff suite.
   const seeded = createFreshRuntimeSnapshot(plan);
   seeded.nextActionId = 2;
   const laterPending = run(plan, seeded);
+  const laterPendingBefore = structuredClone(laterPending.snapshot);
   const stale = completeAction(plan, laterPending.snapshot, {
     actionId: 1,
     actionKind: "interaction",
   });
   assert.equal(stale.outcome.kind, "staleAction");
-  const unknown = completeAction(plan, done.snapshot, {
-    actionId: done.snapshot.nextActionId,
-    actionKind: "interaction",
-  });
-  assert.equal(unknown.outcome.kind, "unknownAction");
+  assertUnchanged(stale, laterPending.snapshot, laterPendingBefore, "stale");
 });
 
 test("pending interaction survives JSON checkpoint restore with monotonic events and speaker provenance", () => {
