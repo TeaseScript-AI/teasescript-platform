@@ -46,17 +46,27 @@ test("nested source beyond the former parser guard remains valid", () => {
   }
 });
 
-test("deep linear prefix chains compile without native recursion", () => {
+test("deep linear prefix chains compile and evaluate without native recursion", () => {
+  // An even count of `not` or `-` cancels out; an odd count applies once.
   const sources = [
-    ["not", `let value = ${"not ".repeat(10_000)}true\nexit`],
-    ["unary minus", `let value = ${"-".repeat(10_000)}1\nexit`],
-    ["parentheses", `let value = ${"(".repeat(500)}1${")".repeat(500)}\nexit`],
+    ["even not", `let value = ${"not ".repeat(10_000)}true\nexit`, true],
+    ["odd not", `let value = ${"not ".repeat(9_999)}true\nexit`, false],
+    ["even unary minus", `let value = ${"-".repeat(10_000)}1\nexit`, 1],
+    ["odd unary minus", `let value = ${"-".repeat(9_999)}1\nexit`, -1],
+    ["parentheses", `let value = ${"(".repeat(500)}1${")".repeat(500)}\nexit`, 1],
   ] as const;
 
-  for (const [name, source] of sources) {
+  for (const [name, source, expected] of sources) {
     const compiled = compileSource(source);
     assert.deepEqual(compiled.diagnostics, [], name);
     assert.notEqual(compiled.plan, null, name);
+    const result = runValidSource(source);
+    assert.equal(result.snapshot.status, "halted", name);
+    assert.equal(
+      result.snapshot.frames[0]?.bindings.find((binding) => binding.name === "value")?.value,
+      expected,
+      name,
+    );
   }
 });
 
