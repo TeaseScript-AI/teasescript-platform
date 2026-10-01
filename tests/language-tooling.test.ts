@@ -188,3 +188,15 @@ test("multiline choose formatting preserves the following option text", () => {
   const formatted = formatLanguageDocument(createLanguageDocument("file:///main.tease", source));
   assert.equal(formatted.text, 'let result = choose first: "One", second: "Two"');
 });
+
+test("editor tooling handles deeply nested media blocks without native recursion", () => {
+  const depth = 2_500;
+  const source = `${'playAudio async "a" {\n'.repeat(depth)}say "deep"\n${"}\n".repeat(depth)}`;
+  assert.notEqual(compileSource(source).plan, null);
+  const document = createLanguageDocument("file:///main.tease", source);
+  const position = languagePositionAt(document, source.indexOf('say "deep"') + 2);
+  assert.notEqual(formatLanguageDocument(document), null);
+  languageHover(document, position);
+  assert.notEqual(languageSignatureHelp(document, position), null);
+  languageContextHelp(document, position);
+});

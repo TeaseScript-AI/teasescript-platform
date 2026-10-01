@@ -262,6 +262,21 @@ test("cue detection needs a complete position and block; indexed and called uses
   );
 });
 
+test("cue positions may start with an object literal and continue like other expressions", () => {
+  const offsets = (source: string): string[] =>
+    plan(source)
+      .instructions.filter(
+        (instruction): instruction is PlayMediaInstruction => instruction.kind === "playMedia",
+      )
+      .flatMap((instruction) => instruction.cues.map((cue) => cue.kind));
+  assert.deepEqual(offsets('playAudio "a" {\n  at { point: 1 s }.point { }\n}'), ["at"]);
+  assert.deepEqual(
+    offsets('playAudio "a" {\n  at 1 s +\n\n    2 s { }\n  beforeEnd (\n    1 s\n  ) { }\n}'),
+    ["at", "beforeEnd"],
+  );
+  assertRejected('playAudio "a" {\n  at { say "x" }\n}', "TSP", "");
+});
+
 test("media parse errors recover at the end of the line and keep enclosing blocks", () => {
   const result = compileSource(
     'if true { hideImage() }\nsay "next"\nshowImage("a.jpg")\nsay "last"',

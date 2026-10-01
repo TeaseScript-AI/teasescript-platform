@@ -59,6 +59,13 @@ export interface RuntimeMediaSnapshot {
   elapsedMs: number;
   /** Completed passes at the committed progress. */
   passesCompleted: number;
+  /**
+   * Position, completed passes, and total playback where the current segment started. Every segment progress the
+   * timeline waits for is calculated from them by one formula, so it equals the terminal progress given to the Player.
+   */
+  segmentPositionMs: number;
+  segmentPasses: number;
+  segmentElapsedMs: number;
   /** Cues at the current start position fire once playback proceeds from it (after load, seek, or a pass wrap). */
   startCuesPending: boolean;
   /** Samples of the current segment; the first is the segment's anchor or the last sample before current time. */
@@ -138,10 +145,30 @@ function nextCuePointAfter(media: RuntimeMediaSnapshot, from: number): number | 
   return next;
 }
 
-function budgetLeftMs(media: RuntimeMediaSnapshot): number {
+/**
+ * Segment progress at which playback reaches `positionMs` in the pass after `passes` completed ones. Arrivals and the
+ * terminal progress use only this calculation, never accumulated sums, so equal points compare equal exactly.
+ */
+function progressTo(media: RuntimeMediaSnapshot, positionMs: number, passes: number): number {
+  return (
+    (passes - media.segmentPasses) * (mediaEndMs(media) - media.startAtMs) +
+    (positionMs - media.segmentPositionMs)
+  );
+}
+
+/** Segment progress at which a repeat duration is used up; unlimited for other repeat forms. */
+function budgetEndProgressMs(media: RuntimeMediaSnapshot): number {
   return media.repeat.kind === "budget"
-    ? Math.max(0, media.repeat.milliseconds - media.elapsedMs)
+    ? media.repeat.milliseconds - media.segmentElapsedMs
     : Infinity;
+}
+
+/** Total playback at segment progress `progressMs`; a used-up repeat duration is exactly its length. */
+function elapsedAt(media: RuntimeMediaSnapshot, progressMs: number): number {
+  if (media.repeat.kind !== "budget") return media.segmentElapsedMs + progressMs;
+  return progressMs >= budgetEndProgressMs(media)
+    ? media.repeat.milliseconds
+    : Math.min(media.repeat.milliseconds, media.segmentElapsedMs + progressMs);
 }
 
 /** Whether another pass follows the one that just completed (`passesCompleted` already counts it). */
@@ -154,7 +181,7 @@ function anotherPass(media: RuntimeMediaSnapshot): boolean {
     case "count":
       return media.passesCompleted < media.repeat.passes;
     case "budget":
-      return budgetLeftMs(media) > 0;
+      return media.committedProgressMs < budgetEndProgressMs(media);
   }
 }
 
@@ -163,8 +190,11 @@ function nextArrival(media: RuntimeMediaSnapshot): { progressMs: number; positio
   const end = mediaEndMs(media);
   const from = media.positionMs;
   const target = from >= end ? end : (nextCuePointAfter(media, from) ?? end);
-  const progressMs = media.committedProgressMs + (target - from);
-  const budgetEnd = media.committedProgressMs + budgetLeftMs(media);
+  const progressMs = Math.max(
+    media.committedProgressMs,
+    progressTo(media, target, media.passesCompleted),
+  );
+  const budgetEnd = Math.max(media.committedProgressMs, budgetEndProgressMs(media));
   return budgetEnd < progressMs
     ? { progressMs: budgetEnd, positionMs: from + (budgetEnd - media.committedProgressMs) }
     : { progressMs, positionMs: target };
@@ -274,7 +304,7 @@ export function commitMediaEvent(
     media.startCuesPending = false;
     return { cueFunctionIds: cuesAt(media, media.positionMs), finished: false };
   }
-  media.elapsedMs += event.progressMs - media.committedProgressMs;
+  media.elapsedMs = elapsedAt(media, event.progressMs);
   media.committedProgressMs = event.progressMs;
   media.positionMs = event.positionMs;
   const cueFunctionIds = cuesAt(media, media.positionMs);
@@ -285,14 +315,21 @@ export function commitMediaEvent(
       media.startCuesPending = cuesAt(media, media.startAtMs).length > 0;
       return { cueFunctionIds, finished: false };
     }
-    media.state = "finished";
+    finishMedia(media, event);
     return { cueFunctionIds, finished: true };
   }
-  if (budgetLeftMs(media) <= 0) {
-    media.state = "finished";
+  if (media.committedProgressMs >= budgetEndProgressMs(media)) {
+    finishMedia(media, event);
     return { cueFunctionIds, finished: true };
   }
   return { cueFunctionIds, finished: false };
+}
+
+/** Settled media never interpolates again; one sample at the finish replaces the segment's history. */
+function finishMedia(media: RuntimeMediaSnapshot, event: MediaTimelineEvent): void {
+  media.state = "finished";
+  if (event.dueAtMs !== null)
+    media.points = [{ atMs: event.dueAtMs, progressMs: event.progressMs }];
 }
 
 /** Segment progress at scene time `atMs`, never beyond the next uncommitted arrival. */
@@ -308,19 +345,30 @@ function progressBefore(media: RuntimeMediaSnapshot, atMs: number): number {
  */
 function startSegment(media: RuntimeMediaSnapshot, atMs: number): void {
   const progress = progressBefore(media, atMs);
-  // Playback that reached a cue point whose turn has not come yet at this scene time leaves those cues pending.
-  if (
-    progress > media.committedProgressMs &&
-    progress === nextArrival(media).progressMs &&
-    media.positionMs + (progress - media.committedProgressMs) < mediaEndMs(media)
-  ) {
-    media.startCuesPending =
-      cuesAt(media, media.positionMs + (progress - media.committedProgressMs)).length > 0;
+  if (progress > media.committedProgressMs) {
+    const arrival = nextArrival(media);
+    if (progress === arrival.progressMs) {
+      // Playback that reached an arrival whose turn has not come yet at this scene time stands exactly on it; cues
+      // there stay pending.
+      media.positionMs = arrival.positionMs;
+      if (media.positionMs < mediaEndMs(media)) {
+        media.startCuesPending = cuesAt(media, media.positionMs).length > 0;
+      }
+    } else {
+      media.positionMs += progress - media.committedProgressMs;
+    }
+    media.elapsedMs = elapsedAt(media, progress);
   }
-  media.positionMs += progress - media.committedProgressMs;
-  media.elapsedMs += progress - media.committedProgressMs;
+  anchorSegment(media, atMs);
+}
+
+/** Begins a new segment at scene time `atMs` from the current position, passes, and total playback. */
+function anchorSegment(media: RuntimeMediaSnapshot, atMs: number): void {
   media.segment += 1;
   media.committedProgressMs = 0;
+  media.segmentPositionMs = media.positionMs;
+  media.segmentPasses = media.passesCompleted;
+  media.segmentElapsedMs = media.elapsedMs;
   media.points = [{ atMs, progressMs: 0 }];
 }
 
@@ -338,9 +386,7 @@ export function loadMedia(
   }
   media.positionMs = media.startAtMs;
   media.startCuesPending = cuesAt(media, media.startAtMs).length > 0;
-  media.segment += 1;
-  media.committedProgressMs = 0;
-  media.points = [{ atMs, progressMs: 0 }];
+  anchorSegment(media, atMs);
   return null;
 }
 
@@ -407,6 +453,7 @@ export function seekMedia(
   startSegment(media, atMs);
   const end = mediaEndMs(media);
   media.positionMs = Math.min(Math.max(requestedMs, media.startAtMs), end);
+  media.segmentPositionMs = media.positionMs;
   media.startCuesPending = media.positionMs < end && cuesAt(media, media.positionMs).length > 0;
   return null;
 }
@@ -427,16 +474,16 @@ export function mediaProperty(
     kind: "duration",
     milliseconds,
   });
-  const advanced = progressBefore(media, atMs) - media.committedProgressMs;
+  const advanced = (): number => progressBefore(media, atMs) - media.committedProgressMs;
   switch (name) {
     case "position":
-      return duration(media.positionMs + advanced);
+      return duration(media.positionMs + advanced());
     case "elapsed":
-      return duration(media.elapsedMs + advanced);
+      return duration(media.elapsedMs + advanced());
     case "remaining":
       if (!media.loaded) return null;
       return duration(
-        isActiveMedia(media) ? Math.max(0, mediaEndMs(media) - media.positionMs - advanced) : 0,
+        isActiveMedia(media) ? Math.max(0, mediaEndMs(media) - media.positionMs - advanced()) : 0,
       );
     case "duration":
       return media.durationMs === null ? null : duration(media.durationMs);
@@ -456,19 +503,13 @@ export function mediaProperty(
 export function mediaTerminalProgressMs(media: RuntimeMediaSnapshot): number | null {
   if (!media.loaded || !isActiveMedia(media) || media.repeat.kind === "indefinite") return null;
   const end = mediaEndMs(media);
-  const toEnd = end - media.positionMs;
-  const base = media.committedProgressMs;
   switch (media.repeat.kind) {
     case "once":
-      return base + toEnd;
+      return progressTo(media, end, media.passesCompleted);
     case "count":
-      return (
-        base +
-        toEnd +
-        Math.max(0, media.repeat.passes - media.passesCompleted - 1) * (end - media.startAtMs)
-      );
+      return progressTo(media, end, media.repeat.passes - 1);
     case "budget":
-      return base + budgetLeftMs(media);
+      return Math.max(media.committedProgressMs, budgetEndProgressMs(media));
   }
 }
 

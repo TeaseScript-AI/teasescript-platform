@@ -620,8 +620,10 @@ delays, pacing gates, and timers by `(scene time, phase, action ID)`, where depa
 phase 0, and commits one event per step, so queued cue blocks hold catch-up exactly like timer expiry blocks. An
 arrival queues every cue exactly at its point in source order and, at the end of the range, completes the pass
 atomically: the next pass restarts at `startAt` with its start cues pending, or the media finishes and queues `finish`.
-A repeat duration that ends mid-pass queues the cues reached there, then finishes. Committed values advance only by
-event distances, so the same events produce the same values however the Player's samples are spaced. As for timers,
+A repeat duration that ends mid-pass queues the cues reached there, then finishes. Every event's segment progress is
+calculated from the segment's anchor — its start position, completed passes, and total playback — rather than
+accumulated, so the same events produce the same values however the Player's samples are spaced, and the final arrival
+equals `terminalProgressMs` exactly, also for fractional ranges. Finished media keep only the sample at their finish. As for timers,
 cue blocks behave as if every sample had arrived on time, while the main path continues at the observed time and
 settlements outside a running block record the observation.
 

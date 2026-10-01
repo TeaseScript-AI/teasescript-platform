@@ -9,7 +9,7 @@ import type {
   TimerParts,
 } from "./ast.js";
 import { compileSource } from "./compiler.js";
-import { mediaHandlerBlocks, mediaOperands } from "./expression-children.js";
+import { expressionChildren, mediaHandlerBlocks, mediaOperands } from "./expression-children.js";
 import type { Diagnostic } from "./diagnostics.js";
 import { lex } from "./lexer.js";
 import {
@@ -512,156 +512,136 @@ interface Visitor {
   readonly say: (node: SayStatement) => void;
 }
 
+type VisitNode =
+  | { readonly kind: "statement"; readonly node: Statement }
+  | { readonly kind: "expression"; readonly node: Expression };
+
+/** Visits in source pre-order with an explicit work stack, so deeply nested valid source cannot exhaust the call stack. */
 function visitProgram(program: Program, visitor: Visitor): void {
-  for (const statement of program.statements) visitStatement(statement, visitor);
+  const work: VisitNode[] = [];
+  const pushAll = (children: readonly VisitNode[]): void => {
+    for (let index = children.length - 1; index >= 0; index -= 1) work.push(children[index]!);
+  };
+  pushAll(program.statements.map(statementNode));
+  for (let item = work.pop(); item !== undefined; item = work.pop()) {
+    pushAll(
+      item.kind === "statement"
+        ? visitStatement(item.node, visitor)
+        : visitExpression(item.node, visitor),
+    );
+  }
 }
 
-function visitStatement(statement: Statement, visitor: Visitor): void {
+function statementNode(node: Statement): VisitNode {
+  return { kind: "statement", node };
+}
+
+function expressionNode(node: Expression): VisitNode {
+  return { kind: "expression", node };
+}
+
+function blockNodes(statements: readonly Statement[]): VisitNode[] {
+  return statements.map(statementNode);
+}
+
+/** Reports the statement and returns its children in source order. */
+function visitStatement(statement: Statement, visitor: Visitor): readonly VisitNode[] {
   switch (statement.kind) {
     case "showButtonStatement":
       visitor.showButton(statement);
-      visitExpression(statement.label, visitor);
-      return;
-    case "sayStatement":
+      return [expressionNode(statement.label)];
+    case "sayStatement": {
       visitor.say(statement);
-      if (statement.presentation !== null) visitExpression(statement.presentation, visitor);
-      visitExpression(statement.value, visitor);
+      const children: VisitNode[] = [];
+      if (statement.presentation !== null) children.push(expressionNode(statement.presentation));
+      children.push(expressionNode(statement.value));
       if (statement.pacing !== null && statement.pacing !== "instant")
-        visitExpression(statement.pacing, visitor);
-      return;
+        children.push(expressionNode(statement.pacing));
+      return children;
+    }
     case "letStatement":
-      visitExpression(statement.initializer, visitor);
-      return;
+      return [expressionNode(statement.initializer)];
     case "assignmentStatement":
-      visitExpression(statement.target, visitor);
-      visitExpression(statement.value, visitor);
-      return;
+      return [expressionNode(statement.target), expressionNode(statement.value)];
     case "expressionStatement":
-      visitExpression(statement.expression, visitor);
-      return;
+      return [expressionNode(statement.expression)];
     case "speakerDeclaration":
-      for (const property of statement.properties) visitExpression(property.value, visitor);
-      return;
+      return statement.properties.map((property) => expressionNode(property.value));
     case "ifStatement":
-      visitExpression(statement.condition, visitor);
-      for (const child of statement.thenBlock.statements) visitStatement(child, visitor);
-      if (statement.elseBlock?.kind === "block")
-        for (const child of statement.elseBlock.statements) visitStatement(child, visitor);
-      else if (statement.elseBlock !== null) visitStatement(statement.elseBlock, visitor);
-      return;
+      return [
+        expressionNode(statement.condition),
+        ...blockNodes(statement.thenBlock.statements),
+        ...(statement.elseBlock === null
+          ? []
+          : statement.elseBlock.kind === "block"
+            ? blockNodes(statement.elseBlock.statements)
+            : [statementNode(statement.elseBlock)]),
+      ];
     case "repeatStatement":
-      visitExpression(statement.count, visitor);
-      for (const child of statement.body.statements) visitStatement(child, visitor);
-      return;
+      return [expressionNode(statement.count), ...blockNodes(statement.body.statements)];
     case "forStatement":
-      visitExpression(statement.iterable, visitor);
-      for (const child of statement.body.statements) visitStatement(child, visitor);
-      return;
+      return [expressionNode(statement.iterable), ...blockNodes(statement.body.statements)];
     case "whileStatement":
-      visitExpression(statement.condition, visitor);
-      for (const child of statement.body.statements) visitStatement(child, visitor);
-      return;
+      return [expressionNode(statement.condition), ...blockNodes(statement.body.statements)];
     case "functionDeclaration":
-      for (const parameter of statement.parameters)
-        if (parameter.defaultValue !== null) visitExpression(parameter.defaultValue, visitor);
-      for (const child of statement.body.statements) visitStatement(child, visitor);
-      return;
+      return [
+        ...statement.parameters.flatMap((parameter) =>
+          parameter.defaultValue === null ? [] : [expressionNode(parameter.defaultValue)],
+        ),
+        ...blockNodes(statement.body.statements),
+      ];
     case "returnStatement":
-      if (statement.value !== null) visitExpression(statement.value, visitor);
-      return;
+      return statement.value === null ? [] : [expressionNode(statement.value)];
     case "timerStatement":
-      visitTimer(statement, visitor);
-      return;
+      return timerNodes(statement);
     case "playMediaStatement":
-      visitMedia(statement, visitor);
-      return;
+      return mediaNodes(statement);
     case "showImageStatement":
-      visitExpression(statement.image, visitor);
-      return;
+      return [expressionNode(statement.image)];
     case "hideImageStatement":
     case "speakerSetterStatement":
     case "waitStatement":
     case "exitStatement":
     case "breakStatement":
     case "continueStatement":
-      return;
+      return [];
   }
 }
 
-function visitTimer(timer: TimerParts, visitor: Visitor): void {
-  if (typeof timer.display === "object" && timer.display !== null) {
-    visitExpression(timer.display, visitor);
-  }
-  visitExpression(timer.duration, visitor);
-  if (timer.label !== null) visitExpression(timer.label, visitor);
-  for (const child of timer.handler?.statements ?? []) visitStatement(child, visitor);
+function timerNodes(timer: TimerParts): VisitNode[] {
+  return [
+    ...(typeof timer.display === "object" && timer.display !== null
+      ? [expressionNode(timer.display)]
+      : []),
+    expressionNode(timer.duration),
+    ...(timer.label === null ? [] : [expressionNode(timer.label)]),
+    ...blockNodes(timer.handler?.statements ?? []),
+  ];
 }
 
-function visitMedia(parts: MediaParts, visitor: Visitor): void {
-  for (const operand of mediaOperands(parts)) visitExpression(operand, visitor);
-  for (const block of mediaHandlerBlocks(parts))
-    for (const child of block.statements) visitStatement(child, visitor);
+function mediaNodes(parts: MediaParts): VisitNode[] {
+  return [
+    ...mediaOperands(parts).map(expressionNode),
+    ...mediaHandlerBlocks(parts).flatMap((block) => blockNodes(block.statements)),
+  ];
 }
 
-function visitExpression(expression: Expression, visitor: Visitor): void {
+/** Reports the expression and returns its children in source order. */
+function visitExpression(expression: Expression, visitor: Visitor): readonly VisitNode[] {
   switch (expression.kind) {
     case "interactionExpression":
       visitor.interaction(expression);
-      if (expression.hint !== null) visitExpression(expression.hint, visitor);
-      for (const option of expression.options) visitExpression(option.value, visitor);
-      return;
-    case "parenthesizedExpression":
-      visitExpression(expression.expression, visitor);
-      return;
-    case "listLiteral":
-      for (const item of expression.elements) visitExpression(item, visitor);
-      return;
-    case "setLiteral":
-      for (const item of expression.elements) visitExpression(item, visitor);
-      return;
-    case "objectLiteral":
-      for (const property of expression.properties) visitExpression(property.value, visitor);
-      return;
-    case "propertyAccessExpression":
-      visitExpression(expression.object, visitor);
-      return;
-    case "indexExpression":
-      visitExpression(expression.object, visitor);
-      visitExpression(expression.index, visitor);
-      return;
-    case "callExpression":
-      visitExpression(expression.callee, visitor);
-      for (const argument of expression.arguments) visitExpression(argument.value, visitor);
-      return;
-    case "unaryExpression":
-      visitExpression(expression.operand, visitor);
-      return;
-    case "binaryExpression":
-      visitExpression(expression.left, visitor);
-      visitExpression(expression.right, visitor);
-      return;
-    case "rangeExpression":
-      visitExpression(expression.start, visitor);
-      visitExpression(expression.end, visitor);
-      return;
-    case "stringLiteral":
-      for (const part of expression.parts)
-        if (part.kind === "stringInterpolation") visitExpression(part.expression, visitor);
-      return;
+      return [
+        ...(expression.hint === null ? [] : [expressionNode(expression.hint)]),
+        ...expression.options.map((option) => expressionNode(option.value)),
+      ];
     case "timerExpression":
-      visitTimer(expression, visitor);
-      return;
+      return timerNodes(expression);
     case "playMediaExpression":
-      visitMedia(expression, visitor);
-      return;
-    case "identifier":
-    case "booleanLiteral":
-    case "nullLiteral":
-    case "numberLiteral":
-    case "durationLiteral":
-      return;
+      return mediaNodes(expression);
+    default:
+      return expressionChildren(expression).map(expressionNode);
   }
-  expression satisfies never;
 }
 
 interface OffsetEdit {

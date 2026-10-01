@@ -1047,10 +1047,11 @@ class Parser {
   }
 
   /**
-   * `at` and `beforeEnd` followed by a cue position and `{` on the same line, and `finish` followed by `{`, start a cue
-   * declaration. A call or index written directly after the word, and lines without a top-level `{` or with a
-   * top-level assignment, such as `at (1)` or `beforeEnd [1] = 2`, stay ordinary statements. The scan is linear in the
-   * line and never reparses a cue position.
+   * `at` and `beforeEnd` followed by a cue position and `{`, and `finish` followed by `{`, start a cue declaration. The
+   * position may continue across lines like any expression, and a leading `{` belongs to an object-literal position. A
+   * call or index written directly after the word, and logical lines without a top-level `{` or with a top-level
+   * assignment, such as `at (1)` or `beforeEnd [1] = 2`, stay ordinary statements. The scan is linear in the line and
+   * never reparses a cue position.
    */
   #isMediaCueStart(): boolean {
     const token = this.#peek();
@@ -1058,18 +1059,21 @@ class Parser {
     const next = this.#peek(1);
     if (token.lexeme === "finish") return next.kind === TokenKind.LeftBrace;
     if (token.lexeme !== "at" && token.lexeme !== "beforeEnd") return false;
-    if (next.kind === TokenKind.LeftBrace || !isExpressionStart(next)) return false;
+    if (!isExpressionStart(next)) return false;
     if (
       next.span.start.offset === token.span.end.offset &&
       (next.kind === TokenKind.LeftParenthesis || next.kind === TokenKind.LeftBracket)
     )
       return false;
     let depth = 0;
+    let previous: TokenKind = token.kind;
     for (let index = this.#current + 1; index < this.tokens.length; index += 1) {
       const kind = this.tokens[index]!.kind;
       if (kind === TokenKind.EndOfFile) return false;
+      if (kind === TokenKind.Newline && continuesExpression(previous)) continue;
+      previous = kind;
       if (depth === 0) {
-        if (kind === TokenKind.LeftBrace) return true;
+        if (kind === TokenKind.LeftBrace && index > this.#current + 1) return true;
         if (
           kind === TokenKind.Newline ||
           kind === TokenKind.RightBrace ||
@@ -2658,6 +2662,23 @@ function isAssignmentTarget(expression: Expression): expression is AssignmentTar
     expression.kind === "identifier" ||
     expression.kind === "propertyAccessExpression" ||
     expression.kind === "indexExpression"
+  );
+}
+
+/** Operators after which the expression parser skips newlines. */
+function continuesExpression(kind: TokenKind): boolean {
+  return (
+    isComparisonKind(kind) ||
+    kind === TokenKind.KeywordOr ||
+    kind === TokenKind.KeywordAnd ||
+    kind === TokenKind.KeywordNot ||
+    kind === TokenKind.RangeExclusive ||
+    kind === TokenKind.RangeInclusive ||
+    kind === TokenKind.Plus ||
+    kind === TokenKind.Minus ||
+    kind === TokenKind.Star ||
+    kind === TokenKind.Slash ||
+    kind === TokenKind.Percent
   );
 }
 

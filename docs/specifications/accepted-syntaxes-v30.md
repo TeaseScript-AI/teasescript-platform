@@ -1749,7 +1749,8 @@ playAudio async repeat "music/beat.mp3" {
 
 - A block after a play command holds either ordinary statements or cue declarations. An ordinary block runs at the end
   of every pass, like `beforeEnd 0 s`; it is not `finish`. `at`, `beforeEnd`, and `finish` are cue words only at the top
-  level of such a block.
+  level of such a block. A cue position is an ordinary expression and may continue across lines as described in
+  [Statement termination](#1-statement-termination); its `{` follows the position on the same logical line.
 - `at <position>` is an absolute position in the source; `beforeEnd <offset>` is measured back from the effective end.
   Both run on every natural passage through their point, including repeated passes. A cue outside the active range never
   runs and reports developer warning `TSW012`.

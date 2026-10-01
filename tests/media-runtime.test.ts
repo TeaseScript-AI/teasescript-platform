@@ -898,3 +898,35 @@ test("restore validation keeps elapsed and sample history coherent with scene ti
     "no retained sample at or before current scene time",
   );
 });
+
+test("reporting the projected terminal progress ends fractional ranges, also after a pause or seek", () => {
+  const terminal = (session: Session): number => {
+    const [media] = mediaPlaybackProjection(session.snapshot);
+    assert.notEqual(media?.terminalProgressMs, null);
+    return media!.terminalProgressMs!;
+  };
+  for (const endAt of ["0.1 ms", "10.1 ms", "1000.1 ms"]) {
+    for (const repeat of ["3 times", "10 times", "100 times", "1000.3 ms"]) {
+      const session = new Session(
+        `playAudio(file: "a", repeat: ${repeat}, endAt: ${endAt})\nsay "done"`,
+      );
+      session.load(1, 5_000);
+      session.at(1, [1, terminal(session)]);
+      assert.deepEqual(session.said(), ["done"], `${endAt} ${repeat}`);
+      assert.equal(session.media(1)?.points.length, 1, "settled media keeps one sample");
+    }
+    const controlled = new Session(
+      [
+        `let m = playAudio(file: "a", async: true, repeat: 7 times, endAt: ${endAt})`,
+        "wait 1",
+        "m.pause()",
+        "m.resume()",
+        "m.position = 0.05 ms",
+        "wait 1000000",
+      ].join("\n"),
+    );
+    controlled.load(1, 5_000).at(1_000, [1, 0.25]);
+    controlled.at(2_000, [1, terminal(controlled)]);
+    assert.equal(controlled.media(1)?.state, "finished", endAt);
+  }
+});

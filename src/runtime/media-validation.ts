@@ -21,6 +21,9 @@ const MEDIA_KEYS = [
   "positionMs",
   "elapsedMs",
   "passesCompleted",
+  "segmentPositionMs",
+  "segmentPasses",
+  "segmentElapsedMs",
   "startCuesPending",
   "points",
 ] as const;
@@ -103,6 +106,9 @@ function validMediaRecord(
     !validMilliseconds(media.positionMs) ||
     !validMilliseconds(media.elapsedMs) ||
     !nonNegativeSafeInteger(media.passesCompleted) ||
+    !validMilliseconds(media.segmentPositionMs) ||
+    !nonNegativeSafeInteger(media.segmentPasses) ||
+    !validMilliseconds(media.segmentElapsedMs) ||
     typeof media.startCuesPending !== "boolean" ||
     !validPoints(media.points, snapshot.observedSessionTimeMs)
   ) {
@@ -110,6 +116,10 @@ function validMediaRecord(
   }
   const points = media.points;
   if (!isPointList(points)) return false;
+  const unanchored =
+    media.segmentPositionMs === media.startAtMs &&
+    media.segmentPasses === 0 &&
+    media.segmentElapsedMs === 0;
   if (!media.loaded) {
     // Only an unloaded source can report no duration; it never started a segment.
     return (
@@ -121,6 +131,7 @@ function validMediaRecord(
       media.passesCompleted === 0 &&
       !media.startCuesPending &&
       media.positionMs === media.startAtMs &&
+      unanchored &&
       (active ? media.state === "running" : media.state === "stopped")
     );
   }
@@ -135,12 +146,24 @@ function validMediaRecord(
       points.length === 0 &&
       media.positionMs === media.startAtMs &&
       media.committedProgressMs === 0 &&
-      media.elapsedMs === 0
+      media.elapsedMs === 0 &&
+      unanchored
     );
   }
-  if (media.positionMs < media.startAtMs || media.positionMs > end) return false;
-  // Total playback includes the current segment's committed playback.
-  if (media.elapsedMs < media.committedProgressMs) return false;
+  if (
+    media.positionMs < media.startAtMs ||
+    media.positionMs > end ||
+    media.segmentPositionMs < media.startAtMs ||
+    media.segmentPositionMs > end ||
+    media.segmentPasses > media.passesCompleted ||
+    media.elapsedMs !== elapsedAtCommitted(media, media.segmentElapsedMs, media.committedProgressMs)
+  )
+    return false;
+  // A stop starts a final segment at the stop position.
+  const atAnchor =
+    media.segmentPositionMs === media.positionMs &&
+    media.segmentPasses === media.passesCompleted &&
+    media.segmentElapsedMs === media.elapsedMs;
   // The first retained sample precedes current scene time, unless it is the anchor of a segment that a load report
   // started while catch-up was held.
   const head = points[0];
@@ -178,11 +201,29 @@ function validMediaRecord(
         reachedRepeatLimit(media)
       );
     case "stopped":
-      // Stopping starts a final empty segment at the stop position.
-      return !active && media.segment >= 1 && segmentStart && media.committedProgressMs === 0;
+      return (
+        !active && media.segment >= 1 && segmentStart && atAnchor && media.committedProgressMs === 0
+      );
     default:
       return false;
   }
+}
+
+/**
+ * Total playback at the committed segment progress, calculated as the runtime does: a used-up repeat duration is
+ * exactly its length.
+ */
+function elapsedAtCommitted(
+  media: Record<string, unknown>,
+  segmentElapsedMs: number,
+  committedProgressMs: number,
+): number {
+  const repeat = media.repeat;
+  if (!isPlainRecord(repeat) || repeat.kind !== "budget" || typeof repeat.milliseconds !== "number")
+    return segmentElapsedMs + committedProgressMs;
+  return committedProgressMs >= repeat.milliseconds - segmentElapsedMs
+    ? repeat.milliseconds
+    : Math.min(repeat.milliseconds, segmentElapsedMs + committedProgressMs);
 }
 
 /** Finished media ended naturally: after its only or last counted pass, or when its duration budget ran out. */
