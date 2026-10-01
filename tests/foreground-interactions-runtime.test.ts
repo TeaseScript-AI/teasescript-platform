@@ -668,43 +668,57 @@ test("planless pending result interactions require positive destination temporar
   assert.equal(validateRuntimeSnapshot(hostileButton).valid, false);
 });
 
-test("planless interaction settlements enforce intrinsic transcript and result semantics", () => {
+test("consumed interaction settlements enforce intrinsic text and number semantics", () => {
   const textPlan = interactionPlan("text", {
     kind: "text",
     hint: null,
     accessibleName: defaults.text,
+  });
+  const numberPlan = interactionPlan("number", {
+    kind: "number",
+    hint: null,
+    accessibleName: defaults.number,
   });
   const text = completeAndConsume(
     textPlan,
     { kind: "submittedText", submittedText: "answer" },
     "text",
   );
-  assert.equal(validateRuntimeSnapshot(JSON.parse(JSON.stringify(text))).valid, true);
-  const wrongText: any = structuredClone(text); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture makes the retained text result disagree with the canonical transcript.
-  wrongText.lastSettlement.result = "different";
-  assert.equal(validateRuntimeSnapshot(wrongText).valid, false);
-
-  const numberPlan = interactionPlan("number", {
-    kind: "number",
-    hint: null,
-    accessibleName: defaults.number,
-  });
   const number = completeAndConsume(
     numberPlan,
     { kind: "submittedText", submittedText: "1e1" },
     "number",
   );
+  assert.equal(validateRuntimeSnapshot(JSON.parse(JSON.stringify(text))).valid, true);
   assert.equal(validateRuntimeSnapshot(JSON.parse(JSON.stringify(number))).valid, true);
-  for (const [name, result, transcript] of [
-    ["non-numeric transcript", 10, "nonsense"],
-    ["line-separator transcript", 10, "1\u2028"],
-    ["result differs from parsed transcript", 11, "1e1"],
-    ["negative-zero result", -0, "-0"],
+  // Each row changes only the retained settlement after the handoff and destination are gone.
+  for (const [name, plan, consumed, result, transcript] of [
+    ["text result differs from transcript", textPlan, text, "different", "answer"],
+    ["empty text", textPlan, text, "", ""],
+    ["whitespace-only text", textPlan, text, " \t\n", " \t\n"],
+    ["leading CR text", textPlan, text, "\rvalue", "\rvalue"],
+    ["CRLF text", textPlan, text, "value\r\n", "value\r\n"],
+    ["non-numeric transcript", numberPlan, number, 10, "nonsense"],
+    ["line-separator transcript", numberPlan, number, 10, "1\u2028"],
+    ["result differs from parsed transcript", numberPlan, number, 11, "1e1"],
+    ["negative-zero result", numberPlan, number, -0, "-0"],
   ] as const) {
-    const hostile: any = structuredClone(number); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture corrupts a numeric settlement result and transcript with the supplied invalid pair.
-    hostile.lastSettlement.result = result;
-    hostile.lastSettlement.transcriptText = transcript;
+    const hostile = structuredClone(consumed);
+    assert.ok(hostile.lastSettlement?.actionKind === "interaction", name);
+    // EVIDENCE: fixture replaces only the retained result and transcript with the candidate pair.
+    const hostileSettlement = hostile.lastSettlement as {
+      result: string | number | null;
+      transcriptText: string | null;
+    };
+    hostileSettlement.result = result;
+    hostileSettlement.transcriptText = transcript;
     assert.equal(validateRuntimeSnapshot(hostile).valid, false, name);
+    assert.equal(validateRuntimeSnapshot(hostile, plan).valid, false, name);
+    assert.throws(
+      () => restoreCheckpoint({ ...createCheckpoint(plan, consumed), snapshot: hostile }),
+      name,
+    );
+    assert.throws(() => run(plan, hostile), name);
   }
 });
 
@@ -1369,33 +1383,6 @@ test("one multibyte per-string failure stops all later interaction UTF-8 measure
     return finish();
   });
   assert.equal(snapshotStats.counts.interactionUtf8Measurements, 1);
-});
-
-test("completed text settlements retain only canonical non-whitespace LF text", () => {
-  const plan = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
-  const completed = completeAndConsume(
-    plan,
-    { kind: "submittedText", submittedText: "value" },
-    "text",
-  );
-  for (const text of ["", " \t\n", "\rvalue", "value\r\n"]) {
-    const hostile = structuredClone(completed);
-    assert.ok(hostile.lastSettlement?.actionKind === "interaction");
-    // EVIDENCE: fixture replaces only the retained text result and transcript with the candidate malformed text.
-    const hostileSettlement = hostile.lastSettlement as {
-      result: string | number | null;
-      transcriptText: string | null;
-    };
-    hostileSettlement.result = text;
-    hostileSettlement.transcriptText = text;
-    assert.equal(validateRuntimeSnapshot(hostile).valid, false, JSON.stringify(text));
-    assert.equal(validateRuntimeSnapshot(hostile, plan).valid, false, JSON.stringify(text));
-    assert.throws(
-      () => restoreCheckpoint({ ...createCheckpoint(plan, completed), snapshot: hostile }),
-      JSON.stringify(text),
-    );
-    assert.throws(() => run(plan, hostile), JSON.stringify(text));
-  }
 });
 
 test("pending actions reserve their complete event sequence capacity", () => {
