@@ -14,6 +14,19 @@ const SOURCE_STATEMENT_KINDS = new Set([
   "tryCatch",
   "unsupportedStatement",
 ]);
+const WRAPPER_DIAGNOSTIC_CODES = new Set([
+  "SX_SAVE_ARGUMENT",
+  "SX_UNSUPPORTED_ARGUMENT",
+  "SX_UNSUPPORTED_ASSIGNMENT_VALUE",
+  "SX_UNSUPPORTED_CALL",
+  "SX_UNSUPPORTED_DECLARATION_VALUE",
+  "SX_UNSUPPORTED_EXPRESSION_STATEMENT",
+  "SX_UNSUPPORTED_FOR",
+  "SX_UNSUPPORTED_FUNCTION_RETURN",
+  "SX_UNSUPPORTED_IF",
+  "SX_UNSUPPORTED_WHILE",
+]);
+
 
 export interface FeasibilityFileReport {
   sourceName: string;
@@ -108,11 +121,15 @@ export function rootDiagnostics(diagnostics: MigrationDiagnostic[]): MigrationDi
       continue;
     }
     const key = spanKey(diagnostic.span);
-    if (!exact.has(key)) exact.set(key, diagnostic);
+    const current = exact.get(key);
+    if (current === undefined || (isWrapper(current) && !isWrapper(diagnostic))) {
+      exact.set(key, diagnostic);
+    }
   }
 
   const located = [...exact.values()];
   const roots = located.filter((candidate) => {
+    if (!isWrapper(candidate)) return true;
     const candidateSpan = candidate.span;
     if (candidateSpan == null) return true;
     return !located.some((other) =>
@@ -120,6 +137,10 @@ export function rootDiagnostics(diagnostics: MigrationDiagnostic[]): MigrationDi
     );
   });
   return [...withoutSpan, ...roots];
+}
+
+function isWrapper(diagnostic: MigrationDiagnostic): boolean {
+  return WRAPPER_DIAGNOSTIC_CODES.has(diagnostic.code);
 }
 
 function countIrStatements(statements: IrStatement[]): { total: number; unsupported: number } {

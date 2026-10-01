@@ -10,8 +10,8 @@ const parent: SourceSpan = { line: 2, column: 1, endLine: 4, endColumn: 2 };
 test("keeps the innermost diagnostic and removes wrapper cascades", () => {
   const diagnostics: MigrationDiagnostic[] = [
     { code: "SX_ROOT", severity: "error", message: "root", span: child },
-    { code: "SX_WRAPPER", severity: "error", message: "wrapper", span: parent },
-    { code: "SX_DUPLICATE_WRAPPER", severity: "error", message: "duplicate", span: parent },
+    { code: "SX_UNSUPPORTED_IF", severity: "error", message: "wrapper", span: parent },
+    { code: "SX_UNSUPPORTED_WHILE", severity: "error", message: "duplicate wrapper", span: parent },
   ];
 
   assert.deepEqual(rootDiagnostics(diagnostics), [diagnostics[0]]);
@@ -61,4 +61,23 @@ test("reports source and IR counts separately instead of inventing a conversion 
   assert.equal(report.rootMigrationErrors, 1);
   assert.deepEqual(report.rootDiagnosticsByCode, { SX_STORAGE_MISSING_KEY_SEMANTICS: 1 });
   assert.equal(report.unsupportedPlaceholders, 1);
+});
+
+
+test("keeps independent semantic parent diagnostics when a child also fails", () => {
+  const diagnostics: MigrationDiagnostic[] = [
+    { code: "SX_STORAGE_MISSING_KEY_SEMANTICS", severity: "error", message: "child", span: child },
+    { code: "SX_SWITCH_FALLTHROUGH", severity: "error", message: "independent parent", span: parent },
+  ];
+
+  assert.deepEqual(rootDiagnostics(diagnostics), diagnostics);
+});
+
+test("prefers a concrete diagnostic over a wrapper at the same source span", () => {
+  const diagnostics: MigrationDiagnostic[] = [
+    { code: "SX_UNSUPPORTED_CALL", severity: "error", message: "wrapper", span: child },
+    { code: "SX_DYNAMIC_OR_OBJECT_CALL", severity: "error", message: "concrete", span: child },
+  ];
+
+  assert.deepEqual(rootDiagnostics(diagnostics), [diagnostics[1]]);
 });
