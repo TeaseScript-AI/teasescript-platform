@@ -56,7 +56,7 @@ test("lowers common SexScript flow to accepted TeaseScript forms", () => {
       "hideImage",
       'playAudio "bell.mp3"',
       'playAudio(file: "beat.mp3", async: true, repeat: 3 times)',
-      'showButton("Continue")',
+      'showButton "Continue"',
       'run "next.tease"',
       "",
     ].join("\n"),
@@ -140,4 +140,28 @@ test("extracts static setInfos metadata instead of emitting runtime code", () =>
   assert.equal(program.metadata?.title, "Example");
   assert.deepEqual(program.metadata?.tags, ["tag-a", "tag-b"]);
   assert.equal(emitTease(program), "end\n");
+});
+
+test("does not silently discard legacy showButton timeout/result semantics", () => {
+  const timeoutSource = file([statement(call("showButton", constant("Quick"), constant(3)))]);
+  const timeoutProgram = lowerParsedFile(timeoutSource);
+  assert.ok(timeoutProgram.diagnostics.some((diagnostic) => diagnostic.code === "SX_BUTTON_TIMEOUT_SEMANTICS"));
+  assert.match(emitTease(timeoutProgram), /MIGRATION INCOMPLETE/);
+
+  const assignedSource = file([
+    {
+      kind: "expressionStatement",
+      span,
+      expression: {
+        kind: "declaration",
+        span,
+        multipleAssignment: false,
+        left: variable("elapsed"),
+        right: call("showButton", constant("Continue")),
+      },
+    },
+  ]);
+  const assignedProgram = lowerParsedFile(assignedSource);
+  assert.ok(assignedProgram.diagnostics.some((diagnostic) => diagnostic.code === "SX_BUTTON_RESULT_SEMANTICS"));
+  assert.match(emitTease(assignedProgram), /MIGRATION INCOMPLETE/);
 });
