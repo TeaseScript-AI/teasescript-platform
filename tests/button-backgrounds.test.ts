@@ -190,3 +190,24 @@ test("option objects retain static and dynamic unlabelled uniqueness rules", () 
     playerRuntimeForeground(plain),
   );
 });
+
+test("a showButton background continues after its colon, as in #453", () => {
+  const singleLine = createPlayerRuntimeSession('showButton "Continue", background: "gold"');
+  for (const source of [
+    'showButton "Continue", background:\n    "gold"',
+    'showButton "Continue",\n    background:\n\n    // fill\n    "gold"',
+  ]) {
+    const session = createPlayerRuntimeSession(source);
+    assert.equal(session.snapshot.status, "waiting", source);
+    assert.deepEqual(playerRuntimeForeground(session), playerRuntimeForeground(singleLine), source);
+    assert.deepEqual(
+      activatePlayerRuntimeButton(session)!.session.snapshot.status,
+      activatePlayerRuntimeButton(singleLine)!.session.snapshot.status,
+    );
+  }
+  const missing = compileSource('showButton "Continue", background:\n');
+  assert.deepEqual(
+    missing.parserDiagnostics.map((diagnostic) => diagnostic.message),
+    ["Expected a button background colour."],
+  );
+});
