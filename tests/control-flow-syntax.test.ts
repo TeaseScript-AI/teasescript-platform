@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { Expression } from "../src/ast.js";
 import { compileSource } from "../src/compiler.js";
 import { lex } from "../src/lexer.js";
 import { parse } from "../src/parser.js";
@@ -25,7 +26,12 @@ test("comment markers remain ordinary string and template text", () => {
   const result = parse('say "// not a comment /* either */"\nsay \"/* ${"//"} */\"');
 
   assert.deepEqual(result.diagnostics, []);
-  assert.equal(result.program.statements.length, 2);
+  assert.deepEqual(
+    result.program.statements.map((statement) =>
+      statement.kind === "sayStatement" ? stringContent(statement.value) : statement.kind,
+    ),
+    [["// not a comment /* either */"], ["/* ", { interpolation: ["//"] }, " */"]],
+  );
 });
 
 test("unterminated block comments have a precise UTF-16 span", () => {
@@ -67,6 +73,8 @@ test("ranges bind below addition and above comparisons with exact bounds", () =>
     start: { offset: 13, line: 0, column: 13 },
     end: { offset: 26, line: 0, column: 26 },
   });
+  assert.deepEqual(literalArithmetic(statement.initializer.left.start), ["+", 1, 2]);
+  assert.deepEqual(literalArithmetic(statement.initializer.left.end), ["-", 8, 3]);
 });
 
 test("lexes both range operators without consuming decimal dots", () => {
@@ -128,3 +136,24 @@ test("recovers malformed loop headers at the following statement", () => {
   assert.equal(result.diagnostics[0]?.code, "TSP023");
   assert.equal(result.program.statements.at(-1)?.kind, "sayStatement");
 });
+
+type StringContent = readonly (string | { readonly interpolation: StringContent | null })[];
+
+function stringContent(expression: Expression): StringContent | null {
+  assert.equal(expression.kind, "stringLiteral");
+  if (expression.kind !== "stringLiteral") return null;
+  return expression.parts.map((part) =>
+    part.kind === "stringText" ? part.value : { interpolation: stringContent(part.expression) },
+  );
+}
+
+function literalArithmetic(expression: Expression) {
+  if (
+    expression.kind !== "binaryExpression" ||
+    expression.left.kind !== "numberLiteral" ||
+    expression.right.kind !== "numberLiteral"
+  ) {
+    return expression.kind;
+  }
+  return [expression.operator, expression.left.value, expression.right.value];
+}
