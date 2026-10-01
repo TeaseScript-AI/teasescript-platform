@@ -16,6 +16,9 @@ const nextLines = {
   closeBrace: "}",
   closeParenthesis: ")",
   end: null,
+  // A protected statement-only command never holds a value; an expression command such as `timer` does.
+  statementCommand: 'showButton "Next"',
+  expressionCommand: "timer 5 seconds",
 } as const;
 
 const sites = {
@@ -235,6 +238,55 @@ const matrix: ReadonlyArray<
     "if[exit] exit | TSP028@2:0 TSP002@2:0",
   ],
   ["showButton", "end", "| TSP028@1:0", null],
+  [
+    "speaker",
+    "statementCommand",
+    "speaker showButton exit | TSP006@2:0 TSP007@2:0 TSP001@3:0",
+    "if[speaker showButton] exit exit | TSP006@3:0 TSP007@3:0 TSP001@6:0",
+  ],
+  [
+    "choice",
+    "statementCommand",
+    "let showButton exit | TSP030@1:0",
+    "if[let showButton exit] exit | TSP030@2:0",
+  ],
+  [
+    "presentation",
+    "statementCommand",
+    "say exit | TSP012@1:0 TSP012@1:0 TSP002@1:11",
+    "if[say exit] exit | TSP012@2:0 TSP012@2:0 TSP002@2:11",
+  ],
+  [
+    "call",
+    "statementCommand",
+    "let exit | TSP012@1:0 TSP017@1:0 TSP002@1:0",
+    "if[let exit] exit | TSP012@2:0 TSP017@2:0 TSP002@2:0",
+  ],
+  [
+    "media",
+    "statementCommand",
+    "exit | TSP012@1:0 TSP017@1:0",
+    "if[exit] exit | TSP012@2:0 TSP017@2:0",
+  ],
+  [
+    "object",
+    "statementCommand",
+    "let exit | TSP012@1:0 TSP017@1:0 TSP002@1:0",
+    "if[let] exit exit | TSP012@2:0 TSP017@2:0 TSP002@2:0 TSP001@4:0",
+  ],
+  [
+    "showButton",
+    "statementCommand",
+    "showButton exit | TSP028@1:0",
+    "if[showButton exit] exit | TSP028@2:0",
+  ],
+  ["speaker", "expressionCommand", "speaker exit |", "if[speaker exit] exit |"],
+  ["choice", "expressionCommand", "let exit |", "if[let exit] exit |"],
+  ["presentation", "expressionCommand", "say exit |", "if[say exit] exit |"],
+  ["call", "expressionCommand", "let exit |", "if[let exit] exit |"],
+  ["media", "expressionCommand", "playMedia exit |", "if[playMedia exit] exit |"],
+  ["object", "expressionCommand", "let exit |", "if[let exit] exit |"],
+  ["showButton", "expressionCommand", "showButton exit |", "if[showButton exit] exit |"],
 ];
 
 function summary(source: string): string {

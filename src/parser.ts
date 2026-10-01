@@ -70,6 +70,13 @@ export interface ParseResult {
   readonly diagnostics: readonly Diagnostic[];
 }
 
+// Commands that #parseStatement dispatches by name and that have no expression form.
+const statementOnlyCommands: ReadonlySet<string> = new Set([
+  "showButton",
+  "showImage",
+  "hideImage",
+]);
+
 const parserDiagnosticCode = {
   expectedStatement: "TSP001",
   expectedStatementEnd: "TSP002",
@@ -290,7 +297,7 @@ class Parser {
           "Expected a button background colour.",
         );
         // A statement at the start of a continued line is kept, as for choice values.
-        if (this.#previous().kind === TokenKind.Newline && isStatementStart(this.#peek().kind))
+        if (this.#previous().kind === TokenKind.Newline && this.#atStatementStart())
           this.#recoveredAtStatementBoundary = true;
         return null;
       }
@@ -1673,7 +1680,7 @@ class Parser {
       case TokenKind.KeywordSpeaker:
         return next === TokenKind.Identifier;
       default:
-        return isStatementStart(token.kind);
+        return this.#atStatementStart();
     }
   }
 
@@ -2157,7 +2164,7 @@ class Parser {
             ? "Expected at least one choice option."
             : "Expected a choice option expression after ':'.",
         );
-        if (isStatementStart(this.#peek().kind)) {
+        if (this.#atStatementStart()) {
           this.#recoveredAtStatementBoundary = true;
         }
         break;
@@ -2584,7 +2591,16 @@ class Parser {
   }
 
   #isRecoveredTopLevelStatement(): boolean {
-    return isStatementStart(this.#peek().kind) && this.#peek(1).kind !== TokenKind.Colon;
+    return this.#atStatementStart() && this.#peek(1).kind !== TokenKind.Colon;
+  }
+
+  /** A statement keyword, or a protected statement-only command, which can never be a value. */
+  #atStatementStart(): boolean {
+    const token = this.#peek();
+    return (
+      isStatementStart(token.kind) ||
+      (token.kind === TokenKind.Identifier && statementOnlyCommands.has(token.lexeme))
+    );
   }
 
   #skipNewlines(): void {
