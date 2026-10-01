@@ -97,6 +97,7 @@ function harness() {
       const state = { closed: 0 };
       samplers.push(state);
       const sampler: AudioSampler = {
+        running: true,
         sampleRate: 48_000,
         windowSize: 4,
         readTimeDomain: (target) => target.fill(0.5),
@@ -354,6 +355,7 @@ test("a revoked microphone ends its recording and closes its samplers", async ()
   const samples = new Float32Array(sampler.sampler.windowSize);
   sampler.sampler.readTimeDomain(samples);
   assert.deepEqual([...samples], [0.5, 0.5, 0.5, 0.5]);
+  assert.equal(sampler.sampler.running, true);
   const started = device.startRecording(["microphone"]);
   if (started.kind !== "recording") return assert.fail(started.kind);
 
@@ -366,6 +368,7 @@ test("a revoked microphone ends its recording and closes its samplers", async ()
   assert.equal(states.at(-1), "microphone:ended");
   assert.equal(device.openAudioSampler().kind, "failed");
   // A closed sampler no longer reads the released stream.
+  assert.equal(sampler.sampler.running, false);
   samples.fill(0);
   sampler.sampler.readTimeDomain(samples);
   assert.deepEqual([...samples], [0, 0, 0, 0]);

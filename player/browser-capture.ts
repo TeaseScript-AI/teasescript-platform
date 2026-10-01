@@ -91,13 +91,17 @@ function constraints(request: CaptureRequest): MediaStreamConstraints {
 }
 
 function browserRecorder(recorder: MediaRecorder): CaptureRecorder {
+  // Firefox leaves `MediaRecorder.mimeType` empty and only types the recorded data.
+  let dataType = "";
   return {
     get mimeType() {
-      return recorder.mimeType;
+      return recorder.mimeType || dataType;
     },
     start(sink) {
       recorder.addEventListener("dataavailable", (event) => {
-        if (event.data.size > 0) sink.data(event.data);
+        if (event.data.size === 0) return;
+        dataType ||= event.data.type;
+        sink.data(event.data);
       });
       recorder.addEventListener("stop", () => sink.stopped(), { once: true });
       recorder.addEventListener("error", (event) => sink.failed(event), { once: true });
@@ -157,13 +161,14 @@ function context(canvas: Canvas): OffscreenCanvasRenderingContext2D | CanvasRend
   // Frequent reads are the purpose of this canvas, so keep its pixels in memory.
   const options: CanvasRenderingContext2DSettings = { willReadFrequently: true };
   const drawing =
-    "toBlob" in canvas ? canvas.getContext("2d", options) : canvas.getContext("2d", options);
+    "convertToBlob" in canvas ? canvas.getContext("2d", options) : canvas.getContext("2d", options);
   if (drawing === null) throw new DOMException("No 2D canvas is available.", "NotSupportedError");
   return drawing;
 }
 
 function canvasBlob(canvas: Canvas, type: string): Promise<Blob> {
-  if (!("toBlob" in canvas)) return canvas.convertToBlob({ type });
+  // Firefox's OffscreenCanvas also has a deprecated promise-based `toBlob`, so detect the offscreen API itself.
+  if ("convertToBlob" in canvas) return canvas.convertToBlob({ type });
   return new Promise((resolve, reject) =>
     canvas.toBlob(
       (blob) => (blob === null ? reject(new DOMException("", "EncodingError")) : resolve(blob)),
@@ -179,9 +184,12 @@ function createAudioSampler(track: MediaStreamTrack): AudioSampler {
   analyser.fftSize = AUDIO_WINDOW_SIZE;
   // Analysis only: the analyser is not connected to the speakers, so the microphone is never played back.
   source.connect(analyser);
-  // A context created without user activation may start suspended; analysis then reads silence until it resumes.
+  // A context created without user activation, or without an audio output device, may stay suspended and read silence.
   void audio.resume().catch(() => {});
   return {
+    get running() {
+      return audio.state === "running";
+    },
     sampleRate: audio.sampleRate,
     windowSize: AUDIO_WINDOW_SIZE,
     readTimeDomain: (target) => analyser.getFloatTimeDomainData(target),

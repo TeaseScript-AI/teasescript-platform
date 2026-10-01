@@ -57,6 +57,8 @@ export interface CaptureRecorder {
 
 /** Live microphone analysis; `MediaStream` audio through an analyser node is the browser implementation. */
 export interface AudioSampler {
+  /** Whether samples are live; a suspended audio context reads silence. */
+  readonly running: boolean;
   readonly sampleRate: number;
   /** Number of samples `readTimeDomain` fills; `readFrequency` fills half as many bins. */
   readonly windowSize: number;
@@ -348,6 +350,9 @@ export class CaptureDevice<Track extends CaptureTrack> {
     const samplers = this.#samplers;
     let closed = false;
     const sampler: AudioSampler = {
+      get running() {
+        return !closed && created.running;
+      },
       sampleRate: created.sampleRate,
       windowSize: created.windowSize,
       readTimeDomain: (target) => {
