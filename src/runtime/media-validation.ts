@@ -193,7 +193,10 @@ function reachedRepeatLimit(media: Record<string, unknown>): boolean {
   }
 }
 
-/** An active media record has not yet used up a count or duration limit. */
+/**
+ * An active media record has not used up a count limit. A duration budget may be used up exactly, while the arrival
+ * that finishes the media waits to be committed.
+ */
 function withinRepeatLimit(media: Record<string, unknown>): boolean {
   const repeat = media.repeat;
   if (!isPlainRecord(repeat)) return false;
@@ -208,7 +211,7 @@ function withinRepeatLimit(media: Record<string, unknown>): boolean {
     return (
       typeof media.elapsedMs === "number" &&
       typeof repeat.milliseconds === "number" &&
-      media.elapsedMs < repeat.milliseconds
+      media.elapsedMs <= repeat.milliseconds
     );
   }
   if (repeat.kind === "once") return media.passesCompleted === 0;

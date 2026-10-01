@@ -206,8 +206,9 @@ function executeInstructionBoundary(
       snapshot.status === "running" &&
       snapshot.callFrames.length === 0 &&
       snapshot.nextInstruction === plan.rootEndInstruction &&
-      // Expiry blocks queued before the script ends still run first.
-      !timerHandlerDispatchable(snapshot)
+      // Blocks queued before the script ends still run first, also behind a terminal commit window.
+      !timerHandlerDispatchable(snapshot) &&
+      !(snapshot.terminalContinuationHandoff !== null && snapshot.pendingTimerHandlers.length > 0)
     ) {
       stopAllTimersForSessionEnd(snapshot);
       stopAllMediaForSessionEnd(snapshot);

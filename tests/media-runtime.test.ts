@@ -708,3 +708,33 @@ test("an async play whose loaded source leaves no range continues as a failed lo
   assert.deepEqual(session.said(), ["stopped 1 s"]);
   assert.equal(session.warnings().filter((warning) => warning.startsWith("TSW013")).length, 1);
 });
+
+test("a terminal blocking play still runs finish after an earlier cue in one late observation", () => {
+  const session = new Session(
+    'playAudio "a.mp3" {\n  at 500 ms {\n    say "cue"\n  }\n  finish {\n    say "finish"\n  }\n}',
+  );
+  session.load(1, 1_000).at(1_000, [1, 1_000]);
+  assert.deepEqual(session.said(), ["cue", "finish"]);
+  assert.equal(session.snapshot.status, "halted");
+});
+
+test("pausing media exactly where its repeat duration runs out still finishes it", () => {
+  const session = new Session(
+    [
+      'playAudio async "a.mp3" {',
+      "  at 500 ms {",
+      "    b.pause()",
+      "  }",
+      "}",
+      'let b = playAudio(file: "b.mp3", async: true, repeat: 500 ms) {',
+      "  finish {",
+      '    say "b finished ${b.elapsed}"',
+      "  }",
+      "}",
+      "wait 10",
+    ].join("\n"),
+  );
+  session.load(1, 1_000).load(2, 1_000).at(1_000, [1, 1_000], [2, 1_000]);
+  assert.equal(session.media(2)?.state, "finished");
+  assert.deepEqual(session.said(), ["b finished 500 ms"]);
+});

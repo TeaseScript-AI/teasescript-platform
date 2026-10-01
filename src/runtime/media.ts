@@ -226,18 +226,20 @@ function progressAt(points: readonly RuntimeMediaPointSnapshot[], atMs: number):
 }
 
 /**
- * The next event of loaded media, with its due time when reported progress covers it. Paused media at the end of its
- * range still completes that pass, which a seek to the end requested.
+ * The next event of loaded media, with its due time when reported progress covers it. Paused media still commits an
+ * arrival it already stands on — the end of its range after a seek there, or a repeat duration used up exactly where
+ * it was paused.
  */
 export function nextMediaEvent(media: RuntimeMediaSnapshot): MediaTimelineEvent | null {
   if (!media.loaded || !isActiveMedia(media)) return null;
   const atEnd = media.positionMs >= mediaEndMs(media);
   if (media.state === "paused") {
-    return atEnd
+    const reached = nextArrival(media);
+    return reached.progressMs === media.committedProgressMs
       ? {
           kind: "arrival",
-          progressMs: media.committedProgressMs,
-          positionMs: media.positionMs,
+          progressMs: reached.progressMs,
+          positionMs: reached.positionMs,
           dueAtMs: media.points[0]!.atMs,
         }
       : null;
