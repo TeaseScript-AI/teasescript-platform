@@ -10,7 +10,11 @@ import {
 import { executeInstruction, run, RuntimeDataError } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
-import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
+import {
+  createFreshRuntimeSnapshot,
+  validateRuntimeSnapshot,
+  type RuntimeSnapshot,
+} from "../src/runtime/state.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
 test("say lowers smart, exact, and instant pacing with explicit skip policy", () => {
@@ -85,17 +89,49 @@ test("instant remains an identifier when its pacing expression continues", () =>
 
 test("say preparation resumes exactly once across an instruction-call pacing checkpoint", () => {
   const compiled = plan(
-    ["function pace(value) { return value }", 'say ["first", "second"], pace(1)'].join("\n"),
+    [
+      'let log = ""',
+      "function textValue {",
+      "  let ignored = random()",
+      '  log = "${log}text"',
+      '  return "hello"',
+      "}",
+      "function pace {",
+      '  log = "${log}pace"',
+      "  return 1",
+      "}",
+      "say textValue(), pace()",
+    ].join("\n"),
   );
+  const log = (snapshot: RuntimeSnapshot) =>
+    snapshot.frames[0]?.bindings.find((binding) => binding.name === "log")?.value;
+
+  // Step to the boundary after the text call returned and before the pacing call runs.
   let snapshot = createFreshRuntimeSnapshot(compiled, { seed: 77 });
-  snapshot = executeInstruction(compiled, snapshot).snapshot;
-  snapshot = executeInstruction(compiled, snapshot).snapshot;
+  while (!(log(snapshot) === "text" && snapshot.frames.length === 1)) {
+    assert.ok(["ready", "running"].includes(snapshot.status) && log(snapshot) !== "textpace");
+    snapshot = executeInstruction(compiled, snapshot).snapshot;
+  }
+  const preparedRng = snapshot.rng.state;
+  assert.notEqual(preparedRng, createFreshRuntimeSnapshot(compiled, { seed: 77 }).rng.state);
+
   const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, snapshot)));
   const resumed = run(restored.plan, restored.snapshot);
   const direct = run(compiled, createFreshRuntimeSnapshot(compiled, { seed: 77 }));
+  for (const [path, result] of [
+    ["direct", direct],
+    ["restored", resumed],
+  ] as const) {
+    assert.deepEqual(
+      result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+      ["hello"],
+      path,
+    );
+    assert.equal(log(result.snapshot), "textpace", path);
+    assert.equal(result.snapshot.rng.state, preparedRng, path);
+  }
   assert.deepEqual(resumed.events, direct.events);
   assert.deepEqual(resumed.snapshot, direct.snapshot);
-  assert.equal(resumed.events.filter((event) => event.kind === "say").length, 1);
 });
 
 test("text-side calls capture explicit speaker provenance before they suspend", () => {
