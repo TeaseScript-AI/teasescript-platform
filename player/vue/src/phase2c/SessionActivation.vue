@@ -2,9 +2,9 @@
 import PlayerActionButton from "@/components/PlayerActionButton.vue";
 
 // Explicit session activation (PLAYER-UI "Session start and user activation"). The click that starts or
-// continues a session is the user activation audible playback relies on; a later refusal offers a retry.
-defineProps<{ activation: "start" | "continue" | null; audioBlocked: boolean }>();
-defineEmits<{ activate: []; retryAudio: [] }>();
+// continues a session is the user activation audible playback relies on.
+defineProps<{ activation: "start" | "continue" | null }>();
+defineEmits<{ activate: [] }>();
 </script>
 
 <template>
@@ -12,10 +12,6 @@ defineEmits<{ activate: []; retryAudio: [] }>();
     <PlayerActionButton autofocus @click="$emit('activate')">
       {{ activation === "start" ? "Start" : "Continue" }}
     </PlayerActionButton>
-  </div>
-  <div v-else-if="audioBlocked" class="session-activation session-activation-audio" role="status">
-    <p>The browser blocked audio.</p>
-    <PlayerActionButton data-audio-retry @click="$emit('retryAudio')">Enable audio</PlayerActionButton>
   </div>
 </template>
 
@@ -31,14 +27,4 @@ defineEmits<{ activate: []; retryAudio: [] }>();
   pointer-events: none;
 }
 .session-activation > * { pointer-events: auto; }
-.session-activation-audio {
-  inset: var(--player-following-control-top) 0 auto;
-}
-.session-activation-audio p {
-  margin: 0;
-  padding: 4px 12px;
-  border-radius: 999px;
-  color: var(--theme-text-primary);
-  background: var(--surface-component);
-}
 </style>

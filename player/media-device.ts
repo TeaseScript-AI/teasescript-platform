@@ -124,7 +124,8 @@ export class MediaDevice {
   /** Retries refused playback; call from a user activation such as a click. */
   retryBlocked(): void {
     for (const entry of this.#entries.values()) {
-      if (entry.blocked && entry.element !== null) this.#play(entry, entry.element);
+      if (entry.blocked && entry.element !== null && this.#wantsPlayback(entry))
+        this.#play(entry, entry.element);
     }
   }
 
@@ -220,12 +221,28 @@ export class MediaDevice {
       entry.pendingPositionMs = null;
       this.#position(entry, element, positionMs);
     }
-    if (projection.state === "running" && !entry.finished) {
+    if (this.#wantsPlayback(entry)) {
       // A refused element waits for a deliberate retry instead of being asked again on every update.
       if (element.paused && !entry.blocked) this.#play(entry, element);
-    } else if (!element.paused) {
-      element.pause();
+    } else {
+      // Only playback the runtime currently requests can be refused or retried.
+      entry.blocked = false;
+      if (!element.paused) element.pause();
     }
+  }
+
+  /** Whether the runtime currently requests audible playback of this instance. */
+  #wantsPlayback(entry: Entry): boolean {
+    const { projection } = entry;
+    return (
+      this.#entries.get(entry.mediaId) === entry &&
+      !entry.failed &&
+      !entry.finished &&
+      entry.metadata &&
+      projection.loaded &&
+      projection.state === "running" &&
+      entry.segment === projection.segment
+    );
   }
 
   #position(entry: Entry, element: MediaDeviceElement, positionMs: number): void {
@@ -267,6 +284,8 @@ export class MediaDevice {
   #play(entry: Entry, element: MediaDeviceElement): void {
     element.play().then(
       () => {
+        // The runtime may have paused or stopped the instance while play() was pending.
+        if (!this.#wantsPlayback(entry)) element.pause();
         if (!entry.blocked) return;
         entry.blocked = false;
         this.#updateBlocked();
@@ -276,7 +295,7 @@ export class MediaDevice {
         if (
           error instanceof Error &&
           error.name === "NotAllowedError" &&
-          this.#entries.get(entry.mediaId) === entry
+          this.#wantsPlayback(entry)
         ) {
           entry.blocked = true;
           this.#updateBlocked();
@@ -300,5 +319,53 @@ export class MediaDevice {
     if (blocked === this.#blocked) return;
     this.#blocked = blocked;
     this.#host.blockedChanged(blocked);
+  }
+}
+
+/**
+ * Delivers device load reports to the runtime. A load report continues execution, so each delivery first observes the
+ * current time, as input does. A report the runtime cannot take yet (`executionPending`) stays queued and is retried
+ * after the engine ran again; the host keeps observing while reports are queued.
+ */
+export class MediaLoadQueue {
+  readonly #observe: () => void;
+  readonly #report: (mediaId: number, report: MediaLoadReport) => "pending" | "delivered";
+  readonly #pending = new Map<number, MediaLoadReport>();
+  #scheduled = false;
+
+  constructor(
+    observe: () => void,
+    report: (mediaId: number, report: MediaLoadReport) => "pending" | "delivered",
+  ) {
+    this.#observe = observe;
+    this.#report = report;
+  }
+
+  /** Queues a report; delivery happens after the current task, outside device reconciliation. */
+  add(mediaId: number, report: MediaLoadReport): void {
+    this.#pending.set(mediaId, report);
+    if (this.#scheduled) return;
+    this.#scheduled = true;
+    queueMicrotask(() => {
+      this.#scheduled = false;
+      if (this.#pending.size === 0) return;
+      this.#observe();
+      this.retry();
+    });
+  }
+
+  /** Offers queued reports again; call after the session changed. */
+  retry(): void {
+    for (const [mediaId, report] of this.#pending) {
+      if (this.#report(mediaId, report) === "delivered") this.#pending.delete(mediaId);
+    }
+  }
+
+  get size(): number {
+    return this.#pending.size;
+  }
+
+  clear(): void {
+    this.#pending.clear();
   }
 }

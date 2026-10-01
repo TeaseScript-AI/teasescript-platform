@@ -163,12 +163,7 @@ async function toggleFullscreen() {
           <Stage ref="stage" :media="stageMedia" @media-aspect="mediaAspect = $event" />
         </template>
         <template #overlay>
-          <SessionActivation
-            :activation="player.activation.value"
-            :audio-blocked="player.audioBlocked.value"
-            @activate="player.activate"
-            @retry-audio="player.retryAudio"
-          />
+          <SessionActivation :activation="player.activation.value" @activate="player.activate" />
         </template>
         <template #right-rail>
           <!-- Runtime timers are runtime-owned content; the preview may add fixtures around them. -->
@@ -189,6 +184,8 @@ async function toggleFullscreen() {
           :speakers="transcript.speakers"
           :revision="transcript.revision"
           :observe-time="player.observe"
+          :audio-blocked="player.audioBlocked.value"
+          @retry-audio="player.retryAudio"
           @update:session="player.update"
         />
       </PlayerComposition>

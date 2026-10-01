@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   MediaDevice,
+  MediaLoadQueue,
   SOURCE_UNAVAILABLE_MESSAGE,
   VIDEO_UNSUPPORTED_MESSAGE,
   type MediaDeviceElement,
@@ -10,12 +11,13 @@ import {
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
+  playerRuntimeDeadlines,
   playerRuntimeMedia,
   reportPlayerRuntimeMediaLoad,
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
-import type { MediaLoadReport } from "../src/index.js";
+import { observeTime, type MediaLoadReport } from "../src/index.js";
 
 // A deterministic stand-in for HTMLAudioElement: tests move `position` to simulate what was actually played.
 class FakeElement implements MediaDeviceElement {
@@ -266,4 +268,147 @@ test("restore reconnects a fresh element at the saved playhead without reloading
   assert.equal(playerRuntimeMedia(player.session.snapshot).media[0]?.playheadMs, 2500);
   player.tick(10_000, 1.5);
   assert.deepEqual(player.texts(), ["cue", "done"], "the cue ran once across restore");
+});
+
+test("a stall reports unchanged progress, so a nearby cue waits for actual playback", () => {
+  const player = harness(
+    [
+      'let music = playAudio async "music.mp3" {',
+      "  at 1 s {",
+      '    say "cue", instant',
+      "  }",
+      "}",
+      "wait 30",
+    ].join("\n"),
+  );
+  player.start();
+  player.elements[0]!.metadata(10);
+  player.tick(900);
+  player.tick(5000, 0);
+  assert.deepEqual(player.device.sample(), [{ mediaId: 1, segment: 1, progressMs: 900 }]);
+  assert.deepEqual(player.texts(), [], "the cue must not run during the stall");
+  player.tick(200);
+  assert.deepEqual(player.texts(), ["cue"]);
+});
+
+test("an element error after loading stalls progress instead of inventing playback or a second load report", () => {
+  const player = harness('let music = playAudio async "music.mp3"\nwait 30');
+  player.start();
+  const [element] = player.elements;
+  element!.metadata(10);
+  player.tick(500);
+  element!.emit("error");
+  assert.equal(element!.paused, true);
+  // Later updates must not resume the broken element.
+  player.tick(2000);
+  player.tick(1000);
+  assert.deepEqual(player.device.sample(), [{ mediaId: 1, segment: 1, progressMs: 500 }]);
+  assert.equal(player.loads.length, 1);
+});
+
+test("a retry never plays audio the script has paused", async () => {
+  const player = harness(
+    'let music = playAudio async "music.mp3"\nwait 0.1\nmusic.pause()\nwait 10',
+  );
+  player.start();
+  const [element] = player.elements;
+  element!.refuse = true;
+  element!.metadata(10);
+  await settle();
+  assert.equal(player.blocked, true);
+  player.tick(200, 0);
+  assert.equal(playerRuntimeMedia(player.session.snapshot).media[0]?.state, "paused");
+  assert.equal(player.blocked, false, "paused media is not refused playback");
+  element!.refuse = false;
+  const plays = element!.plays;
+  player.device.retryBlocked();
+  await settle();
+  assert.equal(element!.plays, plays, "a retry must not even briefly start paused media");
+  assert.equal(element!.paused, true);
+});
+
+test("the load queue keeps a report the runtime cannot take yet and offers it again", async () => {
+  const offered: number[] = [];
+  let accept = false;
+  let observations = 0;
+  const queue = new MediaLoadQueue(
+    () => observations++,
+    (mediaId) => {
+      offered.push(mediaId);
+      return accept ? "delivered" : "pending";
+    },
+  );
+  queue.add(7, { kind: "loaded", durationMs: 1000 });
+  await settle();
+  assert.deepEqual([observations, offered, queue.size], [1, [7], 1]);
+  accept = true;
+  queue.retry();
+  assert.deepEqual([offered, queue.size], [[7, 7], 0]);
+});
+
+// The Phase 2C host loop around MediaLoadQueue: observe current time, then deliver; keep pending reports queued.
+function queued(initial: PlayerRuntimeSession) {
+  let session = initial;
+  let now = session.snapshot.observedSessionTimeMs;
+  const queue = new MediaLoadQueue(
+    () => {
+      const result = observePlayerRuntimeTime(session, now);
+      if (result.outcome.kind === "observed") session = result.session;
+    },
+    (mediaId, report) => {
+      const result = reportPlayerRuntimeMediaLoad(session, mediaId, report);
+      if (result.outcome.kind === "executionPending") return "pending";
+      if (result.outcome.kind === "accepted") session = result.session;
+      return "delivered";
+    },
+  );
+  return {
+    queue,
+    get session() {
+      return session;
+    },
+    at(ms: number) {
+      now = ms;
+    },
+  };
+}
+
+test("a load report applies at the current scene time, not the last observation", async () => {
+  const host = queued(
+    createPlayerRuntimeSession('playAudio async "bell.mp3"\nwait 50 ms\nsay "after", instant'),
+  );
+  host.at(75);
+  host.queue.add(1, { kind: "loaded", durationMs: 1000 });
+  await settle();
+  assert.equal(host.queue.size, 0);
+  assert.ok(
+    playerRuntimeDeadlines(host.session.snapshot).includes(125),
+    "the wait starts when loading was reported",
+  );
+});
+
+test("an execution-pending load report is delivered after the engine ran queued work", async () => {
+  const source =
+    'timer async 1 s {\n  say "timer", instant\n}\nplayVideo "intro.mp4"\nsay "after", instant';
+  const started = createPlayerRuntimeSession(source);
+  // A canonical checkpoint whose timer expiry is queued but has not run yet.
+  const observed = observeTime(started.plan, started.snapshot, 2000);
+  const checkpointed = { ...started, snapshot: observed.snapshot };
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(checkpointed));
+  assert.equal(
+    reportPlayerRuntimeMediaLoad(restored, 1, {
+      kind: "failed",
+      message: VIDEO_UNSUPPORTED_MESSAGE,
+    }).outcome.kind,
+    "executionPending",
+  );
+  const host = queued(restored);
+  host.at(2000);
+  host.queue.add(1, { kind: "failed", message: VIDEO_UNSUPPORTED_MESSAGE });
+  await settle();
+  assert.equal(host.queue.size, 0);
+  const texts = host.session.transcriptEntries.flatMap((entry) =>
+    entry.kind === "message" ? [entry.text] : [],
+  );
+  assert.deepEqual(texts, ["timer", "after"]);
 });

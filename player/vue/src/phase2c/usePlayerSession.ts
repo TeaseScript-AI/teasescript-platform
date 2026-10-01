@@ -1,12 +1,11 @@
 import { computed, ref, shallowRef, watch } from "vue";
 import { tryOnScopeDispose, useIntervalFn } from "@vueuse/core";
-import { MediaDevice } from "../../../media-device.js";
+import { MediaDevice, MediaLoadQueue } from "../../../media-device.js";
 import {
   playerRuntimeMedia,
   reportPlayerRuntimeMediaLoad,
   type PlayerRuntimeSession,
 } from "../../../runtime-adapter.js";
-import type { MediaLoadReport } from "../../../../src/index.js";
 import { useRuntimeSceneClock } from "./useRuntimeSceneClock";
 
 // Media progress is sampled this often while media loads or plays; cues fire at this resolution.
@@ -38,43 +37,44 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const activation = shallowRef<Activation | null>(null);
   const audioBlocked = ref(false);
 
-  // Load reports the runtime could not take yet (`executionPending`); retried after the next session change.
-  const pendingLoads = new Map<number, MediaLoadReport>();
+  const pendingLoadCount = ref(0);
+  const loads = new MediaLoadQueue(
+    () => clock.observe(),
+    (mediaId, report) => {
+      const current = session.value;
+      if (!current) return "delivered";
+      const result = reportPlayerRuntimeMediaLoad(current, mediaId, report);
+      if (result.outcome.kind === "executionPending") return "pending";
+      if (result.outcome.kind === "accepted") session.value = result.session;
+      return "delivered";
+    },
+  );
   const device = new MediaDevice({
     createElement: () => new Audio(),
     resolveSource: resolveAsset,
     reportLoad: (mediaId, report) => {
-      pendingLoads.set(mediaId, report);
-      flushLoads();
+      loads.add(mediaId, report);
+      pendingLoadCount.value = loads.size;
     },
     requestObservation: () => clock.observe(),
     blockedChanged: (blocked) => (audioBlocked.value = blocked),
   });
   const clock = useRuntimeSceneClock(session, () => device.sample());
 
-  function flushLoads() {
-    for (const [mediaId, report] of pendingLoads) {
-      const current = session.value;
-      if (!current) return;
-      const result = reportPlayerRuntimeMediaLoad(current, mediaId, report);
-      if (result.outcome.kind === "executionPending") continue;
-      pendingLoads.delete(mediaId);
-      if (result.outcome.kind === "accepted") session.value = result.session;
-    }
-  }
-
   watch(
     session,
     (current) => {
       device.reconcile(current ? playerRuntimeMedia(current.snapshot).media : []);
-      if (pendingLoads.size > 0) flushLoads();
+      loads.retry();
+      pendingLoadCount.value = loads.size;
     },
     { immediate: true },
   );
   // Media cues depend on measured progress, not on a deadline, so observe regularly while media is active.
   const sampling = useIntervalFn(() => clock.observe(), MEDIA_SAMPLE_MS, { immediate: false });
+  // Pending load reports also keep observing, so the engine runs until it can accept them.
   watch(
-    () => session.value !== null && device.active,
+    () => session.value !== null && (device.active || pendingLoadCount.value > 0),
     (active) => (active ? sampling.resume() : sampling.pause()),
     { immediate: true },
   );
@@ -84,7 +84,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // gap while no Player ran is not consumed.
   function start(next: PlayerRuntimeSession) {
     device.reset();
-    pendingLoads.clear();
+    loads.clear();
+    pendingLoadCount.value = 0;
     generation.value++;
     interactionReset.value++;
     session.value = next;

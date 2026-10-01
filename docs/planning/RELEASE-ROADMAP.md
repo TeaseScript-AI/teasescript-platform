@@ -62,8 +62,8 @@ architecture may change substantially while correctness and the basic model are 
     debug controls secondary to the actual Player experience.
   - **Reference:** [`PRODUCT.md`](../PRODUCT.md), [`DEBUGGER.md`](../DEBUGGER.md),
     [`PLAYER-UI.md`](../ui/PLAYER-UI.md), and [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md). The Phase 2C Player is the
-    selected direction; its foundation landed in #418 and its runtime timers in #444, with Stage image/audio in #446
-    and the single-script demo and legacy Player retirement in #448.
+    selected direction; its foundation landed in #418, its runtime timers in #444, and Stage image/audio in #446,
+    with the single-script demo and legacy Player retirement in #448.
 
 - [ ] **Iframe development host and virtual viewport**
   - **Outcome:** Run the Player through a small local host shell using the product's iframe boundary without requiring a
@@ -83,8 +83,8 @@ architecture may change substantially while correctness and the basic model are 
 - [ ] **Audio and video playback**
   - **Outcome:** Support real Player audio playback and the Stage image for the POC, including blocking and background
     use, simultaneous identified resources, and targeted lifecycle control. The video authoring API is defined with
-    audio; browser video playback may follow the POC. The language/runtime foundation landed for #445 in #452; Player
-    integration is #446. Keep exact media APIs and persistence details in the runtime/specification rather than
+    audio; browser video playback may follow the POC. The language/runtime foundation landed for #445 in #452 and the
+    Phase 2C Player audio and Stage-image integration in #446. Keep exact media APIs and persistence details in the runtime/specification rather than
     defining them in the roadmap.
   - **Reference:** [`RUNTIME.md`](../RUNTIME.md), [`LIBRARIES.md`](../LIBRARIES.md), and
     [`WISHES.xml` W-044](../../WISHES.xml).

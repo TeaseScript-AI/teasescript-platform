@@ -4,7 +4,8 @@ const props = defineProps<{
   media: { src: string; alt: string } | undefined;
 }>();
 const emit = defineEmits<{ mediaAspect: [ratio: number] }>();
-watch(() => props.media, () => emit("mediaAspect", 0));
+// Only a new source needs measuring again; an equal source keeps its loaded image and aspect.
+watch(() => props.media?.src, () => emit("mediaAspect", 0));
 function mediaLoaded(event: Event) {
   const image = event.currentTarget;
   if (image instanceof HTMLImageElement && image.naturalHeight)

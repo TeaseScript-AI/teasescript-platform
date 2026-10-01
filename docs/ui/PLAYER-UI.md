@@ -405,8 +405,8 @@ users may ever control playback is open; if accepted, such controls send typed h
 acting on the media element ([`RUNTIME.md`](../RUNTIME.md#stage-image-and-media-playback)).
 
 The trusted host resolves authored package-relative references, such as `sounds/bell.mp3`, to playable sources; the
-runtime keeps them opaque, and arbitrary external URLs are not resolved. A reference the host cannot resolve is
-reported as a failed load. Phase 2C plays audio; a `playVideo` request is reported as a failed load ("Video playback
+runtime keeps them opaque, and arbitrary external URLs are not resolved. An audio reference the host cannot resolve is
+reported as a failed load; an unresolvable Stage image leaves the Stage empty. Phase 2C plays audio; a `playVideo` request is reported as a failed load ("Video playback
 is not supported by this Player yet."), so the script continues with the runtime's warning. An authored Stage image
 has no alternative text yet. Media-derived ambience, explicit transitions, and custom stage rendering are not yet
 implemented in Phase 2C; the development preview's Stage media picker can override the Stage for layout comparison.
