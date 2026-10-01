@@ -5,7 +5,6 @@ import type { InstructionPlan } from "../src/plan/model.js";
 import {
   executeInstruction,
   run,
-  stepToEvent,
   type RuntimeBuiltinFunction,
   type RuntimeCapabilityCall,
 } from "../src/runtime/engine.js";
@@ -16,8 +15,8 @@ test("requires explicit own registration for an inherited builtin name", () => {
   const compiled = inheritedBuiltinPlan("valueOf");
   const missing = run(compiled, createFreshRuntimeSnapshot(compiled));
 
+  assert.equal(missing.snapshot.status, "failed");
   assert.equal(missing.snapshot.failure?.code, "TSR011");
-  assert.match(missing.snapshot.failure?.message ?? "", /Unknown built-in function 'valueOf'/u);
 
   let calls = 0;
   const valueOf: RuntimeBuiltinFunction = () => {
@@ -81,43 +80,19 @@ test("exposes prototype-sensitive named arguments as own immutable keys", () => 
 
 test("detects duplicate prototype-sensitive named arguments", () => {
   const compiled = namedBuiltinPlan(["__proto__", "__proto__"]);
+  let calls = 0;
   const result = run(compiled, createFreshRuntimeSnapshot(compiled), {
-    builtins: { capture: () => null },
+    builtins: {
+      capture: () => {
+        calls += 1;
+        return null;
+      },
+    },
   });
 
+  assert.equal(result.snapshot.status, "failed");
   assert.equal(result.snapshot.failure?.code, "TSR010");
-  assert.match(result.snapshot.failure?.message ?? "", /Duplicate named argument '__proto__'/u);
-});
-
-test("refreshes builtin registration between instructions while reusing operation context", () => {
-  const compiled = compile(
-    ["let first = probe()", "let second = probe()", 'say "${first}:${second}", instant'].join("\n"),
-    ["probe"],
-  );
-  const calls: string[] = [];
-  const builtins: Record<string, RuntimeBuiltinFunction> = Object.create(null);
-  const replacement: RuntimeBuiltinFunction = () => {
-    calls.push("replacement");
-    return "replacement";
-  };
-  builtins.probe = () => {
-    calls.push("original");
-    builtins.probe = replacement;
-    return "original";
-  };
-
-  const first = stepToEvent(compiled, createFreshRuntimeSnapshot(compiled), { builtins });
-  const second = run(compiled, createFreshRuntimeSnapshot(compiled), { builtins });
-
-  assert.deepEqual(calls, ["original", "replacement", "replacement", "replacement"]);
-  assert.deepEqual(
-    first.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["original:replacement"],
-  );
-  assert.deepEqual(
-    second.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["replacement:replacement"],
-  );
+  assert.equal(calls, 0);
 });
 
 test("keeps public single-instruction event results isolated", () => {

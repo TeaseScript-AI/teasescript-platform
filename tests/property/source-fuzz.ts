@@ -275,7 +275,7 @@ function countCall(
   }
 }
 
-export function selectSourceFamily<T>(families: readonly T[], seed: number, index: number): T {
+function selectSourceFamily<T>(families: readonly T[], seed: number, index: number): T {
   return families[(seed + index) % families.length]!;
 }
 

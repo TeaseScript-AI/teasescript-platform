@@ -366,9 +366,13 @@ test("rejects inconsistent argument supply and parameter bindings", () => {
   occupiedBeforeCall.temporaries.push({ id: call.destinationTemporary, value: null });
   assert.equal(validateRuntimeSnapshot(occupiedBeforeCall, compiled).valid, false);
 
-  let snapshot = createFreshRuntimeSnapshot(compiled);
-  snapshot = executeInstruction(compiled, snapshot).snapshot;
-  snapshot = executeInstruction(compiled, snapshot).snapshot;
+  // After the supplied argument is bound, before the default phase starts.
+  const snapshot = executeUntil(
+    compiled,
+    (candidate) =>
+      candidate.callFrames[0]?.parameterState.phase === "supplied" &&
+      candidate.callFrames[0].parameterState.parameterIndex === 1,
+  );
 
   const changedArgument = mutableCheckpoint(createCheckpoint(compiled, snapshot));
   changedArgument.snapshot.callFrames[0]!.arguments[0]!.value = 99;
@@ -411,8 +415,12 @@ test("rejects inconsistent argument supply and parameter bindings", () => {
   assert.equal(validateRuntimeSnapshot(forgedSupplied.snapshot, optional).valid, false);
   assertCheckpointRejected(forgedSupplied, "TSK002");
 
-  snapshot = executeInstruction(compiled, snapshot).snapshot;
-  const missingBinding = mutableCheckpoint(createCheckpoint(compiled, snapshot));
+  // The default phase still requires the supplied parameter binding.
+  const defaults = executeUntil(
+    compiled,
+    (candidate) => candidate.callFrames[0]?.parameterState.phase === "defaults",
+  );
+  const missingBinding = mutableCheckpoint(createCheckpoint(compiled, defaults));
   missingBinding.snapshot.frames[1]!.bindings = [];
   assertCheckpointRejected(missingBinding, "TSK002");
 });

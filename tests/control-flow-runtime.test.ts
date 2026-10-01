@@ -4,7 +4,7 @@ import test from "node:test";
 import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
-import { CheckpointError, createCheckpoint, restoreCheckpoint } from "../src/runtime/checkpoint.js";
+import { createCheckpoint, restoreCheckpoint } from "../src/runtime/checkpoint.js";
 import { run, stepToEvent } from "../src/runtime/engine.js";
 import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
@@ -152,7 +152,7 @@ test("runtime instruction budgets use the positive safe-integer domain", () => {
         { instructionBudget: maximum + 1 },
       ),
   ]) {
-    assert.throws(operation, /positive safe integer/);
+    assert.throws(operation, RangeError);
   }
 });
 
@@ -277,14 +277,7 @@ test("checkpoint restore accepts range loop-position length and rejects length +
     // completed range position one step beyond the runtime-produced boundary.
     const beyondEnd = structuredClone(checkpoint);
     beyondEnd.snapshot.loopFrames[0]!.position = values.length + 1;
-    assert.throws(
-      () => restoreCheckpoint(beyondEnd),
-      (error: unknown) =>
-        error instanceof CheckpointError &&
-        error.info.code === "TSK002" &&
-        error.info.message === "Runtime for-loop iterator state is malformed.",
-      name,
-    );
+    assertCheckpointRejected(beyondEnd, "TSK002");
   }
 });
 

@@ -261,31 +261,17 @@ test("unsupported and invalid timer forms fail with structured diagnostics", () 
 });
 
 test("invalid dynamic timer durations fail deterministically before any action", () => {
+  // Each row names the failure code and the duration operand it must locate.
   const cases: ReadonlyArray<readonly [string, string, string]> = [
-    [
-      'let d = "soon"\ntimer d',
-      "TSR050",
-      "Timer duration must be a non-negative duration, number of seconds, or range of whole seconds.",
-    ],
-    [
-      "let d = -1\ntimer d",
-      "TSR050",
-      "Timer duration must be a non-negative duration, number of seconds, or range of whole seconds.",
-    ],
-    ["let a = 3\ntimer a..a", "TSR041", "timer requires a non-empty range."],
-    ["let a = 0.5\ntimer a..3", "TSR045", "Range iteration requires safe integer bounds."],
-    [
-      "let a = -3\ntimer a..3",
-      "TSR050",
-      "Timer duration must be a non-negative duration, number of seconds, or range of whole seconds.",
-    ],
-    [
-      "let d = 1..3\nwait d",
-      "TSR050",
-      "Wait duration must be a non-negative duration or finite number.",
-    ],
+    ['let d = "soon"\ntimer d', "TSR050", "d"],
+    ["let d = -1\ntimer d", "TSR050", "d"],
+    ["let a = 3\ntimer a..a", "TSR041", "a..a"],
+    ["let a = 0.5\ntimer a..3", "TSR045", "a..3"],
+    ["let a = -3\ntimer a..3", "TSR050", "a..3"],
+    ["let d = 1..3\nwait d", "TSR050", "d"],
   ];
-  for (const [source, code, message] of cases) {
+  for (const [source, code, operand] of cases) {
+    const operandStart = source.lastIndexOf(operand);
     for (const seed of SEEDS) {
       const { compiled, snapshot, events } = start(source, seed);
       assert.equal(snapshot.status, "failed", source);
@@ -297,8 +283,11 @@ test("invalid dynamic timer durations fail deterministically before any action",
       );
       const failure = events.at(-1);
       assert.ok(failure?.kind === "runtimeFailure", source);
-      assert.equal(failure.code, code, source);
-      assert.ok(failure.message.startsWith(message), `${source}: ${failure.message}`);
+      assert.deepEqual(
+        [failure.code, failure.span.start.offset, failure.span.end.offset],
+        [code, operandStart, operandStart + operand.length],
+        source,
+      );
     }
   }
 });

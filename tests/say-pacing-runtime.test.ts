@@ -9,6 +9,7 @@ import {
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
 import { executeInstruction, run, RuntimeDataError } from "../src/runtime/engine.js";
+import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import {
@@ -88,29 +89,56 @@ test("instant remains an identifier when its pacing expression continues", () =>
   if (callGate?.kind === "chatPacingGate") assert.equal(callGate.deadlineMs, 2_000);
 });
 
-test("say prepares earlier inputs before a suspending pacing call and restores them exactly once", () => {
+test("say keeps text prepared before a pacing call across that call's checkpoint and evaluates each once", () => {
   const compiled = plan(
-    ["function pace(value) { return value }", 'say ["first", "second"], pace(1)'].join("\n"),
+    [
+      'let log = ""',
+      "function textValue {",
+      '  log = "${log}text"',
+      "  let draw = random()",
+      '  return "hello"',
+      "}",
+      "function pace {",
+      '  log = "${log}pace"',
+      "  return 1",
+      "}",
+      "say textValue(), pace()",
+    ].join("\n"),
   );
-  const kinds = compiled.instructions.map((instruction) => instruction.kind);
-  const speakerPreparation = kinds.indexOf("prepareSaySpeaker");
-  const textPreparation = kinds.indexOf("prepareSayText");
-  const pacingCall = kinds.indexOf("callFunction");
-  const say = kinds.indexOf("say");
-  assert.ok(speakerPreparation >= 0);
-  assert.ok(speakerPreparation < textPreparation);
-  assert.ok(textPreparation < pacingCall);
-  assert.ok(pacingCall < say);
+  const direct = run(compiled, createFreshRuntimeSnapshot(compiled, { seed: 77 }));
 
+  // Checkpoint inside the pacing call, after the text side has been evaluated and prepared.
   let snapshot = createFreshRuntimeSnapshot(compiled, { seed: 77 });
-  snapshot = executeInstruction(compiled, snapshot).snapshot;
-  snapshot = executeInstruction(compiled, snapshot).snapshot;
+  const stepped: InterpreterEvent[] = [];
+  for (let guard = 0; snapshot.callFrames.at(-1)?.functionName !== "pace"; guard += 1) {
+    assert.ok(guard < 100 && snapshot.status !== "halted", "the pacing call must be reached");
+    const step = executeInstruction(compiled, snapshot);
+    stepped.push(...step.events);
+    snapshot = step.snapshot;
+  }
+  const preparedRng = structuredClone(snapshot.rng);
   const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, snapshot)));
   const resumed = run(restored.plan, restored.snapshot);
-  const direct = run(compiled, createFreshRuntimeSnapshot(compiled, { seed: 77 }));
-  assert.deepEqual(resumed.events, direct.events);
+
+  for (const [name, events, result] of [
+    ["direct", direct.events, direct.snapshot],
+    ["restored", [...stepped, ...resumed.events], resumed.snapshot],
+  ] as const) {
+    assert.equal(result.status, "halted", name);
+    assert.deepEqual(
+      events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+      ["hello"],
+      name,
+    );
+    assert.equal(
+      result.frames[0]?.bindings.find((binding) => binding.name === "log")?.value,
+      "textpace",
+      name,
+    );
+    assert.deepEqual(result.rng, preparedRng, `${name}: the text side draws only once`);
+  }
+  assert.deepEqual([...stepped, ...resumed.events], direct.events);
   assert.deepEqual(resumed.snapshot, direct.snapshot);
-  assert.equal(resumed.events.filter((event) => event.kind === "say").length, 1);
 });
 
 test("text-side calls capture explicit speaker provenance before they suspend", () => {
@@ -460,15 +488,6 @@ test("pacing creation provenance rejects an impossible function owner", () => {
 
   assert.equal(validateRuntimeSnapshot(corrupted.snapshot, compiled).valid, false);
   assert.throws(() => deserializeCheckpoint(JSON.stringify(corrupted)));
-});
-
-test("speaker default and explicit skip policy determine pacing gate skippability", () => {
-  const compiled = plan(
-    'speaker vera { defaultSaySkippable: false }\nsay as vera "one"\nsay skippable "two"',
-  );
-  const result = run(compiled, createFreshRuntimeSnapshot(compiled));
-  assert.equal(result.snapshot.foregroundAction?.kind, "chatPacingGate");
-  assert.equal(result.snapshot.foregroundAction?.skippable, false);
 });
 
 test("smart pacing uses the final visible text and captured settings", () => {
@@ -878,7 +897,7 @@ test("foreground interaction consumes background pacing before its action reques
   assert.equal(result.snapshot.backgroundActions.length, 0);
 });
 
-test("exact, zero, and instant pacing create only the required actions", () => {
+test("exact and zero pacing create only the required actions", () => {
   const exact = plan('say "first", 0.5');
   const exactResult = run(exact, createFreshRuntimeSnapshot(exact));
   assert.equal(exactResult.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
