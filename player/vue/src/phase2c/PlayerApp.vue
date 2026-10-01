@@ -22,9 +22,8 @@ const props = withDefaults(
     title?: string;
     media?: { src: string; alt: string } | undefined;
     tools?: readonly PlayerTool[];
-    initialStageSize?: number;
   }>(),
-  { title: "", tools: () => [], initialStageSize: 60 },
+  { title: "", tools: () => [] },
 );
 const themeIntent = defineModel<PlayerThemeIntent>("themeIntent", {
   default: () => defaultPlayerThemeIntent,
@@ -100,7 +99,7 @@ async function toggleFullscreen() {
       <slot name="tool" v-bind="scope" />
     </template>
     <template #default="{ sidebarVisible }">
-      <PlayerComposition :initial-stage-size="initialStageSize">
+      <PlayerComposition>
         <template #topbar>
           <PlayerTopBar
             :title="title"
