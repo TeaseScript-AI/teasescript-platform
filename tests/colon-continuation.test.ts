@@ -27,6 +27,7 @@ const sites = {
   call: (line: string | null) => `let x = f(a:\n${line === null ? "" : `${line})`}`,
   media: (line: string | null) => `playAudio(file:\n${line === null ? "" : `${line})`}`,
   object: (line: string | null) => `let o = { a:\n${line === null ? "" : `${line} }`}`,
+  showButton: (line: string | null) => `showButton "Continue", background:\n${line ?? ""}`,
 } as const;
 
 // [site, next line, top-level result, result nested in an if block]
@@ -211,6 +212,29 @@ const matrix: ReadonlyArray<
     "if[let] exit exit | TSP012@2:0 TSP017@2:0 TSP002@2:0 TSP001@4:0",
   ],
   ["object", "end", "let | TSP012@1:0 TSP017@1:0", null],
+  ["showButton", "value", "showButton exit |", "if[showButton exit] exit |"],
+  ["showButton", "statement", "say exit | TSP028@1:0", "if[say exit] exit | TSP028@2:0"],
+  [
+    "showButton",
+    "speakerDeclaration",
+    "speaker exit | TSP028@1:0",
+    "if[speaker exit] exit | TSP028@2:0",
+  ],
+  ["showButton", "speakerExpression", "showButton exit |", "if[showButton exit] exit |"],
+  ["showButton", "key", "exit | TSP028@1:0 TSP002@1:0", "if[exit] exit | TSP028@2:0 TSP002@2:0"],
+  [
+    "showButton",
+    "closeBrace",
+    "exit | TSP028@1:0 TSP002@1:0",
+    "if[] exit exit | TSP028@2:0 TSP001@4:0",
+  ],
+  [
+    "showButton",
+    "closeParenthesis",
+    "exit | TSP028@1:0 TSP002@1:0",
+    "if[exit] exit | TSP028@2:0 TSP002@2:0",
+  ],
+  ["showButton", "end", "| TSP028@1:0", null],
 ];
 
 function summary(source: string): string {

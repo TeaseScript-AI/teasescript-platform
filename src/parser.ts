@@ -283,12 +283,15 @@ class Parser {
       }
       this.#advance();
       this.#advance();
-      background = this.#parseExpression();
+      background = runParse(this.#parseColonValueTask(false));
       if (background === null) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedInteractionText,
           "Expected a button background colour.",
         );
+        // A statement at the start of a continued line is kept, as for choice values.
+        if (this.#previous().kind === TokenKind.Newline && isStatementStart(this.#peek().kind))
+          this.#recoveredAtStatementBoundary = true;
         return null;
       }
     }
