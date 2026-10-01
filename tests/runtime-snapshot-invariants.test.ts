@@ -212,50 +212,82 @@ test("rejects exhausted scope, speaker, and call-frame allocators before collisi
   assert.equal(callSnapshot.nextCallFrameId, MAX_SAFE);
 });
 
-test("requires safe integers for nested runtime identities, positions, and progress", () => {
+test("rejects unsafe source positions and out-of-range nested identities and progress", () => {
   const speakerPlan = plan('speaker vera {}\nsay as vera "hello"\nexit');
   const declared = executeInstruction(
     speakerPlan,
     createFreshRuntimeSnapshot(speakerPlan),
   ).snapshot;
+  assert.equal(validateRuntimeSnapshot(declared, speakerPlan).valid, true);
   const speakerSnapshot = structuredClone(declared);
   // EVIDENCE: fixture: expose the readonly speaker ID on a cloned snapshot for unsafe-integer validation.
   (speakerSnapshot.speakers[0] as { id: number }).id = 2 ** 53;
-  assert.equal(validateRuntimeSnapshot(speakerSnapshot, speakerPlan).valid, false);
+  assert.equal(
+    validateRuntimeSnapshot(speakerSnapshot, speakerPlan).valid,
+    false,
+    "speaker ID beyond its allocator and references",
+  );
 
   const scopePlan = plan('if true {\n  say "inside"\n}\nexit');
   let enteredScope = createFreshRuntimeSnapshot(scopePlan);
   enteredScope = executeInstruction(scopePlan, enteredScope).snapshot;
   enteredScope = executeInstruction(scopePlan, enteredScope).snapshot;
+  assert.equal(enteredScope.frames.length, 2);
+  assert.equal(validateRuntimeSnapshot(enteredScope, scopePlan).valid, true);
   // EVIDENCE: fixture: expose the readonly scope ID on an active snapshot for unsafe-integer validation.
   (enteredScope.frames[1] as { id: number }).id = 2 ** 53;
   enteredScope.nextScopeId = MAX_SAFE;
-  assert.equal(validateRuntimeSnapshot(enteredScope, scopePlan).valid, false);
+  assert.equal(
+    validateRuntimeSnapshot(enteredScope, scopePlan).valid,
+    false,
+    "scope ID beyond its allocator",
+  );
 
   const callPlan = plan("function value(input = 1) { return input }\nvalue()");
   let activeCall = createFreshRuntimeSnapshot(callPlan);
-  while (activeCall.callFrames.length === 0) {
+  for (let steps = 0; steps < 20 && activeCall.callFrames.length === 0; steps += 1) {
     activeCall = executeInstruction(callPlan, activeCall).snapshot;
   }
+  assert.equal(activeCall.callFrames.length, 1);
+  assert.equal(validateRuntimeSnapshot(activeCall, callPlan).valid, true);
+  const parameterSnapshot = structuredClone(activeCall);
   // EVIDENCE: fixture: expose the readonly call-frame ID on an active snapshot for unsafe-integer validation.
   (activeCall.callFrames[0] as { id: number }).id = 2 ** 53;
   activeCall.nextCallFrameId = MAX_SAFE;
-  assert.equal(validateRuntimeSnapshot(activeCall, callPlan).valid, false);
+  assert.equal(
+    validateRuntimeSnapshot(activeCall, callPlan).valid,
+    false,
+    "call-frame ID beyond its allocator",
+  );
 
-  const parameterSnapshot = structuredClone(activeCall);
-  // EVIDENCE: fixture: expose the readonly call-frame ID to isolate malformed parameter-state validation.
-  (parameterSnapshot.callFrames[0] as { id: number }).id = 1;
-  parameterSnapshot.nextCallFrameId = 2;
   parameterSnapshot.callFrames[0]!.parameterState.parameterIndex = 2 ** 53;
-  assert.equal(validateRuntimeSnapshot(parameterSnapshot, callPlan).valid, false);
+  assert.equal(
+    validateRuntimeSnapshot(parameterSnapshot, callPlan).valid,
+    false,
+    "parameter progress beyond the function's parameters and instruction position",
+  );
 
   const failedPlan = plan("let value = []\nsay value.first\nexit");
   const failed = run(failedPlan, createFreshRuntimeSnapshot(failedPlan)).snapshot;
   assert.equal(failed.status, "failed");
+  assert.equal(validateRuntimeSnapshot(failed, failedPlan).valid, true);
   const spanSnapshot = structuredClone(failed);
   // EVIDENCE: fixture: expose the readonly failure offset for unsafe source-span validation.
   (spanSnapshot.failure!.span.start as { offset: number }).offset = 2 ** 53;
-  assert.equal(validateRuntimeSnapshot(spanSnapshot, failedPlan).valid, false);
+  assert.equal(
+    validateRuntimeSnapshot(spanSnapshot, failedPlan).valid,
+    false,
+    "failure span starts after it ends",
+  );
+
+  const lineSnapshot = structuredClone(failed);
+  // EVIDENCE: fixture: expose the readonly failure line; no other span relationship constrains it.
+  (lineSnapshot.failure!.span.start as { line: number }).line = 2 ** 53;
+  assert.equal(
+    validateRuntimeSnapshot(lineSnapshot, failedPlan).valid,
+    false,
+    "unsafe failure source line",
+  );
 });
 
 test("emits only safe, unique, strictly increasing event sequences", () => {
