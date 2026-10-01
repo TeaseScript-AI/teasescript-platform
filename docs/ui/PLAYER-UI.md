@@ -730,7 +730,7 @@ Ordinary neutral controls use the shared progression without geometric movement:
 2. hover: `border-default` plus `surface-hover` fill;
 3. pressed/active: `border-strong` plus `surface-pressed` fill;
 4. keyboard focus: use the shared `2px` accent-outline width with `2px` visible separation and no layout shift. Visual
-   Lab offers a temporary `1px` separation candidate for comparison with the shared `1px` baseline;
+   Lab offers a temporary `1px` separation candidate, matching the shared UI baseline, for comparison with that default;
 5. disabled: dedicated readable disabled surface/border/text roles and non-interactive semantics/cursor behavior.
 
 A non-interactive status item is a separate semantic/visual class, not a disabled control.
