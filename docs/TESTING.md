@@ -287,7 +287,11 @@ tests/property/
 
 `tests/property.test.ts` is a root test entrypoint, so normal compiled-test
 discovery executes the required 128-case campaign through `npm run check`.
-The replay implementation imports only public exports from `src/index.ts`.
+The fixed operation, rejected-completion, checkpoint, and malformed-input
+fixtures consume no randomness, so they run once each in that entrypoint and
+before the campaign in a full CLI run; the generated cases cover same-seed
+determinism and source fuzzing. The replay implementation imports only public
+exports from `src/index.ts`.
 
 ### Commands and budgets
 
@@ -308,9 +312,11 @@ unbounded generated inputs.
 The command accepts `--seed`, `--runs`, and optional zero-based `--case`.
 `--case` replays one generated case from the stated campaign on the same
 repository revision and campaign implementation. The small internal property
-ordering is not a compatibility contract. Every failure reports seed, run
-count, case number, property ID, boundary, property-specific context, the
-generated source when applicable, cause, and a working replay command such as:
+ordering is not a compatibility contract. A fixed-fixture failure reports its
+property ID, boundary, variant, and cause; `--case` skips the fixed fixtures.
+Every generated-case failure reports seed, run count, case number, property ID,
+boundary, property-specific context, the generated source when applicable,
+cause, and a working replay command such as:
 
 ```shell
 npm run test:property -- --seed 12345 --runs 250 --case 17
