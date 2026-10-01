@@ -1,0 +1,64 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { analyzeFeasibility, rootDiagnostics } from "../src/report.ts";
+import type { MigrationDiagnostic } from "../src/ir.ts";
+import type { ParsedGroovyFile, SourceSpan } from "../src/ast.ts";
+
+const child: SourceSpan = { line: 2, column: 5, endLine: 2, endColumn: 15 };
+const parent: SourceSpan = { line: 2, column: 1, endLine: 4, endColumn: 2 };
+
+test("keeps the innermost diagnostic and removes wrapper cascades", () => {
+  const diagnostics: MigrationDiagnostic[] = [
+    { code: "SX_ROOT", severity: "error", message: "root", span: child },
+    { code: "SX_WRAPPER", severity: "error", message: "wrapper", span: parent },
+    { code: "SX_DUPLICATE_WRAPPER", severity: "error", message: "duplicate", span: parent },
+  ];
+
+  assert.deepEqual(rootDiagnostics(diagnostics), [diagnostics[0]]);
+});
+
+test("reports source and IR counts separately instead of inventing a conversion percentage", () => {
+  const file: ParsedGroovyFile = {
+    formatVersion: 1,
+    sourceName: "report-fixture.groovy",
+    groovyVersion: "2.5.21",
+    mode: "script-body",
+    diagnostics: [],
+    root: {
+      kind: "scriptBody",
+      span: null,
+      body: {
+        kind: "block",
+        span: parent,
+        statements: [{
+          kind: "if",
+          span: parent,
+          condition: {
+            kind: "methodCall",
+            span: child,
+            object: { kind: "variable", span: null, name: "this", type: "java.lang.Object" },
+            method: { kind: "constant", span: child, value: "loadBoolean" },
+            arguments: {
+              kind: "arguments",
+              span: child,
+              items: [{ kind: "constant", span: child, value: "missing" }],
+            },
+            implicitThis: true,
+            safe: false,
+            spreadSafe: false,
+          },
+          then: { kind: "block", span: parent, statements: [] },
+          else: { kind: "empty", span: parent },
+        }],
+      },
+    },
+  };
+
+  const report = analyzeFeasibility([file]);
+  assert.equal(report.fileCount, 1);
+  assert.equal(report.sourceStatementNodes, 1);
+  assert.equal(report.migrationErrors, 2);
+  assert.equal(report.rootMigrationErrors, 1);
+  assert.deepEqual(report.rootDiagnosticsByCode, { SX_STORAGE_MISSING_KEY_SEMANTICS: 1 });
+  assert.equal(report.unsupportedPlaceholders, 1);
+});
