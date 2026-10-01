@@ -152,12 +152,6 @@ function assertForgedRejected(json: string, path: JsonPath, value: Json): void {
   );
 }
 
-function diagnostics(source: string): string[] {
-  const result = compileSource(source);
-  assert.equal(result.plan, null, `${JSON.stringify(source)} must not compile`);
-  return result.diagnostics.map((diagnostic) => `${diagnostic.code} ${diagnostic.message}`);
-}
-
 function warnings(session: Session): string[] {
   return session.events.flatMap((event) => (event.kind === "developerWarning" ? [event.code] : []));
 }
@@ -224,51 +218,6 @@ test("a blocking timer evaluates a named display expression like an async timer"
 
   const invalid = new Session('let mode = "loud"\ntimer(duration: 1, display: mode)');
   assert.equal(invalid.snapshot.failure?.code, "TSR050");
-});
-
-test("timer forms reject invalid positions, members, and handler scope", () => {
-  const cases: ReadonlyArray<readonly [string, string]> = [
-    ["let t = timer 5", "TSV033 A blocking timer returns no handle"],
-    ["timer 5 { exit }", "TSV033 Only an async timer may have an expiry block"],
-    ["let t = timer async 5\nsay t.nope", "TSV034 Timer handles have no property 'nope'"],
-    [
-      "let t = timer async 5\nt.elapsed = 1 s",
-      "TSV034 Timer handle property 'elapsed' cannot be assigned",
-    ],
-    ["let t = timer async 5\nt.restart()", "TSV034 Timer handles have no method 'restart'"],
-    [
-      'function f {\n  let local = 1\n  timer async 1 { say "${local}" }\n}',
-      "TSV002 Unknown variable 'local'",
-    ],
-    [
-      "timer async 1 { return 5 }",
-      "TSV033 A timer expiry block may use 'return' only without a value.",
-    ],
-    [
-      "timer(duration: 1, async: true, repeat: true)\ntimer(duration: 0, async: true, repeat: true)",
-      "TSV011 A repeating timer duration must be greater than zero.",
-    ],
-    ["timer(duration: 1, display: 5)", "TSV033 Timer display must be"],
-    ["let t = timer async 5\n(t).bogus()", "TSV034 Timer handles have no method 'bogus'"],
-    [
-      "let t = timer async 5\nt.remaining = 1",
-      "TSV034 Timer remaining must be assigned a duration",
-    ],
-    ["let t = timer async 5\nt.display = 1", "TSV034 Timer display must be"],
-    ["let t = timer async 5\nt.pause(1)", "TSV034 Timer pause() takes no arguments."],
-    ["timer 5..10 min", "TSV010 A timer range counts whole seconds"],
-    [
-      "timer(duration: 0..2, async: true, repeat: true)",
-      "TSV010 A repeating timer range must start at one second or more.",
-    ],
-  ];
-  for (const [source, expected] of cases) {
-    const found = diagnostics(source);
-    assert.ok(
-      found.some((diagnostic) => diagnostic.startsWith(expected)),
-      `${JSON.stringify(source)}: ${found.join(" | ")}`,
-    );
-  }
 });
 
 test("static handle hints do not leak from untaken or reassigned paths", () => {

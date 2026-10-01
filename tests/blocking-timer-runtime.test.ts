@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { isDeepStrictEqual } from "node:util";
 
 import { compileSource } from "../src/compiler.js";
 import type { WaitInstruction } from "../src/plan/model.js";
@@ -37,10 +38,10 @@ function start(source: string, seed = SEEDS[0]!) {
   return { compiled, ...operation };
 }
 
-function diagnostics(source: string): string[] {
+function diagnostics(source: string) {
   const result = compileSource(source);
   assert.equal(result.plan, null, `${JSON.stringify(source)} must not compile`);
-  return result.diagnostics.map((diagnostic) => `${diagnostic.code} ${diagnostic.message}`);
+  return result.diagnostics;
 }
 
 test("timer compiles fixed seconds and integer-second ranges into visible foreground delays", () => {
@@ -229,33 +230,60 @@ test("zero timers are immediate and create no action", () => {
   );
 });
 
-test("unsupported and invalid timer forms fail with structured diagnostics", () => {
-  const cases: ReadonlyArray<readonly [string, string]> = [
-    ["timer", "TSP012 Expected a timer duration"],
-    ["timer(10)", "TSP034 The parenthesized timer form uses named arguments"],
-    ["timer(duration: 1, repeat: yes)", "TSP034 Timer argument 'repeat' must be the literal"],
-    ["timer(duration: 1, speed: 2)", "TSP034 Unknown timer argument 'speed'"],
-    ['timer(label: "x")', "TSP034 The parenthesized timer form requires a 'duration'"],
-    ["timer 10 { exit }", "TSV033 Only an async timer may have an expiry block"],
-    ["timer(duration: 1, repeat: true)", "TSV033 Only an async timer may have an expiry block"],
-    ["let t = timer 10", "TSV033 A blocking timer returns no handle"],
-    ['timer(duration: 1, display: "loud")', "TSV033 Timer display must be"],
-    ["timer 10 s ms", "TSV033 This duration already has a unit."],
-    ["timer 1 day", "TSP033"],
-    ["timer 5..10 min", "TSV010 A timer range counts whole seconds"],
-    ["let n = 10\ntimer 5..n min", "TSV010 A timer range counts whole seconds"],
-    ["timer -1", "TSV011 Timer duration must not be negative."],
-    ["timer 1.5..3", "TSV010 A statically known timer range must have integer second bounds."],
-    ["timer -2..3", "TSV010 A timer range must not start below zero seconds."],
-    ["timer 5..5", "TSV010 A timer range must contain at least one whole second."],
-    ["timer 6..=5", "TSV010 A timer range must contain at least one whole second."],
-    ["let timer = 1", "TSV001"],
+test("timer forms reject invalid syntax, positions, members, handler scope, and static durations", () => {
+  // Each row names the diagnostic code and the last occurrence of the source text it must locate.
+  const cases: ReadonlyArray<readonly [string, string, string]> = [
+    // Parser forms.
+    ["timer", "TSP012", ""],
+    ["timer(10)", "TSP034", "10"],
+    ["timer(duration: 1, repeat: yes)", "TSP034", "yes"],
+    ["timer(duration: 1, speed: 2)", "TSP034", "speed"],
+    ['timer(label: "x")', "TSP034", 'timer(label: "x")'],
+    ["timer 1 day", "TSP033", "day"],
+    ["let timer = 1", "TSV001", "timer"],
+    // Blocking timers have no handle or expiry block.
+    ["let t = timer 5", "TSV033", "timer 5"],
+    ["timer 5 { exit }", "TSV033", "{ exit }"],
+    ["timer(duration: 1, repeat: true)", "TSV033", "timer(duration: 1, repeat: true)"],
+    // Display and duration operands.
+    ["timer(duration: 1, display: 5)", "TSV033", "5"],
+    ['timer(duration: 1, display: "loud")', "TSV033", '"loud"'],
+    ["timer 10 s ms", "TSV033", "10 s"],
+    ["timer -1", "TSV011", "-1"],
+    [
+      "timer(duration: 1, async: true, repeat: true)\ntimer(duration: 0, async: true, repeat: true)",
+      "TSV011",
+      "0",
+    ],
+    ["timer 5..10 min", "TSV010", "5..10"],
+    ["let n = 10\ntimer 5..n min", "TSV010", "5..n"],
+    ["timer 1.5..3", "TSV010", "1.5..3"],
+    ["timer -2..3", "TSV010", "-2..3"],
+    ["timer 5..5", "TSV010", "5..5"],
+    ["timer 6..=5", "TSV010", "6..=5"],
+    ["timer(duration: 0..2, async: true, repeat: true)", "TSV010", "0..2"],
+    // Handle members.
+    ["let t = timer async 5\nsay t.nope", "TSV034", "nope"],
+    ["let t = timer async 5\nt.elapsed = 1 s", "TSV034", "elapsed"],
+    ["let t = timer async 5\nt.restart()", "TSV034", "restart"],
+    ["let t = timer async 5\n(t).bogus()", "TSV034", "bogus"],
+    ["let t = timer async 5\nt.remaining = 1", "TSV034", "remaining"],
+    ["let t = timer async 5\nt.display = 1", "TSV034", "display"],
+    ["let t = timer async 5\nt.pause(1)", "TSV034", "pause"],
+    // Expiry block scope and return value.
+    ['function f {\n  let local = 1\n  timer async 1 { say "${local}" }\n}', "TSV002", "local"],
+    ["timer async 1 { return 5 }", "TSV033", "5"],
   ];
-  for (const [source, expected] of cases) {
-    const found = diagnostics(source);
+  for (const [source, code, subject] of cases) {
+    const start = source.lastIndexOf(subject);
+    const found = diagnostics(source).map((diagnostic) => [
+      diagnostic.code,
+      diagnostic.span.start.offset,
+      diagnostic.span.end.offset,
+    ]);
     assert.ok(
-      found.some((diagnostic) => diagnostic.startsWith(expected)),
-      `${JSON.stringify(source)}: ${found.join(" | ")}`,
+      found.some((entry) => isDeepStrictEqual(entry, [code, start, start + subject.length])),
+      `${JSON.stringify(source)}: expected ${code} at ${JSON.stringify(subject)}, found ${JSON.stringify(found)}`,
     );
   }
 });

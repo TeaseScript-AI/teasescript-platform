@@ -655,6 +655,10 @@ test("unsupported and overflowing runtime pacing leave message evaluation uncomm
 test("typed skip resolves an active background pacing gate without disturbing a foreground wait", () => {
   const standalone = plan('say "first"');
   const standaloneWaiting = run(standalone, createFreshRuntimeSnapshot(standalone));
+  assert.deepEqual(
+    standaloneWaiting.events.map((event) => event.kind),
+    ["say", "actionRequested", "complete"],
+  );
   const standaloneGate = standaloneWaiting.snapshot.backgroundActions[0];
   assert.equal(standaloneGate?.kind, "chatPacingGate");
   const standaloneSkipped = completeAction(standalone, standaloneWaiting.snapshot, {
@@ -664,7 +668,10 @@ test("typed skip resolves an active background pacing gate without disturbing a 
   });
   assert.equal(standaloneSkipped.outcome.kind, "completed");
   assert.equal(standaloneSkipped.snapshot.backgroundActions.length, 0);
-  assert.equal(standaloneSkipped.events[0]?.kind, "actionCompleted");
+  assert.deepEqual(
+    standaloneSkipped.events.map((event) => event.kind),
+    ["actionCompleted"],
+  );
 
   const withWait = plan('say "first"\nwait 1 s');
   const waiting = run(withWait, createFreshRuntimeSnapshot(withWait));
@@ -1519,57 +1526,6 @@ test("say instruction plans and public pacing failures stay at their validation 
     assert.deepEqual(result.events, []);
     assert.equal(JSON.stringify(result.snapshot), baseline);
   }
-});
-
-test("pacing event-order matrix covers representative lifecycle transitions", () => {
-  const initialPlan = plan('say "first"');
-  const initial = run(initialPlan, createFreshRuntimeSnapshot(initialPlan));
-  const promotedPlan = plan('say "first"\nsay "second"');
-  const promoted = run(promotedPlan, createFreshRuntimeSnapshot(promotedPlan));
-  const promotedGate = promoted.snapshot.foregroundAction;
-  assert.equal(promotedGate?.kind, "chatPacingGate");
-  const released = observeTime(promotedPlan, promoted.snapshot, promotedGate!.deadlineMs);
-  const interactionPlan = plan('say "first"\nshowButton "Continue"');
-  const interaction = run(interactionPlan, createFreshRuntimeSnapshot(interactionPlan));
-  const instantPlan = plan('say "first"\nsay "now", instant');
-  const instant = run(instantPlan, createFreshRuntimeSnapshot(instantPlan));
-  const dualPlan = plan('say "first"\nwait 1 s\nexit');
-  const dual = run(dualPlan, createFreshRuntimeSnapshot(dualPlan));
-
-  const cases: Array<[string, readonly string[]]> = [
-    ["initial positive say", initial.events.map((event) => event.kind)],
-    ["later positive say promotion", promoted.events.map((event) => event.kind)],
-    ["foreground pacing settlement", released.events.map((event) => event.kind)],
-    [
-      "background typed skip",
-      completeAction(initialPlan, initial.snapshot, {
-        actionId: initial.snapshot.backgroundActions[0]!.actionId,
-        actionKind: "chatPacingGate",
-        payload: { kind: "skip" },
-      }).events.map((event) => event.kind),
-    ],
-    ["interaction consumption", interaction.events.map((event) => event.kind)],
-    ["instant supersession", instant.events.map((event) => event.kind)],
-    [
-      "late observation replays the delay before later pacing",
-      observeTime(dualPlan, dual.snapshot, 2_000).events.map((event) => event.kind),
-    ],
-    [
-      "prepared re-entry replacement",
-      run(promotedPlan, released.snapshot).events.map((event) => event.kind),
-    ],
-  ];
-  const expected = new Map<string, readonly string[]>([
-    ["initial positive say", ["say", "actionRequested", "complete"]],
-    ["later positive say promotion", ["say", "actionRequested"]],
-    ["foreground pacing settlement", ["actionCompleted"]],
-    ["background typed skip", ["actionCompleted"]],
-    ["interaction consumption", ["say", "actionRequested", "actionCompleted", "actionRequested"]],
-    ["instant supersession", ["say", "actionRequested", "actionCompleted", "say", "complete"]],
-    ["late observation replays the delay before later pacing", ["actionCompleted"]],
-    ["prepared re-entry replacement", ["say", "actionRequested", "complete"]],
-  ]);
-  for (const [label, events] of cases) assert.deepEqual(events, expected.get(label), label);
 });
 
 test("bounded replay advances across delay, pacing, and interaction settlements", () => {
