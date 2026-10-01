@@ -1,3 +1,12 @@
+import type { InjectionKey } from "vue";
+
+/**
+ * Resolves an authored, package-relative speaker `avatar` reference through the Player's host, like the Stage image.
+ * `null` keeps the letter glyph.
+ */
+export const speakerAvatarSource: InjectionKey<(path: string) => string | null> =
+  Symbol("speaker-avatar-source");
+
 // Early assignments span the palette; neighboring hues use different lightness levels.
 // Each pair keeps its hue across themes.
 export const speakerAvatarPalette = [

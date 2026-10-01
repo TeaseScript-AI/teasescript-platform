@@ -16,6 +16,7 @@ import SessionActivation from "./SessionActivation.vue";
 import Stage from "./Stage.vue";
 import StageRightRail from "./StageRightRail.vue";
 import TimerRegion from "./TimerRegion.vue";
+import { speakerAvatarSource } from "./speakerAvatar";
 import { enhancedTranscriptContrast } from "./transcriptContrast";
 import { usePlayerKeyboardFocus } from "./usePlayerKeyboardFocus";
 import { usePlayerPreference } from "./usePlayerPreference";
@@ -42,6 +43,7 @@ provide(
   enhancedTranscriptContrast,
   computed(() => themeIntent.value.contrast === "high"),
 );
+provide(speakerAvatarSource, props.player.resolveAsset);
 usePlayerTheme(themeIntent);
 // Each mode starts from its own default palette; the contrast choice carries over.
 // Player Settings persist in this browser. Contrast is part of the theme intent; the

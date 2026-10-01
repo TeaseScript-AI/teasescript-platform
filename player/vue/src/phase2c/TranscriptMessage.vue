@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, inject } from "vue";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Message, MessageAvatar, MessageContent, MessageHeader } from "@/components/ui/message";
@@ -9,7 +9,7 @@ import type {
 } from "../../../model.js";
 import TranscriptMarkup from "./TranscriptMarkup.vue";
 import { nameOf, resolveAppearance } from "./transcriptPresentation";
-import { speakerAvatarColors } from "./speakerAvatar";
+import { speakerAvatarColors, speakerAvatarSource } from "./speakerAvatar";
 
 const props = defineProps<{
   entry: PlayerTranscriptEntryPresentation;
@@ -21,6 +21,8 @@ const props = defineProps<{
 }>();
 const player = props.entry.kind === "message" && props.entry.speakerId === "user";
 const speaker = props.entry.kind === "message" ? props.speakers[props.entry.speakerId] : undefined;
+const resolveAvatar = inject(speakerAvatarSource, () => null);
+const avatarImage = speaker?.avatarImage === undefined ? null : resolveAvatar(speaker.avatarImage);
 const name = !player && !props.continues ? nameOf(props.speakers, props.entry) : "";
 const avatarColors = computed(() => speakerAvatarColors(props.avatarOrdinal ?? 0));
 const avatarStyle = computed(() => ({
@@ -61,7 +63,7 @@ const avatarStyle = computed(() => ({
     <MessageAvatar v-if="!player" class="self-start" :class="continues ? 'invisible' : ''">
       <!-- The visible speaker name identifies the message; the avatar is decorative. -->
       <Avatar aria-hidden="true">
-        <AvatarImage v-if="speaker?.avatarImage" :src="speaker.avatarImage" alt="" />
+        <AvatarImage v-if="avatarImage" :src="avatarImage" alt="" />
         <AvatarFallback data-speaker-avatar class="text-xs font-semibold" :style="avatarStyle">
           {{ speaker?.avatar }}
         </AvatarFallback>
