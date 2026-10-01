@@ -1,5 +1,5 @@
 // Requires Playwright CLI and a running Player development preview (`npm run dev:player`).
-// npm run test:player:preview -- http://agents.home.arpa:5173/player/
+// npm run test:player:preview -- http://localhost:5173/player/
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

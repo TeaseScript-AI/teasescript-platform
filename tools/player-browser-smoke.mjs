@@ -55,7 +55,10 @@ async function main() {
       await setViewport(cdp, 390, 844);
       await selectPlayerExample(cdp);
       await narrowScenario(cdp);
-      console.log("player-browser-smoke: PASS technical playground");
+      await demoScenario(cdp, origin);
+      console.log(
+        "player-browser-smoke: PASS technical playground and the repository demo on /player/",
+      );
     } finally {
       cdp.close();
     }
@@ -409,6 +412,177 @@ async function narrowScenario(cdp) {
     `const select=document.querySelector('.choice-select'); select.value='1'; select.dispatchEvent(new Event('change', {bubbles:true}))`,
   );
   await waitFor(cdp, `document.querySelector('#runtime-status')?.textContent === 'halted'`);
+}
+
+// Plays the repository demo on the maintained /player/ route of the built Player with trusted input, so the Start
+// click is the user activation its audio relies on. Checks rely on the demo's authored text and timer labels.
+async function demoScenario(cdp, origin) {
+  const { identifier } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
+    source: `window.__played = [];
+      const play = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function () {
+        if (!window.__played.includes(this)) window.__played.push(this);
+        return play.call(this);
+      };`,
+  });
+  await setViewport(cdp, 1440, 900);
+  await navigate(cdp, `${origin}/player/`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  assertEqual(
+    await value(cdp, `document.querySelectorAll('.transcript-entry').length`),
+    0,
+    "The demo ran before Start",
+  );
+  await physicalClick(cdp, "[data-session-activation] button");
+
+  const stageSources = [];
+  const timers = new Map();
+  const texts = new Set();
+  const avatars = {};
+  const audio = [];
+  let roomPausedDuringCountdown = false;
+  let finished = false;
+  const deadline = Date.now() + 120_000;
+  while (!finished) {
+    if (Date.now() > deadline) throw new Error("The demo did not reach Finish in time");
+    const state = await value(
+      cdp,
+      `(() => {
+        const input = document.querySelector('[data-composer-input]');
+        const entries = [...document.querySelectorAll('.transcript-entry')];
+        const entry = (text) => entries.find((element) => element.textContent.includes(text));
+        return {
+          stage: document.querySelector('.stage-media')?.getAttribute('src') ?? null,
+          timers: [...document.querySelectorAll('.timer-display')].map((timer) => [
+            timer.querySelector('.timer-label')?.textContent.trim() ?? '',
+            timer.dataset.kind,
+          ]),
+          // The room ambience is the 4 s loop; the chime lasts 1.6 s.
+          roomPaused: window.__played.find((element) => element.duration > 3)?.paused ?? null,
+          audio: window.__played.map((element) => ({ time: element.currentTime, audible: !element.muted && element.volume > 0 })),
+          texts: entries.map((element) => element.textContent),
+          vera: entry('Eyes on me.')?.querySelector('[data-slot=avatar-image]')?.getAttribute('src')?.slice(0, 18),
+          session: entry('Some of her messages')?.querySelector('[data-speaker-avatar]')?.textContent.trim(),
+          buttons: [...document.querySelectorAll('[data-foreground-controls] button')].map((button) => button.textContent.trim()),
+          placeholder: input && !input.disabled ? input.placeholder : null,
+        };
+      })()`,
+    );
+    if (state.stage !== null && stageSources.at(-1) !== state.stage) stageSources.push(state.stage);
+    for (const [label, kind] of state.timers) {
+      timers.set(label, new Set([...(timers.get(label) ?? []), kind]));
+      if (label === "Stay exactly like that")
+        roomPausedDuringCountdown ||= state.roomPaused === true;
+    }
+    for (const text of state.texts) texts.add(text);
+    avatars.vera ??= state.vera;
+    avatars.session ??= state.session;
+    state.audio.forEach(({ time, audible }, index) => {
+      if (audible && time > (audio[index] ?? 0)) audio[index] = time;
+    });
+
+    if (state.buttons.includes("Stand at attention")) {
+      await physicalClick(cdp, "[data-foreground-controls] button:last-of-type");
+    } else if (state.buttons.length === 1) {
+      finished = state.buttons[0] === "Finish";
+      await physicalClick(cdp, "[data-foreground-controls] button");
+    } else if (state.placeholder === "What you call her") {
+      await evaluate(cdp, `document.querySelector('[data-composer-input]').focus()`);
+      await cdp.call("Input.insertText", { text: "Mistress" });
+      await physicalClick(cdp, ".composer-send");
+    } else if (state.placeholder !== null) {
+      // A skippable pacing gate: Space in the empty composer hurries the message along.
+      await evaluate(cdp, `document.querySelector('[data-composer-input]').focus()`);
+      await pressSpace(cdp);
+    }
+    await delay(150);
+  }
+
+  await waitFor(cdp, `!document.querySelector('.stage-media')`);
+  assertEqual(stageSources.length, 2, "Stage images shown before hideImage");
+  if (!stageSources.every((source) => source.startsWith("data:image/svg+xml"))) {
+    throw new Error(`The Stage did not show the demo's package images: ${stageSources.join(", ")}`);
+  }
+  assertEqual(
+    JSON.stringify([...timers].map(([label, kinds]) => [label, [...kinds].sort()])),
+    JSON.stringify([
+      ["Hold still", ["visible"]],
+      ["Mistress's timer", ["mystery", "visible"]],
+      ["Stay exactly like that", ["visible"]],
+    ]),
+    "Presented runtime timers",
+  );
+  if (!roomPausedDuringCountdown)
+    throw new Error("The room ambience kept playing during the countdown");
+  if (audio.length !== 2 || !audio.every((time) => time > 0.2)) {
+    throw new Error(`Both demo sounds must actually play audibly: ${JSON.stringify(audio)}`);
+  }
+  assertEqual(avatars.vera, "data:image/svg+xml", "Mistress Vera's avatar image");
+  assertEqual(avatars.session, "S", "Letter glyph for a speaker without an avatar");
+  for (const text of [
+    "Mistress. Good. Don't forget it.",
+    "When you hear that bell, you listen.",
+    "Good. That's enough for your first lesson.",
+  ]) {
+    if (![...texts].some((entry) => entry.includes(text)))
+      throw new Error(`Missing message: ${text}`);
+  }
+
+  // A narrow phone viewport keeps Start and the first question's input reachable.
+  await setViewport(cdp, 390, 844);
+  await navigate(cdp, `${origin}/player/`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  const narrowDeadline = Date.now() + 20_000;
+  while (
+    (await value(cdp, `document.querySelector('[data-composer-input]')?.placeholder`)) !==
+    "What you call her"
+  ) {
+    if (Date.now() > narrowDeadline)
+      throw new Error("The narrow demo did not reach its first question");
+    if (await value(cdp, `document.querySelector('[data-composer-input]')?.disabled === false`)) {
+      await evaluate(cdp, `document.querySelector('[data-composer-input]').focus()`);
+      await pressSpace(cdp);
+    }
+    await delay(150);
+  }
+  const inputVisible = await value(
+    cdp,
+    `(() => { const rect = document.querySelector('[data-composer-input]').getBoundingClientRect(); return rect.top >= 0 && rect.bottom <= innerHeight && rect.left >= 0 && rect.right <= innerWidth && rect.height > 0; })()`,
+  );
+  assertEqual(
+    inputVisible,
+    true,
+    "The narrow layout keeps the question's input inside the viewport",
+  );
+  await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+}
+
+async function physicalClick(cdp, selector) {
+  const point = await value(
+    cdp,
+    `(() => { const rect=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return {x:rect.left + rect.width / 2, y:rect.top + rect.height / 2}; })()`,
+  );
+  for (const type of ["mousePressed", "mouseReleased"]) {
+    await cdp.call("Input.dispatchMouseEvent", {
+      type,
+      x: point.x,
+      y: point.y,
+      button: "left",
+      clickCount: 1,
+    });
+  }
+}
+
+async function pressSpace(cdp) {
+  for (const type of ["keyDown", "keyUp"]) {
+    await cdp.call("Input.dispatchKeyEvent", {
+      type,
+      key: " ",
+      code: "Space",
+      windowsVirtualKeyCode: 32,
+    });
+  }
 }
 
 async function selectPlayerExample(cdp) {
