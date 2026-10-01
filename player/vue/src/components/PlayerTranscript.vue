@@ -116,7 +116,11 @@ function messageStyle(entry: PlayerTranscriptEntryPresentation): Record<string, 
   const speaker = speakerFor(entry);
   return speaker === null
     ? {}
-    : { "--speaker-accent": speaker.accent, "--speaker-font": speaker.fontFamily };
+    : {
+        // "inherit" means no authored colour; keep this Player's stylesheet default accent.
+        ...(speaker.accent === "inherit" ? {} : { "--speaker-accent": speaker.accent }),
+        "--speaker-font": speaker.fontFamily,
+      };
 }
 
 function virtualItemStyle(start: number): CSSProperties {
