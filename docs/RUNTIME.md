@@ -656,8 +656,11 @@ queue and interrupt machinery above; interrupt frames record `mediaId` instead o
 stays. Checkpoints carry the complete media state, including unprocessed samples, and restore does not advance or
 rewrite it. Restore validation requires issued media IDs to have exactly one active or settled record, handles to refer
 to issued IDs, queued and running cue blocks to belong to their media's own blocks, at most one active video,
-waits to refer to their active media, and each media's position, passes, committed progress, and total playback to
-agree with its segment anchor, whose first sample does not lie after current scene time. Cross-device handoff is not part of this contract.
+waits to refer to their active media, each media's total playback to agree with its segment anchor, whose first
+sample does not lie after current scene time, and each committed cursor to be one the runtime produces: at the origin
+of a pass, where pending start cues wait, or exactly the arrival that the runtime's own next-arrival step commits from
+the preceding arrival point. Distinct cue points whose segment progress is identical in double precision, which needs
+extreme source ranges, cannot be told apart this way. Cross-device handoff is not part of this contract.
 
 **Player projection.** `mediaPlaybackProjection(snapshot)` exposes each active media's identity, source, `loaded`,
 state, `segment`, active range, `volume`, `playheadMs` (the source position that the reported progress reaches),
