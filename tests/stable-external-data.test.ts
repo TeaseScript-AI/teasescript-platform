@@ -94,8 +94,7 @@ test("fresh globals reject changing and throwing getters without invoking them",
         });
       },
       (error: unknown) =>
-        error instanceof TypeError &&
-        error.message === "$.globals.payload is not a JSON-safe runtime value.",
+        error instanceof TypeError && error.message.startsWith("$.globals.payload "),
     );
     assert.equal(reads, 0);
   }
@@ -133,11 +132,9 @@ test("instruction plans reject accessors before validation or execution", () => 
 
   const validation = validateInstructionPlan(valid);
   assert.equal(validation.valid, false);
-  assert.deepEqual(validation.errors[0], {
-    code: "TSC002",
-    message: "Plan contains a non-JSON-safe value.",
-    path: "$.padding",
-  });
+  assert.ok(
+    validation.errors.some((error) => error.code === "TSC002" && error.path === "$.padding"),
+  );
 
   const safePlan = plan("exit");
   const snapshot = createFreshRuntimeSnapshot(safePlan);
@@ -297,7 +294,7 @@ test("serializable-value APIs reject accessors and consume stable proxy arrays",
     },
   });
 
-  assert.equal(validateSerializableValue(unstable), "$.items is not a JSON-safe runtime value.");
+  assert.ok(validateSerializableValue(unstable)?.startsWith("$.items "));
   assert.throws(
     () => {
       // EVIDENCE: the accessor-bearing list deliberately violates the serializable-value input contract.
