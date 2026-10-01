@@ -20,7 +20,6 @@ import {
 } from "../media.js";
 import type { RuntimeSnapshot } from "../state.js";
 import { terminalContinuationHandoffFor } from "./terminal-continuation.js";
-import { settlementTimeMs } from "./timer-lifecycle.js";
 import { assertEventSequenceCapacity, copySpan, takeSequence } from "./support.js";
 
 export type MediaWaitOutcome = RuntimeMediaPlaybackSettlementSnapshot["outcome"];
@@ -192,7 +191,7 @@ function settleMediaAction(
     owningInstruction: action.owningInstruction,
     requestEventSequence: action.requestEventSequence,
     completionEventSequence,
-    completedAtMs: settlementTimeMs(snapshot),
+    completedAtMs: snapshot.currentSessionTimeMs,
   });
   events.push(
     Object.freeze({
@@ -273,7 +272,7 @@ function mediaWaitSettlement(
     continuationInstruction: action.continuationInstruction,
     requestEventSequence: action.requestEventSequence,
     completionEventSequence: takeSequence(snapshot, 1),
-    completedAtMs: settlementTimeMs(snapshot),
+    completedAtMs: snapshot.currentSessionTimeMs,
   });
 }
 

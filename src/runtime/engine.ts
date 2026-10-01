@@ -148,7 +148,8 @@ function executeCapturedInstruction(
   const executed = executeInstructionBoundary(plan, snapshot, context);
   if (
     snapshot.status !== "failed" &&
-    snapshot.currentSessionTimeMs < snapshot.observedSessionTimeMs &&
+    // Work due exactly at the observed time also settles once execution waits or ends.
+    snapshot.currentSessionTimeMs <= snapshot.observedSessionTimeMs &&
     !executionRunnable(snapshot)
   ) {
     processDueWork(plan, snapshot, context.events);
@@ -182,10 +183,7 @@ function executeInstructionBoundary(
     assertEventSequenceCapacity(snapshot, completeEventAndFutureCompletions);
     snapshot.terminalContinuationHandoff = null;
     snapshot.status = "halted";
-    const terminalInstruction = plan.instructions[plan.rootEndInstruction - 1];
-    context.events.push(
-      createCompleteEvent(snapshot, terminalInstruction?.span ?? plan.sourceSpan),
-    );
+    context.events.push(createCompleteEvent(snapshot, rootCompletionSpan(plan)));
     return 1;
   }
   const instructionIndex = snapshot.nextInstruction;
@@ -216,11 +214,7 @@ function executeInstructionBoundary(
       snapshot.status = "halted";
       const completeEventAndFutureCompletions = requiredEventSequencesForRootCompletion(snapshot);
       assertEventSequenceCapacity(snapshot, completeEventAndFutureCompletions);
-      // Root completion belongs to the terminal root instruction, also when a block's return reaches it.
-      const terminalInstruction = plan.instructions[plan.rootEndInstruction - 1];
-      context.events.push(
-        createCompleteEvent(snapshot, terminalInstruction?.span ?? instruction.span),
-      );
+      context.events.push(createCompleteEvent(snapshot, rootCompletionSpan(plan)));
     }
   } catch (error) {
     if (!(error instanceof RuntimeFault)) throw error;
@@ -586,6 +580,10 @@ function executePlannedInstruction(
     }
     case "wait": {
       const evaluated = evaluator.evaluate(instruction.duration);
+      const display =
+        typeof instruction.display === "string"
+          ? instruction.display
+          : timerDisplay(evaluator.evaluate(instruction.display), instruction.display.span);
       const label =
         instruction.label === null
           ? null
@@ -630,7 +628,7 @@ function executePlannedInstruction(
         createdAtMs: snapshot.currentSessionTimeMs,
         deadlineMs,
         expectedCompletion: "time" as const,
-        display: instruction.display,
+        display,
         label,
         requestEventSequence: sequence,
       });
@@ -1771,6 +1769,11 @@ function requiredEventSequencesForNewDelay(snapshot: RuntimeSnapshot): number {
 function requiredEventSequencesForRootCompletion(snapshot: RuntimeSnapshot): number {
   const rootCompleteEvent = 1;
   return rootCompleteEvent + requiredFutureActionCompletionEvents(snapshot);
+}
+
+/** Completion is attributed to the script's last root instruction, however execution reached the end. */
+function rootCompletionSpan(plan: InstructionPlan): SourceSpan {
+  return plan.instructions[plan.rootEndInstruction - 1]?.span ?? plan.sourceSpan;
 }
 
 function createCompleteEvent(snapshot: RuntimeSnapshot, span: SourceSpan): CompleteEvent {

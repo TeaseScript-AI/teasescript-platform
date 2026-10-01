@@ -9,7 +9,7 @@ import type {
   TimerParts,
 } from "./ast.js";
 import { compileSource } from "./compiler.js";
-import { expressionChildren, mediaHandlerBlocks, mediaOperands } from "./expression-children.js";
+import { mediaHandlerBlocks, mediaOperands } from "./expression-children.js";
 import type { Diagnostic } from "./diagnostics.js";
 import { lex } from "./lexer.js";
 import {
@@ -512,136 +512,189 @@ interface Visitor {
   readonly say: (node: SayStatement) => void;
 }
 
-type VisitNode =
+type VisitItem =
   | { readonly kind: "statement"; readonly node: Statement }
   | { readonly kind: "expression"; readonly node: Expression };
 
-/** Visits in source pre-order with an explicit work stack, so deeply nested valid source cannot exhaust the call stack. */
+/**
+ * Visits the program in source order with an explicit work stack, so deeply nested source that compiles does not
+ * depend on the host call stack.
+ */
 function visitProgram(program: Program, visitor: Visitor): void {
-  const work: VisitNode[] = [];
-  const pushAll = (children: readonly VisitNode[]): void => {
-    for (let index = children.length - 1; index >= 0; index -= 1) work.push(children[index]!);
+  const stack: VisitItem[] = [];
+  const pushInOrder = (items: readonly VisitItem[]): void => {
+    for (let index = items.length - 1; index >= 0; index -= 1) stack.push(items[index]!);
   };
-  pushAll(program.statements.map(statementNode));
-  for (let item = work.pop(); item !== undefined; item = work.pop()) {
-    pushAll(
-      item.kind === "statement"
-        ? visitStatement(item.node, visitor)
-        : visitExpression(item.node, visitor),
-    );
+  pushInOrder(program.statements.map((node) => ({ kind: "statement", node })));
+  for (let item = stack.pop(); item !== undefined; item = stack.pop()) {
+    const children: VisitItem[] = [];
+    if (item.kind === "statement") visitStatement(item.node, visitor, children);
+    else visitExpression(item.node, visitor, children);
+    pushInOrder(children);
   }
 }
 
-function statementNode(node: Statement): VisitNode {
-  return { kind: "statement", node };
-}
-
-function expressionNode(node: Expression): VisitNode {
-  return { kind: "expression", node };
-}
-
-function blockNodes(statements: readonly Statement[]): VisitNode[] {
-  return statements.map(statementNode);
-}
-
-/** Reports the statement and returns its children in source order. */
-function visitStatement(statement: Statement, visitor: Visitor): readonly VisitNode[] {
+function visitStatement(statement: Statement, visitor: Visitor, children: VisitItem[]): void {
   switch (statement.kind) {
     case "showButtonStatement":
       visitor.showButton(statement);
-      return [expressionNode(statement.label)];
-    case "sayStatement": {
+      children.push({ kind: "expression", node: statement.label });
+      return;
+    case "sayStatement":
       visitor.say(statement);
-      const children: VisitNode[] = [];
-      if (statement.presentation !== null) children.push(expressionNode(statement.presentation));
-      children.push(expressionNode(statement.value));
+      if (statement.presentation !== null)
+        children.push({ kind: "expression", node: statement.presentation });
+      children.push({ kind: "expression", node: statement.value });
       if (statement.pacing !== null && statement.pacing !== "instant")
-        children.push(expressionNode(statement.pacing));
-      return children;
-    }
+        children.push({ kind: "expression", node: statement.pacing });
+      return;
     case "letStatement":
-      return [expressionNode(statement.initializer)];
+      children.push({ kind: "expression", node: statement.initializer });
+      return;
     case "assignmentStatement":
-      return [expressionNode(statement.target), expressionNode(statement.value)];
+      children.push({ kind: "expression", node: statement.target });
+      children.push({ kind: "expression", node: statement.value });
+      return;
     case "expressionStatement":
-      return [expressionNode(statement.expression)];
+      children.push({ kind: "expression", node: statement.expression });
+      return;
     case "speakerDeclaration":
-      return statement.properties.map((property) => expressionNode(property.value));
+      for (const property of statement.properties)
+        children.push({ kind: "expression", node: property.value });
+      return;
     case "ifStatement":
-      return [
-        expressionNode(statement.condition),
-        ...blockNodes(statement.thenBlock.statements),
-        ...(statement.elseBlock === null
-          ? []
-          : statement.elseBlock.kind === "block"
-            ? blockNodes(statement.elseBlock.statements)
-            : [statementNode(statement.elseBlock)]),
-      ];
+      children.push({ kind: "expression", node: statement.condition });
+      for (const child of statement.thenBlock.statements)
+        children.push({ kind: "statement", node: child });
+      if (statement.elseBlock?.kind === "block")
+        for (const child of statement.elseBlock.statements)
+          children.push({ kind: "statement", node: child });
+      else if (statement.elseBlock !== null)
+        children.push({ kind: "statement", node: statement.elseBlock });
+      return;
     case "repeatStatement":
-      return [expressionNode(statement.count), ...blockNodes(statement.body.statements)];
+      children.push({ kind: "expression", node: statement.count });
+      for (const child of statement.body.statements)
+        children.push({ kind: "statement", node: child });
+      return;
     case "forStatement":
-      return [expressionNode(statement.iterable), ...blockNodes(statement.body.statements)];
+      children.push({ kind: "expression", node: statement.iterable });
+      for (const child of statement.body.statements)
+        children.push({ kind: "statement", node: child });
+      return;
     case "whileStatement":
-      return [expressionNode(statement.condition), ...blockNodes(statement.body.statements)];
+      children.push({ kind: "expression", node: statement.condition });
+      for (const child of statement.body.statements)
+        children.push({ kind: "statement", node: child });
+      return;
     case "functionDeclaration":
-      return [
-        ...statement.parameters.flatMap((parameter) =>
-          parameter.defaultValue === null ? [] : [expressionNode(parameter.defaultValue)],
-        ),
-        ...blockNodes(statement.body.statements),
-      ];
+      for (const parameter of statement.parameters)
+        if (parameter.defaultValue !== null)
+          children.push({ kind: "expression", node: parameter.defaultValue });
+      for (const child of statement.body.statements)
+        children.push({ kind: "statement", node: child });
+      return;
     case "returnStatement":
-      return statement.value === null ? [] : [expressionNode(statement.value)];
+      if (statement.value !== null) children.push({ kind: "expression", node: statement.value });
+      return;
     case "timerStatement":
-      return timerNodes(statement);
+      visitTimer(statement, children);
+      return;
     case "playMediaStatement":
-      return mediaNodes(statement);
+      visitMedia(statement, children);
+      return;
     case "showImageStatement":
-      return [expressionNode(statement.image)];
+      children.push({ kind: "expression", node: statement.image });
+      return;
     case "hideImageStatement":
     case "speakerSetterStatement":
     case "waitStatement":
     case "exitStatement":
     case "breakStatement":
     case "continueStatement":
-      return [];
+      return;
   }
 }
 
-function timerNodes(timer: TimerParts): VisitNode[] {
-  return [
-    ...(typeof timer.display === "object" && timer.display !== null
-      ? [expressionNode(timer.display)]
-      : []),
-    expressionNode(timer.duration),
-    ...(timer.label === null ? [] : [expressionNode(timer.label)]),
-    ...blockNodes(timer.handler?.statements ?? []),
-  ];
+function visitTimer(timer: TimerParts, children: VisitItem[]): void {
+  if (typeof timer.display === "object" && timer.display !== null) {
+    children.push({ kind: "expression", node: timer.display });
+  }
+  children.push({ kind: "expression", node: timer.duration });
+  if (timer.label !== null) children.push({ kind: "expression", node: timer.label });
+  for (const child of timer.handler?.statements ?? [])
+    children.push({ kind: "statement", node: child });
 }
 
-function mediaNodes(parts: MediaParts): VisitNode[] {
-  return [
-    ...mediaOperands(parts).map(expressionNode),
-    ...mediaHandlerBlocks(parts).flatMap((block) => blockNodes(block.statements)),
-  ];
+function visitMedia(parts: MediaParts, children: VisitItem[]): void {
+  for (const operand of mediaOperands(parts)) children.push({ kind: "expression", node: operand });
+  for (const block of mediaHandlerBlocks(parts))
+    for (const child of block.statements) children.push({ kind: "statement", node: child });
 }
 
-/** Reports the expression and returns its children in source order. */
-function visitExpression(expression: Expression, visitor: Visitor): readonly VisitNode[] {
+function visitExpression(expression: Expression, visitor: Visitor, children: VisitItem[]): void {
   switch (expression.kind) {
     case "interactionExpression":
       visitor.interaction(expression);
-      return [
-        ...(expression.hint === null ? [] : [expressionNode(expression.hint)]),
-        ...expression.options.map((option) => expressionNode(option.value)),
-      ];
+      if (expression.hint !== null) children.push({ kind: "expression", node: expression.hint });
+      for (const option of expression.options)
+        children.push({ kind: "expression", node: option.value });
+      return;
+    case "parenthesizedExpression":
+      children.push({ kind: "expression", node: expression.expression });
+      return;
+    case "listLiteral":
+      for (const item of expression.elements) children.push({ kind: "expression", node: item });
+      return;
+    case "setLiteral":
+      for (const item of expression.elements) children.push({ kind: "expression", node: item });
+      return;
+    case "objectLiteral":
+      for (const property of expression.properties)
+        children.push({ kind: "expression", node: property.value });
+      return;
+    case "propertyAccessExpression":
+      children.push({ kind: "expression", node: expression.object });
+      return;
+    case "indexExpression":
+      children.push({ kind: "expression", node: expression.object });
+      children.push({ kind: "expression", node: expression.index });
+      return;
+    case "callExpression":
+      children.push({ kind: "expression", node: expression.callee });
+      for (const argument of expression.arguments)
+        children.push({ kind: "expression", node: argument.value });
+      return;
+    case "unaryExpression":
+      children.push({ kind: "expression", node: expression.operand });
+      return;
+    case "binaryExpression":
+      children.push({ kind: "expression", node: expression.left });
+      children.push({ kind: "expression", node: expression.right });
+      return;
+    case "rangeExpression":
+      children.push({ kind: "expression", node: expression.start });
+      children.push({ kind: "expression", node: expression.end });
+      return;
+    case "stringLiteral":
+      for (const part of expression.parts)
+        if (part.kind === "stringInterpolation")
+          children.push({ kind: "expression", node: part.expression });
+      return;
     case "timerExpression":
-      return timerNodes(expression);
+      visitTimer(expression, children);
+      return;
     case "playMediaExpression":
-      return mediaNodes(expression);
-    default:
-      return expressionChildren(expression).map(expressionNode);
+      visitMedia(expression, children);
+      return;
+    case "identifier":
+    case "booleanLiteral":
+    case "nullLiteral":
+    case "numberLiteral":
+    case "durationLiteral":
+      return;
   }
+  expression satisfies never;
 }
 
 interface OffsetEdit {

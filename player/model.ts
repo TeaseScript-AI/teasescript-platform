@@ -28,17 +28,14 @@ export interface PlayerMediaPresentation {
   readonly ambientColor: string;
 }
 
+/** One presented timer. Hidden timers are never presented, so they have no entry. */
 export interface PlayerTimerPresentation {
+  /** Stable presentation key; it is never displayed. */
+  readonly id: string;
+  readonly kind: Exclude<PlayerTimerKind, "hidden">;
   readonly name?: string;
   readonly remainingSeconds: number;
   readonly totalSeconds: number;
-}
-
-/** A timer derived from runtime state. Hidden timers are never presented, so they have no entry. */
-export interface PlayerRuntimeTimerPresentation extends PlayerTimerPresentation {
-  /** Stable presentation key derived from the action ID; it is never displayed. */
-  readonly id: string;
-  readonly kind: Exclude<PlayerTimerKind, "hidden">;
 }
 
 export interface PlayerSpeakerPresentation {

@@ -495,12 +495,13 @@ unless the session has failed:
   settle due work in (scene time, phase, action ID) order, advancing currentSessionTimeMs toward observedSessionTimeMs
 ```
 
-Outside a failed session, both coordinates are equal after every operation unless queued or running timer expiry
-blocks or media cue blocks hold `currentSessionTimeMs` behind `observedSessionTimeMs`. A failed session is terminal:
-later observations record the observed time but settle nothing and leave scene time unchanged.
-Catch-up with expiry blocks is defined under [Timers and scene time](#timers-and-scene-time). No checkpoint may contain due-action processing performed
-against a newer time than its `currentSessionTimeMs`; a checkpoint taken while catch-up is held keeps both coordinates
-and the pending work.
+Scene time stands behind the observed time only while the script, a timer expiry block, or a media cue
+block can execute; once execution
+waits or ends, catch-up continues and both coordinates are equal again. A failed session is terminal: later
+observations record the observed time but settle nothing and leave scene time unchanged. Catch-up is defined under
+[Timers and scene time](#timers-and-scene-time). No checkpoint may contain due-action processing performed against a
+newer time than its `currentSessionTimeMs`; a checkpoint taken while catch-up is held keeps both coordinates and the
+pending work.
 
 Blocking `wait` and `timer`, foreground interactions, pacing gates, and asynchronous timers share ADR 0016 action,
 identity, observation, event, and checkpoint infrastructure. Their timer-specific composition is defined below.
@@ -543,17 +544,21 @@ script change to the current round (`pause`, `resume`, `remaining`, or `repeatDu
 next full round. Observations after a runtime failure record the observed time but settle no further work.
 
 An observation records `observedSessionTimeMs`; `currentSessionTimeMs` is the scene time at which execution stands.
-Due work settles one deadline at a time, advancing scene time to each. While an expiry block can execute, now or
-right after the current single-instruction commit window, catch-up pauses with scene time at the moment its work
-became due: the block starts at its expiry's deadline and continues
-after its own waits and pacing at their deadlines, and catch-up continues toward the observed time once the block
-returns or waits. Later due work, including other timers, the foreground delay, and pacing gates, therefore stays
-unsettled until then, however late or often the Player observes. The main path still continues at the observed
-time. Time-driven settlements outside a running block record the observation, as for plans without expiry blocks; a
-pacing gate that is skipped or consumed records the current scene time. This reproduces a Player that observed every
-deadline on time: a block can `stop()` a later timer before it expires, a timer it starts orders by its own
-deadline, and a handler-free repeating timer skips silent rounds only up to the next other due work. A Player delay completion that an earlier-due block will interrupt
-returns `suspendedAction` while keeping the time observation.
+Due work settles one deadline at a time, advancing scene time to each. Whenever the script or an expiry block can
+execute, catch-up pauses with scene time at the moment that work became due: the script continues after a `wait` or
+pacing gate at its deadline, a block starts at its expiry's deadline, and catch-up continues toward the observed time
+once execution waits or ends. Every settlement records the scene time at which it happened: a time-driven settlement
+records its deadline, and a pacing gate that is skipped, consumed, or superseded records the current scene time. A
+late observation therefore gives the same output, events, and snapshot as observing every deadline on time: a block
+can `stop()` a later timer before it expires, a timer it starts orders by its own deadline, and a handler-free
+repeating timer skips silent rounds only up to the next other due work.
+
+Time reaches waits and timers only through `observeTime`; a Player cannot complete them. Host input (an interaction
+answer or a pacing skip) happens at the observed time, so `completeAction` returns `executionPending` without changing
+anything while scene time is behind the observed time or a due expiry block can run. The Player then runs the engine
+and retries with the same action ID; if a block ended or replaced that action, the retry reports it as no longer
+active. A failed session accepts no host input: such a request is `invalidPayload`, and Players schedule no further
+observation for it.
 
 Expiry blocks compile to parameterless handler regions. A runtime entry starts the first queued block before
 executing the next instruction, including from `waiting`, unless a block is already running, a single-instruction
@@ -623,9 +628,9 @@ atomically: the next pass restarts at `startAt` with its start cues pending, or 
 A repeat duration that ends mid-pass queues the cues reached there, then finishes. Every event's segment progress is
 calculated from the segment's anchor — its start position, completed passes, and total playback — rather than
 accumulated, so the same events produce the same values however the Player's samples are spaced, and the final arrival
-equals `terminalProgressMs` exactly, also for fractional ranges. Finished media keep only the sample at their finish. As for timers,
-cue blocks behave as if every sample had arrived on time, while the main path continues at the observed time and
-settlements outside a running block record the observation.
+equals `terminalProgressMs` exactly, also for fractional ranges. Finished media keep only the sample at their finish.
+As for timers, catch-up pauses whenever the script or a cue block can execute, so both behave as if every sample had
+arrived on time, and every media settlement records the scene time at which it happened.
 
 **Script operations.** Handle reads use the progress interpolated at current scene time, capped at the next
 uncommitted arrival. Before `pause()`, `resume()`, `stop()`, a seek, or a Stage replacement changes a segment, the

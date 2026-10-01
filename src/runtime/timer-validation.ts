@@ -1,7 +1,7 @@
 import type { InstructionPlan } from "../plan/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import { anchoredDeadlineMs } from "./timers.js";
-import { timerBlockHoldsCatchUp } from "./action-validation.js";
+import { catchUpPaused } from "./action-validation.js";
 
 /** Restore validation for asynchronous timers, their handles, and queued expiry blocks. */
 
@@ -32,17 +32,12 @@ const TIMER_ACTION_KEYS = [
   "timer",
 ] as const;
 
-/** Whether a plan can interrupt a waiting path, which relaxes action-history ordering after a block returns. */
-export function planHasTimerHandlers(plan: InstructionPlan | undefined): boolean {
-  return plan === undefined || plan.functions.some((definition) => definition.handler !== null);
-}
-
 /**
- * A deadline equal to scene time stays unsettled while a block holds catch-up, and in a failed session, which settles
- * nothing further.
+ * A deadline equal to scene time stays unsettled while execution can continue at that time, and in a failed session,
+ * which settles nothing further.
  */
 function dueDeadlineMayRemain(snapshot: Record<string, unknown>): boolean {
-  return snapshot.status === "failed" || timerBlockHoldsCatchUp(snapshot);
+  return snapshot.status === "failed" || catchUpPaused(snapshot);
 }
 
 export function validTimerAction(
@@ -170,7 +165,7 @@ function validTimerRecord(
   if (
     !hasExactKeys(timer, TIMER_KEYS) ||
     !positiveSafeInteger(timer.timerId) ||
-    !["visible", "mystery", "hidden"].includes(String(timer.display)) ||
+    (timer.display !== "visible" && timer.display !== "mystery" && timer.display !== "hidden") ||
     (timer.label !== null && typeof timer.label !== "string") ||
     typeof timer.repeat !== "boolean" ||
     typeof timer.persist !== "boolean" ||

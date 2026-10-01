@@ -19,6 +19,16 @@ import { timerProperty } from "../src/runtime/timers.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
+import {
+  activePlayerRuntimePacingGate,
+  playerRuntimeDeadlines,
+} from "../player/runtime-adapter.js";
+
+function playerRuntimeDeadlinesDue(snapshot: RuntimeSnapshot): boolean {
+  return playerRuntimeDeadlines(snapshot).some(
+    (deadline) => deadline <= snapshot.observedSessionTimeMs,
+  );
+}
 
 /** Drives a session with explicit time observations and completions, round-tripping every checkpoint. */
 class Session {
@@ -194,6 +204,27 @@ test("short and named timer forms lower to blocking delays or async timer starts
   assert.equal(compiled.functions.length, 2);
 });
 
+test("a blocking timer evaluates a named display expression like an async timer", () => {
+  const blocking = new Session(
+    'let mode = "mystery"\ntimer(duration: 30 s, display: mode, label: "Hold")\nsay "done"',
+  );
+  const delay = blocking.snapshot.foregroundAction;
+  assert.equal(delay?.kind, "delay");
+  assert.equal(delay?.kind === "delay" ? delay.display : null, "mystery");
+  blocking.at(30_000);
+  assert.deepEqual(blocking.said(), ["done"]);
+
+  // Operands written out of order are still evaluated in source order.
+  const order = new Session(
+    'let log = ""\nfunction mode { log = "${log}display "\nreturn "hidden" }\nfunction seconds { log = "${log}duration "\nreturn 1 }\ntimer(display: mode(), duration: seconds())\nsay log',
+  );
+  order.at(1_000);
+  assert.deepEqual(order.said(), ["display duration "]);
+
+  const invalid = new Session('let mode = "loud"\ntimer(duration: 1, display: mode)');
+  assert.equal(invalid.snapshot.failure?.code, "TSR050");
+});
+
 test("timer forms reject invalid positions, members, and handler scope", () => {
   const cases: ReadonlyArray<readonly [string, string]> = [
     ["let t = timer 5", "TSV033 A blocking timer returns no handle"],
@@ -216,10 +247,7 @@ test("timer forms reject invalid positions, members, and handler scope", () => {
       "timer(duration: 1, async: true, repeat: true)\ntimer(duration: 0, async: true, repeat: true)",
       "TSV011 A repeating timer duration must be greater than zero.",
     ],
-    [
-      'let d = "hidden"\ntimer(duration: 1, display: d)',
-      "TSV033 A blocking timer needs a literal display",
-    ],
+    ["timer(duration: 1, display: 5)", "TSV033 Timer display must be"],
     ["let t = timer async 5\n(t).bogus()", "TSV034 Timer handles have no method 'bogus'"],
     [
       "let t = timer async 5\nt.remaining = 1",
@@ -683,12 +711,12 @@ test("runtime review regressions stay checkpointable and ordered", () => {
 
   const deferred = new Session('timer async 1 s { say "interrupt" }\nwait 2 s');
   const delay = deferred.snapshot.foregroundAction!;
-  const completion = completeAction(deferred.plan, deferred.snapshot, {
-    actionId: delay.actionId,
-    actionKind: "delay",
-    payload: { kind: "time", currentSessionTimeMs: 2_000 },
-  });
-  assert.equal(completion.outcome.kind, "suspendedAction");
+  const interrupted = observeTime(deferred.plan, deferred.snapshot, 2_000);
+  assert.equal(interrupted.snapshot.currentSessionTimeMs, 1_000, "the earlier block runs first");
+  assert.equal(interrupted.snapshot.foregroundAction?.actionId, delay.actionId);
+  deferred.at(2_000);
+  assert.deepEqual(deferred.said(), ["interrupt"]);
+  assert.equal(deferred.snapshot.status, "halted");
 
   const stopped = new Session(
     'let second = timer async 2 s { say "second" }\nlet first = timer async 1 s { second.stop() }\nwait 3 s',
@@ -812,26 +840,49 @@ test("late observations run expiry blocks at their due scene time, like on-time 
     assert.deepEqual(said(source, onTime), expected, source);
     assert.deepEqual(said(source, [onTime.at(-1)!]), expected, `late: ${source}`);
   }
+  // Scene-time replay makes the complete result independent of observation cadence, not only the output.
+  const scripts = [
+    ...cases.map(([source]) => source),
+    'say "a"\nwait 1\nlet t = timer async 2 { say "block" }\nwait 3\nsay "b"\nt.stop()\nwait 1',
+  ];
+  for (const source of scripts) {
+    const onTime = new Session(source, { pacing: true });
+    for (let nowMs = 250; nowMs <= 12_000; nowMs += 250) onTime.at(nowMs);
+    const late = new Session(source, { pacing: true }).at(12_000);
+    assert.deepEqual(late.events, onTime.events, `events: ${source}`);
+    assert.deepEqual(late.snapshot, onTime.snapshot, `snapshot: ${source}`);
+  }
 });
 
-test("catch-up keeps observation-time settlements and rejects an unexplained observed-time lead", () => {
-  const plain = new Session('wait 1\nsay "done"').at(5_000);
-  const settled = plain.events.find(
-    (event) => event.kind === "actionCompleted" && event.settlement.actionKind === "delay",
+test("late observations replay the script at scene time and reject an unexplained observed-time lead", () => {
+  const late = new Session('wait 1\nsay "done"\nwait 1\nsay "later"').at(5_000);
+  const delays = late.events.flatMap((event) =>
+    event.kind === "actionCompleted" && event.settlement.actionKind === "delay"
+      ? [event.settlement.completedAtMs]
+      : [],
   );
-  assert.ok(settled?.kind === "actionCompleted" && settled.settlement.actionKind === "delay");
-  assert.equal(
-    settled.settlement.completedAtMs,
-    5_000,
-    "plans without expiry blocks settle at the observation",
-  );
+  assert.deepEqual(delays, [1_000, 2_000], "every delay settles at its deadline");
+  assert.deepEqual(late.said(), ["done", "later"]);
+  const onTime = new Session('wait 1\nsay "done"\nwait 1\nsay "later"');
+  for (const nowMs of [1_000, 2_000, 5_000]) onTime.at(nowMs);
+  assert.deepEqual(late.snapshot, onTime.snapshot);
 
   const waiting = new Session('wait 1\nsay "done"');
   const json = serializeCheckpoint(createCheckpoint(waiting.plan, waiting.snapshot));
   assertForgedRejected(json, ["snapshot", "observedSessionTimeMs"], 5_000);
+
+  // Observed but not yet replayed: the script is runnable at the delay deadline behind the horizon.
+  const held = observeTime(waiting.plan, waiting.snapshot, 5_000).snapshot;
+  assert.equal(held.status, "running");
+  assert.equal(held.currentSessionTimeMs, 1_000);
+  assert.equal(held.observedSessionTimeMs, 5_000);
+  const heldJson = serializeCheckpoint(createCheckpoint(waiting.plan, held));
+  assert.deepEqual(deserializeCheckpoint(heldJson).snapshot, held);
+  assertForgedRejected(heldJson, ["snapshot", "lastSettlement", "completedAtMs"], 3_000);
+  assertForgedRejected(heldJson, ["snapshot", "currentSessionTimeMs"], 6_000);
 });
 
-test("catch-up holds for a queued block behind a commit window and keeps observation-time timer settlements", () => {
+test("catch-up holds for a queued block behind a commit window and timer settlements record scene time", () => {
   const source =
     'let t = timer async 3 { say "too late", 0 }\ntimer async 1 { t.stop() }\nsay "first", 2\nsay "second", 1\nlet name = askText "Hold"';
   const onTime = new Session(source, { pacing: true });
@@ -844,18 +895,27 @@ test("catch-up holds for a queued block behind a commit window and keeps observa
     'timer async 1 { say "handler" }\nlet name = askText "Name?"\nsay name',
   );
   const observed = observeTime(asking.plan, asking.snapshot, 5_000).snapshot;
-  const completed = completeAction(asking.plan, observed, {
-    actionId: observed.foregroundAction!.actionId,
-    actionKind: "interaction",
-    interactionKind: "text",
-    payload: { kind: "submittedText", submittedText: "ok" },
-  });
+  const answer = (snapshot: RuntimeSnapshot, actionId: number, text: string) =>
+    completeAction(asking.plan, snapshot, {
+      actionId,
+      actionKind: "interaction",
+      interactionKind: "text",
+      payload: { kind: "submittedText", submittedText: text },
+    });
+  const questionId = observed.foregroundAction!.actionId;
+  const early = answer(observed, questionId, "ok");
+  assert.equal(early.outcome.kind, "executionPending", "the due block runs before input");
+  assert.deepEqual(early.snapshot, observed);
+  assert.deepEqual(early.events, []);
+  const caughtUp = run(asking.plan, observed);
+  assert.equal(caughtUp.snapshot.currentSessionTimeMs, 5_000);
+  const completed = answer(caughtUp.snapshot, questionId, "ok");
   assert.equal(completed.outcome.kind, "completed");
   const restored = deserializeCheckpoint(
     serializeCheckpoint(createCheckpoint(asking.plan, completed.snapshot)),
   ).snapshot;
   assert.deepEqual(
-    run(asking.plan, restored).events.flatMap((event) =>
+    [...caughtUp.events, ...run(asking.plan, restored).events].flatMap((event) =>
       event.kind === "say" ? [event.text] : [],
     ),
     ["handler", "ok"],
@@ -866,7 +926,7 @@ test("catch-up holds for a queued block behind a commit window and keeps observa
     (event) => event.kind === "actionCompleted" && event.settlement.actionKind === "timer",
   );
   assert.ok(settled?.kind === "actionCompleted" && settled.settlement.actionKind === "timer");
-  assert.equal(settled.settlement.completedAtMs, 5_000);
+  assert.equal(settled.settlement.completedAtMs, 1_000);
 });
 
 test("pacing consumed or skipped during catch-up and terminal completions keep queued blocks valid", () => {
@@ -893,25 +953,129 @@ test("pacing consumed or skipped during catch-up and terminal completions keep q
     actionKind: "chatPacingGate",
     payload: { kind: "skip" },
   });
-  assert.equal(skipped.outcome.kind, "completed");
-  deserializeCheckpoint(serializeCheckpoint(createCheckpoint(skipping.plan, skipped.snapshot)));
+  assert.equal(skipped.outcome.kind, "executionPending");
+  assert.deepEqual(skipped.snapshot, held);
 
   const button = new Session('timer async 1 { say "handler", 0 }\nshowButton "Continue"');
   const due = observeTime(button.plan, button.snapshot, 5_000).snapshot;
-  const pressed = completeAction(button.plan, due, {
-    actionId: due.foregroundAction!.actionId,
-    actionKind: "interaction",
-    interactionKind: "button",
-    payload: { kind: "activate" },
-  });
+  const buttonId = due.foregroundAction!.actionId;
+  const press = (snapshot: RuntimeSnapshot) =>
+    completeAction(button.plan, snapshot, {
+      actionId: buttonId,
+      actionKind: "interaction",
+      interactionKind: "button",
+      payload: { kind: "activate" },
+    });
+  assert.equal(press(due).outcome.kind, "executionPending");
+  const handled = run(button.plan, due);
+  assert.deepEqual(
+    handled.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["handler"],
+  );
+  const pressed = press(handled.snapshot);
   assert.equal(pressed.outcome.kind, "completed");
   const ended = run(button.plan, pressed.snapshot);
-  assert.deepEqual(
-    ended.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
-    ["handler"],
-    "expiry blocks queued before a terminal action completes still run",
-  );
   assert.equal(ended.snapshot.status, "halted");
+});
+
+test("work due exactly at the observed time settles once execution waits or ends", () => {
+  const cases: readonly (readonly [string, readonly number[]])[] = [
+    // A block's pacing is due when the script ends at the same deadline.
+    ['timer async 1 { say "block", 1 }\nwait 2', [1_000, 2_000]],
+    // A nested timer is due when the script resumes and waits again at the same deadline.
+    [
+      'timer async 0.5 { timer async 0.5 { say "nested", instant } }\nwait 1\nwait 1\nsay "main", instant',
+      [500, 1_000, 2_000],
+    ],
+    [
+      'timer async 0.5 { timer async 0.5 { say "nested", instant } }\nwait 1\nshowButton "Go"',
+      [500, 1_000],
+    ],
+    // A waiting block with another timer due at its wait's deadline.
+    [
+      'timer async 1 { wait 1 }\ntimer async 2 { say "second", instant }\nwait 5',
+      [1_000, 2_000, 5_000],
+    ],
+  ];
+  for (const [source, onTimeSchedule] of cases) {
+    const horizon = onTimeSchedule.at(-1)!;
+    // Session round-trips a checkpoint after every operation, so an invalid state fails here.
+    const exact = new Session(source, { pacing: true });
+    for (const nowMs of onTimeSchedule) exact.at(nowMs);
+    const late = new Session(source, { pacing: true }).at(horizon);
+    assert.deepEqual(late.events, exact.events, source);
+    assert.deepEqual(late.snapshot, exact.snapshot, source);
+    assert.equal(
+      playerRuntimeDeadlinesDue(exact.snapshot),
+      false,
+      `nothing due at the horizon remains: ${source}`,
+    );
+  }
+});
+
+test("a failed session accepts no host input and schedules no further observation", () => {
+  const failed = new Session('say "first", 10\nlet x = 1 / 0', { pacing: true });
+  assert.equal(failed.snapshot.status, "failed");
+  const observed = observeTime(failed.plan, failed.snapshot, 5_000).snapshot;
+  const gate = observed.backgroundActions.find((action) => action.kind === "chatPacingGate");
+  assert.ok(gate !== undefined);
+  const skipped = completeAction(failed.plan, observed, {
+    actionId: gate.actionId,
+    actionKind: "chatPacingGate",
+    payload: { kind: "skip" },
+  });
+  assert.equal(skipped.outcome.kind, "invalidPayload");
+  assert.deepEqual(skipped.snapshot, observed);
+  assert.deepEqual(playerRuntimeDeadlines(observed), []);
+  assert.equal(activePlayerRuntimePacingGate(observed), null);
+});
+
+test("host input waits for scene-time catch-up and for an expiry block due at the same time", () => {
+  // An answer at 5 s must not continue the script at the 1 s scene time of a queued block.
+  const late = new Session(
+    'let answer = "old"\ntimer async 1 { say answer, instant }\nanswer = askText "Name?"\nwait 1\nshowButton "Done"',
+  );
+  const lateObserved = observeTime(late.plan, late.snapshot, 5_000).snapshot;
+  const lateId = lateObserved.foregroundAction!.actionId;
+  const lateRequest = {
+    actionId: lateId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: { kind: "submittedText", submittedText: "new" },
+  };
+  assert.equal(
+    completeAction(late.plan, lateObserved, lateRequest).outcome.kind,
+    "executionPending",
+  );
+  const lateRun = run(late.plan, lateObserved).snapshot;
+  const answered = completeAction(late.plan, lateRun, lateRequest);
+  assert.equal(answered.outcome.kind, "completed");
+  const waiting = run(late.plan, answered.snapshot).snapshot;
+  assert.equal(waiting.foregroundAction?.kind, "delay");
+  assert.equal(
+    waiting.foregroundAction?.kind === "delay" ? waiting.foregroundAction.deadlineMs : null,
+    6_000,
+  );
+
+  // At equal time the due block still runs first, and its exit cancels the question.
+  const exiting = new Session(
+    'timer async 1 s { exit }\nlet answer = askText "Your answer"\nsay answer',
+  );
+  const equal = observeTime(exiting.plan, exiting.snapshot, 1_000).snapshot;
+  assert.equal(equal.currentSessionTimeMs, equal.observedSessionTimeMs);
+  const questionId = equal.foregroundAction!.actionId;
+  const request = {
+    actionId: questionId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: { kind: "submittedText", submittedText: "too late" },
+  };
+  const pending = completeAction(exiting.plan, equal, request);
+  assert.equal(pending.outcome.kind, "executionPending");
+  assert.deepEqual(pending.snapshot, equal);
+  const exited = run(exiting.plan, equal).snapshot;
+  assert.equal(exited.status, "halted");
+  assert.equal(completeAction(exiting.plan, exited, request).outcome.kind, "staleAction");
 });
 
 test("audit regressions: fractional repeats, tiny rounds, remaining rounding, and visible lists", () => {
@@ -1098,4 +1262,25 @@ test("second re-audit regressions: plateau skipping, failure at a due deadline, 
   assert.deepEqual(late.said(), ["end"]);
   assert.deepEqual(prefix.said(), late.said());
   assert.deepEqual(late.snapshot.settledTimers, prefix.snapshot.settledTimers);
+});
+
+test("third re-audit regressions: exact display strings and failed pacing gates at scene time", () => {
+  const session = new Session("let t = timer async 5\nwait 10");
+  const json = serializeCheckpoint(createCheckpoint(session.plan, session.snapshot));
+  assertForgedRejected(json, ["snapshot", "backgroundActions", 0, "timer", "display"], ["hidden"]);
+
+  const failed = new Session(
+    'timer async 1 ms { let n = 0\nlet x = 1 / n }\nsay "pacing", 0.001\nwait 2 ms',
+    { pacing: true },
+  ).at(1);
+  assert.equal(failed.snapshot.status, "failed");
+  const gate = failed.snapshot.backgroundActions.find((action) => action.kind === "chatPacingGate");
+  assert.equal(
+    gate?.kind === "chatPacingGate" && gate.deadlineMs,
+    failed.snapshot.currentSessionTimeMs,
+  );
+  const observed = observeTime(failed.plan, failed.snapshot, 5);
+  assert.deepEqual(observed.events, []);
+  assert.equal(observed.snapshot.observedSessionTimeMs, 5);
+  assert.equal(observed.snapshot.currentSessionTimeMs, failed.snapshot.currentSessionTimeMs);
 });

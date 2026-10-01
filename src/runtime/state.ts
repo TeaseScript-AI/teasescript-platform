@@ -2665,6 +2665,7 @@ function requiredInstructionTemporaries(
       break;
     case "wait":
       collect(instruction.duration);
+      if (typeof instruction.display === "object") collect(instruction.display);
       if (instruction.label !== null) collect(instruction.label);
       break;
     case "startTimer":

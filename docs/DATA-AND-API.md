@@ -64,7 +64,8 @@ ADR 0016 defines one canonical runtime-owned contract for waits, timers, choices
 
 The runtime owns:
 
-- persisted `currentSessionTimeMs` and nondecreasing time updates;
+- the persisted observation horizon (`observedSessionTimeMs`), scene time (`currentSessionTimeMs`), and nondecreasing
+  time updates;
 - foreground and background action state;
 - action and event identities;
 - expected response types;

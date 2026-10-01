@@ -252,7 +252,7 @@ unknownAction
 staleAction
 wrongActionKind
 invalidPayload
-notDue
+executionPending
 ```
 
 Rules:
@@ -266,7 +266,11 @@ Rules:
   is `staleAction`;
 - an ID at or above `nextActionId` is `unknownAction`;
 - a response for another action kind is rejected;
-- a timed action submitted before its deadline is `notDue`;
+- waits and timers accept no host completion: time reaches them only through `observeTime`, and a completion request
+  for one is `invalidPayload`;
+- a failed session accepts no host completion; a request for a still-recorded action is `invalidPayload`;
+- host input for an active action is `executionPending` while scene time is behind the observed time or a due timer
+  expiry block can run; the host runs the engine and retries with the same action ID if it is still active;
 - a late response after timeout, cancellation, or replacement does not revive the action.
 
 ## Time model
@@ -314,9 +318,9 @@ observation and restore contract is maintained in [`RUNTIME.md`](../RUNTIME.md#t
 3. Persist `snapshot.observedSessionTimeMs = effectiveNow`.
 4. Determine which timed foreground and background actions are due at `effectiveNow`.
 5. Unless the session has failed, settle due actions according to the accepted deterministic ordering, advancing
-   `snapshot.currentSessionTimeMs` to each settled deadline and finally to `effectiveNow`. While a timer expiry
-   block can execute, `currentSessionTimeMs` stands at the moment its work became due until the block returns or
-   waits; see [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time).
+   `snapshot.currentSessionTimeMs` to each settled deadline and finally to `effectiveNow`. While the script or a
+   timer expiry block can execute, `currentSessionTimeMs` stands at the moment that work became due until execution
+   waits or ends; see [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time).
 6. Return the updated validated snapshot and structured outcomes.
 
 No checkpoint may expose due-action processing performed against a newer time than its `currentSessionTimeMs`

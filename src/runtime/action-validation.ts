@@ -12,7 +12,7 @@ import type { RuntimeChatPacingGateSettlementSnapshot } from "./actions/model.js
 import { requiredActionCompletionEvents } from "./actions/model.js";
 import { recordValidationTestWork } from "../validation-testing.js";
 import { validMediaAction } from "./media-validation.js";
-import { planHasTimerHandlers, validTimerAction } from "./timer-validation.js";
+import { validTimerAction } from "./timer-validation.js";
 
 interface ActionValidationAnalysis {
   readonly functionIdsByInstruction: readonly (number | null)[];
@@ -93,10 +93,10 @@ export function validatePendingActionState(
     value.observedSessionTimeMs < value.currentSessionTimeMs ||
     (value.observedSessionTimeMs > value.currentSessionTimeMs &&
       value.status !== "failed" &&
-      !timerBlockHoldsCatchUp(value))
+      !catchUpPaused(value))
   ) {
     errors.push(
-      "Runtime observedSessionTimeMs must not precede scene time, and exceeds it only while an expiry block holds catch-up.",
+      "Runtime observedSessionTimeMs must not precede scene time, and exceeds it only while execution can continue.",
     );
   }
   if (!validBackgroundPacingActions(value, plan)) {
@@ -105,22 +105,19 @@ export function validatePendingActionState(
   if (!positiveSafeInteger(value.nextActionId))
     errors.push("Runtime nextActionId must be a positive safe integer.");
   const action = value.foregroundAction;
-  if (
-    action !== null &&
-    !validForegroundActionState(action, value, plan, timerBlockHoldsCatchUp(value))
-  ) {
+  if (action !== null && !validForegroundActionState(action, value, plan, catchUpPaused(value))) {
     errors.push("Runtime foreground action is malformed.");
   }
   const settlement = value.lastSettlement;
   if (!validRetainedSettlement(settlement, value, plan, analysis)) {
     errors.push("Runtime lastSettlement is malformed.");
   }
-  if (!validActiveActionIdentityCoherence(value, plan)) {
+  if (!validActiveActionIdentityCoherence(value)) {
     errors.push(
       "Runtime active action identities are inconsistent with each other or the retained settlement.",
     );
   }
-  if (!validActiveActionLocationCoherence(value, plan)) {
+  if (!validActiveActionLocationCoherence(value)) {
     errors.push("Runtime foreground and background action locations are incoherent.");
   }
   if (!validActiveActionCompletionCapacity(value)) {
@@ -259,18 +256,15 @@ function validSettlementIdentityAndEventSequences(
   );
 }
 
-function validActiveActionIdentityCoherence(
-  snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
-): boolean {
+function validActiveActionIdentityCoherence(snapshot: Record<string, unknown>): boolean {
   const actions = [
     snapshot.foregroundAction,
     ...(Array.isArray(snapshot.backgroundActions) ? snapshot.backgroundActions : []),
     ...suspendedActions(snapshot),
   ].filter(isPlainRecord);
   // Timers outlive later settlements, and an expiry block can settle newer actions before an interrupted older one
-  // resumes. Such actions need unique identities that differ from the retained settlement, not a younger history.
-  const interruptible = planHasTimerHandlers(plan);
+  // resumes. Active actions therefore need unique identities that differ from the retained settlement, not a younger
+  // history.
   const actionIds = new Set<number>();
   const requestSequences = new Set<number>();
   const settlement = isPlainRecord(snapshot.lastSettlement) ? snapshot.lastSettlement : null;
@@ -280,15 +274,7 @@ function validActiveActionIdentityCoherence(
       return false;
     if (actionIds.has(action.actionId) || requestSequences.has(action.requestEventSequence))
       return false;
-    if (
-      settlement !== null &&
-      !(
-        (action.kind === "timer" || action.kind === "media" || interruptible) &&
-        validActiveActionEventIdentity(action, settlement)
-      ) &&
-      !validActiveActionAgainstSettlement(action, settlement)
-    )
-      return false;
+    if (settlement !== null && !validActiveActionEventIdentity(action, settlement)) return false;
     actionIds.add(action.actionId);
     requestSequences.add(action.requestEventSequence);
   }
@@ -344,24 +330,31 @@ export function validForegroundActionState(
 }
 
 /**
- * Mirrors the engine's pause of catch-up toward the observed time: the running expiry block can continue, or a queued
- * block can interrupt now or after the current commit window. Only then may scene time stand behind the observed time,
- * and timed work due exactly now wait for that block.
+ * Mirrors the engine's pause of catch-up toward the observed time: the script or a queued expiry block can execute.
+ * Only then may scene time stand behind the observed time, and timed work due exactly now wait for that execution.
  */
-export function timerBlockHoldsCatchUp(snapshot: Record<string, unknown>): boolean {
-  if (!Array.isArray(snapshot.callFrames)) return false;
-  const executable =
-    snapshot.status === "ready" || snapshot.status === "running" || snapshot.status === "waiting";
-  const blockRunning = snapshot.callFrames.some(
-    (frame) => isPlainRecord(frame) && isPlainRecord(frame.timerInterruption),
-  );
-  if (blockRunning) return executable && snapshot.status !== "waiting";
+export function catchUpPaused(snapshot: Record<string, unknown>): boolean {
+  if (snapshot.status === "ready" || snapshot.status === "running") return true;
+  if (
+    snapshot.status !== "waiting" ||
+    !Array.isArray(snapshot.callFrames) ||
+    !Array.isArray(snapshot.pendingTimerHandlers) ||
+    snapshot.pendingTimerHandlers.length === 0 ||
+    snapshot.callFrames.some(
+      (frame) => isPlainRecord(frame) && isPlainRecord(frame.timerInterruption),
+    ) ||
+    snapshot.preparedSayOutput !== null ||
+    snapshot.interactionResultHandoff !== null ||
+    snapshot.terminalContinuationHandoff !== null
+  )
+    return false;
   const foreground = snapshot.foregroundAction;
   return (
-    executable &&
-    Array.isArray(snapshot.pendingTimerHandlers) &&
-    snapshot.pendingTimerHandlers.length > 0 &&
-    !(isPlainRecord(foreground) && foreground.kind === "chatPacingGate")
+    foreground === null ||
+    (isPlainRecord(foreground) &&
+      (foreground.kind === "delay" ||
+        foreground.kind === "interaction" ||
+        foreground.kind === "mediaPlayback"))
   );
 }
 
@@ -377,10 +370,7 @@ function suspendedActions(snapshot: Record<string, unknown>): Record<string, unk
   );
 }
 
-function validActiveActionLocationCoherence(
-  snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
-): boolean {
+function validActiveActionLocationCoherence(snapshot: Record<string, unknown>): boolean {
   const backgroundActions = snapshot.backgroundActions;
   if (!Array.isArray(backgroundActions)) return false;
 
@@ -407,47 +397,9 @@ function validActiveActionLocationCoherence(
   if (foregroundAction?.kind !== "delay") return true;
   if (backgroundPacingActions.length === 0) return true;
 
-  const backgroundPacingAction = backgroundPacingActions[0];
-  if (backgroundPacingAction === undefined) return false;
-
-  // After an expiry block returns to a delay, its own paced output may have left a newer background gate.
-  return (
-    planHasTimerHandlers(plan) ||
-    validPacingGateCreatedBeforeForegroundDelay(backgroundPacingAction, foregroundAction)
-  );
-}
-
-function validPacingGateCreatedBeforeForegroundDelay(
-  pacingGate: Record<string, unknown>,
-  delay: Record<string, unknown>,
-): boolean {
-  return (
-    positiveSafeInteger(pacingGate.actionId) &&
-    positiveSafeInteger(pacingGate.requestEventSequence) &&
-    positiveSafeInteger(delay.actionId) &&
-    positiveSafeInteger(delay.requestEventSequence) &&
-    pacingGate.actionId < delay.actionId &&
-    pacingGate.requestEventSequence < delay.requestEventSequence
-  );
-}
-
-function validActiveActionAgainstSettlement(
-  action: Record<string, unknown>,
-  settlement: Record<string, unknown>,
-): boolean {
-  if (
-    !positiveSafeInteger(action.actionId) ||
-    !positiveSafeInteger(action.requestEventSequence) ||
-    !positiveSafeInteger(settlement.actionId) ||
-    !positiveSafeInteger(settlement.requestEventSequence) ||
-    !positiveSafeInteger(settlement.completionEventSequence)
-  )
-    return false;
-
-  if (!validActiveActionEventIdentity(action, settlement)) return false;
-  if (validActionCreatedAfterSettlement(action, settlement)) return true;
-  if (validOlderPacingGateWithNewerDelaySettlement(action, settlement)) return true;
-  return validForegroundDelayWithOlderPacingSettlement(action, settlement);
+  // After an expiry block returns to a delay, its own paced output may have left a newer background gate, so the gate
+  // and the delay have no required age order.
+  return true;
 }
 
 function validActiveActionEventIdentity(
@@ -495,59 +447,6 @@ function validActionCreatedAfterSettlement(
     positiveSafeInteger(settlementCompletionEventSequence) &&
     actionId > settlementActionId &&
     requestEventSequence > settlementCompletionEventSequence
-  );
-}
-
-function validOlderPacingGateWithNewerDelaySettlement(
-  action: Record<string, unknown>,
-  settlement: Record<string, unknown>,
-): boolean {
-  // A pacing gate can remain background while a later foreground delay settles,
-  // then be promoted by a later say. It must predate that delay in both action
-  // identity and request sequence. An interaction would have consumed it, and
-  // a second pacing settlement would require a second simultaneous gate.
-  const actionId = action.actionId;
-  const requestEventSequence = action.requestEventSequence;
-  const settlementActionId = settlement.actionId;
-  const settlementRequestEventSequence = settlement.requestEventSequence;
-  const settlementCompletionEventSequence = settlement.completionEventSequence;
-  return (
-    action.kind === "chatPacingGate" &&
-    settlement.actionKind === "delay" &&
-    positiveSafeInteger(actionId) &&
-    positiveSafeInteger(requestEventSequence) &&
-    positiveSafeInteger(settlementActionId) &&
-    positiveSafeInteger(settlementRequestEventSequence) &&
-    positiveSafeInteger(settlementCompletionEventSequence) &&
-    actionId < settlementActionId &&
-    requestEventSequence < settlementRequestEventSequence &&
-    settlementRequestEventSequence < settlementCompletionEventSequence
-  );
-}
-
-function validForegroundDelayWithOlderPacingSettlement(
-  action: Record<string, unknown>,
-  settlement: Record<string, unknown>,
-): boolean {
-  // A wait requested after a pacing gate may remain foreground while that
-  // older background gate settles. The delay request is therefore between the
-  // pacing request and completion, even though its action ID is newer.
-  const actionId = action.actionId;
-  const requestEventSequence = action.requestEventSequence;
-  const settlementActionId = settlement.actionId;
-  const settlementRequestEventSequence = settlement.requestEventSequence;
-  const settlementCompletionEventSequence = settlement.completionEventSequence;
-  return (
-    action.kind === "delay" &&
-    settlement.actionKind === "chatPacingGate" &&
-    positiveSafeInteger(actionId) &&
-    positiveSafeInteger(requestEventSequence) &&
-    positiveSafeInteger(settlementActionId) &&
-    positiveSafeInteger(settlementRequestEventSequence) &&
-    positiveSafeInteger(settlementCompletionEventSequence) &&
-    actionId > settlementActionId &&
-    requestEventSequence > settlementRequestEventSequence &&
-    requestEventSequence < settlementCompletionEventSequence
   );
 }
 
@@ -713,7 +612,7 @@ function validPacingGateTiming(
     action.createdAtMs <= snapshot.currentSessionTimeMs &&
     (action.deadlineMs > snapshot.currentSessionTimeMs ||
       (action.deadlineMs === snapshot.currentSessionTimeMs &&
-        (snapshot.status === "failed" || timerBlockHoldsCatchUp(snapshot))))
+        (snapshot.status === "failed" || catchUpPaused(snapshot))))
   );
 }
 
@@ -1067,17 +966,11 @@ export function validateTerminalContinuationHandoffState(
     !nonNegativeSafeInteger(handoff.continuationInstruction) ||
     !positiveSafeInteger(snapshot.nextActionId) ||
     // An expiry block may have allocated newer actions before the terminal action settled.
-    (planHasTimerHandlers(plan)
-      ? handoff.actionId >= snapshot.nextActionId
-      : handoff.actionId !== snapshot.nextActionId - 1) ||
+    handoff.actionId >= snapshot.nextActionId ||
     snapshot.status !== "running" ||
     snapshot.foregroundAction !== null ||
     snapshot.interactionResultHandoff !== null ||
-    !validTerminalContinuationHandoffSettlement(
-      handoff,
-      snapshot.lastSettlement,
-      planHasTimerHandlers(plan),
-    )
+    !validTerminalContinuationHandoffSettlement(handoff, snapshot.lastSettlement)
   ) {
     errors.push("Runtime terminal continuation handoff is malformed.");
     return;
@@ -1106,7 +999,6 @@ export function validateTerminalContinuationHandoffState(
 function validTerminalContinuationHandoffSettlement(
   handoff: Record<string, unknown>,
   settlement: unknown,
-  interruptible: boolean,
 ): boolean {
   if (!positiveSafeInteger(handoff.actionId) || !isPlainRecord(settlement)) return false;
   if (settlement.actionId === handoff.actionId) {
@@ -1117,14 +1009,12 @@ function validTerminalContinuationHandoffSettlement(
     );
   }
 
-  // Only the older background pacing gate can settle after a terminal delay
-  // and replace bounded replay before root completion is entered.
-  // With expiry blocks, a gate created by a block may be the newer one.
+  // Only a background pacing gate can settle after a terminal delay and replace bounded replay before root
+  // completion is entered; a gate created by an expiry block may be newer than the delay.
   return (
     handoff.actionKind === "delay" &&
     settlement.actionKind === "chatPacingGate" &&
-    positiveSafeInteger(settlement.actionId) &&
-    (interruptible || settlement.actionId < handoff.actionId)
+    positiveSafeInteger(settlement.actionId)
   );
 }
 
@@ -1730,7 +1620,7 @@ function validPacingGateSettlement(
   if (settlement.settlementKind === "completed") {
     return validSettlementChronology(settlement, snapshot);
   }
-  return validNonTimePacingSettlementChronology(settlement, snapshot, plan);
+  return validNonTimePacingSettlementChronology(settlement, snapshot);
 }
 
 function validPacingSettlementKind(
@@ -1772,18 +1662,14 @@ function validPacingSettlementReleaseLineage(
 function validNonTimePacingSettlementChronology(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
 ): boolean {
+  // A skip, consumption or supersession happens at scene time no later than the deadline.
   return (
     validSessionTime(settlement.deadlineMs) &&
     validSessionTime(settlement.completedAtMs) &&
     validSessionTime(snapshot.currentSessionTimeMs) &&
-    validSessionTime(snapshot.observedSessionTimeMs) &&
-    // A skip or consumption happens before the deadline, or at it when an expiry block with the same due time
-    // runs first and supersedes the gate.
-    (settlement.completedAtMs < settlement.deadlineMs ||
-      (settlement.completedAtMs === settlement.deadlineMs && planHasTimerHandlers(plan))) &&
-    settlement.completedAtMs <= snapshot.observedSessionTimeMs
+    settlement.completedAtMs <= settlement.deadlineMs &&
+    settlement.completedAtMs <= snapshot.currentSessionTimeMs
   );
 }
 
@@ -1846,14 +1732,12 @@ function validSettlementChronology(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
 ): boolean {
-  // Settlements outside a running expiry block record the observation, which may lead scene time.
-  const observedSessionTimeMs = snapshot.observedSessionTimeMs;
+  // Time-driven settlements happen exactly at their deadline in scene time.
   return (
     validSessionTime(settlement.deadlineMs) &&
-    validSessionTime(settlement.completedAtMs) &&
-    validSessionTime(observedSessionTimeMs) &&
-    settlement.completedAtMs >= settlement.deadlineMs &&
-    settlement.completedAtMs <= observedSessionTimeMs
+    validSessionTime(snapshot.currentSessionTimeMs) &&
+    settlement.completedAtMs === settlement.deadlineMs &&
+    settlement.completedAtMs <= snapshot.currentSessionTimeMs
   );
 }
 
@@ -1937,7 +1821,8 @@ function validForegroundActionOwnership(
   if (
     action.kind === "delay" &&
     (owner?.kind !== "wait" ||
-      owner.display !== action.display ||
+      // An evaluated display expression may give any valid display.
+      (typeof owner.display === "string" && owner.display !== action.display) ||
       (owner.label === null) !== (action.label === null))
   ) {
     return false;

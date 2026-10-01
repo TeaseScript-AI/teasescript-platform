@@ -27,7 +27,7 @@ import {
 import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
 import type {
   PlayerForegroundPresentation,
-  PlayerRuntimeTimerPresentation,
+  PlayerTimerPresentation,
   PlayerSpeakerPresentation,
   PlayerTranscriptEntryPresentation,
 } from "./model.js";
@@ -134,9 +134,9 @@ export function playerRuntimeForeground(
 export function playerRuntimeTimers(
   snapshot: RuntimeSnapshot,
   currentSessionTimeMs: number,
-): readonly PlayerRuntimeTimerPresentation[] {
+): readonly PlayerTimerPresentation[] {
   const now = Math.max(snapshot.observedSessionTimeMs, currentSessionTimeMs);
-  const timers: Array<PlayerRuntimeTimerPresentation & { readonly actionId: number }> = [];
+  const timers: Array<PlayerTimerPresentation & { readonly actionId: number }> = [];
   const delays = [
     snapshot.foregroundAction,
     ...snapshot.callFrames.map((frame) => frame.timerInterruption?.suspendedAction ?? null),
@@ -175,9 +175,10 @@ export function playerRuntimeTimers(
   );
 }
 
-/** Session-time deadlines at which the Player must observe time again. */
+/** Session-time deadlines at which the Player must observe time again. A failed session settles nothing further. */
 export function playerRuntimeDeadlines(snapshot: RuntimeSnapshot): readonly number[] {
   const deadlines: number[] = [];
+  if (snapshot.status === "failed") return deadlines;
   for (const action of [
     snapshot.foregroundAction,
     ...snapshot.backgroundActions,
@@ -207,6 +208,7 @@ export function activePlayerRuntimeInteraction(
 export function activePlayerRuntimePacingGate(
   snapshot: RuntimeSnapshot,
 ): RuntimeChatPacingGateActionSnapshot | null {
+  if (snapshot.status === "failed") return null;
   const foreground = snapshot.foregroundAction;
   if (foreground?.kind === "chatPacingGate") return foreground;
   return snapshot.backgroundActions.find((action) => action.kind === "chatPacingGate") ?? null;

@@ -488,7 +488,8 @@ Timer coverage starts with real `.tease` source and exercises elapsed units and 
 assignment, short/named forms, blocking and asynchronous presentation, handles, pause/resume/stop, current-round
 adjustment, repetition, and settled-operation warnings. Deterministic cases cover queued non-nested expiry
 interrupts, normal resume versus handler `exit`, suspended input rejection, suspended-delay ordering, pacing and
-result-handoff boundaries, and JSON checkpoint/restore equivalence.
+result-handoff boundaries, and JSON checkpoint/restore equivalence. Late observation must give the same output,
+events, and snapshot as observing every deadline on time, for main-path waits and pacing as well as expiry blocks.
 
 Player adapter coverage derives presented timers and observation deadlines from real `.tease` fixtures, catches up
 late observations, and restores the same timer state from a checkpoint. Malformed timer, handler, suspended-action, and handle-reference state is rejected

@@ -2097,7 +2097,8 @@ let beat = timer(duration: 1..=3, async: true, display: "mystery", label: "Beat"
 
 The named form carries the same fields plus `repeat` and `persist`. `async`, `repeat`, and `persist` are the
 literals `true` or `false`; `duration`, `display`, and `label` are expressions evaluated in source order. `display`
-defaults to `visible`; a blocking timer's explicit `display` must be a literal.
+defaults to `visible`, and an expression must evaluate to `"visible"`, `"mystery"`, or `"hidden"` for blocking and
+asynchronous timers alike.
 
 ### Blocking and asynchronous timers
 
@@ -2198,7 +2199,8 @@ code that started the timer.
 Timers and `wait` measure Player-executed scene time. Presentation and blocking do not change the clock. Time keeps
 running while a live Player is minimized or in the background; when the Player is closed and later restored,
 including on another device, the gap does not consume timer time and the timer continues with its saved remaining
-time. See [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time) for the observation contract.
+time. A script plays the same however late or often the Player observes time: everything happens at its own moment
+in scene time. See [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time) for the observation contract.
 
 ## 28. Permanent buttons
 **Status:** Accepted

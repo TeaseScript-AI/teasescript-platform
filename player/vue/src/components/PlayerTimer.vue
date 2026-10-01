@@ -11,6 +11,8 @@ const props = defineProps<{
 
 const timers = computed(() =>
   Array.from({ length: props.timerCount }, (_, index): PlayerTimerPresentation => ({
+    id: `${props.timer.id}-${index}`,
+    kind: props.timerKind === "mystery" ? "mystery" : "visible",
     ...(index === 0 && props.timer.name !== undefined ? { name: props.timer.name } : {}),
     remainingSeconds: props.timer.remainingSeconds + index * 37,
     totalSeconds: props.timer.totalSeconds + index * 60,

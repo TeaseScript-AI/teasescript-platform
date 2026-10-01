@@ -65,6 +65,16 @@ test("context, hover, and signature help describe current compact semantics", ()
   assert.equal(languageSignatureHelp(document, position)?.label, "askText [as speaker] [hint]");
 });
 
+test("hover and formatting handle deeply nested source inside a timer expiry block", () => {
+  const depth = 4_000;
+  const source = `timer async 1 {\n${"if true {\n".repeat(depth)}say "deep"\n${"}\n".repeat(depth)}}\n`;
+  assert.equal(compileSource(source).plan !== null, true);
+  const document = createLanguageDocument("file:///main.tease", source);
+  const position = languagePositionAt(document, source.indexOf("say"));
+  assert.match(languageHover(document, position)?.contents.join(" ") ?? "", /say/u);
+  assert.doesNotThrow(() => formatLanguageDocument(document));
+});
+
 test("number and choice help reflects current result rules", () => {
   const numberDoc = createLanguageDocument("file:///number.tease", "let x = askNumber");
   assert.match(
