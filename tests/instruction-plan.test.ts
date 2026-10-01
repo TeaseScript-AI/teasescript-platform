@@ -94,16 +94,22 @@ test("contains no non-JSON-safe values and rejects them when supplied", () => {
 
 test("compiler-produced plans remain deeply frozen", () => {
   const compiled = plan("let value = { nested: [1, { deeper: 2 }] }\nexit");
-  const instruction = compiled.instructions[0];
-  assert.equal(Object.isFrozen(compiled), true);
-  assert.equal(Object.isFrozen(compiled.instructions), true);
-  assert.equal(Object.isFrozen(instruction), true);
-  if (instruction?.kind !== "declareBinding" || instruction.value.kind !== "object") {
-    assert.fail("Expected object declaration plan.");
-  }
-  assert.equal(Object.isFrozen(instruction.value.properties), true);
-  assert.equal(Object.isFrozen(instruction.value.properties[0]), true);
-  assert.equal(Object.isFrozen(instruction.value.properties[0]!.value), true);
+  const unfrozen: string[] = [];
+  const objectPropertyNames: string[] = [];
+  const visit = (value: unknown, path: string): void => {
+    if (typeof value !== "object" || value === null) return;
+    if (!Object.isFrozen(value)) unfrozen.push(path);
+    for (const [key, nested] of Object.entries(value)) {
+      if (path.endsWith(".properties") && typeof nested === "object" && nested !== null) {
+        objectPropertyNames.push("name" in nested ? String(nested.name) : "");
+      }
+      visit(nested, `${path}.${key}`);
+    }
+  };
+  visit(compiled, "plan");
+
+  assert.deepEqual(objectPropertyNames, ["nested", "deeper"]);
+  assert.deepEqual(unfrozen, []);
 });
 
 function findNonJsonValue(value: unknown, active = new Set<object>()): string | null {

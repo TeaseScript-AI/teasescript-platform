@@ -20,6 +20,29 @@ function assertRejected(source: string, code: string, fragment: string): void {
   );
 }
 
+/** Requires `code` on the source text `text` that directly follows the unique `before` context. */
+function assertRejectedAt(source: string, code: string, before: string, text: string): void {
+  const result = compileSource(source);
+  assert.equal(result.plan, null, `${JSON.stringify(source)} must not compile`);
+  const offset = source.indexOf(before + text) + before.length;
+  assert.ok(offset >= before.length, `${JSON.stringify(before + text)} must occur in the source`);
+  assert.ok(
+    result.diagnostics.some(
+      (diagnostic) =>
+        diagnostic.code === code &&
+        diagnostic.span.start.offset === offset &&
+        diagnostic.span.end.offset === offset + text.length,
+    ),
+    `${JSON.stringify(source)} should report ${code} at ${offset}; got ${JSON.stringify(
+      result.diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.span.start.offset,
+        diagnostic.span.end.offset,
+      ]),
+    )}`,
+  );
+}
+
 function kinds(instructions: readonly Instruction[]): string[] {
   return instructions.map((instruction) => instruction.kind);
 }
@@ -274,7 +297,9 @@ test("cue positions may start with an object literal and continue like other exp
     offsets('playAudio "a" {\n  at 1 s +\n\n    2 s { }\n  beforeEnd (\n    1 s\n  ) { }\n}'),
     ["at", "beforeEnd"],
   );
-  assertRejected('playAudio "a" {\n  at { say "x" }\n}', "TSP", "");
+  // A leading `{` belongs to an object-literal position; with no block after it, `at` starts an
+  // ordinary statement, which is unsupported here.
+  assertRejectedAt('playAudio "a" {\n  at { say "x" }\n}', "TSP001", "{\n  ", "at");
   assert.deepEqual(offsets('playAudio "a" {\n  at askNumber """${\n    1\n  }""" { }\n}'), ["at"]);
   assert.deepEqual(
     offsets(
@@ -282,23 +307,35 @@ test("cue positions may start with an object literal and continue like other exp
     ),
     ["beforeEnd", "at"],
   );
-  assertRejected('let x = choose 1: "One" {\n}', "TSP", "");
-  // A block inside a cue position parses like any other block.
-  assertRejected(
+  // Outside cue positions a block cannot follow choice options.
+  assertRejectedAt('let x = choose 1: "One" {\n}', "TSP031", '"One" ', "{");
+  // A block inside a cue position parses like any other block, with the same error.
+  assertRejectedAt(
     'function point(x) {\n  return 1\n}\nplayAudio "a" {\n  at point(timer async 1 {\n    repeat choose 1: "Once", 2: "Twice" { }\n  }) { }\n}',
-    "TSP",
-    "",
+    "TSP031",
+    '"Twice" ',
+    "{",
   );
 });
 
 test("media parse errors recover at the end of the line and keep enclosing blocks", () => {
-  const result = compileSource(
-    'if true { hideImage() }\nsay "next"\nshowImage("a.jpg")\nsay "last"',
-  );
+  const source = 'if true { hideImage() }\nsay "next"\nshowImage("a.jpg")\nsay "last"';
+  const result = compileSource(source);
   assert.equal(result.plan, null);
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => diagnostic.code),
     ["TSP035", "TSP035"],
+  );
+  assert.deepEqual(
+    result.program.statements.map((statement) => [
+      statement.kind,
+      source.slice(statement.span.start.offset, statement.span.end.offset),
+    ]),
+    [
+      ["ifStatement", "if true { hideImage() }"],
+      ["sayStatement", 'say "next"'],
+      ["sayStatement", 'say "last"'],
+    ],
   );
   assertRejected('playAudio(file: "a.mp3",)', "TSP012", "Expected an argument after ','");
 });

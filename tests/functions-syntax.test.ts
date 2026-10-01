@@ -27,9 +27,26 @@ test("parses functions without parameters and value or bare returns", () => {
   assert.equal(add?.kind, "functionDeclaration");
   if (kneel?.kind !== "functionDeclaration" || add?.kind !== "functionDeclaration") return;
   assert.deepEqual(kneel.parameters, []);
-  assert.equal(kneel.body.statements[1]?.kind, "returnStatement");
-  assert.equal(add.parameters.length, 2);
-  assert.equal(add.body.statements[0]?.kind, "returnStatement");
+  const bareReturn = kneel.body.statements[1];
+  assert.equal(bareReturn?.kind, "returnStatement");
+  if (bareReturn?.kind === "returnStatement") assert.equal(bareReturn.value, null);
+  assert.deepEqual(
+    add.parameters.map((parameter) => parameter.name.name),
+    ["left", "right"],
+  );
+  const valueReturn = add.body.statements[0];
+  assert.equal(valueReturn?.kind, "returnStatement");
+  if (valueReturn?.kind !== "returnStatement") return;
+  const sum = valueReturn.value;
+  assert.equal(sum?.kind, "binaryExpression");
+  if (sum?.kind !== "binaryExpression") return;
+  assert.equal(sum.operator, "+");
+  assert.deepEqual(
+    [sum.left, sum.right].map((operand) =>
+      operand.kind === "identifier" ? operand.name : operand.kind,
+    ),
+    ["left", "right"],
+  );
 });
 
 test("parses multiline defaults, named calls, and exact declaration spans", () => {

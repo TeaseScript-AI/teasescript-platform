@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
+import { runValidSource } from "./helpers/run-valid-source.js";
 
 test("downstream expression frames traverse each public stage and resume on a constrained stack", () => {
   const api = new URL("../src/index.js", import.meta.url).href;
@@ -57,11 +58,14 @@ test("downstream expression frames traverse each public stage and resume on a co
       assert.ok(rejected.errors[0].path.endsWith('.kind'));
       assert.ok(rejected.errors[1].path.endsWith('.name'));
       const grouped=external(valid);assert.equal(validateInstructionPlan(grouped).valid,true);
-      assert.equal(run(grouped,createFreshRuntimeSnapshot(grouped)).snapshot.status,'halted');
+      const groupedRun=run(grouped,createFreshRuntimeSnapshot(grouped));
+      assert.equal(groupedRun.snapshot.status,'halted');
+      assert.equal(groupedRun.snapshot.frames[0].bindings.find(binding=>binding.name==='result').value,1);
       // Static choice analysis consumes the same accepted arithmetic trees.
       const choice=compileSource('let selected=choose '+Array(depth).fill('1').join('+')+', 2\\nexit');
       assert.deepEqual(choice.diagnostics,[]);
       const waiting=run(choice.plan,createFreshRuntimeSnapshot(choice.plan));assert.equal(waiting.snapshot.status,'waiting');
+      assert.deepEqual(waiting.snapshot.foregroundAction.ui.options.map(option=>option.text),[String(depth),'2']);
       deserializeCheckpoint(serializeCheckpoint(createCheckpoint(choice.plan,waiting.snapshot)));
     }
     console.log('all downstream stages and resume passed');
@@ -86,18 +90,25 @@ test("expression continuations preserve short circuit, references, RNG, and user
       "let skipped = false and mark(true)",
       "let kept = true or mark(false)",
       'let output = [mark(1), {nested: mark(2) + mark(3)}, "x${mark(4)}"]',
-      "say order.length",
-      "say order[0]",
+      "for item in order { say item }",
       "say output[1].nested",
       "say output[2]",
+      "say values[0].value[0]",
+      "say values[1].value[0]",
       "exit",
     ].join("\n"),
     { scenarioName: "expression frames and prepared references", seed: 42 },
   );
+  // A one-draw control with the same seed identifies the selected element and the RNG state after one draw.
+  const control = runValidSource("say [0, 1].random\nexit", 42);
+  const picked = control.events.find((event) => event.kind === "say")?.text;
+  assert.ok(picked === "0" || picked === "1");
+
   assert.deepEqual(
     result.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["5", "7", "5", "x4"],
+    ["7", "1", "2", "3", "4", "5", "x4", ...(picked === "0" ? ["7", "2"] : ["1", "7"])],
   );
+  assert.deepEqual(result.finalSnapshot.rng, control.snapshot.rng);
 });
 
 test("compiler continuations unwind suspended parent cleanup on a child failure", () => {

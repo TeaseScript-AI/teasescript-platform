@@ -122,6 +122,9 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
       collectionRuntimeStatus: runtimeResult.snapshot.status,
       collectionDepth,
       setCodeCount: compiledSet.diagnostics.length,
+      setCodesAllTSV006:
+        compiledSet.diagnostics.length > 0 &&
+        compiledSet.diagnostics.every((diagnostic) => diagnostic.code === "TSV006"),
       setFirstCode: compiledSet.diagnostics[0]?.code,
       setLastCode: compiledSet.diagnostics.at(-1)?.code,
       setFirstStart: compiledSet.diagnostics[0]?.span.start.offset,
@@ -178,6 +181,7 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
     collectionRuntimeStatus: "halted",
     collectionDepth: 1_024,
     setCodeCount: 1_023,
+    setCodesAllTSV006: true,
     setFirstCode: "TSV006",
     setLastCode: "TSV006",
     setFirstStart: 4_104,

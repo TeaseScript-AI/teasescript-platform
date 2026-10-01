@@ -48,29 +48,32 @@ test("loop variables have lexical scope and conflict with visible names", () => 
 
 test("rejects statically invalid range operands and repeat counts", () => {
   const cases = [
-    'let bad = "a"..3',
-    "for value in 1.5..3 { say value }",
-    'repeat -1 { say "never" }',
-    'repeat 1.5 { say "never" }',
-    'repeat "twice" { say "never" }',
-  ];
-  for (const source of cases) {
+    ['let bad = "a"..3', "TSV010"],
+    ["for value in 1.5..3 { say value }", "TSV010"],
+    ['repeat -1 { say "never" }', "TSV011"],
+    ['repeat 1.5 { say "never" }', "TSV011"],
+    ['repeat "twice" { say "never" }', "TSV011"],
+  ] as const;
+  for (const [source, code] of cases) {
     const result = compileSource(source);
-    assert.equal(result.plan, null);
-    assert.ok(
-      result.semanticDiagnostics.some((item) => item.code === "TSV010" || item.code === "TSV011"),
+    assert.equal(result.plan, null, source);
+    assert.deepEqual(
+      result.semanticDiagnostics.map((item) => item.code),
+      [code],
+      source,
     );
   }
 });
 
-test("semantic range validation detects chained ASTs independently", () => {
+test("rejects a range-valued bound through semantic validation", () => {
   const result = compileSource("let bad = (1..2)..3");
 
-  assert.equal(result.plan, null);
-  assert.ok(
-    result.parserDiagnostics.some((item) => item.code === "TSP022") ||
-      result.semanticDiagnostics.some((item) => item.code === "TSV009" || item.code === "TSV010"),
+  assert.deepEqual(result.parserDiagnostics, []);
+  assert.deepEqual(
+    result.semanticDiagnostics.map((item) => item.code),
+    ["TSV010"],
   );
+  assert.equal(result.plan, null);
 });
 
 test("recognizes and protects the core random built-ins", () => {

@@ -1,10 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { Expression } from "../src/ast.js";
 import { compileSource } from "../src/compiler.js";
 import { lex } from "../src/lexer.js";
 import { parse } from "../src/parser.js";
 import { TokenKind } from "../src/token.js";
+
+type TextShape = string | readonly TextShape[];
+
+function stringParts(expression: Expression): TextShape {
+  if (expression.kind !== "stringLiteral") return expression.kind;
+  return expression.parts.map((part) =>
+    part.kind === "stringText" ? part.value : stringParts(part.expression),
+  );
+}
+
+function binaryShape(expression: Expression) {
+  if (expression.kind !== "binaryExpression") return expression.kind;
+  const operand = (side: Expression) => (side.kind === "numberLiteral" ? side.value : side.kind);
+  return [expression.operator, operand(expression.left), operand(expression.right)];
+}
 
 test("comments are whitespace across tokens, statements, blocks, LF, and CRLF", () => {
   const source = [
@@ -25,7 +41,12 @@ test("comment markers remain ordinary string and template text", () => {
   const result = parse('say "// not a comment /* either */"\nsay \"/* ${"//"} */\"');
 
   assert.deepEqual(result.diagnostics, []);
-  assert.equal(result.program.statements.length, 2);
+  assert.deepEqual(
+    result.program.statements.map((statement) =>
+      statement.kind === "sayStatement" ? stringParts(statement.value) : statement.kind,
+    ),
+    [["// not a comment /* either */"], ["/* ", ["//"], " */"]],
+  );
 });
 
 test("unterminated block comments have a precise UTF-16 span", () => {
@@ -67,6 +88,8 @@ test("ranges bind below addition and above comparisons with exact bounds", () =>
     start: { offset: 13, line: 0, column: 13 },
     end: { offset: 26, line: 0, column: 26 },
   });
+  assert.deepEqual(binaryShape(statement.initializer.left.start), ["+", 1, 2]);
+  assert.deepEqual(binaryShape(statement.initializer.left.end), ["-", 8, 3]);
 });
 
 test("lexes both range operators without consuming decimal dots", () => {
