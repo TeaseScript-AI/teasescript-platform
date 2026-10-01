@@ -21,7 +21,10 @@ export interface PlayerSessionOptions {
   resolveAsset?: (path: string) => string | null;
 }
 
-type Activation = { readonly kind: "start" | "continue"; readonly begin: () => PlayerRuntimeSession };
+type Activation = {
+  readonly kind: "start" | "continue";
+  readonly begin: () => PlayerRuntimeSession;
+};
 
 // Presentation lifecycle around the canonical runtime session. The adapter session stays the only
 // Player state; this host records which session is shown, when presentation must reset, maps

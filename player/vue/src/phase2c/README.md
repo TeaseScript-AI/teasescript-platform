@@ -22,8 +22,14 @@ specification.
   deadline, before input (`RuntimeInteraction.vue` rejects input when the presented interaction changed), before a
   checkpoint capture, and on `visibilitychange`, `pagehide`, and `pageshow`; hidden pages keep running. Starting or
   restoring a session rebases the clock so no gap is consumed; see
-  [timers and scene time](../../../../docs/RUNTIME.md#timers-and-scene-time).
-- `DevelopmentPreview.vue` opens one runtime choice scenario and supplies Visual Lab's Theme Lab, Stage media picker,
+  [timers and scene time](../../../../docs/RUNTIME.md#timers-and-scene-time). The host prepares a new session for
+  the explicit Start control (`SessionActivation.vue`) and creates it only on that click; a restored session waits for
+  Continue. The host also owns the framework-independent `player/media-device.ts`: it reconciles the session's media
+  projection onto `Audio` elements, reports loading through the adapter, and contributes measured progress to every
+  clock observation, which runs every 100 ms while media loads or plays. Authored media references resolve only through
+  the host-supplied `resolveAsset`. `PlayerApp.vue` derives the Stage image from runtime state.
+- `DevelopmentPreview.vue` opens one runtime choice scenario, with a Stage image and a short chime that
+  `developmentMedia.ts` resolves, and supplies Visual Lab's Theme Lab, Stage media picker,
   and timer/background-button presentation fixtures, plus Layout Debug. `main.ts` loads it as a separate chunk on the
   development server, or in a build only with the `?dev` URL opt-in. The default build mounts `PlayerApp.vue` with
   runtime-owned content only; integration supplies sessions through `usePlayerSession.ts`.

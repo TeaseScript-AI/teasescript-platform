@@ -17,7 +17,10 @@ export interface MediaDeviceElement {
   pause(): void;
   load(): void;
   removeAttribute(name: "src"): void;
-  addEventListener(type: "loadedmetadata" | "error" | "seeked" | "ended", listener: () => void): void;
+  addEventListener(
+    type: "loadedmetadata" | "error" | "seeked" | "ended",
+    listener: () => void,
+  ): void;
 }
 
 export interface MediaDeviceHost {
@@ -89,9 +92,18 @@ export class MediaDevice {
     const reports: MediaProgressReport[] = [];
     for (const entry of this.#entries.values()) {
       const { projection } = entry;
-      if (!projection.loaded || projection.state !== "running" || entry.segment !== projection.segment) continue;
+      if (
+        !projection.loaded ||
+        projection.state !== "running" ||
+        entry.segment !== projection.segment
+      )
+        continue;
       if (entry.element !== null && !entry.failed) this.#measure(entry, entry.element);
-      reports.push({ mediaId: entry.mediaId, segment: entry.segment, progressMs: entry.progressMs });
+      reports.push({
+        mediaId: entry.mediaId,
+        segment: entry.segment,
+        progressMs: entry.progressMs,
+      });
     }
     return reports;
   }
@@ -99,7 +111,8 @@ export class MediaDevice {
   /** Whether any instance is waiting for load or running, so observations should continue regularly. */
   get active(): boolean {
     for (const entry of this.#entries.values()) {
-      if (!entry.failed && (!entry.projection.loaded || entry.projection.state === "running")) return true;
+      if (!entry.failed && (!entry.projection.loaded || entry.projection.state === "running"))
+        return true;
     }
     return false;
   }
@@ -142,7 +155,8 @@ export class MediaDevice {
       entry.failed = true;
       this.#reportLoad(entry, {
         kind: "failed",
-        message: projection.media === "video" ? VIDEO_UNSUPPORTED_MESSAGE : SOURCE_UNAVAILABLE_MESSAGE,
+        message:
+          projection.media === "video" ? VIDEO_UNSUPPORTED_MESSAGE : SOURCE_UNAVAILABLE_MESSAGE,
       });
       return entry;
     }
@@ -153,7 +167,8 @@ export class MediaDevice {
       // Before loading this is the canonical failure; after it no protocol exists, so progress simply stalls.
       entry.failed = true;
       element.pause();
-      if (!entry.projection.loaded) this.#reportLoad(entry, { kind: "failed", message: LOAD_FAILED_MESSAGE });
+      if (!entry.projection.loaded)
+        this.#reportLoad(entry, { kind: "failed", message: LOAD_FAILED_MESSAGE });
     });
     element.addEventListener("seeked", () => {
       if (entry.pendingPositionMs === null) entry.lastPositionMs = element.currentTime * 1000;
@@ -258,7 +273,11 @@ export class MediaDevice {
       },
       (error: unknown) => {
         // Never mute to get around a refusal: report no progress and offer a deliberate retry instead.
-        if (error instanceof Error && error.name === "NotAllowedError" && this.#entries.get(entry.mediaId) === entry) {
+        if (
+          error instanceof Error &&
+          error.name === "NotAllowedError" &&
+          this.#entries.get(entry.mediaId) === entry
+        ) {
           entry.blocked = true;
           this.#updateBlocked();
         }
