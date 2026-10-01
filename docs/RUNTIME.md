@@ -619,8 +619,11 @@ anchored at `(scene time, 0)`: load, pause, resume from pause, seek, stop, and S
 volume changes do not. A Player acknowledges a new segment by reporting progress `0` when it applies it.
 
 **Timeline events.** The engine owns passes, repeat limits, cue order, and settlement. Between samples, progress is
-interpolated linearly and exactly. An event is due at its crossing rounded up to a whole millisecond, so an observation
-at that time has always reported it; progress read at a scene time is rounded to a whole millisecond, except that an
+interpolated linearly using the exact values of the reported samples. Nonzero-progress arrivals are due at their exact
+crossing rounded up to a whole millisecond, so an observation at that time has always reported them; progress zero is
+reached at the segment anchor's exact time. When playback proceeds beyond a sampled position, its departure uses the
+exact time of the last equal-progress sample (the right edge of a stall); otherwise it uses the rounded-up crossing.
+Progress read at a scene time rounds to the nearest whole millisecond, with halves up, including at sample points; an
 arrival due by that time is reached exactly. The next event is
 either an arrival — the next cue point, the end of the pass, or the end of a repeat duration — due when reported
 progress reaches it, or a departure — the cues at a start position after load, seek, or a pass wrap — due when
