@@ -126,8 +126,8 @@ Choice buttons may occupy one or two rows. The Player application may render the
 viewport, text, font, zoom, accessibility, or other layout constraints make buttons impractical. Button-versus-dropdown
 presentation is not canonical runtime/checkpoint state and does not change labels, visible text, completion validation,
 transcript output, or return values. Exact unambiguous visible option text may activate `choose`. The one-option
-`showButton` completes only through its rendered control; composer submission, including the exact visible label, and
-Space with the empty focused composer do not activate it.
+`showButton` completes through its rendered control or composer submission of its exact, non-empty visible label;
+other text and Space with the empty focused composer do not activate it.
 
 Field hints, control labels, requesting-speaker metadata, localized validation feedback, and accessibility labels are not duplicate speaker transcript messages.
 
@@ -298,9 +298,9 @@ Player-authored messages do not create gates. No compiler lookahead across branc
 
 Message presentation follows the accepted [speaker inheritance and override contract](specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides).
 The runtime resolves mode/style into `MessagePresentation` while preparing output, preserves that data through pacing
-promotion and checkpoints, and emits it with the canonical `say` event. The Player adapter forwards these values;
-rendering integration belongs to #421. Invalid colour values fall back without a new warning policy; general
-diagnostic/recovery design is tracked separately in #427.
+promotion and checkpoints, and emits it with the canonical `say` event. The Player adapter forwards these values; the
+Phase 2C Player renders them under the observable contract in [Player UI](ui/PLAYER-UI.md). Invalid colour values fall
+back without a new warning policy; general diagnostic/recovery design is tracked separately in #427.
 
 ### Skippable gate completion
 

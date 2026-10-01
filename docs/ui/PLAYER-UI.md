@@ -55,9 +55,10 @@ Current implementation status belongs in [`PHASE-STATUS.md`](../../PHASE-STATUS.
 [`player/README.md`](../../player/README.md) records POC seams and demo-only behavior. This specification may lead the
 implementation. The current Vue reference connects implemented Standard interactions, transcript output, pacing, time
 observation, checkpoint, and restore to canonical runtime state. Production host wiring remains incomplete; `Visual
-Lab`, `Layout Debug`, placeholder content, demo media, timers, and right-rail controls are development fixtures
-rather than Standard Player product content. Values explicitly marked for retesting remain provisional tuning
-baselines.
+Lab`, `Layout Debug`, placeholder content, demo media, timers, and right-rail controls are development fixtures rather
+than Standard Player product content. The default Phase 2C build excludes them; its development preview loads on the
+development server or through the explicit `?dev` URL opt-in. Values explicitly marked for retesting remain provisional
+tuning baselines.
 
 A current implementation detail is not a durable requirement merely because it exists. Owner-confirmed behavior here is
 the target unless higher authority conflicts with it.
@@ -164,8 +165,7 @@ content. Major numerical values below are POC reconstruction/tuning baselines un
 | Player chrome control size | compact controls use `calc(1rem + 16px)`; top-row controls grow together when the title's text line plus 8px needs more height |
 | title bar row | derived control size plus 8px outer padding above and below; do not separately hardcode the height |
 | content below top controls | one 16px visible gap from the controls' lower edge to the first tool-menu control or timer; no separate outer timer-halo space is reserved |
-| normal stage row | current `55dvh` baseline; expose as a development tuning value and visually re-evaluate |
-| overlay-chrome stage row | current `64dvh` baseline; visually re-evaluate with low-height and fullscreen cases |
+| stage/conversation allocation | user-adjustable split; see [Stage and media presentation](#stage-and-media-presentation). The existing `/player/` reference uses `55dvh` normal and `64dvh` overlay-chrome stage-row baselines |
 | tool column | fixed `300px` default; individual columns do not shrink to hide their content |
 | readable conversation maximum | current `880px` reading width inside a `896px` outer column; keep a cap for ultrawide readability and visually retest, including browser zoom |
 | protected conversation minimum | current `380px` baseline; remeasure after tool-width/right-rail simplification |
@@ -281,6 +281,10 @@ The narrow drawer:
 - remains below critical/global chrome in z-order.
 
 ### Tool columns and lifecycle
+
+This column model describes the existing `/player/` reference. The Phase 2C preview instead opens tools from the menu as
+temporary or pinned panels with one retained instance per tool; see its
+[component README](../../player/vue/src/phase2c/README.md).
 
 The tools framework always retains at least one presentation column internally. Each column has one Player-owned header
 row containing:
@@ -478,11 +482,13 @@ when shown, uses a neutral session-event presentation rather than implying spoke
 are not user activations and use the same neutral event family with their script origin identified. Visual markers must
 not become canonical punctuation; their exact appearance remains tuning work.
 
-The POC's letter-glyph avatars use twelve fixed colour families, with a light fill and dark letter in light mode and
-the inverse in dark mode. On a speaker's first bubble, the Player assigns the colour used by the fewest messages so far;
+The POC's letter-glyph avatars use twelve fixed colour families, with a light fill and dark letter in light mode and the
+inverse in dark mode. On a speaker's first bubble, the Player assigns the colour used by the fewest messages so far;
 ties follow a fixed, perceptually spaced palette order. Later messages increase that colour's count, and the speaker
-keeps the assignment. Authored text and bubble colours do not choose avatar colours. Accepted V30 speaker avatar
-references remain the product capability.
+keeps the assignment. Authored text and bubble colours do not choose avatar colours. An authored V30 speaker `avatar`
+image replaces the glyph and is decorative beside the visible speaker name; while it is unavailable or fails to load,
+the glyph remains. Package-relative asset resolution is not yet defined, so the Phase 2C Player currently uses the
+authored reference as the image URL.
 
 ## Composer and foreground interactions
 
@@ -699,6 +705,9 @@ the timer pane owns timer overflow and the action pane continues to own action o
 row so timer count does not unnecessarily consume vertical Action space.
 
 ### Right background mode
+
+The Phase 2C preview currently overlays its timer/action rail within the Stage; it provides neither this backing toggle
+nor a reserved right-hand track, and its rail dimensions remain provisional.
 
 The right presentation has two independent state axes: **control geometry** (`rail` or stage overlay) and **backing
 paint** (docked surface or transparent overlay). The compact toggle changes only the backing preference; it never moves

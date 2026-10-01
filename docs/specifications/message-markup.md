@@ -123,10 +123,11 @@ allow internal whitespace. The complete set of valid opening and closing spellin
 [size=small|normal|large|x-large] [/size]
 ```
 
-Colour spans normalize to OKLCH with alpha through the shared colour parser. Their values remain constrained data;
-CSS declarations, host variables, classes, selectors, and additional attributes are not accepted. Invalid runtime colours
-use `inherit` in the prepared span so enclosing text/background presentation remains effective. Player themes own the
-exact visual mapping of accepted weight and size names.
+Colour spans normalize to opaque OKLCH through the shared colour parser; like other [authored
+colours](accepted-syntaxes-v30.md#authored-colours), values below full opacity are invalid. Their values remain
+constrained data; CSS declarations, host variables, classes, selectors, and additional attributes are not accepted.
+Invalid runtime colours use `inherit` in the prepared span so enclosing text/background presentation remains effective.
+Player themes own the exact visual mapping of accepted weight and size names.
 
 A recognized valid opening tag formats content only when a matching closer can complete a properly nested span on the
 same line. An empty extension span is valid. An unknown tag, invalid non-colour value, extra attribute, mismatched closing

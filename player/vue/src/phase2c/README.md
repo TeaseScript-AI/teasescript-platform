@@ -72,9 +72,10 @@ Story-button ink and transcript readability follow the current Player treatment 
 
 Shared chrome geometry lives in `style.css`; the
 [Player geometry contract](../../../../docs/ui/PLAYER-UI.md#global-geometry-and-overflow) records dimensions and their tuning status.
-Top controls, menu and tool headers share edge/control tokens. The menu width ruler avoids a second JavaScript
-formula; its resize target shares right padding. The right rail derives top clearance from header height and width
-from the timer plus halo, independently of root font size.
+Top controls, menu and tool headers share edge/control tokens. The menu width ruler avoids a second JavaScript formula;
+its resize target shares right padding. The right rail derives top clearance from header height. Timer diameter and rail
+width are selected separately from the shared space conditions, independently of root font size; no outside halo space
+is reserved.
 
 Component-specific presentation belongs with its component. Shared theme-token
 mapping and overall composition remain in `style.css`. Do not change settled
