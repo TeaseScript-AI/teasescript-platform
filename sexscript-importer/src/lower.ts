@@ -177,19 +177,17 @@ function lowerCallStatement(node: AstNode, span: SourceSpan | null, context: Low
       return oneArgumentStatement(args, context, node, (duration) => ({ kind: "wait", duration, visible: false, span }));
     case "waitWithGauge":
       return oneArgumentStatement(args, context, node, (duration) => ({ kind: "wait", duration, visible: true, span }));
-    case "showButton":
-      if (args.length === 1) {
-        return oneArgumentStatement(args, context, node, (label) => ({ kind: "showButton", label, span }));
+    case "showButton": {
+      if (args.length < 1 || args.length > 2) {
+        return [unsupportedStatement(context, node, "SX_BUTTON_ARITY", "showButton() must have one or two arguments.")];
       }
-      if (args.length === 2) {
-        return [unsupportedStatement(
-          context,
-          node,
-          "SX_BUTTON_TIMEOUT_SEMANTICS",
-          "Legacy showButton(message, duration) timeout/elapsed-time behavior is not lowered automatically yet.",
-        )];
+      const label = lowerExpression(args[0]!, context);
+      const timeout = args[1] === undefined ? null : lowerExpression(args[1], context);
+      if (label === null || (args[1] !== undefined && timeout === null)) {
+        return [unsupportedStatement(context, node, "SX_UNSUPPORTED_BUTTON_ARGUMENT", "showButton() arguments could not be migrated.")];
       }
-      return [unsupportedStatement(context, node, "SX_BUTTON_ARITY", "showButton() must have one or two arguments.")];
+      return [{ kind: "showButton", label, timeout, span }];
+    }
     case "showPopup":
       return oneArgumentStatement(args, context, node, (message) => ({ kind: "showPopup", message, span }));
     case "setImage":
@@ -229,8 +227,10 @@ function lowerBackgroundSound(args: AstNode[], node: AstNode, span: SourceSpan |
 function lowerSave(args: AstNode[], node: AstNode, span: SourceSpan | null, context: LowerContext): IrStatement[] {
   if (args.length !== 2) return [unsupportedStatement(context, node, "SX_SAVE_ARITY", "save() must have exactly two arguments.")];
   const key = lowerExpression(args[0]!, context);
+  if (key === null) return [unsupportedStatement(context, node, "SX_SAVE_ARGUMENT", "save() key could not be migrated.")];
+  if (isNullConstant(args[1])) return [{ kind: "delete", key, span }];
   const value = lowerExpression(args[1]!, context);
-  if (key === null || value === null) return [unsupportedStatement(context, node, "SX_SAVE_ARGUMENT", "save() arguments could not be migrated.")];
+  if (value === null) return [unsupportedStatement(context, node, "SX_SAVE_ARGUMENT", "save() value could not be migrated.")];
   return [{ kind: "save", key, value, span }];
 }
 
@@ -415,12 +415,9 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
       if (args.length === 3) return { kind: "call", name: "askBoolean", positional: [], named: { message: args[0]!, yesText: args[1]!, noText: args[2]! } };
       return unsupportedExpression(context, node, "SX_BOOLEAN_ARITY", "getBoolean() must have one or three arguments.");
     case "showButton":
-      return unsupportedExpression(
-        context,
-        node,
-        "SX_BUTTON_RESULT_SEMANTICS",
-        "Legacy showButton() returns elapsed time; current TeaseScript showButton has no useful return value.",
-      );
+      return args.length === 1 || args.length === 2
+        ? { kind: "call", name: "showButton", positional: args, named: {} }
+        : unsupportedExpression(context, node, "SX_BUTTON_ARITY", "showButton() must have one or two arguments.");
     case "useUrl":
       return args.length === 1
         ? { kind: "call", name: "openUrl", positional: args, named: {} }

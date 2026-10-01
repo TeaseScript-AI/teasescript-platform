@@ -26,7 +26,8 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
       lines.push(`${pad}${statement.visible ? "timer" : "wait"} ${emitExpression(statement.duration)}`);
       return;
     case "showButton":
-      lines.push(`${pad}showButton ${emitExpression(statement.label)}`);
+      if (statement.timeout === null) lines.push(`${pad}showButton ${emitExpression(statement.label)}`);
+      else lines.push(`${pad}showButton(${emitExpression(statement.label)}, ${emitExpression(statement.timeout)})`);
       return;
     case "showPopup":
       lines.push(`${pad}showPopup ${emitExpression(statement.message)}`);
@@ -48,6 +49,9 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
     }
     case "save":
       lines.push(`${pad}save ${emitExpression(statement.value)} as ${emitExpression(statement.key)}`);
+      return;
+    case "delete":
+      lines.push(`${pad}delete ${emitExpression(statement.key)}`);
       return;
     case "let":
       lines.push(`${pad}let ${statement.name} = ${emitExpression(statement.value)}`);

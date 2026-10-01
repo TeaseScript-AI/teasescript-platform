@@ -143,11 +143,11 @@ test("extracts static setInfos metadata instead of emitting runtime code", () =>
 });
 
 
-test("does not silently discard legacy showButton timeout/result semantics", () => {
+test("preserves accepted showButton timeout and elapsed-result semantics", () => {
   const timeoutSource = file([statement(call("showButton", constant("Quick"), constant(3)))]);
   const timeoutProgram = lowerParsedFile(timeoutSource);
-  assert.ok(timeoutProgram.diagnostics.some((diagnostic) => diagnostic.code === "SX_BUTTON_TIMEOUT_SEMANTICS"));
-  assert.match(emitTease(timeoutProgram), /MIGRATION INCOMPLETE/);
+  assert.deepEqual(timeoutProgram.diagnostics, []);
+  assert.equal(emitTease(timeoutProgram), 'showButton("Quick", 3)\n');
 
   const assignedSource = file([
     {
@@ -163,6 +163,12 @@ test("does not silently discard legacy showButton timeout/result semantics", () 
     },
   ]);
   const assignedProgram = lowerParsedFile(assignedSource);
-  assert.ok(assignedProgram.diagnostics.some((diagnostic) => diagnostic.code === "SX_BUTTON_RESULT_SEMANTICS"));
-  assert.match(emitTease(assignedProgram), /MIGRATION INCOMPLETE/);
+  assert.deepEqual(assignedProgram.diagnostics, []);
+  assert.equal(emitTease(assignedProgram), 'let elapsed = showButton("Continue")\n');
+});
+
+test("maps legacy save(key, null) deletion semantics to delete", () => {
+  const program = lowerParsedFile(file([statement(call("save", constant("intro.running"), constant(null)))]));
+  assert.deepEqual(program.diagnostics, []);
+  assert.equal(emitTease(program), 'delete "intro.running"\n');
 });

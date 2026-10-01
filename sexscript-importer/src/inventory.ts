@@ -17,13 +17,13 @@ export function inventoryFiles(files: ParsedGroovyFile[]): InventoryReport {
   const report: InventoryReport = {
     fileCount: files.length,
     parseErrorCount: 0,
-    nodeKinds: {},
-    unsupportedNodeTypes: {},
-    methodCalls: {},
-    implicitCalls: {},
-    mainReceiverCalls: {},
-    sexScriptApiCalls: {},
-    constructorTypes: {},
+    nodeKinds: emptyCounts(),
+    unsupportedNodeTypes: emptyCounts(),
+    methodCalls: emptyCounts(),
+    implicitCalls: emptyCounts(),
+    mainReceiverCalls: emptyCounts(),
+    sexScriptApiCalls: emptyCounts(),
+    constructorTypes: emptyCounts(),
   };
 
   for (const file of files) {
@@ -63,6 +63,10 @@ function inventoryNode(report: InventoryReport, node: AstNode): void {
   ) {
     increment(report.sexScriptApiCalls, method);
   }
+}
+
+function emptyCounts(): Record<string, number> {
+  return Object.create(null) as Record<string, number>;
 }
 
 function increment(target: Record<string, number>, key: string): void {

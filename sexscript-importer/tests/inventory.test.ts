@@ -97,3 +97,39 @@ test("reports parser failures and unsupported Groovy nodes", () => {
   assert.equal(report.parseErrorCount, 1);
   assert.deepEqual(report.unsupportedNodeTypes, { "org.example.UnknownExpression": 1 });
 });
+
+
+test("counts method names that collide with Object.prototype safely", () => {
+  const file: ParsedGroovyFile = {
+    formatVersion: 1,
+    sourceName: "prototype-name.groovy",
+    groovyVersion: "2.5.21",
+    mode: "script-body",
+    diagnostics: [],
+    root: {
+      kind: "scriptBody",
+      span: null,
+      body: {
+        kind: "block",
+        span,
+        statements: [
+          {
+            kind: "expressionStatement",
+            span,
+            expression: {
+              kind: "methodCall",
+              span,
+              object: variable("helper"),
+              method: constant("valueOf"),
+              arguments: { kind: "arguments", span, items: [] },
+              implicitThis: false,
+            },
+          },
+        ],
+      },
+    },
+  };
+
+  const report = inventoryFiles([file]);
+  assert.deepEqual(report.methodCalls, { valueOf: 1 });
+});

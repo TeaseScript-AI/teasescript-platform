@@ -34,7 +34,7 @@ interface IrBase {
 export type IrStatement =
   | (IrBase & { kind: "say"; value: IrExpression })
   | (IrBase & { kind: "wait"; duration: IrExpression; visible: boolean })
-  | (IrBase & { kind: "showButton"; label: IrExpression })
+  | (IrBase & { kind: "showButton"; label: IrExpression; timeout: IrExpression | null })
   | (IrBase & { kind: "showPopup"; message: IrExpression })
   | (IrBase & { kind: "showImage"; file: IrExpression })
   | (IrBase & { kind: "hideImage" })
@@ -45,6 +45,7 @@ export type IrStatement =
       repeatCount: IrExpression | null;
     })
   | (IrBase & { kind: "save"; key: IrExpression; value: IrExpression })
+  | (IrBase & { kind: "delete"; key: IrExpression })
   | (IrBase & { kind: "let"; name: string; value: IrExpression })
   | (IrBase & { kind: "assign"; target: string; operator: "=" | "+=" | "-="; value: IrExpression })
   | (IrBase & { kind: "expression"; expression: IrExpression })
