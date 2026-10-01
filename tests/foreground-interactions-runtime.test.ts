@@ -26,8 +26,6 @@ import { observeTime } from "../src/runtime/operations/observe-time.js";
 import {
   createFreshRuntimeSnapshot,
   validateRuntimeSnapshot,
-  type RuntimeBindingSnapshot,
-  type RuntimeScopeFrameSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
@@ -711,172 +709,160 @@ test("planless interaction settlements enforce intrinsic transcript and result s
 });
 
 test("pending interaction speaker provenance is bound to the instructed speaker", () => {
-  const compiled = compileSource("speaker alice {}\nspeaker bob {}\nspeaker alice\nwait 1\nexit");
-  assert.deepEqual(compiled.diagnostics, []);
-  const base = compiled.plan!;
-  const waitIndex = base.instructions.findIndex((instruction) => instruction.kind === "wait");
-  const interaction: InteractionInstruction = {
-    kind: "interaction",
-    interactionKind: "button",
-    target: "standardChat",
-    speaker: "alice",
-    destinationTemporary: null,
-    expectedResult: "none",
-    ui: { kind: "button", buttonLabel: "Continue", accessibleName: defaults.button },
-    span: base.instructions[waitIndex]!.span,
+  const compiledPlan = (source: string) => {
+    const compiled = compileSource(source);
+    assert.deepEqual(compiled.diagnostics, [], source);
+    return compiled.plan!;
   };
-  const instructions = base.instructions.map((instruction, index) =>
-    index === waitIndex ? interaction : instruction,
-  );
-  const speakerPlan = { ...base, instructions };
-  const pending = waiting(speakerPlan);
-  const bob = pending.snapshot.speakers.find((speaker) => speaker.identifier === "bob")!;
-  const mutated: any = structuredClone(pending.snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture changes the requesting speaker identity after the action was prepared.
-  mutated.foregroundAction.speakerId = bob.id;
-  assert.equal(validateRuntimeSnapshot(mutated, speakerPlan).valid, false);
-
-  // EVIDENCE: structuredClone preserves the runtime snapshot shape while this fixture swaps persisted identifiers.
-  const swappedIdentifiers = structuredClone(pending.snapshot) as Mutable<RuntimeSnapshot>;
-  const alice = swappedIdentifiers.speakers.find((speaker) => speaker.identifier === "alice");
-  const swappedBob = swappedIdentifiers.speakers.find((speaker) => speaker.identifier === "bob");
-  assert.ok(alice !== undefined && swappedBob !== undefined);
-  assert.ok(swappedIdentifiers.foregroundAction?.kind === "interaction");
-  [alice.identifier, swappedBob.identifier] = [swappedBob.identifier, alice.identifier];
-  swappedIdentifiers.foregroundAction.speakerId = swappedBob.id;
-  assert.equal(validateRuntimeSnapshot(swappedIdentifiers, speakerPlan).valid, false);
-
-  // EVIDENCE: structuredClone preserves the runtime snapshot shape while this fixture changes one speaker reference.
-  const alteredBinding = structuredClone(pending.snapshot) as Mutable<RuntimeSnapshot>;
-  const aliceBinding = alteredBinding.frames
-    .flatMap((frame) => frame.bindings)
-    .find((binding) => binding.name === "alice");
-  assert.ok(
-    aliceBinding !== undefined &&
-      typeof aliceBinding.value === "object" &&
-      aliceBinding.value !== null &&
-      aliceBinding.value.kind === "speakerReference",
-  );
-  aliceBinding.value.speakerId = bob.id;
-  assert.equal(validateRuntimeSnapshot(alteredBinding, speakerPlan).valid, false);
-
-  // EVIDENCE: structuredClone preserves the runtime snapshot shape while this fixture changes matching speaker IDs.
-  const bindingResolved = structuredClone(pending.snapshot) as Mutable<RuntimeSnapshot>;
-  const binding = bindingResolved.frames
-    .flatMap((frame) => frame.bindings)
-    .find((candidate) => candidate.name === "alice");
-  assert.ok(
-    binding !== undefined &&
-      typeof binding.value === "object" &&
-      binding.value !== null &&
-      binding.value.kind === "speakerReference",
-  );
-  binding.value.speakerId = bob.id;
-  assert.ok(bindingResolved.foregroundAction?.kind === "interaction");
-  bindingResolved.foregroundAction.speakerId = bob.id;
-  assert.equal(validateRuntimeSnapshot(bindingResolved, speakerPlan).valid, true);
-
-  const defaultSpeakerPlan = structuredClone(speakerPlan);
-  const defaultSpeakerInteraction = defaultSpeakerPlan.instructions[waitIndex];
-  assert.ok(
-    defaultSpeakerInteraction?.kind === "interaction" && "speaker" in defaultSpeakerInteraction,
-  );
-  // EVIDENCE: fixture changes only the static interaction speaker to exercise default-speaker resolution.
-  (defaultSpeakerInteraction as { speaker: string | null }).speaker = null;
-  assert.equal(validateInstructionPlan(defaultSpeakerPlan).valid, true);
-  const defaultPending = waiting(defaultSpeakerPlan);
-  const defaultAction = defaultPending.snapshot.foregroundAction;
-  assert.equal(
-    defaultAction?.kind === "interaction" && defaultAction.speakerId,
-    defaultPending.snapshot.defaultSpeaker,
-  );
-  const wrongDefault: any = structuredClone(defaultPending.snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture changes a default-speaker action to an unrelated speaker ID.
-  wrongDefault.foregroundAction.speakerId = bob.id;
-  assert.equal(validateRuntimeSnapshot(wrongDefault, defaultSpeakerPlan).valid, false);
-
-  // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture callbacks remove or corrupt the explicit speaker binding and its resolved speaker identity.
-  const explicitMutations: Array<(snapshot: any) => void> = [
-    (snapshot) => {
-      const frame = snapshot.frames.find((candidate: RuntimeScopeFrameSnapshot) =>
-        candidate.bindings.some((binding: RuntimeBindingSnapshot) => binding.name === "alice"),
-      );
-      assert.ok(frame);
-      frame.bindings = frame.bindings.filter(
-        (binding: RuntimeBindingSnapshot) => binding.name !== "alice",
-      );
-      snapshot.foregroundAction.speakerId = null;
-    },
-    (snapshot) => {
-      const binding = snapshot.frames
-        .flatMap((frame: RuntimeScopeFrameSnapshot) => frame.bindings)
-        .find((candidate: RuntimeBindingSnapshot) => candidate.name === "alice");
-      assert.ok(binding);
-      binding.value = "ordinary";
-      snapshot.foregroundAction.speakerId = null;
-    },
-    (snapshot) => {
-      const binding = snapshot.frames
-        .flatMap((frame: RuntimeScopeFrameSnapshot) => frame.bindings)
-        .find((candidate: RuntimeBindingSnapshot) => candidate.name === "alice");
-      assert.ok(binding);
-      binding.value = { kind: "speakerReference", speakerId: "bad", identifier: "alice" };
-      snapshot.foregroundAction.speakerId = null;
-    },
-    (snapshot) => {
-      const binding = snapshot.frames
-        .flatMap((frame: RuntimeScopeFrameSnapshot) => frame.bindings)
-        .find((candidate: RuntimeBindingSnapshot) => candidate.name === "alice");
-      assert.ok(binding);
-      binding.value = { kind: "speakerReference", speakerId: 999, identifier: "alice" };
-      snapshot.foregroundAction.speakerId = null;
-    },
-    (snapshot) => {
-      snapshot.foregroundAction.speakerId = null;
-    },
-  ];
-  for (const mutate of explicitMutations) {
-    const hostile = structuredClone(pending.snapshot);
-    mutate(hostile);
-    assert.equal(validateRuntimeSnapshot(hostile, speakerPlan).valid, false);
-    assert.throws(() =>
-      restoreCheckpoint({ ...createCheckpoint(speakerPlan, pending.snapshot), snapshot: hostile }),
-    );
-  }
-
-  for (const source of [
-    "speaker alice {}\nspeaker bob {}\nfunction prompt(requested) { wait 1 }\nprompt(bob)\nexit",
-    "speaker alice {}\nfunction prompt { wait 1 }\nprompt()\nexit",
-  ]) {
-    const scoped = buttonPlanFromSource(source);
-    const interaction = scoped.instructions.find(
-      (instruction) => instruction.kind === "interaction",
-    );
-    assert.ok(interaction?.kind === "interaction" && "speaker" in interaction);
-    // EVIDENCE: fixture changes only the static interaction's speaker expression before plan validation.
-    (interaction as { speaker: string | null }).speaker = source.includes("requested")
-      ? "requested"
-      : "alice";
-    assert.equal(validateInstructionPlan(scoped).valid, true);
-    const scopedPending = waiting(scoped);
-    const binding = scopedPending.snapshot.frames
+  const speakerId = (snapshot: RuntimeSnapshot, identifier: string) => {
+    const speaker = snapshot.speakers.find((candidate) => candidate.identifier === identifier);
+    assert.ok(speaker !== undefined, identifier);
+    return speaker.id;
+  };
+  // Returns the innermost visible speaker-reference binding with this name.
+  const speakerBinding = (snapshot: Mutable<RuntimeSnapshot>, name: string) => {
+    const binding = snapshot.frames
       .slice()
       .reverse()
       .flatMap((frame) => frame.bindings)
-      .find((candidate) => candidate.name === interaction.speaker);
-    assert.ok(binding);
+      .find((candidate) => candidate.name === name);
     assert.ok(
-      typeof binding.value === "object" &&
+      binding !== undefined &&
+        typeof binding.value === "object" &&
         binding.value !== null &&
         binding.value.kind === "speakerReference",
+      name,
     );
-    const bindingSpeakerId = binding.value.speakerId;
-    assert.equal(
-      scopedPending.snapshot.foregroundAction?.kind === "interaction" &&
-        scopedPending.snapshot.foregroundAction.speakerId,
-      bindingSpeakerId,
+    return binding.value;
+  };
+  const corrupted = (
+    snapshot: RuntimeSnapshot,
+    mutate: (copy: Mutable<RuntimeSnapshot>, action: { speakerId: number | null }) => void,
+  ) => {
+    // EVIDENCE: structuredClone preserves the runtime snapshot shape while each fixture changes speaker data.
+    const copy = structuredClone(snapshot) as Mutable<RuntimeSnapshot>;
+    assert.ok(copy.foregroundAction?.kind === "interaction");
+    mutate(copy, copy.foregroundAction);
+    return copy;
+  };
+
+  const speakerPlan = compiledPlan(
+    'speaker alice {}\nspeaker bob {}\nspeaker alice\nshowButton as alice "Continue"\nexit',
+  );
+  const pending = waiting(speakerPlan).snapshot;
+  const bob = speakerId(pending, "bob");
+  const rejectedExplicit = [
+    corrupted(pending, (_copy, action) => {
+      action.speakerId = bob;
+    }),
+    corrupted(pending, (copy, action) => {
+      const alice = copy.speakers.find((speaker) => speaker.identifier === "alice")!;
+      const swappedBob = copy.speakers.find((speaker) => speaker.identifier === "bob")!;
+      [alice.identifier, swappedBob.identifier] = [swappedBob.identifier, alice.identifier];
+      action.speakerId = swappedBob.id;
+    }),
+    corrupted(pending, (copy) => {
+      speakerBinding(copy, "alice").speakerId = bob;
+    }),
+  ];
+  for (const hostile of rejectedExplicit) {
+    assert.equal(validateRuntimeSnapshot(hostile, speakerPlan).valid, false);
+  }
+  // A coherent binding change moves the instructed speaker with it.
+  const bindingResolved = corrupted(pending, (copy, action) => {
+    speakerBinding(copy, "alice").speakerId = bob;
+    action.speakerId = bob;
+  });
+  assert.equal(validateRuntimeSnapshot(bindingResolved, speakerPlan).valid, true);
+
+  const defaultSpeakerPlan = compiledPlan(
+    'speaker alice {}\nspeaker bob {}\nspeaker alice\nshowButton "Continue"\nexit',
+  );
+  const defaultPending = waiting(defaultSpeakerPlan).snapshot;
+  const defaultAction = defaultPending.foregroundAction;
+  assert.equal(
+    defaultAction?.kind === "interaction" && defaultAction.speakerId,
+    defaultPending.defaultSpeaker,
+  );
+  const wrongDefault = corrupted(defaultPending, (_copy, action) => {
+    action.speakerId = speakerId(defaultPending, "bob");
+  });
+  assert.equal(validateRuntimeSnapshot(wrongDefault, defaultSpeakerPlan).valid, false);
+
+  const removeAliceBinding = (copy: Mutable<RuntimeSnapshot>) => {
+    const frame = copy.frames.find((candidate) =>
+      candidate.bindings.some((binding) => binding.name === "alice"),
     );
-    assert.equal(validateRuntimeSnapshot(scopedPending.snapshot, scoped).valid, true);
+    assert.ok(frame);
+    frame.bindings = frame.bindings.filter((binding) => binding.name !== "alice");
+  };
+  const replaceAliceBinding = (copy: Mutable<RuntimeSnapshot>, value: unknown) => {
+    const binding = copy.frames
+      .flatMap((frame) => frame.bindings)
+      .find((candidate) => candidate.name === "alice");
+    assert.ok(binding);
+    // EVIDENCE: fixture stores malformed external binding data excluded by the canonical snapshot type.
+    (binding as { value: unknown }).value = value;
+  };
+  for (const mutateBinding of [
+    removeAliceBinding,
+    (copy: Mutable<RuntimeSnapshot>) => replaceAliceBinding(copy, "ordinary"),
+    (copy: Mutable<RuntimeSnapshot>) =>
+      replaceAliceBinding(copy, {
+        kind: "speakerReference",
+        speakerId: "bad",
+        identifier: "alice",
+      }),
+    (copy: Mutable<RuntimeSnapshot>) =>
+      replaceAliceBinding(copy, { kind: "speakerReference", speakerId: 999, identifier: "alice" }),
+    () => {},
+  ]) {
+    const hostile = corrupted(pending, (copy, action) => {
+      mutateBinding(copy);
+      action.speakerId = null;
+    });
+    assert.equal(validateRuntimeSnapshot(hostile, speakerPlan).valid, false);
+    assert.throws(() =>
+      restoreCheckpoint({ ...createCheckpoint(speakerPlan, pending), snapshot: hostile }),
+    );
   }
 
+  // Source has no parameter speaker form, so the parameter row patches only the instructed speaker.
+  const parameterPlan = buttonPlanFromSource(
+    "speaker alice {}\nspeaker bob {}\nfunction prompt(requested) { wait 1 }\nprompt(bob)\nexit",
+  );
+  const parameterInteraction = parameterPlan.instructions.find(
+    (instruction) => instruction.kind === "interaction",
+  );
+  assert.ok(parameterInteraction?.kind === "interaction" && "speaker" in parameterInteraction);
+  // EVIDENCE: fixture changes only the static interaction's speaker expression before plan validation.
+  (parameterInteraction as { speaker: string | null }).speaker = "requested";
+  assert.equal(validateInstructionPlan(parameterPlan).valid, true);
+  for (const [plan, name] of [
+    [parameterPlan, "requested"],
+    [
+      compiledPlan(
+        'speaker alice {}\nfunction prompt { showButton as alice "Continue" }\nprompt()\nexit',
+      ),
+      "alice",
+    ],
+  ] as const) {
+    const scopedPending = waiting(plan).snapshot;
+    // EVIDENCE: structuredClone preserves the runtime snapshot shape for the read-only binding lookup.
+    const scopedCopy = structuredClone(scopedPending) as Mutable<RuntimeSnapshot>;
+    assert.equal(
+      scopedPending.foregroundAction?.kind === "interaction" &&
+        scopedPending.foregroundAction.speakerId,
+      speakerBinding(scopedCopy, name).speakerId,
+      name,
+    );
+    assert.equal(validateRuntimeSnapshot(scopedPending, plan).valid, true, name);
+  }
+
+  // The nearest scope's binding decides the instructed speaker.
+  const nestedPending = waiting(
+    compiledPlan('speaker root {}\nspeaker bob {}\nif true { showButton "Continue" }\nexit'),
+  ).snapshot;
   const nestedBase = buttonPlanFromSource(
     "speaker root {}\nspeaker bob {}\nif true { wait 1 }\nexit",
   );
@@ -886,31 +872,24 @@ test("pending interaction speaker provenance is bound to the instructed speaker"
   assert.ok(nestedInstruction?.kind === "interaction" && "speaker" in nestedInstruction);
   // EVIDENCE: fixture changes only the static interaction's speaker binding for nested-scope resolution.
   (nestedInstruction as { speaker: string | null }).speaker = "alice";
-  const nestedInstructions = nestedBase.instructions.map((instruction) =>
-    instruction.kind === "interaction" ? { ...instruction, speaker: null } : instruction,
-  );
-  const nestedPending = waiting({ ...nestedBase, instructions: nestedInstructions });
-  // EVIDENCE: structuredClone preserves the runtime snapshot shape while this fixture adds scoped speaker bindings.
-  const nested = structuredClone(nestedPending.snapshot) as Mutable<RuntimeSnapshot>;
-  const rootSpeaker = nested.speakers.find((speaker) => speaker.identifier === "root");
-  const nestedBob = nested.speakers.find((speaker) => speaker.identifier === "bob");
-  assert.ok(rootSpeaker !== undefined && nestedBob !== undefined);
-  assert.ok(nested.frames[0] !== undefined);
-  assert.ok(nested.frames.at(-1) !== undefined);
-  nested.frames[0].bindings.push({
-    name: "alice",
-    value: { kind: "speakerReference", speakerId: rootSpeaker.id, identifier: "root" },
-  });
-  nested.frames
-    .at(-1)!
-    .bindings.push({
+  const rootSpeaker = speakerId(nestedPending, "root");
+  const nestedBob = speakerId(nestedPending, "bob");
+  const nested = corrupted(nestedPending, (copy, action) => {
+    copy.frames[0]!.bindings.push({
       name: "alice",
-      value: { kind: "speakerReference", speakerId: nestedBob.id, identifier: "bob" },
+      value: { kind: "speakerReference", speakerId: rootSpeaker, identifier: "root" },
     });
-  assert.ok(nested.foregroundAction?.kind === "interaction");
-  nested.foregroundAction.speakerId = nestedBob.id;
+    copy.frames
+      .at(-1)!
+      .bindings.push({
+        name: "alice",
+        value: { kind: "speakerReference", speakerId: nestedBob, identifier: "bob" },
+      });
+    action.speakerId = nestedBob;
+  });
   assert.equal(validateRuntimeSnapshot(nested, nestedBase).valid, true);
-  nested.foregroundAction.speakerId = rootSpeaker.id;
+  assert.ok(nested.foregroundAction?.kind === "interaction");
+  nested.foregroundAction.speakerId = rootSpeaker;
   assert.equal(validateRuntimeSnapshot(nested, nestedBase).valid, false);
 });
 
