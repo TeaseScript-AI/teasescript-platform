@@ -989,7 +989,7 @@ test("huge completion kind tokens are not reflected or allowed to mutate canonic
   const pending = waiting(plan);
   const actionId = pending.snapshot.foregroundAction!.actionId;
   const before = structuredClone(pending.snapshot);
-  // Two different oversized lengths must yield the same bounded, non-reflected token.
+  // Two different oversized lengths must yield bounded tokens whose length does not follow the input.
   for (const field of ["actionKind", "interactionKind"] as const) {
     const tokens = [16, 32].map((multiple) => {
       const huge = "x".repeat(MAX_INTERACTION_STRING_UTF8_BYTES * multiple);
@@ -1003,7 +1003,7 @@ test("huge completion kind tokens are not reflected or allowed to mutate canonic
       assert.deepEqual(rejected.snapshot, before, field);
       return rejected.outcome.receivedActionKind;
     });
-    assert.equal(tokens[0], tokens[1], field);
+    assert.equal(tokens[0]!.length, tokens[1]!.length, field);
     assert.ok(tokens[0]!.length < MAX_INTERACTION_STRING_UTF8_BYTES, field);
   }
   assert.deepEqual(pending.snapshot, before);

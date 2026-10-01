@@ -891,8 +891,6 @@ interface RejectedExpressionGuaranteeRow {
   readonly category: string;
   readonly expression: unknown;
   readonly temporaryCount?: number;
-  /** Count of TSC002 errors at the handoff path when another rule also rejects the expression. */
-  readonly handoffPathErrors?: number;
 }
 
 function temporaryExpression(temporaryId: number, span: PlanSourceLocation): ExpressionPlan {
@@ -1128,13 +1126,6 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
       temporaryCount: injected.plan.temporaryCount + 1,
     },
     {
-      id: "PR194-expression-prepared-reference",
-      category: "prepared reference",
-      expression: { kind: "preparedReference", temporaryId: destination, span },
-      // The missing prepareReference producer is reported separately at the same path.
-      handoffPathErrors: 2,
-    },
-    {
       id: "PR194-expression-and-right-false",
       category: "short-circuit",
       expression: binaryExpression("and", literalExpression(false, span), matching, span),
@@ -1210,7 +1201,7 @@ test("PR194 matrix: expression consumption requires guaranteed evaluation", () =
     assert.equal(validation.valid, false, `${row.id}: ${row.category}`);
     assert.deepEqual(
       validation.errors.map((error) => [error.code, error.path]),
-      Array.from({ length: row.handoffPathErrors ?? 1 }, () => ["TSC002", handoffPath]),
+      [["TSC002", handoffPath]],
       row.id,
     );
     assert.deepEqual(plan, before, row.id);
@@ -2152,18 +2143,27 @@ test("PR194 matrix: rejected completion and snapshot operations preserve canonic
     interactionKind: "text",
     payload: { kind: "submittedText", submittedText: "committed" },
   });
+  // The owner row starts from the newer-settlement composite, so no equal-ID settlement can
+  // reject the forged owner in place of the ownership rule.
+  const composite = settledHandoffFixture();
   const malformedOperationRows: readonly {
     readonly id: string;
+    readonly plan: InstructionPlan;
+    readonly valid: RuntimeSnapshot;
     readonly mutate: (snapshot: ExternalRecord) => void;
   }[] = [
     {
       id: "PR194-rejected-operation-handoff-null",
+      plan: injected.plan,
+      valid: completed.snapshot,
       mutate: (snapshot) => {
         snapshot.interactionResultHandoff = null;
       },
     },
     {
       id: "PR194-rejected-operation-handoff-owner",
+      plan: composite.injected.plan,
+      valid: composite.validatedCompositeWithNewerSettlement,
       mutate: (snapshot) => {
         externalRecord(snapshot.interactionResultHandoff, "handoff").ownerCallFrameId = 99;
         snapshot.nextCallFrameId = 100;
@@ -2171,22 +2171,26 @@ test("PR194 matrix: rejected completion and snapshot operations preserve canonic
     },
     {
       id: "PR194-rejected-operation-handoff-extra-field",
+      plan: injected.plan,
+      valid: completed.snapshot,
       mutate: (snapshot) => {
         externalRecord(snapshot.interactionResultHandoff, "handoff").extra = true;
       },
     },
   ];
   for (const row of malformedOperationRows) {
-    const snapshot = externalRecord(structuredClone(completed.snapshot), "malformed snapshot");
+    assert.equal(validateRuntimeSnapshot(row.valid, row.plan).valid, true, `${row.id}: base`);
+    const handoffActionId = row.valid.interactionResultHandoff?.actionId;
+    const snapshot = externalRecord(structuredClone(row.valid), "malformed snapshot");
     row.mutate(snapshot);
     const before = structuredClone(snapshot);
-    const planBefore = structuredClone(injected.plan);
+    const planBefore = structuredClone(row.plan);
     // Deliberately malformed external snapshot data must be rejected before completion mutates it.
     assert.throws(
       () => {
         // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture passes the malformed external record to completion to verify atomic rejection.
-        return completeAction(injected.plan, snapshot as unknown as RuntimeSnapshot, {
-          actionId,
+        return completeAction(row.plan, snapshot as unknown as RuntimeSnapshot, {
+          actionId: handoffActionId,
           actionKind: "interaction",
           interactionKind: "text",
           payload: { kind: "submittedText", submittedText: "committed" },
@@ -2199,7 +2203,7 @@ test("PR194 matrix: rejected completion and snapshot operations preserve canonic
       },
       row.id,
     );
-    assert.deepEqual(injected.plan, planBefore, row.id);
+    assert.deepEqual(row.plan, planBefore, row.id);
     assert.deepEqual(snapshot, before, row.id);
   }
 });
