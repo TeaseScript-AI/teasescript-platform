@@ -117,11 +117,10 @@ async function toggleFullscreen() {
           </PlayerTopBar>
         </template>
         <template #stage>
-          <Stage ref="stage" :media="media" @media-aspect="mediaAspect = $event">
-            <template #right-rail>
-              <slot name="right-rail" />
-            </template>
-          </Stage>
+          <Stage ref="stage" :media="media" @media-aspect="mediaAspect = $event" />
+        </template>
+        <template #right-rail>
+          <slot name="right-rail" />
         </template>
 
         <RuntimeInteraction

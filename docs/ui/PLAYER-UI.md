@@ -622,7 +622,7 @@ invent a competing inline-error semantic merely because the current POC lacks th
 
 ## Right timer and background rail
 
-The Player's right timer/background rail overlays the stage and is not another tool panel. Timer and background-control
+The Player's right timer/background rail is an overlay at the Player's right edge, not another tool panel. Timer and background-control
 content have separate overflow owners. Presentation remains separate from runtime action/lifecycle ownership; fixture
 content in the development preview does not create a second runtime model.
 
@@ -708,15 +708,18 @@ Recorded background-control activation history follows the transcript provenance
 
 ### Vertical placement and overflow
 
-With one timer, the control/status group targets the Player viewport centre while all items fit, yielding downward only
-when the fixed timer would otherwise collide with it. A software keyboard reduces the usable space for this calculation.
-Once the control/status list no longer fits, only that list scrolls and the timer remains fixed. With multiple timers,
-the timer pane owns vertical timer overflow and the action pane continues to own action overflow.
+The complete control/status group is vertically centred on the Player viewport, not on the Stage, whenever it fits. The
+centre is a preference, not a fixed coordinate: the whole group shifts only as far as needed to stay below the timers
+and inside the usable Player area, and individual controls are never clipped. A software keyboard reduces that usable
+area. When the group cannot fit even after shifting, only the group scrolls and the timers remain fixed. With multiple
+timers, the timer pane owns vertical timer overflow and the action pane continues to own action overflow.
 
 ### Stage overlay and material
 
-The rail always overlays the stage; it has no separately reserved right-hand track and no backing toggle. Rail
-dimensions remain provisional. Timer surfaces use the current graded translucent timer material. Right-rail action
+The rail never reserves a right-hand track and has no backing toggle. It spans the full Player height while it stays
+clear of the reading column, overlaying the Stage and the conversation margin. When it would cover transcript or composer
+content, it falls back to the Stage height, with the controls directly below the timers. Rail dimensions remain
+provisional. Timer surfaces use the current graded translucent timer material. Right-rail action
 buttons remain fully opaque, including authored colours and hover/pressed states.
 
 ## Interaction states and input methods

@@ -1,18 +1,71 @@
 <script setup lang="ts">
+import { computed, ref } from "vue";
+import { useResizeObserver } from "@vueuse/core";
 import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
+
+// Owner decision (#418): the background-control group targets the Player viewport centre.
+// The rail spans the full Player height while it stays clear of the reading column; otherwise
+// it falls back to the Stage, with controls directly below the timers.
+const rail = ref<HTMLElement | null>(null);
+const pane = ref<InstanceType<typeof ScrollArea> | null>(null);
+const group = ref<HTMLElement | null>(null);
+const fullHeight = ref(true);
+const groupOffset = ref(0);
+
+const player = computed(() => (rail.value?.offsetParent as HTMLElement | null) ?? undefined);
+const column = computed(
+  () => player.value?.querySelector<HTMLElement>("[data-conversation-overlay]") ?? undefined,
+);
+
+function layout() {
+  const railElement = rail.value;
+  const playerElement = player.value;
+  if (!railElement || !playerElement) return;
+  const columnRight = column.value?.getBoundingClientRect().right ?? -Infinity;
+  fullHeight.value = columnRight <= railElement.getBoundingClientRect().left;
+  const paneElement = pane.value?.$el as HTMLElement | undefined;
+  if (!paneElement || !group.value) return;
+  if (!fullHeight.value) {
+    groupOffset.value = 0;
+    return;
+  }
+  // Centre on the viewport, then shift only as far as needed to stay below the timers and
+  // inside the Player. A group taller than the pane starts at its top and scrolls.
+  const playerBox = playerElement.getBoundingClientRect();
+  const paneBox = paneElement.getBoundingClientRect();
+  const height = group.value.offsetHeight;
+  const centred = playerBox.top + playerBox.height / 2 - height / 2 - paneBox.top;
+  groupOffset.value = Math.max(0, Math.min(centred, paneBox.height - height));
+}
+
+useResizeObserver(
+  () => [player.value, column.value, rail.value, pane.value?.$el as HTMLElement | undefined, group.value],
+  layout,
+);
 </script>
 
 <template>
   <div
     v-if="$slots.timers || $slots.controls"
+    ref="rail"
     class="stage-right-rail"
     :data-has-controls="$slots.controls ? '' : undefined"
+    :data-rail-extent="fullHeight ? 'player' : 'stage'"
   >
     <div v-if="$slots.timers" class="stage-right-rail-timers">
       <slot name="timers" />
     </div>
-    <ScrollArea v-if="$slots.controls" class="stage-right-rail-controls" viewport-class="overscroll-y-contain" role="group" aria-label="Background controls and status">
-      <slot name="controls" />
+    <ScrollArea
+      v-if="$slots.controls"
+      ref="pane"
+      class="stage-right-rail-controls"
+      viewport-class="overscroll-y-contain"
+      role="group"
+      aria-label="Background controls and status"
+    >
+      <div ref="group" class="stage-right-rail-group" :style="{ marginBlockStart: `${groupOffset}px` }">
+        <slot name="controls" />
+      </div>
     </ScrollArea>
   </div>
 </template>
@@ -29,6 +82,13 @@ import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
   min-block-size: 0;
   grid-template-rows: minmax(0, 1fr);
   padding-block: var(--player-following-control-top) var(--player-edge-space);
+  /* Over the conversation margin, only the timers and controls take pointer input. */
+  pointer-events: none;
+}
+
+.stage-right-rail[data-rail-extent="stage"] {
+  bottom: auto;
+  block-size: var(--stage-height);
 }
 
 .stage-right-rail[data-has-controls] {
@@ -53,10 +113,15 @@ import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
   justify-content: center;
   grid-row: 1;
   overflow: hidden;
+  pointer-events: auto;
 }
 
 .stage-right-rail-controls {
   grid-row: 2;
 }
 
+.stage-right-rail-group,
+.stage-right-rail-controls :deep([data-slot="scroll-area-scrollbar"]) {
+  pointer-events: auto;
+}
 </style>

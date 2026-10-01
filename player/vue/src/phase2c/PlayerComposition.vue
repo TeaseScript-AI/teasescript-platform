@@ -21,6 +21,7 @@ const hitAreaMargins = { fine: 0, coarse: 0 };
         <slot />
       </SplitterPanel>
     </SplitterGroup>
+    <slot name="right-rail" />
   </div>
 </template>
 

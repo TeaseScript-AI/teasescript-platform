@@ -1646,6 +1646,55 @@ async function focusOffsetChecks(page) {
   return "PASS focus outline is 2px wide with 2px separation and adds no ring";
 }
 
+async function backgroundControlPlacementChecks(page) {
+  const placement = () =>
+    page.evaluate(() => {
+      const rail = document.querySelector(".stage-right-rail");
+      const box = (element) => element.getBoundingClientRect();
+      const group = box(rail.querySelector(".stage-right-rail-group"));
+      const player = box(document.querySelector(".player-composition"));
+      const viewport = rail.querySelector(
+        ".stage-right-rail-controls [data-reka-scroll-area-viewport]",
+      );
+      return {
+        extent: rail.dataset.railExtent,
+        top: group.top,
+        bottom: group.bottom,
+        centreOffset: (group.top + group.bottom) / 2 - (player.top + player.height / 2),
+        timerBottom: box(rail.querySelector(".stage-right-rail-timers")).bottom,
+        railBottom: box(rail).bottom,
+        columnRight: box(document.querySelector("[data-conversation-overlay]")).right,
+        railLeft: box(rail).left,
+        scrolls: viewport.scrollHeight > viewport.clientHeight,
+      };
+    });
+  const settle = async (width, height) => {
+    await page.setViewportSize({ width, height });
+    await page.waitForTimeout(300);
+    return placement();
+  };
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  // Owner decision: centre the complete group on the Player viewport when it fits.
+  let state = await settle(1440, 900);
+  if (state.extent !== "player" || Math.abs(state.centreOffset) > 1)
+    throw new Error(`Group is not viewport-centred: ${JSON.stringify(state)}`);
+  // Shift only as needed to stay clear of the timer and inside the Player.
+  state = await settle(1440, 420);
+  if (state.top < state.timerBottom - 1 || state.bottom > state.railBottom + 1 || state.scrolls)
+    throw new Error(`Short viewport did not shift the complete group: ${JSON.stringify(state)}`);
+  // Too little height: the group scrolls instead of clipping or overlapping the timer.
+  state = await settle(1440, 330);
+  if (!state.scrolls || state.top < state.timerBottom - 1)
+    throw new Error(`Insufficient height must scroll the group: ${JSON.stringify(state)}`);
+  // A rail that would cover the reading column stays within the Stage.
+  state = await settle(800, 900);
+  if (state.extent !== "stage" || state.columnRight <= state.railLeft)
+    throw new Error(`Narrow layout must keep the Stage fallback: ${JSON.stringify(state)}`);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  return "PASS background controls centre on the viewport, shift, scroll and keep the narrow Stage fallback";
+}
+
 async function composerMouseFocusChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -1828,6 +1877,7 @@ const groups = [
   composerSendFocusChecks,
   sidebarShortcutChecks,
   focusOffsetChecks,
+  backgroundControlPlacementChecks,
   directDemoLatestChecks,
   timerChecks,
   contentAlignmentChecks,

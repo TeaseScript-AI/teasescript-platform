@@ -17,7 +17,6 @@ function mediaLoaded(event: Event) {
     <div class="stage-media-frame">
       <img v-if="media" :src="media.src" :alt="media.alt" class="stage-media" @load="mediaLoaded" />
     </div>
-    <slot name="right-rail" />
   </section>
 </template>
 

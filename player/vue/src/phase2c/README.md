@@ -54,7 +54,7 @@ specification.
   for syntax and completion semantics.
 - `usePlayerTheme.ts` applies/restores document variables; `player/theme` calculates colours and Theme Lab edits intent.
   See [theme evaluation](../../../README.md#experimental-dynamic-theme-evaluation).
-- `StageRightRail.vue` owns the stage-overlay rail, `TimerRegion.vue` its timer collection and `TimerDisplay.vue`
+- `StageRightRail.vue` owns the right overlay rail and its viewport-centred control placement, `TimerRegion.vue` its timer collection and `TimerDisplay.vue`
   individual timers. The development preview supplies fixture timers and `BackgroundControlsFixture.vue` samples of
   action, local-toggle and disabled states. The sample actions have no scripted handlers or canonical history; runtime
   timer/background-control wiring remains separate work.
