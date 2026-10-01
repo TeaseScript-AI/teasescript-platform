@@ -20,6 +20,7 @@ import { createSerializableList } from "../src/runtime/serializable-values.js";
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+import { sayTexts } from "./helpers/runtime-events.js";
 
 function compiled(source: string, options: Parameters<typeof compileSource>[1] = {}) {
   const plan = compileValidPlan(source, options);
@@ -995,6 +996,27 @@ test("interaction expressions preserve function-argument source order across sus
   assert.deepEqual(marks, ["before", "after"]);
   assert.equal(done.snapshot.status, "halted");
   assert.equal(done.events.find((event) => event.kind === "say")?.text, "received answer");
+
+  // User-defined calls on both sides: foo runs before the request and bar only after completion.
+  const userPlan = compiled(
+    [
+      'function foo { say "foo"\nreturn "first" }',
+      'function bar { say "bar"\nreturn "third" }',
+      'function send(first, answer, third) { say "${first}:${answer}:${third}"\nreturn }',
+      "send(foo(), askText, bar())",
+    ].join("\n"),
+  );
+  const userPending = run(userPlan, createImmediatePacingRuntimeSnapshot(userPlan));
+  assert.equal(userPending.snapshot.status, "waiting");
+  assert.deepEqual(sayTexts(userPending), ["foo"]);
+  const userCompleted = completePending(userPlan, userPending.snapshot, "text", {
+    kind: "submittedText",
+    submittedText: "middle",
+  });
+  assert.deepEqual(sayTexts(userCompleted), []);
+  const userDone = run(userPlan, userCompleted.snapshot);
+  assert.equal(userDone.snapshot.status, "halted");
+  assert.deepEqual(sayTexts(userDone), ["bar", "first:middle:third"]);
 });
 
 test("real source completes, retries invalid input, records provenance, and resumes at top level", () => {
