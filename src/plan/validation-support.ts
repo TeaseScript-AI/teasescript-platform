@@ -54,6 +54,11 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** A string that is exactly one of `options`; other types are never coerced to text. */
+export function isOneOf(value: unknown, options: readonly string[]): boolean {
+  return typeof value === "string" && options.includes(value);
+}
+
 export function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
   const keys = Object.keys(value);
   return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
