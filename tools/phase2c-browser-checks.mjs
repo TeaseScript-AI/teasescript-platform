@@ -2274,6 +2274,22 @@ async function playerSettingsChecks(page) {
   if (bounds.y < 0 || bounds.y + bounds.height > 261)
     throw new Error(`Player Settings exceeds a short viewport: ${JSON.stringify(bounds)}`);
   await page.getByRole("radio", { name: "B · Auto-hide, controls right" }).check();
+  // The focus trap wraps without scrolling; the wrapped control must still be fully visible.
+  await page.locator('[data-tools-focus="label-mode"]').focus();
+  for (const key of ["Tab", "Tab", "Shift+Tab", "Shift+Tab", "Shift+Tab"])
+    await page.keyboard.press(key);
+  const wrapped = await page.evaluate(() => {
+    const dialog = document.querySelector("[data-player-settings]").getBoundingClientRect();
+    const focused = document.activeElement.getBoundingClientRect();
+    return {
+      name:
+        document.activeElement.textContent.trim() ||
+        document.activeElement.getAttribute("aria-label"),
+      visible: focused.top >= dialog.top && focused.bottom <= dialog.bottom,
+    };
+  });
+  if (!wrapped.visible)
+    throw new Error(`Wrapped Settings focus is outside the dialog: ${JSON.stringify(wrapped)}`);
   await closeSettings();
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(() => {

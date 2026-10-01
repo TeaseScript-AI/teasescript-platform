@@ -247,6 +247,10 @@ function focusToolsToggle() {
     )
     ?.focus({ preventScroll: true });
 }
+// Reka's focus trap wraps with preventScroll; keep the wrapped control visible on short screens.
+function revealFocusedSetting(event: FocusEvent) {
+  if (event.target instanceof HTMLElement) event.target.scrollIntoView({ block: "nearest" });
+}
 function closeSettingsFocus(event: Event) {
   if (sidebarVisible.value) return;
   event.preventDefault();
@@ -807,6 +811,7 @@ async function updateSidebarVisibility(open: boolean) {
                     data-tools-context
                     data-player-settings
                     @close-auto-focus="closeSettingsFocus"
+                    @focusin="revealFocusedSetting"
                   >
                     <DialogHeader>
                       <DialogTitle>Player Settings</DialogTitle>
