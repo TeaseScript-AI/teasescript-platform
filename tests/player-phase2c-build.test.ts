@@ -5,7 +5,7 @@ import test from "node:test";
 
 // Requires `npm run build:player:phase2c` (part of `npm run build`).
 const buildRoot = resolve(import.meta.dirname, "../player-phase2c");
-const developmentMarkers = ["Start runtime scenario", "Coastal Guide", "development illustration"];
+const developmentMarkers = ["Stage media fixture", "Coastal Guide", "development illustration"];
 
 test("the default Phase 2C build statically loads no development preview content", async () => {
   const html = await readFile(resolve(buildRoot, "phase2c/index.html"), "utf8");
