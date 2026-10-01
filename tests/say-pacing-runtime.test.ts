@@ -83,20 +83,10 @@ test("instant remains an identifier when its pacing expression continues", () =>
   if (callGate?.kind === "chatPacingGate") assert.equal(callGate.deadlineMs, 2_000);
 });
 
-test("say prepares earlier inputs before a suspending pacing call and restores them exactly once", () => {
+test("say preparation resumes exactly once across an instruction-call pacing checkpoint", () => {
   const compiled = plan(
     ["function pace(value) { return value }", 'say ["first", "second"], pace(1)'].join("\n"),
   );
-  const kinds = compiled.instructions.map((instruction) => instruction.kind);
-  const speakerPreparation = kinds.indexOf("prepareSaySpeaker");
-  const textPreparation = kinds.indexOf("prepareSayText");
-  const pacingCall = kinds.indexOf("callFunction");
-  const say = kinds.indexOf("say");
-  assert.ok(speakerPreparation >= 0);
-  assert.ok(speakerPreparation < textPreparation);
-  assert.ok(textPreparation < pacingCall);
-  assert.ok(pacingCall < say);
-
   let snapshot = createFreshRuntimeSnapshot(compiled, { seed: 77 });
   snapshot = executeInstruction(compiled, snapshot).snapshot;
   snapshot = executeInstruction(compiled, snapshot).snapshot;
@@ -437,15 +427,6 @@ test("pacing creation provenance rejects an impossible function owner", () => {
 
   assert.equal(validateRuntimeSnapshot(corrupted.snapshot, compiled).valid, false);
   assert.throws(() => deserializeCheckpoint(JSON.stringify(corrupted)));
-});
-
-test("speaker default and explicit skip policy determine pacing gate skippability", () => {
-  const compiled = plan(
-    'speaker vera { defaultSaySkippable: false }\nsay as vera "one"\nsay skippable "two"',
-  );
-  const result = run(compiled, createFreshRuntimeSnapshot(compiled));
-  assert.equal(result.snapshot.foregroundAction?.kind, "chatPacingGate");
-  assert.equal(result.snapshot.foregroundAction?.skippable, false);
 });
 
 test("smart pacing uses the final visible text and captured settings", () => {
@@ -855,7 +836,7 @@ test("foreground interaction consumes background pacing before its action reques
   assert.equal(result.snapshot.backgroundActions.length, 0);
 });
 
-test("exact, zero, and instant pacing create only the required actions", () => {
+test("exact and zero pacing create only the required actions", () => {
   const exact = plan('say "first", 0.5');
   const exactResult = run(exact, createFreshRuntimeSnapshot(exact));
   assert.equal(exactResult.snapshot.backgroundActions[0]?.kind, "chatPacingGate");

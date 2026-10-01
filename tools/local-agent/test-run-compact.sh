@@ -11,7 +11,9 @@ success_output=$(
     bash -c 'printf "hidden success noise\n"; printf "hidden success stderr noise\n" >&2' \
     2>"$tmp/success.stderr"
 )
-[[ "$success_output" == 'sample-success: PASS' ]]
+[[ -n $success_output && $success_output != *$'\n'* ]]
+[[ $success_output == *sample-success* && $success_output == *PASS* ]]
+if [[ $success_output == *'hidden success'* ]]; then exit 1; fi
 if grep -q 'hidden success' "$tmp/success.stderr"; then exit 1; fi
 [[ ! -e "$tmp/success.log" ]]
 

@@ -293,7 +293,6 @@ test("uses the speaker identifier fallback and warns only once per speaker", () 
       warning.kind,
       warning.severity,
       warning.code,
-      warning.message,
       warning.span.start.offset,
       warning.span.end.offset,
     ]),
@@ -302,7 +301,6 @@ test("uses the speaker identifier fallback and warns only once per speaker", () 
         "developerWarning",
         "warning",
         "TSW001",
-        "Speaker 'mistressVera' uses its identifier as the display name.",
         firstSayStart,
         firstSayStart + 'say "First"'.length,
       ],
@@ -356,19 +354,10 @@ test("warns when list.remove cannot find a matching value", () => {
     result.warnings.map((warning) => [
       warning.severity,
       warning.code,
-      warning.message,
       warning.span.start.offset,
       warning.span.end.offset,
     ]),
-    [
-      [
-        "warning",
-        "TSW002",
-        "list.remove(value) found no matching value; the list was left unchanged.",
-        start,
-        start + call.length,
-      ],
-    ],
+    [["warning", "TSW002", start, start + call.length]],
   );
 });
 

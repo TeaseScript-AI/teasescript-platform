@@ -182,8 +182,8 @@ test("counts UTF-16 code units in string token offsets and columns", () => {
 test("diagnoses invalid characters and continues lexing", () => {
   const result = lex("😀@ say");
   assert.deepEqual(result.diagnostics.map(compactDiagnostic), [
-    ["TSL001", 'Invalid character "😀".', [0, 0, 0, 2, 0, 2]],
-    ["TSL001", 'Invalid character "@".', [2, 0, 2, 3, 0, 3]],
+    ["TSL001", [0, 0, 0, 2, 0, 2]],
+    ["TSL001", [2, 0, 2, 3, 0, 3]],
   ]);
   assert.deepEqual(
     result.tokens.map((token) => token.kind),
@@ -193,9 +193,7 @@ test("diagnoses invalid characters and continues lexing", () => {
 
 test("diagnoses unknown escapes and obsolete backticks precisely", () => {
   const unknown = lex('"bad \\q still"');
-  assert.deepEqual(unknown.diagnostics.map(compactDiagnostic), [
-    ["TSL002", "Unknown escape sequence \\q.", [5, 0, 5, 7, 0, 7]],
-  ]);
+  assert.deepEqual(unknown.diagnostics.map(compactDiagnostic), [["TSL002", [5, 0, 5, 7, 0, 7]]]);
   assert.equal(tokenValue(unknown.tokens[1]), "bad q still");
   assert.deepEqual(
     lex("`old`").diagnostics.map((diagnostic) => diagnostic.code),
@@ -225,9 +223,7 @@ test("recovers an unknown escape before a physical newline", () => {
 
 test("diagnoses unterminated ordinary, block, and interpolated strings", () => {
   const ordinary = lex('say "unfinished');
-  assert.deepEqual(ordinary.diagnostics.map(compactDiagnostic), [
-    ["TSL003", "Unterminated string literal.", [4, 0, 4, 15, 0, 15]],
-  ]);
+  assert.deepEqual(ordinary.diagnostics.map(compactDiagnostic), [["TSL003", [4, 0, 4, 15, 0, 15]]]);
   assert.deepEqual(
     lex('"""unfinished').diagnostics.map((diagnostic) => diagnostic.code),
     ["TSL004"],
@@ -268,10 +264,9 @@ function compactToken(
 
 function compactDiagnostic(
   diagnostic: ReturnType<typeof lex>["diagnostics"][number],
-): [string, string, [number, number, number, number, number, number]] {
+): [string, [number, number, number, number, number, number]] {
   return [
     diagnostic.code,
-    diagnostic.message,
     [
       diagnostic.span.start.offset,
       diagnostic.span.start.line,

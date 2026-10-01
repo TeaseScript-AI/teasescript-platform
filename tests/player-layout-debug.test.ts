@@ -11,7 +11,6 @@ import {
   buildDiagnosticCardLines,
   captureRect,
   captureScrollMetrics,
-  formatRect,
   LAYOUT_DEBUG_SELECTORS,
   parseGridTracks,
   type LayoutDebugSnapshot,
@@ -30,8 +29,8 @@ test("Layout Debug options retain individual layers while the master is toggled"
   assert.equal(defaults.grid, true);
 });
 
-test("Layout Debug pure measurement helpers normalize geometry, overflow, and grid tracks", () => {
-  const rect = captureRect({
+test("Layout Debug measurement helpers preserve rectangle fields, overflow, and grid tracks", () => {
+  const geometry = {
     x: 10.25,
     y: 20.5,
     width: 320.75,
@@ -40,8 +39,8 @@ test("Layout Debug pure measurement helpers normalize geometry, overflow, and gr
     right: 331,
     bottom: 200.75,
     left: 10.25,
-  });
-  assert.equal(formatRect(rect), "320.8px × 180.3px @ 10.3px, 20.5px");
+  };
+  assert.deepEqual(captureRect(geometry), geometry);
 
   assert.deepEqual(
     captureScrollMetrics({

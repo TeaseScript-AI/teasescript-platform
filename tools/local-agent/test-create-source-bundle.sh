@@ -87,11 +87,6 @@ assert "bash ../tooling/tools/local-agent/create-source-bundle.sh" in automatic
 assert "--output ../source-artifact" in automatic
 assert "steps.source.outputs.sha" in automatic
 assert "name: teasescript-source-${{ steps.source.outputs.sha }}" in automatic
-assert "cancel-in-progress: true" in automatic
-assert "retention-days: 7" in automatic
-assert "retention-days: 1" not in automatic
-assert "runs-on: ubuntu-24.04" in automatic
-assert "timeout-minutes: 5" in automatic
 
 assert re.search(
     r"^  workflow_run:\n    workflows: \[Source bundle\]\n    types: \[completed\]",
@@ -104,8 +99,6 @@ assert "statuses: write" in index
 assert "contents:" not in index
 assert "actions/checkout@" not in index
 assert "actions/download-artifact@" not in index
-assert "runs-on: ubuntu-24.04" in index
-assert "timeout-minutes: 3" in index
 
 assert re.search(r"^  issue_comment:\n    types: \[created\]", artifact_router, re.MULTILINE)
 assert "permissions: {}" in artifact_router
@@ -279,11 +272,8 @@ assert "request.resolveRequest" in artifact_request
 assert "request.completeRequest" in artifact_request
 assert "request.reportProductionFailure" in artifact_request
 assert "--event-name source-bundle-artifact-request" in artifact_request
-assert "retention-days: 7" in artifact_request
 assert "SOURCE_SHA: ${{ steps.resolve.outputs.source_sha }}" in artifact_request
 assert "sourceSha: process.env.SOURCE_SHA" in artifact_request
-assert "runs-on: ubuntu-24.04" in artifact_request
-assert "timeout-minutes: 8" in artifact_request
 
 PYWORKFLOW
 

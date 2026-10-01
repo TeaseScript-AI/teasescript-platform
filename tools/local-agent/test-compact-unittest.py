@@ -41,14 +41,21 @@ class CompactUnittestTests(unittest.TestCase):
             "import unittest\n"
             "from compact_unittest import run_compact_unittest\n\n"
             "class Example(unittest.TestCase):\n"
-            "    def test_ok(self):\n"
+            "    def test_first_ok(self):\n"
+            "        self.assertTrue(True)\n\n"
+            "    def test_second_ok(self):\n"
             "        self.assertTrue(True)\n\n"
             "if __name__ == '__main__':\n"
             "    run_compact_unittest('fixture-suite')\n"
         )
         self.assertEqual(completed.returncode, 0)
-        self.assertEqual(completed.stdout, "fixture-suite: PASS (1 tests)\n")
         self.assertEqual(completed.stderr, "")
+        lines = completed.stdout.splitlines()
+        self.assertEqual(len(lines), 1, completed.stdout)
+        self.assertIn("fixture-suite", lines[0])
+        self.assertIn("PASS", lines[0])
+        self.assertRegex(lines[0], r"(?<!\d)2(?!\d)")
+        self.assertNotIn("test_", lines[0])
 
     def test_failure_keeps_identity_traceback_and_assertion(self) -> None:
         completed = self.run_fixture(

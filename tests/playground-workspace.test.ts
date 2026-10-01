@@ -65,24 +65,25 @@ test("workspace helper reports parser and semantic diagnostics", () => {
 });
 
 test("workspace compilation reuses the compiler-validated plan", () => {
-  const statistics = withValidationTestStatistics((finish) => {
-    assert.ok(
-      compileWorkspaceSource(Array.from({ length: 100 }, () => 'say "Hello"').join("\n")).plan,
+  const source = (statements: number) =>
+    Array.from({ length: statements }, () => 'say "Hello"').join("\n");
+  const compileWork = (statements: number) =>
+    captureWork(() => assert.ok(compileWorkspaceSource(source(statements)).plan));
+  const executeWork = (statements: number) =>
+    captureWork(() =>
+      assert.ok(
+        executeWorkspaceSource(source(statements)).events.some(({ kind }) => kind === "say"),
+      ),
     );
-    return finish();
-  }).counts;
 
-  assert.equal(
-    statistics.externalCaptureVisits,
-    1,
-    "only the empty fresh-runtime options object is captured",
-  );
-
-  const executionStatistics = withValidationTestStatistics((finish) => {
-    assert.equal(executeWorkspaceSource('say "Hello"').status, "halted");
-    return finish();
-  }).counts;
-  assert.equal(executionStatistics.externalCaptureVisits, 1);
+  // Recapturing the plan or snapshot would add capture calls and grow visits with the plan size.
+  for (const work of [compileWork, executeWork]) {
+    const small = work(1);
+    const large = work(100);
+    assert.equal(small.planCaptures, 0);
+    assert.equal(small.snapshotCaptures, 0);
+    assert.deepEqual(large, small);
+  }
 });
 
 test("workspace helper stops blocking waits in waiting with action events", () => {
@@ -99,14 +100,13 @@ test("validated workspace execution clones state without hostile-data recapture"
   assert.ok(compiled.plan);
   assert.ok(compiled.snapshot);
   const before = JSON.stringify(compiled.snapshot);
-  const statistics = withValidationTestStatistics((finish) => {
+  const work = captureWork(() => {
     const result = executeValidatedWorkspaceSnapshot(compiled.plan!, compiled.snapshot!, "run");
     assert.equal(result.status, "halted");
-    return finish();
-  }).counts;
+  });
 
   assert.equal(JSON.stringify(compiled.snapshot), before);
-  assert.equal(statistics.externalCaptureVisits, undefined);
+  assert.deepEqual(work, { planCaptures: 0, snapshotCaptures: 0, externalVisits: 0 });
 });
 
 test("workspace helper accepts source beyond the former local byte limit", () => {
@@ -246,17 +246,11 @@ test("workspace controls preserve number input and authored choice order", () =>
   const choiceWaiting = executeValidatedWorkspaceSnapshot(choice.plan, choice.snapshot, "run");
   assert.ok(choiceWaiting.snapshot);
   const choiceBefore = JSON.stringify(choiceWaiting.snapshot);
+  const ui = inspectWorkspacePlayerPresentation(choiceWaiting.snapshot).activeInteraction?.ui;
+  assert.equal(ui?.kind, "choice");
   assert.deepEqual(
-    inspectWorkspacePlayerPresentation(choiceWaiting.snapshot).activeInteraction?.ui,
-    {
-      kind: "choice",
-      labelType: "none",
-      options: [
-        { label: null, text: "Alpha" },
-        { label: null, text: "Beta" },
-      ],
-      accessibleName: { kind: "localizedDefault", key: "chooseOption" },
-    },
+    ui.options.map((option) => option.text),
+    ["Alpha", "Beta"],
   );
   const selected = selectWorkspaceChoice(choice.plan, choiceWaiting.snapshot, {
     kind: "text",
@@ -324,6 +318,23 @@ test("workspace controls preserve engine pacing and completion rejection outcome
   assert.equal(JSON.stringify(oversized.snapshot), textBefore);
   assert.equal(JSON.stringify(textWaiting.snapshot), textBefore);
 });
+
+/** Counts capture work during `operation`; counters absent from the statistics count as zero. */
+function captureWork(operation: () => void): {
+  planCaptures: number;
+  snapshotCaptures: number;
+  externalVisits: number;
+} {
+  const counts = withValidationTestStatistics((finish) => {
+    operation();
+    return finish();
+  }).counts;
+  return {
+    planCaptures: counts.instructionPlanCaptureCalls ?? 0,
+    snapshotCaptures: counts.runtimeSnapshotCaptureCalls ?? 0,
+    externalVisits: counts.externalCaptureVisits ?? 0,
+  };
+}
 
 function transcriptTexts(events: readonly InterpreterEvent[]): string[] {
   return events.flatMap((event) => (event.kind === "playerTranscript" ? [event.text] : []));

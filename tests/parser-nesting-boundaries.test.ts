@@ -4,14 +4,23 @@ import test from "node:test";
 import type { Expression } from "../src/ast.js";
 import { parse } from "../src/parser.js";
 
-test("deep malformed nesting retains structured parser diagnostics", () => {
+test("deep malformed nesting reports the missing closer at EOF with structured recovery", () => {
   const source = `${"(".repeat(2_000)}1`;
+  // Returning at all, rather than throwing a native RangeError, is the termination evidence.
   const first = parse(source);
   const second = parse(source);
   assert.deepEqual(first.diagnostics, second.diagnostics);
-  assert.equal(first.diagnostics.length, 2_000);
-  assert.equal(first.diagnostics[0]?.code, "TSP017");
-  assert.ok(first.diagnostics.slice(1).every((diagnostic) => diagnostic.code === "TSP012"));
+  const [root] = first.diagnostics;
+  assert.deepEqual(
+    [root?.code, root?.span.start.offset, root?.span.end.offset],
+    ["TSP017", source.length, source.length],
+  );
+  // Secondary unwinding may improve, but must stay structured and source-associated.
+  for (const diagnostic of first.diagnostics) {
+    assert.match(diagnostic.code, /^TSP\d{3}$/u);
+    assert.ok(diagnostic.span.start.offset <= diagnostic.span.end.offset);
+    assert.ok(diagnostic.span.end.offset <= source.length);
+  }
 });
 
 test("parenthesis-chain parsing preserves grouping spans and statement boundaries", () => {
@@ -40,7 +49,7 @@ test("parenthesis-chain parsing preserves grouping spans and statement boundarie
   );
 });
 
-test("deep malformed collection chains retain ordered delimiter diagnostics", () => {
+test("deep malformed collection chains recover every missing closer at EOF", () => {
   const depth = 2_000;
   const openings = Array.from({ length: depth }, (_, index) =>
     index % 2 === 0 ? "[" : "set[",
@@ -49,8 +58,6 @@ test("deep malformed collection chains retain ordered delimiter diagnostics", ()
   const parsed = parse(source);
   assert.equal(parsed.diagnostics.length, depth);
   assert.ok(parsed.diagnostics.every((diagnostic) => diagnostic.code === "TSP017"));
-  assert.equal(parsed.diagnostics[0]?.message, "Expected ']' after the set literal.");
-  assert.equal(parsed.diagnostics.at(-1)?.message, "Expected ']' after the list literal.");
   assert.ok(
     parsed.diagnostics.every(
       (diagnostic) =>

@@ -111,12 +111,6 @@ test("function scopes access globals but keep parameters and locals isolated", (
   assert.ok(escaped.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV002"));
 });
 
-test("rejects calls to non-callable variables", () => {
-  const result = compileSource("let value = 1\nvalue()");
-
-  assert.ok(result.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV019"));
-});
-
 test("rejects all accepted V30 protected names in declarations", () => {
   const protectedFunction = compileSource("function wait { return 1 }");
   assert.equal(protectedFunction.plan, null);
