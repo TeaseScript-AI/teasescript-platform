@@ -6,7 +6,12 @@ import { fileURLToPath } from "node:url";
 
 import { ts } from "ts-morph";
 
-const forbiddenToolingSpecifiers = ["typescript", "@typescript/native", "ts-morph"] as const;
+const forbiddenToolingSpecifiers = [
+  "typescript",
+  "typescript-vue",
+  "@typescript/native",
+  "ts-morph",
+] as const;
 
 function isForbiddenToolingSpecifier(specifier: string): boolean {
   return forbiddenToolingSpecifiers.some(
