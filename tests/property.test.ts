@@ -105,7 +105,7 @@ test("near-valid source determinism rejects a plan from either compilation", () 
   assert.equal(compilationCount, 2);
 });
 
-test("execution compiles the reported prepared source scenario", () => {
+test("source scenarios are prepared once and execution compiles the reported source", () => {
   assertReportedSourceExecutes("valid");
   assertReportedSourceExecutes("near-valid");
 });
