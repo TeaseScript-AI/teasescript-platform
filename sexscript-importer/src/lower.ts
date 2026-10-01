@@ -540,36 +540,56 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
   const value = valueNode === null ? null : lowerExpression(valueNode, context);
   if (value === null) return [unsupportedStatement(context, node, "SX_UNSUPPORTED_SWITCH_VALUE", "switch value could not be migrated.")];
 
+  const caseNodes = nodeArray(node.cases);
+  const defaultNode = asNode(node.default);
+  const defaultSource = switchBodyStatements(defaultNode);
+  if (defaultSource === null) {
+    return [unsupportedStatement(context, node, "SX_UNSUPPORTED_SWITCH_CASE", "Switch default body could not be migrated safely.")];
+  }
+
   const cases: IrSwitchCase[] = [];
-  for (const caseNode of nodeArray(node.cases)) {
+  for (let index = 0; index < caseNodes.length; index += 1) {
+    const caseNode = caseNodes[index]!;
     if (caseNode.kind !== "case") return [unsupportedStatement(context, node, "SX_UNSUPPORTED_SWITCH_CASE", "Unexpected Groovy switch case node.")];
     const matchNode = asNode(caseNode.expression);
-    const bodyNode = asNode(caseNode.body);
     const match = matchNode === null ? null : lowerExpression(matchNode, context);
-    if (match === null || bodyNode?.kind !== "block") {
+    if (match === null) {
       return [unsupportedStatement(context, node, "SX_UNSUPPORTED_SWITCH_CASE", "Switch case could not be migrated safely.")];
     }
-    const sourceStatements = nodeArray(bodyNode.statements);
-    const terminalBreak = sourceStatements.at(-1)?.kind === "break";
-    const terminalReturn = sourceStatements.at(-1)?.kind === "return";
-    if (!terminalBreak && !terminalReturn) {
-      addDiagnostic(context, "SX_SWITCH_FALLTHROUGH", "error", "Groovy switch fallthrough is not equivalent to TeaseScript switch semantics.", caseNode.span);
-      return [{ kind: "unsupported", diagnosticCode: "SX_SWITCH_FALLTHROUGH", summary: "Switch with possible fallthrough requires manual migration.", span: node.span }];
+    const sourceStatements = collectSwitchPath(caseNodes, index, defaultSource);
+    if (sourceStatements === null) {
+      return [unsupportedStatement(context, node, "SX_UNSUPPORTED_SWITCH_CASE", "Switch case body could not be migrated safely.")];
     }
     const loweredBody: IrStatement[] = [];
-    for (const statement of terminalBreak ? sourceStatements.slice(0, -1) : sourceStatements) {
-      loweredBody.push(...lowerStatement(statement, context));
-    }
+    for (const statement of sourceStatements) loweredBody.push(...lowerStatement(statement, context));
     cases.push({ span: caseNode.span, match, body: loweredBody });
   }
 
-  const defaultNode = asNode(node.default);
-  let defaultStatements: IrStatement[] = [];
-  if (defaultNode !== null && defaultNode.kind !== "empty") {
-    defaultStatements = defaultNode.kind === "block" ? lowerBlock(defaultNode, context) : lowerStatement(defaultNode, context);
-    if (defaultStatements.at(-1)?.kind === "break") defaultStatements.pop();
-  }
+  const defaultStatements: IrStatement[] = [];
+  for (const statement of withoutTerminalBreak(defaultSource)) defaultStatements.push(...lowerStatement(statement, context));
   return [{ kind: "switch", value, cases, default: defaultStatements, span: node.span }];
+}
+
+function collectSwitchPath(caseNodes: AstNode[], start: number, defaultSource: AstNode[]): AstNode[] | null {
+  const result: AstNode[] = [];
+  for (let index = start; index < caseNodes.length; index += 1) {
+    const body = switchBodyStatements(asNode(caseNodes[index]?.body));
+    if (body === null) return null;
+    const terminal = body.at(-1);
+    result.push(...withoutTerminalBreak(body));
+    if (terminal?.kind === "break" || terminal?.kind === "return") return result;
+  }
+  result.push(...withoutTerminalBreak(defaultSource));
+  return result;
+}
+
+function switchBodyStatements(node: AstNode | null): AstNode[] | null {
+  if (node === null || node.kind === "empty") return [];
+  return node.kind === "block" ? nodeArray(node.statements) : [node];
+}
+
+function withoutTerminalBreak(statements: AstNode[]): AstNode[] {
+  return statements.at(-1)?.kind === "break" ? statements.slice(0, -1) : statements;
 }
 
 function lowerReturnStatement(node: AstNode, context: LowerContext): IrStatement[] {

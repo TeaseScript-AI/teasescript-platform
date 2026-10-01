@@ -696,3 +696,65 @@ test("recognizes GroovyClassLoader boilerplate as legacy helper setup", () => {
   assert.ok(program.diagnostics.some((diagnostic) => diagnostic.code === "SX_LEGACY_HELPER_CALL"));
   assert.ok(!program.diagnostics.some((diagnostic) => diagnostic.code === "SX_DYNAMIC_OR_OBJECT_CALL"));
 });
+
+test("expands Groovy switch fallthrough into explicit TeaseScript case bodies", () => {
+  const source = file([{
+    kind: "switch",
+    span,
+    expression: variable("value"),
+    cases: [
+      {
+        kind: "case",
+        span,
+        expression: constant(0),
+        body: { kind: "block", span, statements: [statement(call("show", constant("zero")))] },
+      },
+      {
+        kind: "case",
+        span,
+        expression: constant(1),
+        body: {
+          kind: "block",
+          span,
+          statements: [statement(call("show", constant("one"))), { kind: "break", span }],
+        },
+      },
+      {
+        kind: "case",
+        span,
+        expression: constant(2),
+        body: { kind: "block", span, statements: [statement(call("show", constant("two")))] },
+      },
+    ],
+    default: {
+      kind: "block",
+      span,
+      statements: [statement(call("show", constant("default"))), { kind: "break", span }],
+    },
+  }]);
+
+  const program = lowerParsedFile(source);
+  assert.deepEqual(program.diagnostics.filter((diagnostic) => diagnostic.severity === "error"), []);
+  assert.equal(
+    emitTease(program),
+    [
+      "switch value {",
+      "  case 0 {",
+      '    say "zero"',
+      '    say "one"',
+      "  }",
+      "  case 1 {",
+      '    say "one"',
+      "  }",
+      "  case 2 {",
+      '    say "two"',
+      '    say "default"',
+      "  }",
+      "  default {",
+      '    say "default"',
+      "  }",
+      "}",
+      "",
+    ].join("\n"),
+  );
+});
