@@ -13,7 +13,12 @@ test("creates immutable zero-based source positions and half-open spans", () => 
   const end = createSourcePosition(7, 0, 7);
   const span = createSourceSpan(start, end);
 
-  assert.deepEqual(span, { start, end });
+  assert.deepEqual(start, { offset: 0, line: 0, column: 0 });
+  assert.deepEqual(end, { offset: 7, line: 0, column: 7 });
+  assert.deepEqual(span, {
+    start: { offset: 0, line: 0, column: 0 },
+    end: { offset: 7, line: 0, column: 7 },
+  });
   assert.equal(Object.isFrozen(span), true);
   assert.equal(Object.isFrozen(span.start), true);
   assert.equal(Object.isFrozen(span.end), true);
