@@ -130,6 +130,10 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Camera UI and lifecycle around accepted `askImage(...)` and nullable `takePhoto(...)`, including preview, countdown,
   retake, permission, and restore behavior.
 - Motion detection, sampling, camera resource limits, and scene ownership.
+- User control of media playback: whether players may seek, pause, or skip script media, whether authors can allow or
+  forbid it per media, and its Player UI. The Player currently offers no media controls; accepted controls would enter
+  the runtime as typed host input like script seeks
+  ([`RUNTIME.md`](RUNTIME.md#stage-image-and-media-playback)).
 - Layered-scene media (backgrounds, overlays, blur, drawings, transitions) and its reconciliation with the Stage image
   model of specification §22.
 - Persistent media identity, labels, timestamps, retrieval, privacy, retention, encryption, export, and quotas.

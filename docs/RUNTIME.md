@@ -614,7 +614,11 @@ samples must increase in time and must not decrease in progress, and reports for
 or unloaded media are ignored, as are reports with non-increasing times or decreasing progress; a malformed report
 batch rejects the whole observation as `invalidObservation`. A running media without a report in an observation has
 made no known progress, so
-Players report every running media on every observation. Every canonical timeline change starts a new segment
+Players report every running media on every observation. The engine interpolates only between reported samples and
+never extrapolates past the latest one: a gap between reports usually means buffering, a throttled or suspended
+background tab, or blocked playback, so assumed progress could fire cues for content that never played, and a
+committed cue cannot be withdrawn. A late report instead places each crossing at its canonical scene time, so waiting
+costs only latency. A Player may extrapolate for display, such as a progress bar, but reports only measured progress. Every canonical timeline change starts a new segment
 anchored at `(scene time, 0)`: load, pause, resume from pause, seek, stop, and Stage replacement; lifecycle no-ops and
 volume changes do not. A Player acknowledges a new segment by reporting progress `0` when it applies it.
 
@@ -673,7 +677,10 @@ result of unloaded media and keeps paused media silent. For running media, on a 
 `playheadMs` (rewinding any overshoot), reports progress `0`, plays and wraps the range natively until
 `terminalProgressMs`, and keeps counting progress across wraps. A restored running media continues from `playheadMs`
 and `reportedProgressMs` after Continue. Browser `ended` or `timeupdate` callbacks are observation opportunities, not
-settlement.
+settlement. Reported progress is the natural playback of the current segment only: the Player never seeks, pauses,
+or skips a media on its own, and a browser-forced pause or buffering appears as a stall. Any future user control of
+media playback enters the runtime as typed host input and changes segments like the script's own controls; it is an
+open decision in [`OPEN-DECISIONS.md`](OPEN-DECISIONS.md).
 
 ## Compiler and execution entry points
 

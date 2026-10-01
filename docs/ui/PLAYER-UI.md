@@ -369,6 +369,12 @@ video temporarily occupies the Stage over that image; when the video ends or is 
 ([§22](../specifications/accepted-syntaxes-v30.md#22-stage-image-audio-and-video)). Presentation follows canonical
 runtime Stage and media state; browser media callbacks are observations reported to the runtime, not settlement.
 
+Media playback is script-controlled. Audio and video elements show no native browser controls, and the Player offers
+no seek, scrub, pause, or skip control of its own: playback the runtime did not command would make reported progress
+disagree with the canonical timeline. A progress indicator may extrapolate between reports for display only. Whether
+users may ever control playback is open; if accepted, such controls send typed host input to the runtime rather than
+acting on the media element ([`RUNTIME.md`](../RUNTIME.md#stage-image-and-media-playback)).
+
 Standard image/video-like presentation:
 
 - defaults to `contain`, keeping the complete media visible within the allocated stage;
