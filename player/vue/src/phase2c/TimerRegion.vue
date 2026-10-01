@@ -1,41 +1,29 @@
 <script setup lang="ts">
 import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
-import { computed } from "vue";
-import type { PlayerTimerKind, PlayerTimerPresentation } from "../../../model.js";
+import type { PlayerTimerPresentation } from "../../../model.js";
 import TimerDisplay from "./TimerDisplay.vue";
 
-const props = defineProps<{
-  timers: readonly PlayerTimerPresentation[];
-  kind: PlayerTimerKind;
-}>();
-
-const activeTimers = computed(() =>
-  props.kind === "hidden"
-    ? []
-    : props.timers.filter((timer) => timer.remainingSeconds > 0),
-);
-const renderedKind = computed<Exclude<PlayerTimerKind, "hidden">>(() =>
-  props.kind === "mystery" ? "mystery" : "visible",
-);
+// Every entry is presented; hidden timers have no entry, and each timer carries its own kind.
+const props = defineProps<{ timers: readonly PlayerTimerPresentation[] }>();
 
 function timerLabel(timer: PlayerTimerPresentation, index: number): string | null {
   if (timer.name?.trim()) return timer.name;
-  return activeTimers.value.length > 1 ? `Timer ${index + 1}` : null;
+  return props.timers.length > 1 ? `Timer ${index + 1}` : null;
 }
 </script>
 
 <template>
   <ScrollArea
-    v-if="activeTimers.length"
+    v-if="timers.length"
     class="timer-pane max-h-full"
     viewport-class="overscroll-y-contain"
   >
     <TransitionGroup name="stage-timer" tag="div" class="timer-region">
       <TimerDisplay
-        v-for="(timer, index) in activeTimers"
+        v-for="(timer, index) in timers"
         :key="timer.id"
         :timer="timer"
-        :kind="renderedKind"
+        :kind="timer.kind"
         :label="timerLabel(timer, index)"
       />
     </TransitionGroup>

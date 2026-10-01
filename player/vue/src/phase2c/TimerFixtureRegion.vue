@@ -39,17 +39,22 @@ watch(() => props.reset, () => {
 });
 
 const timers = computed<readonly PlayerTimerPresentation[]>(() => {
+  const kind = props.kind;
+  if (kind === "hidden") return [];
   const elapsed = elapsedSeconds.value;
-  return seeds.slice(0, props.count).map((timer) => ({
-    id: timer.id,
-    kind: props.kind === "mystery" ? ("mystery" as const) : ("visible" as const),
-    ...("name" in timer ? { name: timer.name } : {}),
-    remainingSeconds: Math.max(0, timer.remainingSeconds - elapsed),
-    totalSeconds: timer.totalSeconds,
-  }));
+  return seeds
+    .slice(0, props.count)
+    .filter((timer) => timer.remainingSeconds > elapsed)
+    .map((timer) => ({
+      id: timer.id,
+      kind,
+      ...("name" in timer ? { name: timer.name } : {}),
+      remainingSeconds: timer.remainingSeconds - elapsed,
+      totalSeconds: timer.totalSeconds,
+    }));
 });
 </script>
 
 <template>
-  <TimerRegion :timers="timers" :kind="kind" />
+  <TimerRegion :timers="timers" />
 </template>

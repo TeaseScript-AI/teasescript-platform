@@ -18,7 +18,8 @@ const elapsed = computed(() =>
 );
 const dasharray = computed(() => `${RING_CIRCUMFERENCE * elapsed.value} ${RING_CIRCUMFERENCE}`);
 const displayedTime = computed(() =>
-  props.kind === "mystery" ? "?" : formatTimer(props.timer.remainingSeconds),
+  // A countdown shows the started second, so it reads 0:00 only once the timer has run out.
+  props.kind === "mystery" ? "?" : formatTimer(Math.ceil(props.timer.remainingSeconds)),
 );
 const accessibleName = computed(() => {
   const subject = props.label ?? "Timer";
@@ -32,7 +33,7 @@ const accessibleName = computed(() => {
   <div
     class="timer-display"
     :data-kind="kind"
-    :data-long-time="(kind === 'visible' && timer.remainingSeconds >= 3600) || undefined"
+    :data-long-time="(kind === 'visible' && Math.ceil(timer.remainingSeconds) >= 3600) || undefined"
     role="timer"
     :aria-label="accessibleName"
   >

@@ -17,7 +17,12 @@ specification.
   once, including for body-portaled controls; the [focus contract](../../../../docs/ui/PLAYER-UI.md#input-growth-focus-and-keyboard-behavior)
   defines input modality and composer/Send focus.
 - `usePlayerSession.ts` hosts the canonical adapter session for presentation: starting a session remounts the
-  transcript and resets interaction-local state. Vue derives everything else from that session.
+  transcript and resets interaction-local state. Vue derives everything else from that session. Its
+  `useRuntimeSceneClock.ts` maps browser time onto the session's scene time: it observes time at the next runtime
+  deadline, before input (`RuntimeInteraction.vue` rejects input when the presented interaction changed), before a
+  checkpoint capture, and on `visibilitychange`, `pagehide`, and `pageshow`; hidden pages keep running. Starting or
+  restoring a session rebases the clock so no gap is consumed; see
+  [timers and scene time](../../../../docs/RUNTIME.md#timers-and-scene-time).
 - `DevelopmentPreview.vue` opens one runtime choice scenario and supplies Visual Lab's Theme Lab, Stage media picker,
   and timer/background-button presentation fixtures, plus Layout Debug. `main.ts` loads it as a separate chunk on the
   development server, or in a build only with the `?dev` URL opt-in. The default build mounts `PlayerApp.vue` with
@@ -55,9 +60,10 @@ specification.
 - `usePlayerTheme.ts` applies/restores document variables; `player/theme` calculates colours and Theme Lab edits intent.
   See [theme evaluation](../../../README.md#experimental-dynamic-theme-evaluation).
 - `StageRightRail.vue` owns the right overlay rail and its viewport-centred control placement, `TimerRegion.vue` its
-  timer collection and `TimerDisplay.vue` individual timers. The development preview supplies fixture timers and `BackgroundControlsFixture.vue` samples of
+  timer collection and `TimerDisplay.vue` individual timers. `PlayerApp.vue` presents runtime timers in the rail; the
+  development preview's fixture timers fill it only while no runtime timer is presented, and `BackgroundControlsFixture.vue` samples
   action, local-toggle and disabled states. The sample actions have no scripted handlers or canonical history; runtime
-  timer/background-control wiring remains separate work.
+  background-control wiring remains separate work.
 
 The development preview opens with one runtime choice scenario. Composer dimensions and height caps remain visual
 trials.
