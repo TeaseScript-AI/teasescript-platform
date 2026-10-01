@@ -22,6 +22,9 @@ This is a local inspection route, not the production cross-origin Player/host pr
   its [component map](vue/src/README.md) records responsibility boundaries.
 - `model.ts` and `presentation.ts` contain shared presentation shapes and timer formatting helpers.
 - `theme/` owns theme generation and authored action-button material.
+- `capture-device.ts`, `session-media.ts`, `rgba-image.ts`, and `browser-capture.ts` contain the framework-independent
+  camera/microphone capture foundation: Player-owned stream lifecycle, bounded failures, recording, still frames, pixel
+  copies, microphone sampling, and session-scoped media references. Neither the Player nor the runtime uses it yet.
 
 Browser-native CSS remains responsible for layout and responsive composition. Vue 3 owns rendering and local
 presentation state in the Player; Tailwind CSS 4 is integrated through Vite as a foundation layer,
