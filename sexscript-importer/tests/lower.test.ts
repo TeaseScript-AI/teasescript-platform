@@ -277,3 +277,114 @@ test("lowers indexing, primitive casts, and compound multiplication assignments"
   assert.deepEqual(program.diagnostics, []);
   assert.equal(emitTease(program), "let value = toInteger(items[1])\nvalue = value * 2\n");
 });
+
+
+test("maps list-only Groovy size property and size() method to TeaseScript length", () => {
+  const sizeProperty: AstNode = {
+    kind: "property",
+    span,
+    object: variable("items"),
+    property: constant("size"),
+    safe: false,
+    spreadSafe: false,
+  };
+  const sizeCall: AstNode = {
+    kind: "methodCall",
+    span,
+    object: variable("items"),
+    method: constant("size"),
+    arguments: args(),
+    implicitThis: false,
+    safe: false,
+    spreadSafe: false,
+  };
+  const source = file([
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("items"),
+      right: { kind: "list", span, items: [constant("a"), constant("b")] },
+    }),
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("a"),
+      right: sizeProperty,
+    }),
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("b"),
+      right: sizeCall,
+    }),
+  ]);
+
+  const program = lowerParsedFile(source);
+  assert.deepEqual(program.diagnostics, []);
+  assert.equal(
+    emitTease(program),
+    ['let items = ["a", "b"]', "let a = items.length", "let b = items.length", ""].join("\n"),
+  );
+});
+
+test("keeps mixed-type Groovy size access as a migration error", () => {
+  const source = file([
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("items"),
+      right: constant("text"),
+    }),
+    statement({
+      kind: "binary",
+      span,
+      operator: "=",
+      left: variable("items"),
+      right: { kind: "list", span, items: [constant(1)] },
+    }),
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("count"),
+      right: {
+        kind: "property",
+        span,
+        object: variable("items"),
+        property: constant("size"),
+        safe: false,
+        spreadSafe: false,
+      },
+    }),
+  ]);
+
+  const program = lowerParsedFile(source);
+  assert.ok(program.diagnostics.some((diagnostic) => diagnostic.code === "SX_UNSUPPORTED_PROPERTY"));
+});
+
+test("lowers direct indexed assignment targets", () => {
+  const source = file([
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("items"),
+      right: { kind: "list", span, items: [constant(1), constant(2)] },
+    }),
+    statement({
+      kind: "binary",
+      span,
+      operator: "=",
+      left: { kind: "binary", span, operator: "[", left: variable("items"), right: constant(1) },
+      right: constant(9),
+    }),
+  ]);
+
+  const program = lowerParsedFile(source);
+  assert.deepEqual(program.diagnostics, []);
+  assert.equal(emitTease(program), "let items = [1, 2]\nitems[1] = 9\n");
+});

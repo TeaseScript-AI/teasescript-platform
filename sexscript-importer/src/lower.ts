@@ -19,6 +19,7 @@ interface LowerContext {
   diagnostics: MigrationDiagnostic[];
   metadata: LegacyMetadata | null;
   functions: Map<string, ClosureInfo>;
+  listVariables: Set<string>;
   functionDepth: number;
 }
 
@@ -33,7 +34,7 @@ const STORAGE_LOADS = new Set([
 ]);
 
 export function lowerParsedFile(file: ParsedGroovyFile): MigrationProgram {
-  const context: LowerContext = { diagnostics: [], metadata: null, functions: new Map(), functionDepth: 0 };
+  const context: LowerContext = { diagnostics: [], metadata: null, functions: new Map(), listVariables: new Set(), functionDepth: 0 };
   if (file.diagnostics.length > 0 || file.root === null) {
     for (const diagnostic of file.diagnostics) {
       context.diagnostics.push({
@@ -57,7 +58,10 @@ export function lowerParsedFile(file: ParsedGroovyFile): MigrationProgram {
   }
 
   const body = asNode(file.root.body);
-  if (body?.kind === "block") context.functions = collectClosureInfo(body);
+  if (body?.kind === "block") {
+    context.functions = collectClosureInfo(body);
+    context.listVariables = collectListVariables(body);
+  }
   const statements = body?.kind === "block" ? lowerBlock(body, context) : [];
   if (body?.kind !== "block") {
     addDiagnostic(context, "SX_INVALID_SCRIPT_BODY", "error", "Parser output does not contain a script body block.", file.root.span);
@@ -194,16 +198,29 @@ function lowerAssignment(node: AstNode, span: SourceSpan | null, context: LowerC
       ? [unsupportedStatement(context, node, "SX_UNSUPPORTED_BINARY_STATEMENT", `Unsupported binary statement operator ${operator ?? "?"}.`)]
       : [{ kind: "expression", expression: lowered, span }];
   }
-  const target = variableName(node.left);
+  const targetNode = asNode(node.left);
   const right = asNode(node.right);
-  if (target === null || right === null) {
-    return [unsupportedStatement(context, node, "SX_UNSUPPORTED_ASSIGNMENT_TARGET", "The first slice only assigns to local variables.")];
+  if (targetNode === null || right === null) {
+    return [unsupportedStatement(context, node, "SX_UNSUPPORTED_ASSIGNMENT_TARGET", "Assignment target or value is missing.")];
+  }
+  const variableTarget = variableName(targetNode);
+  let target: IrExpression | null = null;
+  if (variableTarget !== null) target = { kind: "variable", name: variableTarget };
+  else if (operator === "=" && targetNode.kind === "binary" && targetNode.operator === "[") {
+    target = lowerExpression(targetNode, context);
+  }
+  if (target === null) {
+    return [unsupportedStatement(context, node, "SX_UNSUPPORTED_ASSIGNMENT_TARGET", "Only local variables and indexed list targets are migrated automatically.")];
   }
   const value = lowerExpression(right, context);
   if (value === null) {
-    return [unsupportedStatement(context, node, "SX_UNSUPPORTED_ASSIGNMENT_VALUE", `Cannot safely migrate assignment to ${target}.`)];
+    const targetName = variableTarget ?? "indexed target";
+    return [unsupportedStatement(context, node, "SX_UNSUPPORTED_ASSIGNMENT_VALUE", `Cannot safely migrate assignment to ${targetName}.`)];
   }
   if (operator === "*=" || operator === "/=") {
+    if (variableTarget === null) {
+      return [unsupportedStatement(context, node, "SX_UNSUPPORTED_ASSIGNMENT_TARGET", "Compound assignment to an indexed target requires single-evaluation rewriting.")];
+    }
     return [{
       kind: "assign",
       target,
@@ -211,7 +228,7 @@ function lowerAssignment(node: AstNode, span: SourceSpan | null, context: LowerC
       value: {
         kind: "binary",
         operator: operator === "*=" ? "*" : "/",
-        left: { kind: "variable", name: target },
+        left: { kind: "variable", name: variableTarget },
         right: value,
       },
       span,
@@ -228,7 +245,7 @@ function lowerPostfix(node: AstNode, span: SourceSpan | null, context: LowerCont
   }
   return [{
     kind: "assign",
-    target,
+    target: { kind: "variable", name: target },
     operator: operator === "++" ? "+=" : "-=",
     value: { kind: "literal", value: 1 },
     span,
@@ -430,6 +447,8 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
       }
       return { kind: "list", items };
     }
+    case "property":
+      return lowerPropertyExpression(node, context);
     case "range": {
       const fromNode = asNode(node.from);
       const toNode = asNode(node.to);
@@ -513,11 +532,53 @@ function lowerUnary(node: AstNode, operator: "not" | "+" | "-", context: LowerCo
   return value === null ? null : { kind: "unary", operator, value };
 }
 
-function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpression | null {
-  const call = callParts(node);
-  if (call === null || !call.inherited) {
+function lowerPropertyExpression(node: AstNode, context: LowerContext): IrExpression | null {
+  const targetNode = asNode(node.object);
+  const property = constantString(node.property);
+  if (targetNode === null || property === null) {
+    return unsupportedExpression(context, node, "SX_DYNAMIC_PROPERTY", "Dynamic Groovy property access is not lowered automatically.");
+  }
+  if (property === "size" && isKnownListExpression(targetNode, context)) {
+    const target = lowerExpression(targetNode, context);
+    return target === null ? null : { kind: "property", target, name: "length" };
+  }
+  return unsupportedExpression(context, node, "SX_UNSUPPORTED_PROPERTY", `Groovy property .${property} is not safely mapped for this receiver.`);
+}
+
+function lowerObjectMethodCallExpression(
+  node: AstNode,
+  name: string,
+  argumentsNodes: AstNode[],
+  context: LowerContext,
+): IrExpression | null {
+  const targetNode = asNode(node.object);
+  if (targetNode === null || !isKnownListExpression(targetNode, context)) {
     return unsupportedExpression(context, node, "SX_DYNAMIC_OR_OBJECT_CALL", "Object/dynamic Groovy method calls are not lowered by the first slice.");
   }
+  const target = lowerExpression(targetNode, context);
+  if (target === null) return null;
+  if (name === "size" && argumentsNodes.length === 0) {
+    return { kind: "property", target, name: "length" };
+  }
+  if (name === "contains" && argumentsNodes.length === 1) {
+    const args = lowerArguments(argumentsNodes, context);
+    return args === null ? null : { kind: "methodCall", target, name: "contains", arguments: args };
+  }
+  return unsupportedExpression(context, node, "SX_UNSUPPORTED_LIST_METHOD", `Groovy list method ${name}() is not safely mapped yet.`);
+}
+
+function isKnownListExpression(node: AstNode, context: LowerContext): boolean {
+  if (node.kind === "list") return true;
+  const name = variableName(node);
+  return name !== null && context.listVariables.has(name);
+}
+
+function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpression | null {
+  const call = callParts(node);
+  if (call === null) {
+    return unsupportedExpression(context, node, "SX_DYNAMIC_OR_OBJECT_CALL", "Dynamic Groovy method names are not lowered by the first slice.");
+  }
+  if (!call.inherited) return lowerObjectMethodCallExpression(node, call.name, call.arguments, context);
   const functionInfo = context.functions.get(call.name);
   if (functionInfo !== undefined) {
     if (call.arguments.length < functionInfo.minArgs || call.arguments.length > functionInfo.maxArgs) {
@@ -633,6 +694,78 @@ function callParts(node: AstNode): { name: string; inherited: boolean; arguments
   const inherited = node.implicitThis === true || objectName === "main";
   const argsNode = asNode(node.arguments);
   return { name, inherited, arguments: argsNode === null ? [] : nodeArray(argsNode.items) };
+}
+
+function collectListVariables(body: AstNode): Set<string> {
+  const assignments = new Map<string, AstNode[]>();
+  const add = (name: string, value: AstNode): void => {
+    const current = assignments.get(name);
+    if (current === undefined) assignments.set(name, [value]);
+    else current.push(value);
+  };
+
+  walkAst(body, (node) => {
+    if (node.kind === "declaration") {
+      const name = variableName(node.left);
+      const value = asNode(node.right);
+      if (name !== null && value !== null) add(name, value);
+      return;
+    }
+    if (node.kind === "binary" && node.operator === "=") {
+      const name = variableName(node.left);
+      const value = asNode(node.right);
+      if (name !== null && value !== null) add(name, value);
+    }
+  });
+
+  const known = new Set<string>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [name, values] of assignments) {
+      if (known.has(name)) continue;
+      let evidence = false;
+      let valid = true;
+      for (const value of values) {
+        if (isEmptyGroovyExpression(value)) continue;
+        if (expressionProvesList(value, name, known)) {
+          evidence = true;
+          continue;
+        }
+        valid = false;
+        break;
+      }
+      if (valid && evidence) {
+        known.add(name);
+        changed = true;
+      }
+    }
+  }
+  return known;
+}
+
+function expressionProvesList(node: AstNode, selfName: string, known: Set<string>): boolean {
+  if (node.kind === "list") return true;
+  if (node.kind === "cast" && (node.type === "List" || node.type === "java.util.List")) {
+    const value = asNode(node.value);
+    return value !== null && expressionProvesList(value, selfName, known);
+  }
+  if (node.kind === "variable") {
+    const name = variableName(node);
+    return name !== null && known.has(name);
+  }
+  if (node.kind === "binary" && node.operator === "+") {
+    const left = asNode(node.left);
+    const right = asNode(node.right);
+    if (left === null || right === null) return false;
+    const leftIsSelf = variableName(left) === selfName;
+    return (leftIsSelf || expressionProvesList(left, selfName, known)) && expressionProvesList(right, selfName, known);
+  }
+  return false;
+}
+
+function isEmptyGroovyExpression(node: AstNode): boolean {
+  return node.kind === "unsupportedExpression" && node.groovyType === "org.codehaus.groovy.ast.expr.EmptyExpression";
 }
 
 function collectClosureInfo(body: AstNode): Map<string, ClosureInfo> {

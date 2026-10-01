@@ -71,7 +71,7 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
       lines.push(`${pad}let ${statement.name} = ${emitExpression(statement.value)}`);
       return;
     case "assign":
-      lines.push(`${pad}${statement.target} ${statement.operator} ${emitExpression(statement.value)}`);
+      lines.push(`${pad}${emitExpression(statement.target)} ${statement.operator} ${emitExpression(statement.value)}`);
       return;
     case "expression":
       lines.push(`${pad}${emitExpression(statement.expression)}`);
@@ -143,6 +143,10 @@ export function emitExpression(expression: IrExpression): string {
       return `[${expression.items.map(emitExpression).join(", ")}]`;
     case "index":
       return `${parenthesize(expression.target)}[${emitExpression(expression.index)}]`;
+    case "property":
+      return `${parenthesize(expression.target)}.${expression.name}`;
+    case "methodCall":
+      return `${parenthesize(expression.target)}.${expression.name}(${expression.arguments.map(emitExpression).join(", ")})`;
     case "range":
       return `${parenthesize(expression.from)}${expression.inclusive ? "..=" : ".."}${parenthesize(expression.to)}`;
     case "unary":

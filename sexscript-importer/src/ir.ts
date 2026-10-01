@@ -54,7 +54,7 @@ export type IrStatement =
   | (IrBase & { kind: "function"; name: string; parameters: IrFunctionParameter[]; body: IrStatement[] })
   | (IrBase & { kind: "return"; value: IrExpression | null })
   | (IrBase & { kind: "let"; name: string; value: IrExpression })
-  | (IrBase & { kind: "assign"; target: string; operator: "=" | "+=" | "-="; value: IrExpression })
+  | (IrBase & { kind: "assign"; target: IrExpression; operator: "=" | "+=" | "-="; value: IrExpression })
   | (IrBase & { kind: "expression"; expression: IrExpression })
   | (IrBase & { kind: "if"; condition: IrExpression; then: IrStatement[]; else: IrStatement[] })
   | (IrBase & { kind: "while"; condition: IrExpression; body: IrStatement[] })
@@ -78,6 +78,8 @@ export type IrExpression =
   | { kind: "variable"; name: string }
   | { kind: "list"; items: IrExpression[] }
   | { kind: "index"; target: IrExpression; index: IrExpression }
+  | { kind: "property"; target: IrExpression; name: string }
+  | { kind: "methodCall"; target: IrExpression; name: string; arguments: IrExpression[] }
   | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean }
   | { kind: "unary"; operator: "not" | "+" | "-"; value: IrExpression }
   | { kind: "binary"; operator: string; left: IrExpression; right: IrExpression }
