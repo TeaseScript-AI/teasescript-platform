@@ -79,12 +79,18 @@ export function assertRuntimeResumeEquivalent(
   );
 
   const mediaDurationMs = options.mediaDurationMs;
+  const pristineInitial = structuredClone(initial);
   const uninterrupted = runServicingDelays(
     plan,
     initial,
     instructionGuard,
     scenario,
     mediaDurationMs,
+  );
+  assert.deepEqual(
+    initial,
+    pristineInitial,
+    `${scenario}: uninterrupted execution must not mutate its input snapshot`,
   );
   assert.equal(
     uninterrupted.snapshot.status,
@@ -179,6 +185,7 @@ export function assertRuntimeResumeEquivalent(
 
     boundaries.push(boundarySnapshot);
   }
+  assert.ok(boundaries.length > 0, `${scenario}: no checkpoint boundary was verified`);
 
   return Object.freeze({
     boundaries: Object.freeze([...boundaries]),

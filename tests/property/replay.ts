@@ -16,6 +16,7 @@ import {
   validateInstructionPlan,
   validateRuntimeSnapshot,
   type InstructionPlan,
+  type RuntimeOperationResult,
   type RuntimeSnapshot,
 } from "../../src/index.js";
 import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
@@ -346,25 +347,33 @@ function assertOperationClosure(seed: number, index: number): void {
   assertValidSnapshot(plan, result.snapshot);
 }
 
+/** Runs one public operation and asserts that it performed its intended transition. */
 function runOperationVariant(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   variant: (typeof OPERATION_VARIANTS)[number],
-) {
-  switch (variant) {
-    case "run":
-      return run(plan, snapshot);
-    case "executeInstruction":
-      return executeInstruction(plan, snapshot);
-    case "observeTime": {
-      const waiting = run(plan, snapshot).snapshot;
-      return observeTime(plan, waiting, 1);
-    }
-    case "completeAction": {
-      const waiting = run(plan, snapshot).snapshot;
-      return completeAction(plan, waiting, buttonCompletion(waiting));
-    }
+): RuntimeOperationResult {
+  if (variant === "executeInstruction") {
+    const result = executeInstruction(plan, snapshot);
+    assert.equal(result.instructionsExecuted, 1);
+    return result;
   }
+  const waiting = run(plan, snapshot);
+  assert.equal(waiting.snapshot.status, "waiting");
+  assert.equal(waiting.snapshot.foregroundAction?.kind, "interaction");
+  if (variant === "run") return waiting;
+  const waitingBefore = structuredClone(waiting.snapshot);
+  if (variant === "observeTime") {
+    const observed = observeTime(plan, waiting.snapshot, 1);
+    assert.deepEqual(observed.outcome, { kind: "observed", currentSessionTimeMs: 1 });
+    assert.deepEqual(waiting.snapshot, waitingBefore);
+    return observed;
+  }
+  const completed = completeAction(plan, waiting.snapshot, buttonCompletion(waiting.snapshot));
+  assert.equal(completed.outcome.kind, "completed");
+  assert.equal(completed.snapshot.foregroundAction, null);
+  assert.deepEqual(waiting.snapshot, waitingBefore);
+  return completed;
 }
 
 function describeOperationClosure(_seed: number, index: number): PropertyCaseContext {
@@ -391,13 +400,25 @@ function assertRejectedCompletionIsAtomic(seed: number, index: number): void {
           payload: { kind: "time", currentSessionTimeMs: 10 },
         }
       : buttonCompletion(waiting);
-  const input =
-    variant === "time-completion" ? waiting : completeAction(plan, waiting, request).snapshot;
-  const inputBefore = structuredClone(input);
-  const result = completeAction(plan, input, request);
+  if (variant === "time-completion") {
+    const inputBefore = structuredClone(waiting);
+    const result = completeAction(plan, waiting, request);
+    assert.equal(result.outcome.kind, "invalidPayload");
+    assert.deepEqual(result.snapshot, inputBefore);
+    assert.deepEqual(result.events, []);
+    return;
+  }
+  const settled = completeAction(plan, waiting, request);
+  assert.equal(settled.outcome.kind, "completed");
+  assertValidSnapshot(plan, settled.snapshot);
+  const settledBefore = structuredClone(settled.snapshot);
+  const result = completeAction(plan, settled.snapshot, request);
 
-  assert.ok(["invalidPayload", "alreadySettled"].includes(result.outcome.kind));
-  assert.deepEqual(result.snapshot, inputBefore);
+  assert.deepEqual(result.outcome, {
+    kind: "alreadySettled",
+    settlement: settled.outcome.settlement,
+  });
+  assert.deepEqual(result.snapshot, settledBefore);
   assert.deepEqual(result.events, []);
   assert.deepEqual(waiting, waitingBefore);
 }
