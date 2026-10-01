@@ -1304,3 +1304,64 @@ test("a terminal playhead stays at the range end beyond exactly countable passes
     assert.equal(media?.playheadMs, expected, `${endAt} ${repeat}`);
   }
 });
+
+test("a repeat duration ends inside its stretch, after its exact cue arrival, and before any departure", () => {
+  // After a seek and a wrap, the duration's end stays inside the range and can be saved.
+  const seek = new Session(
+    'let m = playAudio(file: "m", async: true, startAt: 0.3 ms, endAt: 1000 ms, repeat: 1.0000000000000002 ms)\nm.position = 999 ms\nwait 100 ms',
+  );
+  seek.load(1, 1_000).at(2, [1, 1.0000000000000002]);
+  const finished = seek.media(1)!;
+  assert.equal(finished.state, "finished");
+  assert.ok(finished.positionMs >= 0.3 && finished.positionMs <= 1_000);
+  // A duration ending at the cue it reached fires that cue once.
+  const atCue = new Session(
+    'let m = playAudio(file: "m", async: true, startAt: 1.1 ms, endAt: 10.3 ms, repeat: 2.3000000000000007 ms) {\n  at 3.4000000000000004 ms {\n    say "Q", instant\n  }\n  at 5.700000000000001 ms {\n    say "C", instant\n  }\n}\nwait 100 ms',
+  );
+  atCue.load(1, 100).at(5, [1, 2.3000000000000007]);
+  assert.deepEqual(atCue.said(), ["Q"]);
+  // A duration used up where a pause left start cues pending fires them and finishes.
+  const paused = new Session(
+    [
+      "timer async 16 ms {",
+      "  m.pause()",
+      "  m.resume()",
+      "}",
+      'let m = playAudio(file: "m", async: true, endAt: 1 ms, repeat: 0.5 ms) {',
+      "  at 0.5 ms {",
+      '    say "C", instant',
+      "  }",
+      "  finish {",
+      '    say "F", instant',
+      "  }",
+      "}",
+      "wait 1000 ms",
+    ].join("\n"),
+  );
+  paused.load(1, 100).at(32, [1, 1]);
+  assert.deepEqual(paused.said(), ["C", "F"]);
+});
+
+test("restore validation accepts only positions the runtime can stand on", () => {
+  const corrupt = (session: Session, mutate: (media: MutableMedia) => void, name: string): void => {
+    assert.equal(validateRuntimeSnapshot(session.snapshot, session.plan).valid, true, name);
+    // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; each case applies one invalid mutation.
+    const corrupted = JSON.parse(JSON.stringify(session.snapshot)) as MutableSnapshot;
+    const media =
+      corrupted.backgroundActions.find((action) => action.media?.mediaId === 1)?.media ??
+      corrupted.settledMedia.find((candidate) => candidate.mediaId === 1);
+    assert.ok(media !== undefined, name);
+    mutate(media);
+    assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false, name);
+  };
+  const wrapped = new Session(
+    'let m = playAudio(file: "a", async: true, endAt: 1.1 ms, repeat: 3 times)\nwait 2 ms\nwait 200 ms',
+  );
+  wrapped.load(1, 100).at(1, [1, 1.1]);
+  corrupt(wrapped, (media) => (media.positionMs = Number.MIN_VALUE), "wrapped start alias");
+  const tail = new Session(
+    'let m = playAudio(file: "a", async: true, endAt: 1000000000000000.1 ms, repeat: 6700000000000001 ms)\nwait 8000000000000000 ms',
+  );
+  tail.load(1, 1_000_000_000_000_000.1).at(6_700_000_000_000_001, [1, 6_700_000_000_000_001]);
+  corrupt(tail, (media) => (media.positionMs += 0.125), "duration tail alias");
+});

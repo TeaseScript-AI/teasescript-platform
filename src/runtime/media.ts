@@ -167,14 +167,16 @@ export function segmentProgressMs(
   return passes * passLengthMs + distanceMs;
 }
 
-/** The inverse anchor formula shared with restore validation: the position that segment progress reaches. */
-export function segmentPositionAtMs(
-  passes: number,
-  passLengthMs: number,
-  progressMs: number,
-  anchorPositionMs: number,
+/**
+ * Where a repeat duration ending at `endProgressMs` stands, measured back from the target its stretch heads to, which
+ * playback reaches at `targetProgressMs`. Shared with restore validation; nearby coordinates keep it stable.
+ */
+export function durationTailPositionMs(
+  targetMs: number,
+  targetProgressMs: number,
+  endProgressMs: number,
 ): number {
-  return anchorPositionMs + (progressMs - passes * passLengthMs);
+  return targetMs - (targetProgressMs - endProgressMs);
 }
 
 /** Segment progress at which a repeat duration is used up; unlimited for other repeat forms. */
@@ -216,17 +218,19 @@ function nextArrival(media: RuntimeMediaSnapshot): { progressMs: number; positio
     progressTo(media, target, media.passesCompleted),
   );
   const budgetEnd = Math.max(media.committedProgressMs, budgetEndProgressMs(media));
-  // A repeat duration ending before the target ends inside this stretch; rounding never carries it past the target.
+  // A repeat duration ending before the target ends inside this stretch; rounding never carries it outside.
   return budgetEnd < progressMs
     ? {
         progressMs: budgetEnd,
-        positionMs: Math.min(
-          target,
-          segmentPositionAtMs(
-            media.passesCompleted - media.segmentPasses,
-            end - media.startAtMs,
-            budgetEnd,
-            media.segmentPositionMs,
+        positionMs: Math.max(
+          from,
+          Math.min(
+            target,
+            durationTailPositionMs(
+              target,
+              progressTo(media, target, media.passesCompleted),
+              budgetEnd,
+            ),
           ),
         ),
       }
@@ -311,7 +315,8 @@ export function nextMediaEvent(media: RuntimeMediaSnapshot): MediaTimelineEvent 
         }
       : null;
   }
-  if (media.startCuesPending && !atEnd) {
+  // A repeat duration already used up ends before playback departs again.
+  if (media.startCuesPending && !atEnd && budgetEndProgressMs(media) > media.committedProgressMs) {
     return {
       kind: "departure",
       progressMs: media.committedProgressMs,
@@ -341,10 +346,17 @@ export function commitMediaEvent(
     media.startCuesPending = false;
     return { cueFunctionIds: cuesAt(media, media.positionMs), finished: false };
   }
+  // An arrival where playback already stands fires only cues that have not fired there yet: pending start cues, or the
+  // end of the range after a seek to it. A repeat duration that ends at its stretch's start does not repeat them.
+  const fires =
+    event.positionMs !== media.positionMs ||
+    media.startCuesPending ||
+    event.positionMs >= mediaEndMs(media);
   media.elapsedMs = elapsedAt(media, event.progressMs);
   media.committedProgressMs = event.progressMs;
   media.positionMs = event.positionMs;
-  const cueFunctionIds = cuesAt(media, media.positionMs);
+  media.startCuesPending = false;
+  const cueFunctionIds = fires ? cuesAt(media, media.positionMs) : [];
   if (media.positionMs >= mediaEndMs(media)) {
     media.passesCompleted += 1;
     if (anotherPass(media)) {
