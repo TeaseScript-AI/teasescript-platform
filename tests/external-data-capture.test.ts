@@ -144,6 +144,22 @@ function assertCheckpointError(operation: () => void, path: string, message?: st
   });
 }
 
+// Represents a snapshot whose frames array is huge and sparse through own descriptors only,
+// so the comparison never iterates or materializes the sparse length.
+function sparseSnapshotState(snapshot: RuntimeSnapshot): {
+  ordinary: Omit<RuntimeSnapshot, "frames">;
+  frames: Array<[string, PropertyDescriptor | undefined]>;
+} {
+  const { frames, ...ordinary } = snapshot;
+  return {
+    ordinary: structuredClone(ordinary),
+    frames: Object.getOwnPropertyNames(frames).map((key) => [
+      key,
+      structuredClone(Object.getOwnPropertyDescriptor(frames, key)),
+    ]),
+  };
+}
+
 interface ProxyArrayAccess {
   gets: number;
   lengthDescriptors: number;
@@ -254,6 +270,12 @@ test("repeated event stepping reuses validated immutable plans and preserves res
     assert.notEqual(captureInstructionPlan(plan).plan, null);
     return finish();
   }).counts.externalCaptureVisits!;
+  // One event boundary per instant say, plus a small allowance for the terminal step.
+  const stepLimit = statementCount + 2;
+  const assertSteppable = (status: RuntimeSnapshot["status"], step: number): void => {
+    assert.ok(step < stepLimit, `stepping exceeded ${stepLimit} event boundaries`);
+    assert.ok(status === "running" || status === "halted", `unexpected ${status} at step ${step}`);
+  };
   let snapshot = createFreshRuntimeSnapshot(plan);
   const events: (typeof uninterrupted.events)[number][] = [];
   let calls = 0;
@@ -263,6 +285,7 @@ test("repeated event stepping reuses validated immutable plans and preserves res
       const callerBefore = structuredClone(snapshot);
       const stepped = stepToEvent(plan, snapshot);
       assert.deepEqual(snapshot, callerBefore);
+      assertSteppable(stepped.snapshot.status, calls);
       events.push(...stepped.events);
       calls += 1;
       snapshot = stepped.snapshot;
@@ -280,8 +303,9 @@ test("repeated event stepping reuses validated immutable plans and preserves res
   let restoredPlan = plan;
   let restoredSnapshot = createFreshRuntimeSnapshot(plan);
   const restoredEvents: (typeof uninterrupted.events)[number][] = [];
-  while (restoredSnapshot.status !== "halted") {
+  for (let step = 0; restoredSnapshot.status !== "halted"; step += 1) {
     const stepped = stepToEvent(restoredPlan, restoredSnapshot);
+    assertSteppable(stepped.snapshot.status, step);
     restoredEvents.push(...stepped.events);
     const restored = deserializeCheckpoint(
       JSON.stringify(createCheckpoint(restoredPlan, stepped.snapshot)),
@@ -465,7 +489,23 @@ test("runtime entry points accept valid deep plan and snapshot data without muta
 });
 
 test("serializable cloning is stack-independent beyond the removed depth threshold", () => {
-  assert.doesNotThrow(() => cloneSerializableValue(deepList(FAILING_BEFORE_DEPTH)));
+  const input = deepList(FAILING_BEFORE_DEPTH);
+  const cloned = cloneSerializableValue(input);
+
+  // Walk input and clone together iteratively: same depth and leaf, with no shared list or items array.
+  let source: SerializableRuntimeValue | undefined = input;
+  let copy: SerializableRuntimeValue | undefined = cloned;
+  for (let level = 0; level < FAILING_BEFORE_DEPTH; level += 1) {
+    assert.ok(typeof source === "object" && source?.kind === "list", `input level ${level}`);
+    assert.ok(typeof copy === "object" && copy?.kind === "list", `clone level ${level}`);
+    assert.notEqual(copy, source, `shared list at level ${level}`);
+    assert.notEqual(copy.items, source.items, `shared items at level ${level}`);
+    assert.equal(copy.items.length, 1, `clone level ${level}`);
+    source = source.items[0];
+    copy = copy.items[0];
+  }
+  assert.equal(source, "leaf");
+  assert.equal(copy, "leaf");
 });
 
 test("external capture rejects sparse arrays as non-canonical regardless of length", () => {
@@ -539,22 +579,44 @@ test("external capture rejects non-canonical and length-conflicting proxy arrays
   }
 });
 
-test("external capture rejects malformed proxy length descriptors without invoking getters", () => {
-  for (const getOwnPropertyDescriptor of [
-    () => undefined,
-    () => ({ get: () => 0, enumerable: false, configurable: false }),
-    () => {
-      throw new Error("raw descriptor failure");
-    },
-  ]) {
-    const hostile = new Proxy([], { getOwnPropertyDescriptor });
-    assert.deepEqual(captureExternalData(hostile), {
-      ok: false,
-      failure: { kind: "nonJsonSafeValue", path: "$" },
+test("external capture rejects failed proxy length-descriptor traps without invoking get", () => {
+  // Hiding or reporting an accessor for a real array's non-configurable `length` violates Proxy
+  // invariants, so Reflect fails these traps before capture can inspect the returned descriptor.
+  for (const [name, lengthDescriptor] of [
+    ["hidden length (invariant violation)", () => undefined],
+    [
+      "accessor length (invariant violation)",
+      () => ({ get: () => 0, enumerable: false, configurable: false }),
+    ],
+    [
+      "explicitly throwing trap",
+      () => {
+        throw new Error("raw descriptor failure");
+      },
+    ],
+  ] as const) {
+    const access = { descriptors: 0, gets: 0 };
+    const hostile = new Proxy([], {
+      getOwnPropertyDescriptor(target, key) {
+        access.descriptors += 1;
+        return key === "length"
+          ? lengthDescriptor()
+          : Reflect.getOwnPropertyDescriptor(target, key);
+      },
+      get(target, key, receiver) {
+        access.gets += 1;
+        return Reflect.get(target, key, receiver); // oxlint-disable-line anti-slop/no-reflect-get -- EVIDENCE: fixture forwards and counts any property read so the test can require none.
+      },
     });
+    assert.deepEqual(
+      captureExternalData(hostile),
+      { ok: false, failure: { kind: "nonJsonSafeValue", path: "$" } },
+      name,
+    );
+    assert.ok(access.descriptors > 0, name);
+    assert.equal(access.gets, 0, name);
   }
 });
-
 test("proxy array length inflation is structured at plan, snapshot, checkpoint, and serializable boundaries", () => {
   const hostile = () => proxyArray(0, ["length", "4294967294"], { "4294967294": null });
 
@@ -686,14 +748,15 @@ test("snapshot and checkpoint paths reject sparse arrays as malformed data", () 
   const plan = compiledPlan("say random()\nexit");
   const malformedSnapshot = mutableSnapshot(plan);
   malformedSnapshot.frames.length = 0xffff_ffff;
+  const validationBefore = sparseSnapshotState(malformedSnapshot);
 
   assert.equal(validateRuntimeSnapshot(malformedSnapshot, plan).valid, false);
+  assert.deepEqual(sparseSnapshotState(malformedSnapshot), validationBefore);
 
   for (const operation of [executeInstruction, stepToEvent, run]) {
     const snapshot = mutableSnapshot(plan);
     snapshot.frames.length = 0xffff_ffff;
-    const rngState = snapshot.rng.state;
-    const eventSequence = snapshot.nextEventSequence;
+    const before = sparseSnapshotState(snapshot);
     let randomCalls = 0;
     assert.throws(
       () =>
@@ -708,13 +771,14 @@ test("snapshot and checkpoint paths reject sparse arrays as malformed data", () 
       (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
     );
     assert.equal(randomCalls, 0);
-    assert.equal(snapshot.rng.state, rngState);
-    assert.equal(snapshot.nextEventSequence, eventSequence);
+    assert.deepEqual(sparseSnapshotState(snapshot), before);
   }
 
   const malformedCheckpoint = checkpoint(plan, createFreshRuntimeSnapshot(plan));
   malformedCheckpoint.snapshot.frames.length = 0xffff_ffff;
+  const checkpointBefore = sparseSnapshotState(malformedCheckpoint.snapshot);
   assertCheckpointError(() => restoreCheckpoint(malformedCheckpoint), "$.snapshot");
+  assert.deepEqual(sparseSnapshotState(malformedCheckpoint.snapshot), checkpointBefore);
 });
 
 test("cycles, non-plain objects, non-finite numbers, and malformed kinds remain rejected", () => {
