@@ -273,20 +273,26 @@ test("does not advance RNG state for empty list or set random", () => {
 test("uses the speaker identifier fallback and warns only once per speaker", () => {
   const source = [
     "speaker mistressVera {}",
+    "speaker guest {}",
     "speaker mistressVera",
     'say "First"',
-    'say "Second"',
-    'say as mistressVera "Third"',
+    'say as guest "Second"',
+    'say "Third"',
+    'say as guest "Fourth"',
+    'say as mistressVera "Fifth"',
   ].join("\n");
   const result = executeSource(source);
-  const firstSayStart = source.indexOf('say "First"');
+  const warningSpan = (statement: string) => {
+    const start = source.indexOf(statement);
+    return [start, start + statement.length];
+  };
 
   assert.deepEqual(result.errors, []);
   assert.deepEqual(
     result.events
       .filter((event) => event.kind === "say")
       .map((event) => event.speaker?.displayName),
-    ["mistressVera", "mistressVera", "mistressVera"],
+    ["mistressVera", "guest", "mistressVera", "guest", "mistressVera"],
   );
   assert.deepEqual(
     result.warnings.map((warning) => [
@@ -297,13 +303,8 @@ test("uses the speaker identifier fallback and warns only once per speaker", () 
       warning.span.end.offset,
     ]),
     [
-      [
-        "developerWarning",
-        "warning",
-        "TSW001",
-        firstSayStart,
-        firstSayStart + 'say "First"'.length,
-      ],
+      ["developerWarning", "warning", "TSW001", ...warningSpan('say "First"')],
+      ["developerWarning", "warning", "TSW001", ...warningSpan('say as guest "Second"')],
     ],
   );
 });
