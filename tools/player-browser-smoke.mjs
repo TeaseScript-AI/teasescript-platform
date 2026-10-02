@@ -456,7 +456,12 @@ async function scriptStorageScenario(cdp, origin) {
   await navigate(cdp, `${origin}/player/`);
   await waitFor(cdp, `!!document.querySelector('${start}')`);
   await physicalClick(cdp, start);
-  await waitFor(cdp, `${messages}.some((text) => text.includes('Eyes on me.'))`);
+  // Reach the introductory Session message, after the returning-visit branch, so its absence is conclusive.
+  await waitFor(
+    cdp,
+    `${messages}.some((text) => text.includes('Some of her messages make you wait.'))`,
+    15_000,
+  );
   assertEqual(
     await value(cdp, `${messages}.some((text) => text.includes('Back again'))`),
     false,
@@ -523,6 +528,14 @@ async function scriptStorageScenario(cdp, origin) {
     });
   }
   await reloadBeforeStart();
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { try { return localStorage.length >= 0; } catch { return false; } })()`,
+    ),
+    true,
+    "Browser storage is usable again before the next scenario",
+  );
 }
 
 // Plays the repository demo on the maintained /player/ route of the built Player with trusted input, so the Start

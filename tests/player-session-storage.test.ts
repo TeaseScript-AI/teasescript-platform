@@ -15,6 +15,9 @@ import type { ScriptStorageProvider } from "../player/script-storage.js";
 interface StorageHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly canClearScriptStorage: Readonly<Ref<boolean>>;
+  readonly activation: Readonly<Ref<"start" | "continue" | null>>;
+  clearScriptStorage(): Promise<boolean>;
+  observe(): PlayerRuntimeSession | null;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   prepare(create: () => PlayerRuntimeSession): void;
@@ -262,5 +265,77 @@ test("Vue host reloads before each Start and falls back to session-local storage
   assert.deepEqual(
     recovered.transcriptEntries.map((entry) => entry.text),
     ["3"],
+  );
+});
+
+test("Vue host clears once, and no Start begins until the clear settles", async (context) => {
+  const clearing = deferred();
+  let clears = 0;
+  const { host } = createHost(context, {
+    scope: "test",
+    load: async () => [{ key: "answer", value: "old" }],
+    write: async () => {},
+    clear: () => {
+      clears++;
+      return clearing.promise;
+    },
+  });
+  await host.loadScriptStorage();
+  host.prepare(() =>
+    createPlayerRuntimeSession('let answer = load "answer"\nexit', host.scriptStorageOptions()),
+  );
+  const first = host.clearScriptStorage();
+  assert.equal(host.canClearScriptStorage.value, false);
+  assert.equal(await host.clearScriptStorage(), false);
+  assert.equal(host.activation.value, null);
+  // Read through a function: an assertion narrows the reactive value's type for the rest of the test.
+  const current = (): PlayerRuntimeSession | null => host.session.value;
+  host.activate();
+  assert.equal(current(), null);
+
+  clearing.resolve();
+  assert.equal(await first, true);
+  assert.equal(clears, 1);
+  assert.equal(host.activation.value, "start");
+  host.activate();
+  // The session starts from the cleared view, not from the values loaded before the clear.
+  assert.deepEqual(current()?.snapshot.scriptStorage, []);
+});
+
+test("Vue host schedules no clock wake-ups while a pending write holds scene time", async (context) => {
+  const persistence = deferred();
+  let now = 0;
+  const realNow = performance.now.bind(performance);
+  performance.now = () => now;
+  context.after(() => (performance.now = realNow));
+  const { host } = createHost(context, {
+    scope: "test",
+    load: async () => [],
+    write: () => persistence.promise,
+    clear: async () => {},
+  });
+  await start(
+    host,
+    'timer async 10 ms { say "one", instant }\ntimer async 20 ms { say "two", instant }\nsave 1 as "k"\nwait 100 ms',
+  );
+  now = 100;
+  host.observe();
+  // Catch-up holds at the first block's due time behind the write; an overdue deadline must not spin the clock.
+  assert.equal(host.session.value?.snapshot.currentSessionTimeMs, 10);
+  const held = host.session.value;
+  // The clock reschedules from a pre-flush watcher, so each step lets Vue run it before timers advance.
+  for (let tick = 0; tick < 25; tick++) {
+    await nextTick();
+    context.mock.timers.tick(0);
+  }
+  assert.equal(host.session.value, held);
+
+  persistence.resolve();
+  await nextTick();
+  context.mock.timers.tick(0);
+  // After the acknowledgement both blocks run at their due times and the clock schedules the wait again.
+  assert.deepEqual(
+    host.session.value?.transcriptEntries.map((entry) => entry.text),
+    ["one", "two"],
   );
 });

@@ -77,10 +77,13 @@ function parseItemName(name: string): { readonly scope: string; readonly key: st
   if (!name.startsWith(ITEM_PREFIX)) return null;
   try {
     const parsed: unknown = JSON.parse(name.slice(ITEM_PREFIX.length));
+    // Only the exact name this provider writes counts; an alias such as one with extra spaces is ignored, so it can
+    // neither duplicate a key nor survive the key's removal.
     return Array.isArray(parsed) &&
       parsed.length === 2 &&
       typeof parsed[0] === "string" &&
-      typeof parsed[1] === "string"
+      typeof parsed[1] === "string" &&
+      name === ITEM_PREFIX + JSON.stringify(parsed)
       ? { scope: parsed[0], key: parsed[1] }
       : null;
   } catch {

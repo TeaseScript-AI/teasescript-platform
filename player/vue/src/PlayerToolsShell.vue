@@ -194,6 +194,13 @@ const playerSettingsOpen = ref(false);
 // Clearing saved script data asks for confirmation first and then reports its result.
 const clearSavedData = ref<"idle" | "confirm" | "clearing" | "cleared" | "failed">("idle");
 watch(playerSettingsOpen, () => (clearSavedData.value = "idle"));
+const clearConfirmation = ref<HTMLElement | null>(null);
+async function askToClearSavedData() {
+  clearSavedData.value = "confirm";
+  // The control that replaced Clear takes focus, so keyboard users keep their place.
+  await nextTick();
+  clearConfirmation.value?.querySelector("button")?.focus();
+}
 async function confirmClearSavedData() {
   clearSavedData.value = "clearing";
   clearSavedData.value = (await props.savedData?.clear()) ? "cleared" : "failed";
@@ -871,16 +878,24 @@ async function updateSidebarVisibility(open: boolean) {
                       <p>What this script saved in this browser for its next runs.</p>
                       <template v-if="clearSavedData === 'confirm' || clearSavedData === 'clearing'">
                         <p>Clear all saved data for this script? This cannot be undone.</p>
-                        <div class="flex gap-2">
+                        <div ref="clearConfirmation" class="flex gap-2">
                           <Button
                             variant="destructive"
                             size="sm"
+                            :disabled="clearSavedData === 'clearing'"
                             data-clear-saved-data-confirm
                             @click="confirmClearSavedData"
                           >
-                            Clear
+                            {{ clearSavedData === "clearing" ? "Clearing…" : "Clear" }}
                           </Button>
-                          <Button variant="outline" size="sm" @click="clearSavedData = 'idle'">Cancel</Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            :disabled="clearSavedData === 'clearing'"
+                            @click="clearSavedData = 'idle'"
+                          >
+                            Cancel
+                          </Button>
                         </div>
                       </template>
                       <template v-else>
@@ -890,7 +905,7 @@ async function updateSidebarVisibility(open: boolean) {
                           size="sm"
                           :disabled="!savedData.canClear"
                           data-clear-saved-data
-                          @click="clearSavedData = 'confirm'"
+                          @click="askToClearSavedData"
                         >
                           Clear saved script data
                         </Button>

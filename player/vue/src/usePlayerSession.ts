@@ -263,11 +263,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     },
     { flush: "sync" },
   );
-  // A running or resumable session keeps its own view of the stored values, so clearing waits until it ends.
+  // A running or resumable session keeps its own view of the stored values, so clearing waits until it ends; while a
+  // clear runs, no second clear and no Start can begin, so a new session never starts from the values being removed.
+  const clearing = ref(false);
   const canClearScriptStorage = computed(
     () =>
       scriptStorage !== undefined &&
       storedEntries.value !== null &&
+      !clearing.value &&
       activation.value?.kind !== "continue" &&
       (session.value === null ||
         session.value.snapshot.status === "halted" ||
@@ -276,13 +279,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   /** Removes this script's saved data; resolves to whether it was cleared. */
   async function clearScriptStorage(): Promise<boolean> {
     if (!scriptStorage || !canClearScriptStorage.value) return false;
+    clearing.value = true;
     try {
       await scriptStorage.clear();
+      storedEntries.value = [];
+      return true;
     } catch {
       return false;
+    } finally {
+      clearing.value = false;
     }
-    storedEntries.value = [];
-    return true;
   }
 
   // Starts or restores a session; its scene time continues from the persisted observation, so a
@@ -323,7 +329,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   async function activate() {
     const pending = activation.value;
-    if (!pending) return;
+    if (!pending || clearing.value) return;
     activation.value = null;
     const token = ++activationToken;
     if (options.capabilities?.camera !== true) {
@@ -350,8 +356,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     session: computed(() => session.value),
     generation: computed(() => generation.value),
     interactionReset: computed(() => interactionReset.value),
-    /** The prepared Start or Continue, or `null` once the session runs. */
-    activation: computed(() => activation.value?.kind ?? null),
+    /** The prepared Start or Continue, or `null` once the session runs or while saved data is being cleared. */
+    activation: computed(() => (clearing.value ? null : (activation.value?.kind ?? null))),
     /** Whether the browser refused audible playback; `retryAudio` must run from a user activation. */
     audioBlocked: computed(() => audioBlocked.value),
     retryAudio: () => device.retryBlocked(),
