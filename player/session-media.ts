@@ -26,8 +26,6 @@ export interface SessionMediaUrls {
   revoke(url: string): void;
 }
 
-const REFERENCE_PREFIX = "session-media:";
-
 /**
  * Captured media of one Player session. Entries live until explicitly deleted or until the session is cleared:
  * without complete reachability tracking, overwriting one variable does not prove a reference is unused elsewhere.
@@ -36,6 +34,11 @@ export class SessionMediaStore {
   readonly #urls: SessionMediaUrls;
   readonly #entries = new Map<string, StoredMedia>();
   readonly #objectUrls = new Map<string, string>();
+  /**
+   * Unique per store, so a reference kept from an earlier session, for example in persisted data, never resolves to
+   * media captured in a later one.
+   */
+  readonly #prefix = `session-media:${crypto.randomUUID()}:`;
   #next = 1;
 
   constructor(urls: SessionMediaUrls) {
@@ -43,7 +46,7 @@ export class SessionMediaStore {
   }
 
   add(kind: SessionMediaKind, data: Blob, details: SessionMediaDetails = {}): SessionMediaEntry {
-    const reference = `${REFERENCE_PREFIX}${this.#next++}`;
+    const reference = `${this.#prefix}${this.#next++}`;
     const entry: StoredMedia = {
       reference,
       kind,

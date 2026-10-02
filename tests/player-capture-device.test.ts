@@ -501,4 +501,17 @@ test("session media references stay unique and their browser URLs are revoked", 
   media.clear();
   assert.deepEqual(log.at(-1), `revoke ${secondUrl}`);
   assert.equal(media.size, 0);
+  assert.notEqual(media.add("image", new Blob(["d"])).reference, first.reference);
+});
+
+test("a reference kept from an earlier session never resolves to media of a later one", () => {
+  const urls = { create: () => "blob:", revoke: () => {} };
+  const earlier = new SessionMediaStore(urls);
+  // For example persisted as a saved value, then loaded after the earlier session ended.
+  const kept = earlier.add("image", new Blob(["earlier photo"])).reference;
+  const later = new SessionMediaStore(urls);
+  const captured = later.add("image", new Blob(["later photo"]));
+  assert.notEqual(captured.reference, kept);
+  assert.equal(later.get(kept), null);
+  assert.equal(later.url(kept), null);
 });

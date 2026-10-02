@@ -7,7 +7,8 @@ export interface Rgba {
 
 /**
  * Plain pixel data copied out of a camera frame or decoded image: four 0–255 channels per pixel, rows top to bottom.
- * It holds no browser object, so it can be handed to package code or copied across a message boundary.
+ * It holds no browser object, so package code can process it locally; like other derived media buffers it stays inside
+ * the Player sandbox unless a later explicit validated boundary admits it.
  */
 export class RgbaImage {
   readonly width: number;
