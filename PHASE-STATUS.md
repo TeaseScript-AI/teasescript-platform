@@ -34,8 +34,8 @@ accept syntax, architecture, or implementation details.
   audio after explicit Start; browser video playback remains deferred.
 - **Camera capture:** `takePhoto()` as a typed capture action with trusted reference admission and non-fatal
   unavailability under [Runtime](docs/RUNTIME.md#camera-capture). With a trusted host capability the Player opens the
-  session camera after Start and captures silently; saved photos persist through script storage, whose Player
-  persistence follows separately. `askImage`, recording APIs, and the advanced package media API remain deferred.
+  session camera after Start and captures silently; a photo saved through script storage is stored in the browser and
+  shown again in a later run. `askImage`, recording APIs, and the advanced package media API remain deferred.
 - **Player:** the POC Player is the Vue implementation under `player/vue/src/` (#418), served on `/player/`. It uses
   Vue/Vite, Tailwind CSS 4, repository-owned shadcn-vue/Reka primitives, and TanStack Vue Virtual as the transcript
   owner. A framework-independent adapter connects it to the implemented transcript, foreground-interaction, pacing,

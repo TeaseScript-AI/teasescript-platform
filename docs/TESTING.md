@@ -96,7 +96,7 @@ measurements as permanent limits.
 Before removing or consolidating a family, record its obligation and remaining evidence in the issue/PR. Delete checks
 that only freeze provisional geometry, development-fixture content, private implementation details, or temporary
 incompleteness (for example an accepted or intended capability being absent, unsuggested, disabled, or represented by a
-placeholder); preserve genuine regressions and browser risks exercised *through* fixtures. Replace numeric tuning
+placeholder); preserve genuine regressions and browser risks exercised _through_ fixtures. Replace numeric tuning
 assertions with observable behavior where possible. A POC check needs reassessment when its experiment changes or ends,
 not automatic repair to preserve an obsolete expectation. Repeated input/viewport cases need distinct failure modes, not
 merely different values.
@@ -572,8 +572,9 @@ playback, a script pause reaching the playing element, pacing skips from a press
 empty composer but not from a Player control, message text or Space while the composer holds text, a press held past
 one message's pacing that must not skip the next message's pacing, Finish ending the session, and a narrow viewport
 that keeps the first question's input visible. With a synthetic camera it also runs the development preview's camera
-scenario (`/player/?dev&scenario=camera`): granted, the session camera opens at Start and `takePhoto()` puts its photo
-on the Stage; denied, the script continues without a photo. Development preview presentation is covered by the [Player browser
+scenario (`/player/?dev&scenario=camera`): granted, the session camera opens at Start, `takePhoto()` puts its photo on
+the Stage, and the saved photo is shown again in a new run, after which the next mount reclaims a replaced photo;
+denied, the script continues without a photo; a forged reference in saved data shows no photo. Development preview presentation is covered by the [Player browser
 verification route](#player-browser-and-visual-verification). `CHROMIUM_BIN` is tried before the `/usr/bin` Chromium
 paths; an unusable value falls back to them. An unavailable Chromium executable is an explicit skip; an available
 browser must pass the configured smoke checks.

@@ -24,17 +24,21 @@ specification.
   the explicit Start control (`SessionActivation.vue`) and creates it only on that click; a restored session waits for
   Continue. The host also owns the framework-independent `player/media-device.ts`: it reconciles the session's media
   projection onto `Audio` elements, reports loading through the adapter, and contributes measured progress to every
-  clock observation, which runs every 100 ms while media loads or plays. The host reuses released elements and, within
-  the Start or Continue click, plays silence on every spare one, ensuring at least two, because some browsers (Safari)
-  allow playback per element only from a user activation, which the session may outlive while a camera permission
-  prompt is open; elements allocated beyond the pool fall back to the refused-playback retry. With the camera capability, Start first opens the
-  session camera (`player/session-camera.ts`) before the session is created. Authored media references resolve only through
-  the host-supplied `resolveAsset`. `PlayerApp.vue` derives the Stage image from runtime state and provides the same
-  resolver to `TranscriptMessage.vue` for speaker avatars.
+  clock observation, which runs every 100 ms while media loads or plays. With the camera capability, Start
+  first opens the session camera (`player/session-camera.ts`) before the session is created; without it, the session
+  starts within the click. Because some browsers (Safari) allow playback per element only from a user activation, which
+  the session may outlive while a camera permission prompt is open, the host reuses released elements and, within a
+  Start or Continue click that waits for the camera, plays silence on every spare one, ensuring at least two; elements
+  allocated beyond the pool fall back to the refused-playback retry. In a Player that can capture or read stored
+  photos, a save first stores the captured photos its value references (`player/captured-media-persistence.ts`);
+  captured references resolve only through that trusted store, and authored
+  media references only through the host-supplied `resolveAsset`. `PlayerApp.vue` derives the Stage image from
+  runtime state and provides the same resolver to `TranscriptMessage.vue` for speaker avatars.
 - `DevelopmentPreview.vue` opens one runtime choice scenario, with a Stage image and a short chime that
   `developmentMedia.ts` resolves, and supplies Visual Lab's Theme Lab, Stage media picker,
-  and timer/background-button presentation fixtures, plus Layout Debug. `main.ts` loads it as a separate chunk on the
-  development server, or in a build only with the `?dev` URL opt-in. The default build mounts `PlayerApp.vue` with the
+  and timer/background-button presentation fixtures, plus Layout Debug; `?scenario=camera` instead opens a camera
+  scenario with persistent script storage that shows the saved photo again in a later run. `main.ts` loads it as a
+  separate chunk on the development server, or in a build only with the `?dev` URL opt-in. The default build mounts `PlayerApp.vue` with the
   repository demo: `demoHost.ts` supplies its source and resolves its package-relative references to the package's
   SVG files and to sounds that `generatedAudio.ts` synthesizes.
 - `PlayerToolsShell.vue` receives its tool list from the root and owns tool selection, pinning, order, resizing, retained content and dock/drawer focus.

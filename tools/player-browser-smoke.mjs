@@ -519,7 +519,7 @@ async function scriptStorageScenario(cdp, origin) {
     await waitFor(cdp, `${messages}.some((text) => text.includes('Eyes on me.'))`);
   } finally {
     await cdp.call("Page.removeScriptToEvaluateOnNewDocument", {
-      identifier: deniedStorage.identifier,
+      identifier: deniedStorage.result.identifier,
     });
   }
   await reloadBeforeStart();
@@ -528,7 +528,9 @@ async function scriptStorageScenario(cdp, origin) {
 // Plays the repository demo on the maintained /player/ route of the built Player with trusted input, so the Start
 // click is the user activation its audio relies on. Checks rely on the demo's authored text and timer labels.
 async function demoScenario(cdp, origin) {
-  const { identifier } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
+  const {
+    result: { identifier },
+  } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
     source: `window.__played = [];
       const play = HTMLMediaElement.prototype.play;
       HTMLMediaElement.prototype.play = function () {
@@ -901,8 +903,29 @@ async function cameraScenario(cdp, origin) {
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
     await physicalClick(cdp, "[data-session-activation] button");
   };
+  const takeNewPhoto = () =>
+    evaluate(
+      cdp,
+      `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Take a new photo').click()`,
+    );
   // A decoded photo, not merely an image element with a captured URL.
   const capturedImages = `[...document.querySelectorAll('img')].filter((image) => image.src.startsWith('blob:') && image.complete && image.naturalWidth > 0).length`;
+  const savedItem = JSON.stringify('player-storage:["development-camera","camera.photo"]');
+  const savedPhoto = `JSON.parse(localStorage.getItem(${savedItem}) ?? 'null')?.value ?? null`;
+  const storedPhotos = () =>
+    evaluate(
+      cdp,
+      `return new Promise((resolve, reject) => {
+        const request = indexedDB.open('teasescript-captured-media');
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const database = request.result;
+          const store = database.objectStoreNames[0];
+          const keys = database.transaction(store).objectStore(store).getAllKeys();
+          keys.onsuccess = () => { database.close(); resolve(keys.result.map(([, reference]) => reference)); };
+        };
+      })`,
+    );
 
   await cdp.call("Browser.setPermission", {
     origin,
@@ -912,6 +935,35 @@ async function cameraScenario(cdp, origin) {
   await start();
   await waitFor(cdp, `document.body.innerText.includes('Captured.')`);
   await waitFor(cdp, `${capturedImages} === 1`);
+  const first = await value(cdp, savedPhoto);
+  assertEqual(String(first).startsWith("captured-media:"), true, "The photo reference was saved");
+  assertEqual((await storedPhotos()).includes(first), true, "The saved photo was stored durably");
+
+  // A new run loads the saved reference and shows the same stored photo.
+  await start();
+  await waitFor(cdp, `document.body.innerText.includes('Your previous photo.')`);
+  await waitFor(
+    cdp,
+    `${capturedImages} === 1`,
+    8_000,
+    "The saved photo did not resolve in a new run",
+  );
+  await takeNewPhoto();
+  await waitFor(cdp, `document.body.innerText.includes('Captured.')`);
+  const second = await value(cdp, savedPhoto);
+  assertEqual(
+    second !== first && String(second).startsWith("captured-media:"),
+    true,
+    "The new photo was saved",
+  );
+
+  // The next mount reclaims the replaced photo, which no saved value references.
+  await navigate(cdp, url);
+  const deadline = Date.now() + 8_000;
+  while (JSON.stringify(await storedPhotos()) !== JSON.stringify([second])) {
+    if (Date.now() > deadline) throw new Error("The replaced photo was not reclaimed");
+    await delay(50);
+  }
 
   await cdp.call("Browser.setPermission", {
     origin,
@@ -919,8 +971,22 @@ async function cameraScenario(cdp, origin) {
     setting: "denied",
   });
   await start();
+  await waitFor(cdp, `document.body.innerText.includes('Your previous photo.')`);
+  await takeNewPhoto();
   await waitFor(cdp, `document.body.innerText.includes('No camera; continuing without a photo.')`);
-  assertEqual(await value(cdp, capturedImages), 0, "A denied camera produced a photo");
+  assertEqual(await value(cdp, savedPhoto), second, "A denied camera replaced the saved photo");
+
+  // A forged reference in saved data is ordinary text: it resolves to no photo, and the script continues.
+  await evaluate(
+    cdp,
+    `localStorage.setItem(${savedItem}, JSON.stringify({ v: 1, value: 'captured-media:00000000-0000-4000-8000-000000000000:1' }))`,
+  );
+  await start();
+  await waitFor(cdp, `document.body.innerText.includes('Your previous photo.')`);
+  await delay(500);
+  assertEqual(await value(cdp, capturedImages), 0, "A forged reference resolved to a photo");
+  await takeNewPhoto();
+  await waitFor(cdp, `document.body.innerText.includes('No camera; continuing without a photo.')`);
   await cdp.call("Browser.resetPermissions");
 }
 
