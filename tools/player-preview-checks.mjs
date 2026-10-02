@@ -1365,7 +1365,12 @@ async function focusIndicatorChecks(page) {
         shadow: style.boxShadow,
       };
     });
-    if (!focused.focusVisible || !(focused.outline || focused.shadow !== resting))
+    // A changed shadow counts only if some part of it is not transparent.
+    const visibleShadow =
+      focused.shadow !== resting &&
+      focused.shadow.split(/,(?![^(]*\))/u).some((part) => !/^\s*rgba\(0, 0, 0, 0\)/u.test(part)) &&
+      focused.shadow !== "none";
+    if (!focused.focusVisible || !(focused.outline || visibleShadow))
       throw new Error(`${label}: keyboard focus shows no indicator ${JSON.stringify(focused)}`);
     await button.evaluate((el) => el.blur());
   }
@@ -1420,6 +1425,20 @@ async function backgroundControlPlacementChecks(page) {
   state = await settle(1440, 330);
   if (!state.scrolls || state.top < state.timerBottom - 1)
     throw new Error(`Insufficient height must scroll the group: ${JSON.stringify(state)}`);
+  const group = await page.locator(".stage-right-rail-group").boundingBox();
+  await page.mouse.move(group.x + group.width / 2, group.y + Math.min(group.height, 60) / 2);
+  await page.mouse.wheel(0, 400);
+  await page
+    .waitForFunction(
+      () =>
+        document.querySelector(".stage-right-rail-controls [data-reka-scroll-area-viewport]")
+          .scrollTop > 0,
+      null,
+      { timeout: 5000 },
+    )
+    .catch(() => {
+      throw new Error("A wheel over the background controls did not scroll them");
+    });
   // A minimal Stage clips the fallback rail instead of letting the timer cover the transcript.
   await settle(390, 430);
   await page.getByRole("separator", { name: "Resize media and conversation" }).focus();
