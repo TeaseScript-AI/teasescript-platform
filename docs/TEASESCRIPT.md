@@ -224,7 +224,9 @@ The current function subset includes:
 - lexical function scope with package-global access;
 - deep-copy ordinary arguments/returns and speaker-reference identity preservation.
 
-Complete static typing and the wider V30 Standard Library/runtime APIs are not implemented. Typed signatures may be parsed for diagnostics while unsupported execution/type semantics remain rejected.
+Complete static typing and the wider V30 Standard Library/runtime APIs are not implemented yet. Until function-signature
+types are checked, a typed function signature parses but does not compile, so its declared types are never silently
+ignored.
 
 The current source/compiler implements authored presentation options and the ADR 0018 `say` pacing and skip forms while
 preserving existing `say`/
