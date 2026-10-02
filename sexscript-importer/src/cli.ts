@@ -14,8 +14,10 @@ const compileRequested = rawArgs.includes("--compile");
 const args = rawArgs.filter((arg) => arg !== "--compile");
 
 if (command === "inventory") {
-  if (args.length === 0) fail("Usage: node src/cli.ts inventory <ast.json> [...]");
-  const files = await Promise.all(args.map(readParsedFile));
+  if (args.length === 0) {
+    fail("Usage: node src/cli.ts inventory <ast.json|script.groovy|source-dir> [...]");
+  }
+  const files = await readReportInputs(args);
   process.stdout.write(`${JSON.stringify(inventoryFiles(files), null, 2)}\n`);
 } else if (command === "report") {
   if (args.length === 0) {

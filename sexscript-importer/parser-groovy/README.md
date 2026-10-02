@@ -15,7 +15,9 @@ worker with CPU/memory/time limits and no ambient network or filesystem privileg
 
 ## Run locally
 
-Set the two JAR paths from a SexScript desktop distribution:
+The helper needs Java 17 or newer and the Groovy 2.5.21 `groovy` and `groovy-json` JARs, from a SexScript desktop
+distribution (`lib/`) or Maven Central. Without explicit paths it uses the Maven local-repository layout
+(`~/.m2/repository/org/codehaus/groovy/<artifact>/2.5.21/`):
 
 ```sh
 export SEXSCRIPT_GROOVY_JAR=/path/to/groovy-2.5.21.jar
@@ -35,3 +37,7 @@ Parse an auxiliary Groovy class such as `Domme3Class.groovy` as a compilation un
 ```
 
 The generated `.class` file is written under `.tmp/` and remains local.
+
+Besides the AST, the output contains the original source text and its comments. The Groovy AST drops comments, so the
+helper re-lexes the source with Groovy's own lexer; string, GString, and slashy-string contents are therefore never
+mistaken for comments.

@@ -1,7 +1,8 @@
 # Compatibility gaps and TeaseScript feedback
 
 This document separates importer limitations from actual TeaseScript design questions. SexScript compatibility is not
-a reason by itself to copy Groovy or the old runtime.
+a reason by itself to copy Groovy or the old runtime. Corpus counts come from the dated snapshot in
+[`CORPUS-INVENTORY.md`](CORPUS-INVENTORY.md); the target policy is in [`POC-SCOPE.md`](POC-SCOPE.md).
 
 ## Classification
 
@@ -23,75 +24,91 @@ Importer progress is measured at package level rather than by requiring every ge
 2. **Lowered** — the script body has TeaseScript IR/output without direct migration errors.
 3. **Dependency-closed** — every generated function call resolves to generated package code or a known accepted
    TeaseScript/Standard-Library capability. This includes transitive helper dependencies.
-4. **Compiler-clean** — the resulting generated package passes the real compiler for the capability surface being
-   claimed. Current POC implementation coverage must be distinguished from accepted V30 syntax.
+4. **Compiler-clean** — the generated script passes the real compiler. The report also compiles a copy in which
+   accepted-but-unimplemented TeaseScript (storage, `run`/`end`, `switch`, ...) is replaced by placeholder host calls;
+   a file that is clean only in that copy is blocked by TeaseScript implementation work, not by importer output.
 5. **Runnable/verified** — relevant execution paths have actually run without unresolved runtime behavior.
 
-The current POC embeds transitively required helper functions into generated `.tease` output because generic
-package-library linkage is not yet available to the importer. That is a current migration strategy, not a language
-requirement that every `.tease` file be permanently standalone.
+The POC embeds transitively required helper functions into each generated `.tease` file because package-library linkage
+is not yet available. That is a current migration strategy, not a language requirement. Auxiliary Groovy classes with
+fields are not duplicated automatically because fields may carry shared state; the importer reports
+`SX_HELPER_SHARED_STATE` instead.
 
-Auxiliary Groovy classes with fields are not duplicated automatically. Fields may represent shared/static mutable
-state whose semantics would change if helper functions were copied independently. The parser exports these fields and
-the importer reports `SX_HELPER_SHARED_STATE` instead. The current `Domme3Class` corpus helper has zero class fields,
-so its helper methods do not carry hidden in-memory class state.
+## Existing TeaseScript is sufficient
 
-## Proven importer gaps
+These corpus patterns looked like gaps but are importer work; the generated form is ordinary TeaseScript:
 
-Current examples that are not TeaseScript language gaps:
+| Legacy pattern | TeaseScript form |
+| --- | --- |
+| `"Hi " + name` (string `+`) | `"Hi ${name}"`; TeaseScript `+` is numeric only |
+| Groovy truthiness (`if (name)`, `!count`) | explicit comparisons chosen from inferred types (`name != ""`, `count == null or count == 0`) |
+| ternary / Elvis | `if` statements; `loadX(k) ?: d` becomes `load k default d` |
+| `def x = loadInteger(k); if (x == null) x = 0` | `let x = load k default 0` |
+| `list[getRandom(list.size())]` | `list.random` |
+| `getSelectedValue(text, [...])` | `say text` plus `choose 0: ..., 1: ...` (numeric labels return the index) |
+| `getBoolean(text, yes, no)` | `say text` plus `(choose yes: ..., no: ...) == "yes"` |
+| `getString` / `getFloat` | `say text` plus compact `askText` / `askNumber` |
+| `Calendar.getInstance().get(Calendar.HOUR_OF_DAY)` and other fields | `getDateTime().hour`, with month and weekday-number conversions |
+| `list + other`, `list << x`, `list.push(x)` | a generated concatenation helper and `add()` |
+| `def x` without initializer | `let x: string? = null` (or `string[]?`, ...) when the later type is unambiguous |
+| `System.exit(0)` | `exit` (the Player stays open) |
+| `sleep(ms)`, `waitWithGauge(s)` | `wait ... ms`, `timer ...` |
 
-- Groovy `getBooleans(...)` targets accepted `askBooleans(...)`;
-- Groovy list `.size`/`.size()` can target TeaseScript `.length` when the receiver is proven to be a list;
-- ordinary Groovy helper closures/methods can usually become normal TeaseScript functions;
-- static Groovy maps with identifier-like keys can become TeaseScript objects;
-- list `indexOf` and SexScript `loadFirstTrue` can be expressed through generated ordinary TeaseScript helper functions.
+## Semantic differences
 
-## Known semantic differences
+The importer converts these with an inline `NOTE` or reports them when it cannot prove equivalence:
 
-- Groovy lists/maps use mutable reference aliasing; TeaseScript ordinary composite values use ADR 0014 deep-copy value
-  semantics. Alias-dependent scripts need analysis or a warning rather than silently changing TeaseScript semantics.
-- Groovy `def` may change runtime type; TeaseScript variables keep their inferred or declared type.
-- SexScript/JVM APIs may expose host state that has no deterministic package-level equivalent.
+- `show()` replaced the single text area; `say` appends to a transcript. `show(null)` only cleared the text, so it is
+  dropped. Input functions showed their text like `show()`; a `null` text kept the current text.
+- `say` text is message markup: legacy `*emphasis*` renders as formatting and URLs become links. Line-start list,
+  heading, or quote markers and backslash escapes get a `NOTE` (`escapeMarkup()` keeps text literal).
+- Single-field input had a pre-filled value; TeaseScript input has none, so the player types it (`SX_INPUT_PREFILL`).
+- Groovy turned lists into text as `[a, b]`; TeaseScript interpolation shows one random element (`SX_COLLECTION_TEXT`).
+- Groovy `?:` also replaced stored `false`, `0`, and `""`; `load ... default` only replaces a missing key.
+- Legacy `save(key, null)` deleted the key and every dotted sub-key (`key.*`). Storage therefore never held `null`,
+  which keeps `load ... default` folds exact; saves of possibly-null values become explicit `delete`. TeaseScript keys
+  are flat, so saving a scalar over a former list/map key leaves the old sub-keys.
+- Groovy lists and maps alias by reference; TeaseScript composite values copy (ADR 0014). Groovy `def` may change type.
+- Java `Math.round` rounds `.5` toward positive infinity; TeaseScript `round()` does not specify ties yet.
+- Java date pattern formatting (`new Date().format("yyyy-MM-dd")`) has no equivalent; typed `date`/`datetime` values
+  compare and store directly, and `formatDate()`/`formatTime()` cover display (`SX_DATE_FORMAT`).
+- Rewrites that move evaluation (ternary branches, input prompts) are applied only when the expression is not behind
+  `&&`/`||`/`?:` and nothing with side effects is evaluated earlier in the statement; otherwise the statement is
+  reported (`SX_CONDITIONAL_POSITION`, `SX_PROMPT_POSITION`).
 
 ## Capability candidates
 
-### Single-field input prefill/default values
+Evidence for owner evaluation, ordered by corpus weight:
 
-SexScript `getString`, `getInteger`, and `getFloat` accept a value that is shown as the field's initial value. Accepted
-TeaseScript has defaults for multi-field `askNumbers`, `askIntegers`, and `askBooleans`, but no proven equivalent option
-for the single-field `askText`, `askInteger`, or `askNumber` APIs. The corpus currently has 62 root diagnostics in this
-family. This is evidence worth owner evaluation, but the importer must not invent an approximation.
+1. **Choice from a runtime list.** DisciplineClinic builds menus from data (`getSelectedValue(dialog, ["Back"] +
+   offenseTextArray)`), and the Toy package's main menu is built from runtime options. Compact `choose` needs every
+   option in the source; numeric labels require a fixed count, and `choose someList` presents one random option
+   (visible-text list conversion). No accepted form expands a runtime list into options. This is the strongest
+   candidate: menus over data are ordinary script logic.
+2. **Single-field input prefill.** About 30 corpus calls pass a meaningful default, typically to edit a current
+   setting (`getInteger("...", cornerBase + playerLevel)`). Accepted multi-field `askIntegers`/`askNumbers` have
+   `defaults`; single-field input has none. Lower priority: the player can still type the value.
+3. **Rounding contract.** Not a missing capability: `round()` is accepted, but its tie rule needs specification.
+4. **Localized script variants.** The distribution ships language variants per script (`intro`, `intro_de`,
+   `intro_fr`, ...) selected by the legacy player. The repository has no localization decision; this is a package-level
+   product question, not syntax.
 
-## Accepted syntax versus current implementation
+Not candidates on current evidence: string methods (rare in the corpus; the V30 string library remains an open
+decision), dictionary types, and exceptions.
 
-The accepted V30 specification is broader than the current POC compiler/runtime. In particular, generated use of
-accepted storage plus `run`/`end` can still be rejected by the current implementation. That is an implementation
-coverage gap, not by itself a language-design gap.
+## Legacy baggage
 
-A direct conversion of the distribution's `simpleexample.groovy` is importer-clean. When only those accepted but
-currently unimplemented operations are replaced in a local compiler probe, the rest of the generated source parses,
-validates, and compiles to an instruction plan with zero diagnostics.
+Reported for manual work and intentionally not reproduced: reflection and `GroovyClassLoader` outside resolved
+package helpers, `java.io.File` access and directory listing, `System.getProperty`, webcam/file pickers (`getImage`,
+`getFile`), `openCdTrays`, `useEmailAddress`, `useFile`, the old online `send`/`receive` service, and `try`/`catch`
+around desktop APIs. `Locale.getDefault()` serves the localization question above.
 
-## Current end-to-end evidence
+## Accepted but not implemented
 
-At the current POC checkpoint:
+The importer emits these accepted forms although the current compiler rejects them; the compiler gate counts them
+separately: storage (`save`/`load`/`delete`), `run`/`end`, `switch`, `showPopup`, `showButton` with timeout or elapsed
+result, `askInteger`, `askBooleans`, `getSeconds`/`getDateTime`, `openUrl`, `round`/`floor`/`ceil`, and conversions.
+Storage and `run`/`end` dominate: they are the only blockers of most otherwise compiler-clean corpus scripts.
 
-- 45/45 corpus Groovy files parse;
-- 44 are executable SexScript script bodies and one is an auxiliary helper class;
-- 44/44 script bodies are **recognized**;
-- 7/44 are fully **lowered** without direct migration errors;
-- those same 7/44 are currently **dependency-closed** after package helper composition;
-- the corpus has 278 root migration errors after the `getBooleans` mapping, down from 287 before it;
-- direct `.groovy` -> Groovy AST -> migration IR -> `.tease` conversion works;
-- package conversion embeds only transitively required TeaseScript helper functions and never emits a Groovy runtime
-  dependency;
-- the focused importer suite passes 46/46 tests and `git diff --check` is clean.
-
-The current engine compiler still rejects all seven dependency-closed outputs because the generated sources use a mix
-of accepted V30 capabilities not implemented by the current POC and, for larger scripts, resulting parser cascades.
-That is not reported as a TeaseScript language gap until accepted-syntax validation proves the generated form itself
-invalid.
-
-The parser also had one important importer bug: Groovy `NotExpression` is a subtype of `BooleanExpression`, so checking
-`BooleanExpression` first silently dropped `!`. The exporter now preserves negation before corpus measurements are
-trusted.
+The owner-selected storage semantics (`load` returns `null` or the default without writing) still differ from the
+canonical V30 text, which describes default-and-write behavior.

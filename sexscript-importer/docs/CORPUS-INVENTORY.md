@@ -1,127 +1,84 @@
 # Real-script corpus inventory
 
-This document records the current feasibility corpus and aggregate parser results. The source archives and their media
-remain external inputs; this repository stores only aggregate findings and importer code.
+This document records the feasibility corpus and a dated measurement snapshot. The source archives and their media
+remain external inputs (local copies go under the ignored `external/` directory); this repository stores only aggregate
+findings and importer code.
 
-## Corpus snapshot
+## Corpus
 
-| Corpus | Groovy files | Source bytes | Source lines |
-| --- | ---: | ---: | ---: |
-| SexScript desktop distribution | 14 | 46,638 | 1,082 |
-| Domme3 | 25 | 474,372 | 14,526 |
-| DisciplineClinic | 6 | 813,848 | 20,479 |
-| **Total** | **45** | **1,334,858** | **36,087** |
+| Package | Groovy files | Source bytes | Source lines | Notes |
+| --- | ---: | ---: | ---: | --- |
+| SexScript desktop distribution | 14 | 46,638 | 1,078 | bundled examples, including localized variants |
+| Domme3 | 25 | 474,372 | 14,524 | multi-script package plus the `Domme3Class` helper class |
+| DisciplineClinic | 6 | 813,848 | 20,479 | very long scripts; menus built from runtime lists |
+| Toy expanded | 22 | 316,758 | 8,298 | anonymous-object script with runtime-loaded `metaClass` modules |
+| **Total** | **67** | **1,651,616** | **44,379** | |
 
-All 45 files parse successfully through the Groovy 2.5.21 `CONVERSION` phase with the POC parser helper. Ordinary
-SexScript files are parsed inside the reconstructed method-body context. `Domme3Class.groovy` is parsed as an auxiliary
-Groovy compilation unit.
+All 67 files parse through the Groovy 2.5.21 `CONVERSION` phase. Ordinary SexScript files are parsed inside the
+reconstructed method-body context; `Domme3Class.groovy` is parsed as an auxiliary compilation unit. The media packs
+(DisciplinePack 1–10, the Toy Emily packs) contain images, sounds, and persona data files, not scripts.
 
-The other user-provided DisciplinePack ZIPs contain images/sounds rather than Groovy and are therefore package-resource
-inputs, not parser-corpus inputs.
+Groovy 2.5 has no `do`/`while` loop, so legacy scripts cannot contain one. The parser exports two expression classes as
+explicit unsupported nodes: `EmptyExpression` (29, a declaration without initializer, which the importer now lowers) and
+`ArrayExpression` (4, `new Boolean[n]`-style arrays).
 
-## AST shape encountered
+## Feasibility snapshot
 
-The most common normalized AST node kinds are:
+Measured on 2026-10-02 at importer commit `6d6f0be3` with `node src/cli.ts report --compile <package scripts>`:
 
-| Node kind | Count |
-| --- | ---: |
-| constant | 50,858 |
-| variable | 33,501 |
-| expression statement | 21,241 |
-| method call | 18,417 |
-| binary expression | 14,606 |
-| block | 4,077 |
-| if | 2,077 |
-| declaration | 1,962 |
-| break | 1,422 |
-| case | 1,408 |
-| list | 1,052 |
-| property access | 473 |
-| closure | 322 |
-| return | 275 |
-| switch | 270 |
-| postfix expression | 247 |
-| while | 101 |
-| cast | 76 |
-| for | 76 |
-| range | 63 |
-| map entry | 53 |
-| constructor call | 41 |
-| map | 11 |
-| try/catch | 2 |
-| continue | 1 |
+| Package | Scripts | Lowered | Dependency-closed | Compiler-clean except pending | Root errors | Placeholders |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Distribution | 14 | 10 | 10 | 10 | 15 | 13 |
+| Domme3 | 24 | 9 | 7 | 5 | 29 | 32 |
+| DisciplineClinic | 6 | 2 | 2 | 2 | 34 | 33 |
+| Toy expanded | 22 | 0 | 0 | 0 | 23 | 22 |
 
-Two Groovy expression classes are not normalized yet and are emitted explicitly as unsupported nodes:
+No script is compiler-clean as generated, because almost all use storage or script chaining. Scripts using each
+accepted-but-unimplemented capability, and the scripts it alone blocks (otherwise compiler-clean):
 
-- `org.codehaus.groovy.ast.expr.EmptyExpression`: 26 occurrences;
-- `org.codehaus.groovy.ast.expr.ArrayExpression`: 4 occurrences.
+| Capability | Scripts using it | Only blocker in |
+| --- | ---: | ---: |
+| storage (`save`/`load`/`delete`) | 44 | 17 |
+| `run`/`end` | 40 | 13 |
+| `switch` | 28 | 5 |
+| `getDateTime()` | 13 | 1 |
+| `showButton` timeout/elapsed | 12 | 1 |
+| `getSeconds()` | 10 | 0 |
+| `askBooleans()` | 9 | 8 |
+| `showPopup` | 9 | 1 |
+| `askInteger()` | 7 | 0 |
 
-This is intentionally visible in the JSON AST. The parser helper does not drop unknown constructs silently.
+The Toy package is not yet lowered: its body is one anonymous Groovy object and its modules are runtime-evaluated
+closures, so the statement-level importer reports each file as a single unsupported construct.
 
 ## SexScript API usage
 
-The corpus contains 14,233 calls to 35 distinct API-9/source-level SexScript methods when counting inherited calls and
-`main.<method>` calls from the auxiliary Domme3 helper class.
+Calls to API-9/source-level SexScript methods, counting inherited calls and `main.<method>` calls from helper classes:
 
-| API method | Calls |
-| --- | ---: |
-| `show` | 4,820 |
-| `wait` | 3,622 |
-| `showButton` | 1,734 |
-| `getRandom` | 1,081 |
-| `save` | 939 |
-| `setImage` | 435 |
-| `getBoolean` | 319 |
-| `loadInteger` | 286 |
-| `loadBoolean` | 258 |
-| `loadString` | 135 |
-| `showPopup` | 112 |
-| `playSound` | 73 |
-| `getSelectedValue` | 70 |
-| `getTime` | 65 |
-| `load` | 65 |
-| `waitWithGauge` | 60 |
-| `getInteger` | 38 |
-| `getString` | 26 |
-| `setInfos` | 22 |
-| `useUrl` | 18 |
-| `playBackgroundSound` | 15 |
-| `getBooleans` | 9 |
-| `loadFloat` | 8 |
-| `loadFirstTrue` | 6 |
-| `exit` | 4 |
+| API method | Calls | API method | Calls |
+| --- | ---: | --- | ---: |
+| `show` | 4,859 | `getSelectedValue` | 91 |
+| `wait` | 3,622 | `playSound` | 74 |
+| `showButton` | 1,783 | `load` | 66 |
+| `getRandom` | 1,253 | `waitWithGauge` | 60 |
+| `save` | 965 | `playBackgroundSound` | 50 |
+| `setImage` | 446 | `getInteger` | 43 |
+| `getBoolean` | 323 | `getString` | 29 |
+| `loadInteger` | 299 | `setInfos` | 23 |
+| `loadBoolean` | 258 | `useUrl` | 20 |
+| `loadString` | 146 | `getBooleans` | 12 |
+| `getTime` | 125 | `exit`, `loadFloat` | 8 each |
+| `showPopup` | 116 | `loadFirstTrue` | 6 |
 
-The remaining observed API calls occur three times or fewer each. The old online `send`/`receive` surface and OS helper
-calls are present, but rare in this corpus.
+The remaining API calls (`getImage`, `getFloat`, `useFile`, `getDataFolder`, `isConnected`, ...) occur three times or
+fewer each.
 
 ## Plain-Groovy patterns that matter
 
-The scripts also contain behavior that is not part of the SexScript API:
-
-- `sleep(...)`: 94 calls. This is a promising recognized migration pattern because it often expresses a blocking delay
-  in milliseconds, but it is plain Groovy behavior and must be validated before rewriting to TeaseScript `wait`.
-- `GroovyClassLoader`: 23 constructor calls, with corresponding `addClasspath`/`loadClass` use. Domme3 uses this to load
-  `Domme3Class.groovy` from its package.
-- `Class.forName`: 19 calls and reflection helpers such as `getMethod`, `invoke`, `getConstructor`, and `newInstance`.
-- `File`: 6 constructor calls.
-- `Date`: 10 constructor calls.
-- `ByteArrayOutputStream`: 2 constructor calls.
-
-`Domme3Class.groovy` contains 21 methods. Some are pure calculations, but others call SexScript interactions, media,
-storage, or delays through a `main` parameter. Therefore an auxiliary Groovy class is not automatically a `.ts` helper
-candidate. Resumable methods may need to become TeaseScript functions or be inlined/rewritten; synchronous `.ts` is
-appropriate only for portable non-suspending logic.
-
-## Implications for the first lowering slice
-
-The corpus supports prioritizing these conversions:
-
-1. literals, variables, assignments, arithmetic/comparison/boolean expressions;
-2. `if`/`else`, `switch`/`case`, `while`, range iteration, `break`, and `continue`;
-3. the high-frequency SexScript API calls above;
-4. simple helper closures and `.each` range/list iteration;
-5. recognized `sleep(milliseconds)` to TeaseScript elapsed-time waits where the argument can be proven numeric;
-6. auxiliary-class methods only after class-loading use has been resolved to a known package-local source.
-
-Reflection, arbitrary JVM/filesystem/platform access, dynamic class loading that cannot be resolved to package-local
-source, and alias/type behavior that changes TeaseScript semantics remain diagnostic/manual-migration cases.
+- Closure-based collection methods: `each` 53, `collect` 32, `add` 34, `indexOf` 24, `times` 20, `findAll` 19,
+  `push` 13, `max` 11, `containsKey` 10, `join` 10; mostly in the Toy package.
+- String methods are rare: `contains` ≤ 5 (some are list calls), `split` 4, `startsWith` 2, `substring` 1.
+- `sleep(...)` 94 calls; `GroovyClassLoader` 23 (Domme3 loads `Domme3Class` this way); `java.util.Calendar` and
+  `Date` reads about 40; `File` 11; reflection helpers in the distribution's adversarial `test.groovy`.
+- `Domme3Class.groovy` has 21 methods; several call interactions, media, storage, or delays through a `main` parameter,
+  so the importer lowers them to ordinary TeaseScript functions rather than synchronous `.ts` helpers.

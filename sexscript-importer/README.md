@@ -27,36 +27,47 @@ Large legacy archives, Groovy JARs, media, and other binary fixtures are intenti
 locally as external test inputs. When a reproducible fixture is needed in Git, prefer the smallest text-only extracted
 source that is legally and technically appropriate.
 
-## Current scope
+## Prerequisites
 
-The first POC will establish:
+- Node.js as pinned by the repository.
+- Java 17 or newer and the Groovy 2.5.21 `groovy` and `groovy-json` JARs (the version SexScript embeds). The parser
+  helper uses `SEXSCRIPT_GROOVY_JAR` and `SEXSCRIPT_GROOVY_JSON_JAR`, defaulting to the Maven local-repository layout
+  under `~/.m2/repository/org/codehaus/groovy/`. See [`parser-groovy/README.md`](parser-groovy/README.md).
+- For `--compile` and the compiler-checked fixtures: the repository build (`npm run build:typescript` in the
+  repository root), which provides the real TeaseScript compiler under `dist/`.
 
-1. a stable parser-output contract with source spans;
-2. a small SexScript-oriented migration IR;
-3. classification of supported, helper-candidate, and warning-only constructs;
-4. lowering of a representative safe subset to readable `.tease`;
-5. corpus reporting for real SexScripts without executing imported scripts.
-
-See [`docs/LEGACY-SEXSCRIPT-ANALYSIS.md`](docs/LEGACY-SEXSCRIPT-ANALYSIS.md) for the legacy runtime findings and
-[`docs/POC-SCOPE.md`](docs/POC-SCOPE.md) for the implementation slice.
-
-
-## Convert source directly
-
-The POC can invoke the legacy Groovy parser itself when the external Groovy 2.5.21 JARs are available:
+## Usage
 
 ```sh
-export SEXSCRIPT_GROOVY_JAR=/path/to/groovy-2.5.21.jar
-export SEXSCRIPT_GROOVY_JSON_JAR=/path/to/groovy-json-2.5.21.jar
 node src/cli.ts convert /path/to/script.groovy > script.tease
+node src/cli.ts convert-package [--compile] /path/to/legacy/scripts /path/to/output
+node src/cli.ts report [--compile] /path/to/legacy/scripts > report.json
+node src/cli.ts inventory /path/to/legacy/scripts > inventory.json
 ```
 
-Convert a source tree while using package-local auxiliary Groovy classes as migration input:
+`convert-package` writes text `.tease` files only; it never copies legacy media, JARs, or archives. Package-local
+auxiliary Groovy classes (such as `Domme3Class`) are migration input: their transitively used methods are embedded as
+ordinary TeaseScript functions so the result depends on neither Groovy nor the old runtime. `report` and `inventory`
+accept `.groovy` files, directories, or parser JSON; inputs of one invocation form one package.
+
+Generated files follow these conventions:
+
+- legacy comments and paragraph breaks are kept; `setInfos()` metadata becomes a header comment;
+- `// TODO CODE line N: ...` marks the root cause of something that needs manual migration, followed by the original
+  Groovy as `// | ...` lines; `// NOTE CODE line N: ...` marks a converted construct whose behavior differs;
+- a file with unresolved errors starts with `// MIGRATION INCOMPLETE`.
+
+Mapping decisions and their rationale are in [`docs/POC-SCOPE.md`](docs/POC-SCOPE.md) and
+[`docs/LEGACY-SEXSCRIPT-ANALYSIS.md`](docs/LEGACY-SEXSCRIPT-ANALYSIS.md); TeaseScript feedback from the corpus is in
+[`docs/COMPATIBILITY-GAPS.md`](docs/COMPATIBILITY-GAPS.md).
+
+## Tests
 
 ```sh
-node src/cli.ts convert-package /path/to/legacy/scripts /path/to/output
+node --test tests/*.test.ts
 ```
 
-`convert-package` writes text `.tease` files only. It does not copy legacy media, JARs, ZIPs, or other binary assets.
-For auxiliary helper classes, only transitively used helper functions are embedded into each generated script so the
-result does not depend on Groovy or the old SexScript runtime.
+`tests/fixtures/conversion/` pairs real Groovy inputs with the expected `.tease` output; that output must compile with
+the TeaseScript compiler. `tests/fixtures/conversion-accepted/` holds output that uses accepted but not yet implemented
+TeaseScript; it must compile once those capabilities are replaced by placeholder calls. These tests skip with a stated
+reason when Java/Groovy or the repository build is unavailable.

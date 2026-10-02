@@ -157,29 +157,36 @@ Legacy `show()` replaces a single main text area. A normal TeaseScript `say` con
 That may be an acceptable migration choice for many scripts, but it is a visible semantic difference and should be
 tracked explicitly rather than called an exact mapping.
 
-## Mapping direction
+## Mapping
 
-| Legacy SexScript | Migration direction | Notes |
+Legacy semantics below are verified against the API contract (`ss/IScript.java`) and desktop implementation
+(`ss/desktop/Script.java`, `PropertiesWorker`) of the SexScript source. Input functions show their text exactly like
+`show()` before asking; a `null` text keeps the current text.
+
+| Legacy SexScript | Generated TeaseScript | Notes |
 | --- | --- | --- |
-| `show(...)` | usually `say` | Presentation semantics differ. |
-| `showButton(...)` | `showButton` | Legacy timeout/elapsed result needs later accepted capability or a diagnostic. |
-| `getBoolean(...)` | boolean/choice interaction | Preserve custom labels. |
-| `getSelectedValue(...)` | `choose` | Legacy returns zero-based index. |
-| `getBooleans(...)` | multi-select interaction | Depends on accepted/current multi-select surface. |
-| `getString(...)` | text interaction | Legacy pre-filled default is a fidelity point. |
-| `getInteger(...)` | integer/number interaction | Legacy pre-filled default is a fidelity point. |
-| `getFloat(...)` | number interaction | Legacy pre-filled default is a fidelity point. |
-| `getRandom(max)` | deterministic integer random | Preserve exclusive upper bound. |
-| `getTime()` | TeaseScript time capability where appropriate | Legacy value is Unix seconds. |
-| `wait(...)` | `wait` | Clean intent mapping. |
-| `waitWithGauge(...)` | visible blocking timer | Gauge styling is presentation. |
-| `save/load*` | native typed persistence | Do not retain Java Properties as the runtime model. |
-| `setImage(...)` | Stage image operations | Byte-array generated images require a helper/rewrite or warning. |
-| `playSound(...)` | blocking audio | Clean intent mapping. |
-| `playBackgroundSound(...)` | asynchronous/repeating audio | Clean where current media semantics match. |
-| `useUrl(...)` | typed URL-opening capability | Subject to normal TeaseScript capability rules. |
-| returned script name | run/transfer to another `.tease` module | Must not become a returning function call. |
-| `exit()` | package/session exit semantics | Distinct from ordinary script end. |
+| `show(x)` | `say x` | `show` replaced the text area; `show(null)`/`show()` only cleared it and are dropped. |
+| `showButton(label)` | `showButton label` | Legacy default timeout was 30 days; the elapsed-seconds result is unused as a statement. |
+| `showButton(label, s)` / its result | `showButton(label, s)` | Accepted V30 timeout/elapsed form, not implemented yet. |
+| `showPopup(x)` | `showPopup x` | Accepted, not implemented yet; the legacy elapsed result is not mapped. |
+| `getBoolean(text[, yes, no])` | `say text` + `(choose yes: ..., no: ...) == "yes"` | First button means true; default labels Yes/No. |
+| `getSelectedValue(text, [a, b])` | `say text` + `choose 0: a, 1: b` | Numeric labels return the zero-based index. Runtime lists are a capability gap. |
+| `getString` / `getFloat` | `say text` + `askText` / `askNumber` | Legacy prefill and cancel-to-null are lost. |
+| `getInteger(text, d)` | `askInteger(text)` | Accepted V30 integer input, not implemented yet; prefill lost. |
+| `getBooleans(t, values, defaults)` | `askBooleans(message:, texts:, defaults:)` | Accepted, not implemented yet. |
+| `getRandom(max)` | `randomInteger(0..max)` | Exclusive upper bound; `list[getRandom(list.size())]` becomes `list.random`. |
+| `getTime()` | `getSeconds()` | Unix seconds; TeaseScript `getTime()` is a time-of-day value. |
+| `wait(s)`, `sleep(ms)` | `wait s`, `wait ms ms` | |
+| `waitWithGauge(s)` | `timer s` | Gauge styling is presentation. |
+| `save(k, v)` / `save(k, null)` | `save v as k` / `delete k` | Legacy `save` also removed dotted sub-keys `k.*`. |
+| `loadString(k)` etc. | `load k` | Owner semantics: `null` when missing, no write. In conditions: `load k default false/0/""`. |
+| `setImage(f)` / `setImage(null)` | `showImage f` / `hideImage` | Byte-array images and video files need manual work. |
+| `playSound(f)` | `playAudio f` | Blocking. `playSound(null)` stopped every sound. |
+| `playBackgroundSound(f[, n])` | `playAudio async f` / with `repeat: n times` | Legacy plays `n` passes total and overlaps; `null` stops all sounds (no TeaseScript equivalent). |
+| `useUrl(u)` | `openUrl(u)` | Accepted, not implemented yet. |
+| `setInfos(...)` | header comment | No accepted manifest format yet. |
+| returned script name / `return null` | `run "x.tease"` / `end` | A final `return null` is dropped; chaining is not a function call. |
+| `exit()`, `System.exit(n)` | `exit` | Ends the session; the Player stays open. |
 
 ## Parser recommendation
 
