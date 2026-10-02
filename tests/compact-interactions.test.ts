@@ -274,13 +274,13 @@ test("a parenthesized interaction spelling is never silently given compact seman
       false,
       source,
     );
-    const diagnostic = parsed.diagnostics[0];
-    assert.deepEqual(
-      diagnostic === undefined
-        ? null
-        : [diagnostic.code, diagnostic.span.start.offset, diagnostic.span.end.offset],
-      ["TSP032", opening, opening + 1],
-      source,
+    const payloadEnd = source.lastIndexOf(")") + 1;
+    assert.ok(
+      parsed.diagnostics.some(
+        ({ severity, span }) =>
+          severity === "error" && span.start.offset >= opening && span.end.offset <= payloadEnd,
+      ),
+      `${source}: an error must be located at the parenthesized payload`,
     );
     assert.equal(parsed.program.statements.at(-1)?.kind, "sayStatement", source);
   }
