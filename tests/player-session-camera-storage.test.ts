@@ -33,7 +33,7 @@ before(async () => {
   const server = await createServer({
     configFile: false,
     logLevel: "warn",
-    server: { middlewareMode: true },
+    server: { middlewareMode: true, hmr: false, ws: false },
     appType: "custom",
     optimizeDeps: { noDiscovery: true },
   });
