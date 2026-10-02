@@ -140,6 +140,8 @@ class Parser {
   #recoveredAtStatementBoundary = false;
   /** Inside a media cue position, whose block `{` ends a compact choice. */
   #inCuePosition = false;
+  /** Inside a `save` value or `load` key, whose `as` or `default` ends a compact interaction. */
+  #storageDelimiter: "as" | "default" | null = null;
 
   public constructor(private readonly tokens: readonly Token[]) {}
 
@@ -858,7 +860,7 @@ class Parser {
   /** `save <value> as <key>`; both operands are full expressions. */
   #parseSaveStatement(): SaveStatement | null {
     const command = this.#advance();
-    const value = this.#parseExpression();
+    const value = this.#parseStorageOperand("as");
     if (value === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedExpression,
@@ -875,7 +877,7 @@ class Parser {
       this.#synchronizeStatement(true);
       return null;
     }
-    const key = this.#parseExpression();
+    const key = this.#parseStorageOperand(null);
     if (key === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedStorageKey,
@@ -894,7 +896,7 @@ class Parser {
 
   #parseDeleteStatement(): DeleteStatement | null {
     const command = this.#advance();
-    const key = this.#parseExpression();
+    const key = this.#parseStorageOperand(null);
     if (key === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedStorageKey,
@@ -912,7 +914,18 @@ class Parser {
    */
   *#parseLoadExpression(): ParseTask<LoadExpression | null> {
     const command = this.#advance();
+    const enclosing = this.#storageDelimiter;
+    this.#storageDelimiter = "default";
     const key = yield* parseChild(this.#parseOr());
+    this.#storageDelimiter = null;
+    let defaultValue: Expression | null = null;
+    let missingDefault = false;
+    if (key !== null && this.#checkIdentifier("default")) {
+      this.#advance();
+      defaultValue = yield* parseChild(this.#parseRequiredExpressionTask());
+      missingDefault = defaultValue === null;
+    }
+    this.#storageDelimiter = enclosing;
     if (key === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedStorageKey,
@@ -920,12 +933,7 @@ class Parser {
       );
       return null;
     }
-    let defaultValue: Expression | null = null;
-    if (this.#checkIdentifier("default")) {
-      this.#advance();
-      defaultValue = yield* parseChild(this.#parseRequiredExpressionTask());
-      if (defaultValue === null) return null;
-    }
+    if (missingDefault) return null;
     return Object.freeze({
       kind: "loadExpression",
       key,
@@ -1130,9 +1138,12 @@ class Parser {
   *#parseMediaHandlers(): ParseTask<MediaHandlers | null | false> {
     if (!this.#check(TokenKind.LeftBrace)) return null;
     const enclosingCuePosition = this.#inCuePosition;
+    const enclosingStorageDelimiter = this.#storageDelimiter;
     this.#inCuePosition = false;
+    this.#storageDelimiter = null;
     const handlers = yield* parseChild(this.#parseMediaHandlerBlock());
     this.#inCuePosition = enclosingCuePosition;
+    this.#storageDelimiter = enclosingStorageDelimiter;
     return handlers;
   }
 
@@ -1616,9 +1627,12 @@ class Parser {
   /** A statement block; statements inside it are not part of an enclosing cue position. */
   *#parseBlock(): ParseTask<Block | null> {
     const enclosingCuePosition = this.#inCuePosition;
+    const enclosingStorageDelimiter = this.#storageDelimiter;
     this.#inCuePosition = false;
+    this.#storageDelimiter = null;
     const block = yield* parseChild(this.#parseBlockStatements());
     this.#inCuePosition = enclosingCuePosition;
+    this.#storageDelimiter = enclosingStorageDelimiter;
     return block;
   }
 
@@ -2213,7 +2227,7 @@ class Parser {
 
     if (interactionKind !== "choice") {
       const hint = isExpressionStart(this.#peek()) ? yield* parseChild(this.#parseOr()) : null;
-      if (this.#check(TokenKind.KeywordAs)) {
+      if (this.#check(TokenKind.KeywordAs) && !this.#atStorageDelimiter()) {
         this.#reportSpan(
           parserDiagnosticCode.unsupportedInteractionForm,
           `The 'as speaker' clause must appear immediately after '${command.lexeme}'.`,
@@ -2336,8 +2350,24 @@ class Parser {
       this.#check(TokenKind.RightBrace) ||
       this.#check(TokenKind.RightParenthesis) ||
       this.#check(TokenKind.RightBracket) ||
-      this.#check(TokenKind.InterpolationEnd)
+      this.#check(TokenKind.InterpolationEnd) ||
+      this.#atStorageDelimiter()
     );
+  }
+
+  #atStorageDelimiter(): boolean {
+    return this.#storageDelimiter === "as"
+      ? this.#check(TokenKind.KeywordAs)
+      : this.#storageDelimiter === "default" && this.#checkIdentifier("default");
+  }
+
+  /** Parses a storage operand; `delimiter` ends a compact interaction inside it. */
+  #parseStorageOperand(delimiter: "as" | "default" | null): Expression | null {
+    const enclosing = this.#storageDelimiter;
+    this.#storageDelimiter = delimiter;
+    const operand = this.#parseExpression();
+    this.#storageDelimiter = enclosing;
+    return operand;
   }
 
   #interactionChoiceLabel(token: Token): Identifier | import("./ast.js").NumberLiteral {

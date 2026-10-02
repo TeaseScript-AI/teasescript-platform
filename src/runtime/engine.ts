@@ -55,12 +55,7 @@ import type {
   SayEvent,
   ScriptStorageChangedEvent,
 } from "./events.js";
-import {
-  assertPersistable,
-  storageKey,
-  WRITE_KEY_MESSAGE,
-  writeScriptStorage,
-} from "./script-storage.js";
+import { assertPersistable, storageKey, WRITE_KEY_MESSAGE } from "./script-storage.js";
 import type { XorShift32State } from "./random.js";
 import {
   cloneCapturedSerializableValue,
@@ -2116,7 +2111,7 @@ function writeStorage(
   );
   assertPersistable(value, instruction.span);
   const sequence = takeSequence(snapshot);
-  writeScriptStorage(snapshot, key, value);
+  evaluator.writeScriptStorage(key, value);
   events.push(
     Object.freeze({
       kind: "scriptStorageChanged",

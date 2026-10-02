@@ -21,6 +21,7 @@ test("fresh state and JSON checkpoint restore reject invalid external script sto
 
   for (const [name, invalid] of [
     ["non-array", {}],
+    ["null", null],
     ["non-string key", [{ key: 1, value: "value" }]],
     [
       "duplicate key",

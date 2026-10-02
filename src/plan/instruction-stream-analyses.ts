@@ -1035,11 +1035,6 @@ function canonicalHandoffConsumesTemporary(
     case "prepareReference":
       expression = instruction.expression;
       break;
-    case "storageWrite":
-      return (
-        expressionGuaranteesTemporaryEvaluation(instruction.value, temporaryId) ||
-        expressionGuaranteesTemporaryEvaluation(instruction.key, temporaryId)
-      );
     case "say":
       return (
         expressionGuaranteesTemporaryEvaluation(instruction.presentation, temporaryId) ||

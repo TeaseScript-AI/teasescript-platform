@@ -32,11 +32,52 @@ export function storageKey(
   return value;
 }
 
-export function findScriptStorageEntry(
-  view: ScriptStorageView,
-  key: string,
-): RuntimeScriptStorageEntrySnapshot | undefined {
-  return view.scriptStorage.find((entry) => entry.key === key);
+/**
+ * Key positions in the session's storage view for one runtime operation, so reads and writes do not scan every
+ * entry. The view stays a plain entry array in snapshots; the index is rebuilt when that array is replaced, such as
+ * after a staged `say` commits its cloned state.
+ */
+export class ScriptStorageIndex {
+  #entries: RuntimeScriptStorageEntrySnapshot[] | null = null;
+  readonly #positions = new Map<string, number>();
+
+  public find(view: ScriptStorageView, key: string): RuntimeScriptStorageEntrySnapshot | undefined {
+    const position = this.#positionsFor(view.scriptStorage).get(key);
+    return position === undefined ? undefined : view.scriptStorage[position];
+  }
+
+  /** Stores a copy of a persistable value, or removes the key when the value is `null`. */
+  public write(view: ScriptStorageView, key: string, value: SerializableRuntimeValue): void {
+    const entries = view.scriptStorage;
+    const positions = this.#positionsFor(entries);
+    const position = positions.get(key);
+    if (value === null) {
+      if (position === undefined) return;
+      // Move the last entry into the removed slot; entry order carries no meaning.
+      const last = entries.pop()!;
+      positions.delete(key);
+      if (position < entries.length) {
+        entries[position] = last;
+        positions.set(last.key, position);
+      }
+      return;
+    }
+    const stored = cloneCapturedSerializableValue(value);
+    if (position !== undefined) entries[position]!.value = stored;
+    else {
+      positions.set(key, entries.length);
+      entries.push({ key, value: stored });
+    }
+  }
+
+  #positionsFor(entries: RuntimeScriptStorageEntrySnapshot[]): Map<string, number> {
+    if (this.#entries !== entries) {
+      this.#entries = entries;
+      this.#positions.clear();
+      for (const [position, entry] of entries.entries()) this.#positions.set(entry.key, position);
+    }
+    return this.#positions;
+  }
 }
 
 export function assertPersistable(
@@ -50,22 +91,6 @@ export function assertPersistable(
       span,
     );
   }
-}
-
-/** Stores a copy of a persistable value, or removes the key when the value is `null`. */
-export function writeScriptStorage(
-  view: ScriptStorageView,
-  key: string,
-  value: SerializableRuntimeValue,
-): void {
-  const index = view.scriptStorage.findIndex((entry) => entry.key === key);
-  if (value === null) {
-    if (index >= 0) view.scriptStorage.splice(index, 1);
-    return;
-  }
-  const stored = cloneCapturedSerializableValue(value);
-  if (index >= 0) view.scriptStorage[index]!.value = stored;
-  else view.scriptStorage.push({ key, value: stored });
 }
 
 /** Rejects a stored value that does not match the declared type of a direct `let x: T = load ...`. */

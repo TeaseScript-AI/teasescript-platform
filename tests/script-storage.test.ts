@@ -438,3 +438,61 @@ test("persisted-value type checks exclude missing keys, defaults, and non-direct
   assert.equal(binding(result.snapshot, "indirect"), "stored");
   assert.deepEqual(changes(result.events), []);
 });
+
+test("compact interactions end at the save 'as' and the load 'default' delimiters", () => {
+  const compiled = plan(
+    'save askText "Your name?" as "name"\nlet pick = load choose "a", "b" default "fallback"\nexit',
+  );
+  const pending = run(compiled, createFreshRuntimeSnapshot(compiled));
+  const action = pending.snapshot.foregroundAction;
+  assert.ok(action?.kind === "interaction" && action.interactionKind === "text");
+  const completed = completeAction(compiled, pending.snapshot, {
+    actionId: action.actionId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: { kind: "submittedText", submittedText: "Ada" },
+  });
+  const choosing = run(compiled, completed.snapshot);
+  assert.deepEqual(
+    changes([...completed.events, ...choosing.events]).map(({ key, value }) => ({ key, value })),
+    [{ key: "name", value: "Ada" }],
+  );
+  const choice = choosing.snapshot.foregroundAction;
+  assert.ok(choice?.kind === "interaction" && choice.interactionKind === "choice");
+
+  const misplaced = compileSource('let name = askText "Your name?" as narrator');
+  assert.deepEqual(
+    misplaced.diagnostics.map(({ code }) => code),
+    ["TSP032"],
+  );
+});
+
+test("deleting a key keeps every other stored key readable and writable", () => {
+  const result = assertRuntimeResumeEquivalent(
+    [
+      'save 1 as "a"',
+      'save 2 as "b"',
+      'save 3 as "c"',
+      'delete "a"',
+      'save 4 as "d"',
+      'save 20 as "b"',
+      'let a = load "a"',
+      'let b = load "b"',
+      'let c = load "c"',
+      'let d = load "d"',
+      "exit",
+    ].join("\n"),
+  );
+  assert.equal(binding(result.finalSnapshot, "a"), null);
+  assert.equal(binding(result.finalSnapshot, "b"), 20);
+  assert.equal(binding(result.finalSnapshot, "c"), 3);
+  assert.equal(binding(result.finalSnapshot, "d"), 4);
+  assert.deepEqual(
+    new Map(result.finalSnapshot.scriptStorage.map(({ key, value }) => [key, value])),
+    new Map([
+      ["b", 20],
+      ["c", 3],
+      ["d", 4],
+    ]),
+  );
+});

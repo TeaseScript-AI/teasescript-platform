@@ -371,7 +371,8 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
       `maxCallDepth must be an integer from 1 through ${MAX_SUPPORTED_CALL_DEPTH}.`,
     );
   }
-  const scriptStorage = capturedOptions.scriptStorage ?? [];
+  const scriptStorage =
+    capturedOptions.scriptStorage === undefined ? [] : capturedOptions.scriptStorage;
   const scriptStorageFailure = validateScriptStorageEntries(scriptStorage, "scriptStorage");
   if (scriptStorageFailure !== null) throw new TypeError(scriptStorageFailure);
   for (const [name, value] of Object.entries(globals)) {
