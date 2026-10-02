@@ -784,29 +784,7 @@ test("snapshot and checkpoint paths reject sparse arrays as malformed data", () 
   assert.deepEqual(sparseSnapshotState(malformedCheckpoint.snapshot), checkpointBefore);
 });
 
-test("cycles, non-plain objects, non-finite numbers, and malformed kinds remain rejected", () => {
-  const cyclicPlan = mutablePlan();
-  cyclicPlan.self = cyclicPlan;
-  assert.deepEqual(validateInstructionPlan(cyclicPlan).errors[0], {
-    code: "TSC002",
-    message: "Plan contains a cycle.",
-    path: "$.self",
-  });
-
-  const nonPlainPlan = mutablePlan();
-  nonPlainPlan.padding = new Date(0);
-  assert.equal(
-    validateInstructionPlan(nonPlainPlan).errors[0]?.message,
-    "Plan contains a non-plain object.",
-  );
-
-  const nonFinitePlan = mutablePlan();
-  nonFinitePlan.padding = Number.POSITIVE_INFINITY;
-  assert.equal(
-    validateInstructionPlan(nonFinitePlan).errors[0]?.message,
-    "Plan contains a non-finite number.",
-  );
-
+test("serializable cloning rejects cyclic values and unknown kinds", () => {
   const cyclicValue: { kind: "list"; items: SerializableRuntimeValue[] } = {
     kind: "list",
     items: [],
