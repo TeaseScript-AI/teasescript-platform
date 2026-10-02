@@ -267,7 +267,8 @@ async function pointerScenario(cdp) {
       const text = [...item.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim().length > 0);
       const range = document.createRange();
       range.selectNodeContents(text);
-      const rect = range.getBoundingClientRect();
+      // Drag along the first rendered line; a wrapped message's bounding box also covers the gap between lines.
+      const rect = range.getClientRects()[0];
       return {startX: rect.left + 2, endX: rect.right - 2, y: rect.top + rect.height / 2};
     })()`,
   );
