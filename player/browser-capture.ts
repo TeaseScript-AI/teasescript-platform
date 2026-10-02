@@ -123,30 +123,43 @@ async function grabFrame(track: MediaStreamTrack, released: AbortSignal): Promis
   video.muted = true;
   video.playsInline = true;
   video.srcObject = new MediaStream([track]);
-  // Firefox never settles `play()` for a stopped track, so a release must end the wait itself.
-  const abandoned = new Promise<never>((_resolve, reject) =>
-    released.addEventListener("abort", () => reject(released.reason), { once: true }),
-  );
-  // The losing side of each race below may reject later; that rejection is expected and ignored.
-  abandoned.catch(() => {});
   try {
-    await Promise.race([video.play(), abandoned]);
+    // Firefox never settles `play()` for a stopped track, so a release must end the wait itself.
+    await untilReleased(video.play(), released);
     if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA)
-      await Promise.race([
+      await untilReleased(
         new Promise<void>((resolve, reject) => {
           video.addEventListener("loadeddata", () => resolve(), { once: true });
           video.addEventListener("error", () => reject(new DOMException("", "AbortError")), {
             once: true,
           });
         }),
-        abandoned,
-      ]);
+        released,
+      );
     if (video.videoWidth === 0 || video.videoHeight === 0)
       throw new DOMException("The camera delivered no frame.", "NotReadableError");
     return drawPixels(video, video.videoWidth, video.videoHeight);
   } finally {
     video.pause();
     video.srcObject = null;
+  }
+}
+
+/**
+ * Settles like `work`, or rejects once `released` aborts. The abort listener is removed when the call settles, so
+ * repeated captures on a long-open camera do not accumulate listeners.
+ */
+export async function untilReleased<T>(work: Promise<T>, released: AbortSignal): Promise<T> {
+  released.throwIfAborted();
+  let onAbort = () => {};
+  const abandoned = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(released.reason);
+    released.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([work, abandoned]);
+  } finally {
+    released.removeEventListener("abort", onAbort);
   }
 }
 

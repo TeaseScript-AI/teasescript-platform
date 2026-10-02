@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { getEventListeners } from "node:events";
 import test from "node:test";
 import {
   CaptureDevice,
@@ -10,6 +11,7 @@ import {
   type CaptureRequest,
   type CaptureTrack,
 } from "../player/capture-device.js";
+import { untilReleased } from "../player/browser-capture.js";
 import { RgbaImage } from "../player/rgba-image.js";
 import { SessionMediaStore } from "../player/session-media.js";
 
@@ -514,4 +516,19 @@ test("a reference kept from an earlier session never resolves to media of a late
   assert.notEqual(captured.reference, kept);
   assert.equal(later.get(kept), null);
   assert.equal(later.url(kept), null);
+});
+
+test("waiting on a long-open camera leaves no abort listener behind", async () => {
+  const released = new AbortController();
+  for (let grab = 0; grab < 8; grab++)
+    assert.equal(await untilReleased(Promise.resolve(grab), released.signal), grab);
+  await assert.rejects(
+    untilReleased(Promise.reject(new Error("no frame")), released.signal),
+    /no frame/u,
+  );
+  assert.equal(getEventListeners(released.signal, "abort").length, 0);
+  const pending = untilReleased(new Promise(() => {}), released.signal);
+  released.abort(new DOMException("released", "AbortError"));
+  await assert.rejects(pending, { name: "AbortError" });
+  assert.equal(getEventListeners(released.signal, "abort").length, 0);
 });
