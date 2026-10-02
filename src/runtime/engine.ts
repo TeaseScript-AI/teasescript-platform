@@ -77,6 +77,7 @@ import {
   type RuntimeTemporarySnapshot,
 } from "./state.js";
 import type {
+  RuntimeCaptureActionSnapshot,
   RuntimeChatPacingGateActionSnapshot,
   RuntimeInteractionActionSnapshot,
   RuntimePreparedSayOutputSnapshot,
@@ -734,6 +735,47 @@ function executePlannedInstruction(
           kind: "actionRequested",
           sequence,
           action: cloneInteractionAction(action),
+          span: copySpan(instruction.span),
+        } satisfies ActionRequestedEvent),
+      );
+      return;
+    }
+    case "capture": {
+      if (
+        snapshot.temporaries.some((temporary) => temporary.id === instruction.destinationTemporary)
+      ) {
+        throw fault("TSR050", "Capture result destination is already occupied.", instruction.span);
+      }
+      if (
+        !Number.isSafeInteger(snapshot.nextActionId) ||
+        snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
+      ) {
+        throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+      }
+      // The request, a possible unavailable-camera warning, and the completion.
+      assertEventSequenceCapacity(snapshot, 3, instruction.span);
+      const sequence = takeSequence(snapshot);
+      const action: RuntimeCaptureActionSnapshot = Object.freeze({
+        kind: "capture",
+        capture: instruction.capture,
+        actionId: snapshot.nextActionId,
+        owningInstruction: snapshot.nextInstruction,
+        continuationInstruction: snapshot.nextInstruction + 1,
+        ownerCallFrameId: snapshot.callFrames.at(-1)?.id ?? null,
+        scopeDepth: snapshot.frames.length,
+        loopDepth: snapshot.loopFrames.length,
+        destinationTemporary: instruction.destinationTemporary,
+        createdAtMs: snapshot.currentSessionTimeMs,
+        requestEventSequence: sequence,
+      });
+      snapshot.nextActionId += 1;
+      snapshot.foregroundAction = action;
+      snapshot.status = "waiting";
+      events.push(
+        Object.freeze({
+          kind: "actionRequested",
+          sequence,
+          action: { ...action },
           span: copySpan(instruction.span),
         } satisfies ActionRequestedEvent),
       );

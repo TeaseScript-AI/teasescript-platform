@@ -93,6 +93,7 @@ export type Instruction =
   | StorageWriteInstruction
   | PlayMediaInstruction
   | InteractionInstruction
+  | CaptureInstruction
   | ExitInstruction;
 
 interface InstructionBase {
@@ -488,6 +489,16 @@ export interface PreparedInteractionInstruction extends InstructionBase {
 }
 
 export type InteractionInstruction = StaticInteractionInstruction | PreparedInteractionInstruction;
+
+/**
+ * `takePhoto()`: waits until the Player answers with a still from the session camera or reports it unavailable. The
+ * result is the captured image reference, or `null`; it is always handed off through `destinationTemporary`.
+ */
+export interface CaptureInstruction extends InstructionBase {
+  readonly kind: "capture";
+  readonly capture: "photo";
+  readonly destinationTemporary: number;
+}
 
 export interface ExitInstruction extends InstructionBase {
   readonly kind: "exit";

@@ -605,7 +605,7 @@ function cloneForegroundAction<T extends RuntimeForegroundActionSnapshot>(action
 function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendingActionSnapshot {
   if (action.kind === "timer") return { ...action, timer: cloneTimer(action.timer) };
   if (action.kind === "media") return { ...action, media: cloneMedia(action.media) };
-  if (action.kind === "mediaPlayback") return { ...action };
+  if (action.kind === "mediaPlayback" || action.kind === "capture") return { ...action };
   if (action.kind === "delay")
     return {
       kind: "delay",
@@ -697,7 +697,11 @@ function cloneSettlement(
       deadlineMs: settlement.deadlineMs,
       completedAtMs: settlement.completedAtMs,
     };
-  if (settlement.actionKind === "chatPacingGate" || settlement.actionKind === "mediaPlayback")
+  if (
+    settlement.actionKind === "chatPacingGate" ||
+    settlement.actionKind === "mediaPlayback" ||
+    settlement.actionKind === "capture"
+  )
     return { ...settlement };
   return {
     actionId: settlement.actionId,
@@ -2348,6 +2352,8 @@ function instructionKilledTemporaries(instruction: Instruction): ReadonlySet<num
       return new Set(instruction.temporaryIds);
     case "callFunction":
       return new Set([instruction.destinationTemporary]);
+    case "capture":
+      return new Set([instruction.destinationTemporary]);
     case "interaction":
     case "startTimer":
     case "playMedia":
@@ -2380,7 +2386,7 @@ function validateStatusConsistency(
     const hasForegroundAction = isPlainRecord(action);
     const hasAllowedActionKind =
       hasForegroundAction &&
-      isOneOf(action.kind, ["delay", "interaction", "chatPacingGate", "mediaPlayback"]);
+      isOneOf(action.kind, ["delay", "interaction", "chatPacingGate", "mediaPlayback", "capture"]);
     if (!hasAllowedActionKind) {
       errors.push("Waiting runtime state requires one foreground action.");
     }
@@ -2593,6 +2599,9 @@ function validateCurrentTemporaryRequirements(
   }
   if (instruction.kind === "callFunction" && present.has(instruction.destinationTemporary)) {
     errors.push("Runtime function result destination is already occupied.");
+  }
+  if (instruction.kind === "capture" && present.has(instruction.destinationTemporary)) {
+    errors.push("Runtime capture result destination is already occupied.");
   }
 }
 
