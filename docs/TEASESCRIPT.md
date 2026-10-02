@@ -208,7 +208,8 @@ expressions, comments, ranges, deterministic random built-ins, conditionals, loo
 Implemented script storage includes `save`, `load` with an optional lazy default, and `delete`, with a checkpointed
 session view and host-acknowledged atomic writes. Accepted semantics and current type-checking limits are defined in
 specification [§25](specifications/accepted-syntaxes-v30.md#25-persistent-storage-and-keys); the host boundary is defined
-in [Runtime](RUNTIME.md#script-storage). Browser persistence in the Player follows separately.
+in [Runtime](RUNTIME.md#script-storage). The Player keeps script storage in browser local storage
+([data boundary](DATA-AND-API.md#script-storage-in-the-browser)).
 
 Implemented timing includes exact elapsed duration literals/values, cross-unit comparisons, blocking `wait`/`timer`,
 and asynchronous timers with display, labels, handles, lifecycle control, repetition, expiry interrupts, and

@@ -16,6 +16,10 @@ const resolved = new Map<string, string | null>();
 
 export { demoSource };
 
+// A stable, opaque script-storage scope for this package. A production host derives it from the script's and the
+// player's identities so that players sharing a browser never see each other's saved data.
+export const demoStorageScope = "repository-demo";
+
 export function resolveDemoAsset(path: string): string | null {
   let url = resolved.get(path);
   if (url === undefined) {

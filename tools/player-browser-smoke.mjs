@@ -55,6 +55,7 @@ async function main() {
       await setViewport(cdp, 390, 844);
       await selectPlayerExample(cdp);
       await narrowScenario(cdp);
+      await scriptStorageScenario(cdp, origin);
       await demoScenario(cdp, origin);
       console.log(
         "player-browser-smoke: PASS technical playground and the repository demo on /player/",
@@ -386,10 +387,131 @@ async function narrowScenario(cdp) {
   await waitFor(cdp, `document.querySelector('#runtime-status')?.textContent === 'halted'`);
 }
 
+async function scriptStorageScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  const start = "[data-session-activation] button";
+  const messages = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent)`;
+  const openSettings = async () => {
+    await physicalClick(cdp, "[data-settings-trigger]");
+    await waitFor(cdp, `!!document.querySelector('[data-player-settings]')`);
+    await waitFor(cdp, `!!document.querySelector('[data-clear-saved-data]')`);
+  };
+  const reloadBeforeStart = async () => {
+    await cdp.call("Page.reload");
+    await waitFor(
+      cdp,
+      `!!document.querySelector('${start}') && !document.querySelector('[data-player-settings]')`,
+    );
+  };
+  const clearBeforeStart = async () => {
+    await openSettings();
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-clear-saved-data]')?.disabled === false`,
+      15_000,
+      "Saved data can be cleared before Start after the provider has loaded",
+    );
+    await physicalClick(cdp, "[data-clear-saved-data]");
+    await waitFor(cdp, `!!document.querySelector('[data-clear-saved-data-confirm]')`);
+    await physicalClick(cdp, "[data-clear-saved-data-confirm]");
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-player-setting="saved-data"]')?.textContent.includes('Saved script data cleared.')`,
+    );
+  };
+
+  // This is the first demo run in main's fresh Chromium profile.
+  await navigate(cdp, `${origin}/player/`);
+  await waitFor(cdp, `!!document.querySelector('${start}')`);
+  await physicalClick(cdp, start);
+  // Reach the introductory Session message, after the returning-visit branch, so its absence is conclusive.
+  await waitFor(
+    cdp,
+    `${messages}.some((text) => text.includes('Some of her messages make you wait.'))`,
+    15_000,
+  );
+  assertEqual(
+    await value(cdp, `${messages}.some((text) => text.includes('Back again'))`),
+    false,
+    "The first visit has no returning-visit message",
+  );
+
+  await reloadBeforeStart();
+  await physicalClick(cdp, start);
+  await waitFor(
+    cdp,
+    `${messages}.some((text) => text.includes('Back again. Visit 2.'))`,
+    15_000,
+    "Reloading after the first visible demo message must show Back again. Visit 2.",
+  );
+  await openSettings();
+  assertEqual(
+    await value(cdp, `document.querySelector('[data-clear-saved-data]').disabled`),
+    true,
+    "Saved data cannot be cleared while the session runs",
+  );
+
+  await reloadBeforeStart();
+  await clearBeforeStart();
+  await reloadBeforeStart();
+  await physicalClick(cdp, start);
+  // Reach the introductory Session message so an absent returning-visit line is conclusive.
+  await waitFor(
+    cdp,
+    `${messages}.some((text) => text.includes('Some of her messages make you wait.'))`,
+    15_000,
+  );
+  assertEqual(
+    await value(cdp, `${messages}.some((text) => text.includes('Back again'))`),
+    false,
+    "Clearing saved data resets the demo's visit count",
+  );
+
+  // Leave the existing end-to-end demo scenario with its original first-visit state.
+  await reloadBeforeStart();
+  await clearBeforeStart();
+  await reloadBeforeStart();
+
+  // A denied read makes the next run session-local and disables clearing even before Start.
+  const deniedStorage = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
+    source: `Object.defineProperty(Storage.prototype, 'length', {
+      get() { throw new Error('Storage denied for smoke'); }
+    });`,
+  });
+  try {
+    await reloadBeforeStart();
+    await openSettings();
+    assertEqual(
+      await value(cdp, `document.querySelector('[data-clear-saved-data]').disabled`),
+      true,
+      "Saved data cannot be cleared when storage is session-local",
+    );
+    await physicalClick(cdp, "[data-settings-trigger]");
+    await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
+    await physicalClick(cdp, start);
+    await waitFor(cdp, `${messages}.some((text) => text.includes('Eyes on me.'))`);
+  } finally {
+    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", {
+      identifier: deniedStorage.result.identifier,
+    });
+  }
+  await reloadBeforeStart();
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { try { return localStorage.length >= 0; } catch { return false; } })()`,
+    ),
+    true,
+    "Browser storage is usable again before the next scenario",
+  );
+}
+
 // Plays the repository demo on the maintained /player/ route of the built Player with trusted input, so the Start
 // click is the user activation its audio relies on. Checks rely on the demo's authored text and timer labels.
 async function demoScenario(cdp, origin) {
-  const { identifier } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
+  const {
+    result: { identifier },
+  } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
     source: `window.__played = [];
       const play = HTMLMediaElement.prototype.play;
       HTMLMediaElement.prototype.play = function () {

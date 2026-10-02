@@ -68,6 +68,14 @@ function toggleThemeMode() {
 }
 
 const session = computed(() => props.player.session.value);
+const savedData = computed(() =>
+  props.player.hasScriptStorage
+    ? {
+        canClear: props.player.canClearScriptStorage.value,
+        clear: props.player.clearScriptStorage,
+      }
+    : null,
+);
 const noSpeakers: Readonly<Record<string, PlayerSpeakerPresentation>> = Object.freeze({});
 const transcript = computed(() =>
   session.value
@@ -132,6 +140,7 @@ async function toggleFullscreen() {
     :stage-height="stageHeight"
     :media-aspect="mediaAspect"
     :fullscreen="fullscreen"
+    :saved-data="savedData"
     v-model:contrast="contrast"
     v-model:titlebar-option="titlebarOption"
   >
