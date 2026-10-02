@@ -2526,6 +2526,86 @@ async function directDemoLatestChecks(page) {
   }
 }
 
+// Authored markup reaches the transcript only as controlled text, style and link pieces: HTML-like text stays literal,
+// and a validated link opens a separate browsing context without opener or referrer. This group replaces the
+// development scenario with its own script.
+async function markupLinkChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  const source = [
+    'say "Literal <b>tags</b> & <img src=x onerror=window.markupInjected=1> [Docs](https://example.com/docs) and https://example.com/bare", instant',
+    'showButton "Done"',
+  ].join("\n");
+  await page.route("**/src/runtimeScenario.ts*", (route) =>
+    route.fulfill({
+      contentType: "text/javascript",
+      body: `export const openingScenario = ${JSON.stringify(source)};`,
+    }),
+  );
+  await page
+    .context()
+    .route("https://example.com/**", (route) =>
+      route.fulfill({ contentType: "text/html", body: "<title>Linked page</title>" }),
+    );
+  await page.reload();
+  const markup = page
+    .locator(".transcript-entry .transcript-markup")
+    .filter({ hasText: "Literal" });
+  await markup.waitFor();
+  const rendered = await markup.evaluate((element) => ({
+    text: element.textContent,
+    elements: element.querySelectorAll("b, img, script").length,
+    injected: "markupInjected" in window,
+    links: Array.from(element.querySelectorAll("a"), (link) => ({
+      href: link.href,
+      target: link.target,
+      rel: link.rel.split(/\s+/u).sort().join(" "),
+    })),
+  }));
+  check(
+    rendered.text.includes(
+      "Literal <b>tags</b> & <img src=x onerror=window.markupInjected=1> Docs",
+    ) &&
+      rendered.elements === 0 &&
+      !rendered.injected,
+    `Authored HTML did not stay literal: ${JSON.stringify(rendered)}`,
+  );
+  check(
+    JSON.stringify(rendered.links) ===
+      JSON.stringify(
+        ["https://example.com/docs", "https://example.com/bare"].map((href) => ({
+          href,
+          target: "_blank",
+          rel: "noopener noreferrer",
+        })),
+      ),
+    `Authored links are not isolated new-context links: ${JSON.stringify(rendered.links)}`,
+  );
+  const playerUrl = page.url();
+  const [linked] = await Promise.all([
+    page.context().waitForEvent("page", { timeout: 5_000 }),
+    markup.getByRole("link", { name: "Docs", exact: true }).click(),
+  ]);
+  await linked.waitForLoadState();
+  const isolation = await linked.evaluate(() => ({
+    opener: window.opener === null,
+    referrer: document.referrer,
+  }));
+  check(
+    linked.url() === "https://example.com/docs" && isolation.opener && isolation.referrer === "",
+    `The link did not open an isolated browsing context: ${JSON.stringify(isolation)}`,
+  );
+  await linked.close();
+  check(
+    page.url() === playerUrl &&
+      JSON.stringify(await page.locator("[data-foreground-controls] button").allInnerTexts()) ===
+        JSON.stringify(["Done"]),
+    "Opening the link replaced the Player session",
+  );
+  return "PASS authored HTML stays literal and links open an isolated browsing context";
+}
+
 const groups = [
   topBarChecks,
   tooltipDelayChecks,
@@ -2549,6 +2629,7 @@ const groups = [
   backgroundControlPlacementChecks,
   mediaPlaybackChecks,
   directDemoLatestChecks,
+  markupLinkChecks,
   timerChecks,
   transcriptNativeWheelChecks,
   contentAlignmentChecks,
