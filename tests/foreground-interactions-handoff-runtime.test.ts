@@ -538,9 +538,10 @@ function externalInstructions(plan: ExternalRecord): unknown[] {
 }
 
 test("PR194 matrix: each validator-accepted handoff category consumes the result once", () => {
-  // One row per handoff category that ADR 0018 accepts (transfer, discard, exit, return). The
-  // compiler emits only the transfer shape; the other rows are validator-accepted plans that no
-  // producer emits yet.
+  // One row per handoff category that ADR 0018 accepts (consume, transfer, discard, exit, return).
+  // The transfer row also covers consume: both are one local instruction reading the destination,
+  // validated by the same shape check and dropped on the same engine path. The compiler emits only
+  // the transfer shape; the other rows are validator-accepted plans that no producer emits yet.
   const rows: readonly CanonicalHandoffRow[] = [
     {
       id: "PR194-category-transfer",
@@ -1413,10 +1414,10 @@ test("PR194 matrix: handoff shapes that would reach invalid runtime states are r
       }, targetInjected.plan),
       paths: [`$.instructions[${targetInjected.handoffInstruction}]`],
     },
-    // Provisional regression oracle for the current fixed local shape in docs/RUNTIME.md: a handoff
-    // instruction that does not read the destination is rejected, although accepting it has no
-    // known state consequence because the engine drops the handoff after that instruction either
-    // way. Remove this row when the local shape is reassessed.
+    // Scoped regression oracle for the consume requirement as the current fixed local shape in
+    // docs/RUNTIME.md analyses it: a handoff instruction that does not read the destination is
+    // rejected, although accepting it has no known state consequence because the engine drops the
+    // handoff after that instruction either way. Reassess this row with the local shape.
     {
       id: "PR194-provisional-non-consuming-handoff",
       plan: mutated((plan) => {

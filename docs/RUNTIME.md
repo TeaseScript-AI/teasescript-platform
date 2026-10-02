@@ -85,11 +85,11 @@ continuation.
 
 The compact compiler fully lowers these forms into the versioned plan. Static control text is embedded directly in the interaction instruction. Dynamic control text first captures the requesting speaker, evaluates payload expressions in source order, and stores one prepared UI value; dynamic `choose` batches all option expressions into one prepared list rather than emitting one interaction-preparation instruction per option. The runtime materializes and validates that prepared UI atomically before publishing the pending action. No Standard Library lookup or suspended JavaScript/TypeScript call survives the compile boundary.
 
-Result-bearing text, number, and choice instructions require the destination temporary to be absent when the
-interaction is requested. Successful completion atomically writes the typed result into that prepared ordinary runtime
-temporary, records one nullable single-use `interactionResultHandoff` authority, and advances to the next instruction
-without executing it. The handoff contains only the completed action identity, owning and continuation positions, owner
-call frame, destination temporary, and canonical result. Snapshot validation checks it independently of the bounded
+Result-bearing text, number, and choice instructions require the destination temporary to be absent when the interaction
+is requested. Successful completion atomically writes the typed result into that prepared ordinary runtime temporary,
+records one nullable single-use `interactionResultHandoff` authority, and advances to the next instruction without
+executing it. The handoff contains only the completed action identity, owning and continuation positions, owner call
+frame, destination temporary, and canonical result. Snapshot validation checks it independently of the bounded
 `lastSettlement` replay data, so persisted data that pairs it with a newer settlement cannot bypass the
 value-consistency check before consumption. A canonical plan then either discards the temporary directly, returns or
 exits the owning runtime region, or performs one ordinary local consume/transfer instruction followed immediately by
@@ -98,10 +98,10 @@ ordinary binding, prepared argument, assignment, or other runtime destination, n
 remains during cleanup or later execution. A second blocking action, a second producer of the destination, a missing or
 different cleanup, and an independent control-flow entry into the handoff are invalid inside that short boundary,
 because each would let a validated plan reach a state that snapshot validation rejects. The current validator enforces
-this through a fixed local shape rather than whole-plan result-liveness analysis; its further limits (the handoff
-instruction must read the destination, and no branch, loop edge, user-function call, or control-flow target onto the
-cleanup may occur there) are provisional POC policy, not language semantics. A result-free button may be the terminal
-root instruction and uses the existing canonical settled root-end transition.
+this through a fixed local shape rather than whole-plan result-liveness analysis; its conservative analysis of which
+expression positions count as reading the destination, and its exclusion of branches, loop edges, user-function calls,
+and control-flow targets onto the cleanup, are provisional POC policy, not language semantics. A result-free button may
+be the terminal root instruction and uses the existing canonical settled root-end transition.
 
 Completion semantics are:
 
@@ -118,8 +118,8 @@ aggregate UTF-8 bytes for one retained interaction definition, and option count.
 independent per-field byte ceiling; each preflights against the remaining definition aggregate. Exact numeric values and
 their provisional Owner POC reassessment route live in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md); they are not accepted
 capacity or source targets. Bounded validation rejects impossible UTF-16 lengths before encoding and encodes no further
-field once the applicable byte budget fails, so validation work stays bounded by the budget rather than by the size of
-the data. The text-completion limit applies to the raw host string before CRLF/CR-to-LF normalization, which cannot
+field once the applicable byte budget fails, so encoding work stays bounded by the byte budget rather than by the total
+string size. The text-completion limit applies to the raw host string before CRLF/CR-to-LF normalization, which cannot
 increase its UTF-8 size. Over-limit data is rejected without truncation, clamping, or partial state mutation.
 
 Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `WhiteSpace` and `LineTerminator` classification represented by the engine's Unicode-aware regular expression. The identifier-choice label grammar is the current ASCII TeaseScript identifier form. Choice duplicate detection and completion matching use bounded native sets or one linear option pass.
