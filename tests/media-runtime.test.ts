@@ -1159,31 +1159,27 @@ test("anchor coherence tolerates rounding only at the magnitude of segment progr
   corrupt(passes, (media) => (media.segmentPasses = 1), "far anchor passes");
 });
 
-test(
-  "the playhead projection stays finite and in range at pass counts beyond exact integers",
-  { timeout: 10_000 },
-  () => {
-    for (const [endAt, repeat] of [
-      ["0.1 ms", "true"],
-      ["1.1 ms", "true"],
-      ["0.1 ms", "9007199254740991 times"],
-      ["0.0000000000000001 ms", "true"],
-    ] as const) {
-      const session = new Session(
-        `let m = playAudio(file: "a", async: true, repeat: ${repeat}, endAt: ${endAt}) {\n  at 0 ms { }\n}\nwait 10`,
-      );
-      session.load(1, 100);
-      session.snapshot = observeTime(session.plan, session.snapshot, Number.MAX_SAFE_INTEGER, [
-        { mediaId: 1, segment: 1, progressMs: Number.MAX_SAFE_INTEGER },
-      ]).snapshot;
-      const [media] = mediaPlaybackProjection(session.snapshot);
-      assert.ok(
-        media !== undefined && media.playheadMs >= 0 && media.playheadMs <= media.endMs!,
-        `${endAt} ${repeat}`,
-      );
-    }
-  },
-);
+test("the playhead projection stays finite and in range at pass counts beyond exact integers", () => {
+  for (const [endAt, repeat] of [
+    ["0.1 ms", "true"],
+    ["1.1 ms", "true"],
+    ["0.1 ms", "9007199254740991 times"],
+    ["0.0000000000000001 ms", "true"],
+  ] as const) {
+    const session = new Session(
+      `let m = playAudio(file: "a", async: true, repeat: ${repeat}, endAt: ${endAt}) {\n  at 0 ms { }\n}\nwait 10`,
+    );
+    session.load(1, 100);
+    session.snapshot = observeTime(session.plan, session.snapshot, Number.MAX_SAFE_INTEGER, [
+      { mediaId: 1, segment: 1, progressMs: Number.MAX_SAFE_INTEGER },
+    ]).snapshot;
+    const [media] = mediaPlaybackProjection(session.snapshot);
+    assert.ok(
+      media !== undefined && media.playheadMs >= 0 && media.playheadMs <= media.endMs!,
+      `${endAt} ${repeat}`,
+    );
+  }
+});
 
 test("crossings never become due before an on-time observation could report them", () => {
   // A control at 10 ms on the curve progress = time does not reach a 10.1 ms range end, however late it is observed.
