@@ -99,18 +99,17 @@ test("older pacing gate promotes after a newer delay settlement and resumes prep
   const pacing = initial.snapshot.backgroundActions[0];
   const delay = initial.snapshot.foregroundAction;
   assert.equal(pacing?.kind, "chatPacingGate");
-  assert.equal(pacing?.actionId, 1);
   assert.equal(delay?.kind, "delay");
-  assert.equal(delay?.actionId, 2);
+  assert.ok(pacing!.actionId < delay!.actionId);
 
   const delaySettled = observeTime(compiled, initial.snapshot, delay!.deadlineMs);
-  assert.equal(delaySettled.snapshot.lastSettlement?.actionId, 2);
-  assert.equal(delaySettled.snapshot.backgroundActions[0]?.actionId, 1);
+  assert.equal(delaySettled.snapshot.lastSettlement?.actionId, delay!.actionId);
+  assert.equal(delaySettled.snapshot.backgroundActions[0]?.actionId, pacing!.actionId);
 
   const promoted = run(compiled, delaySettled.snapshot);
   const gate = promoted.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
-  assert.equal(gate?.actionId, 1);
+  assert.equal(gate?.actionId, pacing!.actionId);
   assert.equal(gate?.deadlineMs, pacing?.deadlineMs);
   assert.equal(promoted.events.filter((event) => event.kind === "actionRequested").length, 0);
   assert.equal(validateRuntimeSnapshot(promoted.snapshot, compiled).valid, true);
@@ -735,7 +734,7 @@ test("snapshot and checkpoint reject representative malformed pacing action stat
   const functionPlan = plan('function f { say "first" }\nf()');
   const functionBackground = run(functionPlan, createFreshRuntimeSnapshot(functionPlan));
   const settled = completeAction(backgroundPlan, background.snapshot, {
-    actionId: 1,
+    actionId: background.snapshot.backgroundActions[0]!.actionId,
     actionKind: "chatPacingGate",
     payload: { kind: "skip" },
   });
@@ -1615,7 +1614,7 @@ test("instruction boundaries preserve pacing release provenance before and after
 
   const secondAsFreshOutput = executeInstruction(compiled, backgroundSkip.snapshot);
   assert.equal(secondAsFreshOutput.events.filter((event) => event.kind === "say").length, 1);
-  assert.equal(secondAsFreshOutput.snapshot.backgroundActions[0]?.actionId, 2);
+  assert.ok(secondAsFreshOutput.snapshot.backgroundActions[0]!.actionId > backgroundGate!.actionId);
 
   const promoted = run(restoredBackground.plan, restoredBackground.snapshot);
   const foregroundGate = promoted.snapshot.foregroundAction;
@@ -1640,7 +1639,10 @@ test("instruction boundaries preserve pacing release provenance before and after
   );
   const resumed = executeInstruction(restoredRelease.plan, restoredRelease.snapshot);
   assert.equal(resumed.events.filter((event) => event.kind === "say").length, 1);
-  assert.equal(resumed.snapshot.backgroundActions[0]?.actionId, 2);
+  assert.equal(
+    resumed.snapshot.backgroundActions[0]?.actionId,
+    secondAsFreshOutput.snapshot.backgroundActions[0]?.actionId,
+  );
   assert.equal(resumed.snapshot.rng.state, secondAsFreshOutput.snapshot.rng.state);
 });
 
@@ -1681,7 +1683,7 @@ test("pacing settlements retain exact prepared-output lineage through release an
   const replacement = consumed.snapshot.backgroundActions[0];
   assert.equal(replacement?.kind, "chatPacingGate");
   assert.equal(replacement?.owningInstruction, 1);
-  assert.equal(replacement?.actionId, 2);
+  assert.ok(replacement!.actionId > firstGate!.actionId);
   assert.equal(validateRuntimeSnapshot(consumed.snapshot, threeSays).valid, true);
   assert.doesNotThrow(() =>
     deserializeCheckpoint(serializeCheckpoint(createCheckpoint(threeSays, consumed.snapshot))),

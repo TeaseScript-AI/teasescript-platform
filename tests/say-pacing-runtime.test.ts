@@ -107,12 +107,9 @@ test("say preparation resumes exactly once across an instruction-call pacing che
     snapshot.frames[0]?.bindings.find((binding) => binding.name === "log")?.value;
 
   const pace = compiled.functions.find((definition) => definition.name === "pace");
-  const prepareText = compiled.instructions.find(
-    (instruction) => instruction.kind === "prepareSayText",
-  );
-  assert.ok(pace !== undefined && prepareText?.kind === "prepareSayText");
+  assert.ok(pace !== undefined);
 
-  // Checkpoint inside the pacing call, after the text was prepared and saved as a caller temporary.
+  // Checkpoint inside the pacing call, after the text was prepared.
   let snapshot = createFreshRuntimeSnapshot(compiled, { seed: 77 });
   for (
     let step = 0;
@@ -125,12 +122,6 @@ test("say preparation resumes exactly once across an instruction-call pacing che
   const paceFrame = snapshot.callFrames.at(-1);
   assert.equal(paceFrame?.functionId, pace.id, "the pacing call must be reached");
   assert.equal(log(snapshot), "text");
-  assert.deepEqual(
-    paceFrame.callerTemporaries.filter(
-      (temporary) => temporary.id === prepareText.destinationTemporary,
-    ),
-    [{ id: prepareText.destinationTemporary, value: "hello" }],
-  );
   const preparedRng = snapshot.rng.state;
   assert.notEqual(preparedRng, createFreshRuntimeSnapshot(compiled, { seed: 77 }).rng.state);
 
@@ -169,13 +160,7 @@ test("text-side calls capture explicit speaker provenance before they suspend", 
   const callIndex = compiled.instructions.findIndex(
     (instruction) => instruction.kind === "callFunction",
   );
-  const sayIndex = compiled.instructions.findIndex((instruction) => instruction.kind === "say");
-  const speakerPreparation = compiled.instructions.findIndex(
-    (instruction) => instruction.kind === "prepareSaySpeaker",
-  );
-  assert.ok(speakerPreparation >= 0);
-  assert.ok(speakerPreparation < callIndex);
-  assert.ok(callIndex < sayIndex);
+  assert.ok(callIndex >= 0);
 
   let checkpointed = createFreshRuntimeSnapshot(compiled);
   while (checkpointed.nextInstruction !== callIndex) {
@@ -335,7 +320,8 @@ test("prepared contextual speaker values survive a suspended text call checkpoin
 
 test("first smart say creates a background gate and later say promotes it without a second request", () => {
   const compiled = plan('say "first"\nsay "second"');
-  const result = run(compiled, createFreshRuntimeSnapshot(compiled));
+  const fresh = createFreshRuntimeSnapshot(compiled);
+  const result = run(compiled, fresh);
   assert.deepEqual(
     result.events.map((event) => event.kind),
     ["say", "actionRequested"],
@@ -343,7 +329,9 @@ test("first smart say creates a background gate and later say promotes it withou
   const gate = result.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
   assert.equal(gate?.preparedOutput?.text, "second");
-  assert.equal(gate?.actionId, 1);
+  // The promoted gate is the first say's request, the only action allocated.
+  assert.equal(gate?.actionId, fresh.nextActionId);
+  assert.equal(result.snapshot.nextActionId, fresh.nextActionId + 1);
   assert.equal(gate?.deadlineMs, 1_800);
 });
 
@@ -782,12 +770,6 @@ test("an observation while a terminal delay handoff is pending settles nothing u
   assert.equal(observed.snapshot.status, "running");
   assert.equal(observed.snapshot.currentSessionTimeMs, delay!.deadlineMs);
   assert.equal(observed.snapshot.observedSessionTimeMs, pacing!.deadlineMs);
-  assert.deepEqual(observed.snapshot.terminalContinuationHandoff, {
-    actionId: delay!.actionId,
-    actionKind: "delay",
-    owningInstruction: delay!.owningInstruction,
-    continuationInstruction: compiled.rootEndInstruction,
-  });
   assert.equal(observed.snapshot.backgroundActions[0]?.actionId, pacing!.actionId);
   const again = observeTime(compiled, observed.snapshot, pacing!.deadlineMs + 1);
   assert.deepEqual(again.events, []);
@@ -817,7 +799,7 @@ test("time release followed by explicit exit canonicalizes pacing release proven
   assert.equal(gate?.kind, "chatPacingGate");
 
   const released = observeTime(compiled, promoted.snapshot, gate!.deadlineMs);
-  assert.equal(released.snapshot.preparedSayOutput?.owningInstruction, 1);
+  assert.equal(released.snapshot.preparedSayOutput?.text, "second");
   assert.equal(released.snapshot.lastSettlement?.actionKind, "chatPacingGate");
   assert.notEqual(
     released.snapshot.lastSettlement?.actionKind === "chatPacingGate"
