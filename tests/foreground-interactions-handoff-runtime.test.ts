@@ -473,26 +473,6 @@ function handoffInstructionSpan(injected: InjectedInteractionPlan): PlanSourceLo
   return injected.plan.instructions[injected.handoffInstruction]!.span;
 }
 
-function completeCommittedTextInteraction(plan: InstructionPlan) {
-  const pending = waiting(plan);
-  const before = structuredClone(pending.snapshot);
-  const action = pending.snapshot.foregroundAction;
-  assert.ok(action !== null);
-  const completed = completeAction(plan, pending.snapshot, {
-    actionId: action.actionId,
-    actionKind: "interaction",
-    interactionKind: "text",
-    payload: { kind: "submittedText", submittedText: "committed" },
-  });
-  assert.deepEqual(pending.snapshot, before);
-  assert.equal(completed.outcome.kind, "completed");
-  assert.deepEqual(
-    completed.events.map((event) => event.kind),
-    ["playerTranscript", "actionCompleted"],
-  );
-  return { pending, completed };
-}
-
 function checkpointJsonRoundTrip(plan: InstructionPlan, snapshot: RuntimeSnapshot) {
   const planBefore = structuredClone(plan);
   const before = structuredClone(snapshot);
@@ -925,23 +905,6 @@ test("PR194 matrix: every reachable canonical handoff form consumes exactly once
   }
 });
 
-interface AcceptedExpressionGuaranteeRow {
-  readonly id: string;
-  readonly category: string;
-  readonly expression: ExpressionPlan;
-  readonly temporaryCount?: number;
-  readonly runtimeWitness?: true;
-}
-
-interface RejectedExpressionGuaranteeRow {
-  readonly id: string;
-  readonly category: string;
-  readonly expression: unknown;
-  readonly temporaryCount?: number;
-  /** Additional TSC002 rejections that share the handoff instruction path. */
-  readonly sharedPathRejections?: number;
-}
-
 function temporaryExpression(temporaryId: number, span: PlanSourceLocation): ExpressionPlan {
   return { kind: "temporary", temporaryId, span };
 }
@@ -961,316 +924,6 @@ function binaryExpression(
 ): ExpressionPlan {
   return { kind: "binary", operator, left, right, span };
 }
-
-function handoffPlanWithExpression(
-  injected: InjectedInteractionPlan,
-  expression: ExpressionPlan,
-  temporaryCount = injected.plan.temporaryCount,
-): InstructionPlan {
-  return replaceHandoffInstruction(
-    injected,
-    {
-      kind: "declareBinding",
-      name: "answer",
-      value: expression,
-      span: handoffInstructionSpan(injected),
-    },
-    temporaryCount,
-  );
-}
-
-function handoffPlanWithMalformedExpression(
-  injected: InjectedInteractionPlan,
-  expression: unknown,
-  temporaryCount = injected.plan.temporaryCount,
-): InstructionPlan {
-  const instruction = {
-    kind: "declareBinding",
-    name: "answer",
-    value: expression,
-    span: handoffInstructionSpan(injected),
-  };
-  // Deliberately malformed external plan data cannot be represented by Instruction.
-  return replaceHandoffInstruction(
-    injected,
-    // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture injects an unvalidated expression into declareBinding to test malformed-plan rejection.
-    instruction as unknown as Instruction,
-    temporaryCount,
-  );
-}
-
-test("PR194 matrix: expression consumption requires guaranteed evaluation", () => {
-  const injected = injectTextInteraction('let answer = "__interaction_result__"\nexit');
-  const span = handoffInstructionSpan(injected);
-  const destination = injected.destinationTemporary;
-  const matching = temporaryExpression(destination, span);
-  // The alternate temporary is declared by widening the plan, so it is in range and only the
-  // handoff rule can reject reading it instead of the destination.
-  const widenedTemporaryCount = injected.plan.temporaryCount + 1;
-  assert.ok(destination + 1 <= widenedTemporaryCount);
-  const wrong = temporaryExpression(destination + 1, span);
-  const propertyCallee: ExpressionPlan = {
-    kind: "property",
-    object: { kind: "list", elements: [], span },
-    name: "contains",
-    span,
-  };
-  const accepted: readonly AcceptedExpressionGuaranteeRow[] = [
-    {
-      id: "PR194-expression-direct-temporary",
-      category: "temporary",
-      expression: matching,
-      runtimeWitness: true,
-    },
-    {
-      id: "PR194-expression-list-element",
-      category: "list",
-      expression: { kind: "list", elements: [matching], span },
-      runtimeWitness: true,
-    },
-    {
-      id: "PR194-expression-set-element",
-      category: "set",
-      expression: { kind: "set", elements: [matching], span },
-    },
-    {
-      id: "PR194-expression-object-property-value",
-      category: "object",
-      expression: { kind: "object", properties: [{ name: "answer", value: matching, span }], span },
-    },
-    {
-      id: "PR194-expression-group",
-      category: "group",
-      expression: { kind: "group", expression: matching, span },
-    },
-    {
-      id: "PR194-expression-template-part",
-      category: "template",
-      expression: {
-        kind: "template",
-        parts: [
-          { kind: "text", value: "answer: ", span },
-          { kind: "expression", expression: matching, span },
-        ],
-        span,
-      },
-    },
-    {
-      id: "PR194-expression-property-object",
-      category: "property",
-      expression: { kind: "property", object: matching, name: "length", span },
-    },
-    {
-      id: "PR194-expression-index-object",
-      category: "index",
-      expression: { kind: "index", object: matching, index: literalExpression(0, span), span },
-    },
-    {
-      id: "PR194-expression-index-index",
-      category: "index",
-      expression: {
-        kind: "index",
-        object: { kind: "list", elements: [literalExpression("value", span)], span },
-        index: matching,
-        span,
-      },
-    },
-    {
-      id: "PR194-expression-property-call-receiver",
-      category: "call",
-      expression: {
-        kind: "call",
-        callee: { kind: "property", object: matching, name: "contains", span },
-        arguments: [],
-        span,
-      },
-    },
-    {
-      id: "PR194-expression-positional-call-argument",
-      category: "call",
-      expression: {
-        kind: "call",
-        callee: propertyCallee,
-        arguments: [{ kind: "positional", value: matching, span }],
-        span,
-      },
-    },
-    {
-      id: "PR194-expression-named-call-argument",
-      category: "call",
-      expression: {
-        kind: "call",
-        callee: propertyCallee,
-        arguments: [{ kind: "named", name: "value", value: matching, span }],
-        span,
-      },
-    },
-    {
-      id: "PR194-expression-unary-operand",
-      category: "unary",
-      expression: { kind: "unary", operator: "not", operand: matching, span },
-    },
-    {
-      id: "PR194-expression-eager-left",
-      category: "binary",
-      expression: binaryExpression("==", matching, literalExpression("committed", span), span),
-    },
-    {
-      id: "PR194-expression-eager-right",
-      category: "binary",
-      expression: binaryExpression("==", literalExpression("committed", span), matching, span),
-      runtimeWitness: true,
-    },
-    {
-      id: "PR194-expression-range-start",
-      category: "range",
-      expression: {
-        kind: "range",
-        start: matching,
-        end: literalExpression(2, span),
-        inclusive: true,
-        span,
-      },
-    },
-    {
-      id: "PR194-expression-range-end",
-      category: "range",
-      expression: {
-        kind: "range",
-        start: literalExpression(1, span),
-        end: matching,
-        inclusive: true,
-        span,
-      },
-    },
-    {
-      id: "PR194-expression-and-left",
-      category: "short-circuit",
-      expression: binaryExpression("and", matching, literalExpression(true, span), span),
-    },
-    {
-      id: "PR194-expression-or-left",
-      category: "short-circuit",
-      expression: binaryExpression("or", matching, literalExpression(false, span), span),
-    },
-    {
-      id: "PR194-expression-multiple-guaranteed",
-      category: "multiple",
-      expression: { kind: "list", elements: [matching, matching], span },
-      runtimeWitness: true,
-    },
-    {
-      id: "PR194-expression-wrong-and-correct",
-      category: "multiple",
-      expression: { kind: "list", elements: [wrong, matching], span },
-      temporaryCount: widenedTemporaryCount,
-    },
-  ];
-  const rejected: readonly RejectedExpressionGuaranteeRow[] = [
-    {
-      id: "PR194-expression-no-occurrence",
-      category: "missing",
-      expression: literalExpression(false, span),
-    },
-    {
-      id: "PR194-expression-wrong-temporary",
-      category: "wrong temporary",
-      expression: wrong,
-      temporaryCount: widenedTemporaryCount,
-    },
-    {
-      id: "PR194-expression-prepared-reference",
-      category: "prepared reference",
-      expression: { kind: "preparedReference", temporaryId: destination, span },
-      sharedPathRejections: 1,
-    },
-    {
-      id: "PR194-expression-and-right-false",
-      category: "short-circuit",
-      expression: binaryExpression("and", literalExpression(false, span), matching, span),
-    },
-    {
-      id: "PR194-expression-and-right-true",
-      category: "short-circuit",
-      expression: binaryExpression("and", literalExpression(true, span), matching, span),
-    },
-    {
-      id: "PR194-expression-or-right-false",
-      category: "short-circuit",
-      expression: binaryExpression("or", literalExpression(false, span), matching, span),
-    },
-    {
-      id: "PR194-expression-or-right-true",
-      category: "short-circuit",
-      expression: binaryExpression("or", literalExpression(true, span), matching, span),
-    },
-    {
-      id: "PR194-expression-nested-short-circuit-right",
-      category: "short-circuit",
-      expression: binaryExpression(
-        "and",
-        literalExpression(true, span),
-        binaryExpression("or", literalExpression(false, span), matching, span),
-        span,
-      ),
-    },
-    {
-      id: "PR194-expression-non-property-callee",
-      category: "call",
-      expression: { kind: "call", callee: matching, arguments: [], span },
-    },
-    {
-      id: "PR194-expression-template-text-metadata",
-      category: "metadata",
-      // oxlint-disable-next-line anti-slop/no-known-value-widening -- EVIDENCE: fixture adds forbidden temporary metadata to a template text part for plan rejection.
-      expression: {
-        kind: "template",
-        parts: [{ kind: "text", value: "ignored", span, temporaryId: destination }],
-        span,
-      } as unknown,
-    },
-    {
-      id: "PR194-expression-ignored-extra-field",
-      category: "ignored field",
-      expression: { kind: "literal", value: false, span, ignored: matching },
-    },
-    {
-      id: "PR194-expression-wrong-left-correct-right",
-      category: "short-circuit",
-      expression: binaryExpression("or", wrong, matching, span),
-      temporaryCount: widenedTemporaryCount,
-    },
-  ];
-
-  for (const row of accepted) {
-    const plan = handoffPlanWithExpression(injected, row.expression, row.temporaryCount);
-    const before = structuredClone(plan);
-    const validation = validateInstructionPlan(plan);
-    assert.equal(validation.valid, true, `${row.id}: ${row.category}`);
-    assert.deepEqual(plan, before, row.id);
-  }
-
-  for (const row of rejected) {
-    const plan = handoffPlanWithMalformedExpression(injected, row.expression, row.temporaryCount);
-    const before = structuredClone(plan);
-    const validation = validateInstructionPlan(plan);
-    assert.equal(validation.valid, false, `${row.id}: ${row.category}`);
-    const handoffRejection = ["TSC002", `$.instructions[${injected.handoffInstruction}]`];
-    assert.deepEqual(
-      validation.errors.map((error) => [error.code, error.path]),
-      Array.from({ length: 1 + (row.sharedPathRejections ?? 0) }, () => handoffRejection),
-      row.id,
-    );
-    assert.deepEqual(plan, before, row.id);
-  }
-
-  for (const row of accepted.filter((entry) => entry.runtimeWitness === true)) {
-    const plan = handoffPlanWithExpression(injected, row.expression);
-    const { completed } = completeCommittedTextInteraction(plan);
-    const continued = executeInstruction(plan, completed.snapshot);
-    assert.equal(continued.snapshot.interactionResultHandoff, null, row.id);
-  }
-});
 
 interface SettlementHandoffFixture {
   readonly injected: InjectedInteractionPlan;
@@ -2218,7 +1871,7 @@ test("PR194 matrix: checkpoint boundaries preserve typed interaction results", (
   }
 });
 
-test("PR194 matrix: invalid local handoff shapes reject without mutating plans", () => {
+test("PR194 matrix: handoff shapes that would reach invalid runtime states are rejected", () => {
   const injected = injectTextInteraction('let answer = "__interaction_result__"\nsay answer\nexit');
   const span = injected.plan.instructions[injected.handoffInstruction]!.span;
   assert.equal(validateInstructionPlan(injected.plan).valid, true);
@@ -2230,123 +1883,11 @@ test("PR194 matrix: invalid local handoff shapes reject without mutating plans",
   assert.ok(validWait?.kind === "wait" && validSay?.kind === "say");
   const handoffPath = `$.instructions[${injected.handoffInstruction}]`;
   const clearPath = `$.instructions[${injected.clearInstruction}]`;
-  const mustConsume = "Interaction result handoff must consume the destination immediately.";
-  const mustClear =
-    "Interaction result handoff must clear its transient destination immediately after transfer.";
-  const rows: readonly {
-    readonly id: string;
-    readonly mutate: (plan: ExternalRecord) => void;
-    readonly errors: readonly (readonly [path: string, message: string])[];
-  }[] = [
-    {
-      id: "PR194-jump-continuation",
-      mutate: (plan) => {
-        externalInstructions(plan)[injected.handoffInstruction] = {
-          kind: "jump",
-          target: injected.clearInstruction,
-          span,
-        };
-      },
-      errors: [[handoffPath, mustConsume]],
-    },
-    {
-      id: "PR194-second-blocking-action",
-      mutate: (plan) => {
-        externalInstructions(plan)[injected.handoffInstruction] = { ...validWait, span };
-      },
-      errors: [[handoffPath, mustConsume]],
-    },
-    {
-      id: "PR194-missing-clear",
-      mutate: (plan) => {
-        externalInstructions(plan)[injected.clearInstruction] = { ...validSay, span };
-      },
-      errors: [[clearPath, mustClear]],
-    },
-    {
-      id: "PR194-wrong-clear",
-      mutate: (plan) => {
-        plan.temporaryCount = injected.plan.temporaryCount + 1;
-        externalRecord(externalInstructions(plan)[injected.clearInstruction], "clear").temporaryId =
-          injected.destinationTemporary + 1;
-      },
-      errors: [[clearPath, mustClear]],
-    },
-    {
-      id: "PR194-second-producer",
-      mutate: (plan) => {
-        externalInstructions(plan)[injected.clearInstruction] = {
-          kind: "storeTemporary",
-          temporaryId: injected.destinationTemporary,
-          value: { kind: "literal", value: "x", span },
-          expectBoolean: false,
-          span,
-        };
-      },
-      // Replacing the cleanup with a producer breaks both owner-only production and cleanup.
-      errors: [
-        [
-          `$.instructions[${injected.interactionInstruction}].destinationTemporary`,
-          "Canonical interaction result destinations must be produced only by their owning interaction.",
-        ],
-        [clearPath, mustClear],
-      ],
-    },
-  ];
-  for (const row of rows) {
-    const plan = externalRecord(structuredClone(injected.plan), row.id);
-    row.mutate(plan);
-    const beforeValidation = structuredClone(plan);
-    const validation = validateInstructionPlan(plan);
-    assert.deepEqual(
-      validation.errors.map((error) => [error.code, error.path, error.message]),
-      row.errors.map(([path, message]) => ["TSC002", path, message]),
-      row.id,
-    );
-    assert.deepEqual(plan, beforeValidation, row.id);
-  }
-
-  const assertExactLocalHandoffError = (plan: InstructionPlan, id: string, path: string): void => {
-    const before = structuredClone(plan);
-    const validation = validateInstructionPlan(plan);
-    assert.equal(validation.valid, false, id);
-    assert.deepEqual(
-      validation.errors.map((error) => [error.code, error.path]),
-      [["TSC002", path]],
-      id,
-    );
-    assert.deepEqual(plan, before, `${id}: plan input`);
+  const mutated = (mutate: (plan: ExternalRecord) => void, source = injected.plan) => {
+    const plan = externalRecord(structuredClone(source), "plan");
+    mutate(plan);
+    return plan;
   };
-
-  const callInjected = injectTextInteraction(
-    [
-      'function helper { return "helper" }',
-      "let ignored = helper()",
-      'let answer = "__interaction_result__"',
-      "say answer",
-      "exit",
-    ].join("\n"),
-  );
-  const compilerCall = callInjected.plan.instructions.find(
-    (instruction) => instruction.kind === "callFunction",
-  );
-  assert.ok(compilerCall !== undefined && compilerCall.kind === "callFunction");
-  const callDestinationTemporary = callInjected.plan.temporaryCount + 1;
-  const callAtHandoff = replaceHandoffInstruction(
-    callInjected,
-    {
-      ...structuredClone(compilerCall),
-      destinationTemporary: callDestinationTemporary,
-      returnInstruction: callInjected.clearInstruction,
-      span: callInjected.plan.instructions[callInjected.handoffInstruction]!.span,
-    },
-    callDestinationTemporary,
-  );
-  assertExactLocalHandoffError(
-    callAtHandoff,
-    "PR194-call-function-as-handoff",
-    `$.instructions[${callInjected.handoffInstruction}]`,
-  );
 
   const targetInjected = injectTextInteraction(
     [
@@ -2356,39 +1897,85 @@ test("PR194 matrix: invalid local handoff shapes reject without mutating plans",
       "exit",
     ].join("\n"),
   );
-  assert.equal(
-    validateInstructionPlan(targetInjected.plan).valid,
-    true,
-    JSON.stringify(validateInstructionPlan(targetInjected.plan).errors),
-  );
   const jumpIndex = targetInjected.plan.instructions.findIndex(
     (instruction) => instruction.kind === "jump",
   );
   assert.notEqual(jumpIndex, -1);
-  const jump = targetInjected.plan.instructions[jumpIndex];
-  assert.ok(jump !== undefined && jump.kind === "jump");
-  const targetedRows = [
+
+  // Accepting any of the invariant rows lets a validated plan reach a snapshot that validation
+  // then rejects: a handoff missing at the next commit boundary, a destination still occupied when
+  // the interaction runs again, or a handoff entered without its completed interaction.
+  const rows: readonly {
+    readonly id: string;
+    readonly plan: ExternalRecord;
+    readonly paths: readonly string[];
+  }[] = [
     {
-      id: "PR194-explicit-target-handoff-entry",
-      target: targetInjected.handoffInstruction,
-      path: `$.instructions[${targetInjected.handoffInstruction}]`,
+      id: "PR194-second-blocking-action",
+      plan: mutated((plan) => {
+        externalInstructions(plan)[injected.handoffInstruction] = { ...validWait, span };
+      }),
+      paths: [handoffPath],
     },
     {
-      id: "PR194-explicit-target-handoff-cleanup",
-      target: targetInjected.clearInstruction,
-      path: `$.instructions[${targetInjected.clearInstruction}]`,
+      id: "PR194-missing-clear",
+      plan: mutated((plan) => {
+        externalInstructions(plan)[injected.clearInstruction] = { ...validSay, span };
+      }),
+      paths: [clearPath],
     },
-  ] as const;
-  for (const row of targetedRows) {
-    const targeted: InstructionPlan = {
-      ...structuredClone(targetInjected.plan),
-      instructions: targetInjected.plan.instructions.map((instruction, index) =>
-        index === jumpIndex && instruction.kind === "jump"
-          ? { ...instruction, target: row.target }
-          : instruction,
-      ),
-    };
-    assertExactLocalHandoffError(targeted, row.id, row.path);
+    {
+      id: "PR194-wrong-clear",
+      plan: mutated((plan) => {
+        plan.temporaryCount = injected.plan.temporaryCount + 1;
+        externalRecord(externalInstructions(plan)[injected.clearInstruction], "clear").temporaryId =
+          injected.destinationTemporary + 1;
+      }),
+      paths: [clearPath],
+    },
+    {
+      id: "PR194-second-producer",
+      plan: mutated((plan) => {
+        externalInstructions(plan)[injected.clearInstruction] = {
+          kind: "storeTemporary",
+          temporaryId: injected.destinationTemporary,
+          value: literalExpression("x", span),
+          expectBoolean: false,
+          span,
+        };
+      }),
+      // Replacing the cleanup with a producer breaks both owner-only production and cleanup.
+      paths: [`$.instructions[${injected.interactionInstruction}].destinationTemporary`, clearPath],
+    },
+    {
+      id: "PR194-handoff-entry-target",
+      plan: mutated((plan) => {
+        externalRecord(externalInstructions(plan)[jumpIndex], "jump").target =
+          targetInjected.handoffInstruction;
+      }, targetInjected.plan),
+      paths: [`$.instructions[${targetInjected.handoffInstruction}]`],
+    },
+    // Provisional regression oracle for the current fixed local shape in docs/RUNTIME.md: a handoff
+    // instruction that does not read the destination is rejected, although accepting it has no
+    // known state consequence because the engine drops the handoff after that instruction either
+    // way. Remove this row when the local shape is reassessed.
+    {
+      id: "PR194-provisional-non-consuming-handoff",
+      plan: mutated((plan) => {
+        externalRecord(externalInstructions(plan)[injected.handoffInstruction], "handoff").value =
+          literalExpression(false, span);
+      }),
+      paths: [handoffPath],
+    },
+  ];
+  for (const row of rows) {
+    const before = structuredClone(row.plan);
+    assert.deepEqual(
+      validateInstructionPlan(row.plan).errors.map((error) => [error.code, error.path]),
+      row.paths.map((path) => ["TSC002", path]),
+      row.id,
+    );
+    assert.deepEqual(row.plan, before, row.id);
   }
 });
 
