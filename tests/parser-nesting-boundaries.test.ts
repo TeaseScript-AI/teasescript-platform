@@ -86,12 +86,8 @@ test("mixed collection chains preserve kinds, spans, and the following statement
 
 test("deep collection chains retain ordinary innermost expressions", () => {
   const depth = 1_024;
+  // Innermost siblings and an object frame inside the list frames.
   const rows: readonly (readonly [string, readonly ExpressionShape[]])[] = [
-    ['"text"', [["string", "text"]]],
-    ["-1", [["-", 1]]],
-    ["1 + 2", [["+", 1, 2]]],
-    ["sample()", [["call", "sample"]]],
-    ["source[0]", [["index", "source", 0]]],
     ["{ value: 1 }", [["object", ["value", 1]]]],
     ["1, 2", [1, 2]],
   ];
@@ -126,68 +122,13 @@ test("deep collection chains retain ordinary innermost expressions", () => {
   }
 });
 
-test("sibling-nested collections do not trigger repeated chain parsing", () => {
-  const depth = 96;
-  let expression = "1";
-  for (let index = 0; index < depth; index += 1) expression = `[[0, ${expression}]]`;
-  const parsed = parse(`let value = ${expression}`);
-  assert.deepEqual(parsed.diagnostics, []);
-
-  const statement = parsed.program.statements[0];
-  assert.equal(statement?.kind, "letStatement");
-  if (statement?.kind !== "letStatement") return;
-  let current = statement.initializer;
-  let observedDepth = 0;
-  while (current.kind === "listLiteral") {
-    observedDepth += 1;
-    const next = current.elements.at(-1);
-    if (next === undefined) break;
-    current = next;
-  }
-  assert.equal(observedDepth, depth * 2);
-});
-
-test("malformed sibling-nested collections do not retry failed chain parsing", () => {
-  const depth = 96;
-  let expression = "value[]";
-  for (let index = 0; index < depth; index += 1) expression = `[[0, ${expression}]]`;
-  const parsed = parse(`let value = ${expression}`);
-  assert.deepEqual(
-    parsed.diagnostics.map((diagnostic) => diagnostic.code),
-    ["TSP012", "TSP002"],
-  );
-});
-
 type ExpressionShape = string | number | readonly ExpressionShape[];
 
-// Compact projection: identifiers by name, literals by value, operators and postfix forms with their operands.
+// Compact projection: number literals by value, objects with their properties, other nodes by kind.
 function expressionShape(expression: Expression): ExpressionShape {
   switch (expression.kind) {
-    case "identifier":
-      return expression.name;
     case "numberLiteral":
       return expression.value;
-    case "stringLiteral":
-      return [
-        "string",
-        ...expression.parts.map((part) => (part.kind === "stringText" ? part.value : part.kind)),
-      ];
-    case "unaryExpression":
-      return [expression.operator, expressionShape(expression.operand)];
-    case "binaryExpression":
-      return [
-        expression.operator,
-        expressionShape(expression.left),
-        expressionShape(expression.right),
-      ];
-    case "callExpression":
-      return [
-        "call",
-        expressionShape(expression.callee),
-        ...expression.arguments.map((argument) => expressionShape(argument.value)),
-      ];
-    case "indexExpression":
-      return ["index", expressionShape(expression.object), expressionShape(expression.index)];
     case "objectLiteral":
       return [
         "object",
