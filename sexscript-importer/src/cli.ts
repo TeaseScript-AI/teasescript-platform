@@ -6,12 +6,14 @@ import { emitTease } from "./emit-tease.ts";
 import { inventoryFiles } from "./inventory.ts";
 import { lowerParsedFile } from "./lower.ts";
 import { lowerSelfContainedPackage } from "./package.ts";
-import { analyzeFeasibility } from "./report.ts";
+import { analyzeFeasibility, type FeasibilityOptions } from "./report.ts";
+import { loadRepositoryRunner } from "./runtime-check.ts";
 import { parseGroovySource } from "./source-parser.ts";
 
 const [command, ...rawArgs] = process.argv.slice(2);
-const compileRequested = rawArgs.includes("--compile");
-const args = rawArgs.filter((arg) => arg !== "--compile");
+const runRequested = rawArgs.includes("--run");
+const compileRequested = runRequested || rawArgs.includes("--compile");
+const args = rawArgs.filter((arg) => arg !== "--compile" && arg !== "--run");
 
 if (command === "inventory") {
   if (args.length === 0) {
@@ -21,11 +23,15 @@ if (command === "inventory") {
   process.stdout.write(`${JSON.stringify(inventoryFiles(files), null, 2)}\n`);
 } else if (command === "report") {
   if (args.length === 0) {
-    fail("Usage: node src/cli.ts report [--compile] <ast.json|script.groovy|source-dir> [...]");
+    fail(
+      "Usage: node src/cli.ts report [--compile | --run] <ast.json|script.groovy|source-dir> [...]",
+    );
   }
   const files = await readReportInputs(args);
-  const compiler = compileRequested ? await loadRepositoryCompiler() : undefined;
-  const report = analyzeFeasibility(files, compiler === undefined ? {} : { compiler });
+  const options: FeasibilityOptions = {};
+  if (compileRequested) options.compiler = await loadRepositoryCompiler();
+  if (runRequested) options.runner = await loadRepositoryRunner();
+  const report = analyzeFeasibility(files, options);
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } else if (command === "convert") {
   if (args.length !== 1) fail("Usage: node src/cli.ts convert <script.groovy|ast.json>");

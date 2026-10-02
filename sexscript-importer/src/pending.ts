@@ -1,3 +1,4 @@
+import type { FlowState, HostFunction, RuntimeValue } from "./runtime-check.ts";
 import type { IrExpression, IrStatement, IrSwitchCase, MigrationProgram } from "./ir.ts";
 
 /**
@@ -30,6 +31,8 @@ export interface PendingShim {
   program: MigrationProgram;
   /** Placeholder names to register as host builtins when compiling the shimmed program. */
   builtins: string[];
+  /** Placeholder name to the TeaseScript operation it stands for (`save`, `askBooleans`, ...). */
+  operations: Map<string, string>;
   /** Accepted-but-unimplemented capabilities the program uses, by display name. */
   capabilities: Set<string>;
 }
@@ -41,6 +44,7 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
   const used = new Set<string>();
   collectNames(program.statements, used);
   const shimNames = new Map<string, string>();
+  const operations = new Map<string, string>();
   const shimName = (base: string): string => {
     const existing = shimNames.get(base);
     if (existing !== undefined) return existing;
@@ -59,6 +63,7 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
   ): IrExpression => {
     capabilities.add(capability);
     const shim = shimName(`${SHIM_PREFIX}${name[0]!.toUpperCase()}${name.slice(1)}`);
+    operations.set(shim, name);
     builtins.add(shim);
     return { kind: "call", name: shim, positional, named };
   };
@@ -143,10 +148,17 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         ];
       case "delete":
         return [callStatement(call("storage", "delete", [expression(item.key)]), item.span)];
+      // Transfer and end leave the current file, so the shimmed copy stops there.
       case "run":
-        return [callStatement(call("run/end", "run", [expression(item.script)]), item.span)];
+        return [
+          callStatement(call("run/end", "run", [expression(item.script)]), item.span),
+          { kind: "exit", span: item.span },
+        ];
       case "end":
-        return [callStatement(call("run/end", "end", []), item.span)];
+        return [
+          callStatement(call("run/end", "end", []), item.span),
+          { kind: "exit", span: item.span },
+        ];
       case "showPopup":
         return [
           callStatement(call("showPopup", "showPopup", [expression(item.message)]), item.span),
@@ -225,6 +237,7 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
   return {
     program: { ...program, statements: statements(program.statements) },
     builtins: [...builtins].sort(),
+    operations,
     capabilities,
   };
 }
@@ -281,4 +294,69 @@ function collectNames(value: unknown, names: Set<string>): void {
     if ((key === "name" || key === "variable") && typeof child === "string") names.add(child);
     else collectNames(child, names);
   }
+}
+
+/**
+ * Host stand-ins for the pending capabilities of a shimmed program, for smoke runs only: storage follows the owner
+ * semantics (a missing key reads as null or the supplied default, reads never write), `run` records its target
+ * in the flow state, time and dates are fixed, and inputs give simple valid answers.
+ */
+export function pendingHostFunctions(
+  shim: PendingShim,
+  state: FlowState = { storage: new Map(), transfer: null },
+): Record<string, HostFunction> {
+  const storage = state.storage;
+  const key = (value: RuntimeValue | undefined): string => String(value);
+  const number = (value: RuntimeValue | undefined): number =>
+    typeof value === "number" ? value : Number(value);
+  const emptyList = { kind: "list", items: [] };
+  const dateTime = {
+    kind: "object",
+    properties: [
+      { name: "year", value: 2026 },
+      { name: "month", value: 10 },
+      { name: "day", value: 2 },
+      { name: "hour", value: 12 },
+      { name: "minute", value: 0 },
+      { name: "weekday", value: "Friday" },
+      { name: "weekdayNumber", value: 5 },
+    ],
+  };
+  const implementations = new Map<string, HostFunction>([
+    // V30 leaves `save null` open; the stand-in removes the key as legacy SexScript did.
+    [
+      "save",
+      ([name, value]) => {
+        if (value === undefined || value === null) storage.delete(key(name));
+        else storage.set(key(name), value);
+        return null;
+      },
+    ],
+    ["load", ([name, fallback]) => storage.get(key(name)) ?? fallback ?? null],
+    ["delete", ([name]) => (storage.delete(key(name)), null)],
+    ["run", ([script]) => ((state.transfer = String(script)), null)],
+    ["end", () => null],
+    ["showPopup", () => null],
+    ["showButton", () => 0],
+    ["askBoolean", () => true],
+    ["askBooleans", (_, named) => named.defaults ?? emptyList],
+    ["askInteger", () => 1],
+    ["getSeconds", () => 1_790_000_000],
+    ["getDateTime", () => dateTime],
+    ["getDate", () => dateTime],
+    ["openUrl", () => null],
+    ["round", ([value]) => Math.round(number(value))],
+    ["floor", ([value]) => Math.floor(number(value))],
+    ["ceil", ([value]) => Math.ceil(number(value))],
+    ["toInteger", ([value]) => Math.trunc(number(value))],
+    ["toNumber", ([value]) => number(value)],
+    ["toString", ([value]) => String(value)],
+    ["toBoolean", ([value]) => value === true || value === "true"],
+  ]);
+  const result: Record<string, HostFunction> = {};
+  for (const [shimName, operation] of shim.operations) {
+    const implementation = implementations.get(operation);
+    if (implementation !== undefined) result[shimName] = implementation;
+  }
+  return result;
 }

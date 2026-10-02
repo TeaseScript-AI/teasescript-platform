@@ -4,7 +4,14 @@ import { emitTease } from "./emit-tease.ts";
 import { rootDiagnostics } from "./diagnostics.ts";
 import type { IrStatement } from "./ir.ts";
 import { lowerPackage } from "./package.ts";
-import { shimPendingCapabilities } from "./pending.ts";
+import { pendingHostFunctions, shimPendingCapabilities } from "./pending.ts";
+import {
+  flowKey,
+  smokeRunFlow,
+  type FlowRunResult,
+  type FlowScript,
+  type TeaseRunner,
+} from "./runtime-check.ts";
 
 const SOURCE_STATEMENT_KINDS = new Set([
   "expressionStatement",
@@ -41,11 +48,15 @@ export interface FeasibilityFileReport {
   pendingCapabilities: string[];
   /** Compiler diagnostics that remain after the pending-capability placeholders. */
   compilerDiagnostics: TeaseCompileDiagnostic[];
+  /** Whether a package smoke run executed this script; null when no runner was supplied. */
+  smokeRunReached: boolean | null;
 }
 
 export interface FeasibilityOptions {
   /** Real TeaseScript compiler used for the compiler-clean gate. */
   compiler?: TeaseCompiler;
+  /** Real TeaseScript runtime used for smoke runs of compiler-clean output; needs `compiler`. */
+  runner?: TeaseRunner;
 }
 
 export interface FeasibilityReport {
@@ -79,6 +90,18 @@ export interface FeasibilityReport {
    * they use: the implementation gaps that block otherwise convertible content.
    */
   blockingPendingCapabilityFileCounts: Record<string, number>;
+  /**
+   * Package smoke runs in the real runtime, using the placeholder copies with host stand-ins for pending
+   * capabilities: one per entry script (a script in the package's top directory), then isolated runs of runnable
+   * scripts no earlier run reached. Assumes one package per report.
+   */
+  smokeRuns: FlowRunResult[];
+  /** Smoke-run outcomes `halted`, `failed`, `blocked`, `stepLimit`, `stuck`; prefixed `isolated` for those runs. */
+  smokeRunStatusCounts: Record<string, number>;
+  /** Runtime failures of smoke runs, grouped by code and message; prefixed `isolated` for those runs. */
+  smokeRunFailuresByMessage: Record<string, number>;
+  /** Null when no runner was supplied. */
+  smokeRunReachedScriptFileCount: number | null;
   files: FeasibilityFileReport[];
 }
 
@@ -107,9 +130,14 @@ export function analyzeFeasibility(
     compilerDiagnosticsByMessage: emptyCounts(),
     pendingCapabilityFileCounts: emptyCounts(),
     blockingPendingCapabilityFileCounts: emptyCounts(),
+    smokeRuns: [],
+    smokeRunStatusCounts: emptyCounts(),
+    smokeRunFailuresByMessage: emptyCounts(),
+    smokeRunReachedScriptFileCount: options.runner === undefined ? null : 0,
     files: [],
   };
 
+  const flowScripts: Array<{ sourceName: string; script: FlowScript | null }> = [];
   for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
     const file = files[fileIndex]!;
     const parseErrors = file.diagnostics.length;
@@ -174,6 +202,16 @@ export function analyzeFeasibility(
         increment(report.compilerDiagnosticsByMessage, `${diagnostic.code} ${diagnostic.message}`);
       }
     }
+    if (isScriptBody) {
+      const source = compilerCleanExceptPending === true ? emitTease(shim.program) : null;
+      flowScripts.push({
+        sourceName: file.sourceName,
+        script:
+          source === null
+            ? null
+            : { source, builtins: (state) => pendingHostFunctions(shim, state) },
+      });
+    }
 
     if (errors.length === 0) report.migrationCleanFileCount += 1;
     if (lowered) report.loweredScriptFileCount += 1;
@@ -201,6 +239,7 @@ export function analyzeFeasibility(
       compilerCleanExceptPending,
       pendingCapabilities,
       compilerDiagnostics,
+      smokeRunReached: options.runner === undefined ? null : false,
     });
   }
 
@@ -211,12 +250,68 @@ export function analyzeFeasibility(
   report.blockingPendingCapabilityFileCounts = sortCounts(
     report.blockingPendingCapabilityFileCounts,
   );
+  if (options.runner !== undefined) runPackageFlows(report, flowScripts, options.runner);
+  report.smokeRunStatusCounts = sortCounts(report.smokeRunStatusCounts);
+  report.smokeRunFailuresByMessage = sortCounts(report.smokeRunFailuresByMessage);
   report.files.sort((left, right) => {
     if (left.rootMigrationErrors !== right.rootMigrationErrors)
       return right.rootMigrationErrors - left.rootMigrationErrors;
     return left.sourceName.localeCompare(right.sourceName);
   });
   return report;
+}
+
+function runPackageFlows(
+  report: FeasibilityReport,
+  flowScripts: ReadonlyArray<{ sourceName: string; script: FlowScript | null }>,
+  runner: TeaseRunner,
+): void {
+  const directories = flowScripts.map(({ sourceName }) =>
+    sourceName.replaceAll("\\", "/").split("/").slice(0, -1),
+  );
+  const root = directories.reduce((common, directory) => {
+    let length = 0;
+    while (length < common.length && common[length] === directory[length]) length += 1;
+    return common.slice(0, length);
+  }, directories[0] ?? []);
+  const keyOf = (sourceName: string): string =>
+    flowKey(
+      sourceName
+        .replaceAll("\\", "/")
+        .split("/")
+        .slice(root.length)
+        .join("/")
+        .replace(/\.groovy$/iu, ".tease"),
+    );
+  const scripts = new Map(flowScripts.map(({ sourceName, script }) => [keyOf(sourceName), script]));
+  const entries = flowScripts
+    .filter((_, index) => directories[index]!.length === root.length)
+    .map(({ sourceName }) => keyOf(sourceName))
+    .sort();
+  const reached = new Set<string>();
+  const record = (flow: FlowRunResult): void => {
+    const prefix = flow.isolated ? "isolated " : "";
+    report.smokeRuns.push(flow);
+    increment(report.smokeRunStatusCounts, `${prefix}${flow.status}`);
+    if (flow.failure !== null) {
+      increment(
+        report.smokeRunFailuresByMessage,
+        `${prefix}${flow.failure.code} ${flow.failure.message}`,
+      );
+    }
+    for (const script of flow.visited) reached.add(script);
+  };
+  for (const entry of entries) record(smokeRunFlow(runner, entry, scripts));
+  const unreached = [...scripts].filter(([, script]) => script !== null).map(([key]) => key);
+  for (const key of unreached.sort()) {
+    if (!reached.has(key)) record(smokeRunFlow(runner, key, scripts, true));
+  }
+  for (const file of report.files) {
+    if (reached.has(keyOf(file.sourceName))) file.smokeRunReached = true;
+  }
+  report.smokeRunReachedScriptFileCount = report.files.filter(
+    (file) => file.smokeRunReached,
+  ).length;
 }
 
 function countIrStatements(statements: IrStatement[]): { total: number; unsupported: number } {
