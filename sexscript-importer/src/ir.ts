@@ -56,6 +56,8 @@ export type IrStatement =
       name: string;
       parameters: IrFunctionParameter[];
       body: IrStatement[];
+      /** Legacy comments that preceded the function declaration. */
+      leadingComments?: string[];
     })
   | (IrBase & { kind: "return"; value: IrExpression | null })
   | (IrBase & { kind: "let"; name: string; value: IrExpression })
@@ -80,7 +82,12 @@ export type IrStatement =
   | (IrBase & { kind: "run"; script: IrExpression })
   | (IrBase & { kind: "end" })
   | (IrBase & { kind: "exit" })
-  | (IrBase & { kind: "unsupported"; diagnosticCode: string; summary: string });
+  /** Legacy code that needs manual migration, preserved as commented-out source lines. */
+  | (IrBase & { kind: "unsupported"; legacySource: string[] })
+  /** Preserved legacy source comment; `trailing` keeps it on the previous statement's line. */
+  | (IrBase & { kind: "comment"; text: string; trailing: boolean })
+  /** Preserved paragraph break between legacy statements. */
+  | (IrBase & { kind: "blank" });
 
 export interface IrSwitchCase {
   span: SourceSpan | null;

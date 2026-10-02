@@ -67,7 +67,10 @@ test("does not hide a broken SexScript by accepting generic unit parsing", async
 
 test("rejects malformed parser-helper output instead of trusting its shape", () => {
   const valid = parsed("script-body", [], null);
-  assert.deepEqual(parseParsedGroovyFile(JSON.parse(JSON.stringify(valid)), "helper"), valid);
+  assert.deepEqual(parseParsedGroovyFile(JSON.parse(JSON.stringify(valid)), "helper"), {
+    ...valid,
+    comments: [],
+  });
   assert.throws(() => parseParsedGroovyFile({ ...valid, formatVersion: 2 }, "helper"), /format/);
   assert.throws(
     () => parseParsedGroovyFile({ ...valid, root: { span: null } }, "helper"),

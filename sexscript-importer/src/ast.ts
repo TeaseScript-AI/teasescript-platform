@@ -16,12 +16,24 @@ export interface ParserDiagnostic {
   message: string;
 }
 
+export interface SourceComment {
+  line: number;
+  column: number;
+  endLine: number;
+  /** Exact comment text including its line or block comment delimiters. */
+  text: string;
+}
+
 export interface ParsedGroovyFile {
   formatVersion: 1;
   sourceName: string;
   groovyVersion: string;
   mode: "script-body" | "unit";
   root: AstNode | null;
+  /** Original legacy source text; absent in older parser output. */
+  source?: string;
+  /** Source comments in source order; absent in older parser output. */
+  comments?: SourceComment[];
   diagnostics: ParserDiagnostic[];
 }
 
@@ -43,12 +55,13 @@ export function parseParsedGroovyFile(value: unknown, origin: string): ParsedGro
   if (!isRecord(value) || value.formatVersion !== 1) {
     throw new Error(`Unsupported parser format in ${origin}`);
   }
-  const { sourceName, groovyVersion, mode, root, diagnostics } = value;
+  const { sourceName, groovyVersion, mode, root, source, comments, diagnostics } = value;
   if (
     typeof sourceName !== "string" ||
     typeof groovyVersion !== "string" ||
     (mode !== "script-body" && mode !== "unit") ||
     (root !== null && !isAstNode(root)) ||
+    (source !== undefined && typeof source !== "string") ||
     !Array.isArray(diagnostics)
   ) {
     throw new Error(`Malformed parser output in ${origin}`);
@@ -70,8 +83,32 @@ export function parseParsedGroovyFile(value: unknown, origin: string): ParsedGro
     groovyVersion,
     mode,
     root,
+    ...(source === undefined ? {} : { source }),
+    comments: parseComments(comments, origin),
     diagnostics: parsedDiagnostics,
   };
+}
+
+function parseComments(value: unknown, origin: string): SourceComment[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error(`Malformed parser comments in ${origin}`);
+  return value.map((comment) => {
+    if (
+      !isRecord(comment) ||
+      typeof comment.line !== "number" ||
+      typeof comment.column !== "number" ||
+      typeof comment.endLine !== "number" ||
+      typeof comment.text !== "string"
+    ) {
+      throw new Error(`Malformed parser comment in ${origin}`);
+    }
+    return {
+      line: comment.line,
+      column: comment.column,
+      endLine: comment.endLine,
+      text: comment.text,
+    };
+  });
 }
 
 /**

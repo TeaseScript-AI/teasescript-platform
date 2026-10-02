@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { analyzeFeasibility, rootDiagnostics } from "../src/report.ts";
+import { rootDiagnostics } from "../src/diagnostics.ts";
+import { analyzeFeasibility } from "../src/report.ts";
 import type { MigrationDiagnostic } from "../src/ir.ts";
 import type { ParsedGroovyFile, SourceSpan } from "../src/ast.ts";
 
@@ -276,4 +277,27 @@ test("reports recognized, lowered, and dependency-closed script stages separatel
   assert.equal(report.files[0]?.recognized, true);
   assert.equal(report.files[0]?.lowered, true);
   assert.equal(report.files[0]?.dependencyClosed, true);
+  assert.equal(report.compilerCleanScriptFileCount, null);
+  assert.equal(report.files[0]?.compilerClean, null);
+
+  const compiledSources: string[] = [];
+  const rejecting = analyzeFeasibility([clean], {
+    compiler: (source) => {
+      compiledSources.push(source);
+      return {
+        compiled: false,
+        diagnostics: [{ severity: "error", code: "TSP001", message: "x", line: 1, column: 1 }],
+      };
+    },
+  });
+  assert.deepEqual(compiledSources, ['say "hello"\n']);
+  assert.equal(rejecting.compilerCleanScriptFileCount, 0);
+  assert.equal(rejecting.files[0]?.compilerClean, false);
+  assert.deepEqual(rejecting.compilerDiagnosticsByMessage, { "TSP001 x": 1 });
+
+  const accepting = analyzeFeasibility([clean], {
+    compiler: () => ({ compiled: true, diagnostics: [] }),
+  });
+  assert.equal(accepting.compilerCleanScriptFileCount, 1);
+  assert.equal(accepting.files[0]?.compilerClean, true);
 });

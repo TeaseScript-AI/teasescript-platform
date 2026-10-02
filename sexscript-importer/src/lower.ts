@@ -6,8 +6,10 @@ import {
   walkAst,
   type AstNode,
   type ParsedGroovyFile,
+  type SourceComment,
   type SourceSpan,
 } from "./ast.ts";
+import { rootDiagnostics } from "./diagnostics.ts";
 import type {
   IrExpression,
   IrFunctionParameter,
@@ -50,7 +52,29 @@ interface LowerContext {
   packageHelperRegistry: HelperRegistry;
   syntheticHelpers: Set<SyntheticHelper>;
   functionDepth: number;
+  comments: CommentQueue;
+  /** Legacy source lines used to preserve code that needs manual migration. */
+  sourceLines: string[];
+  /** Diagnostics already rendered as inline notes in the generated output. */
+  renderedDiagnostics: Set<MigrationDiagnostic>;
 }
+
+/** Source comments not yet emitted; shared by every context lowering the same file. */
+interface CommentQueue {
+  items: SourceComment[];
+  next: number;
+}
+
+const JAVA_REFLECTION_METHODS = new Set([
+  "getConstructor",
+  "getDeclaredConstructor",
+  "getDeclaredField",
+  "getDeclaredMethod",
+  "getField",
+  "getMethod",
+  "invoke",
+  "newInstance",
+]);
 
 const DIRECT_STORAGE_LOADS = new Set([
   "load",
@@ -95,6 +119,9 @@ export function lowerParsedFile(
     packageHelperRegistry: options.helperRegistry ?? new Map(),
     syntheticHelpers: new Set(),
     functionDepth: 0,
+    comments: { items: file.comments ?? [], next: 0 },
+    sourceLines: file.source === undefined ? [] : file.source.split(/\r\n?|\n/u),
+    renderedDiagnostics: new Set(),
   };
   if (file.diagnostics.length > 0 || file.root === null) {
     for (const diagnostic of file.diagnostics) {
@@ -212,8 +239,14 @@ function lowerHelperCompilationUnit(
   const helperFunctions = collectHelperFunctionInfo(methods);
   const statements: IrStatement[] = [];
   for (const method of methods) {
+    const leadingComments = takeCommentsBefore(baseContext, method.span).map(
+      (comment) => comment.text,
+    );
     const lowered = lowerHelperMethod(method, baseContext, helperFunctions);
-    if (lowered !== null) statements.push(lowered);
+    if (lowered === null) continue;
+    if (lowered.kind === "function" && leadingComments.length > 0)
+      lowered.leadingComments = leadingComments;
+    statements.push(lowered);
   }
   return {
     sourceName: file.sourceName,
@@ -289,6 +322,9 @@ function lowerHelperMethod(
     packageHelperRegistry: baseContext.packageHelperRegistry,
     syntheticHelpers: baseContext.syntheticHelpers,
     functionDepth: 1,
+    comments: baseContext.comments,
+    sourceLines: baseContext.sourceLines,
+    renderedDiagnostics: baseContext.renderedDiagnostics,
   };
   const parameters: IrFunctionParameter[] = [];
   for (const parameter of authoredRecords) {
@@ -310,10 +346,94 @@ function lowerHelperMethod(
 }
 
 function lowerBlock(block: AstNode, context: LowerContext): IrStatement[] {
-  const statements = nodeArray(block.statements);
+  return lowerStatementList(nodeArray(block.statements), block.span, context);
+}
+
+/** Lowers statements in source order and interleaves the comments that precede or follow them. */
+function lowerStatementList(
+  statements: AstNode[],
+  enclosingSpan: SourceSpan | null,
+  context: LowerContext,
+): IrStatement[] {
   const result: IrStatement[] = [];
-  for (const statement of statements) result.push(...lowerStatement(statement, context));
+  let previousEndLine: number | null = null;
+  const emitComments = (comments: SourceComment[]): void => {
+    for (const comment of comments) {
+      result.push(...paragraphBreak(context, previousEndLine, comment.line));
+      result.push(commentStatement(comment, previousEndLine));
+      previousEndLine = comment.endLine;
+    }
+  };
+  for (const statement of statements) {
+    const span = statementSpan(statement);
+    emitComments(takeCommentsBefore(context, span));
+    if (span !== null) result.push(...paragraphBreak(context, previousEndLine, span.line));
+    const firstDiagnostic = context.diagnostics.length;
+    const lowered = lowerStatement(statement, context);
+    const only = lowered.length === 1 ? lowered[0] : undefined;
+    if (only?.kind === "unsupported" && span !== null) {
+      only.legacySource = legacySourceLines(context, span);
+    }
+    result.push(...diagnosticNotes(context, firstDiagnostic), ...lowered);
+    if (span !== null) previousEndLine = span.endLine;
+  }
+  emitComments(takeCommentsBefore(context, enclosingSpan === null ? null : endOf(enclosingSpan)));
   return result;
+}
+
+/** Keeps one blank line where the legacy source separated statements or comments by blank lines. */
+function paragraphBreak(
+  context: LowerContext,
+  previousEndLine: number | null,
+  nextLine: number,
+): IrStatement[] {
+  if (previousEndLine === null || nextLine <= previousEndLine + 1) return [];
+  const gap = context.sourceLines.slice(previousEndLine, nextLine - 1);
+  return gap.length > 0 && gap.every((line) => line.trim() === "")
+    ? [{ kind: "blank", span: null }]
+    : [];
+}
+
+/** Groovy omits positions on some expression statements; fall back to the expression. */
+function statementSpan(node: AstNode): SourceSpan | null {
+  return node.span ?? asNode(node.expression)?.span ?? null;
+}
+
+function endOf(span: SourceSpan): SourceSpan {
+  return {
+    line: span.endLine,
+    column: span.endColumn,
+    endLine: span.endLine,
+    endColumn: span.endColumn,
+  };
+}
+
+function takeCommentsBefore(context: LowerContext, span: SourceSpan | null): SourceComment[] {
+  if (span === null) return [];
+  const queue = context.comments;
+  const start = queue.next;
+  while (queue.next < queue.items.length) {
+    const comment = queue.items[queue.next]!;
+    const before =
+      comment.line < span.line || (comment.line === span.line && comment.column < span.column);
+    if (!before) break;
+    queue.next += 1;
+  }
+  return queue.items.slice(start, queue.next);
+}
+
+function commentStatement(comment: SourceComment, previousEndLine: number | null): IrStatement {
+  return {
+    kind: "comment",
+    text: comment.text.replace(/\r\n?/gu, "\n"),
+    trailing: previousEndLine !== null && comment.line === previousEndLine,
+    span: {
+      line: comment.line,
+      column: comment.column,
+      endLine: comment.endLine,
+      endColumn: comment.column,
+    },
+  };
 }
 
 function lowerStatement(node: AstNode, context: LowerContext): IrStatement[] {
@@ -1184,15 +1304,11 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
         ),
       ];
     }
-    const loweredBody: IrStatement[] = [];
-    for (const statement of sourceStatements)
-      loweredBody.push(...lowerStatement(statement, context));
+    const loweredBody = lowerStatementList(sourceStatements, null, context);
     cases.push({ span: caseNode.span, match, body: loweredBody });
   }
 
-  const defaultStatements: IrStatement[] = [];
-  for (const statement of withoutTerminalBreak(defaultSource))
-    defaultStatements.push(...lowerStatement(statement, context));
+  const defaultStatements = lowerStatementList(withoutTerminalBreak(defaultSource), null, context);
   return [{ kind: "switch", value, cases, default: defaultStatements, span: node.span }];
 }
 
@@ -1553,12 +1669,16 @@ function lowerObjectMethodCallExpression(
       "System.exit() terminates the legacy JVM process and is not automatically equivalent to TeaseScript exit.",
     );
   }
-  if (name === "get" && targetNode?.kind === "methodCall") {
+  if (
+    JAVA_REFLECTION_METHODS.has(name) ||
+    (name === "forName" && receiverName === "Class") ||
+    (name === "get" && targetNode?.kind === "methodCall")
+  ) {
     return unsupportedExpression(
       context,
       node,
       "SX_JAVA_REFLECTION",
-      "Java/reflection call chains are not reproduced by the TeaseScript importer.",
+      "Java reflection has no TeaseScript equivalent; reimplement the intended behavior manually.",
     );
   }
   if (targetNode?.kind === "constructorCall") {
@@ -2181,7 +2301,41 @@ function unsupportedStatement(
   message: string,
 ): IrStatement {
   addDiagnostic(context, code, "error", message, node.span);
-  return { kind: "unsupported", diagnosticCode: code, summary: message, span: node.span };
+  const legacySource = node.span === null ? [] : legacySourceLines(context, node.span);
+  return { kind: "unsupported", legacySource, span: node.span };
+}
+
+/**
+ * Renders the not-yet-rendered root causes added while lowering one statement as inline notes, so the
+ * generated file explains what needs manual work at the place where it is needed.
+ */
+function diagnosticNotes(context: LowerContext, firstDiagnostic: number): IrStatement[] {
+  const fresh = context.diagnostics
+    .slice(firstDiagnostic)
+    .filter(
+      (diagnostic) =>
+        diagnostic.severity !== "info" && !context.renderedDiagnostics.has(diagnostic),
+    );
+  for (const diagnostic of fresh) context.renderedDiagnostics.add(diagnostic);
+  return rootDiagnostics(fresh).map((diagnostic) => {
+    const label = diagnostic.severity === "error" ? "TODO" : "NOTE";
+    const location = diagnostic.span === null ? "" : ` line ${diagnostic.span.line}`;
+    return {
+      kind: "comment",
+      text: `// ${label} ${diagnostic.code}${location}: ${diagnostic.message}`,
+      trailing: false,
+      span: diagnostic.span,
+    };
+  });
+}
+
+function legacySourceLines(context: LowerContext, span: SourceSpan): string[] {
+  const lines = context.sourceLines.slice(span.line - 1, span.endLine);
+  const indents = lines
+    .filter((line) => line.trim() !== "")
+    .map((line) => /^[ \t]*/u.exec(line)?.[0].length ?? 0);
+  const indent = indents.length === 0 ? 0 : Math.min(...indents);
+  return lines.map((line) => line.slice(indent).trimEnd());
 }
 
 function addDiagnostic(

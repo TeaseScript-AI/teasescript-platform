@@ -1,5 +1,7 @@
 import groovy.json.JsonOutput;
 import groovy.lang.GroovySystem;
+import groovyjarjarantlr.Token;
+import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -7,6 +9,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.codehaus.groovy.antlr.parser.GroovyLexer;
+import org.codehaus.groovy.antlr.parser.GroovyTokenTypes;
 import org.codehaus.groovy.ast.ASTNode;
 import org.codehaus.groovy.ast.ClassNode;
 import org.codehaus.groovy.ast.FieldNode;
@@ -126,7 +130,7 @@ public final class SexScriptAstExporter {
         Map<String, Object> root = mapOf(
                 "kind", "scriptBody",
                 "body", exporter.statement(run.getCode()));
-        return file(sourceName, "script-body", root);
+        return file(sourceName, "script-body", root, source);
     }
 
     private static Map<String, Object> exportCompilationUnit(String sourceName, String source) {
@@ -147,17 +151,70 @@ public final class SexScriptAstExporter {
                 "kind", "compilationUnit",
                 "topLevel", topLevel == null ? null : exporter.statement(topLevel),
                 "classes", classes);
-        return file(sourceName, "unit", root);
+        return file(sourceName, "unit", root, source);
     }
 
-    private static Map<String, Object> file(String sourceName, String mode, Map<String, Object> root) {
+    private static Map<String, Object> file(
+            String sourceName, String mode, Map<String, Object> root, String source) {
         return mapOf(
                 "formatVersion", FORMAT_VERSION,
                 "sourceName", sourceName,
                 "groovyVersion", GroovySystem.getVersion(),
                 "mode", mode,
                 "root", root,
+                "source", source,
+                "comments", comments(source),
                 "diagnostics", List.of());
+    }
+
+    /**
+     * The Groovy AST drops comments. Re-lex the original source with the same Groovy lexer so string, GString,
+     * and slashy-string contents are never mistaken for comments.
+     */
+    private static List<Object> comments(String source) {
+        List<Integer> lineStarts = new ArrayList<>();
+        lineStarts.add(0);
+        for (int index = 0; index < source.length(); index += 1) {
+            if (source.charAt(index) == '\n') {
+                lineStarts.add(index + 1);
+            }
+        }
+        List<Object> result = new ArrayList<>();
+        try {
+            GroovyLexer lexer = new GroovyLexer(new StringReader(source));
+            lexer.setWhitespaceIncluded(true);
+            lexer.setTabSize(1);
+            // plumb() is the parser-facing stream; it tracks GString and division/regex context.
+            groovyjarjarantlr.TokenStream tokens = lexer.plumb();
+            for (Token token = tokens.nextToken(); token.getType() != Token.EOF_TYPE; token = tokens.nextToken()) {
+                int type = token.getType();
+                if (type != GroovyTokenTypes.SL_COMMENT && type != GroovyTokenTypes.ML_COMMENT) {
+                    continue;
+                }
+                // ANTLR drops newlines from comment token text, so read the exact text from the source.
+                int start = lineStarts.get(token.getLine() - 1) + token.getColumn() - 1;
+                int end;
+                if (type == GroovyTokenTypes.ML_COMMENT) {
+                    end = source.indexOf("*/", start + 2) + 2;
+                } else {
+                    end = source.indexOf('\n', start);
+                    if (end < 0) {
+                        end = source.length();
+                    }
+                }
+                String text = source.substring(start, end).stripTrailing();
+                int endLine = token.getLine() + (int) text.chars().filter(character -> character == '\n').count();
+                result.add(mapOf(
+                        "line", token.getLine(),
+                        "column", token.getColumn(),
+                        "endLine", endLine,
+                        "text", text));
+            }
+        } catch (Exception error) {
+            // Comments are presentation only; the AST export remains authoritative when re-lexing fails.
+            return List.of();
+        }
+        return result;
     }
 
     private Map<String, Object> classNode(ClassNode node) {

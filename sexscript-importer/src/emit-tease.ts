@@ -1,8 +1,11 @@
+import { rootDiagnostics } from "./diagnostics.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
 
 export function emitTease(program: MigrationProgram): string {
   const lines: string[] = [];
-  const errors = program.diagnostics.filter((diagnostic) => diagnostic.severity === "error").length;
+  const errors = rootDiagnostics(
+    program.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+  ).length;
   if (errors > 0) {
     lines.push(`// MIGRATION INCOMPLETE: ${errors} error diagnostic${errors === 1 ? "" : "s"}.`);
     lines.push("// Review diagnostics before treating this file as behaviorally equivalent.");
@@ -65,7 +68,26 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
     case "delete":
       lines.push(`${pad}delete ${emitExpression(statement.key)}`);
       return;
+    case "blank":
+      if (lines.length > 0 && lines.at(-1) !== "") lines.push("");
+      return;
+    case "comment": {
+      const [first = "", ...rest] = statement.text.split("\n");
+      const previous = lines.length - 1;
+      if (statement.trailing && previous >= 0 && lines[previous]!.trim() !== "") {
+        lines[previous] = `${lines[previous]} ${first}`;
+      } else {
+        lines.push(`${pad}${first}`);
+      }
+      for (const line of rest) lines.push(line.trimEnd());
+      return;
+    }
     case "function": {
+      for (const comment of statement.leadingComments ?? []) {
+        lines.push(
+          ...comment.split("\n").map((line, index) => (index === 0 ? `${pad}${line}` : line)),
+        );
+      }
       const parameters = statement.parameters.map((parameter) =>
         parameter.defaultValue === null
           ? parameter.name
@@ -142,12 +164,9 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
     case "exit":
       lines.push(`${pad}exit`);
       return;
-    case "unsupported": {
-      const line = statement.span?.line;
-      const location = line === undefined ? "" : ` line ${line}`;
-      lines.push(`${pad}// TODO ${statement.diagnosticCode}${location}: ${statement.summary}`);
+    case "unsupported":
+      for (const line of statement.legacySource) lines.push(`${pad}// | ${line}`.trimEnd());
       return;
-    }
   }
 }
 

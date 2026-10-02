@@ -6,8 +6,16 @@ if (($# != 2)); then
   exit 2
 fi
 
-: "${SEXSCRIPT_GROOVY_JAR:?Set SEXSCRIPT_GROOVY_JAR to groovy-2.5.21.jar}"
-: "${SEXSCRIPT_GROOVY_JSON_JAR:?Set SEXSCRIPT_GROOVY_JSON_JAR to groovy-json-2.5.21.jar}"
+# Default to the standard Maven local-repository layout when the JAR paths are not set explicitly.
+maven_groovy="${HOME}/.m2/repository/org/codehaus/groovy"
+SEXSCRIPT_GROOVY_JAR="${SEXSCRIPT_GROOVY_JAR:-$maven_groovy/groovy/2.5.21/groovy-2.5.21.jar}"
+SEXSCRIPT_GROOVY_JSON_JAR="${SEXSCRIPT_GROOVY_JSON_JAR:-$maven_groovy/groovy-json/2.5.21/groovy-json-2.5.21.jar}"
+for jar in "$SEXSCRIPT_GROOVY_JAR" "$SEXSCRIPT_GROOVY_JSON_JAR"; do
+  if [[ ! -f "$jar" ]]; then
+    printf 'Groovy 2.5.21 JAR not found: %s (set SEXSCRIPT_GROOVY_JAR and SEXSCRIPT_GROOVY_JSON_JAR)\n' "$jar" >&2
+    exit 2
+  fi
+done
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 project_dir=$(cd -- "$script_dir/../.." && pwd)
