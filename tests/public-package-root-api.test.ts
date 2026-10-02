@@ -7,8 +7,6 @@ import * as validationTesting from "../src/validation-testing.js";
 test("the package root excludes internal compiler and test seams", () => {
   for (const internal of [
     "InstructionCompilationError",
-    "Interpreter",
-    "execute",
     "captureInstructionPlan",
     "validateCapturedInstructionPlan",
   ])

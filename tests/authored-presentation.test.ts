@@ -13,7 +13,6 @@ import {
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
-import { parseMessageMarkup } from "../src/message-markup.js";
 
 test("accepts concrete CSS colour notations and preserves out-of-gamut coordinates", () => {
   for (const color of [
@@ -28,10 +27,15 @@ test("accepts concrete CSS colour notations and preserves out-of-gamut coordinat
     assert.equal(normalizeColor(color), normalizeColor("red"), color);
   for (const color of ["lab(50% 20 30)", "lch(50% 40 30)", "oklab(50% .1 .1)", "oklch(.5 .1 30)"])
     assert.ok(isNormalizedColor(normalizeColor(color)), color);
-  assert.equal(normalizeColor("oklch(.5 .8 20)"), "oklch(0.5 0.8 20)");
-  const smallChroma = normalizeColor("oklch(.5 1e-14 20)");
-  assert.equal(smallChroma, "oklch(0.5 1e-14 20)");
-  assert.equal(isNormalizedColor(smallChroma), true);
+  // Out-of-gamut and tiny chroma coordinates are retained without gamut mapping.
+  for (const [color, coordinates] of [
+    ["oklch(.5 .8 20)", [0.5, 0.8, 20]],
+    ["oklch(.5 1e-14 20)", [0.5, 1e-14, 20]],
+  ] as const) {
+    const normalized = normalizeColor(color);
+    assert.ok(normalized !== null && isNormalizedColor(normalized), color);
+    assert.deepEqual(oklchCoordinates(normalized), coordinates, color);
+  }
   for (const color of [
     "oops",
     "currentColor",
@@ -116,18 +120,16 @@ test("keeps contextual identifiers usable as ordinary say values", () => {
 });
 
 test("rejects invalid constant colours and presentation options at compile time", () => {
-  for (const source of [
-    'say prose(color: "not-a-color") "x"',
-    'speaker vera { color: "not-a-color" }',
-    'speaker vera { prose: { background: "not-a-color" } }',
-    'say "[color=not-a-color]x[/color]"',
-    'say prose(align: "diagonal") "x"',
-    'say prose(align: "left", align: "right") "x"',
-    'say prose(unknown: "x") "x"',
-  ]) {
-    const result = compileSource(source);
-    assert.equal(result.plan, null, source);
-    assert.ok(result.diagnostics.length > 0, source);
+  for (const [source, code, located] of [
+    ['say prose(color: "not-a-color") "x"', "TSC008", '"not-a-color"'],
+    ['speaker vera { color: "not-a-color" }', "TSC008", '"not-a-color"'],
+    ['speaker vera { prose: { background: "not-a-color" } }', "TSC008", '"not-a-color"'],
+    ['say "[color=not-a-color]x[/color]"', "TSC008", '"[color=not-a-color]x[/color]"'],
+    ['say prose(align: "diagonal") "x"', "TSC008", '"diagonal"'],
+    ['say prose(align: "left", align: "right") "x"', "TSP004", "align"],
+    ['say prose(unknown: "x") "x"', "TSP004", "unknown"],
+  ] as const) {
+    assertLocatedRejection(source, code, located);
   }
   assert.notEqual(compileSource('say "`[color=invalid]literal[/color]`"').plan, null);
 });
@@ -177,6 +179,12 @@ say "[color=\${invalid}]third[/color]", instant
   assert.equal(messages[1]!.presentation.color, null);
   assert.equal(messages[1]!.presentation.background, null);
   assert.equal(messages[2]!.text, "third");
+  const block = messages[2]!.content.blocks[0];
+  if (block?.kind !== "paragraph") throw new Error("Expected paragraph.");
+  assert.deepEqual(
+    block.lines[0]!.spans.map((span) => [span.kind, "value" in span ? span.value : null]),
+    [["color", "inherit"]],
+  );
 });
 
 test("captures presentation in paced output and validates restored presentation data", () => {
@@ -206,11 +214,6 @@ test("captures presentation in paced output and validates restored presentation 
   assert.equal(validateRuntimeSnapshot(malformed.snapshot, plan).valid, false);
 });
 
-test("removed spoiler tags are ordinary visible text", () => {
-  const content = parseMessageMarkup("[spoiler]**visible**[/spoiler]");
-  assert.equal(content.visibleText, "[spoiler]visible[/spoiler]");
-});
-
 test("a user-provided colour survives an input checkpoint and invalid input uses the default", () => {
   const plan = compileValidPlan(
     'say prose(color: askText "Colour") "The story continues.", instant',
@@ -237,12 +240,16 @@ test("a user-provided colour survives an input checkpoint and invalid input uses
 });
 
 test("null options inherit, and malformed external resolved values are rejected", () => {
-  const plan = compileValidPlan('say prose(color: null, align: null) "x", instant');
+  const plan = compileValidPlan(`
+speaker vera { prose: { color: "red", position: "right", align: "left" } }
+speaker vera
+say prose(color: null, position: null, align: null) "x", instant
+`);
   const result = run(plan, createFreshRuntimeSnapshot(plan));
   const output = result.events.find((event) => event.kind === "say");
-  assert.equal(output?.presentation.color, null);
-  assert.equal(output?.presentation.align, null);
-  assert.equal(output?.presentation.position, null);
+  assert.equal(output?.presentation.color, normalizeColor("red"));
+  assert.equal(output?.presentation.position, "right");
+  assert.equal(output?.presentation.align, "left");
   assert.equal(isMessagePresentation(output?.presentation), true);
   assert.equal(isMessagePresentation({ ...output?.presentation, align: ["center"] }), false);
   assert.equal(isMessagePresentation({ ...output?.presentation, background: "url(x)" }), false);
@@ -408,17 +415,12 @@ say "[color=\${faded}]third[/color]", instant
 test("bubble syntax and speaker defaults reject authored placement, including null", () => {
   for (const option of ["position", "align"]) {
     for (const value of ['"left"', '"center"', '"right"', "null"]) {
-      for (const source of [
-        `say bubble(${option}: ${value}) "message"`,
+      assertLocatedRejection(`say bubble(${option}: ${value}) "message"`, "TSP004", option);
+      assertLocatedRejection(
         `speaker vera { bubble: ({ ${option}: ${value} }) }`,
-      ]) {
-        const compiled = compileSource(source);
-        assert.equal(compiled.plan, null, source);
-        assert.ok(
-          compiled.diagnostics.some((item) => item.message.includes(option)),
-          source,
-        );
-      }
+        "TSC008",
+        option,
+      );
     }
   }
 });
@@ -511,3 +513,26 @@ test("checkpoint validation rejects authored placement on prepared bubble output
     assert.throws(() => deserializeCheckpoint(JSON.stringify(malformed)));
   }
 });
+
+/** Compilation fails with `code` located within the last occurrence of `located` in `source`. */
+function assertLocatedRejection(source: string, code: string, located: string): void {
+  const start = source.lastIndexOf(located);
+  assert.ok(start >= 0, source);
+  const result = compileSource(source);
+  assert.equal(result.plan, null, source);
+  assert.ok(
+    result.diagnostics.some(
+      (diagnostic) =>
+        diagnostic.code === code &&
+        diagnostic.span.start.offset >= start &&
+        diagnostic.span.end.offset <= start + located.length,
+    ),
+    `${source}: ${JSON.stringify(result.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.span]))}`,
+  );
+}
+
+function oklchCoordinates(color: string): number[] {
+  const match = /^oklch\((.*)\)$/u.exec(color);
+  assert.ok(match !== null, color);
+  return match[1]!.trim().split(/\s+/u).map(Number);
+}

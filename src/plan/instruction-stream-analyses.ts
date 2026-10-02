@@ -5,6 +5,7 @@ import {
   nonNegativeSafeInteger,
   planError,
   positiveSafeInteger,
+  rejectUnknownFields,
   requireString,
   validateSpan,
   validInstructionBoundary,
@@ -1143,6 +1144,22 @@ function validateInstructionRegionTarget(
   }
 }
 
+const FUNCTION_FIELDS = [
+  "id",
+  "handler",
+  "selfHandle",
+  "name",
+  "declarationSpan",
+  "parameters",
+  "entryInstruction",
+  "bodyEntryInstruction",
+  "implicitReturnInstruction",
+  "endInstruction",
+  "bodySpan",
+];
+
+const PARAMETER_FIELDS = ["name", "index", "hasDefault", "declarationSpan", "defaultSpan"];
+
 function validateFunctionDefinitions(
   value: unknown,
   instructions: readonly unknown[],
@@ -1163,6 +1180,7 @@ function validateFunctionDefinitions(
       errors.push(planError("TSC002", "Function definition must be an object.", path));
       return;
     }
+    rejectUnknownFields(definition, FUNCTION_FIELDS, path, errors);
     requirePositiveInteger(definition.id, `${path}.id`, errors);
     requireString(definition.name, `${path}.name`, errors);
     if (
@@ -1663,6 +1681,7 @@ function validateFunctionParameters(
       errors.push(planError("TSC002", "Function parameter must be an object.", parameterPath));
       return;
     }
+    rejectUnknownFields(parameter, PARAMETER_FIELDS, parameterPath, errors);
     requireString(parameter.name, `${parameterPath}.name`, errors);
     if (typeof parameter.name === "string") {
       if (names.has(parameter.name)) {

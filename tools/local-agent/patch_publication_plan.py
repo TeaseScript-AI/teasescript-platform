@@ -242,7 +242,7 @@ python3 -B tools/local-agent/prepare-patch-publication.py \
   --reset-publication-stage <tree|commit|branch>
 ```
 
-After the manifest upload is recorded, continue using the canonical `--show-next-action`.
+After the manifest upload is recorded, continue using `--show-next-action`.
 The helper exposes exactly one next action at a time: transfer tree, transfer
 commit, transfer-branch creation, a read-only exact branch comparison, and
 finally the publication command. Record each returned SHA, branch name, or
@@ -250,8 +250,6 @@ comparison status with the command printed for that step before continuing.
 After branch creation, an interruption resumes at the comparison read rather
 than repeating the branch write. The helper verifies the payload-only tree SHA
 and the final branch target and never requires manual placeholder substitution.
-
-`--show-next-upload` remains an exact compatibility alias for `--show-next-action`.
 
 The current connector action names may change; follow the printed action
 direction and argument shape rather than relying only on a hard-coded name.

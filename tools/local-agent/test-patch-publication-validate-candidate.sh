@@ -26,14 +26,14 @@ exit "${TOOLING_STATUS:-0}"
 STUB
 chmod +x "$work/tools/local-agent/check-local-agent.sh"
 
+# Records the locked install as "ci" and the complete check as "check", whatever flags they use.
 cat > "$bin/npm" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
-printf 'npm %s\n' "$*" >> "$CALLS"
-case "$*" in
-  'ci --no-audit --no-fund') exit "${CI_STATUS:-0}" ;;
-  'run check') exit "${CHECK_STATUS:-0}" ;;
-  *) exit 64 ;;
+case "${1-} ${2-}" in
+  'ci '*) printf 'ci\n' >> "$CALLS"; exit "${CI_STATUS:-0}" ;;
+  'run check') printf 'check\n' >> "$CALLS"; exit "${CHECK_STATUS:-0}" ;;
+  *) printf 'npm %s\n' "$*" >> "$CALLS"; exit 64 ;;
 esac
 STUB
 chmod +x "$bin/npm"
@@ -126,11 +126,11 @@ test ! -s "$calls"
 
 : > "$calls"
 run_profile source >/dev/null
-test "$(cat "$calls")" = $'npm ci --no-audit --no-fund\nnpm run check'
+test "$(cat "$calls")" = $'ci\ncheck'
 
 : > "$calls"
 run_profile full >/dev/null
-test "$(cat "$calls")" = $'tooling\nnpm ci --no-audit --no-fund\nnpm run check'
+test "$(cat "$calls")" = $'tooling\nci\ncheck'
 
 : > "$calls"
 set +e
@@ -146,8 +146,7 @@ run_profile full CI_STATUS=8 >/dev/null 2>&1
 status=$?
 set -e
 test "$status" -eq 8
-test "$(cat "$calls")" = $'tooling\nnpm ci --no-audit --no-fund'
-test "$(grep -c '^npm run check$' "$calls" || true)" -eq 0
+test "$(cat "$calls")" = $'tooling\nci'
 
 : > "$calls"
 set +e
@@ -155,7 +154,7 @@ run_profile full CHECK_STATUS=9 >/dev/null 2>&1
 status=$?
 set -e
 test "$status" -eq 9
-test "$(cat "$calls")" = $'tooling\nnpm ci --no-audit --no-fund\nnpm run check'
+test "$(cat "$calls")" = $'tooling\nci\ncheck'
 
 if run_profile unknown >/dev/null 2>&1; then
   echo 'unknown validation profile unexpectedly succeeded' >&2

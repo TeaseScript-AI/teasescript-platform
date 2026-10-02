@@ -74,7 +74,11 @@ The accepted boundary does not itself change accepted V30 forms such as `wait 2`
 
 ADR 0018 selects direct Standard Library names with no import and no first-POC opt-out or shadowing.
 
-The current compiler implements the four compact interaction forms in this section through explicit versioned interaction instructions and the canonical resumable runtime. The broader parenthesized V30 APIs and their advanced parameters remain deferred; this slice does not treat compact syntax as a runtime library call. Parenthesized interaction-call spellings and an `as speaker` clause placed after the payload are rejected with focused parser diagnostic `TSP032` rather than being interpreted as compact syntax.
+The current compiler implements the four compact interaction forms in this section through explicit versioned
+interaction instructions and the canonical resumable runtime. The broader parenthesized V30 APIs and their advanced
+parameters remain deferred; this slice does not treat compact syntax as a runtime library call. A parenthesized
+interaction-call spelling is never interpreted as compact syntax; until those APIs are implemented, the parser reports
+it with focused diagnostic `TSP032`. An `as speaker` clause placed after the payload receives the same diagnostic.
 
 ### Basic interactions
 
@@ -224,7 +228,9 @@ The current function subset includes:
 - lexical function scope with package-global access;
 - deep-copy ordinary arguments/returns and speaker-reference identity preservation.
 
-Complete static typing and the wider V30 Standard Library/runtime APIs are not implemented. Typed signatures may be parsed for diagnostics while unsupported execution/type semantics remain rejected.
+Complete static typing and the wider V30 Standard Library/runtime APIs are not implemented yet. Until function-signature
+types are checked, a typed function signature parses but does not compile, so its declared types are never silently
+ignored.
 
 The current source/compiler implements authored presentation options and the ADR 0018 `say` pacing and skip forms while
 preserving existing `say`/
@@ -251,7 +257,8 @@ implementation constraint, not language capacity. Historical diagnostic measurem
 
 ## Protected names
 
-Grammar keywords, type names, engine names, and implemented core built-ins are centrally protected from user declarations even when a protected future engine API is not yet callable. Protection does not make a deferred API implemented.
+Grammar keywords, type names, engine names, and implemented core built-ins are centrally protected from user
+declarations. Protecting a name reserves it; it does not make that name callable.
 
 A Standard Library export does not automatically become a protected grammar keyword. ADR 0018 explicitly protects its
 selected first-POC direct names, and the message-markup specification explicitly protects `escapeMarkup`, as part of

@@ -234,6 +234,10 @@ test("bounds malformed bare-link work and recovers a later URL in the same run",
       target: "https://example.com/",
     },
   ]);
+  // Regression bound for linear validation work, not a product limit: re-validating the rest of the run from each
+  // invalid prefix would validate about 250 times the source length. The counter only sees `new URL`, so it must be
+  // non-zero for the bound to mean anything.
+  assert.ok(validatedCharacters > 0, "URL validation is not observed");
   assert.ok(validatedCharacters <= source.length * 2, `${validatedCharacters} URL characters`);
 });
 

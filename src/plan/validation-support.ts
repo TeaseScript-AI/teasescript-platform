@@ -64,6 +64,31 @@ export function hasExactKeys(value: Record<string, unknown>, expected: readonly 
   return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
 }
 
+/**
+ * Reports each own field that the current plan version does not define for this object. Plan schemas evolve through a
+ * new plan version, so an unknown field is malformed data rather than an ignored extension.
+ */
+export function rejectUnknownFields(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  path: string,
+  errors: PlanValidationError[],
+): void {
+  for (const key of Object.keys(value)) {
+    if (allowed.includes(key)) continue;
+    const fieldPath = /^[A-Za-z_$][A-Za-z0-9_$]*$/u.test(key)
+      ? `${path}.${key}`
+      : `${path}[${JSON.stringify(key)}]`;
+    errors.push(
+      planError(
+        "TSC002",
+        "Field is not defined by the current instruction-plan version.",
+        fieldPath,
+      ),
+    );
+  }
+}
+
 export function planError(
   code: PlanValidationError["code"],
   message: string,
