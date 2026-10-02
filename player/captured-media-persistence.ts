@@ -1,0 +1,118 @@
+import type { RuntimeScriptStorageEntrySnapshot, SerializableRuntimeValue } from "../src/index.js";
+import { isCapturedMediaReference, type CapturedMediaStore } from "./captured-media.js";
+
+/**
+ * The Player's durable script storage for one trusted script scope, as the storage track provides it. `load` returns
+ * a complete fresh view or rejects; it never reports unavailable storage as empty. `write` and `clear` resolve once
+ * persisted; a `null` value removes the key, like `save null`.
+ */
+export interface ScriptStorageProvider {
+  readonly scope: string;
+  load(): Promise<readonly RuntimeScriptStorageEntrySnapshot[]>;
+  write(key: string, value: SerializableRuntimeValue): Promise<void>;
+  clear(): Promise<void>;
+}
+
+/**
+ * Captured-media references inside a stored value: list and set items, object property names and values. A match is
+ * only a candidate: an unknown or forged reference stays ordinary data.
+ */
+export function capturedMediaReferences(value: SerializableRuntimeValue): Set<string> {
+  const found = new Set<string>();
+  const pending: SerializableRuntimeValue[] = [value];
+  for (let current = pending.pop(); current !== undefined; current = pending.pop()) {
+    if (typeof current === "string") {
+      if (isCapturedMediaReference(current)) found.add(current);
+    } else if (current !== null && typeof current === "object") {
+      if (current.kind === "list" || current.kind === "set") pending.push(...current.items);
+      else if (current.kind === "object")
+        for (const property of current.properties) pending.push(property.name, property.value);
+    }
+  }
+  return found;
+}
+
+/**
+ * Wraps the script-storage provider so saved captured media stays resolvable in later runs: every write first stores
+ * the session media it references durably, then persists the value. When the media cannot be stored, the write is not
+ * persisted at all, so no saved reference outlives its media; the key keeps its previous durable value and the write
+ * rejects with `CapturedMediaNotStoredError`. All operations run in order, so a clear cannot be refilled by an earlier
+ * write. Nothing is deleted here; unreferenced media is removed by `sweepCapturedMedia`.
+ */
+export function withCapturedMedia(
+  provider: ScriptStorageProvider,
+  media: CapturedMediaStore,
+): ScriptStorageProvider {
+  let queue: Promise<unknown> = Promise.resolve();
+  const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
+    const next = queue.then(operation, operation);
+    queue = next.catch(() => {});
+    return next;
+  };
+  return {
+    scope: provider.scope,
+    load: () => enqueue(() => provider.load()),
+    write: (key, value) =>
+      enqueue(async () => {
+        await media.promote(capturedMediaReferences(value));
+        await provider.write(key, value);
+      }),
+    clear: () => enqueue(() => provider.clear()),
+  };
+}
+
+/** Coordination of captured media across every Player of one scope, also in other tabs. */
+export interface CapturedMediaLocks {
+  /** Holds the shared live-Player lock until the returned release is called. */
+  holdLive(scope: string): () => void;
+  /**
+   * Runs `work` with the exclusive lock if no Player of the scope is live anywhere; returns `false` without running
+   * it otherwise, or when locks are unavailable.
+   */
+  whenIdle(scope: string, work: () => Promise<void>): Promise<boolean>;
+}
+
+const lockName = (scope: string) => `teasescript-captured-media:${scope}`;
+
+/** Web Locks coordination; without it no Player can prove it is alone, so media is never swept. */
+export function browserCapturedMediaLocks(): CapturedMediaLocks {
+  const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+  return {
+    holdLive(scope) {
+      if (locks === undefined) return () => {};
+      let release = () => {};
+      const held = new Promise<void>((resolve) => (release = resolve));
+      void locks.request(lockName(scope), { mode: "shared" }, () => held).catch(() => {});
+      return release;
+    },
+    async whenIdle(scope, work) {
+      if (locks === undefined) return false;
+      return locks.request(
+        lockName(scope),
+        { mode: "exclusive", ifAvailable: true },
+        async (lock) => {
+          if (lock === null) return false;
+          await work();
+          return true;
+        },
+      );
+    },
+  };
+}
+
+/**
+ * Removes stored media of the scope that no saved value references any more. It runs only while no Player of the
+ * scope is live, against a fresh read of the saved values; when either cannot be established it defers.
+ */
+export async function sweepCapturedMedia(
+  provider: ScriptStorageProvider,
+  media: CapturedMediaStore,
+  locks: CapturedMediaLocks,
+): Promise<boolean> {
+  return locks.whenIdle(provider.scope, async () => {
+    const referenced = new Set<string>();
+    for (const entry of await provider.load())
+      for (const reference of capturedMediaReferences(entry.value)) referenced.add(reference);
+    await media.sweep(referenced);
+  });
+}

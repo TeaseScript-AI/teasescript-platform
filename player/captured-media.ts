@@ -37,6 +37,8 @@ export interface CapturedMediaRepository {
   add(record: CapturedMediaRecord): Promise<void>;
   /** Resolves once the record is durably removed. */
   delete(namespace: string, reference: string): Promise<void>;
+  /** The references of every stored record of `namespace`, without reading their media. */
+  listReferences(namespace: string): Promise<readonly string[]>;
 }
 
 export interface CapturedMediaUrls {
@@ -44,9 +46,9 @@ export interface CapturedMediaUrls {
   revoke(url: string): void;
 }
 
-/** Thrown by `add` when no durable storage is available; capture then reports a storage failure. */
-export class CapturedMediaUnavailableError extends Error {
-  override readonly name = "CapturedMediaUnavailableError";
+/** Thrown by `promote` when media could not be stored durably. */
+export class CapturedMediaNotStoredError extends Error {
+  override readonly name = "CapturedMediaNotStoredError";
 }
 
 export type CapturedMediaResolution =
@@ -70,27 +72,30 @@ export function isCapturedMediaReference(value: string): boolean {
 }
 
 /**
- * Captured media that outlives a Player run: a script may save a reference and resolve the same media in a later run.
- * New references use a random per-store identity, so they never alias media stored by an earlier run, and records
- * are read lazily per reference. Stored media stays until it is deleted explicitly: without reachability tracking
- * across runs and saved values, overwriting one reference does not prove the media is unused, so reclamation is a
- * separate policy.
+ * Captured media of one Player and its durable backing. A capture starts as session media, held in memory for the
+ * live Player and same-page restore. It becomes durable only when a saved script value references it, through
+ * `promote`. Durable media is read lazily per reference. New references use a random per-store identity, so they never
+ * alias media of an earlier run. Nothing is deleted while the Player lives: media no saved value references is removed
+ * later by `sweep`, which runs only when no Player of the namespace is live.
  */
 export class CapturedMediaStore {
   readonly #repository: CapturedMediaRepository | null;
   readonly #urls: CapturedMediaUrls;
   readonly #namespace: string;
   readonly #changed: () => void;
+  /** Session captures and durable records read so far; all stay available while the Player lives. */
   readonly #records = new Map<string, CapturedMediaRecord>();
+  readonly #durable = new Set<string>();
   readonly #loading = new Map<string, Promise<CapturedMediaRecord | null>>();
   readonly #missing = new Set<string>();
   readonly #objectUrls = new Map<string, string>();
   readonly #prefix = `${REFERENCE_PREFIX}${crypto.randomUUID()}:`;
   #next = 1;
+  #closed = false;
 
   /**
-   * @param repository durable storage, or `null` when it could not be opened; captures then fail and stored
-   *   references stay unresolved, while everything else keeps working.
+   * @param repository durable storage, or `null` when it could not be opened; captures still work for the session,
+   *   while promotion fails and stored references stay unresolved.
    * @param changed called when a loading reference became ready or missing, so presentation can resolve it again.
    */
   constructor(
@@ -105,18 +110,8 @@ export class CapturedMediaStore {
     this.#changed = changed;
   }
 
-  get available(): boolean {
-    return this.#repository !== null;
-  }
-
-  /** Stores new media durably first; the returned reference only exists once the media does. */
-  async add(
-    kind: CapturedMediaKind,
-    data: Blob,
-    details: CapturedMediaDetails = {},
-  ): Promise<CapturedMediaEntry> {
-    if (this.#repository === null)
-      throw new CapturedMediaUnavailableError("No durable media storage is available.");
+  /** Adds a capture as session media. */
+  add(kind: CapturedMediaKind, data: Blob, details: CapturedMediaDetails = {}): CapturedMediaEntry {
     const record: CapturedMediaRecord = {
       namespace: this.#namespace,
       reference: `${this.#prefix}${this.#next++}`,
@@ -126,17 +121,47 @@ export class CapturedMediaStore {
       ...details,
       data,
     };
-    await this.#repository.add(record);
     this.#records.set(record.reference, record);
     return describe(record);
   }
 
-  /** Whether `reference` is stored media of `kind` known to this store, without reading storage. */
+  /** Drops a session capture whose reference was never handed out, for example after a reset. */
+  discard(reference: string): void {
+    if (this.#durable.has(reference)) return;
+    this.#records.delete(reference);
+    this.#revoke(reference);
+  }
+
+  /** Whether `reference` is media of `kind` this store holds, without reading storage. */
   holds(reference: string, kind: CapturedMediaKind): boolean {
     return this.#records.get(reference)?.kind === kind;
   }
 
-  /** The stored record, reading it from storage when needed. */
+  /**
+   * Stores the session media among `references` durably; references this store does not hold are ordinary data and
+   * ignored. Idempotent: media already stored, also by an earlier attempt, is kept as it is.
+   */
+  async promote(references: Iterable<string>): Promise<void> {
+    for (const reference of references) {
+      const record = this.#records.get(reference);
+      if (record === undefined || this.#durable.has(reference)) continue;
+      if (this.#repository === null)
+        throw new CapturedMediaNotStoredError("No durable media storage is available.");
+      try {
+        await this.#repository.add(record);
+      } catch (error) {
+        // An earlier attempt may have committed it before failing later; insert-only writes never overwrite.
+        const stored = await this.#repository.get(this.#namespace, reference).catch(() => null);
+        if (validRecord(stored, this.#namespace, reference) === null)
+          throw new CapturedMediaNotStoredError("The captured media could not be stored.", {
+            cause: error,
+          });
+      }
+      this.#durable.add(reference);
+    }
+  }
+
+  /** The record, reading it from storage when needed. */
   async read(reference: string): Promise<CapturedMediaRecord | null> {
     return this.#records.get(reference) ?? this.#load(reference);
   }
@@ -145,30 +170,45 @@ export class CapturedMediaStore {
   resolve(reference: string): CapturedMediaResolution {
     const record = this.#records.get(reference);
     if (record !== undefined) return { state: "ready", url: this.#url(record) };
-    if (this.#missing.has(reference) || !REFERENCE_PATTERN.test(reference))
+    if (this.#closed || this.#missing.has(reference) || !REFERENCE_PATTERN.test(reference))
       return { state: "missing" };
     if (!this.#loading.has(reference)) void this.#load(reference).then(this.#changed);
     return { state: "loading" };
   }
 
-  /** Deletes stored media durably; a reference a script still holds then resolves as missing. */
-  async delete(reference: string): Promise<void> {
-    await this.#repository?.delete(this.#namespace, reference);
-    this.#records.delete(reference);
-    this.#missing.add(reference);
-    this.#revoke(reference);
+  /**
+   * Deletes stored media of the namespace that no saved value references. Call only while no Player of the namespace
+   * is live, with references taken from a fresh read of the saved values.
+   */
+  async sweep(referenced: ReadonlySet<string>): Promise<number> {
+    if (this.#repository === null) return 0;
+    let deleted = 0;
+    for (const reference of await this.#repository.listReferences(this.#namespace)) {
+      if (referenced.has(reference) || this.#records.has(reference)) continue;
+      await this.#repository.delete(this.#namespace, reference);
+      deleted++;
+    }
+    return deleted;
   }
 
-  /** Releases browser URLs, for example when the Player unmounts; stored media stays. */
+  /** How many captures and read records this store holds. */
+  get size(): number {
+    return this.#records.size;
+  }
+
+  /** Releases browser URLs and session media when the Player unmounts; durable media stays. */
   close(): void {
+    this.#closed = true;
     for (const reference of [...this.#objectUrls.keys()]) this.#revoke(reference);
+    this.#records.clear();
   }
 
   #load(reference: string): Promise<CapturedMediaRecord | null> {
     const existing = this.#loading.get(reference);
     if (existing !== undefined) return existing;
     const repository = this.#repository;
-    if (repository === null || !REFERENCE_PATTERN.test(reference)) return Promise.resolve(null);
+    if (this.#closed || repository === null || !REFERENCE_PATTERN.test(reference))
+      return Promise.resolve(null);
     const loading = repository
       .get(this.#namespace, reference)
       .then(
@@ -178,12 +218,13 @@ export class CapturedMediaStore {
       )
       .then((record) => {
         this.#loading.delete(reference);
-        // A delete during the read wins.
-        if (record === null || this.#missing.has(reference)) {
+        if (this.#closed) return null;
+        if (record === null) {
           this.#missing.add(reference);
           return null;
         }
         this.#records.set(reference, record);
+        this.#durable.add(reference);
         return record;
       });
     this.#loading.set(reference, loading);

@@ -47,6 +47,22 @@ function repository(database: IDBDatabase): CapturedMediaRepository {
       committed(database, (store) => store.add(record)),
     delete: (namespace, reference) =>
       committed(database, (store) => store.delete([namespace, reference])),
+    listReferences: (namespace) =>
+      new Promise((resolve, reject) => {
+        // Every key [namespace, reference] sorts between [namespace] and [namespace, []]: arrays sort after strings.
+        const range = IDBKeyRange.bound([namespace], [namespace, []]);
+        const request = database
+          .transaction(STORE, "readonly")
+          .objectStore(STORE)
+          .getAllKeys(range);
+        request.onsuccess = () =>
+          resolve(
+            request.result.flatMap((key) =>
+              Array.isArray(key) && typeof key[1] === "string" ? [key[1]] : [],
+            ),
+          );
+        request.onerror = () => reject(request.error);
+      }),
   };
 }
 

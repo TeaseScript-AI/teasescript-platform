@@ -84,14 +84,7 @@ export interface CaptureHost<Track extends CaptureTrack> {
 }
 
 export type CaptureFailureKind =
-  | "denied"
-  | "not-found"
-  | "busy"
-  | "overconstrained"
-  | "unsupported"
-  | "inactive"
-  | "storage"
-  | "failed";
+  "denied" | "not-found" | "busy" | "overconstrained" | "unsupported" | "inactive" | "failed";
 
 export interface CaptureFailure {
   readonly kind: CaptureFailureKind;
@@ -105,7 +98,6 @@ const FAILURE_MESSAGES: Readonly<Record<CaptureFailureKind, string>> = {
   overconstrained: "The device cannot satisfy the requested settings.",
   unsupported: "This browser does not support the requested capture.",
   inactive: "The required device is not active.",
-  storage: "The captured media could not be stored.",
   failed: "The capture failed.",
 };
 
@@ -360,22 +352,12 @@ export class CaptureDevice<Track extends CaptureTrack> {
     } catch (error) {
       return { kind: "failed", failure: captureFailure(error) };
     }
-    // The session ended while encoding; nothing is stored for it.
+    // The session ended while encoding; nothing is kept for it.
     if (this.#resets !== resets) return { kind: "failed", failure: failure("inactive") };
-    let media: CapturedMediaEntry;
-    try {
-      media = await this.#media.add("image", data, {
-        width: frame.image.width,
-        height: frame.image.height,
-      });
-    } catch {
-      return { kind: "failed", failure: failure("storage") };
-    }
-    if (this.#resets !== resets) {
-      // Stored while the session ended: no reference was handed out, so remove it again.
-      void this.#media.delete(media.reference).catch(() => {});
-      return { kind: "failed", failure: failure("inactive") };
-    }
+    const media = this.#media.add("image", data, {
+      width: frame.image.width,
+      height: frame.image.height,
+    });
     return { kind: "photo", media };
   }
 
@@ -514,8 +496,6 @@ class Recording implements CaptureRecording {
   /** When recording ended; `null` while the recorder still records. */
   #endedAt: number | null = null;
   #interrupted = false;
-  /** The recorder stopped and its data is being stored. */
-  #storing = false;
   #done = false;
 
   constructor(
@@ -586,22 +566,18 @@ class Recording implements CaptureRecording {
   }
 
   #stored(): void {
-    if (this.#done || this.#storing) return;
-    this.#storing = true;
+    if (this.#done) return;
     // A recorder may also stop by itself, for example when every recorded track ended.
     const interrupted = this.#interrupted || this.#endedAt === null;
     const durationMs = Math.max(0, (this.#endedAt ?? this.#clock.now()) - this.#startedAt);
     const data = new Blob(this.#chunks, { type: this.#recorder.mimeType });
-    this.#chunks.length = 0;
     const kind = this.sources.includes("camera") ? "video" : "audio";
-    this.#media.add(kind, data, { durationMs }).then(
-      (media) => {
-        // Cancelled or reset while storing: no reference was handed out, so remove it again.
-        if (this.#done) void this.#media.delete(media.reference).catch(() => {});
-        else this.#finish({ kind: "recorded", media, durationMs, interrupted });
-      },
-      () => this.#finish({ kind: "failed", failure: failure("storage") }),
-    );
+    this.#finish({
+      kind: "recorded",
+      media: this.#media.add(kind, data, { durationMs }),
+      durationMs,
+      interrupted,
+    });
   }
 
   #finish(outcome: RecordingOutcome): void {

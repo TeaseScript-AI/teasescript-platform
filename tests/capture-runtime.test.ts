@@ -89,7 +89,6 @@ test("an unavailable camera yields null with a developer warning and the script 
     "busy",
     "unsupported",
     "revoked",
-    "storage",
     "failed",
   ]) {
     const { plan, snapshot } = started(
