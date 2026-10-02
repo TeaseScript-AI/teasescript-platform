@@ -164,24 +164,25 @@ test("formatter leaves malformed and incomplete source untouched", () => {
 });
 
 test("signature help ignores punctuation inside say strings and tracks grammar slots", () => {
-  const active = (source: string) => {
+  // Compare slot names, not positions, so adding an accepted slot to a signature does not shift the expectations.
+  const activeSlot = (source: string) => {
     const document = createLanguageDocument("file:///main.tease", source);
-    return languageSignatureHelp(document, languagePositionAt(document, source.length))
-      ?.activeParameter;
+    const help = languageSignatureHelp(document, languagePositionAt(document, source.length));
+    return help === null ? null : help.parameters[help.activeParameter];
   };
-  assert.equal(active('say "Hello, there"'), 2);
-  assert.equal(active('say "Hello, there",'), 3);
-  assert.equal(active("say as narrator"), 0);
-  assert.equal(active("say as narrator "), 2);
-  assert.equal(active("say skippable"), 1);
-  assert.equal(active("say skippable "), 2);
-  assert.equal(active("say unskippable "), 2);
-  assert.equal(active("askText as mistress"), 0);
-  assert.equal(active("askText as mistress "), 1);
-  assert.equal(active("askNumber as mistress "), 1);
-  assert.equal(active("showButton as mistress "), 1);
-  assert.equal(active("choose as mistress "), 1);
-  assert.equal(active('say ["Hello", "there"]'), 2);
+  assert.equal(activeSlot('say "Hello, there"'), "text");
+  assert.equal(activeSlot('say "Hello, there",'), "pacing");
+  assert.equal(activeSlot("say as narrator"), "speaker");
+  assert.equal(activeSlot("say as narrator "), "text");
+  assert.equal(activeSlot("say skippable"), "skip policy");
+  assert.equal(activeSlot("say skippable "), "text");
+  assert.equal(activeSlot("say unskippable "), "text");
+  assert.equal(activeSlot("askText as mistress"), "speaker");
+  assert.equal(activeSlot("askText as mistress "), "hint");
+  assert.equal(activeSlot("askNumber as mistress "), "hint");
+  assert.equal(activeSlot("showButton as mistress "), "label");
+  assert.equal(activeSlot("choose as mistress "), "options");
+  assert.equal(activeSlot('say ["Hello", "there"]'), "text");
 });
 
 test("editor tooling handles deeply nested media blocks without native recursion", () => {

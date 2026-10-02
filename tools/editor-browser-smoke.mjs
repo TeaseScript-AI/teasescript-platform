@@ -1,10 +1,16 @@
 import { spawn } from "node:child_process";
-import { access } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, readdir } from "node:fs/promises";
 import { createServer } from "node:net";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 const chromium = await findChromium();
 if (chromium === null) {
-  console.log("editor-browser-smoke: SKIP Chromium executable not available");
+  console.log(
+    "editor-browser-smoke: SKIP no Chromium executable found (checked CHROMIUM_BIN, /usr/bin and " +
+      "Playwright-managed browsers); the built editor was NOT browser-checked",
+  );
   process.exit(0);
 }
 
@@ -40,22 +46,37 @@ try {
     "--no-sandbox",
     "--disable-gpu",
     "--disable-dev-shm-usage",
+    // Only the 127.0.0.1 preview resolves, so the editor cannot start from a CDN or other host.
+    "--no-proxy-server",
+    "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
     "--dump-dom",
     url,
   ]);
   if (result.code !== 0) throw new Error(`Chromium exited with ${result.code}: ${result.stderr}`);
-  if (
-    !result.stdout.includes("Browser editor") ||
-    !result.stdout.includes("TeaseScript source editor") ||
-    !result.stdout.includes('data-monaco-ready="true"') ||
-    !result.stdout.includes('class="monaco-editor')
-  ) {
-    throw new Error("The built editor did not create and mark a ready Monaco instance.");
-  }
-  console.log("editor-browser-smoke: PASS built Vue/Monaco editor starts without a CDN dependency");
+  checkEditorDom(result.stdout);
+  console.log(
+    "editor-browser-smoke: PASS built Vue/Monaco editor starts with only the local preview reachable (no CDN)",
+  );
 } finally {
-  preview.kill("SIGTERM");
-  await new Promise((resolve) => preview.once("close", resolve));
+  if (preview.exitCode === null && preview.signalCode === null) {
+    const closed = new Promise((resolve) => preview.once("close", resolve));
+    preview.kill("SIGTERM");
+    await closed;
+  }
+}
+
+function checkEditorDom(dom) {
+  const readyTag = /<[^>]*\sdata-monaco-ready="true"[^>]*>/.exec(dom);
+  if (readyTag === null) {
+    throw new Error("The built editor never marked its Monaco container ready.");
+  }
+  const label = /\saria-label="([^"]*)"/.exec(readyTag[0])?.[1].trim() ?? "";
+  if (label === "") {
+    throw new Error("The ready Monaco container has no accessible name (aria-label).");
+  }
+  if (!dom.includes('class="monaco-editor', readyTag.index + readyTag[0].length)) {
+    throw new Error("Monaco did not render an editor inside the ready container.");
+  }
 }
 
 async function reservePort() {
@@ -84,18 +105,54 @@ async function waitForHttp(url) {
   throw new Error(`Vite preview did not start: ${previewOutput}`);
 }
 
+/**
+ * Uses an explicit CHROMIUM_BIN, then a system Chromium, then the newest Playwright-managed Chromium (the browser the
+ * `playwright-cli` route uses), so an installed browser is not silently skipped.
+ */
 async function findChromium() {
+  const configured = process.env.CHROMIUM_BIN;
+  if (configured) {
+    if (await isExecutable(configured)) return configured;
+    throw new Error(`CHROMIUM_BIN is not an executable file: ${configured}`);
+  }
   for (const candidate of [
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
     "/usr/bin/google-chrome",
+    ...(await playwrightChromiums()),
   ]) {
-    try {
-      await access(candidate);
-      return candidate;
-    } catch {}
+    if (await isExecutable(candidate)) return candidate;
   }
   return null;
+}
+
+async function playwrightChromiums() {
+  const root = process.env.PLAYWRIGHT_BROWSERS_PATH || join(homedir(), ".cache", "ms-playwright");
+  let names;
+  try {
+    names = await readdir(root);
+  } catch {
+    return [];
+  }
+  return names
+    .flatMap((name) => {
+      const revision = /^chromium-(\d+)$/.exec(name)?.[1];
+      return revision === undefined ? [] : [{ name, revision: Number(revision) }];
+    })
+    .sort((left, right) => right.revision - left.revision)
+    .flatMap(({ name }) => [
+      join(root, name, "chrome-linux", "chrome"),
+      join(root, name, "chrome-linux64", "chrome"),
+    ]);
+}
+
+async function isExecutable(path) {
+  try {
+    await access(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function run(command, args) {

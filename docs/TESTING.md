@@ -573,6 +573,11 @@ Development preview presentation is covered by the [Player browser verification
 route](#player-browser-and-visual-verification). An unavailable Chromium executable is an explicit skip; an available
 browser must pass the configured smoke checks.
 
+The Monaco editor has a separate route outside `npm run check`: `npm run test:editor-browser` builds the editor and runs
+`tools/editor-browser-smoke.mjs`. Chromium may resolve only the local preview, so a build that needs remote code to
+start fails, and the editor must become ready with an accessible name. The script uses `CHROMIUM_BIN` (an unusable value
+fails), `/usr/bin`, or a Playwright Chromium; without a browser it reports an explicit skip.
+
 Production browser E2E coverage becomes required after the cross-origin host shell and player exist. It should then
 include:
 
