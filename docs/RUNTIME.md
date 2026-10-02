@@ -870,11 +870,12 @@ The checkpoint revision represents the complete accepted checkpoint bundle:
 
 Instruction-plan and runtime-snapshot revisions remain independent and do not need matching numbers. No nested duplicate version fields, hidden sub-format registry, migration chain, or generated documentation synchronization is introduced.
 
-During the POC, only the current revision of each format is supported. Non-current revisions may be rejected explicitly,
-obsolete development saves and fixtures may become invalid after an incompatible change, and migration code requires
-a separate owner-approved decision. Git history is sufficient for reconstructing exact older schemas. The current
-revisions include populated `chatPacingGate` background state, prepared pacing output, captured smart-autoplay
-settings, exact pacing-settlement release lineage, and validated prepared message markup with canonical visible text.
+Current POC status: only the current revision of each format is supported and no migration exists. A non-current
+revision is rejected explicitly as unsupported rather than read as current, so obsolete development saves and fixtures
+may become invalid after an incompatible change. Adding migration requires a separate owner-approved decision. Git
+history is sufficient for reconstructing exact older schemas. The current revisions include populated `chatPacingGate`
+background state, prepared pacing output, captured smart-autoplay settings, exact pacing-settlement release lineage, and
+validated prepared message markup with canonical visible text.
 
 ## API stability boundary
 
