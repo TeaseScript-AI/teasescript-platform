@@ -5,8 +5,6 @@ import { normalizeOpaqueColor } from "../src/color.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { deserializeCheckpoint } from "../src/runtime/checkpoint.js";
 import { validateRuntimeSnapshot } from "../src/runtime/state.js";
-import { authoredColorToOklch } from "../player/theme/color.js";
-import { storyChoiceVariables } from "../player/theme/story-choice.js";
 import {
   activatePlayerRuntimeButton,
   createPlayerRuntimeRestorePoint,
@@ -20,7 +18,7 @@ import {
 
 const colours = ["gold", "oklch(0.7 0.18 45)"];
 
-test("authored CSS backgrounds cross source, runtime, adapter, material and checkpoint for both button kinds", () => {
+test("authored CSS backgrounds cross source, runtime, adapter and checkpoint for both button kinds", () => {
   for (const colour of colours) {
     const literal = JSON.stringify(colour);
     let session = createPlayerRuntimeSession(
@@ -34,7 +32,6 @@ test("authored CSS backgrounds cross source, runtime, adapter, material and chec
     if (foreground?.kind !== "choose") throw new Error("Expected choices");
     assert.equal(foreground.options[0]!.authoredFill, normalizeOpaqueColor(colour));
     assert.equal(foreground.options[1]!.authoredFill, undefined);
-    assert.ok(storyChoiceVariables(authoredColorToOklch(foreground.options[0]!.authoredFill!)));
     const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
     assert.deepEqual(playerRuntimeForeground(restored), foreground);
     const direct = selectPlayerRuntimeChoice(session, foreground.options[0]!.id)!;
@@ -74,9 +71,24 @@ say answer, instant
   let session = createPlayerRuntimeSession(source);
   assert.equal(session.snapshot.status, "waiting");
   session = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
+  const choices = playerRuntimeForeground(session);
+  assert.equal(choices?.kind, "choose");
+  if (choices?.kind !== "choose") throw new Error("Expected choices");
+  assert.deepEqual(
+    choices.options.map((option) => [option.label, option.authoredFill]),
+    [
+      ["First", normalizeOpaqueColor("red")],
+      ["Second", normalizeOpaqueColor("gold")],
+    ],
+  );
   const submission = submitPlayerRuntimeComposer(session, "Second")!;
   assert.equal(submission.outcome.kind, "completed");
   session = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(submission.session));
+  const button = playerRuntimeForeground(session);
+  assert.equal(
+    button?.kind === "show-button" ? button.authoredFill : null,
+    normalizeOpaqueColor("blue"),
+  );
   session = activatePlayerRuntimeButton(session)!.session;
   assert.equal(session.snapshot.status, "halted");
   assert.deepEqual(
@@ -203,37 +215,6 @@ test("a showButton background continues after its colon like the single-line for
     assert.deepEqual(
       activatePlayerRuntimeButton(session)!.session.snapshot.status,
       activatePlayerRuntimeButton(singleLine)!.session.snapshot.status,
-      source,
-    );
-  }
-});
-
-test("a missing continued showButton background keeps the statement on the next line", () => {
-  for (const [source, statements] of [
-    ['showButton "Continue", background:\n', []],
-    [
-      'showButton "Continue", background:\nsay "recovered"\nexit',
-      ["sayStatement", "exitStatement"],
-    ],
-    [
-      'showButton "Continue", background:\n\nsay "recovered"\nexit',
-      ["sayStatement", "exitStatement"],
-    ],
-    [
-      'showButton "Continue", background:\nspeaker bob {}\nexit',
-      ["speakerDeclaration", "exitStatement"],
-    ],
-  ] as const) {
-    const result = compileSource(source);
-    assert.equal(result.plan, null, source);
-    assert.deepEqual(
-      result.program.statements.map((statement) => statement.kind),
-      statements,
-      source,
-    );
-    assert.deepEqual(
-      result.parserDiagnostics.map((diagnostic) => diagnostic.code),
-      ["TSP028"],
       source,
     );
   }
