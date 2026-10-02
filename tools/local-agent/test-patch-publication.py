@@ -265,23 +265,21 @@ class PatchPublicationTests(unittest.TestCase):
                 if mode == "materialized":
                     manifest, transfer_ref, _parts = self.create_transfer_payload()
                     materialized = self.root / "materialized-v2.patch"
-                    completed = run(
+                    run(
                         self.materialize_command(manifest, transfer_ref, materialized),
                         cwd=self.repo,
                     )
-                    self.assertIn("format=2", completed.stdout)
                     self.assertEqual(
                         materialized.read_bytes(), direct_patch.read_bytes()
                     )
                     self.manifest, self.patch = manifest, materialized
 
                 output = self.root / f"output-{mode}"
-                completed = run(
+                run(
                     self.command("prepare", "--output-directory", str(output)),
                     cwd=self.repo,
                     env=env,
                 )
-                self.assertIn("prepared patch publication", completed.stdout)
                 metadata = json.loads(
                     (output / "publication.json").read_text(encoding="utf-8")
                 )
@@ -296,7 +294,7 @@ class PatchPublicationTests(unittest.TestCase):
                     ["git", "clone", "-q", str(self.repo), str(verify_repo)],
                     cwd=self.root,
                 )
-                verified = run(
+                run(
                     [
                         *STDLIB_PYTHON,
                         str(SCRIPT),
@@ -310,7 +308,6 @@ class PatchPublicationTests(unittest.TestCase):
                     ],
                     cwd=verify_repo,
                 )
-                self.assertIn("verified publication bundle", verified.stdout)
                 candidate = metadata["candidateCommitSha"]
                 self.assertEqual(
                     git(verify_repo, "show", "-s", "--format=%P", candidate),

@@ -311,7 +311,7 @@ class PreparePatchPublicationTests(unittest.TestCase):
         git(repository, "commit", "-q", "-m", "Base")
         base = git(repository, "rev-parse", "HEAD")
 
-        (repository / "large.txt").write_text("ordinary text line\n" * 70_000)
+        (repository / "large.txt").write_text("ordinary text line\n" * 300)
         git(repository, "add", "large.txt")
         git(repository, "commit", "-q", "-m", "Add large text file")
 
@@ -328,6 +328,8 @@ class PreparePatchPublicationTests(unittest.TestCase):
                 "feat/test-target",
                 "--expected-base-sha",
                 base,
+                "--part-size-kib",
+                "1",
                 "--output-directory",
                 str(output),
             ],
@@ -336,7 +338,7 @@ class PreparePatchPublicationTests(unittest.TestCase):
         )
         self.assertEqual(prepared.returncode, 1)
         self.assertIn("manifest connector upload is", prepared.stderr)
-        self.assertIn("configured 12288-byte upload ceiling", prepared.stderr)
+        self.assertIn("exceeding the configured 1024-byte upload ceiling", prepared.stderr)
         self.assertFalse(output.exists())
 
     def test_real_o200k_estimator_when_available(self) -> None:
@@ -346,6 +348,9 @@ class PreparePatchPublicationTests(unittest.TestCase):
                 "requires local TEASESCRIPT_O200K_TOKENIZER and importable tiktoken"
             )
         estimator = SUPPORT.load_token_estimator(Path(configured))
+        # Scoped PR #174 splitter regression oracle: the fixture length and digest and exactly
+        # four parts are recorded for this fixture with the current o200k_base tokenizer, not
+        # general limits. Four is also the byte-ceiling minimum (43,250 bytes at 12 KiB per part).
         patch = gzip.decompress(PR_174_PATCH_GZIP.read_bytes())
         self.assertEqual(len(patch), 43_250)
         self.assertEqual(
