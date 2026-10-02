@@ -13,3 +13,9 @@ items.remove("wait")
 show("Best: " + [3, 7, 5].max() + ", joined: " + items.join(", "))
 def bigger = Math.max(total, 4)
 if (items.isEmpty()) show("Nothing left")
+// A loop that reads its own target keeps the old value until the result is complete.
+def again = true
+again = [1, 2].any { again }
+int rounds = 2
+rounds.times { show("Round") }
+show("Second " + [1, 2, 3][-2])

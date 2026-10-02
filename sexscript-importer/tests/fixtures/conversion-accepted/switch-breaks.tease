@@ -17,3 +17,32 @@ switch n {
     say "One or two"
   }
 }
+// A switch case that ends with break returns its last value from the function.
+function labelValue(kind) {
+  switch kind {
+    case 1 {
+      return "one"
+    }
+    default {
+      return "many"
+    }
+  }
+}
+say labelValue(1)
+// A case expression with effects needs the switch value kept; a list variable case tests membership.
+let subject = 1
+subject = randomInteger(0..3)
+let options = [1, 2]
+let switchValue1 = subject
+if switchValue1 == randomInteger(0..3) {
+  say "drawn"
+} else if options.contains(switchValue1) {
+  say "listed"
+} else {
+  say "other"
+}
+// A range bound known only at runtime may make the range run in either direction.
+let top = 3
+if (subject >= top and subject <= 1) or (subject <= top and subject >= 1) {
+  say "in range"
+}

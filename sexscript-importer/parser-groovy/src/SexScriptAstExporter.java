@@ -339,11 +339,11 @@ public final class SexScriptAstExporter {
         if (node instanceof ReturnStatement child) {
             return nodeMap(node, "return", "value", expression(child.getExpression()));
         }
-        if (node instanceof BreakStatement) {
-            return nodeMap(node, "break");
+        if (node instanceof BreakStatement child) {
+            return nodeMap(node, "break", "label", child.getLabel());
         }
-        if (node instanceof ContinueStatement) {
-            return nodeMap(node, "continue");
+        if (node instanceof ContinueStatement child) {
+            return nodeMap(node, "continue", "label", child.getLabel());
         }
         if (node instanceof ThrowStatement child) {
             return nodeMap(node, "throw", "value", expression(child.getExpression()));

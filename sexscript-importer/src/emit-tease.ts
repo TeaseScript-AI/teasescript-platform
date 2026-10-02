@@ -260,7 +260,12 @@ export function emitExpression(expression: IrExpression): string {
       const rightLevel =
         expression.operator === "and" || expression.operator === "or" ? level : level + 1;
       const leftLevel = level === COMPARISON ? level + 1 : level;
-      return `${operand(expression.left, leftLevel)} ${expression.operator} ${operand(expression.right, rightLevel)}`;
+      // `and` binds more tightly than `or`; parentheses keep mixed conditions readable.
+      const side = (value: IrExpression, minimum: number): string =>
+        expression.operator === "or" && value.kind === "binary" && value.operator === "and"
+          ? `(${emitExpression(value)})`
+          : operand(value, minimum);
+      return `${side(expression.left, leftLevel)} ${expression.operator} ${side(expression.right, rightLevel)}`;
     }
     case "call": {
       const positional = expression.positional.map(emitExpression);

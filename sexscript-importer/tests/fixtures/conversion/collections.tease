@@ -94,3 +94,18 @@ let bigger = sexscriptLegacyMax(total, 4)
 if items.length == 0 {
   say "Nothing left"
 }
+// A loop that reads its own target keeps the old value until the result is complete.
+let again = true
+let anyResult = false
+for it in [1, 2] {
+  if again {
+    anyResult = true
+    break
+  }
+}
+again = anyResult
+let rounds = 2
+for it in 0..rounds {
+  say "Round"
+}
+say "Second ${[1, 2, 3][[1, 2, 3].length - 2]}"

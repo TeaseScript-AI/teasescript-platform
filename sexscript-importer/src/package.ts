@@ -6,6 +6,7 @@ import {
   lowerParsedFile,
   packageFunctionNames,
   packageGlobalTypes,
+  packageResultUses,
   packageStableNames,
   packageStopsBackgroundSounds,
 } from "./lower.ts";
@@ -58,6 +59,7 @@ export function lowerPackage(files: readonly ParsedGroovyFile[]): LoweredPackage
   const stableNames = packageStableNames(files);
   const globalTypes = packageGlobalTypes(files);
   const stopsBackgroundSounds = packageStopsBackgroundSounds(files);
+  const resultUses = packageResultUses(files);
   const lowered = files.map((file) =>
     lowerParsedFile(file, {
       helperRegistry,
@@ -66,6 +68,7 @@ export function lowerPackage(files: readonly ParsedGroovyFile[]): LoweredPackage
       stableNames,
       globalTypes,
       stopsBackgroundSounds,
+      resultUses,
       renameIdentifiers: false,
     }),
   );

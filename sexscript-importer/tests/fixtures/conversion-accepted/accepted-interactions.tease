@@ -22,3 +22,12 @@ let late = getSeconds() - popupStart
 if late > 60 {
   say "What took you so long?"
 }
+function title {
+  wait 1
+  return "Ready?"
+}
+// NOTE SX_POPUP_ELAPSED line 14: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getSeconds(), in whole seconds.
+let popupMessage2 = title()
+let popupStart2 = getSeconds()
+showPopup popupMessage2
+let slow = getSeconds() - popupStart2

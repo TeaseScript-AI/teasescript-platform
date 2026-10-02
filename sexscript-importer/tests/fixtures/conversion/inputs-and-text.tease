@@ -18,3 +18,13 @@ wait 500 ms
 if name != "" {
   say "Good, ${name}"
 }
+// The question of an endless loop's condition is asked again in every round.
+let round = 0
+while true {
+  say "Round ${round}"
+  let ignoredAnswer1 = askText
+  round += 1
+  if round == 2 {
+    break
+  }
+}

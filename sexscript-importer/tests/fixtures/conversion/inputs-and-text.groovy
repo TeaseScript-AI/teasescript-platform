@@ -8,3 +8,9 @@ while (getSelectedValue("Ready?", ["No", "Yes"]) == 0) {
 }
 sleep(500)
 if (name) show("Good, " + name)
+// The question of an endless loop's condition is asked again in every round.
+def round = 0
+while (getString("Round " + round) || true) {
+	round += 1
+	if (round == 2) break
+}

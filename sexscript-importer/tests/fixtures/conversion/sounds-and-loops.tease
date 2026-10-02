@@ -1,5 +1,12 @@
 let sexscriptBackgroundSounds = []
 function sexscriptLegacyPlayBackgroundSound(file, passes) {
+  if file == null {
+    sexscriptLegacyStopBackgroundSounds()
+    return
+  }
+  if passes < 1 {
+    return
+  }
   let sound = playAudio(file: file, async: true, repeat: passes times)
   sexscriptBackgroundSounds.add(sound)
 }

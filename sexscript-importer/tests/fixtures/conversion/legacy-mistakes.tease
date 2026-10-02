@@ -1,4 +1,4 @@
-// MIGRATION INCOMPLETE: 1 error diagnostic.
+// MIGRATION INCOMPLETE: 2 error diagnostics.
 // Review diagnostics before treating this file as behaviorally equivalent.
 
 function setImageImplement {
@@ -21,3 +21,22 @@ if true {
 startFast()
 // TODO SX_UNDEFINED_FUNCTION line 10: mistressInfo() is not defined in this script, its package helpers, or the SexScript API; SexScript failed here at runtime.
 // | mistressInfo()
+// A comparison used as a statement had no effect.
+let amPm = "A"
+// NOTE SX_DISCARDED_VALUE line 13: Groovy computed this value and discarded it, so the statement had no effect and is dropped. A comparison (==) here is often a mistake for an assignment (=).
+if amPm == "A" {
+  amPm = "P"
+}
+// A labelled continue leaves the outer loop.
+let i = 0
+while i < 2 {
+  let j = 0
+  while j < 2 {
+    // TODO SX_LABELLED_JUMP line 17: continue outer leaves an outer labelled loop; TeaseScript continue affects only the innermost loop. Restructure the loops, for example with a flag.
+    if j == 0 {
+      // | if (j == 0) continue outer
+    }
+    j += 1
+  }
+  i += 1
+}

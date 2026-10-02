@@ -76,9 +76,8 @@ export function helperDefinitionOrder(statement: IrStatement): number {
 /** Helper functions in a stable order, so generated files do not depend on discovery order. */
 export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] {
   const needed = new Set(names);
-  if (needed.has("playBackgroundSound") || needed.has("stopBackgroundSounds")) {
-    needed.add("backgroundSounds");
-  }
+  if (needed.has("playBackgroundSound")) needed.add("stopBackgroundSounds");
+  if (needed.has("stopBackgroundSounds")) needed.add("backgroundSounds");
   return HELPER_ORDER.filter((name) => needed.has(name)).map((name) => HELPERS[name].build());
 }
 
@@ -205,6 +204,21 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         "sexscriptLegacyPlayBackgroundSound",
         ["file", "passes"],
         [
+          // A null file stopped all background sounds; fewer than one pass played nothing.
+          ifS(bin("==", v("file"), lit(null)), [
+            {
+              kind: "expression",
+              expression: {
+                kind: "call",
+                name: "sexscriptLegacyStopBackgroundSounds",
+                positional: [],
+                named: {},
+              },
+              span: null,
+            },
+            { kind: "return", value: null, span: null },
+          ]),
+          ifS(bin("<", v("passes"), lit(1)), [{ kind: "return", value: null, span: null }]),
           {
             kind: "playAudio",
             file: v("file"),
@@ -236,8 +250,8 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
       ),
   },
   random: {
-    // SexScript getRandom(max) computed (int) (Math.random() * max): 0 for 0, toward zero for a negative max,
-    // and 0..99 for null. randomInteger() rejects the empty range 0..0.
+    // SexScript getRandom(max) computed (int) (Math.random() * (int) max): 0 for 0, toward zero for a negative
+    // max, and 0..99 for null. randomInteger() rejects the empty range 0..0.
     name: "sexscriptLegacyRandom",
     build: () =>
       fn(
@@ -245,12 +259,14 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ["max"],
         [
           ifS(bin("==", v("max"), lit(null)), [ret(randomBelow(lit(100)))]),
-          ifS(bin(">", v("max"), lit(0)), [ret(randomBelow(v("max")))]),
-          ifS(bin("<", v("max"), lit(0)), [
+          // A fractional bound was truncated toward zero, like (int) max.
+          letS("bound", bin("-", v("max"), bin("%", v("max"), lit(1)))),
+          ifS(bin(">", v("bound"), lit(0)), [ret(randomBelow(v("bound")))]),
+          ifS(bin("<", v("bound"), lit(0)), [
             ret({
               kind: "unary",
               operator: "-",
-              value: randomBelow({ kind: "unary", operator: "-", value: v("max") }),
+              value: randomBelow({ kind: "unary", operator: "-", value: v("bound") }),
             }),
           ]),
           ret(lit(0)),
@@ -399,6 +415,8 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         "sexscriptLegacyListSum",
         ["items"],
         [
+          // Groovy sum() of an empty list is null.
+          ifS(bin("==", prop(v("items"), "length"), lit(0)), [ret(lit(null))]),
           letS("total", lit(0)),
           forS("item", v("items"), [set(v("total"), v("item"), "+=")]),
           ret(v("total")),

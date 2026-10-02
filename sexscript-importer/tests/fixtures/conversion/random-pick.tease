@@ -2,11 +2,12 @@ function sexscriptLegacyRandom(max) {
   if max == null {
     return randomInteger(0..100)
   }
-  if max > 0 {
-    return randomInteger(0..max)
+  let bound = max - max % 1
+  if bound > 0 {
+    return randomInteger(0..bound)
   }
-  if max < 0 {
-    return -randomInteger(0..-max)
+  if bound < 0 {
+    return -randomInteger(0..-bound)
   }
   return 0
 }

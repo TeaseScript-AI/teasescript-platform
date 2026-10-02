@@ -73,6 +73,8 @@ export interface LowerOptions {
    * package context, the file itself decides.
    */
   stopsBackgroundSounds?: boolean;
+  /** Functions whose result some caller uses (packageResultUses); without package context, the file decides. */
+  resultUses?: ReadonlySet<string>;
   /**
    * Rename identifiers TeaseScript rejects (default). Package composition disables this per file and renames
    * the composed program once.
@@ -130,6 +132,11 @@ interface LowerContext {
   /** Counter for variables that keep the start time of a popup whose waiting time is used. */
   popupTimers: number;
   stopsBackgroundSounds: boolean;
+  resultUses: ReadonlySet<string>;
+  /** Variables assigned once with the current date (`new Date()`, `Calendar.getInstance()`). */
+  dateValues: ReadonlySet<string>;
+  /** List variables that Groovy shared with another variable by an assignment of one to the other. */
+  aliasedLists: ReadonlySet<string>;
 }
 
 /** Source comments not yet emitted; shared by every context lowering the same file. */
@@ -211,6 +218,9 @@ export function lowerParsedFile(
     switchValues: 0,
     popupTimers: 0,
     stopsBackgroundSounds: options.stopsBackgroundSounds ?? packageStopsBackgroundSounds([file]),
+    resultUses: options.resultUses ?? packageResultUses([file]),
+    dateValues: new Set(),
+    aliasedLists: new Set(),
   };
   if (file.diagnostics.length > 0 || file.root === null) {
     for (const diagnostic of file.diagnostics) {
@@ -255,6 +265,8 @@ export function lowerParsedFile(
       inferVariableTypes(body, [], context.packageFunctions),
       options.globalTypes,
     );
+    context.dateValues = currentDateVariables(body, context.types);
+    context.aliasedLists = aliasedListVariables(body, context.types);
     const helpers = collectLegacyHelperBindings(body);
     context.classLoaderVariables = helpers.classLoaders;
     context.legacyHelperClasses = helpers.helperClasses;
@@ -447,6 +459,9 @@ function lowerHelperMethod(
     mixinModules: baseContext.mixinModules,
     loadsModuleDirectories: baseContext.loadsModuleDirectories,
     stopsBackgroundSounds: baseContext.stopsBackgroundSounds,
+    resultUses: baseContext.resultUses,
+    dateValues: new Set(),
+    aliasedLists: new Set(),
     currentFunction: {
       name,
       locals: functionLocalNames(
@@ -480,7 +495,12 @@ function lowerHelperMethod(
     kind: "function",
     name,
     parameters,
-    body: lowerBlock(method.returnType === "void" ? body : withImplicitReturn(body), context),
+    body: lowerBlock(
+      method.returnType === "void" || !context.resultUses.has(name)
+        ? body
+        : withImplicitReturn(body, context),
+      context,
+    ),
     span: method.span,
   };
 }
@@ -674,9 +694,18 @@ function lowerStatementNode(node: AstNode, context: LowerContext): IrStatement[]
     case "return":
       return lowerReturnStatement(node, context);
     case "break":
-      return [{ kind: "break", span: node.span }];
     case "continue":
-      return [{ kind: "continue", span: node.span }];
+      if (typeof node.label === "string") {
+        return [
+          unsupportedStatement(
+            context,
+            node,
+            "SX_LABELLED_JUMP",
+            `${node.kind} ${node.label} leaves an outer labelled loop; TeaseScript ${node.kind} affects only the innermost loop. Restructure the loops, for example with a flag.`,
+          ),
+        ];
+      }
+      return [{ kind: node.kind, span: node.span }];
     default:
       return [
         unsupportedStatement(
@@ -947,6 +976,8 @@ function hasOwnEffect(node: AstNode, context: LowerContext): boolean {
   if (node.kind === "postfix" || node.kind === "prefix" || node.kind === "constructorCall")
     return true;
   if (node.kind === "binary" && typeof node.operator === "string") {
+    // `list << x` appends to the list.
+    if (node.operator === "<<") return true;
     return node.operator.endsWith("=") && !["==", "!=", "<=", ">="].includes(node.operator);
   }
   if (node.kind !== "methodCall") return false;
@@ -982,6 +1013,7 @@ function isPure(node: AstNode, context: LowerContext): boolean {
       pureCall && (call.inherited || target === null || pure(target)) && call.arguments.every(pure)
     );
   }
+  if (node.kind === "binary" && node.operator === "<<") return false;
   if (node.kind === "binary" && typeof node.operator === "string" && node.operator.endsWith("=")) {
     return ["==", "!=", "<=", ">="].includes(node.operator) && nodeChildren(node).every(pure);
   }
@@ -1051,6 +1083,20 @@ function lowerExpressionStatement(node: AstNode, context: LowerContext): IrState
     return [unsupportedStatement(context, node, "SX_MISSING_EXPRESSION", "Missing expression.")];
 
   if (expression.kind === "declaration") return lowerDeclaration(expression, node.span, context);
+  if (
+    expression.kind !== "methodCall" &&
+    !isUncalledClosure(expression, context) &&
+    isPure(expression, context)
+  ) {
+    addDiagnostic(
+      context,
+      "SX_DISCARDED_VALUE",
+      "warning",
+      "Groovy computed this value and discarded it, so the statement had no effect and is dropped. A comparison (==) here is often a mistake for an assignment (=).",
+      node.span,
+    );
+    return [];
+  }
   if (expression.kind === "binary") return lowerAssignment(expression, node.span, context);
   if (expression.kind === "postfix") return lowerPostfix(expression, node.span, context);
   if (expression.kind === "methodCall") return lowerCallStatement(expression, node.span, context);
@@ -1261,7 +1307,9 @@ function lowerClosureDeclaration(
         name,
         parameters,
         body: lowerBlock(
-          closure.implicitReturn === false ? body : withImplicitReturn(body),
+          closure.implicitReturn === false || !context.resultUses.has(name)
+            ? body
+            : withImplicitReturn(body, context),
           context,
         ),
         span,
@@ -1314,40 +1362,104 @@ const EFFECT_COLLECTION_CALLS = new Set([
 ]);
 
 /**
- * Groovy closures and methods return the value of their last expression, including the last expression of
- * each `if`/`else` branch. Makes those returns explicit, except for assignments and value-less API calls.
+ * Groovy closures and methods return the value of their last expression, including the last expression of each
+ * `if`/`else` branch and of each `switch` case that ends with `break`. Makes those returns explicit for functions
+ * whose result some caller uses; value-less API calls stay statements. A final assignment or declaration returns
+ * the assigned variable; other final forms whose value Groovy returned get a note.
  */
-function withImplicitReturn(block: AstNode): AstNode {
+function withImplicitReturn(block: AstNode, context: LowerContext): AstNode {
   const statements = nodeArray(block.statements);
   const last = statements.at(-1);
   if (last === undefined) return block;
-  const replaced = implicitReturnStatement(last);
-  return replaced === last
-    ? block
-    : { ...block, statements: [...statements.slice(0, -1), replaced] };
+  return { ...block, statements: [...statements.slice(0, -1), ...implicitReturn(last, context)] };
 }
 
-function implicitReturnStatement(statement: AstNode): AstNode {
-  if (statement.kind === "block") return withImplicitReturn(statement);
+function implicitReturn(statement: AstNode, context: LowerContext): AstNode[] {
+  const span = statement.span;
+  const branch = (node: AstNode): AstNode => {
+    const replaced = implicitReturn(node, context);
+    return replaced.length === 1
+      ? replaced[0]!
+      : { kind: "block", span: node.span, statements: replaced };
+  };
+  if (statement.kind === "block") return [withImplicitReturn(statement, context)];
   if (statement.kind === "if") {
     const then = asNode(statement.then);
     const otherwise = asNode(statement.else);
-    return {
-      ...statement,
-      then: then === null ? null : implicitReturnStatement(then),
-      else:
-        otherwise === null || otherwise.kind === "empty"
-          ? otherwise
-          : implicitReturnStatement(otherwise),
-    };
+    return [
+      {
+        ...statement,
+        then: then === null ? null : branch(then),
+        else: otherwise === null || otherwise.kind === "empty" ? otherwise : branch(otherwise),
+      },
+    ];
   }
-  if (statement.kind !== "expressionStatement") return statement;
+  if (statement.kind === "switch") {
+    // Groovy's ReturnAdder returns from a case that ends with break, and from the default case.
+    const caseBody = (body: AstNode | null, isDefault: boolean): AstNode | null => {
+      if (body?.kind !== "block") return body;
+      const items = nodeArray(body.statements);
+      const last = items.at(-1);
+      if (last?.kind === "break") {
+        const kept = items.slice(0, -1);
+        const tail = kept.at(-1);
+        if (tail === undefined) return body;
+        // A case that no longer returns keeps its break.
+        const replaced = implicitReturn(tail, context);
+        const returns = replaced.at(-1)?.kind === "return";
+        return {
+          ...body,
+          statements: [...kept.slice(0, -1), ...replaced, ...(returns ? [] : [last])],
+        };
+      }
+      return isDefault ? withImplicitReturn(body, context) : body;
+    };
+    return [
+      {
+        ...statement,
+        cases: nodeArray(statement.cases).map((item) => ({
+          ...item,
+          body: caseBody(asNode(item.body), false),
+        })),
+        default: caseBody(asNode(statement.default), true),
+      },
+    ];
+  }
+  if (statement.kind !== "expressionStatement") return [statement];
   const expression = asNode(statement.expression);
-  if (expression === null || !returnsValue(expression)) return statement;
-  return { kind: "return", span: statement.span, value: expression };
+  if (expression === null) return [statement];
+  const assigned =
+    expression.kind === "declaration" ||
+    (expression.kind === "binary" && expression.operator === "=") ||
+    expression.kind === "prefix"
+      ? variableName(expression.kind === "prefix" ? expression.value : expression.left)
+      : null;
+  if (assigned !== null) {
+    return [statement, { kind: "return", span, value: { kind: "variable", span, name: assigned } }];
+  }
+  const call = expression.kind === "methodCall" ? callParts(expression) : null;
+  const valueNote =
+    expression.kind === "postfix" ||
+    expression.kind === "prefix" ||
+    (expression.kind === "binary" && !returnsValue(expression, context)) ||
+    (call !== null && !call.inherited && (call.name === "each" || call.name === "forEach"));
+  if (valueNote) {
+    return [
+      {
+        kind: "importerNote",
+        span,
+        code: "SX_IMPLICIT_RETURN_VALUE",
+        message:
+          "Groovy returned the value of this last statement to callers that use the result; the converted function returns nothing here. Add an explicit return if the value matters.",
+      },
+      statement,
+    ];
+  }
+  if (!returnsValue(expression, context)) return [statement];
+  return [{ kind: "return", span, value: expression }];
 }
 
-function returnsValue(expression: AstNode): boolean {
+function returnsValue(expression: AstNode, context: LowerContext): boolean {
   if (["declaration", "postfix", "prefix", "closure"].includes(expression.kind)) return false;
   if (expression.kind === "binary" && typeof expression.operator === "string") {
     const operator = expression.operator;
@@ -1357,13 +1469,101 @@ function returnsValue(expression: AstNode): boolean {
   if (expression.kind !== "methodCall") return true;
   const call = callParts(expression);
   if (call === null) return true;
-  if (call.inherited && VOID_API_CALLS.has(call.name)) return false;
+  // A package function shadows the API name it shares.
+  const api = legacyApiCall(expression, context);
+  if (api !== null && VOID_API_CALLS.has(api.name)) return false;
   // Compact showButton has no result; only the timeout form returns the elapsed time.
-  if (call.inherited && call.name === "showButton" && call.arguments.length < 2) return false;
+  if (api !== null && api.name === "showButton" && api.arguments.length < 2) return false;
   if (!call.inherited && call.name === "exit" && variableName(expression.object) === "System") {
     return false;
   }
   return call.inherited || !EFFECT_COLLECTION_CALLS.has(call.name);
+}
+
+/**
+ * Names of functions whose result some caller uses: a call in a value position, a reference that keeps the function
+ * as a value, or the last statement of a function whose own result is used. Calls are matched by name whatever their
+ * receiver, which can only add returns.
+ */
+export function packageResultUses(files: readonly ParsedGroovyFile[]): Set<string> {
+  const used = new Set<string>();
+  const tails: Array<{ caller: string; callee: string }> = [];
+  const tailOwners = new Map<AstNode, string>();
+  const collectTails = (statement: AstNode | null, owner: string): void => {
+    if (statement === null) return;
+    if (statement.kind === "block")
+      collectTails(nodeArray(statement.statements).at(-1) ?? null, owner);
+    else if (statement.kind === "if") {
+      collectTails(asNode(statement.then), owner);
+      collectTails(asNode(statement.else), owner);
+    } else if (statement.kind === "switch") {
+      for (const item of nodeArray(statement.cases)) {
+        const items = nodeArray(asNode(item.body)?.statements);
+        collectTails(items.at(-1)?.kind === "break" ? (items.at(-2) ?? null) : null, owner);
+      }
+      collectTails(asNode(statement.default), owner);
+    } else if (statement.kind === "expressionStatement") tailOwners.set(statement, owner);
+  };
+  const named = (name: string | null, closure: AstNode | null): void => {
+    if (name !== null && closure?.kind === "closure") collectTails(asNode(closure.body), name);
+  };
+  for (const file of files) {
+    walkAst(file.root, (node) => {
+      if (node.kind === "declaration") named(variableName(node.left), asNode(node.right));
+      if (node.kind === "binary" && node.operator === "=") {
+        const left = asNode(node.left);
+        named(
+          left?.kind === "property" ? constantString(left.property) : variableName(left),
+          asNode(node.right),
+        );
+      }
+      if (node.kind === "field" && typeof node.name === "string") {
+        named(node.name, asNode(node.initialExpression));
+      }
+      if (
+        typeof node.name === "string" &&
+        node.returnType !== undefined &&
+        node.returnType !== "void"
+      ) {
+        collectTails(asNode(node.body), node.name);
+      }
+    });
+  }
+  const visit = (node: AstNode, parent: AstNode | null): void => {
+    if (node.kind === "methodCall") {
+      const call = callParts(node);
+      if (call !== null) {
+        const owner = parent?.kind === "expressionStatement" ? tailOwners.get(parent) : undefined;
+        if (parent?.kind !== "expressionStatement") used.add(call.name);
+        else if (owner !== undefined) tails.push({ caller: owner, callee: call.name });
+      }
+    } else if (node.kind === "variable" || node.kind === "methodPointer") {
+      const name = variableName(node) ?? constantString(node.method);
+      if (name !== null) used.add(name);
+    }
+    // Declaring or assigning a name does not use a function's result.
+    const assignsName =
+      (node.kind === "declaration" || (node.kind === "binary" && node.operator === "=")) &&
+      asNode(node.left)?.kind === "variable";
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "span" || (node.kind === "methodCall" && key === "method")) continue;
+      if (key === "left" && assignsName) continue;
+      for (const child of Array.isArray(value) ? value : [value]) {
+        if (isAstNode(child)) visit(child, node);
+      }
+    }
+  };
+  for (const file of files) if (file.root !== null) visit(file.root, null);
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const { caller, callee } of tails) {
+      if (used.has(caller) && !used.has(callee)) {
+        used.add(callee);
+        changed = true;
+      }
+    }
+  }
+  return used;
 }
 
 /** Parameter and declared local names of a function body, including nested blocks. */
@@ -1432,7 +1632,8 @@ function lowerClosureValue(
         name: parameter,
         defaultValue: implicit ? { kind: "literal", value: null } : null,
       })),
-      body: lowerBlock(withImplicitReturn(body), context),
+      // Callers reach a closure value through the dispatcher, whose result may be used.
+      body: lowerBlock(withImplicitReturn(body, context), context),
       span: closure.span,
     });
   } finally {
@@ -1495,7 +1696,8 @@ function lowerAssignment(
     rightNode !== null &&
     voidCall !== null &&
     VOID_API_CALLS.has(voidCall.name) &&
-    isPure(rightNode, context)
+    isPure(rightNode, context) &&
+    onlyOf(inferType(rightNode, context.types), STRING)
   ) {
     // `show(a) + (b)`: Groovy appended b to the call's null result and discarded it, so b was never shown.
     addDiagnostic(
@@ -1559,6 +1761,16 @@ function lowerAssignment(
   if (variableTarget !== null) target = { kind: "variable", name: variableTarget };
   else if (operator === "=" && targetNode.kind === "binary" && targetNode.operator === "[") {
     target = lowerExpression(targetNode, context);
+    const list = variableName(targetNode.left);
+    if (target !== null && list !== null && context.aliasedLists.has(list)) {
+      addDiagnostic(
+        context,
+        "SX_SHARED_LIST_WRITE",
+        "warning",
+        `Groovy shared the list in ${list} with another variable assigned from it, so this write changed both; in TeaseScript the variables hold separate copies (ADR 0014).`,
+        node.span,
+      );
+    }
   } else if (operator === "=" && targetNode.kind === "property") {
     target = lowerExpression(targetNode, context);
     if (target !== null) {
@@ -1948,6 +2160,20 @@ function lowerCollectionAssignment(
   const variable = argument?.parameters[0] ?? "item";
   const result = argument === null ? null : closureResult(argument.closure);
   if (argument !== null && result === null) return null;
+  // Groovy sum() adds numbers (it joins text) and returns null for an empty list.
+  const summand =
+    result === null ? listElementType(receiver, context) : inferType(result.value, context.types);
+  const nonEmpty =
+    (receiver.kind === "list" && nodeArray(receiver.items).length > 0) ||
+    (receiver.kind === "range" &&
+      constantValue(asNode(receiver.from) ?? undefined) !== undefined &&
+      constantValue(asNode(receiver.to) ?? undefined) !== undefined);
+  if (
+    call.name === "sum" &&
+    (!onlyOf(summand, NUMBER) || (!nonEmpty && !isRepeatableExpression(receiver)))
+  ) {
+    return null;
+  }
 
   // From here on the idiom is recognized; an inner failure keeps its own root diagnostic.
   const failed = (): IrStatement[] => [
@@ -1960,7 +2186,10 @@ function lowerCollectionAssignment(
   ];
   const collection = lowerExpression(receiver, context);
   if (collection === null) return failed();
-  const targetVariable: IrExpression = { kind: "variable", name: target };
+  // A loop body that reads the target sees its old value only through a separate result variable.
+  const readsTarget = argument !== null && closureUsesName(argument.closure, target);
+  const accumulator = readsTarget ? `${call.name}Result` : target;
+  const targetVariable: IrExpression = { kind: "variable", name: accumulator };
   const item: IrExpression = { kind: "variable", name: variable };
   const prefix = result === null ? [] : lowerStatementList(result.statements, null, context);
   const assign = (value: IrExpression): IrStatement => ({
@@ -2021,10 +2250,49 @@ function lowerCollectionAssignment(
       body = [...prefix, { kind: "assign", target: targetVariable, operator: "+=", value, span }];
     }
   }
-  const start: IrStatement = declaration
-    ? { kind: "let", name: target, value: initial, span }
-    : assign(initial);
-  return [start, { kind: "for", variable, collection, body, span }];
+  const start: IrStatement =
+    declaration || readsTarget
+      ? { kind: "let", name: accumulator, value: initial, span }
+      : assign(initial);
+  const loop: IrStatement = { kind: "for", variable, collection, body, span };
+  const empty: IrStatement[] =
+    call.name === "sum" && !nonEmpty
+      ? [
+          {
+            kind: "if",
+            condition: {
+              kind: "binary",
+              operator: "==",
+              left: { kind: "property", target: collection, name: "length" },
+              right: { kind: "literal", value: 0 },
+            },
+            then: [assign({ kind: "literal", value: null })],
+            else: [],
+            span,
+          },
+        ]
+      : [];
+  if (!readsTarget) return [start, loop, ...empty];
+  const accumulated: IrExpression = { kind: "variable", name: accumulator };
+  const store: IrStatement = declaration
+    ? { kind: "let", name: target, value: accumulated, span }
+    : {
+        kind: "assign",
+        target: { kind: "variable", name: target },
+        operator: "=",
+        value: accumulated,
+        span,
+      };
+  return [start, loop, ...empty, store];
+}
+
+/** Element type of a range, list literal, or list variable with known elements. */
+function listElementType(node: AstNode, context: LowerContext): number {
+  if (node.kind === "range") return NUMBER;
+  if (node.kind === "list") {
+    return nodeArray(node.items).reduce((type, item) => type | inferType(item, context.types), 0);
+  }
+  return context.types.listElements?.get(variableName(node) ?? "") ?? UNKNOWN;
 }
 
 /** A closure body ending in an expression (or `return expression`) with no other returns. */
@@ -2079,11 +2347,19 @@ function lowerCollectionStatement(
     ) {
       return null;
     }
-    const count = lowerExpression(receiver, context);
-    if (count === null) return null;
+    const lowered = lowerExpression(receiver, context);
+    if (lowered === null) return null;
+    // Groovy runs n.times for the integer part of n and not at all below one; `repeat` needs a whole count, so
+    // other counts loop over a range, which is empty for a count of zero or less.
+    const count =
+      lowered.kind === "literal" && typeof lowered.value === "number"
+        ? { ...lowered, value: Math.max(0, Math.trunc(lowered.value)) }
+        : lowered;
+    const wholeCount =
+      count.kind === "literal" || (count.kind === "property" && count.name === "length");
     const loopBody = lowerBlock(body(argument.closure), context);
     const variable = argument.parameters[0]!;
-    const usesIndex = closureUsesName(argument.closure, variable);
+    const usesIndex = closureUsesName(argument.closure, variable) || !wholeCount;
     return usesIndex
       ? [
           {
@@ -2399,8 +2675,15 @@ function lowerBackgroundSound(
       ),
     ];
   }
-  if (context.stopsBackgroundSounds) {
-    // Keep the handle so a later playBackgroundSound(null) can stop this sound.
+  const fixedPasses =
+    repeatCount === null ||
+    (repeatCount.kind === "literal" &&
+      typeof repeatCount.value === "number" &&
+      Number.isInteger(repeatCount.value) &&
+      repeatCount.value >= 1);
+  if (context.stopsBackgroundSounds || !fixedPasses) {
+    // Keep the handle so a later playBackgroundSound(null) can stop this sound; the helper also plays nothing for
+    // fewer than one pass, which `repeat: n times` rejects.
     const passes = repeatCount ?? { kind: "literal", value: 1 };
     return [
       {
@@ -2421,7 +2704,14 @@ export function packageStopsBackgroundSounds(files: readonly ParsedGroovyFile[])
       const call = node.kind === "methodCall" ? callParts(node) : null;
       if (call === null || !call.inherited) return;
       if (call.name === "stopSoundThreads") stops = true;
-      if (call.name === "playBackgroundSound" && isNullConstant(call.arguments[0])) stops = true;
+      // A file that may be null at runtime stops all sounds as well.
+      const file = call.arguments[0];
+      if (
+        call.name === "playBackgroundSound" &&
+        !(file?.kind === "constant" && typeof file.value === "string")
+      ) {
+        stops = true;
+      }
     });
   }
   return stops;
@@ -2517,7 +2807,7 @@ function lowerWhile(node: AstNode, context: LowerContext): IrStatement[] {
       {
         kind: "while",
         condition: always,
-        body: [...lowerStatement(statement, context), ...lowerBranch(body, context)],
+        body: [...lowerBranch(statement, context), ...lowerBranch(body, context)],
         span: node.span,
       },
     ];
@@ -2732,6 +3022,7 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
   }
 
   const cases: IrSwitchCase[] = [];
+  const matchNodes: AstNode[] = [];
   for (let index = 0; index < caseNodes.length; index += 1) {
     const caseNode = caseNodes[index]!;
     if (caseNode.kind !== "case")
@@ -2768,6 +3059,7 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
     }
     const loweredBody = lowerStatementList(eliminateSwitchBreaks(sourceStatements), null, context);
     cases.push({ span: caseNode.span, match, body: loweredBody });
+    matchNodes.push(matchNode!);
   }
 
   const defaultStatements = lowerStatementList(
@@ -2778,18 +3070,53 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
   if (isAcceptedSwitch(cases)) {
     return [{ kind: "switch", value, cases, default: defaultStatements, span: node.span }];
   }
-  // Accepted switch cases are distinct literals or ranges; other Groovy cases become an equivalent if chain.
-  const repeatable = valueNode !== null && isRepeatableExpression(valueNode);
+  // Accepted switch cases are distinct literals or ranges; other Groovy cases become an equivalent if chain when
+  // their isCase meaning is known from the case value: membership for lists and literal ranges, equality for
+  // scalars. Groovy evaluated the switch value once, so case expressions with effects need a temporary.
+  const listCases: boolean[] = [];
+  for (let index = 0; index < cases.length; index += 1) {
+    const match = cases[index]!.match;
+    const type = inferType(matchNodes[index]!, context.types);
+    // A Groovy range runs in either direction; bounds evaluated twice must be plain values.
+    const boundsRepeatable = match.kind === "range" && [match.from, match.to].every(isPlainValue);
+    const known =
+      match.kind === "list" ||
+      boundsRepeatable ||
+      (match.kind !== "range" &&
+        (onlyOf(type, LIST) || onlyOf(type, STRING | NUMBER | BOOLEAN | NULL)));
+    if (!known) {
+      return [
+        unsupportedStatement(
+          context,
+          matchNodes[index]!,
+          "SX_SWITCH_CASE_MATCH",
+          "This switch case's Groovy isCase meaning depends on its runtime value (a list, a range in either direction, a class, a pattern, or a closure); rewrite the case as an explicit condition.",
+        ),
+      ];
+    }
+    listCases.push(match.kind !== "range" && onlyOf(type, LIST));
+  }
+  const subjectName = valueNode === null ? null : variableName(valueNode);
+  const stableSubject =
+    valueNode?.kind === "constant" ||
+    (subjectName !== null &&
+      (context.types.singleAssignment?.has(subjectName) === true ||
+        context.stableNames.has(subjectName)));
+  const repeatable =
+    valueNode !== null &&
+    isRepeatableExpression(valueNode) &&
+    (stableSubject || matchNodes.every((matchNode) => isPure(matchNode, context)));
   context.switchValues += 1;
   const subject: IrExpression = repeatable
     ? value
     : { kind: "variable", name: `switchValue${context.switchValues}` };
   let chain: IrStatement[] = defaultStatements;
-  for (const switchCase of [...cases].reverse()) {
+  for (let index = cases.length - 1; index >= 0; index -= 1) {
+    const switchCase = cases[index]!;
     chain = [
       {
         kind: "if",
-        condition: caseMatches(subject, switchCase.match),
+        condition: caseMatches(subject, switchCase.match, listCases[index]!),
         then: switchCase.body,
         else: chain,
         span: switchCase.span,
@@ -2823,21 +3150,53 @@ function isAcceptedSwitch(cases: IrSwitchCase[]): boolean {
   return true;
 }
 
+/** Literals, variables, properties, and arithmetic on them: values that may be evaluated twice. */
+function isPlainValue(expression: IrExpression): boolean {
+  switch (expression.kind) {
+    case "literal":
+    case "variable":
+      return true;
+    case "property":
+      return isPlainValue(expression.target);
+    case "unary":
+      return isPlainValue(expression.value);
+    case "binary":
+      return isPlainValue(expression.left) && isPlainValue(expression.right);
+    default:
+      return false;
+  }
+}
+
 /** Groovy `isCase`: list membership, range bounds, or equality. */
-function caseMatches(subject: IrExpression, match: IrExpression): IrExpression {
-  if (match.kind === "list")
+function caseMatches(subject: IrExpression, match: IrExpression, isList = false): IrExpression {
+  if (match.kind === "list" || isList)
     return { kind: "methodCall", target: match, name: "contains", arguments: [subject] };
   if (match.kind === "range") {
-    return {
+    const within = (low: IrExpression, high: IrExpression, upward: boolean): IrExpression => ({
       kind: "binary",
       operator: "and",
-      left: { kind: "binary", operator: ">=", left: subject, right: match.from },
+      left: { kind: "binary", operator: upward ? ">=" : "<=", left: subject, right: low },
       right: {
         kind: "binary",
-        operator: match.inclusive ? "<=" : "<",
+        operator: upward ? (match.inclusive ? "<=" : "<") : match.inclusive ? ">=" : ">",
         left: subject,
-        right: match.to,
+        right: high,
       },
+    });
+    const { from, to } = match;
+    if (from.kind === "literal" && to.kind === "literal") {
+      const upward =
+        typeof from.value === "number" && typeof to.value === "number"
+          ? from.value <= to.value
+          : true;
+      return within(from, to, upward);
+    }
+    // A bound known only at runtime may make the range descend.
+    return {
+      kind: "binary",
+      operator: "or",
+      left: within(from, to, true),
+      right: within(from, to, false),
     };
   }
   return { kind: "binary", operator: "==", left: subject, right: match };
@@ -3221,7 +3580,7 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     ) {
       // Groovy negative indexes count from the end; TeaseScript indexes start at 0 only.
       if (negativeIndex === 1) return { kind: "property", target, name: "last" };
-      if (isRepeatableExpression(targetNode)) {
+      if (isRepeatableExpression(targetNode) || isPure(targetNode, context)) {
         return {
           kind: "index",
           target,
@@ -3234,8 +3593,19 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
         };
       }
     }
+    if (negativeIndex !== null) {
+      return unsupportedExpression(
+        context,
+        node,
+        "SX_NEGATIVE_INDEX",
+        "Groovy counted this negative index from the end; the receiver is not proven to be a list or cannot be evaluated twice. Index from the end explicitly.",
+      );
+    }
+    // `date[Calendar.MONTH]` reads a date field only on a current date; elsewhere the constant is a number.
     const calendarIndex = calendarConstant(indexNode);
-    if (calendarIndex !== null) return dateTimeField(calendarIndex, target, node, context);
+    if (calendarIndex !== null && targetNode !== null && isCurrentDateValue(targetNode, context)) {
+      return dateTimeField(calendarIndex, target, node, context);
+    }
     if (targetNode !== null && isRandomIndexOf(indexNode, targetNode, context)) {
       // `items[getRandom(items.size())]` picks one element uniformly, which is TeaseScript `items.random`.
       return { kind: "property", target, name: "random" };
@@ -3349,7 +3719,7 @@ function lowerCondition(node: AstNode, context: LowerContext): IrExpression | nu
   return truthiness(
     value,
     inferType(node, context.types),
-    isRepeatableExpression(node),
+    isRepeatableExpression(node) || isRepeatableIndex(node),
     node,
     context,
   );
@@ -3965,6 +4335,15 @@ function lowerObjectMethodCallExpression(
       case "min":
         return useHelper(context, "listMin", [target]);
       case "sum":
+        // Groovy sum() joins text; the helper adds numbers only.
+        if (!onlyOf(listElementType(targetNode, context), NUMBER)) {
+          return unsupportedExpression(
+            context,
+            node,
+            "SX_LIST_SUM_TYPE",
+            "Groovy sum() adds numbers but joins text and other values; this list is not proven to hold only numbers. Add the elements explicitly.",
+          );
+        }
         return useHelper(context, "listSum", [target]);
       case "unique":
         // Groovy unique() also deduplicates the receiver in place; as an expression only the result is kept.
@@ -4021,6 +4400,9 @@ const PRIMITIVE_DEFAULTS = new Map<string, number | boolean>([
   ["short", 0],
 ]);
 
+/** Integer and character arrays convert or truncate written values, which a list does not. */
+const COERCING_ARRAY_TYPES = new Set(["byte", "char", "int", "long", "short", "Character"]);
+
 function lowerArrayExpression(node: AstNode, context: LowerContext): IrExpression | null {
   const sizes = nodeArray(node.sizes);
   const items = nodeArray(node.items);
@@ -4036,11 +4418,67 @@ function lowerArrayExpression(node: AstNode, context: LowerContext): IrExpressio
       "Multi-dimensional Java arrays are not converted automatically.",
     );
   }
+  const elementType = text(node.elementType) ?? "";
+  if (COERCING_ARRAY_TYPES.has(elementType)) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_JAVA_ARRAY_TYPE",
+      `A Java ${elementType}[] converts every written value to its element type (truncating numbers, holding characters); a TeaseScript list keeps values as written. Use a list and convert values explicitly.`,
+    );
+  }
   const size = lowerExpression(sizes[0]!, context);
   if (size === null) return null;
-  const elementType = text(node.elementType) ?? "";
   const defaultValue = PRIMITIVE_DEFAULTS.get(elementType) ?? null;
   return useHelper(context, "array", [size, { kind: "literal", value: defaultValue }]);
+}
+
+function isCurrentDateValue(node: AstNode, context: LowerContext): boolean {
+  const name = variableName(node);
+  return name === null ? isCurrentDate(node) : context.dateValues.has(name);
+}
+
+function isCurrentDate(node: AstNode): boolean {
+  const call = callParts(node);
+  const calendar =
+    call !== null &&
+    call.name === "getInstance" &&
+    call.arguments.length === 0 &&
+    variableName(node.object) === "Calendar";
+  return calendar || isCurrentDateConstructor(node);
+}
+
+function aliasedListVariables(body: AstNode, types: TypeEnvironment): Set<string> {
+  const names = new Set<string>();
+  walkAst(body, (node) => {
+    const assigns =
+      node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
+    const target = assigns ? variableName(node.left) : null;
+    const source = assigns ? variableName(node.right) : null;
+    if (target === null || source === null) return;
+    if (onlyOf(types.variables.get(source) ?? UNKNOWN, LIST | NULL)) {
+      names.add(target);
+      names.add(source);
+    }
+  });
+  return names;
+}
+
+function currentDateVariables(body: AstNode, types: TypeEnvironment): Set<string> {
+  const names = new Set<string>();
+  walkAst(body, (node) => {
+    const name = node.kind === "declaration" ? variableName(node.left) : null;
+    const value = asNode(node.right);
+    if (
+      name !== null &&
+      value !== null &&
+      isCurrentDate(value) &&
+      types.singleAssignment?.has(name)
+    ) {
+      names.add(name);
+    }
+  });
+  return names;
 }
 
 function isCurrentDateConstructor(node: AstNode): boolean {
@@ -4342,9 +4780,16 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         "showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getSeconds(), in whole seconds.",
         node.span,
       );
+      // Legacy timing started once the message was computed.
+      let message = args[0]!;
+      if (!isPure(call.arguments[0]!, context)) {
+        const name = start.replace("popupStart", "popupMessage");
+        context.prelude.push({ kind: "let", name, value: message, span: node.span });
+        message = { kind: "variable", name };
+      }
       context.prelude.push(
         { kind: "let", name: start, value: seconds, span: node.span },
-        { kind: "showPopup", message: args[0]!, span: node.span },
+        { kind: "showPopup", message, span: node.span },
       );
       return {
         kind: "binary",

@@ -11,3 +11,16 @@ function labelValue(n) {
   }
 }
 say "Twice ${twice(scores[0])}, ${labelValue(scores[1])}"
+// A final assignment returns the assigned value.
+let counter = 0
+function bump {
+  counter = counter + 1
+  return counter
+}
+say "Count ${bump()}"
+// No caller uses this result, so the last expression stays a statement.
+function greet {
+  say "Hi"
+  bump()
+}
+greet()

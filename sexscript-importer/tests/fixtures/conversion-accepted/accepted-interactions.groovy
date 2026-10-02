@@ -10,3 +10,5 @@ if (ready && sure) show("Starting " + count + " rounds at " + start)
 // showPopup() returned the seconds until the player closed it.
 int late = showPopup("Come here!")
 if (late > 60) show("What took you so long?")
+def title = { -> wait(1); return "Ready?" }
+int slow = showPopup(title())
