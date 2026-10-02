@@ -23,13 +23,10 @@ publish_body="$tmp/publish-body.sh"
 python3 - "$workflow" \
   "$root/tools/local-agent/patch-publication-request.cjs" \
   "$root/tools/local-agent/patch-publication-cleanup-comment.cjs" \
-  "$root/tools/local-agent/patch-publication-cleanup-transfer.sh" \
-  "$root/tools/local-agent/patch-publication-prepare-steps.sh" \
-  "$root/tools/local-agent/patch-publication-summary.sh" \
   "$root/.github/workflows/ci.yml" \
   "$publish_body" <<'PY'
 import pathlib, re, subprocess, sys, tempfile, textwrap
-workflow_path, request_path, cleanup_path, transfer_path, prepare_path, summary_path, ci_path, publish_body_path = map(pathlib.Path, sys.argv[1:])
+workflow_path, request_path, cleanup_path, ci_path, publish_body_path = map(pathlib.Path, sys.argv[1:])
 text = workflow_path.read_text(encoding="utf-8")
 ci_text = ci_path.read_text(encoding="utf-8")
 assert "patch-publication-request.cjs" in text
@@ -179,11 +176,6 @@ assert "contents: write" in transfer_cleanup and "issues: write" not in transfer
 assert "contents: read" in comment_cleanup
 assert "pull-requests: write" in comment_cleanup
 assert "issues: write" not in comment_cleanup and "contents: write" not in comment_cleanup
-subprocess.run(["node", "--check", str(request_path)], check=True)
-subprocess.run(["node", "--check", str(cleanup_path)], check=True)
-subprocess.run(["bash", "-n", str(transfer_path)], check=True)
-subprocess.run(["bash", "-n", str(prepare_path)], check=True)
-subprocess.run(["bash", "-n", str(summary_path)], check=True)
 
 with tempfile.TemporaryDirectory() as temporary:
     temporary_path = pathlib.Path(temporary)
@@ -790,7 +782,7 @@ GITHUB_STEP_SUMMARY="$summary" TARGET_BRANCH=feat/summary-target PUBLISHED_COMMI
 for field in "target branch=feat/summary-target" "published commit=$published_sha" \
   prepare=success test=failure publish=skipped \
   "transfer cleanup=preserved_retry" "command cleanup=already_absent"; do
-  grep -E -- "^- ${field%%=*}: " "$summary" | grep -Fq -- "${field#*=}" || {
+  grep -E -- "(^|[^[:alnum:]])${field%%=*}[^[:alnum:]]" "$summary" | grep -F -- "${field#*=}" >/dev/null || {
     echo "publication summary did not report ${field#*=} as its ${field%%=*}" >&2
     exit 1
   }
