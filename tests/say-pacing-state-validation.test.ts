@@ -906,20 +906,6 @@ test("snapshot and checkpoint reject representative malformed pacing action stat
       }),
     },
     {
-      name: "background uniqueness",
-      plan: backgroundPlan,
-      checkpoint: mutateCheckpoint(backgroundPlan, background.snapshot, (snapshot) => {
-        snapshot.backgroundActions.push(structuredClone(snapshot.backgroundActions[0]));
-      }),
-    },
-    {
-      name: "foreground/background location",
-      plan: foregroundPlan,
-      checkpoint: mutateCheckpoint(foregroundPlan, foreground.snapshot, (snapshot) => {
-        snapshot.backgroundActions.push(structuredClone(snapshot.foregroundAction));
-      }),
-    },
-    {
       name: "background prepared output",
       plan: backgroundPlan,
       checkpoint: mutateCheckpoint(backgroundPlan, background.snapshot, (snapshot) => {
@@ -1019,11 +1005,6 @@ test("background pacing actions require dense JSON-safe array entries", () => {
   // EVIDENCE: fixture widens only backgroundActions to inject a numeric direct-state entry.
   (nonObjectEntrySnapshot as { backgroundActions: unknown }).backgroundActions = [42];
 
-  const duplicateGateSnapshot = structuredClone(baselineCheckpoint.snapshot);
-  const duplicateGate = duplicateGateSnapshot.backgroundActions[0];
-  assert.ok(duplicateGate !== undefined);
-  duplicateGateSnapshot.backgroundActions.push(structuredClone(duplicateGate));
-
   const preparedOutputArraySnapshot = checkpointSnapshot(foregroundPlan, foreground.snapshot);
   assert.notEqual(preparedOutputArraySnapshot.foregroundAction, null);
   // EVIDENCE: fixture widens only preparedOutput to inject an array where an output object is required.
@@ -1067,12 +1048,6 @@ test("background pacing actions require dense JSON-safe array entries", () => {
       compiled,
       snapshot: nonObjectEntrySnapshot,
       checkpoint: checkpointWithSnapshot(baselineCheckpoint, nonObjectEntrySnapshot),
-    },
-    {
-      name: "second background pacing gate",
-      compiled,
-      snapshot: duplicateGateSnapshot,
-      checkpoint: checkpointWithSnapshot(baselineCheckpoint, duplicateGateSnapshot),
     },
     {
       name: "array prepared output",
@@ -1487,13 +1462,6 @@ test("cross-field pacing snapshot corruption rejects at direct and checkpoint bo
       }),
     },
     {
-      name: "multiple background gates",
-      plan: waitPlan,
-      checkpoint: mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
-        snapshot.backgroundActions.push(structuredClone(snapshot.backgroundActions[0]));
-      }),
-    },
-    {
       name: "extra pacing setting",
       plan: waitPlan,
       checkpoint: mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
@@ -1573,7 +1541,20 @@ test("active pacing locations allow only runtime-produced foreground and backgro
     ),
   );
 
+  // Each forged gate takes fresh identities, so only the one-active-gate rule can reject it.
   const corruptions = [
+    {
+      name: "background cannot retain two pacing gates",
+      compiled: waitPlan,
+      checkpoint: mutateCheckpoint(waitPlan, waitState.snapshot, (snapshot) => {
+        const duplicate = structuredClone(snapshot.backgroundActions[0]);
+        duplicate.actionId = snapshot.nextActionId;
+        duplicate.requestEventSequence = snapshot.nextEventSequence;
+        snapshot.nextActionId += 1;
+        snapshot.nextEventSequence += 1;
+        snapshot.backgroundActions.push(duplicate);
+      }),
+    },
     {
       name: "foreground and background cannot retain two pacing gates",
       compiled: promotionPlan,
