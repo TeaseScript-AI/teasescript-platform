@@ -10,6 +10,7 @@ import {
   type SourceSpan,
 } from "./ast.ts";
 import { rootDiagnostics } from "./diagnostics.ts";
+import { helperCall, helperStatements, type HelperName } from "./helpers.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
 import {
@@ -63,8 +64,6 @@ export interface LowerOptions {
   renameIdentifiers?: boolean;
 }
 
-type SyntheticHelper = "loadFirstTrue" | "indexOf" | "concat" | "array";
-
 interface LowerContext {
   diagnostics: MigrationDiagnostic[];
   metadata: LegacyMetadata | null;
@@ -84,7 +83,7 @@ interface LowerContext {
   helperFunctions: Map<string, HelperFunctionInfo>;
   helperMainParameter: string | null;
   packageHelperRegistry: HelperRegistry;
-  syntheticHelpers: Set<SyntheticHelper>;
+  syntheticHelpers: Set<HelperName>;
   functionDepth: number;
   comments: CommentQueue;
   /** Legacy source lines used to preserve code that needs manual migration. */
@@ -214,7 +213,7 @@ export function lowerParsedFile(
   const authoredStatements = withoutTrailingEnd(
     body?.kind === "block" ? lowerBlock(body, context) : [],
   );
-  const statements = [...syntheticHelperStatements(context), ...authoredStatements];
+  const statements = [...helperStatements(context.syntheticHelpers), ...authoredStatements];
   if (body?.kind !== "block") {
     addDiagnostic(
       context,
@@ -305,7 +304,7 @@ function lowerHelperCompilationUnit(
   return {
     sourceName: file.sourceName,
     metadata: null,
-    statements: [...syntheticHelperStatements(baseContext), ...statements],
+    statements: [...helperStatements(baseContext.syntheticHelpers), ...statements],
     diagnostics: baseContext.diagnostics,
   };
 }
@@ -1092,6 +1091,8 @@ function lowerDeclaration(
     return [];
   }
   // A non-closure declaration that shares a closure's name is a nested local in Groovy; naming renames it.
+  const collectionLoop = lowerCollectionAssignment(true, name, right, span, context);
+  if (collectionLoop !== null) return collectionLoop;
   // `def x` without an initializer starts as null in Groovy.
   const value = isEmptyGroovyExpression(right)
     ? { kind: "literal" as const, value: null }
@@ -1274,6 +1275,10 @@ function lowerAssignment(
     ];
   }
   const variableTarget = variableName(targetNode);
+  if (operator === "=" && variableTarget !== null) {
+    const collectionLoop = lowerCollectionAssignment(false, variableTarget, right, span, context);
+    if (collectionLoop !== null) return collectionLoop;
+  }
   if (operator !== "=" && variableTarget === null && isRepeatableIndex(targetNode)) {
     // `items[i] += v` evaluates `items` and `i` twice harmlessly when both are plain references.
     const binaryOperator = operator.slice(0, -1);
@@ -1385,9 +1390,12 @@ function lowerCallStatement(
   context: LowerContext,
 ): IrStatement[] {
   const call = callParts(node);
-  if (call !== null && !call.inherited && call.name === "each") {
+  if (call !== null && !call.inherited && (call.name === "each" || call.name === "forEach")) {
     return lowerEachStatement(node, call.arguments, span, context);
   }
+  const collectionStatement =
+    call === null || call.inherited ? null : lowerCollectionStatement(node, call, span, context);
+  if (collectionStatement !== null) return collectionStatement;
   const receiverName = variableName(node.object);
   if (
     call !== null &&
@@ -1601,6 +1609,276 @@ function lowerCallStatement(
         : [{ kind: "expression", expression, span }];
     }
   }
+}
+
+/**
+ * `target = list.collect { x -> f(x) }` and its relatives become an initial value plus an ordinary loop:
+ * collect/findAll build a list, find picks the first match, any/every compute a flag, and sum adds up.
+ */
+function lowerCollectionAssignment(
+  declaration: boolean,
+  target: string,
+  right: AstNode,
+  span: SourceSpan | null,
+  context: LowerContext,
+): IrStatement[] | null {
+  const call = callParts(right);
+  const receiver = asNode(right.object);
+  if (call === null || call.inherited || receiver === null) return null;
+  if (!["collect", "findAll", "find", "any", "every", "sum"].includes(call.name)) return null;
+  if (receiver.kind !== "range" && !isKnownListExpression(receiver, context)) return null;
+  // The loop reads the receiver after the target is initialized, so the receiver must not mention it.
+  if (closureUsesName({ kind: "closure", span: null, body: receiver }, target)) return null;
+  const argument =
+    call.arguments.length === 0 && call.name === "sum" ? null : closureArgument(call.arguments);
+  if (argument === null && !(call.name === "sum" && call.arguments.length === 0)) return null;
+  if (argument !== null && argument.parameters.length !== 1) return null;
+  const variable = argument?.parameters[0] ?? "item";
+  const result = argument === null ? null : closureResult(argument.closure);
+  if (argument !== null && result === null) return null;
+
+  // From here on the idiom is recognized; an inner failure keeps its own root diagnostic.
+  const failed = (): IrStatement[] => [
+    unsupportedStatement(
+      context,
+      right,
+      "SX_UNSUPPORTED_DECLARATION_VALUE",
+      `Cannot safely migrate the ${call.name}() loop for ${target}.`,
+    ),
+  ];
+  const collection = lowerExpression(receiver, context);
+  if (collection === null) return failed();
+  const targetVariable: IrExpression = { kind: "variable", name: target };
+  const item: IrExpression = { kind: "variable", name: variable };
+  const prefix = result === null ? [] : lowerStatementList(result.statements, null, context);
+  const assign = (value: IrExpression): IrStatement => ({
+    kind: "assign",
+    target: targetVariable,
+    operator: "=",
+    value,
+    span,
+  });
+  const add = (value: IrExpression): IrStatement => ({
+    kind: "expression",
+    expression: { kind: "methodCall", target: targetVariable, name: "add", arguments: [value] },
+    span,
+  });
+  const condition = (): IrExpression | null =>
+    result === null ? null : lowerCondition(result.value, context);
+  let initial: IrExpression;
+  let body: IrStatement[];
+  switch (call.name) {
+    case "collect": {
+      const value = lowerExpression(result!.value, context);
+      if (value === null) return failed();
+      initial = { kind: "list", items: [] };
+      body = [...prefix, add(value)];
+      break;
+    }
+    case "findAll": {
+      const test = condition();
+      if (test === null) return failed();
+      initial = { kind: "list", items: [] };
+      body = [...prefix, { kind: "if", condition: test, then: [add(item)], else: [], span }];
+      break;
+    }
+    case "find":
+    case "any":
+    case "every": {
+      const test = condition();
+      if (test === null) return failed();
+      const found =
+        call.name === "find" ? item : { kind: "literal" as const, value: call.name === "any" };
+      initial = { kind: "literal", value: call.name === "find" ? null : call.name === "every" };
+      body = [
+        ...prefix,
+        {
+          kind: "if",
+          condition: call.name === "every" ? negate(test) : test,
+          then: [assign(found), { kind: "break", span }],
+          else: [],
+          span,
+        },
+      ];
+      break;
+    }
+    default: {
+      const value = result === null ? item : lowerExpression(result.value, context);
+      if (value === null) return failed();
+      initial = { kind: "literal", value: 0 };
+      body = [...prefix, { kind: "assign", target: targetVariable, operator: "+=", value, span }];
+    }
+  }
+  const start: IrStatement = declaration
+    ? { kind: "let", name: target, value: initial, span }
+    : assign(initial);
+  return [start, { kind: "for", variable, collection, body, span }];
+}
+
+/** A closure body ending in an expression (or `return expression`) with no other returns. */
+function closureResult(closure: AstNode): { statements: AstNode[]; value: AstNode } | null {
+  const statements = nodeArray(asNode(closure.body)?.statements);
+  const last = statements.at(-1);
+  const value = asNode(
+    last?.kind === "return"
+      ? last.value
+      : last?.kind === "expressionStatement"
+        ? last.expression
+        : null,
+  );
+  if (value === null) return null;
+  const leading = statements.slice(0, -1);
+  if (leading.some((statement) => containsReturnForCurrentClosure(statement))) return null;
+  return { statements: leading, value };
+}
+
+/** Single closure argument with its loop variable name (`it` when the closure declares none). */
+function closureArgument(args: AstNode[]): { closure: AstNode; parameters: string[] } | null {
+  const closure = args.length === 1 && args[0]!.kind === "closure" ? args[0]! : null;
+  if (closure === null || asNode(closure.body)?.kind !== "block") return null;
+  const parameters = groovyParameters(closure.parameters);
+  if (parameters === null) return null;
+  return {
+    closure,
+    parameters: closure.parameterSpecified === true ? parameters.map((p) => p.name) : ["it"],
+  };
+}
+
+/**
+ * Statement-level Groovy collection idioms that become ordinary loops or helper assignments:
+ * `n.times { }`, `list.eachWithIndex { item, i -> }`, `Collections.shuffle(list)`, `list.unique()`, and
+ * `list.remove(i)` with a numeric position.
+ */
+function lowerCollectionStatement(
+  node: AstNode,
+  call: { name: string; arguments: AstNode[] },
+  span: SourceSpan | null,
+  context: LowerContext,
+): IrStatement[] | null {
+  const receiver = asNode(node.object);
+  if (receiver === null) return null;
+  const body = (closure: AstNode): AstNode => asNode(closure.body)!;
+  if (call.name === "times" && onlyOf(inferType(receiver, context.types), NUMBER)) {
+    const argument = closureArgument(call.arguments);
+    if (
+      argument === null ||
+      argument.parameters.length > 1 ||
+      containsReturnForCurrentClosure(body(argument.closure))
+    ) {
+      return null;
+    }
+    const count = lowerExpression(receiver, context);
+    if (count === null) return null;
+    const loopBody = lowerBlock(body(argument.closure), context);
+    const variable = argument.parameters[0]!;
+    const usesIndex = closureUsesName(argument.closure, variable);
+    return usesIndex
+      ? [
+          {
+            kind: "for",
+            variable,
+            collection: {
+              kind: "range",
+              from: { kind: "literal", value: 0 },
+              to: count,
+              inclusive: false,
+            },
+            body: loopBody,
+            span,
+          },
+        ]
+      : [{ kind: "repeat", count, body: loopBody, span }];
+  }
+  if (
+    call.name === "eachWithIndex" &&
+    isKnownListExpression(receiver, context) &&
+    isRepeatableExpression(receiver)
+  ) {
+    const argument = closureArgument(call.arguments);
+    if (
+      argument === null ||
+      argument.parameters.length !== 2 ||
+      containsReturnForCurrentClosure(body(argument.closure))
+    ) {
+      return null;
+    }
+    const list = lowerExpression(receiver, context);
+    if (list === null) return null;
+    const item = argument.parameters[0]!;
+    const index = argument.parameters[1]!;
+    return [
+      {
+        kind: "for",
+        variable: index,
+        collection: {
+          kind: "range",
+          from: { kind: "literal", value: 0 },
+          to: { kind: "property", target: list, name: "length" },
+          inclusive: false,
+        },
+        body: [
+          {
+            kind: "let",
+            name: item,
+            value: { kind: "index", target: list, index: { kind: "variable", name: index } },
+            span,
+          },
+          ...lowerBlock(body(argument.closure), context),
+        ],
+        span,
+      },
+    ];
+  }
+  const shuffledList =
+    variableName(receiver) === "Collections" && call.name === "shuffle"
+      ? call.arguments[0]
+      : undefined;
+  const listTarget = shuffledList ?? receiver;
+  const listName = variableName(listTarget);
+  if (listName === null || !isKnownListExpression(listTarget, context)) return null;
+  const list: IrExpression = { kind: "variable", name: listName };
+  const reassign = (value: IrExpression): IrStatement[] => [
+    { kind: "assign", target: list, operator: "=", value, span },
+  ];
+  if (shuffledList !== undefined && call.arguments.length === 1) {
+    return reassign(useHelper(context, "shuffled", [list]));
+  }
+  if (call.name === "unique" && call.arguments.length === 0)
+    return reassign(useHelper(context, "unique", [list]));
+  if (call.name === "remove" && call.arguments.length === 1) {
+    const argument = call.arguments[0]!;
+    const value = lowerExpression(argument, context);
+    if (value === null) return null;
+    if (onlyOf(inferType(argument, context.types), NUMBER))
+      return reassign(useHelper(context, "removeAt", [list, value]));
+    if (onlyOf(inferType(argument, context.types), STRING | BOOLEAN)) {
+      return [
+        {
+          kind: "expression",
+          expression: { kind: "methodCall", target: list, name: "remove", arguments: [value] },
+          span,
+        },
+      ];
+    }
+  }
+  if (call.name === "clear" && call.arguments.length === 0) {
+    return [
+      {
+        kind: "expression",
+        expression: { kind: "methodCall", target: list, name: "clear", arguments: [] },
+        span,
+      },
+    ];
+  }
+  return null;
+}
+
+function closureUsesName(closure: AstNode, name: string): boolean {
+  let used = false;
+  walkAst(closure.body, (node) => {
+    if (variableName(node) === name) used = true;
+  });
+  return used;
 }
 
 function lowerEachStatement(
@@ -2490,13 +2768,7 @@ function lowerPlus(node: AstNode, context: LowerContext): IrExpression | null {
   if (isListType(leftType)) {
     const lists = listConcatenationOperands(node, context);
     if (lists === null) return null;
-    context.syntheticHelpers.add("concat");
-    return {
-      kind: "call",
-      name: "sexscriptLegacyConcat",
-      positional: [{ kind: "list", items: lists }],
-      named: {},
-    };
+    return useHelper(context, "concat", [{ kind: "list", items: lists }]);
   }
   // A null operand fails in both languages, so only non-numeric possibilities need review.
   if (!onlyOf(leftType, NUMBER | NULL) || !onlyOf(rightType, NUMBER | NULL)) {
@@ -2740,7 +3012,16 @@ function lowerObjectMethodCallExpression(
     return args === null ? null : { kind: "call", name, positional: args, named: {}, local: true };
   }
 
+  if (name === "toString" && argumentsNodes.length === 0 && targetNode !== null) {
+    const value = lowerExpression(targetNode, context);
+    return value === null ? null : templateOrLiteral([{ value }]);
+  }
   if (receiverName === "Math") {
+    const helper = MATH_HELPERS.get(name);
+    if (helper !== undefined && argumentsNodes.length === helper.arity) {
+      const args = lowerArguments(argumentsNodes, context);
+      return args === null ? null : useHelper(context, helper.name, args);
+    }
     if ((name === "ceil" || name === "floor") && argumentsNodes.length === 1) {
       const args = lowerArguments(argumentsNodes, context);
       return args === null ? null : { kind: "call", name, positional: args, named: {} };
@@ -2807,6 +3088,18 @@ function lowerObjectMethodCallExpression(
     );
   }
 
+  if (
+    targetNode !== null &&
+    STRING_METHODS.has(name) &&
+    !isKnownListExpression(targetNode, context)
+  ) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_STRING_METHOD",
+      `Groovy string method ${name}() has no TeaseScript equivalent yet (no accepted string library); rewrite this text handling manually.`,
+    );
+  }
   if (targetNode === null || !isKnownListExpression(targetNode, context)) {
     return unsupportedExpression(
       context,
@@ -2827,13 +3120,38 @@ function lowerObjectMethodCallExpression(
   if (name === "indexOf" && argumentsNodes.length === 1) {
     const args = lowerArguments(argumentsNodes, context);
     if (args === null) return null;
-    context.syntheticHelpers.add("indexOf");
-    return {
-      kind: "call",
-      name: "sexscriptLegacyIndexOf",
-      positional: [target, args[0]!],
-      named: {},
-    };
+    return useHelper(context, "indexOf", [target, args[0]!]);
+  }
+  if (argumentsNodes.length === 0) {
+    switch (name) {
+      case "isEmpty":
+        return {
+          kind: "binary",
+          operator: "==",
+          left: { kind: "property", target, name: "length" },
+          right: { kind: "literal", value: 0 },
+        };
+      case "first":
+      case "last":
+        return { kind: "property", target, name };
+      case "toList":
+        return target;
+      case "max":
+        return useHelper(context, "listMax", [target]);
+      case "min":
+        return useHelper(context, "listMin", [target]);
+      case "sum":
+        return useHelper(context, "listSum", [target]);
+      case "unique":
+        // Groovy unique() also deduplicates the receiver in place; as an expression only the result is kept.
+        return useHelper(context, "unique", [target]);
+      case "join":
+        return useHelper(context, "join", [target, { kind: "literal", value: "" }]);
+    }
+  }
+  if (name === "join" && argumentsNodes.length === 1) {
+    const separator = lowerExpression(argumentsNodes[0]!, context);
+    return separator === null ? null : useHelper(context, "join", [target, separator]);
   }
   return unsupportedExpression(
     context,
@@ -2843,7 +3161,31 @@ function lowerObjectMethodCallExpression(
   );
 }
 
-/** A null receiver fails in Groovy and TeaseScript alike, so "list or null" counts as a list receiver. */
+/** Groovy/Java string methods; `size`/`length` also measure lists, which are handled when proven. */
+const STRING_METHODS = new Set([
+  "capitalize",
+  "endsWith",
+  "equalsIgnoreCase",
+  "length",
+  "replace",
+  "replaceAll",
+  "size",
+  "split",
+  "startsWith",
+  "substring",
+  "toLowerCase",
+  "toUpperCase",
+  "tokenize",
+  "trim",
+]);
+
+/** Java Math helpers without an accepted TeaseScript built-in. */
+const MATH_HELPERS = new Map<string, { name: HelperName; arity: number }>([
+  ["abs", { name: "abs", arity: 1 }],
+  ["max", { name: "max", arity: 2 }],
+  ["min", { name: "min", arity: 2 }],
+]);
+
 /** Java default element values: null for object arrays, zero or false for primitive arrays. */
 const PRIMITIVE_ARRAY_DEFAULTS = new Map<string, number | boolean>([
   ["boolean", false],
@@ -2874,13 +3216,7 @@ function lowerArrayExpression(node: AstNode, context: LowerContext): IrExpressio
   if (size === null) return null;
   const elementType = text(node.elementType) ?? "";
   const defaultValue = PRIMITIVE_ARRAY_DEFAULTS.get(elementType) ?? null;
-  context.syntheticHelpers.add("array");
-  return {
-    kind: "call",
-    name: "sexscriptLegacyArray",
-    positional: [size, { kind: "literal", value: defaultValue }],
-    named: {},
-  };
+  return useHelper(context, "array", [size, { kind: "literal", value: defaultValue }]);
 }
 
 function isCurrentDateConstructor(node: AstNode): boolean {
@@ -3115,13 +3451,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
   if (call.name === "loadFirstTrue") {
     const keys = lowerArguments(call.arguments, context);
     if (keys === null) return null;
-    context.syntheticHelpers.add("loadFirstTrue");
-    return {
-      kind: "call",
-      name: "sexscriptLegacyLoadFirstTrue",
-      positional: [{ kind: "list", items: keys }],
-      named: {},
-    };
+    return useHelper(context, "loadFirstTrue", [{ kind: "list", items: keys }]);
   }
 
   // getSelectedValue lowers its own arguments: its option list must stay a literal list.
@@ -3975,170 +4305,9 @@ function collectClosureInfo(body: AstNode): Map<string, ClosureInfo> {
   return result;
 }
 
-function syntheticHelperStatements(context: LowerContext): IrStatement[] {
-  const result: IrStatement[] = [];
-  if (context.syntheticHelpers.has("loadFirstTrue")) result.push(loadFirstTrueHelper());
-  if (context.syntheticHelpers.has("indexOf")) result.push(indexOfHelper());
-  if (context.syntheticHelpers.has("concat")) result.push(concatHelper());
-  if (context.syntheticHelpers.has("array")) result.push(arrayHelper());
-  return result;
-}
-
-/** A Java `new T[size]` array starts with `size` default values; TeaseScript lists grow with add(). */
-function arrayHelper(): IrStatement {
-  const variable = (name: string): IrExpression => ({ kind: "variable", name });
-  return {
-    kind: "function",
-    name: "sexscriptLegacyArray",
-    parameters: [
-      { name: "size", defaultValue: null },
-      { name: "value", defaultValue: null },
-    ],
-    span: null,
-    body: [
-      { kind: "let", name: "items", value: { kind: "list", items: [] }, span: null },
-      {
-        kind: "repeat",
-        count: variable("size"),
-        span: null,
-        body: [
-          {
-            kind: "expression",
-            expression: {
-              kind: "methodCall",
-              target: variable("items"),
-              name: "add",
-              arguments: [variable("value")],
-            },
-            span: null,
-          },
-        ],
-      },
-      { kind: "return", value: variable("items"), span: null },
-    ],
-  };
-}
-
-/** Groovy `a + b + c` on lists creates a new list; TeaseScript has no list operator for that. */
-function concatHelper(): IrStatement {
-  const variable = (name: string): IrExpression => ({ kind: "variable", name });
-  return {
-    kind: "function",
-    name: "sexscriptLegacyConcat",
-    parameters: [{ name: "lists", defaultValue: null }],
-    span: null,
-    body: [
-      { kind: "let", name: "combined", value: { kind: "list", items: [] }, span: null },
-      {
-        kind: "for",
-        variable: "list",
-        collection: variable("lists"),
-        span: null,
-        body: [
-          {
-            kind: "for",
-            variable: "item",
-            collection: variable("list"),
-            span: null,
-            body: [
-              {
-                kind: "expression",
-                expression: {
-                  kind: "methodCall",
-                  target: variable("combined"),
-                  name: "add",
-                  arguments: [variable("item")],
-                },
-                span: null,
-              },
-            ],
-          },
-        ],
-      },
-      { kind: "return", value: variable("combined"), span: null },
-    ],
-  };
-}
-
-function loadFirstTrueHelper(): IrStatement {
-  return {
-    kind: "function",
-    name: "sexscriptLegacyLoadFirstTrue",
-    parameters: [{ name: "keys", defaultValue: null }],
-    span: null,
-    body: [
-      {
-        kind: "for",
-        variable: "key",
-        collection: { kind: "variable", name: "keys" },
-        span: null,
-        body: [
-          {
-            kind: "let",
-            name: "value",
-            value: { kind: "load", key: { kind: "variable", name: "key" } },
-            span: null,
-          },
-          {
-            kind: "if",
-            condition: {
-              kind: "binary",
-              operator: "==",
-              left: { kind: "variable", name: "value" },
-              right: { kind: "literal", value: true },
-            },
-            then: [{ kind: "return", value: { kind: "variable", name: "key" }, span: null }],
-            else: [],
-            span: null,
-          },
-        ],
-      },
-      { kind: "return", value: { kind: "literal", value: null }, span: null },
-    ],
-  };
-}
-
-function indexOfHelper(): IrStatement {
-  return {
-    kind: "function",
-    name: "sexscriptLegacyIndexOf",
-    parameters: [
-      { name: "items", defaultValue: null },
-      { name: "value", defaultValue: null },
-    ],
-    span: null,
-    body: [
-      { kind: "let", name: "index", value: { kind: "literal", value: 0 }, span: null },
-      {
-        kind: "for",
-        variable: "item",
-        collection: { kind: "variable", name: "items" },
-        span: null,
-        body: [
-          {
-            kind: "if",
-            condition: {
-              kind: "binary",
-              operator: "==",
-              left: { kind: "variable", name: "item" },
-              right: { kind: "variable", name: "value" },
-            },
-            then: [{ kind: "return", value: { kind: "variable", name: "index" }, span: null }],
-            else: [],
-            span: null,
-          },
-          {
-            kind: "assign",
-            target: { kind: "variable", name: "index" },
-            operator: "+=",
-            value: { kind: "literal", value: 1 },
-            span: null,
-          },
-        ],
-      },
-      { kind: "return", value: { kind: "literal", value: -1 }, span: null },
-    ],
-  };
+function useHelper(context: LowerContext, name: HelperName, args: IrExpression[]): IrExpression {
+  context.syntheticHelpers.add(name);
+  return helperCall(name, args);
 }
 
 function unsupportedExpression(

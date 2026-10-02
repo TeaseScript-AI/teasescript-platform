@@ -57,6 +57,18 @@ const SEXSCRIPT_RESULT_TYPES = new Map<string, ValueType>([
 ]);
 
 const OBJECT_METHOD_RESULT_TYPES = new Map<string, ValueType>([
+  ["any", BOOLEAN],
+  ["collect", LIST],
+  ["every", BOOLEAN],
+  ["findAll", LIST],
+  ["flatten", LIST],
+  ["intersect", LIST],
+  ["keySet", LIST],
+  ["shuffle", LIST],
+  ["sum", NUMBER],
+  ["toList", LIST],
+  ["unique", LIST],
+  ["values", LIST],
   ["capitalize", STRING],
   ["contains", BOOLEAN],
   ["endsWith", BOOLEAN],

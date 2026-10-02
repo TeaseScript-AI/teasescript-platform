@@ -1,0 +1,96 @@
+// MIGRATION INCOMPLETE: 1 error diagnostic.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+function sexscriptLegacyShuffled(itemsValue) {
+  let shuffled = itemsValue
+  let index = shuffled.length - 1
+  while index > 0 {
+    let other = randomInteger(0..=index)
+    let swap = shuffled[index]
+    shuffled[index] = shuffled[other]
+    shuffled[other] = swap
+    index -= 1
+  }
+  return shuffled
+}
+function sexscriptLegacyRemoveAt(itemsValue2, position) {
+  let remaining = []
+  for index in 0..itemsValue2.length {
+    if index != position {
+      remaining.add(itemsValue2[index])
+    }
+  }
+  return remaining
+}
+function sexscriptLegacyListMax(itemsValue3) {
+  if itemsValue3.length == 0 {
+    return null
+  }
+  let best = itemsValue3.first
+  for item in itemsValue3 {
+    if item > best {
+      best = item
+    }
+  }
+  return best
+}
+function sexscriptLegacyJoin(itemsValue4, separator) {
+  let text = ""
+  for index in 0..itemsValue4.length {
+    if index == 0 {
+      text = "${itemsValue4[index]}"
+    } else {
+      text = "${text}${separator}${itemsValue4[index]}"
+    }
+  }
+  return text
+}
+function sexscriptLegacyMax(first, second) {
+  if first >= second {
+    return first
+  }
+  return second
+}
+let items = ["kneel", "wait", "count"]
+let upper = []
+for it in items {
+  upper.add("${it}!")
+}
+// TODO SX_STRING_METHOD line 3: Groovy string method size() has no TeaseScript equivalent yet (no accepted string library); rewrite this text handling manually.
+// | def longOnes = items.findAll { item -> item.size() > 4 }
+let found = null
+for it in items {
+  if it == "wait" {
+    found = it
+    break
+  }
+}
+let anyCount = false
+for it in items {
+  if it == "count" {
+    anyCount = true
+    break
+  }
+}
+let total = 0
+for item in [1, 2, 3] {
+  total += item
+}
+for it in 0..3 {
+  say "Round ${it}"
+}
+repeat 2 {
+  say "Again"
+}
+for i in 0..items.length {
+  let item = items[i]
+  say "${i}: ${item}"
+}
+items = sexscriptLegacyShuffled(items)
+items = sexscriptLegacyRemoveAt(items, 0)
+items.remove("wait")
+say "Best: ${sexscriptLegacyListMax([3, 7, 5])}, joined: ${sexscriptLegacyJoin(items, ", ")}"
+let bigger = sexscriptLegacyMax(total, 4)
+if items.length == 0 {
+  say "Nothing left"
+}
