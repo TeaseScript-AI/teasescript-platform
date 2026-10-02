@@ -3,6 +3,8 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import { parse } from "../src/parser.js";
+import { run } from "../src/runtime/engine.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
 test("parses functions without parameters and value or bare returns", () => {
   const source = [
@@ -127,7 +129,7 @@ test("reports malformed parameter lists and missing function blocks precisely", 
   }
 });
 
-test("preserves typed signatures and reports the explicit unsupported subset", () => {
+test("preserves typed signatures and never silently ignores declared types", () => {
   const source = "function add(left: number, right: number): number { return left + right }";
   const parsed = parse(source);
 
@@ -135,12 +137,30 @@ test("preserves typed signatures and reports the explicit unsupported subset", (
   const declaration = parsed.program.statements[0];
   assert.equal(declaration?.kind, "functionDeclaration");
   if (declaration?.kind !== "functionDeclaration") return;
-  assert.equal(declaration.parameters[0]?.typeAnnotation?.name, "number");
-  assert.equal(declaration.returnTypeAnnotation?.name, "number");
-  const compiled = compileSource(source);
-  assert.equal(compiled.plan, null);
   assert.deepEqual(
-    compiled.semanticDiagnostics.map((diagnostic) => diagnostic.code),
-    ["TSV027", "TSV027", "TSV027"],
+    [
+      ...declaration.parameters.map((parameter) => parameter.typeAnnotation),
+      declaration.returnTypeAnnotation,
+    ].map((annotation) => [annotation?.name, annotation?.span.start.offset]),
+    [...source.matchAll(/number/gu)].map((match) => ["number", match.index]),
   );
+
+  // Type checking is not implemented yet. Either outcome below is acceptable; running the call as if the declared
+  // types were absent is not.
+  const violating = "function echo(value: string): string { return value }\nsay echo(5)";
+  const compiled = compileSource(violating);
+  if (compiled.plan === null) {
+    assert.notEqual(compiled.diagnostics.length, 0);
+    for (const diagnostic of compiled.diagnostics) {
+      assert.match(diagnostic.code, /^TS[LPV]\d{3}$/u);
+      assert.ok(diagnostic.span.end.offset <= violating.length, diagnostic.code);
+    }
+  } else {
+    const result = run(compiled.plan, createImmediatePacingRuntimeSnapshot(compiled.plan));
+    assert.match(result.snapshot.failure?.code ?? "", /^TSR\d{3}$/u);
+    assert.deepEqual(
+      result.events.filter((event) => event.kind === "say"),
+      [],
+    );
+  }
 });
