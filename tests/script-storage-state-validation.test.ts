@@ -10,6 +10,7 @@ import {
   run,
   serializeCheckpoint,
   type FreshRuntimeOptions,
+  type RuntimeSnapshot,
 } from "../src/index.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
@@ -187,7 +188,7 @@ test("restore rejects storage settlements inconsistent with persistence or the f
         payload: { kind },
       }).snapshot,
     ).snapshot;
-  const restore = (snapshot: object) => () =>
+  const restore = (snapshot: RuntimeSnapshot) => () =>
     deserializeCheckpoint(
       JSON.stringify({
         ...JSON.parse(serializeCheckpoint(createCheckpoint(compiled, settle("stored")))),
