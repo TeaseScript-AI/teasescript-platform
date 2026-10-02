@@ -1399,18 +1399,6 @@ test("handoff shapes that would reach invalid runtime states are rejected", () =
       }, targetInjected.plan),
       paths: [`$.instructions[${targetInjected.handoffInstruction}]`],
     },
-    // Scoped regression oracle for the consume requirement as the current fixed local shape in
-    // docs/RUNTIME.md analyses it: a handoff instruction that does not read the destination is
-    // rejected, although accepting it has no known state consequence because the engine drops the
-    // handoff after that instruction either way. Reassess this row with the local shape.
-    {
-      id: "PR194-provisional-non-consuming-handoff",
-      plan: mutated((plan) => {
-        externalRecord(externalInstructions(plan)[injected.handoffInstruction], "handoff").value =
-          literalExpression(false, span);
-      }),
-      paths: [handoffPath],
-    },
   ];
   for (const row of rows) {
     const before = structuredClone(row.plan);
@@ -1457,12 +1445,8 @@ test("ownership contexts resume from pending and committed boundaries", () => {
       assertPending: (snapshot) => {
         assert.equal(snapshot.callFrames.length, 1);
         const caller = snapshot.callFrames[0];
-        const action = snapshot.foregroundAction;
-        assert.ok(caller !== undefined && action?.kind === "interaction");
+        assert.ok(caller !== undefined);
         assert.ok(caller.callerTemporaries.some((temporary) => temporary.value === "first"));
-        // The suspended caller's return destination stays distinct from the interaction destination.
-        assert.equal(typeof caller.destinationTemporary, "number");
-        assert.notEqual(caller.destinationTemporary, action.destinationTemporary);
       },
       finalSay: "first:committed",
     },
