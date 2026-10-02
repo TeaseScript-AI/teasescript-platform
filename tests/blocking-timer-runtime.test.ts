@@ -338,25 +338,39 @@ test("restored timer display data is validated against its owning instruction", 
     assertCheckpointRejected(candidate, "TSK002");
   }
 
-  const planVariants: Array<(instruction: Record<string, unknown>) => void> = [
-    (instruction) => delete instruction.display,
-    (instruction) => (instruction.display = "loud"),
-    (instruction) => (instruction.unit = "days"),
-    (instruction) => delete instruction.label,
-    (instruction) => (instruction.command = "sleep"),
-    (instruction) => (instruction.extra = true),
+  // Each variant names the rejected field; an unknown key is reported at the instruction itself.
+  const planVariants: ReadonlyArray<
+    readonly [field: string, mutate: (instruction: Record<string, unknown>) => void]
+  > = [
+    ["display", (instruction) => delete instruction.display],
+    ["display", (instruction) => (instruction.display = "loud")],
+    ["unit", (instruction) => (instruction.unit = "days")],
+    ["label", (instruction) => delete instruction.label],
+    ["command", (instruction) => (instruction.command = "sleep")],
+    ["", (instruction) => (instruction.extra = true)],
   ];
-  for (const mutate of planVariants) {
+  for (const [field, mutate] of planVariants) {
     const candidate = jsonRecord(JSON.parse(checkpointJson));
     const instructions = jsonRecord(candidate.plan).instructions;
     assert.ok(Array.isArray(instructions));
-    const instruction = instructions.map(jsonRecord).find((entry) => entry.kind === "wait");
-    assert.ok(instruction !== undefined);
-    mutate(instruction);
-    assert.equal(validateInstructionPlan(candidate.plan).valid, false);
+    const index = instructions.findIndex((entry) => jsonRecord(entry).kind === "wait");
+    mutate(jsonRecord(instructions[index]));
+    const instructionPath = `instructions[${index}]`;
+    const fieldPath = `$.${instructionPath}${field === "" ? "" : `.${field}`}`;
+    assert.ok(
+      validateInstructionPlan(candidate.plan).errors.some(
+        (error) => error.code === "TSC002" && error.path === fieldPath,
+      ),
+      `plan validation must reject ${fieldPath}`,
+    );
+    const checkpointPath = `$.plan.${instructionPath}`;
     assert.throws(
       () => deserializeCheckpoint(JSON.stringify(candidate)),
-      (error: unknown) => error instanceof CheckpointError,
+      (error: unknown) =>
+        error instanceof CheckpointError &&
+        error.info.code === "TSK002" &&
+        (error.info.path === checkpointPath || error.info.path.startsWith(`${checkpointPath}.`)),
+      `checkpoint restore must reject the plan at ${checkpointPath}`,
     );
   }
 });

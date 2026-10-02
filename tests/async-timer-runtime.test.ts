@@ -520,12 +520,14 @@ test("exit in an expiry block cancels the interrupted ask without assigning it",
       'say "never ${name}"',
     ].join("\n"),
   );
+  const prompt = session.snapshot.foregroundAction;
+  assert.ok(prompt?.kind === "interaction");
   session.at(5_000);
   assert.deepEqual(session.said(), ["Too slow."]);
   assert.equal(session.snapshot.status, "halted");
   assert.equal(session.events.at(-1)?.kind, "exit");
   const late = completeAction(session.plan, session.snapshot, {
-    actionId: 2,
+    actionId: prompt.actionId,
     actionKind: "interaction",
     interactionKind: "text",
     payload: { kind: "submittedText", submittedText: "late" },
