@@ -38,7 +38,7 @@ function method(name: string, parameters: ReturnType<typeof parameter>[], statem
   };
 }
 
-function unit(methods: AstNode[]): ParsedGroovyFile {
+function unit(methods: AstNode[], fields: AstNode[] = []): ParsedGroovyFile {
   return {
     formatVersion: 1,
     sourceName: "Helper.groovy",
@@ -49,7 +49,7 @@ function unit(methods: AstNode[]): ParsedGroovyFile {
       kind: "compilationUnit",
       span: null,
       topLevel: { kind: "block", span: null, statements: [] },
-      classes: [{ kind: "class", span, name: "Helper", modifiers: 1, methods }],
+      classes: [{ kind: "class", span, name: "Helper", modifiers: 1, fields, methods }],
     },
   };
 }
@@ -153,4 +153,24 @@ test("package-aware lowering reconnects proven legacy helper calls without choos
   const program = lowerParsedFile(script, { helperRegistry });
   assert.equal(program.diagnostics.filter((diagnostic) => diagnostic.severity === "error").length, 0);
   assert.equal(emitTease(program), "helper(3)\n");
+});
+
+
+test("flags auxiliary helper fields instead of silently duplicating shared state", () => {
+  const program = lowerParsedFile(unit(
+    [method("helper", [parameter("main")], [{ kind: "return", span, value: constant(1) }])],
+    [{
+      kind: "field",
+      span,
+      name: "counter",
+      type: "java.lang.Integer",
+      modifiers: 9,
+      static: true,
+      final: false,
+      initialExpression: constant(0),
+    }],
+  ));
+
+  assert.ok(program.diagnostics.some((diagnostic) => diagnostic.code === "SX_HELPER_SHARED_STATE"));
+  assert.deepEqual(program.statements, []);
 });
