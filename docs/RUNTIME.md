@@ -532,11 +532,11 @@ accumulated elapsed time. A finished or stopped record moves to `settledTimers` 
 
 `observeTime` processes due work globally by `(scene time, phase, action ID)`: foreground and suspended delays, pacing
 gates, timer rounds, and media timeline events (see [Stage image and media playback](#stage-image-and-media-playback)).
-A round that expires naturally ends at its deadline and a repeating timer starts its next round
-there, drawing a repeating range from the session RNG; `remaining` reaching zero ends the round at the current scene
-time, as does pausing a round that is already due while its expiry waits behind a running block. An expired round
-with an expiry block is queued in `pendingTimerHandlers` in due order; consecutive expiries of one timer share an entry
-with a count. A fixed-length repeating timer computes each round's deadline from an anchor as
+A round that expires naturally ends at its deadline and a repeating timer starts its next round there, drawing a
+repeating range from the session RNG; `remaining` reaching zero ends the round at the current scene time, as does
+pausing a round that is already due while its expiry waits behind a running block. An expired round with an expiry block
+is queued in `pendingTimerHandlers` in due order; consecutive expiries of one timer share an entry with a count. A
+fixed-length repeating timer computes each round's deadline from an anchor as
 `anchor + (anchoredRounds + 1) * repeatDuration` instead of accumulating it, so every observation schedule yields the
 same deadlines. Silent rounds of a handler-free timer settle as if each expired on time; the current implementation
 skips them arithmetically up to the next other due work instead of expiring them one by one. Rounds shorter than the
