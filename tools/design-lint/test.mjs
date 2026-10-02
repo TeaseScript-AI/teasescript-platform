@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { ESLint } from "eslint";
 
 const eslint = new ESLint({ overrideConfigFile: "eslint.design.config.mjs" });
-const vueFile = "player/vue/src/phase2c/PlayerApp.vue";
+const vueFile = "player/vue/src/PlayerApp.vue";
 const tsFile = "player/vue/src/components/ui/button/index.ts";
 const vue = (body) =>
   `<script setup lang="ts">import { Button } from '@/components/ui/button';</script><template>${body}</template>`;
@@ -54,13 +54,13 @@ test("local material contracts cannot be reused at arbitrary call sites", async 
   await rejects(
     vue('<Button class="composer-send p-4" />'),
     "shadcn/no-restyle",
-    "player/vue/src/phase2c/Composer.vue",
+    "player/vue/src/Composer.vue",
   );
   assert.deepEqual(
     await messages(
       vue('<Button class="composer-send" />') +
         "<style scoped>.composer-send { font-weight: 700; }</style>",
-      "player/vue/src/phase2c/Composer.vue",
+      "player/vue/src/Composer.vue",
     ),
     [],
   );
@@ -165,8 +165,8 @@ test("the real scope includes shared variants and the story material wrapper", a
     tsFile,
     "player/vue/src/components/ui/bubble/index.ts",
     "player/vue/src/components/PlayerActionButton.vue",
-    "player/vue/src/phase2c/TranscriptMessage.vue",
-    "player/vue/src/phase2c/Composer.vue",
+    "player/vue/src/TranscriptMessage.vue",
+    "player/vue/src/Composer.vue",
   ]) {
     assert.deepEqual(await messages(readFileSync(file, "utf8"), file), [], file);
   }

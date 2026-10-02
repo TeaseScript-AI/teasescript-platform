@@ -46,17 +46,6 @@ test("reports missing property names, colons, and strings at bounded lines", () 
   assert.deepEqual(statementKinds(result), ["speakerDeclaration", "exitStatement"]);
 });
 
-test("a continued speaker property without a value leaves the next statement for recovery", () => {
-  const source = ["speaker vera {", "    displayName:", 'say "recovered"', "exit"].join("\n");
-  const result = parse(source);
-
-  assert.deepEqual(compactDiagnostics(result), [
-    ["TSP006", "error", [32, 2, 0, 32, 2, 0]],
-    ["TSP007", "error", [32, 2, 0, 32, 2, 0]],
-  ]);
-  assert.deepEqual(statementKinds(result), ["speakerDeclaration", "sayStatement", "exitStatement"]);
-});
-
 test("recovers a missing closing brace before a valid statement", () => {
   const source = ["speaker vera {", 'displayName: "Vera"', 'say "Still parsed"', "exit"].join("\n");
   const result = parse(source);

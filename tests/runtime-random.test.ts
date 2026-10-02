@@ -57,6 +57,18 @@ test("preserves deterministic advancement for valid non-zero seeds", () => {
   assert.ok(firstValues.every((value) => value >= 0 && value < 1));
 });
 
+test("xorshift32-v1 matches the published xorshift32 (13, 17, 5) known-answer sequence", () => {
+  // The one canonical known-answer vector for the versioned algorithm (ADR 0015): Marsaglia's
+  // 32-bit xorshift with shifts 13, 17 and 5 from seed 1, each state returned divided by 2^32.
+  // A different sequence needs a new algorithm version; higher-level tests check ranges and
+  // repeatability instead of output sequences.
+  const rng = createXorShift32State(1);
+  for (const expectedState of [270_369, 67_634_689, 2_647_435_461, 307_599_695, 2_398_689_233]) {
+    assert.equal(nextXorShift32(rng), expectedState / 0x1_0000_0000);
+    assert.deepEqual(rng, { algorithm: "xorshift32-v1", state: expectedState });
+  }
+});
+
 test("distinguishes an absent random hook from invalid and valid hook results", () => {
   const compiled = plan("let value = random()\nexit");
   const seed = 0x1234_5678;

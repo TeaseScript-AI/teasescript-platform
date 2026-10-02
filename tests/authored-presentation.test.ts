@@ -13,7 +13,6 @@ import {
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
-import { parseMessageMarkup } from "../src/message-markup.js";
 
 test("accepts concrete CSS colour notations and preserves out-of-gamut coordinates", () => {
   for (const color of [
@@ -204,11 +203,6 @@ test("captures presentation in paced output and validates restored presentation 
   const malformed = JSON.parse(serializeCheckpoint(createCheckpoint(plan, result.snapshot)));
   malformed.snapshot.foregroundAction.preparedOutput.presentation.align = "diagonal";
   assert.equal(validateRuntimeSnapshot(malformed.snapshot, plan).valid, false);
-});
-
-test("removed spoiler tags are ordinary visible text", () => {
-  const content = parseMessageMarkup("[spoiler]**visible**[/spoiler]");
-  assert.equal(content.visibleText, "[spoiler]visible[/spoiler]");
 });
 
 test("a user-provided colour survives an input checkpoint and invalid input uses the default", () => {

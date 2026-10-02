@@ -3,11 +3,7 @@ import tsParser from "@typescript-eslint/parser";
 import vueParser from "vue-eslint-parser";
 import design from "./tools/design-lint/plugin.mjs";
 
-const sources = [
-  "player/vue/src/components/ui/**/*.{vue,ts}",
-  "player/vue/src/phase2c/**/*.{vue,ts}",
-  "player/vue/src/components/PlayerActionButton.vue",
-];
+const sources = ["player/vue/src/**/*.{vue,ts}"];
 // Placement, containment and visibility belong to composition; padding and appearance do not.
 const composition = ["layout", "min-w-0", "shrink-0", "self-start", "invisible", "group"];
 const mechanics = [
@@ -111,17 +107,17 @@ export default [
   localContract("components/PlayerActionButton.vue", [
     contract("Button", ["player-action-button"]),
   ]),
-  localContract("phase2c/Composer.vue", [
+  localContract("Composer.vue", [
     contract("Textarea", ["composer-input"]),
     contract("Button", ["composer-send"]),
   ]),
-  localContract("phase2c/PlayerToolsShell.vue", [contract("Button", ["player-control-square"])]),
-  localContract("phase2c/PlayerTopBar.vue", [
+  localContract("PlayerToolsShell.vue", [contract("Button", ["player-control-square"])]),
+  localContract("PlayerTopBar.vue", [
     contract("Button", ["player-top-bar-theme", "player-top-bar-fullscreen"]),
   ]),
-  localContract("phase2c/ToolPanelHeader.vue", [contract("Button", ["panel-settings-trigger"])]),
-  localContract("phase2c/Transcript.vue", [contract("Button", ["return-to-latest"])]),
-  localContract("phase2c/TranscriptMessage.vue", [
+  localContract("ToolPanelHeader.vue", [contract("Button", ["panel-settings-trigger"])]),
+  localContract("Transcript.vue", [contract("Button", ["return-to-latest"])]),
+  localContract("TranscriptMessage.vue", [
     // AvatarFallback has no typography of its own; the transcript defines initials.
     contract("AvatarFallback", ["text-xs", "font-semibold"]),
     // Speaker/authored material is resolved at the player boundary, outside shared UI.

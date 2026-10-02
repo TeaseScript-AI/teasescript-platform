@@ -1,4 +1,0 @@
-say "The real runtime is waiting for askNumber.", instant
-let answer = askNumber "A number"
-say "The runtime received ${answer}.", instant
-exit

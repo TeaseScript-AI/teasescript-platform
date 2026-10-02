@@ -1,4 +1,0 @@
-say "The real runtime is waiting for showButton.", instant
-showButton "Continue"
-say "showButton completed through the runtime.", instant
-exit

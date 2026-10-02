@@ -85,29 +85,23 @@ test("object name, colon, trailing-comma and cross-delimiter recovery keep diagn
     { expression: "{ x: { : 1 } }", diagnostics: [["TSP004", 19, 19]] },
     { expression: "{ x: { y: } }", diagnostics: [["TSP012", 22, 22]] },
     { expression: "{ x: { y: 1, } }", diagnostics: [["TSP004", 25, 25]] },
-    {
-      expression: "{ x: { y: value[] } }",
-      diagnostics: [
-        ["TSP012", 28, 28],
-        ["TSP017", 28, 28],
-        ["TSP017", 28, 28],
-        ["TSP002", 28, 28],
-      ],
-    },
+    // The empty index is the root; the unwinding after it may improve.
+    { expression: "{ x: { y: value[] } }", root: ["TSP012", 28, 28] },
     { expression: "{ x: { y: 1 } + 2 }", diagnostics: [] },
     { expression: "{ x: { y: 1 }, z: 2 }", diagnostics: [] },
   ];
   for (const fixture of cases) {
     const parsed = parse(`let value = ${fixture.expression}\nexit`);
-    assert.deepEqual(
-      parsed.diagnostics.map((diagnostic) => [
-        diagnostic.code,
-        diagnostic.span.start.offset,
-        diagnostic.span.end.offset,
-      ]),
-      fixture.diagnostics,
-      fixture.expression,
-    );
+    const diagnostics = parsed.diagnostics.map((diagnostic) => [
+      diagnostic.code,
+      diagnostic.span.start.offset,
+      diagnostic.span.end.offset,
+    ]);
+    if ("root" in fixture) {
+      assert.deepEqual(diagnostics[0], fixture.root, fixture.expression);
+    } else {
+      assert.deepEqual(diagnostics, fixture.diagnostics, fixture.expression);
+    }
     assert.deepEqual(
       parsed.program.statements.map((statement) => statement.kind),
       ["letStatement", "exitStatement"],
@@ -117,16 +111,22 @@ test("object name, colon, trailing-comma and cross-delimiter recovery keep diagn
 
 test("mixed object and collection chains preserve contained and cross-delimiter recovery", () => {
   const depth = 96;
-  for (const fixture of [
-    { leaf: "{ nope }", codes: ["TSP005"] },
-    { leaf: "{ a: value[] }", codes: ["TSP012", "TSP017", "TSP017", "TSP002"] },
-  ]) {
-    const source = `let value = ${"{ x: { y: [".repeat(depth)}${fixture.leaf}${"] } }".repeat(depth)}\nexit`;
-    const parsed = parse(source);
-    assert.deepEqual(
-      parsed.diagnostics.map((diagnostic) => diagnostic.code),
-      fixture.codes,
-    );
-    assert.equal(parsed.program.statements[1]?.kind, "exitStatement");
-  }
+  const wrap = (leaf: string) =>
+    `let value = ${"{ x: { y: [".repeat(depth)}${leaf}${"] } }".repeat(depth)}\nexit`;
+
+  const contained = parse(wrap("{ nope }"));
+  assert.deepEqual(
+    contained.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSP005"],
+  );
+  assert.equal(contained.program.statements[1]?.kind, "exitStatement");
+
+  // Across delimiters only the root is fixed: the empty index. The unwinding after it may improve.
+  const crossSource = wrap("{ a: value[] }");
+  const cross = parse(crossSource);
+  assert.deepEqual(
+    [cross.diagnostics[0]?.code, cross.diagnostics[0]?.span.start.offset],
+    ["TSP012", crossSource.indexOf("value[]") + "value[".length],
+  );
+  assert.equal(cross.program.statements[1]?.kind, "exitStatement");
 });

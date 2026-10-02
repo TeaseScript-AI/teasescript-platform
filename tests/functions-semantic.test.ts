@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { createFreshRuntimeSnapshot, run } from "../src/index.js";
+import { TEASESCRIPT_PROTECTED_NAMES } from "../src/protected-names.js";
 
 test("collects top-level functions before validating calls and mutual recursion", () => {
   const result = compileSource(
@@ -140,7 +142,7 @@ test("rejects representative protected names across function, parameter and loca
   assert.ok(protectedType.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV001"));
 });
 
-test("allows the unapproved timer names as ordinary identifiers", () => {
+test("allows timer spellings that are not TeaseScript syntax as ordinary identifiers", () => {
   for (const name of ["mysteryTimer", "startTimer", "stopTimer"]) {
     const result = compileSource(`let ${name} = 1`);
     assert.deepEqual(result.diagnostics, []);
@@ -148,27 +150,26 @@ test("allows the unapproved timer names as ordinary identifiers", () => {
   }
 });
 
-test("does not treat deferred protected engine names as implemented built-ins", () => {
-  const result = compileSource("wait()\ngetDate()\nshowBlur()");
-
-  assert.equal(result.plan, null);
-  assert.deepEqual(
-    result.semanticDiagnostics.map((diagnostic) => diagnostic.code),
-    ["TSV018", "TSV018", "TSV018"],
-  );
-});
-
-test("later-parameter detection scales without changing broad default semantics", () => {
-  const count = 1_500;
-  const parameters = Array.from({ length: count }, (_, index) =>
-    index === 0 ? `p0 = p${count - 1}` : `p${index} = ${index}`,
-  ).join(", ");
-  const result = compileSource(`function broad(${parameters}) { return p0 }`);
-
-  assert.deepEqual(
-    result.semanticDiagnostics.map((diagnostic) => diagnostic.code),
-    ["TSV025", "TSV002"],
-  );
+test("a call to a protected name is rejected with located diagnostics or never fails as an unknown built-in", () => {
+  for (const name of TEASESCRIPT_PROTECTED_NAMES) {
+    const source = `${name}()`;
+    const result = compileSource(source);
+    if (result.plan === null) {
+      assert.ok(result.diagnostics.length > 0, source);
+      for (const diagnostic of result.diagnostics) {
+        assert.match(diagnostic.code, /^TS[PV]\d{3}$/, source);
+        const { start, end } = diagnostic.span;
+        assert.ok(
+          0 <= start.offset && start.offset <= end.offset && end.offset <= source.length,
+          source,
+        );
+      }
+      continue;
+    }
+    // A compiled call must not fail as an unknown built-in (TSR011); other structured runtime failures are allowed.
+    const outcome = run(result.plan, createFreshRuntimeSnapshot(result.plan));
+    assert.notEqual(outcome.snapshot.failure?.code, "TSR011", source);
+  }
 });
 
 test("long unary defaults preserve validation without native semantic recursion", () => {

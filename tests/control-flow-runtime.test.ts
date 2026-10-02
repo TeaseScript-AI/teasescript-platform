@@ -69,12 +69,23 @@ test("uses one deterministic RNG for random, chance, and randomInteger", () => {
     "say randomInteger(1..=6)",
     "say randomInteger(0..3)",
   ].join("\n");
-  const first = runSource(source, 0x1234_5678);
-  const second = runSource(source, 0x1234_5678);
+  const seed = 0x1234_5678;
+  const first = runSource(source, seed);
+  const second = runSource(source, seed);
 
   assert.deepEqual(first.events, second.events);
   assert.deepEqual(first.snapshot.rng, second.snapshot.rng);
-  assert.deepEqual(sayTexts(first).slice(2), ["2", "1"]);
+  const [unit, coin, die, index] = sayTexts(first);
+  assert.ok(Number(unit) >= 0 && Number(unit) < 1, unit);
+  assert.ok(coin === "true" || coin === "false", coin);
+  assert.ok(["1", "2", "3", "4", "5", "6"].includes(die!), die);
+  assert.ok(["0", "1", "2"].includes(index!), index);
+
+  // Each built-in draws from the session RNG; the same seed without a draw keeps the RNG unchanged.
+  const undrawn = runSource("let value = 0", seed).snapshot.rng;
+  for (const call of ["random()", "chance(50)", "randomInteger(1..=6)", "randomInteger(0..3)"]) {
+    assert.notDeepEqual(runSource(`let value = ${call}`, seed).snapshot.rng, undrawn, call);
+  }
 });
 
 test("invalid random built-in arguments fail with source-associated errors", () => {
@@ -241,10 +252,7 @@ test("checkpoint restore preserves RNG and event sequences between calls", () =>
 
   assert.deepEqual([...first.events, ...rest.events], uninterrupted.events);
   assert.deepEqual(rest.snapshot.rng, uninterrupted.snapshot.rng);
-  assert.deepEqual(
-    rest.events.map((event) => event.sequence),
-    [2, 3],
-  );
+  assert.ok(rest.events[0]!.sequence > first.events.at(-1)!.sequence);
 });
 
 test("checkpoint restore accepts range loop-position length and rejects length + 1", () => {
@@ -309,5 +317,8 @@ test("loop variables deep-copy composite list elements", () => {
 });
 
 function runSource(source: string, seed = 1) {
-  return runValidSource(source, seed);
+  const result = runValidSource(source, seed);
+  // An empty or partial say list is only evidence when the run completed instead of failing early.
+  assert.equal(result.snapshot.status, "halted", source);
+  return result;
 }

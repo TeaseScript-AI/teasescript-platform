@@ -2,6 +2,9 @@ import { compileChild, runCompileTask, type CompileTask } from "../src/compiler/
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { run } from "../src/runtime/engine.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
+import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 test("downstream expression frames traverse each public stage and resume on a constrained stack", () => {
@@ -99,13 +102,22 @@ test("expression continuations preserve short circuit, references, RNG, and user
     ].join("\n"),
     { scenarioName: "expression frames and prepared references", seed: 42 },
   );
-  assert.deepEqual(
-    result.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["7", "1", "2", "3", "4", "5", "x4", "7", "2"],
+  const texts = result.events.filter((event) => event.kind === "say").map((event) => event.text);
+  assert.deepEqual(texts.slice(0, 7), ["7", "1", "2", "3", "4", "5", "x4"]);
+  // `values.random` selects one object; the assignment changes exactly that object.
+  assert.ok(
+    [
+      ["7", "2"],
+      ["1", "7"],
+    ].some((selected) => selected.join() === texts.slice(7).join()),
+    texts.join(),
   );
-  // One xorshift32 (13, 17, 5) step moves seed 42 to 11355432, and 11355432 / 2^32 < 0.5 makes
-  // `values.random` select the first object, so exactly one draw leaves this state.
-  assert.equal(result.finalSnapshot.rng.state, 11_355_432);
+  // The random target is drawn exactly once, whatever value the seeded generator produces.
+  const oneDraw = compileValidPlan("random()");
+  assert.deepEqual(
+    result.finalSnapshot.rng,
+    run(oneDraw, createFreshRuntimeSnapshot(oneDraw, { seed: 42 })).snapshot.rng,
+  );
 });
 
 test("compiler continuations unwind suspended parent cleanup on a child failure", () => {

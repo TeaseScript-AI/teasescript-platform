@@ -5,7 +5,7 @@
 `player/runtime-adapter.ts` is the framework-independent Player adapter shared by the Player and the
 playground's action lookup/completion path. It maps validated pending actions and runtime events to Player presentation,
 submits typed interactions, pacing/time observations, media load reports, and media progress, projects the Stage and
-active media for playback, and uses the canonical runtime checkpoint operations. The Phase 2C Player plays the
+active media for playback, and uses the canonical runtime checkpoint operations. The Player plays the
 projected audio through `player/media-device.ts` and shows the Stage image; browser video playback remains deferred.
 `playground/workspace/controller.ts` retains the DOM-free compiler/execution and development-automation workspace
 facade. Neither adapter normalizes answers, matches choices, derives canonical transcript text, or retains an
@@ -330,7 +330,7 @@ Player-authored messages do not create gates. No compiler lookahead across branc
 Message presentation follows the accepted [speaker inheritance and override contract](specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides).
 The runtime resolves mode/style into `MessagePresentation` while preparing output, preserves that data through pacing
 promotion and checkpoints, and emits it with the canonical `say` event. The Player adapter forwards these values; the
-Phase 2C Player renders them under the observable contract in [Player UI](ui/PLAYER-UI.md). Invalid colour values fall
+Player renders them under the observable contract in [Player UI](ui/PLAYER-UI.md). Invalid colour values fall
 back without a new warning policy; general diagnostic/recovery design is tracked separately in #427.
 
 ### Skippable gate completion
@@ -844,7 +844,8 @@ The `xorshift32-v1` seed and serialized state must be non-zero unsigned 32-bit i
 - `nextXorShift32(...)` rejects direct malformed state `0`;
 - `validateRuntimeSnapshot(...)` rejects a snapshot whose RNG state is `0`;
 - checkpoint restore translates that malformed snapshot state into structured `CheckpointError` code `TSK002`;
-- valid non-zero seeds retain the existing deterministic sequence and do not change the algorithm or versioned formats.
+- a valid non-zero seed produces the deterministic sequence of the versioned `xorshift32-v1` algorithm; a deliberate
+  algorithm change uses a new algorithm version (ADR 0015) instead of changing the sequence under that identifier.
 
 The zero-state rule prevents the absorbing xorshift32 state in which every future state and output remains zero. It does not change the plan, runtime-snapshot, or checkpoint format version.
 
