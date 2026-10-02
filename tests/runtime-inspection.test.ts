@@ -7,6 +7,7 @@ import {
   createFreshRuntimeSnapshot,
   deserializeCheckpoint,
   inspectRuntimeState,
+  observeTime,
   run,
   serializeCheckpoint,
   type RuntimeInspectionResult,
@@ -94,6 +95,22 @@ test("runtime inspection exposes pacing settings, deadline, skip policy, and pre
     [
       inspection.nextInstructionSourceSpan?.start.offset,
       inspection.nextInstructionSourceSpan?.end.offset,
+    ],
+    [source.indexOf(secondSay), source.indexOf(secondSay) + secondSay.length],
+  );
+
+  // After the gate expires, the held prepared output keeps the second say's own source span.
+  const released = inspectRuntimeState(
+    plan,
+    observeTime(plan, pending.snapshot, gate.deadlineMs).snapshot,
+  );
+  assert.equal(released.valid, true);
+  if (!released.valid) return;
+  assert.deepEqual(released.preparedSayOutput?.output, prepared);
+  assert.deepEqual(
+    [
+      released.preparedSayOutput?.sourceSpan?.start.offset,
+      released.preparedSayOutput?.sourceSpan?.end.offset,
     ],
     [source.indexOf(secondSay), source.indexOf(secondSay) + secondSay.length],
   );

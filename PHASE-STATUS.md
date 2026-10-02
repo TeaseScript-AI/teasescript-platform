@@ -34,8 +34,8 @@ accept syntax, architecture, or implementation details.
 - **Player:** the POC Player is the Vue implementation under `player/vue/src/` (#418), served on `/player/`. It uses
   Vue/Vite, Tailwind CSS 4, repository-owned shadcn-vue/Reka primitives, and TanStack Vue Virtual as the transcript
   owner. A framework-independent adapter connects it to the implemented transcript, foreground-interaction, pacing,
-  time-observation, runtime timer, checkpoint, and restore slice, including typed message markup with controlled links
-  and spoilers; authored runtime timers render in its timer rail on a session-owned scene clock (#444).
+  time-observation, runtime timer, checkpoint, and restore slice, including typed message markup with controlled links;
+  authored runtime timers render in its timer rail on a session-owned scene clock (#444).
   It also has the tools framework and browser-local Player Settings. It shows the runtime Stage image and plays authored
   audio through `player/media-device.ts` after the explicit Start activation (#446). The default build plays the
   repository demo `examples/demo/demo.tease` (#448); the development server or `?dev` loads the development preview

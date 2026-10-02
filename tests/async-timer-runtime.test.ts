@@ -769,9 +769,17 @@ test("malformed restored timer, handle, queue, and interrupt data is rejected", 
     [[...action, "extra"], true],
   ];
   for (const [path, value] of timerCases) assertForgedRejected(runningJson, path, value);
+
+  // Background work is canonical state in creation order, so a reordered list of valid entries is malformed.
+  const pair = new Session("let a = timer async 5\nlet b = timer async 6\nwait 10");
+  const pairJson = serializeCheckpoint(createCheckpoint(pair.plan, pair.snapshot));
+  // EVIDENCE: fixture: checkpoint serialization produces plain JSON data.
+  const pairActions = child(child(JSON.parse(pairJson) as Json, "snapshot"), "backgroundActions");
+  assert.ok(Array.isArray(pairActions));
+  assertForgedRejected(pairJson, ["snapshot", "backgroundActions"], [...pairActions].reverse());
 });
 
-test("runtime review regressions stay checkpointable and ordered", () => {
+test("repeat overrides, nested and interrupting expiry blocks, and stops stay checkpointable and ordered", () => {
   const overrideSeed = 0x8765_4321;
   const override = new Session(
     "let t = timer(duration: 1..=3, async: true, repeat: true)\nt.repeatDuration = 2 s\nwait 8 s",
@@ -881,7 +889,7 @@ test("a late observation across 10^12 silent fixed rounds ends with on-time elap
   assert.equal(late.snapshot.status, "halted");
 });
 
-test("final review regressions keep late expiries valid and reject forged invocations", () => {
+test("pausing an overdue round stays paused, and restore rejects forged expiry invocations and start times", () => {
   const paused = new Session(
     "let t = timer(duration: 1, async: true, repeat: true) { t.pause() }\nwait 10",
   ).at(3_000);
@@ -1208,7 +1216,7 @@ test("host input waits for scene-time catch-up and for an expiry block due at th
   assert.equal(completeAction(exiting.plan, exited, request).outcome.kind, "staleAction");
 });
 
-test("audit regressions: fractional repeats, tiny rounds, remaining rounding, and visible lists", () => {
+test("late fractional rounds match on time, tiny rounds end normally, zero remaining finishes, and list text or a zero-based repeat range fails", () => {
   // Observes every timer deadline up to the horizon, as a Player that is never late would.
   const onTime = (source: string, horizonMs: number): Session => {
     const session = new Session(source);
@@ -1265,7 +1273,7 @@ test("audit regressions: fractional repeats, tiny rounds, remaining rounding, an
   assert.deepEqual(failed.rng, fresh.rng, "an invalid range fails before its round is drawn");
 });
 
-test("audit regressions: restore rejects contradictory rounds, early expiries, and count overflow", () => {
+test("restore rejects contradictory rounds and early expiries, and a full expiry count loses none", () => {
   const path = ["snapshot", "backgroundActions", 0, "timer"] as const;
   const paused = new Session("let t = timer async 5\nt.pause()\nwait 10");
   const pausedJson = serializeCheckpoint(createCheckpoint(paused.plan, paused.snapshot));
@@ -1315,7 +1323,7 @@ test("audit regressions: restore rejects contradictory rounds, early expiries, a
   );
 });
 
-test("re-audit regressions: skipped rounds keep tie order, termination, and restorable rounds", () => {
+test("skipped rounds keep tie order, termination, and restorable rounds", () => {
   const onTime = (source: string, horizonMs: number, initialSessionTimeMs = 0): Session => {
     const session = new Session(source, { initialSessionTimeMs });
     for (let guard = 0; session.snapshot.observedSessionTimeMs < horizonMs; guard += 1) {
@@ -1370,7 +1378,7 @@ test("re-audit regressions: skipped rounds keep tie order, termination, and rest
   );
 });
 
-test("second re-audit regressions: plateau skipping, failure at a due deadline, and the index limit", () => {
+test("plateaued rounds terminate, a failed catch-up settles nothing further, and index exhaustion matches on time", () => {
   const plateau =
     "let t = timer(duration: 1 ms, async: true, repeat: true)\nt.repeatDuration = 1e-300 ms\nwait 2 ms";
   // From 1 ms on, every round deadline rounds to 1 ms until the round index is exhausted.
@@ -1409,7 +1417,7 @@ test("second re-audit regressions: plateau skipping, failure at a due deadline, 
   assert.deepEqual(late.snapshot.settledTimers, prefix.snapshot.settledTimers);
 });
 
-test("third re-audit regressions: exact display strings and failed pacing gates at scene time", () => {
+test("restore rejects a non-string display, and a failed session keeps its pacing gate at scene time", () => {
   const session = new Session("let t = timer async 5\nwait 10");
   const json = serializeCheckpoint(createCheckpoint(session.plan, session.snapshot));
   assertForgedRejected(json, ["snapshot", "backgroundActions", 0, "timer", "display"], ["hidden"]);

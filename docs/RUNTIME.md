@@ -339,8 +339,7 @@ Effective skip policy comes from explicit `skippable`/`unskippable`, then the ef
 
 A skippable gate may complete through:
 
-- a primary click anywhere in the player iframe viewport, including background or unused space;
-- a primary touch activation;
+- a primary click or tap on Player background or other unused Player space;
 - Space while the focused Standard composer is empty.
 
 A real interactive control has priority and must not also trigger viewport-wide gate completion. Ordinary keys type into the focused composer. Space is normal input when text is already present and does not skip during text composition, a relevant selection, or focus on another interactive control. Unskippable gates reject click, tap, and Space completion.
