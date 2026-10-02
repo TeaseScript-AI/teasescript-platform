@@ -251,7 +251,8 @@ implementation constraint, not language capacity. Historical diagnostic measurem
 
 ## Protected names
 
-Grammar keywords, type names, engine names, and implemented core built-ins are centrally protected from user declarations even when a protected future engine API is not yet callable. Protection does not make a deferred API implemented.
+Grammar keywords, type names, engine names, and implemented core built-ins are centrally protected from user
+declarations. Protecting a name reserves it; it does not make that name callable.
 
 A Standard Library export does not automatically become a protected grammar keyword. ADR 0018 explicitly protects its
 selected first-POC direct names, and the message-markup specification explicitly protects `escapeMarkup`, as part of
