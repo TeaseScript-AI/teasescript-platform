@@ -445,11 +445,14 @@ test("compact interactions end at the save 'as' and the load 'default' delimiter
       'save askText as "bare"',
       'save askText "Your name?" as "name"',
       'save load "nick" default askText "Nickname?" as "nick"',
-      'let pick = load choose "a", "b" default "fallback"',
+      'let pick = load choose first: "a", second: "b" default "fallback"',
       "exit",
     ].join("\n"),
   );
-  let result = run(compiled, createFreshRuntimeSnapshot(compiled));
+  let result = run(
+    compiled,
+    createFreshRuntimeSnapshot(compiled, { scriptStorage: [{ key: "second", value: "stored" }] }),
+  );
   const saved: { key: string; value: SerializableRuntimeValue }[] = [];
   for (const answer of ["Bare", "Ada", "Addy"]) {
     const action = result.snapshot.foregroundAction;
@@ -471,6 +474,15 @@ test("compact interactions end at the save 'as' and the load 'default' delimiter
   ]);
   const choice = result.snapshot.foregroundAction;
   assert.ok(choice?.kind === "interaction" && choice.interactionKind === "choice");
+  const chosen = completeAction(compiled, result.snapshot, {
+    actionId: choice.actionId,
+    actionKind: "interaction",
+    interactionKind: "choice",
+    payload: { kind: "selectedLabel", selectedLabel: "second" },
+  });
+  const finished = run(compiled, chosen.snapshot);
+  assert.equal(finished.snapshot.status, "halted");
+  assert.equal(binding(finished.snapshot, "pick"), "stored");
 
   // A present key never prompts; its stored value is saved again.
   const present = plan('save load "nick" default askText "Nickname?" as "nick"\nexit');
@@ -526,4 +538,38 @@ test("deleting a key keeps every other stored key readable and writable", () => 
       ["d", 4],
     ]),
   );
+});
+
+test("compact interactions parse in every storage operand position", () => {
+  const prelude =
+    'speaker mistress {\n  name: "M"\n}\nfunction wrap(value) { return "${value}" }\n';
+  const values = [
+    "askText",
+    'askText "Hint?"',
+    "askNumber",
+    'askNumber "Age?"',
+    'choose "a", "b"',
+    'choose default: "A", other: "B"',
+    '(askText as mistress "Hint?")',
+    '(choose as mistress "a", "b")',
+    '"${askText}"',
+    "wrap(askNumber)",
+  ];
+  const positions = [
+    (value: string) => `save ${value} as "k"`,
+    (value: string) => `save [${value}] as "k"`,
+    (value: string) => `let v = load ${value}`,
+    (value: string) => `let v = load ${value} default "d"`,
+    (value: string) => `let v = load "k" default ${value}`,
+    (value: string) => `save load "k" default ${value} as "k"`,
+    (value: string) => `save load ${value} as "k"`,
+    (value: string) => `save load ${value} default "d" as "k"`,
+  ];
+  for (const value of values) {
+    for (const position of positions) {
+      const source = position(value);
+      const compiled = compileSource(prelude + source);
+      assert.deepEqual(compiled.diagnostics, [], source);
+    }
+  }
 });
