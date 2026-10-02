@@ -10,13 +10,11 @@ import {
 import { browserCapturedMediaLocks } from "../../captured-media-persistence.js";
 import { MediaDevice, MediaLoadQueue } from "../../media-device.js";
 import {
-  activePlayerRuntimeCapture,
-  answerPlayerRuntimeCapture,
   playerRuntimeMedia,
   reportPlayerRuntimeMediaLoad,
   type PlayerRuntimeSession,
 } from "../../runtime-adapter.js";
-import { CaptureDelivery, SessionCamera, type PlayerDiagnostic } from "../../session-camera.js";
+import { CaptureService, SessionCamera, type PlayerDiagnostic } from "../../session-camera.js";
 import { useRuntimeSceneClock } from "./useRuntimeSceneClock";
 
 // Media progress is sampled this often while media loads or plays; cues fire at this resolution.
@@ -79,7 +77,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     ),
     reportDiagnostic,
   );
-  const captures = new CaptureDelivery();
   /** Captured media resolves only through the trusted store, never as a package asset. */
   const resolveAsset = (path: string): string | null => {
     if (!isCapturedMediaReference(path)) return resolvePackageAsset(path);
@@ -135,49 +132,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     (active) => (active ? sampling.resume() : sampling.pause()),
     { immediate: true },
   );
-  // Answers each `takePhoto()` once from the session camera and delivers that answer until the runtime settles it.
-  let servicing = false;
-  async function serviceCapture(): Promise<void> {
-    const action = session.value && activePlayerRuntimeCapture(session.value.snapshot);
-    if (!action || servicing) return;
-    servicing = true;
-    const servedGeneration = generation.value;
-    try {
-      const answer = await captures.answerFor(action.actionId, () => camera.answer());
-      if (servedGeneration !== generation.value) return;
-      // Input happens at the observed time; elapsed time cannot replace a capture, but stay defensive.
-      const observed = clock.observe() ?? session.value;
-      if (
-        !observed ||
-        activePlayerRuntimeCapture(observed.snapshot)?.actionId !== action.actionId
-      ) {
-        captures.settled(action.actionId);
-        return;
-      }
-      const result = answerPlayerRuntimeCapture(observed, action.actionId, answer, capturedMedia);
-      switch (result.outcome.kind) {
-        case "executionPending":
-          // The same answer is offered again after the engine ran.
-          setTimeout(() => void serviceCapture(), 0);
-          return;
-        case "invalidPayload":
-          reportDiagnostic({ code: "capture-rejected", message: result.outcome.message });
-          captures.settled(action.actionId);
-          // Never leave the script waiting: answer this capture as unavailable instead.
-          session.value = answerPlayerRuntimeCapture(observed, action.actionId, {
-            kind: "unavailable",
-            reason: "failed",
-          }).session;
-          return;
-        default:
-          captures.settled(action.actionId);
-          session.value = result.session;
-      }
-    } finally {
-      servicing = false;
-    }
-    void serviceCapture();
-  }
+  const captures = new CaptureService(() => camera.answer(), {
+    session: () => session.value,
+    generation: () => generation.value,
+    observe: () => clock.observe(),
+    publish: (next) => (session.value = next),
+    capturedMedia,
+    diagnostic: reportDiagnostic,
+    later: (task) => setTimeout(task, 0),
+  });
+  const serviceCapture = () => captures.service();
   watch(session, () => void serviceCapture());
   // A session that ended releases its camera.
   watch(
@@ -221,11 +185,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   function prepare(create: () => PlayerRuntimeSession) {
     activationToken++;
+    // A new session needs its own camera; a superseded acquisition never stays open.
+    camera.release();
     activation.value = { kind: "start", begin: create };
   }
   /** Shows the explicit Continue control for a restored session; its execution, time and media resume only then. */
   function prepareRestore(restored: PlayerRuntimeSession) {
     activationToken++;
+    camera.release();
     activation.value = { kind: "continue", begin: () => restored };
   }
   /**

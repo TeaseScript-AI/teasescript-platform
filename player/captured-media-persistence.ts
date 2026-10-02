@@ -24,7 +24,9 @@ export function capturedMediaReferences(value: SerializableRuntimeValue): Set<st
     if (typeof current === "string") {
       if (isCapturedMediaReference(current)) found.add(current);
     } else if (current !== null && typeof current === "object") {
-      if (current.kind === "list" || current.kind === "set") pending.push(...current.items);
+      // Item by item: a wide stored value must not hit the native argument limit of a spread.
+      if (current.kind === "list" || current.kind === "set")
+        for (const item of current.items) pending.push(item);
       else if (current.kind === "object")
         for (const property of current.properties) pending.push(property.name, property.value);
     }

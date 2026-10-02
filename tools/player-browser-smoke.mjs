@@ -794,7 +794,8 @@ async function cameraScenario(cdp, origin) {
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
     await physicalClick(cdp, "[data-session-activation] button");
   };
-  const capturedImages = `[...document.querySelectorAll('img')].filter((image) => image.src.startsWith('blob:')).length`;
+  // A decoded photo, not merely an image element with a captured URL.
+  const capturedImages = `[...document.querySelectorAll('img')].filter((image) => image.src.startsWith('blob:') && image.complete && image.naturalWidth > 0).length`;
 
   await cdp.call("Browser.setPermission", {
     origin,
@@ -803,7 +804,7 @@ async function cameraScenario(cdp, origin) {
   });
   await start();
   await waitFor(cdp, `document.body.innerText.includes('Captured.')`);
-  assertEqual(await value(cdp, capturedImages), 1, "The captured photo did not reach the Stage");
+  await waitFor(cdp, `${capturedImages} === 1`);
 
   await cdp.call("Browser.setPermission", {
     origin,

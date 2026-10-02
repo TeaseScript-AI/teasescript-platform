@@ -2054,7 +2054,8 @@ Rules:
 - Persistent plain data is storable. Timer handles, media handles, and speaker references exist only in the current
   session and cannot be saved, including when nested inside lists or objects (`TSR055`). Nested `null` is allowed.
 - Saving and loading copy data: later changes to the saved variable or a loaded value do not change storage.
-- A string naming a camera, file, or media reference is stored only as a string; storage does not persist the media.
+- A string naming a camera, file, or media reference is stored only as a string; storage itself does not persist the
+  media. A photo from `takePhoto()` is kept by the Player while saved storage references it (§33).
 - Storage keys are plain strings.
 - After unwrapping parentheses, a recognizably non-string outer key expression is a compile error (`TSV038`). Other
   keys are checked at runtime and raise `TSR054` if non-string. For `load`, the diagnostic explains:

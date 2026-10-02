@@ -9,7 +9,12 @@ import {
 } from "../player/capture-device.js";
 import { CapturedMediaStore } from "../player/captured-media.js";
 import { RgbaImage } from "../player/rgba-image.js";
-import { CaptureDelivery, SessionCamera, type PlayerDiagnostic } from "../player/session-camera.js";
+import {
+  createPlayerRuntimeSession,
+  type PlayerCaptureAnswer,
+  type PlayerRuntimeSession,
+} from "../player/runtime-adapter.js";
+import { CaptureService, SessionCamera, type PlayerDiagnostic } from "../player/session-camera.js";
 
 class FakeTrack implements CaptureTrack {
   readonly kind = "video";
@@ -131,20 +136,69 @@ test("a session released while the browser answers never reports its camera as o
   assert.equal(camera.available, false);
 });
 
-test("one capture is answered once and the same answer is delivered until it settles", async () => {
-  const delivery = new CaptureDelivery();
-  let captures = 0;
-  const capture = async () => {
-    captures++;
-    return { kind: "captured" as const, reference: `photo-${captures}` };
+function serviceHarness(answer: () => Promise<PlayerCaptureAnswer>) {
+  const state: { session: PlayerRuntimeSession | null; generation: number } = {
+    session: null,
+    generation: 0,
   };
-  const first = await delivery.answerFor(7, capture);
-  // The runtime was not ready yet (`executionPending`): offering again reuses the same photo.
-  assert.deepEqual(await delivery.answerFor(7, capture), first);
-  assert.equal(captures, 1);
-  delivery.settled(7);
-  assert.deepEqual(await delivery.answerFor(8, capture), {
-    kind: "captured",
-    reference: "photo-2",
+  const diagnostics: PlayerDiagnostic[] = [];
+  const held = new Set<string>();
+  const service = new CaptureService(answer, {
+    session: () => state.session,
+    generation: () => state.generation,
+    observe: () => state.session,
+    publish: (next) => (state.session = next),
+    capturedMedia: { holds: (reference, kind) => kind === "image" && held.has(reference) },
+    diagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    later: (task) => setImmediate(task),
   });
+  const start = (source: string) => {
+    state.generation++;
+    state.session = createPlayerRuntimeSession(source);
+  };
+  return { state, service, diagnostics, held, start };
+}
+
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test("a capture is answered once and its photo continues the script", async () => {
+  let answers = 0;
+  const harness = serviceHarness(async () => {
+    answers++;
+    return { kind: "captured", reference: `photo-${answers}` };
+  });
+  harness.held.add("photo-1");
+  harness.start("let photo = takePhoto()\nshowImage photo");
+  await harness.service.service();
+  await settle();
+  assert.equal(answers, 1);
+  assert.equal(harness.state.session?.snapshot.status, "halted");
+  assert.equal(harness.state.session?.snapshot.stageImage, "photo-1");
+});
+
+test("a session replaced while its photo is captured gets its own capture serviced", async () => {
+  const answers: Array<(answer: PlayerCaptureAnswer) => void> = [];
+  const harness = serviceHarness(() => new Promise((resolve) => answers.push(resolve)));
+  harness.start("let photo = takePhoto()\nshowImage photo");
+  void harness.service.service();
+  // Action IDs restart, so the successor's capture has the same ID as the replaced one.
+  harness.start("let photo = takePhoto()\nshowImage photo");
+  harness.held.add("old photo");
+  answers[0]?.({ kind: "captured", reference: "old photo" });
+  await settle();
+  assert.equal(answers.length, 2);
+  assert.equal(harness.state.session?.snapshot.foregroundAction?.kind, "capture");
+  harness.held.add("new photo");
+  answers[1]?.({ kind: "captured", reference: "new photo" });
+  await settle();
+  assert.equal(harness.state.session?.snapshot.stageImage, "new photo");
+});
+
+test("a captured reference the store does not hold never leaves the script waiting", async () => {
+  const harness = serviceHarness(async () => ({ kind: "captured", reference: "unknown" }));
+  harness.start("let photo = takePhoto()\nlet missing = photo == null");
+  await harness.service.service();
+  await settle();
+  assert.equal(harness.state.session?.snapshot.status, "halted");
+  assert.equal(harness.diagnostics[0]?.code, "capture-rejected");
 });

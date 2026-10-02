@@ -150,9 +150,11 @@ export class CapturedMediaStore {
   async promote(references: Iterable<string>): Promise<void> {
     for (const reference of references) {
       const record = this.#records.get(reference);
-      if (record === undefined || this.#durable.has(reference)) continue;
+      if (record === undefined) continue;
+      // Without the live lease, even stored media may be swept by another Player before this save persists.
       if (this.#repository === null || this.#durableDisabled)
         throw new CapturedMediaNotStoredError("No durable media storage is available.");
+      if (this.#durable.has(reference)) continue;
       try {
         await this.#repository.add(record);
       } catch (error) {
@@ -176,7 +178,12 @@ export class CapturedMediaStore {
   resolve(reference: string): CapturedMediaResolution {
     const record = this.#records.get(reference);
     if (record !== undefined) return { state: "ready", url: this.#url(record) };
-    if (this.#closed || this.#missing.has(reference) || !REFERENCE_PATTERN.test(reference))
+    if (
+      this.#closed ||
+      this.#repository === null ||
+      this.#missing.has(reference) ||
+      !REFERENCE_PATTERN.test(reference)
+    )
       return { state: "missing" };
     if (!this.#loading.has(reference)) void this.#load(reference).then(this.#changed);
     return { state: "loading" };

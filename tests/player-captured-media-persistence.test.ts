@@ -239,10 +239,12 @@ test("a Player opens persistence by sweeping, then holding the live lock, then r
     order.push("persisted");
     await write(key, value);
   };
+  let grant = () => {};
   const locks: CapturedMediaLocks = {
     holdLive: () => {
       order.push("live lock");
-      return { granted: Promise.resolve("held"), release: () => order.push("released") };
+      const granted = new Promise<"held">((resolve) => (grant = () => resolve("held")));
+      return { granted, release: () => order.push("released") };
     },
     whenIdle: async (_scope, work) => {
       order.push("sweep");
@@ -251,8 +253,13 @@ test("a Player opens persistence by sweeping, then holding the live lock, then r
     },
   };
   const media = new CapturedMediaStore(repository, urls, "package");
-  const scope = await openCapturedMediaScope(provider, media, locks);
+  const opening = openCapturedMediaScope(provider, media, locks);
+  await new Promise((resolve) => setImmediate(resolve));
+  // The session's saved values are read only once the live lock is held.
   assert.deepEqual(order, ["sweep", "live lock"]);
+  assert.deepEqual(provider.log, ["load"]);
+  grant();
+  const scope = await opening;
   assert.deepEqual(provider.log, ["load", "load"]);
   // Unmounting finishes an issued save before the live lock is released.
   const saving = scope.storage.write("photo", media.add("image", png("photo")).reference);
@@ -278,4 +285,34 @@ test("without the live lock where locks exist, saved photos are not made durable
   await assert.rejects(scope.storage.write("photo", photo), CapturedMediaNotStoredError);
   assert.equal(repository.size, 0);
   assert.equal(provider.entries.size, 0);
+});
+
+test("without durable storage a stored reference is missing at once, so presentation does not retry", async () => {
+  let changes = 0;
+  const media = new CapturedMediaStore(null, urls, "package", () => changes++);
+  const reference = "captured-media:00000000-0000-4000-8000-000000000000:1";
+  assert.deepEqual(media.resolve(reference), { state: "missing" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(changes, 0);
+});
+
+test("without the live lease even an already stored photo cannot be saved again", async () => {
+  const repository = new FakeMediaRepository();
+  const earlier = new CapturedMediaStore(repository, urls, "package");
+  const photo = earlier.add("image", png("photo")).reference;
+  await earlier.promote([photo]);
+  const later = new CapturedMediaStore(repository, urls, "package");
+  assert.ok((await later.read(photo)) !== null);
+  later.disableDurable();
+  // Another Player may sweep it meanwhile, so saving it would persist a reference that dangles.
+  await assert.rejects(later.promote([photo]), CapturedMediaNotStoredError);
+});
+
+test("references are found in a stored value too wide for a spread", () => {
+  const items: SerializableRuntimeValue[] = Array.from({ length: 150_000 }, () => null);
+  items[149_999] = "captured-media:wide:1";
+  assert.deepEqual(
+    [...capturedMediaReferences({ kind: "list", items })],
+    ["captured-media:wide:1"],
+  );
 });

@@ -132,8 +132,8 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - The isolation mechanism that enforces brokered camera/microphone acquisition and capability authorization against
   package code calling browser capture APIs directly, such as a separate execution realm or trusted code
   transformation; a wrapper API or manifest field alone cannot.
-- Camera UI and lifecycle around accepted `askImage(...)` and nullable `takePhoto(...)`, including preview, countdown,
-  retake, denied-permission recovery, and restore behavior.
+- Camera and file UI around accepted `askImage(...)`, including source selection, preview, countdown, accept/retake,
+  denied-permission recovery, and restore behavior; `takePhoto()` has no such UI (`SECURITY.md`).
 - The public advanced-TypeScript media surface for arbitrary local image, video, and audio processing, author-facing
   recording APIs and results, how authors request recording composition (it is explicit; see `SECURITY.md`), and
   explicit session-media deletion. The Player capture foundation's shapes are implementation details, not this API;

@@ -1,6 +1,11 @@
-import type { CaptureUnavailableReason } from "../src/index.js";
+import type { CapturedMediaAdmission, CaptureUnavailableReason } from "../src/index.js";
 import type { CaptureDevice, CaptureFailureKind, CaptureTrack } from "./capture-device.js";
-import type { PlayerCaptureAnswer } from "./runtime-adapter.js";
+import {
+  activePlayerRuntimeCapture,
+  answerPlayerRuntimeCapture,
+  type PlayerCaptureAnswer,
+  type PlayerRuntimeSession,
+} from "./runtime-adapter.js";
 
 /** A bounded Player diagnostic for developers; never shown as an ordinary Player notice. */
 export interface PlayerDiagnostic {
@@ -92,36 +97,101 @@ export class SessionCamera<Track extends CaptureTrack> {
   }
 }
 
-/**
- * Delivers one answer per capture action until the runtime settles it. A capture is answered once; when the runtime
- * cannot take the answer yet (`executionPending`), the same answer is offered again after the engine ran, never a
- * second photo.
- */
-export class CaptureDelivery {
-  #actionId: number | null = null;
-  #answer: Promise<PlayerCaptureAnswer> | null = null;
+export interface CaptureServiceHost {
+  /** The published session, or `null` before one starts. */
+  session(): PlayerRuntimeSession | null;
+  /** Identifies the published session; it changes when another session starts. */
+  generation(): number;
+  /** Observes the current time, publishes the result, and returns the published session. */
+  observe(): PlayerRuntimeSession | null;
+  publish(session: PlayerRuntimeSession): void;
+  readonly capturedMedia: CapturedMediaAdmission;
+  diagnostic(diagnostic: PlayerDiagnostic): void;
+  /** Runs `task` later, after the engine had a chance to run. */
+  later(task: () => void): void;
+}
 
-  /** The answer for `actionId`, captured on first request. */
-  answerFor(
-    actionId: number,
-    capture: () => Promise<PlayerCaptureAnswer>,
-  ): Promise<PlayerCaptureAnswer> {
-    if (this.#actionId !== actionId || this.#answer === null) {
-      this.#actionId = actionId;
-      this.#answer = capture();
-    }
-    return this.#answer;
+/**
+ * Answers each pending `takePhoto()` once and delivers that answer until the runtime settles it. When the runtime
+ * cannot take it yet (`executionPending`), the same answer is offered again later, never a second photo. Action IDs
+ * restart with every session, so an answer belongs to one session and one action; when the session is replaced while
+ * an answer is captured, the successor's capture is serviced next.
+ */
+export class CaptureService {
+  readonly #answer: () => Promise<PlayerCaptureAnswer>;
+  readonly #host: CaptureServiceHost;
+  #key: string | null = null;
+  #pending: Promise<PlayerCaptureAnswer> | null = null;
+  #servicing = false;
+
+  constructor(answer: () => Promise<PlayerCaptureAnswer>, host: CaptureServiceHost) {
+    this.#answer = answer;
+    this.#host = host;
   }
 
-  /** Forgets the answer once its action settled or is gone. */
-  settled(actionId: number): void {
-    if (this.#actionId !== actionId) return;
-    this.#actionId = null;
-    this.#answer = null;
+  /** Services the published session's pending capture, if any; call whenever the session changes. */
+  async service(): Promise<void> {
+    const current = this.#host.session();
+    const action = current && activePlayerRuntimeCapture(current.snapshot);
+    if (!action || this.#servicing) return;
+    this.#servicing = true;
+    const generation = this.#host.generation();
+    const key = `${generation}:${action.actionId}`;
+    let retryLater = false;
+    try {
+      if (this.#key !== key || this.#pending === null) {
+        this.#key = key;
+        this.#pending = this.#answer();
+      }
+      const answer = await this.#pending;
+      if (this.#host.generation() !== generation) return;
+      // Input happens at the observed time.
+      const observed = this.#host.observe() ?? this.#host.session();
+      if (
+        !observed ||
+        activePlayerRuntimeCapture(observed.snapshot)?.actionId !== action.actionId
+      ) {
+        this.#settled(key);
+        return;
+      }
+      const result = answerPlayerRuntimeCapture(
+        observed,
+        action.actionId,
+        answer,
+        this.#host.capturedMedia,
+      );
+      if (result.outcome.kind === "executionPending") {
+        retryLater = true;
+        return;
+      }
+      this.#settled(key);
+      if (result.outcome.kind === "invalidPayload") {
+        this.#host.diagnostic({ code: "capture-rejected", message: result.outcome.message });
+        // Never leave the script waiting: answer this capture as unavailable instead.
+        this.#host.publish(
+          answerPlayerRuntimeCapture(observed, action.actionId, {
+            kind: "unavailable",
+            reason: "failed",
+          }).session,
+        );
+        return;
+      }
+      if (result.outcome.kind === "completed") this.#host.publish(result.session);
+    } finally {
+      this.#servicing = false;
+      if (retryLater) this.#host.later(() => void this.service());
+      else void this.service();
+    }
   }
 
   reset(): void {
-    this.#actionId = null;
-    this.#answer = null;
+    this.#key = null;
+    this.#pending = null;
+  }
+
+  #settled(key: string): void {
+    if (this.#key !== key) return;
+    this.#key = null;
+    this.#pending = null;
   }
 }
