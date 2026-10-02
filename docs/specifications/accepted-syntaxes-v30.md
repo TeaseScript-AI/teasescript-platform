@@ -1087,6 +1087,8 @@ Runtime behavior:
 - Automatic visible-text selection from an empty list raises a runtime error because no element can be selected.
 - The empty-list error identifies the list expression and explains that the visible-text context requires at least one eligible element.
 - `remove(value)` leaves the list unchanged when the value is absent and emits a warning to the developer log.
+- `removeFirst()` and `removeLast()` on an empty list, and set `remove(value)` of an absent value, are no-ops: the
+  collection stays unchanged and execution continues without an error or warning.
 - Mutating methods change the existing list.
 - Recoverable index and empty-selection errors follow the runtime recovery rules described later in this document.
 
@@ -2123,7 +2125,8 @@ modifiers mean visible and blocking. `async`, `visible`, `mystery`, and `hidden`
 A duration is a bare number of seconds, a [§35](#35-date-time-durations-and-unix-time) elapsed duration such as
 `500 ms` or `2 min`, or a number followed by a trailing unit as for `wait` (`timer n ms`). A range such as `5..10` or
 `5..=10` counts whole seconds and is drawn once per round from the session RNG after the timer's operands are
-evaluated; ranges with other units are not yet supported. `timer 0` and `wait 0` continue immediately.
+evaluated. Ranges with other units, such as `5..10 min`, are not implemented yet. `timer 0` and `wait 0` continue
+immediately.
 
 ### Named form
 
@@ -2527,7 +2530,7 @@ Recovery is not offered for structural errors such as malformed syntax, unknown 
 TeaseScript has separate `date`, `time`, `datetime`, and `duration` types. The current runtime implements elapsed
 duration literals and values using `ms`, `s`, `min`, and `h`, including their singular and plural long forms.
 Calendar durations, date/time APIs, technical conversions, and locale-aware presentation remain deferred.
-Calendar duration units are rejected by the current compiler.
+Until calendar durations are implemented, a calendar unit fails compilation instead of being read as another value.
 
 Current values:
 

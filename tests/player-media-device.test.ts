@@ -43,11 +43,11 @@ test("device loads resolved audio once, plays it, and completes blocking playbac
 });
 
 test("video and unavailable sources are reported as failed so the script continues", () => {
+  // Scoped to the current Player, which cannot play video yet; replace this row when video playback lands.
   const video = harness('playVideo "videos/intro.mp4"\nsay "after video", instant');
   video.start();
   assert.deepEqual(video.loads, [[1, { kind: "failed", message: VIDEO_UNSUPPORTED_MESSAGE }]]);
   assert.deepEqual(video.texts(), ["after video"]);
-  assert.equal(video.elements.length, 0);
 
   const missing = harness(
     'playAudio "https://example.com/a.mp3"\nsay "after", instant',

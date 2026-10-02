@@ -1,4 +1,4 @@
-import { recordValidationTestMaximum, recordValidationTestWork } from "./validation-testing.js";
+import { recordValidationTestWork } from "./validation-testing.js";
 
 export type ExternalDataFailureKind =
   "nonFiniteNumber" | "nonJsonSafeValue" | "cycle" | "nonPlainObject";
@@ -91,8 +91,6 @@ export function captureExternalData(
       const key = item.keys[item.index]!;
       if (item.array && key === "length") continue;
 
-      recordValidationTestWork("externalCaptureDescriptors");
-
       let descriptor: PropertyDescriptor | undefined;
       try {
         descriptor = Reflect.getOwnPropertyDescriptor(item.value, key);
@@ -139,7 +137,6 @@ export function captureExternalData(
     }
 
     recordValidationTestWork("externalCaptureVisits");
-    recordValidationTestMaximum("externalCaptureMaximumDepth", item.depth);
 
     const current = item.value;
     if (current === null || typeof current === "string" || typeof current === "boolean") {

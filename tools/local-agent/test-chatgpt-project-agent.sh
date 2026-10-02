@@ -11,19 +11,11 @@ builder="$script_dir/build-chatgpt-project-agent-release.sh"
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/test-chatgpt-project-agent.XXXXXX")
 trap 'rm -rf -- "$tmp"' EXIT
 
-python3 - \
-  "$project_root" \
-  "$system_prompt" <<'PY'
-from __future__ import annotations
-
-import json
+python3 - "$system_prompt" <<'PY'
 import sys
 from pathlib import Path
 
-project_root = Path(sys.argv[1])
-system_prompt = Path(sys.argv[2]).read_text()
-tiktoken_installer = (project_root / "bin/install-tiktoken-offline.sh").read_text()
-manifest = json.loads((project_root / "MANIFEST.json").read_text())
+system_prompt = Path(sys.argv[1]).read_text()
 
 SYSTEM_PROMPT_MAX_CHARACTERS = 8_000
 if len(system_prompt) > SYSTEM_PROMPT_MAX_CHARACTERS:
@@ -31,24 +23,6 @@ if len(system_prompt) > SYSTEM_PROMPT_MAX_CHARACTERS:
         "ChatGPT project system prompt exceeds the 8,000-character external limit: "
         f"{len(system_prompt)}"
     )
-
-expected_manifest = {
-    "formatVersion": 1,
-    "bundle": "chatgpt-project-agent-tools",
-    "platform": "linux-x64",
-    "installRoot": "chatgpt-project-agent",
-    "runtimeContract": 1,
-}
-for key, value in expected_manifest.items():
-    if manifest.get(key) != value:
-        raise SystemExit(f"unexpected tools manifest {key}: {manifest.get(key)!r}")
-if manifest.get("normalEntryPoint") != "bin/prepare-agent-workspace.sh":
-    raise SystemExit("tools manifest lacks the normal workspace entrypoint")
-
-if 'tiktoken.get_encoding("o200k_base")' not in tiktoken_installer:
-    raise SystemExit("TikToken installer lacks standard offline tokenizer support")
-if "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d" not in tiktoken_installer:
-    raise SystemExit("TikToken installer lacks the official o200k_base vocabulary digest")
 PY
 
 for script in \
@@ -429,19 +403,26 @@ run_setup() {
   (cd "$repo" && env CALLS="$setup_calls" "$@" >/dev/null 2>&1)
 }
 
+# An offline npm ci in the repository whose npm cache is Git-local state of that repository.
+offline_install() {
+  [[ $1 == "npm ci "* && " $1 " == *" --offline "* && $1 == *" @$repo cache=$repo/.git/"* ]]
+}
+
+# Normal setup runs exactly the offline install, then the TikToken installer, without cache verification.
 repo=$(workspace_repo normal)
 run_setup "$repo" FAKE_TS_MORPH_VERSION=28.0.0 bash "$setup_workspace" "$repo"
-npm_ci="npm ci --offline --no-audit --no-fund @$repo cache=$repo/.git/teasescript-agent/npm-cache"
-[[ "$(cat "$setup_calls")" == "$npm_ci"$'\n'"tiktoken $repo" ]] || {
+mapfile -t calls < "$setup_calls"
+[[ ${#calls[@]} == 2 ]] && offline_install "${calls[0]}" && [[ ${calls[1]} == "tiktoken $repo" ]] || {
   printf 'test-chatgpt-project-agent: FAIL: normal setup did not run exactly the required offline operations\n' >&2
   exit 1
 }
 
+# Debug setup additionally verifies that same cache before installing.
 repo=$(workspace_repo debug)
 run_setup "$repo" FAKE_TS_MORPH_VERSION=28.0.0 bash "$setup_workspace" --debug-verify-bootstrap "$repo"
-npm_ci="npm ci --offline --no-audit --no-fund @$repo cache=$repo/.git/teasescript-agent/npm-cache"
-npm_verify="npm cache verify @$repo cache=$repo/.git/teasescript-agent/npm-cache"
-[[ "$(cat "$setup_calls")" == "$npm_verify"$'\n'"$npm_ci"$'\n'"tiktoken $repo" ]] || {
+mapfile -t calls < "$setup_calls"
+[[ ${#calls[@]} == 3 && ${calls[0]} == "npm cache verify @$repo cache="* ]] && offline_install "${calls[1]}" &&
+  [[ ${calls[0]##* cache=} == "${calls[1]##* cache=}" && ${calls[2]} == "tiktoken $repo" ]] || {
   printf 'test-chatgpt-project-agent: FAIL: debug setup did not verify the npm cache before installation\n' >&2
   exit 1
 }

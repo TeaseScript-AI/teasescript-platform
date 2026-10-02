@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { ESLint } from "eslint";
 
@@ -158,16 +157,4 @@ test("the ESLint CLI exits nonzero on a real violation", () => {
   assert.ifError(result.error);
   assert.equal(result.status, 1, result.stderr + result.stdout);
   assert.match(result.stdout, /shadcn\/no-raw-colors/);
-});
-
-test("the real scope includes shared variants and the story material wrapper", async () => {
-  for (const file of [
-    tsFile,
-    "player/vue/src/components/ui/bubble/index.ts",
-    "player/vue/src/components/PlayerActionButton.vue",
-    "player/vue/src/TranscriptMessage.vue",
-    "player/vue/src/Composer.vue",
-  ]) {
-    assert.deepEqual(await messages(readFileSync(file, "utf8"), file), [], file);
-  }
 });

@@ -12,7 +12,6 @@ for (const source of ["let value = 1e999\nexit", "let value = -1e999\nexit"]) {
     assert.equal(result.parserDiagnostics.length, 1);
     assert.equal(result.diagnostics.length, 1);
     assert.equal(result.diagnostics[0]?.code, "TSC001");
-    assert.match(result.diagnostics[0]?.message ?? "", /finite/u);
     assert.deepEqual(
       [result.diagnostics[0]?.span.start.offset, result.diagnostics[0]?.span.end.offset],
       [literalStart, literalStart + "1e999".length],

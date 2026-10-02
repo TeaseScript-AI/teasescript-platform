@@ -1,5 +1,4 @@
 import { captureExternalData, type ExternalDataFailureKind } from "../external-data-capture.js";
-import { recordValidationTestWork } from "../validation-testing.js";
 import type { PlanValidationError, PlanValidationResult } from "./validation.js";
 
 export interface CapturedPlanData {
@@ -20,7 +19,6 @@ export function capturePlanData(
   value: unknown,
   options?: PlanCaptureOptions,
 ): CapturedPlanData | PlanCaptureFailure {
-  recordValidationTestWork("instructionPlanCaptureCalls");
   const capture = captureExternalData(value, "$", options);
   if (!capture.ok) {
     return Object.freeze({

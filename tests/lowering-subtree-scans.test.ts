@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { Expression, Statement } from "../src/ast.js";
+import type { Expression, FunctionDeclaration, Identifier, Statement } from "../src/ast.js";
 import { InstructionCompiler } from "../src/compiler/lowering/compiler.js";
 import {
   completeAction,
@@ -17,16 +17,21 @@ import { compileValidPlan as compiled } from "./helpers/compile-valid-plan.js";
 const span = createSourceSpan(createSourcePosition(0, 0, 0), createSourcePosition(1, 0, 1));
 
 test("avoids superlinear subtree scans while lowering nested expressions", () => {
-  const reads32 = compileCountedBinaryChain(32);
-  const reads64 = compileCountedBinaryChain(64);
-  const reads128 = compileCountedBinaryChain(128);
+  // A user call at the deepest leaf makes every enclosing level take the instruction-emitting
+  // lowering path, which classifies each subtree (#381). The pure chain takes the direct path.
+  for (const leafCallsUserFunction of [true, false]) {
+    const reads32 = compileCountedBinaryChain(32, leafCallsUserFunction);
+    const reads64 = compileCountedBinaryChain(64, leafCallsUserFunction);
+    const reads128 = compileCountedBinaryChain(128, leafCallsUserFunction);
 
-  // For reads = a * n + b, doubling n doubles the increment; rescanning every
-  // subtree (a * n ** 2) quadruples it. Fixed overhead and the coefficient may change.
-  const firstIncrement = reads64 - reads32;
-  const secondIncrement = reads128 - reads64;
-  assert.ok(reads32 > 0 && firstIncrement > 0, `${reads32}, ${reads64}, ${reads128}`);
-  assert.ok(secondIncrement < firstIncrement * 3, `${reads32}, ${reads64}, ${reads128}`);
+    // For reads = a * n + b, doubling n doubles the increment; rescanning every
+    // subtree (a * n ** 2) quadruples it. Fixed overhead and the coefficient may change.
+    const firstIncrement = reads64 - reads32;
+    const secondIncrement = reads128 - reads64;
+    const counts = `${String(leafCallsUserFunction)}: ${reads32}, ${reads64}, ${reads128}`;
+    assert.ok(reads32 > 0 && firstIncrement > 0, counts);
+    assert.ok(secondIncrement < firstIncrement * 3, counts);
+  }
 });
 
 test("preserves ordered user calls and interaction resume through the public source path", () => {
@@ -68,9 +73,20 @@ test("preserves ordered user calls and interaction resume through the public sou
   );
 });
 
-function compileCountedBinaryChain(binaryCount: number): number {
+function compileCountedBinaryChain(binaryCount: number, leafCallsUserFunction: boolean): number {
   let childReads = 0;
-  let expression: Expression = numberLiteral(0);
+  const callee: Identifier = { kind: "identifier", name: "leaf", span };
+  const declaration: FunctionDeclaration = {
+    kind: "functionDeclaration",
+    name: callee,
+    parameters: [],
+    returnTypeAnnotation: null,
+    body: { kind: "block", statements: [], span },
+    span,
+  };
+  let expression: Expression = leafCallsUserFunction
+    ? { kind: "callExpression", callee, arguments: [], argumentStyle: "none", span }
+    : numberLiteral(0);
   for (let index = 1; index <= binaryCount; index += 1) {
     const left = expression;
     const right = numberLiteral(index);
@@ -96,7 +112,7 @@ function compileCountedBinaryChain(binaryCount: number): number {
     initializer: expression,
     span,
   };
-  new InstructionCompiler([]).compileStatements([statement]);
+  new InstructionCompiler([declaration]).compileStatements([statement]);
   return childReads;
 }
 

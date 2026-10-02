@@ -18,6 +18,7 @@ import {
   validateRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
+import type { SourceSpan } from "../src/source.js";
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -63,13 +64,8 @@ test("timer compiles fixed seconds and integer-second ranges into visible foregr
     (instruction): instruction is WaitInstruction => instruction.kind === "wait",
   );
   assert.deepEqual(
-    waits.map((instruction) => [instruction.display, instruction.unit]),
-    [
-      ["visible", null],
-      ["visible", null],
-      ["visible", null],
-      ["hidden", null],
-    ],
+    waits.map((instruction) => instruction.display),
+    ["visible", "visible", "visible", "hidden"],
   );
 
   const { snapshot, events } = start('timer 3\nsay "after"\nexit');
@@ -255,9 +251,6 @@ test("unsupported and invalid timer forms, members, and handler scope fail with 
     ["let t = timer 10", "TSV033", "timer 10"],
     ['timer(duration: 1, display: "loud")', "TSV033", '"loud"'],
     ["timer 10 s ms", "TSV033", "10 s"],
-    ["timer 1 day", "TSP033", "day"],
-    ["timer 5..10 min", "TSV010", "5..10"],
-    ["let n = 10\ntimer 5..n min", "TSV010", "5..n"],
     ["timer -1", "TSV011", "-1"],
     ["timer 1.5..3", "TSV010", "1.5..3"],
     ["timer -2..3", "TSV010", "-2..3"],
@@ -289,6 +282,51 @@ test("unsupported and invalid timer forms, members, and handler scope fail with 
       found.includes(expected),
       `${JSON.stringify(source)}: ${expected} not in ${found.join(" | ")}`,
     );
+  }
+});
+
+test("accepted duration forms without an implementation are never read as another duration", () => {
+  // Calendar units (§35) and timer ranges with other units (§27) are not implemented yet. They may fail with a compile
+  // or runtime error located in the duration, but a started timer must have the accepted meaning, never for example
+  // plain seconds.
+  const minutesFiveToTen = (deadlineMs: number): boolean =>
+    deadlineMs >= 5 * 60_000 && deadlineMs < 10 * 60_000;
+  const cases: ReadonlyArray<
+    readonly [source: string, subject: string, accepted: (deadlineMs: number) => boolean]
+  > = [
+    // A calendar day spans 23, 24, or 25 elapsed hours around daylight-saving transitions.
+    [
+      "timer 1 day",
+      "1 day",
+      (deadlineMs) => deadlineMs >= 23 * 3_600_000 && deadlineMs <= 25 * 3_600_000,
+    ],
+    ["timer 5..10 min", "5..10 min", minutesFiveToTen],
+    ["let n = 10\ntimer 5..n min", "5..n min", minutesFiveToTen],
+  ];
+  for (const [source, subject, accepted] of cases) {
+    const start = source.lastIndexOf(subject);
+    const inSubject = (span: SourceSpan): boolean =>
+      span.start.offset >= start && span.end.offset <= start + subject.length;
+    const message = `${JSON.stringify(source)}: an error must be located in ${JSON.stringify(subject)}`;
+    const compiled = compileSource(source);
+    if (compiled.plan === null) {
+      assert.ok(
+        compiled.diagnostics.some(({ span }) => inSubject(span)),
+        message,
+      );
+      continue;
+    }
+    const { snapshot, events } = run(
+      compiled.plan,
+      createImmediatePacingRuntimeSnapshot(compiled.plan, { seed: SEEDS[0]! }),
+    );
+    const failure = events.at(-1);
+    if (failure?.kind === "runtimeFailure") {
+      assert.ok(inSubject(failure.span), message);
+      continue;
+    }
+    const { deadlineMs } = delayAction(snapshot);
+    assert.ok(accepted(deadlineMs), `${JSON.stringify(source)} must not mean ${deadlineMs} ms`);
   }
 });
 
@@ -338,25 +376,39 @@ test("restored timer display data is validated against its owning instruction", 
     assertCheckpointRejected(candidate, "TSK002");
   }
 
-  const planVariants: Array<(instruction: Record<string, unknown>) => void> = [
-    (instruction) => delete instruction.display,
-    (instruction) => (instruction.display = "loud"),
-    (instruction) => (instruction.unit = "days"),
-    (instruction) => delete instruction.label,
-    (instruction) => (instruction.command = "sleep"),
-    (instruction) => (instruction.extra = true),
+  // Each variant names the rejected field; an unknown key is reported at the instruction itself.
+  const planVariants: ReadonlyArray<
+    readonly [field: string, mutate: (instruction: Record<string, unknown>) => void]
+  > = [
+    ["display", (instruction) => delete instruction.display],
+    ["display", (instruction) => (instruction.display = "loud")],
+    ["unit", (instruction) => (instruction.unit = "days")],
+    ["label", (instruction) => delete instruction.label],
+    ["command", (instruction) => (instruction.command = "sleep")],
+    ["", (instruction) => (instruction.extra = true)],
   ];
-  for (const mutate of planVariants) {
+  for (const [field, mutate] of planVariants) {
     const candidate = jsonRecord(JSON.parse(checkpointJson));
     const instructions = jsonRecord(candidate.plan).instructions;
     assert.ok(Array.isArray(instructions));
-    const instruction = instructions.map(jsonRecord).find((entry) => entry.kind === "wait");
-    assert.ok(instruction !== undefined);
-    mutate(instruction);
-    assert.equal(validateInstructionPlan(candidate.plan).valid, false);
+    const index = instructions.findIndex((entry) => jsonRecord(entry).kind === "wait");
+    mutate(jsonRecord(instructions[index]));
+    const instructionPath = `instructions[${index}]`;
+    const fieldPath = `$.${instructionPath}${field === "" ? "" : `.${field}`}`;
+    assert.ok(
+      validateInstructionPlan(candidate.plan).errors.some(
+        (error) => error.code === "TSC002" && error.path === fieldPath,
+      ),
+      `plan validation must reject ${fieldPath}`,
+    );
+    const checkpointPath = `$.plan.${instructionPath}`;
     assert.throws(
       () => deserializeCheckpoint(JSON.stringify(candidate)),
-      (error: unknown) => error instanceof CheckpointError,
+      (error: unknown) =>
+        error instanceof CheckpointError &&
+        error.info.code === "TSK002" &&
+        (error.info.path === checkpointPath || error.info.path.startsWith(`${checkpointPath}.`)),
+      `checkpoint restore must reject the plan at ${checkpointPath}`,
     );
   }
 });

@@ -61,6 +61,8 @@ test("property replay selects the same generated case by seed and case number", 
 test("property campaign wraps preparation failures with replay evidence", () => {
   const cause = new Error("synthetic generator failure");
   const config = sourceCaseConfig("valid");
+  // The same case without the failure identifies the property and boundary the report must name.
+  const selected = runPropertyCampaign(config).firstCase;
   const definitions = createPropertyDefinitions({
     createValidSourceCase: () => {
       throw cause;
@@ -74,8 +76,9 @@ test("property campaign wraps preparation failures with replay evidence", () => 
       assert.equal(error.cause, cause);
       assert.deepEqual(error.config, config);
       assert.equal(error.result.index, config.caseIndex);
-      assert.equal(error.result.id, "valid-source-pipeline");
-      assert.equal(error.result.boundary, "package-root compile/run");
+      assert.deepEqual([error.result.id, error.result.boundary], [selected.id, selected.boundary]);
+      assert.ok(error.message.includes(`property=${selected.id}`), error.message);
+      assert.ok(error.message.includes(`boundary=${selected.boundary}`), error.message);
       assert.equal(error.result.source, undefined);
       assert.ok(error.message.includes(error.replayCommand), error.message);
       assert.ok(error.message.includes(cause.message), error.message);
@@ -289,6 +292,6 @@ test("property command accepts only seed, run count, and exact replay case", () 
     parsePropertyCliArguments(["--seed", "12345", "--runs", "2000", "--case", "17"]),
     { seed: 12345, runs: 2000, caseIndex: 17 },
   );
-  assert.throws(() => parsePropertyCliArguments(["--profile", "smoke"]));
+  assert.throws(() => parsePropertyCliArguments(["--unknown-option", "1"]));
   assert.throws(() => parsePropertyCliArguments(["--runs", "0"]));
 });

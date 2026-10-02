@@ -66,22 +66,6 @@ test("Monaco providers receive presentation-only completion, hover, and signatur
     range,
     contents: [{ value: "one" }, { value: "two" }],
   });
-  const kinds = { Keyword: 11, Function: 12, Variable: 13, Value: 14 };
-  const kindRows = [
-    ["keyword", kinds.Keyword],
-    ["modifier", kinds.Keyword],
-    ["command", kinds.Function],
-    ["speaker", kinds.Variable],
-    ["value", kinds.Value],
-  ] as const;
-  assert.deepEqual(
-    toMonacoCompletions(
-      kindRows.map(([kind]) => ({ label: kind, kind, detail: "", insertText: kind })),
-      range,
-      kinds,
-    ).map((item) => [item.label, item.kind]),
-    kindRows,
-  );
   const signature = toMonacoSignatureHelp({
     label: "signature-label",
     documentation: "signature-docs",

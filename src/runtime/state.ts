@@ -44,7 +44,6 @@ import {
   type SerializableRuntimeSet,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
-import { recordValidationTestWork } from "../validation-testing.js";
 import { validateTimerState } from "./timer-validation.js";
 import { validateMediaState } from "./media-validation.js";
 import {
@@ -757,7 +756,6 @@ export function captureRuntimeSnapshotWithValidatedPlan(
   value: unknown,
   plan?: InstructionPlan,
 ): CapturedRuntimeSnapshotResult {
-  recordValidationTestWork("runtimeSnapshotCaptureCalls");
   const snapshotCapture = captureExternalData(value);
   if (!snapshotCapture.ok) {
     return Object.freeze({
@@ -2009,7 +2007,6 @@ function validateCallArgumentSupply(
 function createTemporaryMap(
   temporaries: readonly unknown[],
 ): ReadonlyMap<number, Record<string, unknown>> {
-  recordValidationTestWork("temporaryMapBuilds");
   const result = new Map<number, Record<string, unknown>>();
   for (const temporary of temporaries) {
     if (isPlainRecord(temporary) && nonNegativeSafeInteger(temporary.id)) {
@@ -2264,7 +2261,6 @@ function requiredContinuationTemporaries(
       : "none";
   let liveIn = analysis.continuationLiveness.get(loopSignature);
   if (liveIn === undefined) {
-    recordDetailedValidationWork(analysis.plan.instructions.length);
     liveIn = computeContinuationLiveness(analysis, loopFrames);
     analysis.continuationLiveness.set(loopSignature, liveIn);
   }
@@ -2282,12 +2278,10 @@ function computeContinuationLiveness(
   while (changed) {
     changed = false;
     for (let index = count - 1; index >= 0; index -= 1) {
-      recordDetailedValidationWork();
       const instruction = plan.instructions[index]!;
       const liveOut = new Set<number>();
       for (const successor of instructionSuccessors(analysis, index)) {
         for (const temporaryId of liveIn[successor] ?? []) {
-          recordDetailedValidationWork();
           liveOut.add(temporaryId);
         }
       }
@@ -2304,10 +2298,6 @@ function computeContinuationLiveness(
     }
   }
   return liveIn;
-}
-
-function recordDetailedValidationWork(amount = 1): void {
-  recordValidationTestWork("detailedWorkConsumed", amount);
 }
 
 function instructionSuccessors(

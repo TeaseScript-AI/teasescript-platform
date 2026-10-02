@@ -178,11 +178,18 @@ test("a source the Player cannot load warns, stops without cues or finish, and n
   const session = new Session(
     [
       'playAudio "missing.mp3" {',
+      "  at 0 s {",
+      '    say "never: blocking cue"',
+      "  }",
       "  finish {",
-      '    say "never"',
+      '    say "never: finish"',
       "  }",
       "}",
-      'let m = playAudio async "gone.mp3"',
+      'let m = playAudio async "gone.mp3" {',
+      "  at 0 s {",
+      '    say "never: async cue"',
+      "  }",
+      "}",
       'say "${m.state} ${m.duration} ${m.remaining}"',
     ].join("\n"),
   );
@@ -363,21 +370,22 @@ test("pausing keeps the position and cues pending; resume continues; no-op calls
   assert.deepEqual(session.warnings(), []);
 });
 
-test("a count or duration repeat can end mid-pass and finishes after the reached cues", () => {
+test("a duration repeat can end mid-pass and finishes after the reached cues", () => {
   const session = new Session(
     [
       'playAudio(file: "loop.mp3", repeat: 2500 ms) {',
       "  at 500 ms {",
-      '    say "half ${m}"',
+      '    say "half"',
+      "  }",
+      "  finish {",
+      '    say "finish"',
       "  }",
       "}",
       'say "done"',
-    ]
-      .join("\n")
-      .replace(" ${m}", ""),
+    ].join("\n"),
   );
   session.load(1, 1_000).at(0, [1, 0]).at(3_000, [1, 3_000]);
-  assert.deepEqual(session.said(), ["half", "half", "half", "done"]);
+  assert.deepEqual(session.said(), ["half", "half", "half", "finish", "done"]);
   assert.equal(session.media(1)?.elapsedMs, 2_500);
   assert.equal(session.media(1)?.state, "finished");
 });
@@ -542,17 +550,15 @@ test("media scenarios resume equivalently from every checkpoint boundary", () =>
 });
 
 test("a media statement may end the script, also with a finish block or a failed load", () => {
-  for (const source of [
-    'playAudio "a.mp3"',
-    'playAudio async "a.mp3"',
-    'playVideo "a.mp4" {\n  finish {\n    say "finished"\n  }\n}',
-  ]) {
+  for (const [source, said] of [
+    ['playAudio "a.mp3"', []],
+    ['playAudio async "a.mp3"', []],
+    ['playVideo "a.mp4" {\n  finish {\n    say "finished"\n  }\n}', ["finished"]],
+  ] as const) {
     const session = new Session(source).load(1, 1_000).at(1_000, [1, 1_000]);
     assert.equal(session.snapshot.status, "halted", source);
+    assert.deepEqual(session.said(), said, source);
   }
-  const finished = new Session('playVideo "a.mp4" {\n  finish {\n    say "finished"\n  }\n}');
-  finished.load(1, 1_000).at(1_000, [1, 1_000]);
-  assert.deepEqual(finished.said(), ["finished"]);
   const failed = new Session('playAudio "missing.mp3"').fail(1);
   assert.equal(failed.snapshot.status, "halted");
 });
@@ -596,21 +602,30 @@ test("controlling other media inside a cue block keeps the catch-up order of wor
 });
 
 test("dynamic media options are validated when supplied, including null and indefinite finish", () => {
-  const failure = (source: string) => {
+  // [source, the offending source text the failure must point at]
+  const indefinite =
+    'playAudio(file: "a", async: true, repeat: loop) {\n  finish {\n    say "x"\n  }\n}';
+  for (const [source, offending] of [
+    [`let loop = true\n${indefinite}`, indefinite],
+    ['let v = null\nplayAudio(file: "a", volume: v)', "v"],
+    ['let s = null\nplayAudio(file: "a", startAt: s)', "s"],
+    ['let e = null\nplayAudio(file: "a", endAt: e)', "e"],
+  ] as const) {
     const compiled = plan(source);
-    const operation = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
-    assert.equal(operation.snapshot.status, "failed", source);
-    return operation.snapshot.failure?.message ?? "";
-  };
-  assert.match(
-    failure(
-      'let loop = true\nplayAudio(file: "a", async: true, repeat: loop) {\n  finish {\n    say "x"\n  }\n}',
-    ),
-    /finish' never runs/u,
-  );
-  assert.match(failure('let v = null\nplayAudio(file: "a", volume: v)'), /volume/u);
-  assert.match(failure('let s = null\nplayAudio(file: "a", startAt: s)'), /startAt/u);
-  assert.match(failure('let e = null\nplayAudio(file: "a", endAt: e)'), /endAt/u);
+    const { snapshot } = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
+    assert.equal(snapshot.status, "failed", source);
+    const start = source.lastIndexOf(offending);
+    assert.deepEqual(
+      [
+        snapshot.failure?.code,
+        snapshot.failure?.span.start.offset,
+        snapshot.failure?.span.end.offset,
+      ],
+      ["TSR050", start, start + offending.length],
+      source,
+    );
+    assert.equal(snapshot.nextMediaId, 1, `${source}: no media was created`);
+  }
 });
 
 test("media controls on any receiver wait for pacing and evaluate the receiver once", () => {
@@ -865,6 +880,12 @@ test("root completion keeps the terminal instruction's span however late the med
   };
   const fine = new Session(source).load(1, 1_000).at(100, [1, 100]).at(1_000, [1, 1_000]);
   const late = new Session(source).load(1, 1_000).at(1_000, [1, 1_000]);
+  // Completion is attributed to the authored terminal statement.
+  const terminal = source.lastIndexOf("wait 1 s");
+  assert.deepEqual(
+    [completion(fine).start.offset, completion(fine).end.offset],
+    [terminal, terminal + "wait 1 s".length],
+  );
   assert.deepEqual(completion(late), completion(fine));
 });
 
@@ -989,7 +1010,8 @@ test("restore validation relates segment anchors to the committed cursor and cur
   let snapshot = observeTime(held.plan, held.snapshot, 1_000, [
     { mediaId: 1, segment: 1, progressMs: 1_000 },
   ]).snapshot;
-  while (held.media(1)?.segment === 1 && snapshot.status !== "halted") {
+  for (let step = 0; held.media(1)?.segment === 1 && snapshot.status !== "halted"; step += 1) {
+    assert.ok(step < 100, "the timer block's seek must start a new segment");
     snapshot = executeInstruction(held.plan, snapshot).snapshot;
     held.snapshot = snapshot;
   }
@@ -1302,9 +1324,16 @@ test("a terminal playhead stays at the range end beyond exactly countable passes
       { mediaId: 1, segment: 1, progressMs: terminal },
     ]).snapshot;
     const [media] = mediaPlaybackProjection(session.snapshot);
-    // A repeat duration that ends inside a pass keeps its position there.
-    const expected = endAt === "0.1 ms" ? 0.019488848768742184 : media?.endMs;
-    assert.equal(media?.playheadMs, expected, `${endAt} ${repeat}`);
+    const playhead = media?.playheadMs ?? Number.NaN;
+    if (endAt === "0.1 ms") {
+      // The double nearest 0.1 ms does not divide the repeat duration, so it ends inside a pass and stays there.
+      assert.ok(
+        Number.isFinite(playhead) && playhead > 0 && playhead < media!.endMs!,
+        String(playhead),
+      );
+    } else {
+      assert.equal(playhead, media?.endMs, `${endAt} ${repeat}`);
+    }
   }
 });
 

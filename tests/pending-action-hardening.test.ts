@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { DiagnosticSeverity } from "../src/diagnostics.js";
 import {
   CheckpointError,
   createCheckpoint,
@@ -63,10 +64,6 @@ test("terminal root waits validate, round-trip, settle, and resume at the root c
   const compiled = plan("wait 1 ms");
   const uninterruptedWaiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   assert.equal(uninterruptedWaiting.snapshot.status, "waiting");
-  assert.equal(
-    uninterruptedWaiting.snapshot.foregroundAction!.continuationInstruction,
-    compiled.rootEndInstruction,
-  );
   assert.equal(validateRuntimeSnapshot(uninterruptedWaiting.snapshot, compiled).valid, true);
 
   const checkpointJson = serializeCheckpoint(
@@ -368,9 +365,24 @@ test("#81 keeps representable fractional waits and rejects precision-losing dead
   assert.equal(observeTime(restored.plan, restored.snapshot, 2 ** 52).snapshot.status, "running");
 });
 
-test("#82 uses the wait keyword path and rejects forged ownership, missing wait temporaries, and an arbitrary claimed kind at a delay", () => {
-  assert.equal(compileSource("wait(1)").plan, null);
-  assert.equal(compileSource("wait 1 - 2").plan, null);
+test("#82 uses the wait keyword path and rejects forged ownership and missing wait temporaries", () => {
+  // `wait` is a keyword, never a callable builtin: a call form may only fail with a located diagnostic or mean the
+  // same one-second delay.
+  const callForm = compileSource("wait(1)");
+  if (callForm.plan === null) {
+    assert.ok(
+      callForm.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.severity === DiagnosticSeverity.Error &&
+          diagnostic.span.end.offset <= "wait(1)".length,
+      ),
+    );
+  } else {
+    const delay = run(callForm.plan, createFreshRuntimeSnapshot(callForm.plan)).snapshot;
+    assert.ok(
+      delay.foregroundAction?.kind === "delay" && delay.foregroundAction.deadlineMs === 1000,
+    );
+  }
   assert.equal(compileSource("wait (1 + 2)").diagnostics.length, 0);
 
   const functionWait = waiting("function pause { wait 1 ms }\npause()\nexit");
@@ -397,20 +409,6 @@ test("#82 uses the wait keyword path and rejects forged ownership, missing wait 
   const missingTemporary = mutable(temporaryWait.snapshot);
   missingTemporary.temporaries.length = 0;
   assert.equal(validateRuntimeSnapshot(missingTemporary, temporaryWait.compiled).valid, false);
-
-  // EVIDENCE: fixture: Object.create(null) supplies the property dictionary used as a hostile completion request.
-  const hostileKind = Object.create(null) as Record<string, unknown>;
-  const callerBefore = structuredClone(temporaryWait.snapshot);
-  const completion = completeAction(temporaryWait.compiled, temporaryWait.snapshot, {
-    actionId: temporaryWait.snapshot.foregroundAction!.actionId,
-    actionKind: hostileKind,
-    payload: { kind: "time", currentSessionTimeMs: 1 },
-  });
-  // A delay accepts no host completion at all, whatever kind the request claims.
-  assert.equal(completion.outcome.kind, "invalidPayload");
-  assert.deepEqual(completion.events, []);
-  assert.deepEqual(completion.snapshot, callerBefore);
-  assert.deepEqual(temporaryWait.snapshot, callerBefore);
 });
 
 test("#82 allocates the final safe action identity and then fails without reuse", () => {

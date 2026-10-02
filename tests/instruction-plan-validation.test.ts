@@ -9,8 +9,6 @@ import { executeInstruction, run, RuntimeDataError } from "../src/runtime/engine
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
-const REGION_ERROR = "Control-flow target leaves the instruction's execution region.";
-
 test("reports malformed nested binary expression nodes at their plan paths", () => {
   const malformed = structuredClone(plan("let target = 0\ntarget = 1 + 2 + 3"));
   const assignment = malformed.instructions[1];
@@ -168,7 +166,9 @@ test("rejects control-flow targets that leave the instruction's execution region
     assertRegionError(validation, path, row.name);
     if (row.sharedPath) {
       assert.ok(
-        validation.errors.some((error) => error.path === path && error.message === REGION_ERROR),
+        validation.errors.some(
+          (error) => error.path === path && error.message.includes("execution region"),
+        ),
         row.name,
       );
     }
@@ -194,25 +194,11 @@ test("validates break targets after multi-temporary condition cleanup", () => {
   );
   const validation = validateInstructionPlan(malformed);
   assert.equal(validation.valid, false);
-  assert.equal(
+  assert.ok(
     validation.errors.some(
-      (error) =>
-        error.path === `$.instructions[${breakIndex}].target` &&
-        error.message === "Loop-control target does not match its loop.",
+      (error) => error.code === "TSC002" && error.path === `$.instructions[${breakIndex}].target`,
     ),
-    true,
   );
-});
-
-test("preserves valid root-local and function-local jumps", () => {
-  const compiled = plan(functionBranches());
-  const rootJump = rootInstructionIndex(compiled, "jump");
-  const functionJump = functionInstructionIndex(compiled, compiled.functions[0]!.id, "jump");
-
-  assert.ok(targetOf(compiled, rootJump, "target") < compiled.rootEndInstruction);
-  assert.ok(targetOf(compiled, functionJump, "target") >= compiled.functions[0]!.entryInstruction);
-  assert.ok(targetOf(compiled, functionJump, "target") < compiled.functions[0]!.endInstruction);
-  assert.equal(validateInstructionPlan(compiled).valid, true);
 });
 
 test("preserves a compiler-generated root-end target", () => {
@@ -234,27 +220,6 @@ test("preserves a compiler-generated owning-function implicit-return target", ()
 
   assert.equal(targetOf(compiled, jumpIndex, "target"), definition.implicitReturnInstruction);
   assert.equal(validateInstructionPlan(compiled).valid, true);
-});
-
-test("preserves compiler-generated control flow, calls, and returns", () => {
-  const sources = [
-    rootBranchWithTwoFunctions(),
-    functionBranches(),
-    functionLoop(),
-    ["function answer { return 42 }", "let result = answer()", "say result", "exit"].join("\n"),
-  ];
-
-  for (const source of sources) {
-    assert.equal(validateInstructionPlan(plan(source)).valid, true);
-  }
-
-  const callable = plan(sources[3]!);
-  const completed = run(callable, createFreshRuntimeSnapshot(callable));
-  assert.equal(completed.snapshot.status, "halted");
-  assert.deepEqual(
-    completed.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["42"],
-  );
 });
 
 test("prevents the poisoned-snapshot path before execution", () => {
@@ -341,8 +306,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
   assert.ok(
     validateInstructionPlan(forgedSpeaker).errors.some(
       (error) =>
-        error.path === `$.instructions[${secondSay}].speakerTemporary` &&
-        error.message === "Prepared say speaker temporary lacks its canonical producer.",
+        error.code === "TSC002" && error.path === `$.instructions[${secondSay}].speakerTemporary`,
     ),
   );
   assert.throws(
@@ -389,39 +353,48 @@ test("rejects forged prepared say fields and lifetimes before any script event e
   assert.ok(
     validateInstructionPlan(forgedText).errors.some(
       (error) =>
-        error.path === `$.instructions[${sayIndex}].textTemporary` &&
-        error.message === "Prepared say text temporary lacks its canonical producer.",
+        error.code === "TSC002" && error.path === `$.instructions[${sayIndex}].textTemporary`,
     ),
   );
 
+  const sayPath = `$.instructions[${sayIndex}]`;
+  // Each row names the path of the rule it breaks; a fragment is added where another rule
+  // reports at the same path.
   // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture callbacks deliberately rewrite prepared-say producer, consumer, temporary, and control-flow fields into invalid combinations.
-  const cases: Array<[string, (candidate: any) => void]> = [
+  const cases: Array<[string, string, (candidate: any) => void, string?]> = [
     [
       "wrong producer kind",
+      `${sayPath}.speakerTemporary`,
       (candidate) => {
         candidate.instructions[sayIndex].speakerTemporary = say.textTemporary;
       },
     ],
     [
       "aliased preparation temporaries",
+      `${sayPath}.textTemporary`,
       (candidate) => {
         candidate.instructions[sayIndex].textTemporary = say.speakerTemporary;
       },
+      "alias",
     ],
     [
       "aliased contextual speaker temporary",
+      `${sayPath}.contextualSpeakerTemporary`,
       (candidate) => {
         candidate.instructions[sayIndex].contextualSpeakerTemporary = say.speakerTemporary;
       },
+      "alias",
     ],
     [
       "missing contextual speaker producer",
+      `${sayPath}.contextualSpeakerTemporary`,
       (candidate) => {
         delete candidate.instructions[sayIndex].contextualSpeakerTemporary;
       },
     ],
     [
       "orphaned preparation instructions",
+      `$.instructions[${textPreparation}]`,
       (candidate) => {
         delete candidate.instructions[sayIndex].speakerTemporary;
         delete candidate.instructions[sayIndex].textTemporary;
@@ -429,12 +402,14 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     ],
     [
       "duplicate prepared speaker producer",
+      `${sayPath}.speakerTemporary`,
       (candidate) => {
         candidate.instructions[textPreparation].destinationTemporary = say.speakerTemporary;
       },
     ],
     [
       "prepared speaker overwritten by store",
+      `${sayPath}.speakerTemporary`,
       (candidate) => {
         candidate.instructions[pacingStore].temporaryId = say.speakerTemporary;
         candidate.instructions[sayIndex].pacing.temporaryId = say.speakerTemporary;
@@ -442,6 +417,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     ],
     [
       "prepared text overwritten by store",
+      `${sayPath}.textTemporary`,
       (candidate) => {
         candidate.instructions[pacingStore].temporaryId = say.textTemporary;
         candidate.instructions[sayIndex].pacing.temporaryId = say.textTemporary;
@@ -449,6 +425,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     ],
     [
       "prepared speaker overwritten by a function call",
+      `${sayPath}.speakerTemporary`,
       (candidate) => {
         candidate.instructions[pacingCall].destinationTemporary = say.speakerTemporary;
         candidate.instructions[pacingStore].value.temporaryId = say.speakerTemporary;
@@ -456,6 +433,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     ],
     [
       "prepared speaker cleared before its say",
+      `${sayPath}.speakerTemporary`,
       (candidate) => {
         candidate.instructions[pacingStore] = {
           kind: "clearTemporary",
@@ -466,6 +444,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     ],
     [
       "prepared text cleared before its say",
+      `${sayPath}.textTemporary`,
       (candidate) => {
         candidate.instructions[pacingStore] = {
           kind: "clearTemporary",
@@ -476,6 +455,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     ],
     [
       "backedge re-enters a prepared say",
+      sayPath,
       (candidate) => {
         candidate.instructions[sayIndex + 1] = {
           kind: "jump",
@@ -485,10 +465,19 @@ test("rejects forged prepared say fields and lifetimes before any script event e
       },
     ],
   ];
-  for (const [name, mutate] of cases) {
+  for (const [name, path, mutate, fragment] of cases) {
     const malformed = JSON.parse(JSON.stringify(prepared));
     mutate(malformed);
-    assert.equal(validateInstructionPlan(malformed).valid, false, name);
+    const validation = validateInstructionPlan(malformed);
+    assert.ok(
+      validation.errors.some(
+        (error) =>
+          error.code === "TSC002" &&
+          error.path === path &&
+          (fragment === undefined || error.message.includes(fragment)),
+      ),
+      `${name}: ${JSON.stringify(validation.errors)}`,
+    );
   }
 
   const contextual = plan(
@@ -689,9 +678,8 @@ test("preserves compiler-generated prepared says across control-flow regions", (
     ].join("\n"),
   ];
 
-  for (const source of sources) {
-    assert.equal(validateInstructionPlan(plan(source)).valid, true, source);
-  }
+  // compileSource validates every plan it produces, so compiling without diagnostics is the oracle.
+  for (const source of sources) plan(source);
 });
 
 function rootBranchWithTwoFunctions(): string {

@@ -22,7 +22,7 @@ const validPlanValidation: PlanValidationResult = Object.freeze({
   errors: Object.freeze([]),
 });
 
-export function captureInstructionPlan(value: unknown): CapturedInstructionPlanResult {
+function captureInstructionPlan(value: unknown): CapturedInstructionPlanResult {
   const capture = capturePlanData(value, { freezeCapturedContainers: true });
   if (isPlanCaptureFailure(capture)) {
     return Object.freeze({

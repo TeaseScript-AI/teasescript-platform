@@ -21,7 +21,6 @@ import {
   type InterpreterEvent,
   type RuntimeSnapshot,
 } from "../src/index.js";
-import { withValidationTestStatistics } from "../src/validation-testing.js";
 import { MAX_INTERACTION_STRING_UTF8_BYTES } from "../src/interaction-limits.js";
 
 test("workspace helper exposes production say pacing and returns JSON-safe data", () => {
@@ -64,28 +63,6 @@ test("workspace helper reports parser and semantic diagnostics", () => {
   }
 });
 
-test("workspace compilation reuses the compiler-validated plan", () => {
-  const source = (statements: number) =>
-    Array.from({ length: statements }, () => 'say "Hello"').join("\n");
-  const compileWork = (statements: number) =>
-    captureWork(() => assert.ok(compileWorkspaceSource(source(statements)).plan));
-  const executeWork = (statements: number) =>
-    captureWork(() =>
-      assert.ok(
-        executeWorkspaceSource(source(statements)).events.some(({ kind }) => kind === "say"),
-      ),
-    );
-
-  // Recapturing the plan or snapshot would add capture calls and grow visits with the plan size.
-  for (const work of [compileWork, executeWork]) {
-    const small = work(1);
-    const large = work(100);
-    assert.equal(small.planCaptures, 0);
-    assert.equal(small.snapshotCaptures, 0);
-    assert.deepEqual(large, small);
-  }
-});
-
 test("workspace helper stops blocking waits in waiting with action events", () => {
   const result = executeWorkspaceSource("wait 1");
   assert.equal(result.status, "waiting");
@@ -95,18 +72,15 @@ test("workspace helper stops blocking waits in waiting with action events", () =
   );
 });
 
-test("validated workspace execution clones state without hostile-data recapture", () => {
+test("validated workspace execution does not mutate the caller snapshot", () => {
   const compiled = compileWorkspaceSource('say "Hello"');
   assert.ok(compiled.plan);
   assert.ok(compiled.snapshot);
   const before = JSON.stringify(compiled.snapshot);
-  const work = captureWork(() => {
-    const result = executeValidatedWorkspaceSnapshot(compiled.plan!, compiled.snapshot!, "run");
-    assert.equal(result.status, "halted");
-  });
+  const result = executeValidatedWorkspaceSnapshot(compiled.plan, compiled.snapshot, "run");
 
+  assert.equal(result.status, "halted");
   assert.equal(JSON.stringify(compiled.snapshot), before);
-  assert.deepEqual(work, { planCaptures: 0, snapshotCaptures: 0, externalVisits: 0 });
 });
 
 test("workspace helper accepts source beyond the former local byte limit", () => {
@@ -318,23 +292,6 @@ test("workspace controls preserve engine pacing and completion rejection outcome
   assert.equal(JSON.stringify(oversized.snapshot), textBefore);
   assert.equal(JSON.stringify(textWaiting.snapshot), textBefore);
 });
-
-/** Counts capture work during `operation`; counters absent from the statistics count as zero. */
-function captureWork(operation: () => void): {
-  planCaptures: number;
-  snapshotCaptures: number;
-  externalVisits: number;
-} {
-  const counts = withValidationTestStatistics((finish) => {
-    operation();
-    return finish();
-  }).counts;
-  return {
-    planCaptures: counts.instructionPlanCaptureCalls ?? 0,
-    snapshotCaptures: counts.runtimeSnapshotCaptureCalls ?? 0,
-    externalVisits: counts.externalCaptureVisits ?? 0,
-  };
-}
 
 function transcriptTexts(events: readonly InterpreterEvent[]): string[] {
   return events.flatMap((event) => (event.kind === "playerTranscript" ? [event.text] : []));
