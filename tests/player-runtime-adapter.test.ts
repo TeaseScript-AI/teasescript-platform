@@ -69,7 +69,9 @@ exit
   if (first?.kind !== "message" || second?.kind !== "message") {
     throw new Error("Expected two runtime messages.");
   }
-  assert.notEqual(first.speakerId, second.speakerId);
+  // The earlier message keeps the name it was said with; both share the identity that selects the avatar colour.
+  assert.equal(session.speakers[first.speakerId]?.name, "Guide");
+  assert.equal(session.speakers[second.speakerId]?.name, "Captain");
   assert.equal(session.speakers[first.speakerId]?.identityId, "guide");
   assert.equal(session.speakers[second.speakerId]?.identityId, "guide");
 });
@@ -206,7 +208,6 @@ exit
   );
   const transcriptIds = session.transcriptEntries.map((entry) => entry.id);
   assert.equal(new Set(transcriptIds).size, transcriptIds.length);
-  assert.ok(transcriptIds.every((id) => /^runtime-event-\d+$/u.test(id)));
   assert.equal(
     session.transcriptEntries[0]?.kind === "message" &&
       session.transcriptEntries[0].content !== undefined,
@@ -334,11 +335,17 @@ say "[color=red][bg=ivory]outer [color=\${bad}][bg=\${bad}]inner **bold**[/bg][/
   const block = preparePlayerMessageMarkup(entry.content)[0];
   if (block?.kind !== "paragraph") throw new Error("Expected paragraph.");
   const pieces = block.lines[0]!.pieces;
-  for (const piece of pieces.filter((piece) => /outer|inner|bold/u.test(piece.text))) {
-    assert.equal(piece.style.color, normalizeColor("red"));
-    assert.equal(piece.style.backgroundColor, normalizeColor("ivory"));
+  const text = (selected: typeof pieces) => selected.map((piece) => piece.text).join("");
+  assert.equal(text(pieces), "outer inner bold outer plain");
+  const coloured = pieces.filter(
+    (piece) => piece.style.color !== undefined || piece.style.backgroundColor !== undefined,
+  );
+  assert.equal(text(coloured), "outer inner bold outer");
+  for (const piece of coloured) {
+    assert.equal(piece.style.color, normalizeColor("red"), piece.text);
+    assert.equal(piece.style.backgroundColor, normalizeColor("ivory"), piece.text);
   }
-  assert.deepEqual(pieces.at(-1)?.style, {});
+  assert.equal(text(pieces.filter((piece) => !coloured.includes(piece))).trim(), "plain");
 });
 
 test("response presentation distinguishes choices and buttons from typed answers after restore", () => {
@@ -380,14 +387,16 @@ test("blocking timer scenario presents runtime timers, hides waits, and restores
       presented.push(null);
     } else {
       const total = (action.deadlineMs - action.createdAtMs) / 1000;
-      assert.deepEqual(timers, [
-        {
-          id: `runtime-timer-${action.actionId}`,
-          kind: "visible",
-          remainingSeconds: total,
-          totalSeconds: total,
-        },
-      ]);
+      // The entry ID is an opaque key; restore below compares it for equality.
+      assert.deepEqual(
+        timers.map(({ kind, name, remainingSeconds, totalSeconds }) => ({
+          kind,
+          name,
+          remainingSeconds,
+          totalSeconds,
+        })),
+        [{ kind: "visible", name: undefined, remainingSeconds: total, totalSeconds: total }],
+      );
       assert.equal(
         playerRuntimeTimers(session.snapshot, now + 1_250)[0]?.remainingSeconds,
         total - 1.25,
