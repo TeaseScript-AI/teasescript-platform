@@ -22,9 +22,11 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
     case "say":
       lines.push(`${pad}say ${emitExpression(statement.value)}`);
       return;
-    case "wait":
-      lines.push(`${pad}${statement.visible ? "timer" : "wait"} ${emitExpression(statement.duration)}`);
+    case "wait": {
+      const unit = statement.unit === "ms" ? " ms" : "";
+      lines.push(`${pad}${statement.visible ? "timer" : "wait"} ${emitExpression(statement.duration)}${unit}`);
       return;
+    }
     case "showButton":
       if (statement.timeout === null) lines.push(`${pad}showButton ${emitExpression(statement.label)}`);
       else lines.push(`${pad}showButton(${emitExpression(statement.label)}, ${emitExpression(statement.timeout)})`);

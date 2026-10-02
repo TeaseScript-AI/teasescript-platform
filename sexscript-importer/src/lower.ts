@@ -15,6 +15,12 @@ interface ClosureInfo {
   maxArgs: number;
 }
 
+interface HelperFunctionInfo {
+  minArgs: number;
+  maxArgs: number;
+  stripsMain: boolean;
+}
+
 interface LowerContext {
   diagnostics: MigrationDiagnostic[];
   metadata: LegacyMetadata | null;
@@ -22,6 +28,8 @@ interface LowerContext {
   listVariables: Set<string>;
   classLoaderVariables: Set<string>;
   legacyHelperClasses: Map<string, string>;
+  helperFunctions: Map<string, HelperFunctionInfo>;
+  helperMainParameter: string | null;
   functionDepth: number;
 }
 
@@ -41,6 +49,8 @@ export function lowerParsedFile(file: ParsedGroovyFile): MigrationProgram {
     listVariables: new Set(),
     classLoaderVariables: new Set(),
     legacyHelperClasses: new Map(),
+    helperFunctions: new Map(),
+    helperMainParameter: null,
     functionDepth: 0,
   };
   if (file.diagnostics.length > 0 || file.root === null) {
@@ -55,13 +65,12 @@ export function lowerParsedFile(file: ParsedGroovyFile): MigrationProgram {
     return { sourceName: file.sourceName, metadata: null, statements: [], diagnostics: context.diagnostics };
   }
 
+  if (file.root.kind === "compilationUnit") return lowerHelperCompilationUnit(file, context);
   if (file.root.kind !== "scriptBody") {
     context.diagnostics.push({
-      code: file.root.kind === "compilationUnit" ? "SX_LEGACY_HELPER_UNIT" : "SX_UNIT_LOWERING_DEFERRED",
+      code: "SX_UNIT_LOWERING_DEFERRED",
       severity: "error",
-      message: file.root.kind === "compilationUnit"
-        ? "Auxiliary Groovy class source requires helper-library migration; it is not part of the runtime package output."
-        : "Non-script Groovy input is parsed but not lowered by the script-body importer.",
+      message: "Non-script Groovy input is parsed but not lowered by the importer.",
       span: file.root.span,
     });
     return { sourceName: file.sourceName, metadata: null, statements: [], diagnostics: context.diagnostics };
@@ -86,6 +95,117 @@ export function lowerParsedFile(file: ParsedGroovyFile): MigrationProgram {
     statements,
     diagnostics: context.diagnostics,
   };
+}
+
+
+function lowerHelperCompilationUnit(file: ParsedGroovyFile, baseContext: LowerContext): MigrationProgram {
+  const root = file.root;
+  if (root === null || root.kind !== "compilationUnit") {
+    throw new Error("lowerHelperCompilationUnit requires a compilation unit");
+  }
+  const topLevel = asNode(root.topLevel);
+  if (topLevel !== null && topLevel.kind === "block" && nodeArray(topLevel.statements).length > 0) {
+    addDiagnostic(
+      baseContext,
+      "SX_HELPER_TOP_LEVEL_CODE",
+      "error",
+      "Auxiliary Groovy helper units with executable top-level code require manual migration.",
+      topLevel.span,
+    );
+  }
+  const classes = nodeArray(root.classes);
+  if (classes.length !== 1) {
+    addDiagnostic(
+      baseContext,
+      "SX_HELPER_CLASS_COUNT",
+      "error",
+      `Expected one auxiliary helper class, found ${classes.length}.`,
+      root.span,
+    );
+    return { sourceName: file.sourceName, metadata: null, statements: [], diagnostics: baseContext.diagnostics };
+  }
+  const helperClass = classes[0]!;
+  const methods = nodeArray(helperClass.methods);
+  const helperFunctions = collectHelperFunctionInfo(methods);
+  const statements: IrStatement[] = [];
+  for (const method of methods) {
+    const lowered = lowerHelperMethod(method, baseContext, helperFunctions);
+    if (lowered !== null) statements.push(lowered);
+  }
+  return { sourceName: file.sourceName, metadata: null, statements, diagnostics: baseContext.diagnostics };
+}
+
+function collectHelperFunctionInfo(methods: AstNode[]): Map<string, HelperFunctionInfo> {
+  const result = new Map<string, HelperFunctionInfo>();
+  for (const method of methods) {
+    const name = text(method.name);
+    if (method.kind !== "method" || name === null) continue;
+    const rawParameters = Array.isArray(method.parameters) ? method.parameters : [];
+    const records = rawParameters.filter(
+      (value): value is Record<string, unknown> => typeof value === "object" && value !== null,
+    );
+    const stripsMain = records[0]?.name === "main";
+    const authored = stripsMain ? records.slice(1) : records;
+    const minArgs = authored.filter((parameter) => parameter.hasInitialExpression !== true).length;
+    result.set(name, { minArgs, maxArgs: authored.length, stripsMain });
+  }
+  return result;
+}
+
+function lowerHelperMethod(
+  method: AstNode,
+  baseContext: LowerContext,
+  helperFunctions: Map<string, HelperFunctionInfo>,
+): IrStatement | null {
+  const name = text(method.name);
+  if (method.kind !== "method" || name === null) {
+    addDiagnostic(baseContext, "SX_HELPER_METHOD", "error", "Auxiliary helper contains an invalid method.", method.span);
+    return null;
+  }
+  const rawParameters = Array.isArray(method.parameters) ? method.parameters : [];
+  const records: Record<string, unknown>[] = [];
+  for (const value of rawParameters) {
+    if (typeof value !== "object" || value === null || typeof (value as Record<string, unknown>).name !== "string") {
+      addDiagnostic(baseContext, "SX_HELPER_PARAMETER", "error", `Helper method ${name} has an invalid parameter.`, method.span);
+      return null;
+    }
+    records.push(value as Record<string, unknown>);
+  }
+  const stripsMain = records[0]?.name === "main";
+  const authoredRecords = stripsMain ? records.slice(1) : records;
+  const body = asNode(method.body);
+  if (body?.kind !== "block") {
+    addDiagnostic(baseContext, "SX_HELPER_BODY", "error", `Helper method ${name} does not contain a normal block body.`, method.span);
+    return null;
+  }
+  const context: LowerContext = {
+    diagnostics: baseContext.diagnostics,
+    metadata: baseContext.metadata,
+    functions: collectClosureInfo(body),
+    listVariables: collectListVariables(body),
+    classLoaderVariables: new Set(),
+    legacyHelperClasses: new Map(),
+    helperFunctions,
+    helperMainParameter: stripsMain ? "main" : null,
+    functionDepth: 1,
+  };
+  const parameters: IrFunctionParameter[] = [];
+  for (const parameter of authoredRecords) {
+    const parameterName = String(parameter.name);
+    const initial = asNode(parameter.initialExpression);
+    const defaultValue = initial === null ? null : lowerExpression(initial, context);
+    if (initial !== null && defaultValue === null) {
+      addDiagnostic(
+        context,
+        "SX_HELPER_PARAMETER_DEFAULT",
+        "error",
+        `Default value for helper parameter ${parameterName} could not be migrated.`,
+        method.span,
+      );
+    }
+    parameters.push({ name: parameterName, defaultValue });
+  }
+  return { kind: "function", name, parameters, body: lowerBlock(body, context), span: method.span };
 }
 
 function lowerBlock(block: AstNode, context: LowerContext): IrStatement[] {
@@ -290,6 +410,27 @@ function lowerCallStatement(node: AstNode, span: SourceSpan | null, context: Low
       ? [unsupportedStatement(context, node, "SX_UNSUPPORTED_CALL", "Method call is not a supported SexScript call.")]
       : [{ kind: "expression", expression, span }];
   }
+  if (call.name === "sleep" && context.helperMainParameter !== null) {
+    return oneArgumentStatement(call.arguments, context, node, (duration) => ({
+      kind: "wait",
+      duration,
+      visible: false,
+      unit: "ms",
+      span,
+    }));
+  }
+  if (context.helperFunctions.has(call.name)) {
+    const expression = lowerExpression(node, context);
+    return expression === null
+      ? [unsupportedStatement(context, node, "SX_UNSUPPORTED_HELPER_CALL", `Helper call ${call.name}() could not be migrated.`)]
+      : [{ kind: "expression", expression, span }];
+  }
+  if (context.helperMainParameter !== null && variableName(node.object) !== context.helperMainParameter) {
+    const expression = lowerExpression(node, context);
+    return expression === null
+      ? [unsupportedStatement(context, node, "SX_UNSUPPORTED_HELPER_CALL", `Unqualified helper call ${call.name}() could not be migrated.`)]
+      : [{ kind: "expression", expression, span }];
+  }
 
   const args = call.arguments;
   switch (call.name) {
@@ -299,9 +440,9 @@ function lowerCallStatement(node: AstNode, span: SourceSpan | null, context: Low
     case "show":
       return oneArgumentStatement(args, context, node, (value) => ({ kind: "say", value, span }));
     case "wait":
-      return oneArgumentStatement(args, context, node, (duration) => ({ kind: "wait", duration, visible: false, span }));
+      return oneArgumentStatement(args, context, node, (duration) => ({ kind: "wait", duration, visible: false, unit: "s", span }));
     case "waitWithGauge":
-      return oneArgumentStatement(args, context, node, (duration) => ({ kind: "wait", duration, visible: true, span }));
+      return oneArgumentStatement(args, context, node, (duration) => ({ kind: "wait", duration, visible: true, unit: "s", span }));
     case "showButton": {
       if (args.length < 1 || args.length > 2) {
         return [unsupportedStatement(context, node, "SX_BUTTON_ARITY", "showButton() must have one or two arguments.")];
@@ -615,6 +756,14 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
     case "variable": {
       const name = variableName(node);
       if (name === null) return unsupportedExpression(context, node, "SX_INVALID_VARIABLE", "Variable is missing a name.");
+      if (context.helperMainParameter !== null && name === context.helperMainParameter) {
+        return unsupportedExpression(
+          context,
+          node,
+          "SX_HELPER_MAIN_VALUE",
+          "The legacy SexScript host object cannot become an authored TeaseScript value.",
+        );
+      }
       if (context.functions.has(name)) {
         return unsupportedExpression(
           context,
@@ -816,6 +965,31 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     return unsupportedExpression(context, node, "SX_DYNAMIC_OR_OBJECT_CALL", "Dynamic Groovy method names are not lowered by the first slice.");
   }
   if (!call.inherited) return lowerObjectMethodCallExpression(node, call.name, call.arguments, context);
+  const helperInfo = context.helperFunctions.get(call.name);
+  if (helperInfo !== undefined) {
+    let argumentNodes = call.arguments;
+    if (helperInfo.stripsMain) {
+      if (context.helperMainParameter === null || variableName(argumentNodes[0]) !== context.helperMainParameter) {
+        return unsupportedExpression(
+          context,
+          node,
+          "SX_HELPER_MAIN_ARGUMENT",
+          `Helper call ${call.name}() does not pass the expected legacy main object.`,
+        );
+      }
+      argumentNodes = argumentNodes.slice(1);
+    }
+    if (argumentNodes.length < helperInfo.minArgs || argumentNodes.length > helperInfo.maxArgs) {
+      return unsupportedExpression(
+        context,
+        node,
+        "SX_FUNCTION_ARITY",
+        `Call to ${call.name} has ${argumentNodes.length} authored arguments; expected ${helperInfo.minArgs}..${helperInfo.maxArgs}.`,
+      );
+    }
+    const args = lowerArguments(argumentNodes, context);
+    return args === null ? null : { kind: "call", name: call.name, positional: args, named: {} };
+  }
   const functionInfo = context.functions.get(call.name);
   if (functionInfo !== undefined) {
     if (call.arguments.length < functionInfo.minArgs || call.arguments.length > functionInfo.maxArgs) {
@@ -828,6 +1002,14 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     }
     const args = lowerArguments(call.arguments, context);
     return args === null ? null : { kind: "call", name: call.name, positional: args, named: {} };
+  }
+  if (context.helperMainParameter !== null && variableName(node.object) !== context.helperMainParameter) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_HELPER_UNQUALIFIED_CALL",
+      `Unqualified Groovy helper call ${call.name}() is not assumed to be a SexScript host API.`,
+    );
   }
   if (DIRECT_STORAGE_LOADS.has(call.name)) {
     if (call.arguments.length !== 1) {

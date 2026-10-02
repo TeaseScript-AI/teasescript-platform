@@ -38,7 +38,7 @@ export interface IrFunctionParameter {
 
 export type IrStatement =
   | (IrBase & { kind: "say"; value: IrExpression })
-  | (IrBase & { kind: "wait"; duration: IrExpression; visible: boolean })
+  | (IrBase & { kind: "wait"; duration: IrExpression; visible: boolean; unit: "s" | "ms" })
   | (IrBase & { kind: "showButton"; label: IrExpression; timeout: IrExpression | null })
   | (IrBase & { kind: "showPopup"; message: IrExpression })
   | (IrBase & { kind: "showImage"; file: IrExpression })
