@@ -66,6 +66,8 @@ export interface LowerOptions {
   mixinModules?: readonly MixinModuleInfo[];
   /** Names assigned exactly once in the whole package, which no side effect can change afterwards. */
   stableNames?: ReadonlySet<string>;
+  /** Value types of package globals defined in other files, such as anonymous-object fields. */
+  globalTypes?: ReadonlyMap<string, number>;
   /**
    * Rename identifiers TeaseScript rejects (default). Package composition disables this per file and renames
    * the composed program once.
@@ -231,7 +233,10 @@ export function lowerParsedFile(
   if (body?.kind === "block") {
     context.functions = collectClosureInfo(body);
     context.shadowingReferences = collectShadowingReferences(body, context.functions);
-    context.types = inferVariableTypes(body, [], context.packageFunctions);
+    context.types = withGlobalTypes(
+      inferVariableTypes(body, [], context.packageFunctions),
+      options.globalTypes,
+    );
     const helpers = collectLegacyHelperBindings(body);
     context.classLoaderVariables = helpers.classLoaders;
     context.legacyHelperClasses = helpers.helperClasses;
@@ -4462,6 +4467,52 @@ export function packageFunctionNames(files: readonly ParsedGroovyFile[]): Set<st
     }
   }
   return names;
+}
+
+/** Adds package-global types for names the file does not assign itself; shared names take the union. */
+function withGlobalTypes(
+  environment: TypeEnvironment,
+  globals: ReadonlyMap<string, number> | undefined,
+): TypeEnvironment {
+  if (globals === undefined || globals.size === 0) return environment;
+  const variables = new Map(environment.variables);
+  for (const [name, type] of globals) variables.set(name, (variables.get(name) ?? 0) | type);
+  return { ...environment, variables };
+}
+
+/** Value types of anonymous-object fields, which mixin modules reach through the object receiver. */
+export function packageGlobalTypes(files: readonly ParsedGroovyFile[]): Map<string, number> {
+  const types = new Map<string, number>();
+  for (const file of files) {
+    if (file.root?.kind !== "scriptBody") continue;
+    for (const objectClass of nodeArray(file.root.classes)) {
+      const statements = nodeArray(objectClass.fields).map((field) => ({
+        kind: "expressionStatement",
+        span: field.span,
+        expression: {
+          kind: "declaration",
+          span: field.span,
+          left: syntheticVariable(String(field.name), field.span),
+          right: asNode(field.initialExpression) ?? { kind: "constant", span: null, value: null },
+        },
+      }));
+      const methods = nodeArray(objectClass.methods)
+        .map((method) => asNode(method.body))
+        .filter((body) => body !== null);
+      const environment = inferVariableTypes({
+        kind: "block",
+        span: null,
+        statements: [...statements, ...methods],
+      });
+      for (const field of nodeArray(objectClass.fields)) {
+        const name = String(field.name);
+        const type = environment.variables.get(name);
+        if (type !== undefined && asNode(field.initialExpression)?.kind !== "closure")
+          types.set(name, type);
+      }
+    }
+  }
+  return types;
 }
 
 /**

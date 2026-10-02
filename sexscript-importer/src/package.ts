@@ -5,6 +5,7 @@ import {
   describeMixinModule,
   lowerParsedFile,
   packageFunctionNames,
+  packageGlobalTypes,
   packageStableNames,
 } from "./lower.ts";
 import { withActionDispatcher } from "./helpers.ts";
@@ -54,12 +55,14 @@ export function lowerPackage(files: readonly ParsedGroovyFile[]): LoweredPackage
   const mixinModules = files.flatMap((file) => describeMixinModule(file) ?? []);
   const packageFunctions = packageFunctionNames(files);
   const stableNames = packageStableNames(files);
+  const globalTypes = packageGlobalTypes(files);
   const lowered = files.map((file) =>
     lowerParsedFile(file, {
       helperRegistry,
       mixinModules,
       packageFunctions,
       stableNames,
+      globalTypes,
       renameIdentifiers: false,
     }),
   );
