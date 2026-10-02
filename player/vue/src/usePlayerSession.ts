@@ -8,14 +8,18 @@ import {
   type CapturedMediaRepository,
 } from "../../captured-media.js";
 import { browserCapturedMediaLocks } from "../../captured-media-persistence.js";
-import { MediaDevice, MediaLoadQueue } from "../../media-device.js";
+import { MediaDevice, MediaLoadQueue, type MediaDeviceElement } from "../../media-device.js";
 import {
   playerRuntimeMedia,
   reportPlayerRuntimeMediaLoad,
   type PlayerRuntimeSession,
 } from "../../runtime-adapter.js";
 import { CaptureService, SessionCamera, type PlayerDiagnostic } from "../../session-camera.js";
+import { silence } from "./generatedAudio";
 import { useRuntimeSceneClock } from "./useRuntimeSceneClock";
+
+const PRIMED_AUDIO_ELEMENTS = 2;
+const SILENCE = silence(50);
 
 // Media progress is sampled this often while media loads or plays; cues fire at this resolution.
 const MEDIA_SAMPLE_MS = 100;
@@ -103,8 +107,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       return "delivered";
     },
   );
+  // Audio elements reused across media. Browsers such as Safari allow playback per element only from a user
+  // activation; an element that played during the activating click keeps that permission when its source changes.
+  const audioElements: MediaDeviceElement[] = [];
   const device = new MediaDevice({
-    createElement: () => new Audio(),
+    createElement: () => audioElements.pop() ?? new Audio(),
+    releaseElement: (element) => audioElements.push(element),
     resolveSource: resolveAsset,
     reportLoad: (mediaId, report) => {
       loads.add(mediaId, report);
@@ -151,6 +159,19 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     },
   );
 
+  /**
+   * Plays silence on spare audio elements within the activating click, so script audio may still play when the
+   * session starts later, for example after a camera permission prompt. Two cover the common overlap of a
+   * background loop and a cue; more elements fall back to the refused-playback retry.
+   */
+  function primeAudio() {
+    while (audioElements.length < PRIMED_AUDIO_ELEMENTS) audioElements.push(new Audio());
+    for (const element of audioElements) {
+      element.src = SILENCE;
+      void element.play().catch(() => {});
+    }
+  }
+
   let activationToken = 0;
   let disposed = false;
   tryOnScopeDispose(() => {
@@ -158,6 +179,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     activationToken++;
     loads.clear();
     device.reset();
+    for (const element of audioElements.splice(0)) {
+      element.pause();
+      element.removeAttribute("src");
+      element.load();
+    }
     captures.stop();
     camera.release();
     capturedMedia.close();
@@ -205,6 +231,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (!pending) return;
     activation.value = null;
     const token = ++activationToken;
+    primeAudio();
     const opened = await camera.open(options.capabilities?.camera === true);
     // Replaced, re-prepared, or unmounted while the browser answered: an obsolete session never starts.
     if (!opened || disposed || token !== activationToken) return;

@@ -554,7 +554,8 @@ media and timers, cue blocks with self-handles, Stage replacement, pacing barrie
 checkpoint/restore equivalence with a simulated Player, and rejection of malformed media state.
 `tests/player-media-device.test.ts` drives the Player's media device against real sessions with deterministic element
 stand-ins: single load reports, stalls, range repetition and terminal stop, pause/resume/seek repositioning, refused
-playback and retry, failed video and unavailable sources, and restore reconnection without repeated cues. The preview
+playback and retry, failed video and unavailable sources, restore reconnection without repeated cues, and element reuse
+without stale listeners or late `play()` results reaching the next media. The preview
 browser checks cover Start activation, the runtime Stage image, refused-audio retry, and actually played audio.
 
 ## Local browser smoke and future host E2E gate
