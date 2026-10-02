@@ -13,25 +13,25 @@ or accept final TeaseScript APIs.
 
 ## Camera ownership
 
-When a package declares and receives camera permission, the Player should prefer to keep the selected stream open while
-the package owns that capability instead of reopening the device for every capture. The browser or operating system may
-still display its normal camera-use indicator. The Player owns browser streams and gives TeaseScript only validated,
-engine-managed media references.
+The permission and lifecycle model is accepted in [`SECURITY.md`](../SECURITY.md): one browser permission on first
+activation, then author-controlled opening, use, and closing, with the selected stream kept open rather than reopened
+for every capture. The Player brokers and owns the browser streams without its own prompt, indicator, or stop control,
+and gives TeaseScript only validated, engine-managed media references.
 
-A camera/media decision must define:
+A camera/media decision must still define:
 
-- package capability declarations and permission UX;
-- acquisition, idle close, switching, revocation, reload, restore, reconnect, and fatal-failure behavior;
+- capability declaration metadata in package or script packaging;
+- switching, revocation handling, reload, restore, reconnect, and failure recovery;
 - quality negotiation and default resolution;
-- cleanup across `goto`, `run`, `call`, `end`, `exit`, navigation, and session shutdown;
-- privacy indicators and player-visible camera status;
+- Player cleanup of streams an author left open at `end`, `exit`, navigation, and session shutdown;
 - recording, still capture, motion detection, sampling, and resource limits.
 
 ## Interactive and direct image capture
 
 The [accepted V30 baseline](../specifications/accepted-syntaxes-v30.md) defines mandatory `askImage(...)` and nullable
 direct `takePhoto(...)`; this planning does not redefine their names or return contracts. The remaining Player design
-must decide source selection, preview, countdown, accept/retake, validation, permission, retry, and recovery behavior. A
+must decide source selection, preview, countdown, accept/retake, validation, retry, and recovery behavior, including
+after a denied permission. A
 rejected preview candidate is not runtime-visible.
 
 `takePhoto(...)` should use the selected active stream without a source question or interactive acceptance flow. Its
@@ -86,11 +86,11 @@ a separate decision covering event shape, permissions, privacy, severity, and ga
 
 ## Remaining design questions
 
-- exact camera and file capability declarations;
-- role declaration, default selection, switching, and idle ownership;
+- camera, microphone, and file capability declaration metadata;
+- role declaration, default selection, and switching;
 - image interaction and direct-capture API shapes;
-- recording and still-capture handles;
-- simultaneous camera limits;
+- author-facing recording and still-capture APIs;
+- simultaneous-device policy;
 - motion-detection APIs and resource bounds;
 - session media storage and complete reachability;
 - persistent collections, indexing, privacy, retention, and quotas;

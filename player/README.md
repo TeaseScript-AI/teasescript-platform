@@ -24,7 +24,8 @@ This is a local inspection route, not the production cross-origin Player/host pr
 - `theme/` owns theme generation and authored action-button material.
 - `capture-device.ts`, `session-media.ts`, `rgba-image.ts`, and `browser-capture.ts` contain the framework-independent
   camera/microphone capture foundation: Player-owned stream lifecycle, bounded failures, recording, still frames, pixel
-  copies, microphone sampling, and session-scoped media references. Neither the Player nor the runtime uses it yet.
+  copies, microphone sampling, and session-scoped media references. Neither the Player nor the runtime uses it yet, and
+  its shapes are implementation details rather than an accepted author-facing API.
 
 Browser-native CSS remains responsible for layout and responsive composition. Vue 3 owns rendering and local
 presentation state in the Player; Tailwind CSS 4 is integrated through Vite as a foundation layer,

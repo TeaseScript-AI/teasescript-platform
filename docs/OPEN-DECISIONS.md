@@ -126,12 +126,15 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
   (including optional Shadow DOM), and reconstructible-state declaration/validation; ADR 0012 fixes capability
   semantics.
 - Involved-speaker and conversation metadata for one visible chat with selectively separated future LLM contexts.
-- Camera and microphone capability declarations, stream ownership, device switching, quality negotiation, restore,
-  privacy indicators, and simultaneous-camera policy.
+- Camera and microphone capability declaration metadata, device switching, quality negotiation, reload and restore,
+  failure recovery, and simultaneous-device policy; the permission and lifecycle model is accepted in
+  [`SECURITY.md`](SECURITY.md).
 - Camera UI and lifecycle around accepted `askImage(...)` and nullable `takePhoto(...)`, including preview, countdown,
-  retake, permission, and restore behavior.
-- Advanced package camera/microphone capability shape, recording handles and results, audio/video recording
-  composition, active recording across checkpoint or reload, and explicit session-media deletion.
+  retake, denied-permission recovery, and restore behavior.
+- The public advanced-TypeScript media surface for arbitrary local image, video, and audio processing, author-facing
+  recording APIs and results, how authors request recording composition (it is explicit; see `SECURITY.md`), and
+  explicit session-media deletion. The Player capture foundation's shapes are implementation details, not this API;
+  ephemeral handles are not restored after reload (ADR 0017).
 - Motion detection, sampling, camera resource limits, and scene ownership.
 - User control of media playback: whether players may seek, pause, or skip script media, whether authors can allow or
   forbid it per media, and its Player UI. The Player currently offers no media controls; accepted controls would enter

@@ -74,9 +74,15 @@ truncate or partially mutate state.
 
 The engine, not the caller, normalizes text, parses numbers, resolves choice labels/text, and derives player transcript content. Successful completion emits `playerTranscript` before `actionCompleted`; invalid or duplicate attempts emit neither event. Interaction result destinations, speaker IDs, target, ownership, options, settlement results, transcript text, and the single-use result handoff are validated against the immutable plan and current snapshot. A result is atomically committed into a prepared ordinary runtime destination. Until the first canonical consume, transfer, return, discard, or exit succeeds, the nullable handoff retains the canonical value independently of `lastSettlement`; afterward it is removed immediately. `lastSettlement` remains bounded replay data and is not a destination-liveness authority.
 
-Camera permission, long-lived stream ownership, device switching, captured-media retention, encryption, persistent
-collections, and player-visible privacy indicators require a separate accepted camera/media design. Selected direction
-and open questions are recorded in
+Camera and microphone access is an external capability boundary governed by the browser's own permission, requested once
+on first activation. After that the script or package controls the lifecycle: it may activate the capability at the
+start of a scene, keep the selected stream open for later author-controlled use, and close it. The Player brokers and
+owns the underlying browser resources for sandbox isolation, revocation, and guaranteed cleanup, but adds no permission
+prompt, camera or microphone indicator, stop control, or per-use approval of its own; native browser, OS, and device
+privacy indicators are sufficient. A recording contains exactly the sources the author requests; whether video includes
+microphone audio never depends on whether a microphone is already open. Capability declaration metadata, device
+switching, reload and restore, failure recovery, simultaneous-device policy, captured-media retention, encryption, and
+persistent collections remain open; see
 [`planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md`](planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md).
 
-Exact iframe sandbox flags, CSP, message schemas, capability negotiation, signing, moderation workflows, camera/media privacy policy, and time-integrity policy remain to be specified.
+Exact iframe sandbox flags, CSP, message schemas, capability negotiation, signing, moderation workflows, captured-media privacy policy, and time-integrity policy remain to be specified.
