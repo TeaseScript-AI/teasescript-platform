@@ -27,7 +27,10 @@ Importer progress is measured at package level rather than by requiring every ge
 4. **Compiler-clean** — the generated script passes the real compiler. The report also compiles a copy in which
    accepted-but-unimplemented TeaseScript (storage, `run`/`end`, `switch`, ...) is replaced by placeholder host calls;
    a file that is clean only in that copy is blocked by TeaseScript implementation work, not by importer output.
-5. **Runnable/verified** — relevant execution paths have actually run without unresolved runtime behavior.
+5. **Runnable/verified** — relevant execution paths have actually run without unresolved runtime behavior. The
+   report's smoke run (`report --run`) executes one deterministic path per package entry in the real runtime,
+   following script transfers with shared storage, and runs scripts no entry reached in isolation. It catches runtime
+   type errors the compiler cannot, but one path is evidence, not proof of equivalence.
 
 The POC embeds transitively required helper functions into each generated `.tease` file because package-library linkage
 is not yet available. That is a current migration strategy, not a language requirement. Auxiliary Groovy classes with
@@ -75,6 +78,15 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   string `"null"` as null. Generated reads therefore compare with `null` explicitly, which treats a stored null and a
   missing key alike; `load ... default` is not used because it would keep a stored null (see the specification
   questions below). TeaseScript keys are flat, so saving a scalar over a former list/map key leaves the old sub-keys.
+- `getRandom(max)` returned 0 for `max` 0 (rounding toward zero for a negative bound, and 0..99 for null), while
+  `randomInteger()` rejects the empty range `0..0`. Bounds other than a positive integer literal therefore use a
+  generated helper with the legacy results; the smoke run found this on Domme3's default single image pack.
+- Groovy ordered comparisons accept null (`null` sorts first, so `null >= 5` is false); TeaseScript comparisons fail
+  at runtime. Conversions keep plain comparisons: guarding every comparison of a stored number would bury the intent,
+  and the corpus scripts that compare a missing key (isolated smoke runs of Domme3 `discipline` and `maintenance`)
+  depend on settings saved by the package's introduction anyway.
+- A Groovy map in a condition tests emptiness; records have no emptiness test, so such conditions are manual work
+  (`SX_MAP_TRUTHINESS`).
 - Groovy maps are shared references; TeaseScript records copy. A field write through a copy gets a `NOTE`
   (`SX_SHARED_MAP_WRITE`). Picking from an empty list returned null in Groovy and fails in TeaseScript.
 - Groovy lists and maps alias by reference; TeaseScript composite values copy (ADR 0014). Groovy `def` may change type.

@@ -24,7 +24,7 @@ explicit unsupported nodes: `EmptyExpression` (29, a declaration without initial
 
 ## Feasibility snapshot
 
-Measured on 2026-10-02 at importer commit `93b66bfd` with `node src/cli.ts report --compile <package scripts>`.
+Measured on 2026-10-02 at importer commit `7cca6ab4` with `node src/cli.ts report --run <package scripts>`.
 Toy's 21 runtime-loaded modules are part of its single script `toy.groovy`, so Toy counts as one script whose
 statements include all module code.
 
@@ -33,11 +33,24 @@ statements include all module code.
 | Distribution | 14 | 10 | 10 | 10 | 15 | 13 |
 | Domme3 | 24 | 9 | 7 | 7 | 29 | 32 |
 | DisciplineClinic | 6 | 2 | 2 | 2 | 23 | 22 |
-| Toy expanded | 1 | 0 | 0 | 0 | 258 | 460 |
+| Toy expanded | 1 | 0 | 0 | 0 | 250 | 444 |
 
-Root errors count independent causes that need manual work; placeholders count unconverted statements. Toy's 258 come
+Root errors count independent causes that need manual work; placeholders count unconverted statements. Toy's 250 come
 from about 4,800 source statements, mostly method calls on maps and Java objects, string methods, and conditionals in
 positions where moving them would change evaluation order.
+
+Runtime smoke runs of the compiler-clean scripts (placeholder copies with host stand-ins):
+
+- Distribution: all 10 runnable scripts run to the end; the French introduction's flow passes through three other
+  scripts. The four remaining entry scripts are not converted yet.
+- Domme3: the entry flow stops at the unconverted `introfirst`. Isolated runs: `implements` and `inform` run to the
+  end, `permission` reaches the step limit in a line-writing loop (the typed text must match the shown line),
+  `spanking` returns to the entry flow, and `discipline` and `maintenance` fail comparing a setting that the
+  introduction would have saved (see the null-comparison difference in `COMPATIBILITY-GAPS.md`).
+- DisciplineClinic: the entry flow stops at the unconverted `DisciplineClinicMain`; `Exit` runs to the end.
+
+The first smoke run also failed five Domme3 scripts on `getRandom(0)`, which the importer now converts with the legacy
+result.
 
 No script is compiler-clean as generated, because almost all use storage or script chaining. Scripts using each
 accepted-but-unimplemented capability, and the scripts it alone blocks (otherwise compiler-clean):
@@ -51,7 +64,7 @@ accepted-but-unimplemented capability, and the scripts it alone blocks (otherwis
 | `getDateTime()` | 13 | 1 |
 | `getSeconds()` | 11 | 0 |
 | `askBooleans()` | 10 | 8 |
-| `showPopup` | 9 | 3 |
+| `showPopup` | 10 | 3 |
 | `askInteger()` | 8 | 0 |
 
 ## SexScript API usage

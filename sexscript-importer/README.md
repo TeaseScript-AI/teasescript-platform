@@ -33,15 +33,15 @@ source that is legally and technically appropriate.
 - Java 17 or newer and the Groovy 2.5.21 `groovy` and `groovy-json` JARs (the version SexScript embeds). The parser
   helper uses `SEXSCRIPT_GROOVY_JAR` and `SEXSCRIPT_GROOVY_JSON_JAR`, defaulting to the Maven local-repository layout
   under `~/.m2/repository/org/codehaus/groovy/`. See [`parser-groovy/README.md`](parser-groovy/README.md).
-- For `--compile` and the compiler-checked fixtures: the repository build (`npm run build:typescript` in the
-  repository root), which provides the real TeaseScript compiler under `dist/`.
+- For `--compile`, `--run`, and the compiler-checked fixtures: the repository build (`npm run build:typescript` in the
+  repository root), which provides the real TeaseScript compiler and runtime under `dist/`.
 
 ## Usage
 
 ```sh
 node src/cli.ts convert /path/to/script.groovy > script.tease
 node src/cli.ts convert-package [--compile] /path/to/legacy/scripts /path/to/output
-node src/cli.ts report [--compile] /path/to/legacy/scripts > report.json
+node src/cli.ts report [--compile | --run] /path/to/legacy/scripts > report.json
 node src/cli.ts inventory /path/to/legacy/scripts > inventory.json
 ```
 
@@ -49,6 +49,13 @@ node src/cli.ts inventory /path/to/legacy/scripts > inventory.json
 auxiliary Groovy classes (such as `Domme3Class`) are migration input: their transitively used methods are embedded as
 ordinary TeaseScript functions so the result depends on neither Groovy nor the old runtime. `report` and `inventory`
 accept `.groovy` files, directories, or parser JSON; inputs of one invocation form one package.
+
+`report --run` also smoke-runs the compiler-clean output in the real runtime: from each script in the package's top
+directory, following script transfers with shared storage, then each runnable script no run reached in isolation (with
+empty storage, so a failure there can come from missing setup). Answers are deterministic: buttons are pressed, each
+visit of a choice takes the next option, text and number inputs cycle through fixed values, and time and media advance
+in simulation. Pending capabilities use host stand-ins. A run proves one path executes; `stepLimit` is inconclusive
+(for example a loop that waits until the typed text matches).
 
 Generated files follow these conventions:
 
@@ -69,5 +76,6 @@ node --test tests/*.test.ts
 
 `tests/fixtures/conversion/` pairs real Groovy inputs with the expected `.tease` output; that output must compile with
 the TeaseScript compiler. `tests/fixtures/conversion-accepted/` holds output that uses accepted but not yet implemented
-TeaseScript; it must compile once those capabilities are replaced by placeholder calls. These tests skip with a stated
-reason when Java/Groovy or the repository build is unavailable.
+TeaseScript; it must compile once those capabilities are replaced by placeholder calls. Both groups must also run to
+the end in the runtime smoke run. These tests skip with a stated reason when Java/Groovy or the repository build is
+unavailable.
