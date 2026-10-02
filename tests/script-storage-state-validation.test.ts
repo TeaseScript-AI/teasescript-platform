@@ -36,6 +36,49 @@ test("fresh state and JSON checkpoint restore reject invalid external script sto
       "nested handle",
       [{ key: "k", value: { kind: "list", items: [{ kind: "timerHandle", timerId: 1 }] } }],
     ],
+    // Unknown fields could otherwise carry a session-only value past the storable-value check.
+    [
+      "range with an extra field",
+      [
+        {
+          key: "k",
+          value: {
+            kind: "range",
+            start: 1,
+            end: 3,
+            inclusive: true,
+            extra: { kind: "timerHandle", timerId: 1 },
+          },
+        },
+      ],
+    ],
+    [
+      "list with an extra field",
+      [
+        {
+          key: "k",
+          value: { kind: "list", items: [], extra: { kind: "mediaHandle", mediaId: 1 } },
+        },
+      ],
+    ],
+    [
+      "object property with an extra field",
+      [
+        {
+          key: "k",
+          value: {
+            kind: "object",
+            properties: [
+              {
+                name: "n",
+                value: 1,
+                extra: { kind: "speakerReference", speakerId: 1, identifier: "s" },
+              },
+            ],
+          },
+        },
+      ],
+    ],
   ] as const) {
     assert.throws(
       () =>
