@@ -179,10 +179,6 @@ python3 -B tools/local-agent/prepare-patch-publication.py \
   --show-next-action
 ```
 
-`--show-next-upload` remains an exact compatibility alias for the canonical
-`--show-next-action`; both names invoke the same implementation and print the
-same next action.
-
 The command verifies the local file again and prints one connector-ready argument object for the GitHub action that creates a UTF-8 Git blob from text, currently `GitHub.create_blob`. Call that connector immediately. Do not Base64-encode, pre-open, or manually regenerate the part. Compare its returned Git blob SHA with `expectedGitBlobSha`, record the result, and do not perform another repository write until the match is recorded:
 
 ```shell

@@ -606,12 +606,7 @@ class PreparePatchPublicationTests(unittest.TestCase):
         first, second = plan["files"][:2]
 
         shown = run_cli("--output-directory", str(output), "--show-next-action")
-        shown_alias = run_cli(
-            "--output-directory", str(output), "--show-next-upload"
-        )
         self.assertEqual(shown.returncode, 0)
-        self.assertEqual(shown_alias.returncode, 0)
-        self.assertEqual(shown_alias.stdout, shown.stdout)
         self.assertIn(first["path"], shown.stdout)
         self.assertNotIn(second["path"], shown.stdout)
         first_bytes = (output / first["path"]).read_bytes()
@@ -645,7 +640,7 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertEqual(recorded.returncode, 0)
         self.assertIn("nextUploadIndex=2", recorded.stdout)
         shown_second = run_cli(
-            "--output-directory", str(output), "--show-next-upload"
+            "--output-directory", str(output), "--show-next-action"
         )
         self.assertEqual(shown_second.returncode, 0)
         self.assertIn(second["path"], shown_second.stdout)
@@ -666,7 +661,7 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertEqual(reset.returncode, 0)
         self.assertIn(f"resetUpload={first['index']}", reset.stdout)
         shown_first_again = run_cli(
-            "--output-directory", str(output), "--show-next-upload"
+            "--output-directory", str(output), "--show-next-action"
         )
         self.assertEqual(shown_first_again.returncode, 0)
         self.assertIn(first["path"], shown_first_again.stdout)
@@ -703,12 +698,7 @@ class PreparePatchPublicationTests(unittest.TestCase):
         tree_action = run_cli(
             "--output-directory", str(output), "--show-next-action"
         )
-        tree_action_alias = run_cli(
-            "--output-directory", str(output), "--show-next-upload"
-        )
         self.assertEqual(tree_action.returncode, 0)
-        self.assertEqual(tree_action_alias.returncode, 0)
-        self.assertEqual(tree_action_alias.stdout, tree_action.stdout)
         self.assertIn("stage=create-transfer-tree", tree_action.stdout)
         tree_arguments = connector_arguments(tree_action.stdout)
         self.assertEqual(set(tree_arguments), {"repository_full_name", "tree_elements"})
@@ -736,7 +726,7 @@ class PreparePatchPublicationTests(unittest.TestCase):
         )
         self.assertEqual(recorded_tree.returncode, 0)
         commit_action = run_cli(
-            "--output-directory", str(output), "--show-next-upload"
+            "--output-directory", str(output), "--show-next-action"
         )
         self.assertIn("stage=create-transfer-commit", commit_action.stdout)
         self.assertEqual(
@@ -759,7 +749,7 @@ class PreparePatchPublicationTests(unittest.TestCase):
         )
         self.assertEqual(recorded_commit.returncode, 0)
         branch_action = run_cli(
-            "--output-directory", str(output), "--show-next-upload"
+            "--output-directory", str(output), "--show-next-action"
         )
         self.assertIn("stage=create-transfer-branch", branch_action.stdout)
         self.assertEqual(
@@ -790,7 +780,7 @@ class PreparePatchPublicationTests(unittest.TestCase):
         )
         self.assertEqual(recorded_branch_creation.returncode, 0)
         verify_branch = run_cli(
-            "--output-directory", str(output), "--show-next-upload"
+            "--output-directory", str(output), "--show-next-action"
         )
         self.assertEqual(verify_branch.returncode, 0)
         self.assertIn("stage=verify-transfer-branch", verify_branch.stdout)
@@ -806,7 +796,7 @@ class PreparePatchPublicationTests(unittest.TestCase):
         self.assertNotIn("stage=create-transfer-branch", verify_branch.stdout)
 
         resumed_verification = run_cli(
-            "--output-directory", str(output), "--show-next-upload"
+            "--output-directory", str(output), "--show-next-action"
         )
         self.assertEqual(resumed_verification.returncode, 0)
         self.assertIn("stage=verify-transfer-branch", resumed_verification.stdout)
@@ -830,7 +820,7 @@ class PreparePatchPublicationTests(unittest.TestCase):
             "identical",
         )
         self.assertEqual(recorded_branch.returncode, 0)
-        ready = run_cli("--output-directory", str(output), "--show-next-upload")
+        ready = run_cli("--output-directory", str(output), "--show-next-action")
         self.assertEqual(ready.returncode, 0)
         self.assertIn("stage=ready-to-publish", ready.stdout)
         self.assertIn(str(plan["publicationCommand"]), ready.stdout)
@@ -976,7 +966,7 @@ class PreparePatchPublicationTests(unittest.TestCase):
         malformed["unexpected"] = True
         (output / "upload-state.json").write_text(json.dumps(malformed) + "\n")
         rejected = run_cli(
-            "--output-directory", str(output), "--show-next-upload"
+            "--output-directory", str(output), "--show-next-action"
         )
         self.assertEqual(rejected.returncode, 1)
         self.assertIn("unknown fields", rejected.stderr)

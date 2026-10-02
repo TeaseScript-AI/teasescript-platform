@@ -64,13 +64,8 @@ def build_parser() -> argparse.ArgumentParser:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
         "--show-next-action",
-        "--show-next-upload",
-        dest="show_next_action",
         action="store_true",
-        help=(
-            "show the exact next blob, tree, commit, branch, or publication "
-            "action; --show-next-upload is a compatibility alias"
-        ),
+        help="show the exact next blob, tree, commit, branch, or publication action",
     )
     mode.add_argument(
         "--record-upload-sha",
