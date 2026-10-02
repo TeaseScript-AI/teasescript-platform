@@ -37,4 +37,6 @@ test("serializable-set construction preserves scalar equality and insertion orde
   const values: SerializableRuntimeScalar[] = [1, "1", true, false, null, 0, -0, 1, "1", true];
 
   assert.deepEqual(createSerializableSet(values).items, [1, "1", true, false, null, 0]);
+  // The shared snapshot validator keeps scalars of different kinds distinct as well.
+  assert.equal(validateSerializableValue(createSerializableSet(values)), null);
 });

@@ -908,7 +908,7 @@ test("background pacing actions require dense JSON-safe array entries", () => {
   }
 });
 
-test("#112 persisted arrays reject custom own keys that JSON would omit", () => {
+test("persisted arrays reject custom own keys that JSON would omit", () => {
   const backgroundPlan = plan('say "first"');
   const background = run(backgroundPlan, createFreshRuntimeSnapshot(backgroundPlan));
   const speakerPlan = plan('speaker vera { custom: "kept" }\nexit');

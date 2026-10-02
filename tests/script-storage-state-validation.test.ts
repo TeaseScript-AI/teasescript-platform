@@ -3,12 +3,14 @@ import test from "node:test";
 
 import {
   CheckpointError,
+  completeAction,
   createCheckpoint,
   createFreshRuntimeSnapshot,
   deserializeCheckpoint,
   run,
   serializeCheckpoint,
   type FreshRuntimeOptions,
+  type RuntimeSnapshot,
 } from "../src/index.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
@@ -167,4 +169,59 @@ test("restore rejects a pending storage write in session-local mode", () => {
     snapshot: { ...canonical.snapshot, scriptStoragePersistent: false },
   };
   assert.throws(() => deserializeCheckpoint(JSON.stringify(local)), CheckpointError);
+});
+
+test("restore rejects storage settlements inconsistent with persistence or the failure warning", () => {
+  const compiled = plan('save 1 as "k"\nwait 1 s\nexit');
+  const pending = run(
+    compiled,
+    createFreshRuntimeSnapshot(compiled, { persistentScriptStorage: true }),
+  ).snapshot;
+  const write = pending.foregroundAction;
+  assert.ok(write?.kind === "storageWrite");
+  const settle = (kind: "stored" | "failed") =>
+    run(
+      compiled,
+      completeAction(compiled, pending, {
+        actionId: write.actionId,
+        actionKind: "storageWrite",
+        payload: { kind },
+      }).snapshot,
+    ).snapshot;
+  const restore = (snapshot: RuntimeSnapshot) => () =>
+    deserializeCheckpoint(
+      JSON.stringify({
+        ...JSON.parse(serializeCheckpoint(createCheckpoint(compiled, settle("stored")))),
+        snapshot,
+      }),
+    );
+
+  const sessionLocal = { ...settle("stored"), scriptStoragePersistent: false };
+  assert.equal(sessionLocal.lastSettlement?.actionKind, "storageWrite");
+  assert.throws(restore(sessionLocal), CheckpointError);
+
+  const failed = settle("failed");
+  assert.ok(failed.lastSettlement?.actionKind === "storageWrite");
+  const withoutWarningSlot = {
+    ...failed,
+    lastSettlement: {
+      ...failed.lastSettlement,
+      completionEventSequence: failed.lastSettlement.requestEventSequence + 1,
+    },
+  };
+  assert.doesNotThrow(restore(failed));
+  assert.throws(restore(withoutWarningSlot), CheckpointError);
+});
+
+test("a builtin result with an unknown field on a tagged value fails as malformed data", () => {
+  const compiled = plan("let value = odd()\nexit", { builtins: ["odd"] });
+  const result = run(compiled, createFreshRuntimeSnapshot(compiled), {
+    builtins: {
+      odd: () =>
+        // EVIDENCE: the builtin deliberately returns a range with an unknown field for runtime rejection.
+        ({ kind: "range", start: 1, end: 2, inclusive: true, extra: 1 }) as never,
+    },
+  });
+  assert.equal(result.snapshot.status, "failed");
+  assert.equal(result.snapshot.failure?.code, "TSR013");
 });

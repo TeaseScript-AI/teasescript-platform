@@ -124,6 +124,10 @@ test("invalid random built-in arguments fail with source-associated errors", () 
   );
 });
 
+test("chance at both ends of the percentage range is certain", () => {
+  assert.deepEqual(sayTexts(runSource("say chance(0)\nsay chance(100)")), ["false", "true"]);
+});
+
 test("instruction budget stops an infinite while loop", () => {
   const compiled = plan("while true {}\n");
   const result = run(compiled, createFreshRuntimeSnapshot(compiled), {}, { instructionBudget: 20 });

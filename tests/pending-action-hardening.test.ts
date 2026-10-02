@@ -40,7 +40,7 @@ function mutable(snapshot: RuntimeSnapshot): RuntimeSnapshot {
   return JSON.parse(JSON.stringify(snapshot)) as RuntimeSnapshot;
 }
 
-test("#78 rejects due foreground delays through direct and checkpoint boundaries", () => {
+test("due foreground delays are rejected through direct and checkpoint boundaries", () => {
   const { compiled, snapshot } = waiting();
   for (const currentSessionTimeMs of [9, 10, 11]) {
     const candidate = mutable(snapshot);
@@ -228,7 +228,7 @@ test("zero waits remain immediate while terminal waits use ordinary natural comp
   );
 });
 
-test("#79 validates every settlement relationship and preserves valid replay", () => {
+test("every settlement relationship is validated and valid replay is preserved", () => {
   const compiled = plan("wait 1 ms\nwait 10 ms\nexit");
   const firstWaiting = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
   const firstSettled = observeTime(compiled, firstWaiting, 1).snapshot;
@@ -290,7 +290,7 @@ test("#79 validates every settlement relationship and preserves valid replay", (
   assert.equal(replay.instructionsExecuted, 0);
 });
 
-test("#81 keeps representable fractional waits and rejects precision-losing deadlines before an action request", () => {
+test("wait keeps representable fractional delays and fails precision-losing deadlines before an action request", () => {
   const conversions: ReadonlyArray<readonly [string, number]> = [
     ["wait 0.5", 500],
     ["wait 0.5 ms", 0.5],
@@ -365,7 +365,7 @@ test("#81 keeps representable fractional waits and rejects precision-losing dead
   assert.equal(observeTime(restored.plan, restored.snapshot, 2 ** 52).snapshot.status, "running");
 });
 
-test("#82 uses the wait keyword path and rejects forged ownership and missing wait temporaries", () => {
+test("wait uses the keyword path, and validation rejects forged ownership and missing wait temporaries", () => {
   // `wait` is a keyword, never a callable builtin: a call form may only fail with a located diagnostic or mean the
   // same one-second delay.
   const callForm = compileSource("wait(1)");
@@ -411,7 +411,7 @@ test("#82 uses the wait keyword path and rejects forged ownership and missing wa
   assert.equal(validateRuntimeSnapshot(missingTemporary, temporaryWait.compiled).valid, false);
 });
 
-test("#82 allocates the final safe action identity and then fails without reuse", () => {
+test("the final safe action identity is allocated, and the next allocation fails without reuse", () => {
   const source = "wait 1 ms\nwait 1 ms\nexit";
   const compiled = plan(source);
   const initial = createFreshRuntimeSnapshot(compiled);
