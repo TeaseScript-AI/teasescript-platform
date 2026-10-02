@@ -164,44 +164,32 @@ test("result interaction destinations are produced only by the interaction and a
   }
 });
 
-test("transferred interaction result is independent of the cleanup temporary", () => {
-  const injected = injectTextInteraction('let answer = "__interaction_result__"\nsay answer\nexit');
-  const pending = waiting(injected.plan);
-  const completed = completeAction(
-    injected.plan,
-    pending.snapshot,
-    textCompletionRequest(pending.snapshot),
+test("a transferred interaction result is ordinary state that later writes may change", () => {
+  const plan = compiledTextInteraction(
+    'let answer = askText\nanswer = "changed"\nwait 1 ms\nsay answer\nexit',
+  ).plan;
+  const pending = waiting(plan);
+  const completed = completeAction(plan, pending.snapshot, textCompletionRequest(pending.snapshot));
+  assert.equal(completed.outcome.kind, "completed");
+
+  // At the wait the interaction settlement is still the retained one, but the binding already
+  // holds an ordinary reassignment that carries no interaction provenance.
+  const delay = run(plan, completed.snapshot);
+  assert.equal(delay.snapshot.foregroundAction?.kind, "delay");
+  assert.equal(delay.snapshot.interactionResultHandoff, null);
+  assert.equal(delay.snapshot.lastSettlement?.actionKind, "interaction");
+  assert.equal(bindingValue(delay.snapshot, "answer"), "changed");
+  assert.equal(validateRuntimeSnapshot(delay.snapshot, plan).valid, true);
+  const restored = checkpointJsonRoundTrip(plan, delay.snapshot);
+  assert.deepEqual(restored.snapshot, delay.snapshot);
+
+  const settled = observeTime(restored.plan, restored.snapshot, 1);
+  const final = run(restored.plan, settled.snapshot);
+  assert.equal(final.snapshot.status, "halted");
+  assert.deepEqual(
+    final.events.filter((event) => event.kind === "say").map((event) => event.text),
+    ["changed"],
   );
-  const transferred = executeInstruction(injected.plan, completed.snapshot);
-
-  assert.equal(transferred.snapshot.nextInstruction, injected.clearInstruction);
-  assert.equal(transferred.snapshot.interactionResultHandoff, null);
-  assert.equal(bindingValue(transferred.snapshot, "answer"), "committed");
-  assert.equal(temporaryValue(transferred.snapshot, injected.destinationTemporary), "committed");
-
-  const changedCleanupTemporary = structuredClone(transferred.snapshot);
-  changedCleanupTemporary.temporaries.find(
-    (temporary) => temporary.id === injected.destinationTemporary,
-  )!.value = "changed cleanup value";
-  const changedBeforeValidation = structuredClone(changedCleanupTemporary);
-  assert.equal(validateRuntimeSnapshot(changedCleanupTemporary, injected.plan).valid, true);
-  assert.deepEqual(changedCleanupTemporary, changedBeforeValidation);
-  assert.doesNotThrow(() => createCheckpoint(injected.plan, changedCleanupTemporary));
-
-  const cleaned = executeInstruction(injected.plan, changedCleanupTemporary);
-  assert.equal(
-    cleaned.snapshot.temporaries.some(
-      (temporary) => temporary.id === injected.destinationTemporary,
-    ),
-    false,
-  );
-  assert.equal(bindingValue(cleaned.snapshot, "answer"), "committed");
-
-  const ordinaryMutation = structuredClone(cleaned.snapshot);
-  ordinaryMutation.frames[0]!.bindings.find((binding) => binding.name === "answer")!.value =
-    "ordinary replacement";
-  assert.equal(validateRuntimeSnapshot(ordinaryMutation, injected.plan).valid, true);
-  assert.doesNotThrow(() => createCheckpoint(injected.plan, ordinaryMutation));
 });
 
 test("removed lifecycle fields are rejected structurally", () => {
@@ -1450,79 +1438,56 @@ test("PR194 matrix: handoff shapes that would reach invalid runtime states are r
 interface OwnershipResumeRow {
   readonly id: string;
   readonly source: string;
-  readonly owner: "root" | "active-frame";
-  readonly makePlan: (injected: InjectedInteractionPlan) => InstructionPlan;
   readonly assertPending: (snapshot: RuntimeSnapshot) => void;
-  readonly assertFinal: (snapshot: RuntimeSnapshot, events: readonly InterpreterEvent[]) => void;
+  readonly finalSay: string;
 }
 
 test("PR194 matrix: ownership contexts resume from pending and committed boundaries", () => {
   const rows: readonly OwnershipResumeRow[] = [
     {
-      id: "PR194-resume-context-function-body",
-      source:
-        'function prompt { let answer = "__interaction_result__"\nsay answer\nreturn }\nprompt()\nexit',
-      owner: "active-frame",
-      makePlan: (injected) => injected.plan,
-      assertPending: (snapshot) => assert.equal(snapshot.callFrames.length, 1),
-      assertFinal: (snapshot, events) => {
-        assert.equal(snapshot.callFrames.length, 0);
-        assert.ok(events.some((event) => event.kind === "say" && event.text === "committed"));
-      },
-    },
-    {
-      id: "PR194-resume-context-function-argument",
-      source: 'function send(value) { say value\nreturn }\nsend("__interaction_result__")\nexit',
-      owner: "root",
-      makePlan: (injected) => injected.plan,
-      assertPending: (snapshot) => assert.equal(snapshot.callFrames.length, 0),
-      assertFinal: (_snapshot, events) =>
-        assert.ok(events.some((event) => event.kind === "say" && event.text === "committed")),
-    },
-    {
       id: "PR194-resume-context-nested-return-value",
-      source:
-        'function inner { return "__interaction_result__" }\nfunction outer { let answer = inner()\nsay answer\nreturn }\nouter()\nexit',
-      owner: "active-frame",
-      makePlan: (injected) => injected.plan,
+      source: [
+        "function inner { return askText }",
+        "function outer { let answer = inner()",
+        "say answer",
+        "return }",
+        "outer()",
+        "exit",
+      ].join("\n"),
       assertPending: (snapshot) => assert.equal(snapshot.callFrames.length, 2),
-      assertFinal: (snapshot, events) => {
-        assert.equal(snapshot.callFrames.length, 0);
-        assert.ok(events.some((event) => event.kind === "say" && event.text === "committed"));
-      },
+      finalSay: "committed",
     },
     {
       id: "PR194-resume-context-suspended-caller",
-      source:
-        'function prompt { return "__interaction_result__" }\nfunction send(before, answer) { say \"${before}:${answer}\"\nreturn }\nsend("first", prompt())\nexit',
-      owner: "active-frame",
-      makePlan: (injected) => injected.plan,
+      source: [
+        "function prompt { return askText }",
+        'function send(before, answer) { say "${before}:${answer}"',
+        "return }",
+        'send("first", prompt())',
+        "exit",
+      ].join("\n"),
       assertPending: (snapshot) => {
         assert.equal(snapshot.callFrames.length, 1);
         const caller = snapshot.callFrames[0];
         const action = snapshot.foregroundAction;
         assert.ok(caller !== undefined && action?.kind === "interaction");
         assert.ok(caller.callerTemporaries.some((temporary) => temporary.value === "first"));
-        assert.equal(action.ownerCallFrameId, caller.id);
         // The suspended caller's return destination stays distinct from the interaction destination.
         assert.equal(typeof caller.destinationTemporary, "number");
         assert.notEqual(caller.destinationTemporary, action.destinationTemporary);
       },
-      assertFinal: (snapshot, events) => {
-        assert.equal(snapshot.callFrames.length, 0);
-        assert.ok(events.some((event) => event.kind === "say" && event.text === "first:committed"));
-      },
+      finalSay: "first:committed",
     },
   ];
 
   for (const row of rows) {
-    const injected = injectTextInteraction(row.source);
-    const plan = row.makePlan(injected);
-    assert.equal(validateInstructionPlan(plan).valid, true, row.id);
+    const plan = compiledTextInteraction(row.source).plan;
     const pending = waiting(plan).snapshot;
     const action = pending.foregroundAction;
     assert.ok(action !== null && action.kind === "interaction", row.id);
-    assert.equal(action.ownerCallFrameId === null, row.owner === "root", `${row.id}: action owner`);
+    // The innermost active call frame owns the interaction.
+    assert.notEqual(action.ownerCallFrameId, null, `${row.id}: action owner`);
+    assert.equal(action.ownerCallFrameId, pending.callFrames.at(-1)?.id, `${row.id}: action owner`);
     row.assertPending(pending);
     const completed = assertInteractionResumeEquivalent(
       plan,
@@ -1544,7 +1509,12 @@ test("PR194 matrix: ownership contexts resume from pending and committed boundar
     ).uninterrupted;
     assert.equal(final.snapshot.interactionResultHandoff, null, `${row.id}: final handoff`);
     assert.equal(final.snapshot.status, "halted", `${row.id}: final status`);
-    row.assertFinal(final.snapshot, final.events);
+    assert.equal(final.snapshot.callFrames.length, 0, `${row.id}: final frames`);
+    assert.deepEqual(
+      final.events.filter((event) => event.kind === "say").map((event) => event.text),
+      [row.finalSay],
+      `${row.id}: final output`,
+    );
   }
 });
 
