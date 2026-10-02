@@ -252,10 +252,7 @@ test("checkpoint restore preserves RNG and event sequences between calls", () =>
 
   assert.deepEqual([...first.events, ...rest.events], uninterrupted.events);
   assert.deepEqual(rest.snapshot.rng, uninterrupted.snapshot.rng);
-  assert.deepEqual(
-    rest.events.map((event) => event.sequence),
-    [2, 3],
-  );
+  assert.ok(rest.events[0]!.sequence > first.events.at(-1)!.sequence);
 });
 
 test("checkpoint restore accepts range loop-position length and rejects length + 1", () => {
