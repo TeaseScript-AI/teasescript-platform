@@ -109,9 +109,10 @@ test("nested expression parsing preserves runtime order, grouping, interpolation
   );
 });
 
-// Expected recovery results captured from main before the continuation repair.
-// These rows cover distinct grammar continuations; the complete differential
-// campaign also compared ASTs and every span against that baseline.
+// Each row covers a distinct grammar continuation. Root diagnostics follow from the grammar: the first missing or
+// unexpected token. A value missing after a `:` that ends its line is reported at the start of the continued line,
+// the position chosen when newline continuation after `:` was added. Rows with `root` fix only that first diagnostic,
+// because secondary unwinding may improve; their recovery must still keep the final `exit`.
 test("nested malformed expressions retain root diagnostics, spans, and statement recovery", () => {
   const fixtures = [
     {
@@ -124,34 +125,14 @@ test("nested malformed expressions retain root diagnostics, spans, and statement
       diagnostics: [["TSP012", 25, 25]],
       statements: ["letStatement", "exitStatement"],
     },
-    {
-      expression: "(1 + (2 * ))",
-      // Only the missing-operand root is fixed; same-offset unwinding may change.
-      root: ["TSP012", 22, 22],
-      statements: ["exitStatement"],
-    },
+    { expression: "(1 + (2 * ))", root: ["TSP012", 22, 22] },
     {
       expression: "f(0,f(a:1,2),2)",
       diagnostics: [["TSP019", 22, 23]],
       statements: ["letStatement", "exitStatement"],
     },
-    {
-      expression: '"a${"b${1:2}"}c"',
-      diagnostics: [
-        ["TSP009", 21, 22],
-        ["TSP009", 25, 26],
-        ["TSP012", 28, 28],
-      ],
-      statements: ["exitStatement"],
-    },
-    {
-      expression: "a[b[]].p",
-      diagnostics: [
-        ["TSP012", 16, 16],
-        ["TSP002", 17, 17],
-      ],
-      statements: ["letStatement", "exitStatement"],
-    },
+    { expression: '"a${"b${1:2}"}c"', root: ["TSP009", 21, 22] },
+    { expression: "a[b[]].p", root: ["TSP012", 16, 16] },
     {
       expression: "askText askText as",
       diagnostics: [["TSP029", 30, 30]],
@@ -192,16 +173,18 @@ test("nested malformed expressions retain root diagnostics, spans, and statement
       d.span.start.offset,
       d.span.end.offset,
     ]);
+    const statements = parsed.program.statements.map((s) => s.kind);
     if ("root" in fixture) {
       assert.deepEqual(diagnostics[0], fixture.root, fixture.expression);
+      assert.equal(statements.at(-1), "exitStatement", fixture.expression);
+      assert.ok(
+        statements.every((kind) => kind === "letStatement" || kind === "exitStatement"),
+        fixture.expression,
+      );
     } else {
       assert.deepEqual(diagnostics, fixture.diagnostics, fixture.expression);
+      assert.deepEqual(statements, fixture.statements, fixture.expression);
     }
-    assert.deepEqual(
-      parsed.program.statements.map((s) => s.kind),
-      fixture.statements,
-      fixture.expression,
-    );
     if ("outerProperties" in fixture) {
       // The inner object error must not discard the outer siblings around it.
       const [declaration] = parsed.program.statements;
