@@ -1,6 +1,5 @@
 import {
   newFlowState,
-  NUMBER_ANSWERS,
   type FlowState,
   type HostFunction,
   type RuntimeValue,
@@ -90,6 +89,16 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         const named = Object.fromEntries(
           Object.entries(value.named).map(([name, child]) => [name, expression(child)]),
         );
+        if (value.name === "askInteger" && capability !== undefined) {
+          // A real number input keeps the interaction boundary of each answer in the copy: the placeholder
+          // evaluates the prompt and returns 0, and the input supplies the number.
+          return {
+            kind: "binary",
+            operator: "+",
+            left: call(capability, "askIntegerPrompt", positional, named),
+            right: { kind: "input", input: "askNumber" },
+          };
+        }
         return capability === undefined
           ? { ...value, positional, named }
           : call(capability, value.name, positional, named);
@@ -305,9 +314,9 @@ function collectNames(value: unknown, names: Set<string>): void {
 /**
  * Host stand-ins for the pending capabilities of a shimmed program, for smoke runs only: storage follows the owner
  * semantics (a missing key reads as null or the supplied default, reads never write), `run` records its target in
- * the flow state, time and dates follow the simulated clock from 2026-10-02 12:00 UTC, inputs rotate through simple
- * valid answers like the runner's interaction answers, and conversions fail without a `default` like the accepted
- * functions.
+ * the flow state, time and dates follow the simulated clock from 2026-10-02 12:00 UTC, conversions fail without a
+ * `default` like the accepted functions, and a timed button answers quickly, then at its timeout, without advancing
+ * the clock. Integer input is a real number input in the shimmed program.
  */
 export function pendingHostFunctions(
   shim: PendingShim,
@@ -351,7 +360,8 @@ export function pendingHostFunctions(
       name: string,
       parse: (value: RuntimeValue | undefined) => RuntimeValue | undefined,
     ): HostFunction =>
-    ([value], named) => {
+    ([positionalValue], named) => {
+      const value = positionalValue ?? named.value;
       const converted = parse(value);
       if (converted !== undefined) return converted;
       if (named.default !== undefined) return named.default;
@@ -387,14 +397,18 @@ export function pendingHostFunctions(
     ["run", ([script]) => ((state.transfer = String(script)), null)],
     ["end", () => null],
     ["showPopup", () => null],
-    // Seconds until the click: quick, then slow, the slow answer limited by a timeout.
+    // Seconds until the click: quick, then at the timeout. The simulated clock does not advance meanwhile.
     [
       "showButton",
-      ([, timeout]) => next("showButton", [1, typeof timeout === "number" ? timeout : 30]),
+      ([, positionalTimeout], named) => {
+        const timeout = positionalTimeout ?? named.timeout;
+        const limit = typeof timeout === "number" ? timeout : 30;
+        return next("showButton", [Math.min(1, limit), limit]);
+      },
     ],
+    ["askIntegerPrompt", () => 0],
     ["askBoolean", () => next("askBoolean", [true, false])],
     ["askBooleans", (_, named) => named.defaults ?? emptyList],
-    ["askInteger", () => next("askInteger", NUMBER_ANSWERS)],
     ["getSeconds", () => Math.floor((epochMs + state.clock.nowMs) / 1000)],
     ["getDateTime", () => date(true)],
     ["getDate", () => date(false)],

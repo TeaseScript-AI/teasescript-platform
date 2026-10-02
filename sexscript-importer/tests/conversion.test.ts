@@ -248,6 +248,39 @@ test(
   },
 );
 
+test(
+  "package smoke run blocks scripts whose paths differ only in case",
+  {
+    skip:
+      parserUnavailable ||
+      ("reason" in compilerResult ? compilerResult.reason : false) ||
+      ("reason" in runnerResult ? runnerResult.reason : false),
+  },
+  async () => {
+    if (!("compiler" in compilerResult) || !("runner" in runnerResult)) return;
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-case-"));
+    try {
+      writeFileSync(path.join(directory, "A.groovy"), 'show("Upper")\n');
+      writeFileSync(path.join(directory, "a.groovy"), 'show("Lower")\n');
+      const files = await Promise.all(
+        ["A.groovy", "a.groovy"].map((name) => parseGroovySource(path.join(directory, name))),
+      );
+      const report = analyzeFeasibility(files, {
+        compiler: compilerResult.compiler,
+        runner: runnerResult.runner,
+        packageRoot: directory,
+      });
+      assert.deepEqual(
+        report.smokeRuns.map(({ entry, status }) => ({ entry, status })),
+        [{ entry: "a.tease", status: "blocked" }],
+      );
+      assert.equal(report.smokeRunReachedScriptFileCount, 0);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 // The smoke runner drives the public runtime API like a Player with deterministic answers.
 test(
   "smoke runner plays media in simulated time and reports the last step's outcome",

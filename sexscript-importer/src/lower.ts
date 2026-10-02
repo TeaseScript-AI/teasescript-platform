@@ -780,7 +780,7 @@ function lowerConditionalStatement(node: AstNode, context: LowerContext): IrStat
       ...lowerStatement(syntheticAssignment(false, target, asNode(root.right)!, span), context),
     ];
   }
-  const split = splitConditional(conditional, span, context);
+  const split = splitConditional(conditional);
   if (split === null) return null;
   return lowerStatement(
     syntheticIf(
@@ -859,8 +859,6 @@ function lowerConditionalAssignment(
 /** Returns the condition and branch values; an Elvis operand must be repeatable to serve as both. */
 function splitConditional(
   conditional: AstNode,
-  span: SourceSpan | null,
-  context: LowerContext,
 ): { condition: AstNode; whenTrue: AstNode; whenFalse: AstNode } | null {
   if (conditional.kind === "ternary") {
     const condition = asNode(conditional.condition);

@@ -283,7 +283,9 @@ function runPackageFlows(
   runner: TeaseRunner,
   packageRoot: string | undefined,
 ): void {
-  const segments = (file: string): string[] => path.resolve(file).split(path.sep);
+  // Parser JSON from Windows may use backslashes.
+  const segments = (file: string): string[] =>
+    path.resolve(file.replaceAll("\\", "/")).split(path.sep);
   const directories = flowScripts.map(({ sourceName }) => segments(sourceName).slice(0, -1));
   const root =
     packageRoot === undefined
@@ -300,10 +302,21 @@ function runPackageFlows(
         .join("/")
         .replace(/\.groovy$/iu, ".tease"),
     );
-  const scripts = new Map(flowScripts.map(({ sourceName, script }) => [keyOf(sourceName), script]));
+  // Two files whose paths differ only in case are ambiguous for the legacy player; flows reaching them are blocked.
+  const keyCounts = new Map<string, number>();
+  for (const { sourceName } of flowScripts) {
+    keyCounts.set(keyOf(sourceName), (keyCounts.get(keyOf(sourceName)) ?? 0) + 1);
+  }
+  const scripts = new Map(
+    flowScripts.map(({ sourceName, script }) => {
+      const key = keyOf(sourceName);
+      return [key, keyCounts.get(key) === 1 ? script : null];
+    }),
+  );
   const entries = flowScripts
     .filter((_, index) => directories[index]!.join(path.sep) === root.join(path.sep))
     .map(({ sourceName }) => keyOf(sourceName))
+    .filter((key, index, keys) => keys.indexOf(key) === index)
     .sort();
   const reached = new Set<string>();
   const record = (flow: FlowRunResult): void => {
@@ -320,7 +333,13 @@ function runPackageFlows(
   };
   for (const entry of entries) record(smokeRunFlow(runner, entry, scripts));
   // Scripts that no other script transfers to start isolated runs first, so their targets run with their state.
-  const targets = new Set(flowScripts.flatMap(({ transfers }) => transfers.map(flowKey)));
+  const targets = new Set(
+    flowScripts.flatMap(({ sourceName, script, transfers }) =>
+      script === null
+        ? []
+        : transfers.map(flowKey).filter((target) => target !== keyOf(sourceName)),
+    ),
+  );
   const unreached = [...scripts]
     .filter(([, script]) => script !== null)
     .map(([key]) => key)

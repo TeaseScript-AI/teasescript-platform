@@ -363,8 +363,7 @@ function smokeRun(
 }
 
 const TEXT_ANSWERS = ["answer", "yes", "no"];
-/** Answers for number inputs, also used by host stand-ins for pending integer inputs. */
-export const NUMBER_ANSWERS = [1, 3, 10, 0];
+const NUMBER_ANSWERS = [1, 3, 10, 0];
 
 function interactionAnswer(action: RuntimeData, visit: number) {
   switch (action.interactionKind) {
