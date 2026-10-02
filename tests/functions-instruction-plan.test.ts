@@ -12,6 +12,9 @@ test("assigns deterministic function and temporary IDs", () => {
     "function first { return 1 }",
     "function second { return 2 }",
     "let result = first() + second()",
+    "result = result + 1",
+    'say "${result}"',
+    "exit",
   ].join("\n");
   const first = plan(source);
   const second = plan(source);
