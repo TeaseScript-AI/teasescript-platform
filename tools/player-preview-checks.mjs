@@ -1081,7 +1081,21 @@ async function tooltipClickFocusChecks(page) {
     ))
   )
     throw new Error("Keyboard opening the drawer lost visible focus on Hide sidebar");
-  return "PASS pointer sidebar clicks dismiss tooltips while keyboard focus retains its tooltip";
+
+  // After keyboard use, a mouse click that reopens the drawer leaves no focus tooltip behind.
+  await page.keyboard.press("Escape");
+  await page.locator('[data-slot="sheet-content"]').waitFor({ state: "detached" });
+  await show.click();
+  await page.waitForFunction(
+    () => document.activeElement?.getAttribute("aria-label") === "Hide sidebar",
+  );
+  // A focus tooltip opens with the focus; give it two frames to render.
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  if (await content.filter({ hasText: "Hide sidebar" }).count())
+    throw new Error("A mouse click after keyboard use left a focus tooltip on Hide sidebar");
+  return "PASS pointer sidebar clicks leave no tooltip, also after keyboard use, while keyboard focus shows one";
 }
 
 async function playerTooltipChecks(page) {
