@@ -5,7 +5,7 @@
 `player/runtime-adapter.ts` is the framework-independent Player adapter shared by the Player and the
 playground's action lookup/completion path. It maps validated pending actions and runtime events to Player presentation,
 submits typed interactions, pacing/time observations, media load reports, and media progress, projects the Stage and
-active media for playback, and uses the canonical runtime checkpoint operations. The Phase 2C Player plays the
+active media for playback, and uses the canonical runtime checkpoint operations. The Player plays the
 projected audio through `player/media-device.ts` and shows the Stage image; browser video playback remains deferred.
 `playground/workspace/controller.ts` retains the DOM-free compiler/execution and development-automation workspace
 facade. Neither adapter normalizes answers, matches choices, derives canonical transcript text, or retains an
@@ -315,7 +315,7 @@ Player-authored messages do not create gates. No compiler lookahead across branc
 Message presentation follows the accepted [speaker inheritance and override contract](specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides).
 The runtime resolves mode/style into `MessagePresentation` while preparing output, preserves that data through pacing
 promotion and checkpoints, and emits it with the canonical `say` event. The Player adapter forwards these values; the
-Phase 2C Player renders them under the observable contract in [Player UI](ui/PLAYER-UI.md). Invalid colour values fall
+Player renders them under the observable contract in [Player UI](ui/PLAYER-UI.md). Invalid colour values fall
 back without a new warning policy; general diagnostic/recovery design is tracked separately in #427.
 
 ### Skippable gate completion
