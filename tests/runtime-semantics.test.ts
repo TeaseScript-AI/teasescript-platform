@@ -377,21 +377,27 @@ test("removes only the first matching list value without a missing-value warning
   );
 });
 
-test("does not apply the list.remove warning to sets or other list removals", () => {
-  const result = executeSource([
-    "let values = [1]",
-    "let setValue = set[1]",
-    "setValue.remove(2)",
-    "values.removeFirst()",
-    "values.removeLast()",
-    "values.clear()",
-    "exit",
-  ]);
+test("set remove of an absent value and removeFirst or removeLast on an empty list are no-ops", () => {
+  const captured: unknown[] = [];
+  const result = executeSource(
+    [
+      "let setValue = set[1]",
+      "setValue.remove(2)",
+      "let emptyList = []",
+      "emptyList.removeFirst()",
+      "emptyList.removeLast()",
+      "capture(setValue.toList())",
+      "capture(emptyList)",
+      "exit",
+    ],
+    { capture: captureInto(captured) },
+  );
 
-  assert.deepEqual(result.errors, []);
-  assert.equal(
-    result.warnings.some((warning) => warning.code === "TSW002"),
-    false,
+  assert.deepEqual(captured, [[1], []]);
+  // Unlike list remove(value), these no-ops report neither an error nor a warning.
+  assert.deepEqual(
+    result.events.map((event) => event.kind),
+    ["exit"],
   );
 });
 
