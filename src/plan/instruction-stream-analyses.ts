@@ -759,6 +759,11 @@ export function expressionMayReferenceTemporary(value: unknown, temporaryId: num
         expressionMayReferenceTemporary(value.start, temporaryId) ||
         expressionMayReferenceTemporary(value.end, temporaryId)
       );
+    case "storageLoad":
+      return (
+        expressionMayReferenceTemporary(value.key, temporaryId) ||
+        expressionMayReferenceTemporary(value.default, temporaryId)
+      );
     default:
       return false;
   }
@@ -1119,6 +1124,9 @@ function expressionGuaranteesTemporaryEvaluation(value: unknown, temporaryId: nu
         expressionGuaranteesTemporaryEvaluation(value.start, temporaryId) ||
         expressionGuaranteesTemporaryEvaluation(value.end, temporaryId)
       );
+    case "storageLoad":
+      // The default runs only for an absent key.
+      return expressionGuaranteesTemporaryEvaluation(value.key, temporaryId);
     default:
       return false;
   }

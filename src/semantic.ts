@@ -106,6 +106,7 @@ const semanticCode = {
   mixedDurationOperands: "TSV035",
   invalidMedia: "TSV036",
   invalidMediaHandleMember: "TSV037",
+  invalidStorageKey: "TSV038",
 } as const;
 
 export function validateSemantics(
@@ -730,6 +731,13 @@ class SemanticValidator {
       }
       case "hideImageStatement":
         return;
+      case "saveStatement":
+        this.#validateExpression(statement.value, scope, null);
+        this.#validateStorageKey(statement.key, scope, "Storage key must be a string.");
+        return;
+      case "deleteStatement":
+        this.#validateStorageKey(statement.key, scope, "Storage key must be a string.");
+        return;
       case "assignmentStatement":
         this.#validateAssignmentTarget(statement.target, scope);
         this.#validateExpression(statement.value, scope, null);
@@ -1061,6 +1069,17 @@ class SemanticValidator {
       case "playMediaExpression":
         yield* compileChild(this.#validateMediaTask(expression, scope, true, null));
         return;
+      case "loadExpression":
+        yield* compileChild(this.#validateExpressionTask(expression.key, scope, contextualSpeaker));
+        if (isDefinitelyNonString(expression.key)) {
+          this.#report(semanticCode.invalidStorageKey, LOAD_KEY_MESSAGE, expression.key.span);
+        }
+        if (expression.defaultValue !== null) {
+          yield* compileChild(
+            this.#validateExpressionTask(expression.defaultValue, scope, contextualSpeaker),
+          );
+        }
+        return;
       case "indexExpression":
         yield* compileChild(
           this.#validateExpressionTask(expression.object, scope, contextualSpeaker),
@@ -1178,6 +1197,11 @@ class SemanticValidator {
         return;
     }
     expression satisfies never;
+  }
+
+  #validateStorageKey(key: Expression, scope: SemanticScope, message: string): void {
+    this.#validateExpression(key, scope, null);
+    if (isDefinitelyNonString(key)) this.#report(semanticCode.invalidStorageKey, message, key.span);
   }
 
   #interactionSpeaker(
@@ -1559,6 +1583,39 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
     expression.kind === "objectLiteral" ||
     expression.kind === "rangeExpression" ||
     expression.kind === "durationLiteral" ||
+    expression.kind === "timerExpression" ||
+    expression.kind === "playMediaExpression"
+  );
+}
+
+const LOAD_KEY_MESSAGE =
+  "Storage key must be a string. To compare the loaded value, write '(load \"k\") == null'.";
+
+const NON_STRING_OPERATORS: ReadonlySet<string> = new Set([
+  "==",
+  "!=",
+  "<",
+  "<=",
+  ">",
+  ">=",
+  "and",
+  "or",
+]);
+
+/** A storage key that can never evaluate to a string, such as the comparison in `load "k" == null`. */
+function isDefinitelyNonString(expression: Expression): boolean {
+  expression = unwrapParentheses(expression);
+  if (expression.kind === "binaryExpression") return NON_STRING_OPERATORS.has(expression.operator);
+  return (
+    expression.kind === "numberLiteral" ||
+    expression.kind === "durationLiteral" ||
+    expression.kind === "booleanLiteral" ||
+    expression.kind === "nullLiteral" ||
+    expression.kind === "listLiteral" ||
+    expression.kind === "setLiteral" ||
+    expression.kind === "objectLiteral" ||
+    expression.kind === "rangeExpression" ||
+    expression.kind === "unaryExpression" ||
     expression.kind === "timerExpression" ||
     expression.kind === "playMediaExpression"
   );

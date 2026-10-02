@@ -57,9 +57,15 @@ import {
   type RuntimeMediaSnapshot,
 } from "./media.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
+import {
+  cloneScriptStorage,
+  sortScriptStorage,
+  validateScriptStorageEntries,
+  type RuntimeScriptStorageEntrySnapshot,
+} from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 25;
+export const RUNTIME_SNAPSHOT_VERSION = 26;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -99,6 +105,8 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "nextTimerId",
   "pendingTimerHandlers",
   "stageImage",
+  "scriptStorage",
+  "scriptStoragePersistent",
   "settledMedia",
   "nextMediaId",
   "maxCallDepth",
@@ -230,7 +238,7 @@ export interface RuntimeInteractionResultHandoffSnapshot {
  */
 export interface RuntimeTerminalContinuationHandoffSnapshot {
   readonly actionId: number;
-  readonly actionKind: "delay" | "interaction" | "mediaPlayback";
+  readonly actionKind: "delay" | "interaction" | "mediaPlayback" | "storageWrite";
   readonly owningInstruction: number;
   readonly continuationInstruction: number;
 }
@@ -285,6 +293,10 @@ export interface RuntimeSnapshot {
   )[];
   /** The persistent Stage image reference, or `null` for an empty Stage. */
   stageImage: string | null;
+  /** This session's view of script storage: loaded from the host at start, changed by `save` and `delete`. */
+  readonly scriptStorage: RuntimeScriptStorageEntrySnapshot[];
+  /** Whether a host provider persists script storage, so `save` and `delete` wait for its acknowledgement. */
+  readonly scriptStoragePersistent: boolean;
   /** Finished or stopped media, retained so their handles stay readable. Active media are background actions. */
   readonly settledMedia: RuntimeMediaSnapshot[];
   nextMediaId: number;
@@ -296,6 +308,13 @@ export interface RuntimeSnapshot {
 export interface FreshRuntimeOptions {
   readonly seed?: number;
   readonly globals?: Readonly<Record<string, SerializableRuntimeValue>>;
+  /** The host's stored values for this script. */
+  readonly scriptStorage?: readonly RuntimeScriptStorageEntrySnapshot[];
+  /**
+   * Whether the host persists script storage. Then `save` and `delete` wait for the host's acknowledgement before the
+   * session sees the change; otherwise storage is session-local.
+   */
+  readonly persistentScriptStorage?: boolean;
   readonly maxCallDepth?: number;
   readonly initialSessionTimeMs?: number;
   readonly baseDelayMs?: number;
@@ -360,6 +379,17 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
       `maxCallDepth must be an integer from 1 through ${MAX_SUPPORTED_CALL_DEPTH}.`,
     );
   }
+  const scriptStorage =
+    capturedOptions.scriptStorage === undefined ? [] : capturedOptions.scriptStorage;
+  const scriptStorageFailure = validateScriptStorageEntries(scriptStorage, "scriptStorage");
+  if (scriptStorageFailure !== null) throw new TypeError(scriptStorageFailure);
+  const persistentScriptStorage =
+    capturedOptions.persistentScriptStorage === undefined
+      ? false
+      : capturedOptions.persistentScriptStorage;
+  if (typeof persistentScriptStorage !== "boolean") {
+    throw new TypeError("persistentScriptStorage must be a boolean.");
+  }
   for (const [name, value] of Object.entries(globals)) {
     if (name.length === 0) throw new TypeError("Global binding names must not be empty.");
     const failure = validateCapturedSerializableValue(value, `globals.${name}`);
@@ -407,6 +437,9 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     nextTimerId: 1,
     pendingTimerHandlers: [],
     stageImage: null,
+    // EVIDENCE: validation: validateScriptStorageEntries accepted these captured entries above.
+    scriptStorage: sortScriptStorage(scriptStorage as RuntimeScriptStorageEntrySnapshot[]),
+    scriptStoragePersistent: persistentScriptStorage,
     settledMedia: [],
     nextMediaId: 1,
     maxCallDepth,
@@ -514,6 +547,8 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     nextTimerId: snapshot.nextTimerId,
     pendingTimerHandlers: snapshot.pendingTimerHandlers.map((invocation) => ({ ...invocation })),
     stageImage: snapshot.stageImage,
+    scriptStorage: cloneScriptStorage(snapshot.scriptStorage),
+    scriptStoragePersistent: snapshot.scriptStoragePersistent,
     settledMedia: snapshot.settledMedia.map(cloneMedia),
     nextMediaId: snapshot.nextMediaId,
     maxCallDepth: snapshot.maxCallDepth,
@@ -589,6 +624,8 @@ function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendin
   if (action.kind === "timer") return { ...action, timer: cloneTimer(action.timer) };
   if (action.kind === "media") return { ...action, media: cloneMedia(action.media) };
   if (action.kind === "mediaPlayback") return { ...action };
+  if (action.kind === "storageWrite")
+    return { ...action, value: cloneCapturedSerializableValue(action.value) };
   if (action.kind === "delay")
     return {
       kind: "delay",
@@ -680,7 +717,11 @@ function cloneSettlement(
       deadlineMs: settlement.deadlineMs,
       completedAtMs: settlement.completedAtMs,
     };
-  if (settlement.actionKind === "chatPacingGate" || settlement.actionKind === "mediaPlayback")
+  if (
+    settlement.actionKind === "chatPacingGate" ||
+    settlement.actionKind === "mediaPlayback" ||
+    settlement.actionKind === "storageWrite"
+  )
     return { ...settlement };
   return {
     actionId: settlement.actionId,
@@ -952,6 +993,15 @@ function validateCapturedRuntimeSnapshotDetails(
   validateMediaState(value, plan, handleIds.media, errors);
   if (value.stageImage !== null && typeof value.stageImage !== "string") {
     errors.push("Runtime stageImage must be a string or null.");
+  }
+  const scriptStorageFailure = validateScriptStorageEntries(
+    value.scriptStorage,
+    "Runtime scriptStorage",
+    true,
+  );
+  if (scriptStorageFailure !== null) errors.push(scriptStorageFailure);
+  if (typeof value.scriptStoragePersistent !== "boolean") {
+    errors.push("Runtime scriptStoragePersistent must be a boolean.");
   }
   validateInteractionResultHandoffState(value, plan, analysis, errors);
   validateTerminalContinuationHandoffState(value, plan, errors);
@@ -2358,7 +2408,13 @@ function validateStatusConsistency(
     const hasForegroundAction = isPlainRecord(action);
     const hasAllowedActionKind =
       hasForegroundAction &&
-      isOneOf(action.kind, ["delay", "interaction", "chatPacingGate", "mediaPlayback"]);
+      isOneOf(action.kind, [
+        "delay",
+        "interaction",
+        "chatPacingGate",
+        "mediaPlayback",
+        "storageWrite",
+      ]);
     if (!hasAllowedActionKind) {
       errors.push("Waiting runtime state requires one foreground action.");
     }
@@ -2671,6 +2727,10 @@ function requiredInstructionTemporaries(
       break;
     case "showImage":
       if (instruction.image !== null) collect(instruction.image);
+      break;
+    case "storageWrite":
+      if (instruction.value !== null) collect(instruction.value);
+      collect(instruction.key);
       break;
     case "playMedia":
       collect(instruction.file);

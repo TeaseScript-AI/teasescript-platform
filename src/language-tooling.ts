@@ -608,6 +608,13 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
     case "showImageStatement":
       children.push({ kind: "expression", node: statement.image });
       return;
+    case "saveStatement":
+      children.push({ kind: "expression", node: statement.value });
+      children.push({ kind: "expression", node: statement.key });
+      return;
+    case "deleteStatement":
+      children.push({ kind: "expression", node: statement.key });
+      return;
     case "hideImageStatement":
     case "speakerSetterStatement":
     case "waitStatement":
@@ -688,6 +695,11 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
       return;
     case "playMediaExpression":
       visitMedia(expression, children);
+      return;
+    case "loadExpression":
+      children.push({ kind: "expression", node: expression.key });
+      if (expression.defaultValue !== null)
+        children.push({ kind: "expression", node: expression.defaultValue });
       return;
     case "identifier":
     case "booleanLiteral":

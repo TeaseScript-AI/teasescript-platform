@@ -28,5 +28,7 @@ export function expressionPlanChildren(expression: ExpressionPlan): readonly Exp
       return [expression.left, expression.right];
     case "range":
       return [expression.start, expression.end];
+    case "storageLoad":
+      return expression.default === null ? [expression.key] : [expression.key, expression.default];
   }
 }

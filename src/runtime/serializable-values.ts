@@ -425,6 +425,7 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
       const propertyPath = nestedPath(item.path, `.properties[${item.index}]`);
       if (
         !isPlainRecord(property) ||
+        !hasOnlyKeys(property, ["name", "value"]) ||
         typeof property.name !== "string" ||
         property.name.length === 0
       ) {
@@ -452,6 +453,7 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
     if (current.kind === "speakerReference") {
       // EVIDENCE: validation: the first condition checks speakerId with Number.isSafeInteger before comparison.
       if (
+        !hasOnlyKeys(current, ["kind", "speakerId", "identifier"]) ||
         !Number.isSafeInteger(current.speakerId) ||
         (current.speakerId as number) < 0 ||
         typeof current.identifier !== "string" ||
@@ -491,6 +493,7 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
     }
     if (current.kind === "range") {
       if (
+        !hasOnlyKeys(current, ["kind", "start", "end", "inclusive"]) ||
         typeof current.start !== "number" ||
         !Number.isFinite(current.start) ||
         typeof current.end !== "number" ||
@@ -501,6 +504,7 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
       continue;
     }
     if (current.kind === "set") {
+      if (!hasOnlyKeys(current, ["kind", "items"])) return `${path()} contains a malformed set.`;
       if (!Array.isArray(current.items)) return `${path()}.items must be an array.`;
       const seen = new Set<SerializableRuntimeScalar>();
       for (let index = 0; index < current.items.length; index += 1) {
@@ -512,6 +516,7 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
       continue;
     }
     if (current.kind === "list") {
+      if (!hasOnlyKeys(current, ["kind", "items"])) return `${path()} contains a malformed list.`;
       if (!Array.isArray(current.items)) return `${path()}.items must be an array.`;
       active.add(current);
       work.push({ kind: "leave", value: current });
@@ -519,6 +524,9 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
       continue;
     }
     if (current.kind === "object") {
+      if (!hasOnlyKeys(current, ["kind", "properties"])) {
+        return `${path()} contains a malformed object.`;
+      }
       if (!Array.isArray(current.properties)) return `${path()}.properties must be an array.`;
       active.add(current);
       work.push({ kind: "leave", value: current });

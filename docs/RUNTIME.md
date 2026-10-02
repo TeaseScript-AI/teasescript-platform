@@ -388,7 +388,8 @@ The current internal instruction-plan, runtime-snapshot, and checkpoint format r
 The current runtime implements blocking `wait`/`timer`, asynchronous timers, compact foreground interactions,
 ADR 0018 `say` pacing, and the Stage image and audio/video playback state. Timer lifecycle, interrupts, and Player
 clock recovery are defined under [Timers and scene time](#timers-and-scene-time); media under
-[Stage image and media playback](#stage-image-and-media-playback).
+[Stage image and media playback](#stage-image-and-media-playback); script storage under
+[Script storage](#script-storage).
 
 Runtime state retains persisted scene time, at most one active foreground action, background timers and media and at
 most one pacing gate, the Stage image, monotonic identities, bounded settlement replay, prepared output, and explicit
@@ -446,9 +447,9 @@ lastSettlement:
     ActionSettlement | null
 ```
 
-A valid current `waiting` snapshot contains exactly one active foreground delay, interaction, `chatPacingGate`, or
-`mediaPlayback` wait. Non-waiting states contain no active foreground action. `backgroundActions` may contain timer
-and media actions and at most one pacing gate. A background pacing gate may coexist with a foreground delay; it is consumed before a foreground
+A valid current `waiting` snapshot contains exactly one active foreground delay, interaction, `chatPacingGate`,
+`mediaPlayback`, or `storageWrite` wait. Non-waiting states contain no active foreground action. `backgroundActions` may contain timer
+and media actions and at most one pacing gate. A background pacing gate may coexist with a foreground delay or storage write; it is consumed before a foreground
 interaction and cannot coexist with a foreground pacing gate.
 
 The shared timer and media interrupt state may retain one inert suspended foreground delay, interaction, or media
@@ -570,7 +571,8 @@ can `stop()` a later timer before it expires, and a timer it starts orders by it
 
 Time reaches waits and timers only through `observeTime`; a Player cannot complete them. Host input (an interaction
 answer or a pacing skip) happens at the observed time, so `completeAction` returns `executionPending` without changing
-anything while scene time is behind the observed time or a due expiry block can run. The Player then runs the engine
+anything while scene time is behind the observed time or a due expiry block can run. A storage write acknowledgement
+is the exception: it is accepted at the current scene time (see [Script storage](#script-storage)). The Player then runs the engine
 and retries with the same action ID; if a block ended or replaced that action, the retry reports it as no longer
 active. A failed session accepts no host input: such a request is `invalidPayload`, and Players schedule no further
 observation for it.
@@ -756,8 +758,8 @@ The low-level runtime entry points are:
 Each low-level runtime entry validates the instruction plan and runtime snapshot before executing or returning, including when the supplied snapshot is already halted or failed. Callers may also invoke `validateInstructionPlan(...)` and `validateRuntimeSnapshot(...)` explicitly. Invalid plan data produces `RuntimeDataError` `TSR100`; invalid snapshot data produces `RuntimeDataError` `TSR101`.
 
 Normal main-path execution stops at `waiting`; validated operations submit time observations and typed completions.
-An eligible queued timer handler may preempt a pending foreground action at runtime entry under
-[Timers and scene time](#timers-and-scene-time).
+An eligible queued timer handler may preempt a pending foreground action other than a storage write at runtime entry
+under [Timers and scene time](#timers-and-scene-time).
 
 ## Host values and capabilities
 
@@ -781,6 +783,38 @@ any separately justified capability/interaction boundary. Raw DOM exceptions, br
 mutable host objects do not enter the snapshot.
 
 Under ADR 0017, Standard Library and package-library wrappers may call documented typed capabilities, but they do not bypass these boundaries or become alternate owners of canonical action state.
+
+## Script storage
+
+The engine implements `save`, `load`, and `delete` under specification
+[§25](specifications/accepted-syntaxes-v30.md#25-persistent-storage-and-keys).
+`RuntimeSnapshot.scriptStorage` is the session's view of host-loaded script storage, represented by
+`RuntimeScriptStorageEntrySnapshot[]` entries with `{ key: string, value: SerializableRuntimeValue }` sorted by key in
+UTF-16 code-unit order. The host supplies the initial view, in any order, through optional
+`FreshRuntimeOptions.scriptStorage`. The view is part of every checkpoint, rather than the durable backing store
+itself. Fresh-session creation and snapshot/checkpoint restore validate the entry array, string keys, key uniqueness,
+and recursively storable values under §25; top-level values cannot be `null`, and a restored view must be sorted.
+Invalid fresh-session storage input throws `TypeError`; malformed snapshot/checkpoint storage uses the existing
+structured validation errors. Storage values, loaded values, and action payloads are independent copies.
+
+`FreshRuntimeOptions.persistentScriptStorage` (default `false`, retained as `scriptStoragePersistent`) selects the
+write path:
+
+- **Session-local:** `save` and `delete` change the view at once; no action or warning is produced.
+- **Persistent:** each `save` and `delete` creates a foreground `storageWrite` action
+  (`{ key, value }`, `value: null` removing the key) and emits `actionRequested`; the view does not change yet. The
+  host persists the write and completes the action through `completeAction` with `actionKind: "storageWrite"` and
+  payload `{ kind: "stored" }` or `{ kind: "failed" }`. Only `stored` changes the view; `failed` keeps the previous
+  value or absence and emits developer warning `TSW014`. The settlement records `outcome` and `key`, is retained for
+  replay like other foreground settlements, and the script continues at the next instruction. The host persists only
+  writes requested by actions it completes; retained event history and restored snapshots never repeat a write.
+
+A pending write is not interruptible. A timer expiry or media cue block that becomes due waits for it: scene-time
+catch-up holds at the block's due time, the completion is accepted at that scene time, and the block then runs at its
+due time before catch-up continues. A pending write survives checkpoint and restore like other foreground actions.
+
+Restoring an older checkpoint carries its older storage view. A later read-modify-write can overwrite newer durable
+data; reconciliation belongs to #469 and is not implemented here.
 
 ## Visible text boundary
 
@@ -810,9 +844,10 @@ choices are unrelated to resource capacity.
 A configured instruction budget must be a positive JavaScript safe integer. Omitting it uses the current product default
 tracked in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). Exhaustion fails deterministically with structured runtime error
 `TSR037` instead of hanging and leaves the returned snapshot failed rather than resumable through a later `run(...)`.
-Fresh snapshot creation validates the plan, serializable globals, call-depth limit, and RNG seed before returning state.
+Fresh snapshot creation validates the plan, serializable globals, script storage, call-depth limit, and RNG seed before
+returning state.
 
-Live externally supplied instruction plans, runtime snapshots, globals, and serializable runtime values are captured
+Live externally supplied instruction plans, runtime snapshots, globals, script storage, and serializable runtime values are captured
 into stable plain-data graphs before detailed validation, freezing, state construction, execution, event emission, or
 RNG consumption. Capture rejects accessors, failed traps, cycles, unsupported prototypes, non-finite values, and
 non-canonical arrays without imposing a generic graph-work or nesting ceiling. Compiler-owned plans are validated
@@ -865,9 +900,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 24 | Message preparation accepts authored position and alignment only for prose. Media instructions `pacingBarrier`, `showImage`, and `playMedia`; handler regions carry `handler` (`timer` or `media`) and `selfHandle`. Revision 21 added the timer instructions. |
-| Runtime snapshot | 25 | Captured bubble presentations require null position and alignment; placement is Player-owned. Media state: `stageImage`, background `media` actions, `settledMedia`, `nextMediaId`, foreground `mediaPlayback` waits and settlements, media cue invocations and interrupt frames, barrier-promoted pacing gates, and media handles. Revision 22 added timer state. |
-| Checkpoint | 33 | Updated the self-contained bundle for prose-only authored placement, bubble presentation validation, and the media plan and snapshot contracts. |
+| Instruction plan | 25 | Script storage: `storageLoad` expressions with lazy defaults and direct typed-initializer checks, and `storageWrite` instructions (`save`; `delete` when the value is `null`). Revision 24: message preparation accepts authored position and alignment only for prose. Media instructions `pacingBarrier`, `showImage`, and `playMedia`; handler regions carry `handler` (`timer` or `media`) and `selfHandle`. Revision 21 added the timer instructions. |
+| Runtime snapshot | 26 | The validated, key-sorted `scriptStorage` session view, `scriptStoragePersistent`, and foreground `storageWrite` actions and settlements. Revision 25: captured bubble presentations require null position and alignment; placement is Player-owned. Media state: `stageImage`, background `media` actions, `settledMedia`, `nextMediaId`, foreground `mediaPlayback` waits and settlements, media cue invocations and interrupt frames, barrier-promoted pacing gates, and media handles. Revision 22 added timer state. |
+| Checkpoint | 34 | Updated the self-contained bundle for the script-storage plan and snapshot contracts. Revision 33: prose-only authored placement, bubble presentation validation, and the media plan and snapshot contracts. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
