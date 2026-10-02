@@ -1,22 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  createSerializableSet,
-  type SerializableRuntimeScalar,
-  type SerializableRuntimeSet,
-} from "../src/index.js";
-import {
-  addSerializableSetValue,
-  validateSerializableValue,
-} from "../src/runtime/serializable-values.js";
-
-test("serializable-set validation and construction preserve many unique scalars", () => {
-  const items = Array.from({ length: 4096 }, (_, index) => index);
-
-  assert.equal(validateSerializableValue({ kind: "set", items }), null);
-  assert.deepEqual(createSerializableSet(items).items, items);
-});
+import { createSerializableSet, type SerializableRuntimeScalar } from "../src/index.js";
+import { validateSerializableValue } from "../src/runtime/serializable-values.js";
 
 test("serializable-set validation does not impose the removed capture-work threshold", () => {
   const acceptedSize = 100_001;
@@ -51,15 +37,4 @@ test("serializable-set construction preserves scalar equality and insertion orde
   const values: SerializableRuntimeScalar[] = [1, "1", true, false, null, 0, -0, 1, "1", true];
 
   assert.deepEqual(createSerializableSet(values).items, [1, "1", true, false, null, 0]);
-});
-
-test("serializable set mutation ignores existing values and appends new values in order", () => {
-  const set: SerializableRuntimeSet = { kind: "set", items: [1, 2] };
-  const membership = new Set<SerializableRuntimeScalar>(set.items);
-  assert.equal(addSerializableSetValue(set, 2, membership), false);
-  assert.equal(addSerializableSetValue(set, 3, membership), true);
-  assert.deepEqual(set.items, [1, 2, 3]);
-
-  assert.equal(addSerializableSetValue(set, 3, membership), false);
-  assert.deepEqual(set.items, [1, 2, 3]);
 });

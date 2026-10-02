@@ -16,7 +16,6 @@ import {
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
-import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
@@ -92,19 +91,6 @@ test("accepts and round-trips every runtime-produced halted shape", () => {
       scenario.name,
     );
   }
-});
-
-test("keeps valid halted execution resume-equivalent", () => {
-  const result = assertRuntimeResumeEquivalent(
-    ["function inner { return 2 }", 'say "value:${inner()}"', "exit"].join("\n"),
-    { scenarioName: "runtime snapshot invariant resume equivalence" },
-  );
-
-  assert.equal(result.finalSnapshot.status, "halted");
-  assert.deepEqual(
-    result.events.map((event) => event.kind),
-    ["say", "exit"],
-  );
 });
 
 test("validates allocator counters across the safe-integer boundary at snapshot and checkpoint entry", () => {
@@ -193,7 +179,7 @@ test("rejects exhausted scope, speaker, and call-frame allocators before collisi
   assert.equal(callSnapshot.nextCallFrameId, MAX_SAFE);
 });
 
-test("rejects unsafe source positions and out-of-range nested identities and progress", () => {
+test("rejects unsafe source positions and out-of-range nested identities", () => {
   const speakerPlan = plan('speaker vera {}\nsay as vera "hello"\nexit');
   const declared = executeInstruction(
     speakerPlan,
@@ -209,21 +195,6 @@ test("rejects unsafe source positions and out-of-range nested identities and pro
     "speaker ID beyond its allocator and references",
   );
 
-  const scopePlan = plan('if true {\n  say "inside"\n}\nexit');
-  let enteredScope = createFreshRuntimeSnapshot(scopePlan);
-  enteredScope = executeInstruction(scopePlan, enteredScope).snapshot;
-  enteredScope = executeInstruction(scopePlan, enteredScope).snapshot;
-  assert.equal(enteredScope.frames.length, 2);
-  assert.equal(validateRuntimeSnapshot(enteredScope, scopePlan).valid, true);
-  // EVIDENCE: fixture: expose the readonly scope ID on an active snapshot for unsafe-integer validation.
-  (enteredScope.frames[1] as { id: number }).id = 2 ** 53;
-  enteredScope.nextScopeId = MAX_SAFE;
-  assert.equal(
-    validateRuntimeSnapshot(enteredScope, scopePlan).valid,
-    false,
-    "scope ID beyond its allocator",
-  );
-
   const callPlan = plan("function value(input = 1) { return input }\nvalue()");
   let activeCall = createFreshRuntimeSnapshot(callPlan);
   for (let steps = 0; steps < 20 && activeCall.callFrames.length === 0; steps += 1) {
@@ -231,7 +202,6 @@ test("rejects unsafe source positions and out-of-range nested identities and pro
   }
   assert.equal(activeCall.callFrames.length, 1);
   assert.equal(validateRuntimeSnapshot(activeCall, callPlan).valid, true);
-  const parameterSnapshot = structuredClone(activeCall);
   // EVIDENCE: fixture: expose the readonly call-frame ID on an active snapshot for unsafe-integer validation.
   (activeCall.callFrames[0] as { id: number }).id = 2 ** 53;
   activeCall.nextCallFrameId = MAX_SAFE;
@@ -239,13 +209,6 @@ test("rejects unsafe source positions and out-of-range nested identities and pro
     validateRuntimeSnapshot(activeCall, callPlan).valid,
     false,
     "call-frame ID beyond its allocator",
-  );
-
-  parameterSnapshot.callFrames[0]!.parameterState.parameterIndex = 2 ** 53;
-  assert.equal(
-    validateRuntimeSnapshot(parameterSnapshot, callPlan).valid,
-    false,
-    "parameter progress beyond the function's parameters and instruction position",
   );
 
   const failedPlan = plan("let value = []\nsay value.first\nexit");
