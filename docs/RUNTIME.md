@@ -374,7 +374,8 @@ The current internal instruction-plan, runtime-snapshot, and checkpoint format r
 The current runtime implements blocking `wait`/`timer`, asynchronous timers, compact foreground interactions,
 ADR 0018 `say` pacing, and the Stage image and audio/video playback state. Timer lifecycle, interrupts, and Player
 clock recovery are defined under [Timers and scene time](#timers-and-scene-time); media under
-[Stage image and media playback](#stage-image-and-media-playback).
+[Stage image and media playback](#stage-image-and-media-playback); script storage under
+[Script storage](#script-storage).
 
 Runtime state retains persisted scene time, at most one active foreground action, background timers and media and at
 most one pacing gate, the Stage image, monotonic identities, bounded settlement replay, prepared output, and explicit
@@ -765,6 +766,33 @@ mutable host objects do not enter the snapshot.
 
 Under ADR 0017, Standard Library and package-library wrappers may call documented typed capabilities, but they do not bypass these boundaries or become alternate owners of canonical action state.
 
+## Script storage
+
+The engine implements `save`, `load`, and `delete` under specification
+[§25](specifications/accepted-syntaxes-v30.md#25-persistent-storage-and-keys).
+`RuntimeSnapshot.scriptStorage` is the session's view of host-loaded script storage, represented by
+`RuntimeScriptStorageEntrySnapshot[]` entries with `{ key: string, value: SerializableRuntimeValue }`.
+The host supplies the initial view through optional `FreshRuntimeOptions.scriptStorage`. The engine reads and
+mutates this view, so same-session reads do not depend on host persistence timing. It is part of every checkpoint,
+rather than the durable backing store itself.
+
+Fresh-session creation and snapshot/checkpoint restore validate the entry array, string keys, key uniqueness, and
+recursively storable values under §25; top-level values cannot be `null`. Invalid fresh-session storage input throws
+`TypeError`; malformed snapshot/checkpoint storage uses the existing structured validation errors. Storage values,
+loaded values, and event payloads are independent copies.
+
+Every successful `save` and `delete`, including deletion of an absent key, emits a typed, source-ordered event:
+
+```text
+{ kind: "scriptStorageChanged", sequence, key: string, value: SerializableRuntimeValue | null, span }
+```
+
+`value: null` signals removal. The host persists only newly emitted events from each runtime operation, in sequence;
+retained event history and restored snapshots do not trigger persistence writes.
+
+Restoring an older checkpoint carries its older storage view. A later read-modify-write can overwrite newer durable
+data; reconciliation belongs to #469 and is not implemented here.
+
 ## Visible text boundary
 
 Ordinary scalar visible-text conversion accepts strings, finite numbers, booleans, `null`, and elapsed duration values.
@@ -793,9 +821,10 @@ choices are unrelated to resource capacity.
 A configured instruction budget must be a positive JavaScript safe integer. Omitting it uses the current product default
 tracked in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). Exhaustion fails deterministically with structured runtime error
 `TSR037` instead of hanging and leaves the returned snapshot failed rather than resumable through a later `run(...)`.
-Fresh snapshot creation validates the plan, serializable globals, call-depth limit, and RNG seed before returning state.
+Fresh snapshot creation validates the plan, serializable globals, script storage, call-depth limit, and RNG seed before
+returning state.
 
-Live externally supplied instruction plans, runtime snapshots, globals, and serializable runtime values are captured
+Live externally supplied instruction plans, runtime snapshots, globals, script storage, and serializable runtime values are captured
 into stable plain-data graphs before detailed validation, freezing, state construction, execution, event emission, or
 RNG consumption. Capture rejects accessors, failed traps, cycles, unsupported prototypes, non-finite values, and
 non-canonical arrays without imposing a generic graph-work or nesting ceiling. Compiler-owned plans are validated
@@ -847,9 +876,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 24 | Message preparation accepts authored position and alignment only for prose. Media instructions `pacingBarrier`, `showImage`, and `playMedia`; handler regions carry `handler` (`timer` or `media`) and `selfHandle`. Revision 21 added the timer instructions. |
-| Runtime snapshot | 25 | Captured bubble presentations require null position and alignment; placement is Player-owned. Media state: `stageImage`, background `media` actions, `settledMedia`, `nextMediaId`, foreground `mediaPlayback` waits and settlements, media cue invocations and interrupt frames, barrier-promoted pacing gates, and media handles. Revision 22 added timer state. |
-| Checkpoint | 33 | Updated the self-contained bundle for prose-only authored placement, bubble presentation validation, and the media plan and snapshot contracts. |
+| Instruction plan | 25 | Script storage: `storageLoad` expressions with lazy defaults and direct typed-initializer checks, and `storageWrite` instructions (`save`; `delete` when the value is `null`). Revision 24: message preparation accepts authored position and alignment only for prose. Media instructions `pacingBarrier`, `showImage`, and `playMedia`; handler regions carry `handler` (`timer` or `media`) and `selfHandle`. Revision 21 added the timer instructions. |
+| Runtime snapshot | 26 | The validated `scriptStorage` session view. Revision 25: captured bubble presentations require null position and alignment; placement is Player-owned. Media state: `stageImage`, background `media` actions, `settledMedia`, `nextMediaId`, foreground `mediaPlayback` waits and settlements, media cue invocations and interrupt frames, barrier-promoted pacing gates, and media handles. Revision 22 added timer state. |
+| Checkpoint | 34 | Updated the self-contained bundle for the script-storage plan and snapshot contracts. Revision 33: prose-only authored placement, bubble presentation validation, and the media plan and snapshot contracts. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 

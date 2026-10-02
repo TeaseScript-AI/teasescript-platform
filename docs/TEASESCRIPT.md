@@ -201,6 +201,11 @@ The exact syntax for detailed result objects, advanced accessibility overrides, 
 The repository includes core values, variables, assignments including `+=`/`-=`, speakers, output, collections,
 expressions, comments, ranges, deterministic random built-ins, conditionals, loops, and loop control.
 
+Implemented script storage includes `save`, `load` with an optional lazy default, and `delete`, with a checkpointed
+session view and host persistence events. Accepted semantics and current type-checking limits are defined in
+specification [§25](specifications/accepted-syntaxes-v30.md#25-persistent-storage-and-keys); the host boundary is defined
+in [Runtime](RUNTIME.md#script-storage). Browser persistence in the Player follows separately.
+
 Implemented timing includes exact elapsed duration literals/values, cross-unit comparisons, blocking `wait`/`timer`,
 and asynchronous timers with display, labels, handles, lifecycle control, repetition, expiry interrupts, and
 checkpoint restore. Accepted forms and current limits are defined in specification
