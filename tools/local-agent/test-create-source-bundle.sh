@@ -41,31 +41,47 @@ artifact_request = pathlib.Path(sys.argv[4]).read_text(encoding="utf-8")
 workflow_directory = pathlib.Path(sys.argv[5])
 
 USES = re.compile(r"^[ \t]*(?:-[ \t]+)?uses[ \t]*:[ \t]*(?P<value>.*)$")
+FLOW_MAPPING = re.compile(r"^[ \t]*(?:-[ \t]+)?\{(?P<body>.*)\}[ \t]*(?:#.*)?$")
 PINNED_REF = re.compile(r"[^@\s'\"]+@[0-9a-f]{40}")
 LOCAL_WORKFLOW_REF = re.compile(r"\./\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml")
 
 
 def action_refs(text):
-    refs = []
+    values = []
     for line in text.splitlines():
         match = USES.match(line)
         if match:
-            value = re.sub(r"[ \t]+#.*$", "", match.group("value")).strip()
-            if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-                value = value[1:-1]
-            refs.append(value)
+            values.append(re.sub(r"[ \t]+#.*$", "", match.group("value")))
+        flow = FLOW_MAPPING.match(line)
+        if flow:
+            values += re.findall(r"(?:^|,)[ \t]*uses[ \t]*:([^,]*)", flow.group("body"))
+    refs = []
+    for value in values:
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        refs.append(value)
     return refs
 
 
 def assert_immutable_pins(text):
     refs = action_refs(text)
-    assert refs, "workflow has no uses entries"
     for ref in refs:
         assert PINNED_REF.fullmatch(ref) or LOCAL_WORKFLOW_REF.fullmatch(ref), ref
+    return refs
+
+
+JOB_HEADER = r"  ([A-Za-z0-9_-]+):[ \t]*(?:#.*)?"
 
 
 def workflow_jobs(text):
-    parts = re.split(r"(?m)^  ([A-Za-z0-9_-]+):[ \t]*\n", text.split("\njobs:\n", 1)[1])
+    section = re.split(r"(?m)^jobs:[ \t]*(?:#.*)?\n", text, maxsplit=1)[1]
+    section = re.split(r"(?m)^(?=[^\s#])", section, maxsplit=1)[0]
+    # Every two-space line must be a job header, so no job or checkout escapes the checks below.
+    for line in section.splitlines():
+        if re.match(r"  [^\s#]", line):
+            assert re.fullmatch(JOB_HEADER, line), f"unsupported job header: {line}"
+    parts = re.split(rf"(?m)^{JOB_HEADER}\n", section)
     return dict(zip(parts[1::2], parts[2::2]))
 
 
@@ -101,10 +117,12 @@ assert action_refs(f"      - uses: 'actions/checkout@{pin}' # v6\n        uses: 
     f"actions/checkout@{pin}",
     f"a/b@{pin}",
 ]
+assert action_refs(f"      - {{name: Flow, uses: a/b@{pin}, with: {{ref: x}}}}") == [f"a/b@{pin}"]
 for mutable in [
     "      - uses: actions/checkout@v6",
     '        uses: "actions/checkout@main"',
     "    uses: example/repository/.github/workflows/reusable.yml@main",
+    "      - {uses: actions/checkout@v6}",
 ]:
     mixed = f"        uses: actions/checkout@{pin}\n{mutable}\n"
     assert rejected(assert_immutable_pins, mixed), mutable
@@ -123,13 +141,19 @@ for job_permissions in ([], ["    permissions:", "      issues: write"]):
     workflow_text = checkout_workflow(job_permissions, checkout)
     assert rejected(assert_checkout_jobs_read_contents, workflow_text), job_permissions
 assert_checkout_jobs_read_contents(checkout_workflow([], f"run: echo actions/checkout@{pin}"))
+commented_header = checkout_workflow([], checkout).replace("  job:\n", "  job: # main job\n")
+assert rejected(assert_checkout_jobs_read_contents, commented_header)
+assert rejected(assert_checkout_jobs_read_contents, commented_header.replace("  job:", '  "job":'))
 
 workflow_paths = sorted([*workflow_directory.glob("*.yml"), *workflow_directory.glob("*.yaml")])
 assert workflow_paths
+workflow_refs = []
 for path in workflow_paths:
     workflow_text = path.read_text(encoding="utf-8")
-    assert_immutable_pins(workflow_text)
+    workflow_refs += assert_immutable_pins(workflow_text)
     assert_checkout_jobs_read_contents(workflow_text)
+# Guards the scanner itself: the repository's workflows do use Actions.
+assert workflow_refs, "no workflow uses entries were found"
 
 assert re.search(
     r"^  workflow_run:\n    workflows: \[Source bundle\]\n    types: \[completed\]",
