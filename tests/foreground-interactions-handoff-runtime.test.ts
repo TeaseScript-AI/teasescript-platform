@@ -522,7 +522,7 @@ function externalInstructions(plan: ExternalRecord): unknown[] {
   return externalArray(plan.instructions, "plan instructions");
 }
 
-test("PR194 matrix: each validator-accepted handoff category consumes the result once", () => {
+test("each validator-accepted handoff category consumes the result once", () => {
   // One row per handoff category that ADR 0018 accepts (consume, transfer, discard, exit, return).
   // The transfer row also covers consume: both are one local instruction reading the destination,
   // validated by the same shape check and dropped on the same engine path. The compiler emits only
@@ -896,7 +896,7 @@ function assertRejectedSettlementHandoffSnapshot(
   assert.deepEqual(invalidCheckpoint, beforeRestore, `${id}: restore checkpoint input`);
 }
 
-test("PR194 matrix: settlement and active handoff validation", () => {
+test("validation accepts matching settlement and handoff records and rejects inconsistent ones", () => {
   const fixture = settledHandoffFixture();
   const {
     injected,
@@ -1249,7 +1249,7 @@ function assertReplayRow(row: ReplayRow): void {
   }
 }
 
-test("PR194 matrix: a failed canonical continuation retains the handoff atomically", () => {
+test("a failed canonical continuation retains the handoff atomically", () => {
   // The transfer expects a boolean, so it fails after reading the destination and before writing
   // its target temporary.
   const injected = injectTextInteraction('let answer = "__interaction_result__"\nexit');
@@ -1315,7 +1315,7 @@ test("PR194 matrix: a failed canonical continuation retains the handoff atomical
   assert.deepEqual(failed.snapshot, failedBefore, "run snapshot input");
 });
 
-test("PR194 matrix: handoff shapes that would reach invalid runtime states are rejected", () => {
+test("handoff shapes that would reach invalid runtime states are rejected", () => {
   const injected = injectTextInteraction('let answer = "__interaction_result__"\nsay answer\nexit');
   const span = injected.plan.instructions[injected.handoffInstruction]!.span;
   assert.equal(validateInstructionPlan(injected.plan).valid, true);
@@ -1430,7 +1430,7 @@ interface OwnershipResumeRow {
   readonly finalSay: string;
 }
 
-test("PR194 matrix: ownership contexts resume from pending and committed boundaries", () => {
+test("ownership contexts resume from pending and committed boundaries", () => {
   const rows: readonly OwnershipResumeRow[] = [
     {
       id: "PR194-resume-context-nested-return-value",
@@ -1506,7 +1506,7 @@ test("PR194 matrix: ownership contexts resume from pending and committed boundar
   }
 });
 
-test("PR194 matrix: later settlement preserves ordinary result and makes old replay stale", () => {
+test("later settlement preserves ordinary result and makes old replay stale", () => {
   const injected = injectTextInteraction(
     'let answer = "__interaction_result__"\nwait 1 ms\nsay answer\nexit',
   );
