@@ -939,4 +939,29 @@ test("inspection of a pending write with a deeply nested value stays detached", 
   assert.ok(action?.kind === "storageWrite");
   assert.notEqual(inspected.foregroundAction?.action, action);
   assert.equal(Object.isFrozen(action.value), false);
+  // The innermost inspected list is frozen, and changing the session's value does not reach the inspection.
+  const innermost = (value: SerializableRuntimeValue): SerializableRuntimeValue[] => {
+    let current = value;
+    for (let level = 1; level < depth; level += 1) {
+      assert.ok(typeof current === "object" && current !== null && current.kind === "list");
+      current = current.items[0]!;
+    }
+    assert.ok(typeof current === "object" && current !== null && current.kind === "list");
+    return current.items;
+  };
+  const inspectedAction = inspected.foregroundAction?.action;
+  assert.ok(inspectedAction?.kind === "storageWrite");
+  assert.equal(Object.isFrozen(innermost(inspectedAction.value)), true);
+  innermost(action.value)[0] = 2;
+  assert.deepEqual(innermost(inspectedAction.value), [1]);
+});
+
+test("a member named load or default does not start a nested string in interpolation", () => {
+  const diagnostics = (member: string) =>
+    compileSource(
+      `let obj = { load: "Ada", default: "fallback", name: "Bo" }\nsay "\${obj.${member}"\nlet after = 7\nexit`,
+    ).diagnostics.map(({ code }) => code);
+  // Recovery from the malformed interpolation matches an ordinary member name.
+  assert.deepEqual(diagnostics("load"), diagnostics("name"));
+  assert.deepEqual(diagnostics("default"), diagnostics("name"));
 });

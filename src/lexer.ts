@@ -408,9 +408,10 @@ class Lexer {
     const previousKind = previous?.kind;
     if (
       previousKind === TokenKind.Identifier &&
-      // `load` and its `default` take an operand, such as `"${load "k" default "none"}"`.
-      (previous?.lexeme === "load" ||
-        previous?.lexeme === "default" ||
+      // `load` and its `default` take an operand, such as `"${load "k" default "none"}"`; a member such as
+      // `obj.load` does not.
+      (((previous?.lexeme === "load" || previous?.lexeme === "default") &&
+        this.#tokens[index - 1]?.kind !== TokenKind.Dot) ||
         isInteractionCommand(previous?.lexeme) ||
         (this.#tokens[index - 1]?.kind === TokenKind.KeywordAs &&
           isInteractionCommand(this.#tokens[index - 2]?.lexeme)))
