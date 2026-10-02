@@ -758,6 +758,11 @@ export function expressionMayReferenceTemporary(value: unknown, temporaryId: num
         expressionMayReferenceTemporary(value.start, temporaryId) ||
         expressionMayReferenceTemporary(value.end, temporaryId)
       );
+    case "storageLoad":
+      return (
+        expressionMayReferenceTemporary(value.key, temporaryId) ||
+        expressionMayReferenceTemporary(value.default, temporaryId)
+      );
     default:
       return false;
   }
@@ -1030,6 +1035,11 @@ function canonicalHandoffConsumesTemporary(
     case "prepareReference":
       expression = instruction.expression;
       break;
+    case "storageWrite":
+      return (
+        expressionGuaranteesTemporaryEvaluation(instruction.value, temporaryId) ||
+        expressionGuaranteesTemporaryEvaluation(instruction.key, temporaryId)
+      );
     case "say":
       return (
         expressionGuaranteesTemporaryEvaluation(instruction.presentation, temporaryId) ||
@@ -1118,6 +1128,9 @@ function expressionGuaranteesTemporaryEvaluation(value: unknown, temporaryId: nu
         expressionGuaranteesTemporaryEvaluation(value.start, temporaryId) ||
         expressionGuaranteesTemporaryEvaluation(value.end, temporaryId)
       );
+    case "storageLoad":
+      // The default runs only for an absent key.
+      return expressionGuaranteesTemporaryEvaluation(value.key, temporaryId);
     default:
       return false;
   }

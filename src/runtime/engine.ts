@@ -53,7 +53,14 @@ import type {
   OutputSpeaker,
   RuntimeFailureEvent,
   SayEvent,
+  ScriptStorageChangedEvent,
 } from "./events.js";
+import {
+  assertPersistable,
+  storageKey,
+  WRITE_KEY_MESSAGE,
+  writeScriptStorage,
+} from "./script-storage.js";
 import type { XorShift32State } from "./random.js";
 import {
   cloneCapturedSerializableValue,
@@ -776,6 +783,9 @@ function executePlannedInstruction(
       return;
     case "showImage":
       showImage(plan, instruction, snapshot, evaluator, events);
+      return;
+    case "storageWrite":
+      writeStorage(instruction, snapshot, evaluator, events);
       return;
     case "playMedia":
       startMedia(plan, instruction, snapshot, evaluator, events);
@@ -2088,6 +2098,34 @@ function showImage(
   }
   stopStageVideo(plan, snapshot, events, instruction.span);
   snapshot.stageImage = image;
+  advance(snapshot);
+}
+
+/** `save` and `delete`: changes the session's script storage view and reports the change to the host. */
+function writeStorage(
+  instruction: Extract<Instruction, { kind: "storageWrite" }>,
+  snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
+  events: InterpreterEvent[],
+): void {
+  const value = instruction.value === null ? null : evaluator.evaluate(instruction.value);
+  const key = storageKey(
+    evaluator.evaluate(instruction.key),
+    WRITE_KEY_MESSAGE,
+    instruction.key.span,
+  );
+  assertPersistable(value, instruction.span);
+  const sequence = takeSequence(snapshot);
+  writeScriptStorage(snapshot, key, value);
+  events.push(
+    Object.freeze({
+      kind: "scriptStorageChanged",
+      sequence,
+      key,
+      value: cloneCapturedSerializableValue(value),
+      span: copySpan(instruction.span),
+    } satisfies ScriptStorageChangedEvent),
+  );
   advance(snapshot);
 }
 

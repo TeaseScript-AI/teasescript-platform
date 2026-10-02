@@ -115,7 +115,9 @@ export type {
   OutputSpeaker,
   RuntimeFailureEvent,
   SayEvent,
+  ScriptStorageChangedEvent,
 } from "./runtime/events.js";
+export type { RuntimeScriptStorageEntrySnapshot } from "./runtime/script-storage.js";
 export {
   executeInstruction,
   run,

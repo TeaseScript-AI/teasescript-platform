@@ -487,6 +487,15 @@ function validateInstruction(
         validateExpression(value.image, `${path}.image`, errors, false, temporaryCount);
       }
       return;
+    case "storageWrite":
+      if (!hasExactKeys(value, ["kind", "value", "key", "span"])) {
+        errors.push(planError("TSC002", "Storage-write instruction has an invalid shape.", path));
+      }
+      if (value.value !== null) {
+        validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      }
+      validateExpression(value.key, `${path}.key`, errors, false, temporaryCount);
+      return;
     case "playMedia":
       validatePlayMediaInstruction(value, path, temporaryCount, functionIds, errors);
       return;
@@ -1188,6 +1197,25 @@ function validateExpression(
   }
 }
 
+function validStorageType(value: unknown): boolean {
+  return (
+    value === null ||
+    (isRecord(value) &&
+      hasExactKeys(value, ["name", "collection"]) &&
+      isOneOf(value.name, [
+        "string",
+        "boolean",
+        "integer",
+        "number",
+        "date",
+        "time",
+        "datetime",
+        "duration",
+      ]) &&
+      (value.collection === null || isOneOf(value.collection, ["list", "set"])))
+  );
+}
+
 function validateExpressionNode(
   value: unknown,
   path: string,
@@ -1297,6 +1325,18 @@ function validateExpressionNode(
       pending.push({ kind: "inclusive", value: value.inclusive, path: `${path}.inclusive` });
       pending.push({ value: value.end, path: `${path}.end`, assignmentTarget: false });
       pending.push({ value: value.start, path: `${path}.start`, assignmentTarget: false });
+      return;
+    case "storageLoad":
+      if (
+        !hasExactKeys(value, ["kind", "key", "default", "expectedType", "span"]) ||
+        !validStorageType(value.expectedType)
+      ) {
+        errors.push(planError("TSC002", "Storage-load expression has an invalid shape.", path));
+      }
+      if (value.default !== null) {
+        pending.push({ value: value.default, path: `${path}.default`, assignmentTarget: false });
+      }
+      pending.push({ value: value.key, path: `${path}.key`, assignmentTarget: false });
       return;
     default:
       errors.push(planError("TSC002", `Unknown expression kind '${value.kind}'.`, `${path}.kind`));

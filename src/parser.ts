@@ -40,6 +40,9 @@ import type {
   MediaParts,
   MediaRepeat,
   PlayMediaStatement,
+  DeleteStatement,
+  LoadExpression,
+  SaveStatement,
   ShowImageStatement,
   DurationUnit,
   ListLiteral,
@@ -75,6 +78,8 @@ const statementOnlyCommands: ReadonlySet<string> = new Set([
   "showButton",
   "showImage",
   "hideImage",
+  "save",
+  "delete",
 ]);
 
 const parserDiagnosticCode = {
@@ -112,6 +117,7 @@ const parserDiagnosticCode = {
   unsupportedDurationUnit: "TSP033",
   invalidTimerForm: "TSP034",
   invalidMediaForm: "TSP035",
+  expectedStorageKey: "TSP036",
 } as const;
 
 const MEDIA_ARGUMENTS = ["file", "async", "repeat", "startAt", "endAt", "volume"] as const;
@@ -177,6 +183,12 @@ class Parser {
     }
     if (this.#checkIdentifier("hideImage")) {
       return this.#parseHideImageStatement();
+    }
+    if (this.#checkIdentifier("save")) {
+      return this.#parseSaveStatement();
+    }
+    if (this.#checkIdentifier("delete")) {
+      return this.#parseDeleteStatement();
     }
     if (this.#checkIdentifier("playAudio") || this.#checkIdentifier("playVideo")) {
       const parts = yield* parseChild(this.#parseMediaParts());
@@ -840,6 +852,85 @@ class Parser {
       kind: "showImageStatement",
       image,
       span: spanFrom(command.span, image.span),
+    });
+  }
+
+  /** `save <value> as <key>`; both operands are full expressions. */
+  #parseSaveStatement(): SaveStatement | null {
+    const command = this.#advance();
+    const value = this.#parseExpression();
+    if (value === null) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedExpression,
+        "Expected a value to save after 'save'.",
+      );
+      this.#synchronizeStatement(true);
+      return null;
+    }
+    if (!this.#match(TokenKind.KeywordAs)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedStorageKey,
+        "Expected 'as' and a storage key, such as 'save score as \"player.score\"'.",
+      );
+      this.#synchronizeStatement(true);
+      return null;
+    }
+    const key = this.#parseExpression();
+    if (key === null) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedStorageKey,
+        "Expected a storage key after 'as'.",
+      );
+      this.#synchronizeStatement(true);
+      return null;
+    }
+    return Object.freeze({
+      kind: "saveStatement",
+      value,
+      key,
+      span: spanFrom(command.span, key.span),
+    });
+  }
+
+  #parseDeleteStatement(): DeleteStatement | null {
+    const command = this.#advance();
+    const key = this.#parseExpression();
+    if (key === null) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedStorageKey,
+        "Expected a storage key after 'delete'.",
+      );
+      this.#synchronizeStatement(true);
+      return null;
+    }
+    return Object.freeze({ kind: "deleteStatement", key, span: spanFrom(command.span, key.span) });
+  }
+
+  /**
+   * `load <key> [default <value>]`; both operands are full expressions, so `(load "k") == null` needs parentheses.
+   * The default is evaluated only when the key is absent.
+   */
+  *#parseLoadExpression(): ParseTask<LoadExpression | null> {
+    const command = this.#advance();
+    const key = yield* parseChild(this.#parseOr());
+    if (key === null) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedStorageKey,
+        "Expected a storage key after 'load'.",
+      );
+      return null;
+    }
+    let defaultValue: Expression | null = null;
+    if (this.#checkIdentifier("default")) {
+      this.#advance();
+      defaultValue = yield* parseChild(this.#parseRequiredExpressionTask());
+      if (defaultValue === null) return null;
+    }
+    return Object.freeze({
+      kind: "loadExpression",
+      key,
+      defaultValue,
+      span: spanFrom(command.span, (defaultValue ?? key).span),
     });
   }
 
@@ -2032,6 +2123,9 @@ class Parser {
     if (this.#checkIdentifier("playAudio") || this.#checkIdentifier("playVideo")) {
       const parts = yield* parseChild(this.#parseMediaParts());
       return parts === null ? null : Object.freeze({ kind: "playMediaExpression", ...parts });
+    }
+    if (this.#checkIdentifier("load")) {
+      return yield* parseChild(this.#parseLoadExpression());
     }
     if (this.#match(TokenKind.NumberLiteral)) {
       const amount: NumberLiteral = Object.freeze({

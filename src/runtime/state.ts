@@ -58,9 +58,14 @@ import {
   type RuntimeMediaSnapshot,
 } from "./media.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
+import {
+  cloneScriptStorage,
+  validateScriptStorageEntries,
+  type RuntimeScriptStorageEntrySnapshot,
+} from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 25;
+export const RUNTIME_SNAPSHOT_VERSION = 26;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -100,6 +105,7 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "nextTimerId",
   "pendingTimerHandlers",
   "stageImage",
+  "scriptStorage",
   "settledMedia",
   "nextMediaId",
   "maxCallDepth",
@@ -286,6 +292,8 @@ export interface RuntimeSnapshot {
   )[];
   /** The persistent Stage image reference, or `null` for an empty Stage. */
   stageImage: string | null;
+  /** This session's view of script storage: loaded from the host at start, changed by `save` and `delete`. */
+  readonly scriptStorage: RuntimeScriptStorageEntrySnapshot[];
   /** Finished or stopped media, retained so their handles stay readable. Active media are background actions. */
   readonly settledMedia: RuntimeMediaSnapshot[];
   nextMediaId: number;
@@ -297,6 +305,8 @@ export interface RuntimeSnapshot {
 export interface FreshRuntimeOptions {
   readonly seed?: number;
   readonly globals?: Readonly<Record<string, SerializableRuntimeValue>>;
+  /** The host's stored values for this script; `save` and `delete` report changes as `scriptStorageChanged` events. */
+  readonly scriptStorage?: readonly RuntimeScriptStorageEntrySnapshot[];
   readonly maxCallDepth?: number;
   readonly initialSessionTimeMs?: number;
   readonly baseDelayMs?: number;
@@ -361,6 +371,9 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
       `maxCallDepth must be an integer from 1 through ${MAX_SUPPORTED_CALL_DEPTH}.`,
     );
   }
+  const scriptStorage = capturedOptions.scriptStorage ?? [];
+  const scriptStorageFailure = validateScriptStorageEntries(scriptStorage, "scriptStorage");
+  if (scriptStorageFailure !== null) throw new TypeError(scriptStorageFailure);
   for (const [name, value] of Object.entries(globals)) {
     if (name.length === 0) throw new TypeError("Global binding names must not be empty.");
     const failure = validateCapturedSerializableValue(value, `globals.${name}`);
@@ -408,6 +421,8 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     nextTimerId: 1,
     pendingTimerHandlers: [],
     stageImage: null,
+    // EVIDENCE: validation: validateScriptStorageEntries accepted these captured entries above.
+    scriptStorage: scriptStorage as RuntimeScriptStorageEntrySnapshot[],
     settledMedia: [],
     nextMediaId: 1,
     maxCallDepth,
@@ -515,6 +530,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     nextTimerId: snapshot.nextTimerId,
     pendingTimerHandlers: snapshot.pendingTimerHandlers.map((invocation) => ({ ...invocation })),
     stageImage: snapshot.stageImage,
+    scriptStorage: cloneScriptStorage(snapshot.scriptStorage),
     settledMedia: snapshot.settledMedia.map(cloneMedia),
     nextMediaId: snapshot.nextMediaId,
     maxCallDepth: snapshot.maxCallDepth,
@@ -955,6 +971,11 @@ function validateCapturedRuntimeSnapshotDetails(
   if (value.stageImage !== null && typeof value.stageImage !== "string") {
     errors.push("Runtime stageImage must be a string or null.");
   }
+  const scriptStorageFailure = validateScriptStorageEntries(
+    value.scriptStorage,
+    "Runtime scriptStorage",
+  );
+  if (scriptStorageFailure !== null) errors.push(scriptStorageFailure);
   validateInteractionResultHandoffState(value, plan, analysis, errors);
   validateTerminalContinuationHandoffState(value, plan, errors);
   if (!isOneOf(value.status, ["ready", "running", "waiting", "halted", "failed"])) {
@@ -2681,6 +2702,10 @@ function requiredInstructionTemporaries(
       break;
     case "showImage":
       if (instruction.image !== null) collect(instruction.image);
+      break;
+    case "storageWrite":
+      if (instruction.value !== null) collect(instruction.value);
+      collect(instruction.key);
       break;
     case "playMedia":
       collect(instruction.file);
