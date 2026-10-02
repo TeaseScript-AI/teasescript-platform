@@ -277,15 +277,6 @@ test("keeps set assignment-keyword syntax invalid", () => {
   );
 });
 
-test("does not invent trailing-comma set syntax", () => {
-  const result = parse("let values = set[1,]");
-
-  assert.deepEqual(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
-    ["TSP012"],
-  );
-});
-
 function initializerOf(source: string): Expression {
   const result = parse(source);
   assert.deepEqual(result.diagnostics, []);

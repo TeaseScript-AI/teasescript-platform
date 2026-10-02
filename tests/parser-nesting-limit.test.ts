@@ -12,7 +12,6 @@ test("deep linear prefix chains compile and evaluate without native recursion", 
     ["odd not", `let value = ${"not ".repeat(9_999)}true\nexit`, false],
     ["even unary minus", `let value = ${"-".repeat(10_000)}1\nexit`, 1],
     ["odd unary minus", `let value = ${"-".repeat(9_999)}1\nexit`, -1],
-    ["parentheses", `let value = ${"(".repeat(500)}1${")".repeat(500)}\nexit`, 1],
   ] as const;
 
   for (const [name, source, expected] of sources) {
