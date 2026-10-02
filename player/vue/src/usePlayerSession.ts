@@ -266,11 +266,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // A running or resumable session keeps its own view of the stored values, so clearing waits until it ends; while a
   // clear runs, no second clear and no Start can begin, so a new session never starts from the values being removed.
   const clearing = ref(false);
+  // A Start or Continue waiting for the camera already owns its view of the stored values, although its session is not
+  // published yet; a restored one may still write them.
+  const openingCamera = ref(false);
   const canClearScriptStorage = computed(
     () =>
       scriptStorage !== undefined &&
       storedEntries.value !== null &&
       !clearing.value &&
+      !openingCamera.value &&
       activation.value?.kind !== "continue" &&
       (session.value === null ||
         session.value.snapshot.status === "halted" ||
@@ -312,6 +316,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   function prepare(create: () => PlayerRuntimeSession) {
     activationToken++;
+    openingCamera.value = false;
     // A new session needs its own camera; a superseded acquisition never stays open.
     camera.release();
     activation.value = { kind: "start", begin: create };
@@ -319,6 +324,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   /** Shows the explicit Continue control for a restored session; its execution, time and media resume only then. */
   function prepareRestore(restored: PlayerRuntimeSession) {
     activationToken++;
+    openingCamera.value = false;
     camera.release();
     activation.value = { kind: "continue", begin: () => restored };
   }
@@ -345,7 +351,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     session.value = null;
     device.reset();
     primeAudio();
-    const opened = await camera.open(true);
+    openingCamera.value = true;
+    let opened: boolean;
+    try {
+      opened = await camera.open(true);
+    } finally {
+      // A superseding prepare already reset it for its own activation.
+      if (token === activationToken) openingCamera.value = false;
+    }
     // Replaced, re-prepared, or unmounted while the browser answered: an obsolete session never starts.
     if (!opened || disposed || token !== activationToken) return;
     captures.reset();
