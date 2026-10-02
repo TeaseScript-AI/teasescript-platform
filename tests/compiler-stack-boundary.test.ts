@@ -77,6 +77,8 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
       return {codes: compiled.diagnostics.map((diagnostic) => diagnostic.code), status: compiled.plan ? run(compiled.plan, createFreshRuntimeSnapshot(compiled.plan)).snapshot.status : null};
     });
     const compiledBlock = compileSource(process.env.TEASESCRIPT_BLOCK_SOURCE);
+    const valueOf = (compiled) =>
+      run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot.frames[0]?.bindings.find((binding) => binding.name === "value")?.value;
     const runtimeResult = run(
       compiledCollection.plan,
       createFreshRuntimeSnapshot(compiledCollection.plan, {
@@ -113,13 +115,12 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
     process.stdout.write(JSON.stringify({
       parserDiagnostics: parsed.diagnostics.length,
       semanticDiagnostics: semantic.diagnostics.length,
-      instructionKinds: plan.instructions.map((instruction) => instruction.kind),
-      expressionKind: plan.instructions[0]?.value?.kind,
+      loweredFlatValue: valueOf(plan),
       compiledFlatCodes: compiledFlat.diagnostics.map((diagnostic) => diagnostic.code),
-      compiledFlatExpressionKind: compiledFlat.plan?.instructions[0]?.value?.kind,
+      compiledFlatValue: valueOf(compiledFlat.plan),
       compiledNestedCodes: compiledNested.diagnostics.map((diagnostic) => diagnostic.code),
       compiledNestedProgramStatements: compiledNested.program.statements.length,
-      compiledNestedExpressionKind: compiledNested.plan?.instructions[0]?.value?.kind,
+      compiledNestedValue: valueOf(compiledNested.plan),
       innerObjectCodes,
       downstreamObjects,
       siblingObjects,
@@ -130,12 +131,8 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
       collectionCodes: compiledCollection.diagnostics.map((diagnostic) => diagnostic.code),
       collectionRuntimeStatus: runtimeResult.snapshot.status,
       collectionDepth,
-      setCodeCount: compiledSet.diagnostics.length,
       setDistinctCodes: [...new Set(compiledSet.diagnostics.map((diagnostic) => diagnostic.code))],
-      setFirstCode: compiledSet.diagnostics[0]?.code,
-      setLastCode: compiledSet.diagnostics.at(-1)?.code,
-      setFirstStart: compiledSet.diagnostics[0]?.span.start.offset,
-      setLastStart: compiledSet.diagnostics.at(-1)?.span.start.offset,
+      setStarts: compiledSet.diagnostics.map((diagnostic) => diagnostic.span.start.offset).sort((left, right) => left - right),
       blockCodes: compiledBlock.diagnostics.map((diagnostic) => diagnostic.code),
       blockProgramStatements: compiledBlock.program.statements.length,
       blockSpan: [compiledBlock.program.span.start.offset, compiledBlock.program.span.end.offset],
@@ -167,13 +164,13 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
   assert.deepEqual(JSON.parse(child.stdout), {
     parserDiagnostics: 0,
     semanticDiagnostics: 0,
-    instructionKinds: ["declareBinding"],
-    expressionKind: "binary",
+    // 1,024 terms cycling through 0..9: 102 full cycles of 45 plus 0 + 1 + 2 + 3.
+    loweredFlatValue: 4_596,
     compiledFlatCodes: [],
-    compiledFlatExpressionKind: "binary",
+    compiledFlatValue: 4_596,
     compiledNestedCodes: [],
     compiledNestedProgramStatements: 1,
-    compiledNestedExpressionKind: "literal",
+    compiledNestedValue: 1,
     innerObjectCodes: [[], [], [], []],
     downstreamObjects: [
       { codes: [], status: "halted" },
@@ -190,12 +187,9 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
     collectionCodes: [],
     collectionRuntimeStatus: "halted",
     collectionDepth: 1_024,
-    setCodeCount: 1_023,
     setDistinctCodes: ["TSV006"],
-    setFirstCode: "TSV006",
-    setLastCode: "TSV006",
-    setFirstStart: 4_104,
-    setLastStart: 16,
+    // Every set except the outermost is an invalid set element; "let value = " is 12 characters.
+    setStarts: Array.from({ length: 1_023 }, (_, index) => 12 + 4 * (index + 1)),
     blockCodes: [],
     blockProgramStatements: 1,
     blockSpan: [0, blockSource.length],
@@ -236,19 +230,23 @@ test("compiler containment recognizes native stack failures without relying on a
   }
 });
 
-test("compileSource does not convert unrelated RangeErrors into diagnostics", () => {
-  const error = new RangeError("unrelated compiler failure");
-  const original = RegExp.prototype.test;
-  RegExp.prototype.test = () => {
-    throw error;
-  };
-  try {
-    assert.throws(
-      () => compileSource("let value = 1"),
-      (received: unknown) => received === error,
-    );
-  } finally {
-    RegExp.prototype.test = original;
+test("compileSource does not convert unrelated errors into diagnostics", () => {
+  for (const error of [
+    new RangeError("unrelated compiler failure"),
+    new Error("unrelated failure"),
+  ]) {
+    const original = RegExp.prototype.test;
+    RegExp.prototype.test = () => {
+      throw error;
+    };
+    try {
+      assert.throws(
+        () => compileSource("let value = 1"),
+        (received: unknown) => received === error,
+      );
+    } finally {
+      RegExp.prototype.test = original;
+    }
   }
 });
 
