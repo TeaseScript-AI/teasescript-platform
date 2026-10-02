@@ -237,12 +237,16 @@ test("a user-provided colour survives an input checkpoint and invalid input uses
 });
 
 test("null options inherit, and malformed external resolved values are rejected", () => {
-  const plan = compileValidPlan('say prose(color: null, align: null) "x", instant');
+  const plan = compileValidPlan(`
+speaker vera { prose: { color: "red", position: "right", align: "left" } }
+speaker vera
+say prose(color: null, position: null, align: null) "x", instant
+`);
   const result = run(plan, createFreshRuntimeSnapshot(plan));
   const output = result.events.find((event) => event.kind === "say");
-  assert.equal(output?.presentation.color, null);
-  assert.equal(output?.presentation.align, null);
-  assert.equal(output?.presentation.position, null);
+  assert.equal(output?.presentation.color, normalizeColor("red"));
+  assert.equal(output?.presentation.position, "right");
+  assert.equal(output?.presentation.align, "left");
   assert.equal(isMessagePresentation(output?.presentation), true);
   assert.equal(isMessagePresentation({ ...output?.presentation, align: ["center"] }), false);
   assert.equal(isMessagePresentation({ ...output?.presentation, background: "url(x)" }), false);
