@@ -3,8 +3,7 @@ import type { TeaseCompileDiagnostic, TeaseCompiler } from "./compile-check.ts";
 import { emitTease } from "./emit-tease.ts";
 import { rootDiagnostics } from "./diagnostics.ts";
 import type { IrStatement } from "./ir.ts";
-import { buildHelperRegistry, lowerParsedFile } from "./lower.ts";
-import { lowerSelfContainedPackage } from "./package.ts";
+import { lowerPackage } from "./package.ts";
 import { shimPendingCapabilities } from "./pending.ts";
 
 const SOURCE_STATEMENT_KINDS = new Set([
@@ -87,8 +86,7 @@ export function analyzeFeasibility(
   files: ParsedGroovyFile[],
   options: FeasibilityOptions = {},
 ): FeasibilityReport {
-  const helperRegistry = buildHelperRegistry(files);
-  const packagePrograms = lowerSelfContainedPackage(files);
+  const { lowered: filePrograms, composed: packagePrograms } = lowerPackage(files);
   const report: FeasibilityReport = {
     fileCount: files.length,
     scriptBodyFileCount: 0,
@@ -115,7 +113,9 @@ export function analyzeFeasibility(
   for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
     const file = files[fileIndex]!;
     const parseErrors = file.diagnostics.length;
-    const isScriptBody = file.root?.kind === "scriptBody";
+    // Runtime-loaded mixin modules contribute code to the script that loads them; they are not scripts.
+    const isScriptBody =
+      file.root?.kind === "scriptBody" && packagePrograms[fileIndex]?.module === undefined;
     const recognized = parseErrors === 0 && file.root !== null;
     if (isScriptBody) {
       report.scriptBodyFileCount += 1;
@@ -130,7 +130,7 @@ export function analyzeFeasibility(
       });
     }
 
-    const program = lowerParsedFile(file, { helperRegistry });
+    const program = filePrograms[fileIndex]!;
     const packageProgram = packagePrograms[fileIndex]!;
     const errors = program.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
     const packageErrors = packageProgram.diagnostics.filter(

@@ -25,6 +25,21 @@ export interface MigrationProgram {
   metadata: LegacyMetadata | null;
   statements: IrStatement[];
   diagnostics: MigrationDiagnostic[];
+  /** Set for a runtime-loaded mixin module, which contributes package code instead of being a script. */
+  module?: MixinModuleInfo;
+  /** Module directories whose mixin modules this script loads at runtime. */
+  loadsModuleDirectories?: string[];
+}
+
+export interface MixinModuleInfo {
+  sourceName: string;
+  /** Package directory the legacy loader lists, such as `toy` for `scripts/toy/*.groovy`. */
+  directory: string;
+  name: string;
+  loadFunction: string;
+  setupFunction: string | null;
+  /** Functions the module defines, including injected methods. */
+  functions: string[];
 }
 
 interface IrBase {

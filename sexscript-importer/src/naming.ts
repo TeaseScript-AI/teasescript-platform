@@ -8,8 +8,18 @@ const PROTECTED = new Set<string>(TEASESCRIPT_PROTECTED_NAMES);
  * locals that collide with a package-global name (TeaseScript forbids that shadowing even when the global is
  * declared later in the file). Groovy allowed both. Runs on the final program, after package helper composition.
  */
-export function renameConflictingIdentifiers(program: MigrationProgram): MigrationProgram {
-  const used = new Set<string>();
+export function renameConflictingIdentifiers(
+  program: MigrationProgram,
+  /** Root-level names already taken by other code in the same generated file. */
+  taken: ReadonlySet<string> = new Set(),
+  /**
+   * Whether to rename TeaseScript-reserved names. Package composition renames those once on the composed
+   * program, because calls from other files must follow the same rename.
+   */
+  renameProtected = true,
+): MigrationProgram {
+  const isProtected = (name: string): boolean => renameProtected && PROTECTED.has(name);
+  const used = new Set<string>(taken);
   collectNames(program.statements, used);
   const fresh = (base: string): string => {
     let candidate = `${base}Value`;
@@ -27,20 +37,24 @@ export function renameConflictingIdentifiers(program: MigrationProgram): Migrati
     if (statement.kind === "function") {
       functions.set(
         statement.name,
-        PROTECTED.has(statement.name) ? fresh(statement.name) : statement.name,
+        isProtected(statement.name) || taken.has(statement.name)
+          ? fresh(statement.name)
+          : statement.name,
       );
     }
   }
   const rootScope = new Map<string, string>();
   for (const name of globals) {
-    if (PROTECTED.has(name) || functions.has(name)) rootScope.set(name, fresh(name));
+    if (isProtected(name) || functions.has(name) || taken.has(name)) {
+      rootScope.set(name, fresh(name));
+    }
   }
 
   const renamer: Renamer = {
     functions,
     // Function names are package-global too, so no variable may reuse one.
     conflicts: (name, inFunction) =>
-      PROTECTED.has(name) || functions.has(name) || (inFunction && globals.has(name)),
+      isProtected(name) || functions.has(name) || (inFunction && globals.has(name)),
     fresh,
   };
   return { ...program, statements: renameBlock(program.statements, rootScope, false, renamer) };

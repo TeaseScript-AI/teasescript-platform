@@ -128,9 +128,18 @@ public final class SexScriptAstExporter {
         }
 
         SexScriptAstExporter exporter = new SexScriptAstExporter(2);
+        // Anonymous and nested classes declared inside the script body are separate class nodes; constructor
+        // calls refer to them by name.
+        List<Object> classes = new ArrayList<>();
+        for (ASTNode node : nodes) {
+            if (node instanceof ClassNode classNode && classNode != wrapper) {
+                classes.add(exporter.classNode(classNode));
+            }
+        }
         Map<String, Object> root = mapOf(
                 "kind", "scriptBody",
-                "body", exporter.statement(run.getCode()));
+                "body", exporter.statement(run.getCode()),
+                "classes", classes);
         return file(sourceName, "script-body", root, source);
     }
 
@@ -241,6 +250,7 @@ public final class SexScriptAstExporter {
         return nodeMap(node,
                 "class",
                 "name", node.getName(),
+                "outerClass", node.getOuterClass() == null ? null : node.getOuterClass().getName(),
                 "modifiers", node.getModifiers(),
                 "fields", fields,
                 "methods", methods);

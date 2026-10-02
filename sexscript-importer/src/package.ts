@@ -1,6 +1,11 @@
 import { isRecord, type ParsedGroovyFile, type SourceSpan } from "./ast.ts";
 import type { IrStatement, MigrationDiagnostic, MigrationProgram } from "./ir.ts";
-import { buildHelperRegistry, lowerParsedFile } from "./lower.ts";
+import {
+  buildHelperRegistry,
+  describeMixinModule,
+  lowerParsedFile,
+  packageFunctionNames,
+} from "./lower.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 
 const ACCEPTED_EXTERNAL_CALLS = new Set([
@@ -32,17 +37,71 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
 ]);
 
 export function lowerSelfContainedPackage(files: readonly ParsedGroovyFile[]): MigrationProgram[] {
+  return lowerPackage(files).composed;
+}
+
+export interface LoweredPackage {
+  /** Each file lowered with package context, before helper composition. */
+  lowered: MigrationProgram[];
+  /** Scripts with their package helpers and loaded modules embedded; other files as lowered. */
+  composed: MigrationProgram[];
+}
+
+export function lowerPackage(files: readonly ParsedGroovyFile[]): LoweredPackage {
   const helperRegistry = buildHelperRegistry(files);
-  const lowered = files.map((file) => lowerParsedFile(file, { helperRegistry }));
+  const mixinModules = files.flatMap((file) => describeMixinModule(file) ?? []);
+  const packageFunctions = packageFunctionNames(files);
+  const lowered = files.map((file) =>
+    lowerParsedFile(file, {
+      helperRegistry,
+      mixinModules,
+      packageFunctions,
+      renameIdentifiers: false,
+    }),
+  );
   const helperPrograms = lowered.filter(
     (_, index) => files[index]?.root?.kind === "compilationUnit",
   );
   const functionCatalog = buildFunctionCatalog(helperPrograms);
+  const modulePrograms = lowered.filter((program) => program.module !== undefined);
 
-  return lowered.map((program, index) => {
-    if (files[index]?.root?.kind !== "scriptBody") return program;
-    return composeProgram(program, functionCatalog);
+  const composed = lowered.map((program, index) => {
+    if (files[index]?.root?.kind !== "scriptBody" || program.module !== undefined) return program;
+    return composeProgram(withLoadedModules(program, modulePrograms), functionCatalog);
   });
+  return { lowered, composed };
+}
+
+/**
+ * A script that loads mixin modules gets their complete code, in file-name order: injected methods may be
+ * reachable only through callbacks, so nothing is dropped as unused. Module globals that collide with names
+ * already taken are renamed inside their module first.
+ */
+function withLoadedModules(
+  program: MigrationProgram,
+  modulePrograms: readonly MigrationProgram[],
+): MigrationProgram {
+  const directories = new Set(program.loadsModuleDirectories ?? []);
+  if (directories.size === 0) return program;
+  const taken = new Set(rootNames(program.statements));
+  const moduleStatements: IrStatement[] = [];
+  const diagnostics = [...program.diagnostics];
+  const modules = modulePrograms
+    .filter((module) => module.module !== undefined && directories.has(module.module.directory))
+    .toSorted((left, right) => left.module!.name.localeCompare(right.module!.name));
+  for (const module of modules) {
+    const renamed = renameConflictingIdentifiers(module, taken, false);
+    for (const name of rootNames(renamed.statements)) taken.add(name);
+    moduleStatements.push(...renamed.statements);
+    diagnostics.push(...renamed.diagnostics);
+  }
+  return { ...program, statements: [...moduleStatements, ...program.statements], diagnostics };
+}
+
+function rootNames(statements: readonly IrStatement[]): string[] {
+  return statements.flatMap((statement) =>
+    statement.kind === "let" || statement.kind === "function" ? [statement.name] : [],
+  );
 }
 
 interface HelperFunctionEntry {

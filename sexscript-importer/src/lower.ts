@@ -26,6 +26,7 @@ import {
   UNKNOWN,
 } from "./types.ts";
 import type {
+  MixinModuleInfo,
   IrExpression,
   IrFunctionParameter,
   IrStatement,
@@ -51,6 +52,15 @@ export type HelperRegistry = ReadonlyMap<string, ReadonlyMap<string, HelperFunct
 
 export interface LowerOptions {
   helperRegistry?: HelperRegistry;
+  /** Functions defined anywhere in the package, such as runtime-loaded mixin methods. */
+  packageFunctions?: ReadonlySet<string>;
+  /** Runtime-loaded mixin modules of the package. */
+  mixinModules?: readonly MixinModuleInfo[];
+  /**
+   * Rename identifiers TeaseScript rejects (default). Package composition disables this per file and renames
+   * the composed program once.
+   */
+  renameIdentifiers?: boolean;
 }
 
 type SyntheticHelper = "loadFirstTrue" | "indexOf" | "concat" | "array";
@@ -81,6 +91,10 @@ interface LowerContext {
   sourceLines: string[];
   /** Diagnostics already rendered as inline notes in the generated output. */
   renderedDiagnostics: Set<MigrationDiagnostic>;
+  packageFunctions: ReadonlySet<string>;
+  mixinModules: readonly MixinModuleInfo[];
+  /** Module directories whose loader this script replaced with direct module calls. */
+  loadsModuleDirectories: Set<string>;
 }
 
 /** Source comments not yet emitted; shared by every context lowering the same file. */
@@ -149,6 +163,9 @@ export function lowerParsedFile(
     comments: { items: file.comments ?? [], next: 0 },
     sourceLines: file.source === undefined ? [] : file.source.split(/\r\n?|\n/u),
     renderedDiagnostics: new Set(),
+    packageFunctions: options.packageFunctions ?? new Set(),
+    mixinModules: options.mixinModules ?? [],
+    loadsModuleDirectories: new Set(),
   };
   if (file.diagnostics.length > 0 || file.root === null) {
     for (const diagnostic of file.diagnostics) {
@@ -183,11 +200,13 @@ export function lowerParsedFile(
     };
   }
 
-  const body = asNode(file.root.body);
+  const rawBody = asNode(file.root.body);
+  const mixin = rawBody === null ? null : desugarMixinModule(rawBody, file.sourceName);
+  const body = mixin?.body ?? desugarObjectScript(rawBody, nodeArray(file.root.classes), context);
   if (body?.kind === "block") {
     context.functions = collectClosureInfo(body);
     context.shadowingReferences = collectShadowingReferences(body, context.functions);
-    context.types = inferVariableTypes(body);
+    context.types = inferVariableTypes(body, [], context.packageFunctions);
     const helpers = collectLegacyHelperBindings(body);
     context.classLoaderVariables = helpers.classLoaders;
     context.legacyHelperClasses = helpers.helperClasses;
@@ -206,12 +225,17 @@ export function lowerParsedFile(
     );
   }
 
-  return renameConflictingIdentifiers({
+  const program: MigrationProgram = {
     sourceName: file.sourceName,
     metadata: context.metadata,
     statements,
     diagnostics: context.diagnostics,
-  });
+    ...(mixin === null ? {} : { module: mixin.info }),
+    ...(context.loadsModuleDirectories.size === 0
+      ? {}
+      : { loadsModuleDirectories: [...context.loadsModuleDirectories].sort() }),
+  };
+  return options.renameIdentifiers === false ? program : renameConflictingIdentifiers(program);
 }
 
 function lowerHelperCompilationUnit(
@@ -362,6 +386,9 @@ function lowerHelperMethod(
     comments: baseContext.comments,
     sourceLines: baseContext.sourceLines,
     renderedDiagnostics: baseContext.renderedDiagnostics,
+    packageFunctions: baseContext.packageFunctions,
+    mixinModules: baseContext.mixinModules,
+    loadsModuleDirectories: baseContext.loadsModuleDirectories,
   };
   const parameters: IrFunctionParameter[] = [];
   for (const parameter of authoredRecords) {
@@ -591,6 +618,15 @@ function lowerStatement(node: AstNode, context: LowerContext): IrStatement[] {
 }
 
 function lowerStatementNode(node: AstNode, context: LowerContext): IrStatement[] {
+  if (
+    node.kind === "importerNote" &&
+    typeof node.code === "string" &&
+    typeof node.message === "string"
+  ) {
+    // Placed by an AST desugaring so the explanation renders next to the rewritten code.
+    addDiagnostic(context, node.code, "warning", node.message, node.span);
+    return [];
+  }
   const conditional = lowerConditionalStatement(node, context);
   if (conditional !== null) return conditional;
   switch (node.kind) {
@@ -1421,7 +1457,7 @@ function lowerCallStatement(
       span,
     }));
   }
-  if (context.helperFunctions.has(call.name)) {
+  if (context.packageFunctions.has(call.name) || context.helperFunctions.has(call.name)) {
     const expression = lowerExpression(node, context);
     return expression === null
       ? [
@@ -2102,6 +2138,14 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
           "SX_INVALID_VARIABLE",
           "Variable is missing a name.",
         );
+      if (name === "this") {
+        return unsupportedExpression(
+          context,
+          node,
+          "SX_OBJECT_THIS",
+          "The legacy script object (this) cannot become a TeaseScript value.",
+        );
+      }
       if (context.helperMainParameter !== null && name === context.helperMainParameter) {
         return unsupportedExpression(
           context,
@@ -3008,6 +3052,17 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
       ? null
       : { kind: "call", name: call.name, positional: args, named: {}, local: true };
   }
+  if (
+    context.packageFunctions.has(call.name) &&
+    !context.functions.has(call.name) &&
+    context.helperMainParameter === null
+  ) {
+    // Defined elsewhere in the package (for example an injected mixin method); arity is checked by the compiler.
+    const args = lowerArguments(call.arguments, context);
+    return args === null
+      ? null
+      : { kind: "call", name: call.name, positional: args, named: {}, local: true };
+  }
   const functionInfo = context.functions.get(call.name);
   if (functionInfo !== undefined) {
     if (
@@ -3437,6 +3492,453 @@ function isLegacyLoadClassCall(node: AstNode, classLoaders: Set<string>): boolea
   if (node.kind !== "methodCall" || constantString(node.method) !== "loadClass") return false;
   const receiver = variableName(node.object);
   return receiver !== null && classLoaders.has(receiver);
+}
+
+interface MixinShape {
+  parameter: string;
+  methods: Array<{ name: string; closure: AstNode }>;
+  loadStatements: AstNode[];
+  setup: AstNode | null;
+}
+
+/**
+ * A runtime-loaded mixin module is a file whose only statement is a one-parameter closure, evaluated by the
+ * package's loader with the script object as argument. `object.metaClass.name = { ... }` (or the call form
+ * `object.metaClass.name { ... }`) injects a method; other statements run at load time; a returned closure is
+ * a setup callback that the loader runs later.
+ */
+function mixinShape(body: AstNode): MixinShape | null {
+  const statements = nodeArray(body.statements).filter((statement) => statement.kind !== "empty");
+  const only = statements.length === 1 ? statements[0] : undefined;
+  const closure = only?.kind === "expressionStatement" ? asNode(only.expression) : null;
+  if (closure?.kind !== "closure" || closure.parameterSpecified !== true) return null;
+  const parameters = groovyParameters(closure.parameters);
+  const closureBody = asNode(closure.body);
+  if (parameters?.length !== 1 || closureBody?.kind !== "block") return null;
+  const parameter = parameters[0]!.name;
+  const shape: MixinShape = { parameter, methods: [], loadStatements: [], setup: null };
+  const inner = nodeArray(closureBody.statements);
+  inner.forEach((statement, index) => {
+    const method = injectedMethod(statement, parameter);
+    if (method !== null) {
+      shape.methods.push(method);
+      return;
+    }
+    const value = asNode(statement.kind === "return" ? statement.value : statement.expression);
+    if (index === inner.length - 1 && (statement.kind === "return" || value?.kind === "closure")) {
+      if (value?.kind === "closure") shape.setup = value;
+      else if (value !== null && !isNullConstant(value)) shape.loadStatements.push(statement);
+      return;
+    }
+    shape.loadStatements.push(statement);
+  });
+  return shape;
+}
+
+function injectedMethod(
+  statement: AstNode,
+  parameter: string,
+): { name: string; closure: AstNode } | null {
+  const expression = statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+  if (expression === null) return null;
+  const isMetaClass = (node: unknown): boolean =>
+    isAstNode(node) &&
+    node.kind === "property" &&
+    variableName(node.object) === parameter &&
+    constantString(node.property) === "metaClass";
+  if (expression.kind === "methodCall" && isMetaClass(expression.object)) {
+    const name = constantString(expression.method);
+    const args = nodeArray(asNode(expression.arguments)?.items);
+    return name !== null && args.length === 1 && args[0]!.kind === "closure"
+      ? { name, closure: args[0]! }
+      : null;
+  }
+  const left = asNode(expression.left);
+  const right = asNode(expression.right);
+  if (expression.kind === "binary" && expression.operator === "=" && left?.kind === "property") {
+    const name = constantString(left.property);
+    return name !== null && isMetaClass(left.object) && right?.kind === "closure"
+      ? { name, closure: right }
+      : null;
+  }
+  return null;
+}
+
+function moduleNames(sourceName: string): { directory: string; name: string } {
+  const parts = sourceName.split(/[\\/]/u);
+  const file = parts.at(-1) ?? sourceName;
+  const name = file.replace(/\.groovy$/iu, "");
+  return { directory: parts.at(-2) ?? "", name };
+}
+
+function capitalized(name: string): string {
+  return `${name.charAt(0).toUpperCase()}${name.slice(1)}`;
+}
+
+/**
+ * Functions every package file may call: methods injected by mixin modules and the members of an anonymous-object
+ * script, which mixin code reaches through the object receiver.
+ */
+export function packageFunctionNames(files: readonly ParsedGroovyFile[]): Set<string> {
+  const names = new Set<string>();
+  for (const file of files) {
+    for (const name of describeMixinModule(file)?.functions ?? []) names.add(name);
+    if (file.root?.kind !== "scriptBody") continue;
+    for (const objectClass of nodeArray(file.root.classes)) {
+      for (const field of nodeArray(objectClass.fields)) {
+        if (asNode(field.initialExpression)?.kind === "closure" && typeof field.name === "string") {
+          names.add(field.name);
+        }
+      }
+      for (const method of nodeArray(objectClass.methods)) {
+        if (typeof method.name === "string") names.add(method.name);
+      }
+    }
+  }
+  return names;
+}
+
+/** Describes a runtime-loaded mixin module without lowering it; null for ordinary scripts. */
+export function describeMixinModule(file: ParsedGroovyFile): MixinModuleInfo | null {
+  const body = file.root?.kind === "scriptBody" ? asNode(file.root.body) : null;
+  const shape = body === null ? null : mixinShape(body);
+  if (shape === null) return null;
+  const { directory, name } = moduleNames(file.sourceName);
+  const loadFunction = `load${capitalized(name)}Module`;
+  const setupFunction = shape.setup === null ? null : `setup${capitalized(name)}Module`;
+  const hoisted = shape.loadStatements.flatMap((statement) => {
+    const declaration =
+      statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+    const declared = declaration?.kind === "declaration" ? variableName(declaration.left) : null;
+    return declared !== null && asNode(declaration?.right)?.kind === "closure" ? [declared] : [];
+  });
+  return {
+    sourceName: file.sourceName,
+    directory,
+    name,
+    loadFunction,
+    setupFunction,
+    functions: [
+      ...shape.methods.map((method) => method.name),
+      ...hoisted,
+      loadFunction,
+      ...(setupFunction === null ? [] : [setupFunction]),
+    ],
+  };
+}
+
+/**
+ * Flattens a mixin module into an ordinary script body of declarations: injected methods and module-level
+ * closures become functions, module-level variables (which injected methods capture) become globals that the
+ * load function assigns, and the object receiver is removed (`object.x(...)` becomes `x(...)`).
+ */
+function desugarMixinModule(
+  body: AstNode,
+  sourceName: string,
+): { body: AstNode; info: MixinModuleInfo } | null {
+  const shape = mixinShape(body);
+  const info =
+    shape === null
+      ? null
+      : describeMixinModule({
+          formatVersion: 1,
+          sourceName,
+          groovyVersion: "",
+          mode: "script-body",
+          root: { kind: "scriptBody", span: null, body },
+          diagnostics: [],
+        });
+  if (shape === null || info === null) return null;
+  const strip = (node: AstNode): AstNode => stripReceiver(node, shape.parameter);
+  const declaration = (name: string, right: AstNode, span: SourceSpan | null): AstNode => ({
+    kind: "expressionStatement",
+    span,
+    expression: { kind: "declaration", span, left: syntheticVariable(name, span), right },
+  });
+  const functionClosure = (statements: AstNode[], span: SourceSpan | null): AstNode => ({
+    kind: "closure",
+    span,
+    parameters: [],
+    parameterSpecified: true,
+    body: { kind: "block", span, statements },
+  });
+
+  const globals: AstNode[] = [];
+  const loadBody: AstNode[] = [];
+  for (const statement of shape.loadStatements.map(strip)) {
+    const expression =
+      statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+    const name = expression?.kind === "declaration" ? variableName(expression.left) : null;
+    const right = asNode(expression?.right);
+    if (name !== null && right?.kind === "closure") {
+      globals.push(statement);
+    } else if (name !== null && right !== null) {
+      globals.push(
+        declaration(
+          name,
+          {
+            kind: "unsupportedExpression",
+            span: null,
+            groovyType: "org.codehaus.groovy.ast.expr.EmptyExpression",
+          },
+          statement.span,
+        ),
+      );
+      if (!isEmptyGroovyExpression(right)) {
+        loadBody.push({
+          kind: "expressionStatement",
+          span: statement.span,
+          expression: {
+            kind: "binary",
+            span: statement.span,
+            operator: "=",
+            left: syntheticVariable(name, statement.span),
+            right,
+          },
+        });
+      }
+    } else {
+      loadBody.push(statement);
+    }
+  }
+  const members = shape.methods.map((method) =>
+    declaration(method.name, strip(method.closure), method.closure.span),
+  );
+  members.push(declaration(info.loadFunction, functionClosure(loadBody, body.span), body.span));
+  if (shape.setup !== null && info.setupFunction !== null) {
+    const setupBody = asNode(strip(shape.setup).body);
+    members.push(
+      declaration(
+        info.setupFunction,
+        functionClosure(nodeArray(setupBody?.statements), shape.setup.span),
+        shape.setup.span,
+      ),
+    );
+  }
+  const statements = [...globals, ...members].sort(
+    (left, right) => (left.span?.line ?? 0) - (right.span?.line ?? 0),
+  );
+  return { body: { ...body, statements }, info };
+}
+
+function syntheticVariable(name: string, span: SourceSpan | null): AstNode {
+  return { kind: "variable", span, name, type: "java.lang.Object" };
+}
+
+/** Replaces `object.x(...)` with `x(...)` and `object.x` with `x`; a bare `object` becomes `this`. */
+function stripReceiver(node: AstNode, parameter: string): AstNode {
+  if (node.kind === "variable" && variableName(node) === parameter)
+    return { ...node, name: "this" };
+  const propertyName = node.kind === "property" ? constantString(node.property) : null;
+  if (propertyName !== null && variableName(node.object) === parameter) {
+    return syntheticVariable(propertyName, node.span);
+  }
+  const result: AstNode = { ...node };
+  if (node.kind === "methodCall" && variableName(node.object) === parameter) {
+    result.object = syntheticVariable("this", node.span);
+    result.implicitThis = true;
+  }
+  for (const [key, child] of Object.entries(result)) {
+    if (key === "span" || key === "object") continue;
+    if (isAstNode(child)) result[key] = stripReceiver(child, parameter);
+    else if (Array.isArray(child)) {
+      result[key] = child.map((item) => (isAstNode(item) ? stripReceiver(item, parameter) : item));
+    }
+  }
+  const object = asNode(result.object);
+  if (object !== null && result.implicitThis !== true)
+    result.object = stripReceiver(object, parameter);
+  return result;
+}
+
+/**
+ * Some packages wrap the whole script in an anonymous object: `return new Object() { fields; methods }.main()`.
+ * Construction runs the field initializers in order and then the entry method, so the importer flattens it into
+ * an ordinary script body: fields become declarations, methods become closure declarations (lowered to
+ * functions like other closures), and the entry method's statements run last.
+ */
+function desugarObjectScript(
+  body: AstNode | null,
+  classes: AstNode[],
+  context: LowerContext,
+): AstNode | null {
+  const statements = body?.kind === "block" ? nodeArray(body.statements) : [];
+  const last = statements.at(-1);
+  const call = last?.kind === "return" ? asNode(last.value) : null;
+  const constructor = call?.kind === "methodCall" ? asNode(call.object) : null;
+  const entryName = call === null ? null : constantString(call.method);
+  const objectClass = classes.find((item) => item.name === constructor?.type);
+  const callArguments = call === null ? [] : nodeArray(asNode(call.arguments)?.items);
+  if (body === null || constructor?.kind !== "constructorCall" || objectClass === undefined)
+    return body;
+  const methods = nodeArray(objectClass.methods);
+  const entry = methods.find((method) => method.name === entryName);
+  const entryBody = asNode(entry?.body);
+  if (entry === undefined || entryBody?.kind !== "block" || callArguments.length > 0) return body;
+
+  const members: AstNode[] = [];
+  for (const field of nodeArray(objectClass.fields)) {
+    const left: AstNode = {
+      kind: "variable",
+      span: field.span,
+      name: field.name,
+      type: "java.lang.Object",
+    };
+    const right = asNode(field.initialExpression) ?? {
+      kind: "constant",
+      span: field.span,
+      value: null,
+    };
+    const declaration = { kind: "declaration", span: field.span, left, right };
+    members.push({ kind: "expressionStatement", span: field.span, expression: declaration });
+  }
+  for (const method of methods) {
+    if (method === entry) continue;
+    const left: AstNode = {
+      kind: "variable",
+      span: method.span,
+      name: method.name,
+      type: "java.lang.Object",
+    };
+    const closure: AstNode = {
+      kind: "closure",
+      span: method.span,
+      parameters: method.parameters,
+      parameterSpecified: true,
+      body: method.body,
+    };
+    const declaration = { kind: "declaration", span: method.span, left, right: closure };
+    members.push({ kind: "expressionStatement", span: method.span, expression: declaration });
+  }
+  members.sort((left, right) => (left.span?.line ?? 0) - (right.span?.line ?? 0));
+  const entryStatements = replaceModuleLoader(members, nodeArray(entryBody.statements), context);
+  for (const nested of classes) {
+    if (nested !== objectClass && nested.outerClass === objectClass.name) {
+      addDiagnostic(
+        context,
+        "SX_NESTED_CLASS",
+        "warning",
+        `Nested class ${String(nested.name).split("$").at(-1)} has no TeaseScript equivalent; its constructor calls are reported where they occur.`,
+        nested.span,
+      );
+    }
+  }
+  return { ...body, statements: [...statements.slice(0, -1), ...members, ...entryStatements] };
+}
+
+/**
+ * Replaces a runtime module loader (directory listing plus Groovy evaluation of each file) by direct calls to the
+ * package's mixin modules in file-name order, and the later `setups.each { it() }` by calls to their setup
+ * functions. Mutates the loader member in place and returns the rewritten entry statements.
+ */
+function replaceModuleLoader(
+  members: AstNode[],
+  entryStatements: AstNode[],
+  context: LowerContext,
+): AstNode[] {
+  let loaderName: string | null = null;
+  let modules: MixinModuleInfo[] = [];
+  for (const member of members) {
+    const declaration = asNode(member.expression);
+    const closure = asNode(declaration?.right);
+    const name = variableName(declaration?.left);
+    const directory = closure?.kind === "closure" ? moduleLoaderDirectory(closure) : null;
+    if (declaration === null || closure === null || name === null || directory === null) continue;
+    modules = context.mixinModules
+      .filter((module) => module.directory === directory)
+      .toSorted((left, right) => left.name.localeCompare(right.name));
+    if (modules.length === 0) continue;
+    loaderName = name;
+    context.loadsModuleDirectories.add(directory);
+    const span = closure.span;
+    const note: AstNode = {
+      kind: "importerNote",
+      span,
+      code: "SX_MODULE_LOADER",
+      message: `Replaced runtime loading of scripts/${directory}/*.groovy (directory listing and Groovy evaluation) with direct calls to its ${modules.length} modules in file-name order, the order Windows lists them.`,
+    };
+    declaration.right = {
+      ...closure,
+      parameters: [],
+      parameterSpecified: true,
+      body: {
+        kind: "block",
+        span,
+        statements: [note, ...modules.map((module) => callStatement(module.loadFunction, span))],
+      },
+    };
+  }
+  if (loaderName === null) return entryStatements;
+
+  const setupVariables = new Set<string>();
+  return entryStatements.flatMap((statement): AstNode[] => {
+    const expression =
+      statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+    const value = asNode(expression?.right);
+    if (
+      expression?.kind === "declaration" &&
+      value !== null &&
+      callParts(value)?.name === loaderName
+    ) {
+      const variable = variableName(expression.left);
+      if (variable !== null) setupVariables.add(variable);
+      return [callStatement(loaderName, statement.span)];
+    }
+    const call = expression === null ? null : callParts(expression);
+    if (call?.name === loaderName) return [callStatement(loaderName, statement.span)];
+    if (call?.name === "each" && setupVariables.has(variableName(expression?.object) ?? "")) {
+      return modules.flatMap((module) =>
+        module.setupFunction === null ? [] : [callStatement(module.setupFunction, statement.span)],
+      );
+    }
+    return [statement];
+  });
+}
+
+function callStatement(name: string, span: SourceSpan | null): AstNode {
+  return {
+    kind: "expressionStatement",
+    span,
+    expression: {
+      kind: "methodCall",
+      span,
+      object: syntheticVariable("this", span),
+      method: { kind: "constant", span, value: name },
+      arguments: { kind: "arguments", span, items: [] },
+      implicitThis: true,
+      safe: false,
+      spreadSafe: false,
+    },
+  };
+}
+
+/** `new File(".../scripts/<dir>").listFiles()` combined with `Eval.me(...)` marks a module loader closure. */
+function moduleLoaderDirectory(closure: AstNode): string | null {
+  let evaluates = false;
+  let lists = false;
+  let directory: string | null = null;
+  walkAst(closure.body, (node) => {
+    if (node.kind === "methodCall") {
+      const name = constantString(node.method);
+      if (name === "me" && variableName(node.object) === "Eval") evaluates = true;
+      if (name === "listFiles") lists = true;
+    }
+    if (node.kind === "constructorCall" && (node.type === "File" || node.type === "java.io.File")) {
+      walkAst(node.arguments, (argument) => {
+        const texts =
+          argument.kind === "constant" && typeof argument.value === "string"
+            ? [argument.value]
+            : argument.kind === "gstring" && Array.isArray(argument.strings)
+              ? argument.strings.filter((part): part is string => typeof part === "string")
+              : [];
+        for (const text of texts) {
+          const match = /scripts\/([^/]+)\/?$/u.exec(text);
+          if (match !== null) directory = match[1]!;
+        }
+      });
+    }
+  });
+  return evaluates && lists ? directory : null;
 }
 
 function collectClosureInfo(body: AstNode): Map<string, ClosureInfo> {

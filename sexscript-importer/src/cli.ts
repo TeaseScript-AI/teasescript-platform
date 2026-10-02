@@ -83,7 +83,8 @@ async function convertPackage(
   let written = 0;
   let compilerClean = 0;
   for (let index = 0; index < programs.length; index += 1) {
-    if (parsed[index]!.root?.kind !== "scriptBody") continue;
+    if (parsed[index]!.root?.kind !== "scriptBody" || programs[index]!.module !== undefined)
+      continue;
     const relative = path.relative(sourceRoot, sourcePaths[index]!);
     const outputPath = path.join(outputRoot, relative.replace(/\.groovy$/iu, ".tease"));
     await mkdir(path.dirname(outputPath), { recursive: true });
