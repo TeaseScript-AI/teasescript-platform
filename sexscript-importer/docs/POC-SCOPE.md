@@ -33,13 +33,16 @@ avoiding accepted-but-unimplemented forms would only trade compiler errors for w
 - prefer an implemented compact form when it is equally faithful, such as `say` plus `askText`, `askNumber`, or a
   `choose` with numeric or `yes`/`no` labels instead of parenthesized V30 input calls;
 - produce natural TeaseScript: keep comments and paragraph breaks, `else if` chains, interpolation, and idiomatic
-  forms such as `list.random` and `load ... default`; rename only identifiers TeaseScript rejects;
+  forms such as `list.random`; rename only identifiers TeaseScript rejects; make Groovy's implicit last-expression
+  result an explicit `return` only in functions whose result some caller in the package uses;
 - never move evaluation silently: a rewrite that hoists a condition or an input prompt applies only when the
   expression is unguarded, nothing with side effects is evaluated earlier in the same statement, and a hoisted part
   with side effects does not run before values the statement read earlier;
 - resolve package architecture statically instead of emulating Groovy: anonymous-object scripts become globals and
-  functions, runtime-loaded mixin modules become functions plus direct load calls, and closures kept as values become
-  action IDs with one generated dispatcher;
+  functions, runtime-loaded mixin modules become functions plus direct load calls (only when the loader's file
+  selection is the plain `*.groovy` filter, every file of the directory is a recognized module, and module results do
+  not depend on control flow), and closures or functions kept as values become action IDs with one generated
+  dispatcher;
 - keep every unconverted statement visible: an inline `// TODO` with the root cause, followed by the original Groovy
   as `// |` lines; behavior-relevant approximations get an inline `// NOTE`.
 

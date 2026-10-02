@@ -91,6 +91,16 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   depend on settings saved by the package's introduction anyway.
 - A Groovy map in a condition tests emptiness; records have no emptiness test, so such conditions are manual work
   (`SX_MAP_TRUTHINESS`).
+- Closures kept as values become action IDs called through one dispatcher. Unlike Groovy, the dispatcher ignores extra
+  arguments and returns null for an unknown action; Groovy failed in both cases.
+- A `switch` case Groovy tested with `isCase` keeps its meaning only where the case value shows it: equality for
+  scalars, membership for lists, bounds for ranges (tested in both directions when a bound is known only at runtime).
+  Other case values (classes, patterns, closures, values of unknown type) are reported.
+- Java integer and character arrays convert every written value; they are reported instead of becoming lists.
+  Writes to a list that a direct `b = a` assignment shared get a `NOTE` (`SX_SHARED_LIST_WRITE`).
+- `break`/`continue` with a label leave an outer loop; TeaseScript jumps affect only the innermost loop, so they are
+  reported. A statement that only computes a value (often `==` written for `=`) had no effect and is dropped with a
+  `NOTE`.
 - Groovy maps are shared references; TeaseScript records copy. A field write through a copy gets a `NOTE`
   (`SX_SHARED_MAP_WRITE`). Picking from an empty list returned null in Groovy and fails in TeaseScript.
 - Groovy lists and maps alias by reference; TeaseScript composite values copy (ADR 0014). Groovy `def` may change type.
