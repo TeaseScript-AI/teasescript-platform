@@ -1443,6 +1443,15 @@ async function playerTooltipChecks(page) {
     await trigger.hover();
     await tooltip(label).waitFor({ state: "visible" });
   };
+  // The hover tooltip must close first, or its exit animation would satisfy the wait. A key press makes the script
+  // focus keyboard focus (:focus-visible); the shared tooltip ignores pointer focus.
+  const expectFocusTooltip = async (trigger, label) => {
+    await page.mouse.move(500, 500);
+    await tooltip(label).waitFor({ state: "detached" });
+    await page.keyboard.press("Tab");
+    await trigger.focus();
+    await tooltip(label).waitFor({ state: "visible" });
+  };
 
   await page.setViewportSize({ width: 1440, height: 900 });
   const hide = page.getByRole("button", { name: "Hide sidebar", exact: true });
@@ -1454,9 +1463,7 @@ async function playerTooltipChecks(page) {
   });
   const show = page.getByRole("button", { name: "Show sidebar", exact: true });
   await expectTooltip(show, "Show sidebar");
-  await page.mouse.move(500, 500);
-  await show.focus();
-  await tooltip("Show sidebar").waitFor({ state: "visible" });
+  await expectFocusTooltip(show, "Show sidebar");
   await show.click();
 
   await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
@@ -1467,11 +1474,7 @@ async function playerTooltipChecks(page) {
     exact: true,
   });
   await expectTooltip(separator, "Drag or use arrow keys to resize media and conversation");
-  await page.mouse.move(500, 500);
-  await separator.focus();
-  await tooltip("Drag or use arrow keys to resize media and conversation").waitFor({
-    state: "visible",
-  });
+  await expectFocusTooltip(separator, "Drag or use arrow keys to resize media and conversation");
 
   await page.setViewportSize({ width: 390, height: 844 });
   const narrowShow = page.getByRole("button", { name: "Show sidebar", exact: true });
@@ -1496,6 +1499,11 @@ async function playerTooltipChecks(page) {
   await page.keyboard.press("Tab");
   await narrowHide.focus();
   await tooltip("Hide sidebar").waitFor({ state: "visible" });
+  // Hold the closing tooltip's exit animation, so Escape deterministically arrives while its layer remains.
+  const holdExit = await page.addStyleTag({
+    content:
+      '[data-slot="tooltip-content"][data-state="closed"] { animation-play-state: paused !important; }',
+  });
   await page.locator('[data-slot="sheet-content"]').focus();
   if (!(await tooltip("Hide sidebar").count()))
     throw new Error("The drawer tooltip layer did not remain during focus handoff");
@@ -1505,6 +1513,7 @@ async function playerTooltipChecks(page) {
     throw new Error(
       "Escape during tooltip focus handoff must close the drawer and restore opener focus",
     );
+  await holdExit.evaluate((style) => style.remove());
   return "PASS Player sidebar and drag tooltips use shared styling on hover and keyboard focus";
 }
 
@@ -2032,12 +2041,19 @@ async function focusOffsetChecks(page) {
     const button = page.getByRole("button", { name: label, exact: true });
     await button.scrollIntoViewIfNeeded();
     const resting = await button.evaluate((el) => getComputedStyle(el).boxShadow);
-    await page.evaluate(() => (document.documentElement.dataset.playerKeyboardFocus = "true"));
+    // A key press makes the following script focus keyboard focus for the browser (:focus-visible) and the Player.
+    // Chromium ignores `focus({ focusVisible: true })`, so after the launcher click it would stay pointer focus.
+    await page.keyboard.press("Tab");
     // Read styles in the same task as focus: an animated outline would still show its start value.
     const focused = await button.evaluate((el) => {
-      el.focus({ focusVisible: true });
+      el.focus();
       const style = getComputedStyle(el);
-      return { width: style.outlineWidth, offset: style.outlineOffset, shadow: style.boxShadow };
+      return {
+        focusVisible: el.matches(":focus-visible"),
+        width: style.outlineWidth,
+        offset: style.outlineOffset,
+        shadow: style.boxShadow,
+      };
     });
     // Owner decision: a 2px outline with 2px separation.
     if (focused.width !== "2px" || focused.offset !== "2px")
