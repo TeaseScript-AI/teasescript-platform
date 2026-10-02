@@ -921,6 +921,7 @@ export function validateInteractionResultHandoffState(
   if (
     !isPlainRecord(handoff) ||
     !hasExactKeys(handoff, [
+      "actionKind",
       "actionId",
       "owningInstruction",
       "continuationInstruction",
@@ -928,19 +929,21 @@ export function validateInteractionResultHandoffState(
       "destinationTemporary",
       "result",
     ]) ||
+    !isOneOf(handoff.actionKind, ["interaction", "capture"]) ||
     !positiveSafeInteger(handoff.actionId) ||
     !nonNegativeSafeInteger(handoff.owningInstruction) ||
     !nonNegativeSafeInteger(handoff.continuationInstruction) ||
     !positiveSafeInteger(handoff.destinationTemporary) ||
     (handoff.ownerCallFrameId !== null && !positiveSafeInteger(handoff.ownerCallFrameId)) ||
-    !(
-      (typeof handoff.result === "string" && interactionStringFits(handoff.result)) ||
-      (typeof handoff.result === "number" &&
-        Number.isFinite(handoff.result) &&
-        !Object.is(handoff.result, -0)) ||
-      // Only an unavailable capture hands off `null`; the plan and settlement checks below confirm the kind.
-      handoff.result === null
-    ) ||
+    !(handoff.actionKind === "capture"
+      ? handoff.result === null ||
+        (typeof handoff.result === "string" &&
+          handoff.result.length > 0 &&
+          interactionStringFits(handoff.result))
+      : (typeof handoff.result === "string" && interactionStringFits(handoff.result)) ||
+        (typeof handoff.result === "number" &&
+          Number.isFinite(handoff.result) &&
+          !Object.is(handoff.result, -0))) ||
     !positiveSafeInteger(snapshot.nextActionId) ||
     handoff.actionId >= snapshot.nextActionId ||
     snapshot.foregroundAction !== null ||
@@ -971,17 +974,21 @@ export function validateInteractionResultHandoffState(
   }
 
   const settlement = snapshot.lastSettlement;
+  // A foreground interaction consumes the background pacing gate, so only a newer action can settle after it. A
+  // capture leaves that gate running, so the older gate may settle before the capture result is consumed.
   if (
-    !isPlainRecord(settlement) ||
-    !positiveSafeInteger(settlement.actionId) ||
-    settlement.actionId < handoff.actionId
+    handoff.actionKind === "interaction" &&
+    (!isPlainRecord(settlement) ||
+      !positiveSafeInteger(settlement.actionId) ||
+      settlement.actionId < handoff.actionId)
   ) {
     errors.push(
       "Runtime interaction result handoff requires its settlement or a newer retained settlement.",
     );
   } else if (
+    isPlainRecord(settlement) &&
     settlement.actionId === handoff.actionId &&
-    ((settlement.actionKind !== "interaction" && settlement.actionKind !== "capture") ||
+    (settlement.actionKind !== handoff.actionKind ||
       settlement.owningInstruction !== handoff.owningInstruction ||
       settlement.continuationInstruction !== handoff.continuationInstruction ||
       settlement.ownerCallFrameId !== handoff.ownerCallFrameId ||
@@ -991,25 +998,14 @@ export function validateInteractionResultHandoffState(
     errors.push("Runtime interaction result handoff disagrees with its retained settlement.");
   }
 
-  if (plan === undefined) {
-    // Without the plan, a `null` result must at least belong to a retained capture settlement.
-    if (
-      handoff.result === null &&
-      (!isPlainRecord(settlement) ||
-        settlement.actionId !== handoff.actionId ||
-        settlement.actionKind !== "capture")
-    )
-      errors.push("Runtime interaction result handoff has an invalid null result.");
-    return;
-  }
+  if (plan === undefined) return;
   const instruction = plan.instructions[handoff.owningInstruction];
-  if (instruction?.kind === "capture") {
+  if (handoff.actionKind === "capture") {
     if (
+      instruction?.kind !== "capture" ||
       handoff.owningInstruction + 1 !== handoff.continuationInstruction ||
       instruction.destinationTemporary !== handoff.destinationTemporary ||
-      precedingInstruction !== instruction ||
-      (handoff.result !== null &&
-        (typeof handoff.result !== "string" || handoff.result.length === 0))
+      precedingInstruction !== instruction
     ) {
       errors.push(
         "Runtime interaction result handoff does not match its canonical plan instruction.",

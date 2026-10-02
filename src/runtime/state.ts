@@ -223,6 +223,8 @@ export interface RuntimeCallFrameSnapshot {
 }
 
 export interface RuntimeInteractionResultHandoffSnapshot {
+  /** Which foreground action produced the result: an interaction or a capture. */
+  readonly actionKind: "interaction" | "capture";
   readonly actionId: number;
   readonly owningInstruction: number;
   readonly continuationInstruction: number;
@@ -581,6 +583,7 @@ function cloneInteractionResultHandoff(
   handoff: RuntimeInteractionResultHandoffSnapshot,
 ): RuntimeInteractionResultHandoffSnapshot {
   return {
+    actionKind: handoff.actionKind,
     actionId: handoff.actionId,
     owningInstruction: handoff.owningInstruction,
     continuationInstruction: handoff.continuationInstruction,

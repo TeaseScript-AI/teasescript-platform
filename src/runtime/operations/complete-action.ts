@@ -326,6 +326,7 @@ function completeCapture(
   current.lastSettlement = settlement;
   // Like an interaction result, the canonical result is kept until its first consume.
   current.interactionResultHandoff = Object.freeze({
+    actionKind: "capture",
     actionId: action.actionId,
     owningInstruction: action.owningInstruction,
     continuationInstruction: action.continuationInstruction,
@@ -397,6 +398,7 @@ function completeInteraction(
     action.destinationTemporary === null || resolved.result === null
       ? null
       : Object.freeze({
+          actionKind: "interaction",
           actionId: action.actionId,
           owningInstruction: action.owningInstruction,
           continuationInstruction: action.continuationInstruction,

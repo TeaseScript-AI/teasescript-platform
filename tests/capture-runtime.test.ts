@@ -285,3 +285,28 @@ test("a capture reserves its events on top of what active actions still need", (
   assert.notEqual(result.snapshot.foregroundAction?.kind, "capture");
   assert.equal(validateRuntimeSnapshot(result.snapshot, plan).valid, true);
 });
+
+test("an earlier pacing gate may settle after a capture before its result is consumed", () => {
+  for (const answer of ["captured", "unavailable"] as const) {
+    const { plan, snapshot } = started('say "hi"\nlet photo = takePhoto()\nshowImage photo');
+    const gate = snapshot.backgroundActions.find((action) => action.kind === "chatPacingGate");
+    assert.ok(gate !== undefined, "the message is still pacing in the background");
+    const settled =
+      answer === "captured"
+        ? captured(plan, snapshot).snapshot
+        : unavailable(plan, snapshot, "denied").snapshot;
+    const skipped = completeAction(plan, settled, {
+      actionId: gate.actionId,
+      actionKind: "chatPacingGate",
+      payload: { kind: "skip" },
+    });
+    assert.equal(skipped.outcome.kind, "completed", answer);
+    assert.equal(validateRuntimeSnapshot(skipped.snapshot, plan).valid, true, answer);
+    assert.deepEqual(
+      restoreCheckpoint(createCheckpoint(plan, skipped.snapshot)).snapshot,
+      skipped.snapshot,
+    );
+    const finished = run(plan, skipped.snapshot).snapshot;
+    assert.equal(finished.stageImage, answer === "captured" ? PHOTO : null, answer);
+  }
+});
