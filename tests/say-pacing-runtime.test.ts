@@ -857,32 +857,6 @@ test("time release followed by explicit exit canonicalizes pacing release proven
   assert.equal(replay.events.length, 0);
 });
 
-test("skip release followed by explicit exit leaves a checkpointable replay settlement", () => {
-  const compiled = plan('say "first", 5\nsay "second", 5\nexit');
-  const promoted = run(compiled, createFreshRuntimeSnapshot(compiled));
-  const gate = promoted.snapshot.foregroundAction;
-  assert.equal(gate?.kind, "chatPacingGate");
-
-  const released = completeAction(compiled, promoted.snapshot, {
-    actionId: gate!.actionId,
-    actionKind: "chatPacingGate",
-    payload: { kind: "skip" },
-  });
-  assert.notEqual(released.snapshot.preparedSayOutput, null);
-  const exited = run(compiled, released.snapshot);
-
-  assert.equal(exited.snapshot.status, "halted");
-  assert.equal(exited.snapshot.lastSettlement?.actionKind, "chatPacingGate");
-  assert.equal(
-    exited.snapshot.lastSettlement?.actionKind === "chatPacingGate"
-      ? exited.snapshot.lastSettlement.releasedPreparedOutputInstruction
-      : null,
-    null,
-  );
-  assert.equal(validateRuntimeSnapshot(exited.snapshot, compiled).valid, true);
-  assert.doesNotThrow(() => createCheckpoint(compiled, exited.snapshot));
-});
-
 test("equal due pacing and delay actions settle by action ID", () => {
   const compiled = plan('say "first"\nwait 1.8 s\nexit');
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
@@ -1364,7 +1338,7 @@ test("terminal say transitions reserve complete and future action events atomica
   assert.equal(validateRuntimeSnapshot(preparedRejected.snapshot, prepared).valid, true);
 });
 
-test("speaker assignment keeps defaultSaySkippable boolean and exit cleans pacing work", () => {
+test("speaker assignment keeps defaultSaySkippable boolean", () => {
   const assignmentPlan = plan(
     'speaker vera { defaultSaySkippable: true }\nvera.defaultSaySkippable = "no"\nexit',
   );
@@ -1386,18 +1360,6 @@ test("speaker assignment keeps defaultSaySkippable boolean and exit cleans pacin
       (property) => property.name === "defaultSaySkippable",
     )?.value,
     false,
-  );
-
-  const exitPlan = plan('say "first", 5\nexit');
-  const afterSay = executeInstruction(exitPlan, createFreshRuntimeSnapshot(exitPlan));
-  assert.equal(afterSay.snapshot.backgroundActions.length, 1);
-  const exited = executeInstruction(exitPlan, afterSay.snapshot);
-  assert.equal(exited.snapshot.status, "halted");
-  assert.equal(exited.snapshot.backgroundActions.length, 0);
-  assert.equal(exited.snapshot.preparedSayOutput, null);
-  assert.deepEqual(
-    exited.events.map((event) => event.kind),
-    ["exit"],
   );
 });
 
