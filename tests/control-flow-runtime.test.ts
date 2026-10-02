@@ -309,5 +309,8 @@ test("loop variables deep-copy composite list elements", () => {
 });
 
 function runSource(source: string, seed = 1) {
-  return runValidSource(source, seed);
+  const result = runValidSource(source, seed);
+  // An empty or partial say list is only evidence when the run completed instead of failing early.
+  assert.equal(result.snapshot.status, "halted", source);
+  return result;
 }
