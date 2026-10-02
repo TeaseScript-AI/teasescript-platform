@@ -531,17 +531,19 @@ accumulated elapsed time. A finished or stopped record moves to `settledTimers` 
 (`{ kind: "timerHandle", timerId }`) stays readable; `nextTimerId` allocates handle IDs.
 
 `observeTime` processes due work globally by `(scene time, phase, action ID)`: foreground and suspended delays, pacing
-gates, timer rounds, and media timeline events (see [Stage image and media playback](#stage-image-and-media-playback)). A round that expires naturally ends at its deadline and a repeating timer starts its next round
+gates, timer rounds, and media timeline events (see [Stage image and media playback](#stage-image-and-media-playback)).
+A round that expires naturally ends at its deadline and a repeating timer starts its next round
 there, drawing a repeating range from the session RNG; `remaining` reaching zero ends the round at the current scene
 time, as does pausing a round that is already due while its expiry waits behind a running block. An expired round
 with an expiry block is queued in `pendingTimerHandlers` in due order; consecutive expiries of one timer share an entry
 with a count. A fixed-length repeating timer computes each round's deadline from an anchor as
 `anchor + (anchoredRounds + 1) * repeatDuration` instead of accumulating it, so every observation schedule yields the
-same deadlines; a handler-free one skips silent rounds in one step, stopping before other work at the same deadline
-that has a lower action ID. Rounds shorter than the deadline's numeric resolution may end at the same time; an
-anchored timer finishes only when its round index is exhausted or its next deadline leaves the session range. A
-script change to the current round (`pause`, `resume`, `remaining`, or `repeatDuration`) starts a new anchor at the
-next full round. Observations after a runtime failure record the observed time but settle no further work.
+same deadlines. Silent rounds of a handler-free timer settle as if each expired on time; the current implementation
+skips them arithmetically up to the next other due work instead of expiring them one by one. Rounds shorter than the
+deadline's numeric resolution may end at the same time; an anchored timer finishes only when its round index is
+exhausted or its next deadline leaves the session range. A script change to the current round (`pause`, `resume`,
+`remaining`, or `repeatDuration`) starts a new anchor at the next full round. Observations after a runtime failure
+record the observed time but settle no further work.
 
 An observation records `observedSessionTimeMs`; `currentSessionTimeMs` is the scene time at which execution stands.
 Due work settles one deadline at a time, advancing scene time to each. Whenever the script or an expiry block can
@@ -550,8 +552,7 @@ pacing gate at its deadline, a block starts at its expiry's deadline, and catch-
 once execution waits or ends. Every settlement records the scene time at which it happened: a time-driven settlement
 records its deadline, and a pacing gate that is skipped, consumed, or superseded records the current scene time. A
 late observation therefore gives the same output, events, and snapshot as observing every deadline on time: a block
-can `stop()` a later timer before it expires, a timer it starts orders by its own deadline, and a handler-free
-repeating timer skips silent rounds only up to the next other due work.
+can `stop()` a later timer before it expires, and a timer it starts orders by its own deadline.
 
 Time reaches waits and timers only through `observeTime`; a Player cannot complete them. Host input (an interaction
 answer or a pacing skip) happens at the observed time, so `completeAction` returns `executionPending` without changing

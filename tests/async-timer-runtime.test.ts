@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
@@ -15,7 +16,6 @@ import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
-import { timerProperty } from "../src/runtime/timers.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
@@ -29,6 +29,31 @@ function playerRuntimeDeadlinesDue(snapshot: RuntimeSnapshot): boolean {
     (deadline) => deadline <= snapshot.observedSessionTimeMs,
   );
 }
+
+/**
+ * Generous bound for a catch-up that finishes in well under a second. The horizons that use it hold so many silent
+ * rounds that expiring them one at a time would take days, so exceeding it means that regression rather than a slow
+ * machine; it is not a performance threshold.
+ */
+const BOUNDED_CATCH_UP_LIMIT_MS = 20_000;
+
+/** Restores a checkpoint, observes a time, runs the engine, and prints the result as JSON; see `Session.atBounded`. */
+const BOUNDED_CATCH_UP_SCRIPT = `
+  import {
+    createCheckpoint, deserializeCheckpoint, observeTime, run, serializeCheckpoint,
+  } from ${JSON.stringify(new URL("../src/index.js", import.meta.url).href)};
+  let input = "";
+  for await (const chunk of process.stdin) input += chunk;
+  const { checkpoint, nowMs } = JSON.parse(input);
+  const { plan, snapshot } = deserializeCheckpoint(checkpoint);
+  const observed = observeTime(plan, snapshot, nowMs);
+  const ran = run(plan, observed.snapshot);
+  process.stdout.write(JSON.stringify({
+    outcome: observed.outcome.kind,
+    events: [...observed.events, ...ran.events],
+    checkpoint: serializeCheckpoint(createCheckpoint(plan, ran.snapshot)),
+  }));
+`;
 
 /** Drives a session with explicit time observations and completions, round-tripping every checkpoint. */
 class Session {
@@ -72,6 +97,39 @@ class Session {
     assert.equal(observed.outcome.kind, "observed");
     this.events.push(...observed.events);
     this.snapshot = observed.snapshot;
+    return this.run();
+  }
+
+  /**
+   * Like `at`, but catches up in a child process that is stopped after `BOUNDED_CATCH_UP_LIMIT_MS`. Catch-up is
+   * synchronous, so a node:test `timeout` cannot interrupt it; the child turns a regression to per-round catch-up into
+   * a failure instead of a hung suite.
+   */
+  atBounded(nowMs: number): this {
+    this.#restore();
+    const child = spawnSync(
+      process.execPath,
+      ["--input-type=module", "--eval", BOUNDED_CATCH_UP_SCRIPT],
+      {
+        input: JSON.stringify({
+          checkpoint: serializeCheckpoint(createCheckpoint(this.plan, this.snapshot)),
+          nowMs,
+        }),
+        encoding: "utf8",
+        timeout: BOUNDED_CATCH_UP_LIMIT_MS,
+      },
+    );
+    assert.equal(child.error, undefined, `catch-up to ${nowMs} ms must finish within the bound`);
+    assert.equal(child.status, 0, child.stderr);
+    // EVIDENCE: fixture: the child prints plain JSON data in this shape.
+    const result = JSON.parse(child.stdout) as {
+      outcome: string;
+      events: InterpreterEvent[];
+      checkpoint: string;
+    };
+    assert.equal(result.outcome, "observed");
+    this.events.push(...result.events);
+    this.snapshot = deserializeCheckpoint(result.checkpoint).snapshot;
     return this.run();
   }
 
@@ -796,19 +854,15 @@ test("runtime review regressions stay checkpointable and ordered", () => {
   assert.deepEqual(twiceRun.snapshot, onTime.snapshot);
 });
 
-test("a late observation skips silent fixed repeat rounds arithmetically", () => {
-  const source = "let t = timer(duration: 1 ms, async: true, repeat: true)\nwait 10000 s\nexit";
-  const late = new Session(source);
-  const started = performance.now();
-  late.at(3_600_000);
-  assert.ok(performance.now() - started < 500, "catch-up must not process every silent round");
-  const timer = late.timers()[0]!.timer;
-  assert.deepEqual(timerProperty(timer, "elapsed", 3_600_000), {
-    kind: "duration",
-    milliseconds: 3_600_000,
-  });
-  assert.equal(timer.anchoredRounds, 3_600_000, "rounds since the anchor at 0 ms");
-  assert.equal(timer.deadlineMs, 3_600_001);
+test("a late observation across 10^12 silent fixed rounds ends with on-time elapsed and remaining", () => {
+  // A scoped regression oracle for catch-up that does not expire silent rounds one at a time (docs/RUNTIME.md): that
+  // path cannot reach this horizon within the bound. The values follow from the anchor formula.
+  const late = new Session(
+    'let t = timer(duration: 1 ms, async: true, repeat: true)\nwait 1000000000 s\nsay "${t.elapsed == 1000000000 s} ${t.remaining == 1 ms}"',
+  ).atBounded(1e12);
+  // The round ending with the wait settles first by action ID, so the next 1-ms round has just started.
+  assert.deepEqual(late.said(), ["true true"]);
+  assert.equal(late.snapshot.status, "halted");
 });
 
 test("final review regressions keep late expiries valid and reject forged invocations", () => {
@@ -1159,9 +1213,10 @@ test("audit regressions: fractional repeats, tiny rounds, remaining rounding, an
   assert.deepEqual(late.said(), timely.said());
   assert.deepEqual(late.timers()[0]!.timer, timely.timers()[0]!.timer);
 
-  const started = performance.now();
-  const tiny = new Session("timer(duration: 1e-16 ms, async: true, repeat: true)\nwait 1 ms").at(1);
-  assert.ok(performance.now() - started < 1_000, "tiny silent rounds are skipped in one step");
+  // Thousands of trillions of silent rounds end before 1 ms.
+  const tiny = new Session(
+    "timer(duration: 1e-16 ms, async: true, repeat: true)\nwait 1 ms",
+  ).atBounded(1);
   assert.equal(tiny.snapshot.foregroundAction, null);
   // A failure would also clear the foreground action; the session must end normally.
   assert.equal(tiny.snapshot.status, "halted");
@@ -1299,12 +1354,8 @@ test("re-audit regressions: skipped rounds keep tie order, termination, and rest
 test("second re-audit regressions: plateau skipping, failure at a due deadline, and the index limit", () => {
   const plateau =
     "let t = timer(duration: 1 ms, async: true, repeat: true)\nt.repeatDuration = 1e-300 ms\nwait 2 ms";
-  const started = performance.now();
-  const walked = new Session(plateau).at(1).at(2);
-  assert.ok(
-    performance.now() - started < 1_000,
-    "equal-deadline rounds are skipped in bounded steps",
-  );
+  // From 1 ms on, every round deadline rounds to 1 ms until the round index is exhausted.
+  const walked = new Session(plateau).atBounded(1).at(2);
   assert.equal(walked.snapshot.status, "halted");
 
   const failing = new Session(
