@@ -23,11 +23,7 @@ import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import type { RuntimeDelayActionSettlementSnapshot } from "../src/runtime/actions/model.js";
-import {
-  createFreshRuntimeSnapshot,
-  type RuntimeSnapshot,
-  validateRuntimeSnapshot,
-} from "../src/runtime/state.js";
+import { type RuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
 function interactionPlan(
@@ -189,17 +185,6 @@ test("a transferred interaction result is ordinary state that later writes may c
   assert.deepEqual(
     final.events.filter((event) => event.kind === "say").map((event) => event.text),
     ["changed"],
-  );
-});
-
-test("an unknown root snapshot field is rejected at validation, checkpoint and restore", () => {
-  const plan = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
-  const snapshot = createFreshRuntimeSnapshot(plan);
-  const withUnknownField = { ...structuredClone(snapshot), unknownField: "none" };
-  assert.equal(validateRuntimeSnapshot(withUnknownField, plan).valid, false);
-  assert.throws(() => createCheckpoint(plan, withUnknownField));
-  assert.throws(() =>
-    restoreCheckpoint({ ...createCheckpoint(plan, snapshot), snapshot: withUnknownField }),
   );
 });
 

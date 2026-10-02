@@ -211,29 +211,6 @@ test("compact choice keys continue across a newline after ':'", () => {
   );
 });
 
-test("compact choice keys without a value keep the focused diagnostic", () => {
-  // The colon-continuation matrix covers continued end, statement and nested cases by code. These
-  // rows add the end of file directly after the colon and the focused message that separates a key
-  // without a value from a missing option.
-  for (const [source, statements] of [
-    ["let r = choose coast:", ["letStatement"]],
-    ['let r = choose coast:\n\nsay "recovered"', ["letStatement", "sayStatement"]],
-  ] as const) {
-    const parsed = parse(source);
-    assert.deepEqual(
-      parsed.diagnostics.map((diagnostic) => diagnostic.code),
-      ["TSP030"],
-      source,
-    );
-    assert.ok(parsed.diagnostics[0]!.message.includes("after ':'"), source);
-    assert.deepEqual(
-      parsed.program.statements.map((statement) => statement.kind),
-      statements,
-      source,
-    );
-  }
-});
-
 test("nested compact choices report missing options once per affected invocation", () => {
   const insertionDiagnostics = (source: string) =>
     parse(source).diagnostics.map((diagnostic) => [

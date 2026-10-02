@@ -165,6 +165,21 @@ test("keeps same-named speakers in sibling lexical scopes as distinct state", ()
   );
 });
 
+test("an unknown root snapshot field is rejected at validation, checkpoint and restore", () => {
+  const compiled = plan('say "kept"');
+  const snapshot = createFreshRuntimeSnapshot(compiled);
+  const withUnknownField = { ...structuredClone(snapshot), unknownField: "none" };
+  assert.equal(validateRuntimeSnapshot(withUnknownField, compiled).valid, false);
+  assert.throws(
+    () => createCheckpoint(compiled, withUnknownField),
+    (error: unknown) => error instanceof CheckpointError && error.info.code === "TSK002",
+  );
+  assertCheckpointCode(
+    { ...createCheckpoint(compiled, snapshot), snapshot: withUnknownField },
+    "TSK002",
+  );
+});
+
 test("accepts current internal format revisions and rejects non-current or malformed revisions", () => {
   const compiled = plan("exit");
   const snapshot = createFreshRuntimeSnapshot(compiled);

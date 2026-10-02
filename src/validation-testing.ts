@@ -36,7 +36,3 @@ export function withValidationTestStatistics<T>(
 export function recordValidationTestWork(name: string, amount = 1): void {
   if (active !== null) active[name] = (active[name] ?? 0) + amount;
 }
-
-export function recordValidationTestMaximum(name: string, value: number): void {
-  if (active !== null) active[name] = Math.max(active[name] ?? 0, value);
-}
