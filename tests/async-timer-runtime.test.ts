@@ -769,6 +769,14 @@ test("malformed restored timer, handle, queue, and interrupt data is rejected", 
     [[...action, "extra"], true],
   ];
   for (const [path, value] of timerCases) assertForgedRejected(runningJson, path, value);
+
+  // Background work is canonical state in creation order, so a reordered list of valid entries is malformed.
+  const pair = new Session("let a = timer async 5\nlet b = timer async 6\nwait 10");
+  const pairJson = serializeCheckpoint(createCheckpoint(pair.plan, pair.snapshot));
+  // EVIDENCE: fixture: checkpoint serialization produces plain JSON data.
+  const pairActions = child(child(JSON.parse(pairJson) as Json, "snapshot"), "backgroundActions");
+  assert.ok(Array.isArray(pairActions));
+  assertForgedRejected(pairJson, ["snapshot", "backgroundActions"], [...pairActions].reverse());
 });
 
 test("runtime review regressions stay checkpointable and ordered", () => {
