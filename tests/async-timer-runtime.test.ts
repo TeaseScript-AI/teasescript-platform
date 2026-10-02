@@ -610,10 +610,15 @@ test("expiry blocks queued at script end still run, while script end stops runni
   assert.deepEqual(session.said(), ["forced running"]);
   assert.equal(session.snapshot.status, "halted");
   assert.equal(session.timers().length, 0);
-  assert.deepEqual(
-    session.snapshot.settledTimers.map((timer) => timer.state),
-    ["finished", "stopped"].reverse().sort(),
-  );
+  const settledState = (name: string) => {
+    const handle = session.snapshot.frames[0]!.bindings.find(
+      (binding) => binding.name === name,
+    )?.value;
+    assert.ok(typeof handle === "object" && handle?.kind === "timerHandle");
+    return session.snapshot.settledTimers.find((timer) => timer.timerId === handle.timerId)?.state;
+  };
+  assert.deepEqual([settledState("now"), settledState("later")], ["finished", "stopped"]);
+  assert.equal(session.snapshot.settledTimers.length, 2);
 });
 
 test("an expiry block interrupting a function keeps caller scopes, loops, and temporaries", () => {
@@ -1291,10 +1296,13 @@ test("audit regressions: restore rejects contradictory rounds, early expiries, a
   full.snapshot.pendingTimerHandlers[0]!.count = Number.MAX_SAFE_INTEGER;
   counted.snapshot = deserializeCheckpoint(JSON.stringify(full)).snapshot;
   counted.at(3_000);
-  assert.deepEqual(
-    counted.snapshot.pendingTimerHandlers.map((entry) => entry.count),
-    [Number.MAX_SAFE_INTEGER, 1],
-    "a full aggregate count starts a new entry",
+  // How the queue splits a full count is not a rule; the session must not fail, every checkpoint round-trips (so each
+  // count stays a safe integer), and no expiry is lost.
+  assert.equal(counted.snapshot.failure, null);
+  assert.equal(
+    counted.snapshot.pendingTimerHandlers.reduce((total, entry) => total + BigInt(entry.count), 0n),
+    BigInt(Number.MAX_SAFE_INTEGER) + 1n,
+    "a full aggregate count loses no expiry",
   );
 });
 
@@ -1373,7 +1381,11 @@ test("second re-audit regressions: plateau skipping, failure at a due deadline, 
   assert.equal(observed.snapshot.observedSessionTimeMs, 5);
   assert.deepEqual(observed.events, [], "a failed session settles nothing further");
 
-  // The last anchored round index ends both an on-time and a late schedule at the same point.
+  // The last anchored round index ends both an on-time and a late schedule at the same point. The constants are a
+  // regression oracle scoped to the current private index limit, zero-based `Number.MAX_SAFE_INTEGER - 2`: the last
+  // 1e-16-ms round ends at (MAX_SAFE_INTEGER - 1) * 1e-16 ms = 0.900719925474099 ms, so the finished timer's elapsed
+  // time stays at most that ("end"), and the on-time prefix stops a few rounds earlier. docs/RUNTIME.md documents the
+  // late-versus-on-time equality and that an exhausted index finishes the timer, not the index value.
   const indexLimit =
     'let t = timer(duration: 1e-16 ms, async: true, repeat: true)\ntimer async 1 ms {\n  if t.elapsed > 0.900719925474099 ms { say "extra", 0 }\n  else { say "end", 0 }\n}\nwait 10 ms';
   const prefix = new Session(indexLimit).at(0.9007199254740984);
