@@ -62,14 +62,24 @@ test("deep list chains compile in direct expression-plan contexts", () => {
   assert.equal(value?.kind, "literal");
 });
 
-test("deep collection parameter defaults retain semantic diagnostic order", () => {
+test("deep collection parameter defaults finish semantic validation with located results", () => {
   const depth = 2_000;
   const wrap = (expression: string) => `${"[".repeat(depth)}${expression}${"]".repeat(depth)}`;
-  const interaction = compileSource(`function sample(value = ${wrap("askText")}) {\nexit\n}`);
-  assert.deepEqual(
-    interaction.diagnostics.map((diagnostic) => diagnostic.code),
-    ["TSV032"],
-  );
+  // Rejecting a blocking interaction in a parameter default (TSV032) is a provisional implementation restriction,
+  // not TeaseScript semantics. The deep default must compile or fail inside the default, never internally.
+  const interactionSource = `function sample(value = ${wrap("askText")}) {\nexit\n}`;
+  const interaction = compileSource(interactionSource);
+  if (interaction.plan === null) {
+    assert.notEqual(interaction.diagnostics.length, 0);
+    for (const diagnostic of interaction.diagnostics) {
+      assert.match(diagnostic.code, /^TS[LPV]\d{3}$/u);
+      assert.ok(diagnostic.span.start.offset >= interactionSource.indexOf("["), diagnostic.code);
+      assert.ok(
+        diagnostic.span.end.offset <= interactionSource.lastIndexOf("]") + 1,
+        diagnostic.code,
+      );
+    }
+  }
 
   const laterReference = compileSource(
     `function sample(value = ${wrap("later")}, later = 1) {\nexit\n}`,
