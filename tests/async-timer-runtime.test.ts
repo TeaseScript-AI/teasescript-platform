@@ -1216,7 +1216,7 @@ test("host input waits for scene-time catch-up and for an expiry block due at th
   assert.equal(completeAction(exiting.plan, exited, request).outcome.kind, "staleAction");
 });
 
-test("fractional and tiny rounds catch up as on time, zero remaining finishes, and invalid duration uses fail", () => {
+test("late fractional rounds match on time, tiny rounds end normally, zero remaining finishes, and list text or a zero-based repeat range fails", () => {
   // Observes every timer deadline up to the horizon, as a Player that is never late would.
   const onTime = (source: string, horizonMs: number): Session => {
     const session = new Session(source);
