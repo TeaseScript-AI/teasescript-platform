@@ -64,6 +64,8 @@ export interface LowerOptions {
   packageFunctions?: ReadonlySet<string>;
   /** Runtime-loaded mixin modules of the package. */
   mixinModules?: readonly MixinModuleInfo[];
+  /** Names assigned exactly once in the whole package, which no side effect can change afterwards. */
+  stableNames?: ReadonlySet<string>;
   /**
    * Rename identifiers TeaseScript rejects (default). Package composition disables this per file and renames
    * the composed program once.
@@ -98,6 +100,7 @@ interface LowerContext {
   /** Diagnostics already rendered as inline notes in the generated output. */
   renderedDiagnostics: Set<MigrationDiagnostic>;
   packageFunctions: ReadonlySet<string>;
+  stableNames: ReadonlySet<string>;
   mixinModules: readonly MixinModuleInfo[];
   /** Module directories whose loader this script replaced with direct module calls. */
   loadsModuleDirectories: Set<string>;
@@ -107,6 +110,10 @@ interface LowerContext {
   closureFunctions: IrStatement[];
   /** Functions referenced by closure-value action IDs; the package dispatcher calls them. */
   actions: Set<string>;
+  /** Counter for variables that keep an input result the legacy statement ignored. */
+  ignoredInputs: number;
+  /** Counter for temporaries that hold a switch value evaluated once for an if chain. */
+  switchValues: number;
 }
 
 /** Source comments not yet emitted; shared by every context lowering the same file. */
@@ -176,11 +183,14 @@ export function lowerParsedFile(
     sourceLines: file.source === undefined ? [] : file.source.split(/\r\n?|\n/u),
     renderedDiagnostics: new Set(),
     packageFunctions: options.packageFunctions ?? new Set(),
+    stableNames: options.stableNames ?? new Set(),
     mixinModules: options.mixinModules ?? [],
     loadsModuleDirectories: new Set(),
     currentFunction: null,
     closureFunctions: [],
     actions: new Set(),
+    ignoredInputs: 0,
+    switchValues: 0,
   };
   if (file.diagnostics.length > 0 || file.root === null) {
     for (const diagnostic of file.diagnostics) {
@@ -408,6 +418,7 @@ function lowerHelperMethod(
     sourceLines: baseContext.sourceLines,
     renderedDiagnostics: baseContext.renderedDiagnostics,
     packageFunctions: baseContext.packageFunctions,
+    stableNames: baseContext.stableNames,
     mixinModules: baseContext.mixinModules,
     loadsModuleDirectories: baseContext.loadsModuleDirectories,
     currentFunction: {
@@ -419,6 +430,8 @@ function lowerHelperMethod(
     },
     closureFunctions: baseContext.closureFunctions,
     actions: baseContext.actions,
+    ignoredInputs: 0,
+    switchValues: 0,
   };
   const parameters: IrFunctionParameter[] = [];
   for (const parameter of authoredRecords) {
@@ -478,71 +491,7 @@ function lowerStatementList(
     if (span !== null) previousEndLine = span.endLine;
   }
   emitComments(takeCommentsBefore(context, enclosingSpan === null ? null : endOf(enclosingSpan)));
-  return foldLoadDefaults(result);
-}
-
-/**
- * Folds the legacy "read, then fill in a missing value" idiom into one read:
- * `let x = load k` followed by `if x == null { x = d }` becomes `let x = load k default d`. The condition may
- * also accept `x == d`, because assigning `d` to a value that already equals `d` changes nothing.
- */
-function foldLoadDefaults(statements: IrStatement[]): IrStatement[] {
-  const result: IrStatement[] = [];
-  for (let index = 0; index < statements.length; index += 1) {
-    const current = statements[index]!;
-    const next = statements[index + 1];
-    const folded = next === undefined ? null : foldLoadDefault(current, next);
-    if (folded === null) {
-      result.push(current);
-    } else {
-      result.push(folded);
-      index += 1;
-    }
-  }
   return result;
-}
-
-function foldLoadDefault(read: IrStatement, check: IrStatement): IrStatement | null {
-  if (read.kind !== "let" && read.kind !== "assign") return null;
-  const name =
-    read.kind === "let"
-      ? read.name
-      : read.operator === "=" && read.target.kind === "variable"
-        ? read.target.name
-        : null;
-  const value = read.value;
-  if (name === null || value.kind !== "load" || value.defaultValue !== undefined) return null;
-  if (check.kind !== "if" || check.else.length > 0 || check.then.length !== 1) return null;
-  const fill = check.then[0]!;
-  if (fill.kind !== "assign" || fill.operator !== "=" || !isVariable(fill.target, name))
-    return null;
-  if (fill.value.kind !== "literal") return null;
-  if (!isMissingCheck(check.condition, name, fill.value.value)) return null;
-  return { ...read, value: { ...value, defaultValue: fill.value } };
-}
-
-function isMissingCheck(
-  condition: IrExpression,
-  name: string,
-  defaultValue: string | number | boolean | null,
-): boolean {
-  const equals = (expression: IrExpression, literal: string | number | boolean | null): boolean =>
-    expression.kind === "binary" &&
-    expression.operator === "==" &&
-    isVariable(expression.left, name) &&
-    expression.right.kind === "literal" &&
-    expression.right.value === literal;
-  if (equals(condition, null)) return true;
-  return (
-    condition.kind === "binary" &&
-    condition.operator === "or" &&
-    equals(condition.left, null) &&
-    equals(condition.right, defaultValue)
-  );
-}
-
-function isVariable(expression: IrExpression, name: string): boolean {
-  return expression.kind === "variable" && expression.name === name;
 }
 
 /** Keeps one blank line where the legacy source separated statements or comments by blank lines. */
@@ -721,24 +670,18 @@ function lowerConditionalStatement(node: AstNode, context: LowerContext): IrStat
     );
   }
 
-  if (conditional.kind === "elvis") {
-    const value = asNode(conditional.boolean);
-    const fallback = asNode(conditional.false);
-    const loadWithDefault =
-      value === null || fallback === null ? null : legacyLoadWithDefault(value, fallback, context);
-    if (loadWithDefault !== null) {
-      return lowerStatement(substituteNode(node, conditional, loadWithDefault), context);
-    }
-  }
   // Repeating the statement per branch evaluates the condition first, which is only equivalent when nothing
   // with side effects runs earlier in the statement and the conditional is not behind && / || / ?: guards.
-  if (!isHoistable(node, conditional)) {
+  const hoistedCondition = asNode(
+    conditional.kind === "ternary" ? conditional.condition : conditional.boolean,
+  );
+  if (hoistedCondition === null || !isHoistable(node, conditional, context, hoistedCondition)) {
     return [
       unsupportedStatement(
         context,
         conditional,
         "SX_CONDITIONAL_POSITION",
-        "This conditional expression is guarded by && / || / ?: or follows side effects in the same statement; rewrite it with an explicit if.",
+        "This conditional expression cannot be evaluated first without changing behavior: it is guarded by && / || / ?:, follows side effects, or has side effects that values read earlier in the statement would observe. Rewrite it with an explicit if.",
       ),
     ];
   }
@@ -778,13 +721,17 @@ function lowerConditionalAssignment(
     const value = asNode(conditional.boolean);
     const fallback = asNode(conditional.false);
     if (value === null || fallback === null) return [];
-    const loadWithDefault = legacyLoadWithDefault(value, fallback, context);
-    if (loadWithDefault !== null) return lowerStatement(assign(loadWithDefault), context);
     // `x = x ?: d` needs no self-assignment before the check.
     const reassignsSelf = !declaration && variableName(value) === variableName(target);
+    const stored = lowerStatement(assign(value), context);
+    const fill = lowerStatement(update(fallback), context);
+    // The check sees the value just stored, whose type can include null even when the variable's
+    // overall type does not.
+    const variable: IrExpression = { kind: "variable", name: variableName(target)! };
+    const truthy = truthiness(variable, inferType(value, context.types), true, target, context);
     return [
-      ...(reassignsSelf ? [] : lowerStatement(assign(value), context)),
-      ...lowerStatement(syntheticIf(syntheticNot(target), update(fallback), null, span), context),
+      ...(reassignsSelf ? [] : stored),
+      { kind: "if", condition: negate(truthy), then: fill, else: [], span },
     ];
   }
   const condition = asNode(conditional.condition);
@@ -837,43 +784,8 @@ function splitConditional(
   const value = asNode(conditional.boolean);
   const fallback = asNode(conditional.false);
   if (value === null || fallback === null) return null;
-  const loadWithDefault = legacyLoadWithDefault(value, fallback, context);
-  if (loadWithDefault !== null) {
-    return {
-      condition: syntheticConstant(true, span),
-      whenTrue: loadWithDefault,
-      whenFalse: fallback,
-    };
-  }
   if (!isRepeatableExpression(value)) return null;
   return { condition: value, whenTrue: value, whenFalse: fallback };
-}
-
-/**
- * `loadX(key) ?: fallback` maps to `load key default fallback`. Groovy's Elvis also replaces a stored false,
- * zero, or empty value; TeaseScript's default only replaces a missing key.
- */
-function legacyLoadWithDefault(
-  value: AstNode,
-  fallback: AstNode,
-  context: LowerContext,
-): AstNode | null {
-  const call = callParts(value);
-  if (call === null || !call.inherited || call.arguments.length !== 1) return null;
-  if (!DIRECT_STORAGE_LOADS.has(call.name) || context.helperMainParameter !== null) return null;
-  const typed = typedLegacyLoad(value);
-  const exact =
-    typed !== null && fallback.kind === "constant" && fallback.value === typed.falseValue.value;
-  if (!exact) {
-    addDiagnostic(
-      context,
-      "SX_ELVIS_LOAD_DEFAULT",
-      "warning",
-      "Groovy ?: also used the fallback when the stored value was false, zero, or empty; load ... default only applies to a missing key.",
-      value.span,
-    );
-  }
-  return { kind: "loadWithDefault", span: value.span, key: call.arguments[0], fallback };
 }
 
 /** First ternary or Elvis expression in evaluation order, ignoring closure bodies. */
@@ -918,12 +830,20 @@ function isSimpleValue(node: AstNode): boolean {
  * changing behavior: it must not sit behind a short-circuit or conditional guard, and nothing with side effects
  * may be evaluated before it. Closure bodies are not evaluated in place.
  */
-function isHoistable(root: AstNode, target: AstNode): boolean {
+function isHoistable(
+  root: AstNode,
+  target: AstNode,
+  context: LowerContext,
+  hoisted: AstNode = target,
+): boolean {
+  // A hoisted part with side effects must also not run before values the statement read earlier.
+  const hoistedHasEffects = !isPure(hoisted, context);
   let effectsBefore = false;
+  let readsBefore = false;
   let result: boolean | null = null;
   const visit = (node: AstNode, guarded: boolean): boolean => {
     if (node === target) {
-      result = !guarded && !effectsBefore;
+      result = !guarded && !effectsBefore && !(hoistedHasEffects && readsBefore);
       return true;
     }
     if (node.kind === "closure") return false;
@@ -943,14 +863,35 @@ function isHoistable(root: AstNode, target: AstNode): boolean {
         if (isAstNode(child) && visit(child, guarded || guardedChildren.has(value))) return true;
       }
     }
-    if (hasOwnEffect(node)) effectsBefore = true;
+    if (hasOwnEffect(node, context)) effectsBefore = true;
+    // The implicit receiver and variables assigned only by their declaration cannot change.
+    const name = node.kind === "variable" ? variableName(node) : null;
+    const stable =
+      name === "this" ||
+      (name !== null &&
+        (context.types.singleAssignment?.has(name) === true || context.stableNames.has(name)));
+    if ((node.kind === "variable" && !stable) || node.kind === "property") readsBefore = true;
     return false;
   };
   visit(root, false);
   return result === true;
 }
 
-function hasOwnEffect(node: AstNode): boolean {
+/** The SexScript API call this node makes, unless a package function with that name shadows the API. */
+function legacyApiCall(
+  node: AstNode,
+  context: LowerContext,
+): { name: string; arguments: AstNode[] } | null {
+  const call = callParts(node);
+  if (call === null || !call.inherited) return null;
+  const shadowed =
+    context.functions.has(call.name) ||
+    context.packageFunctions.has(call.name) ||
+    context.helperFunctions.has(call.name);
+  return shadowed ? null : call;
+}
+
+function hasOwnEffect(node: AstNode, context: LowerContext): boolean {
   if (node.kind === "postfix" || node.kind === "prefix" || node.kind === "constructorCall")
     return true;
   if (node.kind === "binary" && typeof node.operator === "string") {
@@ -959,9 +900,8 @@ function hasOwnEffect(node: AstNode): boolean {
   if (node.kind !== "methodCall") return false;
   const call = callParts(node);
   if (call === null) return true;
-  return call.inherited
-    ? !DIRECT_STORAGE_LOADS.has(call.name)
-    : !PURE_OBJECT_METHODS.has(call.name);
+  if (call.inherited) return !DIRECT_STORAGE_LOADS.has(legacyApiCall(node, context)?.name ?? "");
+  return !PURE_OBJECT_METHODS.has(call.name);
 }
 
 const PURE_OBJECT_METHODS = new Set([
@@ -977,22 +917,21 @@ const PURE_OBJECT_METHODS = new Set([
 ]);
 
 /** Expressions without interactions, randomness, waits, or writes, so they may be evaluated earlier. */
-function isPure(node: AstNode): boolean {
+function isPure(node: AstNode, context: LowerContext): boolean {
+  const pure = (child: AstNode): boolean => isPure(child, context);
   if (node.kind === "methodCall") {
     const call = callParts(node);
     if (call === null) return false;
     const pureCall = call.inherited
-      ? DIRECT_STORAGE_LOADS.has(call.name)
+      ? DIRECT_STORAGE_LOADS.has(legacyApiCall(node, context)?.name ?? "")
       : PURE_OBJECT_METHODS.has(call.name);
     const target = asNode(node.object);
     return (
-      pureCall &&
-      (call.inherited || target === null || isPure(target)) &&
-      call.arguments.every(isPure)
+      pureCall && (call.inherited || target === null || pure(target)) && call.arguments.every(pure)
     );
   }
   if (node.kind === "binary" && typeof node.operator === "string" && node.operator.endsWith("=")) {
-    return ["==", "!=", "<=", ">="].includes(node.operator) && nodeChildren(node).every(isPure);
+    return ["==", "!=", "<=", ">="].includes(node.operator) && nodeChildren(node).every(pure);
   }
   const pureKinds = new Set([
     "binary",
@@ -1012,7 +951,7 @@ function isPure(node: AstNode): boolean {
     "unaryPlus",
     "variable",
   ]);
-  return pureKinds.has(node.kind) && nodeChildren(node).every(isPure);
+  return pureKinds.has(node.kind) && nodeChildren(node).every(pure);
 }
 
 function nodeChildren(node: AstNode): AstNode[] {
@@ -1130,9 +1069,10 @@ function lowerDeclaration(
   // A non-closure declaration that shares a closure's name is a nested local in Groovy; naming renames it.
   const collectionLoop = lowerCollectionAssignment(true, name, right, span, context);
   if (collectionLoop !== null) return collectionLoop;
-  // `def x` without an initializer starts as null in Groovy.
+  // `def x` without an initializer starts as null in Groovy; primitive declarations start at 0 or false.
+  const declaredType = text(asNode(node.left)?.originType) ?? "";
   const value = isEmptyGroovyExpression(right)
-    ? { kind: "literal" as const, value: null }
+    ? { kind: "literal" as const, value: PRIMITIVE_DEFAULTS.get(declaredType) ?? null }
     : lowerExpression(right, context);
   if (value === null) {
     return [
@@ -1280,6 +1220,14 @@ function lowerClosureDeclaration(
     context.currentFunction = outerFunction;
   }
 }
+
+const INPUT_CALLS = new Set([
+  "getBoolean",
+  "getFloat",
+  "getInteger",
+  "getSelectedValue",
+  "getString",
+]);
 
 /** SexScript API calls that produce no value, so a trailing call stays a statement. */
 const VOID_API_CALLS = new Set([
@@ -1663,7 +1611,14 @@ function lowerCallStatement(
     );
     return [];
   }
-  if (call !== null && !call.inherited && receiverName === "System" && call.name === "exit") {
+  if (
+    call !== null &&
+    !call.inherited &&
+    receiverName === "System" &&
+    call.name === "exit" &&
+    call.arguments.length <= 1 &&
+    call.arguments.every((argument) => isPure(argument, context))
+  ) {
     addDiagnostic(
       context,
       "SX_SYSTEM_EXIT",
@@ -1716,7 +1671,11 @@ function lowerCallStatement(
       span,
     }));
   }
-  if (context.packageFunctions.has(call.name) || context.helperFunctions.has(call.name)) {
+  if (
+    context.functions.has(call.name) ||
+    context.packageFunctions.has(call.name) ||
+    context.helperFunctions.has(call.name)
+  ) {
     const expression = lowerExpression(node, context);
     return expression === null
       ? [
@@ -1747,6 +1706,19 @@ function lowerCallStatement(
   }
 
   const args = call.arguments;
+  if (INPUT_CALLS.has(call.name)) {
+    // An input whose result the legacy statement ignored: TeaseScript allows only calls as expression
+    // statements, so the answer goes into a variable (a yes/no answer without its comparison).
+    const expression = lowerExpression(node, context);
+    if (expression === null) return [];
+    if (expression.kind === "call") return [{ kind: "expression", expression, span }];
+    const answer =
+      expression.kind === "binary" && expression.left.kind === "choice"
+        ? expression.left
+        : expression;
+    context.ignoredInputs += 1;
+    return [{ kind: "let", name: `ignoredAnswer${context.ignoredInputs}`, value: answer, span }];
+  }
   switch (call.name) {
     case "setInfos":
       extractMetadata(args, context, node.span);
@@ -2276,27 +2248,9 @@ function lowerSave(
     return [
       unsupportedStatement(context, node, "SX_SAVE_ARGUMENT", "save() key could not be migrated."),
     ];
+  // Legacy save(key, null) deleted the key. Generated reads compare with null explicitly, so a stored null and a
+  // missing key behave alike; only a literal null needs the explicit delete.
   if (isNullConstant(args[1])) return [{ kind: "delete", key, span }];
-  const valueType = inferType(args[1]!, context.types);
-  if (valueType !== UNKNOWN && valueType & NULL && isRepeatableExpression(args[1]!)) {
-    // Legacy save(key, null) deleted the key, so legacy storage never holds null; keep that invariant.
-    const value = lowerExpression(args[1]!, context);
-    if (value === null) return [];
-    return [
-      {
-        kind: "if",
-        condition: {
-          kind: "binary",
-          operator: "==",
-          left: value,
-          right: { kind: "literal", value: null },
-        },
-        then: [{ kind: "delete", key, span }],
-        else: [{ kind: "save", key, value, span }],
-        span,
-      },
-    ];
-  }
   const value = lowerExpression(args[1]!, context);
   if (value === null)
     return [
@@ -2588,7 +2542,72 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
     null,
     context,
   );
-  return [{ kind: "switch", value, cases, default: defaultStatements, span: node.span }];
+  if (isAcceptedSwitch(cases)) {
+    return [{ kind: "switch", value, cases, default: defaultStatements, span: node.span }];
+  }
+  // Accepted switch cases are distinct literals or ranges; other Groovy cases become an equivalent if chain.
+  const repeatable = valueNode !== null && isRepeatableExpression(valueNode);
+  context.switchValues += 1;
+  const subject: IrExpression = repeatable
+    ? value
+    : { kind: "variable", name: `switchValue${context.switchValues}` };
+  let chain: IrStatement[] = defaultStatements;
+  for (const switchCase of [...cases].reverse()) {
+    chain = [
+      {
+        kind: "if",
+        condition: caseMatches(subject, switchCase.match),
+        then: switchCase.body,
+        else: chain,
+        span: switchCase.span,
+      },
+    ];
+  }
+  return repeatable
+    ? chain
+    : [
+        {
+          kind: "let",
+          name: subject.kind === "variable" ? subject.name : "switchValue",
+          value,
+          span: node.span,
+        },
+        ...chain,
+      ];
+}
+
+function isAcceptedSwitch(cases: IrSwitchCase[]): boolean {
+  const seen = new Set<string>();
+  for (const { match } of cases) {
+    const literal = (expression: IrExpression): boolean =>
+      expression.kind === "literal" && expression.value !== null;
+    const valid =
+      literal(match) || (match.kind === "range" && literal(match.from) && literal(match.to));
+    const key = JSON.stringify(match);
+    if (!valid || seen.has(key)) return false;
+    seen.add(key);
+  }
+  return true;
+}
+
+/** Groovy `isCase`: list membership, range bounds, or equality. */
+function caseMatches(subject: IrExpression, match: IrExpression): IrExpression {
+  if (match.kind === "list")
+    return { kind: "methodCall", target: match, name: "contains", arguments: [subject] };
+  if (match.kind === "range") {
+    return {
+      kind: "binary",
+      operator: "and",
+      left: { kind: "binary", operator: ">=", left: subject, right: match.from },
+      right: {
+        kind: "binary",
+        operator: match.inclusive ? "<=" : "<",
+        left: subject,
+        right: match.to,
+      },
+    };
+  }
+  return { kind: "binary", operator: "==", left: subject, right: match };
 }
 
 /**
@@ -2773,15 +2792,6 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
       );
     case "closure":
       return lowerClosureValue(node, context);
-    case "loadWithDefault": {
-      const keyNode = asNode(node.key);
-      const fallbackNode = asNode(node.fallback);
-      const key = keyNode === null ? null : lowerExpression(keyNode, context);
-      const fallback = fallbackNode === null ? null : lowerExpression(fallbackNode, context);
-      return key === null || fallback === null
-        ? null
-        : { kind: "load", key, defaultValue: fallback };
-    }
     case "property":
       return lowerPropertyExpression(node, context);
     case "range": {
@@ -2829,6 +2839,15 @@ function lowerGString(node: AstNode, context: LowerContext): IrExpression | null
     if (typeof text === "string" && text !== "") parts.push({ text });
     const valueNode = values[index];
     if (valueNode === undefined) continue;
+    const valueType = inferType(valueNode, context.types);
+    if (onlyOf(valueType, LIST | NULL) && valueType & LIST) {
+      return unsupportedExpression(
+        context,
+        valueNode,
+        "SX_COLLECTION_TEXT",
+        "Groovy turned this list into text like [a, b]; TeaseScript interpolation shows one random element instead. Format the list explicitly.",
+      );
+    }
     const value = lowerExpression(valueNode, context);
     if (value === null) return null;
     parts.push({ value });
@@ -2898,7 +2917,7 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     }
     const calendarIndex = calendarConstant(indexNode);
     if (calendarIndex !== null) return dateTimeField(calendarIndex, target, node, context);
-    if (targetNode !== null && isRandomIndexOf(indexNode, targetNode)) {
+    if (targetNode !== null && isRandomIndexOf(indexNode, targetNode, context)) {
       // `items[getRandom(items.size())]` picks one element uniformly, which is TeaseScript `items.random`.
       return { kind: "property", target, name: "random" };
     }
@@ -2972,21 +2991,52 @@ function lowerCondition(node: AstNode, context: LowerContext): IrExpression | nu
     );
     return { kind: "literal", value: true };
   }
-  const legacyLoad = typedLegacyLoad(node);
-  if (legacyLoad !== null) {
-    // A missing key reads as null, which Groovy treats like the type's false value.
+  const legacyLoad = typedLegacyLoad(node, context);
+  if (legacyLoad !== null && isPure(legacyLoad.key, context)) {
+    // A missing key (or a stored null) reads as null, which Groovy treats like the type's false value.
     const key = lowerExpression(legacyLoad.key, context);
     if (key === null) return null;
-    const value: IrExpression = { kind: "load", key, defaultValue: legacyLoad.falseValue };
-    return legacyLoad.falseValue.value === false
-      ? value
-      : { kind: "binary", operator: "!=", left: value, right: legacyLoad.falseValue };
+    const read = (): IrExpression => ({ kind: "load", key });
+    if (legacyLoad.falseValue.value === false) {
+      return {
+        kind: "binary",
+        operator: "==",
+        left: read(),
+        right: { kind: "literal", value: true },
+      };
+    }
+    return {
+      kind: "binary",
+      operator: "and",
+      left: {
+        kind: "binary",
+        operator: "!=",
+        left: read(),
+        right: { kind: "literal", value: null },
+      },
+      right: { kind: "binary", operator: "!=", left: read(), right: legacyLoad.falseValue },
+    };
   }
   const value = lowerExpression(node, context);
   if (value === null) return null;
-  const type = inferType(node, context.types);
+  return truthiness(
+    value,
+    inferType(node, context.types),
+    isRepeatableExpression(node),
+    node,
+    context,
+  );
+}
+
+/** Groovy truth of a lowered value of the given legacy type, as an explicit boolean expression. */
+function truthiness(
+  value: IrExpression,
+  type: number,
+  repeatable: boolean,
+  node: AstNode,
+  context: LowerContext,
+): IrExpression {
   if (onlyOf(type, BOOLEAN)) return value;
-  const repeatable = isRepeatableExpression(node);
   const compare = (operator: string, right: IrExpression): IrExpression => ({
     kind: "binary",
     operator,
@@ -3032,9 +3082,10 @@ function lowerCondition(node: AstNode, context: LowerContext): IrExpression | nu
 /** Typed legacy loads whose missing-key null maps to the type's false value in a condition. */
 function typedLegacyLoad(
   node: AstNode,
+  context: LowerContext,
 ): { key: AstNode; falseValue: { kind: "literal"; value: boolean | number | string } } | null {
-  const call = callParts(node);
-  if (call === null || !call.inherited || call.arguments.length !== 1) return null;
+  const call = legacyApiCall(node, context);
+  if (call === null || call.arguments.length !== 1) return null;
   const falseValues: Record<string, boolean | number | string> = {
     loadBoolean: false,
     loadInteger: 0,
@@ -3083,6 +3134,14 @@ function lowerPlus(node: AstNode, context: LowerContext): IrExpression | null {
     const parts = concatenationParts(node, context);
     return parts === null ? null : templateOrLiteral(parts);
   }
+  const leftType = inferType(leftNode, context.types);
+  const rightType = inferType(rightNode, context.types);
+  if (isListType(leftType)) {
+    // Decided before lowering, so each operand is lowered (and its prompts emitted) exactly once.
+    const lists = listConcatenationOperands(node, context);
+    if (lists === null) return null;
+    return useHelper(context, "concat", [{ kind: "list", items: lists }]);
+  }
   const left = lowerExpression(leftNode, context);
   const right = lowerExpression(rightNode, context);
   if (left === null || right === null) return null;
@@ -3098,13 +3157,6 @@ function lowerPlus(node: AstNode, context: LowerContext): IrExpression | null {
     left.right.value === right.value
   ) {
     return left.left;
-  }
-  const leftType = inferType(leftNode, context.types);
-  const rightType = inferType(rightNode, context.types);
-  if (isListType(leftType)) {
-    const lists = listConcatenationOperands(node, context);
-    if (lists === null) return null;
-    return useHelper(context, "concat", [{ kind: "list", items: lists }]);
   }
   // A null operand fails in both languages, so only non-numeric possibilities need review.
   if (!onlyOf(leftType, NUMBER | NULL) || !onlyOf(rightType, NUMBER | NULL)) {
@@ -3130,11 +3182,23 @@ function listConcatenationOperands(node: AstNode, context: LowerContext): IrExpr
     const leftNode = asNode(node.left);
     const rightNode = asNode(node.right);
     if (leftNode !== null && rightNode !== null && isListType(inferType(leftNode, context.types))) {
+      // Groovy `list + element` appends one element; `list + otherList` appends all elements, so the right
+      // side must be proven one or the other (a null right side is appended as an element).
+      const rightType = inferType(rightNode, context.types);
+      const rightIsList = onlyOf(rightType, LIST);
+      const rightIsElement = (rightType & (LIST | NULL)) === 0 && rightType !== 0;
+      if (!rightIsList && !rightIsElement) {
+        unsupportedExpression(
+          context,
+          rightNode,
+          "SX_LIST_CONCATENATION",
+          "Groovy list + appends a list's elements or a single value; the type of this right side is not proven, so convert it manually.",
+        );
+        return null;
+      }
       const left = listConcatenationOperands(leftNode, context);
       const right = lowerExpression(rightNode, context);
       if (left === null || right === null) return null;
-      // Groovy `list + element` appends one element; `list + otherList` appends all elements.
-      const rightIsList = isListType(inferType(rightNode, context.types));
       return [...left, rightIsList ? right : { kind: "list", items: [right] }];
     }
   }
@@ -3195,7 +3259,7 @@ function isBooleanOperation(node: AstNode, context: LowerContext): boolean {
   return (
     left !== null &&
     right !== null &&
-    isPure(right) &&
+    isPure(right, context) &&
     onlyOf(inferType(left, context.types), BOOLEAN) &&
     onlyOf(inferType(right, context.types), BOOLEAN)
   );
@@ -3251,16 +3315,9 @@ function negativeConstantIndex(node: AstNode): number | null {
 }
 
 /** Recognizes `getRandom(list.size)`, `getRandom(list.size())`, or `getRandom(list.length)` for `list`. */
-function isRandomIndexOf(index: AstNode, list: AstNode): boolean {
-  const call = callParts(index);
-  if (
-    call === null ||
-    !call.inherited ||
-    call.name !== "getRandom" ||
-    call.arguments.length !== 1
-  ) {
-    return false;
-  }
+function isRandomIndexOf(index: AstNode, list: AstNode, context: LowerContext): boolean {
+  const call = legacyApiCall(index, context);
+  if (call === null || call.name !== "getRandom" || call.arguments.length !== 1) return false;
   const bound = call.arguments[0]!;
   const sizeName =
     bound.kind === "property"
@@ -3619,8 +3676,8 @@ const MATH_HELPERS = new Map<string, { name: HelperName; arity: number }>([
   ["min", { name: "min", arity: 2 }],
 ]);
 
-/** Java default element values: null for object arrays, zero or false for primitive arrays. */
-const PRIMITIVE_ARRAY_DEFAULTS = new Map<string, number | boolean>([
+/** Java default values: null for object types, zero or false for primitives. */
+const PRIMITIVE_DEFAULTS = new Map<string, number | boolean>([
   ["boolean", false],
   ["byte", 0],
   ["double", 0],
@@ -3648,7 +3705,7 @@ function lowerArrayExpression(node: AstNode, context: LowerContext): IrExpressio
   const size = lowerExpression(sizes[0]!, context);
   if (size === null) return null;
   const elementType = text(node.elementType) ?? "";
-  const defaultValue = PRIMITIVE_ARRAY_DEFAULTS.get(elementType) ?? null;
+  const defaultValue = PRIMITIVE_DEFAULTS.get(elementType) ?? null;
   return useHelper(context, "array", [size, { kind: "literal", value: defaultValue }]);
 }
 
@@ -3664,9 +3721,11 @@ function isCurrentDateConstructor(node: AstNode): boolean {
 /** `Calendar.getInstance().get(Calendar.FIELD)` reads one field of the current local date and time. */
 function calendarGetField(target: AstNode | null, args: AstNode[]): string | null {
   const instance = target === null ? null : callParts(target);
+  // Only the default instance: an explicit time zone or locale has no datetime-property equivalent.
   if (
     instance === null ||
     instance.name !== "getInstance" ||
+    instance.arguments.length !== 0 ||
     variableName(target?.object) !== "Calendar"
   ) {
     return null;
@@ -4017,7 +4076,7 @@ function lowerSingleInput(
     );
   }
   const defaultNode = argumentNodes[1];
-  if (defaultNode !== undefined && !isPure(defaultNode)) {
+  if (defaultNode !== undefined && !isPure(defaultNode, context)) {
     return unsupportedExpression(
       context,
       node,
@@ -4063,17 +4122,51 @@ function pushPrompt(
 ): boolean {
   if (isNullConstant(messageNode)) return true;
   const root = context.statementRoot;
-  if (root === null || !isHoistable(root, inputNode)) {
+  // Groovy evaluates all arguments before showing the message, so other arguments must not have effects.
+  const otherArguments = (callParts(inputNode)?.arguments ?? []).filter(
+    (argument) => argument !== messageNode,
+  );
+  const ordered =
+    root !== null &&
+    isHoistable(root, inputNode, context, messageNode) &&
+    otherArguments.every((argument) => isPure(argument, context));
+  if (!ordered) {
     addDiagnostic(
       context,
       "SX_PROMPT_POSITION",
       "error",
-      "This input's question cannot be shown at the right moment: the input is guarded by && / || / ?: or follows side effects in the same statement. Split the statement so the input comes first.",
+      "This input's question cannot be shown at the right moment: the input is guarded by && / || / ?:, follows side effects in the same statement, or has arguments with side effects. Split the statement so the input comes first.",
       inputNode.span,
     );
     return false;
   }
-  context.prelude.push({ kind: "say", value: message, span: inputNode.span });
+  const say: IrStatement = { kind: "say", value: message, span: inputNode.span };
+  if (onlyOf(inferType(messageNode, context.types), STRING)) {
+    context.prelude.push(say);
+  } else if (isRepeatableExpression(messageNode)) {
+    // A null legacy message kept the current text instead of showing "null".
+    context.prelude.push({
+      kind: "if",
+      condition: {
+        kind: "binary",
+        operator: "!=",
+        left: message,
+        right: { kind: "literal", value: null },
+      },
+      then: [say],
+      else: [],
+      span: inputNode.span,
+    });
+  } else {
+    addDiagnostic(
+      context,
+      "SX_PROMPT_NULLABLE",
+      "warning",
+      "This input message may be null at runtime; legacy then kept the current text, while say would show null.",
+      inputNode.span,
+    );
+    context.prelude.push(say);
+  }
   return true;
 }
 
@@ -4369,6 +4462,28 @@ export function packageFunctionNames(files: readonly ParsedGroovyFile[]): Set<st
     }
   }
   return names;
+}
+
+/**
+ * Names assigned exactly once across all package files (declarations and object fields included), such as
+ * constants shared by mixin modules.
+ */
+export function packageStableNames(files: readonly ParsedGroovyFile[]): Set<string> {
+  const counts = new Map<string, number>();
+  const count = (name: string | null): void => {
+    if (name !== null) counts.set(name, (counts.get(name) ?? 0) + 1);
+  };
+  for (const file of files) {
+    walkAst(file.root, (node) => {
+      const operator = typeof node.operator === "string" ? node.operator : "";
+      const assigns = operator.endsWith("=") && !["==", "!=", "<=", ">="].includes(operator);
+      if (node.kind === "declaration" || (node.kind === "binary" && assigns))
+        count(variableName(node.left));
+      if (node.kind === "postfix" || node.kind === "prefix") count(variableName(node.value));
+      if (node.kind === "field") count(typeof node.name === "string" ? node.name : null);
+    });
+  }
+  return new Set([...counts].filter(([, total]) => total === 1).map(([name]) => name));
 }
 
 /** Describes a runtime-loaded mixin module without lowering it; null for ordinary scripts. */

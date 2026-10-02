@@ -2,8 +2,8 @@
 // TeaseScript compiler. Each `fixtures/<group>/NAME.groovy` has the expected idiomatic `NAME.tease`.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -71,6 +71,25 @@ function registerFixtures(directoryName: string, usesPendingCapabilities: boolea
     );
   }
 }
+
+// Lone CR line endings cannot live in a committed fixture without tripping whitespace checks.
+test(
+  "keeps lone-CR legacy line endings aligned with comments",
+  { skip: parserUnavailable },
+  async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-cr-"));
+    try {
+      const sourcePath = path.join(directory, "carriage-return-lines.groovy");
+      writeFileSync(sourcePath, '// header\rwait(2)\rshow("done") // trailing\r');
+      assert.equal(
+        emitTease(await convert(sourcePath)),
+        '// header\nwait 2\nsay "done" // trailing\n',
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
 
 async function convert(sourcePath: string): Promise<MigrationProgram> {
   const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)]);

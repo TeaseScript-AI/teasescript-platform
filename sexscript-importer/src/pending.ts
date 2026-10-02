@@ -37,6 +37,19 @@ export interface PendingShim {
 export function shimPendingCapabilities(program: MigrationProgram): PendingShim {
   const builtins = new Set<string>();
   const capabilities = new Set<string>();
+  // Placeholder names must not collide with names the generated program already uses.
+  const used = new Set<string>();
+  collectNames(program.statements, used);
+  const shimNames = new Map<string, string>();
+  const shimName = (base: string): string => {
+    const existing = shimNames.get(base);
+    if (existing !== undefined) return existing;
+    let candidate = base;
+    for (let suffix = 2; used.has(candidate); suffix += 1) candidate = `${base}${suffix}`;
+    used.add(candidate);
+    shimNames.set(base, candidate);
+    return candidate;
+  };
   let switchCount = 0;
   const call = (
     capability: string,
@@ -45,7 +58,7 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
     named: Record<string, IrExpression> = {},
   ): IrExpression => {
     capabilities.add(capability);
-    const shim = `${SHIM_PREFIX}${name[0]!.toUpperCase()}${name.slice(1)}`;
+    const shim = shimName(`${SHIM_PREFIX}${name[0]!.toUpperCase()}${name.slice(1)}`);
     builtins.add(shim);
     return { kind: "call", name: shim, positional, named };
   };
@@ -139,7 +152,7 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
           callStatement(call("showPopup", "showPopup", [expression(item.message)]), item.span),
         ];
       case "showButton":
-        if (item.timeout === null) return [item];
+        if (item.timeout === null) return [{ ...item, label: expression(item.label) }];
         return [
           callStatement(
             call("showButton timeout", "showButton", [
@@ -154,7 +167,7 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         switchCount += 1;
         return switchAsIfChain(
           item,
-          `${SHIM_PREFIX}SwitchValue${switchCount}`,
+          shimName(`${SHIM_PREFIX}SwitchValue${switchCount}`),
           expression,
           statements,
         );
@@ -256,4 +269,16 @@ function switchAsIfChain(
     { kind: "let", name: valueName, value: expression(item.value), span: item.span },
     ...chain,
   ];
+}
+
+function collectNames(value: unknown, names: Set<string>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectNames(item, names);
+    return;
+  }
+  if (typeof value !== "object" || value === null) return;
+  for (const [key, child] of Object.entries(value)) {
+    if ((key === "name" || key === "variable") && typeof child === "string") names.add(child);
+    else collectNames(child, names);
+  }
 }

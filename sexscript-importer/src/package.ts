@@ -5,6 +5,7 @@ import {
   describeMixinModule,
   lowerParsedFile,
   packageFunctionNames,
+  packageStableNames,
 } from "./lower.ts";
 import { withActionDispatcher } from "./helpers.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
@@ -52,11 +53,13 @@ export function lowerPackage(files: readonly ParsedGroovyFile[]): LoweredPackage
   const helperRegistry = buildHelperRegistry(files);
   const mixinModules = files.flatMap((file) => describeMixinModule(file) ?? []);
   const packageFunctions = packageFunctionNames(files);
+  const stableNames = packageStableNames(files);
   const lowered = files.map((file) =>
     lowerParsedFile(file, {
       helperRegistry,
       mixinModules,
       packageFunctions,
+      stableNames,
       renameIdentifiers: false,
     }),
   );

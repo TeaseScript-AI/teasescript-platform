@@ -29,6 +29,8 @@ export interface TypeEnvironment {
   listElements?: ReadonlyMap<string, ValueType>;
   /** Locally defined functions; a call to one of these is not the SexScript API of the same name. */
   localFunctions?: ReadonlySet<string>;
+  /** Names assigned exactly once (their declaration), whose value no later side effect can change. */
+  singleAssignment?: ReadonlySet<string>;
 }
 
 /** True when every possible value has one of the `allowed` types. */
@@ -259,7 +261,20 @@ export function inferVariableTypes(
     }
   }
   for (const [name, type] of variables) if (type === 0) variables.set(name, UNKNOWN);
-  return { variables, localFunctions, listElements: inferListElements(body, environment) };
+  const assignmentCounts = new Map<string, number>();
+  for (const { name } of assignments)
+    assignmentCounts.set(name, (assignmentCounts.get(name) ?? 0) + 1);
+  const singleAssignment = new Set(
+    [...assignmentCounts]
+      .filter(([name, count]) => count === 1 && !unknownNames.has(name))
+      .map(([name]) => name),
+  );
+  return {
+    variables,
+    localFunctions,
+    singleAssignment,
+    listElements: inferListElements(body, environment),
+  };
 }
 
 function inferListElements(body: AstNode, environment: TypeEnvironment): Map<string, ValueType> {

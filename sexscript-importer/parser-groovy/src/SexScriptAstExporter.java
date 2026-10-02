@@ -394,7 +394,11 @@ public final class SexScriptAstExporter {
             return nodeMap(node, "constant", "value", value);
         }
         if (node instanceof VariableExpression child) {
-            return nodeMap(node, "variable", "name", child.getName(), "type", child.getType().getName());
+            return nodeMap(node, "variable",
+                    "name", child.getName(),
+                    "type", child.getType().getName(),
+                    // The declared type as written: `int` rather than the boxed `java.lang.Integer`.
+                    "originType", child.getOriginType().getName());
         }
         if (node instanceof DeclarationExpression child) {
             return nodeMap(node, "declaration",
