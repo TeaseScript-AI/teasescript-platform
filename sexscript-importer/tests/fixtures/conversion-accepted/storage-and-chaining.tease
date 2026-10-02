@@ -1,0 +1,17 @@
+// Legacy SexScript metadata
+// Title: Training
+// Author: Anna
+// Summary: A short session
+// Language: EN
+// Tags: training
+
+let visits = load "training.visits" default 0
+save visits + 1 as "training.visits"
+// NOTE SX_ELVIS_LOAD_DEFAULT line 5: Groovy ?: also used the fallback when the stored value was false, zero, or empty; load ... default only applies to a missing key.
+let title = load "training.title" default "pet"
+if load "training.finished" default false {
+  say "Welcome back, ${title}"
+  run "finished.tease"
+}
+delete "training.old"
+say "Visit ${visits + 1}"

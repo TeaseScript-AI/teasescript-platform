@@ -177,7 +177,19 @@ test("extracts static setInfos metadata instead of emitting runtime code", () =>
   const program = lowerParsedFile(source);
   assert.equal(program.metadata?.title, "Example");
   assert.deepEqual(program.metadata?.tags, ["tag-a", "tag-b"]);
-  assert.equal(emitTease(program), "end\n");
+  // No runtime setInfos code; the metadata survives as a header, and the final `return null` adds nothing.
+  assert.equal(
+    emitTease(program),
+    [
+      "// Legacy SexScript metadata",
+      "// Title: Example",
+      "// Author: Author",
+      "// Summary: Summary",
+      "// Language: en",
+      "// Tags: tag-a, tag-b",
+      "",
+    ].join("\n"),
+  );
 });
 
 test("preserves accepted showButton timeout and elapsed-result semantics", () => {
@@ -431,14 +443,9 @@ test("maps literal getSelectedValue options to zero-based numeric choice labels"
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
     emitTease(program),
-    [
-      'let selected = choose "Choose one" {',
-      '  0: "First"',
-      '  1: "Second"',
-      '  2: "Third"',
-      "}",
-      "",
-    ].join("\n"),
+    ['say "Choose one"', 'let selected = choose 0: "First", 1: "Second", 2: "Third"', ""].join(
+      "\n",
+    ),
   );
 });
 
@@ -653,10 +660,14 @@ test("lowers single-statement if, else, and else-if bodies", () => {
   ]);
 
   const program = lowerParsedFile(source);
-  assert.deepEqual(program.diagnostics, []);
+  assert.deepEqual(
+    program.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+    [],
+  );
   assert.equal(
     emitTease(program),
     [
+      "// NOTE SX_CONDITION_TYPE line 1: Condition is not proven boolean; TeaseScript conditions must be boolean, unlike Groovy truthiness. Verify or compare explicitly.",
       "if first {",
       "  value = 1",
       "} else if second {",
@@ -1004,7 +1015,9 @@ test("generates ordinary TeaseScript helpers for legacy loadFirstTrue and list i
   assert.deepEqual(program.diagnostics, []);
   const output = emitTease(program);
   assert.match(output, /function sexscriptLegacyLoadFirstTrue\(keys\)/);
-  assert.match(output, /function sexscriptLegacyIndexOf\(items, value\)/);
+  // Helper parameters may not shadow the script's globals `items`, `index`, and `key`.
+  assert.match(output, /function sexscriptLegacyIndexOf\(itemsValue, value\)/);
+  assert.match(output, /for keyValue in keys \{/);
   assert.match(output, /let index = sexscriptLegacyIndexOf\(items, "b"\)/);
   assert.match(output, /let key = sexscriptLegacyLoadFirstTrue\(\["a", "b"\]\)/);
 });

@@ -1,0 +1,14 @@
+let ready = askBoolean("Are you ready?")
+let sure = askBoolean(message: "Really?", yesText: "Yes, Mistress", noText: "No")
+// NOTE SX_INPUT_PREFILL line 3: getInteger() pre-filled its field with a default value; TeaseScript single-field input has no prefill, so the player must type it.
+let count = askInteger("How many?")
+showPopup "Session starts now"
+let elapsed = showButton("Done", 30)
+if elapsed >= 30 {
+  say "Too slow"
+}
+openUrl("https://example.com")
+let start = getSeconds()
+if ready and sure {
+  say "Starting ${count} rounds at ${start}"
+}

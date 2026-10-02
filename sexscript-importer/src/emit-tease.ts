@@ -6,6 +6,7 @@ export function emitTease(program: MigrationProgram): string {
   const errors = rootDiagnostics(
     program.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
   ).length;
+  lines.push(...metadataComment(program));
   if (errors > 0) {
     lines.push(`// MIGRATION INCOMPLETE: ${errors} error diagnostic${errors === 1 ? "" : "s"}.`);
     lines.push("// Review diagnostics before treating this file as behaviorally equivalent.");
@@ -13,6 +14,26 @@ export function emitTease(program: MigrationProgram): string {
   }
   emitStatements(program.statements, lines, 0);
   return `${lines.join("\n").trimEnd()}\n`;
+}
+
+/** Legacy setInfos() metadata has no accepted TeaseScript manifest yet, so it is kept as a readable header. */
+function metadataComment(program: MigrationProgram): string[] {
+  const metadata = program.metadata;
+  if (metadata === null) return [];
+  const fields: Array<[string, string | null]> = [
+    ["Title", metadata.title],
+    ["Author", metadata.author],
+    ["Summary", metadata.summary],
+    ["Language", metadata.language],
+    [
+      "Tags",
+      metadata.tags === null || metadata.tags.length === 0 ? null : metadata.tags.join(", "),
+    ],
+  ];
+  const lines = fields
+    .filter((field): field is [string, string] => field[1] !== null && field[1] !== "")
+    .map(([name, value]) => `// ${name}: ${value.replace(/\r?\n/gu, " ")}`);
+  return lines.length === 0 ? [] : ["// Legacy SexScript metadata", ...lines, ""];
 }
 
 function emitStatements(statements: IrStatement[], lines: string[], depth: number): void {
@@ -105,9 +126,11 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
         `${pad}return${statement.value === null ? "" : ` ${emitExpression(statement.value)}`}`,
       );
       return;
-    case "let":
-      lines.push(`${pad}let ${statement.name} = ${emitExpression(statement.value)}`);
+    case "let": {
+      const type = statement.optionalType === undefined ? "" : `: ${statement.optionalType}?`;
+      lines.push(`${pad}let ${statement.name}${type} = ${emitExpression(statement.value)}`);
       return;
+    }
     case "assign":
       lines.push(
         `${pad}${emitExpression(statement.target)} ${statement.operator} ${emitExpression(statement.value)}`,
@@ -201,27 +224,34 @@ export function emitExpression(expression: IrExpression): string {
     case "object":
       return `{ ${expression.properties.map((property) => `${property.name}: ${emitExpression(property.value)}`).join(", ")} }`;
     case "index":
-      return `${parenthesize(expression.target)}[${emitExpression(expression.index)}]`;
+      return `${operand(expression.target, POSTFIX)}[${emitExpression(expression.index)}]`;
     case "property":
-      return `${parenthesize(expression.target)}.${expression.name}`;
+      return `${operand(expression.target, POSTFIX)}.${expression.name}`;
     case "methodCall":
-      return `${parenthesize(expression.target)}.${expression.name}(${expression.arguments.map(emitExpression).join(", ")})`;
+      return `${operand(expression.target, POSTFIX)}.${expression.name}(${expression.arguments.map(emitExpression).join(", ")})`;
     case "load":
-      return `load ${parenthesize(expression.key)}`;
-    case "choice": {
-      const options = expression.options
-        .map((option, index) => `  ${index}: ${emitExpression(option)}`)
-        .join("\n");
-      return `choose ${emitExpression(expression.message)} {\n${options}\n}`;
+      return expression.defaultValue === undefined
+        ? `load ${operand(expression.key, POSTFIX)}`
+        : `load ${operand(expression.key, POSTFIX)} default ${operand(expression.defaultValue, POSTFIX)}`;
+    case "input":
+      return expression.input;
+    case "choice":
+      return `choose ${expression.options.map((option, index) => `${index}: ${emitExpression(option)}`).join(", ")}`;
+    case "range": {
+      const operator = expression.inclusive ? "..=" : "..";
+      return `${operand(expression.from, RANGE + 1)}${operator}${operand(expression.to, RANGE + 1)}`;
     }
-    case "range":
-      return `${parenthesize(expression.from)}${expression.inclusive ? "..=" : ".."}${parenthesize(expression.to)}`;
     case "unary":
       return expression.operator === "not"
-        ? `not ${parenthesize(expression.value)}`
-        : `${expression.operator}${parenthesize(expression.value)}`;
-    case "binary":
-      return `${parenthesize(expression.left)} ${expression.operator} ${parenthesize(expression.right)}`;
+        ? `not ${operand(expression.value, NOT)}`
+        : `${expression.operator}${operand(expression.value, UNARY)}`;
+    case "binary": {
+      const level = precedence(expression);
+      // Left-associative operators need parentheses for an equal-precedence right operand.
+      const rightLevel =
+        expression.operator === "and" || expression.operator === "or" ? level : level + 1;
+      return `${operand(expression.left, level)} ${expression.operator} ${operand(expression.right, rightLevel)}`;
+    }
     case "call": {
       const positional = expression.positional.map(emitExpression);
       const named = Object.entries(expression.named).map(
@@ -246,8 +276,54 @@ function escapeStringText(text: string): string {
     .replace(/\$\{/gu, "\\${");
 }
 
-function parenthesize(expression: IrExpression): string {
-  return expression.kind === "binary"
-    ? `(${emitExpression(expression)})`
-    : emitExpression(expression);
+// TeaseScript precedence from V30 "Expression precedence and associativity", weakest first.
+const OR = 1;
+const AND = 2;
+const NOT = 3;
+const COMPARISON = 4;
+const RANGE = 5;
+const ADDITIVE = 6;
+const MULTIPLICATIVE = 7;
+const UNARY = 8;
+const POSTFIX = 9;
+const PRIMARY = 10;
+
+function precedence(expression: IrExpression): number {
+  switch (expression.kind) {
+    case "binary":
+      switch (expression.operator) {
+        case "or":
+          return OR;
+        case "and":
+          return AND;
+        case "+":
+        case "-":
+          return ADDITIVE;
+        case "*":
+        case "/":
+        case "%":
+          return MULTIPLICATIVE;
+        default:
+          return COMPARISON;
+      }
+    case "unary":
+      return expression.operator === "not" ? NOT : UNARY;
+    case "range":
+      return RANGE;
+    case "index":
+    case "property":
+    case "methodCall":
+      return POSTFIX;
+    // Command-like expressions extend to the end of their operands, so they are always parenthesized as operands.
+    case "load":
+    case "choice":
+      return 0;
+    default:
+      return PRIMARY;
+  }
+}
+
+function operand(expression: IrExpression, minimum: number): string {
+  const text = emitExpression(expression);
+  return precedence(expression) < minimum ? `(${text})` : text;
 }

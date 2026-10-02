@@ -10,6 +10,19 @@ import {
   type SourceSpan,
 } from "./ast.ts";
 import { rootDiagnostics } from "./diagnostics.ts";
+import { renameConflictingIdentifiers } from "./naming.ts";
+import {
+  BOOLEAN,
+  inferType,
+  inferVariableTypes,
+  LIST,
+  NULL,
+  NUMBER,
+  OBJECT,
+  onlyOf,
+  STRING,
+  type TypeEnvironment,
+} from "./types.ts";
 import type {
   IrExpression,
   IrFunctionParameter,
@@ -44,7 +57,12 @@ interface LowerContext {
   diagnostics: MigrationDiagnostic[];
   metadata: LegacyMetadata | null;
   functions: Map<string, ClosureInfo>;
-  listVariables: Set<string>;
+  types: TypeEnvironment;
+  /**
+   * Statements that must run immediately before the statement being lowered, such as the `say` that shows a
+   * legacy input prompt before a compact TeaseScript input expression.
+   */
+  prelude: IrStatement[];
   classLoaderVariables: Set<string>;
   legacyHelperClasses: Map<string, string>;
   helperFunctions: Map<string, HelperFunctionInfo>;
@@ -111,7 +129,8 @@ export function lowerParsedFile(
     diagnostics: [],
     metadata: null,
     functions: new Map(),
-    listVariables: new Set(),
+    types: { variables: new Map() },
+    prelude: [],
     classLoaderVariables: new Set(),
     legacyHelperClasses: new Map(),
     helperFunctions: new Map(),
@@ -159,12 +178,14 @@ export function lowerParsedFile(
   const body = asNode(file.root.body);
   if (body?.kind === "block") {
     context.functions = collectClosureInfo(body);
-    context.listVariables = collectListVariables(body);
+    context.types = inferVariableTypes(body);
     const helpers = collectLegacyHelperBindings(body);
     context.classLoaderVariables = helpers.classLoaders;
     context.legacyHelperClasses = helpers.helperClasses;
   }
-  const authoredStatements = body?.kind === "block" ? lowerBlock(body, context) : [];
+  const authoredStatements = withoutTrailingEnd(
+    body?.kind === "block" ? lowerBlock(body, context) : [],
+  );
   const statements = [...syntheticHelperStatements(context), ...authoredStatements];
   if (body?.kind !== "block") {
     addDiagnostic(
@@ -176,12 +197,12 @@ export function lowerParsedFile(
     );
   }
 
-  return {
+  return renameConflictingIdentifiers({
     sourceName: file.sourceName,
     metadata: context.metadata,
     statements,
     diagnostics: context.diagnostics,
-  };
+  });
 }
 
 function lowerHelperCompilationUnit(
@@ -314,7 +335,8 @@ function lowerHelperMethod(
     diagnostics: baseContext.diagnostics,
     metadata: baseContext.metadata,
     functions: collectClosureInfo(body),
-    listVariables: collectListVariables(body),
+    types: inferVariableTypes(body),
+    prelude: [],
     classLoaderVariables: new Set(),
     legacyHelperClasses: new Map(),
     helperFunctions,
@@ -369,16 +391,80 @@ function lowerStatementList(
     emitComments(takeCommentsBefore(context, span));
     if (span !== null) result.push(...paragraphBreak(context, previousEndLine, span.line));
     const firstDiagnostic = context.diagnostics.length;
-    const lowered = lowerStatement(statement, context);
+    const [prelude, lowered] = withPrelude(context, () => lowerStatement(statement, context));
     const only = lowered.length === 1 ? lowered[0] : undefined;
     if (only?.kind === "unsupported" && span !== null) {
       only.legacySource = legacySourceLines(context, span);
     }
-    result.push(...diagnosticNotes(context, firstDiagnostic), ...lowered);
+    result.push(...diagnosticNotes(context, firstDiagnostic), ...prelude, ...lowered);
     if (span !== null) previousEndLine = span.endLine;
   }
   emitComments(takeCommentsBefore(context, enclosingSpan === null ? null : endOf(enclosingSpan)));
+  return foldLoadDefaults(result);
+}
+
+/**
+ * Folds the legacy "read, then fill in a missing value" idiom into one read:
+ * `let x = load k` followed by `if x == null { x = d }` becomes `let x = load k default d`. The condition may
+ * also accept `x == d`, because assigning `d` to a value that already equals `d` changes nothing.
+ */
+function foldLoadDefaults(statements: IrStatement[]): IrStatement[] {
+  const result: IrStatement[] = [];
+  for (let index = 0; index < statements.length; index += 1) {
+    const current = statements[index]!;
+    const next = statements[index + 1];
+    const folded = next === undefined ? null : foldLoadDefault(current, next);
+    if (folded === null) {
+      result.push(current);
+    } else {
+      result.push(folded);
+      index += 1;
+    }
+  }
   return result;
+}
+
+function foldLoadDefault(read: IrStatement, check: IrStatement): IrStatement | null {
+  if (read.kind !== "let" && read.kind !== "assign") return null;
+  const name =
+    read.kind === "let"
+      ? read.name
+      : read.operator === "=" && read.target.kind === "variable"
+        ? read.target.name
+        : null;
+  const value = read.value;
+  if (name === null || value.kind !== "load" || value.defaultValue !== undefined) return null;
+  if (check.kind !== "if" || check.else.length > 0 || check.then.length !== 1) return null;
+  const fill = check.then[0]!;
+  if (fill.kind !== "assign" || fill.operator !== "=" || !isVariable(fill.target, name))
+    return null;
+  if (fill.value.kind !== "literal") return null;
+  if (!isMissingCheck(check.condition, name, fill.value.value)) return null;
+  return { ...read, value: { ...value, defaultValue: fill.value } };
+}
+
+function isMissingCheck(
+  condition: IrExpression,
+  name: string,
+  defaultValue: string | number | boolean | null,
+): boolean {
+  const equals = (expression: IrExpression, literal: string | number | boolean | null): boolean =>
+    expression.kind === "binary" &&
+    expression.operator === "==" &&
+    isVariable(expression.left, name) &&
+    expression.right.kind === "literal" &&
+    expression.right.value === literal;
+  if (equals(condition, null)) return true;
+  return (
+    condition.kind === "binary" &&
+    condition.operator === "or" &&
+    equals(condition.left, null) &&
+    equals(condition.right, defaultValue)
+  );
+}
+
+function isVariable(expression: IrExpression, name: string): boolean {
+  return expression.kind === "variable" && expression.name === name;
 }
 
 /** Keeps one blank line where the legacy source separated statements or comments by blank lines. */
@@ -392,6 +478,26 @@ function paragraphBreak(
   return gap.length > 0 && gap.every((line) => line.trim() === "")
     ? [{ kind: "blank", span: null }]
     : [];
+}
+
+/** A legacy `return null` on the last line only ends the script, which reaching the end already does. */
+function withoutTrailingEnd(statements: IrStatement[]): IrStatement[] {
+  const lastCode = statements.findLastIndex(
+    (statement) => statement.kind !== "comment" && statement.kind !== "blank",
+  );
+  return statements[lastCode]?.kind === "end" ? statements.toSpliced(lastCode, 1) : statements;
+}
+
+/** Runs `lower` with an empty prelude and returns the prelude statements it produced. */
+function withPrelude<T>(context: LowerContext, lower: () => T): [IrStatement[], T] {
+  const outer = context.prelude;
+  context.prelude = [];
+  try {
+    const result = lower();
+    return [context.prelude, result];
+  } finally {
+    context.prelude = outer;
+  }
 }
 
 /** Groovy omits positions on some expression statements; fall back to the expression. */
@@ -437,6 +543,8 @@ function commentStatement(comment: SourceComment, previousEndLine: number | null
 }
 
 function lowerStatement(node: AstNode, context: LowerContext): IrStatement[] {
+  const conditional = lowerConditionalStatement(node, context);
+  if (conditional !== null) return conditional;
   switch (node.kind) {
     case "empty":
       return [];
@@ -466,6 +574,292 @@ function lowerStatement(node: AstNode, context: LowerContext): IrStatement[] {
         ),
       ];
   }
+}
+
+/**
+ * TeaseScript has no conditional expression. A statement containing a Groovy ternary or Elvis expression is
+ * rewritten into an `if` before lowering: a conditional variable value becomes one assignment per branch, and
+ * any other statement is repeated in both branches so nested conditionals become `else if` chains.
+ */
+function lowerConditionalStatement(node: AstNode, context: LowerContext): IrStatement[] | null {
+  if (node.kind !== "expressionStatement" && node.kind !== "return") return null;
+  const root = asNode(node.kind === "return" ? node.value : node.expression);
+  const conditional = root === null ? null : findConditional(root);
+  if (root === null || conditional === null) return null;
+  const span = node.span;
+
+  const isAssignment =
+    root.kind === "declaration" || (root.kind === "binary" && root.operator === "=");
+  const target = isAssignment ? asNode(root.left) : null;
+  if (target !== null && variableName(target) !== null && asNode(root.right) === conditional) {
+    return lowerConditionalAssignment(
+      root.kind === "declaration",
+      target,
+      conditional,
+      span,
+      context,
+    );
+  }
+
+  const split = splitConditional(conditional, span, context);
+  if (split === null) return null;
+  if (!isPure(split.condition)) {
+    return [
+      unsupportedStatement(
+        context,
+        conditional,
+        "SX_CONDITIONAL_SIDE_EFFECT",
+        "This conditional expression has a condition with side effects inside a larger statement; rewrite it with an explicit if.",
+      ),
+    ];
+  }
+  return lowerStatement(
+    syntheticIf(
+      split.condition,
+      substituteNode(node, conditional, split.whenTrue),
+      substituteNode(node, conditional, split.whenFalse),
+      span,
+    ),
+    context,
+  );
+}
+
+function lowerConditionalAssignment(
+  declaration: boolean,
+  target: AstNode,
+  conditional: AstNode,
+  span: SourceSpan | null,
+  context: LowerContext,
+): IrStatement[] {
+  const assign = (value: AstNode): AstNode => syntheticAssignment(declaration, target, value, span);
+  const update = (value: AstNode): AstNode => syntheticAssignment(false, target, value, span);
+  if (conditional.kind === "elvis") {
+    const value = asNode(conditional.boolean);
+    const fallback = asNode(conditional.false);
+    if (value === null || fallback === null) return [];
+    const loadWithDefault = legacyLoadWithDefault(value, fallback, context);
+    if (loadWithDefault !== null) return lowerStatement(assign(loadWithDefault), context);
+    // `x = x ?: d` needs no self-assignment before the check.
+    const reassignsSelf = !declaration && variableName(value) === variableName(target);
+    return [
+      ...(reassignsSelf ? [] : lowerStatement(assign(value), context)),
+      ...lowerStatement(syntheticIf(syntheticNot(target), update(fallback), null, span), context),
+    ];
+  }
+  const condition = asNode(conditional.condition);
+  const whenTrue = asNode(conditional.true);
+  const whenFalse = asNode(conditional.false);
+  if (condition === null || whenTrue === null || whenFalse === null) return [];
+  if (!declaration) {
+    return lowerStatement(
+      syntheticIf(condition, update(whenTrue), update(whenFalse), span),
+      context,
+    );
+  }
+  // Start from a side-effect-free branch value so the result reads like ordinary TeaseScript.
+  if (isSimpleValue(whenFalse)) {
+    return [
+      ...lowerStatement(assign(whenFalse), context),
+      ...lowerStatement(syntheticIf(condition, update(whenTrue), null, span), context),
+    ];
+  }
+  if (isSimpleValue(whenTrue)) {
+    return [
+      ...lowerStatement(assign(whenTrue), context),
+      ...lowerStatement(
+        syntheticIf(syntheticNot(condition), update(whenFalse), null, span),
+        context,
+      ),
+    ];
+  }
+  return [
+    ...lowerStatement(assign(syntheticConstant(null, span)), context),
+    ...lowerStatement(syntheticIf(condition, update(whenTrue), update(whenFalse), span), context),
+  ];
+}
+
+/** Returns the condition and branch values; an Elvis operand must be repeatable to serve as both. */
+function splitConditional(
+  conditional: AstNode,
+  span: SourceSpan | null,
+  context: LowerContext,
+): { condition: AstNode; whenTrue: AstNode; whenFalse: AstNode } | null {
+  if (conditional.kind === "ternary") {
+    const condition = asNode(conditional.condition);
+    const whenTrue = asNode(conditional.true);
+    const whenFalse = asNode(conditional.false);
+    return condition === null || whenTrue === null || whenFalse === null
+      ? null
+      : { condition, whenTrue, whenFalse };
+  }
+  const value = asNode(conditional.boolean);
+  const fallback = asNode(conditional.false);
+  if (value === null || fallback === null) return null;
+  const loadWithDefault = legacyLoadWithDefault(value, fallback, context);
+  if (loadWithDefault !== null) {
+    return {
+      condition: syntheticConstant(true, span),
+      whenTrue: loadWithDefault,
+      whenFalse: fallback,
+    };
+  }
+  if (!isRepeatableExpression(value)) return null;
+  return { condition: value, whenTrue: value, whenFalse: fallback };
+}
+
+/**
+ * `loadX(key) ?: fallback` maps to `load key default fallback`. Groovy's Elvis also replaces a stored false,
+ * zero, or empty value; TeaseScript's default only replaces a missing key.
+ */
+function legacyLoadWithDefault(
+  value: AstNode,
+  fallback: AstNode,
+  context: LowerContext,
+): AstNode | null {
+  const call = callParts(value);
+  if (call === null || !call.inherited || call.arguments.length !== 1) return null;
+  if (!DIRECT_STORAGE_LOADS.has(call.name) || context.helperMainParameter !== null) return null;
+  const typed = typedLegacyLoad(value);
+  const exact =
+    typed !== null && fallback.kind === "constant" && fallback.value === typed.falseValue.value;
+  if (!exact) {
+    addDiagnostic(
+      context,
+      "SX_ELVIS_LOAD_DEFAULT",
+      "warning",
+      "Groovy ?: also used the fallback when the stored value was false, zero, or empty; load ... default only applies to a missing key.",
+      value.span,
+    );
+  }
+  return { kind: "loadWithDefault", span: value.span, key: call.arguments[0], fallback };
+}
+
+/** First ternary or Elvis expression in evaluation order, ignoring closure bodies. */
+function findConditional(node: AstNode): AstNode | null {
+  if (node.kind === "ternary" || node.kind === "elvis") return node;
+  if (node.kind === "closure") return null;
+  for (const value of Object.values(node)) {
+    const children = Array.isArray(value) ? value : [value];
+    for (const child of children) {
+      if (!isAstNode(child)) continue;
+      const found = findConditional(child);
+      if (found !== null) return found;
+    }
+  }
+  return null;
+}
+
+function substituteNode(value: AstNode, target: AstNode, replacement: AstNode): AstNode {
+  if (value === target) return replacement;
+  const result: AstNode = { ...value };
+  for (const [key, child] of Object.entries(value)) {
+    if (isAstNode(child)) result[key] = substituteNode(child, target, replacement);
+    else if (Array.isArray(child)) {
+      result[key] = child.map((item) =>
+        isAstNode(item) ? substituteNode(item, target, replacement) : item,
+      );
+    }
+  }
+  return result;
+}
+
+/** Values that are safe and readable as an unconditional initial value. */
+function isSimpleValue(node: AstNode): boolean {
+  if (node.kind === "constant" || node.kind === "variable") return true;
+  if (node.kind === "unaryMinus") return asNode(node.value)?.kind === "constant";
+  if (node.kind === "gstring") return nodeArray(node.values).every(isSimpleValue);
+  if (node.kind === "list") return nodeArray(node.items).every(isSimpleValue);
+  return false;
+}
+
+const PURE_OBJECT_METHODS = new Set([
+  "contains",
+  "equals",
+  "isEmpty",
+  "length",
+  "size",
+  "toLowerCase",
+  "toString",
+  "toUpperCase",
+  "trim",
+]);
+
+/** Expressions without interactions, randomness, waits, or writes, so they may be evaluated earlier. */
+function isPure(node: AstNode): boolean {
+  if (node.kind === "methodCall") {
+    const call = callParts(node);
+    if (call === null) return false;
+    const pureCall = call.inherited
+      ? DIRECT_STORAGE_LOADS.has(call.name)
+      : PURE_OBJECT_METHODS.has(call.name);
+    const target = asNode(node.object);
+    return (
+      pureCall &&
+      (call.inherited || target === null || isPure(target)) &&
+      call.arguments.every(isPure)
+    );
+  }
+  if (node.kind === "binary" && typeof node.operator === "string" && node.operator.endsWith("=")) {
+    return ["==", "!=", "<=", ">="].includes(node.operator) && nodeChildren(node).every(isPure);
+  }
+  const pureKinds = new Set([
+    "binary",
+    "boolean",
+    "cast",
+    "constant",
+    "elvis",
+    "gstring",
+    "list",
+    "map",
+    "mapEntry",
+    "not",
+    "property",
+    "range",
+    "ternary",
+    "unaryMinus",
+    "unaryPlus",
+    "variable",
+  ]);
+  return pureKinds.has(node.kind) && nodeChildren(node).every(isPure);
+}
+
+function nodeChildren(node: AstNode): AstNode[] {
+  const children: AstNode[] = [];
+  for (const [key, value] of Object.entries(node)) {
+    if (key === "span") continue;
+    if (isAstNode(value)) children.push(value);
+    else if (Array.isArray(value)) children.push(...value.filter(isAstNode));
+  }
+  return children;
+}
+
+function syntheticAssignment(
+  declaration: boolean,
+  target: AstNode,
+  value: AstNode,
+  span: SourceSpan | null,
+): AstNode {
+  const expression = declaration
+    ? { kind: "declaration", span, left: target, right: value }
+    : { kind: "binary", span, operator: "=", left: target, right: value };
+  return { kind: "expressionStatement", span, expression };
+}
+
+function syntheticIf(
+  condition: AstNode,
+  then: AstNode,
+  otherwise: AstNode | null,
+  span: SourceSpan | null,
+): AstNode {
+  return { kind: "if", span, condition, then, else: otherwise ?? { kind: "empty", span } };
+}
+
+function syntheticNot(value: AstNode): AstNode {
+  return { kind: "not", span: value.span, value };
+}
+
+function syntheticConstant(value: boolean | null, span: SourceSpan | null): AstNode {
+  return { kind: "constant", span, value };
 }
 
 function lowerExpressionStatement(node: AstNode, context: LowerContext): IrStatement[] {
@@ -552,7 +946,22 @@ function lowerDeclaration(
       ),
     ];
   }
-  return [{ kind: "let", name, value, span }];
+  const optionalType =
+    value.kind === "literal" && value.value === null ? nullableScalarType(name, context) : null;
+  return [{ kind: "let", name, value, span, ...(optionalType === null ? {} : { optionalType }) }];
+}
+
+/** The single scalar type a null-initialized variable later receives, if the evidence is unambiguous. */
+function nullableScalarType(
+  name: string,
+  context: LowerContext,
+): "string" | "number" | "boolean" | null {
+  const type = context.types.variables.get(name);
+  if (type === undefined) return null;
+  if (onlyOf(type, STRING | NULL) && type & STRING) return "string";
+  if (onlyOf(type, NUMBER | NULL) && type & NUMBER) return "number";
+  if (onlyOf(type, BOOLEAN | NULL) && type & BOOLEAN) return "boolean";
+  return null;
 }
 
 function lowerClosureDeclaration(
@@ -795,7 +1204,8 @@ function lowerCallStatement(
         ]
       : [{ kind: "expression", expression, span }];
   }
-  if (call.name === "sleep" && context.helperMainParameter !== null) {
+  if (call.name === "sleep") {
+    // Groovy's sleep(milliseconds) blocks the script thread like a hidden wait.
     return oneArgumentStatement(call.arguments, context, node, (duration) => ({
       kind: "wait",
       duration,
@@ -840,6 +1250,7 @@ function lowerCallStatement(
       extractMetadata(args, context, node.span);
       return [];
     case "show":
+      noteUnintendedMarkup(args[0], context);
       return oneArgumentStatement(args, context, node, (value) => ({ kind: "say", value, span }));
     case "wait":
       return oneArgumentStatement(args, context, node, (duration) => ({
@@ -1100,7 +1511,7 @@ function lowerIf(node: AstNode, context: LowerContext): IrStatement[] {
   const conditionNode = asNode(node.condition);
   const thenNode = asNode(node.then);
   const elseNode = asNode(node.else);
-  const condition = conditionNode === null ? null : lowerExpression(conditionNode, context);
+  const condition = conditionNode === null ? null : lowerCondition(conditionNode, context);
   if (condition === null || thenNode === null || thenNode.kind === "empty") {
     return [
       unsupportedStatement(
@@ -1124,13 +1535,28 @@ function lowerIf(node: AstNode, context: LowerContext): IrStatement[] {
 
 function lowerBranch(node: AstNode, context: LowerContext): IrStatement[] {
   if (node.kind === "empty") return [];
-  return node.kind === "block" ? lowerBlock(node, context) : lowerStatement(node, context);
+  if (node.kind === "block") return lowerBlock(node, context);
+  const [prelude, lowered] = withPrelude(context, () => lowerStatement(node, context));
+  return [...prelude, ...lowered];
 }
 
 function lowerWhile(node: AstNode, context: LowerContext): IrStatement[] {
   const conditionNode = asNode(node.condition);
   const body = asNode(node.body);
-  const condition = conditionNode === null ? null : lowerExpression(conditionNode, context);
+  const [prelude, condition] = withPrelude(context, () =>
+    conditionNode === null ? null : lowerCondition(conditionNode, context),
+  );
+  if (condition !== null && body?.kind === "block" && prelude.length > 0) {
+    // The prompt must be shown before every evaluation of the condition, not once before the loop.
+    return [
+      {
+        kind: "while",
+        condition: { kind: "literal", value: true },
+        body: [...prelude, breakUnless(condition), ...lowerBlock(body, context)],
+        span: node.span,
+      },
+    ];
+  }
   if (condition === null || body?.kind !== "block") {
     return [
       unsupportedStatement(
@@ -1142,6 +1568,39 @@ function lowerWhile(node: AstNode, context: LowerContext): IrStatement[] {
     ];
   }
   return [{ kind: "while", condition, body: lowerBlock(body, context), span: node.span }];
+}
+
+function breakUnless(condition: IrExpression): IrStatement {
+  return {
+    kind: "if",
+    condition: negate(condition),
+    then: [{ kind: "break", span: null }],
+    else: [],
+    span: null,
+  };
+}
+
+function negate(condition: IrExpression): IrExpression {
+  if (condition.kind === "unary" && condition.operator === "not") return condition.value;
+  if (
+    condition.kind === "binary" &&
+    (condition.operator === "and" || condition.operator === "or")
+  ) {
+    // De Morgan keeps generated null/zero/empty checks readable: `x == null or x == 0`.
+    return {
+      kind: "binary",
+      operator: condition.operator === "and" ? "or" : "and",
+      left: negate(condition.left),
+      right: negate(condition.right),
+    };
+  }
+  if (condition.kind === "binary" && condition.operator === "==") {
+    return { ...condition, operator: "!=" };
+  }
+  if (condition.kind === "binary" && condition.operator === "!=") {
+    return { ...condition, operator: "==" };
+  }
+  return { kind: "unary", operator: "not", value: condition };
 }
 
 function lowerFor(node: AstNode, context: LowerContext): IrStatement[] {
@@ -1197,9 +1656,14 @@ function lowerCStyleFor(
   const conditionNode = parts[1]!;
   const update = parts[2]!;
   const initialStatements = lowerForControlExpression(initial, context);
-  const condition = lowerExpression(conditionNode, context);
+  const [prelude, condition] = withPrelude(context, () => lowerCondition(conditionNode, context));
   const updateStatements = lowerForControlExpression(update, context);
-  if (condition === null || initialStatements === null || updateStatements === null) {
+  if (
+    condition === null ||
+    prelude.length > 0 ||
+    initialStatements === null ||
+    updateStatements === null
+  ) {
     return [
       unsupportedStatement(
         context,
@@ -1423,6 +1887,15 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
       return lowerMapExpression(node, context);
     case "gstring":
       return lowerGString(node, context);
+    case "loadWithDefault": {
+      const keyNode = asNode(node.key);
+      const fallbackNode = asNode(node.fallback);
+      const key = keyNode === null ? null : lowerExpression(keyNode, context);
+      const fallback = fallbackNode === null ? null : lowerExpression(fallbackNode, context);
+      return key === null || fallback === null
+        ? null
+        : { kind: "load", key, defaultValue: fallback };
+    }
     case "property":
       return lowerPropertyExpression(node, context);
     case "range": {
@@ -1439,8 +1912,11 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
       return asNode(node.value) === null ? null : lowerExpression(asNode(node.value)!, context);
     case "cast":
       return lowerCast(node, context);
-    case "not":
-      return lowerUnary(node, "not", context);
+    case "not": {
+      const valueNode = asNode(node.value);
+      const value = valueNode === null ? null : lowerCondition(valueNode, context);
+      return value === null ? null : negate(value);
+    }
     case "unaryMinus":
       return lowerUnary(node, "-", context);
     case "unaryPlus":
@@ -1471,7 +1947,7 @@ function lowerGString(node: AstNode, context: LowerContext): IrExpression | null
     if (value === null) return null;
     parts.push({ value });
   }
-  return { kind: "template", parts };
+  return templateOrLiteral(parts);
 }
 
 function lowerMapExpression(node: AstNode, context: LowerContext): IrExpression | null {
@@ -1528,7 +2004,16 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     const index = lowerExpression(indexNode, context);
     return index === null ? null : { kind: "index", target, index };
   }
-  const mapped = operator === "&&" ? "and" : operator === "||" ? "or" : operator;
+  if (operator === "&&" || operator === "||") {
+    const leftNode = asNode(node.left);
+    const rightNode = asNode(node.right);
+    const left = leftNode === null ? null : lowerCondition(leftNode, context);
+    const right = rightNode === null ? null : lowerCondition(rightNode, context);
+    if (left === null || right === null) return null;
+    return { kind: "binary", operator: operator === "&&" ? "and" : "or", left, right };
+  }
+  if (operator === "+") return lowerPlus(node, context);
+  const mapped = operator;
   if (
     mapped === null ||
     !new Set(["==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "and", "or"]).has(mapped)
@@ -1545,6 +2030,174 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   const left = leftNode === null ? null : lowerExpression(leftNode, context);
   const right = rightNode === null ? null : lowerExpression(rightNode, context);
   return left === null || right === null ? null : { kind: "binary", operator: mapped, left, right };
+}
+
+/**
+ * Lowers a Groovy condition to an explicitly boolean TeaseScript expression. Groovy treats null, zero, empty
+ * strings, and empty collections as false; TeaseScript conditions must already be boolean.
+ */
+function lowerCondition(node: AstNode, context: LowerContext): IrExpression | null {
+  if (node.kind === "boolean") {
+    const inner = asNode(node.value);
+    return inner === null ? null : lowerCondition(inner, context);
+  }
+  const legacyLoad = typedLegacyLoad(node);
+  if (legacyLoad !== null) {
+    // A missing key reads as null, which Groovy treats like the type's false value.
+    const key = lowerExpression(legacyLoad.key, context);
+    if (key === null) return null;
+    const value: IrExpression = { kind: "load", key, defaultValue: legacyLoad.falseValue };
+    return legacyLoad.falseValue.value === false
+      ? value
+      : { kind: "binary", operator: "!=", left: value, right: legacyLoad.falseValue };
+  }
+  const value = lowerExpression(node, context);
+  if (value === null) return null;
+  const type = inferType(node, context.types);
+  if (onlyOf(type, BOOLEAN)) return value;
+  const repeatable = isRepeatableExpression(node);
+  const compare = (operator: string, right: IrExpression): IrExpression => ({
+    kind: "binary",
+    operator,
+    left: value,
+    right,
+  });
+  const notNull = compare("!=", { kind: "literal", value: null });
+  const and = (left: IrExpression, right: IrExpression): IrExpression => ({
+    kind: "binary",
+    operator: "and",
+    left,
+    right,
+  });
+  if (onlyOf(type, BOOLEAN | NULL)) return compare("==", { kind: "literal", value: true });
+  if (onlyOf(type, NULL | OBJECT)) return notNull;
+  if (onlyOf(type, NUMBER)) return compare("!=", { kind: "literal", value: 0 });
+  if (onlyOf(type, STRING)) return compare("!=", { kind: "literal", value: "" });
+  if (onlyOf(type, LIST)) {
+    return {
+      kind: "binary",
+      operator: ">",
+      left: { kind: "property", target: value, name: "length" },
+      right: { kind: "literal", value: 0 },
+    };
+  }
+  if (repeatable && onlyOf(type, NUMBER | NULL)) {
+    return and(notNull, compare("!=", { kind: "literal", value: 0 }));
+  }
+  if (repeatable && onlyOf(type, STRING | NULL)) {
+    return and(notNull, compare("!=", { kind: "literal", value: "" }));
+  }
+  addDiagnostic(
+    context,
+    "SX_CONDITION_TYPE",
+    "warning",
+    "Condition is not proven boolean; TeaseScript conditions must be boolean, unlike Groovy truthiness. Verify or compare explicitly.",
+    node.span,
+  );
+  return value;
+}
+
+/** Typed legacy loads whose missing-key null maps to the type's false value in a condition. */
+function typedLegacyLoad(
+  node: AstNode,
+): { key: AstNode; falseValue: { kind: "literal"; value: boolean | number | string } } | null {
+  const call = callParts(node);
+  if (call === null || !call.inherited || call.arguments.length !== 1) return null;
+  const falseValues: Record<string, boolean | number | string> = {
+    loadBoolean: false,
+    loadInteger: 0,
+    loadFloat: 0,
+    loadString: "",
+  };
+  const falseValue = falseValues[call.name];
+  return falseValue === undefined
+    ? null
+    : { key: call.arguments[0]!, falseValue: { kind: "literal", value: falseValue } };
+}
+
+/** Expressions that may be evaluated twice without changing behavior or readability much. */
+function isRepeatableExpression(node: AstNode): boolean {
+  if (node.kind === "variable" || node.kind === "constant") return true;
+  if (node.kind === "property") {
+    const target = asNode(node.object);
+    return target !== null && isRepeatableExpression(target);
+  }
+  return false;
+}
+
+/**
+ * Groovy `+` concatenates when either operand is a string; TeaseScript `+` is numeric only, so string
+ * concatenation becomes interpolation. Left-associative chains such as `1 + 2 + "x"` keep their numeric prefix.
+ */
+function lowerPlus(node: AstNode, context: LowerContext): IrExpression | null {
+  const leftNode = asNode(node.left);
+  const rightNode = asNode(node.right);
+  if (leftNode === null || rightNode === null) return null;
+  if (onlyOf(inferType(node, context.types), STRING)) {
+    const parts = concatenationParts(node, context);
+    return parts === null ? null : templateOrLiteral(parts);
+  }
+  const left = lowerExpression(leftNode, context);
+  const right = lowerExpression(rightNode, context);
+  if (left === null || right === null) return null;
+  const leftType = inferType(leftNode, context.types);
+  const rightType = inferType(rightNode, context.types);
+  if (onlyOf(leftType, LIST)) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_LIST_CONCATENATION",
+      "Groovy list + has no TeaseScript operator; build the combined list with add() in a loop.",
+    );
+  }
+  // A null operand fails in both languages, so only non-numeric possibilities need review.
+  if (!onlyOf(leftType, NUMBER | NULL) || !onlyOf(rightType, NUMBER | NULL)) {
+    addDiagnostic(
+      context,
+      "SX_PLUS_OPERAND_TYPE",
+      "warning",
+      "Groovy + operands are not proven numeric; TeaseScript + only adds numbers. Use interpolation if this joins text.",
+      node.span,
+    );
+  }
+  return { kind: "binary", operator: "+", left, right };
+}
+
+type TemplatePart = { text: string } | { value: IrExpression };
+
+function concatenationParts(node: AstNode, context: LowerContext): TemplatePart[] | null {
+  if (node.kind === "binary" && node.operator === "+") {
+    const leftNode = asNode(node.left);
+    const rightNode = asNode(node.right);
+    if (leftNode !== null && rightNode !== null && onlyOf(inferType(node, context.types), STRING)) {
+      const left = concatenationParts(leftNode, context);
+      const right = concatenationParts(rightNode, context);
+      return left === null || right === null ? null : [...left, ...right];
+    }
+  }
+  const value = lowerExpression(node, context);
+  if (value === null) return null;
+  if (value.kind === "literal" && typeof value.value === "string") return [{ text: value.value }];
+  if (value.kind === "template") return value.parts;
+  return [{ value }];
+}
+
+function templateOrLiteral(parts: TemplatePart[]): IrExpression {
+  const merged: TemplatePart[] = [];
+  for (const part of parts) {
+    const previous = merged.at(-1);
+    if ("text" in part && previous !== undefined && "text" in previous) {
+      merged[merged.length - 1] = { text: previous.text + part.text };
+    } else if (!("text" in part) || part.text !== "") {
+      merged.push(part);
+    }
+  }
+  if (merged.length === 0) return { kind: "literal", value: "" };
+  const only = merged[0];
+  if (merged.length === 1 && only !== undefined && "text" in only) {
+    return { kind: "literal", value: only.text };
+  }
+  return { kind: "template", parts: merged };
 }
 
 function lowerCast(node: AstNode, context: LowerContext): IrExpression | null {
@@ -1746,9 +2399,7 @@ function lowerObjectMethodCallExpression(
 }
 
 function isKnownListExpression(node: AstNode, context: LowerContext): boolean {
-  if (node.kind === "list") return true;
-  const name = variableName(node);
-  return name !== null && context.listVariables.has(name);
+  return onlyOf(inferType(node, context.types), LIST);
 }
 
 function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpression | null {
@@ -1925,12 +2576,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     case "getString":
     case "getInteger":
     case "getFloat":
-      return unsupportedExpression(
-        context,
-        node,
-        "SX_INPUT_DEFAULT_SEMANTICS",
-        `${call.name}() has a pre-filled default value that the accepted TeaseScript input contract does not currently preserve.`,
-      );
+      return lowerSingleInput(node, call.name, call.arguments, args, context);
     case "getSelectedValue":
       return lowerSelectedValue(node, call.arguments, context);
     default:
@@ -1943,6 +2589,52 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
   }
 }
 
+/**
+ * Legacy single-field input shows `message` in its dialog and pre-fills `defaultValue`. TeaseScript shows the
+ * question with `say` and then asks with a compact input; it has no single-field prefill.
+ */
+function lowerSingleInput(
+  node: AstNode,
+  name: string,
+  argumentNodes: AstNode[],
+  args: IrExpression[],
+  context: LowerContext,
+): IrExpression | null {
+  if (args.length < 1 || args.length > 2) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_INPUT_ARITY",
+      `${name}() must have a message and an optional default value.`,
+    );
+  }
+  const defaultNode = argumentNodes[1];
+  if (defaultNode !== undefined && !isEmptyDefault(defaultNode)) {
+    addDiagnostic(
+      context,
+      "SX_INPUT_PREFILL",
+      "warning",
+      `${name}() pre-filled its field with a default value; TeaseScript single-field input has no prefill, so the player must type it.`,
+      node.span,
+    );
+  }
+  if (name === "getInteger") {
+    // Accepted V30 integer input; compact syntax exists only for text and number input.
+    return { kind: "call", name: "askInteger", positional: [args[0]!], named: {} };
+  }
+  context.prelude.push(promptSay(args[0]!, node.span));
+  return { kind: "input", input: name === "getString" ? "askText" : "askNumber" };
+}
+
+function isEmptyDefault(node: AstNode): boolean {
+  return node.kind === "constant" && (node.value === null || node.value === "");
+}
+
+function promptSay(message: IrExpression, span: SourceSpan | null): IrStatement {
+  return { kind: "say", value: message, span };
+}
+
+/** Legacy getSelectedValue() returns the zero-based index, which numeric `choose` labels reproduce. */
 function lowerSelectedValue(
   node: AstNode,
   args: AstNode[],
@@ -1964,7 +2656,7 @@ function lowerSelectedValue(
       context,
       node,
       "SX_DYNAMIC_CHOICE_OPTIONS",
-      "Dynamic getSelectedValue() option lists need a separate migration strategy.",
+      "getSelectedValue() options come from a runtime list; TeaseScript choose needs its options written out in the source.",
     );
   }
   const options: IrExpression[] = [];
@@ -1981,7 +2673,8 @@ function lowerSelectedValue(
       "getSelectedValue() has no choices.",
     );
   }
-  return { kind: "choice", message, options };
+  context.prelude.push(promptSay(message, node.span));
+  return { kind: "choice", options };
 }
 
 function lowerArguments(args: AstNode[], context: LowerContext): IrExpression[] | null {
@@ -2013,6 +2706,34 @@ function oneArgumentStatement(
         ),
       ]
     : [build(value)];
+}
+
+/**
+ * `say` text is message markup. Legacy emphasis such as `*grin*` reasonably becomes formatting, but block
+ * markers at a line start and backslash escapes were plain text in SexScript and likely change the message.
+ */
+function noteUnintendedMarkup(node: AstNode | undefined, context: LowerContext): void {
+  if (node === undefined) return;
+  const texts: string[] = [];
+  walkAst(node, (child) => {
+    if (child.kind === "constant" && typeof child.value === "string") texts.push(child.value);
+    if (child.kind === "gstring" && Array.isArray(child.strings)) {
+      for (const part of child.strings) if (typeof part === "string") texts.push(part);
+    }
+  });
+  const risky = texts.some(
+    (text) =>
+      /(^|\n)(#{1,3} |> |- |[1-9][0-9]*\. )/u.test(text) || /\\[\\*~`[\]()#>\-.:]/u.test(text),
+  );
+  if (risky) {
+    addDiagnostic(
+      context,
+      "SX_SAY_MARKUP",
+      "warning",
+      "This legacy plain text contains a line-start list/heading/quote marker or a backslash escape that TeaseScript say renders as message markup; use escapeMarkup() if it must stay literal.",
+      node.span,
+    );
+  }
 }
 
 function extractMetadata(args: AstNode[], context: LowerContext, span: SourceSpan | null): void {
@@ -2101,84 +2822,6 @@ function isLegacyLoadClassCall(node: AstNode, classLoaders: Set<string>): boolea
   if (node.kind !== "methodCall" || constantString(node.method) !== "loadClass") return false;
   const receiver = variableName(node.object);
   return receiver !== null && classLoaders.has(receiver);
-}
-
-function collectListVariables(body: AstNode): Set<string> {
-  const assignments = new Map<string, AstNode[]>();
-  const add = (name: string, value: AstNode): void => {
-    const current = assignments.get(name);
-    if (current === undefined) assignments.set(name, [value]);
-    else current.push(value);
-  };
-
-  walkAst(body, (node) => {
-    if (node.kind === "declaration") {
-      const name = variableName(node.left);
-      const value = asNode(node.right);
-      if (name !== null && value !== null) add(name, value);
-      return;
-    }
-    if (node.kind === "binary" && node.operator === "=") {
-      const name = variableName(node.left);
-      const value = asNode(node.right);
-      if (name !== null && value !== null) add(name, value);
-    }
-  });
-
-  const known = new Set<string>();
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const [name, values] of assignments) {
-      if (known.has(name)) continue;
-      let evidence = false;
-      let valid = true;
-      for (const value of values) {
-        if (isEmptyGroovyExpression(value)) continue;
-        if (expressionProvesList(value, name, known)) {
-          evidence = true;
-          continue;
-        }
-        valid = false;
-        break;
-      }
-      if (valid && evidence) {
-        known.add(name);
-        changed = true;
-      }
-    }
-  }
-  return known;
-}
-
-function expressionProvesList(node: AstNode, selfName: string, known: Set<string>): boolean {
-  if (node.kind === "list") return true;
-  if (node.kind === "cast" && (node.type === "List" || node.type === "java.util.List")) {
-    const value = asNode(node.value);
-    return value !== null && expressionProvesList(value, selfName, known);
-  }
-  if (node.kind === "variable") {
-    const name = variableName(node);
-    return name !== null && known.has(name);
-  }
-  if (node.kind === "binary" && node.operator === "+") {
-    const left = asNode(node.left);
-    const right = asNode(node.right);
-    if (left === null || right === null) return false;
-    const leftIsSelf = variableName(left) === selfName;
-    return (
-      (leftIsSelf || expressionProvesList(left, selfName, known)) &&
-      expressionProvesList(right, selfName, known)
-    );
-  }
-  return false;
-}
-
-function isEmptyGroovyExpression(node: AstNode): boolean {
-  return (
-    node.kind === "unsupportedExpression" &&
-    node.groovyType === "org.codehaus.groovy.ast.expr.EmptyExpression"
-  );
 }
 
 function collectClosureInfo(body: AstNode): Map<string, ClosureInfo> {

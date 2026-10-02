@@ -1,6 +1,7 @@
 import { isRecord, type ParsedGroovyFile, type SourceSpan } from "./ast.ts";
 import type { IrStatement, MigrationDiagnostic, MigrationProgram } from "./ir.ts";
 import { buildHelperRegistry, lowerParsedFile } from "./lower.ts";
+import { renameConflictingIdentifiers } from "./naming.ts";
 
 const ACCEPTED_EXTERNAL_CALLS = new Set([
   "askBoolean",
@@ -111,7 +112,11 @@ function composeProgram(
 
   const statements = [...helperStatements, ...program.statements];
   diagnostics.push(...packageDependencyDiagnostics(statements));
-  return { ...program, statements, diagnostics: deduplicateDiagnostics(diagnostics) };
+  return renameConflictingIdentifiers({
+    ...program,
+    statements,
+    diagnostics: deduplicateDiagnostics(diagnostics),
+  });
 }
 
 export function packageDependencyDiagnostics(

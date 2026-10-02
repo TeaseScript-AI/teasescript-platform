@@ -60,7 +60,13 @@ export type IrStatement =
       leadingComments?: string[];
     })
   | (IrBase & { kind: "return"; value: IrExpression | null })
-  | (IrBase & { kind: "let"; name: string; value: IrExpression })
+  /** `optionalType` declares a nullable scalar when the initializer alone (null) would not show the type. */
+  | (IrBase & {
+      kind: "let";
+      name: string;
+      value: IrExpression;
+      optionalType?: "string" | "number" | "boolean";
+    })
   | (IrBase & {
       kind: "assign";
       target: IrExpression;
@@ -103,8 +109,12 @@ export type IrExpression =
   | { kind: "index"; target: IrExpression; index: IrExpression }
   | { kind: "property"; target: IrExpression; name: string }
   | { kind: "methodCall"; target: IrExpression; name: string; arguments: IrExpression[] }
-  | { kind: "load"; key: IrExpression }
-  | { kind: "choice"; message: IrExpression; options: IrExpression[] }
+  /** `load key` returns null for a missing key; `defaultValue` replaces that null without writing storage. */
+  | { kind: "load"; key: IrExpression; defaultValue?: IrExpression }
+  /** Compact `choose` whose numeric labels return the zero-based option index. */
+  | { kind: "choice"; options: IrExpression[] }
+  /** Compact single-field input whose prompt, if any, was emitted as a preceding `say`. */
+  | { kind: "input"; input: "askText" | "askNumber" }
   | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean }
   | { kind: "unary"; operator: "not" | "+" | "-"; value: IrExpression }
   | { kind: "binary"; operator: string; left: IrExpression; right: IrExpression }

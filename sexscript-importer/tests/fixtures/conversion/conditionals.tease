@@ -1,0 +1,21 @@
+let rounds = randomInteger(0..10)
+let mood = "playful"
+if rounds > 5 {
+  mood = "strict"
+}
+let bonus = 0
+if rounds > 8 {
+  bonus = randomInteger(0..3)
+}
+if rounds == 0 {
+  say "None"
+} else if rounds == 1 {
+  say "One round"
+} else {
+  say "Many rounds"
+}
+let labelValue: string? = null
+if labelValue == null or labelValue == "" {
+  labelValue = "pet"
+}
+say "Mood ${mood}, bonus ${bonus}, ${labelValue}"

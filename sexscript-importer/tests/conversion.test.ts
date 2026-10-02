@@ -1,5 +1,5 @@
 // Source-to-target conversion examples: real Groovy 2.5.21 parsing, importer lowering, and the real
-// TeaseScript compiler. Each `fixtures/conversion/NAME.groovy` has the expected idiomatic `NAME.tease`.
+// TeaseScript compiler. Each `fixtures/<group>/NAME.groovy` has the expected idiomatic `NAME.tease`.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -12,47 +12,55 @@ import { emitTease } from "../src/emit-tease.ts";
 import { lowerSelfContainedPackage } from "../src/package.ts";
 import { parseGroovySource } from "../src/source-parser.ts";
 
-const fixtureDirectory = fileURLToPath(new URL("./fixtures/conversion/", import.meta.url));
-const fixtures = readdirSync(fixtureDirectory)
-  .filter((name) => name.endsWith(".groovy"))
-  .map((name) => name.slice(0, -".groovy".length))
-  .sort();
-
 const parserUnavailable = groovyParserUnavailableReason();
 const compilerResult = await loadRepositoryCompiler().then(
   (compiler): { compiler: TeaseCompiler } | { reason: string } => ({ compiler }),
   (error: unknown) => ({ reason: error instanceof Error ? error.message : String(error) }),
 );
 
-for (const name of fixtures) {
-  const sourcePath = path.join(fixtureDirectory, `${name}.groovy`);
-  const expected = readFileSync(path.join(fixtureDirectory, `${name}.tease`), "utf8");
+// Output that uses only implemented TeaseScript must also compile.
+registerFixtures("conversion", true);
+// Output that deliberately targets accepted TeaseScript the current compiler does not implement yet
+// (storage, script chaining, popups, boolean/integer input, ...): compared as text only.
+registerFixtures("conversion-accepted", false);
 
-  test(
-    `converts ${name}.groovy to the expected TeaseScript`,
-    { skip: parserUnavailable },
-    async () => {
-      const parsed = await parseGroovySource(sourcePath);
-      const [program] = lowerSelfContainedPackage([parsed]);
-      assert.ok(program !== undefined);
-      assert.equal(emitTease(program), expected);
-    },
-  );
+function registerFixtures(directoryName: string, mustCompile: boolean): void {
+  const directory = fileURLToPath(new URL(`./fixtures/${directoryName}/`, import.meta.url));
+  const names = readdirSync(directory)
+    .filter((name) => name.endsWith(".groovy"))
+    .map((name) => name.slice(0, -".groovy".length))
+    .sort();
+  for (const name of names) {
+    const sourcePath = path.join(directory, `${name}.groovy`);
+    const expected = readFileSync(path.join(directory, `${name}.tease`), "utf8");
 
-  const compilerSkip = "reason" in compilerResult ? compilerResult.reason : false;
-  test(
-    `expected ${name}.tease compiles with the TeaseScript compiler`,
-    { skip: compilerSkip },
-    () => {
-      if (!("compiler" in compilerResult)) return;
-      const result = compilerResult.compiler(expected);
-      assert.deepEqual(
-        result.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
-        [],
-      );
-      assert.equal(result.compiled, true);
-    },
-  );
+    test(
+      `converts ${directoryName}/${name}.groovy to the expected TeaseScript`,
+      { skip: parserUnavailable },
+      async () => {
+        const parsed = await parseGroovySource(sourcePath);
+        const [program] = lowerSelfContainedPackage([parsed]);
+        assert.ok(program !== undefined);
+        assert.equal(emitTease(program), expected);
+      },
+    );
+
+    if (!mustCompile) continue;
+    const compilerSkip = "reason" in compilerResult ? compilerResult.reason : false;
+    test(
+      `expected ${directoryName}/${name}.tease compiles with the TeaseScript compiler`,
+      { skip: compilerSkip },
+      () => {
+        if (!("compiler" in compilerResult)) return;
+        const result = compilerResult.compiler(expected);
+        assert.deepEqual(
+          result.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+          [],
+        );
+        assert.equal(result.compiled, true);
+      },
+    );
+  }
 }
 
 function groovyParserUnavailableReason(): string | false {
