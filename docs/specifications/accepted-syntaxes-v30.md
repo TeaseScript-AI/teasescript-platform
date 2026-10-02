@@ -2493,7 +2493,7 @@ Recovery is not offered for structural errors such as malformed syntax, unknown 
 TeaseScript has separate `date`, `time`, `datetime`, and `duration` types. The current runtime implements elapsed
 duration literals and values using `ms`, `s`, `min`, and `h`, including their singular and plural long forms.
 Calendar durations, date/time APIs, technical conversions, and locale-aware presentation remain deferred.
-Calendar duration units are rejected by the current compiler.
+Until calendar durations are implemented, a calendar unit fails compilation instead of being read as another value.
 
 Current values:
 

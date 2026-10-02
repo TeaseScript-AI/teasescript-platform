@@ -88,10 +88,27 @@ test("mixing plain numbers with durations fails instead of guessing a unit", () 
   ]);
 });
 
-test("calendar units and doubled units are rejected at compile time", () => {
-  assert.deepEqual(diagnostics('say "${1 day}"'), ["TSP033"]);
-  assert.deepEqual(diagnostics("let a = 2 weeks"), ["TSP033"]);
-  assert.deepEqual(diagnostics("let a = 1 mo"), ["TSP033"]);
+test("calendar units are never misread; doubled units and overflow are rejected at compile time", () => {
+  // Calendar durations are accepted direction that is not implemented yet (V30 section 35). Until it is, a calendar
+  // unit must stop compilation with a structured diagnostic at the duration instead of running as another value, such
+  // as `wait 3` seconds.
+  for (const [source, duration] of [
+    ['say "${1 day}"', "1 day"],
+    ["let a = 2 weeks", "2 weeks"],
+    ["let a = 1 mo", "1 mo"],
+    ["wait 3 days", "3 days"],
+    ["let n = 3\nwait n days", "n days"],
+  ] as const) {
+    const result = compileSource(source);
+    assert.equal(result.plan, null, source);
+    const first = result.diagnostics[0];
+    assert.match(first?.code ?? "", /^TS[LPV]\d{3}$/u, source);
+    const start = source.indexOf(duration);
+    assert.ok(
+      first!.span.start.offset >= start && first!.span.start.offset < start + duration.length,
+      source,
+    );
+  }
   assert.deepEqual(diagnostics("wait 10 s ms"), ["TSV033"]);
   assert.deepEqual(diagnostics("let a = 1e306 h"), ["TSC001"]);
 });
