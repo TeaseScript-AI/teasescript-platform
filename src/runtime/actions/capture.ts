@@ -24,7 +24,6 @@ const UNAVAILABLE_MESSAGES: Readonly<Record<CaptureUnavailableReason, string>> =
   busy: "The camera is in use or could not be started; takePhoto() returned null.",
   unsupported: "This browser does not support camera capture; takePhoto() returned null.",
   revoked: "The camera was disconnected or access was revoked; takePhoto() returned null.",
-  storage: "The photo could not be stored; takePhoto() returned null.",
   failed: "The camera could not capture a photo; takePhoto() returned null.",
 };
 

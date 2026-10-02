@@ -138,14 +138,7 @@ export interface RuntimeCaptureActionSnapshot {
 
 /** Why the Player had no usable camera for a capture; every reason yields `null` and the script continues. */
 export type CaptureUnavailableReason =
-  | "unconfigured"
-  | "denied"
-  | "notFound"
-  | "busy"
-  | "unsupported"
-  | "revoked"
-  | "storage"
-  | "failed";
+  "unconfigured" | "denied" | "notFound" | "busy" | "unsupported" | "revoked" | "failed";
 
 export const CAPTURE_UNAVAILABLE_REASONS: readonly CaptureUnavailableReason[] = [
   "unconfigured",
@@ -154,7 +147,6 @@ export const CAPTURE_UNAVAILABLE_REASONS: readonly CaptureUnavailableReason[] = 
   "busy",
   "unsupported",
   "revoked",
-  "storage",
   "failed",
 ];
 

@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
+import type { CapturedMediaRepository } from "../../captured-media.js";
 import type { PlayerTimerKind } from "../../model.js";
 import { createPlayerRuntimeSession } from "../../runtime-adapter.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
@@ -10,7 +11,7 @@ import LayoutDebug from "./LayoutDebug.vue";
 import PlayerApp from "./PlayerApp.vue";
 import type { PlayerTool } from "./PlayerToolsShell.vue";
 import { resolveDevelopmentAsset } from "./developmentMedia";
-import { openingScenario } from "./runtimeScenario";
+import { cameraScenarioSource, openingScenario } from "./runtimeScenario";
 import { stageFixtures } from "./stageFixtures";
 import StageRightRail from "./StageRightRail.vue";
 import ThemeLab from "./ThemeLab.vue";
@@ -37,8 +38,17 @@ const timerPaused = ref(true);
 const backgroundControlsReset = ref(0);
 const themeIntent = ref<PlayerThemeIntent>(defaultPlayerThemeIntents.light);
 
-const player = usePlayerSession({ resolveAsset: resolveDevelopmentAsset });
-player.prepare(() => createPlayerRuntimeSession(openingScenario));
+const props = defineProps<{ capturedMediaRepository?: CapturedMediaRepository | null }>();
+// `?scenario=camera` opens the camera scenario with the session camera capability.
+const cameraScenario = new URLSearchParams(window.location.search).get("scenario") === "camera";
+const player = usePlayerSession({
+  resolveAsset: resolveDevelopmentAsset,
+  capabilities: { camera: cameraScenario },
+  capturedMedia: { repository: props.capturedMediaRepository ?? null, scope: "development-preview" },
+});
+player.prepare(() =>
+  createPlayerRuntimeSession(cameraScenario ? cameraScenarioSource : openingScenario),
+);
 </script>
 
 <template>

@@ -12,3 +12,19 @@ let next = choose as guide stay: "Stay a little longer", walk: "Walk together"
 showButton as guide "Finish"
 exit
 `;
+
+// Development camera content: the session camera opens after Start, and `takePhoto()` captures silently from it.
+export const cameraScenarioSource = `
+speaker guide { title: "Camera Guide" }
+playAudio async "sounds/chime.wav"
+say as guide "The camera is ready.", instant
+let photo: string? = takePhoto()
+if photo != null {
+    showImage photo
+    say as guide "Captured.", instant
+} else {
+    say as guide "No camera; continuing without a photo.", instant
+}
+showButton as guide "Finish"
+exit
+`;
