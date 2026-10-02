@@ -1,6 +1,6 @@
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { ParsedGroovyFile } from "./ast.ts";
+import { parseParsedGroovyFile, type ParsedGroovyFile } from "./ast.ts";
 import { emitTease } from "./emit-tease.ts";
 import { inventoryFiles } from "./inventory.ts";
 import { lowerParsedFile } from "./lower.ts";
@@ -69,8 +69,11 @@ async function findGroovyFiles(directory: string): Promise<string[]> {
 function reportDiagnostics(program: ReturnType<typeof lowerParsedFile>): number {
   let errors = 0;
   for (const diagnostic of program.diagnostics) {
-    const location = diagnostic.span === null ? "" : `:${diagnostic.span.line}:${diagnostic.span.column}`;
-    process.stderr.write(`${diagnostic.severity} ${diagnostic.code} ${program.sourceName}${location} ${diagnostic.message}\n`);
+    const location =
+      diagnostic.span === null ? "" : `:${diagnostic.span.line}:${diagnostic.span.column}`;
+    process.stderr.write(
+      `${diagnostic.severity} ${diagnostic.code} ${program.sourceName}${location} ${diagnostic.message}\n`,
+    );
     if (diagnostic.severity === "error") errors += 1;
   }
   if (errors > 0) process.exitCode = 1;
@@ -78,9 +81,7 @@ function reportDiagnostics(program: ReturnType<typeof lowerParsedFile>): number 
 }
 
 async function readParsedFile(filePath: string): Promise<ParsedGroovyFile> {
-  const value = JSON.parse(await readFile(filePath, "utf8")) as ParsedGroovyFile;
-  if (value.formatVersion !== 1) throw new Error(`Unsupported parser format in ${filePath}`);
-  return value;
+  return parseParsedGroovyFile(JSON.parse(await readFile(filePath, "utf8")), filePath);
 }
 
 function fail(message: string): never {

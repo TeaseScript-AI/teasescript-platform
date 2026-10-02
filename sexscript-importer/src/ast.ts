@@ -25,12 +25,68 @@ export interface ParsedGroovyFile {
   diagnostics: ParserDiagnostic[];
 }
 
+export interface GroovyParameter {
+  name: string;
+  defaultValue: AstNode | null;
+}
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export function isAstNode(value: unknown): value is AstNode {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as Record<string, unknown>).kind === "string"
-  );
+  return isRecord(value) && typeof value.kind === "string";
+}
+
+/** Validates parser-helper JSON at the process boundary. */
+export function parseParsedGroovyFile(value: unknown, origin: string): ParsedGroovyFile {
+  if (!isRecord(value) || value.formatVersion !== 1) {
+    throw new Error(`Unsupported parser format in ${origin}`);
+  }
+  const { sourceName, groovyVersion, mode, root, diagnostics } = value;
+  if (
+    typeof sourceName !== "string" ||
+    typeof groovyVersion !== "string" ||
+    (mode !== "script-body" && mode !== "unit") ||
+    (root !== null && !isAstNode(root)) ||
+    !Array.isArray(diagnostics)
+  ) {
+    throw new Error(`Malformed parser output in ${origin}`);
+  }
+  const parsedDiagnostics: ParserDiagnostic[] = [];
+  for (const diagnostic of diagnostics) {
+    if (
+      !isRecord(diagnostic) ||
+      typeof diagnostic.code !== "string" ||
+      typeof diagnostic.message !== "string"
+    ) {
+      throw new Error(`Malformed parser diagnostic in ${origin}`);
+    }
+    parsedDiagnostics.push({ code: diagnostic.code, message: diagnostic.message });
+  }
+  return {
+    formatVersion: 1,
+    sourceName,
+    groovyVersion,
+    mode,
+    root,
+    diagnostics: parsedDiagnostics,
+  };
+}
+
+/**
+ * Reads exported closure (`default`) or method (`initialExpression`) parameters.
+ * Returns null when any entry is malformed.
+ */
+export function groovyParameters(value: unknown): GroovyParameter[] | null {
+  if (!Array.isArray(value)) return [];
+  const result: GroovyParameter[] = [];
+  for (const item of value) {
+    if (!isRecord(item) || typeof item.name !== "string") return null;
+    const initial = item.initialExpression ?? item.default;
+    result.push({ name: item.name, defaultValue: isAstNode(initial) ? initial : null });
+  }
+  return result;
 }
 
 export function walkAst(value: unknown, visit: (node: AstNode) => void): void {

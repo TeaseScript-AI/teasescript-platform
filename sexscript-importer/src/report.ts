@@ -28,7 +28,6 @@ const WRAPPER_DIAGNOSTIC_CODES = new Set([
   "SX_UNSUPPORTED_WHILE",
 ]);
 
-
 export interface FeasibilityFileReport {
   sourceName: string;
   parseErrors: number;
@@ -102,7 +101,9 @@ export function analyzeFeasibility(files: ParsedGroovyFile[]): FeasibilityReport
     const program = lowerParsedFile(file, { helperRegistry });
     const packageProgram = packagePrograms[fileIndex]!;
     const errors = program.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
-    const packageErrors = packageProgram.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
+    const packageErrors = packageProgram.diagnostics.filter(
+      (diagnostic) => diagnostic.severity === "error",
+    );
     const roots = rootDiagnostics(errors);
     const ir = countIrStatements(packageProgram.statements);
     const lowered = isScriptBody && errors.length === 0;
@@ -136,7 +137,8 @@ export function analyzeFeasibility(files: ParsedGroovyFile[]): FeasibilityReport
   report.diagnosticsByCode = sortCounts(report.diagnosticsByCode);
   report.rootDiagnosticsByCode = sortCounts(report.rootDiagnosticsByCode);
   report.files.sort((left, right) => {
-    if (left.rootMigrationErrors !== right.rootMigrationErrors) return right.rootMigrationErrors - left.rootMigrationErrors;
+    if (left.rootMigrationErrors !== right.rootMigrationErrors)
+      return right.rootMigrationErrors - left.rootMigrationErrors;
     return left.sourceName.localeCompare(right.sourceName);
   });
   return report;
@@ -162,8 +164,9 @@ export function rootDiagnostics(diagnostics: MigrationDiagnostic[]): MigrationDi
     if (!isWrapper(candidate)) return true;
     const candidateSpan = candidate.span;
     if (candidateSpan == null) return true;
-    return !located.some((other) =>
-      other !== candidate && other.span != null && strictlyContains(candidateSpan, other.span),
+    return !located.some(
+      (other) =>
+        other !== candidate && other.span != null && strictlyContains(candidateSpan, other.span),
     );
   });
   return [...withoutSpan, ...roots];
@@ -183,7 +186,11 @@ function countIrStatements(statements: IrStatement[]): { total: number; unsuppor
       if (statement.kind === "if") {
         visit(statement.then);
         visit(statement.else);
-      } else if (statement.kind === "while" || statement.kind === "for" || statement.kind === "function") {
+      } else if (
+        statement.kind === "while" ||
+        statement.kind === "for" ||
+        statement.kind === "function"
+      ) {
         visit(statement.body);
       } else if (statement.kind === "switch") {
         for (const branch of statement.cases) visit(branch.body);
@@ -196,12 +203,19 @@ function countIrStatements(statements: IrStatement[]): { total: number; unsuppor
 }
 
 function strictlyContains(outer: SourceSpan, inner: SourceSpan): boolean {
-  const startsBeforeOrEqual = comparePosition(outer.line, outer.column, inner.line, inner.column) <= 0;
-  const endsAfterOrEqual = comparePosition(outer.endLine, outer.endColumn, inner.endLine, inner.endColumn) >= 0;
+  const startsBeforeOrEqual =
+    comparePosition(outer.line, outer.column, inner.line, inner.column) <= 0;
+  const endsAfterOrEqual =
+    comparePosition(outer.endLine, outer.endColumn, inner.endLine, inner.endColumn) >= 0;
   return startsBeforeOrEqual && endsAfterOrEqual && spanKey(outer) !== spanKey(inner);
 }
 
-function comparePosition(leftLine: number, leftColumn: number, rightLine: number, rightColumn: number): number {
+function comparePosition(
+  leftLine: number,
+  leftColumn: number,
+  rightLine: number,
+  rightColumn: number,
+): number {
   if (leftLine !== rightLine) return leftLine - rightLine;
   return leftColumn - rightColumn;
 }
@@ -211,6 +225,8 @@ function spanKey(span: SourceSpan): string {
 }
 
 function emptyCounts(): Record<string, number> {
+  // Prototype-free, so names such as "toString" become ordinary counter keys.
+  // EVIDENCE: Object.create(null) returns an empty object whose keys are written only by increment().
   return Object.create(null) as Record<string, number>;
 }
 

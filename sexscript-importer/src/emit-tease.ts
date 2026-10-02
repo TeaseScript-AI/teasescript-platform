@@ -24,12 +24,18 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
       return;
     case "wait": {
       const unit = statement.unit === "ms" ? " ms" : "";
-      lines.push(`${pad}${statement.visible ? "timer" : "wait"} ${emitExpression(statement.duration)}${unit}`);
+      lines.push(
+        `${pad}${statement.visible ? "timer" : "wait"} ${emitExpression(statement.duration)}${unit}`,
+      );
       return;
     }
     case "showButton":
-      if (statement.timeout === null) lines.push(`${pad}showButton ${emitExpression(statement.label)}`);
-      else lines.push(`${pad}showButton(${emitExpression(statement.label)}, ${emitExpression(statement.timeout)})`);
+      if (statement.timeout === null)
+        lines.push(`${pad}showButton ${emitExpression(statement.label)}`);
+      else
+        lines.push(
+          `${pad}showButton(${emitExpression(statement.label)}, ${emitExpression(statement.timeout)})`,
+        );
       return;
     case "showPopup":
       lines.push(`${pad}showPopup ${emitExpression(statement.message)}`);
@@ -45,12 +51,16 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
       if (statement.repeatCount === null) {
         lines.push(`${pad}playAudio${statement.async ? " async" : ""} ${file}`);
       } else {
-        lines.push(`${pad}playAudio(file: ${file}, async: ${statement.async}, repeat: ${emitExpression(statement.repeatCount)} times)`);
+        lines.push(
+          `${pad}playAudio(file: ${file}, async: ${statement.async}, repeat: ${emitExpression(statement.repeatCount)} times)`,
+        );
       }
       return;
     }
     case "save":
-      lines.push(`${pad}save ${emitExpression(statement.value)} as ${emitExpression(statement.key)}`);
+      lines.push(
+        `${pad}save ${emitExpression(statement.value)} as ${emitExpression(statement.key)}`,
+      );
       return;
     case "delete":
       lines.push(`${pad}delete ${emitExpression(statement.key)}`);
@@ -61,19 +71,25 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
           ? parameter.name
           : `${parameter.name} = ${emitExpression(parameter.defaultValue)}`,
       );
-      lines.push(`${pad}function ${statement.name}${parameters.length === 0 ? "" : `(${parameters.join(", ")})`} {`);
+      lines.push(
+        `${pad}function ${statement.name}${parameters.length === 0 ? "" : `(${parameters.join(", ")})`} {`,
+      );
       emitStatements(statement.body, lines, depth + 1);
       lines.push(`${pad}}`);
       return;
     }
     case "return":
-      lines.push(`${pad}return${statement.value === null ? "" : ` ${emitExpression(statement.value)}`}`);
+      lines.push(
+        `${pad}return${statement.value === null ? "" : ` ${emitExpression(statement.value)}`}`,
+      );
       return;
     case "let":
       lines.push(`${pad}let ${statement.name} = ${emitExpression(statement.value)}`);
       return;
     case "assign":
-      lines.push(`${pad}${emitExpression(statement.target)} ${statement.operator} ${emitExpression(statement.value)}`);
+      lines.push(
+        `${pad}${emitExpression(statement.target)} ${statement.operator} ${emitExpression(statement.value)}`,
+      );
       return;
     case "expression":
       lines.push(`${pad}${emitExpression(statement.expression)}`);
@@ -138,7 +154,9 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
 export function emitExpression(expression: IrExpression): string {
   switch (expression.kind) {
     case "literal":
-      return typeof expression.value === "string" ? JSON.stringify(expression.value) : String(expression.value);
+      return typeof expression.value === "string"
+        ? JSON.stringify(expression.value)
+        : String(expression.value);
     case "variable":
       return expression.name;
     case "list":
@@ -169,12 +187,16 @@ export function emitExpression(expression: IrExpression): string {
       return `${parenthesize(expression.left)} ${expression.operator} ${parenthesize(expression.right)}`;
     case "call": {
       const positional = expression.positional.map(emitExpression);
-      const named = Object.entries(expression.named).map(([name, value]) => `${name}: ${emitExpression(value)}`);
+      const named = Object.entries(expression.named).map(
+        ([name, value]) => `${name}: ${emitExpression(value)}`,
+      );
       return `${expression.name}(${[...positional, ...named].join(", ")})`;
     }
   }
 }
 
 function parenthesize(expression: IrExpression): string {
-  return expression.kind === "binary" ? `(${emitExpression(expression)})` : emitExpression(expression);
+  return expression.kind === "binary"
+    ? `(${emitExpression(expression)})`
+    : emitExpression(expression);
 }

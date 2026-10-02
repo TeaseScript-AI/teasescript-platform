@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import type { ParsedGroovyFile } from "./ast.ts";
+import { isRecord, parseParsedGroovyFile, type ParsedGroovyFile } from "./ast.ts";
 
 export type GroovyParseMode = "script-body" | "unit";
 export type GroovyParserRunner = (
@@ -32,9 +32,7 @@ export async function runLegacyGroovyParser(
       `Legacy Groovy parser failed with exit code ${status}${stderr.length === 0 ? "" : `: ${stderr.trim()}`}`,
     );
   }
-  const value = JSON.parse(stdout) as ParsedGroovyFile;
-  if (value.formatVersion !== 1) throw new Error(`Unsupported parser format for ${sourcePath}`);
-  return value;
+  return parseParsedGroovyFile(JSON.parse(stdout), sourcePath);
 }
 
 function isAuxiliaryUnit(file: ParsedGroovyFile): boolean {
@@ -42,11 +40,7 @@ function isAuxiliaryUnit(file: ParsedGroovyFile): boolean {
   const classes = Array.isArray(file.root.classes) ? file.root.classes : [];
   const topLevel = file.root.topLevel;
   const topLevelStatements =
-    typeof topLevel === "object" &&
-    topLevel !== null &&
-    Array.isArray((topLevel as Record<string, unknown>).statements)
-      ? ((topLevel as Record<string, unknown>).statements as unknown[])
-      : [];
+    isRecord(topLevel) && Array.isArray(topLevel.statements) ? topLevel.statements : [];
   return classes.length > 0 && topLevelStatements.length === 0;
 }
 

@@ -1,4 +1,10 @@
-import { constantString, variableName, walkAst, type AstNode, type ParsedGroovyFile } from "./ast.ts";
+import {
+  constantString,
+  variableName,
+  walkAst,
+  type AstNode,
+  type ParsedGroovyFile,
+} from "./ast.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
 
 export interface InventoryReport {
@@ -66,6 +72,8 @@ function inventoryNode(report: InventoryReport, node: AstNode): void {
 }
 
 function emptyCounts(): Record<string, number> {
+  // Prototype-free, so names such as "toString" become ordinary counter keys.
+  // EVIDENCE: Object.create(null) returns an empty object whose keys are written only by increment().
   return Object.create(null) as Record<string, number>;
 }
 

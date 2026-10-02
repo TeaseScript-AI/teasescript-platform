@@ -30,22 +30,24 @@ test("reports source and IR counts separately instead of inventing a conversion 
       body: {
         kind: "block",
         span: parent,
-        statements: [{
-          kind: "if",
-          span: parent,
-          condition: {
-            kind: "methodCall",
-            span: child,
-            object: { kind: "variable", span: null, name: "helper", type: "java.lang.Object" },
-            method: { kind: "constant", span: child, value: "mystery" },
-            arguments: { kind: "arguments", span: child, items: [] },
-            implicitThis: false,
-            safe: false,
-            spreadSafe: false,
+        statements: [
+          {
+            kind: "if",
+            span: parent,
+            condition: {
+              kind: "methodCall",
+              span: child,
+              object: { kind: "variable", span: null, name: "helper", type: "java.lang.Object" },
+              method: { kind: "constant", span: child, value: "mystery" },
+              arguments: { kind: "arguments", span: child, items: [] },
+              implicitThis: false,
+              safe: false,
+              spreadSafe: false,
+            },
+            then: { kind: "block", span: parent, statements: [] },
+            else: { kind: "empty", span: parent },
           },
-          then: { kind: "block", span: parent, statements: [] },
-          else: { kind: "empty", span: parent },
-        }],
+        ],
       },
     },
   };
@@ -63,11 +65,15 @@ test("reports source and IR counts separately instead of inventing a conversion 
   assert.equal(report.unsupportedPlaceholders, 1);
 });
 
-
 test("keeps independent semantic parent diagnostics when a child also fails", () => {
   const diagnostics: MigrationDiagnostic[] = [
     { code: "SX_DYNAMIC_OR_OBJECT_CALL", severity: "error", message: "child", span: child },
-    { code: "SX_SWITCH_FALLTHROUGH", severity: "error", message: "independent parent", span: parent },
+    {
+      code: "SX_SWITCH_FALLTHROUGH",
+      severity: "error",
+      message: "independent parent",
+      span: parent,
+    },
   ];
 
   assert.deepEqual(rootDiagnostics(diagnostics), diagnostics);
@@ -93,24 +99,53 @@ test("feasibility report resolves package-local legacy helper calls", () => {
       kind: "compilationUnit",
       span: null,
       topLevel: { kind: "block", span: null, statements: [] },
-      classes: [{
-        kind: "class",
-        span: child,
-        name: "Helper",
-        modifiers: 1,
-        methods: [{
-          kind: "method",
+      classes: [
+        {
+          kind: "class",
           span: child,
-          name: "runHelper",
-          returnType: "java.lang.Object",
-          modifiers: 9,
-          parameters: [
-            { name: "main", type: "java.lang.Object", hasInitialExpression: false, initialExpression: null },
-            { name: "value", type: "java.lang.Object", hasInitialExpression: false, initialExpression: null },
+          name: "Helper",
+          modifiers: 1,
+          methods: [
+            {
+              kind: "method",
+              span: child,
+              name: "runHelper",
+              returnType: "java.lang.Object",
+              modifiers: 9,
+              parameters: [
+                {
+                  name: "main",
+                  type: "java.lang.Object",
+                  hasInitialExpression: false,
+                  initialExpression: null,
+                },
+                {
+                  name: "value",
+                  type: "java.lang.Object",
+                  hasInitialExpression: false,
+                  initialExpression: null,
+                },
+              ],
+              body: {
+                kind: "block",
+                span: child,
+                statements: [
+                  {
+                    kind: "return",
+                    span: child,
+                    value: {
+                      kind: "variable",
+                      span: child,
+                      name: "value",
+                      type: "java.lang.Object",
+                    },
+                  },
+                ],
+              },
+            },
           ],
-          body: { kind: "block", span: child, statements: [{ kind: "return", span: child, value: { kind: "variable", span: child, name: "value", type: "java.lang.Object" } }] },
-        }],
-      }],
+        },
+      ],
     },
   };
   const script: ParsedGroovyFile = {
@@ -134,7 +169,12 @@ test("feasibility report resolves package-local legacy helper calls", () => {
               span: child,
               multipleAssignment: false,
               left: { kind: "variable", span: child, name: "loader", type: "java.lang.Object" },
-              right: { kind: "constructorCall", span: child, type: "groovy.lang.GroovyClassLoader", arguments: { kind: "arguments", span: child, items: [] } },
+              right: {
+                kind: "constructorCall",
+                span: child,
+                type: "groovy.lang.GroovyClassLoader",
+                arguments: { kind: "arguments", span: child, items: [] },
+              },
             },
           },
           {
@@ -150,7 +190,11 @@ test("feasibility report resolves package-local legacy helper calls", () => {
                 span: child,
                 object: { kind: "variable", span: child, name: "loader", type: "java.lang.Object" },
                 method: { kind: "constant", span: child, value: "loadClass" },
-                arguments: { kind: "arguments", span: child, items: [{ kind: "constant", span: child, value: "Helper" }] },
+                arguments: {
+                  kind: "arguments",
+                  span: child,
+                  items: [{ kind: "constant", span: child, value: "Helper" }],
+                },
                 implicitThis: false,
               },
             },
@@ -161,7 +205,12 @@ test("feasibility report resolves package-local legacy helper calls", () => {
             expression: {
               kind: "methodCall",
               span: child,
-              object: { kind: "variable", span: child, name: "HelperApi", type: "java.lang.Object" },
+              object: {
+                kind: "variable",
+                span: child,
+                name: "HelperApi",
+                type: "java.lang.Object",
+              },
               method: { kind: "constant", span: child, value: "runHelper" },
               arguments: {
                 kind: "arguments",
@@ -183,7 +232,6 @@ test("feasibility report resolves package-local legacy helper calls", () => {
   assert.equal(report.rootDiagnosticsByCode.SX_LEGACY_HELPER_CALL, undefined);
 });
 
-
 test("reports recognized, lowered, and dependency-closed script stages separately", () => {
   const clean: ParsedGroovyFile = {
     formatVersion: 1,
@@ -197,20 +245,26 @@ test("reports recognized, lowered, and dependency-closed script stages separatel
       body: {
         kind: "block",
         span: parent,
-        statements: [{
-          kind: "expressionStatement",
-          span: child,
-          expression: {
-            kind: "methodCall",
+        statements: [
+          {
+            kind: "expressionStatement",
             span: child,
-            object: { kind: "variable", span: null, name: "this", type: "java.lang.Object" },
-            method: { kind: "constant", span: child, value: "show" },
-            arguments: { kind: "arguments", span: child, items: [{ kind: "constant", span: child, value: "hello" }] },
-            implicitThis: true,
-            safe: false,
-            spreadSafe: false,
+            expression: {
+              kind: "methodCall",
+              span: child,
+              object: { kind: "variable", span: null, name: "this", type: "java.lang.Object" },
+              method: { kind: "constant", span: child, value: "show" },
+              arguments: {
+                kind: "arguments",
+                span: child,
+                items: [{ kind: "constant", span: child, value: "hello" }],
+              },
+              implicitThis: true,
+              safe: false,
+              spreadSafe: false,
+            },
           },
-        }],
+        ],
       },
     },
   };

@@ -5,8 +5,17 @@ import { lowerParsedFile } from "../src/lower.ts";
 import type { AstNode, ParsedGroovyFile, SourceSpan } from "../src/ast.ts";
 
 const span: SourceSpan = { line: 1, column: 1, endLine: 1, endColumn: 2 };
-const constant = (value: string | number | boolean | null): AstNode => ({ kind: "constant", span, value });
-const variable = (name: string): AstNode => ({ kind: "variable", span, name, type: "java.lang.Object" });
+const constant = (value: string | number | boolean | null): AstNode => ({
+  kind: "constant",
+  span,
+  value,
+});
+const variable = (name: string): AstNode => ({
+  kind: "variable",
+  span,
+  name,
+  type: "java.lang.Object",
+});
 const args = (...items: AstNode[]): AstNode => ({ kind: "arguments", span, items });
 const call = (name: string, ...items: AstNode[]): AstNode => ({
   kind: "methodCall",
@@ -18,7 +27,11 @@ const call = (name: string, ...items: AstNode[]): AstNode => ({
   safe: false,
   spreadSafe: false,
 });
-const statement = (expression: AstNode): AstNode => ({ kind: "expressionStatement", span, expression });
+const statement = (expression: AstNode): AstNode => ({
+  kind: "expressionStatement",
+  span,
+  expression,
+});
 
 function file(statements: AstNode[]): ParsedGroovyFile {
   return {
@@ -64,7 +77,13 @@ test("lowers common SexScript flow to accepted TeaseScript forms", () => {
 });
 
 test("maps Groovy inclusive ranges and removes terminal switch breaks", () => {
-  const range: AstNode = { kind: "range", span, from: constant(0), to: constant(3), inclusive: true };
+  const range: AstNode = {
+    kind: "range",
+    span,
+    from: constant(0),
+    to: constant(3),
+    inclusive: true,
+  };
   const source = file([
     {
       kind: "switch",
@@ -90,7 +109,7 @@ test("maps Groovy inclusive ranges and removes terminal switch breaks", () => {
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
     emitTease(program),
-    ['switch value {', '  case 0..=3 {', '    say "small"', "  }", "}", ""].join("\n"),
+    ["switch value {", "  case 0..=3 {", '    say "small"', "  }", "}", ""].join("\n"),
   );
 });
 
@@ -121,16 +140,20 @@ test("lowers nullable legacy scalar storage reads to read-only TeaseScript load"
 });
 
 test("keeps legacy loadMap filtering semantics explicit", () => {
-  const mapProgram = lowerParsedFile(file([
-    statement({
-      kind: "declaration",
-      span,
-      multipleAssignment: false,
-      left: variable("map"),
-      right: call("loadMap", constant("legacy.map")),
-    }),
-  ]));
-  assert.ok(mapProgram.diagnostics.some((diagnostic) => diagnostic.code === "SX_STORAGE_MAP_SEMANTICS"));
+  const mapProgram = lowerParsedFile(
+    file([
+      statement({
+        kind: "declaration",
+        span,
+        multipleAssignment: false,
+        left: variable("map"),
+        right: call("loadMap", constant("legacy.map")),
+      }),
+    ]),
+  );
+  assert.ok(
+    mapProgram.diagnostics.some((diagnostic) => diagnostic.code === "SX_STORAGE_MAP_SEMANTICS"),
+  );
 });
 
 test("extracts static setInfos metadata instead of emitting runtime code", () => {
@@ -157,7 +180,6 @@ test("extracts static setInfos metadata instead of emitting runtime code", () =>
   assert.equal(emitTease(program), "end\n");
 });
 
-
 test("preserves accepted showButton timeout and elapsed-result semantics", () => {
   const timeoutSource = file([statement(call("showButton", constant("Quick"), constant(3)))]);
   const timeoutProgram = lowerParsedFile(timeoutSource);
@@ -183,11 +205,12 @@ test("preserves accepted showButton timeout and elapsed-result semantics", () =>
 });
 
 test("maps legacy save(key, null) deletion semantics to delete", () => {
-  const program = lowerParsedFile(file([statement(call("save", constant("intro.running"), constant(null)))]));
+  const program = lowerParsedFile(
+    file([statement(call("save", constant("intro.running"), constant(null)))]),
+  );
   assert.deepEqual(program.diagnostics, []);
   assert.equal(emitTease(program), 'delete "intro.running"\n');
 });
-
 
 test("lowers top-level Groovy closure helpers to TeaseScript functions with defaults and returns", () => {
   const helperClosure: AstNode = {
@@ -198,11 +221,7 @@ test("lowers top-level Groovy closure helpers to TeaseScript functions with defa
       { name: "count", type: "java.lang.Object", default: null },
       { name: "record", type: "java.lang.Object", default: constant(true) },
     ],
-    body: {
-      kind: "block",
-      span,
-      statements: [{ kind: "return", span, value: variable("count") }],
-    },
+    body: { kind: "block", span, statements: [{ kind: "return", span, value: variable("count") }] },
   };
   const source = file([
     statement({
@@ -219,13 +238,7 @@ test("lowers top-level Groovy closure helpers to TeaseScript functions with defa
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
     emitTease(program),
-    [
-      "function helper(count, record = true) {",
-      "  return count",
-      "}",
-      "helper(4)",
-      "",
-    ].join("\n"),
+    ["function helper(count, record = true) {", "  return count", "}", "helper(4)", ""].join("\n"),
   );
 });
 
@@ -252,13 +265,7 @@ test("synthesizes optional it only when an implicit Groovy closure is called wit
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
     emitTease(program),
-    [
-      "function helper(it = null) {",
-      '  say "ok"',
-      "}",
-      'helper("ignored")',
-      "",
-    ].join("\n"),
+    ["function helper(it = null) {", '  say "ok"', "}", 'helper("ignored")', ""].join("\n"),
   );
 });
 
@@ -292,7 +299,6 @@ test("lowers indexing, primitive casts, and compound multiplication assignments"
   assert.deepEqual(program.diagnostics, []);
   assert.equal(emitTease(program), "let value = toInteger(items[1])\nvalue = value * 2\n");
 });
-
 
 test("maps list-only Groovy size property and size() method to TeaseScript length", () => {
   const sizeProperty: AstNode = {
@@ -378,7 +384,9 @@ test("keeps mixed-type Groovy size access as a migration error", () => {
   ]);
 
   const program = lowerParsedFile(source);
-  assert.ok(program.diagnostics.some((diagnostic) => diagnostic.code === "SX_UNSUPPORTED_PROPERTY"));
+  assert.ok(
+    program.diagnostics.some((diagnostic) => diagnostic.code === "SX_UNSUPPORTED_PROPERTY"),
+  );
 });
 
 test("lowers direct indexed assignment targets", () => {
@@ -404,7 +412,6 @@ test("lowers direct indexed assignment targets", () => {
   assert.equal(emitTease(program), "let items = [1, 2]\nitems[1] = 9\n");
 });
 
-
 test("maps literal getSelectedValue options to zero-based numeric choice labels", () => {
   const source = file([
     statement({
@@ -412,11 +419,11 @@ test("maps literal getSelectedValue options to zero-based numeric choice labels"
       span,
       multipleAssignment: false,
       left: variable("selected"),
-      right: call(
-        "getSelectedValue",
-        constant("Choose one"),
-        { kind: "list", span, items: [constant("First"), constant("Second"), constant("Third")] },
-      ),
+      right: call("getSelectedValue", constant("Choose one"), {
+        kind: "list",
+        span,
+        items: [constant("First"), constant("Second"), constant("Third")],
+      }),
     }),
   ]);
 
@@ -429,8 +436,8 @@ test("maps literal getSelectedValue options to zero-based numeric choice labels"
       '  0: "First"',
       '  1: "Second"',
       '  2: "Third"',
-      '}',
-      '',
+      "}",
+      "",
     ].join("\n"),
   );
 });
@@ -447,7 +454,9 @@ test("keeps dynamic getSelectedValue option lists explicit", () => {
   ]);
 
   const program = lowerParsedFile(source);
-  assert.ok(program.diagnostics.some((diagnostic) => diagnostic.code === "SX_DYNAMIC_CHOICE_OPTIONS"));
+  assert.ok(
+    program.diagnostics.some((diagnostic) => diagnostic.code === "SX_DYNAMIC_CHOICE_OPTIONS"),
+  );
 });
 
 test("lowers simple C-style for loops through an equivalent while loop", () => {
@@ -471,11 +480,7 @@ test("lowers simple C-style for loops through an equivalent while loop", () => {
           { kind: "postfix", span, operator: "++", value: variable("i") },
         ],
       },
-      body: {
-        kind: "block",
-        span,
-        statements: [statement(call("show", variable("i")))],
-      },
+      body: { kind: "block", span, statements: [statement(call("show", variable("i")))] },
     },
   ]);
 
@@ -502,11 +507,7 @@ test("keeps C-style for loops with current-loop continue explicit", () => {
           { kind: "postfix", span, operator: "++", value: variable("i") },
         ],
       },
-      body: {
-        kind: "block",
-        span,
-        statements: [{ kind: "continue", span }],
-      },
+      body: { kind: "block", span, statements: [{ kind: "continue", span }] },
     },
   ]);
 
@@ -523,13 +524,15 @@ test("lowers Groovy each() on ranges and proven lists to TeaseScript for loops",
     arguments: {
       kind: "arguments",
       span,
-      items: [{
-        kind: "closure",
-        span,
-        parameters: [],
-        parameterSpecified: false,
-        body: { kind: "block", span, statements: [statement(call("show", variable("it")))] },
-      }],
+      items: [
+        {
+          kind: "closure",
+          span,
+          parameters: [],
+          parameterSpecified: false,
+          body: { kind: "block", span, statements: [statement(call("show", variable("it")))] },
+        },
+      ],
     },
     implicitThis: false,
     safe: false,
@@ -543,13 +546,15 @@ test("lowers Groovy each() on ranges and proven lists to TeaseScript for loops",
     arguments: {
       kind: "arguments",
       span,
-      items: [{
-        kind: "closure",
-        span,
-        parameters: [],
-        parameterSpecified: false,
-        body: { kind: "block", span, statements: [statement(call("show", variable("it")))] },
-      }],
+      items: [
+        {
+          kind: "closure",
+          span,
+          parameters: [],
+          parameterSpecified: false,
+          body: { kind: "block", span, statements: [statement(call("show", variable("it")))] },
+        },
+      ],
     },
     implicitThis: false,
     safe: false,
@@ -573,43 +578,50 @@ test("lowers Groovy each() on ranges and proven lists to TeaseScript for loops",
     emitTease(program),
     [
       'let items = ["a", "b"]',
-      'for it in 1..=3 {',
-      '  say it',
-      '}',
-      'for it in items {',
-      '  say it',
-      '}',
-      '',
+      "for it in 1..=3 {",
+      "  say it",
+      "}",
+      "for it in items {",
+      "  say it",
+      "}",
+      "",
     ].join("\n"),
   );
 });
 
 test("keeps closure return inside Groovy each() explicit", () => {
-  const source = file([statement({
-    kind: "methodCall",
-    span,
-    object: { kind: "range", span, from: constant(1), to: constant(3), inclusive: true },
-    method: constant("each"),
-    arguments: {
-      kind: "arguments",
+  const source = file([
+    statement({
+      kind: "methodCall",
       span,
-      items: [{
-        kind: "closure",
+      object: { kind: "range", span, from: constant(1), to: constant(3), inclusive: true },
+      method: constant("each"),
+      arguments: {
+        kind: "arguments",
         span,
-        parameters: [],
-        parameterSpecified: false,
-        body: { kind: "block", span, statements: [{ kind: "return", span, value: constant(null) }] },
-      }],
-    },
-    implicitThis: false,
-    safe: false,
-    spreadSafe: false,
-  })]);
+        items: [
+          {
+            kind: "closure",
+            span,
+            parameters: [],
+            parameterSpecified: false,
+            body: {
+              kind: "block",
+              span,
+              statements: [{ kind: "return", span, value: constant(null) }],
+            },
+          },
+        ],
+      },
+      implicitThis: false,
+      safe: false,
+      spreadSafe: false,
+    }),
+  ]);
 
   const program = lowerParsedFile(source);
   assert.ok(program.diagnostics.some((diagnostic) => diagnostic.code === "SX_EACH_RETURN"));
 });
-
 
 test("lowers single-statement if, else, and else-if bodies", () => {
   const source = file([
@@ -617,13 +629,25 @@ test("lowers single-statement if, else, and else-if bodies", () => {
       kind: "if",
       span,
       condition: variable("first"),
-      then: statement({ kind: "binary", span, operator: "=", left: variable("value"), right: constant(1) }),
+      then: statement({
+        kind: "binary",
+        span,
+        operator: "=",
+        left: variable("value"),
+        right: constant(1),
+      }),
       else: {
         kind: "if",
         span,
         condition: variable("second"),
         then: { kind: "return", span, value: constant(null) },
-        else: statement({ kind: "binary", span, operator: "=", left: variable("value"), right: constant(2) }),
+        else: statement({
+          kind: "binary",
+          span,
+          operator: "=",
+          left: variable("value"),
+          right: constant(2),
+        }),
       },
     },
   ]);
@@ -707,49 +731,59 @@ test("recognizes GroovyClassLoader boilerplate as legacy helper setup", () => {
   ]);
 
   const program = lowerParsedFile(source);
-  assert.equal(program.diagnostics.filter((diagnostic) => diagnostic.severity === "info").length, 3);
+  assert.equal(
+    program.diagnostics.filter((diagnostic) => diagnostic.severity === "info").length,
+    3,
+  );
   assert.ok(program.diagnostics.some((diagnostic) => diagnostic.code === "SX_LEGACY_HELPER_CALL"));
-  assert.ok(!program.diagnostics.some((diagnostic) => diagnostic.code === "SX_DYNAMIC_OR_OBJECT_CALL"));
+  assert.ok(
+    !program.diagnostics.some((diagnostic) => diagnostic.code === "SX_DYNAMIC_OR_OBJECT_CALL"),
+  );
 });
 
 test("expands Groovy switch fallthrough into explicit TeaseScript case bodies", () => {
-  const source = file([{
-    kind: "switch",
-    span,
-    expression: variable("value"),
-    cases: [
-      {
-        kind: "case",
-        span,
-        expression: constant(0),
-        body: { kind: "block", span, statements: [statement(call("show", constant("zero")))] },
-      },
-      {
-        kind: "case",
-        span,
-        expression: constant(1),
-        body: {
-          kind: "block",
-          span,
-          statements: [statement(call("show", constant("one"))), { kind: "break", span }],
-        },
-      },
-      {
-        kind: "case",
-        span,
-        expression: constant(2),
-        body: { kind: "block", span, statements: [statement(call("show", constant("two")))] },
-      },
-    ],
-    default: {
-      kind: "block",
+  const source = file([
+    {
+      kind: "switch",
       span,
-      statements: [statement(call("show", constant("default"))), { kind: "break", span }],
+      expression: variable("value"),
+      cases: [
+        {
+          kind: "case",
+          span,
+          expression: constant(0),
+          body: { kind: "block", span, statements: [statement(call("show", constant("zero")))] },
+        },
+        {
+          kind: "case",
+          span,
+          expression: constant(1),
+          body: {
+            kind: "block",
+            span,
+            statements: [statement(call("show", constant("one"))), { kind: "break", span }],
+          },
+        },
+        {
+          kind: "case",
+          span,
+          expression: constant(2),
+          body: { kind: "block", span, statements: [statement(call("show", constant("two")))] },
+        },
+      ],
+      default: {
+        kind: "block",
+        span,
+        statements: [statement(call("show", constant("default"))), { kind: "break", span }],
+      },
     },
-  }]);
+  ]);
 
   const program = lowerParsedFile(source);
-  assert.deepEqual(program.diagnostics.filter((diagnostic) => diagnostic.severity === "error"), []);
+  assert.deepEqual(
+    program.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+    [],
+  );
   assert.equal(
     emitTease(program),
     [
@@ -773,7 +807,6 @@ test("expands Groovy switch fallthrough into explicit TeaseScript case bodies", 
     ].join("\n"),
   );
 });
-
 
 test("maps proven Math ceil/floor and list add to accepted TeaseScript operations", () => {
   const source = file([
@@ -829,10 +862,15 @@ test("maps proven Math ceil/floor and list add to accepted TeaseScript operation
   ]);
 
   const program = lowerParsedFile(source);
-  assert.deepEqual(program.diagnostics.filter((diagnostic) => diagnostic.severity === "error"), []);
+  assert.deepEqual(
+    program.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+    [],
+  );
   assert.equal(
     emitTease(program),
-    ["let items = [1]", "items.add(2)", "let high = ceil(2.1)", "let low = floor(2.9)", ""].join("\n"),
+    ["let items = [1]", "items.add(2)", "let high = ceil(2.1)", "let low = floor(2.9)", ""].join(
+      "\n",
+    ),
   );
 });
 
@@ -891,17 +929,34 @@ test("lowers static Groovy maps and string-key access to TeaseScript objects", (
     span,
     entries: [
       { kind: "mapEntry", span, key: constant("name"), value: constant("Squats") },
-      { kind: "mapEntry", span, key: constant("pictures"), value: { kind: "list", span, items: [constant("a.jpg")] } },
+      {
+        kind: "mapEntry",
+        span,
+        key: constant("pictures"),
+        value: { kind: "list", span, items: [constant("a.jpg")] },
+      },
     ],
   };
   const source = file([
-    statement({ kind: "declaration", span, multipleAssignment: false, left: variable("exercise"), right: exercise }),
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("exercise"),
+      right: exercise,
+    }),
     statement({
       kind: "declaration",
       span,
       multipleAssignment: false,
       left: variable("name"),
-      right: { kind: "binary", span, operator: "[", left: variable("exercise"), right: constant("name") },
+      right: {
+        kind: "binary",
+        span,
+        operator: "[",
+        left: variable("exercise"),
+        right: constant("name"),
+      },
     }),
   ]);
 
@@ -955,7 +1010,6 @@ test("generates ordinary TeaseScript helpers for legacy loadFirstTrue and list i
   assert.match(output, /let index = sexscriptLegacyIndexOf\(items, "b"\)/);
   assert.match(output, /let key = sexscriptLegacyLoadFirstTrue\(\["a", "b"\]\)/);
 });
-
 
 test("maps legacy getBooleans to accepted askBooleans", () => {
   const source = file([

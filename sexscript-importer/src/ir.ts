@@ -51,15 +51,30 @@ export type IrStatement =
     })
   | (IrBase & { kind: "save"; key: IrExpression; value: IrExpression })
   | (IrBase & { kind: "delete"; key: IrExpression })
-  | (IrBase & { kind: "function"; name: string; parameters: IrFunctionParameter[]; body: IrStatement[] })
+  | (IrBase & {
+      kind: "function";
+      name: string;
+      parameters: IrFunctionParameter[];
+      body: IrStatement[];
+    })
   | (IrBase & { kind: "return"; value: IrExpression | null })
   | (IrBase & { kind: "let"; name: string; value: IrExpression })
-  | (IrBase & { kind: "assign"; target: IrExpression; operator: "=" | "+=" | "-="; value: IrExpression })
+  | (IrBase & {
+      kind: "assign";
+      target: IrExpression;
+      operator: "=" | "+=" | "-=";
+      value: IrExpression;
+    })
   | (IrBase & { kind: "expression"; expression: IrExpression })
   | (IrBase & { kind: "if"; condition: IrExpression; then: IrStatement[]; else: IrStatement[] })
   | (IrBase & { kind: "while"; condition: IrExpression; body: IrStatement[] })
   | (IrBase & { kind: "for"; variable: string; collection: IrExpression; body: IrStatement[] })
-  | (IrBase & { kind: "switch"; value: IrExpression; cases: IrSwitchCase[]; default: IrStatement[] })
+  | (IrBase & {
+      kind: "switch";
+      value: IrExpression;
+      cases: IrSwitchCase[];
+      default: IrStatement[];
+    })
   | (IrBase & { kind: "break" })
   | (IrBase & { kind: "continue" })
   | (IrBase & { kind: "run"; script: IrExpression })
