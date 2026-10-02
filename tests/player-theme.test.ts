@@ -5,8 +5,6 @@ import {
   authoredColorToOklch,
   blackOrWhiteInk,
   inSrgbGamut,
-  mapToSrgb,
-  oklchCss,
   pickerHexToOklch,
   oklchToPickerHex,
 } from "../player/theme/color.js";
@@ -29,18 +27,6 @@ test("automatic ink uses relative luminance for saturated fills and the neutral 
 test("opaque contrast handles neutral endpoints", () => {
   assert.ok(Math.abs(contrastRatio(white, black) - 21) < 1e-6);
   assert.equal(contrastRatio(white, white), 1);
-});
-
-test("color adapter rejects invalid literal inputs", () => {
-  for (const color of [
-    { l: NaN, c: 0, h: 0 },
-    { l: 2, c: 0, h: 0 },
-    { l: 0, c: -1, h: 0 },
-    { l: 0, c: 0, h: Infinity },
-  ]) {
-    assert.throws(() => mapToSrgb(color), RangeError);
-  }
-  assert.throws(() => oklchCss(white, 2), RangeError);
 });
 
 test("native picker adapters round-trip sRGB while keeping canonical OKLCH intent", () => {

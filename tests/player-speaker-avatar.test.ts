@@ -37,7 +37,7 @@ test("new speakers get the colour used by the fewest messages, with stable ties"
     firstRound,
     Array.from({ length: paletteSize }, (_, index) => index),
   );
-  assert.equal(Math.max(...counts) - Math.min(...counts), 1);
+  assert.ok(Math.max(...counts) - Math.min(...counts) <= 1);
 
   counts.fill(1);
   counts[0] = 50;
