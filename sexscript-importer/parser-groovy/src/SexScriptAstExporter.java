@@ -479,7 +479,8 @@ public final class SexScriptAstExporter {
             }
             return nodeMap(node, "closure",
                     "parameters", parameters,
-                    "parameterSpecified", child.isParameterSpecified(),
+                    // `{ -> ... }` declares no parameters (Groovy keeps null for it); `{ ... }` has the implicit `it`.
+                    "parameterSpecified", child.isParameterSpecified() || child.getParameters() == null,
                     "body", statement(child.getCode()));
         }
         if (node instanceof GStringExpression child) {

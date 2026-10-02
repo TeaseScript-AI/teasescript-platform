@@ -129,7 +129,11 @@ function renameStatement(
     case "for": {
       const collection = expression(statement.collection);
       const loopScope: Scope = new Map(scope);
-      const variable = declare(statement.variable, loopScope, inFunction, renamer);
+      // A loop variable may not reuse a visible name, such as a parameter `it` of the enclosing function.
+      const variable = scope.has(statement.variable)
+        ? renamer.fresh(statement.variable)
+        : declare(statement.variable, loopScope, inFunction, renamer);
+      loopScope.set(statement.variable, variable);
       return {
         ...statement,
         variable,

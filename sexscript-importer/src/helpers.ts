@@ -34,6 +34,8 @@ export function withActionDispatcher(program: MigrationProgram): MigrationProgra
     .toSorted()
     .map((action) => {
       const { required, total } = signatures.get(action) ?? { required: 0, total: 0 };
+      // The compared ID follows renames of its function like every other action ID.
+      const id: IrExpression = { kind: "literal", value: action, action: true };
       const calls: IrStatement[] = [];
       for (let count = total; count > required; count -= 1) {
         calls.push(
@@ -41,7 +43,7 @@ export function withActionDispatcher(program: MigrationProgram): MigrationProgra
         );
       }
       calls.push(callWith(action, required));
-      return ifS(bin("==", v("action"), lit(action)), calls);
+      return ifS(bin("==", v("action"), id), calls);
     });
   const dispatcher = fn(ACTION_DISPATCHER, ["action", "args"], [...branches, ret(lit(null))]);
   const note: IrStatement = {

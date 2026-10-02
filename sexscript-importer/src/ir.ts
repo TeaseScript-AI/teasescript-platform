@@ -42,6 +42,8 @@ export interface MixinModuleInfo {
   setupFunction: string | null;
   /** Functions the module defines, including injected methods. */
   functions: string[];
+  /** Methods the module injects into the script object; a later module may replace them. */
+  injected: string[];
 }
 
 interface IrBase {

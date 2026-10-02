@@ -101,6 +101,12 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
 - `break`/`continue` with a label leave an outer loop; TeaseScript jumps affect only the innermost loop, so they are
   reported. A statement that only computes a value (often `==` written for `=`) had no effect and is dropped with a
   `NOTE`.
+- Known residual differences, found by adversarial review and left as is because they need unusual input or fail
+  loudly: Groovy integer ranges contain only whole numbers, while a converted range case also matches a fractional
+  value; a `times` count or list index that is fractional or negative only at runtime fails in TeaseScript; two
+  scripts that load the same module directory share one set of function and field facts; a variable that shadows
+  `Calendar` is still read as the Calendar class; functions authored with the importer's `sexscriptLegacy` prefix
+  collide with generated helpers.
 - Groovy maps are shared references; TeaseScript records copy. A field write through a copy gets a `NOTE`
   (`SX_SHARED_MAP_WRITE`). Picking from an empty list returned null in Groovy and fails in TeaseScript.
 - Groovy lists and maps alias by reference; TeaseScript composite values copy (ADR 0014). Groovy `def` may change type.

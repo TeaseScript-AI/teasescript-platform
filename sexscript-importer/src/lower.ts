@@ -140,6 +140,8 @@ interface LowerContext {
   switchValues: number;
   /** Counter for variables that keep the start time of a popup whose waiting time is used. */
   popupTimers: number;
+  /** Names of generated variables, kept apart from each other and from authored variables. */
+  generatedNames: Set<string>;
   stopsBackgroundSounds: boolean;
   resultUses: ReadonlySet<string>;
   directoryFiles: ReadonlyMap<string, readonly string[]>;
@@ -227,6 +229,7 @@ export function lowerParsedFile(
     ignoredInputs: 0,
     switchValues: 0,
     popupTimers: 0,
+    generatedNames: new Set(),
     stopsBackgroundSounds: options.stopsBackgroundSounds ?? packageStopsBackgroundSounds([file]),
     resultUses: options.resultUses ?? packageResultUses([file]),
     directoryFiles: options.directoryFiles ?? new Map(),
@@ -486,6 +489,7 @@ function lowerHelperMethod(
     ignoredInputs: 0,
     switchValues: 0,
     popupTimers: 0,
+    generatedNames: new Set(),
   };
   const parameters: IrFunctionParameter[] = [];
   for (const parameter of authoredRecords) {
@@ -978,8 +982,19 @@ function legacyApiCall(
   const shadowed =
     context.functions.has(call.name) ||
     context.packageFunctions.has(call.name) ||
-    context.helperFunctions.has(call.name);
+    context.helperFunctions.has(call.name) ||
+    isVisibleLocal(call.name, node, context);
   return shadowed ? null : call;
+}
+
+/** Whether a parameter or local of the current function, visible at `node`, has this name. */
+function isVisibleLocal(name: string, node: AstNode, context: LowerContext): boolean {
+  const enclosing = context.currentFunction;
+  if (enclosing?.locals.has(name) !== true) return false;
+  return (
+    enclosing.body === undefined ||
+    visibleLocals(enclosing.body, enclosing.parameters ?? [], node)?.has(name) !== false
+  );
 }
 
 function hasOwnEffect(node: AstNode, context: LowerContext): boolean {
@@ -1274,6 +1289,16 @@ function lowerClosureDeclaration(
         ),
       ];
     }
+    if (defaultBeforeRequired(closureParameters)) {
+      return [
+        unsupportedStatement(
+          context,
+          closure,
+          "SX_PARAMETER_DEFAULT_ORDER",
+          `Closure ${name} gives a parameter a default before a parameter without one; Groovy then fills the required parameters first, which TeaseScript parameters cannot express. Reorder the parameters.`,
+        ),
+      ];
+    }
     for (const record of closureParameters) {
       const defaultNode = record.defaultValue;
       const defaultValue = defaultNode === null ? null : lowerExpression(defaultNode, context);
@@ -1413,7 +1438,7 @@ function implicitReturn(statement: AstNode, context: LowerContext): AstNode[] {
       if (body?.kind !== "block") return body;
       const items = nodeArray(body.statements);
       const last = items.at(-1);
-      if (last?.kind === "break") {
+      if (last !== undefined && isSwitchBreak(last)) {
         const kept = items.slice(0, -1);
         const tail = kept.at(-1);
         if (tail === undefined) return body;
@@ -1512,7 +1537,11 @@ export function packageResultUses(files: readonly ParsedGroovyFile[]): Set<strin
     } else if (statement.kind === "switch") {
       for (const item of nodeArray(statement.cases)) {
         const items = nodeArray(asNode(item.body)?.statements);
-        collectTails(items.at(-1)?.kind === "break" ? (items.at(-2) ?? null) : null, owner);
+        const lastItem = items.at(-1);
+        collectTails(
+          lastItem !== undefined && isSwitchBreak(lastItem) ? (items.at(-2) ?? null) : null,
+          owner,
+        );
       }
       collectTails(asNode(statement.default), owner);
     } else if (statement.kind === "expressionStatement") tailOwners.set(statement, owner);
@@ -1566,6 +1595,28 @@ export function packageResultUses(files: readonly ParsedGroovyFile[]): Set<strin
       }
     }
   };
+  // The last statement of an unnamed closure is its value, which collect(), a list of callbacks, or a callee may use.
+  const namedClosures = new Set<AstNode>();
+  for (const file of files) {
+    walkAst(file.root, (node) => {
+      const value =
+        node.kind === "declaration" || (node.kind === "binary" && node.operator === "=")
+          ? asNode(node.right)
+          : node.kind === "field"
+            ? asNode(node.initialExpression)
+            : null;
+      if (value?.kind === "closure") namedClosures.add(value);
+    });
+  }
+  for (const file of files) {
+    walkAst(file.root, (node) => {
+      if (node.kind !== "closure" || namedClosures.has(node)) return;
+      const last = nodeArray(asNode(node.body)?.statements).at(-1);
+      const expression = last?.kind === "expressionStatement" ? asNode(last.expression) : null;
+      const call = expression === null ? null : callParts(expression);
+      if (call !== null) used.add(call.name);
+    });
+  }
   for (const file of files) if (file.root !== null) visit(file.root, null);
   for (let changed = true; changed;) {
     changed = false;
@@ -1592,7 +1643,10 @@ function visibleLocals(
     if (node === target) return new Set(visible);
     let inner = visible;
     if (node.kind === "for" && typeof node.variable === "string") {
-      inner = new Set([...visible, node.variable]);
+      // A C-style loop declares its counter in the first control expression.
+      const initial = nodeArray(asNode(node.collection)?.items)[0];
+      const counter = initial?.kind === "declaration" ? variableName(initial.left) : null;
+      inner = new Set([...visible, node.variable, ...(counter === null ? [] : [counter])]);
     }
     if (node.kind === "closure") {
       const names = (groovyParameters(node.parameters) ?? []).map((parameter) => parameter.name);
@@ -1621,6 +1675,16 @@ function visibleLocals(
     return null;
   };
   return search(body, new Set(parameters));
+}
+
+function defaultBeforeRequired(
+  parameters: ReadonlyArray<{ defaultValue: AstNode | null }>,
+): boolean {
+  const firstDefault = parameters.findIndex((parameter) => parameter.defaultValue !== null);
+  return (
+    firstDefault >= 0 &&
+    parameters.slice(firstDefault).some((parameter) => parameter.defaultValue === null)
+  );
 }
 
 /** Parameter and declared local names of a function body, including nested blocks. */
@@ -1664,7 +1728,11 @@ function lowerClosureValue(
     new Set<string>();
   const ownNames = functionLocalNames(body, parameterNames);
   const captured = new Set<string>();
-  walkAst(body, (node) => {
+  // Parameter defaults are evaluated in the closure too, so they capture as much as its body.
+  const defaults = parameters.flatMap((parameter) =>
+    parameter.defaultValue === null ? [] : [parameter.defaultValue],
+  );
+  walkAst([body, ...defaults], (node) => {
     // Calling a local closure by name captures it as much as reading it.
     const call = node.kind === "methodCall" ? callParts(node) : null;
     const name = variableName(node) ?? (call?.inherited === true ? call.name : null);
@@ -1676,6 +1744,14 @@ function lowerClosureValue(
       closure,
       "SX_CAPTURING_CLOSURE",
       `This closure value captures local ${[...captured].join(", ")} of its enclosing function; TeaseScript has no closures, so pass that state explicitly.`,
+    );
+  }
+  if (defaultBeforeRequired(parameters)) {
+    return unsupportedExpression(
+      context,
+      closure,
+      "SX_PARAMETER_DEFAULT_ORDER",
+      "This closure gives a parameter a default before a parameter without one; Groovy then fills the required parameters first, which TeaseScript parameters cannot express. Reorder the parameters.",
     );
   }
   // Forwarding keeps the target's own defaults, so the wrapper must not declare any.
@@ -1751,6 +1827,7 @@ function lowerAssignment(
       const target = lowerExpression(listNode, context);
       const value = lowerExpression(valueNode, context);
       if (target === null || value === null) return [];
+      noteSharedListWrite(listNode, node, context);
       return [
         {
           kind: "expression",
@@ -1833,17 +1910,39 @@ function lowerAssignment(
   let target: IrExpression | null = null;
   if (variableTarget !== null) target = { kind: "variable", name: variableTarget };
   else if (operator === "=" && targetNode.kind === "binary" && targetNode.operator === "[") {
-    target = lowerExpression(targetNode, context);
-    const list = variableName(targetNode.left);
-    if (target !== null && list !== null && context.aliasedLists.has(list)) {
-      addDiagnostic(
-        context,
-        "SX_SHARED_LIST_WRITE",
-        "warning",
-        `Groovy shared the list in ${list} with another variable assigned from it, so this write changed both; in TeaseScript the variables hold separate copies (ADR 0014).`,
-        node.span,
-      );
+    const listNode = asNode(targetNode.left);
+    const indexNode = asNode(targetNode.right);
+    const fromEnd = indexNode === null ? null : negativeConstantIndex(indexNode);
+    if (fromEnd !== null) {
+      // `list[-1] = v` writes the last element; `.last` is not assignable, so the index counts from the length.
+      const list =
+        listNode !== null &&
+        isRepeatableExpression(listNode) &&
+        isKnownListExpression(listNode, context)
+          ? lowerExpression(listNode, context)
+          : null;
+      target =
+        list === null
+          ? unsupportedExpression(
+              context,
+              targetNode,
+              "SX_NEGATIVE_INDEX",
+              "Groovy counted this negative index from the end; the receiver is not proven to be a list or cannot be evaluated twice. Index from the end explicitly.",
+            )
+          : {
+              kind: "index",
+              target: list,
+              index: {
+                kind: "binary",
+                operator: "-",
+                left: { kind: "property", target: list, name: "length" },
+                right: { kind: "literal", value: fromEnd },
+              },
+            };
+    } else {
+      target = lowerExpression(targetNode, context);
     }
+    if (target !== null) noteSharedListWrite(asNode(targetNode.left), node, context);
   } else if (operator === "=" && targetNode.kind === "property") {
     target = lowerExpression(targetNode, context);
     if (target !== null) {
@@ -2000,6 +2099,7 @@ function lowerCallStatement(
       const target = lowerExpression(receiver, context);
       const value = lowerExpression(call.arguments[0]!, context);
       if (target === null || value === null) return [];
+      noteSharedListWrite(receiver, node, context);
       return [
         {
           kind: "expression",
@@ -2243,7 +2343,11 @@ function lowerCollectionAssignment(
       constantValue(asNode(receiver.to) ?? undefined) !== undefined);
   if (
     call.name === "sum" &&
-    (!onlyOf(summand, NUMBER) || (!nonEmpty && !isRepeatableExpression(receiver)))
+    (!onlyOf(summand, NUMBER) ||
+      (!nonEmpty && !isRepeatableExpression(receiver)) ||
+      (argument !== null &&
+        variableName(receiver) !== null &&
+        closureUsesName(argument.closure, variableName(receiver)!)))
   ) {
     return null;
   }
@@ -2261,7 +2365,7 @@ function lowerCollectionAssignment(
   if (collection === null) return failed();
   // A loop body that reads the target sees its old value only through a separate result variable.
   const readsTarget = argument !== null && closureUsesName(argument.closure, target);
-  const accumulator = readsTarget ? `${call.name}Result` : target;
+  const accumulator = readsTarget ? freshName(`${call.name}Result`, context) : target;
   const targetVariable: IrExpression = { kind: "variable", name: accumulator };
   const item: IrExpression = { kind: "variable", name: variable };
   const prefix = result === null ? [] : lowerStatementList(result.statements, null, context);
@@ -2357,6 +2461,20 @@ function lowerCollectionAssignment(
         span,
       };
   return [start, loop, ...empty, store];
+}
+
+/** A generated variable name that no variable of the file and no earlier generated name uses. */
+function freshName(base: string, context: LowerContext): string {
+  let candidate = base;
+  for (
+    let suffix = 2;
+    context.types.variables.has(candidate) || context.generatedNames.has(candidate);
+    suffix += 1
+  ) {
+    candidate = `${base}${suffix}`;
+  }
+  context.generatedNames.add(candidate);
+  return candidate;
 }
 
 /** Element type of a range, list literal, or list variable with known elements. */
@@ -3156,6 +3274,21 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
     null,
     context,
   );
+  // A text case matched any subject whose text equals it (`"1"` matches 1); TeaseScript compares values.
+  const subjectType = valueNode === null ? UNKNOWN : inferType(valueNode, context.types);
+  const textCase = matchNodes.findIndex((matchNode) =>
+    onlyOf(inferType(matchNode, context.types), STRING | NULL),
+  );
+  if (textCase >= 0 && onlyOf(subjectType, NUMBER | BOOLEAN | NULL) && subjectType !== NULL) {
+    return [
+      unsupportedStatement(
+        context,
+        matchNodes[textCase]!,
+        "SX_SWITCH_CASE_MATCH",
+        "Groovy matched this text case against the text of a non-text switch value; rewrite the case with the value's own type.",
+      ),
+    ];
+  }
   if (isAcceptedSwitch(cases)) {
     return [{ kind: "switch", value, cases, default: defaultStatements, span: node.span }];
   }
@@ -3300,7 +3433,7 @@ function eliminateSwitchBreaks(statements: AstNode[], rest: AstNode[] = []): Ast
   const result: AstNode[] = [];
   for (let index = 0; index < statements.length; index += 1) {
     const statement = statements[index]!;
-    if (statement.kind === "break") return result;
+    if (isSwitchBreak(statement)) return result;
     if (statement.kind === "block" && containsSwitchBreak(statement)) {
       return [
         ...result,
@@ -3335,7 +3468,7 @@ function branchStatements(node: unknown): AstNode[] {
 
 /** A `break` that belongs to the enclosing switch, not to a nested loop, switch, or closure. */
 function containsSwitchBreak(node: AstNode): boolean {
-  if (node.kind === "break") return true;
+  if (isSwitchBreak(node)) return true;
   if (["for", "while", "switch", "closure"].includes(node.kind)) return false;
   return nodeChildren(node).some(containsSwitchBreak);
 }
@@ -3351,7 +3484,8 @@ function collectSwitchPath(
     if (body === null) return null;
     const terminal = body.at(-1);
     result.push(...withoutTerminalBreak(body));
-    if (terminal?.kind === "break" || terminal?.kind === "return") return result;
+    if ((terminal !== undefined && isSwitchBreak(terminal)) || terminal?.kind === "return")
+      return result;
   }
   result.push(...withoutTerminalBreak(defaultSource));
   return result;
@@ -3362,8 +3496,14 @@ function switchBodyStatements(node: AstNode | null): AstNode[] | null {
   return node.kind === "block" ? nodeArray(node.statements) : [node];
 }
 
+/** An unlabelled break, which leaves the innermost switch; a labelled break leaves an outer loop. */
+function isSwitchBreak(node: AstNode): boolean {
+  return node.kind === "break" && typeof node.label !== "string";
+}
+
 function withoutTerminalBreak(statements: AstNode[]): AstNode[] {
-  return statements.at(-1)?.kind === "break" ? statements.slice(0, -1) : statements;
+  const last = statements.at(-1);
+  return last !== undefined && isSwitchBreak(last) ? statements.slice(0, -1) : statements;
 }
 
 function lowerReturnStatement(node: AstNode, context: LowerContext): IrStatement[] {
@@ -3436,7 +3576,11 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
           "The legacy SexScript host object cannot become an authored TeaseScript value.",
         );
       }
-      if (context.functions.has(name) && !context.shadowingReferences.has(node)) {
+      if (
+        context.functions.has(name) &&
+        !context.shadowingReferences.has(node) &&
+        !isVisibleLocal(name, node, context)
+      ) {
         // A function used as a value becomes its action ID, like a closure value.
         context.actions.add(name);
         return { kind: "literal", value: name, action: true };
@@ -4394,6 +4538,7 @@ function lowerObjectMethodCallExpression(
     return { kind: "property", target, name: "length" };
   }
   if ((name === "contains" || name === "add") && argumentsNodes.length === 1) {
+    if (name === "add") noteSharedListWrite(targetNode, node, context);
     const args = lowerArguments(argumentsNodes, context);
     return args === null ? null : { kind: "methodCall", target, name, arguments: args };
   }
@@ -4486,8 +4631,22 @@ const PRIMITIVE_DEFAULTS = new Map<string, number | boolean>([
   ["short", 0],
 ]);
 
-/** Integer and character arrays convert or truncate written values, which a list does not. */
-const COERCING_ARRAY_TYPES = new Set(["byte", "char", "int", "long", "short", "Character"]);
+/** Arrays whose writes keep their values as a list does (a boolean array rejects other values). */
+const LIST_LIKE_ARRAY_TYPES = new Set(["boolean", "Boolean", "Object", "double", "Double"]);
+/** Arrays that convert written values (numbers truncate or round, values become text); converted with a note. */
+const CONVERTING_ARRAY_TYPES = new Set([
+  "byte",
+  "Byte",
+  "float",
+  "Float",
+  "int",
+  "Integer",
+  "long",
+  "Long",
+  "short",
+  "Short",
+  "String",
+]);
 
 function lowerArrayExpression(node: AstNode, context: LowerContext): IrExpression | null {
   const sizes = nodeArray(node.sizes);
@@ -4504,13 +4663,21 @@ function lowerArrayExpression(node: AstNode, context: LowerContext): IrExpressio
       "Multi-dimensional Java arrays are not converted automatically.",
     );
   }
-  const elementType = text(node.elementType) ?? "";
-  if (COERCING_ARRAY_TYPES.has(elementType)) {
+  const elementType = (text(node.elementType) ?? "").replace(/^java\.lang\./u, "");
+  if (CONVERTING_ARRAY_TYPES.has(elementType)) {
+    addDiagnostic(
+      context,
+      "SX_JAVA_ARRAY_CONVERSION",
+      "warning",
+      `A Java ${elementType}[] converted every written value to its element type (truncating or rounding numbers, turning values into text); this list keeps values as written.`,
+      node.span,
+    );
+  } else if (!LIST_LIKE_ARRAY_TYPES.has(elementType)) {
     return unsupportedExpression(
       context,
       node,
       "SX_JAVA_ARRAY_TYPE",
-      `A Java ${elementType}[] converts every written value to its element type (truncating numbers, holding characters); a TeaseScript list keeps values as written. Use a list and convert values explicitly.`,
+      `A Java ${elementType}[] converts every written value to its element type; a TeaseScript list keeps values as written. Use a list and convert values explicitly.`,
     );
   }
   const size = lowerExpression(sizes[0]!, context);
@@ -4532,6 +4699,18 @@ function isCurrentDate(node: AstNode): boolean {
     call.arguments.length === 0 &&
     variableName(node.object) === "Calendar";
   return calendar || isCurrentDateConstructor(node);
+}
+
+function noteSharedListWrite(list: AstNode | null, node: AstNode, context: LowerContext): void {
+  const name = list === null ? null : variableName(list);
+  if (name === null || !context.aliasedLists.has(name)) return;
+  addDiagnostic(
+    context,
+    "SX_SHARED_LIST_WRITE",
+    "warning",
+    `Groovy shared the list in ${name} with another variable assigned from it, so this change affected both; in TeaseScript the variables hold separate copies (ADR 0014).`,
+    node.span,
+  );
 }
 
 function aliasedListVariables(body: AstNode, types: TypeEnvironment): Set<string> {
@@ -4710,13 +4889,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     return lowerObjectMethodCallExpression(node, call.name, call.arguments, context);
   // A parameter or local of the current function shadows a function of the same name; calling it calls the
   // closure value it holds.
-  const enclosing = context.currentFunction;
-  if (
-    enclosing?.locals.has(call.name) === true &&
-    context.helperMainParameter === null &&
-    (enclosing.body === undefined ||
-      visibleLocals(enclosing.body, enclosing.parameters ?? [], node)?.has(call.name) !== false)
-  ) {
+  if (context.helperMainParameter === null && isVisibleLocal(call.name, node, context)) {
     const args = lowerArguments(call.arguments, context);
     return args === null ? null : actionCall({ kind: "variable", name: call.name }, args, context);
   }
@@ -5381,11 +5554,16 @@ function injectedMethod(
   return null;
 }
 
+/**
+ * A module's loader lists `scripts/<directory>` and keeps names ending in `.groovy` (case-sensitive); files elsewhere
+ * get no directory, so no loader selects them.
+ */
 function moduleNames(sourceName: string): { directory: string; name: string } {
   const parts = sourceName.split(/[\\/]/u);
   const file = parts.at(-1) ?? sourceName;
-  const name = file.replace(/\.groovy$/iu, "");
-  return { directory: parts.at(-2) ?? "", name };
+  const name = file.replace(/\.groovy$/u, "");
+  const loadable = file.endsWith(".groovy") && parts.at(-3) === "scripts";
+  return { directory: loadable ? (parts.at(-2) ?? "") : "", name };
 }
 
 function capitalized(name: string): string {
@@ -5503,6 +5681,7 @@ export function describeMixinModule(file: ParsedGroovyFile): MixinModuleInfo | n
     name,
     loadFunction,
     setupFunction,
+    injected: shape.methods.map((method) => method.name),
     functions: [
       ...shape.methods.map((method) => method.name),
       ...hoisted,
@@ -5895,7 +6074,9 @@ function closureExpression(closure: AstNode): { parameter: string; expression: A
 function callsOwnParameter(closure: AstNode): boolean {
   const body = closureExpression(closure);
   const call = body === null ? null : callParts(body.expression);
-  return call !== null && call.name === body?.parameter && call.arguments.length === 0;
+  return (
+    call !== null && call.inherited && call.name === body?.parameter && call.arguments.length === 0
+  );
 }
 
 /**
@@ -5929,6 +6110,9 @@ export function loadedModuleDirectories(file: ParsedGroovyFile): string[] {
   return [...directories];
 }
 
+/** Calls of a recognized loader: listing, the two filters, evaluation of each file, and calling its result. */
+const LOADER_CALLS = new Set(["listFiles", "findAll", "collect", "me", "call", "endsWith"]);
+
 /** `new File(".../scripts/<dir>").listFiles()` combined with `Eval.me(...)` marks a module loader closure. */
 function moduleLoaderDirectory(closure: AstNode): string | null {
   let evaluates = false;
@@ -5938,7 +6122,14 @@ function moduleLoaderDirectory(closure: AstNode): string | null {
   walkAst(closure.body, (node) => {
     if (node.kind === "methodCall") {
       const name = constantString(node.method);
-      if (name === "me" && variableName(node.object) === "Eval") evaluates = true;
+      // The loader evaluates each listed file's own text and nothing else happens to the list.
+      if (name === null || !LOADER_CALLS.has(name)) exact = false;
+      if (name === "me" && variableName(node.object) === "Eval") {
+        evaluates = true;
+        const source = nodeArray(asNode(node.arguments)?.items)[0];
+        if (source?.kind !== "property" || constantString(source.property) !== "text")
+          exact = false;
+      }
       if (name === "listFiles") lists = true;
       if (name === "findAll") {
         const filter = nodeArray(asNode(node.arguments)?.items)[0];

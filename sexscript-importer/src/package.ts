@@ -145,10 +145,7 @@ function withLoadedModules(
     const statements = withoutHelpers(module.statements);
     const info = module.module!;
     // Modules load in order, so a method that a later module injects again replaces the earlier one.
-    const injected = info.functions.filter(
-      (name) =>
-        name !== info.loadFunction && name !== info.setupFunction && !programNames.has(name),
-    );
+    const injected = info.injected.filter((name) => !programNames.has(name));
     for (const name of injected) {
       const replaced = moduleStatements.some(
         (statement) => statement.kind === "function" && statement.name === name,
@@ -158,6 +155,12 @@ function withLoadedModules(
         (statement) => !(statement.kind === "function" && statement.name === name),
       );
       taken.delete(name);
+      diagnostics.push({
+        code: "SX_MODULE_METHOD_REPLACED",
+        severity: "warning",
+        message: `Module ${info.name} injects ${name} again; the converted script keeps only this later version, while Groovy code that ran while an earlier module loaded, or a setup it returned, still used the earlier one.`,
+        span: null,
+      });
     }
     for (const name of info.functions.filter((name) => programNames.has(name))) {
       diagnostics.push({
