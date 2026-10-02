@@ -144,8 +144,7 @@ Their tests cover different contracts:
   and full profiles select the intended commands, preserve fail-fast ordering,
   and treat every required suite failure as fatal;
 - `test-patch-publication-workflow.sh` prevents weakened workflow permissions,
-  mutable action pins, unsafe job ordering, cleanup regressions, and broken local
-  Git integration.
+  unsafe job ordering, cleanup regressions, and broken local Git integration.
 
 These are complementary tests, not alternative implementations. The canonical
 `check-local-agent.sh` entry point runs each one once.

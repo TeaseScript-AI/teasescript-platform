@@ -28,7 +28,8 @@ python3 - \
   "$workflow" \
   "$index_workflow" \
   "$artifact_router_workflow" \
-  "$artifact_request_workflow" <<'PYWORKFLOW'
+  "$artifact_request_workflow" \
+  "$root/.github/workflows" <<'PYWORKFLOW'
 import pathlib
 import re
 import sys
@@ -37,8 +38,11 @@ automatic = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
 index = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
 artifact_router = pathlib.Path(sys.argv[3]).read_text(encoding="utf-8")
 artifact_request = pathlib.Path(sys.argv[4]).read_text(encoding="utf-8")
+workflow_directory = pathlib.Path(sys.argv[5])
 
 USES = re.compile(r"^[ \t]*(?:-[ \t]+)?uses[ \t]*:[ \t]*(?P<value>.*)$")
+PINNED_REF = re.compile(r"[^@\s'\"]+@[0-9a-f]{40}")
+LOCAL_WORKFLOW_REF = re.compile(r"\./\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml")
 
 
 def action_refs(text):
@@ -55,7 +59,41 @@ def action_refs(text):
 
 def assert_immutable_pins(text):
     refs = action_refs(text)
-    assert refs and all(re.fullmatch(r"[^@\s'\"]+@[0-9a-f]{40}", ref) for ref in refs), refs
+    assert refs, "workflow has no uses entries"
+    for ref in refs:
+        assert PINNED_REF.fullmatch(ref) or LOCAL_WORKFLOW_REF.fullmatch(ref), ref
+
+
+def workflow_jobs(text):
+    parts = re.split(r"(?m)^  ([A-Za-z0-9_-]+):[ \t]*\n", text.split("\njobs:\n", 1)[1])
+    return dict(zip(parts[1::2], parts[2::2]))
+
+
+def grants_contents(text, indent):
+    match = re.search(rf"(?m)^{indent}permissions:(.*)\n((?:{indent}  .*\n)*)", text)
+    if match is None:
+        return None
+    entries = match.group(1) + match.group(2)
+    return re.search(r"\bcontents:[ \t]*(?:read|write)\b", entries) is not None
+
+
+def assert_checkout_jobs_read_contents(text):
+    # Job permissions replace workflow permissions; without either, the token can read contents.
+    workflow_access = grants_contents(text, "")
+    for name, job in workflow_jobs(text).items():
+        if any(ref.startswith("actions/checkout@") for ref in action_refs(job)):
+            access = grants_contents(job, "    ")
+            if access is None:
+                access = workflow_access is not False
+            assert access, f"checkout job {name} cannot read contents"
+
+
+def rejected(check, text):
+    try:
+        check(text)
+    except AssertionError:
+        return True
+    return False
 
 
 pin = "d23441a48e516b6c34aea4fa41551a30e30af803"
@@ -63,15 +101,35 @@ assert action_refs(f"      - uses: 'actions/checkout@{pin}' # v6\n        uses: 
     f"actions/checkout@{pin}",
     f"a/b@{pin}",
 ]
-for mutable in ["      - uses: actions/checkout@v6", '        uses: "actions/checkout@main"']:
-    try:
-        assert_immutable_pins(f"        uses: actions/checkout@{pin}\n{mutable}\n")
-    except AssertionError:
-        pass
-    else:
-        raise AssertionError(f"mutable action ref was accepted: {mutable}")
-for workflow_text in (automatic, index, artifact_request):
+for mutable in [
+    "      - uses: actions/checkout@v6",
+    '        uses: "actions/checkout@main"',
+    "    uses: example/repository/.github/workflows/reusable.yml@main",
+]:
+    mixed = f"        uses: actions/checkout@{pin}\n{mutable}\n"
+    assert rejected(assert_immutable_pins, mixed), mutable
+assert_immutable_pins("    uses: ./.github/workflows/reusable.yml\n")
+
+
+def checkout_workflow(job_permissions, step):
+    lines = ["permissions: {}", "jobs:", "  job:", "    runs-on: ubuntu-24.04", *job_permissions]
+    return "\n".join([*lines, "    steps:", f"      - {step}", ""])
+
+
+checkout = f"uses: actions/checkout@{pin}"
+read_contents = ["    permissions:", "      contents: read"]
+assert_checkout_jobs_read_contents(checkout_workflow(read_contents, checkout))
+for job_permissions in ([], ["    permissions:", "      issues: write"]):
+    workflow_text = checkout_workflow(job_permissions, checkout)
+    assert rejected(assert_checkout_jobs_read_contents, workflow_text), job_permissions
+assert_checkout_jobs_read_contents(checkout_workflow([], f"run: echo actions/checkout@{pin}"))
+
+workflow_paths = sorted([*workflow_directory.glob("*.yml"), *workflow_directory.glob("*.yaml")])
+assert workflow_paths
+for path in workflow_paths:
+    workflow_text = path.read_text(encoding="utf-8")
     assert_immutable_pins(workflow_text)
+    assert_checkout_jobs_read_contents(workflow_text)
 
 assert "workflow_dispatch" not in automatic
 assert "inputs.source_ref" not in automatic
