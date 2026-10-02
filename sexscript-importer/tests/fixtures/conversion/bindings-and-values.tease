@@ -1,4 +1,4 @@
-// MIGRATION INCOMPLETE: 1 error diagnostic.
+// MIGRATION INCOMPLETE: 2 error diagnostics.
 // Review diagnostics before treating this file as behaviorally equivalent.
 
 function sexscriptLegacyConcat(lists) {
@@ -24,10 +24,8 @@ if getString() {
   say "right"
 }
 let empty = {}
-// NOTE SX_CONDITION_TYPE line 6: Condition is not proven boolean; TeaseScript conditions must be boolean, unlike Groovy truthiness. Verify or compare explicitly.
-if empty {
-  say "Has entries"
-}
+// TODO SX_MAP_TRUTHINESS line 6: Groovy treats an empty map as false; TeaseScript records have no emptiness test and a record is not a condition. Test a specific field or keep an explicit flag.
+// | if (empty) { show("Has entries") }
 let items = ["a", "b"]
 // TODO SX_COLLECTION_TEXT line 8: Groovy turned this list into text like [a, b]; TeaseScript interpolation shows one random element instead. Format the list explicitly.
 // | show("Items: " + items)

@@ -734,6 +734,10 @@ function lowerConditionalAssignment(
     // overall type does not.
     const variable: IrExpression = { kind: "variable", name: variableName(target)! };
     const truthy = truthiness(variable, inferType(value, context.types), true, target, context);
+    if (truthy === null) {
+      const legacySource = span === null ? [] : legacySourceLines(context, span);
+      return [{ kind: "unsupported", legacySource, span }];
+    }
     return [
       ...(reassignsSelf ? [] : stored),
       { kind: "if", condition: negate(truthy), then: fill, else: [], span },
@@ -3040,7 +3044,7 @@ function truthiness(
   repeatable: boolean,
   node: AstNode,
   context: LowerContext,
-): IrExpression {
+): IrExpression | null {
   if (onlyOf(type, BOOLEAN)) return value;
   const compare = (operator: string, right: IrExpression): IrExpression => ({
     kind: "binary",
@@ -3056,8 +3060,15 @@ function truthiness(
     right,
   });
   if (onlyOf(type, BOOLEAN | NULL)) return compare("==", { kind: "literal", value: true });
-  // Groovy maps are false when empty, so object/map values are not simply non-null checks.
   if (type === NULL) return notNull;
+  if ((type & OBJECT) !== 0 && onlyOf(type, OBJECT | NULL)) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_MAP_TRUTHINESS",
+      "Groovy treats an empty map as false; TeaseScript records have no emptiness test and a record is not a condition. Test a specific field or keep an explicit flag.",
+    );
+  }
   if (onlyOf(type, NUMBER)) return compare("!=", { kind: "literal", value: 0 });
   if (onlyOf(type, STRING)) return compare("!=", { kind: "literal", value: "" });
   if (onlyOf(type, LIST)) {
@@ -3975,14 +3986,23 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
           "SX_RANDOM_ARITY",
           "getRandom() must have one argument.",
         );
-      return {
-        kind: "call",
-        name: "randomInteger",
-        positional: [
-          { kind: "range", from: { kind: "literal", value: 0 }, to: args[0]!, inclusive: false },
-        ],
-        named: {},
-      };
+      // Only a positive integer bound is certain to give randomInteger() a non-empty range.
+      if (
+        args[0]!.kind === "literal" &&
+        typeof args[0]!.value === "number" &&
+        Number.isInteger(args[0]!.value) &&
+        args[0]!.value > 0
+      ) {
+        return {
+          kind: "call",
+          name: "randomInteger",
+          positional: [
+            { kind: "range", from: { kind: "literal", value: 0 }, to: args[0]!, inclusive: false },
+          ],
+          named: {},
+        };
+      }
+      return useHelper(context, "random", args);
     case "getTime":
       return args.length === 0
         ? { kind: "call", name: "getSeconds", positional: [], named: {} }

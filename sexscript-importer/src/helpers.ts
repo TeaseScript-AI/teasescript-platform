@@ -52,6 +52,7 @@ export type HelperName =
   | "loadFirstTrue"
   | "max"
   | "min"
+  | "random"
   | "removeAt"
   | "shuffled"
   | "unique";
@@ -66,6 +67,7 @@ export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] 
 }
 
 const HELPER_ORDER: readonly HelperName[] = [
+  "random",
   "loadFirstTrue",
   "indexOf",
   "concat",
@@ -163,7 +165,36 @@ function extremum(name: string, operator: ">" | "<"): IrStatement {
   );
 }
 
+const randomBelow = (max: IrExpression): IrExpression => ({
+  kind: "call",
+  name: "randomInteger",
+  positional: [range(max)],
+  named: {},
+});
+
 const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = {
+  random: {
+    // SexScript getRandom(max) computed (int) (Math.random() * max): 0 for 0, toward zero for a negative max,
+    // and 0..99 for null. randomInteger() rejects the empty range 0..0.
+    name: "sexscriptLegacyRandom",
+    build: () =>
+      fn(
+        "sexscriptLegacyRandom",
+        ["max"],
+        [
+          ifS(bin("==", v("max"), lit(null)), [ret(randomBelow(lit(100)))]),
+          ifS(bin(">", v("max"), lit(0)), [ret(randomBelow(v("max")))]),
+          ifS(bin("<", v("max"), lit(0)), [
+            ret({
+              kind: "unary",
+              operator: "-",
+              value: randomBelow({ kind: "unary", operator: "-", value: v("max") }),
+            }),
+          ]),
+          ret(lit(0)),
+        ],
+      ),
+  },
   loadFirstTrue: {
     name: "sexscriptLegacyLoadFirstTrue",
     build: () =>

@@ -1,6 +1,22 @@
+function sexscriptLegacyRandom(max) {
+  if max == null {
+    return randomInteger(0..100)
+  }
+  if max > 0 {
+    return randomInteger(0..max)
+  }
+  if max < 0 {
+    return -randomInteger(0..-max)
+  }
+  return 0
+}
 let lines: string[]? = null
 let line = ""
 lines = ["Good.", "Very good.", "Keep going."]
 line = lines.random
 say line
 say "Count: ${lines.length}"
+// getRandom(0) returned 0; randomInteger() rejects the empty range.
+let packs = 1
+let pack = sexscriptLegacyRandom(packs - 1)
+wait randomInteger(0..5) + 2
