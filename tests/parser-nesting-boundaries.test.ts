@@ -5,21 +5,25 @@ import type { Expression } from "../src/ast.js";
 import { parse } from "../src/parser.js";
 
 test("deep malformed nesting reports the missing closer at EOF with structured recovery", () => {
-  const source = `${"(".repeat(2_000)}1`;
-  // Returning at all, rather than throwing a native RangeError, is the termination evidence.
-  const first = parse(source);
-  const second = parse(source);
-  assert.deepEqual(first.diagnostics, second.diagnostics);
-  const [root] = first.diagnostics;
-  assert.deepEqual(
-    [root?.code, root?.span.start.offset, root?.span.end.offset],
-    ["TSP017", source.length, source.length],
-  );
-  // Secondary unwinding may improve, but must stay structured and source-associated.
-  for (const diagnostic of first.diagnostics) {
-    assert.match(diagnostic.code, /^TSP\d{3}$/u);
-    assert.ok(diagnostic.span.start.offset <= diagnostic.span.end.offset);
-    assert.ok(diagnostic.span.end.offset <= source.length);
+  const collections = Array.from({ length: 2_000 }, (_, index) =>
+    index % 2 === 0 ? "[" : "set[",
+  ).join("");
+  for (const source of [`${"(".repeat(2_000)}1`, `let value = ${collections}1`]) {
+    // Returning at all, rather than throwing a native RangeError, is the termination evidence.
+    const first = parse(source);
+    const second = parse(source);
+    assert.deepEqual(first.diagnostics, second.diagnostics);
+    const [root] = first.diagnostics;
+    assert.deepEqual(
+      [root?.code, root?.span.start.offset, root?.span.end.offset],
+      ["TSP017", source.length, source.length],
+    );
+    // Secondary unwinding may improve, but must stay structured and source-associated.
+    for (const diagnostic of first.diagnostics) {
+      assert.match(diagnostic.code, /^TSP\d{3}$/u);
+      assert.ok(diagnostic.span.start.offset <= diagnostic.span.end.offset);
+      assert.ok(diagnostic.span.end.offset <= source.length);
+    }
   }
 });
 
@@ -46,24 +50,6 @@ test("parenthesis-chain parsing preserves grouping spans and statement boundarie
       statement.initializer.expression.span.end.offset,
     ],
     [13, 16],
-  );
-});
-
-test("deep malformed collection chains recover every missing closer at EOF", () => {
-  const depth = 2_000;
-  const openings = Array.from({ length: depth }, (_, index) =>
-    index % 2 === 0 ? "[" : "set[",
-  ).join("");
-  const source = `let value = ${openings}1`;
-  const parsed = parse(source);
-  assert.equal(parsed.diagnostics.length, depth);
-  assert.ok(parsed.diagnostics.every((diagnostic) => diagnostic.code === "TSP017"));
-  assert.ok(
-    parsed.diagnostics.every(
-      (diagnostic) =>
-        diagnostic.span.start.offset === source.length &&
-        diagnostic.span.end.offset === source.length,
-    ),
   );
 });
 
