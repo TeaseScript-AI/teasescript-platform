@@ -32,7 +32,7 @@ function metadataComment(program: MigrationProgram): string[] {
   ];
   const lines = fields
     .filter((field): field is [string, string] => field[1] !== null && field[1] !== "")
-    .map(([name, value]) => `// ${name}: ${value.replace(/\r?\n/gu, " ")}`);
+    .map(([name, value]) => `// ${name}: ${value.replace(/[\r\n\u2028\u2029]+/gu, " ")}`);
   return lines.length === 0 ? [] : ["// Legacy SexScript metadata", ...lines, ""];
 }
 
@@ -122,22 +122,20 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
       return;
     }
     case "return":
-      lines.push(
-        `${pad}return${statement.value === null ? "" : ` ${emitExpression(statement.value)}`}`,
-      );
+      lines.push(`${pad}return${statement.value === null ? "" : ` ${emitValue(statement.value)}`}`);
       return;
     case "let": {
       const type = statement.optionalType === undefined ? "" : `: ${statement.optionalType}?`;
-      lines.push(`${pad}let ${statement.name}${type} = ${emitExpression(statement.value)}`);
+      lines.push(`${pad}let ${statement.name}${type} = ${emitValue(statement.value)}`);
       return;
     }
     case "assign":
       lines.push(
-        `${pad}${emitExpression(statement.target)} ${statement.operator} ${emitExpression(statement.value)}`,
+        `${pad}${emitExpression(statement.target)} ${statement.operator} ${emitValue(statement.value)}`,
       );
       return;
     case "expression":
-      lines.push(`${pad}${emitExpression(statement.expression)}`);
+      lines.push(`${pad}${emitValue(statement.expression)}`);
       return;
     case "if": {
       lines.push(`${pad}if ${emitExpression(statement.condition)} {`);
@@ -222,7 +220,9 @@ export function emitExpression(expression: IrExpression): string {
     case "list":
       return `[${expression.items.map(emitExpression).join(", ")}]`;
     case "object":
-      return `{ ${expression.properties.map((property) => `${property.name}: ${emitExpression(property.value)}`).join(", ")} }`;
+      return expression.properties.length === 0
+        ? "{}"
+        : `{ ${expression.properties.map((property) => `${property.name}: ${emitExpression(property.value)}`).join(", ")} }`;
     case "index":
       return `${operand(expression.target, POSTFIX)}[${emitExpression(expression.index)}]`;
     case "property":
@@ -236,7 +236,9 @@ export function emitExpression(expression: IrExpression): string {
     case "input":
       return expression.input;
     case "choice":
-      return `choose ${expression.options.map((option, index) => `${index}: ${emitExpression(option)}`).join(", ")}`;
+      // `choose a: x, b: y` extends over following commas, so it is parenthesized unless it is a whole
+      // statement value (see emitValue).
+      return `(${emitChoice(expression)})`;
     case "range": {
       const operator = expression.inclusive ? "..=" : "..";
       return `${operand(expression.from, RANGE + 1)}${operator}${operand(expression.to, RANGE + 1)}`;
@@ -247,10 +249,12 @@ export function emitExpression(expression: IrExpression): string {
         : `${expression.operator}${operand(expression.value, UNARY)}`;
     case "binary": {
       const level = precedence(expression);
-      // Left-associative operators need parentheses for an equal-precedence right operand.
+      // Left-associative operators need parentheses for an equal-precedence right operand, and comparisons
+      // may not be chained at all (V30 section 5).
       const rightLevel =
         expression.operator === "and" || expression.operator === "or" ? level : level + 1;
-      return `${operand(expression.left, level)} ${expression.operator} ${operand(expression.right, rightLevel)}`;
+      const leftLevel = level === COMPARISON ? level + 1 : level;
+      return `${operand(expression.left, leftLevel)} ${expression.operator} ${operand(expression.right, rightLevel)}`;
     }
     case "call": {
       const positional = expression.positional.map(emitExpression);
@@ -314,13 +318,24 @@ function precedence(expression: IrExpression): number {
     case "property":
     case "methodCall":
       return POSTFIX;
-    // Command-like expressions extend to the end of their operands, so they are always parenthesized as operands.
+    // `load` extends to the end of its operands, so it is always parenthesized as an operand.
     case "load":
-    case "choice":
       return 0;
     default:
       return PRIMARY;
   }
+}
+
+function emitChoice(expression: Extract<IrExpression, { kind: "choice" }>): string {
+  const options = expression.options.map(
+    (option, index) => `${expression.labels?.[index] ?? index}: ${emitExpression(option)}`,
+  );
+  return `choose ${options.join(", ")}`;
+}
+
+/** A complete statement value, where a compact choice needs no parentheses. */
+function emitValue(expression: IrExpression): string {
+  return expression.kind === "choice" ? emitChoice(expression) : emitExpression(expression);
 }
 
 function operand(expression: IrExpression, minimum: number): string {

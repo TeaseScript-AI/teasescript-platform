@@ -106,13 +106,23 @@ export type IrExpression =
   | { kind: "methodCall"; target: IrExpression; name: string; arguments: IrExpression[] }
   /** `load key` returns null for a missing key; `defaultValue` replaces that null without writing storage. */
   | { kind: "load"; key: IrExpression; defaultValue?: IrExpression }
-  /** Compact `choose` whose numeric labels return the zero-based option index. */
-  | { kind: "choice"; options: IrExpression[] }
+  /**
+   * Compact `choose`. Without `labels`, numeric labels return the zero-based option index; with `labels`, each
+   * option gets the identifier label that `choose` returns.
+   */
+  | { kind: "choice"; options: IrExpression[]; labels?: string[] }
   /** Compact single-field input whose prompt, if any, was emitted as a preceding `say`. */
   | { kind: "input"; input: "askText" | "askNumber" }
   | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean }
   | { kind: "unary"; operator: "not" | "+" | "-"; value: IrExpression }
   | { kind: "binary"; operator: string; left: IrExpression; right: IrExpression }
-  | { kind: "call"; name: string; positional: IrExpression[]; named: Record<string, IrExpression> }
+  /** `local` marks a call to a function defined in the generated package rather than a TeaseScript built-in. */
+  | {
+      kind: "call";
+      name: string;
+      positional: IrExpression[];
+      named: Record<string, IrExpression>;
+      local?: true;
+    }
   /** Interpolated string: literal text segments and `${...}` values in source order. */
   | { kind: "template"; parts: Array<{ text: string } | { value: IrExpression }> };

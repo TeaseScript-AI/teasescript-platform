@@ -22,6 +22,7 @@ import {
   onlyOf,
   STRING,
   type TypeEnvironment,
+  UNKNOWN,
 } from "./types.ts";
 import type {
   IrExpression,
@@ -63,6 +64,8 @@ interface LowerContext {
    * legacy input prompt before a compact TeaseScript input expression.
    */
   prelude: IrStatement[];
+  /** The Groovy statement being lowered; prelude statements run immediately before it. */
+  statementRoot: AstNode | null;
   classLoaderVariables: Set<string>;
   legacyHelperClasses: Map<string, string>;
   helperFunctions: Map<string, HelperFunctionInfo>;
@@ -131,6 +134,7 @@ export function lowerParsedFile(
     functions: new Map(),
     types: { variables: new Map() },
     prelude: [],
+    statementRoot: null,
     classLoaderVariables: new Set(),
     legacyHelperClasses: new Map(),
     helperFunctions: new Map(),
@@ -335,8 +339,13 @@ function lowerHelperMethod(
     diagnostics: baseContext.diagnostics,
     metadata: baseContext.metadata,
     functions: collectClosureInfo(body),
-    types: inferVariableTypes(body),
+    types: inferVariableTypes(
+      body,
+      authoredRecords.map((parameter) => parameter.name),
+      helperFunctions.keys(),
+    ),
     prelude: [],
+    statementRoot: null,
     classLoaderVariables: new Set(),
     legacyHelperClasses: new Map(),
     helperFunctions,
@@ -485,7 +494,30 @@ function withoutTrailingEnd(statements: IrStatement[]): IrStatement[] {
   const lastCode = statements.findLastIndex(
     (statement) => statement.kind !== "comment" && statement.kind !== "blank",
   );
-  return statements[lastCode]?.kind === "end" ? statements.toSpliced(lastCode, 1) : statements;
+  if (statements[lastCode]?.kind !== "end") return statements;
+  // A trailing comment of the removed statement must not attach to the previous one.
+  return statements
+    .toSpliced(lastCode, 1)
+    .map((statement, index) =>
+      index >= lastCode && statement.kind === "comment"
+        ? { ...statement, trailing: false }
+        : statement,
+    );
+}
+
+/** Like withPrelude, with `root` as the evaluation point for prompt placement. */
+function withStatementRoot<T>(
+  context: LowerContext,
+  root: AstNode,
+  lower: () => T,
+): [IrStatement[], T] {
+  const outerRoot = context.statementRoot;
+  context.statementRoot = root;
+  try {
+    return withPrelude(context, lower);
+  } finally {
+    context.statementRoot = outerRoot;
+  }
 }
 
 /** Runs `lower` with an empty prelude and returns the prelude statements it produced. */
@@ -543,6 +575,16 @@ function commentStatement(comment: SourceComment, previousEndLine: number | null
 }
 
 function lowerStatement(node: AstNode, context: LowerContext): IrStatement[] {
+  const outerRoot = context.statementRoot;
+  context.statementRoot = node;
+  try {
+    return lowerStatementNode(node, context);
+  } finally {
+    context.statementRoot = outerRoot;
+  }
+}
+
+function lowerStatementNode(node: AstNode, context: LowerContext): IrStatement[] {
   const conditional = lowerConditionalStatement(node, context);
   if (conditional !== null) return conditional;
   switch (node.kind) {
@@ -601,18 +643,39 @@ function lowerConditionalStatement(node: AstNode, context: LowerContext): IrStat
     );
   }
 
-  const split = splitConditional(conditional, span, context);
-  if (split === null) return null;
-  if (!isPure(split.condition)) {
+  if (conditional.kind === "elvis") {
+    const value = asNode(conditional.boolean);
+    const fallback = asNode(conditional.false);
+    const loadWithDefault =
+      value === null || fallback === null ? null : legacyLoadWithDefault(value, fallback, context);
+    if (loadWithDefault !== null) {
+      return lowerStatement(substituteNode(node, conditional, loadWithDefault), context);
+    }
+  }
+  // Repeating the statement per branch evaluates the condition first, which is only equivalent when nothing
+  // with side effects runs earlier in the statement and the conditional is not behind && / || / ?: guards.
+  if (!isHoistable(node, conditional)) {
     return [
       unsupportedStatement(
         context,
         conditional,
-        "SX_CONDITIONAL_SIDE_EFFECT",
-        "This conditional expression has a condition with side effects inside a larger statement; rewrite it with an explicit if.",
+        "SX_CONDITIONAL_POSITION",
+        "This conditional expression is guarded by && / || / ?: or follows side effects in the same statement; rewrite it with an explicit if.",
       ),
     ];
   }
+  if (target !== null && variableName(target) !== null && root.kind === "declaration") {
+    // Declare in the enclosing scope first, then assign per branch, so the variable stays visible afterwards.
+    return [
+      ...lowerStatement(
+        syntheticAssignment(true, target, syntheticConstant(null, span), span),
+        context,
+      ),
+      ...lowerStatement(syntheticAssignment(false, target, asNode(root.right)!, span), context),
+    ];
+  }
+  const split = splitConditional(conditional, span, context);
+  if (split === null) return null;
   return lowerStatement(
     syntheticIf(
       split.condition,
@@ -656,7 +719,8 @@ function lowerConditionalAssignment(
       context,
     );
   }
-  // Start from a side-effect-free branch value so the result reads like ordinary TeaseScript.
+  // Start from a constant branch value so the result reads like ordinary TeaseScript; a variable could be
+  // changed by the condition, so it is only read inside its branch.
   if (isSimpleValue(whenFalse)) {
     return [
       ...lowerStatement(assign(whenFalse), context),
@@ -763,13 +827,63 @@ function substituteNode(value: AstNode, target: AstNode, replacement: AstNode): 
   return result;
 }
 
-/** Values that are safe and readable as an unconditional initial value. */
+/** Constant values that are safe and readable as an unconditional initial value. */
 function isSimpleValue(node: AstNode): boolean {
-  if (node.kind === "constant" || node.kind === "variable") return true;
+  if (node.kind === "constant") return true;
   if (node.kind === "unaryMinus") return asNode(node.value)?.kind === "constant";
-  if (node.kind === "gstring") return nodeArray(node.values).every(isSimpleValue);
   if (node.kind === "list") return nodeArray(node.items).every(isSimpleValue);
   return false;
+}
+
+/**
+ * Whether `target` may be evaluated (or have its prompt shown) at the start of statement `root` without
+ * changing behavior: it must not sit behind a short-circuit or conditional guard, and nothing with side effects
+ * may be evaluated before it. Closure bodies are not evaluated in place.
+ */
+function isHoistable(root: AstNode, target: AstNode): boolean {
+  let effectsBefore = false;
+  let result: boolean | null = null;
+  const visit = (node: AstNode, guarded: boolean): boolean => {
+    if (node === target) {
+      result = !guarded && !effectsBefore;
+      return true;
+    }
+    if (node.kind === "closure") return false;
+    const guardedChildren = new Set<unknown>();
+    if (node.kind === "binary" && (node.operator === "&&" || node.operator === "||")) {
+      guardedChildren.add(node.right);
+    } else if (node.kind === "ternary") {
+      guardedChildren.add(node.true);
+      guardedChildren.add(node.false);
+    } else if (node.kind === "elvis") {
+      guardedChildren.add(node.false);
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "span") continue;
+      const children = Array.isArray(value) ? value : [value];
+      for (const child of children) {
+        if (isAstNode(child) && visit(child, guarded || guardedChildren.has(value))) return true;
+      }
+    }
+    if (hasOwnEffect(node)) effectsBefore = true;
+    return false;
+  };
+  visit(root, false);
+  return result === true;
+}
+
+function hasOwnEffect(node: AstNode): boolean {
+  if (node.kind === "postfix" || node.kind === "prefix" || node.kind === "constructorCall")
+    return true;
+  if (node.kind === "binary" && typeof node.operator === "string") {
+    return node.operator.endsWith("=") && !["==", "!=", "<=", ">="].includes(node.operator);
+  }
+  if (node.kind !== "methodCall") return false;
+  const call = callParts(node);
+  if (call === null) return true;
+  return call.inherited
+    ? !DIRECT_STORAGE_LOADS.has(call.name)
+    : !PURE_OBJECT_METHODS.has(call.name);
 }
 
 const PURE_OBJECT_METHODS = new Set([
@@ -1324,6 +1438,17 @@ function lowerCallStatement(
       extractMetadata(args, context, node.span);
       return [];
     case "show":
+      if (args.length === 0 || isNullConstant(args[0])) {
+        // show(null) cleared the legacy text area; a TeaseScript transcript keeps its history.
+        addDiagnostic(
+          context,
+          "SX_SHOW_CLEAR",
+          "info",
+          "Dropped show(null), which only cleared the legacy text area.",
+          span,
+        );
+        return [];
+      }
       noteUnintendedMarkup(args[0], context);
       return oneArgumentStatement(args, context, node, (value) => ({ kind: "say", value, span }));
     case "wait":
@@ -1568,6 +1693,26 @@ function lowerSave(
       unsupportedStatement(context, node, "SX_SAVE_ARGUMENT", "save() key could not be migrated."),
     ];
   if (isNullConstant(args[1])) return [{ kind: "delete", key, span }];
+  const valueType = inferType(args[1]!, context.types);
+  if (valueType !== UNKNOWN && valueType & NULL && isRepeatableExpression(args[1]!)) {
+    // Legacy save(key, null) deleted the key, so legacy storage never holds null; keep that invariant.
+    const value = lowerExpression(args[1]!, context);
+    if (value === null) return [];
+    return [
+      {
+        kind: "if",
+        condition: {
+          kind: "binary",
+          operator: "==",
+          left: value,
+          right: { kind: "literal", value: null },
+        },
+        then: [{ kind: "delete", key, span }],
+        else: [{ kind: "save", key, value, span }],
+        span,
+      },
+    ];
+  }
   const value = lowerExpression(args[1]!, context);
   if (value === null)
     return [
@@ -1729,9 +1874,16 @@ function lowerCStyleFor(
   const initial = parts[0]!;
   const conditionNode = parts[1]!;
   const update = parts[2]!;
-  const initialStatements = lowerForControlExpression(initial, context);
-  const [prelude, condition] = withPrelude(context, () => lowerCondition(conditionNode, context));
-  const updateStatements = lowerForControlExpression(update, context);
+  // Each control expression is its own evaluation point, so input prompts stay next to it.
+  const [initialPrelude, initialStatements] = withStatementRoot(context, initial, () =>
+    lowerForControlExpression(initial, context),
+  );
+  const [prelude, condition] = withStatementRoot(context, conditionNode, () =>
+    lowerCondition(conditionNode, context),
+  );
+  const [updatePrelude, updateStatements] = withStatementRoot(context, update, () =>
+    lowerForControlExpression(update, context),
+  );
   if (
     condition === null ||
     prelude.length > 0 ||
@@ -1749,11 +1901,12 @@ function lowerCStyleFor(
   }
 
   return [
+    ...initialPrelude,
     ...initialStatements,
     {
       kind: "while",
       condition,
-      body: [...lowerBlock(body, context), ...updateStatements],
+      body: [...lowerBlock(body, context), ...updatePrelude, ...updateStatements],
       span: node.span,
     },
   ];
@@ -2160,7 +2313,8 @@ function lowerCondition(node: AstNode, context: LowerContext): IrExpression | nu
     right,
   });
   if (onlyOf(type, BOOLEAN | NULL)) return compare("==", { kind: "literal", value: true });
-  if (onlyOf(type, NULL | OBJECT)) return notNull;
+  // Groovy maps are false when empty, so object/map values are not simply non-null checks.
+  if (type === NULL) return notNull;
   if (onlyOf(type, NUMBER)) return compare("!=", { kind: "literal", value: 0 });
   if (onlyOf(type, STRING)) return compare("!=", { kind: "literal", value: "" });
   if (onlyOf(type, LIST)) {
@@ -2246,14 +2400,6 @@ function lowerPlus(node: AstNode, context: LowerContext): IrExpression | null {
   const leftType = inferType(leftNode, context.types);
   const rightType = inferType(rightNode, context.types);
   if (isListType(leftType)) {
-    if (!isListType(rightType)) {
-      return unsupportedExpression(
-        context,
-        node,
-        "SX_LIST_CONCATENATION",
-        "Groovy list + with a non-list operand appends one element; rewrite it with add().",
-      );
-    }
     const lists = listConcatenationOperands(node, context);
     if (lists === null) return null;
     context.syntheticHelpers.add("concat");
@@ -2289,8 +2435,11 @@ function listConcatenationOperands(node: AstNode, context: LowerContext): IrExpr
     const rightNode = asNode(node.right);
     if (leftNode !== null && rightNode !== null && isListType(inferType(leftNode, context.types))) {
       const left = listConcatenationOperands(leftNode, context);
-      const right = rightNode === null ? null : lowerExpression(rightNode, context);
-      return left === null || right === null ? null : [...left, right];
+      const right = lowerExpression(rightNode, context);
+      if (left === null || right === null) return null;
+      // Groovy `list + element` appends one element; `list + otherList` appends all elements.
+      const rightIsList = isListType(inferType(rightNode, context.types));
+      return [...left, rightIsList ? right : { kind: "list", items: [right] }];
     }
   }
   const value = lowerExpression(node, context);
@@ -2308,6 +2457,16 @@ function concatenationParts(node: AstNode, context: LowerContext): TemplatePart[
       const right = concatenationParts(rightNode, context);
       return left === null || right === null ? null : [...left, ...right];
     }
+  }
+  const valueType = inferType(node, context.types);
+  if (onlyOf(valueType, LIST | NULL) && valueType & LIST) {
+    // Groovy prints the whole list ("[a, b]"); TeaseScript visible-text interpolation picks one element.
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_COLLECTION_TEXT",
+      "Groovy turned this list into text like [a, b]; TeaseScript interpolation shows one random element instead. Format the list explicitly.",
+    );
   }
   const value = lowerExpression(node, context);
   if (value === null) return null;
@@ -2490,7 +2649,7 @@ function lowerObjectMethodCallExpression(
       );
     }
     const args = lowerArguments(argumentNodes, context);
-    return args === null ? null : { kind: "call", name, positional: args, named: {} };
+    return args === null ? null : { kind: "call", name, positional: args, named: {}, local: true };
   }
 
   if (receiverName === "Math") {
@@ -2708,7 +2867,9 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
       );
     }
     const args = lowerArguments(argumentNodes, context);
-    return args === null ? null : { kind: "call", name: call.name, positional: args, named: {} };
+    return args === null
+      ? null
+      : { kind: "call", name: call.name, positional: args, named: {}, local: true };
   }
   const functionInfo = context.functions.get(call.name);
   if (functionInfo !== undefined) {
@@ -2724,7 +2885,9 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
       );
     }
     const args = lowerArguments(call.arguments, context);
-    return args === null ? null : { kind: "call", name: call.name, positional: args, named: {} };
+    return args === null
+      ? null
+      : { kind: "call", name: call.name, positional: args, named: {}, local: true };
   }
   if (
     context.helperMainParameter !== null &&
@@ -2769,6 +2932,8 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     };
   }
 
+  // getSelectedValue lowers its own arguments: its option list must stay a literal list.
+  if (call.name === "getSelectedValue") return lowerSelectedValue(node, call.arguments, context);
   const args = lowerArguments(call.arguments, context);
   if (args === null) return null;
 
@@ -2798,22 +2963,26 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
             "SX_TIME_ARITY",
             "getTime() must have no arguments.",
           );
-    case "getBoolean":
-      if (args.length === 1)
-        return { kind: "call", name: "askBoolean", positional: args, named: {} };
-      if (args.length === 3)
-        return {
-          kind: "call",
-          name: "askBoolean",
-          positional: [],
-          named: { message: args[0]!, yesText: args[1]!, noText: args[2]! },
-        };
-      return unsupportedExpression(
-        context,
-        node,
-        "SX_BOOLEAN_ARITY",
-        "getBoolean() must have one or three arguments.",
-      );
+    case "getBoolean": {
+      if (args.length !== 1 && args.length !== 3) {
+        return unsupportedExpression(
+          context,
+          node,
+          "SX_BOOLEAN_ARITY",
+          "getBoolean() must have one or three arguments.",
+        );
+      }
+      // Legacy getBoolean shows its text like show() and then two buttons; the first button means true.
+      if (!pushPrompt(context, node, call.arguments[0]!, args[0]!)) return null;
+      const yes = args[1] ?? { kind: "literal", value: "Yes" };
+      const no = args[2] ?? { kind: "literal", value: "No" };
+      return {
+        kind: "binary",
+        operator: "==",
+        left: { kind: "choice", options: [yes, no], labels: ["yes", "no"] },
+        right: { kind: "literal", value: "yes" },
+      };
+    }
     case "getBooleans":
       return args.length === 3
         ? {
@@ -2845,8 +3014,6 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     case "getInteger":
     case "getFloat":
       return lowerSingleInput(node, call.name, call.arguments, args, context);
-    case "getSelectedValue":
-      return lowerSelectedValue(node, call.arguments, context);
     default:
       return unsupportedExpression(
         context,
@@ -2877,6 +3044,14 @@ function lowerSingleInput(
     );
   }
   const defaultNode = argumentNodes[1];
+  if (defaultNode !== undefined && !isPure(defaultNode)) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_INPUT_PREFILL_EFFECT",
+      `${name}() computes its pre-filled value with side effects; TeaseScript input has no prefill, so keep that computation explicitly before the question.`,
+    );
+  }
   if (defaultNode !== undefined && !isEmptyDefault(defaultNode)) {
     addDiagnostic(
       context,
@@ -2887,10 +3062,14 @@ function lowerSingleInput(
     );
   }
   if (name === "getInteger") {
-    // Accepted V30 integer input; compact syntax exists only for text and number input.
-    return { kind: "call", name: "askInteger", positional: [args[0]!], named: {} };
+    // Accepted V30 integer input; compact syntax exists only for text and number input. A null legacy
+    // message kept the current text, so the field gets no message of its own.
+    const message = isNullConstant(argumentNodes[0])
+      ? { kind: "literal" as const, value: "" }
+      : args[0]!;
+    return { kind: "call", name: "askInteger", positional: [message], named: {} };
   }
-  context.prelude.push(promptSay(args[0]!, node.span));
+  if (!pushPrompt(context, node, argumentNodes[0]!, args[0]!)) return null;
   return { kind: "input", input: name === "getString" ? "askText" : "askNumber" };
 }
 
@@ -2898,8 +3077,31 @@ function isEmptyDefault(node: AstNode): boolean {
   return node.kind === "constant" && (node.value === null || node.value === "");
 }
 
-function promptSay(message: IrExpression, span: SourceSpan | null): IrStatement {
-  return { kind: "say", value: message, span };
+/**
+ * Legacy input text replaces the shown text like show(); `null` keeps the current text. The prompt becomes a
+ * `say` before the statement, which is only equivalent when the input could be evaluated first; otherwise this
+ * reports the input and returns false.
+ */
+function pushPrompt(
+  context: LowerContext,
+  inputNode: AstNode,
+  messageNode: AstNode,
+  message: IrExpression,
+): boolean {
+  if (isNullConstant(messageNode)) return true;
+  const root = context.statementRoot;
+  if (root === null || !isHoistable(root, inputNode)) {
+    addDiagnostic(
+      context,
+      "SX_PROMPT_POSITION",
+      "error",
+      "This input's question cannot be shown at the right moment: the input is guarded by && / || / ?: or follows side effects in the same statement. Split the statement so the input comes first.",
+      inputNode.span,
+    );
+    return false;
+  }
+  context.prelude.push({ kind: "say", value: message, span: inputNode.span });
+  return true;
 }
 
 /** Legacy getSelectedValue() returns the zero-based index, which numeric `choose` labels reproduce. */
@@ -2941,7 +3143,7 @@ function lowerSelectedValue(
       "getSelectedValue() has no choices.",
     );
   }
-  context.prelude.push(promptSay(message, node.span));
+  if (!pushPrompt(context, node, args[0]!, message)) return null;
   return { kind: "choice", options };
 }
 
@@ -3294,11 +3496,16 @@ function diagnosticNotes(context: LowerContext, firstDiagnostic: number): IrStat
     const location = diagnostic.span === null ? "" : ` line ${diagnostic.span.line}`;
     return {
       kind: "comment",
-      text: `// ${label} ${diagnostic.code}${location}: ${diagnostic.message}`,
+      text: `// ${label} ${diagnostic.code}${location}: ${singleLine(diagnostic.message)}`,
       trailing: false,
       span: diagnostic.span,
     };
   });
+}
+
+/** Generated comment text must not contain line terminators, or the rest would become code. */
+function singleLine(text: string): string {
+  return text.replace(/[\r\n\u2028\u2029]+/gu, " ");
 }
 
 function legacySourceLines(context: LowerContext, span: SourceSpan): string[] {
@@ -3307,7 +3514,7 @@ function legacySourceLines(context: LowerContext, span: SourceSpan): string[] {
     .filter((line) => line.trim() !== "")
     .map((line) => /^[ \t]*/u.exec(line)?.[0].length ?? 0);
   const indent = indents.length === 0 ? 0 : Math.min(...indents);
-  return lines.map((line) => line.slice(indent).trimEnd());
+  return lines.map((line) => singleLine(line.slice(indent)).trimEnd());
 }
 
 function addDiagnostic(

@@ -174,8 +174,13 @@ public final class SexScriptAstExporter {
     private static List<Object> comments(String source) {
         List<Integer> lineStarts = new ArrayList<>();
         lineStarts.add(0);
+        // LF, CRLF, and lone CR all end a line, as they do for the Groovy lexer.
         for (int index = 0; index < source.length(); index += 1) {
-            if (source.charAt(index) == '\n') {
+            char character = source.charAt(index);
+            if (character == '\r' && index + 1 < source.length() && source.charAt(index + 1) == '\n') {
+                continue;
+            }
+            if (character == '\n' || character == '\r') {
                 lineStarts.add(index + 1);
             }
         }
@@ -197,13 +202,13 @@ public final class SexScriptAstExporter {
                 if (type == GroovyTokenTypes.ML_COMMENT) {
                     end = source.indexOf("*/", start + 2) + 2;
                 } else {
-                    end = source.indexOf('\n', start);
-                    if (end < 0) {
-                        end = source.length();
+                    end = start;
+                    while (end < source.length() && source.charAt(end) != '\n' && source.charAt(end) != '\r') {
+                        end += 1;
                     }
                 }
                 String text = source.substring(start, end).stripTrailing();
-                int endLine = token.getLine() + (int) text.chars().filter(character -> character == '\n').count();
+                int endLine = token.getLine() + (int) text.split("\r\n|\r|\n", -1).length - 1;
                 result.add(mapOf(
                         "line", token.getLine(),
                         "column", token.getColumn(),

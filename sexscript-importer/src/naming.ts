@@ -189,7 +189,11 @@ function renameExpression(expression: IrExpression, scope: Scope, renamer: Renam
     case "call":
       return {
         ...expression,
-        name: renamer.functions.get(expression.name) ?? expression.name,
+        // Generated built-in calls keep their names even when a legacy function shared that name.
+        name:
+          expression.local === true
+            ? (renamer.functions.get(expression.name) ?? expression.name)
+            : expression.name,
         positional: expression.positional.map(child),
         named: Object.fromEntries(
           Object.entries(expression.named).map(([name, value]) => [name, child(value)]),

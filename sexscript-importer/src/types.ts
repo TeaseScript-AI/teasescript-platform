@@ -27,6 +27,8 @@ export interface TypeEnvironment {
   variables: ReadonlyMap<string, ValueType>;
   /** Union of element types for names assigned only list literals; absent when unknown. */
   listElements?: ReadonlyMap<string, ValueType>;
+  /** Locally defined functions; a call to one of these is not the SexScript API of the same name. */
+  localFunctions?: ReadonlySet<string>;
 }
 
 /** True when every possible value has one of the `allowed` types. */
@@ -133,7 +135,7 @@ export function inferType(node: AstNode | null, environment: TypeEnvironment): V
     case "binary":
       return binaryType(node, environment);
     case "methodCall":
-      return methodCallType(node);
+      return methodCallType(node, environment);
     case "property": {
       const property = constantString(node.property);
       return property === "size" || property === "length" ? NUMBER : UNKNOWN;
@@ -153,6 +155,8 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
   const left = inferType(asNode(node.left), environment);
   const right = inferType(asNode(node.right), environment);
   if (left === 0 || right === 0) return left | right;
+  // Groovy list + anything is list concatenation or append, even when the right side is a string.
+  if (onlyOf(left, LIST | NULL) && left & LIST) return LIST;
   if (onlyOf(left, STRING | NULL) && left & STRING) return STRING;
   if (onlyOf(right, STRING | NULL) && right & STRING) return STRING;
   if (onlyOf(left, NUMBER) && onlyOf(right, NUMBER)) return NUMBER;
@@ -186,10 +190,11 @@ function castType(type: string): ValueType {
   }
 }
 
-function methodCallType(node: AstNode): ValueType {
+function methodCallType(node: AstNode, environment: TypeEnvironment): ValueType {
   const name = constantString(node.method);
   if (name === null) return UNKNOWN;
   const receiver = variableName(node.object);
+  if (node.implicitThis === true && environment.localFunctions?.has(name) === true) return UNKNOWN;
   if (node.implicitThis === true || receiver === "main") {
     return SEXSCRIPT_RESULT_TYPES.get(name) ?? UNKNOWN;
   }
@@ -202,18 +207,28 @@ function methodCallType(node: AstNode): ValueType {
  * Computes the union of every value assigned to each variable in `body`, iterating to a fixed point so that
  * assignments from other variables propagate. Names without assignment evidence stay absent (unknown).
  */
-export function inferVariableTypes(body: AstNode): TypeEnvironment {
+export function inferVariableTypes(
+  body: AstNode,
+  parameters: readonly string[] = [],
+  localFunctionNames: Iterable<string> = [],
+): TypeEnvironment {
   const assignments: Array<{ name: string; type: (environment: TypeEnvironment) => ValueType }> =
     [];
-  const unknownNames = new Set<string>();
+  // Incoming parameter values are unknown; later assignments do not describe them.
+  const unknownNames = new Set<string>(parameters);
+  const localFunctions = new Set<string>(localFunctionNames);
   walkAst(body, (node) => {
     collectAssignments(node, assignments, unknownNames);
+    if (node.kind === "declaration" && asNode(node.right)?.kind === "closure") {
+      const name = variableName(node.left);
+      if (name !== null) localFunctions.add(name);
+    }
   });
 
   const variables = new Map<string, ValueType>();
   for (const { name } of assignments) variables.set(name, 0);
   for (const name of unknownNames) variables.set(name, UNKNOWN);
-  const environment: TypeEnvironment = { variables };
+  const environment: TypeEnvironment = { variables, localFunctions };
   for (let changed = true; changed;) {
     changed = false;
     for (const assignment of assignments) {
@@ -226,7 +241,7 @@ export function inferVariableTypes(body: AstNode): TypeEnvironment {
     }
   }
   for (const [name, type] of variables) if (type === 0) variables.set(name, UNKNOWN);
-  return { variables, listElements: inferListElements(body, environment) };
+  return { variables, localFunctions, listElements: inferListElements(body, environment) };
 }
 
 function inferListElements(body: AstNode, environment: TypeEnvironment): Map<string, ValueType> {

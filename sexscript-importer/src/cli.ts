@@ -92,6 +92,7 @@ async function convertPackage(
     if (compiler !== undefined) {
       const compiled = compiler(source);
       if (compiled.compiled) compilerClean += 1;
+      else process.exitCode = 1;
       for (const diagnostic of compiled.diagnostics) {
         const location = diagnostic.line === null ? "" : `:${diagnostic.line}:${diagnostic.column}`;
         process.stderr.write(
