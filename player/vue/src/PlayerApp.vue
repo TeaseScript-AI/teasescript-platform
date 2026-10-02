@@ -195,8 +195,8 @@ async function toggleFullscreen() {
           :speakers="transcript.speakers"
           :revision="transcript.revision"
           :observe-time="player.observe"
-          :audio-blocked="player.audioBlocked.value"
-          @retry-audio="player.retryAudio"
+          :notices="player.notices.value"
+          @dismiss-notice="player.dismissNotice"
           @update:session="player.update"
         />
       </PlayerComposition>

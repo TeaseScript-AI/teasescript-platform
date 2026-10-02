@@ -10,6 +10,12 @@ import {
   type PlayerRuntimeSessionOptions,
 } from "../../runtime-adapter.js";
 import type { ScriptStorageProvider } from "../../script-storage.js";
+import {
+  PlayerNotices,
+  playerNoticeKeys,
+  playerNotices,
+  type PlayerNotice,
+} from "../../notices.js";
 import type { RuntimeScriptStorageEntrySnapshot } from "../../../src/index.js";
 import { useRuntimeSceneClock } from "./useRuntimeSceneClock";
 
@@ -45,7 +51,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const generation = ref(0);
   const interactionReset = ref(0);
   const activation = shallowRef<Activation | null>(null);
-  const audioBlocked = ref(false);
+  const notices = new PlayerNotices();
+  const noticeList = shallowRef<readonly PlayerNotice[]>([]);
+  notices.subscribe((current) => (noticeList.value = current));
   const scriptStorage = options.scriptStorage;
 
   const pendingLoadCount = ref(0);
@@ -68,7 +76,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       pendingLoadCount.value = loads.size;
     },
     requestObservation: () => clock.observe(),
-    blockedChanged: (blocked) => (audioBlocked.value = blocked),
+    blockedChanged: (blocked) =>
+      blocked
+        ? notices.publish(playerNotices.audioBlocked(() => device.retryBlocked()))
+        : notices.dismiss(playerNoticeKeys.audioBlocked),
   });
   const clock = useRuntimeSceneClock(session, () => device.sample());
 
@@ -105,8 +116,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (!scriptStorage) return;
     try {
       storedEntries.value = await scriptStorage.load();
+      notices.dismiss(playerNoticeKeys.storageUnavailable);
     } catch {
       storedEntries.value = null;
+      notices.publish(playerNotices.storageUnavailable());
     }
   }
   /** Session options for the script's storage; call it from the Start factory. */
@@ -142,6 +155,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         writesInFlight.delete(flight);
         // A write that settles after unmount must not continue the session.
         if (disposed) return;
+        if (!stored) notices.publish(playerNotices.storageWriteFailed());
         const latest = session.value;
         // The report must belong to the session that requested it.
         if (generation.value !== sessionGeneration || latest === null) return;
@@ -219,9 +233,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     interactionReset: computed(() => interactionReset.value),
     /** The prepared Start or Continue, or `null` once the session runs or while saved data is being cleared. */
     activation: computed(() => (clearing.value ? null : (activation.value?.kind ?? null))),
-    /** Whether the browser refused audible playback; `retryAudio` must run from a user activation. */
-    audioBlocked: computed(() => audioBlocked.value),
-    retryAudio: () => device.retryBlocked(),
+    /** Current Player notices, such as blocked audio; a notice's action runs from the player's click. */
+    notices: computed(() => noticeList.value),
+    /** Reports a host condition to the player; publishing the same key again replaces that notice. */
+    publishNotice: (notice: PlayerNotice) => notices.publish(notice),
+    dismissNotice: (key: string) => notices.dismiss(key),
     /** Whether the host persists script storage, so the Player offers to clear it. */
     hasScriptStorage: scriptStorage !== undefined,
     canClearScriptStorage,

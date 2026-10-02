@@ -384,9 +384,27 @@ relies on, so scripts may play audio from their first statement without a separa
 
 If the browser still refuses required audible playback, the Player surfaces a deliberate activation/retry control. It
 does not silently substitute muted playback or report the audio as played: refused audio reports no progress, so its
-cues and settlement wait, and an **Enable audio** control retries playback from the user's click. In the Player the
+cues and settlement wait, and an **Enable audio** [player notice](#player-notices) retries playback from the user's
+click. In the Player the
 session is created only when Start is activated; the Continue path applies to a session the host restores. Durable
 checkpoint storage and automatic resume across page reloads are tracked in #469.
+
+## Player notices
+
+Player notices tell the player that something about the session's environment matters, such as blocked audio,
+unavailable storage, or a camera problem. They never stop the session and are separate from runtime developer warnings,
+which are creator diagnostics about a script location. Host features publish them through one Player-owned channel
+(`player/notices.ts`) with fixed Player wording per condition; a condition has one notice, which it replaces or
+withdraws, so repeated causes do not stack.
+
+The notices appear in one region directly above the composer, centred, each as a compact card with a level icon (info,
+warning, or error), its text, at most one action control that runs from the player's click (such as **Enable
+audio**), and a dismiss control. Error notices are announced as alerts, others as status. A notice stays until its
+condition resolves or the player dismisses it. On narrow screens the text wraps beside the icon and controls.
+
+The current conditions are blocked audio (warning, with **Enable audio**), browser storage unavailable at session start
+(info: saved progress is not kept), and a failed script-storage write (warning). The level colours and the region's
+placement await Owner review in #492; the development preview's Visual Lab shows every level.
 
 ## Stage and media presentation
 

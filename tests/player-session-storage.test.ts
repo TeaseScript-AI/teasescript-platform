@@ -17,6 +17,7 @@ interface StorageHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly canClearScriptStorage: Readonly<Ref<boolean>>;
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
+  readonly notices: Readonly<Ref<readonly { readonly key: string; readonly level: string }[]>>;
   clearScriptStorage(): Promise<boolean>;
   observe(): PlayerRuntimeSession | null;
   loadScriptStorage(): Promise<void>;
@@ -194,6 +195,11 @@ test("Vue host reports rejected writes in a later task and preserves the previou
       (event) => event.kind === "developerWarning" && event.code === "TSW014",
     ),
   );
+  // The player learns through the notice channel that the progress was not kept.
+  assert.deepEqual(
+    host.notices.value.map(({ key, level }) => [key, level]),
+    [["storage-write-failed", "warning"]],
+  );
 });
 
 for (const settleBeforeDisposal of [false, true]) {
@@ -260,10 +266,16 @@ test("Vue host reloads before each Start and falls back to session-local storage
   );
   assert.equal(host.canClearScriptStorage.value, false);
   assert.equal(writes, 0);
+  assert.deepEqual(
+    host.notices.value.map(({ key, level }) => [key, level]),
+    [["storage-unavailable", "info"]],
+  );
 
   const recovered = await start(host, 'let answer = load "answer"\nsay answer, instant\nexit');
   assert.equal(loads, 3);
   assert.equal(recovered.snapshot.scriptStoragePersistent, true);
+  // A successful load withdraws the unavailable-storage notice.
+  assert.deepEqual(host.notices.value, []);
   assert.deepEqual(
     recovered.transcriptEntries.map((entry) => entry.text),
     ["3"],
