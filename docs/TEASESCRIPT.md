@@ -74,7 +74,11 @@ The accepted boundary does not itself change accepted V30 forms such as `wait 2`
 
 ADR 0018 selects direct Standard Library names with no import and no first-POC opt-out or shadowing.
 
-The current compiler implements the four compact interaction forms in this section through explicit versioned interaction instructions and the canonical resumable runtime. The broader parenthesized V30 APIs and their advanced parameters remain deferred; this slice does not treat compact syntax as a runtime library call. Parenthesized interaction-call spellings and an `as speaker` clause placed after the payload are rejected with focused parser diagnostic `TSP032` rather than being interpreted as compact syntax.
+The current compiler implements the four compact interaction forms in this section through explicit versioned
+interaction instructions and the canonical resumable runtime. The broader parenthesized V30 APIs and their advanced
+parameters remain deferred; this slice does not treat compact syntax as a runtime library call. A parenthesized
+interaction-call spelling is never interpreted as compact syntax; until those APIs are implemented, the parser reports
+it with focused diagnostic `TSP032`. An `as speaker` clause placed after the payload receives the same diagnostic.
 
 ### Basic interactions
 
