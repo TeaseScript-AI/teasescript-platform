@@ -45,16 +45,6 @@ function mutableSnapshot(plan: InstructionPlan): RuntimeSnapshot {
   return JSON.parse(JSON.stringify(createFreshRuntimeSnapshot(plan))) as RuntimeSnapshot;
 }
 
-// oxlint-disable-next-line anti-slop/no-unknown-returns -- EVIDENCE: fixture helper returns deliberately unvalidated external data for the validation boundary under test.
-function deepArray(depth: number): unknown {
-  return JSON.parse(`${"[".repeat(depth)}0${"]".repeat(depth)}`);
-}
-
-// oxlint-disable-next-line anti-slop/no-unknown-returns -- EVIDENCE: fixture helper returns deliberately unvalidated external data for the validation boundary under test.
-function deepObject(depth: number): unknown {
-  return JSON.parse(`${'{"value":'.repeat(depth)}0${"}".repeat(depth)}`);
-}
-
 function deepListJson(depth: number, leaf = '"leaf"'): string {
   return `${'{"kind":"list","items":['.repeat(depth)}${leaf}${"]}".repeat(depth)}`;
 }
@@ -115,18 +105,23 @@ function assertDeepList(
   return innermostItems;
 }
 
-// Walks single-item arrays iteratively, mirroring deepArray without recursive comparison.
-function assertDeepArray(value: unknown, depth: number): unknown[] {
-  let current = value;
-  let innermost: unknown[] = [];
-  for (let level = 0; level < depth; level += 1) {
-    assert.ok(Array.isArray(current), `array level ${level}`);
-    assert.equal(current.length, 1, `array level ${level}`);
-    innermost = current;
-    current = innermost[0];
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Follows fields and indexes through external JSON data, failing at the first missing step. */
+// oxlint-disable-next-line anti-slop/no-unknown-returns -- EVIDENCE: fixture helper returns deliberately unvalidated external plan data for the validation boundary under test.
+function jsonAt(root: unknown, steps: readonly (string | number)[]): unknown {
+  let current = root;
+  for (const step of steps) {
+    const descriptor =
+      typeof current === "object" && current !== null
+        ? Object.getOwnPropertyDescriptor(current, step)
+        : undefined;
+    assert.ok(descriptor !== undefined && "value" in descriptor, `missing ${String(step)}`);
+    current = descriptor.value;
   }
-  assert.equal(current, 0);
-  return innermost;
+  return current;
 }
 
 function checkpoint(plan: InstructionPlan, snapshot: RuntimeSnapshot): RuntimeCheckpoint {
@@ -204,18 +199,38 @@ function activeCallSnapshot(plan: InstructionPlan): RuntimeSnapshot {
   return JSON.parse(JSON.stringify(snapshot)) as RuntimeSnapshot;
 }
 
-test("plan validation measures deep and broad data without rejecting arbitrary work or depth", () => {
-  const value = mutablePlan();
-  value.deepPadding = deepArray(1_000);
-  value.broadPadding = new Array(100_001).fill(0);
+test("plan validation accepts deep and broad plan data without a generic depth or work limit", () => {
+  const depth = 1_000;
+  const width = 10_000;
+  const plan = mutablePlan(
+    `let deep = ${"[".repeat(depth)}0${"]".repeat(depth)}\nlet broad = [0]\nexit`,
+  );
+  const broad = jsonAt(plan, ["instructions", 1, "value", "elements"]);
+  assert.ok(Array.isArray(broad));
+  // Repeating the compiled element keeps every broad element in an accepted plan shape.
+  while (broad.length < width) broad.push(structuredClone(broad[0]));
+  assert.deepEqual(validateInstructionPlan(plan), { valid: true, errors: [] });
 
-  const statistics = withValidationTestStatistics((finish) => {
-    assert.equal(validateInstructionPlan(value).valid, true);
-    return finish();
-  }).counts;
-
-  assert.ok((statistics.externalCaptureVisits ?? 0) > 100_000);
-  assert.ok((statistics.externalCaptureMaximumDepth ?? 0) > 1_000);
+  // A non-finite value at the deepest leaf or the last element proves that validation reached it.
+  const deepest = jsonAt(plan, [
+    "instructions",
+    0,
+    "value",
+    ...Array.from({ length: depth }, () => ["elements", 0]).flat(),
+  ]);
+  const last = broad.at(-1);
+  for (const [leaf, path] of [
+    [deepest, `$.instructions[0].value${".elements[0]".repeat(depth)}.value`],
+    [last, `$.instructions[1].value.elements[${width - 1}].value`],
+  ] as const) {
+    assert.ok(isJsonRecord(leaf) && leaf.value === 0, path);
+    leaf.value = Number.POSITIVE_INFINITY;
+    assert.deepEqual(
+      validateInstructionPlan(plan).errors.map((error) => [error.code, error.path]),
+      [["TSC002", path]],
+    );
+    leaf.value = 0;
+  }
 });
 
 test("compiler and runtime paths avoid duplicate whole-plan capture", () => {
@@ -430,26 +445,17 @@ test("snapshot validation accepts a deeply nested supplied call argument", () =>
 
 test("checkpoint restore and JSON deserialize preserve deeply nested valid state", () => {
   const plan = compiledPlan();
-  // EVIDENCE: the runtime-created checkpoint is extended only with an extra plan field accepted by validation.
-  const live = checkpoint(plan, createFreshRuntimeSnapshot(plan)) as RuntimeCheckpoint & {
-    plan: Record<string, unknown>;
-  };
-  live.plan.padding = deepArray(512);
+  const live = checkpoint(plan, createFreshRuntimeSnapshot(plan));
   addBinding(live.snapshot, deepList(5_000));
   const restored = restoreCheckpoint(live);
   assert.equal(validateRuntimeSnapshot(restored.snapshot, restored.plan).valid, true);
   assertDeepList(deepBindingValue(restored.snapshot), 5_000);
   assert.deepEqual(withoutDeepBinding(restored.snapshot), createFreshRuntimeSnapshot(plan));
-  assert.ok("padding" in restored.plan);
-  const { padding: restoredPadding, ...restoredPlan } = restored.plan;
-  assertDeepArray(restoredPadding, 512);
-  assert.deepEqual(restoredPlan, plan);
+  assert.deepEqual(restored.plan, plan);
 
-  // Any node shared with the caller would expose these innermost rewrites through the restored graph.
+  // Any node shared with the caller would expose this innermost rewrite through the restored graph.
   assertDeepList(deepBindingValue(live.snapshot), 5_000)[0] = "changed";
-  assertDeepArray(live.plan.padding, 512)[0] = 1;
   assertDeepList(deepBindingValue(restored.snapshot), 5_000);
-  assertDeepArray(restoredPadding, 512);
 
   const serializedSnapshot = mutableSnapshot(plan);
   addBinding(serializedSnapshot, "__DEEP_VALUE__");
@@ -465,26 +471,23 @@ test("checkpoint restore and JSON deserialize preserve deeply nested valid state
 });
 
 test("runtime entry points accept valid deep plan and snapshot data without mutating the caller", () => {
-  const validPlan = compiledPlan("exit");
-  // EVIDENCE: JSON preserves the compiler-produced plan before this accepted padding field is added.
-  const extendedPlan = JSON.parse(JSON.stringify(validPlan)) as InstructionPlan & {
-    padding: unknown;
-  };
-  extendedPlan.padding = deepObject(512);
+  const depth = 512;
+  // The plan is a mutable external copy, so each entry captures and validates its deep list literal.
+  const plan = mutablePlan(`let planned = ${"[".repeat(depth)}"leaf"${"]".repeat(depth)}\nexit`);
 
   for (const operation of [executeInstruction, stepToEvent, run]) {
-    const snapshot = mutableSnapshot(validPlan);
-    addBinding(snapshot, deepList(512));
+    let snapshot = mutableSnapshot(plan);
+    addBinding(snapshot, deepList(depth));
     const before = structuredClone(snapshot);
-    const result = operation(extendedPlan, snapshot);
-    assert.deepEqual(
-      result.events.map((event) => event.kind),
-      ["exit"],
-    );
-    assert.equal(result.snapshot.status, "halted");
-    assert.equal(result.snapshot.failure, null);
-    assertDeepList(deepBindingValue(result.snapshot), 512);
+    const result = operation(plan, snapshot);
     assert.deepEqual(snapshot, before);
+    assert.equal(result.snapshot.failure, null);
+    assertDeepList(deepBindingValue(result.snapshot), depth);
+    snapshot = result.snapshot;
+    if (snapshot.status !== "halted") snapshot = run(plan, snapshot).snapshot;
+    assert.equal(snapshot.status, "halted");
+    const planned = snapshot.frames[0]!.bindings.find((binding) => binding.name === "planned");
+    assertDeepList(planned?.value, depth);
   }
 });
 
