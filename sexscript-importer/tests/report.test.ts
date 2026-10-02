@@ -52,6 +52,10 @@ test("reports source and IR counts separately instead of inventing a conversion 
 
   const report = analyzeFeasibility([file]);
   assert.equal(report.fileCount, 1);
+  assert.equal(report.scriptBodyFileCount, 1);
+  assert.equal(report.recognizedScriptFileCount, 1);
+  assert.equal(report.loweredScriptFileCount, 0);
+  assert.equal(report.dependencyClosedScriptFileCount, 0);
   assert.equal(report.sourceStatementNodes, 1);
   assert.equal(report.migrationErrors, 2);
   assert.equal(report.rootMigrationErrors, 1);
@@ -177,4 +181,45 @@ test("feasibility report resolves package-local legacy helper calls", () => {
 
   const report = analyzeFeasibility([helper, script]);
   assert.equal(report.rootDiagnosticsByCode.SX_LEGACY_HELPER_CALL, undefined);
+});
+
+
+test("reports recognized, lowered, and dependency-closed script stages separately", () => {
+  const clean: ParsedGroovyFile = {
+    formatVersion: 1,
+    sourceName: "clean.groovy",
+    groovyVersion: "2.5.21",
+    mode: "script-body",
+    diagnostics: [],
+    root: {
+      kind: "scriptBody",
+      span: null,
+      body: {
+        kind: "block",
+        span: parent,
+        statements: [{
+          kind: "expressionStatement",
+          span: child,
+          expression: {
+            kind: "methodCall",
+            span: child,
+            object: { kind: "variable", span: null, name: "this", type: "java.lang.Object" },
+            method: { kind: "constant", span: child, value: "show" },
+            arguments: { kind: "arguments", span: child, items: [{ kind: "constant", span: child, value: "hello" }] },
+            implicitThis: true,
+            safe: false,
+            spreadSafe: false,
+          },
+        }],
+      },
+    },
+  };
+
+  const report = analyzeFeasibility([clean]);
+  assert.equal(report.recognizedScriptFileCount, 1);
+  assert.equal(report.loweredScriptFileCount, 1);
+  assert.equal(report.dependencyClosedScriptFileCount, 1);
+  assert.equal(report.files[0]?.recognized, true);
+  assert.equal(report.files[0]?.lowered, true);
+  assert.equal(report.files[0]?.dependencyClosed, true);
 });
