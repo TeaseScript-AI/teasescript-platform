@@ -28,6 +28,8 @@ async function main() {
     "--no-sandbox",
     "--disable-gpu",
     "--disable-dev-shm-usage",
+    // A synthetic camera for the camera scenario; permissions are granted or denied per scenario through CDP.
+    "--use-fake-device-for-media-stream",
     `--remote-debugging-port=${debugPort}`,
     "--remote-allow-origins=*",
     `--user-data-dir=${profile}`,
@@ -56,8 +58,9 @@ async function main() {
       await selectPlayerExample(cdp);
       await narrowScenario(cdp);
       await demoScenario(cdp, origin);
+      await cameraScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground and the repository demo on /player/",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, and the camera scenario",
       );
     } finally {
       cdp.close();
@@ -778,6 +781,39 @@ async function transcriptTexts(cdp) {
     cdp,
     `[...document.querySelectorAll('#transcript li')].map((item) => [...item.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join('').trim())`,
   );
+}
+
+/**
+ * The session camera opens at Start and `takePhoto()` puts its photo on the Stage; without camera permission the
+ * script continues without a photo.
+ */
+async function cameraScenario(cdp, origin) {
+  const url = `${origin}/player/?dev&scenario=camera`;
+  const start = async () => {
+    await navigate(cdp, url);
+    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+    await physicalClick(cdp, "[data-session-activation] button");
+  };
+  const capturedImages = `[...document.querySelectorAll('img')].filter((image) => image.src.startsWith('blob:')).length`;
+
+  await cdp.call("Browser.setPermission", {
+    origin,
+    permission: { name: "camera" },
+    setting: "granted",
+  });
+  await start();
+  await waitFor(cdp, `document.body.innerText.includes('Captured.')`);
+  assertEqual(await value(cdp, capturedImages), 1, "The captured photo did not reach the Stage");
+
+  await cdp.call("Browser.setPermission", {
+    origin,
+    permission: { name: "camera" },
+    setting: "denied",
+  });
+  await start();
+  await waitFor(cdp, `document.body.innerText.includes('No camera; continuing without a photo.')`);
+  assertEqual(await value(cdp, capturedImages), 0, "A denied camera produced a photo");
+  await cdp.call("Browser.resetPermissions");
 }
 
 function documentTextIncludes(values, text) {

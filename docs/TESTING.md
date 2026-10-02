@@ -570,7 +570,9 @@ gating, rendered Stage images, the rendered speaker avatar and letter fallback, 
 playback, a script pause reaching the playing element, pacing skips from a press on unused Player space or Space in the
 empty composer but not from a Player control, message text or Space while the composer holds text, a press held past
 one message's pacing that must not skip the next message's pacing, Finish ending the session, and a narrow viewport
-that keeps the first question's input visible. Development preview presentation is covered by the [Player browser
+that keeps the first question's input visible. With a synthetic camera it also runs the development preview's camera
+scenario (`/player/?dev&scenario=camera`): granted, the session camera opens at Start and `takePhoto()` puts its photo
+on the Stage; denied, the script continues without a photo. Development preview presentation is covered by the [Player browser
 verification route](#player-browser-and-visual-verification). `CHROMIUM_BIN` is tried before the `/usr/bin` Chromium
 paths; an unusable value falls back to them. An unavailable Chromium executable is an explicit skip; an available
 browser must pass the configured smoke checks.
