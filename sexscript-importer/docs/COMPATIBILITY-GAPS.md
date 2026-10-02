@@ -15,11 +15,32 @@ Every unsupported corpus construct should end in one of four buckets:
 4. **Legacy baggage** — JVM, reflection, process, filesystem, dynamic class loading, or similarly host-specific behavior
    that should not be reproduced in TeaseScript merely for compatibility.
 
+## Conversion gates
+
+Importer progress is measured at package level rather than by requiring every generated `.tease` file to be standalone:
+
+1. **Recognized** — the legacy source parses and the importer understands its structural form.
+2. **Lowered** — the script body has TeaseScript IR/output without direct migration errors.
+3. **Dependency-closed** — every generated function call resolves to generated package code or a known accepted
+   TeaseScript/Standard-Library capability. This includes transitive helper dependencies.
+4. **Compiler-clean** — the resulting generated package passes the real compiler for the capability surface being
+   claimed. Current POC implementation coverage must be distinguished from accepted V30 syntax.
+5. **Runnable/verified** — relevant execution paths have actually run without unresolved runtime behavior.
+
+The current POC embeds transitively required helper functions into generated `.tease` output because generic
+package-library linkage is not yet available to the importer. That is a current migration strategy, not a language
+requirement that every `.tease` file be permanently standalone.
+
+Auxiliary Groovy classes with fields are not duplicated automatically. Fields may represent shared/static mutable
+state whose semantics would change if helper functions were copied independently. The parser exports these fields and
+the importer reports `SX_HELPER_SHARED_STATE` instead. The current `Domme3Class` corpus helper has zero class fields,
+so its helper methods do not carry hidden in-memory class state.
+
 ## Proven importer gaps
 
 Current examples that are not TeaseScript language gaps:
 
-- Groovy `getBooleans(...)` can target accepted `askBooleans(...)`;
+- Groovy `getBooleans(...)` targets accepted `askBooleans(...)`;
 - Groovy list `.size`/`.size()` can target TeaseScript `.length` when the receiver is proven to be a list;
 - ordinary Groovy helper closures/methods can usually become normal TeaseScript functions;
 - static Groovy maps with identifier-like keys can become TeaseScript objects;
@@ -57,10 +78,20 @@ At the current POC checkpoint:
 
 - 45/45 corpus Groovy files parse;
 - 44 are executable SexScript script bodies and one is an auxiliary helper class;
-- 7 script bodies are importer-clean after self-contained package helper composition;
+- 44/44 script bodies are **recognized**;
+- 7/44 are fully **lowered** without direct migration errors;
+- those same 7/44 are currently **dependency-closed** after package helper composition;
+- the corpus has 278 root migration errors after the `getBooleans` mapping, down from 287 before it;
 - direct `.groovy` -> Groovy AST -> migration IR -> `.tease` conversion works;
 - package conversion embeds only transitively required TeaseScript helper functions and never emits a Groovy runtime
-  dependency.
+  dependency;
+- the focused importer suite passes 46/46 tests and `git diff --check` is clean.
 
-These numbers are feasibility measurements, not a promise that every importer-clean script is already executable by the
-current TeaseScript POC runtime.
+The current engine compiler still rejects all seven dependency-closed outputs because the generated sources use a mix
+of accepted V30 capabilities not implemented by the current POC and, for larger scripts, resulting parser cascades.
+That is not reported as a TeaseScript language gap until accepted-syntax validation proves the generated form itself
+invalid.
+
+The parser also had one important importer bug: Groovy `NotExpression` is a subtype of `BooleanExpression`, so checking
+`BooleanExpression` first silently dropped `!`. The exporter now preserves negation before corpus measurements are
+trusted.
