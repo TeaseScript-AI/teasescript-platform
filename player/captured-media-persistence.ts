@@ -144,42 +144,42 @@ export async function sweepCapturedMedia(
   });
 }
 
-export interface CapturedMediaScope {
-  readonly storage: CapturedMediaStorage;
-  /** The saved values that seed the session, read after the live lock was granted. */
-  readonly entries: readonly RuntimeScriptStorageEntrySnapshot[];
+/** Captured-media persistence for one mounted Player; the host passes it to the session as its script storage. */
+export interface CapturedMediaPersistence extends CapturedMediaStorage {
   /** Finishes issued storage work, then releases the live lock; call when the Player unmounts. */
   close(): Promise<void>;
 }
 
 /**
- * Opens captured-media persistence for a Player in the only safe order: an opportunistic sweep while no Player of the
- * scope is live, then the shared live lock, and only then the saved values that seed the session. Without the lock
- * where locks exist, durable media writes are disabled so they can never race another Player's sweep.
+ * Prepares captured-media persistence for a mounted Player in the only safe order: an opportunistic sweep while no
+ * Player of the scope is live, then the shared live lock. Every `load()` and `write()` waits for that preparation, so a
+ * Start reads its saved values fresh, and only under the live lock. Without the lock where locks exist, durable media
+ * writes are disabled so they can never race another Player's sweep.
  */
-export async function openCapturedMediaScope(
+export function capturedMediaStorage(
   provider: ScriptStorageProvider,
   media: CapturedMediaStore,
   locks: CapturedMediaLocks,
-): Promise<CapturedMediaScope> {
-  // A failed sweep only defers reclamation.
-  await sweepCapturedMedia(provider, media, locks).catch(() => false);
-  const live = locks.holdLive(provider.scope);
-  if ((await live.granted) === "failed") media.disableDurable();
+): CapturedMediaPersistence {
+  let release = () => {};
+  const ready = (async () => {
+    // A failed sweep only defers reclamation.
+    await sweepCapturedMedia(provider, media, locks).catch(() => false);
+    const live = locks.holdLive(provider.scope);
+    release = () => live.release();
+    if ((await live.granted) === "failed") media.disableDurable();
+  })();
   const storage = withCapturedMedia(provider, media);
-  let entries: readonly RuntimeScriptStorageEntrySnapshot[];
-  try {
-    entries = await storage.load();
-  } catch (error) {
-    live.release();
-    throw error;
-  }
   return {
-    storage,
-    entries,
+    scope: provider.scope,
+    load: async () => (await ready, storage.load()),
+    write: async (key, value) => (await ready, storage.write(key, value)),
+    clear: async () => (await ready, storage.clear()),
+    drain: () => storage.drain(),
     async close() {
+      await ready;
       await storage.drain();
-      live.release();
+      release();
     },
   };
 }

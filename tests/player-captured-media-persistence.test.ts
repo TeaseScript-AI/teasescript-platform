@@ -4,7 +4,7 @@ import test from "node:test";
 import { CapturedMediaNotStoredError, CapturedMediaStore } from "../player/captured-media.js";
 import {
   capturedMediaReferences,
-  openCapturedMediaScope,
+  capturedMediaStorage,
   sweepCapturedMedia,
   withCapturedMedia,
   type CapturedMediaLocks,
@@ -244,7 +244,7 @@ test("a photo saved in one run is loaded and shown in a later run; a forged refe
   assert.equal(repository.size, 1);
 });
 
-test("a Player opens persistence by sweeping, then holding the live lock, then reading its saved values", async () => {
+test("a Player prepares persistence by sweeping, then holding the live lock, before any read", async () => {
   const repository = new FakeMediaRepository();
   const provider = new FakeProvider();
   const order: string[] = [];
@@ -269,23 +269,26 @@ test("a Player opens persistence by sweeping, then holding the live lock, then r
     },
   };
   const media = new CapturedMediaStore(repository, urls, "package");
-  const opening = openCapturedMediaScope(provider, media, locks);
+  const storage = capturedMediaStorage(provider, media, locks);
+  const firstStart = storage.load();
   await new Promise((resolve) => setImmediate(resolve));
-  // The session's saved values are read only once the live lock is held.
+  // A Start's saved values are read only once the live lock is held.
   assert.deepEqual(order, ["sweep", "live lock"]);
   assert.deepEqual(provider.log, ["load"]);
   grant();
-  const scope = await opening;
-  assert.deepEqual(provider.log, ["load", "load"]);
+  assert.deepEqual(await firstStart, []);
+  // Every later Start reads fresh, so it sees the saves of an earlier run of the same Player.
+  provider.entries.set("visits", 1);
+  assert.deepEqual(await storage.load(), [{ key: "visits", value: 1 }]);
   // Unmounting finishes an issued save before the live lock is released.
-  const saving = scope.storage.write("photo", media.add("image", png("photo")).reference);
-  const closing = scope.close();
+  const saving = storage.write("photo", media.add("image", png("photo")).reference);
+  const closing = storage.close();
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(order, ["sweep", "live lock"]);
   releaseWrite();
   await Promise.all([saving, closing]);
   assert.deepEqual(order, ["sweep", "live lock", "persisted", "released"]);
-  await assert.rejects(scope.storage.write("late", 1));
+  await assert.rejects(storage.write("late", 1));
 });
 
 test("without the live lock where locks exist, saved photos are not made durable", async () => {
@@ -296,9 +299,9 @@ test("without the live lock where locks exist, saved photos are not made durable
     holdLive: () => ({ granted: Promise.resolve("failed"), release: () => {} }),
     whenIdle: async () => false,
   };
-  const scope = await openCapturedMediaScope(provider, media, failing);
+  const storage = capturedMediaStorage(provider, media, failing);
   const photo = media.add("image", png("photo")).reference;
-  await assert.rejects(scope.storage.write("photo", photo), CapturedMediaNotStoredError);
+  await assert.rejects(storage.write("photo", photo), CapturedMediaNotStoredError);
   assert.equal(repository.size, 0);
   assert.equal(provider.entries.size, 0);
 });
