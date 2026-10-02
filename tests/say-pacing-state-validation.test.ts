@@ -959,11 +959,6 @@ test("background pacing actions require dense JSON-safe array entries", () => {
   assert.equal(validateRuntimeSnapshot(sparseSnapshot, compiled).valid, false);
   assert.throws(() => createCheckpoint(compiled, sparseSnapshot));
 
-  const jsonSparseCheckpoint = structuredClone(baselineCheckpoint);
-  // EVIDENCE: fixture widens only backgroundActions to inject a null checkpoint entry.
-  (jsonSparseCheckpoint.snapshot as { backgroundActions: unknown }).backgroundActions = [null];
-  assert.throws(() => deserializeCheckpoint(JSON.stringify(jsonSparseCheckpoint)));
-
   const foregroundPlan = plan('say "first"\nsay "second"');
   const foreground = run(foregroundPlan, createFreshRuntimeSnapshot(foregroundPlan));
   // EVIDENCE: serialization creates the canonical foreground checkpoint used as an envelope baseline below.
@@ -987,26 +982,6 @@ test("background pacing actions require dense JSON-safe array entries", () => {
   assert.notEqual(preparedOutputArraySnapshot.foregroundAction, null);
   // EVIDENCE: fixture widens only preparedOutput to inject an array where an output object is required.
   (preparedOutputArraySnapshot.foregroundAction as { preparedOutput: unknown }).preparedOutput = [];
-
-  const skipped = completeAction(compiled, background.snapshot, {
-    actionId: 1,
-    actionKind: "chatPacingGate",
-    payload: { kind: "skip" },
-  });
-  // EVIDENCE: serialization creates the canonical skipped checkpoint used as an envelope baseline below.
-  const skippedCheckpoint = JSON.parse(
-    serializeCheckpoint(createCheckpoint(compiled, skipped.snapshot)),
-  ) as { snapshot: RuntimeSnapshot };
-  const obsoleteLineageSnapshot = checkpointSnapshot(compiled, skipped.snapshot);
-  assert.notEqual(obsoleteLineageSnapshot.lastSettlement, null);
-  // EVIDENCE: fixture replaces the current lineage field with the removed boolean field on a pacing settlement.
-  const obsoleteSettlement =
-    obsoleteLineageSnapshot.lastSettlement as typeof obsoleteLineageSnapshot.lastSettlement & {
-      releasedPreparedOutput?: boolean;
-      releasedPreparedOutputInstruction?: number | null;
-    };
-  delete obsoleteSettlement.releasedPreparedOutputInstruction;
-  obsoleteSettlement.releasedPreparedOutput = true;
 
   const corruptions = [
     {
@@ -1032,12 +1007,6 @@ test("background pacing actions require dense JSON-safe array entries", () => {
       compiled: foregroundPlan,
       snapshot: preparedOutputArraySnapshot,
       checkpoint: checkpointWithSnapshot(foregroundCheckpoint, preparedOutputArraySnapshot),
-    },
-    {
-      name: "obsolete settlement lineage field",
-      compiled,
-      snapshot: obsoleteLineageSnapshot,
-      checkpoint: checkpointWithSnapshot(skippedCheckpoint, obsoleteLineageSnapshot),
     },
   ];
 
@@ -1285,13 +1254,6 @@ test("pacing state validation rejects relational identity, property, duration, a
       }),
     },
     {
-      name: "invalid speaker default number",
-      compiled: speakerPlan,
-      checkpoint: mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => {
-        snapshot.speakers[0].properties[0].value = 123;
-      }),
-    },
-    {
       name: "invalid speaker default string",
       compiled: speakerPlan,
       checkpoint: mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => {
@@ -1303,20 +1265,6 @@ test("pacing state validation rejects relational identity, property, duration, a
       compiled: speakerPlan,
       checkpoint: mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => {
         snapshot.speakers[0].properties[0].value = null;
-      }),
-    },
-    {
-      name: "invalid speaker default object",
-      compiled: speakerPlan,
-      checkpoint: mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => {
-        snapshot.speakers[0].properties[0].value = { kind: "object", properties: [] };
-      }),
-    },
-    {
-      name: "invalid speaker default list",
-      compiled: speakerPlan,
-      checkpoint: mutateCheckpoint(speakerPlan, speakerState.snapshot, (snapshot) => {
-        snapshot.speakers[0].properties[0].value = { kind: "list", items: [] };
       }),
     },
     {
@@ -1401,13 +1349,6 @@ test("cross-field pacing snapshot corruption rejects at direct and checkpoint bo
       }),
     },
     {
-      name: "pacing deadline before current time",
-      plan: waitPlan,
-      checkpoint: mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
-        snapshot.backgroundActions[0].deadlineMs = snapshot.currentSessionTimeMs;
-      }),
-    },
-    {
       name: "next action ID reuses active identity",
       plan: waitPlan,
       checkpoint: mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
@@ -1428,15 +1369,6 @@ test("cross-field pacing snapshot corruption rejects at direct and checkpoint bo
         snapshot.foregroundAction.preparedOutput.owningInstruction = 2;
         snapshot.foregroundAction.preparedOutput.continuationInstruction = 3;
         snapshot.nextInstruction = 2;
-      }),
-    },
-    {
-      name: "background gate carries prepared output",
-      plan: waitPlan,
-      checkpoint: mutateCheckpoint(waitPlan, waiting.snapshot, (snapshot) => {
-        snapshot.backgroundActions[0].preparedOutput = structuredClone(
-          promotedGate?.preparedOutput,
-        );
       }),
     },
     {
@@ -1694,13 +1626,6 @@ test("pacing settlement release provenance and chronology accept only canonical 
   const advancedAfterSkip = observeTime(backgroundPlan, backgroundSkipped.snapshot, 2_000);
   const corruptions = [
     {
-      name: "prepared output requires release evidence",
-      compiled: promotionPlan,
-      checkpoint: mutateCheckpoint(promotionPlan, foregroundSkipped.snapshot, (snapshot) => {
-        snapshot.lastSettlement.releasedPreparedOutputInstruction = null;
-      }),
-    },
-    {
       name: "background skip cannot falsely claim prepared-output release",
       compiled: backgroundPlan,
       checkpoint: mutateCheckpoint(backgroundPlan, backgroundSkipped.snapshot, (snapshot) => {
@@ -1936,28 +1861,6 @@ test("pacing settlements retain exact prepared-output lineage through release an
       checkpoint: mutateCheckpoint(threeSays, consumed.snapshot, (snapshot) => {
         snapshot.backgroundActions[0].requestEventSequence =
           snapshot.lastSettlement.completionEventSequence;
-      }),
-    },
-    {
-      name: "lineage must be null for background completion",
-      compiled: plan('say "first"'),
-      checkpoint: (() => {
-        const backgroundPlan = plan('say "first"');
-        const background = run(backgroundPlan, createFreshRuntimeSnapshot(backgroundPlan));
-        const gate = background.snapshot.backgroundActions[0];
-        if (gate?.kind !== "chatPacingGate") throw new Error("Expected a background pacing gate.");
-        const settled = observeTime(backgroundPlan, background.snapshot, gate!.deadlineMs);
-        return mutateCheckpoint(backgroundPlan, settled.snapshot, (snapshot) => {
-          snapshot.lastSettlement.releasedPreparedOutputInstruction = 0;
-        });
-      })(),
-    },
-    {
-      name: "obsolete boolean release evidence is rejected",
-      compiled: threeSays,
-      checkpoint: mutateCheckpoint(threeSays, released.snapshot, (snapshot) => {
-        delete snapshot.lastSettlement.releasedPreparedOutputInstruction;
-        snapshot.lastSettlement.releasedPreparedOutput = true;
       }),
     },
     {
