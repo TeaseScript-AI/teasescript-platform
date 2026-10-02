@@ -564,11 +564,13 @@ node tools/player-browser-smoke.mjs
 
 It covers the technical playground and plays `examples/demo/` on the built `/player/` route with trusted input: Start
 gating, rendered Stage images, the rendered speaker avatar and letter fallback, runtime timers in the rail, audible
-playback, a script pause reaching the playing element, a press held past one message's pacing that must not skip the
-next message's pacing, Finish ending the session, and a narrow viewport that keeps the first question's input visible.
-Development preview presentation is covered by the [Player browser verification
-route](#player-browser-and-visual-verification). An unavailable Chromium executable is an explicit skip; an available
-browser must pass the configured smoke checks.
+playback, a script pause reaching the playing element, pacing skips from a press on unused Player space or Space in the
+empty composer but not from a Player control, message text or Space while the composer holds text, a press held past
+one message's pacing that must not skip the next message's pacing, Finish ending the session, and a narrow viewport
+that keeps the first question's input visible. Development preview presentation is covered by the [Player browser
+verification route](#player-browser-and-visual-verification). `CHROMIUM_BIN` selects a Chromium executable outside
+`/usr/bin`. An unavailable Chromium executable is an explicit skip; an available browser must pass the configured smoke
+checks.
 
 Production browser E2E coverage becomes required after the cross-origin host shell and player exist. It should then
 include:
