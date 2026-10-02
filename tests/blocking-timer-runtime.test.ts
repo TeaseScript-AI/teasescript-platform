@@ -255,9 +255,6 @@ test("unsupported and invalid timer forms, members, and handler scope fail with 
     ["let t = timer 10", "TSV033", "timer 10"],
     ['timer(duration: 1, display: "loud")', "TSV033", '"loud"'],
     ["timer 10 s ms", "TSV033", "10 s"],
-    ["timer 1 day", "TSP033", "day"],
-    ["timer 5..10 min", "TSV010", "5..10"],
-    ["let n = 10\ntimer 5..n min", "TSV010", "5..n"],
     ["timer -1", "TSV011", "-1"],
     ["timer 1.5..3", "TSV010", "1.5..3"],
     ["timer -2..3", "TSV010", "-2..3"],
@@ -289,6 +286,44 @@ test("unsupported and invalid timer forms, members, and handler scope fail with 
       found.includes(expected),
       `${JSON.stringify(source)}: ${expected} not in ${found.join(" | ")}`,
     );
+  }
+});
+
+test("accepted duration forms without an implementation are never read as another duration", () => {
+  // Calendar units (§35) and timer ranges with other units (§27) are not implemented yet. They may fail with an error
+  // located in the duration, but a compiled timer must have the accepted meaning, never for example plain seconds.
+  const minutesFiveToTen = (deadlineMs: number): boolean =>
+    deadlineMs >= 5 * 60_000 && deadlineMs < 10 * 60_000;
+  const cases: ReadonlyArray<
+    readonly [source: string, subject: string, accepted: (deadlineMs: number) => boolean]
+  > = [
+    // A calendar day spans 23, 24, or 25 elapsed hours around daylight-saving transitions.
+    [
+      "timer 1 day",
+      "1 day",
+      (deadlineMs) => deadlineMs >= 23 * 3_600_000 && deadlineMs <= 25 * 3_600_000,
+    ],
+    ["timer 5..10 min", "5..10 min", minutesFiveToTen],
+    ["let n = 10\ntimer 5..n min", "5..n min", minutesFiveToTen],
+  ];
+  for (const [source, subject, accepted] of cases) {
+    const start = source.lastIndexOf(subject);
+    const compiled = compileSource(source);
+    if (compiled.plan === null) {
+      assert.ok(
+        compiled.diagnostics.some(
+          ({ span }) => span.start.offset >= start && span.end.offset <= start + subject.length,
+        ),
+        `${JSON.stringify(source)}: a rejection must be located in ${JSON.stringify(subject)}`,
+      );
+      continue;
+    }
+    const { snapshot } = run(
+      compiled.plan,
+      createImmediatePacingRuntimeSnapshot(compiled.plan, { seed: SEEDS[0]! }),
+    );
+    const { deadlineMs } = delayAction(snapshot);
+    assert.ok(accepted(deadlineMs), `${JSON.stringify(source)} must not mean ${deadlineMs} ms`);
   }
 });
 
