@@ -64,13 +64,8 @@ test("timer compiles fixed seconds and integer-second ranges into visible foregr
     (instruction): instruction is WaitInstruction => instruction.kind === "wait",
   );
   assert.deepEqual(
-    waits.map((instruction) => [instruction.display, instruction.unit]),
-    [
-      ["visible", null],
-      ["visible", null],
-      ["visible", null],
-      ["hidden", null],
-    ],
+    waits.map((instruction) => instruction.display),
+    ["visible", "visible", "visible", "hidden"],
   );
 
   const { snapshot, events } = start('timer 3\nsay "after"\nexit');

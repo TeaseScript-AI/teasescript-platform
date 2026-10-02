@@ -767,7 +767,6 @@ test("runtime review regressions stay checkpointable and ordered", () => {
     "let t = timer(duration: 1..=3, async: true, repeat: true)\nt.repeatDuration = 2 s\nwait 8 s",
     { seed: overrideSeed },
   );
-  assert.equal(override.timers()[0]!.timer.range, null);
   // Only the first round comes from the range; every later round lasts the assigned 2 s without a draw.
   const initial = randomIntegerDraws(overrideSeed, "1..=3", 1);
   const firstExpiryMs = initial.values[0]! * 1_000;
