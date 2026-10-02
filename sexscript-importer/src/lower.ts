@@ -51,7 +51,7 @@ export interface LowerOptions {
   helperRegistry?: HelperRegistry;
 }
 
-type SyntheticHelper = "loadFirstTrue" | "indexOf";
+type SyntheticHelper = "loadFirstTrue" | "indexOf" | "concat";
 
 interface LowerContext {
   diagnostics: MigrationDiagnostic[];
@@ -1068,6 +1068,23 @@ function lowerAssignment(
   context: LowerContext,
 ): IrStatement[] {
   const operator = text(node.operator);
+  if (operator === "<<") {
+    // Groovy `list << value` appends one element.
+    const listNode = asNode(node.left);
+    const valueNode = asNode(node.right);
+    if (listNode !== null && valueNode !== null && isKnownListExpression(listNode, context)) {
+      const target = lowerExpression(listNode, context);
+      const value = lowerExpression(valueNode, context);
+      if (target === null || value === null) return [];
+      return [
+        {
+          kind: "expression",
+          expression: { kind: "methodCall", target, name: "add", arguments: [value] },
+          span,
+        },
+      ];
+    }
+  }
   if (
     operator !== "=" &&
     operator !== "+=" &&
@@ -1153,6 +1170,15 @@ function lowerAssignment(
       },
     ];
   }
+  if (operator === "+=" && variableTarget !== null) {
+    // TeaseScript += only adds numbers; text and list appends become an ordinary assignment.
+    const sum = lowerPlus(
+      { kind: "binary", span: node.span, operator: "+", left: targetNode, right },
+      context,
+    );
+    if (sum === null) return [];
+    if (sum.kind !== "binary") return [{ kind: "assign", target, operator: "=", value: sum, span }];
+  }
   return [{ kind: "assign", target, operator, value, span }];
 }
 
@@ -1208,6 +1234,36 @@ function lowerCallStatement(
       span,
     );
     return [];
+  }
+  if (call !== null && !call.inherited && receiverName === "System" && call.name === "exit") {
+    addDiagnostic(
+      context,
+      "SX_SYSTEM_EXIT",
+      "warning",
+      "System.exit() closed the legacy application; TeaseScript exit ends the session but leaves the Player open.",
+      span,
+    );
+    return [{ kind: "exit", span }];
+  }
+  if (call !== null && !call.inherited && (call.name === "push" || call.name === "leftShift")) {
+    // Groovy 2.5 List.push appends like add().
+    const receiver = asNode(node.object);
+    if (
+      receiver !== null &&
+      isKnownListExpression(receiver, context) &&
+      call.arguments.length === 1
+    ) {
+      const target = lowerExpression(receiver, context);
+      const value = lowerExpression(call.arguments[0]!, context);
+      if (target === null || value === null) return [];
+      return [
+        {
+          kind: "expression",
+          expression: { kind: "methodCall", target, name: "add", arguments: [value] },
+          span,
+        },
+      ];
+    }
   }
   if (call === null || !call.inherited) {
     const expression = lowerExpression(node, context);
@@ -1905,6 +1961,16 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
       return lowerMapExpression(node, context);
     case "gstring":
       return lowerGString(node, context);
+    case "constructorCall":
+      if (isCurrentDateConstructor(node)) {
+        return { kind: "call", name: "getDateTime", positional: [], named: {} };
+      }
+      return unsupportedExpression(
+        context,
+        node,
+        "SX_JAVA_CONSTRUCTOR",
+        `Java object construction (new ${text(node.type) ?? "?"}) has no TeaseScript equivalent.`,
+      );
     case "loadWithDefault": {
       const keyNode = asNode(node.key);
       const fallbackNode = asNode(node.fallback);
@@ -2007,6 +2073,8 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     const indexNode = asNode(node.right);
     const target = targetNode === null ? null : lowerExpression(targetNode, context);
     if (target === null || indexNode === null) return null;
+    const calendarIndex = calendarConstant(indexNode);
+    if (calendarIndex !== null) return dateTimeField(calendarIndex, target, node, context);
     if (targetNode !== null && isRandomIndexOf(indexNode, targetNode)) {
       // `items[getRandom(items.size())]` picks one element uniformly, which is TeaseScript `items.random`.
       return { kind: "property", target, name: "random" };
@@ -2162,15 +2230,39 @@ function lowerPlus(node: AstNode, context: LowerContext): IrExpression | null {
   const left = lowerExpression(leftNode, context);
   const right = lowerExpression(rightNode, context);
   if (left === null || right === null) return null;
+  // `month - 1 + 1` arises from Java's zero-based Calendar.MONTH idiom; keep the plain value.
+  if (
+    left.kind === "binary" &&
+    left.operator === "-" &&
+    left.left.kind === "property" &&
+    left.left.name === "month" &&
+    left.right.kind === "literal" &&
+    right.kind === "literal" &&
+    typeof right.value === "number" &&
+    left.right.value === right.value
+  ) {
+    return left.left;
+  }
   const leftType = inferType(leftNode, context.types);
   const rightType = inferType(rightNode, context.types);
-  if (onlyOf(leftType, LIST)) {
-    return unsupportedExpression(
-      context,
-      node,
-      "SX_LIST_CONCATENATION",
-      "Groovy list + has no TeaseScript operator; build the combined list with add() in a loop.",
-    );
+  if (isListType(leftType)) {
+    if (!isListType(rightType)) {
+      return unsupportedExpression(
+        context,
+        node,
+        "SX_LIST_CONCATENATION",
+        "Groovy list + with a non-list operand appends one element; rewrite it with add().",
+      );
+    }
+    const lists = listConcatenationOperands(node, context);
+    if (lists === null) return null;
+    context.syntheticHelpers.add("concat");
+    return {
+      kind: "call",
+      name: "sexscriptLegacyConcat",
+      positional: [{ kind: "list", items: lists }],
+      named: {},
+    };
   }
   // A null operand fails in both languages, so only non-numeric possibilities need review.
   if (!onlyOf(leftType, NUMBER | NULL) || !onlyOf(rightType, NUMBER | NULL)) {
@@ -2183,6 +2275,26 @@ function lowerPlus(node: AstNode, context: LowerContext): IrExpression | null {
     );
   }
   return { kind: "binary", operator: "+", left, right };
+}
+
+/** A null list operand fails in Groovy and TeaseScript alike, so "list or null" counts as a list. */
+function isListType(type: number): boolean {
+  return onlyOf(type, LIST | NULL) && (type & LIST) !== 0;
+}
+
+/** Flattens `a + b + c` on lists into one operand list for the concatenation helper. */
+function listConcatenationOperands(node: AstNode, context: LowerContext): IrExpression[] | null {
+  if (node.kind === "binary" && node.operator === "+") {
+    const leftNode = asNode(node.left);
+    const rightNode = asNode(node.right);
+    if (leftNode !== null && rightNode !== null && isListType(inferType(leftNode, context.types))) {
+      const left = listConcatenationOperands(leftNode, context);
+      const right = rightNode === null ? null : lowerExpression(rightNode, context);
+      return left === null || right === null ? null : [...left, right];
+    }
+  }
+  const value = lowerExpression(node, context);
+  return value === null ? null : [value];
 }
 
 type TemplatePart = { text: string } | { value: IrExpression };
@@ -2386,15 +2498,27 @@ function lowerObjectMethodCallExpression(
       const args = lowerArguments(argumentsNodes, context);
       return args === null ? null : { kind: "call", name, positional: args, named: {} };
     }
-    if (name === "round") {
-      return unsupportedExpression(
+    if (name === "round" && argumentsNodes.length === 1) {
+      const args = lowerArguments(argumentsNodes, context);
+      if (args === null) return null;
+      addDiagnostic(
         context,
-        node,
-        "SX_ROUNDING_SEMANTICS",
-        "Java Math.round() is not migrated until its tie-breaking semantics are proven equivalent to TeaseScript round().",
+        "SX_ROUNDING_TIES",
+        "warning",
+        "Java Math.round() rounds .5 toward positive infinity (-1.5 becomes -1); TeaseScript round() does not specify its tie rule yet.",
+        node.span,
       );
+      return { kind: "call", name: "round", positional: args, named: {} };
     }
   }
+  const calendarField = name === "get" ? calendarGetField(targetNode, argumentsNodes) : null;
+  if (calendarField !== null)
+    return dateTimeField(
+      calendarField,
+      { kind: "call", name: "getDateTime", positional: [], named: {} },
+      node,
+      context,
+    );
   if (receiverName === "System" && name === "exit") {
     return unsupportedExpression(
       context,
@@ -2413,6 +2537,18 @@ function lowerObjectMethodCallExpression(
       node,
       "SX_JAVA_REFLECTION",
       "Java reflection has no TeaseScript equivalent; reimplement the intended behavior manually.",
+    );
+  }
+  if (
+    name === "format" &&
+    targetNode !== null &&
+    (targetNode.kind === "constructorCall" || isCurrentDateConstructor(targetNode))
+  ) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_DATE_FORMAT",
+      "Java date pattern formatting has no TeaseScript equivalent; keep typed date/datetime values (compare them or store them directly) or display them with formatDate()/formatTime().",
     );
   }
   if (targetNode?.kind === "constructorCall") {
@@ -2461,6 +2597,74 @@ function lowerObjectMethodCallExpression(
 }
 
 /** A null receiver fails in Groovy and TeaseScript alike, so "list or null" counts as a list receiver. */
+function isCurrentDateConstructor(node: AstNode): boolean {
+  const args = asNode(node.arguments);
+  return (
+    node.kind === "constructorCall" &&
+    (node.type === "java.util.Date" || node.type === "Date") &&
+    (args === null || nodeArray(args.items).length === 0)
+  );
+}
+
+/** `Calendar.getInstance().get(Calendar.FIELD)` reads one field of the current local date and time. */
+function calendarGetField(target: AstNode | null, args: AstNode[]): string | null {
+  const instance = target === null ? null : callParts(target);
+  if (
+    instance === null ||
+    instance.name !== "getInstance" ||
+    variableName(target?.object) !== "Calendar"
+  ) {
+    return null;
+  }
+  return args.length === 1 ? calendarConstant(args[0]!) : null;
+}
+
+function calendarConstant(node: AstNode): string | null {
+  if (node.kind !== "property" || variableName(node.object) !== "Calendar") return null;
+  return constantString(node.property);
+}
+
+/**
+ * Maps a java.util.Calendar field to the accepted TeaseScript datetime properties. Java months count from 0 and
+ * Java weekdays run Sunday=1..Saturday=7, while TeaseScript uses months 1..12 and ISO Monday=1..Sunday=7.
+ */
+function dateTimeField(
+  field: string,
+  dateTime: IrExpression,
+  node: AstNode,
+  context: LowerContext,
+): IrExpression | null {
+  const property = (name: string): IrExpression => ({ kind: "property", target: dateTime, name });
+  const literal = (value: number): IrExpression => ({ kind: "literal", value });
+  switch (field) {
+    case "YEAR":
+      return property("year");
+    case "MONTH":
+      return { kind: "binary", operator: "-", left: property("month"), right: literal(1) };
+    case "DATE":
+    case "DAY_OF_MONTH":
+      return property("day");
+    case "HOUR_OF_DAY":
+      return property("hour");
+    case "MINUTE":
+      return property("minute");
+    case "DAY_OF_WEEK":
+      return {
+        kind: "binary",
+        operator: "+",
+        left: { kind: "binary", operator: "%", left: property("weekdayNumber"), right: literal(7) },
+        right: literal(1),
+      };
+    default:
+      return unsupportedExpression(
+        context,
+        node,
+        "SX_CALENDAR_FIELD",
+        `java.util.Calendar field ${field} has no direct TeaseScript datetime property.`,
+      );
+  }
+}
+
 function isKnownListExpression(node: AstNode, context: LowerContext): boolean {
   const type = inferType(node, context.types);
   return onlyOf(type, LIST | NULL) && (type & LIST) !== 0;
@@ -2926,7 +3130,49 @@ function syntheticHelperStatements(context: LowerContext): IrStatement[] {
   const result: IrStatement[] = [];
   if (context.syntheticHelpers.has("loadFirstTrue")) result.push(loadFirstTrueHelper());
   if (context.syntheticHelpers.has("indexOf")) result.push(indexOfHelper());
+  if (context.syntheticHelpers.has("concat")) result.push(concatHelper());
   return result;
+}
+
+/** Groovy `a + b + c` on lists creates a new list; TeaseScript has no list operator for that. */
+function concatHelper(): IrStatement {
+  const variable = (name: string): IrExpression => ({ kind: "variable", name });
+  return {
+    kind: "function",
+    name: "sexscriptLegacyConcat",
+    parameters: [{ name: "lists", defaultValue: null }],
+    span: null,
+    body: [
+      { kind: "let", name: "combined", value: { kind: "list", items: [] }, span: null },
+      {
+        kind: "for",
+        variable: "list",
+        collection: variable("lists"),
+        span: null,
+        body: [
+          {
+            kind: "for",
+            variable: "item",
+            collection: variable("list"),
+            span: null,
+            body: [
+              {
+                kind: "expression",
+                expression: {
+                  kind: "methodCall",
+                  target: variable("combined"),
+                  name: "add",
+                  arguments: [variable("item")],
+                },
+                span: null,
+              },
+            ],
+          },
+        ],
+      },
+      { kind: "return", value: variable("combined"), span: null },
+    ],
+  };
 }
 
 function loadFirstTrueHelper(): IrStatement {

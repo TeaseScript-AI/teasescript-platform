@@ -12,6 +12,8 @@ const PENDING_CALLS = new Map<string, string>([
   ["askInteger", "askInteger()"],
   ["ceil", "ceil()"],
   ["floor", "floor()"],
+  ["getDate", "getDate()"],
+  ["getDateTime", "getDateTime()"],
   ["getSeconds", "getSeconds()"],
   ["openUrl", "openUrl()"],
   ["round", "round()"],

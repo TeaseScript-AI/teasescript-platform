@@ -145,6 +145,7 @@ export function inferType(node: AstNode | null, environment: TypeEnvironment): V
 
 function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
   const operator = typeof node.operator === "string" ? node.operator : "";
+  if (operator === "[" && isCalendarConstant(asNode(node.right))) return NUMBER;
   if (BOOLEAN_OPERATORS.has(operator)) return BOOLEAN;
   if (ARITHMETIC_OPERATORS.has(operator)) return NUMBER;
   if (operator === "=") return inferType(asNode(node.right), environment);
@@ -155,7 +156,7 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
   if (onlyOf(left, STRING | NULL) && left & STRING) return STRING;
   if (onlyOf(right, STRING | NULL) && right & STRING) return STRING;
   if (onlyOf(left, NUMBER) && onlyOf(right, NUMBER)) return NUMBER;
-  if (onlyOf(left, LIST)) return LIST;
+  if (onlyOf(left, LIST | NULL) && left & LIST) return LIST;
   return UNKNOWN;
 }
 
@@ -193,6 +194,7 @@ function methodCallType(node: AstNode): ValueType {
     return SEXSCRIPT_RESULT_TYPES.get(name) ?? UNKNOWN;
   }
   if (receiver === "Math") return NUMBER;
+  if (name === "get" && node.arguments !== undefined && isCalendarFieldRead(node)) return NUMBER;
   return OBJECT_METHOD_RESULT_TYPES.get(name) ?? UNKNOWN;
 }
 
@@ -306,6 +308,16 @@ function collectAssignments(
       unknownNames.add(parameter.name);
     if (node.parameterSpecified !== true) unknownNames.add("it");
   }
+}
+
+function isCalendarConstant(node: AstNode | null): boolean {
+  return node?.kind === "property" && variableName(node.object) === "Calendar";
+}
+
+function isCalendarFieldRead(node: AstNode): boolean {
+  const args = asNode(node.arguments);
+  const first = args === null || !Array.isArray(args.items) ? undefined : args.items[0];
+  return isAstNode(first) && isCalendarConstant(first);
 }
 
 function asNode(value: unknown): AstNode | null {

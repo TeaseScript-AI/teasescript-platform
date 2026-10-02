@@ -883,7 +883,7 @@ test("maps proven Math ceil/floor and list add to accepted TeaseScript operation
   );
 });
 
-test("classifies JVM process control, Java reflection, and unresolved Math round separately", () => {
+test("maps System.exit and Math.round with notes but keeps Java reflection manual", () => {
   const source = file([
     statement({
       kind: "methodCall",
@@ -926,10 +926,16 @@ test("classifies JVM process control, Java reflection, and unresolved Math round
     }),
   ]);
 
-  const codes = new Set(lowerParsedFile(source).diagnostics.map((diagnostic) => diagnostic.code));
-  assert.ok(codes.has("SX_JVM_PROCESS_CONTROL"));
-  assert.ok(codes.has("SX_ROUNDING_SEMANTICS"));
-  assert.ok(codes.has("SX_JAVA_REFLECTION"));
+  const program = lowerParsedFile(source);
+  const severities = new Map(
+    program.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.severity]),
+  );
+  assert.equal(severities.get("SX_SYSTEM_EXIT"), "warning");
+  assert.equal(severities.get("SX_ROUNDING_TIES"), "warning");
+  assert.equal(severities.get("SX_JAVA_REFLECTION"), "error");
+  const output = emitTease(program);
+  assert.match(output, /^exit$/m);
+  assert.match(output, /^round\(2\.5\)$/m);
 });
 
 test("lowers static Groovy maps and string-key access to TeaseScript objects", () => {
