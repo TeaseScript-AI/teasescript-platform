@@ -713,7 +713,9 @@ open decision in [`OPEN-DECISIONS.md`](OPEN-DECISIONS.md).
 
 The result separates parser and semantic diagnostics and returns `plan: null` when compilation fails. Runtime entry
 points reuse the identity of a returned validated immutable plan. Other plan data remains subject to the complete
-`validateInstructionPlan(...)` boundary.
+`validateInstructionPlan(...)` boundary, which accepts only the fields that the current plan version defines for each
+plan object and rejects any other field as malformed `TSC002` data. The plan schema evolves through a new plan version
+rather than through silently accepted fields.
 
 Recognized native JavaScript stack exhaustion during parsing or compilation returns error diagnostic `TSC007` across
 the complete source rather than escaping from `compileSource(...)`. This contains a host failure without defining a
@@ -885,11 +887,12 @@ The checkpoint revision represents the complete accepted checkpoint bundle:
 
 Instruction-plan and runtime-snapshot revisions remain independent and do not need matching numbers. No nested duplicate version fields, hidden sub-format registry, migration chain, or generated documentation synchronization is introduced.
 
-During the POC, only the current revision of each format is supported. Non-current revisions may be rejected explicitly,
-obsolete development saves and fixtures may become invalid after an incompatible change, and migration code requires
-a separate owner-approved decision. Git history is sufficient for reconstructing exact older schemas. The current
-revisions include populated `chatPacingGate` background state, prepared pacing output, captured smart-autoplay
-settings, exact pacing-settlement release lineage, and validated prepared message markup with canonical visible text.
+Current POC status: only the current revision of each format is supported and no migration exists. A non-current
+revision is rejected explicitly as unsupported rather than read as current, so obsolete development saves and fixtures
+may become invalid after an incompatible change. Adding migration requires a separate owner-approved decision. Git
+history is sufficient for reconstructing exact older schemas. The current revisions include populated `chatPacingGate`
+background state, prepared pacing output, captured smart-autoplay settings, exact pacing-settlement release lineage, and
+validated prepared message markup with canonical visible text.
 
 ## API stability boundary
 

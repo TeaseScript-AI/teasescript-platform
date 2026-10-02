@@ -1987,7 +1987,6 @@ function validateCallArgumentSupply(
 function createTemporaryMap(
   temporaries: readonly unknown[],
 ): ReadonlyMap<number, Record<string, unknown>> {
-  recordValidationTestWork("temporaryMapBuilds");
   const result = new Map<number, Record<string, unknown>>();
   for (const temporary of temporaries) {
     if (isPlainRecord(temporary) && nonNegativeSafeInteger(temporary.id)) {
