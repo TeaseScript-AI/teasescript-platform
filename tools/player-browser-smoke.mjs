@@ -437,6 +437,8 @@ async function demoScenario(cdp, origin) {
   await physicalClick(cdp, "[data-session-activation] button");
 
   const stageSources = [];
+  let inputOwnershipChecked = false;
+  let spaceSkipChecked = false;
   let staleGestureChecked = false;
   const timers = new Map();
   const texts = new Set();
@@ -490,6 +492,21 @@ async function demoScenario(cdp, origin) {
     if (state.buttons.includes("Stand at attention")) {
       await physicalClick(cdp, "[data-foreground-controls] button:last-of-type");
     } else if (
+      !inputOwnershipChecked &&
+      state.placeholder !== null &&
+      state.texts.some((text) => text.includes("Some of her messages make you wait."))
+    ) {
+      // The first skippable message: its pacing is still pending while the composer is enabled.
+      inputOwnershipChecked = true;
+      await pacingInputOwnershipCheck(cdp);
+    } else if (
+      !spaceSkipChecked &&
+      state.placeholder !== null &&
+      state.texts.some((text) => text.includes("Twenty seconds less. Don't thank me yet."))
+    ) {
+      spaceSkipChecked = true;
+      await spaceSkipCheck(cdp);
+    } else if (
       !staleGestureChecked &&
       state.texts.some((text) => text.includes("You hold still until that clock runs out.")) &&
       !state.texts.some((text) => text.includes("The other one is mine."))
@@ -517,6 +534,7 @@ async function demoScenario(cdp, origin) {
     `!document.querySelector('[data-foreground-controls] button') && document.querySelector('[data-composer-input]')?.disabled === true`,
   );
   await waitFor(cdp, `!document.querySelector('.stage-media')`);
+  assertEqual(inputOwnershipChecked && spaceSkipChecked, true, "The pacing input checks ran");
   assertEqual(staleGestureChecked, true, "The stale skip gesture check ran");
   assertEqual(stageSources.length, 2, "Stage images shown before hideImage");
   if (!stageSources.every((source) => source.startsWith("data:image/svg+xml"))) {
@@ -577,6 +595,62 @@ async function demoScenario(cdp, origin) {
   await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
 }
 
+// A skippable message's pacing settles only from a stationary primary press on unused Player space or from Space in
+// the empty composer. A Player control, message text, and Space while the composer holds text keep their own behavior.
+// It runs as the demo's session message starts its 7.8 s default pacing, so within it only a skip shows the next one.
+async function pacingInputOwnershipCheck(cdp) {
+  const messageCount = `Number(document.querySelector('.transcript-entry')?.getAttribute('aria-setsize') ?? 0)`;
+  const gate = await value(cdp, messageCount);
+  const unchanged = async (message) => {
+    await delay(400);
+    assertEqual(await value(cdp, messageCount), gate, message);
+  };
+  const theme = `document.documentElement.dataset.playerTheme`;
+  const initialTheme = await value(cdp, theme);
+  await physicalClick(cdp, "[data-theme-mode-control]");
+  await waitFor(cdp, `${theme} !== ${JSON.stringify(initialTheme)}`);
+  await unchanged("Activating a Player control also skipped the message's pacing");
+  await physicalClick(cdp, "[data-theme-mode-control]");
+  await waitFor(cdp, `${theme} === ${JSON.stringify(initialTheme)}`);
+  await physicalClick(
+    cdp,
+    `[...document.querySelectorAll('.transcript-entry')].find((entry) => entry.textContent.includes('Some of her messages')).querySelector('[data-slot=bubble]')`,
+    "expression",
+  );
+  await unchanged("Pressing message text skipped its pacing");
+  const input = `document.querySelector('[data-composer-input]')`;
+  await evaluate(cdp, `${input}.focus()`);
+  await cdp.call("Input.insertText", { text: "x" });
+  await pressSpace(cdp);
+  await unchanged("Space in a composer holding text skipped pacing");
+  assertEqual(await value(cdp, `${input}.value`), "x ", "Space in the composer must type a space");
+  await evaluate(
+    cdp,
+    `${input}.value = ''; ${input}.dispatchEvent(new Event('input', {bubbles:true}))`,
+  );
+  await physicalClick(cdp, ".player-stage");
+  await waitFor(
+    cdp,
+    `${messageCount} > ${gate}`,
+    1_000,
+    "A press on unused space did not skip pacing",
+  );
+}
+
+// It runs as a message starts its 3.6 s default pacing: Space in the empty composer shows the next message at once.
+async function spaceSkipCheck(cdp) {
+  const messageCount = `Number(document.querySelector('.transcript-entry')?.getAttribute('aria-setsize') ?? 0)`;
+  const gate = await value(cdp, messageCount);
+  await evaluate(cdp, `document.querySelector('[data-composer-input]').focus()`);
+  await pressSpace(cdp);
+  await waitFor(
+    cdp,
+    `${messageCount} > ${gate}`,
+    1_000,
+    "Space in the empty composer did not skip pacing",
+  );
+}
+
 // A press on empty Stage space that is held past the current message's pacing deadline must not skip the next
 // message's pacing on release (the gesture belongs to the message presented at press time).
 async function staleSkipGestureCheck(cdp) {
@@ -627,10 +701,12 @@ async function staleSkipGestureCheck(cdp) {
   await delay(300);
 }
 
-async function physicalClick(cdp, selector) {
+async function physicalClick(cdp, target, kind = "selector") {
+  const element =
+    kind === "selector" ? `document.querySelector(${JSON.stringify(target)})` : target;
   const point = await value(
     cdp,
-    `(() => { const rect=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return {x:rect.left + rect.width / 2, y:rect.top + rect.height / 2}; })()`,
+    `(() => { const rect=${element}.getBoundingClientRect(); return {x:rect.left + rect.width / 2, y:rect.top + rect.height / 2}; })()`,
   );
   for (const type of ["mousePressed", "mouseReleased"]) {
     await cdp.call("Input.dispatchMouseEvent", {
@@ -643,6 +719,7 @@ async function physicalClick(cdp, selector) {
   }
 }
 
+// A real Space key: unless a handler prevents its default, it types a space into the focused field.
 async function pressSpace(cdp) {
   for (const type of ["keyDown", "keyUp"]) {
     await cdp.call("Input.dispatchKeyEvent", {
@@ -650,6 +727,7 @@ async function pressSpace(cdp) {
       key: " ",
       code: "Space",
       windowsVirtualKeyCode: 32,
+      ...(type === "keyDown" ? { text: " " } : {}),
     });
   }
 }
@@ -725,13 +803,18 @@ async function navigate(cdp, url) {
   await waitFor(cdp, `document.readyState === 'complete'`);
 }
 
-async function waitFor(cdp, expression) {
-  const deadline = Date.now() + 8_000;
+async function waitFor(
+  cdp,
+  expression,
+  timeout = 8_000,
+  failure = `Timed out waiting for: ${expression}`,
+) {
+  const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     if (await value(cdp, expression)) return;
     await delay(50);
   }
-  throw new Error(`Timed out waiting for: ${expression}`);
+  throw new Error(failure);
 }
 
 async function evaluate(cdp, expression) {
