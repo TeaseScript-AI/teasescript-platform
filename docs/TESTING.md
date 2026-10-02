@@ -511,15 +511,18 @@ The implemented ADR 0018 interaction slice covers button, text, number, unlabell
 and numeric-labelled choice through both direct validated plans and real compact source. Tests cover exact parser spans
 and recovery, V30 comma-newline continuation and enclosing-delimiter composition for compact `choose`, protected prelude
 names, choice domains and duplicates, requesting-speaker capture, prepared UI provenance while preparation state exists,
-intrinsic post-cleanup settlement checks, source-order evaluation, sequential blocking expressions, function arguments, root/function checkpoint
-resume, typed completion, transcript behavior, downstream guard delegation, and atomic rejection. The single-use handoff
-regressions prove that a newer retained settlement cannot remove destination/result mismatch rejection before consumption,
-that the handoff disappears immediately after the first successful consume or discard instruction, and that later ordinary
-state no longer carries interaction provenance. Non-canonical branches, loops, second actions, unrelated writers, duplicate
-producers, and independent targets inside the handoff are rejected locally rather than supported through global
-interaction-result liveness. Current interaction-guard cases remain implementation-boundary regressions for the
-provisional POC policies and structural separation; they are not source-capacity evidence and must move with later
-evidence-based reassessment. Every rejected completion compares
+intrinsic post-cleanup settlement checks, source-order evaluation, sequential blocking expressions, function arguments,
+root/function checkpoint resume, typed completion, transcript behavior, located diagnostics for compiled interaction
+data that plan validation rejects, and atomic rejection. The single-use handoff tests cover one row per accepted handoff
+category and prove that the handoff must agree with its settlement on owning and continuation positions, owner,
+destination, and result, that a newer retained settlement cannot remove destination/result mismatch rejection before
+consumption, that the handoff disappears immediately after the first successful consume or discard instruction, and that
+later ordinary state no longer carries interaction provenance. Handoff shapes that would let a validated plan reach a
+rejected snapshot (a second blocking action, a missing or different cleanup, a second producer, an independent entry)
+are rejected locally rather than supported through global interaction-result liveness; one explicitly scoped regression
+row covers the consume requirement as the fixed local shape analyses it. Current interaction-guard cases remain
+implementation-boundary regressions for the provisional POC policies and structural separation; they are not
+source-capacity evidence and must move with later evidence-based reassessment. Every rejected completion compares
 the complete canonical snapshot so RNG state, event/action counters, destinations, ownership, and continuation cannot
 change unnoticed. The local playground Player slice adds deterministic controller coverage for active-presentation
 inspection, all four interaction completions and rejections, pacing skip, explicit time, and checkpoint reconstruction.
