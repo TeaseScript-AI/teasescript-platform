@@ -910,13 +910,22 @@ async function timerChecks(page) {
       new Set(mysterySizing.fontSizes).size === 1,
     "Mystery timers must not reveal a duration category through their typography",
   );
-  check(
-    (await firstTimer.locator(".timer-time").innerText()) === "?",
-    "Mystery timer reveals its time",
+  const mysteryText = await page.locator(".timer-display").evaluateAll((timers) =>
+    timers.map((timer) => ({
+      time: timer.querySelector(".timer-time").innerText,
+      // An authored label may contain digits; the rest of the accessible name must not.
+      name: timer
+        .getAttribute("aria-label")
+        .replace(timer.querySelector(".timer-label")?.textContent ?? "", ""),
+    })),
   );
   check(
-    !(await firstTimer.getAttribute("aria-label")).match(/\d/u),
-    "Mystery timer accessible text reveals its time",
+    mysteryText.length === 3 && mysteryText.every(({ time }) => time === "?"),
+    `Mystery timer reveals its time: ${JSON.stringify(mysteryText)}`,
+  );
+  check(
+    mysteryText.every(({ name }) => !/\d/u.test(name)),
+    `Mystery timer accessible text reveals its time: ${JSON.stringify(mysteryText)}`,
   );
   await page.emulateMedia({ reducedMotion: "reduce" });
   check(
@@ -1964,15 +1973,16 @@ async function composerNoticeChecks(page) {
       const notice = noticeElement.getBoundingClientRect();
       const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
       return (
-        !!document.querySelector(".composer-notice-arrow") &&
-        getComputedStyle(noticeElement).backgroundColor !== "rgba(0, 0, 0, 0)" &&
         // Error treatment: a clearly red border; exact tones remain provisional.
         (([r, g, b]) => r > g + 40 && r > b + 40)(
           getComputedStyle(noticeElement).borderTopColor.match(/\d+/g).map(Number),
         ) &&
         notice.left >= 0 &&
         notice.right <= innerWidth &&
-        Math.abs(composer.top - notice.bottom - 8) < 1 &&
+        // Anchored above the input it belongs to, without overlapping it.
+        notice.bottom <= composer.top + 1 &&
+        notice.left < composer.right &&
+        notice.right > composer.left &&
         Math.abs(composer.top - before.composer) < 1 &&
         Math.abs(
           document.querySelector("[data-foreground-controls]").getBoundingClientRect().bottom -
@@ -1982,9 +1992,6 @@ async function composerNoticeChecks(page) {
     }, before),
     "Standard red composer notice did not open beside the input or moved the controls",
   );
-  const lightNotice = await page
-    .locator(".composer-notice")
-    .evaluate((notice) => getComputedStyle(notice).backgroundColor);
   await page.mouse.click(100, 120);
   check(
     (await page.locator(".composer-notice").count()) === 0,
@@ -2001,28 +2008,24 @@ async function composerNoticeChecks(page) {
   await input.press("Enter");
   await page.locator("[data-runtime-interaction]").getByRole("status").waitFor();
   check(
-    await page.evaluate(
-      ([controlsBefore, lightNotice]) => {
-        const notice = document.querySelector(".composer-notice");
-        const bounds = notice.getBoundingClientRect();
-        return (
-          document.documentElement.dataset.playerTheme === "dark" &&
-          getComputedStyle(notice).backgroundColor !== lightNotice &&
-          (([r, g, b]) => r > g + 40 && r > b + 40)(
-            getComputedStyle(notice).borderTopColor.match(/\d+/g).map(Number),
-          ) &&
-          bounds.left >= 0 &&
-          bounds.right <= innerWidth &&
-          document.documentElement.scrollWidth <= innerWidth &&
-          Math.abs(
-            document.querySelector("[data-foreground-controls]").getBoundingClientRect().bottom -
-              controlsBefore,
-          ) < 1
-        );
-      },
-      [narrowControls, lightNotice],
-    ),
-    "Narrow dark notice changed layout, overflowed, or kept its light colour",
+    await page.evaluate((controlsBefore) => {
+      const notice = document.querySelector(".composer-notice");
+      const bounds = notice.getBoundingClientRect();
+      return (
+        document.documentElement.dataset.playerTheme === "dark" &&
+        (([r, g, b]) => r > g + 40 && r > b + 40)(
+          getComputedStyle(notice).borderTopColor.match(/\d+/g).map(Number),
+        ) &&
+        bounds.left >= 0 &&
+        bounds.right <= innerWidth &&
+        document.documentElement.scrollWidth <= innerWidth &&
+        Math.abs(
+          document.querySelector("[data-foreground-controls]").getBoundingClientRect().bottom -
+            controlsBefore,
+        ) < 1
+      );
+    }, narrowControls),
+    "Narrow dark notice lost its error treatment, changed layout, or overflowed",
   );
   const touchNotice = page.locator(".composer-notice");
   const cdp = await page.context().newCDPSession(page);
@@ -2033,7 +2036,7 @@ async function composerNoticeChecks(page) {
   });
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   await touchNotice.waitFor({ state: "hidden" });
-  return "PASS single composer notice, outside dismissal, stationary choices, and narrow dark styling";
+  return "PASS anchored red composer notice, outside dismissal, stationary choices, and narrow dark fit";
 }
 
 async function sidebarShortcutChecks(page) {
