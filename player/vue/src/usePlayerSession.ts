@@ -66,7 +66,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     () => mediaRevision.value++,
   );
   // While this Player lives, no other Player of the scope may reclaim media it might still use.
-  const releaseLiveMedia = browserCapturedMediaLocks().holdLive(scope);
+  const liveMedia = browserCapturedMediaLocks().holdLive(scope);
+  void liveMedia.granted.then((lease) => {
+    if (lease === "failed") capturedMedia.disableDurable();
+  });
   const camera: SessionCamera<MediaStreamTrack> = new SessionCamera(
     new CaptureDevice(
       createBrowserCaptureHost((kind, state) => {
@@ -194,7 +197,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     camera.release();
     captures.reset();
     capturedMedia.close();
-    releaseLiveMedia();
+    liveMedia.release();
   });
 
   // Starts or restores a session; its scene time continues from the persisted observation, so a

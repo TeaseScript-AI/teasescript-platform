@@ -833,11 +833,13 @@ private spelling. An unavailable camera yields `null` and one `TSW014` developer
 A settled capture is retained as `lastSettlement`, so a repeated completion replays as `alreadySettled`. Captures are
 not interrupted: a due timer expiry block runs once the capture settles. They emit no transcript.
 
-The Player opens the session camera after Start when the trusted host grants the camera capability, answers each
-capture once from that open stream, and delivers the answer until the runtime settles it. Captured photos are session
-media; a save stores the photos its value references durably before the value is persisted, and media no saved value
-references is reclaimed later (`player/captured-media-persistence.ts`). The technical playground has no camera and
-answers a pending capture as `unconfigured` when execution continues.
+The Player opens the session camera after Start when the trusted host grants the camera capability, answers each capture
+once from that open stream, and delivers the answer until the runtime settles it. Captured photos are session media; a
+save stores the photos its value references durably before the value is persisted
+(`player/captured-media-persistence.ts`). Media no saved value references is reclaimed opportunistically when a Player
+opens while no Player of the same scope is live in any tab (Web Locks) and the saved values can be read completely;
+without Web Locks it is not reclaimed, and while a Player lives nothing is deleted. The technical playground has no
+camera and answers a pending capture as `unconfigured` when execution continues.
 
 ## Visible text boundary
 

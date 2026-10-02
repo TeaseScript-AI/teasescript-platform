@@ -92,6 +92,7 @@ export class CapturedMediaStore {
   readonly #prefix = `${REFERENCE_PREFIX}${crypto.randomUUID()}:`;
   #next = 1;
   #closed = false;
+  #durableDisabled = false;
 
   /**
    * @param repository durable storage, or `null` when it could not be opened; captures still work for the session,
@@ -125,6 +126,11 @@ export class CapturedMediaStore {
     return describe(record);
   }
 
+  /** Keeps captures as session media from now on, for example when coordination with other Players failed. */
+  disableDurable(): void {
+    this.#durableDisabled = true;
+  }
+
   /** Drops a session capture whose reference was never handed out, for example after a reset. */
   discard(reference: string): void {
     if (this.#durable.has(reference)) return;
@@ -145,7 +151,7 @@ export class CapturedMediaStore {
     for (const reference of references) {
       const record = this.#records.get(reference);
       if (record === undefined || this.#durable.has(reference)) continue;
-      if (this.#repository === null)
+      if (this.#repository === null || this.#durableDisabled)
         throw new CapturedMediaNotStoredError("No durable media storage is available.");
       try {
         await this.#repository.add(record);

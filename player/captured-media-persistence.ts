@@ -32,19 +32,27 @@ export function capturedMediaReferences(value: SerializableRuntimeValue): Set<st
   return found;
 }
 
+/** A script-storage provider that keeps saved captured media durable; `drain` waits for issued work and stops it. */
+export interface CapturedMediaStorage extends ScriptStorageProvider {
+  /** Rejects later operations and resolves once every issued operation finished. */
+  drain(): Promise<void>;
+}
+
 /**
  * Wraps the script-storage provider so saved captured media stays resolvable in later runs: every write first stores
  * the session media it references durably, then persists the value. When the media cannot be stored, the write is not
  * persisted at all, so no saved reference outlives its media; the key keeps its previous durable value and the write
- * rejects with `CapturedMediaNotStoredError`. All operations run in order, so a clear cannot be refilled by an earlier
- * write. Nothing is deleted here; unreferenced media is removed by `sweepCapturedMedia`.
+ * rejects with `CapturedMediaNotStoredError`. All operations run in issue order, so a clear cannot be refilled by an
+ * earlier write of the same Player. Nothing is deleted here; unreferenced media is removed by `sweepCapturedMedia`.
  */
 export function withCapturedMedia(
   provider: ScriptStorageProvider,
   media: CapturedMediaStore,
-): ScriptStorageProvider {
+): CapturedMediaStorage {
   let queue: Promise<unknown> = Promise.resolve();
+  let draining = false;
   const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
+    if (draining) return Promise.reject(new Error("Script storage is closed."));
     const next = queue.then(operation, operation);
     queue = next.catch(() => {});
     return next;
@@ -58,13 +66,23 @@ export function withCapturedMedia(
         await provider.write(key, value);
       }),
     clear: () => enqueue(() => provider.clear()),
+    async drain() {
+      draining = true;
+      await queue;
+    },
   };
 }
 
+/** Whether a Player holds the shared live lock; only `unsupported` and `held` permit durable media writes. */
+export type LiveMediaLease = "held" | "unsupported" | "failed";
+
 /** Coordination of captured media across every Player of one scope, also in other tabs. */
 export interface CapturedMediaLocks {
-  /** Holds the shared live-Player lock until the returned release is called. */
-  holdLive(scope: string): () => void;
+  /**
+   * Requests the shared live-Player lock; `granted` settles once it is held, or with why it is not. `release` frees it,
+   * also while the request is still pending.
+   */
+  holdLive(scope: string): { readonly granted: Promise<LiveMediaLease>; release(): void };
   /**
    * Runs `work` with the exclusive lock if no Player of the scope is live anywhere; returns `false` without running
    * it otherwise, or when locks are unavailable.
@@ -79,11 +97,19 @@ export function browserCapturedMediaLocks(): CapturedMediaLocks {
   const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
   return {
     holdLive(scope) {
-      if (locks === undefined) return () => {};
-      let release = () => {};
-      const held = new Promise<void>((resolve) => (release = resolve));
-      void locks.request(lockName(scope), { mode: "shared" }, () => held).catch(() => {});
-      return release;
+      if (locks === undefined)
+        return { granted: Promise.resolve("unsupported" as const), release: () => {} };
+      const abort = new AbortController();
+      let release = () => abort.abort();
+      const granted = new Promise<LiveMediaLease>((resolve) => {
+        locks
+          .request(lockName(scope), { mode: "shared", signal: abort.signal }, () => {
+            resolve("held");
+            return new Promise<void>((done) => (release = done));
+          })
+          .catch(() => resolve("failed"));
+      });
+      return { granted, release: () => release() };
     },
     async whenIdle(scope, work) {
       if (locks === undefined) return false;
@@ -99,7 +125,6 @@ export function browserCapturedMediaLocks(): CapturedMediaLocks {
     },
   };
 }
-
 /**
  * Removes stored media of the scope that no saved value references any more. It runs only while no Player of the
  * scope is live, against a fresh read of the saved values; when either cannot be established it defers.
@@ -115,4 +140,44 @@ export async function sweepCapturedMedia(
       for (const reference of capturedMediaReferences(entry.value)) referenced.add(reference);
     await media.sweep(referenced);
   });
+}
+
+export interface CapturedMediaScope {
+  readonly storage: CapturedMediaStorage;
+  /** The saved values that seed the session, read after the live lock was granted. */
+  readonly entries: readonly RuntimeScriptStorageEntrySnapshot[];
+  /** Finishes issued storage work, then releases the live lock; call when the Player unmounts. */
+  close(): Promise<void>;
+}
+
+/**
+ * Opens captured-media persistence for a Player in the only safe order: an opportunistic sweep while no Player of the
+ * scope is live, then the shared live lock, and only then the saved values that seed the session. Without the lock
+ * where locks exist, durable media writes are disabled so they can never race another Player's sweep.
+ */
+export async function openCapturedMediaScope(
+  provider: ScriptStorageProvider,
+  media: CapturedMediaStore,
+  locks: CapturedMediaLocks,
+): Promise<CapturedMediaScope> {
+  // A failed sweep only defers reclamation.
+  await sweepCapturedMedia(provider, media, locks).catch(() => false);
+  const live = locks.holdLive(provider.scope);
+  if ((await live.granted) === "failed") media.disableDurable();
+  const storage = withCapturedMedia(provider, media);
+  let entries: readonly RuntimeScriptStorageEntrySnapshot[];
+  try {
+    entries = await storage.load();
+  } catch (error) {
+    live.release();
+    throw error;
+  }
+  return {
+    storage,
+    entries,
+    async close() {
+      await storage.drain();
+      live.release();
+    },
+  };
 }
