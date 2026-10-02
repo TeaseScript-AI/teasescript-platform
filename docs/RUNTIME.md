@@ -5,7 +5,7 @@
 `player/runtime-adapter.ts` is the framework-independent Player adapter shared by the Player and the
 playground's action lookup/completion path. It maps validated pending actions and runtime events to Player presentation,
 submits typed interactions, pacing/time observations, media load reports, and media progress, projects the Stage and
-active media for playback, and uses the canonical runtime checkpoint operations. The Phase 2C Player plays the
+active media for playback, and uses the canonical runtime checkpoint operations. The Player plays the
 projected audio through `player/media-device.ts` and shows the Stage image; browser video playback remains deferred.
 `playground/workspace/controller.ts` retains the DOM-free compiler/execution and development-automation workspace
 facade. Neither adapter normalizes answers, matches choices, derives canonical transcript text, or retains an
@@ -85,7 +85,23 @@ continuation.
 
 The compact compiler fully lowers these forms into the versioned plan. Static control text is embedded directly in the interaction instruction. Dynamic control text first captures the requesting speaker, evaluates payload expressions in source order, and stores one prepared UI value; dynamic `choose` batches all option expressions into one prepared list rather than emitting one interaction-preparation instruction per option. The runtime materializes and validates that prepared UI atomically before publishing the pending action. No Standard Library lookup or suspended JavaScript/TypeScript call survives the compile boundary.
 
-Result-bearing text, number, and choice instructions require the destination temporary to be absent when the interaction is requested. Successful completion atomically writes the typed result into that prepared ordinary runtime temporary, records one nullable single-use `interactionResultHandoff` authority, and advances to the next instruction without executing it. The handoff contains only the completed action identity, owning and continuation positions, owner call frame, destination temporary, and canonical result. It remains independent of bounded `lastSettlement` replay data, so a later settlement cannot remove the value-consistency check before consumption. A canonical plan then either discards the temporary directly, returns or exits the owning runtime region, or performs one ordinary local consume/transfer instruction followed immediately by `clearTemporary`. The handoff record is removed after that first instruction succeeds; after a value is copied into an ordinary binding, prepared argument, assignment, or other runtime destination, no interaction-specific provenance remains during cleanup or later execution. No branch, loop edge, second blocking action, arbitrary user-function call, unrelated writer, or independent control-flow target may occur inside that short boundary. The validator enforces this fixed local shape rather than performing whole-plan result-liveness analysis. A result-free button may be the terminal root instruction and uses the existing canonical settled root-end transition.
+Result-bearing text, number, and choice instructions require the destination temporary to be absent when the interaction
+is requested. Successful completion atomically writes the typed result into that prepared ordinary runtime temporary,
+records one nullable single-use `interactionResultHandoff` authority, and advances to the next instruction without
+executing it. The handoff contains only the completed action identity, owning and continuation positions, owner call
+frame, destination temporary, and canonical result. Snapshot validation checks it independently of the bounded
+`lastSettlement` replay data, so persisted data that pairs it with a newer settlement cannot bypass the
+value-consistency check before consumption. A canonical plan then either discards the temporary directly, returns or
+exits the owning runtime region, or performs one ordinary local consume/transfer instruction followed immediately by
+`clearTemporary`. The handoff record is removed after that first instruction succeeds; after a value is copied into an
+ordinary binding, prepared argument, assignment, or other runtime destination, no interaction-specific provenance
+remains during cleanup or later execution. A second blocking action, a second producer of the destination, a missing or
+different cleanup, and an independent control-flow entry into the handoff are invalid inside that short boundary,
+because each would let a validated plan reach a state that snapshot validation rejects. The current validator enforces
+this through a fixed local shape rather than whole-plan result-liveness analysis; its conservative analysis of which
+expression positions count as reading the destination, and its exclusion of branches, loop edges, user-function calls,
+and control-flow targets onto the cleanup, are provisional POC policy, not language semantics. A result-free button may
+be the terminal root instruction and uses the existing canonical settled root-end transition.
 
 Completion semantics are:
 
@@ -101,24 +117,23 @@ The current runtime keeps three independent interaction resource axes: completio
 aggregate UTF-8 bytes for one retained interaction definition, and option count. Authored/materialized UI fields have no
 independent per-field byte ceiling; each preflights against the remaining definition aggregate. Exact numeric values and
 their provisional Owner POC reassessment route live in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md); they are not accepted
-capacity or source targets. Bounded validation first rejects impossible UTF-16 lengths, measures each accepted field
-once, and stops encoding after the applicable byte budget fails. Text completion measures the raw host string once;
-CRLF/CR-to-LF normalization cannot increase its UTF-8 size. Over-limit data is rejected without truncation, clamping,
-or partial state mutation.
+capacity or source targets. Bounded validation rejects impossible UTF-16 lengths before encoding and encodes no further
+field once the applicable byte budget fails, so encoding work stays bounded by the byte budget rather than by the total
+string size. The text-completion limit applies to the raw host string before CRLF/CR-to-LF normalization, which cannot
+increase its UTF-8 size. Over-limit data is rejected without truncation, clamping, or partial state mutation.
 
 Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `WhiteSpace` and `LineTerminator` classification represented by the engine's Unicode-aware regular expression. The identifier-choice label grammar is the current ASCII TeaseScript identifier form. Choice duplicate detection and completion matching use bounded native sets or one linear option pass.
 
 Successful completion emits the canonical `playerTranscript` event first and `actionCompleted` second. Both receive
 monotonic sequences, and the bounded settlement retains both sequences, the canonical result, transcript text,
-destination temporary, and owning call-frame identity for duplicate replay. The separate single-use handoff is the
-persisted authority for the still-unconsumed destination and is validated independently when `lastSettlement` has
-already been replaced. Prepared dynamic UI is checked against its preparation temporaries while those temporaries
-remain; after canonical cleanup, snapshot validation does not reconstruct or authenticate the historical dynamic-UI
-evaluation, consistent with the general snapshot-history rule below. Delay creation preflights its request plus future
-completion sequence; interaction creation preflights its request plus future transcript and completion sequences.
-Interaction completion rechecks both required sequences and validates the complete destination mutation before
-publishing any write, handoff, settlement, event, or continuation change. Continuation execution remains eligible only
-through a later normal runtime entry.
+destination temporary, and owning call-frame identity for duplicate replay. The separate single-use handoff, not that
+settlement, is the persisted authority for the still-unconsumed destination. Prepared dynamic UI is checked against its
+preparation temporaries while those temporaries remain; after canonical cleanup, snapshot validation does not
+reconstruct or authenticate the historical dynamic-UI evaluation, consistent with the general snapshot-history rule
+below. Delay creation preflights its request plus future completion sequence; interaction creation preflights its
+request plus future transcript and completion sequences. Interaction completion rechecks both required sequences and
+validates the complete destination mutation before publishing any write, handoff, settlement, event, or continuation
+change. Continuation execution remains eligible only through a later normal runtime entry.
 
 ### Standard composer and dynamic choice presentation
 
@@ -315,7 +330,7 @@ Player-authored messages do not create gates. No compiler lookahead across branc
 Message presentation follows the accepted [speaker inheritance and override contract](specifications/accepted-syntaxes-v30.md#message-presentation-defaults-and-overrides).
 The runtime resolves mode/style into `MessagePresentation` while preparing output, preserves that data through pacing
 promotion and checkpoints, and emits it with the canonical `say` event. The Player adapter forwards these values; the
-Phase 2C Player renders them under the observable contract in [Player UI](ui/PLAYER-UI.md). Invalid colour values fall
+Player renders them under the observable contract in [Player UI](ui/PLAYER-UI.md). Invalid colour values fall
 back without a new warning policy; general diagnostic/recovery design is tracked separately in #427.
 
 ### Skippable gate completion
@@ -831,7 +846,8 @@ The `xorshift32-v1` seed and serialized state must be non-zero unsigned 32-bit i
 - `nextXorShift32(...)` rejects direct malformed state `0`;
 - `validateRuntimeSnapshot(...)` rejects a snapshot whose RNG state is `0`;
 - checkpoint restore translates that malformed snapshot state into structured `CheckpointError` code `TSK002`;
-- valid non-zero seeds retain the existing deterministic sequence and do not change the algorithm or versioned formats.
+- a valid non-zero seed produces the deterministic sequence of the versioned `xorshift32-v1` algorithm; a deliberate
+  algorithm change uses a new algorithm version (ADR 0015) instead of changing the sequence under that identifier.
 
 The zero-state rule prevents the absorbing xorshift32 state in which every future state and output remains zero. It does not change the plan, runtime-snapshot, or checkpoint format version.
 

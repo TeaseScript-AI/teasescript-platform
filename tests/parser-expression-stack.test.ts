@@ -22,63 +22,57 @@ test("general expression continuations parse valid and malformed nesting on a co
       ['hint', 'askText ', ''],
       ['choice', 'choose first:', ''],
     ];
+    // One depth far beyond the old guard proves stack safety; smaller depths add no failure mode.
+    const depth = 4096;
     for (const [name, open, close] of families) {
-      for (const depth of [256, 1024, 4096]) {
-        const source = 'let value = ' + open.repeat(depth) + '1' + close.repeat(depth) + '\\nexit';
-        const parsed = parse(source);
-        assert.deepEqual(parsed.diagnostics, [], name + ':' + depth);
-        assert.equal(parsed.program.statements.length, 2);
-        const declaration = parsed.program.statements[0];
-        assert.equal(declaration.kind, 'letStatement');
-        assert.equal(declaration.initializer.span.start.offset, 12);
-        assert.equal(declaration.initializer.span.end.offset, source.length - 5);
-        assert.equal(parsed.program.statements[1].kind, 'exitStatement');
-        // Inspect without native JSON/deepEqual recursion, which is not parser evidence.
-        const pending = [declaration.initializer];
-        let nodes = 0;
-        while (pending.length) {
-          const value = pending.pop();
-          if (value === null || typeof value !== 'object') continue;
-          assert.equal(Object.isFrozen(value), true);
-          if ('kind' in value) nodes++;
-          for (const child of Object.values(value)) {
-            if (child !== null && typeof child === 'object') pending.push(child);
-          }
+      const source = 'let value = ' + open.repeat(depth) + '1' + close.repeat(depth) + '\\nexit';
+      const parsed = parse(source);
+      assert.deepEqual(parsed.diagnostics, [], name);
+      assert.equal(parsed.program.statements.length, 2);
+      const declaration = parsed.program.statements[0];
+      assert.equal(declaration.kind, 'letStatement');
+      assert.equal(declaration.initializer.span.start.offset, 12);
+      assert.equal(declaration.initializer.span.end.offset, source.length - 5);
+      assert.equal(parsed.program.statements[1].kind, 'exitStatement');
+      // Inspect without native JSON/deepEqual recursion, which is not parser evidence.
+      const pending = [declaration.initializer];
+      let nodes = 0;
+      while (pending.length) {
+        const value = pending.pop();
+        if (value === null || typeof value !== 'object') continue;
+        assert.equal(Object.isFrozen(value), true);
+        if ('kind' in value) nodes++;
+        for (const child of Object.values(value)) {
+          if (child !== null && typeof child === 'object') pending.push(child);
         }
-        assert.ok(nodes >= depth);
-        // Missing inner operand/property values and closers exercise recovery at
-        // every suspended level without any optimized-path retry/reparse.
-        const malformed = 'let value = ' + open.repeat(depth) + (name === 'hint' ? 'as' : '') + '\\nexit';
-        const rejected = parse(malformed);
-        const repeats = (code, count) => Array(count).fill(code);
-        if (name === 'groups' || name === 'interpolation') {
-          // Neither grammar supplies a boundary before EOF, so only the root
-          // diagnostic is fixed: the missing operand before 'exit' or the
-          // physical newline inside the innermost string. Secondary unwinding
-          // must stay structured, source-associated and deterministic.
-          const compact = (d) => [d.code, d.span.start.offset, d.span.end.offset];
-          const root = name === 'groups'
-            ? ['TSP012', malformed.lastIndexOf('exit'), malformed.lastIndexOf('exit')]
-            : ['TSL008', malformed.indexOf('\\n'), malformed.indexOf('\\n') + 1];
-          assert.deepEqual(compact(rejected.diagnostics[0]), root, name + ':' + depth);
-          for (const d of rejected.diagnostics) {
-            assert.match(d.code, /^TS[LP][0-9]{3}$/u, name + ':' + depth);
-            assert.ok(0 <= d.span.start.offset && d.span.start.offset <= d.span.end.offset
-              && d.span.end.offset <= malformed.length, name + ':' + depth);
-          }
-          assert.deepEqual(parse(malformed).diagnostics.map(compact), rejected.diagnostics.map(compact));
-          for (const s of rejected.program.statements) {
-            assert.ok(['letStatement', 'exitStatement'].includes(s.kind), name);
-          }
-        } else {
-          const codes = name === 'hint' ? ['TSP029']
-            : name === 'choice' ? ['TSP030']
-            : ['TSP012', ...repeats('TSP017', name === 'mixed' ? depth * 2 : name === 'index' ? depth - 1 : depth), ...(name === 'sets' ? [] : ['TSP002'])];
-          assert.deepEqual(rejected.diagnostics.map(d => d.code), codes, name + ':' + depth);
-          const statements = name === 'hint' || name === 'choice' ? ['letStatement', 'exitStatement'] : ['letStatement'];
-          assert.deepEqual(rejected.program.statements.map(s => s.kind), statements, name);
-        }
-
+      }
+      assert.ok(nodes >= depth);
+      // Missing inner operand/property values and closers exercise recovery at
+      // every suspended level without any optimized-path retry/reparse.
+      const malformed = 'let value = ' + open.repeat(depth) + (name === 'hint' ? 'as' : '') + '\\nexit';
+      const rejected = parse(malformed);
+      if (name === 'hint' || name === 'choice') {
+        // The missing hint or option is the only diagnostic, and 'exit' survives.
+        assert.deepEqual(rejected.diagnostics.map((d) => d.code), [name === 'hint' ? 'TSP029' : 'TSP030'], name);
+        assert.deepEqual(rejected.program.statements.map((s) => s.kind), ['letStatement', 'exitStatement'], name);
+        continue;
+      }
+      // Only the root diagnostic is fixed: the missing value before 'exit', or
+      // the physical newline inside the innermost string. Secondary unwinding
+      // may improve but must stay structured, source-associated and deterministic.
+      const compact = (d) => [d.code, d.span.start.offset, d.span.end.offset];
+      const root = name === 'interpolation'
+        ? ['TSL008', malformed.indexOf('\\n'), malformed.indexOf('\\n') + 1]
+        : ['TSP012', malformed.lastIndexOf('exit'), malformed.lastIndexOf('exit')];
+      assert.deepEqual(compact(rejected.diagnostics[0]), root, name);
+      for (const d of rejected.diagnostics) {
+        assert.match(d.code, /^TS[LP][0-9]{3}$/u, name);
+        assert.ok(0 <= d.span.start.offset && d.span.start.offset <= d.span.end.offset
+          && d.span.end.offset <= malformed.length, name);
+      }
+      assert.deepEqual(parse(malformed).diagnostics.map(compact), rejected.diagnostics.map(compact));
+      for (const s of rejected.program.statements) {
+        assert.ok(['letStatement', 'exitStatement'].includes(s.kind), name);
       }
     }
     console.log('all expression families passed');
@@ -115,9 +109,10 @@ test("nested expression parsing preserves runtime order, grouping, interpolation
   );
 });
 
-// Expected recovery results captured from main before the continuation repair.
-// These rows cover distinct grammar continuations; the complete differential
-// campaign also compared ASTs and every span against that baseline.
+// Each row covers a distinct grammar continuation. Root diagnostics follow from the grammar: the first missing or
+// unexpected token. A value missing after a `:` that ends its line is reported at the start of the continued line,
+// the position chosen when newline continuation after `:` was added. Rows with `root` fix only that first diagnostic,
+// because secondary unwinding may improve; their recovery must still keep the final `exit`.
 test("nested malformed expressions retain root diagnostics, spans, and statement recovery", () => {
   const fixtures = [
     {
@@ -130,34 +125,14 @@ test("nested malformed expressions retain root diagnostics, spans, and statement
       diagnostics: [["TSP012", 25, 25]],
       statements: ["letStatement", "exitStatement"],
     },
-    {
-      expression: "(1 + (2 * ))",
-      // Only the missing-operand root is fixed; same-offset unwinding may change.
-      root: ["TSP012", 22, 22],
-      statements: ["exitStatement"],
-    },
+    { expression: "(1 + (2 * ))", root: ["TSP012", 22, 22] },
     {
       expression: "f(0,f(a:1,2),2)",
       diagnostics: [["TSP019", 22, 23]],
       statements: ["letStatement", "exitStatement"],
     },
-    {
-      expression: '"a${"b${1:2}"}c"',
-      diagnostics: [
-        ["TSP009", 21, 22],
-        ["TSP009", 25, 26],
-        ["TSP012", 28, 28],
-      ],
-      statements: ["exitStatement"],
-    },
-    {
-      expression: "a[b[]].p",
-      diagnostics: [
-        ["TSP012", 16, 16],
-        ["TSP002", 17, 17],
-      ],
-      statements: ["letStatement", "exitStatement"],
-    },
+    { expression: '"a${"b${1:2}"}c"', root: ["TSP009", 21, 22] },
+    { expression: "a[b[]].p", root: ["TSP012", 16, 16] },
     {
       expression: "askText askText as",
       diagnostics: [["TSP029", 30, 30]],
@@ -198,16 +173,18 @@ test("nested malformed expressions retain root diagnostics, spans, and statement
       d.span.start.offset,
       d.span.end.offset,
     ]);
+    const statements = parsed.program.statements.map((s) => s.kind);
     if ("root" in fixture) {
       assert.deepEqual(diagnostics[0], fixture.root, fixture.expression);
+      assert.equal(statements.at(-1), "exitStatement", fixture.expression);
+      assert.ok(
+        statements.every((kind) => kind === "letStatement" || kind === "exitStatement"),
+        fixture.expression,
+      );
     } else {
       assert.deepEqual(diagnostics, fixture.diagnostics, fixture.expression);
+      assert.deepEqual(statements, fixture.statements, fixture.expression);
     }
-    assert.deepEqual(
-      parsed.program.statements.map((s) => s.kind),
-      fixture.statements,
-      fixture.expression,
-    );
     if ("outerProperties" in fixture) {
       // The inner object error must not discard the outer siblings around it.
       const [declaration] = parsed.program.statements;

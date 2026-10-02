@@ -6,7 +6,7 @@ import {
   recordSpeakerAvatarMessage,
   speakerAvatarColors,
   speakerAvatarPalette,
-} from "../player/vue/src/phase2c/speakerAvatar.js";
+} from "../player/vue/src/speakerAvatar.js";
 
 // The palette size and values are provisional; the assignment rules are not.
 const paletteSize = speakerAvatarPalette.length;

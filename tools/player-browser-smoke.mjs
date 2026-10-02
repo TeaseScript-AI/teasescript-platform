@@ -55,11 +55,9 @@ async function main() {
       await setViewport(cdp, 390, 844);
       await selectPlayerExample(cdp);
       await narrowScenario(cdp);
-      await vueRuntimeScenario(cdp, origin);
-      await vueDevelopmentToolsScenario(cdp, origin);
-      await vueTranscriptScenario(cdp, origin);
+      await demoScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS runtime-backed Vue Player plus transcript virtualization, anchoring, and follow",
+        "player-browser-smoke: PASS technical playground and the repository demo on /player/",
       );
     } finally {
       cdp.close();
@@ -81,220 +79,6 @@ async function main() {
   }
   if (scenarioFailed) throw scenarioError;
   if (cleanupError !== undefined) throw cleanupError;
-}
-
-async function vueDevelopmentToolsScenario(cdp, origin) {
-  await setViewport(cdp, 1200, 760);
-  await navigate(cdp, `${origin}/player/`);
-  await waitFor(cdp, `document.querySelector('.player') !== null`);
-  const resetBaselineTranscript = await vueRuntimeTranscript(cdp);
-  const resetBaselineToggle = await value(
-    cdp,
-    `document.querySelector('.right-toggle-control input').checked`,
-  );
-  await selectVueTool(cdp, "visuals");
-  await evaluate(
-    cdp,
-    `([...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Run askText scenario')).click()`,
-  );
-  await waitFor(
-    cdp,
-    `document.querySelector('.composer textarea')?.getAttribute('aria-label') === 'Answer'`,
-  );
-  await evaluate(
-    cdp,
-    `([...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Simulate script update')).click()`,
-  );
-  await waitFor(cdp, `document.querySelector('[data-script-update-feedback]') !== null`);
-  await evaluate(
-    cdp,
-    `([...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Reset visual tests')).click()`,
-  );
-  await waitFor(cdp, `document.querySelector('[data-script-update-feedback]') === null`);
-  assertEqual(
-    JSON.stringify(await vueRuntimeTranscript(cdp)),
-    JSON.stringify(resetBaselineTranscript),
-    "Reset visual tests must restore the baseline runtime and transcript",
-  );
-  assertEqual(
-    await value(cdp, `document.querySelector('.right-toggle-control input').checked`),
-    resetBaselineToggle,
-    "Reset visual tests must undo simulated script updates",
-  );
-
-  await setViewport(cdp, 1200, 760);
-  await navigate(cdp, `${origin}/player/?layout-debug=1`);
-  await waitFor(
-    cdp,
-    `document.querySelector('.debug-card')?.textContent.includes('viewport 1200px')`,
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `(() => { const text=document.querySelector('.debug-constraints')?.textContent ?? ''; const pixels=(value) => Math.round(value * 10) / 10 + 'px'; return text.includes('conversation') && text.includes('right') && text.includes('tool column ' + pixels(document.querySelector('.tool-column').getBoundingClientRect().width) + ' /') && text.includes('composer input ' + pixels(document.querySelector('.composer textarea').getBoundingClientRect().height) + ' /'); })()`,
-    ),
-    true,
-    "wide Layout Debug must compare the tool column and composer input measurements with their constraints",
-  );
-  await setViewport(cdp, 390, 700);
-  await waitFor(
-    cdp,
-    `document.querySelector('.debug-card')?.textContent.includes('viewport 390px')`,
-  );
-  assertEqual(
-    await value(cdp, `document.querySelectorAll('[data-debug-kind]').length >= 5`),
-    true,
-    "narrow Layout Debug must retain current region overlays",
-  );
-
-  await setViewport(cdp, 868, 700);
-  await evaluate(cdp, `document.querySelector('[data-tool-column-add]').click()`);
-  await waitFor(cdp, `document.querySelectorAll('[data-tool-column-id]').length === 2`);
-  await evaluate(
-    cdp,
-    `(() => { const selects=document.querySelectorAll('[data-tool-column-select]'); selects[1].value='visuals'; selects[1].dispatchEvent(new Event('change',{bubbles:true})); })()`,
-  );
-  await waitFor(cdp, `document.querySelector('[aria-label="Timer count"]') !== null`);
-  await evaluate(cdp, `document.querySelector('[data-tool-column-add]').click()`);
-  await waitFor(cdp, `document.querySelectorAll('[data-tool-column-id]').length === 3`);
-  await evaluate(
-    cdp,
-    `(() => { const selects=document.querySelectorAll('[data-tool-column-select]'); selects[2].value='visuals'; selects[2].dispatchEvent(new Event('change',{bubbles:true})); })()`,
-  );
-  await waitFor(cdp, `document.querySelectorAll('[data-visual-lab-instance]').length >= 2`);
-  assertEqual(
-    await value(
-      cdp,
-      `(() => { const ids=[...document.querySelectorAll('[id]')].map((node) => node.id); return ids.length === new Set(ids).size; })()`,
-    ),
-    true,
-    "duplicate Visual Lab columns must retain unique DOM IDs",
-  );
-  await evaluate(
-    cdp,
-    `document.querySelectorAll('[data-visual-lab-instance] .lab-option-info-trigger')[0].click()`,
-  );
-  await waitFor(
-    cdp,
-    `document.querySelectorAll('[data-visual-lab-instance]')[0].querySelector('[aria-expanded="true"]') !== null`,
-  );
-  await evaluate(
-    cdp,
-    `document.querySelectorAll('[data-visual-lab-instance]')[1].querySelector('.lab-option-info-trigger').click()`,
-  );
-  await waitFor(
-    cdp,
-    `document.querySelectorAll('[data-visual-lab-instance]')[0].querySelector('[aria-expanded="true"]') === null && document.querySelectorAll('[data-visual-lab-instance]')[1].querySelector('[aria-expanded="true"]') !== null`,
-  );
-  await evaluate(cdp, `document.querySelector('.composer textarea').focus()`);
-  await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
-  await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-visual-lab-instance] [aria-expanded="true"]') === null`,
-  );
-  await evaluate(
-    cdp,
-    `document.querySelectorAll('[data-visual-lab-instance]')[1].querySelector('.lab-option-info-trigger').click()`,
-  );
-  await waitFor(
-    cdp,
-    `document.querySelectorAll('[data-visual-lab-instance]')[1].querySelector('[aria-expanded="true"]') !== null`,
-  );
-  await physicalClick(cdp, ".media-surface");
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-visual-lab-instance] [aria-expanded="true"]') === null`,
-  );
-  const timerPaneBefore = await value(
-    cdp,
-    `document.querySelector('#rightZone > .timer-wrap').getBoundingClientRect().height`,
-  );
-  await evaluate(
-    cdp,
-    `(() => { const input=document.querySelector('[aria-label="Timer count"]'); input.value='24'; input.dispatchEvent(new Event('change',{bubbles:true})); })()`,
-  );
-  await waitFor(
-    cdp,
-    `document.querySelector('.debug-card')?.textContent.match(/right-timer-list scroll .* [1-9][0-9.]*px y/) !== null`,
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `document.querySelector('#rightZone > .timer-wrap').getBoundingClientRect().height > ${JSON.stringify(timerPaneBefore)}`,
-    ),
-    true,
-    "timer count changes must recompute right-rail pane allocation",
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `document.querySelector('.tool-strip-scroll').scrollWidth > document.querySelector('.tool-strip-scroll').clientWidth && [...document.querySelectorAll('.tool-column-body')].some((body) => body.scrollHeight > body.clientHeight) && document.querySelector('.timer-list').scrollHeight > document.querySelector('.timer-list').clientHeight`,
-    ),
-    true,
-    "Layout Debug fixture must create tool-strip, tool-body, and right-timer overflow",
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `document.querySelector('.debug-card')?.textContent.includes('tool-body-') && document.querySelector('.debug-card')?.textContent.match(/right-timer-list scroll .* [1-9][0-9.]*px y/) !== null`,
-    ),
-    true,
-    "Layout Debug must report the actual overflowing tool body and right timer scroll owner",
-  );
-  await evaluate(
-    cdp,
-    `(() => { const selects=document.querySelectorAll('[data-tool-column-select]'); for (const index of [1,2]) { selects[index].value='runtime-session'; selects[index].dispatchEvent(new Event('change',{bubbles:true})); } })()`,
-  );
-  await waitFor(cdp, `document.querySelectorAll('[data-player-runtime-status]').length === 2`);
-  assertEqual(
-    await value(
-      cdp,
-      `(() => { const ids=[...document.querySelectorAll('[id]')].map((node) => node.id); return ids.length === new Set(ids).size; })()`,
-    ),
-    true,
-    "duplicate Runtime Session columns must retain unique DOM IDs",
-  );
-
-  await setViewport(cdp, 1200, 760);
-  await navigate(cdp, `${origin}/player/?fixture=runtime-skippable-long`);
-  await waitFor(cdp, `document.querySelector('.player') !== null`);
-  await selectVueTool(cdp, "runtime-session");
-  await physicalClick(cdp, "[data-save-player-checkpoint]");
-  const runtimeBefore = await vueRuntimeTranscript(cdp);
-  await physicalClick(cdp, "[data-tool-column-add]");
-  await evaluate(
-    cdp,
-    `(() => { const selects=document.querySelectorAll('[data-tool-column-select]'); selects[1].value='visuals'; selects[1].dispatchEvent(new Event('change',{bubbles:true})); const toggle=document.querySelector('.right-toggle-control input'); toggle.click(); const composer=document.querySelector('.composer textarea'); composer.value='local draft'; composer.dispatchEvent(new Event('input',{bubbles:true})); })()`,
-  );
-  const localToggleValue = await value(
-    cdp,
-    `document.querySelector('.right-toggle-control input').checked`,
-  );
-  await waitFor(cdp, `document.querySelector('[aria-label="Accent"]') !== null`);
-  await evaluate(
-    cdp,
-    `(() => { const accent=document.querySelector('[aria-label="Accent"]'); accent.value='teal'; accent.dispatchEvent(new Event('change',{bubbles:true})); })()`,
-  );
-  await physicalClickTranscriptBackground(cdp);
-  await waitFor(cdp, `document.querySelector('[data-foreground-button]') !== null`);
-  await physicalClick(cdp, "[data-restore-player-checkpoint]");
-  await waitFor(cdp, `document.querySelector('[data-foreground-button]') === null`);
-  assertEqual(
-    JSON.stringify(
-      (await vueRuntimeTranscript(cdp)).filter((entry) => entry.id.startsWith("runtime-")),
-    ),
-    JSON.stringify(runtimeBefore),
-    "Runtime Session restore must rewind runtime presentation",
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `document.querySelectorAll('[data-tool-column-id]').length === 2 && document.querySelector('[aria-label="Accent"]').value === 'teal' && document.querySelector('.composer textarea').value === 'local draft' && document.querySelector('.right-toggle-control input').checked === ${JSON.stringify(localToggleValue)}`,
-    ),
-    true,
-    "Runtime Session restore must preserve local Visual Lab, tool, right-rail, and composer state",
-  );
 }
 
 function waitForBrowserClose(browser) {
@@ -630,408 +414,216 @@ async function narrowScenario(cdp) {
   await waitFor(cdp, `document.querySelector('#runtime-status')?.textContent === 'halted'`);
 }
 
-async function vueRuntimeScenario(cdp, origin) {
+// Plays the repository demo on the maintained /player/ route of the built Player with trusted input, so the Start
+// click is the user activation its audio relies on. Checks rely on the demo's authored text and timer labels.
+async function demoScenario(cdp, origin) {
+  const { identifier } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
+    source: `window.__played = [];
+      const play = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function () {
+        if (!window.__played.includes(this)) window.__played.push(this);
+        return play.call(this);
+      };`,
+  });
   await setViewport(cdp, 1440, 900);
-  await navigate(cdp, `${origin}/player/?fixture=runtime-skippable-long`);
-  await waitFor(
-    cdp,
-    `document.querySelector('.player') !== null && document.querySelectorAll('[data-transcript-entry-id]').length === 1`,
-  );
-  assertEqual(
-    await value(cdp, `document.querySelector('[data-layout-debug-overlay]') === null`),
-    true,
-    "normal Vue route must start with Layout Debug disabled",
-  );
-  await selectVueTool(cdp, "runtime-session");
-
-  const initialTranscript = await vueRuntimeTranscript(cdp);
-  await physicalClick(cdp, "[data-save-player-checkpoint]");
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-player-runtime-status]')?.textContent.includes('saved')`,
-  );
-  assertEqual(
-    JSON.stringify(await vueRuntimeTranscript(cdp)),
-    JSON.stringify(initialTranscript),
-    "checkpoint control pointer activation must not also skip pacing",
-  );
-
-  await evaluate(cdp, `document.querySelector('[data-save-player-checkpoint]').focus()`);
-  await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space" });
-  await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space" });
-  assertEqual(
-    JSON.stringify(await vueRuntimeTranscript(cdp)),
-    JSON.stringify(initialTranscript),
-    "checkpoint control Space activation must not also skip pacing",
-  );
-
-  await physicalClick(cdp, ".message-body");
-  assertEqual(
-    await value(cdp, `document.querySelector('[data-foreground-button]') === null`),
-    true,
-    "transcript message activation must not skip pacing",
-  );
-  await physicalClick(cdp, ".right-toggle-control .right-control-label");
-  await waitFor(cdp, `document.body.textContent.includes('You changed Strict mode to off.')`);
-  assertEqual(
-    await value(cdp, `document.querySelector('[data-foreground-button]') === null`),
-    true,
-    "nested right-rail control activation must not skip pacing",
-  );
-  await physicalDragTranscriptBackground(cdp);
-  assertEqual(
-    await value(cdp, `document.querySelector('[data-foreground-button]') === null`),
-    true,
-    "a pointer drag across unused transcript space must not skip pacing",
-  );
-  await physicalClickTranscriptBackground(cdp);
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-foreground-button]')?.textContent === 'Continue'`,
-  );
-  assertEqual(
-    JSON.stringify((await vueRuntimeTranscript(cdp)).map((entry) => entry.text.trim())),
-    JSON.stringify(["Long pacing", "You changed Strict mode to off.", "After"]),
-    "runtime and fixture transcript entries must preserve their presentation arrival order",
-  );
-  await physicalClick(cdp, "[data-save-player-checkpoint]");
-  await physicalClick(cdp, "[data-restore-player-checkpoint]");
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-player-runtime-status]')?.textContent.includes('restored')`,
-  );
-  assertEqual(
-    JSON.stringify((await vueRuntimeTranscript(cdp)).map((entry) => entry.text.trim())),
-    JSON.stringify(["Long pacing", "You changed Strict mode to off.", "After"]),
-    "runtime restore must retain the interleaved presentation arrival order",
-  );
-
   await navigate(cdp, `${origin}/player/`);
-  await waitFor(
-    cdp,
-    `document.querySelector('.player') !== null && document.querySelectorAll('[data-transcript-entry-id]').length === 1`,
-  );
-  await navigate(cdp, `${origin}/player/?layout-debug=1`);
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-layout-debug-overlay]') !== null && document.querySelector('.player')?.dataset.chrome !== undefined`,
-  );
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
   assertEqual(
-    await value(
-      cdp,
-      `document.querySelector('[data-layout-debug-overlay]')?.getAttribute('aria-hidden')`,
-    ),
-    "true",
-    "direct Layout Debug URL must enable the non-interactive diagnostic overlay",
-  );
-  await navigate(cdp, `${origin}/player/`);
-  await waitFor(cdp, `document.querySelector('.player') !== null`);
-  await selectVueTool(cdp, "runtime-session");
-
-  await navigate(cdp, `${origin}/player/?fixture=runtime-message-markup`);
-  await waitFor(
-    cdp,
-    `document.querySelector('.markup-heading[role="heading"]')?.textContent === 'Heading'`,
-  );
-  assertEqual(
-    await value(cdp, `document.querySelector('.message-body img') === null`),
-    true,
-    "authored HTML-like markup must remain literal text",
-  );
-  assertEqual(
-    await value(cdp, `document.querySelector('.message-markup a')?.getAttribute('href')`),
-    "https://example.com/",
-    "message links must retain their validated destination",
-  );
-  assertEqual(
-    await value(cdp, `document.querySelector('.message-markup a')?.getAttribute('target')`),
-    "_blank",
-    "message links must not replace the active Player session",
-  );
-  assertEqual(
-    await value(cdp, `document.querySelector('.message-markup a')?.getAttribute('rel')`),
-    "noopener noreferrer",
-    "external message links must isolate their opener",
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `Number.parseInt(getComputedStyle(document.querySelector('.markup-bold')).fontWeight, 10) >= 700`,
-    ),
-    true,
-    "bold message markup must receive controlled Player styling",
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `JSON.stringify([...document.querySelectorAll('.message-markup ul.markup-list, .message-markup ol.markup-list')].map((list) => getComputedStyle(list).listStyleType))`,
-    ),
-    JSON.stringify(["disc", "decimal"]),
-    "unordered and ordered message lists must retain controlled markers after CSS reset",
-  );
-  assertEqual(
-    await value(cdp, `document.querySelectorAll('.markup-spoiler').length`),
+    await value(cdp, `document.querySelectorAll('.transcript-entry').length`),
     0,
-    "message markup has no spoiler controls",
+    "The demo ran before Start",
   );
-  assertEqual(
-    await value(
-      cdp,
-      `document.querySelector(".message-markup")?.textContent.includes("[spoiler]Keyboard[/spoiler]")`,
-    ),
-    true,
-    "removed spoiler tags remain literal text",
-  );
+  await physicalClick(cdp, "[data-session-activation] button");
 
-  await navigate(cdp, `${origin}/player/`);
-  await waitFor(cdp, `document.querySelector('.player') !== null`);
-  await selectVueTool(cdp, "runtime-session");
-
-  await evaluate(cdp, `document.querySelector('.composer textarea').focus()`);
-  await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space" });
-  await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space" });
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-foreground-button]')?.textContent === 'Continue'`,
-  );
-  assertEqual(
-    (await vueRuntimeTranscript(cdp)).length,
-    2,
-    "eligible composer Space must advance the active pacing gate once",
-  );
-
-  await typeAndSubmitVuePlayer(cdp, "Continue");
-  await waitFor(
-    cdp,
-    `document.querySelector('.composer-feedback')?.textContent.includes('rendered button')`,
-  );
-  assertEqual(
-    (await vueRuntimeTranscript(cdp)).length,
-    2,
-    "showButton composer text must not append transcript output",
-  );
-  await typeAndSubmitVuePlayer(cdp, "");
-  assertEqual(
-    await value(cdp, `document.querySelector('[data-foreground-button]')?.textContent`),
-    "Continue",
-    "empty showButton composer submission must leave the control active",
-  );
-
-  await evaluate(
-    cdp,
-    `const button=document.querySelector('[data-foreground-button]'); button.focus(); button.click()`,
-  );
-  await waitFor(
-    cdp,
-    `document.querySelector('.composer textarea')?.getAttribute('aria-label') === 'Answer'`,
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `document.activeElement === document.querySelector('.composer textarea') ? 'composer' : document.activeElement?.outerHTML`,
-    ),
-    "composer",
-    "a typed interaction after rendered activation must focus the composer",
-  );
-  await typeAndSubmitVuePlayer(cdp, "   ");
-  await waitFor(
-    cdp,
-    `document.querySelector('.composer-feedback')?.textContent.includes('non-whitespace')`,
-  );
-  await physicalClick(cdp, "[data-save-player-checkpoint]");
-  await typeAndSubmitVuePlayer(cdp, "Alex");
-  await waitFor(
-    cdp,
-    `document.querySelector('.composer textarea')?.getAttribute('aria-label') === 'Number'`,
-  );
-  await physicalClick(cdp, "[data-restore-player-checkpoint]");
-  await waitFor(
-    cdp,
-    `document.querySelector('.composer textarea')?.getAttribute('aria-label') === 'Answer'`,
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `document.activeElement === document.querySelector('.composer textarea') ? 'composer' : document.activeElement?.outerHTML`,
-    ),
-    "composer",
-    "restoring a typed interaction must focus the composer",
-  );
-  await typeAndSubmitVuePlayer(cdp, "Alex");
-  await waitFor(
-    cdp,
-    `document.querySelector('.composer textarea')?.getAttribute('aria-label') === 'Number'`,
-  );
-  await typeAndSubmitVuePlayer(cdp, "not a number");
-  await waitFor(
-    cdp,
-    `document.querySelector('.composer-feedback')?.textContent.includes('decimal')`,
-  );
-  await typeAndSubmitVuePlayer(cdp, "12.5");
-  await waitFor(cdp, `document.querySelectorAll('.foreground-choice-buttons button').length === 2`);
-  assertEqual(
-    JSON.stringify(
-      await value(
-        cdp,
-        `[...document.querySelectorAll('.foreground-choice-buttons button')].map((button) => button.textContent)`,
-      ),
-    ),
-    JSON.stringify(["First option", "Second option"]),
-    "Vue choices must preserve authored runtime order",
-  );
-
-  await physicalClick(cdp, "[data-save-player-checkpoint]");
-  const beforeChoice = await vueRuntimeTranscript(cdp);
-  await click(cdp, ".foreground-choice-item:nth-child(2) button");
-  await waitFor(cdp, `document.querySelector('[data-foreground-kind]') === null`);
-  await waitFor(cdp, `document.body.textContent.includes('Thanks Alex')`);
-  await click(cdp, "[data-restore-player-checkpoint]");
-  await waitFor(cdp, `document.querySelectorAll('.foreground-choice-buttons button').length === 2`);
-  assertEqual(
-    JSON.stringify(await vueRuntimeTranscript(cdp)),
-    JSON.stringify(beforeChoice),
-    "Vue restore must reconstruct transcript exactly without duplicate output",
-  );
-  await click(cdp, ".foreground-choice-item:nth-child(2) button");
-  await waitFor(cdp, `document.body.textContent.includes('Thanks Alex')`);
-  assertEqual(
-    (await vueRuntimeTranscript(cdp)).filter((entry) => entry.text.includes("Thanks Alex")).length,
-    1,
-    "continuation after restore must emit final output once",
-  );
-  await typeAndSubmitVuePlayer(cdp, "Local follow-up");
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-transcript-entry-id^="fixture-activity-"]')?.textContent.includes('Local follow-up')`,
-  );
-  assertEqual(
-    await value(
+  const stageSources = [];
+  let staleGestureChecked = false;
+  const timers = new Map();
+  const texts = new Set();
+  const avatars = {};
+  const audio = [];
+  let roomPausedDuringCountdown = false;
+  let finished = false;
+  const deadline = Date.now() + 120_000;
+  while (!finished) {
+    if (Date.now() > deadline) throw new Error("The demo did not reach Finish in time");
+    const state = await value(
       cdp,
       `(() => {
-        const message=document.querySelector('[data-transcript-entry-id^="fixture-activity-"]');
-        const container=message?.parentElement;
-        if (!(message instanceof HTMLElement) || !(container instanceof HTMLElement)) return false;
-        const messageRect=message.getBoundingClientRect();
-        const containerRect=container.getBoundingClientRect();
-        return message.classList.contains('user') &&
-          getComputedStyle(message).textAlign === 'right' &&
-          getComputedStyle(message.querySelector('.message-copy')).fontFamily.startsWith('Verdana') &&
-          containerRect.right - messageRect.right < messageRect.left - containerRect.left;
+        const input = document.querySelector('[data-composer-input]');
+        const entries = [...document.querySelectorAll('.transcript-entry')];
+        const entry = (text) => entries.find((element) => element.textContent.includes(text));
+        // An image counts only once it decoded and occupies layout space.
+        const rendered = (image) => !!image && image.complete && image.naturalWidth > 0 && image.getBoundingClientRect().width > 0;
+        return {
+          stage: rendered(document.querySelector('.stage-media')) ? document.querySelector('.stage-media').getAttribute('src') : null,
+          timers: [...document.querySelectorAll('.timer-display')].map((timer) => [
+            timer.querySelector('.timer-label')?.textContent.trim() ?? '',
+            timer.dataset.kind,
+          ]),
+          // The room ambience is the 4 s loop; the chime lasts 1.6 s.
+          roomPaused: window.__played.find((element) => element.duration > 3)?.paused ?? null,
+          audio: window.__played.map((element) => ({ time: element.currentTime, audible: !element.muted && element.volume > 0 })),
+          texts: entries.map((element) => element.textContent),
+          vera: rendered(entry('Eyes on me.')?.querySelector('[data-slot=avatar-image]'))
+            ? entry('Eyes on me.').querySelector('[data-slot=avatar-image]').getAttribute('src').slice(0, 18)
+            : undefined,
+          session: entry('Some of her messages')?.querySelector('[data-speaker-avatar]')?.textContent.trim(),
+          buttons: [...document.querySelectorAll('[data-foreground-controls] button')].map((button) => button.textContent.trim()),
+          placeholder: input && !input.disabled ? input.placeholder : null,
+        };
       })()`,
-    ),
-    true,
-    "fixture user messages must retain the existing right-aligned Phase 1 user presentation",
-  );
-  await setViewport(cdp, 1200, 700);
-  await physicalClick(cdp, "[data-tool-column-add]");
-  await waitFor(cdp, `document.querySelectorAll('[data-tool-column-id]').length === 2`);
-  await waitFor(
-    cdp,
-    `(() => {
-      const scroller=document.querySelector('.tool-strip-scroll');
-      return scroller instanceof HTMLElement && scroller.scrollWidth <= scroller.clientWidth + 1;
-    })()`,
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `(() => {
-        const scroller=document.querySelector('.tool-strip-scroll');
-        const columns=[...document.querySelectorAll('[data-tool-column-id]')];
-        const last=columns.at(-1);
-        if (!(scroller instanceof HTMLElement) || !(last instanceof HTMLElement)) return false;
-        return last.getBoundingClientRect().right <= scroller.getBoundingClientRect().right + 1;
-      })()`,
-    ),
-    true,
-    "two tool columns must fit their preferred desktop panel width without clipping",
-  );
-  await setViewport(cdp, 868, 700);
-  await waitFor(
-    cdp,
-    `(() => {
-      const scroller=document.querySelector('.tool-strip-scroll');
-      return scroller instanceof HTMLElement && scroller.scrollWidth > scroller.clientWidth + 1;
-    })()`,
-  );
-  assertEqual(
-    await value(
-      cdp,
-      `document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1`,
-    ),
-    true,
-    "a genuinely constrained tool strip must not create outer-page horizontal overflow",
-  );
+    );
+    if (state.stage !== null && stageSources.at(-1) !== state.stage) stageSources.push(state.stage);
+    for (const [label, kind] of state.timers) {
+      timers.set(label, new Set([...(timers.get(label) ?? []), kind]));
+      if (label === "Stay exactly like that")
+        roomPausedDuringCountdown ||= state.roomPaused === true;
+    }
+    for (const text of state.texts) texts.add(text);
+    avatars.vera ??= state.vera;
+    avatars.session ??= state.session;
+    state.audio.forEach(({ time, audible }, index) => {
+      if (audible && time > (audio[index] ?? 0)) audio[index] = time;
+    });
 
+    if (state.buttons.includes("Stand at attention")) {
+      await physicalClick(cdp, "[data-foreground-controls] button:last-of-type");
+    } else if (
+      !staleGestureChecked &&
+      state.texts.some((text) => text.includes("You hold still until that clock runs out.")) &&
+      !state.texts.some((text) => text.includes("The other one is mine."))
+    ) {
+      staleGestureChecked = true;
+      await staleSkipGestureCheck(cdp);
+    } else if (state.buttons.length === 1) {
+      finished = state.buttons[0] === "Finish";
+      await physicalClick(cdp, "[data-foreground-controls] button");
+    } else if (state.placeholder === "What you call her") {
+      await evaluate(cdp, `document.querySelector('[data-composer-input]').focus()`);
+      await cdp.call("Input.insertText", { text: "Mistress" });
+      await physicalClick(cdp, ".composer-send");
+    } else if (state.placeholder !== null) {
+      // A skippable pacing gate: Space in the empty composer hurries the message along.
+      await evaluate(cdp, `document.querySelector('[data-composer-input]').focus()`);
+      await pressSpace(cdp);
+    }
+    await delay(150);
+  }
+
+  // Finish completes the last interaction and the script exits: no control remains and input is disabled.
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-foreground-controls] button') && document.querySelector('[data-composer-input]')?.disabled === true`,
+  );
+  await waitFor(cdp, `!document.querySelector('.stage-media')`);
+  assertEqual(staleGestureChecked, true, "The stale skip gesture check ran");
+  assertEqual(stageSources.length, 2, "Stage images shown before hideImage");
+  if (!stageSources.every((source) => source.startsWith("data:image/svg+xml"))) {
+    throw new Error(`The Stage did not show the demo's package images: ${stageSources.join(", ")}`);
+  }
+  assertEqual(
+    JSON.stringify([...timers].map(([label, kinds]) => [label, [...kinds].sort()])),
+    JSON.stringify([
+      ["Hold still", ["visible"]],
+      ["Mistress's timer", ["mystery", "visible"]],
+      ["Stay exactly like that", ["visible"]],
+    ]),
+    "Presented runtime timers",
+  );
+  if (!roomPausedDuringCountdown)
+    throw new Error("The room ambience kept playing during the countdown");
+  if (audio.length !== 2 || !audio.every((time) => time > 0.2)) {
+    throw new Error(`Both demo sounds must actually play audibly: ${JSON.stringify(audio)}`);
+  }
+  assertEqual(avatars.vera, "data:image/svg+xml", "Mistress Vera's avatar image");
+  assertEqual(avatars.session, "S", "Letter glyph for a speaker without an avatar");
+  for (const text of [
+    "Mistress. Good. Don't forget it.",
+    "When you hear that bell, you listen.",
+    "Good. That's enough for your first lesson.",
+  ]) {
+    if (![...texts].some((entry) => entry.includes(text)))
+      throw new Error(`Missing message: ${text}`);
+  }
+
+  // A narrow phone viewport keeps Start and the first question's input reachable.
   await setViewport(cdp, 390, 844);
   await navigate(cdp, `${origin}/player/`);
-  await waitFor(cdp, `document.querySelectorAll('[data-transcript-entry-id]').length === 1`);
-  await evaluate(cdp, `document.querySelector('.composer textarea').focus()`);
-  await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space" });
-  await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space" });
-  await waitFor(
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  const narrowDeadline = Date.now() + 20_000;
+  while (
+    (await value(cdp, `document.querySelector('[data-composer-input]')?.placeholder`)) !==
+    "What you call her"
+  ) {
+    if (Date.now() > narrowDeadline)
+      throw new Error("The narrow demo did not reach its first question");
+    if (await value(cdp, `document.querySelector('[data-composer-input]')?.disabled === false`)) {
+      await evaluate(cdp, `document.querySelector('[data-composer-input]').focus()`);
+      await pressSpace(cdp);
+    }
+    await delay(150);
+  }
+  const inputVisible = await value(
     cdp,
-    `document.querySelector('[data-foreground-button]')?.textContent === 'Continue'`,
+    `(() => { const rect = document.querySelector('[data-composer-input]').getBoundingClientRect(); return rect.top >= 0 && rect.bottom <= innerHeight && rect.left >= 0 && rect.right <= innerWidth && rect.height > 0; })()`,
   );
   assertEqual(
-    await value(
-      cdp,
-      `document.querySelector('.composer').getBoundingClientRect().bottom <= document.querySelector('.player').getBoundingClientRect().bottom`,
-    ),
+    inputVisible,
     true,
-    "narrow runtime-backed composer must remain inside the Player",
+    "The narrow layout keeps the question's input inside the viewport",
   );
+  await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+}
 
-  await navigate(cdp, `${origin}/player/?fixture=runtime-unskippable`);
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-transcript-entry-id]')?.textContent.includes('Locked')`,
-  );
-  await physicalClickTranscriptBackground(cdp);
-  await waitFor(
-    cdp,
-    `document.querySelector('.composer-feedback')?.textContent.includes('not skippable')`,
-  );
+// A press on empty Stage space that is held past the current message's pacing deadline must not skip the next
+// message's pacing on release (the gesture belongs to the message presented at press time).
+async function staleSkipGestureCheck(cdp) {
+  const point = async (selector) =>
+    value(
+      cdp,
+      `(() => { const rect = [...document.querySelectorAll(${JSON.stringify(selector)})].at(-1).getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }; })()`,
+    );
+  // The transcript is virtualized, so count messages through its list size rather than rendered entries.
+  const count = `Number(document.querySelector('.transcript-entry')?.getAttribute('aria-setsize') ?? 0)`;
+  // Read back in the transcript first, so new messages do not scroll it while the button is held.
+  const transcript = await point(".transcript-entry");
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mouseWheel",
+    ...transcript,
+    deltaX: 0,
+    deltaY: -2000,
+  });
+  await delay(300);
+  const before = await value(cdp, count);
+  const stage = await point(".player-stage");
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    ...stage,
+    button: "left",
+    clickCount: 1,
+  });
+  // Hold until the current message's pacing ends and the next message ("The other one is mine.") arrives.
+  await waitFor(cdp, `${count} === ${before + 1}`);
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mouseReleased",
+    ...stage,
+    button: "left",
+    clickCount: 1,
+  });
+  await delay(500);
   assertEqual(
-    (await vueRuntimeTranscript(cdp)).length,
-    1,
-    "unskippable pointer attempt must leave runtime transcript unchanged",
+    await value(cdp, count),
+    before + 1,
+    "Releasing a held press skipped the next message's pacing",
   );
-  await evaluate(cdp, `document.querySelector('.composer textarea').focus()`);
-  await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: " ", code: "Space" });
-  await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space" });
-  assertEqual(
-    (await vueRuntimeTranscript(cdp)).length,
-    1,
-    "unskippable Space attempt must leave runtime transcript unchanged",
-  );
-}
-
-async function typeAndSubmitVuePlayer(cdp, text) {
-  await evaluate(
-    cdp,
-    `const input=document.querySelector('.composer textarea'); input.value=${JSON.stringify(text)}; input.dispatchEvent(new Event('input', {bubbles:true})); document.querySelector('.composer form').requestSubmit()`,
-  );
-}
-
-async function selectVueTool(cdp, toolId) {
-  await evaluate(
-    cdp,
-    `(() => {
-      const select=document.querySelector('[data-tool-column-select]');
-      if (!(select instanceof HTMLSelectElement)) throw new Error('Vue tool selector missing');
-      select.value=${JSON.stringify(toolId)};
-      select.dispatchEvent(new Event('change', {bubbles:true}));
-    })()`,
-  );
-  await waitFor(cdp, `document.querySelector('[data-tool-id=${JSON.stringify(toolId)}]') !== null`);
-}
-
-async function vueRuntimeTranscript(cdp) {
-  return value(
-    cdp,
-    `[...document.querySelectorAll('[data-transcript-entry-id]')].map((entry) => ({id: entry.dataset.transcriptEntryId, text: entry.querySelector('.message-body')?.textContent ?? entry.textContent}))`,
-  );
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mouseWheel",
+    ...transcript,
+    deltaX: 0,
+    deltaY: 20000,
+  });
+  await delay(300);
 }
 
 async function physicalClick(cdp, selector) {
@@ -1039,322 +631,26 @@ async function physicalClick(cdp, selector) {
     cdp,
     `(() => { const rect=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return {x:rect.left + rect.width / 2, y:rect.top + rect.height / 2}; })()`,
   );
-  await cdp.call("Input.dispatchMouseEvent", {
-    type: "mousePressed",
-    x: point.x,
-    y: point.y,
-    button: "left",
-    clickCount: 1,
-  });
-  await cdp.call("Input.dispatchMouseEvent", {
-    type: "mouseReleased",
-    x: point.x,
-    y: point.y,
-    button: "left",
-    clickCount: 1,
-  });
-}
-
-async function physicalClickTranscriptBackground(cdp) {
-  const point = await value(
-    cdp,
-    `(() => {
-      const rect = document.querySelector('.transcript').getBoundingClientRect();
-      for (let y = rect.top + 4; y < rect.bottom - 4; y += 8) {
-        for (let x = rect.left + 4; x < rect.right - 4; x += 8) {
-          if (document.elementFromPoint(x, y)?.classList.contains('transcript')) return {x, y};
-        }
-      }
-      throw new Error('No unused transcript background point is visible.');
-    })()`,
-  );
-  await cdp.call("Input.dispatchMouseEvent", {
-    type: "mousePressed",
-    x: point.x,
-    y: point.y,
-    button: "left",
-    clickCount: 1,
-  });
-  await cdp.call("Input.dispatchMouseEvent", {
-    type: "mouseReleased",
-    x: point.x,
-    y: point.y,
-    button: "left",
-    clickCount: 1,
-  });
-}
-
-async function physicalDragTranscriptBackground(cdp) {
-  const points = await value(
-    cdp,
-    `(() => {
-      const rect = document.querySelector('.transcript').getBoundingClientRect();
-      const points = [];
-      for (let y = rect.top + 4; y < rect.bottom - 4; y += 8) {
-        for (let x = rect.left + 4; x < rect.right - 4; x += 8) {
-          if (document.elementFromPoint(x, y)?.classList.contains('transcript')) points.push({x, y});
-        }
-      }
-      const start = points[0];
-      const end = points.find((point) => start !== undefined && Math.hypot(point.x - start.x, point.y - start.y) >= 24);
-      if (start === undefined || end === undefined) throw new Error('No unused transcript drag path is visible.');
-      return {start, end};
-    })()`,
-  );
-  await cdp.call("Input.dispatchMouseEvent", {
-    type: "mouseMoved",
-    x: points.start.x,
-    y: points.start.y,
-  });
-  await cdp.call("Input.dispatchMouseEvent", {
-    type: "mousePressed",
-    x: points.start.x,
-    y: points.start.y,
-    button: "left",
-    clickCount: 1,
-  });
-  await cdp.call("Input.dispatchMouseEvent", {
-    type: "mouseMoved",
-    x: points.end.x,
-    y: points.end.y,
-    button: "left",
-  });
-  await cdp.call("Input.dispatchMouseEvent", {
-    type: "mouseReleased",
-    x: points.end.x,
-    y: points.end.y,
-    button: "left",
-    clickCount: 1,
-  });
-}
-
-async function vueTranscriptScenario(cdp, origin) {
-  await navigate(cdp, `${origin}/player/?fixture=transcript-stress`);
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-transcript-fixture="stress"]') !== null && document.querySelector('[data-stress-count]')?.textContent === '2000 entries'`,
-  );
-
-  const fixtureGeometry = await value(
-    cdp,
-    `(() => {
-      const controls = document.querySelector('.transcript-stress-controls').getBoundingClientRect();
-      const transcript = document.querySelector('.transcript').getBoundingClientRect();
-      return {controlsBottom: controls.bottom, transcriptTop: transcript.top};
-    })()`,
-  );
-  if (fixtureGeometry.transcriptTop < fixtureGeometry.controlsBottom) {
-    throw new Error(
-      `Vue stress controls overlap the transcript: ${JSON.stringify(fixtureGeometry)}`,
-    );
+  for (const type of ["mousePressed", "mouseReleased"]) {
+    await cdp.call("Input.dispatchMouseEvent", {
+      type,
+      x: point.x,
+      y: point.y,
+      button: "left",
+      clickCount: 1,
+    });
   }
-
-  let metrics = await vueTranscriptMetrics(cdp);
-  assertEqual(metrics.count, 2000, "Vue stress fixture must retain its complete initial history");
-  assertAtMost(metrics.rendered, 32, "Vue transcript rendered DOM must stay bounded");
-  assertAtMost(metrics.distanceFromEnd, 36, "initial Vue transcript must land at latest");
-
-  await click(cdp, "[data-stress-append]");
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-stress-count]')?.textContent === '2001 entries'`,
-  );
-  await delay(220);
-  metrics = await vueTranscriptMetrics(cdp);
-  assertAtMost(metrics.distanceFromEnd, 36, "pinned Vue transcript append must follow latest");
-  assertAtMost(metrics.rendered, 32, "pinned Vue append must keep rendered DOM bounded");
-
-  const pointerProbe = await value(
-    cdp,
-    `(() => {
-      const rect = document.querySelector('.transcript').getBoundingClientRect();
-      return {x: rect.left + 24, y: rect.top + 24, outsideY: Math.max(2, rect.top - 8)};
-    })()`,
-  );
-  await cdp.call("Input.dispatchMouseEvent", {
-    type: "mouseMoved",
-    x: pointerProbe.x,
-    y: pointerProbe.y,
-  });
-  await cdp.call("Input.dispatchMouseEvent", {
-    type: "mousePressed",
-    x: pointerProbe.x,
-    y: pointerProbe.y,
-    button: "left",
-    clickCount: 1,
-  });
-  await cdp.call("Input.dispatchMouseEvent", {
-    type: "mouseMoved",
-    x: pointerProbe.x,
-    y: pointerProbe.outsideY,
-    button: "left",
-  });
-  await cdp.call("Input.dispatchMouseEvent", {
-    type: "mouseReleased",
-    x: pointerProbe.x,
-    y: pointerProbe.outsideY,
-    button: "left",
-    clickCount: 1,
-  });
-  await delay(180);
-
-  await evaluate(
-    cdp,
-    `document.querySelector('.transcript').scrollTo({top: 1_000, behavior: 'auto'})`,
-  );
-  await waitFor(cdp, `document.querySelector('.transcript').scrollTop >= 500`);
-  await delay(300);
-  metrics = await vueTranscriptMetrics(cdp);
-  if (metrics.returnVisible !== true)
-    throw new Error(
-      `Vue return-to-latest control must appear after scrolling settles: ${JSON.stringify(metrics)}`,
-    );
-  assertEqual(metrics.fade, "true", "Vue transcript top fade must follow scroll state");
-
-  const anchorBeforePrepend = await value(
-    cdp,
-    `(() => {
-      const transcript = document.querySelector('.transcript');
-      const transcriptRect = transcript.getBoundingClientRect();
-      const item = [...transcript.querySelectorAll('[data-transcript-entry-id]')].find((candidate) => {
-        const rect = candidate.getBoundingClientRect();
-        return rect.bottom > transcriptRect.top + 2 && rect.top < transcriptRect.bottom - 2;
-      });
-      return item === undefined
-        ? null
-        : {id: item.dataset.transcriptEntryId, offset: item.getBoundingClientRect().top - transcriptRect.top};
-    })()`,
-  );
-  if (anchorBeforePrepend === null)
-    throw new Error("Vue prepend test could not find a visible anchor");
-  await click(cdp, "[data-stress-prepend]");
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-stress-count]')?.textContent === '2013 entries'`,
-  );
-  await delay(220);
-  const anchorAfterPrepend = await value(
-    cdp,
-    `(() => {
-      const transcript = document.querySelector('.transcript');
-      const item = transcript.querySelector(${JSON.stringify(`[data-transcript-entry-id="${anchorBeforePrepend.id}"]`)});
-      return item === null
-        ? null
-        : {offset: item.getBoundingClientRect().top - transcript.getBoundingClientRect().top};
-    })()`,
-  );
-  if (anchorAfterPrepend === null)
-    throw new Error(`Vue prepend lost anchor entry ${String(anchorBeforePrepend.id)}`);
-  assertAtMost(
-    Math.abs(anchorAfterPrepend.offset - anchorBeforePrepend.offset),
-    2,
-    "Vue prepend must preserve the visible keyed entry offset",
-  );
-  metrics = await vueTranscriptMetrics(cdp);
-  assertAtMost(metrics.rendered, 32, "Vue prepend must keep rendered DOM bounded");
-
-  const awayTop = metrics.scrollTop;
-  await click(cdp, "[data-stress-append]");
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-stress-count]')?.textContent === '2014 entries'`,
-  );
-  await delay(220);
-  metrics = await vueTranscriptMetrics(cdp);
-  assertAtMost(Math.abs(metrics.scrollTop - awayTop), 2, "away Vue append must not follow latest");
-  if (metrics.returnVisible !== true)
-    throw new Error("Vue return-to-latest control must remain visible after away append");
-
-  const awayGrowTop = metrics.scrollTop;
-  await click(cdp, "[data-stress-grow]");
-  await delay(400);
-  metrics = await vueTranscriptMetrics(cdp);
-  assertAtMost(
-    Math.abs(metrics.scrollTop - awayGrowTop),
-    2,
-    "away Vue measurement growth must not follow latest",
-  );
-
-  const awayResizeTop = metrics.scrollTop;
-  const previousHeight = metrics.clientHeight;
-  await click(cdp, "[data-stress-resize]");
-  await waitFor(cdp, `document.querySelector('.transcript').clientHeight < ${previousHeight}`);
-  await delay(300);
-  metrics = await vueTranscriptMetrics(cdp);
-  assertAtMost(
-    Math.abs(metrics.scrollTop - awayResizeTop),
-    2,
-    "away Vue resize must not follow latest",
-  );
-  if (metrics.returnVisible !== true)
-    throw new Error("Vue return-to-latest control must survive an away resize");
-
-  await click(cdp, ".return-to-latest");
-  await waitFor(
-    cdp,
-    `document.querySelector('.transcript').scrollHeight - document.querySelector('.transcript').clientHeight - document.querySelector('.transcript').scrollTop <= 36`,
-  );
-  await delay(220);
-  metrics = await vueTranscriptMetrics(cdp);
-  if (metrics.returnVisible !== false)
-    throw new Error("Vue return-to-latest control must hide at latest");
-  assertAtMost(metrics.distanceFromEnd, 36, "Vue return-to-latest must restore latest follow");
-
-  const pinnedHeight = metrics.clientHeight;
-  await click(cdp, "[data-stress-resize]");
-  await waitFor(cdp, `document.querySelector('.transcript').clientHeight > ${pinnedHeight}`);
-  await delay(300);
-  metrics = await vueTranscriptMetrics(cdp);
-  assertAtMost(
-    metrics.distanceFromEnd,
-    36,
-    "pinned Vue container resize must preserve latest follow",
-  );
-
-  await click(cdp, "[data-stress-grow]");
-  await delay(400);
-  metrics = await vueTranscriptMetrics(cdp);
-  assertAtMost(
-    metrics.distanceFromEnd,
-    36,
-    "pinned Vue measurement growth must keep latest readable",
-  );
-  await click(cdp, "[data-stress-append]");
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-stress-count]')?.textContent === '2015 entries'`,
-  );
-  await delay(220);
-  metrics = await vueTranscriptMetrics(cdp);
-  assertAtMost(
-    metrics.distanceFromEnd,
-    36,
-    "restored Vue follow must keep appended latest readable",
-  );
-
-  await evaluate(cdp, `document.querySelector('.transcript').scrollTo({top: 0, behavior: 'auto'})`);
-  await waitFor(cdp, `document.querySelector('.transcript').scrollTop === 0`);
-  await delay(180);
-  metrics = await vueTranscriptMetrics(cdp);
-  assertEqual(metrics.fade, "false", "Vue top fade must be off at true top");
 }
 
-async function vueTranscriptMetrics(cdp) {
-  return value(
-    cdp,
-    `(() => {
-      const transcript = document.querySelector('.transcript');
-      return {
-        count: Number.parseInt(document.querySelector('[data-stress-count]').textContent, 10),
-        rendered: transcript.querySelectorAll('.transcript-virtual-item').length,
-        clientHeight: transcript.clientHeight,
-        scrollTop: transcript.scrollTop,
-        distanceFromEnd: transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop,
-        returnVisible: document.querySelector('.return-to-latest') !== null,
-        fade: transcript.dataset.scrolledFromTop,
-      };
-    })()`,
-  );
+async function pressSpace(cdp) {
+  for (const type of ["keyDown", "keyUp"]) {
+    await cdp.call("Input.dispatchKeyEvent", {
+      type,
+      key: " ",
+      code: "Space",
+      windowsVirtualKeyCode: 32,
+    });
+  }
 }
 
 async function selectPlayerExample(cdp) {
@@ -1457,10 +753,6 @@ async function value(cdp, expression) {
 
 function assertEqual(actual, expected, message) {
   if (actual !== expected) throw new Error(`${message}: expected ${expected}, received ${actual}`);
-}
-
-function assertAtMost(actual, maximum, message) {
-  if (actual > maximum) throw new Error(`${message}: expected <= ${maximum}, received ${actual}`);
 }
 
 async function findChromium() {

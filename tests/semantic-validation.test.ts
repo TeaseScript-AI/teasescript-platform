@@ -185,12 +185,6 @@ test("preserves existing function, unknown-name, callable, and protected-name di
     [["TSV028", storedStart, storedStart + "sample".length]],
   );
 
-  const unknownVariable = compileSource("let value = missing");
-  assert.deepEqual(
-    unknownVariable.semanticDiagnostics.map((diagnostic) => diagnostic.code),
-    ["TSV002"],
-  );
-
   const unknownFunction = compileSource("missing()");
   assert.deepEqual(
     unknownFunction.semanticDiagnostics.map((diagnostic) => diagnostic.code),

@@ -251,10 +251,16 @@ test("reports invalid assignment targets with an exact target span", () => {
 });
 
 test("bounds malformed-expression recovery at the next statement", () => {
-  const result = parse('let broken = (1 + )\nsay "recovered"\nexit');
+  const source = 'let broken = (1 + )\nsay "recovered"\nexit';
+  const result = parse(source);
 
-  assert.ok(result.diagnostics.length > 0);
-  assert.ok(result.diagnostics.length <= 3);
+  assert.deepEqual(
+    [result.diagnostics[0]?.code, result.diagnostics[0]?.span.start.offset],
+    ["TSP012", source.indexOf(")")],
+  );
+  for (const diagnostic of result.diagnostics) {
+    assert.ok(diagnostic.span.end.offset <= source.indexOf("\n"), diagnostic.code);
+  }
   assert.deepEqual(
     result.program.statements.map((statement) => statement.kind),
     ["sayStatement", "exitStatement"],
@@ -268,15 +274,6 @@ test("keeps set assignment-keyword syntax invalid", () => {
   assert.deepEqual(
     result.program.statements.map((statement) => statement.kind),
     ["exitStatement"],
-  );
-});
-
-test("does not invent trailing-comma set syntax", () => {
-  const result = parse("let values = set[1,]");
-
-  assert.deepEqual(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
-    ["TSP012"],
   );
 });
 

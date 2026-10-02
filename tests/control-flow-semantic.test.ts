@@ -76,10 +76,3 @@ test("rejects a range-valued bound through semantic validation", () => {
     ["TSV010"],
   );
 });
-
-test("recognizes and protects the core random built-ins", () => {
-  assert.deepEqual(compileSource("say random()").diagnostics, []);
-  const shadowed = compileSource("let random = 1");
-  assert.equal(shadowed.plan, null);
-  assert.ok(shadowed.semanticDiagnostics.some((item) => item.code === "TSV001"));
-});

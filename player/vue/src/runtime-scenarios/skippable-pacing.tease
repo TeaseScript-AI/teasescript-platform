@@ -1,3 +1,0 @@
-say skippable "This runtime pacing gate can be skipped.", 60
-say "The skippable runtime pacing gate completed.", 60
-exit

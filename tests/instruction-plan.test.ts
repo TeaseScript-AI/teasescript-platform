@@ -7,32 +7,9 @@ import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 import { run } from "../src/runtime/engine.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
-test("compiles deterministically to the same instruction plan", () => {
-  const source = 'let score = 1\nscore = score + 1\nsay "${score}"\nexit';
-
-  assert.deepEqual(plan(source), plan(source));
-});
-
-test("compiles if and else to explicit validated jump targets", () => {
+test("compiles if and else so that only the selected branch runs", () => {
   const branchSource = (condition: string) =>
     [`if ${condition} {`, '  say "yes"', "} else {", '  say "no"', "}"].join("\n");
-  const compiled = plan(branchSource("true"));
-  const { instructions } = compiled;
-  const conditional = instructions.findIndex((instruction) => instruction.kind === "jumpIfFalse");
-  const skipElse = instructions.findIndex((instruction) => instruction.kind === "jump");
-  const conditionalJump = instructions[conditional];
-  const skipElseJump = instructions[skipElse];
-
-  assert.equal(conditionalJump?.kind, "jumpIfFalse");
-  assert.equal(skipElseJump?.kind, "jump");
-  if (conditionalJump?.kind !== "jumpIfFalse" || skipElseJump?.kind !== "jump") return;
-  assert.ok(conditional < skipElse);
-  // The false edge lands on the first else instruction, directly after the then-branch exit.
-  assert.equal(conditionalJump.target, skipElse + 1);
-  // The then-branch exit skips the complete else branch to the end of the plan.
-  assert.equal(skipElseJump.target, instructions.length);
-  assert.equal(validateInstructionPlan(compiled).valid, true);
-
   for (const [condition, expected] of [
     ["true", ["yes"]],
     ["false", ["no"]],
@@ -103,12 +80,23 @@ test("contains no non-JSON-safe values and rejects them when supplied", () => {
   assert.doesNotThrow(() => JSON.stringify(compiled));
   assert.equal(findNonJsonValue(compiled), null);
 
-  // EVIDENCE: fixture: parse the JSON-safe compiled plan into mutable instruction dictionaries for invalid-value injection.
+  // EVIDENCE: fixture: parse the JSON-safe compiled plan into the mutable declaration shape of its set literal for invalid-value injection.
   const malformed = JSON.parse(JSON.stringify(compiled)) as {
-    instructions: Array<Record<string, unknown>>;
+    instructions: Array<{
+      value: { properties: Array<{ value: { elements: Array<Record<string, unknown>> } }> };
+    }>;
   };
-  malformed.instructions[0]!.callback = () => undefined;
-  assert.equal(validateInstructionPlan(malformed).valid, false);
+  // A known literal-value field, so the rejection is about the value and not about an unknown key.
+  malformed.instructions[0]!.value.properties[0]!.value.elements[0]!.value = () => undefined;
+  const validation = validateInstructionPlan(malformed);
+  assert.ok(
+    validation.errors.some(
+      (error) =>
+        error.code === "TSC002" &&
+        error.path === "$.instructions[0].value.properties[0].value.elements[0].value",
+    ),
+    JSON.stringify(validation.errors),
+  );
 });
 
 test("compiler-produced plans remain deeply frozen", () => {

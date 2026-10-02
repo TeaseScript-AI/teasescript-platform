@@ -29,7 +29,7 @@ The repository currently has no browser-automation dependency and no external pr
 tests, preserving actionable failure information. `npm run format` applies the formatter policy;
 `npm run format:check` verifies it without writing. `npm run lint` applies the [type-evidence policy](LINTING.md);
 `npm run test:lint` type-checks and tests the maintained rule implementation; `npm run knip` checks the selected
-unused-code and dependency categories. `npm run lint:design:phase2c` and `npm run test:lint:design`
+unused-code and dependency categories. `npm run lint:design` and `npm run test:lint:design`
 check the [Player design contracts](LINTING.md#player-design-lint) and their positive/negative fixtures;
 both are included in `npm run check`.
 Independent pre-test gates and UI checks/builds run concurrently through `tools/run-parallel.mjs`.
@@ -96,17 +96,18 @@ measurements as permanent limits.
 Before removing or consolidating a family, record its obligation and remaining evidence in the issue/PR. Delete checks
 that only freeze provisional geometry, development-fixture content, private implementation details, or temporary
 incompleteness (for example an accepted or intended capability being absent, unsuggested, disabled, or represented by a
-placeholder); preserve genuine
-regressions and browser risks exercised *through* fixtures. Replace numeric tuning assertions with observable behavior
-where possible. A POC check needs reassessment when its experiment changes or ends, not automatic repair to preserve an
-obsolete expectation. Repeated input/viewport cases need distinct failure modes, not merely different values.
+placeholder); preserve genuine regressions and browser risks exercised *through* fixtures. Replace numeric tuning
+assertions with observable behavior where possible. A POC check needs reassessment when its experiment changes or ends,
+not automatic repair to preserve an obsolete expectation. Repeated input/viewport cases need distinct failure modes, not
+merely different values.
 
 Tests do not establish product policy. Each test must identify the desirable behavior that would regress if it failed;
 "the code currently does this" is not enough. Derive expected values from specification or independent reasoning where
 possible. A value captured from the current implementation is acceptable only as an explicitly scoped regression oracle
 and does not by itself make that value a broader product requirement. For example, a numeric oracle tied to a current
-algorithm may detect regression without making that number a project-wide accessibility or performance requirement;
-identify that scope explicitly.
+algorithm, such as a plan-size baseline, may detect regression without making that number a project-wide accessibility,
+performance, or compatibility requirement; identify that scope explicitly. The baseline may be reviewed and updated when
+an intentional implementation change legitimately changes it.
 
 ## Test layers
 
@@ -139,14 +140,14 @@ End-to-end testing does not replace focused unit, validator, and invariant tests
 
 Use focused unit tests for deterministic presentation logic and the repository's local Chromium smoke route for changed
 browser behavior, including layout, focus, input, scrolling, overlays, and accessibility state. The existing Chromium
-DevTools smoke route has no browser-automation package dependency. For the Phase 2C development preview, run
-`npm run test:player:phase2c-browser -- <preview-url>` against a running `npm run dev:player:phase2c` server; it requires
+DevTools smoke route has no browser-automation package dependency; it plays the repository demo end to end (see
+[Local browser smoke](#local-browser-smoke-and-future-host-e2e-gate)). For the development preview, run
+`npm run test:player:preview -- <preview-url>` against a running `npm run dev:player` server; it requires
 `playwright-cli` on `PATH` and an available Chromium browser. Both run outside `npm run check` and are not a final
-cross-browser or production-host E2E suite. Retained Phase 2C groups use fresh browser contexts. Checks that depended
-on removed development fixtures are replaced by the `demo.tease` end-to-end path after runtime integration. On failure
-the runner reports a retained scratch directory with a screenshot and Playwright trace for the failing group; delete
-it after diagnosis.
-`npm test` separately checks that the default Phase 2C build does not statically load development preview content.
+cross-browser or production-host E2E suite. Preview groups use fresh browser contexts. On failure the runner reports a
+retained scratch directory with a screenshot and Playwright trace for the failing group; delete it after diagnosis.
+`npm test` separately checks that the default Player build does not statically load development preview content, and
+`tests/player-demo.test.ts` plays the repository demo to its exit through the runtime adapter and media device.
 
 After every visible UI change, the implementer must also open the affected flow with interactive browser tooling
 (computer use where available) and inspect the changed state plus its immediate responsive/interaction neighbors. This
@@ -245,13 +246,13 @@ A matrix or equivalent model should:
   boundaries when those boundaries are relevant;
 - permit later consolidation without losing any unique evidence obligation.
 
-Unsupported or out-of-scope combinations do not automatically require
-executable cases. For obligations included in the bounded coverage model,
-accepted behavior and required rejection through a real supported or trusted
-boundary require executable evidence. When a real boundary must reject an
-otherwise unsupported composition, classify that cell as a rejected obligation
-and test it as such. Other unsupported or out-of-scope cells may remain
-classified but unexecuted.
+Unsupported or out-of-scope combinations do not automatically require executable cases. For obligations included in the
+bounded coverage model, accepted behavior and required rejection through a real supported or trusted boundary require
+executable evidence. When accepted behavior or a real validation boundary requires durable rejection of an otherwise
+unsupported composition, classify that cell as a rejected obligation and test it as such. Behavior that is merely not
+yet implemented is not a rejected obligation; any test for it follows
+[test admission](#test-admission-and-consolidation). Other unsupported or out-of-scope cells may remain classified but
+unexecuted.
 
 An additive evidence phase may temporarily retain overlapping regressions while
 the behavior space is being mapped. Once an independent check confirms that the
@@ -510,15 +511,18 @@ The implemented ADR 0018 interaction slice covers button, text, number, unlabell
 and numeric-labelled choice through both direct validated plans and real compact source. Tests cover exact parser spans
 and recovery, V30 comma-newline continuation and enclosing-delimiter composition for compact `choose`, protected prelude
 names, choice domains and duplicates, requesting-speaker capture, prepared UI provenance while preparation state exists,
-intrinsic post-cleanup settlement checks, source-order evaluation, sequential blocking expressions, function arguments, root/function checkpoint
-resume, typed completion, transcript behavior, downstream guard delegation, and atomic rejection. The single-use handoff
-regressions prove that a newer retained settlement cannot remove destination/result mismatch rejection before consumption,
-that the handoff disappears immediately after the first successful consume or discard instruction, and that later ordinary
-state no longer carries interaction provenance. Non-canonical branches, loops, second actions, unrelated writers, duplicate
-producers, and independent targets inside the handoff are rejected locally rather than supported through global
-interaction-result liveness. Current interaction-guard cases remain implementation-boundary regressions for the
-provisional POC policies and structural separation; they are not source-capacity evidence and must move with later
-evidence-based reassessment. Every rejected completion compares
+intrinsic post-cleanup settlement checks, source-order evaluation, sequential blocking expressions, function arguments,
+root/function checkpoint resume, typed completion, transcript behavior, located diagnostics for compiled interaction
+data that plan validation rejects, and atomic rejection. The single-use handoff tests cover one row per accepted handoff
+category and prove that the handoff must agree with its settlement on owning and continuation positions, owner,
+destination, and result, that a newer retained settlement cannot remove destination/result mismatch rejection before
+consumption, that the handoff disappears immediately after the first successful consume or discard instruction, and that
+later ordinary state no longer carries interaction provenance. Handoff shapes that would let a validated plan reach a
+rejected snapshot (a second blocking action, a missing or different cleanup, a second producer, an independent entry)
+are rejected locally rather than supported through global interaction-result liveness; one explicitly scoped regression
+row covers the consume requirement as the fixed local shape analyses it. Current interaction-guard cases remain
+implementation-boundary regressions for the provisional POC policies and structural separation; they are not
+source-capacity evidence and must move with later evidence-based reassessment. Every rejected completion compares
 the complete canonical snapshot so RNG state, event/action counters, destinations, ownership, and continuation cannot
 change unnoticed. The local playground Player slice adds deterministic controller coverage for active-presentation
 inspection, all four interaction completions and rejections, pacing skip, explicit time, and checkpoint reconstruction.
@@ -550,21 +554,24 @@ media and timers, cue blocks with self-handles, Stage replacement, pacing barrie
 checkpoint/restore equivalence with a simulated Player, and rejection of malformed media state.
 `tests/player-media-device.test.ts` drives the Player's media device against real sessions with deterministic element
 stand-ins: single load reports, stalls, range repetition and terminal stop, pause/resume/seek repositioning, refused
-playback and retry, failed video and unavailable sources, and restore reconnection without repeated cues. The Phase 2C
-browser checks cover Start activation, the runtime Stage image, and actually played audio.
+playback and retry, failed video and unavailable sources, and restore reconnection without repeated cues. The preview
+browser checks cover Start activation, the runtime Stage image, refused-audio retry, and actually played audio.
 
 ## Local browser smoke and future host E2E gate
 
-The playground and legacy Vue reference have a reproducible Chromium smoke route after `npm run build`:
+The playground and the Player's repository demo have a reproducible Chromium smoke route after `npm run build`:
 
 ```shell
 node tools/player-browser-smoke.mjs
 ```
 
-This covers the technical playground and legacy `/player/` reference pending #448. It does not establish Phase 2C
-Player presentation coverage; use the [Player browser verification route](#player-browser-and-visual-verification) for
-that implementation. An unavailable Chromium executable is an explicit skip; an available browser must pass the
-configured smoke checks.
+It covers the technical playground and plays `examples/demo/` on the built `/player/` route with trusted input: Start
+gating, rendered Stage images, the rendered speaker avatar and letter fallback, runtime timers in the rail, audible
+playback, a script pause reaching the playing element, a press held past one message's pacing that must not skip the
+next message's pacing, Finish ending the session, and a narrow viewport that keeps the first question's input visible.
+Development preview presentation is covered by the [Player browser verification
+route](#player-browser-and-visual-verification). An unavailable Chromium executable is an explicit skip; an available
+browser must pass the configured smoke checks.
 
 Production browser E2E coverage becomes required after the cross-origin host shell and player exist. It should then
 include:
