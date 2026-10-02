@@ -912,12 +912,23 @@ test("fixed-seed payload RNG is prepared once and restore does not reevaluate it
   assert.deepEqual(done.snapshot.rng, savedRng);
 });
 
-test("blocking interactions resume through ordinary expression contexts and reject unsupported parameter defaults", () => {
-  const defaultResult = compileSource(
-    "function prompt(value = askText) { return value }\nlet result = prompt()",
-  );
-  assert.equal(defaultResult.plan, null);
-  assert.ok(defaultResult.diagnostics.some((diagnostic) => diagnostic.code === "TSV032"));
+test("blocking interactions resume through ordinary expression contexts and parameter defaults never fail internally", () => {
+  // Rejecting a blocking interaction in a parameter default (currently TSV032) is a provisional implementation
+  // restriction, not TeaseScript semantics. The default must yield a valid plan or source diagnostics located
+  // inside the default, never an internal compiler (TSC) diagnostic.
+  const defaultSource = "function prompt(value = askText) { return value }\nlet result = prompt()";
+  const defaultResult = compileSource(defaultSource);
+  if (defaultResult.plan === null) {
+    assert.notEqual(defaultResult.diagnostics.length, 0);
+    const defaultStart = defaultSource.indexOf("askText");
+    for (const diagnostic of defaultResult.diagnostics) {
+      assert.match(diagnostic.code, /^TS[LPV]\d{3}$/u);
+      assert.ok(diagnostic.span.start.offset >= defaultStart, diagnostic.code);
+      assert.ok(diagnostic.span.end.offset <= defaultStart + "askText".length, diagnostic.code);
+    }
+  } else {
+    assert.equal(validateInstructionPlan(defaultResult.plan).valid, true);
+  }
 
   const pairPlan = compiled("let pair = [askText, askNumber]");
   const firstPending = run(pairPlan, createFreshRuntimeSnapshot(pairPlan));
