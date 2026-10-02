@@ -144,6 +144,8 @@ async function complete(
   operation: (session: PlayerRuntimeSession) => PlayerRuntimeControlResult | null,
   refocusInput = true,
   target: "interaction" | "pacing" = "interaction",
+  // The action the user acted on, when the input began earlier than this call (a held press).
+  expectedActionId?: number,
 ) {
   if (!props.session || submitting.value) return;
   suppressComposerRefocus = !refocusInput;
@@ -156,7 +158,7 @@ async function complete(
       target === "pacing"
         ? playerRuntimePacingGate(current)?.actionId
         : activePlayerRuntimeInteraction(current.snapshot)?.actionId;
-    const presented = targetId(props.session);
+    const presented = expectedActionId ?? targetId(props.session);
     const session = props.observeTime?.() ?? props.session;
     // Elapsed time may have ended or replaced the presented action; input never targets another action.
     if (targetId(session) !== presented) {
@@ -206,11 +208,19 @@ function textSelected() {
   const selection = document.getSelection();
   return !!selection && !selection.isCollapsed;
 }
-function skipPacing(refocusInput: boolean) {
+function skipPacing(refocusInput: boolean, actionId?: number) {
   if (!pacing.value || textSelected()) return;
-  void complete(skipPlayerRuntimePacing, refocusInput, "pacing");
+  void complete(skipPlayerRuntimePacing, refocusInput, "pacing", actionId);
 }
-let pacingGesture: { pointerId: number; x: number; y: number; target: Element } | null = null;
+// A press skips the message whose pacing was presented when it began; a gate that elapses while the button is held
+// is not replaced by the next message's gate.
+let pacingGesture: {
+  pointerId: number;
+  x: number;
+  y: number;
+  target: Element;
+  actionId: number;
+} | null = null;
 useEventListener(document, "pointerdown", (event: PointerEvent) => {
   const composition = root.value?.closest(".player-composition");
   pacingGesture =
@@ -220,7 +230,13 @@ useEventListener(document, "pointerdown", (event: PointerEvent) => {
     event.target instanceof Element &&
     composition?.contains(event.target) &&
     !event.target.closest(pacingSkipExclusions)
-      ? { pointerId: event.pointerId, x: event.clientX, y: event.clientY, target: event.target }
+      ? {
+          pointerId: event.pointerId,
+          x: event.clientX,
+          y: event.clientY,
+          target: event.target,
+          actionId: pacing.value.actionId,
+        }
       : null;
 });
 useEventListener(document, "pointermove", (event: PointerEvent) => {
@@ -236,7 +252,8 @@ for (const type of ["pointercancel", "wheel", "scroll"] as const)
 useEventListener(document, "pointerup", (event: PointerEvent) => {
   const gesture = pacingGesture;
   pacingGesture = null;
-  if (gesture?.pointerId === event.pointerId && gesture.target.isConnected) skipPacing(false);
+  if (gesture?.pointerId === event.pointerId && gesture.target.isConnected)
+    skipPacing(false, gesture.actionId);
 });
 
 function submit(source: "input" | "button") {

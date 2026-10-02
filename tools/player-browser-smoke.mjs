@@ -436,6 +436,7 @@ async function demoScenario(cdp, origin) {
   await physicalClick(cdp, "[data-session-activation] button");
 
   const stageSources = [];
+  let staleGestureChecked = false;
   const timers = new Map();
   const texts = new Set();
   const avatars = {};
@@ -451,8 +452,10 @@ async function demoScenario(cdp, origin) {
         const input = document.querySelector('[data-composer-input]');
         const entries = [...document.querySelectorAll('.transcript-entry')];
         const entry = (text) => entries.find((element) => element.textContent.includes(text));
+        // An image counts only once it decoded and occupies layout space.
+        const rendered = (image) => !!image && image.complete && image.naturalWidth > 0 && image.getBoundingClientRect().width > 0;
         return {
-          stage: document.querySelector('.stage-media')?.getAttribute('src') ?? null,
+          stage: rendered(document.querySelector('.stage-media')) ? document.querySelector('.stage-media').getAttribute('src') : null,
           timers: [...document.querySelectorAll('.timer-display')].map((timer) => [
             timer.querySelector('.timer-label')?.textContent.trim() ?? '',
             timer.dataset.kind,
@@ -461,7 +464,9 @@ async function demoScenario(cdp, origin) {
           roomPaused: window.__played.find((element) => element.duration > 3)?.paused ?? null,
           audio: window.__played.map((element) => ({ time: element.currentTime, audible: !element.muted && element.volume > 0 })),
           texts: entries.map((element) => element.textContent),
-          vera: entry('Eyes on me.')?.querySelector('[data-slot=avatar-image]')?.getAttribute('src')?.slice(0, 18),
+          vera: rendered(entry('Eyes on me.')?.querySelector('[data-slot=avatar-image]'))
+            ? entry('Eyes on me.').querySelector('[data-slot=avatar-image]').getAttribute('src').slice(0, 18)
+            : undefined,
           session: entry('Some of her messages')?.querySelector('[data-speaker-avatar]')?.textContent.trim(),
           buttons: [...document.querySelectorAll('[data-foreground-controls] button')].map((button) => button.textContent.trim()),
           placeholder: input && !input.disabled ? input.placeholder : null,
@@ -483,6 +488,13 @@ async function demoScenario(cdp, origin) {
 
     if (state.buttons.includes("Stand at attention")) {
       await physicalClick(cdp, "[data-foreground-controls] button:last-of-type");
+    } else if (
+      !staleGestureChecked &&
+      state.texts.some((text) => text.includes("You hold still until that clock runs out.")) &&
+      !state.texts.some((text) => text.includes("The other one is mine."))
+    ) {
+      staleGestureChecked = true;
+      await staleSkipGestureCheck(cdp);
     } else if (state.buttons.length === 1) {
       finished = state.buttons[0] === "Finish";
       await physicalClick(cdp, "[data-foreground-controls] button");
@@ -498,7 +510,13 @@ async function demoScenario(cdp, origin) {
     await delay(150);
   }
 
+  // Finish completes the last interaction and the script exits: no control remains and input is disabled.
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-foreground-controls] button') && document.querySelector('[data-composer-input]')?.disabled === true`,
+  );
   await waitFor(cdp, `!document.querySelector('.stage-media')`);
+  assertEqual(staleGestureChecked, true, "The stale skip gesture check ran");
   assertEqual(stageSources.length, 2, "Stage images shown before hideImage");
   if (!stageSources.every((source) => source.startsWith("data:image/svg+xml"))) {
     throw new Error(`The Stage did not show the demo's package images: ${stageSources.join(", ")}`);
@@ -556,6 +574,56 @@ async function demoScenario(cdp, origin) {
     "The narrow layout keeps the question's input inside the viewport",
   );
   await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+}
+
+// A press on empty Stage space that is held past the current message's pacing deadline must not skip the next
+// message's pacing on release (the gesture belongs to the message presented at press time).
+async function staleSkipGestureCheck(cdp) {
+  const point = async (selector) =>
+    value(
+      cdp,
+      `(() => { const rect = [...document.querySelectorAll(${JSON.stringify(selector)})].at(-1).getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }; })()`,
+    );
+  // The transcript is virtualized, so count messages through its list size rather than rendered entries.
+  const count = `Number(document.querySelector('.transcript-entry')?.getAttribute('aria-setsize') ?? 0)`;
+  // Read back in the transcript first, so new messages do not scroll it while the button is held.
+  const transcript = await point(".transcript-entry");
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mouseWheel",
+    ...transcript,
+    deltaX: 0,
+    deltaY: -2000,
+  });
+  await delay(300);
+  const before = await value(cdp, count);
+  const stage = await point(".player-stage");
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    ...stage,
+    button: "left",
+    clickCount: 1,
+  });
+  // Hold until the current message's pacing ends and the next message ("The other one is mine.") arrives.
+  await waitFor(cdp, `${count} === ${before + 1}`);
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mouseReleased",
+    ...stage,
+    button: "left",
+    clickCount: 1,
+  });
+  await delay(500);
+  assertEqual(
+    await value(cdp, count),
+    before + 1,
+    "Releasing a held press skipped the next message's pacing",
+  );
+  await cdp.call("Input.dispatchMouseEvent", {
+    type: "mouseWheel",
+    ...transcript,
+    deltaX: 0,
+    deltaY: 20000,
+  });
+  await delay(300);
 }
 
 async function physicalClick(cdp, selector) {

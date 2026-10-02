@@ -622,7 +622,9 @@ enabled rather than visually disabling it:
 
 This is distinct from a skippable `say` pacing gate: when no foreground interactive control owns the input, a primary
 click/tap on Player background/unused space or Space with the empty focused composer may settle that gate under ADR 0018.
-Actual interactive controls always take precedence and must not also fire the viewport-wide pacing shortcut.
+A click/tap settles only the gate presented when the press began; if that gate ended while the press was held, the
+release settles nothing. Actual interactive controls always take precedence and must not also fire the viewport-wide
+pacing shortcut.
 
 Constraint-driven dropdown presentation under ADR 0018 is not yet implemented in the Player; it currently uses wrapping
 buttons.
