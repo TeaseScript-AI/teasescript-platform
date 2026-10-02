@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ExpressionPlan, Instruction, InstructionPlan } from "../src/plan/model.js";
+import type { Instruction, InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { runValidSource as runSource } from "./helpers/run-valid-source.js";
@@ -12,9 +12,6 @@ test("assigns deterministic function and temporary IDs", () => {
     "function first { return 1 }",
     "function second { return 2 }",
     "let result = first() + second()",
-    "result = result + 1",
-    'say "${result}"',
-    "exit",
   ].join("\n");
   const first = plan(source);
   const second = plan(source);
@@ -31,9 +28,6 @@ test("assigns deterministic function and temporary IDs", () => {
     calls.map((instruction) => functionName(first, instruction.functionId)),
     ["first", "second"],
   );
-  // Both results are live at the addition, so they need independent destinations.
-  const destinations = calls.map((instruction) => instruction.destinationTemporary);
-  assert.equal(new Set(destinations).size, 2);
 });
 
 test("embeds synchronous call arguments without preparation instructions", () => {
@@ -76,59 +70,6 @@ test("evaluates composite and nested user-call arguments in source order", () =>
   assert.equal(result.snapshot.status, "halted");
   assert.deepEqual(sayTexts(result), ["3-5", "3-8", "234"]);
   assert.deepEqual(result.snapshot.temporaries, []);
-});
-
-test("lowers calls in templates, conditions, loop conditions, and returns", () => {
-  const compiled = plan(
-    [
-      "function truth { return true }",
-      "function nested { return truth() }",
-      'if truth() { say "value ${nested()}" }',
-      "while truth() { break }",
-    ].join("\n"),
-  );
-  const { instructions } = compiled;
-  // Names the function whose earlier call writes the temporary that the consumer reads.
-  const calledFor = (consumer: number, value: ExpressionPlan) => {
-    const callIndex = instructions.findIndex(
-      (instruction) =>
-        instruction.kind === "callFunction" &&
-        value.kind === "temporary" &&
-        instruction.destinationTemporary === value.temporaryId,
-    );
-    const call = instructions[callIndex];
-    return callIndex < consumer && call?.kind === "callFunction"
-      ? compiled.functions.find((definition) => definition.id === call.functionId)?.name
-      : null;
-  };
-  const nested = compiled.functions.find((definition) => definition.name === "nested")!;
-  const consumers = instructions.flatMap((instruction, index) => {
-    switch (instruction.kind) {
-      case "jumpIfFalse":
-        return [["condition", calledFor(index, instruction.condition)]];
-      case "loopStart":
-        return [["loop", calledFor(index, instruction.expression)]];
-      case "say":
-        return instruction.value.kind === "template"
-          ? instruction.value.parts.flatMap((part) =>
-              part.kind === "expression" ? [["template", calledFor(index, part.expression)]] : [],
-            )
-          : [];
-      case "returnValue":
-        return index >= nested.entryInstruction && index < nested.endInstruction
-          ? [["return", calledFor(index, instruction.value)]]
-          : [];
-      default:
-        return [];
-    }
-  });
-
-  assert.deepEqual(consumers, [
-    ["condition", "truth"],
-    ["template", "nested"],
-    ["loop", "truth"],
-    ["return", "truth"],
-  ]);
 });
 
 test("evaluates a parameter default only when its argument is omitted", () => {

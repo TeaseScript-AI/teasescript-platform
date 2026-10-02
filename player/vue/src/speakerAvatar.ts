@@ -60,7 +60,7 @@ export const speakerAvatarPalette = [
   },
 ] as const;
 
-export function leastUsedAvatarColor(messageCounts: readonly number[]): number {
+function leastUsedAvatarColor(messageCounts: readonly number[]): number {
   let selected = 0;
   for (let index = 1; index < speakerAvatarPalette.length; index += 1) {
     if (messageCounts[index]! < messageCounts[selected]!) selected = index;

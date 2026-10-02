@@ -2,12 +2,13 @@ import { onScopeDispose } from "vue";
 import { useEventListener } from "@vueuse/core";
 import { isTextEditingTarget } from "@/lib/utils";
 
+const attribute = "data-player-keyboard-focus";
+
 // App owns one navigation modality for the Player and its body-portaled tools.
 // Like React Aria's text-input policy, editing keys do not reveal focus rings:
 // https://github.com/adobe/react-spectrum/blob/main/packages/react-aria/src/interactions/useFocusVisible.ts
 export function usePlayerKeyboardFocus() {
   const root = document.documentElement;
-  const attribute = "data-player-keyboard-focus";
   const previous = root.getAttribute(attribute);
   root.setAttribute(attribute, "true");
 
@@ -36,4 +37,9 @@ export function usePlayerKeyboardFocus() {
     if (previous === null) root.removeAttribute(attribute);
     else root.setAttribute(attribute, previous);
   });
+}
+
+/** Whether the Player's current input modality is a pointer (mouse, touch or pen) rather than the keyboard. */
+export function playerPointerModality(): boolean {
+  return document.documentElement.getAttribute(attribute) === "false";
 }

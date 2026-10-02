@@ -185,6 +185,24 @@ test("supports nested calls in arithmetic and templates", () => {
   assert.deepEqual(sayTexts(result), ["3", "nested:2"]);
 });
 
+test("evaluates user calls used as if and while conditions, template parts, and return values", () => {
+  const result = runSource(
+    [
+      'let calls = ""',
+      'function check(name, value) { calls = "${calls}${name},"\nreturn value }',
+      "function relay(name, value) { return check(name, value) }",
+      "let count = 0",
+      'if check("if", count == 0) { say "then" } else { say "else" }',
+      'while check("while", count < 2) { count = count + 1 }',
+      'say "template:${relay("return", count)}"',
+      "say calls",
+    ].join("\n"),
+  );
+
+  // The while condition is evaluated again before every iteration and once more to stop.
+  assert.deepEqual(sayTexts(result), ["then", "template:2", "if,while,while,while,return,"]);
+});
+
 test("preserves left-to-right call and named-argument side effects", () => {
   const result = runSource(
     [
