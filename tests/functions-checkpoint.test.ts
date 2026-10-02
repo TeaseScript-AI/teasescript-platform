@@ -119,12 +119,14 @@ test("restores direct and mutual recursion at every instruction boundary", () =>
   );
 });
 
-test("restores between nested calls and around say events without duplicates", () => {
-  const { boundaries: observations } = assertRuntimeResumeEquivalent(
+test("restores between nested calls, around say events, and after parameter reassignment", () => {
+  const { boundaries: observations, events } = assertRuntimeResumeEquivalent(
     [
       'function first { say "first"\nreturn 1 }',
       'function second { say "second"\nreturn 2 }',
       "say first() + second()",
+      "function bump(value) { value += 1\nsay value\nreturn value }",
+      "say bump(1)",
     ].join("\n"),
   );
 
@@ -135,6 +137,26 @@ test("restores between nested calls and around say events without duplicates", (
         snapshot.temporaries.length > 0 &&
         snapshot.status === "running",
     ),
+  );
+  // The stored argument stays the supplied value while the body's binding changes, and both remain valid state.
+  assert.ok(
+    observations.some((snapshot) => {
+      const frame = snapshot.callFrames.at(-1);
+      const binding = snapshot.frames[frame?.scopeBaseDepth ?? -1]?.bindings.find(
+        (candidate) => candidate.name === "value",
+      );
+      return (
+        frame?.functionName === "bump" &&
+        frame.parameterState.phase === "body" &&
+        frame.arguments[0]?.supplied === true &&
+        frame.arguments[0].value === 1 &&
+        binding?.value === 2
+      );
+    }),
+  );
+  assert.deepEqual(
+    events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["first", "second", "3", "2", "2"],
   );
 });
 
