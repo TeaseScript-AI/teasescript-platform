@@ -277,6 +277,7 @@ export interface RuntimeCaptureActionSettlementSnapshot {
   readonly settlementKind: "completed";
   readonly owningInstruction: number;
   readonly continuationInstruction: number;
+  readonly ownerCallFrameId: number | null;
   readonly destinationTemporary: number;
   readonly requestEventSequence: number;
   /** The developer warning of an unavailable camera; `null` for a captured photo. */

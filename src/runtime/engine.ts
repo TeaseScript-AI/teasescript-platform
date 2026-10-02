@@ -752,8 +752,12 @@ function executePlannedInstruction(
       ) {
         throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
       }
-      // The request, a possible unavailable-camera warning, and the completion.
-      assertEventSequenceCapacity(snapshot, 3, instruction.span);
+      // The request, a possible unavailable-camera warning, and the completion, besides what active actions reserve.
+      assertEventSequenceCapacity(
+        snapshot,
+        3 + requiredFutureActionCompletionEvents(snapshot),
+        instruction.span,
+      );
       const sequence = takeSequence(snapshot);
       const action: RuntimeCaptureActionSnapshot = Object.freeze({
         kind: "capture",

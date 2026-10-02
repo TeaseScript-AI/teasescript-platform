@@ -226,7 +226,8 @@ export interface RuntimeInteractionResultHandoffSnapshot {
   readonly continuationInstruction: number;
   readonly ownerCallFrameId: number | null;
   readonly destinationTemporary: number;
-  readonly result: string | number;
+  /** `null` only for a capture whose camera was unavailable. */
+  readonly result: string | number | null;
 }
 
 /**

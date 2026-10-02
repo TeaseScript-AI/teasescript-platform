@@ -10,11 +10,15 @@ import {
   restoreCheckpoint,
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
-import { run } from "../src/runtime/engine.js";
+import { executeInstruction, run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
-import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
+import {
+  createFreshRuntimeSnapshot,
+  validateRuntimeSnapshot,
+  type RuntimeSnapshot,
+} from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 
 const PHOTO = "captured-media:photo:1";
@@ -249,4 +253,35 @@ test("restored state rejects a tampered capture action or settlement", () => {
   // An unavailable camera always produced a warning and a null result.
   settled.snapshot.lastSettlement.warningEventSequence = null;
   assert.throws(() => restoreCheckpoint(settled));
+});
+
+test("a restored capture result must match its canonical settlement until the script consumes it", () => {
+  const { plan, snapshot } = started("let photo = takePhoto()\nshowImage photo");
+  const settled = unavailable(plan, snapshot, "denied").snapshot;
+  assert.equal(settled.interactionResultHandoff?.result, null);
+  const restored = JSON.parse(serializeCheckpoint(createCheckpoint(plan, settled)));
+  const destination = restored.snapshot.interactionResultHandoff.destinationTemporary;
+  const temporary = restored.snapshot.temporaries.find(
+    (candidate: { id: number }) => candidate.id === destination,
+  );
+  temporary.value = "images/coast.svg";
+  assert.throws(() => restoreCheckpoint(restored));
+  // The consume clears the handoff, and execution shows nothing.
+  const finished = run(plan, settled).snapshot;
+  assert.equal(finished.interactionResultHandoff, null);
+  assert.equal(finished.stageImage, null);
+});
+
+test("a capture reserves its events on top of what active actions still need", () => {
+  const plan = compileValidPlan("timer async 1\nlet photo = takePhoto()");
+  let snapshot = createFreshRuntimeSnapshot(plan);
+  while (plan.instructions[snapshot.nextInstruction]?.kind !== "capture")
+    snapshot = executeInstruction(plan, snapshot).snapshot;
+  const crowded = structuredClone(snapshot);
+  // The active timer still needs one completion event; the capture needs three more.
+  crowded.nextEventSequence = Number.MAX_SAFE_INTEGER - 3;
+  assert.equal(validateRuntimeSnapshot(crowded, plan).valid, true);
+  const result = executeInstruction(plan, crowded);
+  assert.notEqual(result.snapshot.foregroundAction?.kind, "capture");
+  assert.equal(validateRuntimeSnapshot(result.snapshot, plan).valid, true);
 });

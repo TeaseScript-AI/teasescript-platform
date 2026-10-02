@@ -233,6 +233,7 @@ function completeCapture(
     settlementKind: "completed",
     owningInstruction: action.owningInstruction,
     continuationInstruction: action.continuationInstruction,
+    ownerCallFrameId: action.ownerCallFrameId,
     destinationTemporary: action.destinationTemporary,
     requestEventSequence: action.requestEventSequence,
     warningEventSequence: warningSequence,
@@ -243,6 +244,15 @@ function completeCapture(
   });
   current.foregroundAction = null;
   current.lastSettlement = settlement;
+  // Like an interaction result, the canonical result is kept until its first consume.
+  current.interactionResultHandoff = Object.freeze({
+    actionId: action.actionId,
+    owningInstruction: action.owningInstruction,
+    continuationInstruction: action.continuationInstruction,
+    ownerCallFrameId: action.ownerCallFrameId,
+    destinationTemporary: action.destinationTemporary,
+    result: resolved.result,
+  });
   current.status = "running";
   current.nextInstruction = action.continuationInstruction;
   events.push(

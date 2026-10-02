@@ -867,8 +867,9 @@ export function validateInteractionResultHandoffState(
       ? plan.instructions[nextInstruction - 1]
       : undefined;
   const requiresHandoff =
-    precedingInstruction?.kind === "interaction" &&
-    precedingInstruction.destinationTemporary !== null;
+    (precedingInstruction?.kind === "interaction" &&
+      precedingInstruction.destinationTemporary !== null) ||
+    precedingInstruction?.kind === "capture";
 
   if (handoff === null) {
     if (requiresHandoff) {
@@ -897,7 +898,9 @@ export function validateInteractionResultHandoffState(
       (typeof handoff.result === "string" && interactionStringFits(handoff.result)) ||
       (typeof handoff.result === "number" &&
         Number.isFinite(handoff.result) &&
-        !Object.is(handoff.result, -0))
+        !Object.is(handoff.result, -0)) ||
+      // Only an unavailable capture hands off `null`; the plan and settlement checks below confirm the kind.
+      handoff.result === null
     ) ||
     !positiveSafeInteger(snapshot.nextActionId) ||
     handoff.actionId >= snapshot.nextActionId ||
@@ -939,7 +942,7 @@ export function validateInteractionResultHandoffState(
     );
   } else if (
     settlement.actionId === handoff.actionId &&
-    (settlement.actionKind !== "interaction" ||
+    ((settlement.actionKind !== "interaction" && settlement.actionKind !== "capture") ||
       settlement.owningInstruction !== handoff.owningInstruction ||
       settlement.continuationInstruction !== handoff.continuationInstruction ||
       settlement.ownerCallFrameId !== handoff.ownerCallFrameId ||
@@ -949,8 +952,32 @@ export function validateInteractionResultHandoffState(
     errors.push("Runtime interaction result handoff disagrees with its retained settlement.");
   }
 
-  if (plan === undefined) return;
+  if (plan === undefined) {
+    // Without the plan, a `null` result must at least belong to a retained capture settlement.
+    if (
+      handoff.result === null &&
+      (!isPlainRecord(settlement) ||
+        settlement.actionId !== handoff.actionId ||
+        settlement.actionKind !== "capture")
+    )
+      errors.push("Runtime interaction result handoff has an invalid null result.");
+    return;
+  }
   const instruction = plan.instructions[handoff.owningInstruction];
+  if (instruction?.kind === "capture") {
+    if (
+      handoff.owningInstruction + 1 !== handoff.continuationInstruction ||
+      instruction.destinationTemporary !== handoff.destinationTemporary ||
+      precedingInstruction !== instruction ||
+      (handoff.result !== null &&
+        (typeof handoff.result !== "string" || handoff.result.length === 0))
+    ) {
+      errors.push(
+        "Runtime interaction result handoff does not match its canonical plan instruction.",
+      );
+    }
+    return;
+  }
   if (
     instruction?.kind !== "interaction" ||
     instruction.destinationTemporary === null ||
@@ -1508,6 +1535,7 @@ function validCaptureSettlement(
       "settlementKind",
       "owningInstruction",
       "continuationInstruction",
+      "ownerCallFrameId",
       "destinationTemporary",
       "requestEventSequence",
       "warningEventSequence",
@@ -1517,6 +1545,7 @@ function validCaptureSettlement(
       "unavailableReason",
     ]) ||
     settlement.capture !== "photo" ||
+    (settlement.ownerCallFrameId !== null && !positiveSafeInteger(settlement.ownerCallFrameId)) ||
     !positiveSafeInteger(settlement.destinationTemporary) ||
     !validSessionTime(settlement.completedAtMs) ||
     !validSessionTime(snapshot.currentSessionTimeMs) ||
