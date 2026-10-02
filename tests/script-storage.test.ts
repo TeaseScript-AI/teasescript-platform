@@ -10,7 +10,10 @@ import {
   observeTime,
   reportMediaLoad,
   run,
+  executeInstruction,
+  inspectRuntimeState,
   serializeCheckpoint,
+  validateRuntimeSnapshot,
   type RuntimeSnapshot,
   type SerializableRuntimeValue,
 } from "../src/index.js";
@@ -867,4 +870,73 @@ test("save keeps the value it evaluated before its key expression runs", () => {
     assert.deepEqual(binding(result.finalSnapshot, "stored"), kept, source);
     assert.deepEqual(result.finalSnapshot.scriptStorage, [{ key: "knull", value: kept }], source);
   }
+});
+
+test("a write inside a timer block holds catch-up for the next due block", () => {
+  const compiled = plan(
+    [
+      "let clock = timer async 20 s",
+      "let seen = null",
+      'timer async 1 s { save 2 as "k" }',
+      "timer async 2 s { seen = clock.elapsed }",
+      "wait 10 s",
+    ].join("\n"),
+  );
+  let snapshot = run(
+    compiled,
+    createFreshRuntimeSnapshot(compiled, { persistentScriptStorage: true }),
+  ).snapshot;
+  snapshot = run(compiled, observeTime(compiled, snapshot, 5_000).snapshot).snapshot;
+  const write = snapshot.foregroundAction;
+  assert.ok(write?.kind === "storageWrite");
+  assert.equal(snapshot.currentSessionTimeMs, 2_000);
+  assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
+  const completed = completeAction(compiled, snapshot, {
+    actionId: write.actionId,
+    actionKind: "storageWrite",
+    payload: { kind: "stored" },
+  });
+  assert.ok(
+    completed.outcome.kind === "completed" &&
+      completed.outcome.settlement.actionKind === "storageWrite",
+  );
+  assert.equal(completed.outcome.settlement.completedAtMs, 2_000);
+  snapshot = run(compiled, completed.snapshot).snapshot;
+  assert.deepEqual(binding(snapshot, "seen"), { kind: "duration", milliseconds: 2_000 });
+});
+
+test("a write reserves the completion events of every active action", () => {
+  const compiled = plan('timer async 100 s\nsave 7 as "k"\nwait 200 s');
+  const snapshot = executeInstruction(
+    compiled,
+    createFreshRuntimeSnapshot(compiled, { persistentScriptStorage: true }),
+  ).snapshot;
+  snapshot.nextEventSequence = Number.MAX_SAFE_INTEGER - 3;
+  assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
+  const result = executeInstruction(compiled, snapshot);
+  assert.equal(result.snapshot.status, "failed");
+  assert.equal(validateRuntimeSnapshot(result.snapshot, compiled).valid, true);
+});
+
+test("load operands may be quoted strings inside interpolation", () => {
+  const result = assertRuntimeResumeEquivalent(
+    'save "Ada" as "k"\nlet key = "missing"\nlet present = "${load "k"}"\nlet absent = "${load key default "fallback"}"\nexit',
+  );
+  assert.equal(binding(result.finalSnapshot, "present"), "Ada");
+  assert.equal(binding(result.finalSnapshot, "absent"), "fallback");
+});
+
+test("inspection of a pending write with a deeply nested value stays detached", () => {
+  const depth = 1_024;
+  const compiled = plan(`save ${"[".repeat(depth)}1${"]".repeat(depth)} as "k"`);
+  const pending = run(
+    compiled,
+    createFreshRuntimeSnapshot(compiled, { persistentScriptStorage: true }),
+  ).snapshot;
+  const inspected = inspectRuntimeState(compiled, pending);
+  assert.ok(inspected.valid);
+  const action = pending.foregroundAction;
+  assert.ok(action?.kind === "storageWrite");
+  assert.notEqual(inspected.foregroundAction?.action, action);
+  assert.equal(Object.isFrozen(action.value), false);
 });

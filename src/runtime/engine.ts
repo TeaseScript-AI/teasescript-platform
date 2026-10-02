@@ -2179,10 +2179,10 @@ function writeStorage(
   ) {
     throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
   }
-  // The request, the completion, and a possible failure warning.
+  // The request, the completion, a possible failure warning, and every active action's own completions.
   assertEventSequenceCapacity(
     snapshot,
-    requiredEventSequencesForNewDelay(snapshot) + 1,
+    3 + requiredFutureActionCompletionEvents(snapshot),
     instruction.span,
   );
   const requestSequence = takeSequence(snapshot);

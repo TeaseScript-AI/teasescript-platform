@@ -33,12 +33,14 @@ export function timerHandlerDispatchable(snapshot: RuntimeSnapshot): boolean {
 }
 
 /**
- * A queued block waits for a pending storage write. Catch-up holds at the block's due time, so the block still runs
- * at that scene time once the host acknowledges the write.
+ * A queued block waits for a pending storage write, also one made inside a running block. Catch-up holds at the
+ * block's due time, so the block still runs at that scene time once the host acknowledges the write.
  */
 export function timerHandlerAwaitsStorageWrite(snapshot: RuntimeSnapshot): boolean {
   return (
-    snapshot.foregroundAction?.kind === "storageWrite" && timerHandlerQueuedAndUnblocked(snapshot)
+    snapshot.status === "waiting" &&
+    snapshot.foregroundAction?.kind === "storageWrite" &&
+    snapshot.pendingTimerHandlers.length > 0
   );
 }
 

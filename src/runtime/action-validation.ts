@@ -422,6 +422,14 @@ export function validForegroundActionState(
 export function catchUpPaused(snapshot: Record<string, unknown>): boolean {
   if (snapshot.status === "ready" || snapshot.status === "running") return true;
   if (
+    snapshot.status === "waiting" &&
+    isPlainRecord(snapshot.foregroundAction) &&
+    snapshot.foregroundAction.kind === "storageWrite" &&
+    Array.isArray(snapshot.pendingTimerHandlers) &&
+    snapshot.pendingTimerHandlers.length > 0
+  )
+    return true;
+  if (
     snapshot.status !== "waiting" ||
     !Array.isArray(snapshot.callFrames) ||
     !Array.isArray(snapshot.pendingTimerHandlers) ||
@@ -440,8 +448,7 @@ export function catchUpPaused(snapshot: Record<string, unknown>): boolean {
     (isPlainRecord(foreground) &&
       (foreground.kind === "delay" ||
         foreground.kind === "interaction" ||
-        foreground.kind === "mediaPlayback" ||
-        foreground.kind === "storageWrite"))
+        foreground.kind === "mediaPlayback"))
   );
 }
 
@@ -1647,6 +1654,12 @@ function validSettlementKindData(
       ]) &&
       isOneOf(settlement.outcome, ["stored", "failed"]) &&
       typeof settlement.key === "string" &&
+      snapshot.scriptStoragePersistent === true &&
+      // A failed write publishes its TSW014 warning between the request and the completion.
+      (settlement.outcome === "stored" ||
+        (positiveSafeInteger(settlement.requestEventSequence) &&
+          positiveSafeInteger(settlement.completionEventSequence) &&
+          settlement.completionEventSequence >= settlement.requestEventSequence + 2)) &&
       validSessionTime(settlement.completedAtMs) &&
       validSessionTime(snapshot.currentSessionTimeMs) &&
       settlement.completedAtMs <= snapshot.currentSessionTimeMs
