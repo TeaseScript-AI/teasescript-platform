@@ -1,8 +1,10 @@
 { toy ->
-	toy.metaClass.greet {
+	// A module variable with the name of an object field stays separate from it.
+	int rounds = 10
+	toy.metaClass.greet = {
 		show("Hello")
-		rounds = rounds + getRandom(rounds - 2)
+		toy.rounds = rounds + getRandom(toy.rounds - 2)
 		playBackgroundSound("bell.wav")
-		pause()
 	}
+	return null
 }

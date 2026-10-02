@@ -2,6 +2,7 @@ import {
   constantString,
   groovyParameters,
   isAstNode,
+  isRecord,
   variableName,
   walkAst,
   type AstNode,
@@ -75,6 +76,8 @@ export interface LowerOptions {
   stopsBackgroundSounds?: boolean;
   /** Functions whose result some caller uses (packageResultUses); without package context, the file decides. */
   resultUses?: ReadonlySet<string>;
+  /** Source names of the package files in each directory, to check that a module loader's directory is complete. */
+  directoryFiles?: ReadonlyMap<string, readonly string[]>;
   /**
    * Rename identifiers TeaseScript rejects (default). Package composition disables this per file and renames
    * the composed program once.
@@ -120,7 +123,13 @@ interface LowerContext {
   /** Module directories whose loader this script replaced with direct module calls. */
   loadsModuleDirectories: Set<string>;
   /** Function lowered right now and its parameter/local names, for closure naming and capture checks. */
-  currentFunction: { name: string; locals: ReadonlySet<string> } | null;
+  currentFunction: {
+    name: string;
+    locals: ReadonlySet<string>;
+    /** The body and parameters, for the names visible at a given point. */
+    body?: AstNode;
+    parameters?: readonly string[];
+  } | null;
   /** Functions generated from closure values, emitted at the program root. */
   closureFunctions: IrStatement[];
   /** Functions referenced by closure-value action IDs; the package dispatcher calls them. */
@@ -133,6 +142,7 @@ interface LowerContext {
   popupTimers: number;
   stopsBackgroundSounds: boolean;
   resultUses: ReadonlySet<string>;
+  directoryFiles: ReadonlyMap<string, readonly string[]>;
   /** Variables assigned once with the current date (`new Date()`, `Calendar.getInstance()`). */
   dateValues: ReadonlySet<string>;
   /** List variables that Groovy shared with another variable by an assignment of one to the other. */
@@ -219,6 +229,7 @@ export function lowerParsedFile(
     popupTimers: 0,
     stopsBackgroundSounds: options.stopsBackgroundSounds ?? packageStopsBackgroundSounds([file]),
     resultUses: options.resultUses ?? packageResultUses([file]),
+    directoryFiles: options.directoryFiles ?? new Map(),
     dateValues: new Set(),
     aliasedLists: new Set(),
   };
@@ -460,6 +471,7 @@ function lowerHelperMethod(
     loadsModuleDirectories: baseContext.loadsModuleDirectories,
     stopsBackgroundSounds: baseContext.stopsBackgroundSounds,
     resultUses: baseContext.resultUses,
+    directoryFiles: baseContext.directoryFiles,
     dateValues: new Set(),
     aliasedLists: new Set(),
     currentFunction: {
@@ -1249,7 +1261,8 @@ function lowerClosureDeclaration(
 
   const parameters: IrFunctionParameter[] = [];
   if (info.implicitParameter) {
-    if (info.maxArgs === 1)
+    // Callers in other files may pass `it`, so a body that reads it declares it.
+    if (info.maxArgs === 1 || readsOwnIt(closure))
       parameters.push({ name: "it", defaultValue: { kind: "literal", value: null } });
   } else {
     const closureParameters = groovyParameters(closure.parameters);
@@ -1298,6 +1311,8 @@ function lowerClosureDeclaration(
       body,
       parameters.map((parameter) => parameter.name),
     ),
+    body,
+    parameters: parameters.map((parameter) => parameter.name),
   };
   context.functionDepth += 1;
   try {
@@ -1566,6 +1581,50 @@ export function packageResultUses(files: readonly ParsedGroovyFile[]): Set<strin
   return used;
 }
 
+/**
+ * Local names visible at `target` inside a function body: parameters, declarations earlier in enclosing blocks,
+ * loop variables, and parameters of enclosing closures. Null when `target` is not inside the body.
+ */
+function visibleLocals(
+  body: AstNode,
+  parameters: readonly string[],
+  target: AstNode,
+): Set<string> | null {
+  const search = (node: AstNode, visible: ReadonlySet<string>): Set<string> | null => {
+    if (node === target) return new Set(visible);
+    let inner = visible;
+    if (node.kind === "for" && typeof node.variable === "string") {
+      inner = new Set([...visible, node.variable]);
+    }
+    if (node.kind === "closure") {
+      const names = (groovyParameters(node.parameters) ?? []).map((parameter) => parameter.name);
+      inner = new Set([...visible, ...(node.parameterSpecified === true ? names : ["it"])]);
+    }
+    if (node.kind === "block") {
+      const scope = new Set(inner);
+      for (const statement of nodeArray(node.statements)) {
+        const found = search(statement, scope);
+        if (found !== null) return found;
+        const expression =
+          statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+        const declared = expression?.kind === "declaration" ? variableName(expression.left) : null;
+        if (declared !== null) scope.add(declared);
+      }
+      return null;
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "span") continue;
+      for (const child of Array.isArray(value) ? value : [value]) {
+        if (!isAstNode(child)) continue;
+        const found = search(child, inner);
+        if (found !== null) return found;
+      }
+    }
+    return null;
+  };
+  return search(body, new Set(parameters));
+}
+
 /** Parameter and declared local names of a function body, including nested blocks. */
 function functionLocalNames(body: AstNode, parameters: readonly string[]): Set<string> {
   const names = new Set(parameters);
@@ -1598,11 +1657,19 @@ function lowerClosureValue(
   if (body?.kind !== "block" || parameters === null) return null;
   const parameterNames =
     closure.parameterSpecified === true ? parameters.map((p) => p.name) : ["it"];
-  const locals = context.currentFunction?.locals ?? new Set<string>();
+  const enclosing = context.currentFunction;
+  const locals =
+    (enclosing?.body === undefined
+      ? null
+      : visibleLocals(enclosing.body, enclosing.parameters ?? [], closure)) ??
+    enclosing?.locals ??
+    new Set<string>();
   const ownNames = functionLocalNames(body, parameterNames);
   const captured = new Set<string>();
   walkAst(body, (node) => {
-    const name = variableName(node);
+    // Calling a local closure by name captures it as much as reading it.
+    const call = node.kind === "methodCall" ? callParts(node) : null;
+    const name = variableName(node) ?? (call?.inherited === true ? call.name : null);
     if (name !== null && locals.has(name) && !ownNames.has(name)) captured.add(name);
   });
   if (captured.size > 0) {
@@ -1613,25 +1680,33 @@ function lowerClosureValue(
       `This closure value captures local ${[...captured].join(", ")} of its enclosing function; TeaseScript has no closures, so pass that state explicitly.`,
     );
   }
-  const forwarded = forwardedFunction(body, parameterNames, context);
+  // Forwarding keeps the target's own defaults, so the wrapper must not declare any.
+  const hasDefaults = parameters.some((parameter) => parameter.defaultValue !== null);
+  const forwarded = hasDefaults ? null : forwardedFunction(body, parameterNames, context);
   if (forwarded !== null) {
     context.actions.add(forwarded);
-    return { kind: "literal", value: forwarded };
+    return { kind: "literal", value: forwarded, action: true };
   }
   const base = hint ?? context.currentFunction?.name ?? "script";
   const name = `${base}Callback${context.closureFunctions.length + 1}`;
   const outerFunction = context.currentFunction;
-  context.currentFunction = { name, locals: ownNames };
+  context.currentFunction = { name, locals: ownNames, body, parameters: parameterNames };
   context.functionDepth += 1;
   try {
     const implicit = closure.parameterSpecified !== true;
+    const functionParameters: IrFunctionParameter[] = [];
+    for (const parameter of implicit ? [] : parameters) {
+      const defaultValue =
+        parameter.defaultValue === null ? null : lowerExpression(parameter.defaultValue, context);
+      if (parameter.defaultValue !== null && defaultValue === null) return null;
+      functionParameters.push({ name: parameter.name, defaultValue });
+    }
+    if (implicit)
+      functionParameters.push({ name: "it", defaultValue: { kind: "literal", value: null } });
     context.closureFunctions.push({
       kind: "function",
       name,
-      parameters: parameterNames.map((parameter) => ({
-        name: parameter,
-        defaultValue: implicit ? { kind: "literal", value: null } : null,
-      })),
+      parameters: functionParameters,
       // Callers reach a closure value through the dispatcher, whose result may be used.
       body: lowerBlock(withImplicitReturn(body, context), context),
       span: closure.span,
@@ -1641,7 +1716,7 @@ function lowerClosureValue(
     context.currentFunction = outerFunction;
   }
   context.actions.add(name);
-  return { kind: "literal", value: name };
+  return { kind: "literal", value: name, action: true };
 }
 
 /** The function a closure body only forwards to, passing its own parameters unchanged. */
@@ -2459,6 +2534,22 @@ function lowerCollectionStatement(
     ];
   }
   return null;
+}
+
+/** Whether a closure reads its implicit parameter, outside nested closures that have their own. */
+function readsOwnIt(closure: AstNode): boolean {
+  let reads = false;
+  const visit = (node: AstNode): void => {
+    if (node !== closure && node.kind === "closure") return;
+    if (variableName(node) === "it") reads = true;
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "span") continue;
+      for (const child of Array.isArray(value) ? value : [value])
+        if (isAstNode(child)) visit(child);
+    }
+  };
+  visit(closure);
+  return reads;
 }
 
 function closureUsesName(closure: AstNode, name: string): boolean {
@@ -3348,12 +3439,9 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
         );
       }
       if (context.functions.has(name) && !context.shadowingReferences.has(node)) {
-        return unsupportedExpression(
-          context,
-          node,
-          "SX_FUNCTION_VALUE_REFERENCE",
-          `Groovy closure ${name} is used as a value instead of being called.`,
-        );
+        // A function used as a value becomes its action ID, like a closure value.
+        context.actions.add(name);
+        return { kind: "literal", value: name, action: true };
       }
       return { kind: "variable", name };
     }
@@ -4622,6 +4710,18 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
   }
   if (!call.inherited)
     return lowerObjectMethodCallExpression(node, call.name, call.arguments, context);
+  // A parameter or local of the current function shadows a function of the same name; calling it calls the
+  // closure value it holds.
+  const enclosing = context.currentFunction;
+  if (
+    enclosing?.locals.has(call.name) === true &&
+    context.helperMainParameter === null &&
+    (enclosing.body === undefined ||
+      visibleLocals(enclosing.body, enclosing.parameters ?? [], node)?.has(call.name) !== false)
+  ) {
+    const args = lowerArguments(call.arguments, context);
+    return args === null ? null : actionCall({ kind: "variable", name: call.name }, args, context);
+  }
   const helperInfo = context.helperFunctions.get(call.name);
   if (helperInfo !== undefined) {
     let argumentNodes = call.arguments;
@@ -5204,6 +5304,22 @@ function mixinShape(body: AstNode): MixinShape | null {
   const parameter = parameters[0]!.name;
   const shape: MixinShape = { parameter, methods: [], loadStatements: [], setup: null };
   const inner = nodeArray(closureBody.statements);
+  // An earlier return makes the result depend on control flow; only a module that always returns nothing has a
+  // fixed result then.
+  const earlyReturns = inner.slice(0, -1).flatMap((statement) => closureReturns(statement));
+  const final = inner.at(-1);
+  const finalValue = asNode(final?.kind === "return" ? final.value : null);
+  const returnsNothing = (value: AstNode | null): boolean =>
+    value === null || isNullConstant(value);
+  if (
+    earlyReturns.length > 0 &&
+    (earlyReturns.some(({ value }) => !returnsNothing(value)) ||
+      final?.kind !== "return" ||
+      !returnsNothing(finalValue))
+  ) {
+    return null;
+  }
+  const lastMethod = inner.length === 0 ? null : injectedMethod(inner.at(-1)!, parameter);
   inner.forEach((statement, index) => {
     const method = injectedMethod(statement, parameter);
     if (method !== null) {
@@ -5218,6 +5334,23 @@ function mixinShape(body: AstNode): MixinShape | null {
     }
     shape.loadStatements.push(statement);
   });
+  // A final `object.metaClass.name = { }` returns the assigned closure, which the loader runs as setup.
+  const last = inner.at(-1);
+  const assignsLast =
+    last?.kind === "expressionStatement" && asNode(last.expression)?.kind === "binary";
+  if (lastMethod !== null && assignsLast) {
+    shape.setup = {
+      kind: "closure",
+      span: last.span,
+      parameters: [],
+      parameterSpecified: true,
+      body: {
+        kind: "block",
+        span: last.span,
+        statements: [callStatement(lastMethod.name, last.span)],
+      },
+    };
+  }
   return shape;
 }
 
@@ -5403,7 +5536,28 @@ function desugarMixinModule(
           diagnostics: [],
         });
   if (shape === null || info === null) return null;
-  const strip = (node: AstNode): AstNode => stripReceiver(node, shape.parameter);
+  // A module variable that shares its name with an object member reached as `object.name` keeps its own name
+  // apart, since removing the receiver would otherwise make both the same variable.
+  const moduleVariables = new Set(
+    shape.loadStatements.flatMap((statement) => {
+      const expression =
+        statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+      const name = expression?.kind === "declaration" ? variableName(expression.left) : null;
+      return name === null ? [] : [name];
+    }),
+  );
+  const receiverMembers = new Set<string>();
+  walkAst(body, (node) => {
+    const name = node.kind === "property" ? constantString(node.property) : null;
+    if (name !== null && variableName(node.object) === shape.parameter) receiverMembers.add(name);
+  });
+  const renamed = new Map(
+    [...moduleVariables]
+      .filter((name) => receiverMembers.has(name))
+      .map((name) => [name, `${name}In${capitalized(info.name)}`]),
+  );
+  const strip = (node: AstNode): AstNode =>
+    stripReceiver(renamed.size === 0 ? node : renameVariables(node, renamed), shape.parameter);
   const declaration = (name: string, right: AstNode, span: SourceSpan | null): AstNode => ({
     kind: "expressionStatement",
     span,
@@ -5419,6 +5573,27 @@ function desugarMixinModule(
 
   const globals: AstNode[] = [];
   const loadBody: AstNode[] = [];
+  // Injected methods become functions that exist from the start; Groovy installed them in order.
+  const installedAt = new Map(
+    shape.methods.map((method) => [method.name, method.closure.span?.line ?? 0]),
+  );
+  for (const original of shape.loadStatements) {
+    const early = new Set<string>();
+    walkAst(original, (node) => {
+      const call = node.kind === "methodCall" ? callParts(node) : null;
+      const line = call === null ? undefined : installedAt.get(call.name);
+      if (call !== null && line !== undefined && (original.span?.line ?? 0) < line)
+        early.add(call.name);
+    });
+    if (early.size > 0) {
+      loadBody.push({
+        kind: "importerNote",
+        span: original.span,
+        code: "SX_MODULE_EARLY_CALL",
+        message: `This load-time code calls ${[...early].join(", ")} before the module installed ${early.size === 1 ? "it" : "them"}, which failed in Groovy; the converted function exists from the start.`,
+      });
+    }
+  }
   for (const statement of shape.loadStatements.map(strip)) {
     const expression =
       statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
@@ -5460,19 +5635,36 @@ function desugarMixinModule(
   );
   members.push(declaration(info.loadFunction, functionClosure(loadBody, body.span), body.span));
   if (shape.setup !== null && info.setupFunction !== null) {
-    const setupBody = asNode(strip(shape.setup).body);
-    members.push(
-      declaration(
-        info.setupFunction,
-        functionClosure(nodeArray(setupBody?.statements), shape.setup.span),
-        shape.setup.span,
-      ),
-    );
+    // The setup closure keeps its parameters; the loader calls it without arguments.
+    members.push(declaration(info.setupFunction, strip(shape.setup), shape.setup.span));
   }
   const statements = [...globals, ...members].sort(
     (left, right) => (left.span?.line ?? 0) - (right.span?.line ?? 0),
   );
   return { body: { ...body, statements }, info };
+}
+
+/** Renames plain variable references; member accesses such as `object.name` keep their property names. */
+function renameVariables(node: AstNode, names: ReadonlyMap<string, string>): AstNode {
+  const name = variableName(node);
+  if (name !== null) return names.has(name) ? { ...node, name: names.get(name)! } : node;
+  const result: AstNode = { ...node };
+  for (const [key, child] of Object.entries(node)) {
+    if (key === "span") continue;
+    if (isAstNode(child)) result[key] = renameVariables(child, names);
+    else if (Array.isArray(child)) {
+      result[key] = child.map((item) => {
+        if (isAstNode(item)) return renameVariables(item, names);
+        // Closure parameters are plain records with a name.
+        if (key === "parameters" && isRecord(item) && typeof item.name === "string") {
+          const renamedParameter = names.get(item.name);
+          if (renamedParameter !== undefined) return { ...item, name: renamedParameter };
+        }
+        return item;
+      });
+    }
+  }
+  return result;
 }
 
 function syntheticVariable(name: string, span: SourceSpan | null): AstNode {
@@ -5603,6 +5795,22 @@ function replaceModuleLoader(
       .filter((module) => module.directory === directory)
       .toSorted((left, right) => left.name.localeCompare(right.name));
     if (modules.length === 0) continue;
+    // Replacing the loader would silently skip a file of that directory that is not a recognized module.
+    const recognized = new Set(modules.map((module) => module.sourceName));
+    const others = (context.directoryFiles.get(directory) ?? []).filter(
+      (name) => !recognized.has(name),
+    );
+    if (others.length > 0) {
+      addDiagnostic(
+        context,
+        "SX_MODULE_UNRECOGNIZED",
+        "error",
+        `The loader evaluates every file in scripts/${directory}, but ${others.map((name) => name.split(/[\\/]/u).at(-1)).join(", ")} ${others.length === 1 ? "is" : "are"} not a mixin module the importer can convert (for example a module whose result depends on its control flow); the loader is kept as written.`,
+        closure.span,
+      );
+      modules = [];
+      continue;
+    }
     loaderName = name;
     context.loadsModuleDirectories.add(directory);
     const span = closure.span;
@@ -5641,7 +5849,12 @@ function replaceModuleLoader(
     }
     const call = expression === null ? null : callParts(expression);
     if (call?.name === loaderName) return [callStatement(loaderName, statement.span)];
-    if (call?.name === "each" && setupVariables.has(variableName(expression?.object) ?? "")) {
+    if (
+      call?.name === "each" &&
+      setupVariables.has(variableName(expression?.object) ?? "") &&
+      call.arguments.length === 1 &&
+      callsOwnParameter(call.arguments[0]!)
+    ) {
       return modules.flatMap((module) =>
         module.setupFunction === null ? [] : [callStatement(module.setupFunction, statement.span)],
       );
@@ -5667,16 +5880,72 @@ function callStatement(name: string, span: SourceSpan | null): AstNode {
   };
 }
 
+/** The body of a one-parameter closure as its parameter name and single expression. */
+function closureExpression(closure: AstNode): { parameter: string; expression: AstNode } | null {
+  if (closure.kind !== "closure") return null;
+  const parameters = groovyParameters(closure.parameters) ?? [];
+  const parameter = closure.parameterSpecified === true ? parameters[0]?.name : "it";
+  const statements = nodeArray(asNode(closure.body)?.statements);
+  const only = statements.length === 1 ? statements[0] : undefined;
+  const expression = asNode(only?.kind === "return" ? only.value : only?.expression);
+  return parameter === undefined || parameters.length > 1 || expression === null
+    ? null
+    : { parameter, expression };
+}
+
+/** `{ p -> p() }`: runs each setup callback without arguments. */
+function callsOwnParameter(closure: AstNode): boolean {
+  const body = closureExpression(closure);
+  const call = body === null ? null : callParts(body.expression);
+  return call !== null && call.name === body?.parameter && call.arguments.length === 0;
+}
+
+/**
+ * The loader's file selection and result filter, exactly: `findAll { f -> f.name.endsWith(".groovy") }` and
+ * `findAll { p -> p }`. Any other selection would load a different set of modules.
+ */
+function isModuleLoaderFilter(closure: AstNode): boolean {
+  const body = closureExpression(closure);
+  if (body === null) return false;
+  if (variableName(body.expression) === body.parameter) return true;
+  const call = callParts(body.expression);
+  const receiver = asNode(body.expression.object);
+  const argument = call?.arguments[0];
+  return (
+    call?.name === "endsWith" &&
+    receiver?.kind === "property" &&
+    constantString(receiver.property) === "name" &&
+    variableName(receiver.object) === body.parameter &&
+    argument?.kind === "constant" &&
+    argument.value === ".groovy"
+  );
+}
+
+/** Directories whose mixin modules a script loads at runtime. */
+export function loadedModuleDirectories(file: ParsedGroovyFile): string[] {
+  const directories = new Set<string>();
+  walkAst(file.root, (node) => {
+    const directory = node.kind === "closure" ? moduleLoaderDirectory(node) : null;
+    if (directory !== null) directories.add(directory);
+  });
+  return [...directories];
+}
+
 /** `new File(".../scripts/<dir>").listFiles()` combined with `Eval.me(...)` marks a module loader closure. */
 function moduleLoaderDirectory(closure: AstNode): string | null {
   let evaluates = false;
   let lists = false;
+  let exact = true;
   let directory: string | null = null;
   walkAst(closure.body, (node) => {
     if (node.kind === "methodCall") {
       const name = constantString(node.method);
       if (name === "me" && variableName(node.object) === "Eval") evaluates = true;
       if (name === "listFiles") lists = true;
+      if (name === "findAll") {
+        const filter = nodeArray(asNode(node.arguments)?.items)[0];
+        if (filter === undefined || !isModuleLoaderFilter(filter)) exact = false;
+      }
     }
     if (node.kind === "constructorCall" && (node.type === "File" || node.type === "java.io.File")) {
       walkAst(node.arguments, (argument) => {
@@ -5693,7 +5962,7 @@ function moduleLoaderDirectory(closure: AstNode): string | null {
       });
     }
   });
-  return evaluates && lists ? directory : null;
+  return evaluates && lists && exact ? directory : null;
 }
 
 function collectClosureInfo(body: AstNode): Map<string, ClosureInfo> {

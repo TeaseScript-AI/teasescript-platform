@@ -8,10 +8,15 @@ return new Object() {
 			.findAll { p -> p };
 	};
 	int rounds = 2
+	boolean enabled = false
+	def pauseCycle = { int delay, int cycle = 60 -> wait(delay / cycle) }
 
 	def main() {
-		loadModules(this)
+		def setups = loadModules(this)
+		setups.each { p -> p() }
 		greet()
+		def cycle = pauseCycle
+		cycle(120)
 		show("Rounds: " + rounds)
 	}
 }.main();

@@ -61,7 +61,13 @@ export function renameConflictingIdentifiers(
       isProtected(name) || functions.has(name) || (inFunction && globals.has(name)),
     fresh,
   };
-  return { ...program, statements: renameBlock(program.statements, rootScope, false, renamer) };
+  return {
+    ...program,
+    statements: renameBlock(program.statements, rootScope, false, renamer),
+    ...(program.actions === undefined
+      ? {}
+      : { actions: program.actions.map((action) => functions.get(action) ?? action) }),
+  };
 }
 
 interface Renamer {
@@ -273,6 +279,9 @@ function renameExpression(expression: IrExpression, scope: Scope, renamer: Renam
         ),
       };
     case "literal":
+      return expression.action === true && typeof expression.value === "string"
+        ? { ...expression, value: renamer.functions.get(expression.value) ?? expression.value }
+        : expression;
     case "input":
       return expression;
   }

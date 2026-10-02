@@ -117,7 +117,8 @@ export interface IrSwitchCase {
 }
 
 export type IrExpression =
-  | { kind: "literal"; value: string | number | boolean | null }
+  /** `action` marks the ID of a function kept as a value; renaming the function renames the ID. */
+  | { kind: "literal"; value: string | number | boolean | null; action?: true }
   | { kind: "variable"; name: string }
   | { kind: "list"; items: IrExpression[] }
   | { kind: "object"; properties: Array<{ name: string; value: IrExpression }> }

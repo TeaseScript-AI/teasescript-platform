@@ -299,9 +299,12 @@ test(
   async () => {
     if (!("compiler" in compilerResult) || !("runner" in runnerResult)) return;
     const directory = fileURLToPath(new URL("./fixtures/packages/mixin-modules/", import.meta.url));
-    const sources = ["demo.groovy", "demo/greeting.groovy", "demo/pause.groovy"].map((name) =>
-      path.join(directory, "scripts", name),
-    );
+    const sources = [
+      "demo.groovy",
+      "demo/greeting.groovy",
+      "demo/later.groovy",
+      "demo/pause.groovy",
+    ].map((name) => path.join(directory, "scripts", name));
     const files = await Promise.all(sources.map((source) => parseGroovySource(source)));
     const script = lowerSelfContainedPackage(files)[0];
     assert.ok(script !== undefined);

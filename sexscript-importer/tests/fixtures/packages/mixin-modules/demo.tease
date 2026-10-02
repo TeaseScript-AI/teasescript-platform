@@ -1,6 +1,16 @@
 // MIGRATION INCOMPLETE: 1 error diagnostic.
 // Review diagnostics before treating this file as behaviorally equivalent.
 
+// Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
+function sexscriptLegacyCall(action, args) {
+  if action == "pauseCycle" {
+    if args.length >= 2 {
+      return pauseCycle(args[0], args[1])
+    }
+    return pauseCycle(args[0])
+  }
+  return null
+}
 let sexscriptBackgroundSounds = []
 function sexscriptLegacyPlayBackgroundSound(file, passes) {
   if file == null {
@@ -33,14 +43,26 @@ function sexscriptLegacyRandom(max) {
   return 0
 }
 function loadGreetingModule {
+  // A module variable with the name of an object field stays separate from it.
+  roundsInGreeting = 10
+}
+let roundsInGreeting: number? = null
+function loadLaterModule {
+  // Loaded after greeting.groovy, so this greet replaces the earlier one.
 }
 function greet {
-  say "Hello"
-  rounds = rounds + sexscriptLegacyRandom(rounds - 2)
-  sexscriptLegacyPlayBackgroundSound("bell.wav", 1)
+  say "Hello again"
   pause()
 }
+function setupLaterModule(times = 2) {
+  say "Setup ${times}"
+}
 function loadPauseModule {
+  // Returning nothing on every path keeps the module's result fixed.
+  if not enabled {
+    return null
+  }
+  say "Pausing enabled"
 }
 function pause {
   wait sexscriptLegacyRandom(rounds - 2) + 1
@@ -49,11 +71,19 @@ function pause {
 // TODO SX_UNSUPPORTED_SEXSCRIPT_EXPRESSION line 2: Unsupported SexScript expression call: getDataFolder
 // | final DATAFOLDER = getDataFolder();
 function loadModules {
-  // NOTE SX_MODULE_LOADER line 3: Replaced runtime loading of scripts/demo/*.groovy (directory listing and Groovy evaluation) with direct calls to its 2 modules in file-name order, the order Windows lists them.
+  // NOTE SX_MODULE_LOADER line 3: Replaced runtime loading of scripts/demo/*.groovy (directory listing and Groovy evaluation) with direct calls to its 3 modules in file-name order, the order Windows lists them.
   loadGreetingModule()
-  loadPauseModule()
+  loadLaterModule()
+  return loadPauseModule()
 }
 let rounds = 2
+let enabled = false
+function pauseCycle(delay, cycleValue = 60) {
+  wait delay / cycleValue
+}
 loadModules()
+setupLaterModule()
 greet()
+let cycle = "pauseCycle"
+sexscriptLegacyCall(cycle, [120])
 say "Rounds: ${rounds}"

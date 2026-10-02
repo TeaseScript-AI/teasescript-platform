@@ -3,6 +3,7 @@ import type { IrStatement, MigrationDiagnostic, MigrationProgram } from "./ir.ts
 import {
   buildHelperRegistry,
   describeMixinModule,
+  loadedModuleDirectories,
   lowerParsedFile,
   packageFunctionNames,
   packageGlobalTypes,
@@ -55,20 +56,26 @@ export interface LoweredPackage {
 export function lowerPackage(files: readonly ParsedGroovyFile[]): LoweredPackage {
   const helperRegistry = buildHelperRegistry(files);
   const mixinModules = files.flatMap((file) => describeMixinModule(file) ?? []);
-  const packageFunctions = packageFunctionNames(files);
   const stableNames = packageStableNames(files);
-  const globalTypes = packageGlobalTypes(files);
+  // Function names and object field types are shared only by a script and the mixin modules it loads.
+  const groups = compositionGroups(files);
   const stopsBackgroundSounds = packageStopsBackgroundSounds(files);
   const resultUses = packageResultUses(files);
-  const lowered = files.map((file) =>
+  const directoryFiles = new Map<string, string[]>();
+  for (const file of files) {
+    const directory = file.sourceName.split(/[\\/]/u).at(-2) ?? "";
+    directoryFiles.set(directory, [...(directoryFiles.get(directory) ?? []), file.sourceName]);
+  }
+  const lowered = files.map((file, index) =>
     lowerParsedFile(file, {
       helperRegistry,
       mixinModules,
-      packageFunctions,
+      packageFunctions: packageFunctionNames(groups[index]!),
       stableNames,
-      globalTypes,
+      globalTypes: packageGlobalTypes(groups[index]!),
       stopsBackgroundSounds,
       resultUses,
+      directoryFiles,
       renameIdentifiers: false,
     }),
   );
@@ -90,6 +97,26 @@ export function lowerPackage(files: readonly ParsedGroovyFile[]): LoweredPackage
  * reachable only through callbacks, so nothing is dropped as unused. Module globals that collide with names
  * already taken are renamed inside their module first.
  */
+/** For each file, the files whose names it shares: a script with the modules it loads, and those modules. */
+function compositionGroups(files: readonly ParsedGroovyFile[]): ParsedGroovyFile[][] {
+  const moduleDirectory = files.map((file) => describeMixinModule(file)?.directory ?? null);
+  const loads = files.map((file) => new Set(loadedModuleDirectories(file)));
+  return files.map((file, index) => {
+    const directories = new Set(loads[index]);
+    const own = moduleDirectory[index];
+    if (own !== null && own !== undefined) directories.add(own);
+    if (directories.size === 0) return [file];
+    return files.filter((_, other) => {
+      const directory = moduleDirectory[other];
+      return (
+        other === index ||
+        (directory !== null && directory !== undefined && directories.has(directory)) ||
+        [...loads[other]!].some((loaded) => directories.has(loaded))
+      );
+    });
+  });
+}
+
 function withLoadedModules(
   program: MigrationProgram,
   modulePrograms: readonly MigrationProgram[],
@@ -106,8 +133,9 @@ function withLoadedModules(
       return false;
     });
   const programStatements = withoutHelpers(program.statements);
-  const taken = new Set(rootNames(program.statements));
-  const moduleStatements: IrStatement[] = [];
+  const programNames = new Set(rootNames(program.statements));
+  const taken = new Set(programNames);
+  let moduleStatements: IrStatement[] = [];
   const diagnostics = [...program.diagnostics];
   const modules = modulePrograms
     .filter((module) => module.module !== undefined && directories.has(module.module.directory))
@@ -115,11 +143,35 @@ function withLoadedModules(
   const actions = new Set(program.actions ?? []);
   for (const module of modules) {
     const statements = withoutHelpers(module.statements);
+    const info = module.module!;
+    // Modules load in order, so a method that a later module injects again replaces the earlier one.
+    const injected = info.functions.filter(
+      (name) =>
+        name !== info.loadFunction && name !== info.setupFunction && !programNames.has(name),
+    );
+    for (const name of injected) {
+      const replaced = moduleStatements.some(
+        (statement) => statement.kind === "function" && statement.name === name,
+      );
+      if (!replaced) continue;
+      moduleStatements = moduleStatements.filter(
+        (statement) => !(statement.kind === "function" && statement.name === name),
+      );
+      taken.delete(name);
+    }
+    for (const name of info.functions.filter((name) => programNames.has(name))) {
+      diagnostics.push({
+        code: "SX_MODULE_METHOD_OVERRIDE",
+        severity: "warning",
+        message: `Module ${info.name} injects ${name}, which the script itself defines; Groovy called the injected method once the module was loaded, while the converted script keeps both under different names. Decide which one callers need.`,
+        span: null,
+      });
+    }
     const renamed = renameConflictingIdentifiers({ ...module, statements }, taken, false);
     for (const name of rootNames(renamed.statements)) taken.add(name);
     moduleStatements.push(...renamed.statements);
     diagnostics.push(...renamed.diagnostics);
-    for (const action of module.actions ?? []) actions.add(action);
+    for (const action of renamed.actions ?? []) actions.add(action);
   }
   return {
     ...program,
@@ -152,7 +204,8 @@ function buildFunctionCatalog(
     for (const statement of program.statements) {
       if (statement.kind !== "function") continue;
       if (catalog.has(statement.name)) {
-        catalog.set(statement.name, null);
+        // Generated helpers are identical wherever they appear; other duplicates are ambiguous.
+        if (helperDefinitionOrder(statement) < 0) catalog.set(statement.name, null);
         continue;
       }
       catalog.set(statement.name, {

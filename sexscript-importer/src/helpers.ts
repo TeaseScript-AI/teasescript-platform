@@ -6,34 +6,51 @@ export const ACTION_DISPATCHER = "sexscriptLegacyCall";
 export const ACTION_DISPATCHER_MARKER = "#dispatch";
 
 /**
- * Adds the action dispatcher when the program calls closure values. Each known action calls its function with
- * as many arguments as that function declares; unknown actions return null.
+ * Adds the action dispatcher when the program calls closure values. Each known action calls its function with the
+ * supplied arguments, up to the parameters the function declares, so omitted optional parameters keep their
+ * defaults. Unlike Groovy, extra arguments are ignored and unknown actions return null.
  */
 export function withActionDispatcher(program: MigrationProgram): MigrationProgram {
   const actions = program.actions ?? [];
   if (!actions.includes(ACTION_DISPATCHER_MARKER)) return program;
-  const arities = new Map<string, number>();
+  const signatures = new Map<string, { required: number; total: number }>();
   for (const statement of program.statements) {
-    if (statement.kind === "function") arities.set(statement.name, statement.parameters.length);
+    if (statement.kind !== "function") continue;
+    const required = statement.parameters.filter(
+      (parameter) => parameter.defaultValue === null,
+    ).length;
+    signatures.set(statement.name, { required, total: statement.parameters.length });
   }
+  const callWith = (action: string, count: number): IrStatement =>
+    ret({
+      kind: "call",
+      name: action,
+      positional: Array.from({ length: count }, (_, index) => at(v("args"), lit(index))),
+      named: {},
+      local: true,
+    });
   const branches = actions
     .filter((action) => action !== ACTION_DISPATCHER_MARKER)
     .toSorted()
-    .map((action) =>
-      ifS(bin("==", v("action"), lit(action)), [
-        ret({
-          kind: "call",
-          name: action,
-          positional: Array.from({ length: arities.get(action) ?? 0 }, (_, index) =>
-            at(v("args"), lit(index)),
-          ),
-          named: {},
-          local: true,
-        }),
-      ]),
-    );
+    .map((action) => {
+      const { required, total } = signatures.get(action) ?? { required: 0, total: 0 };
+      const calls: IrStatement[] = [];
+      for (let count = total; count > required; count -= 1) {
+        calls.push(
+          ifS(bin(">=", prop(v("args"), "length"), lit(count)), [callWith(action, count)]),
+        );
+      }
+      calls.push(callWith(action, required));
+      return ifS(bin("==", v("action"), lit(action)), calls);
+    });
   const dispatcher = fn(ACTION_DISPATCHER, ["action", "args"], [...branches, ret(lit(null))]);
-  return { ...program, statements: [dispatcher, ...program.statements] };
+  const note: IrStatement = {
+    kind: "comment",
+    text: "// Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.",
+    trailing: false,
+    span: null,
+  };
+  return { ...program, statements: [note, dispatcher, ...program.statements] };
 }
 
 /**
