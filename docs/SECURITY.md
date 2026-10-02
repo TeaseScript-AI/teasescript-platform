@@ -76,18 +76,19 @@ The engine, not the caller, normalizes text, parses numbers, resolves choice lab
 
 Browser permission is the external permission boundary for camera and microphone. First activation requests device
 access according to the browser's current permission state; the browser may later revoke access, ask again, or fail.
-After access is granted the script or package controls the lifecycle: it may activate the capability at the start of a
-scene, keep the selected stream open for later author-controlled use, and close it, and that use adds no Player-level
-permission or per-use approval. For platform-brokered acquisition, the Player owns the underlying browser resources for
-sandbox isolation, revocation, and cleanup, but adds no permission prompt, camera or microphone indicator, or stop
-control of its own; native browser, OS, and device privacy indicators are sufficient. Complete revocation of
-package-created derivatives of raw resources, such as cloned tracks, relies on the sandbox teardown or lifecycle
-contract (ADR 0017). A recording contains exactly the sources the author requests; whether video includes microphone
-audio never depends on whether a microphone is already open. How brokered acquisition and capability authorization are
-enforced against package code that calls browser capture APIs directly, which needs a concrete isolation mechanism such
-as a separate execution realm rather than a wrapper API or manifest field, remains open, as do capability declaration
-metadata, device switching, reload and restore, failure recovery, simultaneous-device policy, captured-media retention,
-encryption, and persistent collections; see
+After access is granted the script or package controls the lifecycle, and that use adds no Player-level permission or
+per-use approval. A script that uses the camera has it activated at script start, so the browser asks there, and the
+stream stays open for the session unless the author closes it. Direct captures such as `takePhoto()` are therefore
+silent: the native camera indicator stays on throughout and does not reveal individual captures. For platform-brokered
+acquisition, the Player owns the underlying browser resources for sandbox isolation, revocation, and cleanup, but adds
+no permission prompt, camera or microphone indicator, or stop control of its own; native browser, OS, and device privacy
+indicators are sufficient. Complete revocation of package-created derivatives of raw resources, such as cloned tracks,
+relies on the sandbox teardown or lifecycle contract (ADR 0017). A recording contains exactly the sources the author
+requests; whether video includes microphone audio never depends on whether a microphone is already open. How brokered
+acquisition and capability authorization are enforced against package code that calls browser capture APIs directly,
+which needs a concrete isolation mechanism such as a separate execution realm rather than a wrapper API or manifest
+field, remains open, as do capability declaration metadata, device switching, reload and restore, failure recovery,
+simultaneous-device policy, captured-media retention, encryption, and persistent collections; see
 [`planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md`](planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md).
 
 Exact iframe sandbox flags, CSP, message schemas, capability negotiation, signing, moderation workflows, captured-media privacy policy, and time-integrity policy remain to be specified.

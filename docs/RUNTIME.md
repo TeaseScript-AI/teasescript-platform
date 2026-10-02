@@ -936,7 +936,8 @@ The exported TypeScript source frontend, source compiler, low-level runtime, sna
 - stable package/plan identity and migration policy;
 - Standard Library imports, generated declarations/editor metadata transport, versioning, and capability access;
 - iframe host commands and response correlation;
-- camera stream ownership and persistent media collections, their cleanup, persistence, and recovery;
+- captured-media recovery after reload or restore and persistent media collections, their cleanup and persistence
+  (camera and microphone ownership is in [`SECURITY.md`](SECURITY.md));
 - time-integrity diagnostics and future server-authoritative scheduling;
 - server checkpoint persistence and conflict resolution;
 - performance profiling and safe optimization of snapshot cloning/liveness metadata.

@@ -27,7 +27,8 @@ A camera/media decision must still define:
   separate execution realm or trusted code transformation;
 - switching, revocation handling, reload, restore, reconnect, and failure recovery;
 - quality negotiation and default resolution;
-- Player cleanup of streams an author left open at `end`, `exit`, navigation, and session shutdown;
+- exact Player cleanup points at session termination, fatal teardown, navigation, and unmount; a called script's `end`
+  does not close session capture resources;
 - recording, still capture, motion detection, sampling, and resource limits.
 
 ## Interactive and direct image capture
@@ -38,8 +39,9 @@ must decide source selection, preview, countdown, accept/retake, validation, ret
 after a denied permission. A
 rejected preview candidate is not runtime-visible.
 
-`takePhoto(...)` should use the selected active stream without a source question or interactive acceptance flow. Its
-camera options, transcript behavior, and Standard Library composition require a later accepted camera decision.
+`takePhoto(...)` captures silently from the camera stream opened at script start, without a source question, preview, or
+interactive acceptance flow ([`SECURITY.md`](../SECURITY.md)). Its camera options, transcript behavior, and Standard
+Library composition require a later accepted camera decision.
 
 ## Multiple cameras
 
