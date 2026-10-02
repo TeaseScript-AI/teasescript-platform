@@ -430,10 +430,11 @@ test("external capture rejects non-canonical and length-conflicting proxy arrays
       keys,
       values: { "4294967294": 1 },
     })),
-    // One non-index key and one non-canonical index string.
+    // One non-index key and one non-canonical index string. The length matches the key count,
+    // so only the per-key index rule can reject them.
     ...["4294967295", "01"].map((key) => ({
-      name: `key ${key} with zero length`,
-      length: 0,
+      name: `key ${key} with matching length`,
+      length: 1,
       keys: ["length", key],
       values: { [key]: 1 },
     })),

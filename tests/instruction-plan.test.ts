@@ -101,31 +101,15 @@ test("contains no non-JSON-safe values and rejects them when supplied", () => {
 
 test("compiler-produced plans remain deeply frozen", () => {
   const compiled = plan("let value = { nested: [1, { deeper: 2 }] }\nexit");
-  const instruction = compiled.instructions[0];
-  assert.equal(Object.isFrozen(compiled), true);
-  assert.equal(Object.isFrozen(compiled.instructions), true);
-  assert.equal(Object.isFrozen(instruction), true);
-  if (instruction?.kind !== "declareBinding" || instruction.value.kind !== "object") {
-    assert.fail("Expected object declaration plan.");
-  }
-  assert.equal(Object.isFrozen(instruction.value.properties), true);
-  assert.equal(Object.isFrozen(instruction.value.properties[0]), true);
-  assert.equal(Object.isFrozen(instruction.value.properties[0]!.value), true);
-  const list = instruction.value.properties[0]!.value;
-  const inner = list.kind === "list" ? list.elements[1] : undefined;
-  if (list.kind !== "list" || inner?.kind !== "object") {
-    assert.fail("Expected nested list and object plans.");
-  }
-  for (const node of [
-    list.elements,
-    list.elements[0],
-    inner,
-    inner.properties,
-    inner.properties[0],
-    inner.properties[0]?.value,
-  ]) {
-    assert.ok(typeof node === "object" && Object.isFrozen(node));
-  }
+  // Freezing skips already-frozen nodes, so one shallow-frozen node could hide mutable children.
+  const unfrozen: string[] = [];
+  const visit = (value: unknown, path: string): void => {
+    if (typeof value !== "object" || value === null) return;
+    if (!Object.isFrozen(value)) unfrozen.push(path);
+    for (const [key, nested] of Object.entries(value)) visit(nested, `${path}.${key}`);
+  };
+  visit(compiled, "plan");
+  assert.deepEqual(unfrozen, []);
 });
 
 function findNonJsonValue(value: unknown, active = new Set<object>()): string | null {
