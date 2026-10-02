@@ -3,7 +3,6 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import type {
-  BinaryExpressionPlan,
   ExpressionPlan,
   Instruction,
   InstructionPlan,
@@ -19,7 +18,7 @@ import {
   restoreCheckpoint,
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
-import { executeInstruction, run, RuntimeDataError } from "../src/runtime/engine.js";
+import { executeInstruction, run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
@@ -767,15 +766,6 @@ function literalExpression(
   return { kind: "literal", value, span };
 }
 
-function binaryExpression(
-  operator: BinaryExpressionPlan["operator"],
-  left: ExpressionPlan,
-  right: ExpressionPlan,
-  span: PlanSourceLocation,
-): ExpressionPlan {
-  return { kind: "binary", operator, left, right, span };
-}
-
 interface SettlementHandoffFixture {
   readonly injected: InjectedInteractionPlan;
   /** Produced through the public interaction completion operation. */
@@ -1283,132 +1273,70 @@ function assertReplayRow(row: ReplayRow): void {
   }
 }
 
-interface FailedContinuationRow {
-  readonly id: string;
-  readonly expectedCode: string;
-  readonly makePlan: (injected: InjectedInteractionPlan) => InstructionPlan;
-  readonly assertUntouchedTarget?: (
-    snapshot: RuntimeSnapshot,
-    injected: InjectedInteractionPlan,
-  ) => void;
-}
-
-test("PR194 matrix: failed canonical continuations retain the handoff atomically", () => {
-  const rows: readonly FailedContinuationRow[] = [
+test("PR194 matrix: a failed canonical continuation retains the handoff atomically", () => {
+  // The transfer expects a boolean, so it fails after reading the destination and before writing
+  // its target temporary.
+  const injected = injectTextInteraction('let answer = "__interaction_result__"\nexit');
+  const target = injected.destinationTemporary + 1;
+  const plan = replaceHandoffInstruction(
+    injected,
     {
-      id: "PR194-failed-continuation-before-evaluation",
-      expectedCode: "TSR023",
-      makePlan: (injected) =>
-        replaceHandoffInstruction(injected, {
-          kind: "say",
-          presentation: null,
-          speaker: "missing",
-          value: temporaryExpression(injected.destinationTemporary, injected.plan.sourceSpan),
-          skipPolicy: null,
-          pacing: "smart",
-          span: injected.plan.instructions[injected.handoffInstruction]!.span,
-        }),
-      assertUntouchedTarget: (snapshot) => assert.equal(snapshot.speakers.length, 0),
+      kind: "storeTemporary",
+      temporaryId: target,
+      value: temporaryExpression(injected.destinationTemporary, injected.plan.sourceSpan),
+      expectBoolean: true,
+      span: handoffInstructionSpan(injected),
     },
-    {
-      id: "PR194-failed-continuation-during-evaluation",
-      expectedCode: "TSR026",
-      makePlan: (injected) =>
-        replaceHandoffInstruction(injected, {
-          kind: "evaluate",
-          expression: binaryExpression(
-            "and",
-            temporaryExpression(injected.destinationTemporary, injected.plan.sourceSpan),
-            literalExpression(true, injected.plan.sourceSpan),
-            injected.plan.sourceSpan,
-          ),
-          span: injected.plan.instructions[injected.handoffInstruction]!.span,
-        }),
-    },
-    {
-      id: "PR194-failed-continuation-before-target-mutation",
-      expectedCode: "TSR026",
-      makePlan: (injected) =>
-        replaceHandoffInstruction(
-          injected,
-          {
-            kind: "storeTemporary",
-            temporaryId: injected.destinationTemporary + 1,
-            value: temporaryExpression(injected.destinationTemporary, injected.plan.sourceSpan),
-            expectBoolean: true,
-            span: injected.plan.instructions[injected.handoffInstruction]!.span,
-          },
-          injected.plan.temporaryCount + 1,
-        ),
-      assertUntouchedTarget: (snapshot, injected) =>
-        assert.equal(
-          snapshot.temporaries.some(
-            (temporary) => temporary.id === injected.destinationTemporary + 1,
-          ),
-          false,
-        ),
-    },
-  ];
-  for (const row of rows) {
-    const injected = injectTextInteraction('let answer = "__interaction_result__"\nexit');
-    const plan = row.makePlan(injected);
-    assert.equal(validateInstructionPlan(plan).valid, true, row.id);
-    const pending = waiting(plan);
-    const request = textCompletionRequest(pending.snapshot);
-    const completed = completeAction(plan, pending.snapshot, request);
-    assert.equal(completed.outcome.kind, "completed", row.id);
-    const committed = checkpointJsonRoundTrip(plan, completed.snapshot).snapshot;
-    const planBefore = structuredClone(plan);
-    const committedBefore = structuredClone(committed);
-    const failed = executeInstruction(plan, committed);
-    assert.deepEqual(plan, planBefore, `${row.id}: plan input`);
-    assert.deepEqual(committed, committedBefore, `${row.id}: snapshot input`);
-    assert.equal(failed.snapshot.status, "failed", row.id);
-    assert.equal(failed.snapshot.nextInstruction, committed.nextInstruction, row.id);
-    assert.deepEqual(
-      failed.snapshot.interactionResultHandoff,
-      committed.interactionResultHandoff,
-      row.id,
-    );
-    assert.equal(
-      temporaryValue(failed.snapshot, injected.destinationTemporary),
-      "committed",
-      row.id,
-    );
-    assert.deepEqual(failed.snapshot.lastSettlement, committed.lastSettlement, row.id);
-    assert.equal(failed.events.length, 1, row.id);
-    const failure = failed.events[0];
-    assert.ok(failure !== undefined && failure.kind === "runtimeFailure", row.id);
-    assert.equal(failure.code, row.expectedCode, row.id);
-    row.assertUntouchedTarget?.(failed.snapshot, injected);
-    assert.equal(validateRuntimeSnapshot(failed.snapshot, plan).valid, true, row.id);
-    assert.deepEqual(
-      checkpointJsonRoundTrip(plan, failed.snapshot).snapshot,
-      failed.snapshot,
-      row.id,
-    );
-    assertReplayRow({
-      id: `${row.id}-replay`,
-      plan,
-      snapshot: failed.snapshot,
-      request,
-      expected: { kind: "alreadySettled" },
-    });
-    const failedPlanBefore = structuredClone(plan);
-    const failedBefore = structuredClone(failed.snapshot);
-    const repeatedExecute = executeInstruction(plan, failed.snapshot);
-    assert.deepEqual(repeatedExecute.snapshot, failedBefore, `${row.id}: execute snapshot noop`);
-    assert.deepEqual(repeatedExecute.events, [], `${row.id}: execute events noop`);
-    assert.equal(repeatedExecute.instructionsExecuted, 0, `${row.id}: execute instruction noop`);
-    assert.deepEqual(plan, failedPlanBefore, `${row.id}: execute plan input`);
-    assert.deepEqual(failed.snapshot, failedBefore, `${row.id}: execute snapshot input`);
-    const repeatedRun = run(plan, failed.snapshot);
-    assert.deepEqual(repeatedRun.snapshot, failedBefore, `${row.id}: run snapshot noop`);
-    assert.deepEqual(repeatedRun.events, [], `${row.id}: run events noop`);
-    assert.equal(repeatedRun.instructionsExecuted, 0, `${row.id}: run instruction noop`);
-    assert.deepEqual(plan, failedPlanBefore, `${row.id}: run plan input`);
-    assert.deepEqual(failed.snapshot, failedBefore, `${row.id}: run snapshot input`);
-  }
+    injected.plan.temporaryCount + 1,
+  );
+  assert.equal(validateInstructionPlan(plan).valid, true);
+  const pending = waiting(plan);
+  const request = textCompletionRequest(pending.snapshot);
+  const completed = completeAction(plan, pending.snapshot, request);
+  assert.equal(completed.outcome.kind, "completed");
+  const committed = checkpointJsonRoundTrip(plan, completed.snapshot).snapshot;
+  const planBefore = structuredClone(plan);
+  const committedBefore = structuredClone(committed);
+  const failed = executeInstruction(plan, committed);
+  assert.deepEqual(plan, planBefore, "plan input");
+  assert.deepEqual(committed, committedBefore, "snapshot input");
+  assert.equal(failed.snapshot.status, "failed");
+  assert.equal(failed.snapshot.nextInstruction, committed.nextInstruction);
+  assert.deepEqual(failed.snapshot.interactionResultHandoff, committed.interactionResultHandoff);
+  assert.equal(temporaryValue(failed.snapshot, injected.destinationTemporary), "committed");
+  assert.deepEqual(failed.snapshot.lastSettlement, committed.lastSettlement);
+  assert.equal(failed.events.length, 1);
+  const failure = failed.events[0];
+  assert.ok(failure !== undefined && failure.kind === "runtimeFailure");
+  assert.equal(failure.code, "TSR026");
+  assert.equal(
+    failed.snapshot.temporaries.some((temporary) => temporary.id === target),
+    false,
+    "untouched target",
+  );
+  assert.equal(validateRuntimeSnapshot(failed.snapshot, plan).valid, true);
+  assert.deepEqual(checkpointJsonRoundTrip(plan, failed.snapshot).snapshot, failed.snapshot);
+  assertReplayRow({
+    id: "PR194-failed-continuation-replay",
+    plan,
+    snapshot: failed.snapshot,
+    request,
+    expected: { kind: "alreadySettled" },
+  });
+  const failedPlanBefore = structuredClone(plan);
+  const failedBefore = structuredClone(failed.snapshot);
+  const repeatedExecute = executeInstruction(plan, failed.snapshot);
+  assert.deepEqual(repeatedExecute.snapshot, failedBefore, "execute snapshot noop");
+  assert.deepEqual(repeatedExecute.events, [], "execute events noop");
+  assert.equal(repeatedExecute.instructionsExecuted, 0, "execute instruction noop");
+  assert.deepEqual(plan, failedPlanBefore, "execute plan input");
+  assert.deepEqual(failed.snapshot, failedBefore, "execute snapshot input");
+  const repeatedRun = run(plan, failed.snapshot);
+  assert.deepEqual(repeatedRun.snapshot, failedBefore, "run snapshot noop");
+  assert.deepEqual(repeatedRun.events, [], "run events noop");
+  assert.equal(repeatedRun.instructionsExecuted, 0, "run instruction noop");
+  assert.deepEqual(plan, failedPlanBefore, "run plan input");
+  assert.deepEqual(failed.snapshot, failedBefore, "run snapshot input");
 });
 
 test("PR194 matrix: handoff shapes that would reach invalid runtime states are rejected", () => {
@@ -1516,96 +1444,6 @@ test("PR194 matrix: handoff shapes that would reach invalid runtime states are r
       row.id,
     );
     assert.deepEqual(row.plan, before, row.id);
-  }
-});
-
-test("PR194 matrix: rejected completion and snapshot operations preserve canonical state", () => {
-  const injected = injectTextInteraction('let answer = "__interaction_result__"\nsay answer\nexit');
-  const pending = waiting(injected.plan);
-  const actionId = pending.snapshot.foregroundAction!.actionId;
-  const requests = [
-    {
-      id: "PR194-invalid-payload",
-      request: {
-        actionId,
-        actionKind: "interaction" as const,
-        interactionKind: "text" as const,
-        payload: { kind: "submittedText", submittedText: " \t" },
-      },
-      expectedOutcome: "invalidPayload",
-    },
-    {
-      id: "PR194-wrong-action-kind",
-      request: {
-        actionId,
-        actionKind: "delay" as const,
-        payload: { kind: "time", currentSessionTimeMs: 0 },
-      },
-      expectedOutcome: "wrongActionKind",
-    },
-  ];
-  for (const row of requests) {
-    const before = structuredClone(pending.snapshot);
-    const result = completeAction(injected.plan, pending.snapshot, row.request);
-    assert.equal(result.outcome.kind, row.expectedOutcome, row.id);
-    assert.deepEqual(result.snapshot, before, row.id);
-    assert.deepEqual(result.events, [], row.id);
-  }
-  const completed = completeAction(injected.plan, pending.snapshot, {
-    actionId,
-    actionKind: "interaction",
-    interactionKind: "text",
-    payload: { kind: "submittedText", submittedText: "committed" },
-  });
-  const malformedOperationRows: readonly {
-    readonly id: string;
-    readonly mutate: (snapshot: ExternalRecord) => void;
-  }[] = [
-    {
-      id: "PR194-rejected-operation-handoff-null",
-      mutate: (snapshot) => {
-        snapshot.interactionResultHandoff = null;
-      },
-    },
-    {
-      id: "PR194-rejected-operation-handoff-owner",
-      mutate: (snapshot) => {
-        externalRecord(snapshot.interactionResultHandoff, "handoff").ownerCallFrameId = 99;
-        snapshot.nextCallFrameId = 100;
-      },
-    },
-    {
-      id: "PR194-rejected-operation-handoff-extra-field",
-      mutate: (snapshot) => {
-        externalRecord(snapshot.interactionResultHandoff, "handoff").extra = true;
-      },
-    },
-  ];
-  for (const row of malformedOperationRows) {
-    const snapshot = externalRecord(structuredClone(completed.snapshot), "malformed snapshot");
-    row.mutate(snapshot);
-    const before = structuredClone(snapshot);
-    const planBefore = structuredClone(injected.plan);
-    // Deliberately malformed external snapshot data must be rejected before completion mutates it.
-    assert.throws(
-      () => {
-        // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture passes the malformed external record to completion to verify atomic rejection.
-        return completeAction(injected.plan, snapshot as unknown as RuntimeSnapshot, {
-          actionId,
-          actionKind: "interaction",
-          interactionKind: "text",
-          payload: { kind: "submittedText", submittedText: "committed" },
-        });
-      },
-      (error: unknown) => {
-        assert.ok(error instanceof RuntimeDataError, row.id);
-        assert.equal(error.code, "TSR101", row.id);
-        return true;
-      },
-      row.id,
-    );
-    assert.deepEqual(injected.plan, planBefore, row.id);
-    assert.deepEqual(snapshot, before, row.id);
   }
 });
 

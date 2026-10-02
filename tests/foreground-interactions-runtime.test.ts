@@ -19,7 +19,7 @@ import {
   restoreCheckpoint,
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
-import { run } from "../src/runtime/engine.js";
+import { run, RuntimeDataError } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import {
@@ -1483,7 +1483,11 @@ test("unsupported persisted interaction fields are rejected at every boundary", 
         interactionKind: "choice",
         payload: { kind: "selectedLabel", selectedLabel: "one" },
       };
-      assert.throws(() => completeAction(plan, hostile, request), name);
+      assert.throws(
+        () => completeAction(plan, hostile, request),
+        (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
+        name,
+      );
     }
   }
 });
