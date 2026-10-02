@@ -6,3 +6,5 @@ export { lowerParsedFile } from "./lower.ts";
 export { analyzeFeasibility, rootDiagnostics } from "./report.ts";
 export type { FeasibilityFileReport, FeasibilityReport } from "./report.ts";
 export { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
+export { lowerSelfContainedPackage } from "./package.ts";
+export { parseGroovySource, runLegacyGroovyParser } from "./source-parser.ts";
