@@ -62,6 +62,10 @@ These corpus patterns looked like gaps but are importer work; the generated form
 | `def x` / `int x` without initializer | `let x: string? = null` (or `string[]?`, ...), and `0` or `false` for primitives |
 | `new Boolean[n]`, `x in list`, boolean `&`/`|` | a generated list helper, `list.contains(x)`, `and`/`or` with a side-effect-free right side |
 | `System.exit(0)` | `exit` (the Player stays open) |
+| `int t = showPopup(m)` (seconds until closed) | `getSeconds()` before and after `showPopup m`, in whole seconds |
+| `playBackgroundSound(null)`, `stopSoundThreads()` | handles of the async sounds kept in a list and stopped by a generated helper |
+| `f(x++)`, `continue` in a C-style `for`, `return` inside `each()` | `f(x)` then `x += 1`; the update step before each `continue`; `continue` |
+| `while (playBackgroundSound(s) \|\| true)` | `while true` with the call as its first statement |
 | `sleep(ms)`, `waitWithGauge(s)` | `wait ... ms`, `timer ...` |
 
 ## Semantic differences
@@ -111,16 +115,22 @@ Evidence for owner evaluation, ordered by corpus weight:
    string-method calls (`SX_STRING_METHOD`) have no accepted equivalent, not even string length. The corpus does not
    argue for new syntax: a small synchronous `.ts` library of length/case/trim/split functions, once package-library
    linkage exists, would cover these cases.
-3. **Single-field input prefill.** About 30 corpus calls pass a meaningful default, typically to edit a current
+3. **Dictionaries.** Toy keeps registries keyed by runtime strings: toys, events, session parameters, and
+   requestable actions (`events.remove(name)`, `positions.keySet()`, `toys.containsKey(t)`, `map[key]`); about 30
+   Toy sites stay manual work (`containsKey` 13, dynamic keys 5, `keySet`/`values` 5, `remove`/`clear` on maps).
+   TeaseScript objects have fixed, dot-accessed properties. A list of `{ key, value }` records with small lookup
+   functions expresses the behavior, at a clear cost in readability. The evidence comes from one package written by an
+   experienced Groovy programmer; the other three packages use maps only as fixed records.
+4. **Single-field input prefill.** About 30 corpus calls pass a meaningful default, typically to edit a current
    setting (`getInteger("...", cornerBase + playerLevel)`). Accepted multi-field `askIntegers`/`askNumbers` have
    `defaults`; single-field input has none. Lower priority: the player can still type the value.
-4. **Localized script variants.** The distribution ships language variants per script (`intro`, `intro_de`,
+5. **Localized script variants.** The distribution ships language variants per script (`intro`, `intro_de`,
    `intro_fr`, ...) selected by the legacy player. The repository has no localization decision; this is a package-level
    product question, not syntax.
 
-Not candidates on current evidence: first-class closures, dictionaries, metaprogramming, and runtime evaluation. The
-Toy package uses all of them, yet records, functions, and dispatch by action ID express its behavior; exceptions only
-guard desktop APIs.
+Not candidates on current evidence: first-class closures, metaprogramming, and runtime evaluation. Toy uses all
+three, and the converted Toy output expresses them with functions, action IDs plus one dispatcher, and direct module
+calls; exceptions only guard desktop APIs.
 
 ## Specification and implementation observations
 
