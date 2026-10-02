@@ -15,6 +15,7 @@ import { run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
+import { nextXorShift32 } from "../src/runtime/random.js";
 import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -480,9 +481,13 @@ test("repeating ranges redraw each round from the session RNG, including during 
     String(roundsMs),
   );
   assert.ok(30_000 - expiriesMs.at(-1)! < 4_000, String(expiriesMs));
-  // Later rounds are drawn again from the session RNG instead of repeating the first round.
+  // Later rounds are drawn again from the session RNG instead of repeating the first round:
+  // one draw per round, with the range's inclusive upper bound still reachable.
   assert.ok(new Set(roundsMs).size > 1, String(roundsMs));
-  assert.notDeepEqual(late.snapshot.rng, firstRoundRng);
+  assert.ok(roundsMs.slice(1).includes(4_000), String(roundsMs));
+  const expectedRng = structuredClone(firstRoundRng);
+  for (let round = 0; round < expiriesMs.length; round += 1) nextXorShift32(expectedRng);
+  assert.deepEqual(late.snapshot.rng, expectedRng);
 });
 
 test("an expiry block interrupts an unanswered ask and the prompt returns afterwards", () => {
