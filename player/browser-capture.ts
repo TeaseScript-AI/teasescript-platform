@@ -8,7 +8,7 @@ import type {
   CaptureSourceState,
 } from "./capture-device.js";
 import { RgbaImage } from "./rgba-image.js";
-import type { SessionMediaUrls } from "./session-media.js";
+import type { CapturedMediaUrls } from "./captured-media.js";
 
 /** Analysis window of the microphone sampler; 2048 samples are about 43 ms at 48 kHz. */
 const AUDIO_WINDOW_SIZE = 2048;
@@ -60,7 +60,7 @@ export function createBrowserCaptureHost(
   };
 }
 
-export const browserMediaUrls: SessionMediaUrls = {
+export const browserMediaUrls: CapturedMediaUrls = {
   create: (data) => URL.createObjectURL(data),
   revoke: (url) => URL.revokeObjectURL(url),
 };

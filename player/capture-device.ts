@@ -1,5 +1,5 @@
 import { RgbaImage } from "./rgba-image.js";
-import type { SessionMediaEntry, SessionMediaStore } from "./session-media.js";
+import type { CapturedMediaEntry, CapturedMediaStore } from "./captured-media.js";
 
 /**
  * Player-owned camera and microphone capture. The Player owns every physical browser stream; what reaches the runtime
@@ -84,7 +84,14 @@ export interface CaptureHost<Track extends CaptureTrack> {
 }
 
 export type CaptureFailureKind =
-  "denied" | "not-found" | "busy" | "overconstrained" | "unsupported" | "inactive" | "failed";
+  | "denied"
+  | "not-found"
+  | "busy"
+  | "overconstrained"
+  | "unsupported"
+  | "inactive"
+  | "storage"
+  | "failed";
 
 export interface CaptureFailure {
   readonly kind: CaptureFailureKind;
@@ -98,6 +105,7 @@ const FAILURE_MESSAGES: Readonly<Record<CaptureFailureKind, string>> = {
   overconstrained: "The device cannot satisfy the requested settings.",
   unsupported: "This browser does not support the requested capture.",
   inactive: "The required device is not active.",
+  storage: "The captured media could not be stored.",
   failed: "The capture failed.",
 };
 
@@ -150,13 +158,13 @@ export type FrameOutcome =
   | { readonly kind: "failed"; readonly failure: CaptureFailure };
 
 export type PhotoOutcome =
-  | { readonly kind: "photo"; readonly media: SessionMediaEntry }
+  | { readonly kind: "photo"; readonly media: CapturedMediaEntry }
   | { readonly kind: "failed"; readonly failure: CaptureFailure };
 
 export type RecordingOutcome =
   | {
       readonly kind: "recorded";
-      readonly media: SessionMediaEntry;
+      readonly media: CapturedMediaEntry;
       readonly durationMs: number;
       /** A recorded source ended or was stopped before `stop()`; the media holds what was recorded until then. */
       readonly interrupted: boolean;
@@ -204,7 +212,7 @@ export interface CaptureRecording {
  */
 export class CaptureDevice<Track extends CaptureTrack> {
   readonly #host: CaptureHost<Track>;
-  readonly #media: SessionMediaStore;
+  readonly #media: CapturedMediaStore;
   readonly #sources: Record<CaptureSourceKind, Source<Track>> = {
     camera: idleSource(),
     microphone: idleSource(),
@@ -214,7 +222,7 @@ export class CaptureDevice<Track extends CaptureTrack> {
   /** Increments on every reset, so work started before it does not store media afterwards. */
   #resets = 0;
 
-  constructor(host: CaptureHost<Track>, media: SessionMediaStore) {
+  constructor(host: CaptureHost<Track>, media: CapturedMediaStore) {
     this.#host = host;
     this.#media = media;
   }
@@ -346,25 +354,34 @@ export class CaptureDevice<Track extends CaptureTrack> {
     const resets = this.#resets;
     const frame = await this.captureFrame();
     if (frame.kind === "failed") return frame;
+    let data: Blob;
     try {
-      const data = await this.#host.encodeImage(frame.image);
-      // The session ended while encoding; its media store must stay empty.
-      if (this.#resets !== resets) return { kind: "failed", failure: failure("inactive") };
-      return {
-        kind: "photo",
-        media: this.#media.add("image", data, {
-          width: frame.image.width,
-          height: frame.image.height,
-        }),
-      };
+      data = await this.#host.encodeImage(frame.image);
     } catch (error) {
       return { kind: "failed", failure: captureFailure(error) };
     }
+    // The session ended while encoding; nothing is stored for it.
+    if (this.#resets !== resets) return { kind: "failed", failure: failure("inactive") };
+    let media: CapturedMediaEntry;
+    try {
+      media = await this.#media.add("image", data, {
+        width: frame.image.width,
+        height: frame.image.height,
+      });
+    } catch {
+      return { kind: "failed", failure: failure("storage") };
+    }
+    if (this.#resets !== resets) {
+      // Stored while the session ended: no reference was handed out, so remove it again.
+      void this.#media.delete(media.reference).catch(() => {});
+      return { kind: "failed", failure: failure("inactive") };
+    }
+    return { kind: "photo", media };
   }
 
-  /** Decodes stored session image media for pixel access. */
+  /** Decodes stored image media for pixel access. */
   async readImage(reference: string): Promise<FrameOutcome> {
-    const entry = this.#media.get(reference);
+    const entry = await this.#media.read(reference);
     if (entry === null || entry.kind !== "image")
       return { kind: "failed", failure: failure("not-found") };
     try {
@@ -489,7 +506,7 @@ class Recording implements CaptureRecording {
   readonly finished: Promise<RecordingOutcome>;
   readonly #recorder: CaptureRecorder;
   readonly #clock: { now(): number };
-  readonly #media: SessionMediaStore;
+  readonly #media: CapturedMediaStore;
   readonly #settled: () => void;
   readonly #chunks: Blob[] = [];
   readonly #startedAt: number;
@@ -497,13 +514,15 @@ class Recording implements CaptureRecording {
   /** When recording ended; `null` while the recorder still records. */
   #endedAt: number | null = null;
   #interrupted = false;
+  /** The recorder stopped and its data is being stored. */
+  #storing = false;
   #done = false;
 
   constructor(
     sources: readonly CaptureSourceKind[],
     recorder: CaptureRecorder,
     clock: { now(): number },
-    media: SessionMediaStore,
+    media: CapturedMediaStore,
     settled: () => void,
   ) {
     this.sources = sources;
@@ -567,18 +586,22 @@ class Recording implements CaptureRecording {
   }
 
   #stored(): void {
-    if (this.#done) return;
+    if (this.#done || this.#storing) return;
+    this.#storing = true;
     // A recorder may also stop by itself, for example when every recorded track ended.
     const interrupted = this.#interrupted || this.#endedAt === null;
     const durationMs = Math.max(0, (this.#endedAt ?? this.#clock.now()) - this.#startedAt);
     const data = new Blob(this.#chunks, { type: this.#recorder.mimeType });
+    this.#chunks.length = 0;
     const kind = this.sources.includes("camera") ? "video" : "audio";
-    this.#finish({
-      kind: "recorded",
-      media: this.#media.add(kind, data, { durationMs }),
-      durationMs,
-      interrupted,
-    });
+    this.#media.add(kind, data, { durationMs }).then(
+      (media) => {
+        // Cancelled or reset while storing: no reference was handed out, so remove it again.
+        if (this.#done) void this.#media.delete(media.reference).catch(() => {});
+        else this.#finish({ kind: "recorded", media, durationMs, interrupted });
+      },
+      () => this.#finish({ kind: "failed", failure: failure("storage") }),
+    );
   }
 
   #finish(outcome: RecordingOutcome): void {

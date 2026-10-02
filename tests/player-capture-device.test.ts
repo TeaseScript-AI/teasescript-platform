@@ -13,7 +13,12 @@ import {
 } from "../player/capture-device.js";
 import { untilReleased } from "../player/browser-capture.js";
 import { RgbaImage } from "../player/rgba-image.js";
-import { SessionMediaStore } from "../player/session-media.js";
+import {
+  CapturedMediaStore,
+  type CapturedMediaRecord,
+  type CapturedMediaRepository,
+  type StoredCapturedMedia,
+} from "../player/captured-media.js";
 
 // A deterministic stand-in for MediaStreamTrack: `end()` simulates the browser ending it, for example on revocation.
 class FakeTrack implements CaptureTrack {
@@ -68,6 +73,26 @@ interface PendingAcquire {
 
 function image(width = 2, height = 1): RgbaImage {
   return new RgbaImage(width, height, new Uint8ClampedArray([10, 20, 30, 255, 11, 20, 30, 255]));
+}
+
+// Durable storage stand-in with IndexedDB's insert-only `add`; `records` may hold arbitrary stored data.
+class FakeRepository implements CapturedMediaRepository {
+  readonly records = new Map<string, StoredCapturedMedia>();
+  failWrites = false;
+  get size() {
+    return this.records.size;
+  }
+  async get(namespace: string, reference: string) {
+    return this.records.get(`${namespace} ${reference}`) ?? null;
+  }
+  async add(record: CapturedMediaRecord) {
+    const key = `${record.namespace} ${record.reference}`;
+    if (this.failWrites || this.records.has(key)) throw new DOMException("", "ConstraintError");
+    this.records.set(key, record);
+  }
+  async delete(namespace: string, reference: string) {
+    this.records.delete(`${namespace} ${reference}`);
+  }
 }
 
 /** Lets pending promise continuations run, for example a queued acquisition. */
@@ -137,14 +162,19 @@ function harness() {
     now: () => clock.now,
     stateChanged: (kind, state) => states.push(`${kind}:${state.status}`),
   };
-  const media = new SessionMediaStore({
-    create: (data) => {
-      const url = `blob:${urls.length}:${data.size}`;
-      urls.push(url);
-      return url;
+  const repository = new FakeRepository();
+  const media = new CapturedMediaStore(
+    repository,
+    {
+      create: (data) => {
+        const url = `blob:${urls.length}:${data.size}`;
+        urls.push(url);
+        return url;
+      },
+      revoke: (url) => log.push(`revoke ${url}`),
     },
-    revoke: (url) => log.push(`revoke ${url}`),
-  });
+    "package",
+  );
   const device = new CaptureDevice(host, media);
   const track = (kind: "video" | "audio") => new FakeTrack(kind, `${kind}${++tracks}`, log);
   /** Starts an acquisition and lets the browser grant it with fresh tracks of the requested kinds. */
@@ -160,6 +190,7 @@ function harness() {
   return {
     device,
     media,
+    repository,
     log,
     states,
     pending,
@@ -340,14 +371,14 @@ test("a photo is stored as session media and its pixels can be read back", async
   assert.deepEqual(JSON.parse(JSON.stringify(outcome.media)), outcome.media);
   const { reference, size, ...description } = outcome.media;
   assert.deepEqual(description, { kind: "image", mimeType: "image/png", width: 2, height: 1 });
-  assert.equal(media.get(reference)?.data.size, size);
+  assert.equal((await media.read(reference))?.data.size, size);
   const read = await device.readImage(reference);
   assert.deepEqual(read.kind === "frame" && [...read.image.data], [...image().data]);
   assert.equal((await device.readImage(`${reference}-missing`)).kind, "failed");
 });
 
 test("a photo still encoding when the session resets is not stored", async () => {
-  const { device, media, frames, encodes, options, grant } = harness();
+  const { device, repository, frames, encodes, options, grant } = harness();
   options.holdEncoding = true;
   await grant({ camera: {} });
   const photo = device.capturePhoto();
@@ -355,10 +386,9 @@ test("a photo still encoding when the session resets is not stored", async () =>
   await flush();
   assert.equal(encodes.length, 1);
   device.reset();
-  media.clear();
   encodes[0]?.();
   assert.equal((await photo).kind, "failed");
-  assert.equal(media.size, 0);
+  assert.equal(repository.size, 0);
 });
 
 test("a recording stores what was recorded and reports its duration", async () => {
@@ -382,14 +412,14 @@ test("a recording stores what was recorded and reports its duration", async () =
     { kind: outcome.media.kind, mimeType: outcome.media.mimeType, size: outcome.media.size },
     { kind: "video", mimeType: "video/webm", size: "firstlast".length },
   );
-  assert.equal(media.get(outcome.media.reference)?.data.size, "firstlast".length);
+  assert.equal((await media.read(outcome.media.reference))?.data.size, "firstlast".length);
   assert.equal(device.recording, null);
   // Both streams stay open after a recording ends.
   assert.equal(device.state("camera").status, "active");
 });
 
 test("a stopped recording still finishing blocks a new one and is cancelled by reset", async () => {
-  const { device, media, grant } = harness();
+  const { device, repository, grant } = harness();
   await grant({ microphone: {} });
   const started = device.startRecording(["microphone"]);
   if (started.kind !== "recording") return assert.fail(started.kind);
@@ -399,11 +429,11 @@ test("a stopped recording still finishing blocks a new one and is cancelled by r
   device.reset();
   assert.deepEqual(await started.recording.finished, { kind: "cancelled" });
   await Promise.resolve();
-  assert.equal(media.size, 0);
+  assert.equal(repository.size, 0);
 });
 
 test("a cancelled recording stores nothing", async () => {
-  const { device, media, grant } = harness();
+  const { device, repository, grant } = harness();
   await grant({ microphone: {} });
   assert.equal(device.startRecording(["camera"]).kind, "failed");
   const started = device.startRecording(["microphone"]);
@@ -411,7 +441,7 @@ test("a cancelled recording stores nothing", async () => {
   started.recording.cancel();
   assert.deepEqual(await started.recording.finished, { kind: "cancelled" });
   await Promise.resolve();
-  assert.equal(media.size, 0);
+  assert.equal(repository.size, 0);
 });
 
 test("a recorder failure settles the recording as failed", async () => {
@@ -425,7 +455,7 @@ test("a recorder failure settles the recording as failed", async () => {
 });
 
 test("a revoked microphone ends its recording and closes its samplers", async () => {
-  const { device, media, samplers, states, grant } = harness();
+  const { device, repository, samplers, states, grant } = harness();
   const [camera, microphone] = await grant({ camera: {}, microphone: {} });
   const sampler = device.openAudioSampler();
   if (sampler.kind !== "sampler") return assert.fail(sampler.kind);
@@ -440,7 +470,7 @@ test("a revoked microphone ends its recording and closes its samplers", async ()
   const outcome = await started.recording.finished;
   assert.equal(outcome.kind === "recorded" && outcome.interrupted, true);
   assert.equal(outcome.kind === "recorded" && outcome.media.kind, "audio");
-  assert.equal(media.size, 1);
+  assert.equal(repository.size, 1);
   assert.equal(samplers[0]?.closed, 1);
   assert.equal(states.at(-1), "microphone:ended");
   assert.equal(device.openAudioSampler().kind, "failed");
@@ -454,7 +484,7 @@ test("a revoked microphone ends its recording and closes its samplers", async ()
 });
 
 test("reset cancels recording, closes samplers and stops every stream", async () => {
-  const { device, media, pending, samplers, grant, track } = harness();
+  const { device, repository, pending, samplers, grant, track } = harness();
   const late = device.acquire({ camera: {} });
   const [microphone] = await grant({ microphone: {} });
   device.openAudioSampler();
@@ -471,7 +501,7 @@ test("reset cancels recording, closes samplers and stops every stream", async ()
   assert.deepEqual(await late, { kind: "superseded" });
   assert.equal(arriving.stops, 1);
   await Promise.resolve();
-  assert.equal(media.size, 0);
+  assert.equal(repository.size, 0);
 });
 
 test("pixel access validates dimensions and coordinates", () => {
@@ -487,35 +517,89 @@ test("pixel access validates dimensions and coordinates", () => {
     assert.throws(() => pixels.getPixel(x, y), RangeError, `${x},${y}`);
 });
 
-test("session media references stay unique and their browser URLs are revoked", () => {
-  const { media, log } = harness();
-  const first = media.add("image", new Blob(["a"], { type: "image/png" }));
-  const second = media.add("audio", new Blob(["bb"], { type: "audio/webm" }));
-  assert.notEqual(first.reference, second.reference);
-  const url = media.url(first.reference);
-  assert.equal(media.url(first.reference), url);
-  assert.equal(media.delete(first.reference), true);
-  assert.deepEqual(log, [`revoke ${url}`]);
-  assert.equal(media.url(first.reference), null);
-  const third = media.add("image", new Blob(["c"]));
-  assert.notEqual(third.reference, first.reference);
-  const secondUrl = media.url(second.reference);
-  media.clear();
-  assert.deepEqual(log.at(-1), `revoke ${secondUrl}`);
-  assert.equal(media.size, 0);
-  assert.notEqual(media.add("image", new Blob(["d"])).reference, first.reference);
+test("a photo that cannot be stored reports a storage failure and hands out no reference", async () => {
+  const { device, repository, frames, grant } = harness();
+  repository.failWrites = true;
+  await grant({ camera: {} });
+  const photo = device.capturePhoto();
+  frames[0]?.resolve(image());
+  assert.deepEqual(await photo, {
+    kind: "failed",
+    failure: { kind: "storage", message: "The captured media could not be stored." },
+  });
+  const urls = { create: () => "blob:", revoke: () => {} };
+  const unstored = new CapturedMediaStore(null, urls, "package");
+  await assert.rejects(unstored.add("image", new Blob(["x"], { type: "image/png" })));
+  assert.equal(unstored.available, false);
 });
 
-test("a reference kept from an earlier session never resolves to media of a later one", () => {
-  const urls = { create: () => "blob:", revoke: () => {} };
-  const earlier = new SessionMediaStore(urls);
-  // For example persisted as a saved value, then loaded after the earlier session ended.
-  const kept = earlier.add("image", new Blob(["earlier photo"])).reference;
-  const later = new SessionMediaStore(urls);
-  const captured = later.add("image", new Blob(["later photo"]));
+test("a saved reference resolves to the same media in a later run and new captures never alias it", async () => {
+  const repository = new FakeRepository();
+  const urls = { create: (data: Blob) => `blob:${data.size}`, revoke: () => {} };
+  const earlier = new CapturedMediaStore(repository, urls, "package");
+  // For example saved with `save`, then loaded after the earlier run ended.
+  const kept = (await earlier.add("image", new Blob(["earlier"], { type: "image/png" }))).reference;
+  let changes = 0;
+  const later = new CapturedMediaStore(repository, urls, "package", () => changes++);
+  assert.deepEqual(later.resolve(kept), { state: "loading" });
+  await flush();
+  assert.equal(changes, 1);
+  assert.deepEqual(later.resolve(kept), { state: "ready", url: "blob:7" });
+  assert.equal(await (await later.read(kept))?.data.text(), "earlier");
+  const captured = await later.add("image", new Blob(["later"], { type: "image/png" }));
   assert.notEqual(captured.reference, kept);
-  assert.equal(later.get(kept), null);
-  assert.equal(later.url(kept), null);
+  assert.equal(await (await later.read(kept))?.data.text(), "earlier");
+  // Another package never resolves it.
+  const other = new CapturedMediaStore(repository, urls, "other package");
+  other.resolve(kept);
+  await flush();
+  assert.deepEqual(other.resolve(kept), { state: "missing" });
+});
+
+test("invalid stored records never resolve", async () => {
+  const repository = new FakeRepository();
+  const urls = { create: () => "blob:", revoke: () => {} };
+  const reference = (n: number) => `captured-media:00000000-0000-4000-8000-000000000000:${n}`;
+  const png = new Blob(["x"], { type: "image/png" });
+  const valid = { namespace: "package", kind: "image", mimeType: "image/png", size: 1, data: png };
+  const invalid: Array<Record<string, unknown>> = [
+    { ...valid, mimeType: "text/html" },
+    { ...valid, kind: "document" },
+    { ...valid, size: Number.NaN },
+    { ...valid, width: -1 },
+    { ...valid, durationMs: Number.POSITIVE_INFINITY },
+    { ...valid, data: "x" },
+    { ...valid, namespace: "other package" },
+  ];
+  invalid.forEach((record, index) =>
+    repository.records.set(`package ${reference(index + 1)}`, {
+      ...record,
+      reference: reference(index + 1),
+    }),
+  );
+  repository.records.set(`package captured-media:`, { ...valid, reference: "captured-media:" });
+  const store = new CapturedMediaStore(repository, urls, "package");
+  for (let index = 1; index <= invalid.length; index++) store.resolve(reference(index));
+  await flush();
+  for (let index = 1; index <= invalid.length; index++)
+    assert.deepEqual(store.resolve(reference(index)), { state: "missing" }, `record ${index}`);
+  assert.deepEqual(store.resolve("captured-media:"), { state: "missing" });
+  // A package asset path is never treated as captured media.
+  assert.deepEqual(store.resolve("images/coast.svg"), { state: "missing" });
+  assert.equal(store.holds("images/coast.svg", "image"), false);
+});
+
+test("deleting captured media removes it durably and revokes its URL", async () => {
+  const { media, repository, log } = harness();
+  const stored = await media.add("image", new Blob(["a"], { type: "image/png" }));
+  assert.equal(media.holds(stored.reference, "image"), true);
+  assert.equal(media.holds(stored.reference, "video"), false);
+  const resolved = media.resolve(stored.reference);
+  assert.equal(resolved.state, "ready");
+  await media.delete(stored.reference);
+  assert.deepEqual(log, [`revoke ${resolved.state === "ready" ? resolved.url : ""}`]);
+  assert.equal(repository.size, 0);
+  assert.deepEqual(media.resolve(stored.reference), { state: "missing" });
 });
 
 test("waiting on a long-open camera leaves no abort listener behind", async () => {
