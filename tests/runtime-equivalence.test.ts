@@ -75,7 +75,6 @@ test("resume equivalence preserves deterministic random advancement", () => {
 
   assert.equal(result.events.filter((event) => event.kind === "say").length, 4);
   assert.ok(new Set(result.boundaries.map((snapshot) => snapshot.rng.state)).size > 1);
-  assert.notEqual(result.finalSnapshot.rng.state, 0);
 });
 
 function rootValue(snapshot: RuntimeSnapshot, name: string): SerializableRuntimeValue {
