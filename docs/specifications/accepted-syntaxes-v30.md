@@ -2091,7 +2091,8 @@ modifiers mean visible and blocking. `async`, `visible`, `mystery`, and `hidden`
 A duration is a bare number of seconds, a [§35](#35-date-time-durations-and-unix-time) elapsed duration such as
 `500 ms` or `2 min`, or a number followed by a trailing unit as for `wait` (`timer n ms`). A range such as `5..10` or
 `5..=10` counts whole seconds and is drawn once per round from the session RNG after the timer's operands are
-evaluated; ranges with other units are not yet supported. `timer 0` and `wait 0` continue immediately.
+evaluated. Ranges with other units, such as `5..10 min`, are not implemented yet. `timer 0` and `wait 0` continue
+immediately.
 
 ### Named form
 

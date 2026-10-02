@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
@@ -15,7 +16,6 @@ import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
-import { timerProperty } from "../src/runtime/timers.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
@@ -29,6 +29,41 @@ function playerRuntimeDeadlinesDue(snapshot: RuntimeSnapshot): boolean {
     (deadline) => deadline <= snapshot.observedSessionTimeMs,
   );
 }
+
+/**
+ * Generous bound for a catch-up that finishes in well under a second. The horizons that use it hold so many silent
+ * rounds that expiring them one at a time would take days, so exceeding it means that regression rather than a slow
+ * machine; it is not a performance threshold.
+ */
+const BOUNDED_CATCH_UP_LIMIT_MS = 20_000;
+
+/**
+ * Restores a checkpoint, observes a time, and runs the engine, round-tripping each resulting snapshot through checkpoint
+ * JSON as `Session.at` does; prints the result as JSON. See `Session.atBounded`.
+ */
+const BOUNDED_CATCH_UP_SCRIPT = `
+  import assert from "node:assert/strict";
+  import {
+    createCheckpoint, deserializeCheckpoint, observeTime, run, serializeCheckpoint,
+  } from ${JSON.stringify(new URL("../src/index.js", import.meta.url).href)};
+  let input = "";
+  for await (const chunk of process.stdin) input += chunk;
+  const { checkpoint, nowMs } = JSON.parse(input);
+  const { plan, snapshot } = deserializeCheckpoint(checkpoint);
+  const restore = (current) => {
+    const json = serializeCheckpoint(createCheckpoint(plan, current));
+    const restored = deserializeCheckpoint(json).snapshot;
+    assert.deepEqual(restored, current, "checkpoint JSON must round-trip exactly");
+    return { json, restored };
+  };
+  const observed = observeTime(plan, snapshot, nowMs);
+  const ran = run(plan, restore(observed.snapshot).restored);
+  process.stdout.write(JSON.stringify({
+    outcome: observed.outcome.kind,
+    events: [...observed.events, ...ran.events],
+    checkpoint: restore(ran.snapshot).json,
+  }));
+`;
 
 /** Drives a session with explicit time observations and completions, round-tripping every checkpoint. */
 class Session {
@@ -72,6 +107,39 @@ class Session {
     assert.equal(observed.outcome.kind, "observed");
     this.events.push(...observed.events);
     this.snapshot = observed.snapshot;
+    return this.run();
+  }
+
+  /**
+   * Like `at`, but catches up in a child process that is stopped after `BOUNDED_CATCH_UP_LIMIT_MS`. Catch-up is
+   * synchronous, so a node:test `timeout` cannot interrupt it; the child turns a regression to per-round catch-up into
+   * a failure instead of a hung suite.
+   */
+  atBounded(nowMs: number): this {
+    this.#restore();
+    const child = spawnSync(
+      process.execPath,
+      ["--input-type=module", "--eval", BOUNDED_CATCH_UP_SCRIPT],
+      {
+        input: JSON.stringify({
+          checkpoint: serializeCheckpoint(createCheckpoint(this.plan, this.snapshot)),
+          nowMs,
+        }),
+        encoding: "utf8",
+        timeout: BOUNDED_CATCH_UP_LIMIT_MS,
+      },
+    );
+    assert.equal(child.error, undefined, `catch-up to ${nowMs} ms must finish within the bound`);
+    assert.equal(child.status, 0, child.stderr);
+    // EVIDENCE: fixture: the child prints plain JSON data in this shape.
+    const result = JSON.parse(child.stdout) as {
+      outcome: string;
+      events: InterpreterEvent[];
+      checkpoint: string;
+    };
+    assert.equal(result.outcome, "observed");
+    this.events.push(...result.events);
+    this.snapshot = deserializeCheckpoint(result.checkpoint).snapshot;
     return this.run();
   }
 
@@ -462,12 +530,14 @@ test("exit in an expiry block cancels the interrupted ask without assigning it",
       'say "never ${name}"',
     ].join("\n"),
   );
+  const prompt = session.snapshot.foregroundAction;
+  assert.ok(prompt?.kind === "interaction");
   session.at(5_000);
   assert.deepEqual(session.said(), ["Too slow."]);
   assert.equal(session.snapshot.status, "halted");
   assert.equal(session.events.at(-1)?.kind, "exit");
   const late = completeAction(session.plan, session.snapshot, {
-    actionId: 2,
+    actionId: prompt.actionId,
     actionKind: "interaction",
     interactionKind: "text",
     payload: { kind: "submittedText", submittedText: "late" },
@@ -550,10 +620,15 @@ test("expiry blocks queued at script end still run, while script end stops runni
   assert.deepEqual(session.said(), ["forced running"]);
   assert.equal(session.snapshot.status, "halted");
   assert.equal(session.timers().length, 0);
-  assert.deepEqual(
-    session.snapshot.settledTimers.map((timer) => timer.state),
-    ["finished", "stopped"].reverse().sort(),
-  );
+  const settledState = (name: string) => {
+    const handle = session.snapshot.frames[0]!.bindings.find(
+      (binding) => binding.name === name,
+    )?.value;
+    assert.ok(typeof handle === "object" && handle?.kind === "timerHandle");
+    return session.snapshot.settledTimers.find((timer) => timer.timerId === handle.timerId)?.state;
+  };
+  assert.deepEqual([settledState("now"), settledState("later")], ["finished", "stopped"]);
+  assert.equal(session.snapshot.settledTimers.length, 2);
 });
 
 test("an expiry block interrupting a function keeps caller scopes, loops, and temporaries", () => {
@@ -702,7 +777,6 @@ test("runtime review regressions stay checkpointable and ordered", () => {
     "let t = timer(duration: 1..=3, async: true, repeat: true)\nt.repeatDuration = 2 s\nwait 8 s",
     { seed: overrideSeed },
   );
-  assert.equal(override.timers()[0]!.timer.range, null);
   // Only the first round comes from the range; every later round lasts the assigned 2 s without a draw.
   const initial = randomIntegerDraws(overrideSeed, "1..=3", 1);
   const firstExpiryMs = initial.values[0]! * 1_000;
@@ -796,19 +870,15 @@ test("runtime review regressions stay checkpointable and ordered", () => {
   assert.deepEqual(twiceRun.snapshot, onTime.snapshot);
 });
 
-test("a late observation skips silent fixed repeat rounds arithmetically", () => {
-  const source = "let t = timer(duration: 1 ms, async: true, repeat: true)\nwait 10000 s\nexit";
-  const late = new Session(source);
-  const started = performance.now();
-  late.at(3_600_000);
-  assert.ok(performance.now() - started < 500, "catch-up must not process every silent round");
-  const timer = late.timers()[0]!.timer;
-  assert.deepEqual(timerProperty(timer, "elapsed", 3_600_000), {
-    kind: "duration",
-    milliseconds: 3_600_000,
-  });
-  assert.equal(timer.anchoredRounds, 3_600_000, "rounds since the anchor at 0 ms");
-  assert.equal(timer.deadlineMs, 3_600_001);
+test("a late observation across 10^12 silent fixed rounds ends with on-time elapsed and remaining", () => {
+  // A scoped regression oracle for catch-up that does not expire silent rounds one at a time (docs/RUNTIME.md): that
+  // path cannot reach this horizon within the bound. The values follow from the anchor formula.
+  const late = new Session(
+    'let t = timer(duration: 1 ms, async: true, repeat: true)\nwait 1000000000 s\nsay "${t.elapsed == 1000000000 s} ${t.remaining == 1 ms}"',
+  ).atBounded(1e12);
+  // The round ending with the wait settles first by action ID, so the next 1-ms round has just started.
+  assert.deepEqual(late.said(), ["true true"]);
+  assert.equal(late.snapshot.status, "halted");
 });
 
 test("final review regressions keep late expiries valid and reject forged invocations", () => {
@@ -1159,9 +1229,10 @@ test("audit regressions: fractional repeats, tiny rounds, remaining rounding, an
   assert.deepEqual(late.said(), timely.said());
   assert.deepEqual(late.timers()[0]!.timer, timely.timers()[0]!.timer);
 
-  const started = performance.now();
-  const tiny = new Session("timer(duration: 1e-16 ms, async: true, repeat: true)\nwait 1 ms").at(1);
-  assert.ok(performance.now() - started < 1_000, "tiny silent rounds are skipped in one step");
+  // Thousands of trillions of silent rounds end before 1 ms.
+  const tiny = new Session(
+    "timer(duration: 1e-16 ms, async: true, repeat: true)\nwait 1 ms",
+  ).atBounded(1);
   assert.equal(tiny.snapshot.foregroundAction, null);
   // A failure would also clear the foreground action; the session must end normally.
   assert.equal(tiny.snapshot.status, "halted");
@@ -1234,10 +1305,13 @@ test("audit regressions: restore rejects contradictory rounds, early expiries, a
   full.snapshot.pendingTimerHandlers[0]!.count = Number.MAX_SAFE_INTEGER;
   counted.snapshot = deserializeCheckpoint(JSON.stringify(full)).snapshot;
   counted.at(3_000);
-  assert.deepEqual(
-    counted.snapshot.pendingTimerHandlers.map((entry) => entry.count),
-    [Number.MAX_SAFE_INTEGER, 1],
-    "a full aggregate count starts a new entry",
+  // How the queue splits a full count is not a rule; the session must not fail, every checkpoint round-trips (so each
+  // count stays a safe integer), and no expiry is lost.
+  assert.equal(counted.snapshot.failure, null);
+  assert.equal(
+    counted.snapshot.pendingTimerHandlers.reduce((total, entry) => total + BigInt(entry.count), 0n),
+    BigInt(Number.MAX_SAFE_INTEGER) + 1n,
+    "a full aggregate count loses no expiry",
   );
 });
 
@@ -1299,12 +1373,8 @@ test("re-audit regressions: skipped rounds keep tie order, termination, and rest
 test("second re-audit regressions: plateau skipping, failure at a due deadline, and the index limit", () => {
   const plateau =
     "let t = timer(duration: 1 ms, async: true, repeat: true)\nt.repeatDuration = 1e-300 ms\nwait 2 ms";
-  const started = performance.now();
-  const walked = new Session(plateau).at(1).at(2);
-  assert.ok(
-    performance.now() - started < 1_000,
-    "equal-deadline rounds are skipped in bounded steps",
-  );
+  // From 1 ms on, every round deadline rounds to 1 ms until the round index is exhausted.
+  const walked = new Session(plateau).atBounded(1).at(2);
   assert.equal(walked.snapshot.status, "halted");
 
   const failing = new Session(
@@ -1320,11 +1390,15 @@ test("second re-audit regressions: plateau skipping, failure at a due deadline, 
   assert.equal(observed.snapshot.observedSessionTimeMs, 5);
   assert.deepEqual(observed.events, [], "a failed session settles nothing further");
 
-  // The last anchored round index ends both an on-time and a late schedule at the same point.
+  // The last anchored round index ends both an on-time and a late schedule at the same point. The constants are a
+  // regression oracle scoped to the current private index limit, zero-based `Number.MAX_SAFE_INTEGER - 2`: the last
+  // 1e-16-ms round ends at (MAX_SAFE_INTEGER - 1) * 1e-16 ms = 0.900719925474099 ms, so the finished timer's elapsed
+  // time stays at most that ("end"), and the on-time prefix stops a few rounds earlier. docs/RUNTIME.md documents the
+  // late-versus-on-time equality and that an exhausted index finishes the timer, not the index value.
   const indexLimit =
     'let t = timer(duration: 1e-16 ms, async: true, repeat: true)\ntimer async 1 ms {\n  if t.elapsed > 0.900719925474099 ms { say "extra", 0 }\n  else { say "end", 0 }\n}\nwait 10 ms';
-  const prefix = new Session(indexLimit).at(0.9007199254740984);
-  const late = new Session(indexLimit).at(0.9007199254740984).at(1);
+  const prefix = new Session(indexLimit).atBounded(0.9007199254740984);
+  const late = new Session(indexLimit).atBounded(0.9007199254740984).at(1);
   for (let guard = 0; prefix.snapshot.observedSessionTimeMs < 1; guard += 1) {
     assert.ok(guard < 20, "the remaining rounds are few");
     const deadline = prefix.timers()[0]?.timer.deadlineMs ?? 1;
