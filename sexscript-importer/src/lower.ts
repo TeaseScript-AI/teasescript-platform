@@ -10,7 +10,14 @@ import {
   type SourceSpan,
 } from "./ast.ts";
 import { rootDiagnostics } from "./diagnostics.ts";
-import { helperCall, helperStatements, type HelperName } from "./helpers.ts";
+import {
+  ACTION_DISPATCHER,
+  ACTION_DISPATCHER_MARKER,
+  helperCall,
+  helperStatements,
+  withActionDispatcher,
+  type HelperName,
+} from "./helpers.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
 import {
@@ -94,6 +101,12 @@ interface LowerContext {
   mixinModules: readonly MixinModuleInfo[];
   /** Module directories whose loader this script replaced with direct module calls. */
   loadsModuleDirectories: Set<string>;
+  /** Function lowered right now and its parameter/local names, for closure naming and capture checks. */
+  currentFunction: { name: string; locals: ReadonlySet<string> } | null;
+  /** Functions generated from closure values, emitted at the program root. */
+  closureFunctions: IrStatement[];
+  /** Functions referenced by closure-value action IDs; the package dispatcher calls them. */
+  actions: Set<string>;
 }
 
 /** Source comments not yet emitted; shared by every context lowering the same file. */
@@ -165,6 +178,9 @@ export function lowerParsedFile(
     packageFunctions: options.packageFunctions ?? new Set(),
     mixinModules: options.mixinModules ?? [],
     loadsModuleDirectories: new Set(),
+    currentFunction: null,
+    closureFunctions: [],
+    actions: new Set(),
   };
   if (file.diagnostics.length > 0 || file.root === null) {
     for (const diagnostic of file.diagnostics) {
@@ -213,7 +229,11 @@ export function lowerParsedFile(
   const authoredStatements = withoutTrailingEnd(
     body?.kind === "block" ? lowerBlock(body, context) : [],
   );
-  const statements = [...helperStatements(context.syntheticHelpers), ...authoredStatements];
+  const statements = [
+    ...helperStatements(context.syntheticHelpers),
+    ...context.closureFunctions,
+    ...authoredStatements,
+  ];
   if (body?.kind !== "block") {
     addDiagnostic(
       context,
@@ -230,11 +250,13 @@ export function lowerParsedFile(
     statements,
     diagnostics: context.diagnostics,
     ...(mixin === null ? {} : { module: mixin.info }),
+    ...(context.actions.size === 0 ? {} : { actions: [...context.actions] }),
     ...(context.loadsModuleDirectories.size === 0
       ? {}
       : { loadsModuleDirectories: [...context.loadsModuleDirectories].sort() }),
   };
-  return options.renameIdentifiers === false ? program : renameConflictingIdentifiers(program);
+  if (options.renameIdentifiers === false) return program;
+  return renameConflictingIdentifiers(withActionDispatcher(program));
 }
 
 function lowerHelperCompilationUnit(
@@ -388,6 +410,15 @@ function lowerHelperMethod(
     packageFunctions: baseContext.packageFunctions,
     mixinModules: baseContext.mixinModules,
     loadsModuleDirectories: baseContext.loadsModuleDirectories,
+    currentFunction: {
+      name,
+      locals: functionLocalNames(
+        body,
+        authoredRecords.map((parameter) => parameter.name),
+      ),
+    },
+    closureFunctions: baseContext.closureFunctions,
+    actions: baseContext.actions,
   };
   const parameters: IrFunctionParameter[] = [];
   for (const parameter of authoredRecords) {
@@ -405,7 +436,13 @@ function lowerHelperMethod(
     }
     parameters.push({ name: parameterName, defaultValue });
   }
-  return { kind: "function", name, parameters, body: lowerBlock(body, context), span: method.span };
+  return {
+    kind: "function",
+    name,
+    parameters,
+    body: lowerBlock(method.returnType === "void" ? body : withImplicitReturn(body), context),
+    span: method.span,
+  };
 }
 
 function lowerBlock(block: AstNode, context: LowerContext): IrStatement[] {
@@ -1147,14 +1184,18 @@ function lowerClosureDeclaration(
   context: LowerContext,
 ): IrStatement[] {
   if (context.functionDepth !== 0) {
-    return [
-      unsupportedStatement(
-        context,
-        closure,
-        "SX_NESTED_CLOSURE",
-        "Nested Groovy closures are not lowered automatically.",
-      ),
-    ];
+    // A closure stored in a local variable inside a function becomes an action ID called via the dispatcher.
+    const value = lowerClosureValue(closure, context, name);
+    return value === null
+      ? [
+          unsupportedStatement(
+            context,
+            closure,
+            "SX_NESTED_CLOSURE",
+            "Nested Groovy closures are not lowered automatically.",
+          ),
+        ]
+      : [{ kind: "let", name, value, span }];
   }
   const info = context.functions.get(name);
   if (info === undefined) {
@@ -1212,12 +1253,211 @@ function lowerClosureDeclaration(
       ),
     ];
   }
+  const outerFunction = context.currentFunction;
+  context.currentFunction = {
+    name,
+    locals: functionLocalNames(
+      body,
+      parameters.map((parameter) => parameter.name),
+    ),
+  };
   context.functionDepth += 1;
   try {
-    return [{ kind: "function", name, parameters, body: lowerBlock(body, context), span }];
+    return [
+      {
+        kind: "function",
+        name,
+        parameters,
+        body: lowerBlock(
+          closure.implicitReturn === false ? body : withImplicitReturn(body),
+          context,
+        ),
+        span,
+      },
+    ];
   } finally {
     context.functionDepth -= 1;
+    context.currentFunction = outerFunction;
   }
+}
+
+/** SexScript API calls that produce no value, so a trailing call stays a statement. */
+const VOID_API_CALLS = new Set([
+  "exit",
+  "openCdTrays",
+  "playBackgroundSound",
+  "playSound",
+  "save",
+  "send",
+  "setImage",
+  "setInfos",
+  "show",
+  "sleep",
+  "stopSoundThreads",
+  "useEmailAddress",
+  "useFile",
+  "useUrl",
+  "wait",
+  "waitWithGauge",
+]);
+
+/** Collection calls used for their effect, whose trailing use is not a meaningful return value. */
+const EFFECT_COLLECTION_CALLS = new Set([
+  "add",
+  "clear",
+  "each",
+  "eachWithIndex",
+  "forEach",
+  "push",
+  "remove",
+  "times",
+]);
+
+/**
+ * Groovy closures and methods return the value of their last expression, including the last expression of
+ * each `if`/`else` branch. Makes those returns explicit, except for assignments and value-less API calls.
+ */
+function withImplicitReturn(block: AstNode): AstNode {
+  const statements = nodeArray(block.statements);
+  const last = statements.at(-1);
+  if (last === undefined) return block;
+  const replaced = implicitReturnStatement(last);
+  return replaced === last
+    ? block
+    : { ...block, statements: [...statements.slice(0, -1), replaced] };
+}
+
+function implicitReturnStatement(statement: AstNode): AstNode {
+  if (statement.kind === "block") return withImplicitReturn(statement);
+  if (statement.kind === "if") {
+    const then = asNode(statement.then);
+    const otherwise = asNode(statement.else);
+    return {
+      ...statement,
+      then: then === null ? null : implicitReturnStatement(then),
+      else:
+        otherwise === null || otherwise.kind === "empty"
+          ? otherwise
+          : implicitReturnStatement(otherwise),
+    };
+  }
+  if (statement.kind !== "expressionStatement") return statement;
+  const expression = asNode(statement.expression);
+  if (expression === null || !returnsValue(expression)) return statement;
+  return { kind: "return", span: statement.span, value: expression };
+}
+
+function returnsValue(expression: AstNode): boolean {
+  if (["declaration", "postfix", "prefix", "closure"].includes(expression.kind)) return false;
+  if (expression.kind === "binary" && typeof expression.operator === "string") {
+    const operator = expression.operator;
+    const assignment = operator.endsWith("=") && !["==", "!=", "<=", ">="].includes(operator);
+    return !assignment && operator !== "<<";
+  }
+  if (expression.kind !== "methodCall") return true;
+  const call = callParts(expression);
+  if (call === null) return true;
+  if (call.inherited && VOID_API_CALLS.has(call.name)) return false;
+  // Compact showButton has no result; only the timeout form returns the elapsed time.
+  if (call.inherited && call.name === "showButton" && call.arguments.length < 2) return false;
+  return call.inherited || !EFFECT_COLLECTION_CALLS.has(call.name);
+}
+
+/** Parameter and declared local names of a function body, including nested blocks. */
+function functionLocalNames(body: AstNode, parameters: readonly string[]): Set<string> {
+  const names = new Set(parameters);
+  walkAst(body, (node) => {
+    if (node.kind === "declaration") {
+      const name = variableName(node.left);
+      if (name !== null) names.add(name);
+    }
+    if (node.kind === "for" && typeof node.variable === "string") names.add(node.variable);
+    if (node.kind === "closure") {
+      for (const parameter of groovyParameters(node.parameters) ?? []) names.add(parameter.name);
+    }
+  });
+  return names;
+}
+
+/**
+ * A closure used as a value (stored in data, passed as an argument, kept in a local) becomes a string action ID.
+ * A closure that only forwards to a function (`{ f() }`, `{ a -> f(a) }`) uses that function's name; any other
+ * closure body becomes a generated function. Calls of such values go through the package dispatcher. Closures
+ * capturing local variables of their enclosing function are not converted.
+ */
+function lowerClosureValue(
+  closure: AstNode,
+  context: LowerContext,
+  hint?: string,
+): IrExpression | null {
+  const body = asNode(closure.body);
+  const parameters = groovyParameters(closure.parameters);
+  if (body?.kind !== "block" || parameters === null) return null;
+  const parameterNames =
+    closure.parameterSpecified === true ? parameters.map((p) => p.name) : ["it"];
+  const locals = context.currentFunction?.locals ?? new Set<string>();
+  const ownNames = functionLocalNames(body, parameterNames);
+  const captured = new Set<string>();
+  walkAst(body, (node) => {
+    const name = variableName(node);
+    if (name !== null && locals.has(name) && !ownNames.has(name)) captured.add(name);
+  });
+  if (captured.size > 0) {
+    return unsupportedExpression(
+      context,
+      closure,
+      "SX_CAPTURING_CLOSURE",
+      `This closure value captures local ${[...captured].join(", ")} of its enclosing function; TeaseScript has no closures, so pass that state explicitly.`,
+    );
+  }
+  const forwarded = forwardedFunction(body, parameterNames, context);
+  if (forwarded !== null) {
+    context.actions.add(forwarded);
+    return { kind: "literal", value: forwarded };
+  }
+  const base = hint ?? context.currentFunction?.name ?? "script";
+  const name = `${base}Callback${context.closureFunctions.length + 1}`;
+  const outerFunction = context.currentFunction;
+  context.currentFunction = { name, locals: ownNames };
+  context.functionDepth += 1;
+  try {
+    const implicit = closure.parameterSpecified !== true;
+    context.closureFunctions.push({
+      kind: "function",
+      name,
+      parameters: parameterNames.map((parameter) => ({
+        name: parameter,
+        defaultValue: implicit ? { kind: "literal", value: null } : null,
+      })),
+      body: lowerBlock(withImplicitReturn(body), context),
+      span: closure.span,
+    });
+  } finally {
+    context.functionDepth -= 1;
+    context.currentFunction = outerFunction;
+  }
+  context.actions.add(name);
+  return { kind: "literal", value: name };
+}
+
+/** The function a closure body only forwards to, passing its own parameters unchanged. */
+function forwardedFunction(
+  body: AstNode,
+  parameters: string[],
+  context: LowerContext,
+): string | null {
+  const statements = nodeArray(body.statements);
+  const only = statements.length === 1 ? statements[0] : undefined;
+  const expression = asNode(only?.kind === "return" ? only.value : only?.expression);
+  const call = expression === null ? null : callParts(expression);
+  if (call === null || !call.inherited) return null;
+  const isFunction = context.functions.has(call.name) || context.packageFunctions.has(call.name);
+  if (!isFunction) return null;
+  const names = call.arguments.map((argument) => variableName(argument));
+  const expected = parameters[0] === "it" && names.length === 0 ? [] : parameters;
+  return names.length === expected.length && names.every((name, index) => name === expected[index])
+    ? call.name
+    : null;
 }
 
 function lowerAssignment(
@@ -1295,6 +1535,17 @@ function lowerAssignment(
   if (variableTarget !== null) target = { kind: "variable", name: variableTarget };
   else if (operator === "=" && targetNode.kind === "binary" && targetNode.operator === "[") {
     target = lowerExpression(targetNode, context);
+  } else if (operator === "=" && targetNode.kind === "property") {
+    target = lowerExpression(targetNode, context);
+    if (target !== null) {
+      addDiagnostic(
+        context,
+        "SX_SHARED_MAP_WRITE",
+        "warning",
+        "Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).",
+        node.span,
+      );
+    }
   }
   if (target === null) {
     return [
@@ -2328,12 +2579,65 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
         ),
       ];
     }
-    const loweredBody = lowerStatementList(sourceStatements, null, context);
+    const loweredBody = lowerStatementList(eliminateSwitchBreaks(sourceStatements), null, context);
     cases.push({ span: caseNode.span, match, body: loweredBody });
   }
 
-  const defaultStatements = lowerStatementList(withoutTerminalBreak(defaultSource), null, context);
+  const defaultStatements = lowerStatementList(
+    eliminateSwitchBreaks(withoutTerminalBreak(defaultSource)),
+    null,
+    context,
+  );
   return [{ kind: "switch", value, cases, default: defaultStatements, span: node.span }];
+}
+
+/**
+ * A Groovy `break` inside a switch case leaves the switch, also from inside an `if`. TeaseScript switch cases have
+ * no `break`, so statements after an `if` that may break move into the paths that do not break; statements after
+ * an unconditional `break` are unreachable.
+ */
+function eliminateSwitchBreaks(statements: AstNode[], rest: AstNode[] = []): AstNode[] {
+  const result: AstNode[] = [];
+  for (let index = 0; index < statements.length; index += 1) {
+    const statement = statements[index]!;
+    if (statement.kind === "break") return result;
+    if (statement.kind === "block" && containsSwitchBreak(statement)) {
+      return [
+        ...result,
+        ...eliminateSwitchBreaks(
+          [...nodeArray(statement.statements), ...statements.slice(index + 1)],
+          rest,
+        ),
+      ];
+    }
+    if (statement.kind === "if" && containsSwitchBreak(statement)) {
+      const continuation = [...statements.slice(index + 1), ...rest];
+      const branch = (node: unknown): AstNode => ({
+        kind: "block",
+        span: asNode(node)?.span ?? statement.span,
+        statements: eliminateSwitchBreaks(branchStatements(node), continuation),
+      });
+      return [
+        ...result,
+        { ...statement, then: branch(statement.then), else: branch(statement.else) },
+      ];
+    }
+    result.push(statement);
+  }
+  return [...result, ...rest];
+}
+
+function branchStatements(node: unknown): AstNode[] {
+  const branch = asNode(node);
+  if (branch === null || branch.kind === "empty") return [];
+  return branch.kind === "block" ? nodeArray(branch.statements) : [branch];
+}
+
+/** A `break` that belongs to the enclosing switch, not to a nested loop, switch, or closure. */
+function containsSwitchBreak(node: AstNode): boolean {
+  if (node.kind === "break") return true;
+  if (["for", "while", "switch", "closure"].includes(node.kind)) return false;
+  return nodeChildren(node).some(containsSwitchBreak);
 }
 
 function collectSwitchPath(
@@ -2467,6 +2771,8 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
         "SX_JAVA_CONSTRUCTOR",
         `Java object construction (new ${text(node.type) ?? "?"}) has no TeaseScript equivalent.`,
       );
+    case "closure":
+      return lowerClosureValue(node, context);
     case "loadWithDefault": {
       const keyNode = asNode(node.key);
       const fallbackNode = asNode(node.fallback);
@@ -2569,6 +2875,27 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     const indexNode = asNode(node.right);
     const target = targetNode === null ? null : lowerExpression(targetNode, context);
     if (target === null || indexNode === null) return null;
+    const negativeIndex = negativeConstantIndex(indexNode);
+    if (
+      negativeIndex !== null &&
+      targetNode !== null &&
+      isKnownListExpression(targetNode, context)
+    ) {
+      // Groovy negative indexes count from the end; TeaseScript indexes start at 0 only.
+      if (negativeIndex === 1) return { kind: "property", target, name: "last" };
+      if (isRepeatableExpression(targetNode)) {
+        return {
+          kind: "index",
+          target,
+          index: {
+            kind: "binary",
+            operator: "-",
+            left: { kind: "property", target, name: "length" },
+            right: { kind: "literal", value: negativeIndex },
+          },
+        };
+      }
+    }
     const calendarIndex = calendarConstant(indexNode);
     if (calendarIndex !== null) return dateTimeField(calendarIndex, target, node, context);
     if (targetNode !== null && isRandomIndexOf(indexNode, targetNode)) {
@@ -2599,6 +2926,14 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     return { kind: "binary", operator: operator === "&&" ? "and" : "or", left, right };
   }
   if (operator === "+") return lowerPlus(node, context);
+  if (operator === "in") return lowerMembership(node, context);
+  if ((operator === "&" || operator === "|") && isBooleanOperation(node, context)) {
+    // Groovy & and | on booleans evaluate both sides; with a side-effect-free right side that equals and/or.
+    const left = lowerCondition(asNode(node.left)!, context);
+    const right = lowerCondition(asNode(node.right)!, context);
+    if (left === null || right === null) return null;
+    return { kind: "binary", operator: operator === "&" ? "and" : "or", left, right };
+  }
   const mapped = operator;
   if (
     mapped === null ||
@@ -2713,6 +3048,7 @@ function typedLegacyLoad(
 }
 
 function isRepeatableIndex(node: AstNode): boolean {
+  if (node.kind === "property") return isRepeatableExpression(node);
   const target = asNode(node.left);
   const index = asNode(node.right);
   return (
@@ -2853,6 +3189,67 @@ function templateOrLiteral(parts: TemplatePart[]): IrExpression {
   return { kind: "template", parts: merged };
 }
 
+function isBooleanOperation(node: AstNode, context: LowerContext): boolean {
+  const left = asNode(node.left);
+  const right = asNode(node.right);
+  return (
+    left !== null &&
+    right !== null &&
+    isPure(right) &&
+    onlyOf(inferType(left, context.types), BOOLEAN) &&
+    onlyOf(inferType(right, context.types), BOOLEAN)
+  );
+}
+
+/** `x in list` tests membership; `x in a..b` tests the range bounds. */
+function lowerMembership(node: AstNode, context: LowerContext): IrExpression | null {
+  const leftNode = asNode(node.left);
+  const rightNode = asNode(node.right);
+  if (leftNode === null || rightNode === null) return null;
+  const value = lowerExpression(leftNode, context);
+  if (value === null) return null;
+  if (rightNode.kind === "range" && isRepeatableExpression(leftNode)) {
+    const from = asNode(rightNode.from);
+    const to = asNode(rightNode.to);
+    const lower = from === null ? null : lowerExpression(from, context);
+    const upper = to === null ? null : lowerExpression(to, context);
+    if (lower === null || upper === null) return null;
+    return {
+      kind: "binary",
+      operator: "and",
+      left: { kind: "binary", operator: ">=", left: value, right: lower },
+      right: {
+        kind: "binary",
+        operator: rightNode.inclusive === true ? "<=" : "<",
+        left: value,
+        right: upper,
+      },
+    };
+  }
+  if (isKnownListExpression(rightNode, context)) {
+    const list = lowerExpression(rightNode, context);
+    return list === null
+      ? null
+      : { kind: "methodCall", target: list, name: "contains", arguments: [value] };
+  }
+  return unsupportedExpression(
+    context,
+    node,
+    "SX_UNSUPPORTED_OPERATOR",
+    "Groovy `in` is only converted for lists and ranges.",
+  );
+}
+
+/** `-n` as an index literal (Groovy parses it as unary minus applied to a constant). */
+function negativeConstantIndex(node: AstNode): number | null {
+  const value = node.kind === "unaryMinus" ? asNode(node.value) : null;
+  if (value?.kind === "constant" && typeof value.value === "number" && value.value > 0)
+    return value.value;
+  if (node.kind === "constant" && typeof node.value === "number" && node.value < 0)
+    return -node.value;
+  return null;
+}
+
 /** Recognizes `getRandom(list.size)`, `getRandom(list.size())`, or `getRandom(list.length)` for `list`. */
 function isRandomIndexOf(index: AstNode, list: AstNode): boolean {
   const call = callParts(index);
@@ -2956,16 +3353,47 @@ function lowerPropertyExpression(node: AstNode, context: LowerContext): IrExpres
       "Dynamic Groovy property access is not lowered automatically.",
     );
   }
-  if (property === "size" && isKnownListExpression(targetNode, context)) {
+  if (
+    (property === "size" || property === "length") &&
+    isKnownListExpression(targetNode, context)
+  ) {
     const target = lowerExpression(targetNode, context);
     return target === null ? null : { kind: "property", target, name: "length" };
   }
-  return unsupportedExpression(
-    context,
-    node,
-    "SX_UNSUPPORTED_PROPERTY",
-    `Groovy property .${property} is not safely mapped for this receiver.`,
-  );
+  if (!isRecordFieldAccess(targetNode, property, context)) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_UNSUPPORTED_PROPERTY",
+      `Groovy property .${property} is not safely mapped for this receiver.`,
+    );
+  }
+  const target = lowerExpression(targetNode, context);
+  if (target === null) return null;
+  if (!onlyOf(inferType(targetNode, context.types), OBJECT | NULL)) {
+    addDiagnostic(
+      context,
+      "SX_FIELD_ASSUMED",
+      "info",
+      `Read .${property} as an object field; a missing field fails in TeaseScript where a Groovy map returned null.`,
+      node.span,
+    );
+  }
+  return { kind: "property", target, name: property };
+}
+
+/**
+ * Groovy `value.name` on a map (the importer's object/record representation) is a field read. Class-like
+ * receivers (`Calendar.MONTH`, `System.out`) and lists are not records.
+ */
+function isRecordFieldAccess(target: AstNode, property: string, context: LowerContext): boolean {
+  if (!isTeaseObjectPropertyName(property)) return false;
+  const receiver = variableName(target);
+  if (receiver !== null && /^[A-Z]/u.test(receiver) && !context.types.variables.has(receiver))
+    return false;
+  if (target.kind === "constructorCall" || target.kind === "classExpression") return false;
+  const type = inferType(target, context.types);
+  return (type & OBJECT) !== 0 && !onlyOf(type, LIST | NULL);
 }
 
 function lowerObjectMethodCallExpression(
@@ -3012,6 +3440,11 @@ function lowerObjectMethodCallExpression(
     return args === null ? null : { kind: "call", name, positional: args, named: {}, local: true };
   }
 
+  if (name === "call" && targetNode !== null) {
+    const action = lowerExpression(targetNode, context);
+    const args = lowerArguments(argumentsNodes, context);
+    return action === null || args === null ? null : actionCall(action, args, context);
+  }
   if (name === "toString" && argumentsNodes.length === 0 && targetNode !== null) {
     const value = lowerExpression(targetNode, context);
     return value === null ? null : templateOrLiteral([{ value }]);
@@ -3398,6 +3831,16 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     return args === null
       ? null
       : { kind: "call", name: call.name, positional: args, named: {}, local: true };
+  }
+  if (
+    !context.functions.has(call.name) &&
+    !context.packageFunctions.has(call.name) &&
+    context.types.variables.has(call.name) &&
+    context.helperMainParameter === null
+  ) {
+    // Groovy `name(...)` on a variable calls the closure it holds; closure values are action IDs here.
+    const args = lowerArguments(call.arguments, context);
+    return args === null ? null : actionCall({ kind: "variable", name: call.name }, args, context);
   }
   const functionInfo = context.functions.get(call.name);
   if (functionInfo !== undefined) {
@@ -4136,6 +4579,7 @@ function desugarObjectScript(
       parameters: method.parameters,
       parameterSpecified: true,
       body: method.body,
+      implicitReturn: method.returnType !== "void",
     };
     const declaration = { kind: "declaration", span: method.span, left, right: closure };
     members.push({ kind: "expressionStatement", span: method.span, expression: declaration });
@@ -4303,6 +4747,21 @@ function collectClosureInfo(body: AstNode): Map<string, ClosureInfo> {
     if (argumentCount === 1) info.maxArgs = 1;
   });
   return result;
+}
+
+/** Calls the action a closure value stands for through the generated package dispatcher. */
+function actionCall(
+  action: IrExpression,
+  args: IrExpression[],
+  context: LowerContext,
+): IrExpression {
+  context.actions.add(ACTION_DISPATCHER_MARKER);
+  return {
+    kind: "call",
+    name: ACTION_DISPATCHER,
+    positional: [action, { kind: "list", items: args }],
+    named: {},
+  };
 }
 
 function useHelper(context: LowerContext, name: HelperName, args: IrExpression[]): IrExpression {

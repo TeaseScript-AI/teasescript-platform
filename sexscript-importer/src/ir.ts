@@ -29,6 +29,8 @@ export interface MigrationProgram {
   module?: MixinModuleInfo;
   /** Module directories whose mixin modules this script loads at runtime. */
   loadsModuleDirectories?: string[];
+  /** Functions used as closure-value action IDs (and a marker when actions are called). */
+  actions?: string[];
 }
 
 export interface MixinModuleInfo {

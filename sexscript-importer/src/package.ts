@@ -6,6 +6,7 @@ import {
   lowerParsedFile,
   packageFunctionNames,
 } from "./lower.ts";
+import { withActionDispatcher } from "./helpers.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 
 const ACCEPTED_EXTERNAL_CALLS = new Set([
@@ -89,13 +90,20 @@ function withLoadedModules(
   const modules = modulePrograms
     .filter((module) => module.module !== undefined && directories.has(module.module.directory))
     .toSorted((left, right) => left.module!.name.localeCompare(right.module!.name));
+  const actions = new Set(program.actions ?? []);
   for (const module of modules) {
     const renamed = renameConflictingIdentifiers(module, taken, false);
     for (const name of rootNames(renamed.statements)) taken.add(name);
     moduleStatements.push(...renamed.statements);
     diagnostics.push(...renamed.diagnostics);
+    for (const action of module.actions ?? []) actions.add(action);
   }
-  return { ...program, statements: [...moduleStatements, ...program.statements], diagnostics };
+  return {
+    ...program,
+    statements: [...moduleStatements, ...program.statements],
+    diagnostics,
+    actions: [...actions],
+  };
 }
 
 function rootNames(statements: readonly IrStatement[]): string[] {
@@ -169,11 +177,13 @@ function composeProgram(
     diagnostics.push(...entry.diagnostics);
   }
 
-  const statements = [...helperStatements, ...program.statements];
-  diagnostics.push(...packageDependencyDiagnostics(statements));
-  return renameConflictingIdentifiers({
+  const composed = withActionDispatcher({
     ...program,
-    statements,
+    statements: [...helperStatements, ...program.statements],
+  });
+  diagnostics.push(...packageDependencyDiagnostics(composed.statements));
+  return renameConflictingIdentifiers({
+    ...composed,
     diagnostics: deduplicateDiagnostics(diagnostics),
   });
 }

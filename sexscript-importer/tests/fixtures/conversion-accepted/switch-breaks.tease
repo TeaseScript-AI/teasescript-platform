@@ -1,0 +1,19 @@
+let n = randomInteger(0..3)
+let days = load "x.days"
+switch n {
+  case 0 {
+    say "Zero"
+    if days < 5 {
+      say "Too early"
+    } else {
+      say "Changing"
+    }
+  }
+  case 1 {
+    say "One"
+    say "One or two"
+  }
+  case 2 {
+    say "One or two"
+  }
+}

@@ -1,4 +1,40 @@
-import type { IrExpression, IrStatement } from "./ir.ts";
+import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
+
+/** Generated function that calls the function an action ID (a converted closure value) stands for. */
+export const ACTION_DISPATCHER = "sexscriptLegacyCall";
+/** Marks that a program calls actions, which requires the dispatcher even without known actions. */
+export const ACTION_DISPATCHER_MARKER = "#dispatch";
+
+/**
+ * Adds the action dispatcher when the program calls closure values. Each known action calls its function with
+ * as many arguments as that function declares; unknown actions return null.
+ */
+export function withActionDispatcher(program: MigrationProgram): MigrationProgram {
+  const actions = program.actions ?? [];
+  if (!actions.includes(ACTION_DISPATCHER_MARKER)) return program;
+  const arities = new Map<string, number>();
+  for (const statement of program.statements) {
+    if (statement.kind === "function") arities.set(statement.name, statement.parameters.length);
+  }
+  const branches = actions
+    .filter((action) => action !== ACTION_DISPATCHER_MARKER)
+    .toSorted()
+    .map((action) =>
+      ifS(bin("==", v("action"), lit(action)), [
+        ret({
+          kind: "call",
+          name: action,
+          positional: Array.from({ length: arities.get(action) ?? 0 }, (_, index) =>
+            at(v("args"), lit(index)),
+          ),
+          named: {},
+          local: true,
+        }),
+      ]),
+    );
+  const dispatcher = fn(ACTION_DISPATCHER, ["action", "args"], [...branches, ret(lit(null))]);
+  return { ...program, statements: [dispatcher, ...program.statements] };
+}
 
 /**
  * Small ordinary TeaseScript functions the importer generates when a legacy operation has no single TeaseScript

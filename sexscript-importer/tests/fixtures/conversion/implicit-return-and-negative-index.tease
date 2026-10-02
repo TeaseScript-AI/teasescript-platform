@@ -1,0 +1,13 @@
+let scores = [3, 5, 8]
+say "Last ${scores.last}, second last ${scores[scores.length - 2]}"
+function twice(x) {
+  return x * 2
+}
+function labelValue(n) {
+  if n > 4 {
+    return "high"
+  } else {
+    return "low"
+  }
+}
+say "Twice ${twice(scores[0])}, ${labelValue(scores[1])}"
