@@ -1039,31 +1039,35 @@ async function actionButtonGeometryChecks(page) {
     "Long choice did not wrap and grow inside its group",
   );
   // A wrapped button fits its widest rendered line plus its own padding instead of keeping the unwrapped width.
-  const fittedChoice = await page
-    .locator("[data-foreground-controls] button")
-    .filter({ hasText: "Take the longer path" })
-    .evaluate((button) => {
-      const range = document.createRange();
-      range.selectNodeContents(button.querySelector(".player-action-label"));
-      const lines = range.getClientRects();
-      const style = getComputedStyle(button);
-      const inset =
-        Number.parseFloat(style.paddingLeft) +
-        Number.parseFloat(style.paddingRight) +
-        Number.parseFloat(style.borderLeftWidth) +
-        Number.parseFloat(style.borderRightWidth);
-      let widestLine = 0;
-      for (const line of lines) widestLine = Math.max(widestLine, line.width);
-      return {
-        lineCount: lines.length,
-        widestLine,
-        contentWidth: button.getBoundingClientRect().width - inset,
-      };
-    });
-  check(
-    fittedChoice.lineCount > 1 && Math.abs(fittedChoice.contentWidth - fittedChoice.widestLine) < 2,
-    `Wrapped choice border does not follow the rendered text plus its padding: ${JSON.stringify(fittedChoice)}`,
-  );
+  // A changed row split recreates the buttons, which fit a frame later, so poll the current button until it fits.
+  const fittedChoice = (requireFit) => {
+    const button = Array.from(document.querySelectorAll("[data-foreground-controls] button")).find(
+      (candidate) => candidate.textContent.includes("Take the longer path"),
+    );
+    if (!button) return requireFit ? false : { button: "missing" };
+    const range = document.createRange();
+    range.selectNodeContents(button.querySelector(".player-action-label"));
+    const lines = range.getClientRects();
+    const style = getComputedStyle(button);
+    const inset =
+      Number.parseFloat(style.paddingLeft) +
+      Number.parseFloat(style.paddingRight) +
+      Number.parseFloat(style.borderLeftWidth) +
+      Number.parseFloat(style.borderRightWidth);
+    let widestLine = 0;
+    for (const line of lines) widestLine = Math.max(widestLine, line.width);
+    const fit = {
+      lineCount: lines.length,
+      widestLine,
+      contentWidth: button.getBoundingClientRect().width - inset,
+    };
+    return requireFit ? fit.lineCount > 1 && Math.abs(fit.contentWidth - fit.widestLine) < 2 : fit;
+  };
+  await page.waitForFunction(fittedChoice, true, { timeout: 5_000 }).catch(async () => {
+    throw new Error(
+      `Wrapped choice border does not follow the rendered text plus its padding: ${JSON.stringify(await page.evaluate(fittedChoice, false))}`,
+    );
+  });
   await page.getByRole("button", { name: "Stay by the water", exact: true }).click();
   const continueButton = page.getByRole("button", { name: "Continue", exact: true });
   await continueButton.waitFor();
