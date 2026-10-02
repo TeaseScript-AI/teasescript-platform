@@ -169,15 +169,37 @@ test("current-version plans reject an added field on each object shape of a comp
       `${path}: ${JSON.stringify(errors)}`,
     );
   }
+
+  // Allowed fields are per kind: a field that another kind defines is still unknown here.
+  for (const [kind, field, value] of [
+    [
+      "declareBinding",
+      "condition",
+      { kind: "literal", value: true, span: compiled.plan!.sourceSpan },
+    ],
+    ["literal", "name", "value"],
+  ] as const) {
+    const target = objects.find((object) => object.value.kind === kind);
+    assert.ok(target !== undefined, kind);
+    target.value[field] = value;
+    const errors = validateInstructionPlan(external).errors;
+    delete target.value[field];
+    assert.deepEqual(
+      errors.map((error) => [error.code, error.path]),
+      [["TSC002", `${target.path}.${field}`]],
+      kind,
+    );
+  }
 });
 
 test("checkpoint restore and deserialization reject unknown plan fields at their plan path", () => {
   const plan = compileValidPlan('let value = "x"\nexit');
   const json = JSON.stringify(createCheckpoint(plan, createFreshRuntimeSnapshot(plan)));
-  for (const { field, mutate, path } of [
+  for (const { field, mutate, code, path } of [
     {
       field: "top-level field",
       mutate: (text: string) => text.replace('"plan":{', `"plan":{"${UNKNOWN_FIELD}":0,`),
+      code: "TSK002",
       path: `$.plan.${UNKNOWN_FIELD}`,
     },
     {
@@ -185,14 +207,26 @@ test("checkpoint restore and deserialization reject unknown plan fields at their
       field: "prototype-named expression field",
       mutate: (text: string) =>
         text.replace('{"kind":"literal",', '{"__proto__":0,"kind":"literal",'),
+      code: "TSK002",
       path: "$.plan.instructions[0].value.__proto__",
+    },
+    {
+      // Fields are defined per plan version, so a newer revision is unsupported rather than malformed.
+      field: "newer revision with a new top-level field",
+      mutate: (text: string) =>
+        text.replace(
+          `"plan":{"format":"${plan.format}","version":${plan.version},`,
+          `"plan":{"${UNKNOWN_FIELD}":0,"format":"${plan.format}","version":${plan.version + 1},`,
+        ),
+      code: "TSK001",
+      path: "$.plan.version",
     },
   ]) {
     const malformed = mutate(json);
     assert.notEqual(malformed, json, field);
     const isExpected = (error: unknown): boolean => {
       assert.ok(error instanceof CheckpointError, field);
-      assert.deepEqual({ code: error.info.code, path: error.info.path }, { code: "TSK002", path });
+      assert.deepEqual({ code: error.info.code, path: error.info.path }, { code, path }, field);
       return true;
     };
     assert.throws(() => deserializeCheckpoint(malformed), isExpected);
