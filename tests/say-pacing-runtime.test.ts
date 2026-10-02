@@ -860,13 +860,21 @@ test("time release followed by explicit exit canonicalizes pacing release proven
 test("equal due pacing and delay actions settle by action ID", () => {
   const compiled = plan('say "first"\nwait 1.8 s\nexit');
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
+  const pacing = waiting.snapshot.backgroundActions[0];
+  const delay = waiting.snapshot.foregroundAction;
+  assert.equal(pacing?.kind, "chatPacingGate");
+  assert.equal(delay?.kind, "delay");
+  // Default smart pacing for one word: 1500 + max(1 * 300, 5 * 30) = 1800 ms, the same deadline as the wait.
+  assert.equal(pacing!.deadlineMs, 1_800);
+  assert.equal(delay!.deadlineMs, pacing!.deadlineMs);
+  assert.ok(pacing!.actionId < delay!.actionId);
   const observed = observeTime(compiled, waiting.snapshot, 1_800);
 
   assert.deepEqual(
     observed.events.map((event) =>
       event.kind === "actionCompleted" ? event.settlement.actionId : null,
     ),
-    [1, 2],
+    [pacing!.actionId, delay!.actionId],
   );
   assert.equal(observed.snapshot.foregroundAction, null);
   assert.equal(observed.snapshot.backgroundActions.length, 0);
