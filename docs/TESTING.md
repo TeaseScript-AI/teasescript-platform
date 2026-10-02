@@ -567,17 +567,18 @@ node tools/player-browser-smoke.mjs
 It covers the technical playground and plays `examples/demo/` on the built `/player/` route with trusted input: Start
 gating, rendered Stage images, the rendered speaker avatar and letter fallback, runtime timers in the rail, audible
 playback, a script pause reaching the playing element, pacing skips from a press on unused Player space or Space in the
-empty composer but not from a Player control, message text or Space while the composer holds text, a press held past
+empty composer but not from a Player control or Space while the composer holds text, smart follow that keeps a
+scrolled-up reader in place while a message arrives and resumes through Return to latest, a press held past
 one message's pacing that must not skip the next message's pacing, Finish ending the session, and a narrow viewport
 that keeps the first question's input visible. Development preview presentation is covered by the [Player browser
 verification route](#player-browser-and-visual-verification). `CHROMIUM_BIN` is tried before the `/usr/bin` Chromium
-paths; an unusable value falls back to them. An unavailable Chromium executable is an explicit skip; an available
-browser must pass the configured smoke checks.
+paths and then the newest Playwright-managed Chromium; an unusable value falls back to them. An unavailable Chromium
+executable is an explicit skip; an available browser must pass the configured smoke checks.
 
 The Monaco editor has a separate route outside `npm run check`: `npm run test:editor-browser` builds the editor and runs
 `tools/editor-browser-smoke.mjs`. Chromium may resolve only the local preview, so a build that needs remote code to
-start fails, and the editor must become ready with an accessible name. The script uses `CHROMIUM_BIN` (an unusable value
-fails), `/usr/bin`, or a Playwright Chromium; without a browser it reports an explicit skip.
+start fails, and the editor must become ready with an accessible name. Chromium selection and the explicit skip without
+a browser match the Player smoke.
 
 Production browser E2E coverage becomes required after the cross-origin host shell and player exist. It should then
 include:

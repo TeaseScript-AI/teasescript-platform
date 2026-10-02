@@ -1,9 +1,6 @@
 import { spawn } from "node:child_process";
-import { constants } from "node:fs";
-import { access, readdir } from "node:fs/promises";
 import { createServer } from "node:net";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { findChromium } from "./find-chromium.mjs";
 
 const chromium = await findChromium();
 if (chromium === null) {
@@ -103,56 +100,6 @@ async function waitForHttp(url) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(`Vite preview did not start: ${previewOutput}`);
-}
-
-/**
- * Uses an explicit CHROMIUM_BIN, then a system Chromium, then the newest Playwright-managed Chromium (the browser the
- * `playwright-cli` route uses), so an installed browser is not silently skipped.
- */
-async function findChromium() {
-  const configured = process.env.CHROMIUM_BIN;
-  if (configured) {
-    if (await isExecutable(configured)) return configured;
-    throw new Error(`CHROMIUM_BIN is not an executable file: ${configured}`);
-  }
-  for (const candidate of [
-    "/usr/bin/chromium",
-    "/usr/bin/chromium-browser",
-    "/usr/bin/google-chrome",
-    ...(await playwrightChromiums()),
-  ]) {
-    if (await isExecutable(candidate)) return candidate;
-  }
-  return null;
-}
-
-async function playwrightChromiums() {
-  const root = process.env.PLAYWRIGHT_BROWSERS_PATH || join(homedir(), ".cache", "ms-playwright");
-  let names;
-  try {
-    names = await readdir(root);
-  } catch {
-    return [];
-  }
-  return names
-    .flatMap((name) => {
-      const revision = /^chromium-(\d+)$/.exec(name)?.[1];
-      return revision === undefined ? [] : [{ name, revision: Number(revision) }];
-    })
-    .sort((left, right) => right.revision - left.revision)
-    .flatMap(({ name }) => [
-      join(root, name, "chrome-linux", "chrome"),
-      join(root, name, "chrome-linux64", "chrome"),
-    ]);
-}
-
-async function isExecutable(path) {
-  try {
-    await access(path, constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function run(command, args) {
