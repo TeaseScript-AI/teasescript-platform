@@ -686,7 +686,7 @@ class Parser {
       this.#check(TokenKind.LeftParenthesis) &&
       this.#peek().span.start.offset === command.span.end.offset
     ) {
-      return yield* parseChild(this.#parseNamedTimer(command));
+      return yield* parseChild(this.#withoutStorageDelimiters(this.#parseNamedTimer(command)));
     }
     const async = this.#checkIdentifier("async");
     if (async) this.#advance();
@@ -990,7 +990,9 @@ class Parser {
       this.#check(TokenKind.LeftParenthesis) &&
       this.#peek().span.start.offset === command.span.end.offset
     ) {
-      return yield* parseChild(this.#parseNamedMedia(command, media));
+      return yield* parseChild(
+        this.#withoutStorageDelimiters(this.#parseNamedMedia(command, media)),
+      );
     }
     const async = this.#checkIdentifier("async");
     if (async) this.#advance();

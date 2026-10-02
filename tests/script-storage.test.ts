@@ -554,6 +554,8 @@ test("compact interactions parse in every storage operand position", () => {
     '(choose as mistress "a", "b")',
     '"${askText}"',
     "wrap(askNumber)",
+    'timer(duration: 1 s, async: true, label: askText as mistress "Label?").state',
+    'playAudio(file: askText as mistress "File?", async: true).state',
   ];
   const positions = [
     (value: string) => `save ${value} as "k"`,
@@ -571,5 +573,21 @@ test("compact interactions parse in every storage operand position", () => {
       const compiled = compileSource(prelude + source);
       assert.deepEqual(compiled.diagnostics, [], source);
     }
+  }
+});
+
+test("save keeps the value it evaluated before its key expression runs", () => {
+  for (const source of [
+    'let items = [1]\nsave items as "k${items.clear()}"\nlet stored = load "knull"\nexit',
+    'let items = [1]\nfunction clearItems { items.clear()\nreturn "knull" }\nsave items as clearItems()\nlet stored = load "knull"\nexit',
+  ]) {
+    const result = assertRuntimeResumeEquivalent(source);
+    const kept = { kind: "list", items: [1] };
+    assert.deepEqual(binding(result.finalSnapshot, "stored"), kept, source);
+    assert.deepEqual(
+      changes(result.events).map(({ key, value }) => ({ key, value })),
+      [{ key: "knull", value: kept }],
+      source,
+    );
   }
 });

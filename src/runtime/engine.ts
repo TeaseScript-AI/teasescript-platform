@@ -2103,7 +2103,11 @@ function writeStorage(
   evaluator: Evaluator,
   events: InterpreterEvent[],
 ): void {
-  const value = instruction.value === null ? null : evaluator.evaluate(instruction.value);
+  // Copy the value before the key runs: the key expression may change a borrowed collection.
+  const value =
+    instruction.value === null
+      ? null
+      : cloneCapturedSerializableValue(evaluator.evaluate(instruction.value));
   const key = storageKey(
     evaluator.evaluate(instruction.key),
     WRITE_KEY_MESSAGE,
