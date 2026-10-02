@@ -829,7 +829,8 @@ The `xorshift32-v1` seed and serialized state must be non-zero unsigned 32-bit i
 - `nextXorShift32(...)` rejects direct malformed state `0`;
 - `validateRuntimeSnapshot(...)` rejects a snapshot whose RNG state is `0`;
 - checkpoint restore translates that malformed snapshot state into structured `CheckpointError` code `TSK002`;
-- valid non-zero seeds retain the existing deterministic sequence and do not change the algorithm or versioned formats.
+- a valid non-zero seed produces the deterministic sequence of the versioned `xorshift32-v1` algorithm; a deliberate
+  algorithm change uses a new algorithm version (ADR 0015) instead of changing the sequence under that identifier.
 
 The zero-state rule prevents the absorbing xorshift32 state in which every future state and output remains zero. It does not change the plan, runtime-snapshot, or checkpoint format version.
 
