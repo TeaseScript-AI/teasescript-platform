@@ -1,0 +1,8 @@
+let mood = randomInteger(0..3)
+if mood == 0 {
+  say "Happy"
+} else if mood == 1 {
+  say "Strict"
+} else {
+  say "Bored"
+}

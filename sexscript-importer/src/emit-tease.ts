@@ -116,15 +116,27 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
     case "expression":
       lines.push(`${pad}${emitExpression(statement.expression)}`);
       return;
-    case "if":
+    case "if": {
       lines.push(`${pad}if ${emitExpression(statement.condition)} {`);
       emitStatements(statement.then, lines, depth + 1);
-      if (statement.else.length > 0) {
+      let alternative = statement.else;
+      // Flatten Groovy `else if` chains, which the AST represents as nested if statements.
+      for (
+        let nested = alternative[0];
+        alternative.length === 1 && nested?.kind === "if";
+        nested = alternative[0]
+      ) {
+        lines.push(`${pad}} else if ${emitExpression(nested.condition)} {`);
+        emitStatements(nested.then, lines, depth + 1);
+        alternative = nested.else;
+      }
+      if (alternative.length > 0) {
         lines.push(`${pad}} else {`);
-        emitStatements(statement.else, lines, depth + 1);
+        emitStatements(alternative, lines, depth + 1);
       }
       lines.push(`${pad}}`);
       return;
+    }
     case "while":
       lines.push(`${pad}while ${emitExpression(statement.condition)} {`);
       emitStatements(statement.body, lines, depth + 1);
@@ -174,8 +186,14 @@ export function emitExpression(expression: IrExpression): string {
   switch (expression.kind) {
     case "literal":
       return typeof expression.value === "string"
-        ? JSON.stringify(expression.value)
+        ? `"${escapeStringText(expression.value)}"`
         : String(expression.value);
+    case "template": {
+      const parts = expression.parts.map((part) =>
+        "text" in part ? escapeStringText(part.text) : `\${${emitExpression(part.value)}}`,
+      );
+      return `"${parts.join("")}"`;
+    }
     case "variable":
       return expression.name;
     case "list":
@@ -212,6 +230,20 @@ export function emitExpression(expression: IrExpression): string {
       return `${expression.name}(${[...positional, ...named].join(", ")})`;
     }
   }
+}
+
+/**
+ * Encodes literal text for a TeaseScript string. TeaseScript knows only the escapes below, and an
+ * unescaped `${` would start interpolation, so legacy literal text must escape it.
+ */
+function escapeStringText(text: string): string {
+  return text
+    .replace(/\\/gu, "\\\\")
+    .replace(/"/gu, '\\"')
+    .replace(/\n/gu, "\\n")
+    .replace(/\r/gu, "\\r")
+    .replace(/\t/gu, "\\t")
+    .replace(/\$\{/gu, "\\${");
 }
 
 function parenthesize(expression: IrExpression): string {

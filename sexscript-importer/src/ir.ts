@@ -108,4 +108,6 @@ export type IrExpression =
   | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean }
   | { kind: "unary"; operator: "not" | "+" | "-"; value: IrExpression }
   | { kind: "binary"; operator: string; left: IrExpression; right: IrExpression }
-  | { kind: "call"; name: string; positional: IrExpression[]; named: Record<string, IrExpression> };
+  | { kind: "call"; name: string; positional: IrExpression[]; named: Record<string, IrExpression> }
+  /** Interpolated string: literal text segments and `${...}` values in source order. */
+  | { kind: "template"; parts: Array<{ text: string } | { value: IrExpression }> };

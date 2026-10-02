@@ -1421,6 +1421,8 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
     }
     case "map":
       return lowerMapExpression(node, context);
+    case "gstring":
+      return lowerGString(node, context);
     case "property":
       return lowerPropertyExpression(node, context);
     case "range": {
@@ -1453,6 +1455,23 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
         `Unsupported Groovy expression: ${node.kind}`,
       );
   }
+}
+
+/** Groovy GString `"a ${b} c"` interleaves constant strings and values, starting with a string. */
+function lowerGString(node: AstNode, context: LowerContext): IrExpression | null {
+  const strings = Array.isArray(node.strings) ? node.strings : [];
+  const values = nodeArray(node.values);
+  const parts: Array<{ text: string } | { value: IrExpression }> = [];
+  for (let index = 0; index < Math.max(strings.length, values.length); index += 1) {
+    const text: unknown = strings[index];
+    if (typeof text === "string" && text !== "") parts.push({ text });
+    const valueNode = values[index];
+    if (valueNode === undefined) continue;
+    const value = lowerExpression(valueNode, context);
+    if (value === null) return null;
+    parts.push({ value });
+  }
+  return { kind: "template", parts };
 }
 
 function lowerMapExpression(node: AstNode, context: LowerContext): IrExpression | null {
