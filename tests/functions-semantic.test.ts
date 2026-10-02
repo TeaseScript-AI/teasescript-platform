@@ -150,7 +150,7 @@ test("allows timer spellings that are not TeaseScript syntax as ordinary identif
   }
 });
 
-test("protecting a name does not make a call to it compile without an implementation", () => {
+test("a call to a protected name is rejected with located diagnostics or never fails as an unknown built-in", () => {
   for (const name of TEASESCRIPT_PROTECTED_NAMES) {
     const source = `${name}()`;
     const result = compileSource(source);
@@ -158,11 +158,15 @@ test("protecting a name does not make a call to it compile without an implementa
       assert.ok(result.diagnostics.length > 0, source);
       for (const diagnostic of result.diagnostics) {
         assert.match(diagnostic.code, /^TS[PV]\d{3}$/, source);
-        assert.ok(diagnostic.span.end.offset <= source.length, source);
+        const { start, end } = diagnostic.span;
+        assert.ok(
+          0 <= start.offset && start.offset <= end.offset && end.offset <= source.length,
+          source,
+        );
       }
       continue;
     }
-    // An accepted call reaches an implementation; argument failures are ordinary runtime failures.
+    // A compiled call must not fail as an unknown built-in (TSR011); other structured runtime failures are allowed.
     const outcome = run(result.plan, createFreshRuntimeSnapshot(result.plan));
     assert.notEqual(outcome.snapshot.failure?.code, "TSR011", source);
   }
