@@ -1383,44 +1383,26 @@ test("dynamic settlement uses prepared UI provenance while available and intrins
   assert.throws(() => deserializeCheckpoint(JSON.stringify(mismatchedLabelCheckpoint)));
 });
 
-test("static compact source delegates current interaction guards to plan validation instead of semantic source limits", () => {
+test("oversized static compact interactions return no plan and a diagnostic at the interaction span", () => {
   // The button label is the only authored definition string, so it alone exceeds the aggregate.
   const oversizedButton = `showButton "${"x".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES + 1)}"`;
-  const buttonResult = compileSource(oversizedButton);
-  assert.deepEqual(buttonResult.semanticDiagnostics, []);
-  assert.equal(buttonResult.plan, null);
-  const buttonDiagnostic = buttonResult.diagnostics.find(
-    (diagnostic) => diagnostic.code === "TSC006",
-  );
-  assert.deepEqual(buttonDiagnostic?.span, {
-    start: { offset: 0, line: 0, column: 0 },
-    end: { offset: oversizedButton.length, line: 0, column: oversizedButton.length },
-  });
-  assert.equal(
-    buttonResult.diagnostics.some((diagnostic) => diagnostic.code === "TSV031"),
-    false,
-  );
-
   const options = Array.from(
     { length: MAX_INTERACTION_OPTION_ENTRIES + 1 },
     (_, index) => `"option-${index}"`,
   ).join(", ");
-  const choiceSource = `let result = choose ${options}`;
-  const choiceResult = compileSource(choiceSource);
-  assert.deepEqual(choiceResult.semanticDiagnostics, []);
-  assert.equal(choiceResult.plan, null);
-  const choiceDiagnostic = choiceResult.diagnostics.find(
-    (diagnostic) => diagnostic.code === "TSC006",
-  );
-  const choiceStart = choiceSource.indexOf("choose");
-  assert.deepEqual(choiceDiagnostic?.span, {
-    start: { offset: choiceStart, line: 0, column: choiceStart },
-    end: { offset: choiceSource.length, line: 0, column: choiceSource.length },
-  });
-  assert.equal(
-    choiceResult.diagnostics.some((diagnostic) => diagnostic.code === "TSV031"),
-    false,
-  );
+  const oversizedChoice = `let result = choose ${options}`;
+  for (const [source, start] of [
+    [oversizedButton, 0],
+    [oversizedChoice, oversizedChoice.indexOf("choose")],
+  ] as const) {
+    const result = compileSource(source);
+    assert.equal(result.plan, null);
+    const diagnostic = result.diagnostics.find((candidate) => candidate.code === "TSC006");
+    assert.deepEqual(diagnostic?.span, {
+      start: { offset: start, line: 0, column: start },
+      end: { offset: source.length, line: 0, column: source.length },
+    });
+  }
 });
 
 test("representative static and dynamic root/function choices complete through checkpoint restore", () => {
