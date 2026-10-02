@@ -1,5 +1,5 @@
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 24;
+export const INSTRUCTION_PLAN_VERSION = 25;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -90,6 +90,7 @@ export type Instruction =
   | StartTimerInstruction
   | PacingBarrierInstruction
   | ShowImageInstruction
+  | StorageWriteInstruction
   | PlayMediaInstruction
   | InteractionInstruction
   | ExitInstruction;
@@ -361,6 +362,13 @@ export interface ShowImageInstruction extends InstructionBase {
   readonly image: ExpressionPlan | null;
 }
 
+/** `save <value> as <key>`, or `delete <key>` when `value` is `null`; evaluates the value, then the key. */
+export interface StorageWriteInstruction extends InstructionBase {
+  readonly kind: "storageWrite";
+  readonly value: ExpressionPlan | null;
+  readonly key: ExpressionPlan;
+}
+
 export type MediaRepeatPlan =
   | { readonly kind: "once" }
   | { readonly kind: "indefinite" }
@@ -510,7 +518,8 @@ export type ExpressionPlan =
   | BinaryExpressionPlan
   | RangeExpressionPlan
   | TemporaryExpressionPlan
-  | PreparedReferenceExpressionPlan;
+  | PreparedReferenceExpressionPlan
+  | StorageLoadExpressionPlan;
 
 interface ExpressionPlanBase {
   readonly span: PlanSourceLocation;
@@ -535,6 +544,21 @@ export interface IdentifierExpressionPlan extends ExpressionPlanBase {
 export interface TemporaryExpressionPlan extends ExpressionPlanBase {
   readonly kind: "temporary";
   readonly temporaryId: number;
+}
+
+/** `load <key> [default <value>]`: the default is evaluated only when the key is absent. */
+export interface StorageLoadExpressionPlan extends ExpressionPlanBase {
+  readonly kind: "storageLoad";
+  readonly key: ExpressionPlan;
+  readonly default: ExpressionPlan | null;
+  /** The declared type of a direct `let x: T = load ...`; a stored value must match it. */
+  readonly expectedType: StorageTypePlan | null;
+}
+
+export interface StorageTypePlan {
+  readonly name:
+    "string" | "boolean" | "integer" | "number" | "date" | "time" | "datetime" | "duration";
+  readonly collection: "list" | "set" | null;
 }
 
 export interface PreparedReferenceExpressionPlan extends ExpressionPlanBase {

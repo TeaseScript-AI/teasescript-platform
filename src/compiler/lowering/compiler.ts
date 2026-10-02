@@ -27,6 +27,7 @@ import type {
   PrepareParameterDefaultInstruction,
   CallArgumentPlan,
   TemplatePartPlan,
+  StorageTypePlan,
   TemporaryExpressionPlan,
   InteractionUiPayload,
   PreparedInteractionUiPayload,
@@ -313,6 +314,30 @@ export class InstructionCompiler {
         this.#emitPacingBarrier(null, statement.span);
         this.instructions.push({ kind: "showImage", image: null, span: copySpan(statement.span) });
         return;
+      case "saveStatement": {
+        const [value, key] = runCompileTask(
+          this.#lowerOrderedExpressionsTask([statement.value, statement.key]),
+        );
+        this.instructions.push({
+          kind: "storageWrite",
+          value: value!.plan,
+          key: key!.plan,
+          span: copySpan(statement.span),
+        });
+        this.#emitTemporaryCleanup([...value!.temporaryIds, ...key!.temporaryIds], statement.span);
+        return;
+      }
+      case "deleteStatement": {
+        const key = this.#lowerExpression(statement.key);
+        this.instructions.push({
+          kind: "storageWrite",
+          value: null,
+          key: key.plan,
+          span: copySpan(statement.span),
+        });
+        this.#emitTemporaryCleanup(key.temporaryIds, statement.span);
+        return;
+      }
       case "exitStatement":
         this.instructions.push({ kind: "exit", span: copySpan(statement.span) });
         return;
@@ -321,7 +346,15 @@ export class InstructionCompiler {
         if (initializer.kind === "playMediaExpression") {
           this.#selfHandleByInitializer.set(initializer, statement.name.name);
         }
-        const lowered = this.#lowerExpression(statement.initializer);
+        const lowered =
+          initializer.kind === "loadExpression" && statement.typeAnnotation !== null
+            ? runCompileTask(
+                this.#lowerLoadTask(initializer, {
+                  name: statement.typeAnnotation.name,
+                  collection: statement.typeAnnotation.collection,
+                }),
+              )
+            : this.#lowerExpression(statement.initializer);
         this.instructions.push({
           kind: "declareBinding",
           name: statement.name.name,
@@ -876,6 +909,9 @@ export class InstructionCompiler {
       this.#functionByName.has(expression.callee.name)
     ) {
       return yield* compileChild(this.#lowerUserFunctionCallTask(expression));
+    }
+    if (expression.kind === "loadExpression") {
+      return yield* compileChild(this.#lowerLoadTask(expression, null));
     }
     if (
       expression.kind === "binaryExpression" &&
@@ -1559,6 +1595,81 @@ export class InstructionCompiler {
     };
   }
 
+  /**
+   * Lowers `load`. A default that emits instructions runs only when the stored value is `null`, which means the key
+   * is absent because stored values are never `null`; any other default stays lazy inside the load plan.
+   */
+  *#lowerLoadTask(
+    expression: Extract<Expression, { kind: "loadExpression" }>,
+    expectedType: StorageTypePlan | null,
+  ): CompileTask<LoweredExpression> {
+    const key = yield* compileChild(this.#lowerExpressionTask(expression.key));
+    const defaultValue = expression.defaultValue;
+    if (defaultValue === null || !this.#containsUserCall(defaultValue)) {
+      const lowered =
+        defaultValue === null ? null : yield* compileChild(this.#lowerExpressionTask(defaultValue));
+      return {
+        plan: {
+          kind: "storageLoad",
+          key: key.plan,
+          default: lowered?.plan ?? null,
+          expectedType,
+          span: copySpan(expression.span),
+        },
+        temporaryIds: [...key.temporaryIds, ...(lowered?.temporaryIds ?? [])],
+      };
+    }
+    const resultTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "storeTemporary",
+      temporaryId: resultTemporary,
+      value: {
+        kind: "storageLoad",
+        key: key.plan,
+        default: null,
+        expectedType,
+        span: copySpan(expression.span),
+      },
+      expectBoolean: false,
+      span: copySpan(expression.span),
+    });
+    const result: TemporaryExpressionPlan = {
+      kind: "temporary",
+      temporaryId: resultTemporary,
+      span: copySpan(expression.span),
+    };
+    const conditional = this.instructions.length;
+    const conditionalInstruction: JumpIfFalseInstruction = {
+      kind: "jumpIfFalse",
+      condition: {
+        kind: "binary",
+        operator: "==",
+        left: result,
+        right: { kind: "literal", value: null, span: copySpan(expression.span) },
+        span: copySpan(expression.span),
+      },
+      target: -1,
+      span: copySpan(expression.span),
+    };
+    this.instructions.push(conditionalInstruction);
+    const lowered = yield* compileChild(this.#lowerExpressionTask(defaultValue));
+    this.instructions.push({
+      kind: "storeTemporary",
+      temporaryId: resultTemporary,
+      value: lowered.plan,
+      expectBoolean: false,
+      span: copySpan(defaultValue.span),
+    });
+    this.instructions[conditional] = {
+      ...conditionalInstruction,
+      target: this.instructions.length,
+    };
+    return {
+      plan: result,
+      temporaryIds: [...key.temporaryIds, ...lowered.temporaryIds, resultTemporary],
+    };
+  }
+
   *#lowerLogicalExpressionTask(
     expression: Extract<Expression, { kind: "binaryExpression" }>,
   ): CompileTask<LoweredExpression> {
@@ -1936,6 +2047,14 @@ function assembleExpression(
         start: child(expression.start),
         end: child(expression.end),
         inclusive: expression.inclusive,
+        span: copySpan(expression.span),
+      };
+    case "loadExpression":
+      return {
+        kind: "storageLoad",
+        key: child(expression.key),
+        default: expression.defaultValue === null ? null : child(expression.defaultValue),
+        expectedType: null,
         span: copySpan(expression.span),
       };
     case "interactionExpression":

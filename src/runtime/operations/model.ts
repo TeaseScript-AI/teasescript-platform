@@ -26,7 +26,7 @@ export type ActionCompletionOutcome =
   | {
       readonly kind: "wrongActionKind";
       readonly actionId: number;
-      readonly expectedActionKind: "interaction" | "chatPacingGate";
+      readonly expectedActionKind: "interaction" | "chatPacingGate" | "storageWrite";
       readonly receivedActionKind: string;
     }
   | { readonly kind: "invalidPayload"; readonly message: string }

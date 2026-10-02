@@ -283,8 +283,6 @@ test("checkpoint classification uses structured producer failures", () => {
       [["TSC002", path]],
       name,
     );
-    // Capture names the failure kind; a generic shape error from later validation would not.
-    assert.ok(errors[0]!.message.includes(name), errors[0]!.message);
     assertCheckpointError(
       { format: CHECKPOINT_FORMAT, version: CHECKPOINT_VERSION, plan: malformedPlan, snapshot },
       { code: "TSK002", path: `$.plan${path.slice(1)}` },

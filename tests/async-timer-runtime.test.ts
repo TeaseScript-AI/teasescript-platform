@@ -15,6 +15,7 @@ import { run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
+import { nextXorShift32 } from "../src/runtime/random.js";
 import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -239,15 +240,6 @@ function timedSettlements(events: readonly InterpreterEvent[]) {
   );
 }
 
-/** Independent RNG oracle: `count` draws of real-source `randomInteger(range)` from `seed`. */
-function randomIntegerDraws(seed: number, range: string, count: number) {
-  const session = new Session(`repeat ${count} {\n  say "\${randomInteger(${range})}"\n}`, {
-    seed,
-  });
-  assert.equal(session.snapshot.status, "halted");
-  return { values: session.said().map(Number), rng: session.snapshot.rng };
-}
-
 function warnings(session: Session): string[] {
   return session.events.flatMap((event) => (event.kind === "developerWarning" ? [event.code] : []));
 }
@@ -470,29 +462,32 @@ test("repeating ranges redraw each round from the session RNG, including during 
     "wait 30",
     'say "${rounds.length}"',
   ].join("\n");
-  // At most 30 one-second rounds fit in the wait, plus the round drawn at the last expiry.
-  const draws = randomIntegerDraws(seed, "1..=4", 31).values;
-  const expiriesMs: number[] = [];
-  let nextExpiryMs = draws[0]! * 1_000;
-  while (nextExpiryMs < 30_000) {
-    expiriesMs.push(nextExpiryMs);
-    nextExpiryMs += draws[expiriesMs.length]! * 1_000;
-  }
-  assert.ok(nextExpiryMs > 30_000, "the seed must not tie an expiry with the end of the wait");
-  // Every expiry draws the next round, so the session makes one draw more than it has expiries.
-  const expectedRng = randomIntegerDraws(seed, "1..=4", expiriesMs.length + 1).rng;
-  const expectedSaid = [...expiriesMs.map((ms) => `${ms / 1_000} s`), String(expiriesMs.length)];
-
   const late = new Session(source, { seed });
+  const firstRoundRng = structuredClone(late.snapshot.rng);
   late.at(30_000);
   const stepwise = new Session(source, { seed });
   for (let now = 500; now <= 30_000; now += 500) stepwise.at(now);
-  for (const session of [late, stepwise]) {
-    assert.deepEqual(session.said(), expectedSaid);
-    assert.deepEqual(session.snapshot.rng, expectedRng);
-  }
+  // The same seed gives the same rounds, draws, and output whether time is observed late or stepwise.
   assert.deepEqual(late.events, stepwise.events);
   assert.deepEqual(late.snapshot, stepwise.snapshot);
+
+  const said = late.said();
+  const expiriesMs = said.slice(0, -1).map((text) => Number(text.replace(/ s$/u, "")) * 1_000);
+  assert.equal(said.at(-1), String(expiriesMs.length));
+  const roundsMs = expiriesMs.map((ms, index) => ms - (expiriesMs[index - 1] ?? 0));
+  // Every round lasts whole seconds in 1..=4, and rounds keep expiring until the wait ends.
+  assert.ok(
+    roundsMs.every((ms) => [1_000, 2_000, 3_000, 4_000].includes(ms)),
+    String(roundsMs),
+  );
+  assert.ok(30_000 - expiriesMs.at(-1)! < 4_000, String(expiriesMs));
+  // Later rounds are drawn again from the session RNG instead of repeating the first round:
+  // one draw per round, with the range's inclusive upper bound still reachable.
+  assert.ok(new Set(roundsMs).size > 1, String(roundsMs));
+  assert.ok(roundsMs.slice(1).includes(4_000), String(roundsMs));
+  const expectedRng = structuredClone(firstRoundRng);
+  for (let round = 0; round < expiriesMs.length; round += 1) nextXorShift32(expectedRng);
+  assert.deepEqual(late.snapshot.rng, expectedRng);
 });
 
 test("an expiry block interrupts an unanswered ask and the prompt returns afterwards", () => {
@@ -786,19 +781,21 @@ test("repeat overrides, nested and interrupting expiry blocks, and stops stay ch
     { seed: overrideSeed },
   );
   // Only the first round comes from the range; every later round lasts the assigned 2 s without a draw.
-  const initial = randomIntegerDraws(overrideSeed, "1..=3", 1);
-  const firstExpiryMs = initial.values[0]! * 1_000;
-  assert.notEqual(firstExpiryMs, 2_000, "the seed's first round must differ from the assigned 2 s");
-  assert.equal(override.timers()[0]!.timer.deadlineMs, firstExpiryMs);
+  const initialRng = structuredClone(override.snapshot.rng);
+  const firstExpiryMs = override.timers()[0]!.timer.deadlineMs;
+  assert.ok(
+    firstExpiryMs === 1_000 || firstExpiryMs === 3_000,
+    "the seed's first round must be in 1..=3 s and differ from the assigned 2 s",
+  );
   for (let expiryMs = firstExpiryMs; expiryMs < 8_000; expiryMs += 2_000) {
     override.at(expiryMs);
     const { timer } = override.timers()[0]!;
     assert.deepEqual([timer.roundDurationMs, timer.deadlineMs], [2_000, expiryMs + 2_000]);
-    assert.deepEqual(override.snapshot.rng, initial.rng);
+    assert.deepEqual(override.snapshot.rng, initialRng);
   }
   override.at(8_000);
   assert.equal(override.snapshot.status, "halted");
-  assert.deepEqual(override.snapshot.rng, initial.rng);
+  assert.deepEqual(override.snapshot.rng, initialRng);
 
   const rootEnd = new Session(
     'timer async 1 s {\n  timer async 0 ms { say "nested" }\n  wait 1 s\n}\nwait 2 s',

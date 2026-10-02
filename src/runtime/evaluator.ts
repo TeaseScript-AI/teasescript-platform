@@ -23,6 +23,12 @@ import {
 } from "./prepared-references.js";
 import { nextXorShift32, type RandomSource, type XorShift32State } from "./random.js";
 import {
+  assertStoredType,
+  LOAD_KEY_MESSAGE,
+  findScriptStorageEntry,
+  storageKey,
+} from "./script-storage.js";
+import {
   addSerializableSetValue,
   cloneCapturedSerializableValue,
   cloneSerializableValue,
@@ -560,6 +566,32 @@ export class Evaluator {
             continue;
           }
           value = this.#call(expression, frame.value, frame.positional!, frame.named!);
+          break;
+        case "storageLoad":
+          if (frame.stage === 0) {
+            frame.stage = 1;
+            pending.push(evaluationFrame(expression.key));
+            continue;
+          }
+          if (frame.stage === 1) {
+            const key = storageKey(result.value, LOAD_KEY_MESSAGE, expression.key.span);
+            const entry = findScriptStorageEntry(this.snapshot, key);
+            if (entry !== undefined) {
+              if (expression.expectedType !== null)
+                assertStoredType(entry, expression.expectedType, expression.span);
+              value = entry.value;
+              break;
+            }
+            if (expression.default === null) {
+              value = null;
+              break;
+            }
+            // The default is evaluated only for an absent key.
+            frame.stage = 2;
+            pending.push(evaluationFrame(expression.default));
+            continue;
+          }
+          value = result.value;
           break;
       }
       result = { value, owned, descriptor: null, epoch: this.#referenceEpoch };

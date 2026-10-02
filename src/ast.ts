@@ -16,6 +16,8 @@ export type Statement =
   | ShowImageStatement
   | HideImageStatement
   | PlayMediaStatement
+  | SaveStatement
+  | DeleteStatement
   | ExitStatement
   | LetStatement
   | AssignmentStatement
@@ -184,6 +186,29 @@ export interface PlayMediaExpression extends MediaParts {
   readonly kind: "playMediaExpression";
 }
 
+/** `save <value> as <key>`: stores a copy of the value in script storage; saving `null` removes the key. */
+export interface SaveStatement {
+  readonly kind: "saveStatement";
+  readonly value: Expression;
+  readonly key: Expression;
+  readonly span: SourceSpan;
+}
+
+/** `delete <key>`: removes the key from script storage. */
+export interface DeleteStatement {
+  readonly kind: "deleteStatement";
+  readonly key: Expression;
+  readonly span: SourceSpan;
+}
+
+/** `load <key> [default <value>]`: the stored value, else the default (evaluated only then), else `null`. */
+export interface LoadExpression {
+  readonly kind: "loadExpression";
+  readonly key: Expression;
+  readonly defaultValue: Expression | null;
+  readonly span: SourceSpan;
+}
+
 export interface ExitStatement {
   readonly kind: "exitStatement";
   readonly span: SourceSpan;
@@ -307,7 +332,8 @@ export type Expression =
   | RangeExpression
   | InteractionExpression
   | TimerExpression
-  | PlayMediaExpression;
+  | PlayMediaExpression
+  | LoadExpression;
 
 export interface InteractionExpression {
   readonly kind: "interactionExpression";

@@ -519,9 +519,8 @@ destination, and result, that a newer retained settlement cannot remove destinat
 consumption, that the handoff disappears immediately after the first successful consume or discard instruction, and that
 later ordinary state no longer carries interaction provenance. Handoff shapes that would let a validated plan reach a
 rejected snapshot (a second blocking action, a missing or different cleanup, a second producer, an independent entry)
-are rejected locally rather than supported through global interaction-result liveness; one explicitly scoped regression
-row covers the consume requirement as the fixed local shape analyses it. Current interaction-guard cases remain
-implementation-boundary regressions for the provisional POC policies and structural separation; they are not
+are rejected locally rather than supported through global interaction-result liveness. Current interaction-guard cases
+remain implementation-boundary regressions for the provisional POC policies and structural separation; they are not
 source-capacity evidence and must move with later evidence-based reassessment. Every rejected completion compares
 the complete canonical snapshot so RNG state, event/action counters, destinations, ownership, and continuation cannot
 change unnoticed. The local playground Player slice adds deterministic controller coverage for active-presentation
