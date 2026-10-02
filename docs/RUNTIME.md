@@ -697,7 +697,9 @@ open decision in [`OPEN-DECISIONS.md`](OPEN-DECISIONS.md).
 
 The result separates parser and semantic diagnostics and returns `plan: null` when compilation fails. Runtime entry
 points reuse the identity of a returned validated immutable plan. Other plan data remains subject to the complete
-`validateInstructionPlan(...)` boundary.
+`validateInstructionPlan(...)` boundary, which accepts only the fields that the current plan version defines for each
+plan object and rejects any other field as malformed `TSC002` data. The plan schema evolves through a new plan version
+rather than through silently accepted fields.
 
 Recognized native JavaScript stack exhaustion during parsing or compilation returns error diagnostic `TSC007` across
 the complete source rather than escaping from `compileSource(...)`. This contains a host failure without defining a

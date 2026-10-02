@@ -20,6 +20,7 @@ import {
   nonNegativeSafeInteger,
   planError,
   positiveSafeInteger,
+  rejectUnknownFields,
   requireString,
   validateSpan,
   validInstructionBoundary,
@@ -49,6 +50,7 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
   if (!isRecord(value)) {
     return invalidPlan("TSC002", "Instruction plan must be an object.", "$.");
   }
+  rejectUnknownFields(value, PLAN_FIELDS, "$", errors);
   if (value.format !== INSTRUCTION_PLAN_FORMAT) {
     errors.push(planError("TSC001", "Unsupported instruction-plan format.", "$.format"));
   }
@@ -97,6 +99,96 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
   return Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
 }
 
+const PLAN_FIELDS = [
+  "format",
+  "version",
+  "sourceSpan",
+  "rootEndInstruction",
+  "temporaryCount",
+  "functions",
+  "instructions",
+];
+
+const PROPERTY_FIELDS = ["name", "value", "span"];
+
+/** Fields of instruction kinds whose case in validateInstruction does not already require exact keys. */
+const INSTRUCTION_FIELDS = fieldsByKind([
+  ["declareSpeaker", "name", "properties"],
+  ["setDeclaredSpeakerProperty", "speaker", "name", "value"],
+  ["setDefaultSpeaker", "name"],
+  ["enterScope"],
+  ["leaveScope"],
+  ["exit"],
+  ["declareBinding", "name", "value"],
+  ["prepareReference", "expression", "destinationTemporary"],
+  ["validateAssignmentTarget", "target"],
+  ["assign", "target", "value"],
+  ["validateCallReceiver", "receiver", "method"],
+  ["evaluate", "expression"],
+  ["jumpIfFalse", "condition", "target"],
+  ["jump", "target"],
+  ["loopStart", "loopKind", "loopId", "expression", "continueTarget", "target"],
+  ["loopControl", "action", "loopId", "target"],
+  ["storeTemporary", "temporaryId", "value", "expectBoolean"],
+  ["clearTemporary", "temporaryId"],
+  ["clearTemporaries", "temporaryIds"],
+  ["callFunction", "functionId", "arguments", "destinationTemporary", "returnInstruction"],
+  ["bindSuppliedParameter", "functionId", "parameterIndex"],
+  ["beginFunctionDefaults", "functionId"],
+  ["prepareParameterDefault", "functionId", "parameterIndex", "target"],
+  ["bindDefaultParameter", "functionId", "parameterIndex", "value"],
+  ["enterFunctionBody", "functionId"],
+  ["returnValue", "value"],
+  ["returnVoid"],
+  [
+    "say",
+    "presentation",
+    "speaker",
+    "value",
+    "speakerTemporary",
+    "contextualSpeakerTemporary",
+    "textTemporary",
+    "skipPolicy",
+    "pacing",
+  ],
+]);
+
+const FOR_LOOP_START_FIELDS = [
+  "kind",
+  "span",
+  "loopKind",
+  "loopId",
+  "variable",
+  "expression",
+  "continueTarget",
+  "target",
+];
+
+/** Fields of expression kinds whose case in validateExpressionNode does not already require exact keys. */
+const EXPRESSION_FIELDS = fieldsByKind([
+  ["literal", "value"],
+  ["identifier", "name"],
+  ["temporary", "temporaryId"],
+  ["preparedReference", "temporaryId"],
+  ["list", "elements"],
+  ["set", "elements"],
+  ["object", "properties"],
+  ["group", "expression"],
+  ["template", "parts"],
+  ["property", "object", "name"],
+  ["index", "object", "index"],
+  ["call", "callee", "arguments"],
+  ["unary", "operator", "operand"],
+  ["binary", "operator", "left", "right"],
+  ["range", "start", "end", "inclusive"],
+]);
+
+function fieldsByKind(
+  entries: readonly (readonly [kind: string, ...fields: string[]])[],
+): ReadonlyMap<string, readonly string[]> {
+  return new Map(entries.map(([kind, ...fields]) => [kind, ["kind", "span", ...fields]]));
+}
+
 function validateInstruction(
   value: unknown,
   path: string,
@@ -111,6 +203,11 @@ function validateInstruction(
     return;
   }
   validateSpan(value.span, `${path}.span`, errors);
+  const fields =
+    value.kind === "loopStart" && value.loopKind === "for"
+      ? FOR_LOOP_START_FIELDS
+      : INSTRUCTION_FIELDS.get(value.kind);
+  if (fields !== undefined) rejectUnknownFields(value, fields, path, errors);
   switch (value.kind) {
     case "declareSpeaker":
       requireString(value.name, `${path}.name`, errors);
@@ -1145,28 +1242,38 @@ function validateExpression(
         );
       } else if (current.kind === "part") {
         validateSpan(current.value.span, `${current.path}.span`, errors);
-        if (current.value.kind === "text")
+        if (current.value.kind === "text") {
+          rejectUnknownFields(current.value, ["kind", "value", "span"], current.path, errors);
           requireString(current.value.value, `${current.path}.value`, errors);
-        else if (current.value.kind === "expression")
+        } else if (current.value.kind === "expression") {
+          rejectUnknownFields(current.value, ["kind", "expression", "span"], current.path, errors);
           pending.push({
             value: current.value.expression,
             path: `${current.path}.expression`,
             assignmentTarget: false,
           });
-        else
+        } else
           errors.push(planError("TSC002", "Unknown template part kind.", `${current.path}.kind`));
       } else if (current.kind === "argument") {
         validateSpan(current.value.span, `${current.path}.span`, errors);
-        if (current.value.kind === "named")
+        if (current.value.kind === "named") {
+          rejectUnknownFields(
+            current.value,
+            ["kind", "name", "value", "span"],
+            current.path,
+            errors,
+          );
           requireString(current.value.name, `${current.path}.name`, errors);
-        else if (current.value.kind !== "positional")
-          errors.push(planError("TSC002", "Unknown argument kind.", `${current.path}.kind`));
+        } else if (current.value.kind === "positional")
+          rejectUnknownFields(current.value, ["kind", "value", "span"], current.path, errors);
+        else errors.push(planError("TSC002", "Unknown argument kind.", `${current.path}.kind`));
         pending.push({
           value: current.value.value,
           path: `${current.path}.value`,
           assignmentTarget: false,
         });
       } else {
+        rejectUnknownFields(current.value, PROPERTY_FIELDS, current.path, errors);
         requireString(current.value.name, `${current.path}.name`, errors);
         pending.push({ kind: "span", value: current.value.span, path: `${current.path}.span` });
         pending.push({
@@ -1201,6 +1308,8 @@ function validateExpressionNode(
     return;
   }
   validateSpan(value.span, `${path}.span`, errors);
+  const fields = EXPRESSION_FIELDS.get(value.kind);
+  if (fields !== undefined) rejectUnknownFields(value, fields, path, errors);
   if (assignmentTarget && !["identifier", "property", "index"].includes(value.kind)) {
     errors.push(planError("TSC002", "Invalid assignment target plan.", path));
   }
@@ -1361,6 +1470,7 @@ function validateProperties(
       errors.push(planError("TSC002", "Property must be an object.", propertyPath));
       continue;
     }
+    rejectUnknownFields(property, PROPERTY_FIELDS, propertyPath, errors);
     requireString(property.name, `${propertyPath}.name`, errors);
     validateExpression(property.value, `${propertyPath}.value`, errors, false, temporaryCount);
     validateSpan(property.span, `${propertyPath}.span`, errors);
