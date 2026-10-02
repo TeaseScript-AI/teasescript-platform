@@ -362,15 +362,24 @@ test("warns when list.remove cannot find a matching value", () => {
   );
 });
 
-test("removes only the first matching list value without a missing-value warning", () => {
+test("removes only the first matching list value and present-value removals do not warn", () => {
   const captured: unknown[] = [];
   const result = executeSource(
-    ["let values = [1, 1, 2]", "values.remove(1)", "capture(values)", "exit"],
+    [
+      "let values = [1, 1, 2]",
+      "values.remove(1)",
+      "capture(values)",
+      "values.removeFirst()",
+      "capture(values)",
+      "values.clear()",
+      "capture(values)",
+      "exit",
+    ],
     { capture: captureInto(captured) },
   );
 
   assert.deepEqual(result.errors, []);
-  assert.deepEqual(captured, [[1, 2]]);
+  assert.deepEqual(captured, [[1, 2], [2], []]);
   assert.equal(
     result.warnings.some((warning) => warning.code === "TSW002"),
     false,
