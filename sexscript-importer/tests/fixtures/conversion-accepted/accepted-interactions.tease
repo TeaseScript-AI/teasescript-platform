@@ -14,3 +14,11 @@ let start = getSeconds()
 if ready and sure {
   say "Starting ${count} rounds at ${start}"
 }
+// showPopup() returned the seconds until the player closed it.
+// NOTE SX_POPUP_ELAPSED line 11: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getSeconds(), in whole seconds.
+let popupStart = getSeconds()
+showPopup "Come here!"
+let late = getSeconds() - popupStart
+if late > 60 {
+  say "What took you so long?"
+}

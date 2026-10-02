@@ -12,3 +12,8 @@ def bump = { -> n += 1; return "prefill" }
 def typed = getString("Question", bump())
 show(getBoolean("Strict?") ? "Strict" : "Gentle")
 for (def i = 0; i < 2; i = getFloat("Next")) { show("Round") }
+// An increment used as a value follows the statement when nothing else in it reads the variable.
+def rules = ["Kneel", "Wait"]
+def r = 0
+show(rules[r++])
+show(rules[r++] + " " + r)

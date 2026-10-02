@@ -92,6 +92,12 @@ interface LowerContext {
   prelude: IrStatement[];
   /** The Groovy statement being lowered; prelude statements run immediately before it. */
   statementRoot: AstNode | null;
+  /**
+   * Statements that must run immediately after the statement being lowered, such as the increment of `i++` used as
+   * a value. Only a statement lowered directly from a statement list (`postludeRoot`) may add them.
+   */
+  postlude: IrStatement[];
+  postludeRoot: AstNode | null;
   /** Variable nodes that refer to a local variable sharing its name with a closure function. */
   shadowingReferences: ReadonlySet<AstNode>;
   classLoaderVariables: Set<string>;
@@ -121,6 +127,8 @@ interface LowerContext {
   ignoredInputs: number;
   /** Counter for temporaries that hold a switch value evaluated once for an if chain. */
   switchValues: number;
+  /** Counter for variables that keep the start time of a popup whose waiting time is used. */
+  popupTimers: number;
   stopsBackgroundSounds: boolean;
 }
 
@@ -179,6 +187,8 @@ export function lowerParsedFile(
     types: { variables: new Map() },
     prelude: [],
     statementRoot: null,
+    postlude: [],
+    postludeRoot: null,
     shadowingReferences: new Set(),
     classLoaderVariables: new Set(),
     legacyHelperClasses: new Map(),
@@ -199,6 +209,7 @@ export function lowerParsedFile(
     actions: new Set(),
     ignoredInputs: 0,
     switchValues: 0,
+    popupTimers: 0,
     stopsBackgroundSounds: options.stopsBackgroundSounds ?? packageStopsBackgroundSounds([file]),
   };
   if (file.diagnostics.length > 0 || file.root === null) {
@@ -418,6 +429,8 @@ function lowerHelperMethod(
     ),
     prelude: [],
     statementRoot: null,
+    postlude: [],
+    postludeRoot: null,
     shadowingReferences: collectShadowingReferences(body, collectClosureInfo(body)),
     classLoaderVariables: new Set(),
     legacyHelperClasses: new Map(),
@@ -445,6 +458,7 @@ function lowerHelperMethod(
     actions: baseContext.actions,
     ignoredInputs: 0,
     switchValues: 0,
+    popupTimers: 0,
   };
   const parameters: IrFunctionParameter[] = [];
   for (const parameter of authoredRecords) {
@@ -495,12 +509,12 @@ function lowerStatementList(
     emitComments(takeCommentsBefore(context, span));
     if (span !== null) result.push(...paragraphBreak(context, previousEndLine, span.line));
     const firstDiagnostic = context.diagnostics.length;
-    const [prelude, lowered] = withPrelude(context, () => lowerStatement(statement, context));
+    const [prelude, lowered, postlude] = withSurroundings(context, statement);
     const only = lowered.length === 1 ? lowered[0] : undefined;
     if (only?.kind === "unsupported" && span !== null) {
       only.legacySource = legacySourceLines(context, span);
     }
-    result.push(...diagnosticNotes(context, firstDiagnostic), ...prelude, ...lowered);
+    result.push(...diagnosticNotes(context, firstDiagnostic), ...prelude, ...lowered, ...postlude);
     if (span !== null) previousEndLine = span.endLine;
   }
   emitComments(takeCommentsBefore(context, enclosingSpan === null ? null : endOf(enclosingSpan)));
@@ -548,6 +562,23 @@ function withStatementRoot<T>(
     return withPrelude(context, lower);
   } finally {
     context.statementRoot = outerRoot;
+  }
+}
+
+/** Lowers one statement of a statement list with the statements that must run right before and after it. */
+function withSurroundings(
+  context: LowerContext,
+  statement: AstNode,
+): [IrStatement[], IrStatement[], IrStatement[]] {
+  const outer = { postlude: context.postlude, root: context.postludeRoot };
+  context.postlude = [];
+  context.postludeRoot = statement;
+  try {
+    const [prelude, lowered] = withPrelude(context, () => lowerStatement(statement, context));
+    return [prelude, lowered, context.postlude];
+  } finally {
+    context.postlude = outer.postlude;
+    context.postludeRoot = outer.root;
   }
 }
 
@@ -873,8 +904,12 @@ function isHoistable(
     } else if (node.kind === "elvis") {
       guardedChildren.add(node.false);
     }
+    // A plain assignment target is written after the value is computed, not read before it.
+    const assignsVariable =
+      (node.kind === "declaration" || (node.kind === "binary" && node.operator === "=")) &&
+      asNode(node.left)?.kind === "variable";
     for (const [key, value] of Object.entries(node)) {
-      if (key === "span") continue;
+      if (key === "span" || (key === "left" && assignsVariable)) continue;
       const children = Array.isArray(value) ? value : [value];
       for (const child of children) {
         if (isAstNode(child) && visit(child, guarded || guardedChildren.has(value))) return true;
@@ -2198,13 +2233,18 @@ function lowerEachStatement(
       ),
     ];
   }
-  if (containsReturnForCurrentClosure(body)) {
+  const returns = closureReturns(body);
+  if (
+    returns.some(
+      ({ insideLoop, value }) => insideLoop || (value !== null && !isPure(value, context)),
+    )
+  ) {
     return [
       unsupportedStatement(
         context,
         node,
         "SX_EACH_RETURN",
-        "Groovy return inside each() returns from the closure and needs a dedicated control-flow rewrite.",
+        "Groovy return inside each() ends only the current iteration; here it sits in a nested loop or returns a value with side effects, so it needs a manual rewrite.",
       ),
     ];
   }
@@ -2234,7 +2274,82 @@ function lowerEachStatement(
       ),
     ];
   }
-  return [{ kind: "for", variable, collection, body: lowerBlock(body, context), span }];
+  if (returns.length > 0) {
+    addDiagnostic(
+      context,
+      "SX_EACH_RETURN_CONTINUE",
+      "warning",
+      "Groovy return inside each() ended only the current iteration and each() discarded its value; it becomes continue. Check whether leaving the enclosing function was intended.",
+      returns[0]!.node.span,
+    );
+  }
+  const loopBody = lowerBlock(body, context);
+  return [
+    {
+      kind: "for",
+      variable,
+      collection,
+      body: returns.length > 0 ? withoutFinalContinue(returnsAsContinue(loopBody)) : loopBody,
+      span,
+    },
+  ];
+}
+
+/** Return statements of a closure body, outside nested closures, and whether a loop encloses them. */
+function closureReturns(
+  body: AstNode,
+): Array<{ node: AstNode; value: AstNode | null; insideLoop: boolean }> {
+  const found: Array<{ node: AstNode; value: AstNode | null; insideLoop: boolean }> = [];
+  const visit = (node: AstNode, insideLoop: boolean): void => {
+    if (node.kind === "closure") return;
+    if (node.kind === "return") found.push({ node, value: asNode(node.value), insideLoop });
+    const loop = node.kind === "for" || node.kind === "while";
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "span") continue;
+      for (const child of Array.isArray(value) ? value : [value]) {
+        if (isAstNode(child)) visit(child, insideLoop || loop);
+      }
+    }
+  };
+  visit(body, false);
+  return found;
+}
+
+/** A continue at the end of a loop body, also at the end of a final if branch, does nothing. */
+function withoutFinalContinue(statements: IrStatement[]): IrStatement[] {
+  const last = statements.at(-1);
+  if (last?.kind === "continue") return statements.slice(0, -1);
+  if (last?.kind !== "if") return statements;
+  return [
+    ...statements.slice(0, -1),
+    { ...last, then: withoutFinalContinue(last.then), else: withoutFinalContinue(last.else) },
+  ];
+}
+
+/** At script level a lowered return is a script transfer or end; inside each() it only ended the iteration. */
+function returnsAsContinue(statements: IrStatement[]): IrStatement[] {
+  return statements.map((statement): IrStatement => {
+    switch (statement.kind) {
+      case "return":
+      case "run":
+      case "end":
+        return { kind: "continue", span: statement.span };
+      case "if":
+        return {
+          ...statement,
+          then: returnsAsContinue(statement.then),
+          else: returnsAsContinue(statement.else),
+        };
+      case "switch":
+        return {
+          ...statement,
+          cases: statement.cases.map((item) => ({ ...item, body: returnsAsContinue(item.body) })),
+          default: returnsAsContinue(statement.default),
+        };
+      default:
+        return statement;
+    }
+  });
 }
 
 function containsReturnForCurrentClosure(node: AstNode, root = true): boolean {
@@ -2377,8 +2492,8 @@ function lowerIf(node: AstNode, context: LowerContext): IrStatement[] {
 function lowerBranch(node: AstNode, context: LowerContext): IrStatement[] {
   if (node.kind === "empty") return [];
   if (node.kind === "block") return lowerBlock(node, context);
-  const [prelude, lowered] = withPrelude(context, () => lowerStatement(node, context));
-  return [...prelude, ...lowered];
+  const [prelude, lowered, postlude] = withSurroundings(context, node);
+  return [...prelude, ...lowered, ...postlude];
 }
 
 function lowerWhile(node: AstNode, context: LowerContext): IrStatement[] {
@@ -2505,17 +2620,6 @@ function lowerCStyleFor(
       ),
     ];
   }
-  if (containsContinueForCurrentLoop(body)) {
-    return [
-      unsupportedStatement(
-        context,
-        node,
-        "SX_C_STYLE_CONTINUE",
-        "C-style for loop contains continue; its update step must run before continuing, so this loop needs a dedicated rewrite.",
-      ),
-    ];
-  }
-
   const initial = parts[0]!;
   const conditionNode = parts[1]!;
   const update = parts[2]!;
@@ -2545,16 +2649,52 @@ function lowerCStyleFor(
     ];
   }
 
+  const step = [...updatePrelude, ...updateStatements];
   return [
     ...initialPrelude,
     ...initialStatements,
     {
       kind: "while",
       condition,
-      body: [...lowerBlock(body, context), ...updatePrelude, ...updateStatements],
+      // `continue` in a for loop still runs the update step.
+      body: [
+        ...withStepBeforeContinue(withoutFinalContinue(lowerBlock(body, context)), step),
+        ...step,
+      ],
       span: node.span,
     },
   ];
+}
+
+function withStepBeforeContinue(statements: IrStatement[], step: IrStatement[]): IrStatement[] {
+  return statements.flatMap((statement): IrStatement[] => {
+    switch (statement.kind) {
+      case "continue":
+        return [...structuredClone(step), statement];
+      case "if":
+        return [
+          {
+            ...statement,
+            then: withStepBeforeContinue(statement.then, step),
+            else: withStepBeforeContinue(statement.else, step),
+          },
+        ];
+      case "switch":
+        return [
+          {
+            ...statement,
+            cases: statement.cases.map((item) => ({
+              ...item,
+              body: withStepBeforeContinue(item.body, step),
+            })),
+            default: withStepBeforeContinue(statement.default, step),
+          },
+        ];
+      default:
+        // A continue inside a nested loop belongs to that loop.
+        return [statement];
+    }
+  });
 }
 
 function lowerForControlExpression(node: AstNode, context: LowerContext): IrStatement[] | null {
@@ -2562,20 +2702,6 @@ function lowerForControlExpression(node: AstNode, context: LowerContext): IrStat
   if (node.kind === "binary") return lowerAssignment(node, node.span, context);
   if (node.kind === "postfix") return lowerPostfix(node, node.span, context);
   return null;
-}
-
-function containsContinueForCurrentLoop(node: AstNode, root = true): boolean {
-  if (!root && (node.kind === "for" || node.kind === "while")) return false;
-  if (node.kind === "continue") return true;
-  for (const value of Object.values(node)) {
-    if (isAstNode(value) && containsContinueForCurrentLoop(value, false)) return true;
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (isAstNode(item) && containsContinueForCurrentLoop(item, false)) return true;
-      }
-    }
-  }
-  return false;
 }
 
 function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
@@ -2926,6 +3052,8 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
       return lowerUnary(node, "+", context);
     case "methodCall":
       return lowerMethodCallExpression(node, context);
+    case "postfix":
+      return lowerPostfixValue(node, context);
     default:
       return unsupportedExpression(
         context,
@@ -2934,6 +3062,90 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
         `Unsupported Groovy expression: ${node.kind}`,
       );
   }
+}
+
+/**
+ * `save("k", count++)` uses the old value and then increments. When nothing else in the statement can observe the
+ * variable, the value is the variable itself and the increment follows the statement.
+ */
+function lowerPostfixValue(node: AstNode, context: LowerContext): IrExpression | null {
+  const name = variableName(asNode(node.value));
+  const operator = node.operator === "++" ? "+=" : node.operator === "--" ? "-=" : null;
+  const root = context.statementRoot;
+  if (
+    name === null ||
+    operator === null ||
+    root === null ||
+    root !== context.postludeRoot ||
+    root.kind !== "expressionStatement" ||
+    !incrementsAfterStatement(root, node, name, context)
+  ) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_INCREMENT_POSITION",
+      "This ++/-- result is used where the increment cannot simply follow the statement: the variable is used again in the statement, the increment is guarded by && / || / ?:, or a function called in the statement could read the variable. Move the increment to its own statement.",
+    );
+  }
+  context.postlude.push({
+    kind: "assign",
+    target: { kind: "variable", name },
+    operator,
+    value: { kind: "literal", value: 1 },
+    span: node.span,
+  });
+  return { kind: "variable", name };
+}
+
+function incrementsAfterStatement(
+  root: AstNode,
+  target: AstNode,
+  name: string,
+  context: LowerContext,
+): boolean {
+  const local = context.currentFunction?.locals.has(name) === true;
+  let safe = true;
+  let found = false;
+  const visit = (node: AstNode, guarded: boolean): void => {
+    if (node === target) {
+      found = true;
+      if (guarded) safe = false;
+      return;
+    }
+    if (node.kind === "closure") {
+      safe = false;
+      return;
+    }
+    if (variableName(node) === name) safe = false;
+    if (node.kind === "methodCall") {
+      const call = callParts(node);
+      const helperClass = context.legacyHelperClasses.has(variableName(asNode(node.object)) ?? "");
+      const readsScriptVariables =
+        call === null ||
+        (call.inherited
+          ? legacyApiCall(node, context) === null
+          : !helperClass && !PURE_OBJECT_METHODS.has(call.name));
+      // Other functions can see the variable only when it is not a local of the current function.
+      if (readsScriptVariables && !local) safe = false;
+    }
+    const guardedChildren = new Set<unknown>();
+    if (node.kind === "binary" && (node.operator === "&&" || node.operator === "||")) {
+      guardedChildren.add(node.right);
+    } else if (node.kind === "ternary") {
+      guardedChildren.add(node.true);
+      guardedChildren.add(node.false);
+    } else if (node.kind === "elvis") {
+      guardedChildren.add(node.false);
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "span") continue;
+      for (const child of Array.isArray(value) ? value : [value]) {
+        if (isAstNode(child)) visit(child, guarded || guardedChildren.has(value));
+      }
+    }
+  };
+  visit(root, false);
+  return found && safe;
 }
 
 /** Groovy GString `"a ${b} c"` interleaves constant strings and values, starting with a string. */
@@ -3061,6 +3273,14 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     return { kind: "binary", operator: operator === "&" ? "and" : "or", left, right };
   }
   const mapped = operator;
+  if (operator === "=") {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_ASSIGNMENT_VALUE",
+      "An assignment is used as a value here (Groovy assigned, then used the assigned value, for example as a condition); this is often a mistake for ==. Make the assignment its own statement.",
+    );
+  }
   if (
     mapped === null ||
     !new Set(["==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "and", "or"]).has(mapped)
@@ -4101,6 +4321,38 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         };
       }
       return useHelper(context, "random", args);
+    case "showPopup": {
+      // TeaseScript popups return nothing; the legacy result was the seconds until the player closed it.
+      const root = context.statementRoot;
+      if (args.length !== 1 || root === null || !isHoistable(root, node, context)) {
+        return unsupportedExpression(
+          context,
+          node,
+          "SX_POPUP_POSITION",
+          "The popup's waiting time is used inside a larger expression that cannot run around the popup; assign showPopup() to a variable first.",
+        );
+      }
+      context.popupTimers += 1;
+      const start = context.popupTimers === 1 ? "popupStart" : `popupStart${context.popupTimers}`;
+      const seconds: IrExpression = { kind: "call", name: "getSeconds", positional: [], named: {} };
+      addDiagnostic(
+        context,
+        "SX_POPUP_ELAPSED",
+        "warning",
+        "showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getSeconds(), in whole seconds.",
+        node.span,
+      );
+      context.prelude.push(
+        { kind: "let", name: start, value: seconds, span: node.span },
+        { kind: "showPopup", message: args[0]!, span: node.span },
+      );
+      return {
+        kind: "binary",
+        operator: "-",
+        left: seconds,
+        right: { kind: "variable", name: start },
+      };
+    }
     case "getTime":
       return args.length === 0
         ? { kind: "call", name: "getSeconds", positional: [], named: {} }

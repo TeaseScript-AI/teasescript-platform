@@ -499,7 +499,14 @@ test("lowers simple C-style for loops through an equivalent while loop", () => {
   );
 });
 
-test("keeps C-style for loops with current-loop continue explicit", () => {
+test("runs the update step of a C-style for loop before continue", () => {
+  const skipOne: AstNode = {
+    kind: "if",
+    span,
+    condition: { kind: "binary", span, operator: "==", left: variable("i"), right: constant(1) },
+    then: { kind: "continue", span },
+    else: { kind: "empty", span },
+  };
   const source = file([
     {
       kind: "for",
@@ -509,17 +516,42 @@ test("keeps C-style for loops with current-loop continue explicit", () => {
         kind: "list",
         span,
         items: [
-          { kind: "binary", span, operator: "=", left: variable("i"), right: constant(0) },
+          {
+            kind: "declaration",
+            span,
+            multipleAssignment: false,
+            left: variable("i"),
+            right: constant(0),
+          },
           { kind: "binary", span, operator: "<", left: variable("i"), right: constant(3) },
           { kind: "postfix", span, operator: "++", value: variable("i") },
         ],
       },
-      body: { kind: "block", span, statements: [{ kind: "continue", span }] },
+      body: {
+        kind: "block",
+        span,
+        statements: [skipOne, statement(call("show", variable("i"))), { kind: "continue", span }],
+      },
     },
   ]);
 
   const program = lowerParsedFile(source);
-  assert.ok(program.diagnostics.some((diagnostic) => diagnostic.code === "SX_C_STYLE_CONTINUE"));
+  assert.deepEqual(program.diagnostics, []);
+  assert.equal(
+    emitTease(program),
+    [
+      "let i = 0",
+      "while i < 3 {",
+      "  if i == 1 {",
+      "    i += 1",
+      "    continue",
+      "  }",
+      "  say i",
+      "  i += 1",
+      "}",
+      "",
+    ].join("\n"),
+  );
 });
 
 test("lowers Groovy each() on ranges and proven lists to TeaseScript for loops", () => {
@@ -596,8 +628,8 @@ test("lowers Groovy each() on ranges and proven lists to TeaseScript for loops",
   );
 });
 
-test("keeps closure return inside Groovy each() explicit", () => {
-  const source = file([
+test("turns return inside Groovy each() into continue", () => {
+  const eachWith = (body: AstNode[]): AstNode =>
     statement({
       kind: "methodCall",
       span,
@@ -612,22 +644,56 @@ test("keeps closure return inside Groovy each() explicit", () => {
             span,
             parameters: [],
             parameterSpecified: false,
-            body: {
-              kind: "block",
-              span,
-              statements: [{ kind: "return", span, value: constant(null) }],
-            },
+            body: { kind: "block", span, statements: body },
           },
         ],
       },
       implicitThis: false,
       safe: false,
       spreadSafe: false,
-    }),
-  ]);
+    });
+  const skipTwo: AstNode = {
+    kind: "if",
+    span,
+    condition: { kind: "binary", span, operator: "==", left: variable("it"), right: constant(2) },
+    then: { kind: "return", span, value: constant("ignored") },
+    else: { kind: "empty", span },
+  };
+  const program = lowerParsedFile(
+    file([eachWith([skipTwo, statement(call("show", variable("it")))])]),
+  );
+  assert.deepEqual(
+    program.diagnostics.map((diagnostic) => diagnostic.code),
+    ["SX_EACH_RETURN_CONTINUE"],
+  );
+  assert.equal(
+    emitTease(program),
+    [
+      "// NOTE SX_EACH_RETURN_CONTINUE line 1: Groovy return inside each() ended only the current iteration and each() discarded its value; it becomes continue. Check whether leaving the enclosing function was intended.",
+      "for it in 1..=3 {",
+      "  if it == 2 {",
+      "    continue",
+      "  }",
+      "  say it",
+      "}",
+      "",
+    ].join("\n"),
+  );
 
-  const program = lowerParsedFile(source);
-  assert.ok(program.diagnostics.some((diagnostic) => diagnostic.code === "SX_EACH_RETURN"));
+  // Inside a nested loop, continue would continue the wrong loop.
+  const nested = lowerParsedFile(
+    file([
+      eachWith([
+        {
+          kind: "while",
+          span,
+          condition: constant(true),
+          body: { kind: "block", span, statements: [{ kind: "return", span, value: null }] },
+        },
+      ]),
+    ]),
+  );
+  assert.ok(nested.diagnostics.some((diagnostic) => diagnostic.code === "SX_EACH_RETURN"));
 });
 
 test("lowers single-statement if, else, and else-if bodies", () => {

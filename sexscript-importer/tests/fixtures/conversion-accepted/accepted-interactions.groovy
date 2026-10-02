@@ -7,3 +7,6 @@ if (elapsed >= 30) show("Too slow")
 useUrl("https://example.com")
 def start = getTime()
 if (ready && sure) show("Starting " + count + " rounds at " + start)
+// showPopup() returned the seconds until the player closed it.
+int late = showPopup("Come here!")
+if (late > 60) show("What took you so long?")
