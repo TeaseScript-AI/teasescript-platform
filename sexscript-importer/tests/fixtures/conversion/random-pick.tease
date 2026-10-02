@@ -1,0 +1,6 @@
+let lines: string[]? = null
+let line = ""
+lines = ["Good.", "Very good.", "Keep going."]
+line = lines.random
+say line
+say "Count: ${lines.length}"

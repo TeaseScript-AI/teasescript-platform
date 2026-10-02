@@ -60,13 +60,8 @@ export type IrStatement =
       leadingComments?: string[];
     })
   | (IrBase & { kind: "return"; value: IrExpression | null })
-  /** `optionalType` declares a nullable scalar when the initializer alone (null) would not show the type. */
-  | (IrBase & {
-      kind: "let";
-      name: string;
-      value: IrExpression;
-      optionalType?: "string" | "number" | "boolean";
-    })
+  /** `optionalType` (such as `string` or `string[]`) declares a nullable type for a null initializer. */
+  | (IrBase & { kind: "let"; name: string; value: IrExpression; optionalType?: string })
   | (IrBase & {
       kind: "assign";
       target: IrExpression;

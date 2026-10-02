@@ -25,6 +25,8 @@ export type ValueType = number;
 export interface TypeEnvironment {
   /** Union of every value assigned to a name anywhere in the analysed body. */
   variables: ReadonlyMap<string, ValueType>;
+  /** Union of element types for names assigned only list literals; absent when unknown. */
+  listElements?: ReadonlyMap<string, ValueType>;
 }
 
 /** True when every possible value has one of the `allowed` types. */
@@ -222,7 +224,35 @@ export function inferVariableTypes(body: AstNode): TypeEnvironment {
     }
   }
   for (const [name, type] of variables) if (type === 0) variables.set(name, UNKNOWN);
-  return environment;
+  return { variables, listElements: inferListElements(body, environment) };
+}
+
+function inferListElements(body: AstNode, environment: TypeEnvironment): Map<string, ValueType> {
+  const elements = new Map<string, ValueType>();
+  const unknown = new Set<string>();
+  walkAst(body, (node) => {
+    if (node.kind !== "declaration" && !(node.kind === "binary" && node.operator === "=")) return;
+    const name = variableName(node.left);
+    const value = asNode(node.right);
+    if (name === null || value === null) return;
+    if (
+      value.kind === "unsupportedExpression" ||
+      (value.kind === "constant" && value.value === null)
+    ) {
+      return;
+    }
+    if (value.kind !== "list") {
+      unknown.add(name);
+      return;
+    }
+    let type = elements.get(name) ?? 0;
+    for (const item of Array.isArray(value.items) ? value.items : []) {
+      type |= isAstNode(item) ? inferType(item, environment) : UNKNOWN;
+    }
+    elements.set(name, type);
+  });
+  for (const name of unknown) elements.delete(name);
+  return elements;
 }
 
 function collectAssignments(

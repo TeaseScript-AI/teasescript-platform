@@ -935,7 +935,10 @@ function lowerDeclaration(
       ),
     ];
   }
-  const value = lowerExpression(right, context);
+  // `def x` without an initializer starts as null in Groovy.
+  const value = isEmptyGroovyExpression(right)
+    ? { kind: "literal" as const, value: null }
+    : lowerExpression(right, context);
   if (value === null) {
     return [
       unsupportedStatement(
@@ -947,21 +950,36 @@ function lowerDeclaration(
     ];
   }
   const optionalType =
-    value.kind === "literal" && value.value === null ? nullableScalarType(name, context) : null;
+    value.kind === "literal" && value.value === null ? nullableValueType(name, context) : null;
   return [{ kind: "let", name, value, span, ...(optionalType === null ? {} : { optionalType }) }];
 }
 
-/** The single scalar type a null-initialized variable later receives, if the evidence is unambiguous. */
-function nullableScalarType(
-  name: string,
-  context: LowerContext,
-): "string" | "number" | "boolean" | null {
+/**
+ * The type a null-initialized variable later receives when the evidence is unambiguous, such as `string` or
+ * `string[]` (the emitted declaration adds `?`).
+ */
+function nullableValueType(name: string, context: LowerContext): string | null {
   const type = context.types.variables.get(name);
   if (type === undefined) return null;
-  if (onlyOf(type, STRING | NULL) && type & STRING) return "string";
-  if (onlyOf(type, NUMBER | NULL) && type & NUMBER) return "number";
-  if (onlyOf(type, BOOLEAN | NULL) && type & BOOLEAN) return "boolean";
-  return null;
+  const scalar = (value: number): string | null => {
+    if (onlyOf(value, STRING | NULL) && value & STRING) return "string";
+    if (onlyOf(value, NUMBER | NULL) && value & NUMBER) return "number";
+    if (onlyOf(value, BOOLEAN | NULL) && value & BOOLEAN) return "boolean";
+    return null;
+  };
+  if (onlyOf(type, LIST | NULL) && type & LIST) {
+    const elements = context.types.listElements?.get(name);
+    const element = elements === undefined || elements & NULL ? null : scalar(elements);
+    return element === null ? null : `${element}[]`;
+  }
+  return scalar(type);
+}
+
+function isEmptyGroovyExpression(node: AstNode): boolean {
+  return (
+    node.kind === "unsupportedExpression" &&
+    node.groovyType === "org.codehaus.groovy.ast.expr.EmptyExpression"
+  );
 }
 
 function lowerClosureDeclaration(
@@ -1989,6 +2007,10 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     const indexNode = asNode(node.right);
     const target = targetNode === null ? null : lowerExpression(targetNode, context);
     if (target === null || indexNode === null) return null;
+    if (targetNode !== null && isRandomIndexOf(indexNode, targetNode)) {
+      // `items[getRandom(items.size())]` picks one element uniformly, which is TeaseScript `items.random`.
+      return { kind: "property", target, name: "random" };
+    }
     const propertyName = constantString(indexNode);
     if (propertyName !== null) {
       if (!isTeaseObjectPropertyName(propertyName)) {
@@ -2200,6 +2222,46 @@ function templateOrLiteral(parts: TemplatePart[]): IrExpression {
   return { kind: "template", parts: merged };
 }
 
+/** Recognizes `getRandom(list.size)`, `getRandom(list.size())`, or `getRandom(list.length)` for `list`. */
+function isRandomIndexOf(index: AstNode, list: AstNode): boolean {
+  const call = callParts(index);
+  if (
+    call === null ||
+    !call.inherited ||
+    call.name !== "getRandom" ||
+    call.arguments.length !== 1
+  ) {
+    return false;
+  }
+  const bound = call.arguments[0]!;
+  const sizeName =
+    bound.kind === "property"
+      ? constantString(bound.property)
+      : callParts(bound)?.arguments.length === 0
+        ? constantString(bound.method)
+        : null;
+  if (sizeName !== "size" && sizeName !== "length") return false;
+  const receiver = asNode(bound.object);
+  return receiver !== null && sameReference(receiver, list);
+}
+
+function sameReference(left: AstNode, right: AstNode): boolean {
+  if (left.kind === "variable" && right.kind === "variable") {
+    return variableName(left) === variableName(right);
+  }
+  if (left.kind === "property" && right.kind === "property") {
+    const leftObject = asNode(left.object);
+    const rightObject = asNode(right.object);
+    return (
+      constantString(left.property) === constantString(right.property) &&
+      leftObject !== null &&
+      rightObject !== null &&
+      sameReference(leftObject, rightObject)
+    );
+  }
+  return false;
+}
+
 function lowerCast(node: AstNode, context: LowerContext): IrExpression | null {
   const valueNode = asNode(node.value);
   const value = valueNode === null ? null : lowerExpression(valueNode, context);
@@ -2398,8 +2460,10 @@ function lowerObjectMethodCallExpression(
   );
 }
 
+/** A null receiver fails in Groovy and TeaseScript alike, so "list or null" counts as a list receiver. */
 function isKnownListExpression(node: AstNode, context: LowerContext): boolean {
-  return onlyOf(inferType(node, context.types), LIST);
+  const type = inferType(node, context.types);
+  return onlyOf(type, LIST | NULL) && (type & LIST) !== 0;
 }
 
 function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpression | null {
