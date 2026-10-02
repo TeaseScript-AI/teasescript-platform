@@ -179,10 +179,6 @@ python3 -B tools/local-agent/prepare-patch-publication.py \
   --show-next-action
 ```
 
-`--show-next-upload` remains an exact compatibility alias for the canonical
-`--show-next-action`; both names invoke the same implementation and print the
-same next action.
-
 The command verifies the local file again and prints one connector-ready argument object for the GitHub action that creates a UTF-8 Git blob from text, currently `GitHub.create_blob`. Call that connector immediately. Do not Base64-encode, pre-open, or manually regenerate the part. Compare its returned Git blob SHA with `expectedGitBlobSha`, record the result, and do not perform another repository write until the match is recorded:
 
 ```shell
@@ -360,9 +356,10 @@ step's own `run` body against a local bare remote, where a fixture Git wrapper r
 GitHub URL, and runs the summary script on fixture job results. It covers PR binding, request rejection, retry
 preservation, target-race rejection, exact-base publication, changed-ref preservation, exact-SHA deletion, successful
 HTTP-204 deletion, already-absent comments before either the read or delete call, changed or mismatched identities, and
-visible deletion failures. Its static checks cover separated permissions, immutable Action pins, read-only built-in
-publish permissions, non-persisted checkout credentials, exact App variable and secret routing, current-repository token
-scope, explicit App-token permissions, post-verification token creation, and App-authenticated push wiring. Live GitHub
+visible deletion failures. Its static checks cover separated permissions, read-only built-in publish permissions,
+trusted-revision checkouts without persisted credentials, exact App variable and secret routing, current-repository
+token scope, explicit App-token permissions, post-verification token creation, and App-authenticated push wiring. The
+source-bundle workflow suite checks immutable Action pins and checkout `contents` access in every workflow. Live GitHub
 App installation behavior, actual workflow triggering, comment deletion, artifact transport, and exact `tiktoken`
 integration with the separately stored vocabulary remain environment-specific verification concerns.
 

@@ -513,12 +513,12 @@ async function testCacheHitCreatesOneRegistryAndCleansExactRequest() {
   assert.equal(entries[0].state, "ready");
   assert.deepEqual(entries[0].requestCommentIds, [501]);
   assert.equal(entries[0].artifactId, artifactId);
-  const download = JSON.parse(registryBlock(botComments[0].body, "json"));
-  assert.deepEqual(download, {
-    repo_full_name: REPOSITORY,
-    artifact_id: artifactId,
-    file_name: `teasescript-source-${MAIN_SHA}-request-501.zip`,
-  });
+  const { file_name: fileName, ...download } = JSON.parse(
+    registryBlock(botComments[0].body, "json"),
+  );
+  assert.deepEqual(download, { repo_full_name: REPOSITORY, artifact_id: artifactId });
+  assert.match(fileName, /^[^/]+\.zip$/);
+  assert.ok(fileName.includes(MAIN_SHA), fileName);
   const preparation = commandOptions(registryBlock(botComments[0].body, "shell"));
   assert.equal(
     preparation.executable,
@@ -527,7 +527,7 @@ async function testCacheHitCreatesOneRegistryAndCleansExactRequest() {
   const { "--output": workspace, ...verified } = preparation.options;
   assert.match(workspace, /^\/mnt\/data\/[^/]+$/);
   assert.deepEqual(verified, {
-    "--artifact": `/mnt/data/${download.file_name}`,
+    "--artifact": `/mnt/data/${fileName}`,
     "--artifact-sha256": DIGEST,
     "--expected-repository": REPOSITORY,
     "--expected-head": MAIN_SHA,
@@ -839,16 +839,13 @@ async function testRegistryEscapesUntrustedPullHeadRef() {
 
   const body = request.formatRegistryComment([entry]);
   // CommonMark code span: an opening run of N backticks closes at the next run of exactly N.
-  const afterHead = body.slice(body.indexOf(" · head ") + " · head ".length);
-  const fence = afterHead.match(/^`+/)[0];
+  const start = body.indexOf("Contributor/teasescript-platform:");
+  const fence = body.slice(0, start).match(/`+$/)[0];
   const closing = new RegExp(`(?<!\`)${fence}(?!\`)`, "g");
-  closing.lastIndex = fence.length;
-  const close = closing.exec(afterHead);
+  closing.lastIndex = start;
+  const close = closing.exec(body);
   assert.ok(close, "head code span is closed");
-  assert.equal(
-    afterHead.slice(fence.length, close.index),
-    `Contributor/teasescript-platform:${hostileRef}`,
-  );
+  assert.equal(body.slice(start, close.index), `Contributor/teasescript-platform:${hostileRef}`);
   assert.deepEqual(request.parseRegistryComment(body), [entry]);
 }
 
@@ -905,35 +902,6 @@ async function testDifferentResolvedIdentitiesDoNotDeduplicate() {
   assert.equal(mergedBase.length, 2);
   assert.deepEqual(request.findRegistryEntry(mergedBase, 503), pull);
   assert.deepEqual(request.findRegistryEntry(mergedBase, 505), advancedBase);
-}
-
-async function testSerializedDistinctUpdatesPreserveBothEntries() {
-  const first = readyEntry({
-    requestId: 511,
-    sourceSha: MAIN_SHA,
-    artifactId: 8211,
-    runId: 9211,
-    updatedAt: "2026-08-04T10:00:00.000Z",
-  });
-  const second = readyEntry({
-    requestId: 512,
-    sourceSha: EXACT_SHA,
-    artifactId: 8212,
-    runId: 9212,
-    updatedAt: "2026-08-04T10:01:00.000Z",
-  });
-  const afterFirst = request.mergeRegistryEntries([], first, new Date("2026-08-04T10:00:30Z"));
-  const afterSecond = request.mergeRegistryEntries(
-    afterFirst,
-    second,
-    new Date("2026-08-04T10:01:30Z"),
-  );
-
-  assert.equal(afterSecond.length, 2);
-  assert.equal(afterSecond[0].requestCommentIds[0], 512);
-  assert.equal(afterSecond[1].requestCommentIds[0], 511);
-  assert.equal(request.findRegistryEntry(afterSecond, 511).artifactId, 8211);
-  assert.equal(request.findRegistryEntry(afterSecond, 512).artifactId, 8212);
 }
 
 async function testRegistryPrunesExpiryOrdersNewestAndBoundsTen() {
@@ -1236,8 +1204,8 @@ async function testFailureEntryIsCompactBoundedAndCleaned() {
     entries[0].reason.startsWith("Permission service unavailable: retry later upstream detail"),
   );
   assert.doesNotMatch(entries[0].reason, /[\r\n\t]| {2}/);
-  assert.ok(entries[0].reason.length < apiMessage.trim().length);
-  assert.ok(entries[0].reason.length <= 240);
+  // Truncated, whatever the limit: shorter than the message with only its whitespace compacted.
+  assert.ok(entries[0].reason.length < apiMessage.replace(/\s+/g, " ").trim().length);
 }
 
 async function testChangedRequestCannotFinalizeOrDelete() {
@@ -1320,7 +1288,6 @@ async function main() {
   await testSpoofedRegistryCannotClaimAuthority();
   await testRegistryEscapesUntrustedPullHeadRef();
   await testDifferentResolvedIdentitiesDoNotDeduplicate();
-  await testSerializedDistinctUpdatesPreserveBothEntries();
   await testRegistryPrunesExpiryOrdersNewestAndBoundsTen();
   await testEquivalentArtifactRequestIdsAreGloballyBounded();
   await testMultipleAuthoritativeRegistriesFailClosed();

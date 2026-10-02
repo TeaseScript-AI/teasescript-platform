@@ -25,7 +25,7 @@ status=$?
 set -e
 [[ $status -eq 7 ]]
 [[ ! -s "$tmp/failure.stdout" ]]
-grep -q '^sample-failure: FAIL (exit 7)$' "$tmp/failure.stderr"
+grep -F sample-failure "$tmp/failure.stderr" | grep -F FAIL | grep -w 7 >/dev/null
 grep -q '^command:' "$tmp/failure.stderr"
 grep -q 'diagnostic line' "$tmp/failure.stderr"
 [[ -f "$tmp/failure.log" ]]

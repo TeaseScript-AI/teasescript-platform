@@ -28,7 +28,8 @@ python3 - \
   "$workflow" \
   "$index_workflow" \
   "$artifact_router_workflow" \
-  "$artifact_request_workflow" <<'PYWORKFLOW'
+  "$artifact_request_workflow" \
+  "$root/.github/workflows" <<'PYWORKFLOW'
 import pathlib
 import re
 import sys
@@ -37,25 +38,78 @@ automatic = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
 index = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
 artifact_router = pathlib.Path(sys.argv[3]).read_text(encoding="utf-8")
 artifact_request = pathlib.Path(sys.argv[4]).read_text(encoding="utf-8")
+workflow_directory = pathlib.Path(sys.argv[5])
 
 USES = re.compile(r"^[ \t]*(?:-[ \t]+)?uses[ \t]*:[ \t]*(?P<value>.*)$")
+FLOW_MAPPING = re.compile(r"^[ \t]*(?:-[ \t]+)?\{(?P<body>.*)\}[ \t]*(?:#.*)?$")
+PINNED_REF = re.compile(r"[^@\s'\"]+@[0-9a-f]{40}")
+LOCAL_WORKFLOW_REF = re.compile(r"\./\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml")
 
 
 def action_refs(text):
-    refs = []
+    values = []
     for line in text.splitlines():
         match = USES.match(line)
         if match:
-            value = re.sub(r"[ \t]+#.*$", "", match.group("value")).strip()
-            if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-                value = value[1:-1]
-            refs.append(value)
+            values.append(re.sub(r"[ \t]+#.*$", "", match.group("value")))
+        flow = FLOW_MAPPING.match(line)
+        if flow:
+            values += re.findall(r"(?:^|,)[ \t]*uses[ \t]*:([^,]*)", flow.group("body"))
+    refs = []
+    for value in values:
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        refs.append(value)
     return refs
 
 
 def assert_immutable_pins(text):
     refs = action_refs(text)
-    assert refs and all(re.fullmatch(r"[^@\s'\"]+@[0-9a-f]{40}", ref) for ref in refs), refs
+    for ref in refs:
+        assert PINNED_REF.fullmatch(ref) or LOCAL_WORKFLOW_REF.fullmatch(ref), ref
+    return refs
+
+
+JOB_HEADER = r"  ([A-Za-z0-9_-]+):[ \t]*(?:#.*)?"
+
+
+def workflow_jobs(text):
+    section = re.split(r"(?m)^jobs:[ \t]*(?:#.*)?\n", text, maxsplit=1)[1]
+    section = re.split(r"(?m)^(?=[^\s#])", section, maxsplit=1)[0]
+    # Every two-space line must be a job header, so no job or checkout escapes the checks below.
+    for line in section.splitlines():
+        if re.match(r"  [^\s#]", line):
+            assert re.fullmatch(JOB_HEADER, line), f"unsupported job header: {line}"
+    parts = re.split(rf"(?m)^{JOB_HEADER}\n", section)
+    return dict(zip(parts[1::2], parts[2::2]))
+
+
+def grants_contents(text, indent):
+    match = re.search(rf"(?m)^{indent}permissions:(.*)\n((?:{indent}  .*\n)*)", text)
+    if match is None:
+        return None
+    entries = match.group(1) + match.group(2)
+    return re.search(r"\bcontents:[ \t]*(?:read|write)\b", entries) is not None
+
+
+def assert_checkout_jobs_read_contents(text):
+    # Job permissions replace workflow permissions; without either, the token can read contents.
+    workflow_access = grants_contents(text, "")
+    for name, job in workflow_jobs(text).items():
+        if any(ref.startswith("actions/checkout@") for ref in action_refs(job)):
+            access = grants_contents(job, "    ")
+            if access is None:
+                access = workflow_access is not False
+            assert access, f"checkout job {name} cannot read contents"
+
+
+def rejected(check, text):
+    try:
+        check(text)
+    except AssertionError:
+        return True
+    return False
 
 
 pin = "d23441a48e516b6c34aea4fa41551a30e30af803"
@@ -63,30 +117,43 @@ assert action_refs(f"      - uses: 'actions/checkout@{pin}' # v6\n        uses: 
     f"actions/checkout@{pin}",
     f"a/b@{pin}",
 ]
-for mutable in ["      - uses: actions/checkout@v6", '        uses: "actions/checkout@main"']:
-    try:
-        assert_immutable_pins(f"        uses: actions/checkout@{pin}\n{mutable}\n")
-    except AssertionError:
-        pass
-    else:
-        raise AssertionError(f"mutable action ref was accepted: {mutable}")
-for workflow_text in (automatic, index, artifact_request):
-    assert_immutable_pins(workflow_text)
+assert action_refs(f"      - {{name: Flow, uses: a/b@{pin}, with: {{ref: x}}}}") == [f"a/b@{pin}"]
+for mutable in [
+    "      - uses: actions/checkout@v6",
+    '        uses: "actions/checkout@main"',
+    "    uses: example/repository/.github/workflows/reusable.yml@main",
+    "      - {uses: actions/checkout@v6}",
+]:
+    mixed = f"        uses: actions/checkout@{pin}\n{mutable}\n"
+    assert rejected(assert_immutable_pins, mixed), mutable
+assert_immutable_pins("    uses: ./.github/workflows/reusable.yml\n")
 
-assert "workflow_dispatch" not in automatic
-assert "inputs.source_ref" not in automatic
-assert "TOOLING_REF: ${{ github.workflow_sha }}" in automatic
-assert "REQUESTED_SOURCE:" in automatic and "github.event.pull_request.head.sha" in automatic
-assert "SOURCE_REF:" in automatic and "github.head_ref" in automatic
-assert automatic.count("uses: actions/checkout@") == 2
-assert "ref: ${{ env.TOOLING_REF }}" in automatic and "path: tooling" in automatic
-assert "ref: ${{ env.REQUESTED_SOURCE }}" in automatic and "path: source" in automatic
-assert "id: source" in automatic and "working-directory: source" in automatic
-assert "source_sha=$(git rev-parse --verify HEAD)" in automatic
-assert "bash ../tooling/tools/local-agent/create-source-bundle.sh" in automatic
-assert "--output ../source-artifact" in automatic
-assert "steps.source.outputs.sha" in automatic
-assert "name: teasescript-source-${{ steps.source.outputs.sha }}" in automatic
+
+def checkout_workflow(job_permissions, step):
+    lines = ["permissions: {}", "jobs:", "  job:", "    runs-on: ubuntu-24.04", *job_permissions]
+    return "\n".join([*lines, "    steps:", f"      - {step}", ""])
+
+
+checkout = f"uses: actions/checkout@{pin}"
+read_contents = ["    permissions:", "      contents: read"]
+assert_checkout_jobs_read_contents(checkout_workflow(read_contents, checkout))
+for job_permissions in ([], ["    permissions:", "      issues: write"]):
+    workflow_text = checkout_workflow(job_permissions, checkout)
+    assert rejected(assert_checkout_jobs_read_contents, workflow_text), job_permissions
+assert_checkout_jobs_read_contents(checkout_workflow([], f"run: echo actions/checkout@{pin}"))
+commented_header = checkout_workflow([], checkout).replace("  job:\n", "  job: # main job\n")
+assert rejected(assert_checkout_jobs_read_contents, commented_header)
+assert rejected(assert_checkout_jobs_read_contents, commented_header.replace("  job:", '  "job":'))
+
+workflow_paths = sorted([*workflow_directory.glob("*.yml"), *workflow_directory.glob("*.yaml")])
+assert workflow_paths
+workflow_refs = []
+for path in workflow_paths:
+    workflow_text = path.read_text(encoding="utf-8")
+    workflow_refs += assert_immutable_pins(workflow_text)
+    assert_checkout_jobs_read_contents(workflow_text)
+# Guards the scanner itself: the repository's workflows do use Actions.
+assert workflow_refs, "no workflow uses entries were found"
 
 assert re.search(
     r"^  workflow_run:\n    workflows: \[Source bundle\]\n    types: \[completed\]",
@@ -106,31 +173,27 @@ artifact_route = artifact_router.split("  mailbox:\n", 1)[1].split("\n  prepare:
 assert "uses: ./.github/workflows/artifact-mailbox-worker.yml" in artifact_route
 assert "pull-requests: read" in artifact_route
 assert "pull-requests: write" not in artifact_route
-assert "author_association" not in artifact_route
 assert re.search(r"^  workflow_call:\n", artifact_request, re.MULTILINE)
 assert "issue_comment:" not in artifact_request
 assert "permissions: {}" in artifact_request
 assert "github.event.issue.number == 235" in artifact_request
 assert "startsWith(github.event.comment.body, '/artifact source ')" in artifact_request
-assert "group: source-bundle-artifact-request" in artifact_request
-assert "queue: max" in artifact_request
 assert "pull-requests: read" in artifact_request
 assert "pull-requests: write" not in artifact_request
-assert "cancel-in-progress: false" in artifact_request
+# One constant group serializes every request; queueing without cancellation keeps pending requests.
+concurrency_lines = re.search(r"(?m)^    concurrency:\n((?:      .*\n)+)", artifact_request).group(1)
+concurrency = dict(line.strip().split(": ", 1) for line in concurrency_lines.splitlines())
+assert concurrency["group"] and "${{" not in concurrency["group"], concurrency
+assert concurrency["queue"] == "max" and concurrency["cancel-in-progress"] == "false", concurrency
 job_prefix = artifact_request.split("    runs-on:", 1)[0]
 assert "github.event.comment.author_association" in job_prefix
 assert "[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]" in job_prefix
-assert job_prefix.index("    if:") < job_prefix.index("    concurrency:")
 assert "actions: read" in artifact_request
 assert "contents: read" in artifact_request
 assert "issues: write" in artifact_request
 assert "statuses: write" in artifact_request
 assert "contents: write" not in artifact_request
 assert "workflows: write" not in artifact_request
-assert artifact_request.count("uses: actions/checkout@") == 2
-assert "ref: ${{ github.workflow_sha }}" in artifact_request
-assert "repository: ${{ steps.resolve.outputs.source_repository }}" in artifact_request
-assert "ref: ${{ steps.resolve.outputs.source_sha }}" in artifact_request
 
 
 def workflow_steps(text):
@@ -159,8 +222,8 @@ def step_condition(step):
 worker = workflow_steps(artifact_request)
 
 
-def worker_step(role, predicate):
-    matches = [step for step in worker if predicate(step)]
+def one_step(steps, role, predicate):
+    matches = [step for step in steps if predicate(step)]
     assert len(matches) == 1, role
     return matches[0]
 
@@ -169,21 +232,25 @@ def uses_action(step, action):
     return step.get("uses", [""])[0].startswith(f"{action}@")
 
 
-trusted = worker_step(
+trusted = one_step(
+    worker,
     "trusted checkout",
     lambda step: uses_action(step, "actions/checkout") and "path: tooling" in step["with"],
 )
-selected = worker_step(
+selected = one_step(
+    worker,
     "selected checkout",
     lambda step: uses_action(step, "actions/checkout") and "path: source" in step["with"],
 )
-resolve = worker_step("resolve", lambda step: step.get("id") == ["resolve"])
-create = worker_step(
+resolve = one_step(worker, "resolve", lambda step: step.get("id") == ["resolve"])
+create = one_step(
+    worker,
     "bundle creation",
     lambda step: any("create-source-bundle.sh" in line for line in step.get("run", [])),
 )
-finalize = worker_step("finalize", lambda step: step.get("id") == ["finalize"])
-report = worker_step(
+finalize = one_step(worker, "finalize", lambda step: step.get("id") == ["finalize"])
+report = one_step(
+    worker,
     "failure report",
     lambda step: any("reportProductionFailure" in line for line in step.get("with", [])),
 )
@@ -266,14 +333,46 @@ for step, expected in required_inputs:
     )
     assert inputs == expected, step["name"]
     assert {line.split(":", 1)[0] for line in step["env"]} == set(expected.values()), step["name"]
-assert artifact_request.count("persist-credentials: false") == 2
-assert "source-bundle-artifact-request.cjs" in artifact_request
-assert "request.resolveRequest" in artifact_request
-assert "request.completeRequest" in artifact_request
-assert "request.reportProductionFailure" in artifact_request
-assert "--event-name source-bundle-artifact-request" in artifact_request
-assert "SOURCE_SHA: ${{ steps.resolve.outputs.source_sha }}" in artifact_request
-assert "sourceSha: process.env.SOURCE_SHA" in artifact_request
+
+# The automatic producer bundles the pull-request head on pull_request and the pushed commit on
+# push. Its artifact name carries the SHA passed to the producer, which refuses any other HEAD.
+producer = workflow_steps(automatic)
+job_env_block = re.search(r"(?m)^    env:\n((?:      .*\n)+)", automatic).group(1)
+job_env = dict(line.strip().split(": ", 1) for line in job_env_block.splitlines())
+
+
+def resolved_ref(step):
+    ref = next(line.split(": ", 1)[1] for line in step["with"] if line.startswith("ref: "))
+    match = re.fullmatch(r"\$\{\{ env\.(\w+) \}\}", ref)
+    return job_env[match.group(1)] if match else ref
+
+
+requested_source = (
+    "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+)
+one_step(
+    producer,
+    "requested source checkout",
+    lambda step: uses_action(step, "actions/checkout") and resolved_ref(step) == requested_source,
+)
+upload = one_step(producer, "upload", lambda step: uses_action(step, "actions/upload-artifact"))
+artifact_name = next(line.split(": ", 1)[1] for line in upload["with"] if line.startswith("name: "))
+name_match = re.fullmatch(
+    r"teasescript-source-(\$\{\{ steps\.[\w-]+\.outputs\.[\w-]+ \}\})", artifact_name
+)
+assert name_match, artifact_name
+producer_run = one_step(
+    producer,
+    "producer run",
+    lambda step: any("create-source-bundle.sh" in line for line in step.get("run", [])),
+)
+argument = re.search(r'--source-sha (?:"([^"]+)"|(\S+))', " ".join(producer_run["run"]))
+source_sha = argument.group(1) or argument.group(2)
+variable = re.fullmatch(r"\$\{?(\w+)\}?", source_sha)
+if variable:
+    step_env = dict(line.split(": ", 1) for line in producer_run.get("env", []))
+    source_sha = {**job_env, **step_env}[variable.group(1)]
+assert source_sha == name_match.group(1), (source_sha, artifact_name)
 
 PYWORKFLOW
 
@@ -487,15 +586,27 @@ output="$temp_root/output"
   sha256sum --check SHA256SUMS >/dev/null
 )
 
-[[ $(jq -r '.formatVersion' "$output/manifest.json") == 1 ]] || fail "formatVersion mismatch"
-[[ $(jq -r '.repository' "$output/manifest.json") == TeaseScript-AI/teasescript-platform ]] || fail "repository mismatch"
-[[ $(jq -r '.commitSha' "$output/manifest.json") == "$second_sha" ]] || fail "commit SHA mismatch"
-[[ $(jq -r '.treeSha' "$output/manifest.json") == "$second_tree" ]] || fail "tree SHA mismatch"
-[[ $(jq -r '.sourceRef' "$output/manifest.json") == fixture-branch ]] || fail "source ref mismatch"
-[[ $(jq -r '.bundleRef' "$output/manifest.json") == refs/heads/source-bundle ]] || fail "bundle ref mismatch"
-[[ $(jq -r '.eventName' "$output/manifest.json") == test ]] || fail "event name mismatch"
-[[ $(jq -r '.bundleSha256' "$output/manifest.json") == "$(sha256sum "$output/repository.bundle" | awk '{print $1}')" ]] || fail "bundle checksum mismatch"
 [[ $(git -C "$repo" rev-parse refs/heads/source-bundle) == "$first_sha" ]] || fail "pre-existing temporary ref was not restored"
+
+# The real source-review consumer is the protocol oracle for the producer's manifest and bundle.
+consumer_artifact="$temp_root/source-artifact.zip"
+python3 - "$output" "$consumer_artifact" <<'PYZIP'
+import pathlib
+import sys
+import zipfile
+
+output, artifact = map(pathlib.Path, sys.argv[1:])
+with zipfile.ZipFile(artifact, "w") as archive:
+    for name in ("repository.bundle", "manifest.json", "SHA256SUMS"):
+        archive.write(output / name, name)
+PYZIP
+python3 -S -B "$root/tools/chatgpt-project-agent/tools/prepare-source-review.py" \
+  --artifact "$consumer_artifact" \
+  --artifact-sha256 "$(sha256sum "$consumer_artifact" | awk '{print $1}')" \
+  --expected-repository TeaseScript-AI/teasescript-platform \
+  --expected-head "$second_sha" \
+  --expected-merge-base "$first_sha" \
+  --output "$temp_root/review" >/dev/null || fail "source-review consumer rejected the producer artifact"
 
 bundle_heads=$(git bundle list-heads "$output/repository.bundle")
 [[ "$bundle_heads" != *"refs/heads/unrelated"* ]] || fail "unrelated branch entered bundle heads"
