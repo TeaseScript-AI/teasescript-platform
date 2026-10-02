@@ -881,6 +881,185 @@ async function transcriptNativeWheelChecks(page) {
   return "PASS native transcript wheel ownership across text, margins and thumb, malformed input, burst and drag";
 }
 
+// Accepted transcript behavior (PLAYER-UI.md, transcript and smart follow): a history far larger than a screen keeps a
+// bounded rendered DOM, appended entries do not move a reader who scrolled up, and follow resumes once the reader is
+// back at the latest entry. This group replaces the development scenario with a long history and one new entry per
+// second.
+async function transcriptHistoryChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  const until = (predicate, arg, message) =>
+    page.waitForFunction(predicate, arg, { timeout: 10_000 }).catch((error) => {
+      throw new Error(`${message}: ${error.message.split("\n")[0]}`);
+    });
+  // Within one default instruction budget, so the history is complete when Start returns.
+  const historySize = 2000;
+  const source = [
+    `repeat ${historySize} {`,
+    '    say "Earlier message", instant',
+    "}",
+    "while true {",
+    "    wait 1",
+    '    say "New message", instant',
+    "}",
+  ].join("\n");
+  await page.route("**/src/runtimeScenario.ts*", (route) => {
+    const original = new URL(route.request().url());
+    if (original.searchParams.has("original")) return route.continue();
+    original.searchParams.set("original", "");
+    // Only the opening scenario is replaced; the module's other exports stay available.
+    return route.fulfill({
+      contentType: "text/javascript",
+      body: `export * from ${JSON.stringify(original.href)};\nexport const openingScenario = ${JSON.stringify(source)};`,
+    });
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  const transcript = page.locator(".transcript-scroll");
+  const state = () =>
+    transcript.evaluate((viewport) => {
+      const box = viewport.getBoundingClientRect();
+      const centre = (box.top + box.bottom) / 2;
+      const entries = Array.from(document.querySelectorAll(".transcript-entry"));
+      return {
+        size: Number(entries[0]?.getAttribute("aria-setsize") ?? 0),
+        rendered: entries.length,
+        first: Math.min(...entries.map((entry) => Number(entry.getAttribute("aria-posinset")))),
+        last: Math.max(...entries.map((entry) => Number(entry.getAttribute("aria-posinset")))),
+        centreCovered: entries.some((entry) => {
+          const rect = entry.getBoundingClientRect();
+          return rect.top <= centre && rect.bottom >= centre;
+        }),
+        fromEnd: viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop,
+      };
+    });
+  // Settled once the scroll position holds for two frames; appends arrive only once per second.
+  const settle = () =>
+    transcript.evaluate(async (viewport) => {
+      const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+      let previous = Number.NaN;
+      for (let attempt = 0; attempt < 120 && viewport.scrollTop !== previous; attempt++) {
+        previous = viewport.scrollTop;
+        await frame();
+        await frame();
+      }
+    });
+  const atLatest = () => {
+    const viewport = document.querySelector(".transcript-scroll");
+    return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 2;
+  };
+  // The newest entry is rendered above the composer and below the viewport's top edge.
+  const latestShownAfter = (size) => {
+    const viewport = document.querySelector(".transcript-scroll").getBoundingClientRect();
+    const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
+    const latest = Array.from(document.querySelectorAll(".transcript-entry")).find(
+      (entry) => entry.getAttribute("aria-posinset") === entry.getAttribute("aria-setsize"),
+    );
+    const rect = latest?.getBoundingClientRect();
+    return (
+      Number(latest?.getAttribute("aria-setsize")) > size &&
+      rect.top >= viewport.top &&
+      rect.bottom <= composer.top + 1
+    );
+  };
+
+  // Bounded DOM: a tenth of the history separates a rendered window (tens of entries) from a rendered history.
+  const bounded = async (where, covers) => {
+    const current = await state();
+    check(
+      current.rendered > 0 && current.rendered < current.size / 10 && covers(current),
+      `Transcript window ${where} is unbounded or misplaced: ${JSON.stringify(current)}`,
+    );
+  };
+  await until(
+    (size) =>
+      Number(document.querySelector(".transcript-entry")?.getAttribute("aria-setsize")) >= size,
+    historySize,
+    "The long history did not reach the transcript",
+  );
+  await until(atLatest, undefined, "The transcript did not open at the latest entry");
+  await bounded("at the latest entry", (current) => current.last === current.size);
+  await transcript.focus();
+  await page.keyboard.press("Home");
+  await until(
+    () =>
+      document.querySelector(".transcript-scroll").scrollTop === 0 &&
+      !!document.querySelector('.transcript-entry[aria-posinset="1"]'),
+    undefined,
+    "Home did not reach the first entry",
+  );
+  await bounded("at the first entry", (current) => current.first === 1);
+  await transcript.evaluate((viewport) => {
+    viewport.scrollTop = viewport.scrollHeight / 2;
+  });
+  await settle();
+  await bounded("in the middle of the history", (current) => current.centreCovered);
+
+  // Smart follow: an upward wheel suspends it, so appended entries leave the visible anchor in place.
+  await page.keyboard.press("End");
+  await until(atLatest, undefined, "End did not reach the latest entry");
+  const centre = await transcript.evaluate((viewport) => {
+    const rect = viewport.getBoundingClientRect();
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  });
+  const scrollUp = async () => {
+    await page.mouse.move(centre.x, centre.y);
+    await page.mouse.wheel(0, -1500);
+    await settle();
+  };
+  await scrollUp();
+  const anchor = await transcript.evaluate((viewport) => {
+    const top = viewport.getBoundingClientRect().top;
+    const [entry] = Array.from(document.querySelectorAll(".transcript-entry"))
+      .filter((candidate) => candidate.getBoundingClientRect().top >= top)
+      .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+    return {
+      id: entry.dataset.messageId,
+      offset: entry.getBoundingClientRect().top - top,
+      size: Number(entry.getAttribute("aria-setsize")),
+    };
+  });
+  await until(
+    (size) =>
+      Number(document.querySelector(".transcript-entry")?.getAttribute("aria-setsize")) >= size + 2,
+    anchor.size,
+    "No entries arrived while the reader was scrolled up",
+  );
+  await settle();
+  const moved = await transcript.evaluate((viewport, { id, offset }) => {
+    const entry = document.querySelector(`.transcript-entry[data-message-id="${id}"]`);
+    return entry
+      ? entry.getBoundingClientRect().top - viewport.getBoundingClientRect().top - offset
+      : null;
+  }, anchor);
+  check(
+    moved !== null && Math.abs(moved) <= 2,
+    `Appended entries moved a reader who had scrolled up (anchor moved ${moved} px)`,
+  );
+
+  // Follow resumes through the return-to-latest control and by scrolling back to the bottom.
+  await page.getByRole("button", { name: "Return to latest", exact: true }).click();
+  await until(atLatest, undefined, "Return to latest did not reach the latest entry");
+  await until(
+    latestShownAfter,
+    (await state()).size,
+    "After Return to latest, a new entry did not stay in view",
+  );
+  await scrollUp();
+  for (let attempt = 0; attempt < 5 && !(await page.evaluate(atLatest)); attempt++) {
+    await page.mouse.wheel(0, 3000);
+    await settle();
+  }
+  await until(atLatest, undefined, "Scrolling down did not reach the latest entry");
+  await until(
+    latestShownAfter,
+    (await state()).size,
+    "After scrolling back to the bottom, a new entry did not stay in view",
+  );
+  return "PASS large transcript history stays windowed; appends keep a scrolled-up reader in place and follow resumes at latest";
+}
+
 async function timerChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -2619,6 +2798,7 @@ const groups = [
   markupLinkChecks,
   timerChecks,
   transcriptNativeWheelChecks,
+  transcriptHistoryChecks,
   contentAlignmentChecks,
   playerConditionChecks,
   zoomedViewportChecks,
