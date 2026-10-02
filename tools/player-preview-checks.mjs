@@ -1406,8 +1406,7 @@ async function backgroundControlPlacementChecks(page) {
         bottom: group.bottom,
         timerBottom: box(rail.querySelector(".stage-right-rail-timers")).bottom,
         railBottom: box(rail).bottom,
-        // The reading column plus its 8px scrollbar gutter.
-        columnRight: box(document.querySelector("[data-conversation-overlay]")).right + 8,
+        columnRight: box(document.querySelector("[data-conversation-overlay]")).right,
         railLeft: box(rail).left,
         scrolls: viewport.scrollHeight > viewport.clientHeight,
       };
@@ -1419,8 +1418,8 @@ async function backgroundControlPlacementChecks(page) {
   };
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload();
-  // A full-height rail must leave the reading column and its scrollbar free, near the threshold and where only the
-  // Stage-height rail fits.
+  // A full-height rail must leave the reading column free, near the threshold and where only the Stage-height rail
+  // fits.
   let state;
   for (const width of [800, 1200, 1216, 1240, 1280]) {
     state = await settle(width, 900);
@@ -1520,14 +1519,19 @@ async function playerSettingsChecks(page) {
   await page.mouse.move(700, 400);
   await page.locator("[data-composer-input]").focus();
   await page.waitForFunction(
-    () => getComputedStyle(document.querySelector("[data-player-top-bar]")).opacity === "0",
+    () =>
+      !document
+        .querySelector("[data-player-top-bar]")
+        .checkVisibility({ opacityProperty: true, visibilityProperty: true }),
     null,
     { timeout: 6000 },
   );
   const box = await bar.boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.waitForFunction(
-    () => getComputedStyle(document.querySelector("[data-player-top-bar]")).opacity === "1",
+  await page.waitForFunction(() =>
+    document
+      .querySelector("[data-player-top-bar]")
+      .checkVisibility({ opacityProperty: true, visibilityProperty: true }),
   );
   await page.setViewportSize({ width: 1440, height: 900 });
 
