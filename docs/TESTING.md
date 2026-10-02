@@ -96,17 +96,18 @@ measurements as permanent limits.
 Before removing or consolidating a family, record its obligation and remaining evidence in the issue/PR. Delete checks
 that only freeze provisional geometry, development-fixture content, private implementation details, or temporary
 incompleteness (for example an accepted or intended capability being absent, unsuggested, disabled, or represented by a
-placeholder); preserve genuine
-regressions and browser risks exercised *through* fixtures. Replace numeric tuning assertions with observable behavior
-where possible. A POC check needs reassessment when its experiment changes or ends, not automatic repair to preserve an
-obsolete expectation. Repeated input/viewport cases need distinct failure modes, not merely different values.
+placeholder); preserve genuine regressions and browser risks exercised *through* fixtures. Replace numeric tuning
+assertions with observable behavior where possible. A POC check needs reassessment when its experiment changes or ends,
+not automatic repair to preserve an obsolete expectation. Repeated input/viewport cases need distinct failure modes, not
+merely different values.
 
 Tests do not establish product policy. Each test must identify the desirable behavior that would regress if it failed;
 "the code currently does this" is not enough. Derive expected values from specification or independent reasoning where
 possible. A value captured from the current implementation is acceptable only as an explicitly scoped regression oracle
 and does not by itself make that value a broader product requirement. For example, a numeric oracle tied to a current
-algorithm may detect regression without making that number a project-wide accessibility or performance requirement;
-identify that scope explicitly.
+algorithm, such as a plan-size baseline, may detect regression without making that number a project-wide accessibility,
+performance, or compatibility requirement; identify that scope explicitly, and review and update the baseline when an
+intentional implementation change legitimately changes it.
 
 ## Test layers
 
@@ -248,10 +249,12 @@ A matrix or equivalent model should:
 Unsupported or out-of-scope combinations do not automatically require
 executable cases. For obligations included in the bounded coverage model,
 accepted behavior and required rejection through a real supported or trusted
-boundary require executable evidence. When a real boundary must reject an
-otherwise unsupported composition, classify that cell as a rejected obligation
-and test it as such. Other unsupported or out-of-scope cells may remain
-classified but unexecuted.
+boundary require executable evidence. When accepted behavior or a real
+validation boundary requires durable rejection of an otherwise unsupported
+composition, classify that cell as a rejected obligation and test it as such.
+Behavior that is merely not yet implemented is not a rejected obligation; test
+it under [test admission](#test-admission-and-consolidation). Other unsupported
+or out-of-scope cells may remain classified but unexecuted.
 
 An additive evidence phase may temporarily retain overlapping regressions while
 the behavior space is being mapped. Once an independent check confirms that the
