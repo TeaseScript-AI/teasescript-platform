@@ -15,10 +15,16 @@ interface ClosureInfo {
   maxArgs: number;
 }
 
-interface HelperFunctionInfo {
+export interface HelperFunctionInfo {
   minArgs: number;
   maxArgs: number;
   stripsMain: boolean;
+}
+
+export type HelperRegistry = ReadonlyMap<string, ReadonlyMap<string, HelperFunctionInfo>>;
+
+export interface LowerOptions {
+  helperRegistry?: HelperRegistry;
 }
 
 interface LowerContext {
@@ -30,6 +36,7 @@ interface LowerContext {
   legacyHelperClasses: Map<string, string>;
   helperFunctions: Map<string, HelperFunctionInfo>;
   helperMainParameter: string | null;
+  packageHelperRegistry: HelperRegistry;
   functionDepth: number;
 }
 
@@ -41,7 +48,26 @@ const DIRECT_STORAGE_LOADS = new Set([
   "loadString",
 ]);
 
-export function lowerParsedFile(file: ParsedGroovyFile): MigrationProgram {
+export function buildHelperRegistry(files: readonly ParsedGroovyFile[]): HelperRegistry {
+  const registry = new Map<string, ReadonlyMap<string, HelperFunctionInfo>>();
+  for (const file of files) {
+    const root = file.root;
+    if (root?.kind !== "compilationUnit") continue;
+    for (const helperClass of nodeArray(root.classes)) {
+      const className = text(helperClass.name);
+      if (helperClass.kind !== "class" || className === null) continue;
+      registry.set(className, collectHelperFunctionInfo(nodeArray(helperClass.methods)));
+    }
+  }
+  return registry;
+}
+
+export function lowerParsedFiles(files: readonly ParsedGroovyFile[]): MigrationProgram[] {
+  const helperRegistry = buildHelperRegistry(files);
+  return files.map((file) => lowerParsedFile(file, { helperRegistry }));
+}
+
+export function lowerParsedFile(file: ParsedGroovyFile, options: LowerOptions = {}): MigrationProgram {
   const context: LowerContext = {
     diagnostics: [],
     metadata: null,
@@ -51,6 +77,7 @@ export function lowerParsedFile(file: ParsedGroovyFile): MigrationProgram {
     legacyHelperClasses: new Map(),
     helperFunctions: new Map(),
     helperMainParameter: null,
+    packageHelperRegistry: options.helperRegistry ?? new Map(),
     functionDepth: 0,
   };
   if (file.diagnostics.length > 0 || file.root === null) {
@@ -187,6 +214,7 @@ function lowerHelperMethod(
     legacyHelperClasses: new Map(),
     helperFunctions,
     helperMainParameter: stripsMain ? "main" : null,
+    packageHelperRegistry: baseContext.packageHelperRegistry,
     functionDepth: 1,
   };
   const parameters: IrFunctionParameter[] = [];
@@ -891,12 +919,37 @@ function lowerObjectMethodCallExpression(
   const receiverName = targetNode === null ? null : variableName(targetNode);
   const helperClass = receiverName === null ? undefined : context.legacyHelperClasses.get(receiverName);
   if (helperClass !== undefined) {
-    return unsupportedExpression(
-      context,
-      node,
-      "SX_LEGACY_HELPER_CALL",
-      `Legacy helper ${helperClass}.${name}() requires helper-library migration.`,
-    );
+    const helperInfo = context.packageHelperRegistry.get(helperClass)?.get(name);
+    if (helperInfo === undefined) {
+      return unsupportedExpression(
+        context,
+        node,
+        "SX_LEGACY_HELPER_CALL",
+        `Legacy helper ${helperClass}.${name}() has no discovered package-local method to migrate.`,
+      );
+    }
+    let argumentNodes = argumentsNodes;
+    if (helperInfo.stripsMain) {
+      if (variableName(argumentNodes[0]) !== "this") {
+        return unsupportedExpression(
+          context,
+          node,
+          "SX_HELPER_MAIN_ARGUMENT",
+          `Legacy helper ${helperClass}.${name}() does not pass the script host as its first argument.`,
+        );
+      }
+      argumentNodes = argumentNodes.slice(1);
+    }
+    if (argumentNodes.length < helperInfo.minArgs || argumentNodes.length > helperInfo.maxArgs) {
+      return unsupportedExpression(
+        context,
+        node,
+        "SX_FUNCTION_ARITY",
+        `Call to ${helperClass}.${name} has ${argumentNodes.length} authored arguments; expected ${helperInfo.minArgs}..${helperInfo.maxArgs}.`,
+      );
+    }
+    const args = lowerArguments(argumentNodes, context);
+    return args === null ? null : { kind: "call", name, positional: args, named: {} };
   }
 
   if (receiverName === "Math") {

@@ -77,3 +77,104 @@ test("prefers a concrete diagnostic over a wrapper at the same source span", () 
 
   assert.deepEqual(rootDiagnostics(diagnostics), [diagnostics[1]]);
 });
+
+test("feasibility report resolves package-local legacy helper calls", () => {
+  const helper: ParsedGroovyFile = {
+    formatVersion: 1,
+    sourceName: "Helper.groovy",
+    groovyVersion: "2.5.21",
+    mode: "unit",
+    diagnostics: [],
+    root: {
+      kind: "compilationUnit",
+      span: null,
+      topLevel: { kind: "block", span: null, statements: [] },
+      classes: [{
+        kind: "class",
+        span: child,
+        name: "Helper",
+        modifiers: 1,
+        methods: [{
+          kind: "method",
+          span: child,
+          name: "runHelper",
+          returnType: "java.lang.Object",
+          modifiers: 9,
+          parameters: [
+            { name: "main", type: "java.lang.Object", hasInitialExpression: false, initialExpression: null },
+            { name: "value", type: "java.lang.Object", hasInitialExpression: false, initialExpression: null },
+          ],
+          body: { kind: "block", span: child, statements: [{ kind: "return", span: child, value: { kind: "variable", span: child, name: "value", type: "java.lang.Object" } }] },
+        }],
+      }],
+    },
+  };
+  const script: ParsedGroovyFile = {
+    formatVersion: 1,
+    sourceName: "script.groovy",
+    groovyVersion: "2.5.21",
+    mode: "script-body",
+    diagnostics: [],
+    root: {
+      kind: "scriptBody",
+      span: null,
+      body: {
+        kind: "block",
+        span: parent,
+        statements: [
+          {
+            kind: "expressionStatement",
+            span: child,
+            expression: {
+              kind: "declaration",
+              span: child,
+              multipleAssignment: false,
+              left: { kind: "variable", span: child, name: "loader", type: "java.lang.Object" },
+              right: { kind: "constructorCall", span: child, type: "groovy.lang.GroovyClassLoader", arguments: { kind: "arguments", span: child, items: [] } },
+            },
+          },
+          {
+            kind: "expressionStatement",
+            span: child,
+            expression: {
+              kind: "declaration",
+              span: child,
+              multipleAssignment: false,
+              left: { kind: "variable", span: child, name: "HelperApi", type: "java.lang.Object" },
+              right: {
+                kind: "methodCall",
+                span: child,
+                object: { kind: "variable", span: child, name: "loader", type: "java.lang.Object" },
+                method: { kind: "constant", span: child, value: "loadClass" },
+                arguments: { kind: "arguments", span: child, items: [{ kind: "constant", span: child, value: "Helper" }] },
+                implicitThis: false,
+              },
+            },
+          },
+          {
+            kind: "expressionStatement",
+            span: child,
+            expression: {
+              kind: "methodCall",
+              span: child,
+              object: { kind: "variable", span: child, name: "HelperApi", type: "java.lang.Object" },
+              method: { kind: "constant", span: child, value: "runHelper" },
+              arguments: {
+                kind: "arguments",
+                span: child,
+                items: [
+                  { kind: "variable", span: child, name: "this", type: "java.lang.Object" },
+                  { kind: "constant", span: child, value: 1 },
+                ],
+              },
+              implicitThis: false,
+            },
+          },
+        ],
+      },
+    },
+  };
+
+  const report = analyzeFeasibility([helper, script]);
+  assert.equal(report.rootDiagnosticsByCode.SX_LEGACY_HELPER_CALL, undefined);
+});

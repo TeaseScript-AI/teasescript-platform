@@ -107,3 +107,50 @@ test("does not leak the legacy main host object into TeaseScript values", () => 
   assert.ok(program.diagnostics.some((diagnostic) => diagnostic.code === "SX_HELPER_MAIN_VALUE"));
   assert.match(emitTease(program), /MIGRATION INCOMPLETE/);
 });
+
+test("package-aware lowering reconnects proven legacy helper calls without choosing module syntax", async () => {
+  const helper = unit([
+    method("helper", [parameter("main"), parameter("count")], [
+      { kind: "return", span, value: variable("count") },
+    ]),
+  ]);
+  const script: ParsedGroovyFile = {
+    formatVersion: 1,
+    sourceName: "script.groovy",
+    groovyVersion: "2.5.21",
+    mode: "script-body",
+    diagnostics: [],
+    root: {
+      kind: "scriptBody",
+      span: null,
+      body: {
+        kind: "block",
+        span,
+        statements: [
+          statement({
+            kind: "declaration",
+            span,
+            multipleAssignment: false,
+            left: variable("loader"),
+            right: { kind: "constructorCall", span, type: "groovy.lang.GroovyClassLoader", arguments: args() },
+          }),
+          statement(call(variable("loader"), "addClasspath", false, constant("Domme3"))),
+          statement({
+            kind: "declaration",
+            span,
+            multipleAssignment: false,
+            left: variable("Domme3"),
+            right: call(variable("loader"), "loadClass", false, constant("Helper")),
+          }),
+          statement(call(variable("Domme3"), "helper", false, variable("this"), constant(3))),
+        ],
+      },
+    },
+  };
+
+  const { buildHelperRegistry } = await import("../src/lower.ts");
+  const helperRegistry = buildHelperRegistry([helper, script]);
+  const program = lowerParsedFile(script, { helperRegistry });
+  assert.equal(program.diagnostics.filter((diagnostic) => diagnostic.severity === "error").length, 0);
+  assert.equal(emitTease(program), "helper(3)\n");
+});

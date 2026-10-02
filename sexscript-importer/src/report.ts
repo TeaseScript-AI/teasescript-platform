@@ -1,6 +1,6 @@
 import { walkAst, type ParsedGroovyFile, type SourceSpan } from "./ast.ts";
 import type { IrStatement, MigrationDiagnostic } from "./ir.ts";
-import { lowerParsedFile } from "./lower.ts";
+import { buildHelperRegistry, lowerParsedFile } from "./lower.ts";
 
 const SOURCE_STATEMENT_KINDS = new Set([
   "expressionStatement",
@@ -53,6 +53,7 @@ export interface FeasibilityReport {
 }
 
 export function analyzeFeasibility(files: ParsedGroovyFile[]): FeasibilityReport {
+  const helperRegistry = buildHelperRegistry(files);
   const report: FeasibilityReport = {
     fileCount: files.length,
     parseErrorFileCount: 0,
@@ -78,7 +79,7 @@ export function analyzeFeasibility(files: ParsedGroovyFile[]): FeasibilityReport
       });
     }
 
-    const program = lowerParsedFile(file);
+    const program = lowerParsedFile(file, { helperRegistry });
     const errors = program.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
     const roots = rootDiagnostics(errors);
     const ir = countIrStatements(program.statements);
