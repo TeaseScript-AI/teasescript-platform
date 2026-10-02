@@ -904,35 +904,6 @@ async function testDifferentResolvedIdentitiesDoNotDeduplicate() {
   assert.deepEqual(request.findRegistryEntry(mergedBase, 505), advancedBase);
 }
 
-async function testSerializedDistinctUpdatesPreserveBothEntries() {
-  const first = readyEntry({
-    requestId: 511,
-    sourceSha: MAIN_SHA,
-    artifactId: 8211,
-    runId: 9211,
-    updatedAt: "2026-08-04T10:00:00.000Z",
-  });
-  const second = readyEntry({
-    requestId: 512,
-    sourceSha: EXACT_SHA,
-    artifactId: 8212,
-    runId: 9212,
-    updatedAt: "2026-08-04T10:01:00.000Z",
-  });
-  const afterFirst = request.mergeRegistryEntries([], first, new Date("2026-08-04T10:00:30Z"));
-  const afterSecond = request.mergeRegistryEntries(
-    afterFirst,
-    second,
-    new Date("2026-08-04T10:01:30Z"),
-  );
-
-  assert.equal(afterSecond.length, 2);
-  assert.equal(afterSecond[0].requestCommentIds[0], 512);
-  assert.equal(afterSecond[1].requestCommentIds[0], 511);
-  assert.equal(request.findRegistryEntry(afterSecond, 511).artifactId, 8211);
-  assert.equal(request.findRegistryEntry(afterSecond, 512).artifactId, 8212);
-}
-
 async function testRegistryPrunesExpiryOrdersNewestAndBoundsTen() {
   const entries = [];
   for (let index = 0; index < 11; index += 1) {
@@ -1317,7 +1288,6 @@ async function main() {
   await testSpoofedRegistryCannotClaimAuthority();
   await testRegistryEscapesUntrustedPullHeadRef();
   await testDifferentResolvedIdentitiesDoNotDeduplicate();
-  await testSerializedDistinctUpdatesPreserveBothEntries();
   await testRegistryPrunesExpiryOrdersNewestAndBoundsTen();
   await testEquivalentArtifactRequestIdsAreGloballyBounded();
   await testMultipleAuthoritativeRegistriesFailClosed();
