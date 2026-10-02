@@ -120,7 +120,7 @@ test("lowers nullable legacy scalar storage reads to read-only TeaseScript load"
   );
 });
 
-test("keeps specialized legacy storage helpers explicit", () => {
+test("keeps legacy loadMap filtering semantics explicit", () => {
   const mapProgram = lowerParsedFile(file([
     statement({
       kind: "declaration",
@@ -131,17 +131,6 @@ test("keeps specialized legacy storage helpers explicit", () => {
     }),
   ]));
   assert.ok(mapProgram.diagnostics.some((diagnostic) => diagnostic.code === "SX_STORAGE_MAP_SEMANTICS"));
-
-  const firstTrueProgram = lowerParsedFile(file([
-    statement({
-      kind: "declaration",
-      span,
-      multipleAssignment: false,
-      left: variable("winner"),
-      right: call("loadFirstTrue", constant("a"), constant("b")),
-    }),
-  ]));
-  assert.ok(firstTrueProgram.diagnostics.some((diagnostic) => diagnostic.code === "SX_STORAGE_FIRST_TRUE_SEMANTICS"));
 });
 
 test("extracts static setInfos metadata instead of emitting runtime code", () => {
@@ -894,4 +883,75 @@ test("classifies JVM process control, Java reflection, and unresolved Math round
   assert.ok(codes.has("SX_JVM_PROCESS_CONTROL"));
   assert.ok(codes.has("SX_ROUNDING_SEMANTICS"));
   assert.ok(codes.has("SX_JAVA_REFLECTION"));
+});
+
+test("lowers static Groovy maps and string-key access to TeaseScript objects", () => {
+  const exercise: AstNode = {
+    kind: "map",
+    span,
+    entries: [
+      { kind: "mapEntry", span, key: constant("name"), value: constant("Squats") },
+      { kind: "mapEntry", span, key: constant("pictures"), value: { kind: "list", span, items: [constant("a.jpg")] } },
+    ],
+  };
+  const source = file([
+    statement({ kind: "declaration", span, multipleAssignment: false, left: variable("exercise"), right: exercise }),
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("name"),
+      right: { kind: "binary", span, operator: "[", left: variable("exercise"), right: constant("name") },
+    }),
+  ]);
+
+  const program = lowerParsedFile(source);
+  assert.deepEqual(program.diagnostics, []);
+  assert.equal(
+    emitTease(program),
+    'let exercise = { name: "Squats", pictures: ["a.jpg"] }\nlet name = exercise.name\n',
+  );
+});
+
+test("generates ordinary TeaseScript helpers for legacy loadFirstTrue and list indexOf", () => {
+  const source = file([
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("items"),
+      right: { kind: "list", span, items: [constant("a"), constant("b")] },
+    }),
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("index"),
+      right: {
+        kind: "methodCall",
+        span,
+        object: variable("items"),
+        method: constant("indexOf"),
+        arguments: args(constant("b")),
+        implicitThis: false,
+        safe: false,
+        spreadSafe: false,
+      },
+    }),
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("key"),
+      right: call("loadFirstTrue", constant("a"), constant("b")),
+    }),
+  ]);
+
+  const program = lowerParsedFile(source);
+  assert.deepEqual(program.diagnostics, []);
+  const output = emitTease(program);
+  assert.match(output, /function sexscriptLegacyLoadFirstTrue\(keys\)/);
+  assert.match(output, /function sexscriptLegacyIndexOf\(items, value\)/);
+  assert.match(output, /let index = sexscriptLegacyIndexOf\(items, "b"\)/);
+  assert.match(output, /let key = sexscriptLegacyLoadFirstTrue\(\["a", "b"\]\)/);
 });

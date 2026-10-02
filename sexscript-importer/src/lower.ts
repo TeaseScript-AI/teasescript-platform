@@ -27,6 +27,8 @@ export interface LowerOptions {
   helperRegistry?: HelperRegistry;
 }
 
+type SyntheticHelper = "loadFirstTrue" | "indexOf";
+
 interface LowerContext {
   diagnostics: MigrationDiagnostic[];
   metadata: LegacyMetadata | null;
@@ -37,6 +39,7 @@ interface LowerContext {
   helperFunctions: Map<string, HelperFunctionInfo>;
   helperMainParameter: string | null;
   packageHelperRegistry: HelperRegistry;
+  syntheticHelpers: Set<SyntheticHelper>;
   functionDepth: number;
 }
 
@@ -78,6 +81,7 @@ export function lowerParsedFile(file: ParsedGroovyFile, options: LowerOptions = 
     helperFunctions: new Map(),
     helperMainParameter: null,
     packageHelperRegistry: options.helperRegistry ?? new Map(),
+    syntheticHelpers: new Set(),
     functionDepth: 0,
   };
   if (file.diagnostics.length > 0 || file.root === null) {
@@ -111,7 +115,8 @@ export function lowerParsedFile(file: ParsedGroovyFile, options: LowerOptions = 
     context.classLoaderVariables = helpers.classLoaders;
     context.legacyHelperClasses = helpers.helperClasses;
   }
-  const statements = body?.kind === "block" ? lowerBlock(body, context) : [];
+  const authoredStatements = body?.kind === "block" ? lowerBlock(body, context) : [];
+  const statements = [...syntheticHelperStatements(context), ...authoredStatements];
   if (body?.kind !== "block") {
     addDiagnostic(context, "SX_INVALID_SCRIPT_BODY", "error", "Parser output does not contain a script body block.", file.root.span);
   }
@@ -159,7 +164,12 @@ function lowerHelperCompilationUnit(file: ParsedGroovyFile, baseContext: LowerCo
     const lowered = lowerHelperMethod(method, baseContext, helperFunctions);
     if (lowered !== null) statements.push(lowered);
   }
-  return { sourceName: file.sourceName, metadata: null, statements, diagnostics: baseContext.diagnostics };
+  return {
+    sourceName: file.sourceName,
+    metadata: null,
+    statements: [...syntheticHelperStatements(baseContext), ...statements],
+    diagnostics: baseContext.diagnostics,
+  };
 }
 
 function collectHelperFunctionInfo(methods: AstNode[]): Map<string, HelperFunctionInfo> {
@@ -215,6 +225,7 @@ function lowerHelperMethod(
     helperFunctions,
     helperMainParameter: stripsMain ? "main" : null,
     packageHelperRegistry: baseContext.packageHelperRegistry,
+    syntheticHelpers: baseContext.syntheticHelpers,
     functionDepth: 1,
   };
   const parameters: IrFunctionParameter[] = [];
@@ -811,6 +822,8 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
       }
       return { kind: "list", items };
     }
+    case "map":
+      return lowerMapExpression(node, context);
     case "property":
       return lowerPropertyExpression(node, context);
     case "range": {
@@ -840,14 +853,55 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
   }
 }
 
+
+function lowerMapExpression(node: AstNode, context: LowerContext): IrExpression | null {
+  const properties: Array<{ name: string; value: IrExpression }> = [];
+  for (const entry of nodeArray(node.entries)) {
+    if (entry.kind !== "mapEntry") {
+      return unsupportedExpression(context, node, "SX_MAP_ENTRY", "Groovy map contains an invalid entry.");
+    }
+    const name = constantString(entry.key);
+    const valueNode = asNode(entry.value);
+    if (name === null || !isTeaseObjectPropertyName(name)) {
+      return unsupportedExpression(
+        context,
+        entry,
+        "SX_DYNAMIC_MAP_KEY",
+        "Only static identifier-like Groovy map keys lower to TeaseScript object properties.",
+      );
+    }
+    const value = valueNode === null ? null : lowerExpression(valueNode, context);
+    if (value === null) return null;
+    properties.push({ name, value });
+  }
+  return { kind: "object", properties };
+}
+
+function isTeaseObjectPropertyName(value: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
+}
+
 function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpression | null {
   const operator = text(node.operator);
   if (operator === "[") {
     const targetNode = asNode(node.left);
     const indexNode = asNode(node.right);
     const target = targetNode === null ? null : lowerExpression(targetNode, context);
-    const index = indexNode === null ? null : lowerExpression(indexNode, context);
-    return target === null || index === null ? null : { kind: "index", target, index };
+    if (target === null || indexNode === null) return null;
+    const propertyName = constantString(indexNode);
+    if (propertyName !== null) {
+      if (!isTeaseObjectPropertyName(propertyName)) {
+        return unsupportedExpression(
+          context,
+          node,
+          "SX_DYNAMIC_MAP_KEY",
+          `Groovy map key ${JSON.stringify(propertyName)} is not a TeaseScript object property name.`,
+        );
+      }
+      return { kind: "property", target, name: propertyName };
+    }
+    const index = lowerExpression(indexNode, context);
+    return index === null ? null : { kind: "index", target, index };
   }
   const mapped = operator === "&&" ? "and" : operator === "||" ? "or" : operator;
   if (mapped === null || !new Set(["==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "and", "or"]).has(mapped)) {
@@ -1003,6 +1057,12 @@ function lowerObjectMethodCallExpression(
     const args = lowerArguments(argumentsNodes, context);
     return args === null ? null : { kind: "methodCall", target, name, arguments: args };
   }
+  if (name === "indexOf" && argumentsNodes.length === 1) {
+    const args = lowerArguments(argumentsNodes, context);
+    if (args === null) return null;
+    context.syntheticHelpers.add("indexOf");
+    return { kind: "call", name: "sexscriptLegacyIndexOf", positional: [target, args[0]!], named: {} };
+  }
   return unsupportedExpression(context, node, "SX_UNSUPPORTED_LIST_METHOD", `Groovy list method ${name}() is not safely mapped yet.`);
 }
 
@@ -1080,12 +1140,15 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     );
   }
   if (call.name === "loadFirstTrue") {
-    return unsupportedExpression(
-      context,
-      node,
-      "SX_STORAGE_FIRST_TRUE_SEMANTICS",
-      "Legacy loadFirstTrue() searches keys in order and returns the first key whose stored boolean is true.",
-    );
+    const keys = lowerArguments(call.arguments, context);
+    if (keys === null) return null;
+    context.syntheticHelpers.add("loadFirstTrue");
+    return {
+      kind: "call",
+      name: "sexscriptLegacyLoadFirstTrue",
+      positional: [{ kind: "list", items: keys }],
+      named: {},
+    };
   }
 
   const args = lowerArguments(call.arguments, context);
@@ -1350,6 +1413,90 @@ function collectClosureInfo(body: AstNode): Map<string, ClosureInfo> {
     if (argumentCount === 1) info.maxArgs = 1;
   });
   return result;
+}
+
+
+function syntheticHelperStatements(context: LowerContext): IrStatement[] {
+  const result: IrStatement[] = [];
+  if (context.syntheticHelpers.has("loadFirstTrue")) result.push(loadFirstTrueHelper());
+  if (context.syntheticHelpers.has("indexOf")) result.push(indexOfHelper());
+  return result;
+}
+
+function loadFirstTrueHelper(): IrStatement {
+  return {
+    kind: "function",
+    name: "sexscriptLegacyLoadFirstTrue",
+    parameters: [{ name: "keys", defaultValue: null }],
+    span: null,
+    body: [
+      {
+        kind: "for",
+        variable: "key",
+        collection: { kind: "variable", name: "keys" },
+        span: null,
+        body: [
+          { kind: "let", name: "value", value: { kind: "load", key: { kind: "variable", name: "key" } }, span: null },
+          {
+            kind: "if",
+            condition: {
+              kind: "binary",
+              operator: "==",
+              left: { kind: "variable", name: "value" },
+              right: { kind: "literal", value: true },
+            },
+            then: [{ kind: "return", value: { kind: "variable", name: "key" }, span: null }],
+            else: [],
+            span: null,
+          },
+        ],
+      },
+      { kind: "return", value: { kind: "literal", value: null }, span: null },
+    ],
+  };
+}
+
+function indexOfHelper(): IrStatement {
+  return {
+    kind: "function",
+    name: "sexscriptLegacyIndexOf",
+    parameters: [
+      { name: "items", defaultValue: null },
+      { name: "value", defaultValue: null },
+    ],
+    span: null,
+    body: [
+      { kind: "let", name: "index", value: { kind: "literal", value: 0 }, span: null },
+      {
+        kind: "for",
+        variable: "item",
+        collection: { kind: "variable", name: "items" },
+        span: null,
+        body: [
+          {
+            kind: "if",
+            condition: {
+              kind: "binary",
+              operator: "==",
+              left: { kind: "variable", name: "item" },
+              right: { kind: "variable", name: "value" },
+            },
+            then: [{ kind: "return", value: { kind: "variable", name: "index" }, span: null }],
+            else: [],
+            span: null,
+          },
+          {
+            kind: "assign",
+            target: { kind: "variable", name: "index" },
+            operator: "+=",
+            value: { kind: "literal", value: 1 },
+            span: null,
+          },
+        ],
+      },
+      { kind: "return", value: { kind: "literal", value: -1 }, span: null },
+    ],
+  };
 }
 
 function unsupportedExpression(context: LowerContext, node: AstNode, code: string, message: string): null {

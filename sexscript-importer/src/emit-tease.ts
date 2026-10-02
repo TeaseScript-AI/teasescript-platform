@@ -143,6 +143,8 @@ export function emitExpression(expression: IrExpression): string {
       return expression.name;
     case "list":
       return `[${expression.items.map(emitExpression).join(", ")}]`;
+    case "object":
+      return `{ ${expression.properties.map((property) => `${property.name}: ${emitExpression(property.value)}`).join(", ")} }`;
     case "index":
       return `${parenthesize(expression.target)}[${emitExpression(expression.index)}]`;
     case "property":

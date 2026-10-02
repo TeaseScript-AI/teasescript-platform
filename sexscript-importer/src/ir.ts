@@ -77,6 +77,7 @@ export type IrExpression =
   | { kind: "literal"; value: string | number | boolean | null }
   | { kind: "variable"; name: string }
   | { kind: "list"; items: IrExpression[] }
+  | { kind: "object"; properties: Array<{ name: string; value: IrExpression }> }
   | { kind: "index"; target: IrExpression; index: IrExpression }
   | { kind: "property"; target: IrExpression; name: string }
   | { kind: "methodCall"; target: IrExpression; name: string; arguments: IrExpression[] }
