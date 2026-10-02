@@ -138,8 +138,10 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
   recording APIs and results, how authors request recording composition (it is explicit; see `SECURITY.md`), and
   explicit session-media deletion. The Player capture foundation's shapes are implementation details, not this API;
   ephemeral handles are not restored after reload (ADR 0017).
-- Whether captured media the runtime already accepted, such as a `takePhoto()` result, survives a reload or checkpoint
-  restore, and the ordering of media storage and runtime completion.
+- Whether captured media the runtime already accepted, such as a `takePhoto()` result, survives a page reload, and the
+  ordering of media storage and runtime completion. Captured media is currently held in memory for the live page only;
+  before durable checkpoint restore (#469) can restore session-media references after reload, its design must preserve
+  or explicitly reconcile the backing media, and a restored reference must never silently alias different media.
 - Motion detection, sampling, camera resource limits, and scene ownership.
 - User control of media playback: whether players may seek, pause, or skip script media, whether authors can allow or
   forbid it per media, and its Player UI. The Player currently offers no media controls; accepted controls would enter

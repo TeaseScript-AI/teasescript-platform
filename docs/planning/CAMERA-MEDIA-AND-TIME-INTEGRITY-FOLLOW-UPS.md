@@ -14,10 +14,10 @@ or accept final TeaseScript APIs.
 ## Camera ownership
 
 The permission and lifecycle model is accepted in [`SECURITY.md`](../SECURITY.md): browser permission is the boundary,
-requested on first activation according to the browser's current permission state, then author-controlled opening, use,
-and closing, with the selected stream kept open rather than reopened for every capture. For platform-brokered
-acquisition the Player owns the browser streams, without its own prompt, indicator, or stop control, and gives
-TeaseScript only validated, engine-managed media references.
+requested on first activation according to the browser's current permission state, with the camera acquired after Start
+and kept open for the session rather than reopened for every capture. For platform-brokered acquisition the Player owns
+the browser streams, without its own prompt, indicator, or stop control, and gives TeaseScript only validated,
+engine-managed media references.
 
 A camera/media decision must still define:
 
@@ -27,8 +27,7 @@ A camera/media decision must still define:
   separate execution realm or trusted code transformation;
 - switching, revocation handling, reload, restore, reconnect, and failure recovery;
 - quality negotiation and default resolution;
-- exact Player cleanup points at session termination, fatal teardown, navigation, and unmount; a called script's `end`
-  does not close session capture resources;
+- Player cleanup details beyond the accepted release on session teardown, unmount, navigation, `end`, and `exit`;
 - recording, still capture, motion detection, sampling, and resource limits.
 
 ## Interactive and direct image capture
@@ -39,9 +38,9 @@ must decide source selection, preview, countdown, accept/retake, validation, ret
 after a denied permission. A
 rejected preview candidate is not runtime-visible.
 
-`takePhoto(...)` captures silently from the camera stream opened at script start, without a source question, preview, or
-interactive acceptance flow ([`SECURITY.md`](../SECURITY.md)). Its camera options, transcript behavior, and Standard
-Library composition require a later accepted camera decision.
+`takePhoto(...)` captures silently from the camera stream the Player opened at session start, without a source question,
+preview, or interactive acceptance flow ([`SECURITY.md`](../SECURITY.md)). Its camera options, transcript behavior, and
+Standard Library composition require a later accepted camera decision.
 
 ## Multiple cameras
 
