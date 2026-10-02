@@ -13,14 +13,17 @@ or accept final TeaseScript APIs.
 
 ## Camera ownership
 
-The permission and lifecycle model is accepted in [`SECURITY.md`](../SECURITY.md): one browser permission on first
-activation, then author-controlled opening, use, and closing, with the selected stream kept open rather than reopened
-for every capture. The Player brokers and owns the browser streams without its own prompt, indicator, or stop control,
-and gives TeaseScript only validated, engine-managed media references.
+The permission and lifecycle model is accepted in [`SECURITY.md`](../SECURITY.md): browser permission is the boundary,
+requested on first activation according to the browser's current permission state, then author-controlled opening, use,
+and closing, with the selected stream kept open rather than reopened for every capture. The Player brokers and owns the
+browser streams without its own prompt, indicator, or stop control, and gives TeaseScript only validated, engine-managed
+media references.
 
 A camera/media decision must still define:
 
 - capability declaration metadata in package or script packaging;
+- how brokered acquisition and capability authorization are enforced against package code calling browser capture APIs
+  directly;
 - switching, revocation handling, reload, restore, reconnect, and failure recovery;
 - quality negotiation and default resolution;
 - Player cleanup of streams an author left open at `end`, `exit`, navigation, and session shutdown;

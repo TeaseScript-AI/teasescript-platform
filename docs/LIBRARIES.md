@@ -96,11 +96,13 @@ Package libraries may import only the public, capability-safe Standard Library s
 Privileged platform adapters may exist internally for player integration or capability brokering, but they are separate
 modules and are not transitively exported. Calling a public helper must not grant access to privileged adapters,
 internal host capabilities, the parent DOM, account cookies, or unrestricted networking. Inside the Player sandbox,
-capability-authorized package code may receive and use ephemeral live browser and media objects and APIs, or equivalent
-capability objects, for arbitrary local image, video, and audio processing, including pixel- and sample-level work,
-recording, and custom UI; they never enter canonical runtime, checkpoint, or persisted state or cross the parent/Player
-boundary as raw objects, and derived pixel, image, and sample buffers stay inside the sandbox unless a later explicit
-validated boundary admits them (ADR 0017).
+capability-authorized package code may receive and use ephemeral live browser and media objects and APIs through an
+accepted capability surface, which may expose raw objects such as streams or tracks where deliberately supported, for
+arbitrary local image, video, and audio processing, including pixel- and sample-level work, recording, and custom UI.
+They never enter canonical runtime, checkpoint, or persisted state or cross the parent/Player boundary as raw objects,
+and derived pixel, image, and sample buffers stay inside the sandbox unless a later explicit validated boundary admits
+them. Player cleanup is guaranteed for resources the Player owns; complete revocation of package-created derivatives of
+raw resources, such as cloned tracks, relies on the sandbox teardown or lifecycle contract (ADR 0017).
 
 ### Deterministic version binding
 

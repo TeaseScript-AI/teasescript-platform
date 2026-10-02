@@ -74,15 +74,19 @@ truncate or partially mutate state.
 
 The engine, not the caller, normalizes text, parses numbers, resolves choice labels/text, and derives player transcript content. Successful completion emits `playerTranscript` before `actionCompleted`; invalid or duplicate attempts emit neither event. Interaction result destinations, speaker IDs, target, ownership, options, settlement results, transcript text, and the single-use result handoff are validated against the immutable plan and current snapshot. A result is atomically committed into a prepared ordinary runtime destination. Until the first canonical consume, transfer, return, discard, or exit succeeds, the nullable handoff retains the canonical value independently of `lastSettlement`; afterward it is removed immediately. `lastSettlement` remains bounded replay data and is not a destination-liveness authority.
 
-Camera and microphone access is an external capability boundary governed by the browser's own permission, requested once
-on first activation. After that the script or package controls the lifecycle: it may activate the capability at the
-start of a scene, keep the selected stream open for later author-controlled use, and close it. The Player brokers and
-owns the underlying browser resources for sandbox isolation, revocation, and guaranteed cleanup, but adds no permission
-prompt, camera or microphone indicator, stop control, or per-use approval of its own; native browser, OS, and device
-privacy indicators are sufficient. A recording contains exactly the sources the author requests; whether video includes
-microphone audio never depends on whether a microphone is already open. Capability declaration metadata, device
-switching, reload and restore, failure recovery, simultaneous-device policy, captured-media retention, encryption, and
-persistent collections remain open; see
+Browser permission is the external permission boundary for camera and microphone. First activation requests device
+access according to the browser's current permission state; the browser may later revoke access, ask again, or fail.
+After access is granted the script or package controls the lifecycle: it may activate the capability at the start of a
+scene, keep the selected stream open for later author-controlled use, and close it, and that use adds no Player-level
+permission or per-use approval. The Player brokers and owns the underlying browser resources for sandbox isolation,
+revocation, and cleanup of the resources it owns, but adds no permission prompt, camera or microphone indicator, or stop
+control of its own; native browser, OS, and device privacy indicators are sufficient. Complete revocation of
+package-created derivatives of raw resources, such as cloned tracks, relies on the sandbox teardown or lifecycle
+contract (ADR 0017). A recording contains exactly the sources the author requests; whether video includes microphone
+audio never depends on whether a microphone is already open. How brokered acquisition and capability authorization are
+enforced against package code that calls browser capture APIs directly remains open, as do capability declaration
+metadata, device switching, reload and restore, failure recovery, simultaneous-device policy, captured-media retention,
+encryption, and persistent collections; see
 [`planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md`](planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md).
 
 Exact iframe sandbox flags, CSP, message schemas, capability negotiation, signing, moderation workflows, captured-media privacy policy, and time-integrity policy remain to be specified.

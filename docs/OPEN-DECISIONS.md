@@ -126,9 +126,10 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
   (including optional Shadow DOM), and reconstructible-state declaration/validation; ADR 0012 fixes capability
   semantics.
 - Involved-speaker and conversation metadata for one visible chat with selectively separated future LLM contexts.
-- Camera and microphone capability declaration metadata, device switching, quality negotiation, reload and restore,
-  failure recovery, and simultaneous-device policy; the permission and lifecycle model is accepted in
-  [`SECURITY.md`](SECURITY.md).
+- Camera and microphone capability declaration metadata, enforcement of brokered acquisition and capability
+  authorization against package code calling browser capture APIs directly, device switching, quality negotiation,
+  reload and restore, failure recovery, and simultaneous-device policy; the permission and lifecycle model is accepted
+  in [`SECURITY.md`](SECURITY.md).
 - Camera UI and lifecycle around accepted `askImage(...)` and nullable `takePhoto(...)`, including preview, countdown,
   retake, denied-permission recovery, and restore behavior.
 - The public advanced-TypeScript media surface for arbitrary local image, video, and audio processing, author-facing
