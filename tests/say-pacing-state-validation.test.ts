@@ -1859,7 +1859,6 @@ test("pacing settlements retain exact prepared-output lineage through release an
   assert.ok(forgedThird.preparedSayOutput !== null);
   forgedThird.preparedSayOutput.owningInstruction = 2;
   forgedThird.preparedSayOutput.continuationInstruction = 3;
-  forgedThird.preparedSayOutput.text = "forged third";
   forgedThird.nextInstruction = 2;
   expectInvalidSnapshot(
     "settlement lineage must match the released prepared say",
