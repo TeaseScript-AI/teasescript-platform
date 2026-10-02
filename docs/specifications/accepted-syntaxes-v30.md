@@ -2031,7 +2031,9 @@ before combining its result with another expression:
 ```
 
 Without parentheses, `load "k" == null` uses `"k" == null` as the key, which is not a string. Group a nested `load`
-used as a key too. A default may suspend, such as `load "name" default askText "Your name?"`; it starts only when
+used as a key too. A compact interaction inside an operand ends at the enclosing `as` or `default`, and inside a
+`save` value `as` belongs to `save`: `save askText as "name"` asks and stores the answer, while an interaction with
+its own speaker clause is grouped, as in `save (askText as mistress "Name?") as "name"`. A default may suspend, such as `load "name" default askText "Your name?"`; it starts only when
 the key is absent and can resume across checkpoint restore.
 
 Delete a value:

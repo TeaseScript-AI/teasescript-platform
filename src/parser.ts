@@ -122,6 +122,10 @@ const parserDiagnosticCode = {
 
 const MEDIA_ARGUMENTS = ["file", "async", "repeat", "startAt", "endAt", "volume"] as const;
 
+type StorageDelimiter = "as" | "default";
+const NO_STORAGE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set();
+const SAVE_VALUE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set(["as"]);
+
 /** Parses the accepted core-language milestone. */
 export function parse(source: string): ParseResult {
   const lexResult = lex(source);
@@ -140,8 +144,11 @@ class Parser {
   #recoveredAtStatementBoundary = false;
   /** Inside a media cue position, whose block `{` ends a compact choice. */
   #inCuePosition = false;
-  /** Inside a `save` value or `load` key, whose `as` or `default` ends a compact interaction. */
-  #storageDelimiter: "as" | "default" | null = null;
+  /**
+   * The `save` `as` and `load` `default` that end an enclosing storage operand. A compact interaction stops at them, and
+   * a bare interaction leaves the `as` to `save`; groupings such as parentheses start without them.
+   */
+  #storageDelimiters: ReadonlySet<StorageDelimiter> = NO_STORAGE_DELIMITERS;
 
   public constructor(private readonly tokens: readonly Token[]) {}
 
@@ -860,7 +867,7 @@ class Parser {
   /** `save <value> as <key>`; both operands are full expressions. */
   #parseSaveStatement(): SaveStatement | null {
     const command = this.#advance();
-    const value = this.#parseStorageOperand("as");
+    const value = this.#parseStorageOperand(SAVE_VALUE_DELIMITERS);
     if (value === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedExpression,
@@ -877,7 +884,7 @@ class Parser {
       this.#synchronizeStatement(true);
       return null;
     }
-    const key = this.#parseStorageOperand(null);
+    const key = this.#parseStorageOperand(NO_STORAGE_DELIMITERS);
     if (key === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedStorageKey,
@@ -896,7 +903,7 @@ class Parser {
 
   #parseDeleteStatement(): DeleteStatement | null {
     const command = this.#advance();
-    const key = this.#parseStorageOperand(null);
+    const key = this.#parseStorageOperand(NO_STORAGE_DELIMITERS);
     if (key === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedStorageKey,
@@ -914,10 +921,12 @@ class Parser {
    */
   *#parseLoadExpression(): ParseTask<LoadExpression | null> {
     const command = this.#advance();
-    const enclosing = this.#storageDelimiter;
-    this.#storageDelimiter = "default";
+    // The key ends at this load's `default` and at any delimiter of an enclosing storage operand; the default
+    // ends only at the enclosing ones.
+    const enclosing = this.#storageDelimiters;
+    this.#storageDelimiters = new Set([...enclosing, "default"]);
     const key = yield* parseChild(this.#parseOr());
-    this.#storageDelimiter = null;
+    this.#storageDelimiters = enclosing;
     let defaultValue: Expression | null = null;
     let missingDefault = false;
     if (key !== null && this.#checkIdentifier("default")) {
@@ -925,7 +934,6 @@ class Parser {
       defaultValue = yield* parseChild(this.#parseRequiredExpressionTask());
       missingDefault = defaultValue === null;
     }
-    this.#storageDelimiter = enclosing;
     if (key === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedStorageKey,
@@ -1138,12 +1146,11 @@ class Parser {
   *#parseMediaHandlers(): ParseTask<MediaHandlers | null | false> {
     if (!this.#check(TokenKind.LeftBrace)) return null;
     const enclosingCuePosition = this.#inCuePosition;
-    const enclosingStorageDelimiter = this.#storageDelimiter;
     this.#inCuePosition = false;
-    this.#storageDelimiter = null;
-    const handlers = yield* parseChild(this.#parseMediaHandlerBlock());
+    const handlers = yield* parseChild(
+      this.#withoutStorageDelimiters(this.#parseMediaHandlerBlock()),
+    );
     this.#inCuePosition = enclosingCuePosition;
-    this.#storageDelimiter = enclosingStorageDelimiter;
     return handlers;
   }
 
@@ -1627,12 +1634,9 @@ class Parser {
   /** A statement block; statements inside it are not part of an enclosing cue position. */
   *#parseBlock(): ParseTask<Block | null> {
     const enclosingCuePosition = this.#inCuePosition;
-    const enclosingStorageDelimiter = this.#storageDelimiter;
     this.#inCuePosition = false;
-    this.#storageDelimiter = null;
-    const block = yield* parseChild(this.#parseBlockStatements());
+    const block = yield* parseChild(this.#withoutStorageDelimiters(this.#parseBlockStatements()));
     this.#inCuePosition = enclosingCuePosition;
-    this.#storageDelimiter = enclosingStorageDelimiter;
     return block;
   }
 
@@ -2002,7 +2006,9 @@ class Parser {
       if (this.#match(TokenKind.LeftBracket)) {
         const start = expression;
         this.#skipNewlines();
-        const index = yield* parseChild(this.#parseRequiredExpressionTask());
+        const index = yield* parseChild(
+          this.#withoutStorageDelimiters(this.#parseRequiredExpressionTask()),
+        );
         this.#skipNewlines();
         if (index === null || !this.#match(TokenKind.RightBracket)) {
           if (index !== null) {
@@ -2022,7 +2028,9 @@ class Parser {
         continue;
       }
       if (this.#match(TokenKind.LeftParenthesis)) {
-        expression = yield* parseChild(this.#finishCall(expression, this.#previous()));
+        expression = yield* parseChild(
+          this.#withoutStorageDelimiters(this.#finishCall(expression, this.#previous())),
+        );
         continue;
       }
       break;
@@ -2168,23 +2176,27 @@ class Parser {
       return this.#identifier(token);
     }
     if (this.#match(TokenKind.StringStart)) {
-      return yield* parseChild(this.#parseStringLiteral(token));
+      return yield* parseChild(this.#withoutStorageDelimiters(this.#parseStringLiteral(token)));
     }
     if (this.#match(TokenKind.LeftParenthesis)) {
-      return yield* parseChild(this.#parseParenthesized(token));
+      return yield* parseChild(this.#withoutStorageDelimiters(this.#parseParenthesized(token)));
     }
     if (this.#match(TokenKind.LeftBracket)) {
-      return yield* parseChild(this.#parseCollectionLiteralElements(token, "listLiteral"));
+      return yield* parseChild(
+        this.#withoutStorageDelimiters(this.#parseCollectionLiteralElements(token, "listLiteral")),
+      );
     }
     if (this.#match(TokenKind.LeftBrace)) {
-      return yield* parseChild(this.#parseObjectLiteral(token));
+      return yield* parseChild(this.#withoutStorageDelimiters(this.#parseObjectLiteral(token)));
     }
     if (this.#match(TokenKind.KeywordSet)) {
       if (!this.#match(TokenKind.LeftBracket)) {
         this.#reportInsertion(parserDiagnosticCode.expectedDelimiter, "Expected '[' after 'set'.");
         return null;
       }
-      return yield* parseChild(this.#parseCollectionLiteralElements(token, "setLiteral"));
+      return yield* parseChild(
+        this.#withoutStorageDelimiters(this.#parseCollectionLiteralElements(token, "setLiteral")),
+      );
     }
     return null;
   }
@@ -2204,7 +2216,7 @@ class Parser {
       command.lexeme === "askText" ? "text" : command.lexeme === "askNumber" ? "number" : "choice";
     let asSpan: SourceSpan | null = null;
     let speaker: Identifier | null = null;
-    if (this.#match(TokenKind.KeywordAs)) {
+    if (!this.#atStorageDelimiter() && this.#match(TokenKind.KeywordAs)) {
       asSpan = copySpan(this.#previous().span);
       if (!this.#check(TokenKind.Identifier)) {
         this.#reportInsertion(
@@ -2226,7 +2238,10 @@ class Parser {
     }
 
     if (interactionKind !== "choice") {
-      const hint = isExpressionStart(this.#peek()) ? yield* parseChild(this.#parseOr()) : null;
+      const hint =
+        isExpressionStart(this.#peek()) && !this.#atStorageDelimiter()
+          ? yield* parseChild(this.#parseOr())
+          : null;
       if (this.#check(TokenKind.KeywordAs) && !this.#atStorageDelimiter()) {
         this.#reportSpan(
           parserDiagnosticCode.unsupportedInteractionForm,
@@ -2356,17 +2371,28 @@ class Parser {
   }
 
   #atStorageDelimiter(): boolean {
-    return this.#storageDelimiter === "as"
-      ? this.#check(TokenKind.KeywordAs)
-      : this.#storageDelimiter === "default" && this.#checkIdentifier("default");
+    return (
+      (this.#storageDelimiters.has("as") && this.#check(TokenKind.KeywordAs)) ||
+      (this.#storageDelimiters.has("default") && this.#checkIdentifier("default"))
+    );
   }
 
-  /** Parses a storage operand; `delimiter` ends a compact interaction inside it. */
-  #parseStorageOperand(delimiter: "as" | "default" | null): Expression | null {
-    const enclosing = this.#storageDelimiter;
-    this.#storageDelimiter = delimiter;
+  *#withoutStorageDelimiters<T>(task: ParseTask<T>): ParseTask<T> {
+    const enclosing = this.#storageDelimiters;
+    this.#storageDelimiters = NO_STORAGE_DELIMITERS;
+    try {
+      return yield* parseChild(task);
+    } finally {
+      this.#storageDelimiters = enclosing;
+    }
+  }
+
+  /** Parses a `save` or `delete` operand that ends at the given delimiters. */
+  #parseStorageOperand(delimiters: ReadonlySet<StorageDelimiter>): Expression | null {
+    const enclosing = this.#storageDelimiters;
+    this.#storageDelimiters = delimiters;
     const operand = this.#parseExpression();
-    this.#storageDelimiter = enclosing;
+    this.#storageDelimiters = enclosing;
     return operand;
   }
 

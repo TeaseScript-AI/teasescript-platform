@@ -441,28 +441,59 @@ test("persisted-value type checks exclude missing keys, defaults, and non-direct
 
 test("compact interactions end at the save 'as' and the load 'default' delimiters", () => {
   const compiled = plan(
-    'save askText "Your name?" as "name"\nlet pick = load choose "a", "b" default "fallback"\nexit',
+    [
+      'save askText as "bare"',
+      'save askText "Your name?" as "name"',
+      'save load "nick" default askText "Nickname?" as "nick"',
+      'let pick = load choose "a", "b" default "fallback"',
+      "exit",
+    ].join("\n"),
   );
-  const pending = run(compiled, createFreshRuntimeSnapshot(compiled));
-  const action = pending.snapshot.foregroundAction;
-  assert.ok(action?.kind === "interaction" && action.interactionKind === "text");
-  const completed = completeAction(compiled, pending.snapshot, {
-    actionId: action.actionId,
-    actionKind: "interaction",
-    interactionKind: "text",
-    payload: { kind: "submittedText", submittedText: "Ada" },
-  });
-  const choosing = run(compiled, completed.snapshot);
-  assert.deepEqual(
-    changes([...completed.events, ...choosing.events]).map(({ key, value }) => ({ key, value })),
-    [{ key: "name", value: "Ada" }],
-  );
-  const choice = choosing.snapshot.foregroundAction;
+  let result = run(compiled, createFreshRuntimeSnapshot(compiled));
+  const saved: { key: string; value: SerializableRuntimeValue }[] = [];
+  for (const answer of ["Bare", "Ada", "Addy"]) {
+    const action = result.snapshot.foregroundAction;
+    assert.ok(action?.kind === "interaction" && action.interactionKind === "text", answer);
+    const completed = completeAction(compiled, result.snapshot, {
+      actionId: action.actionId,
+      actionKind: "interaction",
+      interactionKind: "text",
+      payload: { kind: "submittedText", submittedText: answer },
+    });
+    result = run(compiled, completed.snapshot);
+    for (const { key, value } of changes([...completed.events, ...result.events]))
+      saved.push({ key, value });
+  }
+  assert.deepEqual(saved, [
+    { key: "bare", value: "Bare" },
+    { key: "name", value: "Ada" },
+    { key: "nick", value: "Addy" },
+  ]);
+  const choice = result.snapshot.foregroundAction;
   assert.ok(choice?.kind === "interaction" && choice.interactionKind === "choice");
 
-  const misplaced = compileSource('let name = askText "Your name?" as narrator');
+  // A present key never prompts; its stored value is saved again.
+  const present = plan('save load "nick" default askText "Nickname?" as "nick"\nexit');
+  const rerun = run(
+    present,
+    createFreshRuntimeSnapshot(present, { scriptStorage: [{ key: "nick", value: "Addy" }] }),
+  );
+  assert.equal(rerun.snapshot.status, "halted");
   assert.deepEqual(
-    misplaced.diagnostics.map(({ code }) => code),
+    changes(rerun.events).map(({ key, value }) => ({ key, value })),
+    [{ key: "nick", value: "Addy" }],
+  );
+
+  // Inside a save value, `as` belongs to save; a speaker clause needs parentheses.
+  const speakerSource = 'speaker mistress {\n  name: "M"\n}\n';
+  assert.notEqual(
+    compileSource(`${speakerSource}save (askText as mistress "Name?") as "name"`).plan,
+    null,
+  );
+  assert.deepEqual(
+    compileSource(`${speakerSource}let name = askText "Your name?" as mistress`).diagnostics.map(
+      ({ code }) => code,
+    ),
     ["TSP032"],
   );
 });
