@@ -6,6 +6,7 @@ import { createServer } from "vite";
 import {
   createPlayerRuntimeSession,
   pendingPlayerRuntimeStorageWrite,
+  playerRuntimePacingGate,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
@@ -30,7 +31,8 @@ before(async () => {
   const server = await createServer({
     configFile: false,
     logLevel: "warn",
-    server: { middlewareMode: true },
+    // No HMR websocket: parallel test runs must not compete for its default port.
+    server: { middlewareMode: true, hmr: false, ws: false },
     appType: "custom",
     optimizeDeps: { noDiscovery: true },
   });
@@ -339,3 +341,46 @@ test("Vue host schedules no clock wake-ups while a pending write holds scene tim
     ["one", "two"],
   );
 });
+
+for (const [name, source, expected] of [
+  // Without a queued block, an elapsed background pacing gate settles while the write waits.
+  [
+    "an elapsed pacing gate settles",
+    'say "before", 1\nsave 1 as "k"\nsay "after", instant\nexit',
+    ["before", "after"],
+  ],
+  // A due block waits for the write, then runs at its time before the script continues and ends.
+  [
+    "a due block runs before the script continues",
+    'timer async 10 ms { say "due", instant }\nsave 1 as "k"\nsay "main", instant\nexit',
+    ["due", "main"],
+  ],
+] as const) {
+  test(`Vue host still observes deadlines while a slow write waits: ${name}`, async (context) => {
+    let now = 0;
+    context.mock.method(performance, "now", () => now);
+    const persistence = deferred();
+    const { host } = createHost(context, {
+      scope: "test",
+      load: async () => [],
+      write: () => persistence.promise,
+      clear: async () => {},
+    });
+    await start(host, source);
+    await nextTick();
+    now = 2_000;
+    context.mock.timers.tick(2_000);
+    await nextTick();
+    if (source.startsWith("say")) {
+      const waiting: PlayerRuntimeSession | null = host.session.value;
+      assert.equal(playerRuntimePacingGate(waiting!), null);
+    }
+    persistence.resolve();
+    await nextTick();
+    context.mock.timers.tick(0);
+    assert.deepEqual(
+      host.session.value?.transcriptEntries.map((entry) => entry.text),
+      expected,
+    );
+  });
+}

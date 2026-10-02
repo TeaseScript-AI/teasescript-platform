@@ -54,9 +54,14 @@ export function useRuntimeSceneClock(
     wakeUp = undefined;
     if (!current) return;
     displayTimeMs.value = sceneTimeMs(current);
-    // Behind a pending storage write the runtime may hold scene time, so an overdue deadline cannot progress; the
-    // session the acknowledgement publishes schedules again.
-    if (pendingPlayerRuntimeStorageWrite(current.snapshot)) return;
+    // A queued timer or media block waits for a pending storage write, and catch-up holds at its due time: an overdue
+    // deadline cannot progress until the acknowledgement, whose published session schedules again. Without a queued
+    // block, deadlines are observed as usual.
+    if (
+      pendingPlayerRuntimeStorageWrite(current.snapshot) &&
+      current.snapshot.pendingTimerHandlers.length > 0
+    )
+      return;
     const deadlines = playerRuntimeDeadlines(current.snapshot);
     if (deadlines.length === 0) return;
     const delay = Math.min(...deadlines) - sceneTimeMs(current);

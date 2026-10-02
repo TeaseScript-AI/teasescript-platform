@@ -41,10 +41,6 @@ export function mapToSrgb(color: OklchColor): OklchColor {
   return plain(colorValue(color).toGamut({ space: "srgb", method: "css" }));
 }
 
-export function inSrgbGamut(color: OklchColor): boolean {
-  return colorValue(color).inGamut("srgb");
-}
-
 export function contrastRatio(first: OklchColor, second: OklchColor): number {
   return Color.contrast(colorValue(first), colorValue(second), "WCAG21");
 }
