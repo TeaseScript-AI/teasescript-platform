@@ -179,7 +179,7 @@ Legacy semantics below are verified against the API contract (`ss/IScript.java`)
 | `wait(s)`, `sleep(ms)` | `wait s`, `wait ms ms` | |
 | `waitWithGauge(s)` | `timer s` | Gauge styling is presentation. |
 | `save(k, v)` / `save(k, null)` | `save v as k` / `delete k` | Legacy `save` also removed dotted sub-keys `k.*`. |
-| `loadString(k)` etc. | `load k` | Owner semantics: `null` when missing, no write. In conditions: `load k default false/0/""`. |
+| `loadString(k)` etc. | `load k` | Owner semantics: `null` when missing, no write; defaults stay explicit null checks. A condition `loadBoolean(k)` becomes `(load k) == true`. |
 | `setImage(f)` / `setImage(null)` | `showImage f` / `hideImage` | Byte-array images and video files need manual work. |
 | `playSound(f)` | `playAudio f` | Blocking. `playSound(null)` stopped every sound. |
 | `playBackgroundSound(f[, n])` | `playAudio async f` / with `repeat: n times` | Legacy plays `n` passes total and overlaps; `null` stops all sounds (no TeaseScript equivalent). |

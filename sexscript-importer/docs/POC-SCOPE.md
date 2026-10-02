@@ -35,7 +35,11 @@ avoiding accepted-but-unimplemented forms would only trade compiler errors for w
 - produce natural TeaseScript: keep comments and paragraph breaks, `else if` chains, interpolation, and idiomatic
   forms such as `list.random` and `load ... default`; rename only identifiers TeaseScript rejects;
 - never move evaluation silently: a rewrite that hoists a condition or an input prompt applies only when the
-  expression is unguarded and nothing with side effects is evaluated earlier in the same statement;
+  expression is unguarded, nothing with side effects is evaluated earlier in the same statement, and a hoisted part
+  with side effects does not run before values the statement read earlier;
+- resolve package architecture statically instead of emulating Groovy: anonymous-object scripts become globals and
+  functions, runtime-loaded mixin modules become functions plus direct load calls, and closures kept as values become
+  action IDs with one generated dispatcher;
 - keep every unconverted statement visible: an inline `// TODO` with the root cause, followed by the original Groovy
   as `// |` lines; behavior-relevant approximations get an inline `// NOTE`.
 

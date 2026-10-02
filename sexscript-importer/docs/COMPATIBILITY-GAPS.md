@@ -42,15 +42,22 @@ These corpus patterns looked like gaps but are importer work; the generated form
 | --- | --- |
 | `"Hi " + name` (string `+`) | `"Hi ${name}"`; TeaseScript `+` is numeric only |
 | Groovy truthiness (`if (name)`, `!count`) | explicit comparisons chosen from inferred types (`name != ""`, `count == null or count == 0`) |
-| ternary / Elvis | `if` statements; `loadX(k) ?: d` becomes `load k default d` |
-| `def x = loadInteger(k); if (x == null) x = 0` | `let x = load k default 0` |
-| `list[getRandom(list.size())]` | `list.random` |
+| ternary / Elvis | `if` statements with one assignment or statement per branch |
+| implicit last-expression return | explicit `return`, also in the last statements of `if`/`else` branches |
+| `list[getRandom(list.size())]`, `list[-1]` | `list.random`, `list.last` / `list[list.length - n]` |
+| `collect`, `findAll`, `find`, `any`, `every`, `sum`, `times`, `eachWithIndex` with closures | ordinary `for` / `repeat` loops |
+| closures stored in data or passed as callbacks | string action IDs (the forwarded function's name) plus one generated dispatcher function |
+| `return new Object() { fields; methods }.main()` | globals, functions, and the entry method's statements as the script flow |
+| runtime-loaded `metaClass` mixin modules (`Eval.me` over a script directory) | the injected methods as functions and direct calls to each module's load and setup function |
+| a `break` in the middle of a `switch` case | break-free case paths |
+| switch cases that are variables or lists | an `if`/`else if` chain with `==` or `contains()` |
 | `getSelectedValue(text, [...])` | `say text` plus `choose 0: ..., 1: ...` (numeric labels return the index) |
 | `getBoolean(text, yes, no)` | `say text` plus `(choose yes: ..., no: ...) == "yes"` |
 | `getString` / `getFloat` | `say text` plus compact `askText` / `askNumber` |
 | `Calendar.getInstance().get(Calendar.HOUR_OF_DAY)` and other fields | `getDateTime().hour`, with month and weekday-number conversions |
 | `list + other`, `list << x`, `list.push(x)` | a generated concatenation helper and `add()` |
-| `def x` without initializer | `let x: string? = null` (or `string[]?`, ...) when the later type is unambiguous |
+| `def x` / `int x` without initializer | `let x: string? = null` (or `string[]?`, ...), and `0` or `false` for primitives |
+| `new Boolean[n]`, `x in list`, boolean `&`/`|` | a generated list helper, `list.contains(x)`, `and`/`or` with a side-effect-free right side |
 | `System.exit(0)` | `exit` (the Player stays open) |
 | `sleep(ms)`, `waitWithGauge(s)` | `wait ... ms`, `timer ...` |
 
@@ -64,10 +71,12 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   heading, or quote markers and backslash escapes get a `NOTE` (`escapeMarkup()` keeps text literal).
 - Single-field input had a pre-filled value; TeaseScript input has none, so the player types it (`SX_INPUT_PREFILL`).
 - Groovy turned lists into text as `[a, b]`; TeaseScript interpolation shows one random element (`SX_COLLECTION_TEXT`).
-- Groovy `?:` also replaced stored `false`, `0`, and `""`; `load ... default` only replaces a missing key.
-- Legacy `save(key, null)` deleted the key and every dotted sub-key (`key.*`). Storage therefore never held `null`,
-  which keeps `load ... default` folds exact; saves of possibly-null values become explicit `delete`. TeaseScript keys
-  are flat, so saving a scalar over a former list/map key leaves the old sub-keys.
+- Legacy `save(key, null)` deleted the key and every dotted sub-key (`key.*`), and generic `load()` decoded a stored
+  string `"null"` as null. Generated reads therefore compare with `null` explicitly, which treats a stored null and a
+  missing key alike; `load ... default` is not used because it would keep a stored null (see the specification
+  questions below). TeaseScript keys are flat, so saving a scalar over a former list/map key leaves the old sub-keys.
+- Groovy maps are shared references; TeaseScript records copy. A field write through a copy gets a `NOTE`
+  (`SX_SHARED_MAP_WRITE`). Picking from an empty list returned null in Groovy and fails in TeaseScript.
 - Groovy lists and maps alias by reference; TeaseScript composite values copy (ADR 0014). Groovy `def` may change type.
 - Java `Math.round` rounds `.5` toward positive infinity; TeaseScript `round()` does not specify ties yet.
 - Java date pattern formatting (`new Date().format("yyyy-MM-dd")`) has no equivalent; typed `date`/`datetime` values
@@ -81,27 +90,48 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
 Evidence for owner evaluation, ordered by corpus weight:
 
 1. **Choice from a runtime list.** DisciplineClinic builds menus from data (`getSelectedValue(dialog, ["Back"] +
-   offenseTextArray)`), and the Toy package's main menu is built from runtime options. Compact `choose` needs every
-   option in the source; numeric labels require a fixed count, and `choose someList` presents one random option
-   (visible-text list conversion). No accepted form expands a runtime list into options. This is the strongest
-   candidate: menus over data are ordinary script logic.
-2. **Single-field input prefill.** About 30 corpus calls pass a meaningful default, typically to edit a current
+   offenseTextArray)`), and Toy builds its menus from registered options; 23 corpus calls. Compact `choose` needs every
+   option in the source, and `choose someList` presents one random option (visible-text list conversion). For a
+   bounded package a helper that branches on the list length (`choose 0: rows[0].label, 1: rows[1].label, ...` per
+   length) works, so this is an ergonomic gap rather than an inexpressible one; menus over data are ordinary script
+   logic, which makes it the strongest candidate.
+2. **Text utilities.** Toy measures typed lines (`line.size()` for typing speed) and transforms input text; 13 corpus
+   string-method calls (`SX_STRING_METHOD`) have no accepted equivalent, not even string length. The corpus does not
+   argue for new syntax: a small synchronous `.ts` library of length/case/trim/split functions, once package-library
+   linkage exists, would cover these cases.
+3. **Single-field input prefill.** About 30 corpus calls pass a meaningful default, typically to edit a current
    setting (`getInteger("...", cornerBase + playerLevel)`). Accepted multi-field `askIntegers`/`askNumbers` have
    `defaults`; single-field input has none. Lower priority: the player can still type the value.
-3. **Rounding contract.** Not a missing capability: `round()` is accepted, but its tie rule needs specification.
 4. **Localized script variants.** The distribution ships language variants per script (`intro`, `intro_de`,
    `intro_fr`, ...) selected by the legacy player. The repository has no localization decision; this is a package-level
    product question, not syntax.
 
-Not candidates on current evidence: string methods (rare in the corpus; the V30 string library remains an open
-decision), dictionary types, and exceptions.
+Not candidates on current evidence: first-class closures, dictionaries, metaprogramming, and runtime evaluation. The
+Toy package uses all of them, yet records, functions, and dispatch by action ID express its behavior; exceptions only
+guard desktop APIs.
+
+## Specification and implementation observations
+
+Concrete points the migration surfaced in TeaseScript itself:
+
+- **`save null as "key"` is unspecified.** If it deletes the key (as legacy SexScript and most key-value stores do),
+  `load "key" default value` becomes exact for migrated read-then-default code and the importer can use it again.
+- **`set` is a parser keyword** (ADR 0013 set literals) but missing from `TEASESCRIPT_PROTECTED_NAMES`; the importer
+  reserves it itself. Declarations named `set` fail to parse instead of getting the protected-name diagnostic.
+- **`round()` tie rule.** Java `Math.round` rounds `.5` toward positive infinity; the accepted `round()` does not say.
+- **`showButton` elapsed result** type (number or duration) is still open in V30 section 21.
+- **Storage semantics.** The owner-selected `load` semantics (no write on read) still differ from the canonical V30
+  text (default-and-write).
 
 ## Legacy baggage
 
 Reported for manual work and intentionally not reproduced: reflection and `GroovyClassLoader` outside resolved
-package helpers, `java.io.File` access and directory listing, `System.getProperty`, webcam/file pickers (`getImage`,
-`getFile`), `openCdTrays`, `useEmailAddress`, `useFile`, the old online `send`/`receive` service, and `try`/`catch`
-around desktop APIs. `Locale.getDefault()` serves the localization question above.
+package helpers, `java.io.File` access and directory listing other than a recognized module loader,
+`System.getProperty`, OS processes (Toy's speech output), webcam/file pickers (`getImage`, `getFile`), `openCdTrays`,
+`useEmailAddress`, `useFile`, the old online `send`/`receive` service, and `try`/`catch` around desktop APIs.
+`Locale.getDefault()` serves the localization question above. Scripts also contain plain legacy bugs the importer
+reports instead of repairing: calls to undefined functions, helper calls with missing arguments, and closures
+referenced without `()` (which Groovy evaluated as a no-op or as `true`).
 
 ## Accepted but not implemented
 

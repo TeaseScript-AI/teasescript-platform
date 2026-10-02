@@ -24,32 +24,35 @@ explicit unsupported nodes: `EmptyExpression` (29, a declaration without initial
 
 ## Feasibility snapshot
 
-Measured on 2026-10-02 at importer commit `6d6f0be3` with `node src/cli.ts report --compile <package scripts>`:
+Measured on 2026-10-02 at importer commit `93b66bfd` with `node src/cli.ts report --compile <package scripts>`.
+Toy's 21 runtime-loaded modules are part of its single script `toy.groovy`, so Toy counts as one script whose
+statements include all module code.
 
 | Package | Scripts | Lowered | Dependency-closed | Compiler-clean except pending | Root errors | Placeholders |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Distribution | 14 | 10 | 10 | 10 | 15 | 13 |
-| Domme3 | 24 | 9 | 7 | 5 | 29 | 32 |
-| DisciplineClinic | 6 | 2 | 2 | 2 | 34 | 33 |
-| Toy expanded | 22 | 0 | 0 | 0 | 23 | 22 |
+| Domme3 | 24 | 9 | 7 | 7 | 29 | 32 |
+| DisciplineClinic | 6 | 2 | 2 | 2 | 23 | 22 |
+| Toy expanded | 1 | 0 | 0 | 0 | 258 | 460 |
+
+Root errors count independent causes that need manual work; placeholders count unconverted statements. Toy's 258 come
+from about 4,800 source statements, mostly method calls on maps and Java objects, string methods, and conditionals in
+positions where moving them would change evaluation order.
 
 No script is compiler-clean as generated, because almost all use storage or script chaining. Scripts using each
 accepted-but-unimplemented capability, and the scripts it alone blocks (otherwise compiler-clean):
 
 | Capability | Scripts using it | Only blocker in |
 | --- | ---: | ---: |
-| storage (`save`/`load`/`delete`) | 44 | 17 |
-| `run`/`end` | 40 | 13 |
-| `switch` | 28 | 5 |
+| storage (`save`/`load`/`delete`) | 45 | 19 |
+| `run`/`end` | 41 | 15 |
+| `switch` | 26 | 6 |
+| `showButton` timeout/elapsed | 13 | 2 |
 | `getDateTime()` | 13 | 1 |
-| `showButton` timeout/elapsed | 12 | 1 |
-| `getSeconds()` | 10 | 0 |
-| `askBooleans()` | 9 | 8 |
-| `showPopup` | 9 | 1 |
-| `askInteger()` | 7 | 0 |
-
-The Toy package is not yet lowered: its body is one anonymous Groovy object and its modules are runtime-evaluated
-closures, so the statement-level importer reports each file as a single unsupported construct.
+| `getSeconds()` | 11 | 0 |
+| `askBooleans()` | 10 | 8 |
+| `showPopup` | 9 | 3 |
+| `askInteger()` | 8 | 0 |
 
 ## SexScript API usage
 
