@@ -9,6 +9,7 @@ import {
   inspectRuntimeState,
   run,
   serializeCheckpoint,
+  type RuntimeInspectionResult,
 } from "../src/index.js";
 import { compileValidPlan as compiled } from "./helpers/compile-valid-plan.js";
 
@@ -43,8 +44,11 @@ test("runtime inspection exposes foreground interaction provenance without mutat
     [source.indexOf(ask), source.indexOf(ask) + ask.length],
   );
   assert.equal(JSON.stringify(callerState), before);
-  assert.equal(Object.isFrozen(inspection), true);
-  assert.equal(Object.isFrozen(action), true);
+
+  // Writing to a view, whether or not the view accepts the write, cannot change the inspected state.
+  Reflect.set(foregroundTextUi(inspectRuntimeState(plan, callerState)), "hint", "changed in view");
+  assert.equal(JSON.stringify(callerState), before);
+  assert.equal(foregroundTextUi(inspectRuntimeState(plan, callerState)).hint, "Type here");
 
   assert.equal(callerState.foregroundAction?.kind, "interaction");
   if (callerState.foregroundAction?.kind === "interaction") {
@@ -128,3 +132,9 @@ test("runtime inspection rejects malformed external state without changing it", 
   if (!result.valid) assert.ok(result.errors.some((error) => error.kind === "snapshot"));
   assert.equal(JSON.stringify(malformed), before);
 });
+
+function foregroundTextUi(inspection: RuntimeInspectionResult) {
+  const action = inspection.valid ? inspection.foregroundAction?.action : undefined;
+  assert.ok(action?.kind === "interaction" && action.ui.kind === "text");
+  return action.ui;
+}

@@ -1087,6 +1087,8 @@ Runtime behavior:
 - Automatic visible-text selection from an empty list raises a runtime error because no element can be selected.
 - The empty-list error identifies the list expression and explains that the visible-text context requires at least one eligible element.
 - `remove(value)` leaves the list unchanged when the value is absent and emits a warning to the developer log.
+- `removeFirst()` and `removeLast()` on an empty list, and set `remove(value)` of an absent value, are no-ops: the
+  collection stays unchanged and execution continues without an error or warning.
 - Mutating methods change the existing list.
 - Recoverable index and empty-selection errors follow the runtime recovery rules described later in this document.
 
