@@ -155,11 +155,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         writesInFlight.delete(flight);
         // A write that settles after unmount must not continue the session.
         if (disposed) return;
-        if (!stored) notices.publish(playerNotices.storageWriteFailed());
         const latest = session.value;
         // The report must belong to the session that requested it.
         if (generation.value !== sessionGeneration || latest === null) return;
         if (pendingPlayerRuntimeStorageWrite(latest.snapshot)?.actionId !== write!.actionId) return;
+        if (!stored) notices.publish(playerNotices.storageWriteFailed());
         session.value = completePlayerRuntimeStorageWrite(latest, write!.actionId, stored).session;
       }
     },
@@ -196,6 +196,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // Starts or restores a session; its scene time continues from the persisted observation, so a
   // gap while no Player ran is not consumed.
   function start(next: PlayerRuntimeSession) {
+    // A failed write concerns the run it happened in.
+    notices.dismiss(playerNoticeKeys.storageWriteFailed);
     device.reset();
     loads.clear();
     pendingLoadCount.value = 0;
@@ -237,7 +239,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     notices: computed(() => noticeList.value),
     /** Reports a host condition to the player; publishing the same key again replaces that notice. */
     publishNotice: (notice: PlayerNotice) => notices.publish(notice),
-    dismissNotice: (key: string) => notices.dismiss(key),
+    /** Dismisses a notice for the player; a notice that is the only way to recover stays until it resolves. */
+    dismissNotice: (key: string) => {
+      if (notices.list.some((notice) => notice.key === key && notice.dismissible !== false))
+        notices.dismiss(key);
+    },
     /** Whether the host persists script storage, so the Player offers to clear it. */
     hasScriptStorage: scriptStorage !== undefined,
     canClearScriptStorage,

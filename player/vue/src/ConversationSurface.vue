@@ -25,7 +25,7 @@ useResizeObserver(overlay, () => {
 <template>
   <div class="conversation-region">
   <section ref="container" class="player-conversation conversation-surface"
-    :style="{ '--composer-input-limit': `${Math.max(40, availableHeight * 0.45)}px`, '--composer-top-from-bottom': `${composerEdges.top}px`, '--composer-bottom-from-bottom': `${composerEdges.bottom}px` }">
+    :style="{ '--composer-input-limit': `${Math.max(40, availableHeight * 0.45)}px`, '--composer-top-from-bottom': `${composerEdges.top}px`, '--composer-bottom-from-bottom': `${composerEdges.bottom}px`, '--conversation-available-height': `${availableHeight}px` }">
     <slot :bottom-inset="bottomInset" />
     <div ref="overlay" class="conversation-overlay" :class="{ 'edge-clearance': conditions.edgeClearance.value }" data-conversation-overlay>
       <slot name="interaction" />
@@ -47,7 +47,8 @@ useResizeObserver(overlay, () => {
   inset-inline-end: auto;
   width: calc(var(--conversation-width) - max(var(--composer-inline-gutter), env(safe-area-inset-left, 0px)) - max(var(--composer-inline-gutter), env(safe-area-inset-right, 0px)));
   max-inline-size: var(--conversation-content-max-width); margin-inline: 0;
-  padding-top: 12px; padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+  --conversation-overlay-top-padding: 12px;
+  padding-top: var(--conversation-overlay-top-padding); padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
 }
 .conversation-overlay.edge-clearance {
   /* Keep 32px at narrow viewport edges without narrowing the capped reading width. */

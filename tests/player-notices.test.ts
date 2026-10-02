@@ -45,3 +45,9 @@ test("a notice action runs the producer's handler", () => {
   notice?.action?.run();
   assert.equal(retries, 1);
 });
+
+test("only a recovery notice the player must act on is not dismissible", () => {
+  assert.equal(playerNotices.audioBlocked(() => {}).dismissible, false);
+  assert.equal(playerNotices.storageUnavailable().dismissible, undefined);
+  assert.equal(playerNotices.storageWriteFailed().dismissible, undefined);
+});

@@ -1290,7 +1290,8 @@ async function composerNoticeChecks(page) {
     const input = page.locator("[data-runtime-interaction] textarea");
     await input.fill("Not an option");
     await input.press("Enter");
-    await page.locator("[data-runtime-interaction]").getByRole("status").waitFor();
+    // The composer's own feedback; the Player notice live regions are separate status regions.
+    await page.locator("[data-runtime-interaction] .composer-notice[role='status']").waitFor();
     const placement = await page.evaluate(() => {
       const notice = document.querySelector(".composer-notice").getBoundingClientRect();
       const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
@@ -1617,6 +1618,48 @@ async function playerSettingsChecks(page) {
   return "PASS Player Settings apply, persist, validate stored and cross-tab values, and fit short screens";
 }
 
+// Every notice and its controls stay reachable when the stack outgrows a small conversation.
+async function noticeStackChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  // Publish every level from Visual Lab, then shrink to a small phone where the sidebar is hidden.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).first().click();
+  await page.getByRole("button", { name: "Show every notice level" }).click();
+  await page.setViewportSize({ width: 320, height: 568 });
+  if (await page.locator("[data-tools-surface]").isVisible())
+    await page.locator("[data-sidebar=trigger]").first().click();
+  await page.locator("[data-tools-surface]").waitFor({ state: "hidden" });
+  const stack = page.locator("[data-player-notices]");
+  const conversation = page.locator("[data-conversation-overlay]").locator("xpath=..");
+  const notices = page.locator("[data-player-notice]");
+  check((await notices.count()) === 4, "Every published notice is rendered");
+  for (let index = 0; index < (await notices.count()); index += 1) {
+    const notice = notices.nth(index);
+    await notice.scrollIntoViewIfNeeded();
+    const [box, frame, area] = await Promise.all([
+      notice.boundingBox(),
+      stack.boundingBox(),
+      conversation.boundingBox(),
+    ]);
+    check(
+      box &&
+        frame &&
+        area &&
+        box.y >= area.y - 1 &&
+        box.y + box.height <= frame.y + frame.height + 1,
+      `Notice ${index + 1} must scroll fully into the visible stack inside the conversation`,
+    );
+  }
+  check(
+    (await stack.evaluate((element) => getComputedStyle(element).overflowY)) === "auto",
+    "The notice stack scrolls when it overflows",
+  );
+  return "PASS notice stack stays reachable in a small conversation";
+}
+
 async function mediaPlaybackChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -1649,6 +1692,13 @@ async function mediaPlaybackChecks(page) {
   const firstImage = await page.locator(".stage-media").getAttribute("src");
   // Refused audio offers a deliberate retry and reports no progress until it plays.
   const retry = page.getByRole("button", { name: "Enable audio", exact: true });
+  // The retry is the only way to continue, so its notice offers no dismissal.
+  await retry.waitFor();
+  check(
+    (await page.locator('[data-player-notice="audio-blocked"] [data-notice-dismiss]').count()) ===
+      0,
+    "The blocked-audio notice must not be dismissible",
+  );
   await retry.waitFor();
   check(
     await page.evaluate(() => window.__played.length === 0),
@@ -1949,6 +1999,7 @@ const groups = [
   focusIndicatorChecks,
   backgroundControlPlacementChecks,
   mediaPlaybackChecks,
+  noticeStackChecks,
   directDemoLatestChecks,
   markupLinkChecks,
   timerChecks,

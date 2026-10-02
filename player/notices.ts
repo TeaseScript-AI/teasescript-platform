@@ -12,6 +12,11 @@ export interface PlayerNotice {
   readonly message: string;
   /** One control the player may activate, such as retrying audio; it runs from the player's click. */
   readonly action?: { readonly label: string; readonly run: () => void };
+  /**
+   * `false` for a notice whose action is the player's only way to recover, such as retrying blocked audio the script
+   * waits for; its producer withdraws it once the condition resolves. Notices are dismissible otherwise.
+   */
+  readonly dismissible?: boolean;
 }
 
 export type PlayerNoticeListener = (notices: readonly PlayerNotice[]) => void;
@@ -64,6 +69,7 @@ export const playerNotices = {
     level: "warning",
     message: "The browser blocked audio.",
     action: { label: "Enable audio", run: retry },
+    dismissible: false,
   }),
   storageUnavailable: (): PlayerNotice => ({
     key: playerNoticeKeys.storageUnavailable,

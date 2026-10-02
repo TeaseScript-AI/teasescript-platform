@@ -399,12 +399,17 @@ withdraws, so repeated causes do not stack.
 
 The notices appear in one region directly above the composer, centred, each as a compact card with a level icon (info,
 warning, or error), its text, at most one action control that runs from the player's click (such as **Enable
-audio**), and a dismiss control. Error notices are announced as alerts, others as status. A notice stays until its
-condition resolves or the player dismisses it. On narrow screens the text wraps beside the icon and controls.
+audio**), and a dismiss control. The region keeps one status and one alert live region in place before any notice, so
+the first notice is announced too; errors use the alert region. A notice stays until its condition resolves or the
+player dismisses it, and dismissal moves focus to the nearest remaining notice control. A notice whose action is the
+only way to continue, such as **Enable audio** while the script waits for that audio, offers no dismiss control and
+disappears once its condition resolves. The stack may use the conversation space above the composer and scrolls
+within it, so every notice stays reachable on small screens; the text wraps beside the icon and controls.
 
 The current conditions are blocked audio (warning, with **Enable audio**), browser storage unavailable at session start
-(info: saved progress is not kept), and a failed script-storage write (warning). The level colours and the region's
-placement await Owner review in #492; the development preview's Visual Lab shows every level.
+(info: saved progress is not kept), and a failed script-storage write (warning, for the run it happened in; a new
+Start withdraws it). The level colours and the region's placement await Owner review in #492; the development
+preview's Visual Lab shows every level.
 
 ## Stage and media presentation
 

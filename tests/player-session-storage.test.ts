@@ -20,6 +20,13 @@ interface StorageHost {
   readonly notices: Readonly<Ref<readonly { readonly key: string; readonly level: string }[]>>;
   clearScriptStorage(): Promise<boolean>;
   observe(): PlayerRuntimeSession | null;
+  publishNotice(notice: {
+    readonly key: string;
+    readonly level: "info" | "warning" | "error";
+    readonly message: string;
+    readonly dismissible?: boolean;
+  }): void;
+  dismissNotice(key: string): void;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   prepare(create: () => PlayerRuntimeSession): void;
@@ -396,3 +403,57 @@ for (const [name, source, expected] of [
     );
   });
 }
+
+test("Vue host scopes the write-failure notice to the run it happened in", async (context) => {
+  const pendingWrites: ReturnType<typeof deferred>[] = [];
+  const { host } = createHost(context, {
+    scope: "test",
+    load: async () => [],
+    write: () => {
+      const write = deferred();
+      pendingWrites.push(write);
+      return write.promise;
+    },
+    clear: async () => {},
+  });
+  // A rejection reported after its session was replaced says nothing about the current run.
+  await start(host, 'save 1 as "k"\nexit');
+  await start(host, 'save 2 as "k"\nexit');
+  pendingWrites[0]!.reject(new Error("Write denied"));
+  pendingWrites[1]!.resolve();
+  await nextTick();
+  context.mock.timers.tick(0);
+  assert.deepEqual(host.notices.value, []);
+
+  // A failure in the current run is reported, and a new Start withdraws it.
+  await start(host, 'save 3 as "k"\nexit');
+  pendingWrites[2]!.reject(new Error("Write denied"));
+  await nextTick();
+  context.mock.timers.tick(0);
+  assert.deepEqual(
+    host.notices.value.map(({ key }) => key),
+    ["storage-write-failed"],
+  );
+  await start(host, "exit");
+  assert.deepEqual(host.notices.value, []);
+});
+
+test("Vue host keeps a recovery notice until its condition resolves", async (context) => {
+  const { host } = createHost(context, {
+    scope: "test",
+    load: async () => [],
+    write: async () => {},
+    clear: async () => {},
+  });
+  host.publishNotice({
+    key: "needs-action",
+    level: "warning",
+    message: "Act.",
+    dismissible: false,
+  });
+  host.dismissNotice("needs-action");
+  assert.deepEqual(
+    host.notices.value.map(({ key }) => key),
+    ["needs-action"],
+  );
+});
