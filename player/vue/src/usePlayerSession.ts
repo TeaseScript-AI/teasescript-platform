@@ -141,7 +141,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     diagnostic: reportDiagnostic,
     later: (task) => setTimeout(task, 0),
   });
-  const serviceCapture = () => captures.service();
+  const serviceCapture = () => captures.request();
   watch(session, () => void serviceCapture());
   // A session that ended releases its camera.
   watch(
@@ -158,8 +158,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     activationToken++;
     loads.clear();
     device.reset();
+    captures.stop();
     camera.release();
-    captures.reset();
     capturedMedia.close();
     liveMedia.release();
   });

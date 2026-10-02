@@ -169,7 +169,7 @@ test("a capture is answered once and its photo continues the script", async () =
   });
   harness.held.add("photo-1");
   harness.start("let photo = takePhoto()\nshowImage photo");
-  await harness.service.service();
+  harness.service.request();
   await settle();
   assert.equal(answers, 1);
   assert.equal(harness.state.session?.snapshot.status, "halted");
@@ -180,16 +180,19 @@ test("a session replaced while its photo is captured gets its own capture servic
   const answers: Array<(answer: PlayerCaptureAnswer) => void> = [];
   const harness = serviceHarness(() => new Promise((resolve) => answers.push(resolve)));
   harness.start("let photo = takePhoto()\nshowImage photo");
-  void harness.service.service();
+  harness.service.request();
+  await settle();
   // Action IDs restart, so the successor's capture has the same ID as the replaced one.
   harness.start("let photo = takePhoto()\nshowImage photo");
   harness.held.add("old photo");
   answers[0]?.({ kind: "captured", reference: "old photo" });
   await settle();
+  await settle();
   assert.equal(answers.length, 2);
   assert.equal(harness.state.session?.snapshot.foregroundAction?.kind, "capture");
   harness.held.add("new photo");
   answers[1]?.({ kind: "captured", reference: "new photo" });
+  await settle();
   await settle();
   assert.equal(harness.state.session?.snapshot.stageImage, "new photo");
 });
@@ -197,8 +200,41 @@ test("a session replaced while its photo is captured gets its own capture servic
 test("a captured reference the store does not hold never leaves the script waiting", async () => {
   const harness = serviceHarness(async () => ({ kind: "captured", reference: "unknown" }));
   harness.start("let photo = takePhoto()\nlet missing = photo == null");
-  await harness.service.service();
+  harness.service.request();
   await settle();
   assert.equal(harness.state.session?.snapshot.status, "halted");
   assert.equal(harness.diagnostics[0]?.code, "capture-rejected");
+});
+
+test("a script capturing in a loop still lets other tasks run between captures", async () => {
+  let otherTaskRan = false;
+  let answers = 0;
+  let starved = false;
+  const harness = serviceHarness(async () => {
+    // Without yielding, captures keep coming without the other task ever running; stop instead of hanging.
+    if (++answers > 50 && !otherTaskRan) {
+      starved = true;
+      harness.service.stop();
+    }
+    return { kind: "unavailable", reason: "denied" };
+  });
+  harness.start("while true {\n  takePhoto()\n}");
+  setTimeout(() => (otherTaskRan = true), 0);
+  harness.service.request();
+  for (let turn = 0; turn < 20 && !otherTaskRan && !starved; turn++) await settle();
+  harness.service.stop();
+  assert.equal(starved, false);
+  assert.equal(otherTaskRan, true);
+});
+
+test("a stopped service never resumes the script with an answer still in flight", async () => {
+  let deliver = (_answer: PlayerCaptureAnswer) => {};
+  const harness = serviceHarness(() => new Promise((resolve) => (deliver = resolve)));
+  harness.start("let photo = takePhoto()\nlet continued = true");
+  harness.service.request();
+  await settle();
+  harness.service.stop();
+  deliver({ kind: "unavailable", reason: "denied" });
+  await settle();
+  assert.equal(harness.state.session?.snapshot.foregroundAction?.kind, "capture");
 });

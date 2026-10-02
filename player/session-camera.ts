@@ -123,28 +123,53 @@ export class CaptureService {
   #key: string | null = null;
   #pending: Promise<PlayerCaptureAnswer> | null = null;
   #servicing = false;
+  #scheduled = false;
+  #stopped = false;
 
   constructor(answer: () => Promise<PlayerCaptureAnswer>, host: CaptureServiceHost) {
     this.#answer = answer;
     this.#host = host;
   }
 
-  /** Services the published session's pending capture, if any; call whenever the session changes. */
-  async service(): Promise<void> {
+  /**
+   * Services the published session's pending capture soon; call whenever the session changes. Servicing always runs
+   * in a later task, so a script that captures in a loop still lets the browser handle input and rendering.
+   */
+  request(): void {
+    if (this.#scheduled || this.#stopped) return;
+    this.#scheduled = true;
+    this.#host.later(() => {
+      this.#scheduled = false;
+      void this.#service();
+    });
+  }
+
+  /** Stops servicing, for example when the Player unmounts; answers still in flight are dropped. */
+  stop(): void {
+    this.#stopped = true;
+    this.#key = null;
+    this.#pending = null;
+  }
+
+  reset(): void {
+    this.#key = null;
+    this.#pending = null;
+  }
+
+  async #service(): Promise<void> {
     const current = this.#host.session();
     const action = current && activePlayerRuntimeCapture(current.snapshot);
-    if (!action || this.#servicing) return;
+    if (!action || this.#servicing || this.#stopped) return;
     this.#servicing = true;
     const generation = this.#host.generation();
     const key = `${generation}:${action.actionId}`;
-    let retryLater = false;
     try {
       if (this.#key !== key || this.#pending === null) {
         this.#key = key;
         this.#pending = this.#answer();
       }
       const answer = await this.#pending;
-      if (this.#host.generation() !== generation) return;
+      if (this.#stopped || this.#host.generation() !== generation) return;
       // Input happens at the observed time.
       const observed = this.#host.observe() ?? this.#host.session();
       if (
@@ -160,10 +185,8 @@ export class CaptureService {
         answer,
         this.#host.capturedMedia,
       );
-      if (result.outcome.kind === "executionPending") {
-        retryLater = true;
-        return;
-      }
+      // `executionPending`: the same answer is offered again in the next service.
+      if (result.outcome.kind === "executionPending") return;
       this.#settled(key);
       if (result.outcome.kind === "invalidPayload") {
         this.#host.diagnostic({ code: "capture-rejected", message: result.outcome.message });
@@ -179,14 +202,9 @@ export class CaptureService {
       if (result.outcome.kind === "completed") this.#host.publish(result.session);
     } finally {
       this.#servicing = false;
-      if (retryLater) this.#host.later(() => void this.service());
-      else void this.service();
+      // A retry, or the next capture of the same or a replacing session.
+      this.request();
     }
-  }
-
-  reset(): void {
-    this.#key = null;
-    this.#pending = null;
   }
 
   #settled(key: string): void {
