@@ -2,9 +2,10 @@ import { RgbaImage } from "./rgba-image.js";
 import type { SessionMediaEntry, SessionMediaStore } from "./session-media.js";
 
 /**
- * Player-owned camera and microphone capture. The Player owns every physical browser stream; the runtime and package
- * code only ever receive serializable results such as session media references or pixel data copied out of a frame.
- * Browser APIs stay behind `CaptureHost`, so lifecycle, cleanup and failure handling are testable with fakes.
+ * Player-owned camera and microphone capture. The Player owns every physical browser stream; what reaches the runtime
+ * is serializable, such as session media references. Pixel copies and samplers are for local computation and never
+ * belong in runtime state. Browser APIs stay behind `CaptureHost`, so lifecycle, cleanup and failure handling are
+ * testable with fakes.
  */
 
 export type CaptureSourceKind = "camera" | "microphone";
@@ -72,7 +73,8 @@ export interface CaptureHost<Track extends CaptureTrack> {
   acquire(request: CaptureRequest): Promise<readonly Track[]>;
   listDevices(): Promise<readonly CaptureDeviceInfo[]>;
   createRecorder(tracks: readonly Track[]): CaptureRecorder;
-  grabFrame(track: Track): Promise<RgbaImage>;
+  /** Copies the current frame; rejects once `released` aborts because the track was stopped. */
+  grabFrame(track: Track, released: AbortSignal): Promise<RgbaImage>;
   encodeImage(image: RgbaImage): Promise<Blob>;
   decodeImage(data: Blob): Promise<RgbaImage>;
   createAudioSampler(track: Track): AudioSampler;
@@ -173,8 +175,16 @@ export type SamplerOutcome =
 interface Source<Track> {
   state: CaptureSourceState;
   track: Track | null;
+  /** Aborts when `track` is released, so pending work on it settles. */
+  released: AbortController | null;
   /** Increments on every acquire, stop and reset, so late browser results can be recognized and released. */
   generation: number;
+  /** The latest acquisition of this kind until it settled; a new one waits for it. */
+  pending: Promise<AcquireOutcome> | null;
+}
+
+function idleSource<Track>(): Source<Track> {
+  return { state: { status: "idle" }, track: null, released: null, generation: 0, pending: null };
 }
 
 /** One running recording; `finished` settles exactly once. */
@@ -196,11 +206,13 @@ export class CaptureDevice<Track extends CaptureTrack> {
   readonly #host: CaptureHost<Track>;
   readonly #media: SessionMediaStore;
   readonly #sources: Record<CaptureSourceKind, Source<Track>> = {
-    camera: { state: { status: "idle" }, track: null, generation: 0 },
-    microphone: { state: { status: "idle" }, track: null, generation: 0 },
+    camera: idleSource(),
+    microphone: idleSource(),
   };
   readonly #samplers = new Set<AudioSampler>();
   #recording: Recording | null = null;
+  /** Increments on every reset, so work started before it does not store media afterwards. */
+  #resets = 0;
 
   constructor(host: CaptureHost<Track>, media: SessionMediaStore) {
     this.#host = host;
@@ -233,38 +245,59 @@ export class CaptureDevice<Track extends CaptureTrack> {
 
   /**
    * Opens the requested sources in one browser request, replacing any active stream of the same kind. Sources that
-   * are not requested are left untouched.
+   * are not requested are left untouched. An earlier acquisition of the same kind finishes and releases its stream
+   * before the browser is asked again, so a device that allows one open stream is never requested twice.
    */
-  async acquire(request: CaptureRequest): Promise<AcquireOutcome> {
+  acquire(request: CaptureRequest): Promise<AcquireOutcome> {
     const kinds = requestedKinds(request);
-    if (kinds.length === 0) return { kind: "active" };
+    if (kinds.length === 0) return Promise.resolve({ kind: "active" });
     const generations = new Map<CaptureSourceKind, number>();
+    const earlier: Array<Promise<AcquireOutcome>> = [];
     for (const kind of kinds) {
       this.#release(kind);
       const source = this.#sources[kind];
+      if (source.pending !== null) earlier.push(source.pending);
       generations.set(kind, ++source.generation);
       this.#setState(kind, { status: "acquiring" });
     }
+    const outcome = this.#open(request, generations, earlier);
+    for (const kind of kinds) this.#sources[kind].pending = outcome;
+    void outcome.then(() => {
+      for (const kind of kinds)
+        if (this.#sources[kind].pending === outcome) this.#sources[kind].pending = null;
+    });
+    return outcome;
+  }
+
+  async #open(
+    request: CaptureRequest,
+    generations: ReadonlyMap<CaptureSourceKind, number>,
+    earlier: ReadonlyArray<Promise<AcquireOutcome>>,
+  ): Promise<AcquireOutcome> {
+    if (earlier.length > 0) await Promise.all(earlier);
+    const current = (kind: CaptureSourceKind) =>
+      this.#sources[kind].generation === generations.get(kind);
+    // Kinds replaced or stopped while waiting are no longer requested.
+    const kinds = [...generations.keys()].filter(current);
+    let superseded = kinds.length < generations.size;
+    if (kinds.length === 0) return { kind: "superseded" };
     let tracks: readonly Track[];
     try {
-      tracks = await this.#host.acquire(request);
+      tracks = await this.#host.acquire({
+        ...(kinds.includes("camera") && { camera: request.camera ?? {} }),
+        ...(kinds.includes("microphone") && { microphone: request.microphone ?? {} }),
+      });
     } catch (error) {
       const failed = captureFailure(error);
-      let current = false;
-      for (const kind of kinds) {
-        if (this.#sources[kind].generation !== generations.get(kind)) continue;
-        current = true;
-        this.#setState(kind, { status: "failed", failure: failed });
-      }
-      return current ? { kind: "failed", failure: failed } : { kind: "superseded" };
+      const failing = kinds.filter(current);
+      for (const kind of failing) this.#setState(kind, { status: "failed", failure: failed });
+      return failing.length > 0 ? { kind: "failed", failure: failed } : { kind: "superseded" };
     }
     const assigned = new Set<Track>();
     let missing = false;
-    let superseded = false;
     for (const kind of kinds) {
-      const source = this.#sources[kind];
       const track = tracks.find((candidate) => candidate.kind === trackKind(kind));
-      if (source.generation !== generations.get(kind)) {
+      if (!current(kind)) {
         superseded = true;
         continue;
       }
@@ -293,26 +326,30 @@ export class CaptureDevice<Track extends CaptureTrack> {
   /** Copies the current camera frame; recording on the same stream continues. */
   async captureFrame(): Promise<FrameOutcome> {
     const track = this.#liveTrack("camera");
-    if (track === null) return { kind: "failed", failure: failure("inactive") };
-    const generation = this.#sources.camera.generation;
+    const released = this.#sources.camera.released;
+    if (track === null || released === null)
+      return { kind: "failed", failure: failure("inactive") };
     let image: RgbaImage;
     try {
-      image = await this.#host.grabFrame(track);
+      image = await this.#host.grabFrame(track, released.signal);
     } catch (error) {
+      if (released.signal.aborted) return { kind: "failed", failure: failure("inactive") };
       return { kind: "failed", failure: captureFailure(error) };
     }
     // A frame that arrives after the camera stopped or switched is not from the current camera.
-    if (this.#sources.camera.generation !== generation || this.#sources.camera.track !== track)
-      return { kind: "failed", failure: failure("inactive") };
+    if (released.signal.aborted) return { kind: "failed", failure: failure("inactive") };
     return { kind: "frame", image };
   }
 
   /** Captures a still frame into session media. */
   async capturePhoto(): Promise<PhotoOutcome> {
+    const resets = this.#resets;
     const frame = await this.captureFrame();
     if (frame.kind === "failed") return frame;
     try {
       const data = await this.#host.encodeImage(frame.image);
+      // The session ended while encoding; its media store must stay empty.
+      if (this.#resets !== resets) return { kind: "failed", failure: failure("inactive") };
       return {
         kind: "photo",
         media: this.#media.add("image", data, {
@@ -402,6 +439,7 @@ export class CaptureDevice<Track extends CaptureTrack> {
 
   /** Cancels any recording, closes samplers and stops every stream, for example when the session ends. */
   reset(): void {
+    this.#resets++;
     this.#recording?.cancel();
     this.stop("camera");
     this.stop("microphone");
@@ -417,6 +455,7 @@ export class CaptureDevice<Track extends CaptureTrack> {
   #attach(kind: CaptureSourceKind, track: Track): void {
     const source = this.#sources[kind];
     source.track = track;
+    source.released = new AbortController();
     const generation = source.generation;
     track.addEventListener("ended", () => {
       if (source.generation !== generation || source.track !== track) return;
@@ -432,6 +471,8 @@ export class CaptureDevice<Track extends CaptureTrack> {
     const track = source.track;
     if (track === null) return;
     source.track = null;
+    source.released?.abort();
+    source.released = null;
     if (this.#recording?.sources.includes(kind)) this.#recording.interrupt();
     if (kind === "microphone") for (const sampler of [...this.#samplers]) sampler.close();
     track.stop();

@@ -117,20 +117,30 @@ function browserRecorder(recorder: MediaRecorder): CaptureRecorder {
  * Copies the current frame through a temporary video element, which every browser with capture supports. The
  * element only consumes the track; stopping it does not stop the camera.
  */
-async function grabFrame(track: MediaStreamTrack): Promise<RgbaImage> {
+async function grabFrame(track: MediaStreamTrack, released: AbortSignal): Promise<RgbaImage> {
+  released.throwIfAborted();
   const video = document.createElement("video");
   video.muted = true;
   video.playsInline = true;
   video.srcObject = new MediaStream([track]);
+  // Firefox never settles `play()` for a stopped track, so a release must end the wait itself.
+  const abandoned = new Promise<never>((_resolve, reject) =>
+    released.addEventListener("abort", () => reject(released.reason), { once: true }),
+  );
+  // The losing side of each race below may reject later; that rejection is expected and ignored.
+  abandoned.catch(() => {});
   try {
-    await video.play();
+    await Promise.race([video.play(), abandoned]);
     if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA)
-      await new Promise<void>((resolve, reject) => {
-        video.addEventListener("loadeddata", () => resolve(), { once: true });
-        video.addEventListener("error", () => reject(new DOMException("", "AbortError")), {
-          once: true,
-        });
-      });
+      await Promise.race([
+        new Promise<void>((resolve, reject) => {
+          video.addEventListener("loadeddata", () => resolve(), { once: true });
+          video.addEventListener("error", () => reject(new DOMException("", "AbortError")), {
+            once: true,
+          });
+        }),
+        abandoned,
+      ]);
     if (video.videoWidth === 0 || video.videoHeight === 0)
       throw new DOMException("The camera delivered no frame.", "NotReadableError");
     return drawPixels(video, video.videoWidth, video.videoHeight);

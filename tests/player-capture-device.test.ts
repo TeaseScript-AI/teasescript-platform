@@ -68,6 +68,22 @@ function image(width = 2, height = 1): RgbaImage {
   return new RgbaImage(width, height, new Uint8ClampedArray([10, 20, 30, 255, 11, 20, 30, 255]));
 }
 
+/** Lets pending promise continuations run, for example a queued acquisition. */
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+// A lossless stand-in for PNG (dimensions, then channels), so reading a photo back proves which pixels were stored.
+const fakeCodec = {
+  encode: (pixels: RgbaImage) =>
+    new Blob([new Uint32Array([pixels.width, pixels.height]), new Uint8Array(pixels.data)], {
+      type: "image/png",
+    }),
+  async decode(data: Blob) {
+    const bytes = await data.arrayBuffer();
+    const [width = 0, height = 0] = new Uint32Array(bytes, 0, 2);
+    return new RgbaImage(width, height, new Uint8ClampedArray(bytes, 8));
+  },
+};
+
 function harness() {
   const log: string[] = [];
   const states: string[] = [];
@@ -76,7 +92,9 @@ function harness() {
   const samplers: Array<{ closed: number }> = [];
   const urls: string[] = [];
   const clock = { now: 0 };
-  const frames: Array<{ resolve(image: RgbaImage): void; reject(error: unknown): void }> = [];
+  const frames: Array<{ resolve(image: RgbaImage): void; signal: AbortSignal }> = [];
+  const encodes: Array<() => void> = [];
+  const options = { holdEncoding: false };
   let tracks = 0;
   const host: CaptureHost<FakeTrack> = {
     acquire: (request) =>
@@ -90,9 +108,17 @@ function harness() {
       recorders.push(recorder);
       return recorder;
     },
-    grabFrame: () => new Promise((resolve, reject) => frames.push({ resolve, reject })),
-    encodeImage: async () => new Blob(["png"], { type: "image/png" }),
-    decodeImage: async () => image(),
+    // Like the browser host, a pending grab rejects once its track is released.
+    grabFrame: (_track, signal) =>
+      new Promise((resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        frames.push({ resolve, signal });
+      }),
+    encodeImage: (pixels) =>
+      options.holdEncoding
+        ? new Promise((resolve) => encodes.push(() => resolve(fakeCodec.encode(pixels))))
+        : Promise.resolve(fakeCodec.encode(pixels)),
+    decodeImage: (data) => fakeCodec.decode(data),
     createAudioSampler: () => {
       const state = { closed: 0 };
       samplers.push(state);
@@ -129,7 +155,21 @@ function harness() {
     assert.deepEqual(await outcome, { kind: "active" });
     return granted;
   }
-  return { device, media, log, states, pending, recorders, samplers, frames, clock, track, grant };
+  return {
+    device,
+    media,
+    log,
+    states,
+    pending,
+    recorders,
+    samplers,
+    frames,
+    encodes,
+    options,
+    clock,
+    track,
+    grant,
+  };
 }
 
 test("one browser request opens camera and microphone together", async () => {
@@ -156,28 +196,51 @@ test("switching cameras stops the open stream before requesting the next one", a
   assert.equal(device.state("microphone").status, "active");
 });
 
-test("a stream that arrives after its request was replaced or stopped is released", async () => {
-  const { device, pending, track, states } = harness();
-  const replaced = device.acquire({ camera: {} });
-  const current = device.acquire({ camera: {} });
+test("a replaced request finishes and releases its stream before the browser is asked again", async () => {
+  const { device, pending, track, log } = harness();
+  const replaced = device.acquire({ camera: { deviceId: "front" } });
+  const current = device.acquire({ camera: { deviceId: "back" } });
+  // A camera that allows one open stream must never see the second request while the first is open.
+  assert.deepEqual(log, ["acquire camera"]);
   const late = track("video");
-  const winner = track("video");
-  pending[1]?.resolve([winner]);
-  assert.deepEqual(await current, { kind: "active" });
   pending[0]?.resolve([late]);
   assert.deepEqual(await replaced, { kind: "superseded" });
   assert.equal(late.stops, 1);
-  assert.equal(winner.stops, 0);
+  await flush();
+  assert.deepEqual(log, ["acquire camera", `stop ${late.label}`, "acquire camera"]);
+  assert.deepEqual(pending[1]?.request, { camera: { deviceId: "back" } });
+  const winner = track("video");
+  pending[1]?.resolve([winner]);
+  assert.deepEqual(await current, { kind: "active" });
   assert.equal(device.track("camera"), winner);
+  assert.equal(winner.stops, 0);
+});
 
+test("a stream that arrives after its kind was stopped is released", async () => {
+  const { device, pending, track, states } = harness();
   const abandoned = device.acquire({ microphone: {} });
   device.stop("microphone");
   const arriving = track("audio");
-  pending[2]?.resolve([arriving]);
+  pending[0]?.resolve([arriving]);
   assert.deepEqual(await abandoned, { kind: "superseded" });
   assert.equal(arriving.stops, 1);
   assert.equal(device.state("microphone").status, "idle");
   assert.equal(states.at(-1), "microphone:idle");
+});
+
+test("a queued request only asks for the kinds still wanted", async () => {
+  const { device, pending, track, log } = harness();
+  const first = device.acquire({ camera: {} });
+  const both = device.acquire({ camera: {}, microphone: {} });
+  device.stop("camera");
+  pending[0]?.resolve([track("video")]);
+  await first;
+  await flush();
+  assert.deepEqual(log.at(-1), "acquire microphone");
+  pending[1]?.resolve([track("audio")]);
+  assert.deepEqual(await both, { kind: "superseded" });
+  assert.equal(device.state("microphone").status, "active");
+  assert.equal(device.state("camera").status, "idle");
 });
 
 test("browser exceptions become bounded failures without browser messages", async () => {
@@ -251,13 +314,16 @@ test("a frame is copied from the active camera while recording continues", async
   assert.equal(device.recording?.sources[0], "camera");
 });
 
-test("a frame that arrives after the camera stopped is not reported as current", async () => {
+test("a frame still pending when the camera stops settles as inactive", async () => {
   const { device, frames, grant } = harness();
   await grant({ camera: {} });
   const frame = device.captureFrame();
   device.stop("camera");
-  frames[0]?.resolve(image());
-  assert.equal((await frame).kind, "failed");
+  assert.equal(frames[0]?.signal.aborted, true);
+  assert.deepEqual(await frame, {
+    kind: "failed",
+    failure: { kind: "inactive", message: "The required device is not active." },
+  });
 });
 
 test("a photo is stored as session media and its pixels can be read back", async () => {
@@ -270,18 +336,27 @@ test("a photo is stored as session media and its pixels can be read back", async
   if (outcome.kind !== "photo") return;
   // Only this plain description may reach runtime state; it survives serialization unchanged.
   assert.deepEqual(JSON.parse(JSON.stringify(outcome.media)), outcome.media);
-  assert.deepEqual(outcome.media, {
-    reference: "session-media:1",
-    kind: "image",
-    mimeType: "image/png",
-    size: 3,
-    width: 2,
-    height: 1,
-  });
-  assert.equal(media.size, 1);
-  const read = await device.readImage(outcome.media.reference);
-  assert.equal(read.kind === "frame" && read.image.getPixel(1, 0).r, 11);
-  assert.equal((await device.readImage("session-media:99")).kind, "failed");
+  const { reference, size, ...description } = outcome.media;
+  assert.deepEqual(description, { kind: "image", mimeType: "image/png", width: 2, height: 1 });
+  assert.equal(media.get(reference)?.data.size, size);
+  const read = await device.readImage(reference);
+  assert.deepEqual(read.kind === "frame" && [...read.image.data], [...image().data]);
+  assert.equal((await device.readImage(`${reference}-missing`)).kind, "failed");
+});
+
+test("a photo still encoding when the session resets is not stored", async () => {
+  const { device, media, frames, encodes, options, grant } = harness();
+  options.holdEncoding = true;
+  await grant({ camera: {} });
+  const photo = device.capturePhoto();
+  frames[0]?.resolve(image());
+  await flush();
+  assert.equal(encodes.length, 1);
+  device.reset();
+  media.clear();
+  encodes[0]?.();
+  assert.equal((await photo).kind, "failed");
+  assert.equal(media.size, 0);
 });
 
 test("a recording stores what was recorded and reports its duration", async () => {
