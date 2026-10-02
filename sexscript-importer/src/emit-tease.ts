@@ -163,6 +163,11 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
       emitStatements(statement.body, lines, depth + 1);
       lines.push(`${pad}}`);
       return;
+    case "repeat":
+      lines.push(`${pad}repeat ${emitExpression(statement.count)} {`);
+      emitStatements(statement.body, lines, depth + 1);
+      lines.push(`${pad}}`);
+      return;
     case "for":
       lines.push(`${pad}for ${statement.variable} in ${emitExpression(statement.collection)} {`);
       emitStatements(statement.body, lines, depth + 1);

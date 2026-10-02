@@ -1,0 +1,23 @@
+// MIGRATION INCOMPLETE: 1 error diagnostic.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+function setImageImplement {
+  showImage "implement.jpg"
+}
+function startFast {
+  say "Fast start"
+}
+if randomInteger(0..2) == 0 {
+  let startFastValue = randomInteger(0..2)
+  if startFastValue == 1 {
+    say "Local value"
+  }
+}
+// NOTE SX_CLOSURE_NOT_CALLED line 7: Dropped the bare reference to closure setImageImplement: without () Groovy did not call it, so it had no effect. Add setImageImplement() manually if a call was intended.
+// NOTE SX_CLOSURE_NOT_CALLED line 8: Groovy treated closure setImageImplement itself as true here because it was not called; kept as true. Use setImageImplement() if a call was intended.
+if true {
+  say "Always shown"
+}
+startFast()
+// TODO SX_UNDEFINED_FUNCTION line 10: mistressInfo() is not defined in this script, its package helpers, or the SexScript API; SexScript failed here at runtime.
+// | mistressInfo()

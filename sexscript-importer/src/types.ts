@@ -108,6 +108,7 @@ export function inferType(node: AstNode | null, environment: TypeEnvironment): V
       return STRING;
     case "list":
     case "range":
+    case "array":
       return LIST;
     case "map":
       return OBJECT;
@@ -148,6 +149,11 @@ export function inferType(node: AstNode | null, environment: TypeEnvironment): V
 function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
   const operator = typeof node.operator === "string" ? node.operator : "";
   if (operator === "[" && isCalendarConstant(asNode(node.right))) return NUMBER;
+  if (operator === "[") {
+    const name = variableName(node.left);
+    const element = name === null ? undefined : environment.listElements?.get(name);
+    return element === undefined || element === 0 ? UNKNOWN : element;
+  }
   if (BOOLEAN_OPERATORS.has(operator)) return BOOLEAN;
   if (ARITHMETIC_OPERATORS.has(operator)) return NUMBER;
   if (operator === "=") return inferType(asNode(node.right), environment);
@@ -256,6 +262,13 @@ function inferListElements(body: AstNode, environment: TypeEnvironment): Map<str
       value.kind === "unsupportedExpression" ||
       (value.kind === "constant" && value.value === null)
     ) {
+      return;
+    }
+    if (value.kind === "array" && typeof value.elementType === "string") {
+      // Java arrays are typed; object arrays start filled with null.
+      const element = castType(value.elementType);
+      const primitive = /^[a-z]/u.test(value.elementType);
+      elements.set(name, (elements.get(name) ?? 0) | element | (primitive ? 0 : NULL));
       return;
     }
     if (value.kind !== "list") {

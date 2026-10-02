@@ -231,6 +231,7 @@ function countIrStatements(statements: IrStatement[]): { total: number; unsuppor
         visit(statement.else);
       } else if (
         statement.kind === "while" ||
+        statement.kind === "repeat" ||
         statement.kind === "for" ||
         statement.kind === "function"
       ) {

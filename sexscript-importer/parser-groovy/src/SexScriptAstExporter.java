@@ -18,6 +18,7 @@ import org.codehaus.groovy.ast.MethodNode;
 import org.codehaus.groovy.ast.Parameter;
 import org.codehaus.groovy.ast.builder.AstBuilder;
 import org.codehaus.groovy.ast.expr.ArgumentListExpression;
+import org.codehaus.groovy.ast.expr.ArrayExpression;
 import org.codehaus.groovy.ast.expr.AttributeExpression;
 import org.codehaus.groovy.ast.expr.BinaryExpression;
 import org.codehaus.groovy.ast.expr.BitwiseNegationExpression;
@@ -516,6 +517,12 @@ public final class SexScriptAstExporter {
             return nodeMap(node, "cast",
                     "type", child.getType().getName(),
                     "value", expression(child.getExpression()));
+        }
+        if (node instanceof ArrayExpression child) {
+            return nodeMap(node, "array",
+                    "elementType", child.getElementType().getName(),
+                    "sizes", child.getSizeExpression() == null ? List.of() : expressions(child.getSizeExpression()),
+                    "items", child.getExpressions() == null ? List.of() : expressions(child.getExpressions()));
         }
         if (node instanceof ClassExpression child) {
             return nodeMap(node, "classExpression", "type", child.getType().getName());

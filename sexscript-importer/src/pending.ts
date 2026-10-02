@@ -194,6 +194,8 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         ];
       case "while":
         return [{ ...item, condition: expression(item.condition), body: statements(item.body) }];
+      case "repeat":
+        return [{ ...item, count: expression(item.count), body: statements(item.body) }];
       case "for":
         return [{ ...item, collection: expression(item.collection), body: statements(item.body) }];
       case "hideImage":

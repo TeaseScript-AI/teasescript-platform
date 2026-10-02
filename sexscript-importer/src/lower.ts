@@ -11,6 +11,7 @@ import {
 } from "./ast.ts";
 import { rootDiagnostics } from "./diagnostics.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
+import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
 import {
   BOOLEAN,
   inferType,
@@ -52,7 +53,7 @@ export interface LowerOptions {
   helperRegistry?: HelperRegistry;
 }
 
-type SyntheticHelper = "loadFirstTrue" | "indexOf" | "concat";
+type SyntheticHelper = "loadFirstTrue" | "indexOf" | "concat" | "array";
 
 interface LowerContext {
   diagnostics: MigrationDiagnostic[];
@@ -66,6 +67,8 @@ interface LowerContext {
   prelude: IrStatement[];
   /** The Groovy statement being lowered; prelude statements run immediately before it. */
   statementRoot: AstNode | null;
+  /** Variable nodes that refer to a local variable sharing its name with a closure function. */
+  shadowingReferences: ReadonlySet<AstNode>;
   classLoaderVariables: Set<string>;
   legacyHelperClasses: Map<string, string>;
   helperFunctions: Map<string, HelperFunctionInfo>;
@@ -135,6 +138,7 @@ export function lowerParsedFile(
     types: { variables: new Map() },
     prelude: [],
     statementRoot: null,
+    shadowingReferences: new Set(),
     classLoaderVariables: new Set(),
     legacyHelperClasses: new Map(),
     helperFunctions: new Map(),
@@ -182,6 +186,7 @@ export function lowerParsedFile(
   const body = asNode(file.root.body);
   if (body?.kind === "block") {
     context.functions = collectClosureInfo(body);
+    context.shadowingReferences = collectShadowingReferences(body, context.functions);
     context.types = inferVariableTypes(body);
     const helpers = collectLegacyHelperBindings(body);
     context.classLoaderVariables = helpers.classLoaders;
@@ -346,6 +351,7 @@ function lowerHelperMethod(
     ),
     prelude: [],
     statementRoot: null,
+    shadowingReferences: collectShadowingReferences(body, collectClosureInfo(body)),
     classLoaderVariables: new Set(),
     legacyHelperClasses: new Map(),
     helperFunctions,
@@ -986,6 +992,16 @@ function lowerExpressionStatement(node: AstNode, context: LowerContext): IrState
   if (expression.kind === "postfix") return lowerPostfix(expression, node.span, context);
   if (expression.kind === "methodCall") return lowerCallStatement(expression, node.span, context);
 
+  if (isUncalledClosure(expression, context)) {
+    addDiagnostic(
+      context,
+      "SX_CLOSURE_NOT_CALLED",
+      "warning",
+      `Dropped the bare reference to closure ${variableName(expression)}: without () Groovy did not call it, so it had no effect. Add ${variableName(expression)}() manually if a call was intended.`,
+      node.span,
+    );
+    return [];
+  }
   const lowered = lowerExpression(expression, context);
   if (lowered === null) {
     return [
@@ -1039,16 +1055,7 @@ function lowerDeclaration(
     );
     return [];
   }
-  if (context.functions.has(name)) {
-    return [
-      unsupportedStatement(
-        context,
-        node,
-        "SX_FUNCTION_LOCAL_NAME_CONFLICT",
-        `Variable ${name} conflicts with a migrated closure function of the same name.`,
-      ),
-    ];
-  }
+  // A non-closure declaration that shares a closure's name is a nested local in Groovy; naming renames it.
   // `def x` without an initializer starts as null in Groovy.
   const value = isEmptyGroovyExpression(right)
     ? { kind: "literal" as const, value: null }
@@ -1231,6 +1238,18 @@ function lowerAssignment(
     ];
   }
   const variableTarget = variableName(targetNode);
+  if (operator !== "=" && variableTarget === null && isRepeatableIndex(targetNode)) {
+    // `items[i] += v` evaluates `items` and `i` twice harmlessly when both are plain references.
+    const binaryOperator = operator.slice(0, -1);
+    const expanded: AstNode = {
+      kind: "binary",
+      span: node.span,
+      operator: binaryOperator,
+      left: targetNode,
+      right,
+    };
+    return lowerAssignment({ ...node, operator: "=", right: expanded }, span, context);
+  }
   let target: IrExpression | null = null;
   if (variableTarget !== null) target = { kind: "variable", name: variableTarget };
   else if (operator === "=" && targetNode.kind === "binary" && targetNode.operator === "[") {
@@ -2091,7 +2110,7 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
           "The legacy SexScript host object cannot become an authored TeaseScript value.",
         );
       }
-      if (context.functions.has(name)) {
+      if (context.functions.has(name) && !context.shadowingReferences.has(node)) {
         return unsupportedExpression(
           context,
           node,
@@ -2114,6 +2133,8 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
       return lowerMapExpression(node, context);
     case "gstring":
       return lowerGString(node, context);
+    case "array":
+      return lowerArrayExpression(node, context);
     case "constructorCall":
       if (isCurrentDateConstructor(node)) {
         return { kind: "call", name: "getDateTime", positional: [], named: {} };
@@ -2284,6 +2305,16 @@ function lowerCondition(node: AstNode, context: LowerContext): IrExpression | nu
     const inner = asNode(node.value);
     return inner === null ? null : lowerCondition(inner, context);
   }
+  if (isUncalledClosure(node, context)) {
+    addDiagnostic(
+      context,
+      "SX_CLOSURE_NOT_CALLED",
+      "warning",
+      `Groovy treated closure ${variableName(node)} itself as true here because it was not called; kept as true. Use ${variableName(node)}() if a call was intended.`,
+      node.span,
+    );
+    return { kind: "literal", value: true };
+  }
   const legacyLoad = typedLegacyLoad(node);
   if (legacyLoad !== null) {
     // A missing key reads as null, which Groovy treats like the type's false value.
@@ -2357,6 +2388,19 @@ function typedLegacyLoad(
   return falseValue === undefined
     ? null
     : { key: call.arguments[0]!, falseValue: { kind: "literal", value: falseValue } };
+}
+
+function isRepeatableIndex(node: AstNode): boolean {
+  const target = asNode(node.left);
+  const index = asNode(node.right);
+  return (
+    node.kind === "binary" &&
+    node.operator === "[" &&
+    target !== null &&
+    index !== null &&
+    isRepeatableExpression(target) &&
+    isRepeatableExpression(index)
+  );
 }
 
 /** Expressions that may be evaluated twice without changing behavior or readability much. */
@@ -2635,7 +2679,7 @@ function lowerObjectMethodCallExpression(
           context,
           node,
           "SX_HELPER_MAIN_ARGUMENT",
-          `Legacy helper ${helperClass}.${name}() does not pass the script host as its first argument.`,
+          `Legacy helper ${helperClass}.${name}() is called without the script host (this) as its first argument; no method matched, so SexScript failed here at runtime.`,
         );
       }
       argumentNodes = argumentNodes.slice(1);
@@ -2645,7 +2689,7 @@ function lowerObjectMethodCallExpression(
         context,
         node,
         "SX_FUNCTION_ARITY",
-        `Call to ${helperClass}.${name} has ${argumentNodes.length} authored arguments; expected ${helperInfo.minArgs}..${helperInfo.maxArgs}.`,
+        `Call to ${helperClass}.${name} has ${argumentNodes.length} authored arguments; expected ${helperInfo.minArgs}..${helperInfo.maxArgs}, so SexScript failed here at runtime.`,
       );
     }
     const args = lowerArguments(argumentNodes, context);
@@ -2756,6 +2800,45 @@ function lowerObjectMethodCallExpression(
 }
 
 /** A null receiver fails in Groovy and TeaseScript alike, so "list or null" counts as a list receiver. */
+/** Java default element values: null for object arrays, zero or false for primitive arrays. */
+const PRIMITIVE_ARRAY_DEFAULTS = new Map<string, number | boolean>([
+  ["boolean", false],
+  ["byte", 0],
+  ["double", 0],
+  ["float", 0],
+  ["int", 0],
+  ["long", 0],
+  ["short", 0],
+]);
+
+function lowerArrayExpression(node: AstNode, context: LowerContext): IrExpression | null {
+  const sizes = nodeArray(node.sizes);
+  const items = nodeArray(node.items);
+  if (sizes.length === 0) {
+    const values = lowerArguments(items, context);
+    return values === null ? null : { kind: "list", items: values };
+  }
+  if (sizes.length !== 1 || items.length > 0) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_JAVA_ARRAY",
+      "Multi-dimensional Java arrays are not converted automatically.",
+    );
+  }
+  const size = lowerExpression(sizes[0]!, context);
+  if (size === null) return null;
+  const elementType = text(node.elementType) ?? "";
+  const defaultValue = PRIMITIVE_ARRAY_DEFAULTS.get(elementType) ?? null;
+  context.syntheticHelpers.add("array");
+  return {
+    kind: "call",
+    name: "sexscriptLegacyArray",
+    positional: [size, { kind: "literal", value: defaultValue }],
+    named: {},
+  };
+}
+
 function isCurrentDateConstructor(node: AstNode): boolean {
   const args = asNode(node.arguments);
   return (
@@ -2822,6 +2905,60 @@ function dateTimeField(
         `java.util.Calendar field ${field} has no direct TeaseScript datetime property.`,
       );
   }
+}
+
+/** A reference to a closure function without calling it (and not to a same-named local variable). */
+function isUncalledClosure(node: AstNode, context: LowerContext): boolean {
+  const name = variableName(node);
+  return name !== null && context.functions.has(name) && !context.shadowingReferences.has(node);
+}
+
+/**
+ * Finds variable references that resolve to a block-local `def` variable sharing its name with a closure function,
+ * following Groovy's lexical block and closure scopes.
+ */
+function collectShadowingReferences(
+  body: AstNode,
+  functions: ReadonlyMap<string, unknown>,
+): Set<AstNode> {
+  const references = new Set<AstNode>();
+  const visit = (value: unknown, scopes: Set<string>[]): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, scopes);
+      return;
+    }
+    if (!isAstNode(value)) return;
+    const node = value;
+    if (node.kind === "block" || node.kind === "closure" || node.kind === "for") {
+      const scope = new Set<string>();
+      if (node.kind === "closure") {
+        for (const parameter of groovyParameters(node.parameters) ?? []) scope.add(parameter.name);
+      }
+      if (node.kind === "for" && typeof node.variable === "string") scope.add(node.variable);
+      const inner = [...scopes, scope];
+      const children = node.kind === "block" ? nodeArray(node.statements) : nodeChildren(node);
+      for (const child of children) visit(child, inner);
+      return;
+    }
+    if (node.kind === "declaration") {
+      const name = variableName(node.left);
+      const right = asNode(node.right);
+      if (right !== null) visit(right, scopes);
+      if (name !== null && functions.has(name) && right?.kind !== "closure")
+        scopes.at(-1)?.add(name);
+      return;
+    }
+    if (node.kind === "variable") {
+      const name = variableName(node);
+      if (name !== null && functions.has(name) && scopes.some((scope) => scope.has(name))) {
+        references.add(node);
+      }
+      return;
+    }
+    for (const child of nodeChildren(node)) visit(child, scopes);
+  };
+  visit(body, []);
+  return references;
 }
 
 function isKnownListExpression(node: AstNode, context: LowerContext): boolean {
@@ -3015,6 +3152,14 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     case "getFloat":
       return lowerSingleInput(node, call.name, call.arguments, args, context);
     default:
+      if (!SEXSCRIPT_API_METHODS.has(call.name)) {
+        return unsupportedExpression(
+          context,
+          node,
+          "SX_UNDEFINED_FUNCTION",
+          `${call.name}() is not defined in this script, its package helpers, or the SexScript API; SexScript failed here at runtime.`,
+        );
+      }
       return unsupportedExpression(
         context,
         node,
@@ -3333,7 +3478,43 @@ function syntheticHelperStatements(context: LowerContext): IrStatement[] {
   if (context.syntheticHelpers.has("loadFirstTrue")) result.push(loadFirstTrueHelper());
   if (context.syntheticHelpers.has("indexOf")) result.push(indexOfHelper());
   if (context.syntheticHelpers.has("concat")) result.push(concatHelper());
+  if (context.syntheticHelpers.has("array")) result.push(arrayHelper());
   return result;
+}
+
+/** A Java `new T[size]` array starts with `size` default values; TeaseScript lists grow with add(). */
+function arrayHelper(): IrStatement {
+  const variable = (name: string): IrExpression => ({ kind: "variable", name });
+  return {
+    kind: "function",
+    name: "sexscriptLegacyArray",
+    parameters: [
+      { name: "size", defaultValue: null },
+      { name: "value", defaultValue: null },
+    ],
+    span: null,
+    body: [
+      { kind: "let", name: "items", value: { kind: "list", items: [] }, span: null },
+      {
+        kind: "repeat",
+        count: variable("size"),
+        span: null,
+        body: [
+          {
+            kind: "expression",
+            expression: {
+              kind: "methodCall",
+              target: variable("items"),
+              name: "add",
+              arguments: [variable("value")],
+            },
+            span: null,
+          },
+        ],
+      },
+      { kind: "return", value: variable("items"), span: null },
+    ],
+  };
 }
 
 /** Groovy `a + b + c` on lists creates a new list; TeaseScript has no list operator for that. */

@@ -71,6 +71,7 @@ export type IrStatement =
   | (IrBase & { kind: "expression"; expression: IrExpression })
   | (IrBase & { kind: "if"; condition: IrExpression; then: IrStatement[]; else: IrStatement[] })
   | (IrBase & { kind: "while"; condition: IrExpression; body: IrStatement[] })
+  | (IrBase & { kind: "repeat"; count: IrExpression; body: IrStatement[] })
   | (IrBase & { kind: "for"; variable: string; collection: IrExpression; body: IrStatement[] })
   | (IrBase & {
       kind: "switch";

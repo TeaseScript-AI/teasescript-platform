@@ -1,0 +1,15 @@
+function sexscriptLegacyArray(size, value) {
+  let items = []
+  repeat size {
+    items.add(value)
+  }
+  return items
+}
+let seen = sexscriptLegacyArray(3, null)
+seen[1] = true
+if seen[0] != true {
+  say "First time"
+}
+let counts = sexscriptLegacyArray(2, 0)
+counts[0] = counts[0] + 1
+say "Count ${counts.length}"

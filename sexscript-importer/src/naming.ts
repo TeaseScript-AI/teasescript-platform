@@ -32,11 +32,15 @@ export function renameConflictingIdentifiers(program: MigrationProgram): Migrati
     }
   }
   const rootScope = new Map<string, string>();
-  for (const name of globals) if (PROTECTED.has(name)) rootScope.set(name, fresh(name));
+  for (const name of globals) {
+    if (PROTECTED.has(name) || functions.has(name)) rootScope.set(name, fresh(name));
+  }
 
   const renamer: Renamer = {
     functions,
-    conflicts: (name, inFunction) => PROTECTED.has(name) || (inFunction && globals.has(name)),
+    // Function names are package-global too, so no variable may reuse one.
+    conflicts: (name, inFunction) =>
+      PROTECTED.has(name) || functions.has(name) || (inFunction && globals.has(name)),
     fresh,
   };
   return { ...program, statements: renameBlock(program.statements, rootScope, false, renamer) };
@@ -122,6 +126,8 @@ function renameStatement(
         condition: expression(statement.condition),
         body: block(statement.body),
       };
+    case "repeat":
+      return { ...statement, count: expression(statement.count), body: block(statement.body) };
     case "switch":
       return {
         ...statement,
