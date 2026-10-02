@@ -16,6 +16,8 @@ import {
 
 import {
   activatePlayerRuntimeButton,
+  completePlayerRuntimeStorageWrite,
+  pendingPlayerRuntimeStorageWrite,
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
@@ -555,4 +557,154 @@ test("runtime adapter forwards media reports, projects a live seek, and restores
   assert.equal(finished.snapshot.status, "halted");
   const last = finished.transcriptEntries.at(-1);
   assert.equal(last?.kind === "message" ? last.text : undefined, "done 10 s 8 s");
+});
+
+test("runtime adapter leaves evaluated persistent writes pending until acknowledgement", () => {
+  const initial = [{ key: "answer.2", value: "previous" }];
+  const session = createPlayerRuntimeSession(
+    `
+let suffix = 2
+let replacement = "new"
+save "\${replacement} value" as "answer.\${suffix}"
+let answer = load "answer.\${suffix}"
+say answer, instant
+exit
+`,
+    { scriptStorage: initial, persistentScriptStorage: true },
+  );
+  const write = pendingPlayerRuntimeStorageWrite(session.snapshot);
+  assert.ok(write);
+  assert.deepEqual({ key: write.key, value: write.value }, { key: "answer.2", value: "new value" });
+  assert.equal(session.snapshot.status, "waiting");
+  assert.equal(session.snapshot.scriptStoragePersistent, true);
+  assert.deepEqual(session.snapshot.scriptStorage, initial);
+  assert.deepEqual(session.transcriptEntries, []);
+
+  const completed = completePlayerRuntimeStorageWrite(session, write.actionId, true);
+  assert.equal(completed.outcome.kind, "completed");
+  assert.equal(completed.session.snapshot.status, "halted");
+  assert.equal(pendingPlayerRuntimeStorageWrite(completed.session.snapshot), null);
+  assert.deepEqual(completed.session.snapshot.scriptStorage, [
+    { key: "answer.2", value: "new value" },
+  ]);
+  assert.deepEqual(
+    completed.session.transcriptEntries.map((entry) => entry.text),
+    ["new value"],
+  );
+});
+
+test("runtime adapter retains the previous value and emits TSW014 after a failed write acknowledgement", () => {
+  const session = createPlayerRuntimeSession(
+    'save "replacement" as "answer"\nlet answer = load "answer"\nsay answer, instant\nexit',
+    { scriptStorage: [{ key: "answer", value: "previous" }], persistentScriptStorage: true },
+  );
+  const write = pendingPlayerRuntimeStorageWrite(session.snapshot);
+  assert.ok(write);
+  const completed = completePlayerRuntimeStorageWrite(session, write.actionId, false);
+  assert.equal(completed.outcome.kind, "completed");
+  assert.equal(completed.session.snapshot.status, "halted");
+  assert.equal(pendingPlayerRuntimeStorageWrite(completed.session.snapshot), null);
+  assert.deepEqual(completed.session.snapshot.scriptStorage, [
+    { key: "answer", value: "previous" },
+  ]);
+  assert.deepEqual(
+    completed.session.transcriptEntries.map((entry) => entry.text),
+    ["previous"],
+  );
+  assert.deepEqual(
+    completed.session.events
+      .filter((event) => event.kind === "developerWarning")
+      .map(({ code, message }) => ({ code, message })),
+    [{ code: "TSW014", message: 'save could not persist "answer"; the previous value is kept.' }],
+  );
+});
+
+test("runtime adapter keeps storage session-local by default without pending writes or warnings", () => {
+  const session = createPlayerRuntimeSession(
+    'save "local" as "answer"\nlet answer = load "answer"\nsay answer, instant\ndelete "old"\nexit',
+    { scriptStorage: [{ key: "old", value: "initial" }] },
+  );
+  assert.equal(session.snapshot.scriptStoragePersistent, false);
+  assert.equal(session.snapshot.status, "halted");
+  assert.equal(session.snapshot.foregroundAction, null);
+  assert.equal(pendingPlayerRuntimeStorageWrite(session.snapshot), null);
+  assert.deepEqual(session.snapshot.scriptStorage, [{ key: "answer", value: "local" }]);
+  assert.deepEqual(
+    session.transcriptEntries.map((entry) => entry.text),
+    ["local"],
+  );
+  assert.deepEqual(
+    session.events.filter(
+      (event) =>
+        event.kind === "developerWarning" ||
+        (event.kind === "actionRequested" && event.action.kind === "storageWrite") ||
+        (event.kind === "actionCompleted" && event.settlement.actionKind === "storageWrite"),
+    ),
+    [],
+  );
+});
+
+test("runtime adapter ignores unknown and stale storage action IDs", () => {
+  const original = createPlayerRuntimeSession('save 1 as "answer"\nsave 2 as "answer"\nexit', {
+    persistentScriptStorage: true,
+  });
+  const first = pendingPlayerRuntimeStorageWrite(original.snapshot);
+  assert.ok(first);
+  const unknown = completePlayerRuntimeStorageWrite(original, first.actionId + 100, true);
+  assert.notEqual(unknown.outcome.kind, "completed");
+  assert.deepEqual(unknown.session, original);
+
+  const completed = completePlayerRuntimeStorageWrite(original, first.actionId, true);
+  const second = pendingPlayerRuntimeStorageWrite(completed.session.snapshot);
+  assert.ok(second);
+  assert.notEqual(second.actionId, first.actionId);
+  const stale = completePlayerRuntimeStorageWrite(completed.session, first.actionId, false);
+  assert.notEqual(stale.outcome.kind, "completed");
+  assert.deepEqual(stale.session, completed.session);
+  assert.deepEqual(stale.session.snapshot.scriptStorage, [{ key: "answer", value: 1 }]);
+});
+
+test("runtime adapter leaves writes reached after interaction and time observation pending", () => {
+  let session = createPlayerRuntimeSession(
+    'showButton "Continue"\nsave 2 as "answered"\nwait 1 s\nsave 3 as "observed"\ndelete "answered"\nlet answer = load "answered" default "deleted"\nsay answer, instant\nexit',
+    { persistentScriptStorage: true },
+  );
+  assert.equal(pendingPlayerRuntimeStorageWrite(session.snapshot), null);
+  const answered = activatePlayerRuntimeButton(session);
+  assert.ok(answered);
+  assert.equal(answered.outcome.kind, "completed");
+  session = answered.session;
+  const interactionWrite = pendingPlayerRuntimeStorageWrite(session.snapshot);
+  assert.ok(interactionWrite);
+  assert.deepEqual(
+    { key: interactionWrite.key, value: interactionWrite.value },
+    { key: "answered", value: 2 },
+  );
+  assert.equal(session.snapshot.status, "waiting");
+  assert.deepEqual(session.snapshot.scriptStorage, []);
+  session = completePlayerRuntimeStorageWrite(session, interactionWrite.actionId, true).session;
+  assert.equal(session.snapshot.foregroundAction?.kind, "delay");
+
+  const observed = observePlayerRuntimeTime(session, 1_000);
+  assert.equal(observed.outcome.kind, "observed");
+  session = observed.session;
+  const timeWrite = pendingPlayerRuntimeStorageWrite(session.snapshot);
+  assert.ok(timeWrite);
+  assert.deepEqual({ key: timeWrite.key, value: timeWrite.value }, { key: "observed", value: 3 });
+  assert.equal(session.snapshot.status, "waiting");
+  assert.deepEqual(session.snapshot.scriptStorage, [{ key: "answered", value: 2 }]);
+  session = completePlayerRuntimeStorageWrite(session, timeWrite.actionId, true).session;
+
+  const deletion = pendingPlayerRuntimeStorageWrite(session.snapshot);
+  assert.ok(deletion);
+  assert.deepEqual({ key: deletion.key, value: deletion.value }, { key: "answered", value: null });
+  assert.deepEqual(session.snapshot.scriptStorage, [
+    { key: "answered", value: 2 },
+    { key: "observed", value: 3 },
+  ]);
+  session = completePlayerRuntimeStorageWrite(session, deletion.actionId, true).session;
+  assert.equal(session.snapshot.status, "halted");
+  assert.equal(pendingPlayerRuntimeStorageWrite(session.snapshot), null);
+  assert.deepEqual(session.snapshot.scriptStorage, [{ key: "observed", value: 3 }]);
+  assert.equal(session.transcriptEntries.at(-1)?.text, "deleted");
 });

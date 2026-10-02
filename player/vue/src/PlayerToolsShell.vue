@@ -58,6 +58,8 @@ const props = defineProps<{
   stageHeight: number;
   mediaAspect: number;
   fullscreen: boolean;
+  /** The script's saved data when the host persists it; clearing is possible only while no session runs. */
+  savedData?: { readonly canClear: boolean; readonly clear: () => Promise<boolean> } | null;
 }>();
 // User-facing Player Settings: owned by PlayerApp and available in every build.
 const contrast = defineModel<"standard" | "high">("contrast", { required: true });
@@ -189,6 +191,13 @@ watch(viewport, () => {
 const sidebarVisible = ref(!narrow.value);
 const sidebarContentsPresent = ref(sidebarVisible.value);
 const playerSettingsOpen = ref(false);
+// Clearing saved script data asks for confirmation first and then reports its result.
+const clearSavedData = ref<"idle" | "confirm" | "clearing" | "cleared" | "failed">("idle");
+watch(playerSettingsOpen, () => (clearSavedData.value = "idle"));
+async function confirmClearSavedData() {
+  clearSavedData.value = "clearing";
+  clearSavedData.value = (await props.savedData?.clear()) ? "cleared" : "failed";
+}
 watch(
   [sidebarVisible, narrow],
   async ([open, isNarrow], _, onCleanup) => {
@@ -815,7 +824,9 @@ async function updateSidebarVisibility(open: boolean) {
                   >
                     <DialogHeader>
                       <DialogTitle>Player Settings</DialogTitle>
-                      <DialogDescription>Preferences for the Player interface.</DialogDescription>
+                      <DialogDescription>
+                        Preferences for the Player interface{{ savedData ? " and this script's saved data" : "" }}.
+                      </DialogDescription>
                     </DialogHeader>
                     <label class="flex flex-col gap-2 text-sm">
                       Menu Sidebar labels
@@ -851,6 +862,43 @@ async function updateSidebarVisibility(open: boolean) {
                         B · Auto-hide, controls right
                       </label>
                     </fieldset>
+                    <section
+                      v-if="savedData"
+                      class="grid gap-2 border-t pt-4 text-sm"
+                      data-player-setting="saved-data"
+                    >
+                      <h3 class="font-medium">Saved script data</h3>
+                      <p>What this script saved in this browser for its next runs.</p>
+                      <template v-if="clearSavedData === 'confirm' || clearSavedData === 'clearing'">
+                        <p>Clear all saved data for this script? This cannot be undone.</p>
+                        <div class="flex gap-2">
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            data-clear-saved-data-confirm
+                            @click="confirmClearSavedData"
+                          >
+                            Clear
+                          </Button>
+                          <Button variant="outline" size="sm" @click="clearSavedData = 'idle'">Cancel</Button>
+                        </div>
+                      </template>
+                      <template v-else>
+                        <Button
+                          class="justify-self-start"
+                          variant="outline"
+                          size="sm"
+                          :disabled="!savedData.canClear"
+                          data-clear-saved-data
+                          @click="clearSavedData = 'confirm'"
+                        >
+                          Clear saved script data
+                        </Button>
+                        <p v-if="!savedData.canClear">Available before the session starts or after it ends.</p>
+                        <p v-if="clearSavedData === 'cleared'" role="status">Saved script data cleared.</p>
+                        <p v-if="clearSavedData === 'failed'" role="status">Could not clear saved script data.</p>
+                      </template>
+                    </section>
                   </DialogContent>
                 </Dialog>
               </div>
