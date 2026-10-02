@@ -192,13 +192,15 @@ test("a transferred interaction result is ordinary state that later writes may c
   );
 });
 
-test("removed lifecycle fields are rejected structurally", () => {
+test("an unknown root snapshot field is rejected at validation, checkpoint and restore", () => {
   const plan = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
   const snapshot = createFreshRuntimeSnapshot(plan);
-
-  const oldLifecycle = { ...structuredClone(snapshot), lastSettlementResultState: "none" };
-  assert.equal(validateRuntimeSnapshot(oldLifecycle, plan).valid, false);
-  assert.throws(() => createCheckpoint(plan, oldLifecycle));
+  const withUnknownField = { ...structuredClone(snapshot), unknownField: "none" };
+  assert.equal(validateRuntimeSnapshot(withUnknownField, plan).valid, false);
+  assert.throws(() => createCheckpoint(plan, withUnknownField));
+  assert.throws(() =>
+    restoreCheckpoint({ ...createCheckpoint(plan, snapshot), snapshot: withUnknownField }),
+  );
 });
 
 interface InjectedInteractionPlan {
