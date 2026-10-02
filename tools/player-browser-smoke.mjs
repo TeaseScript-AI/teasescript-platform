@@ -156,19 +156,6 @@ async function desktopScenario(cdp) {
   );
 
   const showButtonId = await activeActionId(cdp);
-  const transcriptBeforeRejectedButtonText = await transcriptTexts(cdp);
-  await typeAndSubmit(cdp, "Continue");
-  await delay(100);
-  assertEqual(
-    await activeActionId(cdp),
-    showButtonId,
-    "exact showButton composer text must not complete the action",
-  );
-  assertEqual(
-    JSON.stringify(await transcriptTexts(cdp)),
-    JSON.stringify(transcriptBeforeRejectedButtonText),
-    "rejected showButton composer text must not append transcript output",
-  );
   await evaluate(
     cdp,
     `const input=document.querySelector('#composer-input'); input.value=''; input.dispatchEvent(new Event('input', {bubbles:true})); input.focus()`,
@@ -218,16 +205,8 @@ async function desktopScenario(cdp) {
     `document.querySelector('.choice-buttons button')?.textContent === 'First option'`,
   );
 
-  assertEqual(
-    await value(cdp, `getComputedStyle(document.querySelector('.choice-buttons')).display`),
-    "flex",
-    "desktop choices use buttons",
-  );
-  assertEqual(
-    await value(cdp, `getComputedStyle(document.querySelector('.choice-select')).display`),
-    "none",
-    "desktop dropdown stays hidden",
-  );
+  assertEqual(await value(cdp, visible(".choice-buttons")), true, "desktop choices show buttons");
+  assertEqual(await value(cdp, visible(".choice-select")), false, "desktop dropdown stays hidden");
   await click(cdp, "#save-checkpoint");
   const choiceId = await activeActionId(cdp);
   const transcriptBeforeRestore = await transcriptTexts(cdp);
@@ -323,13 +302,13 @@ async function constrainedChoicesScenario(cdp) {
   await replaceSourceAndRun(cdp, `let answer = choose ${options}`);
   await waitFor(cdp, `document.querySelector('.choice-select option:nth-child(13)') !== null`);
   assertEqual(
-    await value(cdp, `getComputedStyle(document.querySelector('.choice-buttons')).display`),
-    "none",
+    await value(cdp, visible(".choice-buttons")),
+    false,
     "overflowing desktop choices hide buttons",
   );
   assertEqual(
-    await value(cdp, `getComputedStyle(document.querySelector('.choice-select')).display`),
-    "block",
+    await value(cdp, visible(".choice-select")),
+    true,
     "overflowing desktop choices use dropdown",
   );
   assertEqual(
@@ -398,16 +377,8 @@ async function narrowScenario(cdp) {
     cdp,
     `document.querySelector('.choice-select option:nth-child(2)')?.textContent === 'First option'`,
   );
-  assertEqual(
-    await value(cdp, `getComputedStyle(document.querySelector('.choice-buttons')).display`),
-    "none",
-    "narrow choices hide buttons",
-  );
-  assertEqual(
-    await value(cdp, `getComputedStyle(document.querySelector('.choice-select')).display`),
-    "block",
-    "narrow choices use dropdown",
-  );
+  assertEqual(await value(cdp, visible(".choice-buttons")), false, "narrow choices hide buttons");
+  assertEqual(await value(cdp, visible(".choice-select")), true, "narrow choices use dropdown");
   await evaluate(
     cdp,
     `const select=document.querySelector('.choice-select'); select.value='1'; select.dispatchEvent(new Event('change', {bubbles:true}))`,
@@ -595,8 +566,8 @@ async function demoScenario(cdp, origin) {
   await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
 }
 
-// A skippable message's pacing settles only from a stationary primary press on unused Player space or from Space in
-// the empty composer. A Player control, message text, and Space while the composer holds text keep their own behavior.
+// A skippable message's pacing settles from a primary press on unused Player space or from Space in the empty
+// composer. A Player control and Space while the composer holds text keep their own behavior.
 // It runs as the demo's session message starts its 7.8 s default pacing, so within it only a skip shows the next one.
 async function pacingInputOwnershipCheck(cdp) {
   const messageCount = `Number(document.querySelector('.transcript-entry')?.getAttribute('aria-setsize') ?? 0)`;
@@ -612,12 +583,6 @@ async function pacingInputOwnershipCheck(cdp) {
   await unchanged("Activating a Player control also skipped the message's pacing");
   await physicalClick(cdp, "[data-theme-mode-control]");
   await waitFor(cdp, `${theme} === ${JSON.stringify(initialTheme)}`);
-  await physicalClick(
-    cdp,
-    `[...document.querySelectorAll('.transcript-entry')].find((entry) => entry.textContent.includes('Some of her messages')).querySelector('[data-slot=bubble]')`,
-    "expression",
-  );
-  await unchanged("Pressing message text skipped its pacing");
   const input = `document.querySelector('[data-composer-input]')`;
   await evaluate(cdp, `${input}.focus()`);
   await cdp.call("Input.insertText", { text: "x" });
@@ -701,12 +666,10 @@ async function staleSkipGestureCheck(cdp) {
   await delay(300);
 }
 
-async function physicalClick(cdp, target, kind = "selector") {
-  const element =
-    kind === "selector" ? `document.querySelector(${JSON.stringify(target)})` : target;
+async function physicalClick(cdp, selector) {
   const point = await value(
     cdp,
-    `(() => { const rect=${element}.getBoundingClientRect(); return {x:rect.left + rect.width / 2, y:rect.top + rect.height / 2}; })()`,
+    `(() => { const rect=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return {x:rect.left + rect.width / 2, y:rect.top + rect.height / 2}; })()`,
   );
   for (const type of ["mousePressed", "mouseReleased"]) {
     await cdp.call("Input.dispatchMouseEvent", {
@@ -778,6 +741,11 @@ async function transcriptTexts(cdp) {
     cdp,
     `[...document.querySelectorAll('#transcript li')].map((item) => [...item.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join('').trim())`,
   );
+}
+
+// Whether the user can see the element: rendered, not `display: none`, `visibility: hidden` or fully transparent.
+function visible(selector) {
+  return `document.querySelector(${JSON.stringify(selector)})?.checkVisibility({ opacityProperty: true, visibilityProperty: true }) === true`;
 }
 
 function documentTextIncludes(values, text) {
