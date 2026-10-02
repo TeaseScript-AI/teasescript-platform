@@ -216,22 +216,25 @@ test("rejects unsafe source positions and out-of-range nested identities", () =>
   assert.equal(failed.status, "failed");
   assert.equal(validateRuntimeSnapshot(failed, failedPlan).valid, true);
   const spanSnapshot = structuredClone(failed);
-  // EVIDENCE: fixture: expose the readonly failure offset for unsafe source-span validation.
-  (spanSnapshot.failure!.span.start as { offset: number }).offset = 2 ** 53;
+  // EVIDENCE: fixture: expose the readonly failure offset; both positions stay safe integers.
+  (spanSnapshot.failure!.span.start as { offset: number }).offset =
+    failed.failure!.span.end.offset + 1;
   assert.equal(
     validateRuntimeSnapshot(spanSnapshot, failedPlan).valid,
     false,
     "failure span starts after it ends",
   );
 
-  const lineSnapshot = structuredClone(failed);
-  // EVIDENCE: fixture: expose the readonly failure line; no other span relationship constrains it.
-  (lineSnapshot.failure!.span.start as { line: number }).line = 2 ** 53;
-  assert.equal(
-    validateRuntimeSnapshot(lineSnapshot, failedPlan).valid,
-    false,
-    "unsafe failure source line",
-  );
+  for (const field of ["offset", "line", "column"] as const) {
+    const unsafe = structuredClone(failed);
+    // EVIDENCE: fixture: expose one readonly end-position field; the span stays ordered.
+    (unsafe.failure!.span.end as Record<typeof field, number>)[field] = MAX_SAFE + 1;
+    assert.equal(
+      validateRuntimeSnapshot(unsafe, failedPlan).valid,
+      false,
+      `unsafe failure end ${field}`,
+    );
+  }
 });
 
 function isAllocatorError(error: unknown): boolean {

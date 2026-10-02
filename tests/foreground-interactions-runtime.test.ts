@@ -216,6 +216,7 @@ test("number accepts TeaseScript decimal/scientific text and preserves its trimm
     "1e999",
     "one",
     "+",
+    "0x10",
   ]) {
     const pending = waiting(plan);
     const before = JSON.stringify(pending.snapshot);
@@ -668,6 +669,8 @@ test("consumed interaction settlements enforce intrinsic text and number semanti
     ["leading CR text", textPlan, text, "\rvalue", "\rvalue"],
     ["CRLF text", textPlan, text, "value\r\n", "value\r\n"],
     ["non-numeric transcript", numberPlan, number, 10, "nonsense"],
+    // Number() maps this transcript to the stored result, but it is not TeaseScript number text.
+    ["hexadecimal transcript", numberPlan, number, 16, "0x10"],
     ["line-separator transcript", numberPlan, number, 10, "1\u2028"],
     ["result differs from parsed transcript", numberPlan, number, 11, "1e1"],
     ["negative-zero result", numberPlan, number, -0, "-0"],

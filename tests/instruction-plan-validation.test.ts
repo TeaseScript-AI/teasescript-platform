@@ -25,6 +25,7 @@ test("reports malformed nested binary expression nodes at their plan paths", () 
   // EVIDENCE: the compiler-produced inner binary expression has literal `2` as its right child.
   const leftRight = left.right as MutableLiteralExpression;
   leftRight.value = {};
+  left.left = null;
   // EVIDENCE: the compiler-produced right operand is literal `3`; only its kind is replaced.
   (expression.right as { kind: string }).kind = "unknown";
 
@@ -37,6 +38,7 @@ test("reports malformed nested binary expression nodes at their plan paths", () 
       // A binary expression is not an assignable target, independent of its nested defects.
       "$.instructions[1].target",
       "$.instructions[1].target.operator",
+      "$.instructions[1].target.left.left",
       "$.instructions[1].target.left.right.value",
       "$.instructions[1].target.right.kind",
     ]),
