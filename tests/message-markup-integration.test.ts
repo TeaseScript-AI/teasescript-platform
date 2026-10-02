@@ -155,7 +155,7 @@ test("restores a promoted block-string fragment without repeating evaluation or 
 test("preserves message markup through every instruction checkpoint boundary", () => {
   const result = assertRuntimeResumeEquivalent(
     [
-      'let literal = "[spoiler]dynamic[/spoiler]"',
+      'let literal = "**dynamic**"',
       'say "# Heading\\nReusable **format** and ${escapeMarkup(literal)}"',
       "exit",
     ].join("\n"),
@@ -164,7 +164,7 @@ test("preserves message markup through every instruction checkpoint boundary", (
   const output = result.events.find((event) => event.kind === "say");
   assert.equal(output?.kind, "say");
   if (output?.kind === "say") {
-    assert.equal(output.text, "Heading\nReusable format and [spoiler]dynamic[/spoiler]");
+    assert.equal(output.text, "Heading\nReusable format and **dynamic**");
     assert.equal(isMessageMarkup(output.content), true);
   }
 });
