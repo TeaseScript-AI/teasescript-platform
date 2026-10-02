@@ -1,8 +1,8 @@
-import { constants } from "node:fs";
-import { access, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { spawn } from "node:child_process";
 import { createPlaygroundServer } from "../dist/playground/server.js";
+import { findChromium } from "./find-chromium.mjs";
 
 await main();
 
@@ -837,21 +837,6 @@ async function value(cdp, expression) {
 
 function assertEqual(actual, expected, message) {
   if (actual !== expected) throw new Error(`${message}: expected ${expected}, received ${actual}`);
-}
-
-async function findChromium() {
-  for (const candidate of [
-    process.env.CHROMIUM_BIN,
-    "/usr/bin/chromium",
-    "/usr/bin/chromium-browser",
-    "/usr/bin/google-chrome",
-  ].filter(Boolean)) {
-    try {
-      await access(candidate, constants.X_OK);
-      return candidate;
-    } catch {}
-  }
-  return null;
 }
 
 async function reservePort() {
