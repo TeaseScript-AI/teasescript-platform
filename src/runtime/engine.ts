@@ -53,9 +53,13 @@ import type {
   OutputSpeaker,
   RuntimeFailureEvent,
   SayEvent,
-  ScriptStorageChangedEvent,
 } from "./events.js";
-import { assertPersistable, storageKey, WRITE_KEY_MESSAGE } from "./script-storage.js";
+import {
+  assertPersistable,
+  storageKey,
+  WRITE_KEY_MESSAGE,
+  writeScriptStorage,
+} from "./script-storage.js";
 import type { XorShift32State } from "./random.js";
 import {
   cloneCapturedSerializableValue,
@@ -83,6 +87,7 @@ import type {
   RuntimeTimerActionSnapshot,
   RuntimeMediaActionSnapshot,
   RuntimeMediaPlaybackActionSnapshot,
+  RuntimeStorageWriteActionSnapshot,
 } from "./actions/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import {
@@ -2096,7 +2101,10 @@ function showImage(
   advance(snapshot);
 }
 
-/** `save` and `delete`: changes the session's script storage view and reports the change to the host. */
+/**
+ * `save` and `delete`. Session-local storage changes at once. Persistent storage waits for the host's acknowledgement:
+ * the view changes only when the host reports the write as stored.
+ */
 function writeStorage(
   instruction: Extract<Instruction, { kind: "storageWrite" }>,
   snapshot: RuntimeSnapshot,
@@ -2114,18 +2122,48 @@ function writeStorage(
     instruction.key.span,
   );
   assertPersistable(value, instruction.span);
-  const sequence = takeSequence(snapshot);
-  evaluator.writeScriptStorage(key, value);
+  if (!snapshot.scriptStoragePersistent) {
+    writeScriptStorage(snapshot, key, value);
+    advance(snapshot);
+    return;
+  }
+  if (
+    !Number.isSafeInteger(snapshot.nextActionId) ||
+    snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
+  ) {
+    throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+  }
+  // The request, the completion, and a possible failure warning.
+  assertEventSequenceCapacity(
+    snapshot,
+    requiredEventSequencesForNewDelay(snapshot) + 1,
+    instruction.span,
+  );
+  const requestSequence = takeSequence(snapshot);
+  const write: RuntimeStorageWriteActionSnapshot = Object.freeze({
+    kind: "storageWrite",
+    actionId: snapshot.nextActionId,
+    owningInstruction: snapshot.nextInstruction,
+    continuationInstruction: snapshot.nextInstruction + 1,
+    ownerCallFrameId: snapshot.callFrames.at(-1)?.id ?? null,
+    scopeDepth: snapshot.frames.length,
+    loopDepth: snapshot.loopFrames.length,
+    createdAtMs: snapshot.currentSessionTimeMs,
+    key,
+    value,
+    requestEventSequence: requestSequence,
+  });
+  snapshot.nextActionId += 1;
+  snapshot.foregroundAction = write;
+  snapshot.status = "waiting";
   events.push(
     Object.freeze({
-      kind: "scriptStorageChanged",
-      sequence,
-      key,
-      value: cloneCapturedSerializableValue(value),
+      kind: "actionRequested",
+      sequence: requestSequence,
+      action: { ...write, value: cloneCapturedSerializableValue(value) },
       span: copySpan(instruction.span),
-    } satisfies ScriptStorageChangedEvent),
+    } satisfies ActionRequestedEvent),
   );
-  advance(snapshot);
 }
 
 /** A media position or duration: a duration value or a number of seconds, finite and not negative. */

@@ -24,7 +24,10 @@ export function startTimerHandler(plan: InstructionPlan, snapshot: RuntimeSnapsh
   if (invocation.count > 1) invocation.count -= 1;
   else snapshot.pendingTimerHandlers.shift();
   const suspendedAction = snapshot.foregroundAction;
-  if (suspendedAction !== null && suspendedAction.kind === "chatPacingGate") {
+  if (
+    suspendedAction !== null &&
+    (suspendedAction.kind === "chatPacingGate" || suspendedAction.kind === "storageWrite")
+  ) {
     throw new Error("Only a foreground delay, interaction, or media wait can be interrupted.");
   }
   const frame: RuntimeCallFrameSnapshot = {

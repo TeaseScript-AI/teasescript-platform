@@ -3,6 +3,7 @@ import type {
   RuntimeDelayActionSnapshot,
   RuntimeInteractionActionSnapshot,
   RuntimeMediaPlaybackActionSnapshot,
+  RuntimeStorageWriteActionSnapshot,
 } from "../actions/model.js";
 import type { RuntimeTerminalContinuationHandoffSnapshot } from "../state.js";
 
@@ -16,7 +17,8 @@ export function terminalContinuationHandoffFor(
   action:
     | RuntimeDelayActionSnapshot
     | RuntimeInteractionActionSnapshot
-    | RuntimeMediaPlaybackActionSnapshot,
+    | RuntimeMediaPlaybackActionSnapshot
+    | RuntimeStorageWriteActionSnapshot,
 ): RuntimeTerminalContinuationHandoffSnapshot | null {
   if (
     action.ownerCallFrameId !== null ||
@@ -27,6 +29,7 @@ export function terminalContinuationHandoffFor(
   const instruction = plan.instructions[action.owningInstruction];
   const matchesTerminalInstruction =
     (action.kind === "delay" && instruction?.kind === "wait") ||
+    (action.kind === "storageWrite" && instruction?.kind === "storageWrite") ||
     (action.kind === "mediaPlayback" &&
       instruction?.kind === "playMedia" &&
       instruction.destinationTemporary === null) ||

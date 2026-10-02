@@ -1,7 +1,6 @@
 import type { MessagePresentation } from "../message-presentation.js";
 import type { SourceSpan } from "../source.js";
 import type { MessageMarkup } from "../message-markup.js";
-import type { SerializableRuntimeValue } from "./serializable-values.js";
 import type {
   RuntimeActionSettlementSnapshot,
   RuntimePendingActionSnapshot,
@@ -83,18 +82,6 @@ export interface RuntimeFailureEvent {
   readonly span: SourceSpan;
 }
 
-/**
- * A `save` or `delete` changed this session's script storage; `value` is `null` when the key was removed. Hosts
- * persist script storage from these newly emitted events.
- */
-export interface ScriptStorageChangedEvent {
-  readonly kind: "scriptStorageChanged";
-  readonly sequence: number;
-  readonly key: string;
-  readonly value: SerializableRuntimeValue;
-  readonly span: SourceSpan;
-}
-
 export type InterpreterEvent =
   | SayEvent
   | ExitEvent
@@ -103,5 +90,4 @@ export type InterpreterEvent =
   | ActionCompletedEvent
   | PlayerTranscriptEvent
   | DeveloperWarningEvent
-  | ScriptStorageChangedEvent
   | RuntimeFailureEvent;

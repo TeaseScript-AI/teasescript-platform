@@ -6,6 +6,7 @@ import {
   createCheckpoint,
   createFreshRuntimeSnapshot,
   deserializeCheckpoint,
+  run,
   serializeCheckpoint,
   type FreshRuntimeOptions,
 } from "../src/index.js";
@@ -51,4 +52,76 @@ test("fresh state and JSON checkpoint restore reject invalid external script sto
     checkpoint.snapshot.scriptStorage = invalid;
     assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)), CheckpointError, name);
   }
+});
+
+test("fresh storage accepts unordered entries and checkpoints retain a sorted view", () => {
+  const compiled = plan("exit");
+  const snapshot = createFreshRuntimeSnapshot(compiled, {
+    persistentScriptStorage: true,
+    scriptStorage: [
+      { key: "z", value: 2 },
+      { key: "a", value: 1 },
+    ],
+  });
+  assert.deepEqual(snapshot.scriptStorage, [
+    { key: "a", value: 1 },
+    { key: "z", value: 2 },
+  ]);
+  assert.equal(snapshot.scriptStoragePersistent, true);
+  const canonical = createCheckpoint(compiled, snapshot);
+  const restored = deserializeCheckpoint(serializeCheckpoint(canonical));
+  assert.deepEqual(restored.snapshot, snapshot);
+  const unsorted = {
+    ...canonical,
+    snapshot: { ...canonical.snapshot, scriptStorage: [...snapshot.scriptStorage].reverse() },
+  };
+  assert.throws(() => deserializeCheckpoint(JSON.stringify(unsorted)), CheckpointError);
+});
+
+const invalidPersistenceValues = [null, 0, "true", {}, []];
+
+test("fresh options reject non-boolean storage persistence", () => {
+  const compiled = plan("exit");
+  for (const invalid of invalidPersistenceValues) {
+    assert.throws(
+      () =>
+        createFreshRuntimeSnapshot(compiled, {
+          // EVIDENCE: intentionally malformed host option exercises the public validation boundary.
+          persistentScriptStorage: invalid as NonNullable<
+            FreshRuntimeOptions["persistentScriptStorage"]
+          >,
+        }),
+      TypeError,
+      JSON.stringify(invalid),
+    );
+  }
+});
+
+test("checkpoint restore rejects non-boolean storage persistence", () => {
+  const compiled = plan("exit");
+  const canonical = createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled));
+  for (const invalid of invalidPersistenceValues) {
+    // EVIDENCE: widen only the persistence flag to simulate corrupted persisted JSON.
+    const checkpoint = structuredClone(canonical) as {
+      snapshot: { scriptStoragePersistent: unknown };
+    };
+    checkpoint.snapshot.scriptStoragePersistent = invalid;
+    assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)), CheckpointError);
+  }
+});
+
+test("restore rejects a pending storage write in session-local mode", () => {
+  const compiled = plan('save 2 as "k"');
+  const pending = run(
+    compiled,
+    createFreshRuntimeSnapshot(compiled, { persistentScriptStorage: true }),
+  );
+  assert.equal(pending.snapshot.foregroundAction?.kind, "storageWrite");
+  const canonical = createCheckpoint(compiled, pending.snapshot);
+  assert.doesNotThrow(() => deserializeCheckpoint(serializeCheckpoint(canonical)));
+  const local = {
+    ...canonical,
+    snapshot: { ...canonical.snapshot, scriptStoragePersistent: false },
+  };
+  assert.throws(() => deserializeCheckpoint(JSON.stringify(local)), CheckpointError);
 });

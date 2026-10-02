@@ -16,6 +16,7 @@ import { requiredActionCompletionEvents } from "./actions/model.js";
 import { recordValidationTestWork } from "../validation-testing.js";
 import { validMediaAction } from "./media-validation.js";
 import { validTimerAction } from "./timer-validation.js";
+import { validateScriptStorageEntries } from "./script-storage.js";
 
 interface ActionValidationAnalysis {
   readonly functionIdsByInstruction: readonly (number | null)[];
@@ -204,7 +205,42 @@ function validForegroundActionKind(
       hasEventSequenceCapacity(snapshot.nextEventSequence, 1)
     );
   }
+  if (action.kind === "storageWrite") {
+    return (
+      validStorageWriteAction(action, snapshot) &&
+      hasEventSequenceCapacity(snapshot.nextEventSequence, 2)
+    );
+  }
   return false;
+}
+
+/** A pending `save`/`delete` exists only for persistent storage and carries a storable value or `null`. */
+function validStorageWriteAction(
+  action: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+): boolean {
+  return (
+    hasExactKeys(action, [
+      "kind",
+      "actionId",
+      "owningInstruction",
+      "continuationInstruction",
+      "ownerCallFrameId",
+      "scopeDepth",
+      "loopDepth",
+      "createdAtMs",
+      "key",
+      "value",
+      "requestEventSequence",
+    ]) &&
+    snapshot.scriptStoragePersistent === true &&
+    typeof action.key === "string" &&
+    (action.value === null ||
+      validateScriptStorageEntries([{ key: action.key, value: action.value }], "value") === null) &&
+    validSessionTime(action.createdAtMs) &&
+    validSessionTime(snapshot.currentSessionTimeMs) &&
+    action.createdAtMs <= snapshot.currentSessionTimeMs
+  );
 }
 
 function validRetainedSettlement(
@@ -225,7 +261,13 @@ function validSettlementShapeAndKind(
   analysis: ActionValidationAnalysis | undefined,
 ): boolean {
   return (
-    isOneOf(settlement.actionKind, ["delay", "interaction", "chatPacingGate", "mediaPlayback"]) &&
+    isOneOf(settlement.actionKind, [
+      "delay",
+      "interaction",
+      "chatPacingGate",
+      "mediaPlayback",
+      "storageWrite",
+    ]) &&
     (settlement.actionKind === "chatPacingGate" || settlement.settlementKind === "completed") &&
     positiveSafeInteger(settlement.actionId) &&
     validSettlementProvenance(settlement, plan) &&
@@ -331,8 +373,9 @@ export function validForegroundActionState(
 }
 
 /**
- * Mirrors the engine's pause of catch-up toward the observed time: the script or a queued expiry block can execute.
- * Only then may scene time stand behind the observed time, and timed work due exactly now wait for that execution.
+ * Mirrors the engine's pause of catch-up toward the observed time: the script or a queued expiry block can execute,
+ * or a queued block waits for a pending storage write. Only then may scene time stand behind the observed time, and
+ * timed work due exactly now wait for that execution.
  */
 export function catchUpPaused(snapshot: Record<string, unknown>): boolean {
   if (snapshot.status === "ready" || snapshot.status === "running") return true;
@@ -355,7 +398,8 @@ export function catchUpPaused(snapshot: Record<string, unknown>): boolean {
     (isPlainRecord(foreground) &&
       (foreground.kind === "delay" ||
         foreground.kind === "interaction" ||
-        foreground.kind === "mediaPlayback"))
+        foreground.kind === "mediaPlayback" ||
+        foreground.kind === "storageWrite"))
   );
 }
 
@@ -962,7 +1006,8 @@ export function validateTerminalContinuationHandoffState(
     !positiveSafeInteger(handoff.actionId) ||
     (handoff.actionKind !== "delay" &&
       handoff.actionKind !== "interaction" &&
-      handoff.actionKind !== "mediaPlayback") ||
+      handoff.actionKind !== "mediaPlayback" &&
+      handoff.actionKind !== "storageWrite") ||
     !nonNegativeSafeInteger(handoff.owningInstruction) ||
     !nonNegativeSafeInteger(handoff.continuationInstruction) ||
     !positiveSafeInteger(snapshot.nextActionId) ||
@@ -983,6 +1028,7 @@ export function validateTerminalContinuationHandoffState(
     snapshot.nextInstruction === plan.rootEndInstruction &&
     handoff.owningInstruction + 1 === handoff.continuationInstruction &&
     ((handoff.actionKind === "delay" && instruction?.kind === "wait") ||
+      (handoff.actionKind === "storageWrite" && instruction?.kind === "storageWrite") ||
       (handoff.actionKind === "mediaPlayback" &&
         instruction?.kind === "playMedia" &&
         instruction.destinationTemporary === null) ||
@@ -1010,10 +1056,10 @@ function validTerminalContinuationHandoffSettlement(
     );
   }
 
-  // Only a background pacing gate can settle after a terminal delay and replace bounded replay before root
-  // completion is entered; a gate created by an expiry block may be newer than the delay.
+  // Only a background pacing gate can settle after a terminal delay or storage write and replace bounded replay
+  // before root completion is entered; a gate created by an expiry block may be newer than the delay.
   return (
-    handoff.actionKind === "delay" &&
+    (handoff.actionKind === "delay" || handoff.actionKind === "storageWrite") &&
     settlement.actionKind === "chatPacingGate" &&
     positiveSafeInteger(settlement.actionId)
   );
@@ -1468,6 +1514,27 @@ function validSettlementKindData(
       ]) && validSettlementChronology(settlement, snapshot)
     );
   }
+  if (settlement.actionKind === "storageWrite") {
+    return (
+      hasExactKeys(settlement, [
+        "actionId",
+        "actionKind",
+        "settlementKind",
+        "outcome",
+        "key",
+        "owningInstruction",
+        "continuationInstruction",
+        "requestEventSequence",
+        "completionEventSequence",
+        "completedAtMs",
+      ]) &&
+      isOneOf(settlement.outcome, ["stored", "failed"]) &&
+      typeof settlement.key === "string" &&
+      validSessionTime(settlement.completedAtMs) &&
+      validSessionTime(snapshot.currentSessionTimeMs) &&
+      settlement.completedAtMs <= snapshot.currentSessionTimeMs
+    );
+  }
   if (settlement.actionKind === "mediaPlayback") {
     return (
       hasExactKeys(settlement, [
@@ -1799,7 +1866,9 @@ function validSettlementProvenance(
         ? "interaction"
         : settlement.actionKind === "mediaPlayback"
           ? "playMedia"
-          : "say";
+          : settlement.actionKind === "storageWrite"
+            ? "storageWrite"
+            : "say";
   if (plan.instructions[owningInstruction]?.kind !== expectedKind) return false;
   const definition = plan.functions.find(
     (candidate) =>
@@ -1832,7 +1901,7 @@ function validForegroundActionOwnership(
     snapshot.nextInstruction !== owningInstruction ||
     owningInstruction >= plan.instructions.length ||
     continuationInstruction !== owningInstruction + 1 ||
-    !["wait", "interaction", "say", "playMedia"].includes(
+    !["wait", "interaction", "say", "playMedia", "storageWrite"].includes(
       plan.instructions[owningInstruction]?.kind ?? "",
     )
   )
@@ -1840,6 +1909,7 @@ function validForegroundActionOwnership(
   const owner = plan.instructions[owningInstruction];
   if (
     (action.kind === "mediaPlayback") !== (owner?.kind === "playMedia") ||
+    (action.kind === "storageWrite") !== (owner?.kind === "storageWrite") ||
     (owner?.kind === "playMedia" && (action.until === "loaded") !== owner.async)
   ) {
     return false;

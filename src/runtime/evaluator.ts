@@ -25,7 +25,7 @@ import { nextXorShift32, type RandomSource, type XorShift32State } from "./rando
 import {
   assertStoredType,
   LOAD_KEY_MESSAGE,
-  ScriptStorageIndex,
+  findScriptStorageEntry,
   storageKey,
 } from "./script-storage.js";
 import {
@@ -140,7 +140,6 @@ export class Evaluator {
   readonly #builtins: Record<string, RuntimeBuiltinFunction> = Object.create(null);
 
   #referenceEpoch = 0;
-  readonly #scriptStorage = new ScriptStorageIndex();
 
   public constructor(
     private readonly snapshot: RuntimeSnapshot,
@@ -153,11 +152,6 @@ export class Evaluator {
   public refreshBuiltinRegistration(): void {
     for (const name of Object.keys(this.#builtins)) delete this.#builtins[name];
     Object.assign(this.#builtins, this.capabilities.builtins ?? {});
-  }
-
-  /** Stores a copy of a persistable value in the session's storage view, or removes the key for `null`. */
-  public writeScriptStorage(key: string, value: SerializableRuntimeValue): void {
-    this.#scriptStorage.write(this.snapshot, key, value);
   }
 
   public forSnapshot(snapshot: RuntimeSnapshot, events: InterpreterEvent[]): Evaluator {
@@ -581,7 +575,7 @@ export class Evaluator {
           }
           if (frame.stage === 1) {
             const key = storageKey(result.value, LOAD_KEY_MESSAGE, expression.key.span);
-            const entry = this.#scriptStorage.find(this.snapshot, key);
+            const entry = findScriptStorageEntry(this.snapshot, key);
             if (entry !== undefined) {
               if (expression.expectedType !== null)
                 assertStoredType(entry, expression.expectedType, expression.span);

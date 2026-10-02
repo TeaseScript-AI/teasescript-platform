@@ -2044,7 +2044,13 @@ Delete a value:
 delete "player.name"
 ```
 
-Deleting an absent key is a no-op. Saving then loading in the same session sees the saved value immediately.
+Deleting an absent key is a no-op.
+
+A write is atomic. Without persistent storage, such as in tests or a development preview, storage is session-local:
+a later `load` in the session sees the saved value at once. When the host persists storage, `save` and `delete` wait
+until the host acknowledges the write, and only a successful write changes what later `load` calls see. A failed write
+keeps the previous value, or leaves the key absent, reports developer warning `TSW014`, and the script continues. A
+timer or media block due while a write waits runs after the write settles, at its own due time.
 
 Rules:
 
