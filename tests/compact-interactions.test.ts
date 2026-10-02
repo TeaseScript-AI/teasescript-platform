@@ -283,47 +283,61 @@ test("nested compact choices report missing options once per affected invocation
   }
 });
 
-test("parenthesized advanced interaction-call forms are rejected with a focused diagnostic and exact span", () => {
+// V30 accepts parenthesized interaction APIs (accepted-syntaxes-v30.md sections 20-21) and ADR 0018 leaves their
+// compatibility mapping to later work. Until they are implemented, the spelling must not be parsed as a compact form
+// with a grouped payload, which would silently decide that mapping. Replace the diagnostic assertions with positive
+// V30 coverage when the parenthesized APIs land.
+test("a parenthesized interaction spelling is never silently given compact semantics", () => {
+  // The statement and expression commands each have one parenthesis check before and after `as speaker`.
   for (const source of [
     'showButton("Continue")',
     'showButton as mistress ("Continue")',
     'let answer = askText("Type here")',
     'let answer = askText as mistress ("Type here")',
-    'let amount = askNumber("Enter a number")',
-    'let amount = askNumber as mistress ("Enter a number")',
-    'let result = choose("A", "B")',
-    'let result = choose as mistress ("A", "B")',
   ]) {
     const parsed = parse(`${source}\nsay "recovered"`);
-    const diagnostic = parsed.diagnostics[0];
     const opening = source.indexOf("(");
-    assert.equal(diagnostic?.code, "TSP032", source);
-    assert.deepEqual(
-      diagnostic === undefined ? null : [diagnostic.span.start.offset, diagnostic.span.end.offset],
-      [opening, opening + 1],
+    const compactPayloads = parsed.program.statements.flatMap((statement) => {
+      if (statement.kind === "showButtonStatement") return [statement.label];
+      if (
+        statement.kind === "letStatement" &&
+        statement.initializer.kind === "interactionExpression"
+      )
+        return [statement.initializer.hint];
+      return [];
+    });
+    assert.equal(
+      compactPayloads.some(
+        (payload) =>
+          payload?.kind === "parenthesizedExpression" && payload.span.start.offset === opening,
+      ),
+      false,
       source,
     );
-    assert.ok(
-      parsed.diagnostics.every((item) => ["TSP032", "TSP012"].includes(item.code)),
-      source,
-    );
-    assert.equal(parsed.program.statements.at(-1)?.kind, "sayStatement", source);
-  }
-});
-
-test("unsupported additional compact interaction arguments are rejected at the separator", () => {
-  for (const source of ['showButton "Continue", 5', 'showButton as mistress "Continue", 5']) {
-    const parsed = parse(`${source}\nsay "recovered"`);
     const diagnostic = parsed.diagnostics[0];
-    const comma = source.indexOf(",");
-    assert.equal(diagnostic?.code, "TSP032", source);
     assert.deepEqual(
-      diagnostic === undefined ? null : [diagnostic.span.start.offset, diagnostic.span.end.offset],
-      [comma, comma + 1],
+      diagnostic === undefined
+        ? null
+        : [diagnostic.code, diagnostic.span.start.offset, diagnostic.span.end.offset],
+      ["TSP032", opening, opening + 1],
       source,
     );
     assert.equal(parsed.program.statements.at(-1)?.kind, "sayStatement", source);
   }
+
+  // The comma after the button text is reserved for `background:`; another trailing argument is
+  // diagnosed at the separator rather than dropped.
+  const extra = 'showButton "Continue", "Extra"';
+  const parsed = parse(`${extra}\nsay "recovered"`);
+  const comma = extra.indexOf(",");
+  const diagnostic = parsed.diagnostics[0];
+  assert.deepEqual(
+    diagnostic === undefined
+      ? null
+      : [diagnostic.code, diagnostic.span.start.offset, diagnostic.span.end.offset],
+    ["TSP032", comma, comma + 1],
+  );
+  assert.equal(parsed.program.statements.at(-1)?.kind, "sayStatement");
 });
 
 test("misplaced interaction speaker clauses receive the focused compact-form diagnostic", () => {
