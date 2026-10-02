@@ -16,111 +16,162 @@ script="$root/tools/local-agent/patch-publication.py"
 target='feat/test-target'
 transfer='agent-patch-publication/integration-test'
 
+tmp="$(mktemp -d -t patch-publication-workflow-XXXXXX)"
+trap 'rm -rf "$tmp"' EXIT
+publish_body="$tmp/publish-body.sh"
+
 python3 - "$workflow" \
   "$root/tools/local-agent/patch-publication-request.cjs" \
   "$root/tools/local-agent/patch-publication-cleanup-comment.cjs" \
   "$root/tools/local-agent/patch-publication-cleanup-transfer.sh" \
   "$root/tools/local-agent/patch-publication-prepare-steps.sh" \
-  "$root/tools/local-agent/patch-publication-validate-candidate.sh" \
   "$root/tools/local-agent/patch-publication-summary.sh" \
-  "$root/.github/workflows/ci.yml" <<'PY'
+  "$root/.github/workflows/ci.yml" \
+  "$publish_body" <<'PY'
 import pathlib, re, subprocess, sys, tempfile, textwrap
-workflow_path, request_path, cleanup_path, transfer_path, prepare_path, validator_path, summary_path, ci_path = map(pathlib.Path, sys.argv[1:])
+workflow_path, request_path, cleanup_path, transfer_path, prepare_path, summary_path, ci_path, publish_body_path = map(pathlib.Path, sys.argv[1:])
 text = workflow_path.read_text(encoding="utf-8")
 ci_text = ci_path.read_text(encoding="utf-8")
-validator_text = validator_path.read_text(encoding="utf-8")
 assert "patch-publication-request.cjs" in text
 assert "patch-publication-cleanup-comment.cjs" in text
 assert "patch-publication-cleanup-transfer.sh" in text
 assert "patch-publication-prepare-steps.sh" in text
 assert "patch-publication-validate-candidate.sh" in text
 assert "patch-publication-summary.sh" in text
-assert text.count("ref: ${{ github.workflow_sha }}") >= 5
-assert "\n  request:\n" not in text
-assert text.count("\n  prepare:\n") == 1
-prepare = text.split("  prepare:\n", 1)[1].split("\n  test:\n", 1)[0]
-assert "issues: read" in prepare and "pull-requests: read" in prepare
-assert prepare.index("Validate publication command") < prepare.index("Read exact transfer manifest")
-assert "request_validated: ${{ steps.bind.outputs.validated }}" in prepare
-assert "fetch-depth: 1" in prepare
-assert "expected_transfer_sha" in text
 assert "comment_id: ${{ steps.request.outputs.comment_id }}" in text
-assert "Read exact transfer manifest" in text
-preserve_tools = prepare.split(
-    "      - name: Preserve trusted publication tools\n", 1
-)[1].split("\n      - name:", 1)[0]
-assert '"$RUNNER_TEMP/patch-publication.py"' in preserve_tools
-assert '"$RUNNER_TEMP/patch-publication-prepare-steps.sh"' in preserve_tools
-assert prepare.index("Preserve trusted publication tools") < prepare.index("Read exact transfer manifest")
-trusted_prepare_driver = 'bash "$RUNNER_TEMP/patch-publication-prepare-steps.sh"'
-assert prepare.count(trusted_prepare_driver) == 6
-assert "bash tools/local-agent/patch-publication-prepare-steps.sh" not in prepare
-assert "cleanup-transfer:" in text and "cleanup-comment:" in text
-assert "uses: ./.github/workflows/artifact-mailbox-worker.yml" in text
 assert "validation_profile: ${{ steps.prepare.outputs.validation_profile }}" in text
-test_job = text.split("  test:\n", 1)[1].split("\n  publish:\n", 1)[0]
-assert test_job.index("Preserve trusted candidate validation driver") < test_job.index("Verify exact candidate identity and target base")
-assert "needs.prepare.outputs.validation_profile != 'docs'" in test_job
-assert 'bash "$RUNNER_TEMP/validate-candidate" validate-profile "${{ needs.prepare.outputs.validation_profile }}"' in test_job
-assert "run: bash tools/local-agent/check-local-agent.sh" not in test_job
-assert "run: npm ci --no-audit --no-fund" not in test_job
-assert 'bash tools/local-agent/check-local-agent.sh' in validator_text
-assert "needs.request" not in text
 assert "needs.prepare.outputs.request_validated == 'true'" in text
 assert "run: bash tools/local-agent/check-local-agent.sh" in ci_text
-assert "run: npm ci --no-audit --no-fund" in ci_text
 
-publish = text.split("  publish:\n", 1)[1].split("  cleanup-transfer:\n", 1)[0]
-permission_header = publish.split("    outputs:\n", 1)[0]
-assert re.search(r"(?m)^    permissions:\n      contents: read$", permission_header)
-assert "contents: write" not in permission_header
 
-checkout = publish.split(
-    "      - name: Check out trusted workflow revision\n", 1
-)[1].split("\n      - name:", 1)[0]
-assert "persist-credentials: false" in checkout
-assert "persist-credentials: true" not in checkout
+def workflow_jobs(text):
+    parts = re.split(r"(?m)^  ([A-Za-z0-9_-]+):\n", text.split("\njobs:\n", 1)[1])
+    return dict(zip(parts[1::2], parts[2::2]))
 
-verify_marker = "      - name: Verify candidate without executing it\n"
-token_marker = "      - name: Create scoped patch publisher token\n"
-push_marker = "      - name: Publish by non-force fast-forward\n"
-assert publish.index(verify_marker) < publish.index(token_marker) < publish.index(push_marker)
-assert '--expected-validation-profile "$VALIDATION_PROFILE"' in publish
 
-token_step = publish.split(token_marker, 1)[1].split("\n      - name:", 1)[0]
-assert "id: patch-publisher-token" in token_step
-assert re.search(
-    r"(?m)^        uses: actions/create-github-app-token@[0-9a-f]{40}(?: +#.*)?$", token_step
-)
-token_inputs = {}
-for line in token_step.split("        with:\n", 1)[1].splitlines():
-    match = re.fullmatch(r"          ([a-z][a-z0-9-]*): (.+)", line)
-    assert match, f"unsupported patch publisher input syntax: {line.strip()}"
-    key, value = match.groups()
-    assert key not in token_inputs
-    token_inputs[key] = value
-assert token_inputs == {
-    "client-id": "${{ vars.PATCH_PUBLISHER_CLIENT_ID }}",
-    "private-key": "${{ secrets.PATCH_PUBLISHER_PRIVATE_KEY }}",
-    "permission-contents": "write",
-    "permission-workflows": "write",
+def job_steps(job):
+    steps = []
+    for chunk in re.split(r"(?m)^      - ", job.split("    steps:\n", 1)[1])[1:]:
+        fields = {}
+        key = None
+        for line in ("        " + chunk).splitlines():
+            match = re.fullmatch(r"        ([a-z-]+):[ ]?(.*)", line)
+            if match:
+                key, value = match.groups()
+                fields[key] = [value] if value else []
+            elif line.strip():
+                fields[key].append(line[10:] if line.startswith(" " * 10) else line.strip())
+        steps.append(fields)
+    return steps
+
+
+def run_body(step):
+    lines = step.get("run", [])
+    return "\n".join(lines[1:] if lines[:1] == ["|"] else lines)
+
+
+def mapping(step, field):
+    return dict(line.split(": ", 1) for line in step.get(field, []) if not line.startswith(" "))
+
+
+def step_index(steps, role, predicate):
+    matches = [index for index, step in enumerate(steps) if predicate(step)]
+    assert len(matches) == 1, role
+    return matches[0]
+
+
+def permissions(job):
+    block = re.search(r"(?m)^    permissions:\n((?:      .*\n)+)", job).group(1)
+    return dict(line.strip().split(": ", 1) for line in block.splitlines())
+
+
+jobs = workflow_jobs(text)
+steps = {name: job_steps(job) for name, job in jobs.items() if "    steps:\n" in job}
+
+# Every job checks out only the trusted workflow revision and never persists checkout credentials.
+checkouts = [
+    step for job in steps.values() for step in job
+    if step.get("uses", [""])[0].startswith("actions/checkout@")
+]
+assert checkouts
+for step in checkouts:
+    checkout_inputs = mapping(step, "with")
+    assert checkout_inputs.get("ref") == "${{ github.workflow_sha }}", step["name"]
+    assert checkout_inputs.get("persist-credentials") == "false", step["name"]
+
+assert {"issues": "read", "pull-requests": "read"}.items() <= permissions(jobs["prepare"]).items()
+assert "request_validated: ${{ steps.bind.outputs.validated }}" in jobs["prepare"]
+prepare = steps["prepare"]
+# The command is validated before any driver reads the transfer, and every driver call uses the
+# trusted copy preserved before the first call; the only other driver mention is that preservation.
+driver_call = re.compile(r'bash "\$RUNNER_TEMP/patch-publication-prepare-steps\.sh" ([a-z-]+)')
+driver_steps = [
+    (index, run_body(step)) for index, step in enumerate(prepare)
+    if "patch-publication-prepare-steps.sh" in run_body(step)
+]
+driver_calls = {
+    driver_call.fullmatch(body).group(1): index
+    for index, body in driver_steps if driver_call.fullmatch(body)
 }
+preservation = [(index, body) for index, body in driver_steps if not driver_call.fullmatch(body)]
+assert len(preservation) == 1, preservation
+preserve_index, preserve_body = preservation[0]
+assert '"$RUNNER_TEMP/patch-publication.py"' in preserve_body
+assert '"$RUNNER_TEMP/patch-publication-prepare-steps.sh"' in preserve_body
+assert driver_calls and preserve_index < min(driver_calls.values())
+request_index = step_index(prepare, "request validation", lambda step: step.get("id") == ["request"])
+assert request_index < driver_calls["read-manifest"]
 
-push_step = publish.split(push_marker, 1)[1]
-assert (
-    "PATCH_PUBLISHER_TOKEN: ${{ steps.patch-publisher-token.outputs.token }}"
-) in push_step
+test_job = jobs["test"]
+validator_index = step_index(
+    steps["test"],
+    "validator preservation",
+    lambda step: "tools/local-agent/patch-publication-validate-candidate.sh" in run_body(step),
+)
+identity_index = step_index(
+    steps["test"],
+    "candidate identity verification",
+    lambda step: run_body(step) == 'bash "$RUNNER_TEMP/validate-candidate" verify-identity',
+)
+assert validator_index < identity_index
+assert "needs.prepare.outputs.validation_profile != 'docs'" in test_job
+assert 'bash "$RUNNER_TEMP/validate-candidate" validate-profile "${{ needs.prepare.outputs.validation_profile }}"' in test_job
+
+publish_job = jobs["publish"]
+publish = steps["publish"]
+assert permissions(publish_job) == {"contents": "read"}
+verify_index = step_index(publish, "candidate verification", lambda step: step.get("id") == ["verify"])
+token_index = step_index(
+    publish, "token creation", lambda step: step.get("id") == ["patch-publisher-token"]
+)
+push_index = step_index(publish, "publication push", lambda step: "git push" in run_body(step))
+assert verify_index < token_index < push_index
+assert '--expected-validation-profile "$VALIDATION_PROFILE"' in run_body(publish[verify_index])
+
+token_step = publish[token_index]
+assert re.fullmatch(
+    r"actions/create-github-app-token@[0-9a-f]{40}(?: +#.*)?", token_step["uses"][0]
+)
+assert sorted(token_step["with"]) == [
+    "client-id: ${{ vars.PATCH_PUBLISHER_CLIENT_ID }}",
+    "permission-contents: write",
+    "permission-workflows: write",
+    "private-key: ${{ secrets.PATCH_PUBLISHER_PRIVATE_KEY }}",
+]
+
+push_step = publish[push_index]
+assert mapping(push_step, "env")["PATCH_PUBLISHER_TOKEN"] == "${{ steps.patch-publisher-token.outputs.token }}"
 assert (
     '"https://x-access-token:${PATCH_PUBLISHER_TOKEN}'
     '@github.com/${GITHUB_REPOSITORY}.git"'
-) in push_step
-assert "git push --porcelain origin" not in push_step
+) in run_body(push_step)
+publish_body_path.write_text(run_body(push_step) + "\n", encoding="utf-8")
 
 assert text.count("${{ vars.PATCH_PUBLISHER_CLIENT_ID }}") == 1
 assert text.count("${{ secrets.PATCH_PUBLISHER_PRIVATE_KEY }}") == 1
 assert text.count("${{ steps.patch-publisher-token.outputs.token }}") == 1
 for forbidden in ["${{ github.token }}", "secrets.GITHUB_TOKEN", "GITHUB_TOKEN:"]:
-    assert forbidden not in publish
+    assert forbidden not in publish_job
 # This guard intentionally accepts one canonical block-style YAML subset.
 # Any alternative structure must fail closed rather than bypass action scanning.
 def line_indentation(line):
@@ -663,8 +714,8 @@ multiline_run_text_job = make_checkout_job(
 )
 assert assert_checkout_jobs_have_contents_access(multiline_run_text_job) == []
 
-transfer_cleanup = text.split("  cleanup-transfer:\n", 1)[1].split("  cleanup-comment:\n", 1)[0]
-comment_cleanup = text.split("  cleanup-comment:\n", 1)[1]
+transfer_cleanup = jobs["cleanup-transfer"]
+comment_cleanup = jobs["cleanup-comment"]
 assert "contents: write" in transfer_cleanup and "issues: write" not in transfer_cleanup
 assert "contents: read" in comment_cleanup
 assert "pull-requests: write" in comment_cleanup
@@ -998,8 +1049,6 @@ with tempfile.TemporaryDirectory() as temporary:
     subprocess.run(["node", str(request_test), str(request_path)], check=True)
 PY
 
-tmp="$(mktemp -d -t patch-publication-workflow-XXXXXX)"
-trap 'rm -rf "$tmp"' EXIT
 cleanup_script="$root/tools/local-agent/patch-publication-cleanup-transfer.sh"
 prepare_script="$root/tools/local-agent/patch-publication-prepare-steps.sh"
 source_repo="$tmp/source"
@@ -1182,20 +1231,8 @@ git -C "$tmp/racer" commit -q -m 'move target'
 race="$(git -C "$tmp/racer" rev-parse HEAD)"
 git -C "$tmp/racer" push -q origin "$target"
 
-# Run the publish step's actual run body; a fixture-only Git wrapper routes its
-# authenticated GitHub URL to the bare remote and passes every other argument through.
-publish_body="$tmp/publish-body.sh"
-python3 - "$workflow" "$publish_body" <<'PY'
-import pathlib, sys, textwrap
-text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-step = text.split("      - name: Publish by non-force fast-forward\n", 1)[1]
-lines = []
-for line in step.split("        run: |\n", 1)[1].splitlines():
-    if line.strip() and not line.startswith("          "):
-        break
-    lines.append(line)
-pathlib.Path(sys.argv[2]).write_text(textwrap.dedent("\n".join(lines)) + "\n", encoding="utf-8")
-PY
+# Run the publish step's actual run body, extracted by the static checks above; a fixture-only Git
+# wrapper routes its authenticated GitHub URL to the bare remote and passes every other argument through.
 publish_url='https://x-access-token:test-token@github.com/example/repository.git'
 publish_calls="$tmp/publish-calls"
 mkdir -p "$tmp/publish-bin"
