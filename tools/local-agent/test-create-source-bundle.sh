@@ -487,15 +487,27 @@ output="$temp_root/output"
   sha256sum --check SHA256SUMS >/dev/null
 )
 
-[[ $(jq -r '.formatVersion' "$output/manifest.json") == 1 ]] || fail "formatVersion mismatch"
-[[ $(jq -r '.repository' "$output/manifest.json") == TeaseScript-AI/teasescript-platform ]] || fail "repository mismatch"
-[[ $(jq -r '.commitSha' "$output/manifest.json") == "$second_sha" ]] || fail "commit SHA mismatch"
-[[ $(jq -r '.treeSha' "$output/manifest.json") == "$second_tree" ]] || fail "tree SHA mismatch"
-[[ $(jq -r '.sourceRef' "$output/manifest.json") == fixture-branch ]] || fail "source ref mismatch"
-[[ $(jq -r '.bundleRef' "$output/manifest.json") == refs/heads/source-bundle ]] || fail "bundle ref mismatch"
-[[ $(jq -r '.eventName' "$output/manifest.json") == test ]] || fail "event name mismatch"
-[[ $(jq -r '.bundleSha256' "$output/manifest.json") == "$(sha256sum "$output/repository.bundle" | awk '{print $1}')" ]] || fail "bundle checksum mismatch"
 [[ $(git -C "$repo" rev-parse refs/heads/source-bundle) == "$first_sha" ]] || fail "pre-existing temporary ref was not restored"
+
+# The real source-review consumer is the protocol oracle for the producer's manifest and bundle.
+consumer_artifact="$temp_root/source-artifact.zip"
+python3 - "$output" "$consumer_artifact" <<'PYZIP'
+import pathlib
+import sys
+import zipfile
+
+output, artifact = map(pathlib.Path, sys.argv[1:])
+with zipfile.ZipFile(artifact, "w") as archive:
+    for name in ("repository.bundle", "manifest.json", "SHA256SUMS"):
+        archive.write(output / name, name)
+PYZIP
+python3 -S -B "$root/tools/chatgpt-project-agent/tools/prepare-source-review.py" \
+  --artifact "$consumer_artifact" \
+  --artifact-sha256 "$(sha256sum "$consumer_artifact" | awk '{print $1}')" \
+  --expected-repository TeaseScript-AI/teasescript-platform \
+  --expected-head "$second_sha" \
+  --expected-merge-base "$first_sha" \
+  --output "$temp_root/review" >/dev/null || fail "source-review consumer rejected the producer artifact"
 
 bundle_heads=$(git bundle list-heads "$output/repository.bundle")
 [[ "$bundle_heads" != *"refs/heads/unrelated"* ]] || fail "unrelated branch entered bundle heads"
