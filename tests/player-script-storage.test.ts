@@ -191,3 +191,18 @@ test("local script storage rejects every operation when storage is missing or th
     await assert.rejects(provider.clear());
   }
 });
+
+test("local script storage ignores item-name aliases of a key", async () => {
+  const storage = new MemoryStorage();
+  const alias = 'player-storage:[ "demo", "answer" ]';
+  storage.setItem(alias, JSON.stringify({ v: 1, value: "alias" }));
+  const provider = createLocalScriptStorage(storage, "demo");
+  // An alias alone is not an entry, so removing the key cannot leave it to resurface after a reload.
+  assert.deepEqual(await provider.load(), []);
+
+  await provider.write("answer", "kept");
+  // With the canonical item present too, the key appears once, so a session can start from it.
+  assert.deepEqual(await provider.load(), [{ key: "answer", value: "kept" }]);
+  await provider.write("answer", null);
+  assert.deepEqual(await provider.load(), []);
+});
