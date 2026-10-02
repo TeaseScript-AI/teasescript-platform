@@ -1678,9 +1678,9 @@ async function playerTooltipChecks(page) {
       .count())
   )
     throw new Error("One Escape must close the drawer, clear its tooltip and restore opener focus");
-  await narrowShow.click();
-  await page.keyboard.press("Tab");
-  await narrowHide.focus();
+  // Reopening from the focused opener with Enter moves keyboard focus to Hide sidebar, which shows its tooltip.
+  await page.keyboard.press("Enter");
+  await narrowHide.waitFor({ state: "visible" });
   await tooltip("Hide sidebar").waitFor({ state: "visible" });
   // Hold the closing tooltip's exit animation, so Escape deterministically arrives while its layer remains.
   const holdExit = await page.addStyleTag({
