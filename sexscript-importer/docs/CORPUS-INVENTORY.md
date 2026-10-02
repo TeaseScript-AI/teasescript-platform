@@ -24,48 +24,52 @@ explicit unsupported nodes: `EmptyExpression` (29, a declaration without initial
 
 ## Feasibility snapshot
 
-Measured on 2026-10-02 at importer commit `7cca6ab4` with `node src/cli.ts report --run <package scripts>`.
+Measured on 2026-10-02 at importer commit `32d8241b` with `node src/cli.ts report --run <package scripts>`.
 Toy's 21 runtime-loaded modules are part of its single script `toy.groovy`, so Toy counts as one script whose
 statements include all module code.
 
 | Package | Scripts | Lowered | Dependency-closed | Compiler-clean except pending | Root errors | Placeholders |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Distribution | 14 | 10 | 10 | 10 | 15 | 13 |
-| Domme3 | 24 | 9 | 7 | 7 | 29 | 32 |
-| DisciplineClinic | 6 | 2 | 2 | 2 | 23 | 22 |
-| Toy expanded | 1 | 0 | 0 | 0 | 250 | 444 |
+| Domme3 | 24 | 13 | 10 | 10 | 35 | 37 |
+| DisciplineClinic | 6 | 3 | 3 | 3 | 17 | 17 |
+| Toy expanded | 1 | 0 | 0 | 0 | 229 | 397 |
 
-Root errors count independent causes that need manual work; placeholders count unconverted statements. Toy's 250 come
-from about 4,800 source statements, mostly method calls on maps and Java objects, string methods, and conditionals in
-positions where moving them would change evaluation order.
+Root errors count independent causes that need manual work; placeholders count unconverted statements. Converting a
+statement can expose more root causes inside it, so the two counts can rise while coverage improves. Toy's 229 come
+from about 4,800 source statements, mostly method calls on maps (dictionaries) and Java objects, conditionals in
+positions where moving them would change evaluation order, string methods, and menus from runtime lists.
 
 Runtime smoke runs of the compiler-clean scripts (placeholder copies with host stand-ins):
 
 - Distribution: all 10 runnable scripts run to the end; the French introduction's flow passes through three other
-  scripts. The four remaining entry scripts are not converted yet.
-- Domme3: the entry flow stops at the unconverted `introfirst`. Isolated runs: `implements` and `inform` run to the
-  end, `permission` reaches the step limit in a line-writing loop (the typed text must match the shown line),
-  `spanking` returns to the entry flow, and `discipline` and `maintenance` fail comparing a setting that the
-  introduction would have saved (see the null-comparison difference in `COMPATIBILITY-GAPS.md`).
-- DisciplineClinic: the entry flow stops at the unconverted `DisciplineClinicMain`; `Exit` runs to the end.
+  scripts. The four remaining entry scripts are not converted (locale detection, desktop font configuration, and the
+  adversarial `test.groovy`).
+- Domme3: the entry flow stops at the unconverted `introfirst`, which counts installed image packs by listing
+  directories. Isolated runs: `implements` and `inform` run to the end, `permission` reaches the step limit in a
+  line-writing loop (the typed text must match the shown line), `spanking` returns to the entry flow, and four
+  scripts fail comparing or calculating with settings that the introduction would have saved (see the null-comparison
+  difference in `COMPATIBILITY-GAPS.md`).
+- DisciplineClinic: the entry flow stops at the unconverted `DisciplineClinicMain` (menus from runtime lists);
+  `Exit` runs to the end, `WaitRoom` fails on a setting saved by the main script.
 
-The first smoke run also failed five Domme3 scripts on `getRandom(0)`, which the importer now converts with the legacy
-result.
+Smoke runs found two importer defects before they reached a snapshot: `getRandom(0)` (fixed with the legacy result)
+and range switch cases tested as lists.
 
 No script is compiler-clean as generated, because almost all use storage or script chaining. Scripts using each
-accepted-but-unimplemented capability, and the scripts it alone blocks (otherwise compiler-clean):
+accepted-but-unimplemented capability, and how many otherwise compiler-clean scripts use it:
 
-| Capability | Scripts using it | Only blocker in |
+| Capability | Scripts using it | Otherwise compiler-clean scripts using it |
 | --- | ---: | ---: |
-| storage (`save`/`load`/`delete`) | 45 | 19 |
-| `run`/`end` | 41 | 15 |
-| `switch` | 26 | 6 |
-| `showButton` timeout/elapsed | 13 | 2 |
-| `getDateTime()` | 13 | 1 |
-| `getSeconds()` | 11 | 0 |
+| storage (`save`/`load`/`delete`) | 45 | 23 |
+| `run`/`end` | 41 | 19 |
+| `switch` | 26 | 9 |
+| `getSeconds()` | 18 | 3 |
+| `showButton` timeout/elapsed | 14 | 4 |
+| `getDateTime()` | 13 | 2 |
 | `askBooleans()` | 10 | 8 |
-| `showPopup` | 10 | 3 |
-| `askInteger()` | 8 | 0 |
+| `showPopup` | 10 | 4 |
+| `askInteger()` | 9 | 0 |
 
 ## SexScript API usage
 
