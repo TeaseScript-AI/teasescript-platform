@@ -89,6 +89,8 @@ export type CaptureFailureKind =
 export interface CaptureFailure {
   readonly kind: CaptureFailureKind;
   readonly message: string;
+  /** The browser exception's name, such as `NotReadableError`, for developer diagnostics. */
+  readonly error?: string;
 }
 
 const FAILURE_MESSAGES: Readonly<Record<CaptureFailureKind, string>> = {
@@ -107,11 +109,16 @@ function failure(kind: CaptureFailureKind): CaptureFailure {
 
 /**
  * Translates a browser exception into a bounded failure. Browser messages are not forwarded: they vary by browser,
- * may name hardware, and are not a stable contract.
+ * may name hardware, and are not a stable contract. An exception name in the standard form is kept for diagnostics.
  */
 export function captureFailure(error: unknown): CaptureFailure {
   const name =
     typeof error === "object" && error !== null && "name" in error ? String(error.name) : "";
+  const translated = translateFailure(name);
+  return /^[A-Z][A-Za-z]{0,40}Error$/.test(name) ? { ...translated, error: name } : translated;
+}
+
+function translateFailure(name: string): CaptureFailure {
   switch (name) {
     case "NotAllowedError":
     case "SecurityError":
@@ -334,7 +341,12 @@ export class CaptureDevice<Track extends CaptureTrack> {
       image = await this.#host.grabFrame(track, released.signal);
     } catch (error) {
       if (released.signal.aborted) return { kind: "failed", failure: failure("inactive") };
-      return { kind: "failed", failure: captureFailure(error) };
+      // The camera is open, so a frame that cannot be copied is a capture failure, not a busy or missing device.
+      const { error: name } = captureFailure(error);
+      return {
+        kind: "failed",
+        failure: name === undefined ? failure("failed") : { ...failure("failed"), error: name },
+      };
     }
     // A frame that arrives after the camera stopped or switched is not from the current camera.
     if (released.signal.aborted) return { kind: "failed", failure: failure("inactive") };

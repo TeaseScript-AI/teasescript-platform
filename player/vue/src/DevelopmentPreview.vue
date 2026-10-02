@@ -27,7 +27,8 @@ import { defaultPlayerThemeIntents } from "./usePlayerTheme";
 const tools: readonly PlayerTool[] = [
   { name: "Visual Lab", icon: FlaskConical },
   { name: "Layout Debug", icon: ScanLine },
-  // Empty panels that exercise multi-panel arrangement and drawer behavior.
+  // Panels that exercise multi-panel arrangement and drawer behavior; Playback Diagnostics also lists the Player's
+  // developer diagnostics, such as why the session camera is unavailable.
   { name: "Playback Diagnostics", icon: Activity },
   { name: "Media Playback Configuration", icon: SlidersHorizontal },
 ];
@@ -73,6 +74,16 @@ else player.prepare(() => createPlayerRuntimeSession(openingScenario));
   >
     <template #tool="{ tool, player: playerElement }">
       <LayoutDebug v-if="tool === 'Layout Debug' && playerElement" :player="playerElement" />
+      <ul
+        v-if="tool === 'Playback Diagnostics' && player.diagnostics.value.length > 0"
+        class="space-y-2 p-4 text-sm"
+        data-player-diagnostics
+      >
+        <li v-for="(diagnostic, index) in player.diagnostics.value" :key="index">
+          <code>{{ diagnostic.code }}</code
+          >: {{ diagnostic.message }}
+        </li>
+      </ul>
       <div v-if="tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
         <ThemeLab v-model:intent="themeIntent" />
         <label class="grid gap-2">

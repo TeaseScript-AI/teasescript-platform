@@ -104,7 +104,11 @@ test("without the capability, or when the camera cannot be opened, captures answ
   assert.deepEqual(await denied.camera.answer(), { kind: "unavailable", reason: "denied" });
   assert.equal(denied.requests.length, 1);
   assert.deepEqual(denied.diagnostics, [
-    { code: "camera-denied", message: "The session camera is unavailable (denied)." },
+    {
+      code: "camera-denied",
+      message:
+        "The session camera could not be opened (denied, NotAllowedError); it stays unavailable for this session.",
+    },
   ]);
 });
 
@@ -118,10 +122,15 @@ test("a revoked or failing camera stays unavailable for the rest of the session"
   const failing = harness(async () => [new FakeTrack()]);
   await failing.camera.open(true);
   failing.frames.fail = true;
-  assert.deepEqual(await failing.camera.answer(), { kind: "unavailable", reason: "busy" });
+  // The camera is open, so a frame that cannot be copied is a capture failure, not a busy device.
+  assert.deepEqual(await failing.camera.answer(), { kind: "unavailable", reason: "failed" });
   failing.frames.fail = false;
-  assert.deepEqual(await failing.camera.answer(), { kind: "unavailable", reason: "busy" });
+  assert.deepEqual(await failing.camera.answer(), { kind: "unavailable", reason: "failed" });
   assert.equal(failing.device.state("camera").status, "idle");
+  assert.match(
+    failing.diagnostics[0]?.message ?? "",
+    /could not capture a photo \(failed, \w+Error\)/,
+  );
 });
 
 test("a session released while the browser answers never reports its camera as opened", async () => {

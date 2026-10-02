@@ -59,13 +59,15 @@ export class SessionCamera<Track extends CaptureTrack> {
     const outcome = await this.#device.acquire({ camera: {} });
     if (generation !== this.#generation) return false;
     if (outcome.kind === "active") this.#unavailable = null;
-    else if (outcome.kind === "failed") this.#markUnavailable(REASONS[outcome.failure.kind]);
+    else if (outcome.kind === "failed")
+      this.#markUnavailable(REASONS[outcome.failure.kind], "could not be opened", outcome.failure);
     return true;
   }
 
   /** Call when the browser or the operating system ended the camera stream. */
   revoked(): void {
-    if (this.#unavailable === null) this.#markUnavailable("revoked");
+    if (this.#unavailable === null)
+      this.#markUnavailable("revoked", "was ended by the browser or the system");
   }
 
   /** Captures a photo for `takePhoto()`, or reports why the camera is unavailable. */
@@ -75,7 +77,7 @@ export class SessionCamera<Track extends CaptureTrack> {
     const photo = await this.#device.capturePhoto();
     if (generation !== this.#generation) return { kind: "unavailable", reason: "revoked" };
     if (photo.kind === "photo") return { kind: "captured", reference: photo.media.reference };
-    this.#markUnavailable(REASONS[photo.failure.kind]);
+    this.#markUnavailable(REASONS[photo.failure.kind], "could not capture a photo", photo.failure);
     return { kind: "unavailable", reason: REASONS[photo.failure.kind] };
   }
 
@@ -86,11 +88,17 @@ export class SessionCamera<Track extends CaptureTrack> {
     this.#device.reset();
   }
 
-  #markUnavailable(reason: CaptureUnavailableReason): void {
+  #markUnavailable(
+    reason: CaptureUnavailableReason,
+    what: string,
+    failure?: { readonly error?: string },
+  ): void {
     this.#unavailable = reason;
+    // Whether opening or capturing failed, and the browser's exception name, tell device problems apart.
+    const cause = failure?.error === undefined ? reason : `${reason}, ${failure.error}`;
     this.#diagnostic({
       code: `camera-${reason}`,
-      message: `The session camera is unavailable (${reason}).`,
+      message: `The session camera ${what} (${cause}); it stays unavailable for this session.`,
     });
     // A failed or revoked camera stays closed for the rest of the session.
     this.#device.stop("camera");

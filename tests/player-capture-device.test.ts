@@ -293,7 +293,7 @@ test("tracks nobody requested are stopped and a missing requested track fails", 
   assert.equal((await outcome).kind, "failed");
   assert.deepEqual(device.state("camera"), {
     status: "failed",
-    failure: captureFailure({ name: "NotFoundError" }),
+    failure: { kind: "not-found", message: "No matching device was found." },
   });
   assert.equal(unrequested.stops, 1);
   assert.equal(device.track("microphone"), null);

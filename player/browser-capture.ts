@@ -13,6 +13,9 @@ import type { CapturedMediaUrls } from "./captured-media.js";
 /** Analysis window of the microphone sampler; 2048 samples are about 43 ms at 48 kHz. */
 const AUDIO_WINDOW_SIZE = 2048;
 
+/** How long a frame grab waits for the camera's first frame with dimensions. */
+const FIRST_FRAME_TIMEOUT_MS = 10_000;
+
 /** The `CaptureHost` for real browsers: `getUserMedia`, `MediaRecorder`, canvas pixel access and Web Audio. */
 export function createBrowserCaptureHost(
   stateChanged: (kind: CaptureSourceKind, state: CaptureSourceState) => void,
@@ -123,26 +126,55 @@ async function grabFrame(track: MediaStreamTrack, released: AbortSignal): Promis
   video.muted = true;
   video.playsInline = true;
   video.srcObject = new MediaStream([track]);
+  // Frames advance only while the element plays, but only a frame with dimensions decides. The cleanup below aborts a
+  // pending `play()`, which must not surface as an unhandled rejection.
+  const playing = video.play();
+  playing.catch(() => {});
   try {
     // Firefox never settles `play()` for a stopped track, so a release must end the wait itself.
-    await untilReleased(video.play(), released);
-    if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA)
-      await untilReleased(
-        new Promise<void>((resolve, reject) => {
-          video.addEventListener("loadeddata", () => resolve(), { once: true });
-          video.addEventListener("error", () => reject(new DOMException("", "AbortError")), {
-            once: true,
-          });
-        }),
-        released,
-      );
-    if (video.videoWidth === 0 || video.videoHeight === 0)
-      throw new DOMException("The camera delivered no frame.", "NotReadableError");
+    await untilReleased(firstFrame(video, playing), released);
     return drawPixels(video, video.videoWidth, video.videoHeight);
   } finally {
     video.pause();
     video.srcObject = null;
   }
+}
+
+/**
+ * Resolves once the element holds a frame with dimensions. A real camera can report the element playable before its
+ * first frame has a size (Firefox), and a starting camera may need a few seconds; a camera that delivers nothing fails
+ * after FIRST_FRAME_TIMEOUT_MS instead of holding the capture forever.
+ */
+function firstFrame(video: HTMLVideoElement, playing: Promise<void>): Promise<void> {
+  const ready = () =>
+    video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+    video.videoWidth > 0 &&
+    video.videoHeight > 0;
+  if (ready()) return Promise.resolve();
+  const events = ["loadeddata", "resize", "playing", "timeupdate"] as const;
+  return new Promise<void>((resolve, reject) => {
+    const check = () => {
+      if (!ready()) return;
+      settle();
+      resolve();
+    };
+    const failed = () => {
+      settle();
+      reject(new DOMException("The camera delivered no frame.", "NotReadableError"));
+    };
+    const timeout = setTimeout(failed, FIRST_FRAME_TIMEOUT_MS);
+    function settle() {
+      clearTimeout(timeout);
+      for (const event of events) video.removeEventListener(event, check);
+      video.removeEventListener("error", failed);
+    }
+    for (const event of events) video.addEventListener(event, check);
+    video.addEventListener("error", failed);
+    playing.then(check, (error: unknown) => {
+      settle();
+      reject(error);
+    });
+  });
 }
 
 /**
