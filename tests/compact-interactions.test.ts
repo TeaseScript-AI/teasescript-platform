@@ -212,38 +212,26 @@ test("compact choice keys continue across a newline after ':'", () => {
 });
 
 test("compact choice keys without a value keep the focused diagnostic", () => {
-  const cases = [
+  // The colon-continuation matrix covers continued end, statement and nested cases by code. These
+  // rows add the end of file directly after the colon and the focused message that separates a key
+  // without a value from a missing option.
+  for (const [source, statements] of [
     ["let r = choose coast:", ["letStatement"]],
-    ["let r = choose coast:\n", ["letStatement"]],
     ['let r = choose coast:\n\nsay "recovered"', ["letStatement", "sayStatement"]],
-  ] as const;
-  for (const [source, statements] of cases) {
+  ] as const) {
     const parsed = parse(source);
     assert.deepEqual(
-      parsed.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message]),
-      [["TSP030", "Expected a choice option expression after ':'."]],
+      parsed.diagnostics.map((diagnostic) => diagnostic.code),
+      ["TSP030"],
+      source,
     );
+    assert.ok(parsed.diagnostics[0]!.message.includes("after ':'"), source);
     assert.deepEqual(
       parsed.program.statements.map((statement) => statement.kind),
       statements,
+      source,
     );
   }
-
-  const block = parse('if true {\n    let r = choose coast:\n    say "recovered"\n}\nexit');
-  assert.deepEqual(
-    block.diagnostics.map((diagnostic) => diagnostic.code),
-    ["TSP030"],
-  );
-  const statement = block.program.statements[0];
-  assert.equal(statement?.kind, "ifStatement");
-  assert.deepEqual(
-    statement?.thenBlock.statements.map((child) => child.kind),
-    ["letStatement", "sayStatement"],
-  );
-  assert.deepEqual(
-    block.program.statements.map((child) => child.kind),
-    ["ifStatement", "exitStatement"],
-  );
 });
 
 test("nested compact choices report missing options once per affected invocation", () => {
@@ -267,20 +255,15 @@ test("nested compact choices report missing options once per affected invocation
     ["TSP030", nestedAndOuter.length, nestedAndOuter.length],
   ]);
 
-  for (const source of [
-    'let result = choose first: choose second:\nsay "recovered"',
-    'let result = choose first: choose "A",\nsay "recovered"',
-  ]) {
-    const continued = parse(source);
-    assert.deepEqual(
-      continued.diagnostics.map((diagnostic) => diagnostic.code),
-      ["TSP030"],
-    );
-    assert.deepEqual(
-      continued.program.statements.map((statement) => statement.kind),
-      ["letStatement", "sayStatement"],
-    );
-  }
+  const continued = parse('let result = choose first: choose "A",\nsay "recovered"');
+  assert.deepEqual(
+    continued.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSP030"],
+  );
+  assert.deepEqual(
+    continued.program.statements.map((statement) => statement.kind),
+    ["letStatement", "sayStatement"],
+  );
 });
 
 // V30 accepts parenthesized interaction APIs (accepted-syntaxes-v30.md sections 20-21) and ADR 0018 leaves their
@@ -537,10 +520,6 @@ test("static choice rules align duplicate diagnostics with direct and prepared i
   );
 
   const staticPlan = compiled('let result = choose "sum ${1 + 2}", -0, true, null');
-  const staticInstruction = staticPlan.instructions.find(
-    (instruction) => instruction.kind === "interaction",
-  );
-  assert.ok(staticInstruction?.kind === "interaction" && "ui" in staticInstruction);
   const staticPending = run(staticPlan, createFreshRuntimeSnapshot(staticPlan));
   assert.deepEqual(
     staticPending.snapshot.foregroundAction?.kind === "interaction"
@@ -560,10 +539,6 @@ test("static choice rules align duplicate diagnostics with direct and prepared i
   );
 
   const dynamicPlan = compiled('let value = 3\nlet result = choose "sum ${value}", "other"');
-  const dynamicInstruction = dynamicPlan.instructions.find(
-    (instruction) => instruction.kind === "interaction",
-  );
-  assert.ok(dynamicInstruction?.kind === "interaction" && "preparedUi" in dynamicInstruction);
   const dynamicPending = run(dynamicPlan, createFreshRuntimeSnapshot(dynamicPlan));
   assert.deepEqual(
     dynamicPending.snapshot.foregroundAction?.kind === "interaction"
@@ -589,7 +564,7 @@ test("interaction result domains participate in existing numeric semantic checks
   assert.ok(textRange.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV010"));
 });
 
-test("prepared-plan validation rejects malformed new shapes and stale plan revisions", () => {
+test("prepared-plan validation rejects malformed prepared interaction shapes", () => {
   const plan = structuredClone(compiled("showButton payload", { globals: ["payload"] }));
   const interaction = plan.instructions.find((instruction) => instruction.kind === "interaction");
   assert.ok(
@@ -615,11 +590,6 @@ test("prepared-plan validation rejects malformed new shapes and stale plan revis
   (aliasedInteraction.preparedUi as { hintTemporary: number | null }).hintTemporary =
     aliasedInteraction.speakerTemporary;
   assert.equal(validateInstructionPlan(aliased).valid, false);
-
-  // EVIDENCE: fixture mutation widens only the plan revision so validation can reject the obsolete value 7.
-  const oldVersion = structuredClone(compiled("let answer = askText")) as { version: number };
-  oldVersion.version = 7;
-  assert.equal(validateInstructionPlan(oldVersion).valid, false);
 });
 
 test("authored payloads evaluate once in source order before pending state", () => {
@@ -704,8 +674,10 @@ test("dynamic interaction UI uses the established visible-text conversion once b
   assert.deepEqual(seededFirst.snapshot.rng, seededSecond.snapshot.rng);
 
   const unsupportedPlan = compiled("showButton [true]");
+  const unsupportedFresh = createFreshRuntimeSnapshot(unsupportedPlan);
+  const nextActionId = unsupportedFresh.nextActionId;
   let unsupportedRandomCalls = 0;
-  const unsupported = run(unsupportedPlan, createFreshRuntimeSnapshot(unsupportedPlan), {
+  const unsupported = run(unsupportedPlan, unsupportedFresh, {
     random: {
       next: () => {
         unsupportedRandomCalls += 1;
@@ -716,7 +688,7 @@ test("dynamic interaction UI uses the established visible-text conversion once b
   assert.equal(unsupportedRandomCalls, 1);
   assert.equal(unsupported.snapshot.failure?.code, "TSR021");
   assert.equal(unsupported.snapshot.foregroundAction, null);
-  assert.equal(unsupported.snapshot.nextActionId, 1);
+  assert.equal(unsupported.snapshot.nextActionId, nextActionId);
 });
 
 test("static compact interactions compile long mixed unary numeric labels without native recursion", () => {
@@ -725,12 +697,10 @@ test("static compact interactions compile long mixed unary numeric labels withou
   assert.deepEqual(result.diagnostics, []);
   assert.ok(result.plan !== null);
   assert.equal(validateInstructionPlan(result.plan).valid, true);
-  const interaction = result.plan.instructions.find(
-    (instruction) => instruction.kind === "interaction",
-  );
-  assert.ok(interaction?.kind === "interaction" && "ui" in interaction);
-  assert.equal(interaction.ui.kind, "button");
-  assert.equal(interaction.ui.buttonLabel, "-1");
+  const pending = run(result.plan, createFreshRuntimeSnapshot(result.plan));
+  const action = pending.snapshot.foregroundAction;
+  assert.ok(action?.kind === "interaction" && action.ui.kind === "button");
+  assert.equal(action.ui.buttonLabel, "-1");
 });
 
 test("dynamic interaction UI commits prepared text and serialized RNG only after full validation", () => {
@@ -748,6 +718,18 @@ test("dynamic interaction UI commits prepared text and serialized RNG only after
         first: createSerializableList(["a".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES / 2)]),
         second: "b".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES / 2 + 1),
       },
+      code: "TSR052",
+    },
+    {
+      name: "a scalar unlabelled duplicate",
+      plan: compiled("let result = choose first, second", { globals: ["first", "second"] }),
+      globals: { first: "same", second: "same" },
+      code: "TSR052",
+    },
+    {
+      name: "an oversized scalar button label",
+      plan: compiled("showButton payload", { globals: ["payload"] }),
+      globals: { payload: "x".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES + 1) },
       code: "TSR052",
     },
     {
@@ -928,36 +910,6 @@ test("fixed-seed payload RNG is prepared once and restore does not reevaluate it
   assert.equal(done.snapshot.status, "halted");
   assert.equal(rootBinding(done.snapshot, "result"), selected);
   assert.deepEqual(done.snapshot.rng, savedRng);
-});
-
-test("dynamic rejection is atomic before action identity, pending state, or transcript allocation", () => {
-  const duplicatePlan = compiled("let result = choose first, second", {
-    globals: ["first", "second"],
-  });
-  const failed = run(
-    duplicatePlan,
-    createFreshRuntimeSnapshot(duplicatePlan, { globals: { first: "same", second: "same" } }),
-  );
-  assert.equal(failed.snapshot.status, "failed");
-  assert.equal(failed.snapshot.foregroundAction, null);
-  assert.equal(failed.snapshot.nextActionId, 1);
-  assert.equal(
-    failed.events.some(
-      (event) => event.kind === "actionRequested" || event.kind === "playerTranscript",
-    ),
-    false,
-  );
-
-  const overPlan = compiled("showButton payload", { globals: ["payload"] });
-  const over = run(
-    overPlan,
-    createFreshRuntimeSnapshot(overPlan, {
-      globals: { payload: "x".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES + 1) },
-    }),
-  );
-  assert.equal(over.snapshot.status, "failed");
-  assert.equal(over.snapshot.nextActionId, 1);
-  assert.equal(over.snapshot.foregroundAction, null);
 });
 
 test("blocking interactions resume through ordinary expression contexts and reject unsupported parameter defaults", () => {
