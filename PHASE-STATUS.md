@@ -27,20 +27,21 @@ accept syntax, architecture, or implementation details.
   output, typed skip settlement, and interaction/timer composition.
 - **Stage image and media:** `showImage`/`hideImage` Stage state and blocking or asynchronous `playAudio`/`playVideo`
   with playback ranges, repetition, volume, handles, seeks, timeline cues, Player load/progress observations, and
-  checkpoint restore at the language, compiler, and runtime level. The Phase 2C Player shows the Stage image and plays
+  checkpoint restore at the language, compiler, and runtime level. The Player shows the Stage image and plays
   audio after explicit Start; browser video playback remains deferred.
-- **Player:** the selected POC Player is the Phase 2C implementation under `player/vue/src/phase2c/` (#418). It uses
+- **Player:** the POC Player is the Vue implementation under `player/vue/src/` (#418), served on `/player/`. It uses
   Vue/Vite, Tailwind CSS 4, repository-owned shadcn-vue/Reka primitives, and TanStack Vue Virtual as the transcript
   owner. A framework-independent adapter connects it to the implemented transcript, foreground-interaction, pacing,
   time-observation, runtime timer, checkpoint, and restore slice, including typed message markup with controlled links
   and spoilers; authored runtime timers render in its timer rail on a session-owned scene clock (#444).
-  It also has the tools framework and browser-local Player Settings. The default build mounts only the Player; the
-  development server or `?dev` adds the development preview with Visual Lab and Layout Debug. It shows the runtime
-  Stage image and plays authored audio through `player/media-device.ts` after the explicit Start activation (#446).
-  The single real demo script and retirement of the legacy `/player/` reference follow in #448.
+  It also has the tools framework and browser-local Player Settings. It shows the runtime Stage image and plays authored
+  audio through `player/media-device.ts` after the explicit Start activation (#446). The default build plays the
+  repository demo `examples/demo/demo.tease` (#448); the development server or `?dev` loads the development preview
+  with Visual Lab and Layout Debug instead.
 - **Development and verification:** a standalone browser playground with Standard interaction and pacing controls;
   source-to-runtime conformance coverage; focused runtime/checkpoint/state-validation tests; reproducible desktop and
-  narrow-screen browser smoke coverage, Phase 2C Player browser checks, and a bounded deterministic property campaign.
+  narrow-screen browser smoke coverage that plays the repository demo, development-preview browser checks, and a bounded
+  deterministic property campaign.
 
 These summaries are orientation only. The current topic documents below are canonical for the detailed implementation
 contracts and boundaries.
@@ -50,8 +51,8 @@ contracts and boundaries.
 - complete V30 coverage, complete static typing, measurement units, date/time values, calendar durations,
   generalized duration ranges, and locale-aware duration presentation;
 - production cross-origin Player/host integration, richer editor support, and final browser acceptance coverage;
-- pending-action capabilities beyond the implemented timer, interaction, pacing, and media families; the
-  single-script demo (#448), browser video playback, the layered scene, camera lifecycle, and custom views;
+- pending-action capabilities beyond the implemented timer, interaction, pacing, and media families; browser video
+  playback, the layered scene, camera lifecycle, and custom views;
 - the cross-origin player-host protocol and production browser security integration;
 - TypeScript library linkage, final Standard Library/package identity and compatibility, richer module selection, and
   community dependency resolution;

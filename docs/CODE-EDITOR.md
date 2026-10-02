@@ -18,7 +18,7 @@ The technical workspace/controller implementation lives at `playground/workspace
 entrypoints use that controller directly. Player rendering remains in the browser presentation layer and does not create
 a second canonical runtime state model.
 
-The Player implementation lives under `player/vue/src/phase2c/`. Its framework-independent `player/runtime-adapter.ts`
+The Player implementation lives under `player/vue/src/`. Its framework-independent `player/runtime-adapter.ts`
 translates canonical runtime state/events into presentation and typed input into runtime operations. The playground
 controller shares its action lookup/completion path without creating a second canonical runtime state model. See
 [`player/README.md`](../player/README.md) for local inspection; that route does not define the future cross-origin

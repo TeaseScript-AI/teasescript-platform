@@ -24,7 +24,7 @@
 - `CONTINUOUS-PERSONALITIES.md`
 - `CODE-EDITOR.md`: browser code editor and tooling integration.
 - `DEBUGGER.md`: runtime inspection, simulation, and debug execution.
-- `ui/PLAYER-UI.md`: normative Standard Player presentation for the Phase 2C Player, including intended behavior that
+- `ui/PLAYER-UI.md`: normative Standard Player presentation for the Player, including intended behavior that
   may lead implementation; while `Upstream contract integration` is non-empty, Player work also reads that section.
 - `ui/UI-DESIGN-AND-ENGINEERING.md`: shared UI guidance; narrow tasks use its focused reading route.
 - `LLM-INTEGRATION.md`

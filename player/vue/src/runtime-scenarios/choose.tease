@@ -1,4 +1,0 @@
-say "The real runtime is waiting for choose.", instant
-let answer = choose first: "First option", second: "Second option"
-say "The runtime received ${answer}.", instant
-exit

@@ -1,18 +1,22 @@
-import { createApp } from "vue";
-import App from "./App.vue";
-import "./styles/globals.css";
-import "../../styles/cascade.css";
-import "../../styles/reset.css";
-import "../../styles/layout.css";
-import "../../styles/components-base.css";
-import "../../styles/components-tools.css";
-import "../../styles/components-media.css";
-import "../../styles/components-transcript.css";
-import "../../styles/components-foreground.css";
-import "../../styles/components-composer.css";
-import "../../styles/components-right-controls.css";
-import "../../styles/components-visual-lab.css";
-import "../../styles/effects.css";
-import "../../styles/responsive.css";
+import { createApp, h } from "vue";
+import { createPlayerRuntimeSession } from "../../runtime-adapter.js";
+import { demoSource, resolveDemoAsset } from "./demoHost";
+import PlayerApp from "./PlayerApp.vue";
+import { usePlayerSession } from "./usePlayerSession";
+import "./style.css";
 
-createApp(App).mount("#app");
+// Fixtures and labs live in a separate chunk: always on the development server, and in a build
+// only after the explicit `?dev` opt-in. The default build plays the repository demo through the runtime.
+const developmentPreview =
+  import.meta.env.DEV || new URLSearchParams(window.location.search).has("dev");
+const app = developmentPreview
+  ? createApp((await import("./DevelopmentPreview.vue")).default)
+  : // The session host lives in a component scope, so unmounting stops its media, clock and listeners.
+    createApp({
+      setup: () => {
+        const player = usePlayerSession({ resolveAsset: resolveDemoAsset });
+        player.prepare(() => createPlayerRuntimeSession(demoSource));
+        return () => h(PlayerApp, { player });
+      },
+    });
+app.mount("#app");
