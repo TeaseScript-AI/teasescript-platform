@@ -1,3 +1,4 @@
+import path from "node:path";
 import { walkAst, type ParsedGroovyFile } from "./ast.ts";
 import type { TeaseCompileDiagnostic, TeaseCompiler } from "./compile-check.ts";
 import { emitTease } from "./emit-tease.ts";
@@ -57,6 +58,11 @@ export interface FeasibilityOptions {
   compiler?: TeaseCompiler;
   /** Real TeaseScript runtime used for smoke runs of compiler-clean output; needs `compiler`. */
   runner?: TeaseRunner;
+  /**
+   * Directory that `run` targets are relative to (the legacy scripts folder); inferred as the files' common
+   * directory when absent.
+   */
+  packageRoot?: string;
 }
 
 export interface FeasibilityReport {
@@ -137,7 +143,7 @@ export function analyzeFeasibility(
     files: [],
   };
 
-  const flowScripts: Array<{ sourceName: string; script: FlowScript | null }> = [];
+  const flowScripts: Array<FlowScriptRecord> = [];
   for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
     const file = files[fileIndex]!;
     const parseErrors = file.diagnostics.length;
@@ -202,10 +208,12 @@ export function analyzeFeasibility(
         increment(report.compilerDiagnosticsByMessage, `${diagnostic.code} ${diagnostic.message}`);
       }
     }
-    if (isScriptBody) {
+    // A file that does not parse may be a script; flows that reach it are blocked.
+    if (isScriptBody || file.root === null) {
       const source = compilerCleanExceptPending === true ? emitTease(shim.program) : null;
       flowScripts.push({
         sourceName: file.sourceName,
+        transfers: ir.transfers,
         script:
           source === null
             ? null
@@ -250,7 +258,9 @@ export function analyzeFeasibility(
   report.blockingPendingCapabilityFileCounts = sortCounts(
     report.blockingPendingCapabilityFileCounts,
   );
-  if (options.runner !== undefined) runPackageFlows(report, flowScripts, options.runner);
+  if (options.runner !== undefined) {
+    runPackageFlows(report, flowScripts, options.runner, options.packageRoot);
+  }
   report.smokeRunStatusCounts = sortCounts(report.smokeRunStatusCounts);
   report.smokeRunFailuresByMessage = sortCounts(report.smokeRunFailuresByMessage);
   report.files.sort((left, right) => {
@@ -261,31 +271,38 @@ export function analyzeFeasibility(
   return report;
 }
 
+interface FlowScriptRecord {
+  sourceName: string;
+  script: FlowScript | null;
+  transfers: string[];
+}
+
 function runPackageFlows(
   report: FeasibilityReport,
-  flowScripts: ReadonlyArray<{ sourceName: string; script: FlowScript | null }>,
+  flowScripts: ReadonlyArray<FlowScriptRecord>,
   runner: TeaseRunner,
+  packageRoot: string | undefined,
 ): void {
-  const directories = flowScripts.map(({ sourceName }) =>
-    sourceName.replaceAll("\\", "/").split("/").slice(0, -1),
-  );
-  const root = directories.reduce((common, directory) => {
-    let length = 0;
-    while (length < common.length && common[length] === directory[length]) length += 1;
-    return common.slice(0, length);
-  }, directories[0] ?? []);
+  const segments = (file: string): string[] => path.resolve(file).split(path.sep);
+  const directories = flowScripts.map(({ sourceName }) => segments(sourceName).slice(0, -1));
+  const root =
+    packageRoot === undefined
+      ? directories.reduce((common, directory) => {
+          let length = 0;
+          while (length < common.length && common[length] === directory[length]) length += 1;
+          return common.slice(0, length);
+        }, directories[0] ?? [])
+      : segments(packageRoot);
   const keyOf = (sourceName: string): string =>
     flowKey(
-      sourceName
-        .replaceAll("\\", "/")
-        .split("/")
+      segments(sourceName)
         .slice(root.length)
         .join("/")
         .replace(/\.groovy$/iu, ".tease"),
     );
   const scripts = new Map(flowScripts.map(({ sourceName, script }) => [keyOf(sourceName), script]));
   const entries = flowScripts
-    .filter((_, index) => directories[index]!.length === root.length)
+    .filter((_, index) => directories[index]!.join(path.sep) === root.join(path.sep))
     .map(({ sourceName }) => keyOf(sourceName))
     .sort();
   const reached = new Set<string>();
@@ -302,25 +319,50 @@ function runPackageFlows(
     for (const script of flow.visited) reached.add(script);
   };
   for (const entry of entries) record(smokeRunFlow(runner, entry, scripts));
-  const unreached = [...scripts].filter(([, script]) => script !== null).map(([key]) => key);
-  for (const key of unreached.sort()) {
+  // Scripts that no other script transfers to start isolated runs first, so their targets run with their state.
+  const targets = new Set(flowScripts.flatMap(({ transfers }) => transfers.map(flowKey)));
+  const unreached = [...scripts]
+    .filter(([, script]) => script !== null)
+    .map(([key]) => key)
+    .sort(
+      (left, right) =>
+        Number(targets.has(left)) - Number(targets.has(right)) || left.localeCompare(right),
+    );
+  for (const key of unreached) {
     if (!reached.has(key)) record(smokeRunFlow(runner, key, scripts, true));
   }
+  // Only the script records count; auxiliary classes and modules share no keys with them.
+  const reachedFiles = new Set(
+    flowScripts
+      .filter(({ sourceName }) => reached.has(keyOf(sourceName)))
+      .map(({ sourceName }) => sourceName),
+  );
   for (const file of report.files) {
-    if (reached.has(keyOf(file.sourceName))) file.smokeRunReached = true;
+    if (reachedFiles.has(file.sourceName)) file.smokeRunReached = true;
   }
-  report.smokeRunReachedScriptFileCount = report.files.filter(
-    (file) => file.smokeRunReached,
-  ).length;
+  report.smokeRunReachedScriptFileCount = reachedFiles.size;
 }
 
-function countIrStatements(statements: IrStatement[]): { total: number; unsupported: number } {
+function countIrStatements(statements: IrStatement[]): {
+  total: number;
+  unsupported: number;
+  /** Literal targets of script transfers. */
+  transfers: string[];
+} {
   let total = 0;
   let unsupported = 0;
+  const transfers: string[] = [];
   const visit = (items: IrStatement[]): void => {
     for (const statement of items) {
       total += 1;
       if (statement.kind === "unsupported") unsupported += 1;
+      if (
+        statement.kind === "run" &&
+        statement.script.kind === "literal" &&
+        typeof statement.script.value === "string"
+      ) {
+        transfers.push(statement.script.value);
+      }
       if (statement.kind === "if") {
         visit(statement.then);
         visit(statement.else);
@@ -338,7 +380,7 @@ function countIrStatements(statements: IrStatement[]): { total: number; unsuppor
     }
   };
   visit(statements);
-  return { total, unsupported };
+  return { total, unsupported, transfers };
 }
 
 function emptyCounts(): Record<string, number> {

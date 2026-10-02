@@ -21,7 +21,12 @@ import type { MigrationProgram } from "../src/ir.ts";
 import { lowerSelfContainedPackage } from "../src/package.ts";
 import { pendingHostFunctions, shimPendingCapabilities } from "../src/pending.ts";
 import { analyzeFeasibility } from "../src/report.ts";
-import { loadRepositoryRunner, type HostFunction, type TeaseRunner } from "../src/runtime-check.ts";
+import {
+  flowKey,
+  loadRepositoryRunner,
+  type HostFunction,
+  type TeaseRunner,
+} from "../src/runtime-check.ts";
 import { parseGroovySource } from "../src/source-parser.ts";
 
 const parserUnavailable = groovyParserUnavailableReason();
@@ -186,6 +191,101 @@ test(
     }
   },
 );
+
+test(
+  "package smoke run uses the package root for entries and counts only scripts as reached",
+  {
+    skip:
+      parserUnavailable ||
+      ("reason" in compilerResult ? compilerResult.reason : false) ||
+      ("reason" in runnerResult ? runnerResult.reason : false),
+  },
+  async () => {
+    if (!("compiler" in compilerResult) || !("runner" in runnerResult)) return;
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-root-"));
+    try {
+      mkdirSync(path.join(directory, "sub"));
+      const sources: Record<string, string> = {
+        "Helper.groovy": "class Helper {\n  static int twice(int x) { return x * 2 }\n}\n",
+        "helper.groovy": 'show("Helper script")\n',
+        "sub/start.groovy": 'return "sub/next.groovy"\n',
+        "sub/next.groovy": 'show("Next")\n',
+      };
+      for (const [name, source] of Object.entries(sources)) {
+        writeFileSync(path.join(directory, name), source);
+      }
+      const files = await Promise.all(
+        Object.keys(sources).map((name) => parseGroovySource(path.join(directory, name))),
+      );
+      const report = analyzeFeasibility(files, {
+        compiler: compilerResult.compiler,
+        runner: runnerResult.runner,
+        packageRoot: directory,
+      });
+      assert.deepEqual(
+        report.smokeRuns.map(({ entry, isolated, status, visited }) => ({
+          entry,
+          isolated,
+          status,
+          visited,
+        })),
+        [
+          { entry: "helper.tease", isolated: false, status: "halted", visited: ["helper.tease"] },
+          {
+            entry: "sub/start.tease",
+            isolated: true,
+            status: "halted",
+            visited: ["sub/start.tease", "sub/next.tease"],
+          },
+        ],
+      );
+      assert.equal(report.smokeRunReachedScriptFileCount, 3);
+      const auxiliary = report.files.find((file) => file.sourceName.endsWith("Helper.groovy"));
+      assert.equal(auxiliary?.smokeRunReached, false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+// The smoke runner drives the public runtime API like a Player with deterministic answers.
+test(
+  "smoke runner plays media in simulated time and reports the last step's outcome",
+  { skip: "reason" in runnerResult ? runnerResult.reason : false },
+  () => {
+    if (!("runner" in runnerResult)) return;
+    const run = (source: string, maxSteps?: number): { status: string; code: string | null } => {
+      const result = runnerResult.runner(source, {}, maxSteps === undefined ? {} : { maxSteps });
+      return { status: result.status, code: result.failure?.code ?? null };
+    };
+    const halted = { status: "halted", code: null };
+    // Background media keeps playing while the script waits.
+    assert.deepEqual(
+      run(
+        'let music = playAudio async "a.wav"\nwhile music.state == "running" {\n  wait 1\n}\nsay "done"\n',
+      ),
+      halted,
+    );
+    // A repeated pass count needs the cumulative progress of all passes.
+    assert.deepEqual(
+      run('playAudio(file: "a.wav", async: false, repeat: 3 times)\nsay "done"\n'),
+      halted,
+    );
+    // A runtime failure caused by the last allowed step is still reported.
+    assert.deepEqual(run('wait 1\nlet total = 1 + "bad"\n', 1), {
+      status: "failed",
+      code: "TSR027",
+    });
+    // Numbered inputs rotate, so a loop waiting for a larger answer ends.
+    assert.deepEqual(run("let n = 0\nwhile n < 3 {\n  n = askNumber\n}\n"), halted);
+  },
+);
+
+test("package flow keys normalize paths like the legacy file system", () => {
+  assert.equal(flowKey("pack//next.tease"), "pack/next.tease");
+  assert.equal(flowKey("./Pack/../Next.tease"), "next.tease");
+  assert.equal(flowKey("pack\\sub\\Next.tease"), "pack/sub/next.tease");
+});
 
 // A package whose script loads `metaClass` mixin modules at runtime, like the Toy package.
 test(

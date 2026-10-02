@@ -1,4 +1,10 @@
-import type { FlowState, HostFunction, RuntimeValue } from "./runtime-check.ts";
+import {
+  newFlowState,
+  NUMBER_ANSWERS,
+  type FlowState,
+  type HostFunction,
+  type RuntimeValue,
+} from "./runtime-check.ts";
 import type { IrExpression, IrStatement, IrSwitchCase, MigrationProgram } from "./ir.ts";
 
 /**
@@ -298,30 +304,74 @@ function collectNames(value: unknown, names: Set<string>): void {
 
 /**
  * Host stand-ins for the pending capabilities of a shimmed program, for smoke runs only: storage follows the owner
- * semantics (a missing key reads as null or the supplied default, reads never write), `run` records its target
- * in the flow state, time and dates are fixed, and inputs give simple valid answers.
+ * semantics (a missing key reads as null or the supplied default, reads never write), `run` records its target in
+ * the flow state, time and dates follow the simulated clock from 2026-10-02 12:00 UTC, inputs rotate through simple
+ * valid answers like the runner's interaction answers, and conversions fail without a `default` like the accepted
+ * functions.
  */
 export function pendingHostFunctions(
   shim: PendingShim,
-  state: FlowState = { storage: new Map(), transfer: null },
+  state: FlowState = newFlowState(),
 ): Record<string, HostFunction> {
   const storage = state.storage;
   const key = (value: RuntimeValue | undefined): string => String(value);
-  const number = (value: RuntimeValue | undefined): number =>
-    typeof value === "number" ? value : Number(value);
-  const emptyList = { kind: "list", items: [] };
-  const dateTime = {
-    kind: "object",
-    properties: [
-      { name: "year", value: 2026 },
-      { name: "month", value: 10 },
-      { name: "day", value: 2 },
-      { name: "hour", value: 12 },
-      { name: "minute", value: 0 },
-      { name: "weekday", value: "Friday" },
-      { name: "weekdayNumber", value: 5 },
-    ],
+  const next = <T>(operation: string, answers: readonly T[]): T => {
+    const visit = state.answers.get(operation) ?? 0;
+    state.answers.set(operation, visit + 1);
+    return answers[visit % answers.length]!;
   };
+  const emptyList = { kind: "list", items: [] };
+  const epochMs = Date.UTC(2026, 9, 2, 12, 0, 0);
+  const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const date = (withTime: boolean): RuntimeValue => {
+    const moment = new Date(epochMs + state.clock.nowMs);
+    const fields: Array<[string, RuntimeValue]> = [
+      ["year", moment.getUTCFullYear()],
+      ["month", moment.getUTCMonth() + 1],
+      ["day", moment.getUTCDate()],
+      ["weekday", weekdays[moment.getUTCDay()]!],
+      ["weekdayNumber", moment.getUTCDay() === 0 ? 7 : moment.getUTCDay()],
+    ];
+    if (withTime) {
+      fields.push(
+        ["hour", moment.getUTCHours()],
+        ["minute", moment.getUTCMinutes()],
+        ["second", moment.getUTCSeconds()],
+        ["millisecond", moment.getUTCMilliseconds()],
+      );
+    }
+    const value = {
+      kind: "object",
+      properties: fields.map(([name, item]) => ({ name, value: item })),
+    };
+    return value;
+  };
+  const convert =
+    (
+      name: string,
+      parse: (value: RuntimeValue | undefined) => RuntimeValue | undefined,
+    ): HostFunction =>
+    ([value], named) => {
+      const converted = parse(value);
+      if (converted !== undefined) return converted;
+      if (named.default !== undefined) return named.default;
+      throw new Error(`${name}() cannot convert ${JSON.stringify(value)}.`);
+    };
+  const toNumber = (value: RuntimeValue | undefined): number | undefined => {
+    const parsed =
+      typeof value === "number"
+        ? value
+        : typeof value === "string" && value.trim() !== ""
+          ? Number(value)
+          : NaN;
+    return Number.isFinite(parsed) ? parsed : undefined;
+  };
+  const rounded =
+    (name: string, round: (value: number) => number): HostFunction =>
+    ([value]) => {
+      if (typeof value !== "number") throw new Error(`${name}() needs a number.`);
+      return round(value);
+    };
   const implementations = new Map<string, HostFunction>([
     // V30 leaves `save null` open; the stand-in removes the key as legacy SexScript did.
     [
@@ -337,21 +387,47 @@ export function pendingHostFunctions(
     ["run", ([script]) => ((state.transfer = String(script)), null)],
     ["end", () => null],
     ["showPopup", () => null],
-    ["showButton", () => 0],
-    ["askBoolean", () => true],
+    // Seconds until the click: quick, then slow, the slow answer limited by a timeout.
+    [
+      "showButton",
+      ([, timeout]) => next("showButton", [1, typeof timeout === "number" ? timeout : 30]),
+    ],
+    ["askBoolean", () => next("askBoolean", [true, false])],
     ["askBooleans", (_, named) => named.defaults ?? emptyList],
-    ["askInteger", () => 1],
-    ["getSeconds", () => 1_790_000_000],
-    ["getDateTime", () => dateTime],
-    ["getDate", () => dateTime],
+    ["askInteger", () => next("askInteger", NUMBER_ANSWERS)],
+    ["getSeconds", () => Math.floor((epochMs + state.clock.nowMs) / 1000)],
+    ["getDateTime", () => date(true)],
+    ["getDate", () => date(false)],
     ["openUrl", () => null],
-    ["round", ([value]) => Math.round(number(value))],
-    ["floor", ([value]) => Math.floor(number(value))],
-    ["ceil", ([value]) => Math.ceil(number(value))],
-    ["toInteger", ([value]) => Math.trunc(number(value))],
-    ["toNumber", ([value]) => number(value)],
-    ["toString", ([value]) => String(value)],
-    ["toBoolean", ([value]) => value === true || value === "true"],
+    ["round", rounded("round", Math.round)],
+    ["floor", rounded("floor", Math.floor)],
+    ["ceil", rounded("ceil", Math.ceil)],
+    [
+      "toInteger",
+      convert("toInteger", (value) => {
+        const parsed = toNumber(value);
+        return parsed === undefined ? undefined : Math.trunc(parsed);
+      }),
+    ],
+    ["toNumber", convert("toNumber", toNumber)],
+    [
+      "toString",
+      convert("toString", (value) =>
+        typeof value === "object" && value !== null ? undefined : String(value),
+      ),
+    ],
+    [
+      "toBoolean",
+      convert("toBoolean", (value) =>
+        typeof value === "boolean"
+          ? value
+          : value === "true"
+            ? true
+            : value === "false"
+              ? false
+              : undefined,
+      ),
+    ],
   ]);
   const result: Record<string, HostFunction> = {};
   for (const [shimName, operation] of shim.operations) {

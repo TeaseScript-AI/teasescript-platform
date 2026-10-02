@@ -31,6 +31,8 @@ if (command === "inventory") {
   const options: FeasibilityOptions = {};
   if (compileRequested) options.compiler = await loadRepositoryCompiler();
   if (runRequested) options.runner = await loadRepositoryRunner();
+  // One scripts folder is the package root that script transfers are relative to.
+  if (args.length === 1 && (await stat(args[0]!)).isDirectory()) options.packageRoot = args[0]!;
   const report = analyzeFeasibility(files, options);
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } else if (command === "convert") {
@@ -89,6 +91,8 @@ async function convertPackage(
   let written = 0;
   let compilerClean = 0;
   for (let index = 0; index < programs.length; index += 1) {
+    // A file that does not parse produces no output but reports its parser errors.
+    if (parsed[index]!.root === null) errors += reportDiagnostics(programs[index]!);
     if (parsed[index]!.root?.kind !== "scriptBody" || programs[index]!.module !== undefined)
       continue;
     const relative = path.relative(sourceRoot, sourcePaths[index]!);
