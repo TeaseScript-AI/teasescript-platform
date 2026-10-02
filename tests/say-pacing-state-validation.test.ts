@@ -576,7 +576,7 @@ test("prepared say temporary values reject malformed top-level and caller state"
   assert.throws(() => run(suspended, forgedCaller), { name: "RuntimeDataError", code: "TSR101" });
 });
 
-test("say pacing expression temporaries are required before checkpoint restore", () => {
+test("say pacing expression temporaries restore behind an older pacing gate", () => {
   const compiled = plan(
     ["function pace(value) { return value }", 'say "first", 5', 'say "second", pace(5)'].join("\n"),
   );
@@ -598,27 +598,18 @@ test("say pacing expression temporaries are required before checkpoint restore",
     pending = executeInstruction(compiled, pending).snapshot;
   }
   assert.ok(pending.temporaries.some((temporary) => temporary.id === pacingTemporary));
+  const olderGate = pending.backgroundActions[0];
+  assert.equal(olderGate?.kind, "chatPacingGate");
   assert.equal(validateRuntimeSnapshot(pending, compiled).valid, true);
 
+  // The restored say promotes the older gate and keeps the pacing value computed before the checkpoint.
   const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, pending)));
   const promoted = executeInstruction(restored.plan, restored.snapshot);
-  assert.equal(promoted.snapshot.foregroundAction?.kind, "chatPacingGate");
-
-  const missingPacingTemporary = structuredClone(pending);
-  // EVIDENCE: fixture removes the required pacing temporary before snapshot validation.
-  (missingPacingTemporary as { temporaries: RuntimeTemporarySnapshot[] }).temporaries =
-    missingPacingTemporary.temporaries.filter((temporary) => temporary.id !== pacingTemporary);
-  assert.equal(validateRuntimeSnapshot(missingPacingTemporary, compiled).valid, false);
-  assert.throws(() => createCheckpoint(compiled, missingPacingTemporary));
-
-  for (const temporaryId of [say.speakerTemporary, say.textTemporary]) {
-    assert.equal(typeof temporaryId, "number");
-    const missingPreparedTemporary = structuredClone(pending);
-    // EVIDENCE: fixture removes one required prepared say temporary before snapshot validation.
-    (missingPreparedTemporary as { temporaries: RuntimeTemporarySnapshot[] }).temporaries =
-      missingPreparedTemporary.temporaries.filter((temporary) => temporary.id !== temporaryId);
-    assert.equal(validateRuntimeSnapshot(missingPreparedTemporary, compiled).valid, false);
-  }
+  const gate = promoted.snapshot.foregroundAction;
+  assert.equal(gate?.kind, "chatPacingGate");
+  assert.equal(gate?.actionId, olderGate?.actionId);
+  assert.equal(gate?.preparedOutput?.text, "second");
+  assert.equal(gate?.preparedOutput?.durationMs, 5_000);
 });
 
 test("prepared say text is live instead of its already-consumed source expression", () => {
