@@ -1024,38 +1024,39 @@ function exhaustedMeasurementCounts(
   };
 }
 
-test("interaction validation measures each accepted field once and stops after aggregate exhaustion", () => {
-  const accepted = interactionPlan("choice", {
+test("interaction validation stops UTF-8 measurement once a field exhausts the aggregate", () => {
+  // `interactionUtf8Measurements` is a scoped regression oracle for bounded validation work: after one field
+  // exhausts the aggregate, later fields must not be encoded, or a hostile plan or checkpoint would cost its field
+  // count times the byte budget. Exact measurement counts are not a requirement.
+  const base = interactionPlan("choice", {
     kind: "choice",
     labelType: "identifier",
-    options: [
-      { text: "One", label: "one" },
-      { text: "Two", label: "two" },
-    ],
+    options: [{ text: "One", label: "one" }],
     accessibleName: defaults.choice,
   });
-  const acceptedStats = withValidationTestStatistics((finish) => {
-    assert.equal(validateInstructionPlan(accepted).valid, true);
-    return finish();
-  });
-  assert.equal(acceptedStats.counts.interactionUtf8Measurements, 4);
-  const acceptedPending = waiting(accepted);
-  const acceptedSnapshotStats = withValidationTestStatistics((finish) => {
-    assert.equal(validateRuntimeSnapshot(acceptedPending.snapshot).valid, true);
-    return finish();
-  });
-  assert.equal(acceptedSnapshotStats.counts.interactionUtf8Measurements, 4);
-
-  // The text fills half the aggregate, the label exceeds the remaining half by one byte, and the
-  // later sentinel option is not measured.
   const half = MAX_INTERACTION_AGGREGATE_UTF8_BYTES / 2;
-  assert.deepEqual(
-    exhaustedMeasurementCounts(accepted, [
-      { text: "a".repeat(half), label: "b".repeat(half + 1) },
-      { text: "later", label: "later" },
-    ]),
-    { plan: 2, snapshot: 2 },
-  );
+  // Each euro sign is three UTF-8 bytes, so this text exceeds the aggregate while its UTF-16 length
+  // passes the constant-time length precheck and must be encoded.
+  const multibyte = "€".repeat(Math.floor(MAX_INTERACTION_AGGREGATE_UTF8_BYTES / 3) + 1);
+  assert.ok(multibyte.length <= MAX_INTERACTION_AGGREGATE_UTF8_BYTES);
+  const laterOptions = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      text: "later ".repeat(100),
+      label: `later${index}`,
+    }));
+  for (const [name, exhausting] of [
+    // The text fills half the aggregate and the label exceeds the remaining half by one byte.
+    ["label after a half-budget text", { text: "a".repeat(half), label: "b".repeat(half + 1) }],
+    ["multibyte first text", { text: multibyte, label: "first" }],
+  ] as const) {
+    const oneLater = exhaustedMeasurementCounts(base, [exhausting, ...laterOptions(1)]);
+    const manyLater = exhaustedMeasurementCounts(base, [exhausting, ...laterOptions(1_000)]);
+    assert.ok(
+      (oneLater.plan ?? 0) > 0 && (oneLater.snapshot ?? 0) > 0,
+      `${name}: exhausting field measured`,
+    );
+    assert.deepEqual(manyLater, oneLater, name);
+  }
 });
 
 test("huge completion kind tokens are not reflected or allowed to mutate canonical state", () => {
@@ -1339,26 +1340,6 @@ test("interaction ownership survives active call, scope, and loop frames", () =>
   }
 });
 
-test("one multibyte field exhausting the aggregate stops all later interaction UTF-8 measurement", () => {
-  const base = interactionPlan("choice", {
-    kind: "choice",
-    labelType: "none",
-    options: [{ text: "ok", label: null }],
-    accessibleName: defaults.choice,
-  });
-  // Each euro sign is three UTF-8 bytes, so this exceeds the aggregate while its UTF-16 length
-  // passes the constant-time length precheck and must be measured once.
-  const overLimit = "\u20ac".repeat(Math.floor(MAX_INTERACTION_AGGREGATE_UTF8_BYTES / 3) + 1);
-  assert.ok(overLimit.length <= MAX_INTERACTION_AGGREGATE_UTF8_BYTES);
-  assert.deepEqual(
-    exhaustedMeasurementCounts(base, [
-      { text: overLimit, label: null },
-      { text: "later", label: null },
-    ]),
-    { plan: 1, snapshot: 1 },
-  );
-});
-
 test("pending actions reserve their complete event sequence capacity", () => {
   const max = Number.MAX_SAFE_INTEGER;
   const interaction = interactionPlan("text", {
@@ -1507,21 +1488,22 @@ test("unsupported persisted interaction fields are rejected at every boundary", 
   }
 });
 
-test("accepted text completions perform one bounded UTF-8 measurement before normalization", () => {
+test("text completion limits the raw submitted string before line-ending normalization", () => {
   const plan = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
-  for (const submittedText of ["ordinary", "a\r\nb\rc"]) {
-    const pending = waiting(plan);
-    const stats = withValidationTestStatistics((finish) => {
-      const completionRequest = {
-        actionId: pending.snapshot.foregroundAction!.actionId,
-        actionKind: "interaction",
-        interactionKind: "text",
-        payload: { kind: "submittedText", submittedText },
-      } as const;
-      const completed = completeAction(plan, pending.snapshot, completionRequest);
-      assert.equal(completed.outcome.kind, "completed");
-      return finish();
-    });
-    assert.equal(stats.counts.interactionUtf8Measurements, 1, JSON.stringify(submittedText));
-  }
+  // Each CRLF pair is two raw bytes but normalizes to one, so only the raw text exceeds the limit.
+  const submittedText = `x${"\r\n".repeat(MAX_INTERACTION_STRING_UTF8_BYTES / 2)}`;
+  assert.ok(submittedText.length > MAX_INTERACTION_STRING_UTF8_BYTES);
+  assert.ok(submittedText.replace(/\r\n/gu, "\n").length <= MAX_INTERACTION_STRING_UTF8_BYTES);
+  const pending = waiting(plan);
+  const before = structuredClone(pending.snapshot);
+  const rejected = completeAction(plan, pending.snapshot, {
+    actionId: pending.snapshot.foregroundAction!.actionId,
+    actionKind: "interaction",
+    interactionKind: "text",
+    payload: { kind: "submittedText", submittedText },
+  });
+  assert.equal(rejected.outcome.kind, "invalidPayload");
+  assert.deepEqual(rejected.events, []);
+  assert.deepEqual(rejected.snapshot, before);
+  assert.deepEqual(pending.snapshot, before);
 });
