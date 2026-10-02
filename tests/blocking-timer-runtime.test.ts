@@ -18,6 +18,7 @@ import {
   validateRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
+import type { SourceSpan } from "../src/source.js";
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -290,8 +291,9 @@ test("unsupported and invalid timer forms, members, and handler scope fail with 
 });
 
 test("accepted duration forms without an implementation are never read as another duration", () => {
-  // Calendar units (§35) and timer ranges with other units (§27) are not implemented yet. They may fail with an error
-  // located in the duration, but a compiled timer must have the accepted meaning, never for example plain seconds.
+  // Calendar units (§35) and timer ranges with other units (§27) are not implemented yet. They may fail with a compile
+  // or runtime error located in the duration, but a started timer must have the accepted meaning, never for example
+  // plain seconds.
   const minutesFiveToTen = (deadlineMs: number): boolean =>
     deadlineMs >= 5 * 60_000 && deadlineMs < 10 * 60_000;
   const cases: ReadonlyArray<
@@ -308,20 +310,26 @@ test("accepted duration forms without an implementation are never read as anothe
   ];
   for (const [source, subject, accepted] of cases) {
     const start = source.lastIndexOf(subject);
+    const inSubject = (span: SourceSpan): boolean =>
+      span.start.offset >= start && span.end.offset <= start + subject.length;
+    const message = `${JSON.stringify(source)}: an error must be located in ${JSON.stringify(subject)}`;
     const compiled = compileSource(source);
     if (compiled.plan === null) {
       assert.ok(
-        compiled.diagnostics.some(
-          ({ span }) => span.start.offset >= start && span.end.offset <= start + subject.length,
-        ),
-        `${JSON.stringify(source)}: a rejection must be located in ${JSON.stringify(subject)}`,
+        compiled.diagnostics.some(({ span }) => inSubject(span)),
+        message,
       );
       continue;
     }
-    const { snapshot } = run(
+    const { snapshot, events } = run(
       compiled.plan,
       createImmediatePacingRuntimeSnapshot(compiled.plan, { seed: SEEDS[0]! }),
     );
+    const failure = events.at(-1);
+    if (failure?.kind === "runtimeFailure") {
+      assert.ok(inSubject(failure.span), message);
+      continue;
+    }
     const { deadlineMs } = delayAction(snapshot);
     assert.ok(accepted(deadlineMs), `${JSON.stringify(source)} must not mean ${deadlineMs} ms`);
   }
