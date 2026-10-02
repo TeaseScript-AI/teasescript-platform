@@ -981,6 +981,19 @@ async function actionButtonGeometryChecks(page) {
         choicesToComposer:
           composer.getBoundingClientRect().top -
           foreground.lastElementChild.getBoundingClientRect().bottom,
+        // The content box, where the choices are laid out; the border box ignores padding.
+        foregroundEdges: ((box, style) => [
+          box.left +
+            Number.parseFloat(style.paddingLeft) +
+            Number.parseFloat(style.borderLeftWidth),
+          box.right -
+            Number.parseFloat(style.paddingRight) -
+            Number.parseFloat(style.borderRightWidth),
+        ])(foreground.getBoundingClientRect(), getComputedStyle(foreground)),
+        composerEdges: [
+          composer.getBoundingClientRect().left,
+          composer.getBoundingClientRect().right,
+        ],
         foregroundWidth: foreground.getBoundingClientRect().width,
         foregroundButtons: Array.from(foreground.querySelectorAll(".player-action-button"), button),
         backgroundButtons: Array.from(background.querySelectorAll(".player-action-button"), button),
@@ -993,10 +1006,10 @@ async function actionButtonGeometryChecks(page) {
     state.foregroundButtons.find((button) => button.text.startsWith("Take the longer path"));
   const initial = await geometry();
   const shared = initial.foregroundButtons[0];
+  // Choices share the transcript reading width and add no inline padding beyond its gutter.
   check(
-    longChoice(initial).height > shared.height &&
-      longChoice(initial).width <= initial.foregroundWidth,
-    "The long desktop choice did not wrap and grow inside its group",
+    initial.foregroundEdges.every((edge, index) => close(edge, initial.composerEdges[index])),
+    "Choices add inline padding inside the shared reading width",
   );
   check(
     initial.messageToChoices > 0 && initial.choicesToComposer > 0,
@@ -1025,6 +1038,32 @@ async function actionButtonGeometryChecks(page) {
       longChoice(narrow).width <= narrow.foregroundWidth,
     "Long choice did not wrap and grow inside its group",
   );
+  // A wrapped button fits its widest rendered line plus its own padding instead of keeping the unwrapped width.
+  const fittedChoice = await page
+    .locator("[data-foreground-controls] button")
+    .filter({ hasText: "Take the longer path" })
+    .evaluate((button) => {
+      const range = document.createRange();
+      range.selectNodeContents(button.querySelector(".player-action-label"));
+      const lines = range.getClientRects();
+      const style = getComputedStyle(button);
+      const inset =
+        Number.parseFloat(style.paddingLeft) +
+        Number.parseFloat(style.paddingRight) +
+        Number.parseFloat(style.borderLeftWidth) +
+        Number.parseFloat(style.borderRightWidth);
+      let widestLine = 0;
+      for (const line of lines) widestLine = Math.max(widestLine, line.width);
+      return {
+        lineCount: lines.length,
+        widestLine,
+        contentWidth: button.getBoundingClientRect().width - inset,
+      };
+    });
+  check(
+    fittedChoice.lineCount > 1 && Math.abs(fittedChoice.contentWidth - fittedChoice.widestLine) < 2,
+    `Wrapped choice border does not follow the rendered text plus its padding: ${JSON.stringify(fittedChoice)}`,
+  );
   await page.getByRole("button", { name: "Stay by the water", exact: true }).click();
   const continueButton = page.getByRole("button", { name: "Continue", exact: true });
   await continueButton.waitFor();
@@ -1050,7 +1089,7 @@ async function actionButtonGeometryChecks(page) {
       `Player action button text did not follow the root size: ${button.text}`,
     );
   }
-  return "PASS shared action button style, wrapping growth, separation and root-font text scaling";
+  return "PASS shared action button style, reading width, wrapping growth and fit, separation and root-font text scaling";
 }
 
 async function buttonInkChecks(page) {
@@ -1903,8 +1942,9 @@ async function composerNoticeChecks(page) {
         ) &&
         notice.left >= 0 &&
         notice.right <= innerWidth &&
-        // Anchored above the input it belongs to, without overlapping it.
+        // Anchored just above the input it belongs to: no overlap, and closer than its own height.
         notice.bottom <= composer.top + 1 &&
+        composer.top - notice.bottom < notice.height &&
         notice.left < composer.right &&
         notice.right > composer.left &&
         Math.abs(composer.top - before.composer) < 1 &&

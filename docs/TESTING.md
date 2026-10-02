@@ -571,9 +571,9 @@ playback, a script pause reaching the playing element, pacing skips from a press
 empty composer but not from a Player control, message text or Space while the composer holds text, a press held past
 one message's pacing that must not skip the next message's pacing, Finish ending the session, and a narrow viewport
 that keeps the first question's input visible. Development preview presentation is covered by the [Player browser
-verification route](#player-browser-and-visual-verification). `CHROMIUM_BIN` selects a Chromium executable outside
-`/usr/bin`. An unavailable Chromium executable is an explicit skip; an available browser must pass the configured smoke
-checks.
+verification route](#player-browser-and-visual-verification). `CHROMIUM_BIN` is tried before the `/usr/bin` Chromium
+paths; an unusable value falls back to them. An unavailable Chromium executable is an explicit skip; an available
+browser must pass the configured smoke checks.
 
 The Monaco editor has a separate route outside `npm run check`: `npm run test:editor-browser` builds the editor and runs
 `tools/editor-browser-smoke.mjs`. Chromium may resolve only the local preview, so a build that needs remote code to
