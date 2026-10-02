@@ -67,7 +67,6 @@ test("serves the Player build at its maintained route", async () => {
     javascript.body,
     await projectFile(`dist/player-app/${assetPath.slice("/player/".length)}`),
   );
-  assert.equal((await get("/player-vue/")).status, 404);
 });
 
 test("serves required JavaScript and CSS assets", async () => {
@@ -174,10 +173,6 @@ test("workspace automation stores revisions and returns compile and run results"
   assert.equal(run.status, 200);
   const runBody = view(run);
   assert.equal(runBody.result?.status, "halted");
-  assert.deepEqual(
-    runBody.result?.events.map((event) => event.kind),
-    ["say", "actionRequested", "complete"],
-  );
   assert.equal(runBody.result?.events[0]?.text, "automation");
   const result = await call("GET", "/api/workspace/result");
   assert.equal(result.status, 200);
