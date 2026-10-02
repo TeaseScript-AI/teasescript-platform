@@ -39,3 +39,24 @@ The first POC will establish:
 
 See [`docs/LEGACY-SEXSCRIPT-ANALYSIS.md`](docs/LEGACY-SEXSCRIPT-ANALYSIS.md) for the legacy runtime findings and
 [`docs/POC-SCOPE.md`](docs/POC-SCOPE.md) for the implementation slice.
+
+
+## Convert source directly
+
+The POC can invoke the legacy Groovy parser itself when the external Groovy 2.5.21 JARs are available:
+
+```sh
+export SEXSCRIPT_GROOVY_JAR=/path/to/groovy-2.5.21.jar
+export SEXSCRIPT_GROOVY_JSON_JAR=/path/to/groovy-json-2.5.21.jar
+node src/cli.ts convert /path/to/script.groovy > script.tease
+```
+
+Convert a source tree while using package-local auxiliary Groovy classes as migration input:
+
+```sh
+node src/cli.ts convert-package /path/to/legacy/scripts /path/to/output
+```
+
+`convert-package` writes text `.tease` files only. It does not copy legacy media, JARs, ZIPs, or other binary assets.
+For auxiliary helper classes, only transitively used helper functions are embedded into each generated script so the
+result does not depend on Groovy or the old SexScript runtime.
