@@ -1,6 +1,7 @@
 import { walkAst, type ParsedGroovyFile, type SourceSpan } from "./ast.ts";
 import type { IrStatement, MigrationDiagnostic } from "./ir.ts";
 import { buildHelperRegistry, lowerParsedFile } from "./lower.ts";
+import { lowerSelfContainedPackage } from "./package.ts";
 
 const SOURCE_STATEMENT_KINDS = new Set([
   "expressionStatement",
@@ -36,10 +37,17 @@ export interface FeasibilityFileReport {
   sourceStatementNodes: number;
   emittedIrStatements: number;
   unsupportedPlaceholders: number;
+  recognized: boolean;
+  lowered: boolean;
+  dependencyClosed: boolean;
 }
 
 export interface FeasibilityReport {
   fileCount: number;
+  scriptBodyFileCount: number;
+  recognizedScriptFileCount: number;
+  loweredScriptFileCount: number;
+  dependencyClosedScriptFileCount: number;
   parseErrorFileCount: number;
   migrationCleanFileCount: number;
   sourceStatementNodes: number;
@@ -54,8 +62,13 @@ export interface FeasibilityReport {
 
 export function analyzeFeasibility(files: ParsedGroovyFile[]): FeasibilityReport {
   const helperRegistry = buildHelperRegistry(files);
+  const packagePrograms = lowerSelfContainedPackage(files);
   const report: FeasibilityReport = {
     fileCount: files.length,
+    scriptBodyFileCount: 0,
+    recognizedScriptFileCount: 0,
+    loweredScriptFileCount: 0,
+    dependencyClosedScriptFileCount: 0,
     parseErrorFileCount: 0,
     migrationCleanFileCount: 0,
     sourceStatementNodes: 0,
@@ -68,9 +81,16 @@ export function analyzeFeasibility(files: ParsedGroovyFile[]): FeasibilityReport
     files: [],
   };
 
-  for (const file of files) {
+  for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
+    const file = files[fileIndex]!;
     const parseErrors = file.diagnostics.length;
-    if (parseErrors > 0 || file.root === null) report.parseErrorFileCount += 1;
+    const isScriptBody = file.root?.kind === "scriptBody";
+    const recognized = parseErrors === 0 && file.root !== null;
+    if (isScriptBody) {
+      report.scriptBodyFileCount += 1;
+      if (recognized) report.recognizedScriptFileCount += 1;
+    }
+    if (!recognized) report.parseErrorFileCount += 1;
 
     let sourceStatementNodes = 0;
     if (file.root !== null) {
@@ -80,11 +100,17 @@ export function analyzeFeasibility(files: ParsedGroovyFile[]): FeasibilityReport
     }
 
     const program = lowerParsedFile(file, { helperRegistry });
+    const packageProgram = packagePrograms[fileIndex]!;
     const errors = program.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
+    const packageErrors = packageProgram.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
     const roots = rootDiagnostics(errors);
-    const ir = countIrStatements(program.statements);
+    const ir = countIrStatements(packageProgram.statements);
+    const lowered = isScriptBody && errors.length === 0;
+    const dependencyClosed = lowered && packageErrors.length === 0;
 
     if (errors.length === 0) report.migrationCleanFileCount += 1;
+    if (lowered) report.loweredScriptFileCount += 1;
+    if (dependencyClosed) report.dependencyClosedScriptFileCount += 1;
     report.sourceStatementNodes += sourceStatementNodes;
     report.emittedIrStatements += ir.total;
     report.unsupportedPlaceholders += ir.unsupported;
@@ -101,6 +127,9 @@ export function analyzeFeasibility(files: ParsedGroovyFile[]): FeasibilityReport
       sourceStatementNodes,
       emittedIrStatements: ir.total,
       unsupportedPlaceholders: ir.unsupported,
+      recognized,
+      lowered,
+      dependencyClosed,
     });
   }
 
