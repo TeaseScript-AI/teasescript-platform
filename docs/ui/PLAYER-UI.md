@@ -561,8 +561,8 @@ and the composer may never grow larger than the conversation area available bene
 contain the complete measured input and Send control; a growing textarea may not paint beyond that row or beneath the
 visual-viewport/keyboard boundary.
 
-The following fullscreen keyboard-geometry and allocation behavior is intended but not yet fully implemented in Phase
-2C.
+The following fullscreen keyboard-geometry and allocation behavior is intended but not yet fully implemented in the
+Player.
 
 The Player re-evaluates during and after keyboard/orientation transitions. Normal browser presentation uses the visual
 viewport that the browser already resizes. Fullscreen uses feature-detected software-keyboard geometry when available,

@@ -64,7 +64,7 @@ specification.
   supplies theme/authored button material. See [ADR 0018](../../../docs/decisions/0018-first-standard-library-poc-contract.md)
   for syntax and completion semantics.
 - `usePlayerTheme.ts` applies/restores document variables; `player/theme` calculates colours and Theme Lab edits intent.
-  See [theme evaluation](../../../README.md#experimental-dynamic-theme-evaluation).
+  See [theme evaluation](../../README.md#experimental-dynamic-theme-evaluation).
 - `StageRightRail.vue` owns the right overlay rail and its viewport-centred control placement, `TimerRegion.vue` its
   timer collection and `TimerDisplay.vue` individual timers. `PlayerApp.vue` presents runtime timers in the rail; the
   development preview's fixture timers fill it only while no runtime timer is presented, and `BackgroundControlsFixture.vue` samples

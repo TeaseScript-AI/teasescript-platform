@@ -50,7 +50,6 @@
   --player-timer-rail-width: 156px;
   --player-menu-compact-width: calc(var(--player-top-control-size) + 2 * var(--player-edge-space));
   font-family: ui-sans-serif, system-ui, sans-serif;
-  /* Existing Player light palette: player/styles/layout.css. */
   --background: oklch(95.839% 0.01306 71.33);
   --foreground: oklch(30.838% 0.01712 35.72);
   --sidebar: oklch(97.586% 0.01130 71.90);
