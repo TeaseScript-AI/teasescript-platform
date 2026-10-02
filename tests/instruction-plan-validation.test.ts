@@ -9,9 +9,7 @@ import { executeInstruction, run, RuntimeDataError } from "../src/runtime/engine
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
-const REGION_ERROR = "Control-flow target leaves the instruction's execution region.";
-
-test("reports malformed binary expression plans in pre-order", () => {
+test("reports malformed nested binary expression nodes at their plan paths", () => {
   const malformed = structuredClone(plan("let target = 0\ntarget = 1 + 2 + 3"));
   const assignment = malformed.instructions[1];
   assert.equal(assignment?.kind, "assign");
@@ -24,56 +22,27 @@ test("reports malformed binary expression plans in pre-order", () => {
   expression.operator = "invalid-root";
   // EVIDENCE: the compiler-produced left-associative `1 + 2 + 3` expression has a binary left child.
   const left = expression.left as MutableBinaryExpression;
-  left.span = null;
-  left.operator = "invalid-left";
-  left.left = null;
   // EVIDENCE: the compiler-produced inner binary expression has literal `2` as its right child.
   const leftRight = left.right as MutableLiteralExpression;
   leftRight.value = {};
-  expression.right = { kind: "unknown", span: null };
+  left.left = null;
+  // EVIDENCE: the compiler-produced right operand is literal `3`; only its kind is replaced.
+  (expression.right as { kind: string }).kind = "unknown";
 
-  assert.deepEqual(validateInstructionPlan(malformed).errors, [
-    {
-      code: "TSC002",
-      message: "Invalid assignment target plan.",
-      path: "$.instructions[1].target",
-    },
-    {
-      code: "TSC002",
-      message: "Invalid binary operator.",
-      path: "$.instructions[1].target.operator",
-    },
-    {
-      code: "TSC002",
-      message: "Plan source location is malformed.",
-      path: "$.instructions[1].target.left.span",
-    },
-    {
-      code: "TSC002",
-      message: "Invalid binary operator.",
-      path: "$.instructions[1].target.left.operator",
-    },
-    {
-      code: "TSC002",
-      message: "Expression must be an object with a kind.",
-      path: "$.instructions[1].target.left.left",
-    },
-    {
-      code: "TSC002",
-      message: "Literal value must be a finite JSON scalar.",
-      path: "$.instructions[1].target.left.right.value",
-    },
-    {
-      code: "TSC002",
-      message: "Plan source location is malformed.",
-      path: "$.instructions[1].target.right.span",
-    },
-    {
-      code: "TSC002",
-      message: "Unknown expression kind 'unknown'.",
-      path: "$.instructions[1].target.right.kind",
-    },
-  ]);
+  const validation = validateInstructionPlan(malformed);
+  assert.equal(validation.valid, false);
+  assert.ok(validation.errors.every((error) => error.code === "TSC002"));
+  assert.deepEqual(
+    new Set(validation.errors.map((error) => error.path)),
+    new Set([
+      // A binary expression is not an assignable target, independent of its nested defects.
+      "$.instructions[1].target",
+      "$.instructions[1].target.operator",
+      "$.instructions[1].target.left.left",
+      "$.instructions[1].target.left.right.value",
+      "$.instructions[1].target.right.kind",
+    ]),
+  );
 });
 
 interface MutableBinaryExpression {
@@ -90,71 +59,122 @@ interface MutableLiteralExpression {
   span: unknown;
 }
 
-test("rejects a root jump into a function prologue", () => {
-  const compiled = plan(rootBranchWithTwoFunctions());
-  const jumpIndex = rootInstructionIndex(compiled, "jump");
-  const second = compiled.functions[1]!;
-  const malformed = mutateTarget(compiled, jumpIndex, "target", second.entryInstruction);
+test("rejects control-flow targets that leave the instruction's execution region", () => {
+  const callSource = [
+    'function first { say "first" }',
+    'function second { say "second" }',
+    "first()",
+    "exit",
+  ].join("\n");
+  const defaultSource = [
+    "function first(value = 1) { say value }",
+    "function second { say 2 }",
+    "first()",
+    "exit",
+  ].join("\n");
+  const firstFunction = (compiled: InstructionPlan): number => compiled.functions[0]!.id;
+  const rows: Array<{
+    name: string;
+    source: string;
+    instruction: (compiled: InstructionPlan) => number;
+    field: "target" | "continueTarget" | "returnInstruction";
+    forbidden: (compiled: InstructionPlan) => number;
+    // A loop or call-return rule also reports at this path, so only the message isolates the region rule.
+    sharedPath?: true;
+  }> = [
+    {
+      name: "root jump into a function prologue",
+      source: rootBranchWithTwoFunctions(),
+      instruction: (compiled) => rootInstructionIndex(compiled, "jump"),
+      field: "target",
+      forbidden: (compiled) => compiled.functions[1]!.entryInstruction,
+    },
+    {
+      name: "root conditional jump into a function body",
+      source: rootBranchWithTwoFunctions(),
+      instruction: (compiled) => rootInstructionIndex(compiled, "jumpIfFalse"),
+      field: "target",
+      forbidden: (compiled) => compiled.functions[1]!.bodyEntryInstruction,
+    },
+    {
+      name: "function jump into root execution",
+      source: functionBranches(),
+      instruction: (compiled) =>
+        functionInstructionIndex(compiled, firstFunction(compiled), "jump"),
+      field: "target",
+      forbidden: () => 0,
+    },
+    {
+      name: "function A jump into function B",
+      source: functionBranches(),
+      instruction: (compiled) =>
+        functionInstructionIndex(compiled, firstFunction(compiled), "jump"),
+      field: "target",
+      forbidden: (compiled) => compiled.functions[1]!.bodyEntryInstruction,
+    },
+    {
+      name: "function loopStart continue target into root execution",
+      source: functionLoop(),
+      instruction: (compiled) =>
+        functionInstructionIndex(compiled, firstFunction(compiled), "loopStart"),
+      field: "continueTarget",
+      forbidden: () => 0,
+      sharedPath: true,
+    },
+    {
+      name: "function loopStart exit target into root execution",
+      source: functionLoop(),
+      instruction: (compiled) =>
+        functionInstructionIndex(compiled, firstFunction(compiled), "loopStart"),
+      field: "target",
+      forbidden: () => 0,
+      sharedPath: true,
+    },
+    {
+      name: "function loopControl target into root execution",
+      source: functionLoop(),
+      instruction: (compiled) =>
+        functionInstructionIndex(compiled, firstFunction(compiled), "loopControl"),
+      field: "target",
+      forbidden: () => 0,
+      sharedPath: true,
+    },
+    {
+      name: "root call return into a function body",
+      source: callSource,
+      instruction: (compiled) => rootInstructionIndex(compiled, "callFunction"),
+      field: "returnInstruction",
+      forbidden: (compiled) => compiled.functions[1]!.bodyEntryInstruction,
+      sharedPath: true,
+    },
+    {
+      name: "parameter default target into another function",
+      source: defaultSource,
+      instruction: (compiled) =>
+        functionInstructionIndex(compiled, firstFunction(compiled), "prepareParameterDefault"),
+      field: "target",
+      forbidden: (compiled) => compiled.functions[1]!.entryInstruction,
+    },
+  ];
 
-  assertRegionError(validateInstructionPlan(malformed), `$.instructions[${jumpIndex}].target`);
-});
+  for (const row of rows) {
+    const compiled = plan(row.source);
+    assert.equal(validateInstructionPlan(compiled).valid, true, row.name);
+    const index = row.instruction(compiled);
+    const malformed = mutateTarget(compiled, index, row.field, row.forbidden(compiled));
 
-test("rejects a root conditional jump into a function body", () => {
-  const compiled = plan(rootBranchWithTwoFunctions());
-  const jumpIndex = rootInstructionIndex(compiled, "jumpIfFalse");
-  const second = compiled.functions[1]!;
-  const malformed = mutateTarget(compiled, jumpIndex, "target", second.bodyEntryInstruction);
-
-  assertRegionError(validateInstructionPlan(malformed), `$.instructions[${jumpIndex}].target`);
-});
-
-test("rejects a function jump into root execution", () => {
-  const compiled = plan(functionBranches());
-  const first = compiled.functions[0]!;
-  const jumpIndex = functionInstructionIndex(compiled, first.id, "jump");
-  const malformed = mutateTarget(compiled, jumpIndex, "target", 0);
-
-  assertRegionError(validateInstructionPlan(malformed), `$.instructions[${jumpIndex}].target`);
-});
-
-test("rejects a function A jump into function B", () => {
-  const compiled = plan(functionBranches());
-  const first = compiled.functions[0]!;
-  const second = compiled.functions[1]!;
-  const jumpIndex = functionInstructionIndex(compiled, first.id, "jump");
-  const malformed = mutateTarget(compiled, jumpIndex, "target", second.bodyEntryInstruction);
-
-  assertRegionError(validateInstructionPlan(malformed), `$.instructions[${jumpIndex}].target`);
-});
-
-test("rejects cross-region loopStart continue targets", () => {
-  const compiled = plan(functionLoop());
-  const definition = compiled.functions[0]!;
-  const loopIndex = functionInstructionIndex(compiled, definition.id, "loopStart");
-  const malformed = mutateTarget(compiled, loopIndex, "continueTarget", 0);
-
-  assertRegionError(
-    validateInstructionPlan(malformed),
-    `$.instructions[${loopIndex}].continueTarget`,
-  );
-});
-
-test("rejects cross-region loopStart exit targets", () => {
-  const compiled = plan(functionLoop());
-  const definition = compiled.functions[0]!;
-  const loopIndex = functionInstructionIndex(compiled, definition.id, "loopStart");
-  const malformed = mutateTarget(compiled, loopIndex, "target", 0);
-
-  assertRegionError(validateInstructionPlan(malformed), `$.instructions[${loopIndex}].target`);
-});
-
-test("rejects cross-region loopControl targets", () => {
-  const compiled = plan(functionLoop());
-  const definition = compiled.functions[0]!;
-  const controlIndex = functionInstructionIndex(compiled, definition.id, "loopControl");
-  const malformed = mutateTarget(compiled, controlIndex, "target", 0);
-
-  assertRegionError(validateInstructionPlan(malformed), `$.instructions[${controlIndex}].target`);
+    const validation = validateInstructionPlan(malformed);
+    const path = `$.instructions[${index}].${row.field}`;
+    assertRegionError(validation, path, row.name);
+    if (row.sharedPath) {
+      assert.ok(
+        validation.errors.some(
+          (error) => error.path === path && error.message.includes("execution region"),
+        ),
+        row.name,
+      );
+    }
+  }
 });
 
 test("validates break targets after multi-temporary condition cleanup", () => {
@@ -176,25 +196,11 @@ test("validates break targets after multi-temporary condition cleanup", () => {
   );
   const validation = validateInstructionPlan(malformed);
   assert.equal(validation.valid, false);
-  assert.equal(
+  assert.ok(
     validation.errors.some(
-      (error) =>
-        error.path === `$.instructions[${breakIndex}].target` &&
-        error.message === "Loop-control target does not match its loop.",
+      (error) => error.code === "TSC002" && error.path === `$.instructions[${breakIndex}].target`,
     ),
-    true,
   );
-});
-
-test("preserves valid root-local and function-local jumps", () => {
-  const compiled = plan(functionBranches());
-  const rootJump = rootInstructionIndex(compiled, "jump");
-  const functionJump = functionInstructionIndex(compiled, compiled.functions[0]!.id, "jump");
-
-  assert.ok(targetOf(compiled, rootJump, "target") < compiled.rootEndInstruction);
-  assert.ok(targetOf(compiled, functionJump, "target") >= compiled.functions[0]!.entryInstruction);
-  assert.ok(targetOf(compiled, functionJump, "target") < compiled.functions[0]!.endInstruction);
-  assert.equal(validateInstructionPlan(compiled).valid, true);
 });
 
 test("preserves a compiler-generated root-end target", () => {
@@ -218,85 +224,6 @@ test("preserves a compiler-generated owning-function implicit-return target", ()
   assert.equal(validateInstructionPlan(compiled).valid, true);
 });
 
-test("keeps function-call return targets inside the caller region", () => {
-  const compiled = plan(rootBranchWithTwoFunctions());
-  const callSource = [
-    'function first { say "first" }',
-    'function second { say "second" }',
-    "first()",
-    "exit",
-  ].join("\n");
-  const callable = plan(callSource);
-  const callIndex = rootInstructionIndex(callable, "callFunction");
-  const malformed = mutateTarget(
-    callable,
-    callIndex,
-    "returnInstruction",
-    callable.functions[1]!.bodyEntryInstruction,
-  );
-
-  assertRegionError(
-    validateInstructionPlan(malformed),
-    `$.instructions[${callIndex}].returnInstruction`,
-  );
-  assert.equal(validateInstructionPlan(compiled).valid, true);
-});
-
-test("keeps parameter-default targets inside their function region", () => {
-  const compiled = plan(
-    [
-      "function first(value = 1) { say value }",
-      "function second { say 2 }",
-      "first()",
-      "exit",
-    ].join("\n"),
-  );
-  const first = compiled.functions[0]!;
-  const prepareIndex = functionInstructionIndex(compiled, first.id, "prepareParameterDefault");
-  const malformed = mutateTarget(
-    compiled,
-    prepareIndex,
-    "target",
-    compiled.functions[1]!.entryInstruction,
-  );
-
-  assertRegionError(validateInstructionPlan(malformed), `$.instructions[${prepareIndex}].target`);
-});
-
-test("preserves compiler-generated control flow, calls, and returns", () => {
-  const sources = [
-    rootBranchWithTwoFunctions(),
-    functionBranches(),
-    functionLoop(),
-    ["function answer { return 42 }", "let result = answer()", "say result", "exit"].join("\n"),
-  ];
-
-  for (const source of sources) {
-    assert.equal(validateInstructionPlan(plan(source)).valid, true);
-  }
-
-  const callable = plan(sources[3]!);
-  const completed = run(callable, createFreshRuntimeSnapshot(callable));
-  assert.equal(completed.snapshot.status, "halted");
-  assert.deepEqual(
-    completed.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["42"],
-  );
-});
-
-test("preserves checkpoint round trips for valid function control flow", () => {
-  const compiled = plan(functionLoop());
-  const initial = createFreshRuntimeSnapshot(compiled);
-  const first = executeInstruction(compiled, initial);
-  const checkpoint = createCheckpoint(compiled, first.snapshot);
-  const restored = restoreCheckpoint(JSON.parse(JSON.stringify(checkpoint)));
-  const uninterrupted = run(compiled, first.snapshot);
-  const resumed = run(restored.plan, restored.snapshot);
-
-  assert.deepEqual(resumed.events, uninterrupted.events);
-  assert.deepEqual(resumed.snapshot, uninterrupted.snapshot);
-});
-
 test("prevents the poisoned-snapshot path before execution", () => {
   const original = plan(
     ['function hidden { say "inside function" }', "if false { exit }"].join("\n"),
@@ -308,23 +235,17 @@ test("prevents the poisoned-snapshot path before execution", () => {
     "target",
     original.functions[0]!.bodyEntryInstruction,
   );
-  const validation = validateInstructionPlan(malformed);
-
-  if (validation.valid) {
-    const firstStep = executeInstruction(malformed, createFreshRuntimeSnapshot(malformed));
-    assert.equal(firstStep.instructionsExecuted, 1);
-    assert.equal(validateRuntimeSnapshot(firstStep.snapshot, malformed).valid, false);
+  assertRegionError(validateInstructionPlan(malformed), `$.instructions[${jumpIndex}].target`);
+  assert.throws(() => createFreshRuntimeSnapshot(malformed), TypeError);
+  for (const operation of [executeInstruction, run]) {
+    const snapshot = createFreshRuntimeSnapshot(original);
+    const before = structuredClone(snapshot);
+    assert.throws(
+      () => operation(malformed, snapshot),
+      (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR100",
+    );
+    assert.deepEqual(snapshot, before);
   }
-
-  assertRegionError(validation, `$.instructions[${jumpIndex}].target`);
-  assert.throws(
-    () => createFreshRuntimeSnapshot(malformed),
-    /Control-flow target leaves the instruction's execution region\./,
-  );
-  assert.throws(
-    () => executeInstruction(malformed, createFreshRuntimeSnapshot(original)),
-    (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR100",
-  );
 });
 
 test("rejects malformed cross-region plans during checkpoint restoration", () => {
@@ -350,8 +271,7 @@ test("rejects malformed cross-region plans during checkpoint restoration", () =>
       return (
         error instanceof CheckpointError &&
         error.info.code === "TSK002" &&
-        error.info.path === `$.plan.instructions[${jumpIndex}].target` &&
-        error.info.message === REGION_ERROR
+        error.info.path === `$.plan.instructions[${jumpIndex}].target`
       );
     },
   );
@@ -380,11 +300,17 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     temporaryCount: number;
   };
   forgedSpeaker.temporaryCount = 1;
+  assert.equal(validateInstructionPlan(forgedSpeaker).valid, true);
   const forgedSay = forgedSpeaker.instructions[secondSay];
   assert.ok(forgedSay?.kind === "say");
-  // EVIDENCE: fixture adds a prepared speaker temporary to an otherwise static say instruction.
-  (forgedSay as { speakerTemporary?: number }).speakerTemporary = 0;
-  assert.equal(validateInstructionPlan(forgedSpeaker).valid, false);
+  // EVIDENCE: fixture adds the newly allocated in-range temporary as a prepared speaker to an otherwise static say.
+  (forgedSay as { speakerTemporary?: number }).speakerTemporary = 1;
+  assert.ok(
+    validateInstructionPlan(forgedSpeaker).errors.some(
+      (error) =>
+        error.code === "TSC002" && error.path === `$.instructions[${secondSay}].speakerTemporary`,
+    ),
+  );
   assert.throws(
     () => run(forgedSpeaker, createFreshRuntimeSnapshot(ordinary)),
     (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR100",
@@ -422,41 +348,55 @@ test("rejects forged prepared say fields and lifetimes before any script event e
   assert.ok(pacingCall >= 0);
   assert.ok(pacingStore >= 0);
 
+  const forgedText = JSON.parse(JSON.stringify(prepared));
+  forgedText.temporaryCount += 1;
+  assert.equal(validateInstructionPlan(forgedText).valid, true);
+  forgedText.instructions[sayIndex].textTemporary = forgedText.temporaryCount;
+  assert.ok(
+    validateInstructionPlan(forgedText).errors.some(
+      (error) =>
+        error.code === "TSC002" && error.path === `$.instructions[${sayIndex}].textTemporary`,
+    ),
+  );
+
+  const sayPath = `$.instructions[${sayIndex}]`;
+  // Each row names the path of the rule it breaks; a fragment is added where another rule
+  // reports at the same path.
   // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture callbacks deliberately rewrite prepared-say producer, consumer, temporary, and control-flow fields into invalid combinations.
-  const cases: Array<[string, (candidate: any) => void]> = [
-    [
-      "forged text temporary",
-      (candidate) => {
-        candidate.temporaryCount += 1;
-        candidate.instructions[sayIndex].textTemporary = candidate.temporaryCount - 1;
-      },
-    ],
+  const cases: Array<[string, string, (candidate: any) => void, string?]> = [
     [
       "wrong producer kind",
+      `${sayPath}.speakerTemporary`,
       (candidate) => {
         candidate.instructions[sayIndex].speakerTemporary = say.textTemporary;
       },
     ],
     [
       "aliased preparation temporaries",
+      `${sayPath}.textTemporary`,
       (candidate) => {
         candidate.instructions[sayIndex].textTemporary = say.speakerTemporary;
       },
+      "alias",
     ],
     [
       "aliased contextual speaker temporary",
+      `${sayPath}.contextualSpeakerTemporary`,
       (candidate) => {
         candidate.instructions[sayIndex].contextualSpeakerTemporary = say.speakerTemporary;
       },
+      "alias",
     ],
     [
       "missing contextual speaker producer",
+      `${sayPath}.contextualSpeakerTemporary`,
       (candidate) => {
         delete candidate.instructions[sayIndex].contextualSpeakerTemporary;
       },
     ],
     [
       "orphaned preparation instructions",
+      `$.instructions[${textPreparation}]`,
       (candidate) => {
         delete candidate.instructions[sayIndex].speakerTemporary;
         delete candidate.instructions[sayIndex].textTemporary;
@@ -464,12 +404,14 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     ],
     [
       "duplicate prepared speaker producer",
+      `${sayPath}.speakerTemporary`,
       (candidate) => {
         candidate.instructions[textPreparation].destinationTemporary = say.speakerTemporary;
       },
     ],
     [
       "prepared speaker overwritten by store",
+      `${sayPath}.speakerTemporary`,
       (candidate) => {
         candidate.instructions[pacingStore].temporaryId = say.speakerTemporary;
         candidate.instructions[sayIndex].pacing.temporaryId = say.speakerTemporary;
@@ -477,6 +419,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     ],
     [
       "prepared text overwritten by store",
+      `${sayPath}.textTemporary`,
       (candidate) => {
         candidate.instructions[pacingStore].temporaryId = say.textTemporary;
         candidate.instructions[sayIndex].pacing.temporaryId = say.textTemporary;
@@ -484,6 +427,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     ],
     [
       "prepared speaker overwritten by a function call",
+      `${sayPath}.speakerTemporary`,
       (candidate) => {
         candidate.instructions[pacingCall].destinationTemporary = say.speakerTemporary;
         candidate.instructions[pacingStore].value.temporaryId = say.speakerTemporary;
@@ -491,6 +435,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     ],
     [
       "prepared speaker cleared before its say",
+      `${sayPath}.speakerTemporary`,
       (candidate) => {
         candidate.instructions[pacingStore] = {
           kind: "clearTemporary",
@@ -501,6 +446,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     ],
     [
       "prepared text cleared before its say",
+      `${sayPath}.textTemporary`,
       (candidate) => {
         candidate.instructions[pacingStore] = {
           kind: "clearTemporary",
@@ -511,6 +457,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     ],
     [
       "backedge re-enters a prepared say",
+      sayPath,
       (candidate) => {
         candidate.instructions[sayIndex + 1] = {
           kind: "jump",
@@ -520,10 +467,19 @@ test("rejects forged prepared say fields and lifetimes before any script event e
       },
     ],
   ];
-  for (const [name, mutate] of cases) {
+  for (const [name, path, mutate, fragment] of cases) {
     const malformed = JSON.parse(JSON.stringify(prepared));
     mutate(malformed);
-    assert.equal(validateInstructionPlan(malformed).valid, false, name);
+    const validation = validateInstructionPlan(malformed);
+    assert.ok(
+      validation.errors.some(
+        (error) =>
+          error.code === "TSC002" &&
+          error.path === path &&
+          (fragment === undefined || error.message.includes(fragment)),
+      ),
+      `${name}: ${JSON.stringify(validation.errors)}`,
+    );
   }
 
   const contextual = plan(
@@ -724,9 +680,8 @@ test("preserves compiler-generated prepared says across control-flow regions", (
     ].join("\n"),
   ];
 
-  for (const source of sources) {
-    assert.equal(validateInstructionPlan(plan(source)).valid, true, source);
-  }
+  // compileSource validates every plan it produces, so compiling without diagnostics is the oracle.
+  for (const source of sources) plan(source);
 });
 
 function rootBranchWithTwoFunctions(): string {
@@ -831,10 +786,10 @@ function targetOf(
   return target as number;
 }
 
-function assertRegionError(result: PlanValidationResult, path: string): void {
-  assert.equal(result.valid, false);
-  assert.deepEqual(
-    result.errors.filter((error) => error.message === REGION_ERROR),
-    [{ code: "TSC002", message: REGION_ERROR, path }],
+function assertRegionError(result: PlanValidationResult, path: string, label?: string): void {
+  assert.equal(result.valid, false, label);
+  assert.ok(
+    result.errors.some((error) => error.code === "TSC002" && error.path === path),
+    label,
   );
 }

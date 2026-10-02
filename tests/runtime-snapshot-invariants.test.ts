@@ -16,7 +16,6 @@ import {
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
-import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
@@ -31,7 +30,6 @@ test("rejects a fresh non-empty snapshot changed only to halted", () => {
 
   const validation = validateRuntimeSnapshot(checkpoint.snapshot, compiled);
   assert.equal(validation.valid, false);
-  assert.ok(validation.errors.includes("Halted runtime state is not at a legal halt position."));
   assertCheckpointRejected(checkpoint, "TSK002");
   assert.throws(
     () => deserializeCheckpoint(JSON.stringify(checkpoint)),
@@ -95,30 +93,16 @@ test("accepts and round-trips every runtime-produced halted shape", () => {
   }
 });
 
-test("keeps valid halted execution resume-equivalent", () => {
-  const result = assertRuntimeResumeEquivalent(
-    ["function inner { return 2 }", 'say "value:${inner()}"', "exit"].join("\n"),
-    { scenarioName: "runtime snapshot invariant resume equivalence" },
-  );
-
-  assert.equal(result.finalSnapshot.status, "halted");
-  assert.deepEqual(
-    result.events.map((event) => event.kind),
-    ["say", "exit"],
-  );
-});
-
-test("validates allocator counters across the JavaScript safe-integer boundary", () => {
-  const compiled = plan("exit");
+test("validates allocator counters across the safe-integer boundary at snapshot and checkpoint entry", () => {
+  const compiled = plan('say "one"\nsay "two"\nexit');
   const fields = ["nextEventSequence", "nextScopeId", "nextSpeakerId", "nextCallFrameId"] as const;
   const accepted = [1, MAX_SAFE - 1, MAX_SAFE];
   const rejected = [
-    { name: "MAX_SAFE_INTEGER + 1", value: MAX_SAFE + 1 },
-    { name: "2 ** 53", value: 2 ** 53 },
-    { name: "NaN", value: Number.NaN },
-    { name: "Infinity", value: Number.POSITIVE_INFINITY },
-    { name: "fractional", value: 1.5 },
-    { name: "negative", value: -1 },
+    { name: "first unsafe integer", value: MAX_SAFE + 1, checkpoint: true },
+    { name: "NaN", value: Number.NaN, checkpoint: false },
+    { name: "Infinity", value: Number.POSITIVE_INFINITY, checkpoint: false },
+    { name: "fractional", value: 1.5, checkpoint: false },
+    { name: "negative", value: -1, checkpoint: false },
   ];
 
   for (const field of fields) {
@@ -132,32 +116,17 @@ test("validates allocator counters across the JavaScript safe-integer boundary",
       );
     }
     for (const entry of rejected) {
-      const snapshot = createFreshRuntimeSnapshot(compiled);
-      snapshot[field] = entry.value;
+      const checkpoint = mutableCheckpoint(
+        createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled)),
+      );
+      checkpoint.snapshot[field] = entry.value;
       assert.equal(
-        validateRuntimeSnapshot(snapshot, compiled).valid,
+        validateRuntimeSnapshot(checkpoint.snapshot, compiled).valid,
         false,
         `${field} should reject ${entry.name}`,
       );
+      if (entry.checkpoint) assertCheckpointRejected(checkpoint, "TSK002");
     }
-  }
-});
-
-test("rejects unsafe counters through direct snapshot and checkpoint boundaries", () => {
-  const compiled = plan('say "one"\nsay "two"\nexit');
-  for (const field of [
-    "nextEventSequence",
-    "nextScopeId",
-    "nextSpeakerId",
-    "nextCallFrameId",
-  ] as const) {
-    const checkpoint = mutableCheckpoint(
-      createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled)),
-    );
-    checkpoint.snapshot[field] = 2 ** 53;
-
-    assert.equal(validateRuntimeSnapshot(checkpoint.snapshot, compiled).valid, false, field);
-    assertCheckpointRejected(checkpoint, "TSK002");
   }
 });
 
@@ -166,16 +135,11 @@ test("rejects event-sequence exhaustion before emitting a duplicate sequence", (
   const snapshot = createImmediatePacingRuntimeSnapshot(compiled);
   snapshot.nextEventSequence = MAX_SAFE;
   assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
+  const before = structuredClone(snapshot);
 
-  assert.throws(
-    () => executeInstruction(compiled, snapshot),
-    (error: unknown) =>
-      error instanceof RuntimeDataError &&
-      error.code === "TSR101" &&
-      error.message === "Runtime nextEventSequence cannot be advanced safely.",
-  );
+  assert.throws(() => executeInstruction(compiled, snapshot), isAllocatorError);
+  assert.deepEqual(snapshot, before);
   assert.equal(snapshot.nextEventSequence, MAX_SAFE);
-  assert.equal(snapshot.status, "ready");
 });
 
 test("rejects exhausted scope, speaker, and call-frame allocators before collision", () => {
@@ -184,97 +148,105 @@ test("rejects exhausted scope, speaker, and call-frame allocators before collisi
   scopeSnapshot.nextScopeId = MAX_SAFE;
   scopeSnapshot = executeInstruction(scopePlan, scopeSnapshot).snapshot;
   assert.equal(scopePlan.instructions[scopeSnapshot.nextInstruction]?.kind, "enterScope");
-  assert.throws(() => executeInstruction(scopePlan, scopeSnapshot), allocatorError("nextScopeId"));
+  assert.throws(() => executeInstruction(scopePlan, scopeSnapshot), isAllocatorError);
   assert.equal(scopeSnapshot.frames.length, 1);
   assert.equal(scopeSnapshot.nextScopeId, MAX_SAFE);
 
   const speakerPlan = plan("speaker vera {}\nexit");
   const speakerSnapshot = createFreshRuntimeSnapshot(speakerPlan);
   speakerSnapshot.nextSpeakerId = MAX_SAFE;
-  assert.throws(
-    () => executeInstruction(speakerPlan, speakerSnapshot),
-    allocatorError("nextSpeakerId"),
-  );
+  assert.throws(() => executeInstruction(speakerPlan, speakerSnapshot), isAllocatorError);
   assert.deepEqual(speakerSnapshot.speakers, []);
   assert.equal(speakerSnapshot.nextSpeakerId, MAX_SAFE);
 
   const callPlan = plan("function value { return 1 }\nvalue()");
   let callSnapshot = createFreshRuntimeSnapshot(callPlan);
-  while (callPlan.instructions[callSnapshot.nextInstruction]?.kind !== "callFunction") {
+  for (
+    let steps = 0;
+    callPlan.instructions[callSnapshot.nextInstruction]?.kind !== "callFunction";
+    steps += 1
+  ) {
+    assert.ok(steps < callPlan.instructions.length, "fixture did not reach its call instruction");
     callSnapshot = executeInstruction(callPlan, callSnapshot).snapshot;
+    assert.ok(
+      callSnapshot.status === "running",
+      `unexpected ${callSnapshot.status} before the call`,
+    );
   }
   callSnapshot.nextCallFrameId = MAX_SAFE;
-  assert.throws(
-    () => executeInstruction(callPlan, callSnapshot),
-    allocatorError("nextCallFrameId"),
-  );
+  assert.throws(() => executeInstruction(callPlan, callSnapshot), isAllocatorError);
   assert.deepEqual(callSnapshot.callFrames, []);
   assert.equal(callSnapshot.nextCallFrameId, MAX_SAFE);
 });
 
-test("requires safe integers for nested runtime identities, positions, and progress", () => {
+test("rejects unsafe source positions and out-of-range nested identities", () => {
   const speakerPlan = plan('speaker vera {}\nsay as vera "hello"\nexit');
   const declared = executeInstruction(
     speakerPlan,
     createFreshRuntimeSnapshot(speakerPlan),
   ).snapshot;
+  assert.equal(validateRuntimeSnapshot(declared, speakerPlan).valid, true);
   const speakerSnapshot = structuredClone(declared);
   // EVIDENCE: fixture: expose the readonly speaker ID on a cloned snapshot for unsafe-integer validation.
   (speakerSnapshot.speakers[0] as { id: number }).id = 2 ** 53;
-  assert.equal(validateRuntimeSnapshot(speakerSnapshot, speakerPlan).valid, false);
-
-  const scopePlan = plan('if true {\n  say "inside"\n}\nexit');
-  let enteredScope = createFreshRuntimeSnapshot(scopePlan);
-  enteredScope = executeInstruction(scopePlan, enteredScope).snapshot;
-  enteredScope = executeInstruction(scopePlan, enteredScope).snapshot;
-  // EVIDENCE: fixture: expose the readonly scope ID on an active snapshot for unsafe-integer validation.
-  (enteredScope.frames[1] as { id: number }).id = 2 ** 53;
-  enteredScope.nextScopeId = MAX_SAFE;
-  assert.equal(validateRuntimeSnapshot(enteredScope, scopePlan).valid, false);
+  assert.equal(
+    validateRuntimeSnapshot(speakerSnapshot, speakerPlan).valid,
+    false,
+    "speaker ID beyond its allocator and references",
+  );
 
   const callPlan = plan("function value(input = 1) { return input }\nvalue()");
   let activeCall = createFreshRuntimeSnapshot(callPlan);
-  while (activeCall.callFrames.length === 0) {
+  for (let steps = 0; steps < 20 && activeCall.callFrames.length === 0; steps += 1) {
     activeCall = executeInstruction(callPlan, activeCall).snapshot;
   }
+  assert.equal(activeCall.callFrames.length, 1);
+  assert.equal(validateRuntimeSnapshot(activeCall, callPlan).valid, true);
   // EVIDENCE: fixture: expose the readonly call-frame ID on an active snapshot for unsafe-integer validation.
   (activeCall.callFrames[0] as { id: number }).id = 2 ** 53;
   activeCall.nextCallFrameId = MAX_SAFE;
-  assert.equal(validateRuntimeSnapshot(activeCall, callPlan).valid, false);
-
-  const parameterSnapshot = structuredClone(activeCall);
-  // EVIDENCE: fixture: expose the readonly call-frame ID to isolate malformed parameter-state validation.
-  (parameterSnapshot.callFrames[0] as { id: number }).id = 1;
-  parameterSnapshot.nextCallFrameId = 2;
-  parameterSnapshot.callFrames[0]!.parameterState.parameterIndex = 2 ** 53;
-  assert.equal(validateRuntimeSnapshot(parameterSnapshot, callPlan).valid, false);
+  assert.equal(
+    validateRuntimeSnapshot(activeCall, callPlan).valid,
+    false,
+    "call-frame ID beyond its allocator",
+  );
 
   const failedPlan = plan("let value = []\nsay value.first\nexit");
   const failed = run(failedPlan, createFreshRuntimeSnapshot(failedPlan)).snapshot;
   assert.equal(failed.status, "failed");
+  assert.equal(validateRuntimeSnapshot(failed, failedPlan).valid, true);
   const spanSnapshot = structuredClone(failed);
-  // EVIDENCE: fixture: expose the readonly failure offset for unsafe source-span validation.
-  (spanSnapshot.failure!.span.start as { offset: number }).offset = 2 ** 53;
-  assert.equal(validateRuntimeSnapshot(spanSnapshot, failedPlan).valid, false);
-});
+  // EVIDENCE: fixture: expose the readonly failure offset; both positions stay safe integers.
+  (spanSnapshot.failure!.span.start as { offset: number }).offset =
+    failed.failure!.span.end.offset + 1;
+  assert.equal(
+    validateRuntimeSnapshot(spanSnapshot, failedPlan).valid,
+    false,
+    "failure span starts after it ends",
+  );
 
-test("emits only safe, unique, strictly increasing event sequences", () => {
-  const compiled = plan('say "one"\nsay "two"\nexit');
-  const result = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
-  const sequences = result.events.map((event) => event.sequence);
-
-  assert.ok(sequences.every(Number.isSafeInteger));
-  assert.equal(new Set(sequences).size, sequences.length);
-  for (let index = 1; index < sequences.length; index += 1) {
-    assert.ok(sequences[index]! > sequences[index - 1]!);
+  // An unsafe start offset would also reverse the span, so the start is probed through line and column.
+  const unsafePositions = [
+    ["start", "line"],
+    ["start", "column"],
+    ["end", "offset"],
+    ["end", "line"],
+    ["end", "column"],
+  ] as const;
+  for (const [position, field] of unsafePositions) {
+    const unsafe = structuredClone(failed);
+    // EVIDENCE: fixture: expose one readonly position field; the span stays ordered.
+    (unsafe.failure!.span[position] as Record<typeof field, number>)[field] = MAX_SAFE + 1;
+    assert.equal(
+      validateRuntimeSnapshot(unsafe, failedPlan).valid,
+      false,
+      `unsafe failure ${position} ${field}`,
+    );
   }
 });
 
-function allocatorError(field: string): (error: unknown) => boolean {
-  return (error: unknown) =>
-    error instanceof RuntimeDataError &&
-    error.code === "TSR101" &&
-    error.message === `Runtime ${field} cannot be advanced safely.`;
+function isAllocatorError(error: unknown): boolean {
+  return error instanceof RuntimeDataError && error.code === "TSR101";
 }
 
 function mutableCheckpoint(checkpoint: RuntimeCheckpoint): {

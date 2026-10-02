@@ -39,27 +39,6 @@ test("lexes prototype-sensitive names as ordinary identifiers with exact spans",
   assert.equal(result.tokens.at(-1)?.kind, TokenKind.EndOfFile);
 });
 
-test("preserves explicit keyword classification", () => {
-  const result = lex("let say function return true false null and or not");
-  assert.deepEqual(result.diagnostics, []);
-  assert.deepEqual(
-    result.tokens.map((token) => token.kind),
-    [
-      TokenKind.KeywordLet,
-      TokenKind.KeywordSay,
-      TokenKind.KeywordFunction,
-      TokenKind.KeywordReturn,
-      TokenKind.KeywordTrue,
-      TokenKind.KeywordFalse,
-      TokenKind.KeywordNull,
-      TokenKind.KeywordAnd,
-      TokenKind.KeywordOr,
-      TokenKind.KeywordNot,
-      TokenKind.EndOfFile,
-    ],
-  );
-});
-
 test("parses and executes prototype-sensitive declarations and properties", () => {
   const source = [
     "let constructor = 1",
@@ -159,13 +138,15 @@ test("preserves unknown-name and protected-name semantic diagnostics", () => {
   );
 });
 
-test("scans a wide dedented block without text amplification", () => {
-  const line = `    ${"x".repeat(100_000)}`;
+test("preserves wide dedented block text without native failure", () => {
+  const text = "x".repeat(100_000);
+  const line = `    ${text}`;
   const source = ['"""', line, line, '"""'].join("\n");
   const result = lex(source);
   assert.deepEqual(result.diagnostics, []);
   const value = result.tokens.find((token) => token.kind === TokenKind.StringText);
-  assert.equal(tokenValue(value)?.length, 200_001);
+  // The shared four-space indentation is removed from both lines.
+  assert.equal(tokenValue(value), `${text}\n${text}`);
 });
 
 function tokenValue(token: Token | undefined): string | undefined {

@@ -120,18 +120,10 @@ test("rejects core and injected builtin identifiers in ordinary value positions"
       assert.deepEqual(
         result.semanticDiagnostics.map((diagnostic) => [
           diagnostic.code,
-          diagnostic.message,
           diagnostic.span.start.offset,
           diagnostic.span.end.offset,
         ]),
-        [
-          [
-            "TSV028",
-            `Builtin '${builtin}' is not a first-class runtime value.`,
-            start,
-            start + builtin.length,
-          ],
-        ],
+        [["TSV028", start, start + builtin.length]],
         `${label}: ${source}`,
       );
     }
@@ -146,12 +138,7 @@ test("reports each invalid builtin value once in deterministic source order", ()
   const expected = names.map((name) => {
     const start = source.indexOf(name, offset);
     offset = start + name.length;
-    return [
-      "TSV028",
-      `Builtin '${name}' is not a first-class runtime value.`,
-      start,
-      start + name.length,
-    ];
+    return ["TSV028", start, start + name.length];
   });
 
   assert.deepEqual(result.parserDiagnostics, []);
@@ -159,7 +146,6 @@ test("reports each invalid builtin value once in deterministic source order", ()
   assert.deepEqual(
     result.semanticDiagnostics.map((diagnostic) => [
       diagnostic.code,
-      diagnostic.message,
       diagnostic.span.start.offset,
       diagnostic.span.end.offset,
     ]),
@@ -187,18 +173,16 @@ test("preserves direct builtin calls in every supported nested context", () => {
 });
 
 test("preserves existing function, unknown-name, callable, and protected-name diagnostics", () => {
-  const functionValue = compileSource(
-    ["function sample { return 1 }", "let stored = sample"].join("\n"),
-  );
+  const functionValueSource = ["function sample { return 1 }", "let stored = sample"].join("\n");
+  const functionValue = compileSource(functionValueSource);
+  const storedStart = functionValueSource.lastIndexOf("sample");
   assert.deepEqual(
-    functionValue.semanticDiagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message]),
-    [["TSV028", "Function 'sample' is not a first-class runtime value."]],
-  );
-
-  const unknownVariable = compileSource("let value = missing");
-  assert.deepEqual(
-    unknownVariable.semanticDiagnostics.map((diagnostic) => diagnostic.code),
-    ["TSV002"],
+    functionValue.semanticDiagnostics.map((diagnostic) => [
+      diagnostic.code,
+      diagnostic.span.start.offset,
+      diagnostic.span.end.offset,
+    ]),
+    [["TSV028", storedStart, storedStart + "sample".length]],
   );
 
   const unknownFunction = compileSource("missing()");

@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import sys
@@ -236,16 +237,16 @@ class PrepareSourceReviewTests(unittest.TestCase):
 
     def test_missing_and_extra_payload_files(self) -> None:
         entries = self.valid_entries()
-        path = self.root / "shape.zip"
-        self.write_zip(
-            path,
-            [
-                ("manifest.json", entries["manifest.json"], None),
-                ("repository.bundle", entries["repository.bundle"], None),
-                ("extra.txt", b"extra", None),
-            ],
-        )
-        self.assert_failure(self.invoke(path), "unexpected artifact payload")
+        valid = [(name, value, None) for name, value in entries.items()]
+        cases = {
+            "missing": [entry for entry in valid if entry[0] != "SHA256SUMS"],
+            "extra": [*valid, ("extra.txt", b"extra", None)],
+        }
+        for name, values in cases.items():
+            with self.subTest(name):
+                path = self.root / f"shape-{name}.zip"
+                self.write_zip(path, values)
+                self.assert_failure(self.invoke(path), "unexpected artifact payload")
 
     def test_unsupported_zip_compression_is_compact_failure(self) -> None:
         path = self.root / "unsupported-compression.zip"
@@ -277,11 +278,8 @@ class PrepareSourceReviewTests(unittest.TestCase):
         self.assert_failure(completed, "head mismatch")
 
     def test_merge_base_absent_from_bundle_history(self) -> None:
-        completed = self.invoke(merge_base="2" * 40)
-        self.assert_failure(completed, "expected merge base is absent from bundle history")
-
-    def test_advanced_base_tip_uses_merge_base_from_compare(self) -> None:
-        advanced_tip = run(
+        # A real sibling tip of the base exists locally but is not in the bundle.
+        unbundled_sibling_tip = run(
             [
                 "git",
                 "commit-tree",
@@ -293,12 +291,17 @@ class PrepareSourceReviewTests(unittest.TestCase):
             ],
             cwd=self.repository,
         )
-        failed = self.invoke(merge_base=advanced_tip)
-        self.assert_failure(failed, "expected merge base is absent from bundle history")
-
-        output = self.root / "advanced-base-review"
-        completed = self.invoke(output=output, merge_base=self.base)
-        self.assertEqual(completed.returncode, 0, completed.stderr)
+        for name, merge_base in (
+            ("fabricated", "2" * 40),
+            ("unbundled-sibling-tip", unbundled_sibling_tip),
+        ):
+            with self.subTest(name):
+                completed = self.invoke(
+                    output=self.root / f"review-{name}", merge_base=merge_base
+                )
+                self.assert_failure(
+                    completed, "expected merge base is absent from bundle history"
+                )
 
     def test_unrelated_bundled_commit_is_not_accepted_as_merge_base(self) -> None:
         unrelated = run(
@@ -347,7 +350,9 @@ class PrepareSourceReviewTests(unittest.TestCase):
             manifest=self.manifest_bytes(manifest),
             bundle=bad_bundle,
         )
-        self.assert_failure(self.invoke(path), "bundle list-heads")
+        output = self.root / "bad-bundle-review"
+        self.assert_failure(self.invoke(path, output=output), "bundle")
+        self.assertFalse(output.exists())
 
     def test_incomplete_bundle_fails_standalone_verification(self) -> None:
         bundle_path = self.root / "incomplete.bundle"
@@ -372,61 +377,72 @@ class PrepareSourceReviewTests(unittest.TestCase):
             manifest=self.manifest_bytes(manifest),
             bundle=incomplete,
         )
-        self.assert_failure(self.invoke(path), "bundle verify")
-
-    def test_tree_mismatch(self) -> None:
-        path = self.root / "tree.zip"
-        manifest = dict(self.manifest)
-        manifest["treeSha"] = "3" * 40
-        self.write_valid_artifact(path, manifest=self.manifest_bytes(manifest))
-        self.assert_failure(self.invoke(path), "cloned tree mismatch")
+        output = self.root / "incomplete-review"
+        self.assert_failure(self.invoke(path, output=output), "bundle")
+        self.assertFalse(output.exists())
 
     def test_existing_output_path_is_rejected(self) -> None:
         output = self.root / "existing"
         output.mkdir()
         self.assert_failure(self.invoke(output=output), "output path already exists")
 
-    def test_output_parent_file_is_rejected_without_traceback(self) -> None:
-        parent = self.root / "existing-file"
-        parent.write_text("not a directory\n", encoding="utf-8")
-        completed = self.invoke(output=parent / "review")
-        self.assert_failure(completed, "cannot create output parent")
-        self.assertEqual(len(completed.stderr.splitlines()), 1)
-        self.assertNotIn("Traceback", completed.stderr)
-
-    def test_artifact_read_failure_is_compact_without_traceback(self) -> None:
-        artifact = Path("/proc/self/mem")
-        if not artifact.exists():
-            self.skipTest("/proc/self/mem is unavailable on this platform")
-        completed = self.invoke(
-            artifact,
-            output=self.root / "read-failure-review",
-            digest="0" * 64,
-        )
-        self.assert_failure(completed, "cannot read artifact")
-        self.assertEqual(len(completed.stderr.splitlines()), 1)
-        self.assertNotIn("Traceback", completed.stderr)
-
-    def test_read_only_output_parent_is_compact_without_traceback(self) -> None:
-        parent = Path("/sys")
+    def test_filesystem_failures_are_compact_and_name_the_path(self) -> None:
+        # The rows reach different handlers; a row this platform cannot reproduce is skipped.
+        parent_file = self.root / "existing-file"
+        parent_file.write_text("not a directory\n", encoding="utf-8")
+        unreadable = Path("/proc/self/mem")
+        read_only_parent = Path("/sys")
         try:
-            read_only = bool(os.statvfs(parent).f_flag & os.ST_RDONLY)
+            read_only = bool(os.statvfs(read_only_parent).f_flag & os.ST_RDONLY)
         except (AttributeError, OSError):
-            self.skipTest("read-only /sys filesystem is unavailable")
-        if not read_only:
-            self.skipTest("/sys is not read-only on this platform")
-        output = parent / f"prepare-source-review-{os.getpid()}-{self._testMethodName}"
-        completed = self.invoke(output=output)
-        self.assert_failure(completed, "filesystem operation failed")
-        self.assertEqual(len(completed.stderr.splitlines()), 1)
-        self.assertNotIn("Traceback", completed.stderr)
+            read_only = False
+        # Each row: name, reproducible here, pattern naming the offending path, invoke arguments.
+        rows = (
+            (
+                "output parent is a file",
+                True,
+                re.escape(str(parent_file)),
+                {"output": parent_file / "review"},
+            ),
+            (
+                "unreadable artifact",
+                unreadable.exists(),
+                r"/proc/(?:self|\d+)/mem",
+                {
+                    "artifact": unreadable,
+                    "output": self.root / "read-failure-review",
+                    "digest": "0" * 64,
+                },
+            ),
+            (
+                "read-only output parent",
+                read_only,
+                re.escape(f"{read_only_parent}/"),
+                {"output": read_only_parent / f"prepare-source-review-{os.getpid()}"},
+            ),
+        )
+        for name, available, path_pattern, arguments in rows:
+            with self.subTest(name):
+                if not available:
+                    self.skipTest(f"{name} cannot be reproduced on this platform")
+                completed = self.invoke(**arguments)
+                self.assertEqual(completed.returncode, 1)
+                self.assertEqual(completed.stdout, "")
+                self.assertEqual(len(completed.stderr.splitlines()), 1)
+                self.assertNotIn("Traceback", completed.stderr)
+                self.assertRegex(completed.stderr, path_pattern)
 
-    def test_failure_does_not_expose_output_or_leave_temporary_checkout(self) -> None:
+    def test_late_tree_mismatch_leaves_no_output_or_temporary_checkout(self) -> None:
+        # The tree mismatch is detected only after extraction, bundle verification and cloning.
+        path = self.root / "late-failure.zip"
+        manifest = dict(self.manifest)
+        manifest["treeSha"] = "3" * 40
+        self.write_valid_artifact(path, manifest=self.manifest_bytes(manifest))
         output = self.root / "atomic-review"
-        completed = self.invoke(output=output, digest="0" * 64)
-        self.assertEqual(completed.returncode, 1)
+        inventory = sorted(entry.name for entry in self.root.iterdir())
+        self.assert_failure(self.invoke(path, output=output), "cloned tree mismatch")
         self.assertFalse(output.exists())
-        self.assertEqual(list(self.root.glob(f".{output.name}.tmp-*")), [])
+        self.assertEqual(sorted(entry.name for entry in self.root.iterdir()), inventory)
 
     def test_dangling_symlink_output_is_rejected(self) -> None:
         output = self.root / "dangling-output"

@@ -77,7 +77,7 @@ main.tease
     -> explicit versioned runtime state and typed sequenced events
         -> standalone browser playground
         -> framework-independent Player adapter
-            -> Vue Player reference
+            -> Vue Player
 ```
 
 ADR 0015 defines the current runtime direction. The AST is compile-time data. Runtime execution uses validated instruction plans and explicit scopes, loop frames, call frames, temporaries, RNG state, event sequence state, prepared references, and structured failures. It does not depend on suspended JavaScript functions, generators, closures, or an implicit JavaScript call stack.
@@ -130,15 +130,12 @@ parser/compiler/runtime; linked reusable Standard Library modules remain future 
 
 The technical playground workspace controller lives at `playground/workspace/controller.ts`. The framework-independent
 runtime-to-Player translation and shared action lookup/completion seam lives at `player/runtime-adapter.ts`. The Player
-implementation lives under `player/`; its maintained Vue implementation is built from `player/vue/` and served at
-`/player/`. It uses Tailwind CSS 4, repository-owned shadcn-vue/Reka primitives, and TanStack Vue Virtual as the single
-transcript windowing and scroll-anchoring owner, and drives the implemented interaction/pacing slice from canonical
-runtime state and events. Development-only Visual Lab, Layout Debug, and Runtime Session tools live in the Vue
-implementation; their state remains local presentation/dev state except for canonical runtime checkpoints. The
-implementation uses the same framework-independent presentation types, shared Player action helpers, and browser-native
-CSS geometry. The Vue choice and migration boundary are accepted in ADR 0020. Current presentation models, demo data,
-media, timer, and right-rail fixtures remain internal POC seams, not an accepted engine/Player protocol or cross-origin
-host contract.
+implementation is under `player/vue/src/`, using the accepted Vue/Tailwind/shadcn-vue/Reka foundation and
+TanStack Vue Virtual for transcript windowing and scroll anchoring. It presents supported interactions and pacing from
+canonical runtime state and events; browser-native CSS owns geometry. The Vue/toolchain boundary is accepted in ADR
+0020. See [`player/README.md`](../player/README.md) for implementation seams, local inspection and the
+development-preview boundary. Presentation fixtures do not define an engine/Player protocol or the production
+cross-origin host contract.
 
 `src/index.ts` is the intentional public package/root API. Canonical internal
 paths may change before a published compatibility policy exists; old repository

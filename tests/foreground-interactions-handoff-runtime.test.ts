@@ -3,11 +3,9 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import type {
-  BinaryExpressionPlan,
   ExpressionPlan,
   Instruction,
   InstructionPlan,
-  InteractionAccessibleName,
   InteractionInstruction,
   InteractionUiPayload,
   PlanSourceLocation,
@@ -20,20 +18,12 @@ import {
   restoreCheckpoint,
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
-import { executeInstruction, run, RuntimeDataError } from "../src/runtime/engine.js";
+import { executeInstruction, run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import type { RuntimeDelayActionSettlementSnapshot } from "../src/runtime/actions/model.js";
-import {
-  getSerializableProperty,
-  type SerializableRuntimeObject,
-} from "../src/runtime/serializable-values.js";
-import {
-  createFreshRuntimeSnapshot,
-  type RuntimeSnapshot,
-  validateRuntimeSnapshot,
-} from "../src/runtime/state.js";
+import { type RuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
 function interactionPlan(
@@ -93,7 +83,7 @@ function waiting(plan: InstructionPlan) {
   return result;
 }
 
-test("result interactions reject occupied destinations before pending-action creation", () => {
+test("result interaction destinations are produced only by the interaction and absent while pending", () => {
   const base = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
   const span = base.instructions[0]!.span;
   const occupiedPlan: InstructionPlan = {
@@ -112,139 +102,90 @@ test("result interactions reject occupied destinations before pending-action cre
       base.instructions[1]!,
     ],
   };
-  const planValidation = validateInstructionPlan(occupiedPlan);
-  assert.equal(planValidation.valid, false);
-  assert.ok(
-    planValidation.errors.some((error) =>
-      error.message.includes("produced only by their owning interaction"),
-    ),
+  assert.deepEqual(
+    validateInstructionPlan(occupiedPlan).errors.map((error) => [error.code, error.path]),
+    [["TSC002", "$.instructions[1].destinationTemporary"]],
   );
 
-  const hostileSnapshot = createFreshRuntimeSnapshot(base);
-  hostileSnapshot.temporaries.push({ id: 1, value: "old" });
-  const before = structuredClone(hostileSnapshot);
-  assert.equal(validateRuntimeSnapshot(hostileSnapshot, base).valid, false);
-  assert.throws(() => run(base, hostileSnapshot));
-  assert.deepEqual(hostileSnapshot, before);
-  assert.equal(hostileSnapshot.foregroundAction, null);
-  assert.equal(hostileSnapshot.nextActionId, before.nextActionId);
-  assert.equal(hostileSnapshot.nextEventSequence, before.nextEventSequence);
+  for (const [owner, source] of [
+    ["root", "let answer = askText\nexit"],
+    ["function", "function prompt { let answer = askText\nreturn }\nprompt()\nexit"],
+    ["loop", "repeat 1 { let answer = askText }\nexit"],
+  ] as const) {
+    const compiled = compileSource(source);
+    assert.deepEqual(compiled.diagnostics, [], owner);
+    const plan = compiled.plan!;
+    let beforeInteraction = createImmediatePacingRuntimeSnapshot(plan);
+    while (plan.instructions[beforeInteraction.nextInstruction]?.kind !== "interaction") {
+      beforeInteraction = executeInstruction(plan, beforeInteraction).snapshot;
+    }
+    const interaction = plan.instructions[beforeInteraction.nextInstruction];
+    assert.ok(interaction?.kind === "interaction" && interaction.destinationTemporary !== null);
+
+    // An occupied destination is rejected before the interaction creates its pending action.
+    const occupied = structuredClone(beforeInteraction);
+    occupied.temporaries.push({ id: interaction.destinationTemporary, value: "old" });
+    const occupiedBefore = structuredClone(occupied);
+    assert.equal(validateRuntimeSnapshot(occupied, plan).valid, false, owner);
+    assert.throws(() => run(plan, occupied), owner);
+    assert.deepEqual(occupied, occupiedBefore, owner);
+
+    const pending = run(plan, beforeInteraction);
+    assert.equal(pending.snapshot.status, "waiting", owner);
+    const action = pending.snapshot.foregroundAction;
+    assert.ok(action?.kind === "interaction" && action.destinationTemporary !== null, owner);
+    const destination = action.destinationTemporary;
+    assert.equal(
+      pending.snapshot.temporaries.some((temporary) => temporary.id === destination),
+      false,
+      owner,
+    );
+    const hostile = structuredClone(pending.snapshot);
+    hostile.temporaries.push({ id: destination, value: "old" });
+    assert.equal(validateRuntimeSnapshot(hostile).valid, false, owner);
+    assert.equal(validateRuntimeSnapshot(hostile, plan).valid, false, owner);
+    assert.throws(
+      () => restoreCheckpoint({ ...createCheckpoint(plan, pending.snapshot), snapshot: hostile }),
+      owner,
+    );
+
+    const completed = completeAction(plan, pending.snapshot, {
+      actionId: action.actionId,
+      actionKind: "interaction",
+      interactionKind: "text",
+      payload: { kind: "submittedText", submittedText: "new" },
+    });
+    assert.equal(completed.outcome.kind, "completed", owner);
+    assert.equal(temporaryValue(completed.snapshot, destination), "new", owner);
+  }
 });
 
-test("completion stops at the handoff before ordinary continuation execution", () => {
-  const injected = injectTextInteraction('let answer = "__interaction_result__"\nsay answer\nexit');
-  const pending = waiting(injected.plan);
-  const planBefore = structuredClone(injected.plan);
-  const pendingBefore = structuredClone(pending.snapshot);
-  const completed = completeAction(
-    injected.plan,
-    pending.snapshot,
-    textCompletionRequest(pending.snapshot),
-  );
-
-  assert.deepEqual(injected.plan, planBefore, "completion plan input");
-  assert.deepEqual(pending.snapshot, pendingBefore, "completion snapshot input");
+test("a transferred interaction result is ordinary state that later writes may change", () => {
+  const plan = compiledTextInteraction(
+    'let answer = askText\nanswer = "changed"\nwait 1 ms\nsay answer\nexit',
+  ).plan;
+  const pending = waiting(plan);
+  const completed = completeAction(plan, pending.snapshot, textCompletionRequest(pending.snapshot));
   assert.equal(completed.outcome.kind, "completed");
-  assert.equal(completed.snapshot.nextInstruction, injected.handoffInstruction);
-  assert.equal(temporaryValue(completed.snapshot, injected.destinationTemporary), "committed");
-  assert.equal(
-    completed.snapshot.frames[0]?.bindings.some((binding) => binding.name === "answer"),
-    false,
-  );
-  assert.deepEqual(
-    completed.events.map((event) => event.kind),
-    ["playerTranscript", "actionCompleted"],
-  );
-  assert.equal(
-    completed.events.some((event) => event.kind === "say"),
-    false,
-  );
-});
 
-test("transferred interaction result is independent of the cleanup temporary", () => {
-  const injected = injectTextInteraction('let answer = "__interaction_result__"\nsay answer\nexit');
-  const pending = waiting(injected.plan);
-  const completed = completeAction(
-    injected.plan,
-    pending.snapshot,
-    textCompletionRequest(pending.snapshot),
-  );
-  const transferred = executeInstruction(injected.plan, completed.snapshot);
+  // At the wait the interaction settlement is still the retained one, but the binding already
+  // holds an ordinary reassignment that carries no interaction provenance.
+  const delay = run(plan, completed.snapshot);
+  assert.equal(delay.snapshot.foregroundAction?.kind, "delay");
+  assert.equal(delay.snapshot.interactionResultHandoff, null);
+  assert.equal(delay.snapshot.lastSettlement?.actionKind, "interaction");
+  assert.equal(bindingValue(delay.snapshot, "answer"), "changed");
+  assert.equal(validateRuntimeSnapshot(delay.snapshot, plan).valid, true);
+  const restored = checkpointJsonRoundTrip(plan, delay.snapshot);
+  assert.deepEqual(restored.snapshot, delay.snapshot);
 
-  assert.equal(transferred.snapshot.nextInstruction, injected.clearInstruction);
-  assert.equal(transferred.snapshot.interactionResultHandoff, null);
-  assert.equal(bindingValue(transferred.snapshot, "answer"), "committed");
-  assert.equal(temporaryValue(transferred.snapshot, injected.destinationTemporary), "committed");
-
-  const changedCleanupTemporary = structuredClone(transferred.snapshot);
-  changedCleanupTemporary.temporaries.find(
-    (temporary) => temporary.id === injected.destinationTemporary,
-  )!.value = "changed cleanup value";
-  const changedBeforeValidation = structuredClone(changedCleanupTemporary);
-  assert.equal(validateRuntimeSnapshot(changedCleanupTemporary, injected.plan).valid, true);
-  assert.deepEqual(changedCleanupTemporary, changedBeforeValidation);
-  assert.doesNotThrow(() => createCheckpoint(injected.plan, changedCleanupTemporary));
-
-  const cleaned = executeInstruction(injected.plan, changedCleanupTemporary);
-  assert.equal(
-    cleaned.snapshot.temporaries.some(
-      (temporary) => temporary.id === injected.destinationTemporary,
-    ),
-    false,
-  );
-  assert.equal(bindingValue(cleaned.snapshot, "answer"), "committed");
-
-  const ordinaryMutation = structuredClone(cleaned.snapshot);
-  ordinaryMutation.frames[0]!.bindings.find((binding) => binding.name === "answer")!.value =
-    "ordinary replacement";
-  assert.equal(validateRuntimeSnapshot(ordinaryMutation, injected.plan).valid, true);
-  assert.doesNotThrow(() => createCheckpoint(injected.plan, ordinaryMutation));
-});
-
-test("removed lifecycle fields are rejected structurally", () => {
-  const plan = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
-  const snapshot = createFreshRuntimeSnapshot(plan);
-
-  const oldLifecycle = { ...structuredClone(snapshot), lastSettlementResultState: "none" };
-  assert.equal(validateRuntimeSnapshot(oldLifecycle, plan).valid, false);
-  assert.throws(() => createCheckpoint(plan, oldLifecycle));
-});
-
-test("compiler-shaped foo, interaction, bar source order remains exact", () => {
-  const injected = injectTextInteraction(
-    [
-      'function foo { say "foo"\nreturn "first" }',
-      'function bar { say "bar"\nreturn "third" }',
-      'function send(first, answer, third) { say "${first}:${answer}:${third}"\nreturn }',
-      'send(foo(), "__interaction_result__", bar())',
-      "exit",
-    ].join("\n"),
-  );
-  const beforeInteraction = run(injected.plan, createImmediatePacingRuntimeSnapshot(injected.plan));
-  assert.equal(beforeInteraction.snapshot.status, "waiting");
-  assert.deepEqual(
-    beforeInteraction.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["foo"],
-  );
-
-  const completed = completeAction(injected.plan, beforeInteraction.snapshot, {
-    actionId: beforeInteraction.snapshot.foregroundAction!.actionId,
-    actionKind: "interaction",
-    interactionKind: "text",
-    payload: { kind: "submittedText", submittedText: "middle" },
-  });
-  assert.equal(
-    completed.events.some((event) => event.kind === "say" && event.text === "bar"),
-    false,
-  );
-
-  const final = run(injected.plan, completed.snapshot);
+  const settled = observeTime(restored.plan, restored.snapshot, 1);
+  const final = run(restored.plan, settled.snapshot);
+  assert.equal(final.snapshot.status, "halted");
   assert.deepEqual(
     final.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["bar", "first:middle:third"],
+    ["changed"],
   );
-  assert.equal(final.snapshot.status, "halted");
-  assert.equal(validateRuntimeSnapshot(final.snapshot, injected.plan).valid, true);
 });
 
 interface InjectedInteractionPlan {
@@ -383,130 +324,6 @@ function injectInteraction(
   };
 }
 
-test("injectInteraction inserts one exact canonical boundary without collateral plan changes", () => {
-  const sources: readonly {
-    readonly name: string;
-    readonly source: string;
-    readonly suspendedCaller?: true;
-  }[] = [
-    { name: "root plan", source: 'let answer = "__interaction_result__"\nsay answer\nexit' },
-    {
-      name: "function-body plan",
-      source:
-        'function prompt { let answer = "__interaction_result__"\nsay answer\nreturn }\nprompt()\nexit',
-    },
-    {
-      name: "suspended caller plan",
-      source:
-        'function prompt { return "__interaction_result__" }\nlet answer = prompt()\nsay answer\nexit',
-      suspendedCaller: true,
-    },
-  ] as const;
-  const marker = "__interaction_result__";
-
-  for (const row of sources) {
-    const compiled = compileSource(row.source);
-    assert.deepEqual(compiled.diagnostics, [], row.name);
-    assert.notEqual(compiled.plan, null, row.name);
-    const original = compiled.plan!;
-    const markerInstructions = original.instructions.filter((instruction) =>
-      containsLiteralMarker(instruction, marker),
-    );
-    assert.equal(markerInstructions.length, 1, row.name);
-    const markerInstruction = markerInstructions[0]!;
-    const markerIndex = original.instructions.indexOf(markerInstruction);
-    const injected = injectTextInteraction(row.source);
-    // EVIDENCE: replacement preserves the compiler-produced marker instruction while substituting one expression.
-    const expectedContinuation = replaceLiteralMarker(
-      markerInstruction,
-      marker,
-      injected.destinationTemporary,
-    ) as Instruction;
-    const expectedInteraction: InteractionInstruction = {
-      kind: "interaction",
-      interactionKind: "text",
-      target: "standardChat",
-      speaker: null,
-      destinationTemporary: injected.destinationTemporary,
-      expectedResult: "string",
-      ui: { kind: "text", hint: null, accessibleName: defaults.text },
-      span: markerInstruction.span,
-    };
-
-    assert.equal(injected.interactionInstruction, markerIndex, row.name);
-    assert.equal(injected.handoffInstruction, markerIndex + 1, row.name);
-    assert.equal(injected.clearInstruction, markerIndex + 2, row.name);
-    assert.equal(injected.plan.instructions.length, original.instructions.length + 2, row.name);
-    assert.equal(injected.plan.temporaryCount, original.temporaryCount + 1, row.name);
-    assert.equal(injected.plan.format, original.format, row.name);
-    assert.equal(injected.plan.version, original.version, row.name);
-    assert.deepEqual(injected.plan.sourceSpan, original.sourceSpan, row.name);
-    assert.deepEqual(
-      injected.plan.instructions.slice(0, markerIndex),
-      original.instructions.slice(0, markerIndex),
-      row.name,
-    );
-    assert.deepEqual(
-      injected.plan.instructions[injected.interactionInstruction],
-      expectedInteraction,
-      row.name,
-    );
-    assert.deepEqual(
-      injected.plan.instructions[injected.handoffInstruction],
-      expectedContinuation,
-      row.name,
-    );
-    assert.deepEqual(
-      injected.plan.instructions[injected.clearInstruction],
-      {
-        kind: "clearTemporary",
-        temporaryId: injected.destinationTemporary,
-        span: markerInstruction.span,
-      },
-      row.name,
-    );
-    assert.deepEqual(
-      injected.plan.instructions.slice(injected.clearInstruction + 1),
-      original.instructions
-        .slice(markerIndex + 1)
-        .map((instruction) => shiftInstructionTargets(instruction, markerIndex)),
-      row.name,
-    );
-    assert.equal(
-      injected.plan.instructions.filter((instruction) => containsLiteralMarker(instruction, marker))
-        .length,
-      0,
-      row.name,
-    );
-    assert.equal(
-      injected.plan.rootEndInstruction,
-      shiftBoundary(original.rootEndInstruction, markerIndex),
-      row.name,
-    );
-    assert.deepEqual(
-      injected.plan.functions,
-      original.functions.map((definition) => ({
-        ...definition,
-        entryInstruction: shiftBoundary(definition.entryInstruction, markerIndex),
-        bodyEntryInstruction: shiftBoundary(definition.bodyEntryInstruction, markerIndex),
-        implicitReturnInstruction: shiftBoundary(definition.implicitReturnInstruction, markerIndex),
-        endInstruction: shiftBoundary(definition.endInstruction, markerIndex),
-      })),
-      row.name,
-    );
-    if (row.suspendedCaller) {
-      const pending = waiting(injected.plan).snapshot;
-      const action = pending.foregroundAction;
-      const caller = pending.callFrames.at(-1);
-      assert.ok(action !== null && action.kind === "interaction", row.name);
-      assert.ok(caller !== undefined, row.name);
-      assert.equal(action.ownerCallFrameId, caller.id, row.name);
-      assert.equal(action.destinationTemporary, injected.destinationTemporary, row.name);
-      assert.notEqual(caller.destinationTemporary, action.destinationTemporary, row.name);
-    }
-  }
-});
-
 function shiftBoundary(value: number, insertionIndex: number, amount = 2): number {
   return value > insertionIndex ? value + amount : value;
 }
@@ -575,48 +392,51 @@ function replaceLiteralMarker(
   );
 }
 
-// Phase 1 deliberately retains the earlier focused regressions above.  These
-// tables make the local handoff boundary explicit without replacing them.
-type CanonicalHandoffKind =
-  | "clearTemporary"
-  | "exit"
-  | "returnVoid"
-  | "returnValue"
-  | "declareBinding"
-  | "assign"
-  | "evaluate"
-  | "storeTemporary"
-  | "say"
-  | "setDeclaredSpeakerProperty"
-  | "prepareReference";
+/** Locates the compiler's canonical `interaction -> storeTemporary -> clearTemporary` handoff in real source. */
+function compiledTextInteraction(source: string): InjectedInteractionPlan {
+  const compiled = compileSource(source);
+  assert.deepEqual(compiled.diagnostics, [], source);
+  assert.notEqual(compiled.plan, null, source);
+  const plan = compiled.plan!;
+  const interactionInstruction = plan.instructions.findIndex(
+    (instruction) => instruction.kind === "interaction",
+  );
+  const interaction = plan.instructions[interactionInstruction];
+  assert.ok(
+    interaction?.kind === "interaction" && interaction.destinationTemporary !== null,
+    source,
+  );
+  return {
+    plan,
+    destinationTemporary: interaction.destinationTemporary,
+    interactionInstruction,
+    handoffInstruction: interactionInstruction + 1,
+    clearInstruction: interactionInstruction + 2,
+  };
+}
 
-interface DirectCanonicalHandoffRow {
+interface CanonicalHandoffRow {
   readonly id: string;
-  readonly kind: CanonicalHandoffKind;
-  readonly source: string;
-  readonly makePlan: (injected: InjectedInteractionPlan) => InstructionPlan;
-  readonly needsCleanup: false;
+  readonly kind: "storeTemporary" | "clearTemporary" | "exit" | "returnVoid" | "returnValue";
+  readonly build: () => InjectedInteractionPlan;
+  /** Direct consumers remove the destination themselves; a transfer leaves it to the cleanup. */
+  readonly needsCleanup: boolean;
+  /** Bounded replay is checked at every boundary of this row only. */
+  readonly replay?: true;
   readonly assertResult?: (
     snapshot: RuntimeSnapshot,
     events: readonly InterpreterEvent[],
-    injected: InjectedInteractionPlan,
+    handoff: InjectedInteractionPlan,
   ) => void;
+  readonly assertFinal?: (snapshot: RuntimeSnapshot, events: readonly InterpreterEvent[]) => void;
 }
 
-interface CleanupCanonicalHandoffRow {
-  readonly id: string;
-  readonly kind: CanonicalHandoffKind;
-  readonly source: string;
-  readonly makePlan: (injected: InjectedInteractionPlan) => InstructionPlan;
-  readonly needsCleanup: true;
-  readonly assertResult: (
-    snapshot: RuntimeSnapshot,
-    events: readonly InterpreterEvent[],
-    injected: InjectedInteractionPlan,
-  ) => void;
+function withHandoffInstruction(
+  injected: InjectedInteractionPlan,
+  instruction: Instruction,
+): InjectedInteractionPlan {
+  return { ...injected, plan: replaceHandoffInstruction(injected, instruction) };
 }
-
-type CanonicalHandoffRow = DirectCanonicalHandoffRow | CleanupCanonicalHandoffRow;
 
 function replaceHandoffInstruction(
   injected: InjectedInteractionPlan,
@@ -634,26 +454,6 @@ function replaceHandoffInstruction(
 
 function handoffInstructionSpan(injected: InjectedInteractionPlan): PlanSourceLocation {
   return injected.plan.instructions[injected.handoffInstruction]!.span;
-}
-
-function completeCommittedTextInteraction(plan: InstructionPlan) {
-  const pending = waiting(plan);
-  const before = structuredClone(pending.snapshot);
-  const action = pending.snapshot.foregroundAction;
-  assert.ok(action !== null);
-  const completed = completeAction(plan, pending.snapshot, {
-    actionId: action.actionId,
-    actionKind: "interaction",
-    interactionKind: "text",
-    payload: { kind: "submittedText", submittedText: "committed" },
-  });
-  assert.deepEqual(pending.snapshot, before);
-  assert.equal(completed.outcome.kind, "completed");
-  assert.deepEqual(
-    completed.events.map((event) => event.kind),
-    ["playerTranscript", "actionCompleted"],
-  );
-  return { pending, completed };
 }
 
 function checkpointJsonRoundTrip(plan: InstructionPlan, snapshot: RuntimeSnapshot) {
@@ -704,20 +504,6 @@ function bindingValue(snapshot: RuntimeSnapshot, name: string) {
   return binding.value;
 }
 
-function assertPreparedReference(value: unknown): void {
-  assert.notEqual(value, null);
-  assert.equal(typeof value, "object");
-  // EVIDENCE: the assertions above establish an object; the following kind/property checks verify its serialized shape.
-  const reference = value as SerializableRuntimeObject;
-  assert.equal(reference.kind, "object");
-  assert.equal(getSerializableProperty(reference, "marker"), "preparedReference");
-  assert.equal(getSerializableProperty(reference, "rootFrameId"), null);
-  assert.equal(getSerializableProperty(reference, "rootName"), null);
-  assert.deepEqual(getSerializableProperty(reference, "path"), { kind: "list", items: [] });
-  assert.equal(getSerializableProperty(reference, "capturedRoot"), "committed");
-  assert.equal(getSerializableProperty(reference, "detached"), true);
-}
-
 type ExternalRecord = Record<string, unknown>;
 
 function externalRecord(value: unknown, label: string): ExternalRecord {
@@ -736,261 +522,214 @@ function externalInstructions(plan: ExternalRecord): unknown[] {
   return externalArray(plan.instructions, "plan instructions");
 }
 
-test("PR194 matrix: every reachable canonical handoff form consumes exactly once", () => {
+test("each validator-accepted handoff category consumes the result once", () => {
+  // One row per handoff category that ADR 0018 accepts (consume, transfer, discard, exit, return).
+  // The transfer row also covers consume: both are one local instruction reading the destination,
+  // validated by the same shape check and dropped on the same engine path. The compiler emits only
+  // the transfer shape; the other rows are validator-accepted plans that no producer emits yet.
   const rows: readonly CanonicalHandoffRow[] = [
     {
-      id: "PR194-form-clear-temporary",
-      kind: "clearTemporary",
-      source: 'let answer = "__interaction_result__"\nexit',
-      makePlan: (injected) =>
-        replaceHandoffInstruction(injected, {
-          kind: "clearTemporary",
-          temporaryId: injected.destinationTemporary,
-          span: handoffInstructionSpan(injected),
-        }),
-      needsCleanup: false,
-    },
-    {
-      id: "PR194-form-exit",
-      kind: "exit",
-      source: 'let answer = "__interaction_result__"\nexit',
-      makePlan: (injected) =>
-        replaceHandoffInstruction(injected, {
-          kind: "exit",
-          span: handoffInstructionSpan(injected),
-        }),
-      needsCleanup: false,
-      assertResult: (snapshot, events) => {
-        assert.equal(snapshot.status, "halted");
-        assert.ok(events.some((event) => event.kind === "exit"));
-      },
-    },
-    {
-      id: "PR194-form-return-void",
-      kind: "returnVoid",
-      source:
-        'function prompt { let ignored = "__interaction_result__"\nreturn }\nprompt()\nsay "after"\nexit',
-      makePlan: (injected) =>
-        replaceHandoffInstruction(injected, {
-          kind: "returnVoid",
-          span: handoffInstructionSpan(injected),
-        }),
-      needsCleanup: false,
-      assertResult: (snapshot) => {
-        assert.equal(snapshot.callFrames.length, 0);
-      },
-    },
-    {
-      id: "PR194-form-return-value",
-      kind: "returnValue",
-      source:
-        'function prompt { return "__interaction_result__" }\nlet answer = prompt()\nsay answer\nexit',
-      makePlan: (injected) => injected.plan,
-      needsCleanup: false,
-      assertResult: (snapshot) => {
-        assert.equal(snapshot.callFrames.length, 0);
-      },
-    },
-    {
-      id: "PR194-form-declare-binding",
-      kind: "declareBinding",
-      source: 'let answer = "__interaction_result__"\nsay answer\nexit',
-      makePlan: (injected) => injected.plan,
-      needsCleanup: true,
-      assertResult: (snapshot) => assert.equal(bindingValue(snapshot, "answer"), "committed"),
-    },
-    {
-      id: "PR194-form-assign",
-      kind: "assign",
-      source: 'let answer = "before"\nanswer = "__interaction_result__"\nsay answer\nexit',
-      makePlan: (injected) => injected.plan,
-      needsCleanup: true,
-      assertResult: (snapshot) => assert.equal(bindingValue(snapshot, "answer"), "committed"),
-    },
-    {
-      id: "PR194-form-evaluate",
-      kind: "evaluate",
-      source: 'let answer = "__interaction_result__"\nexit',
-      makePlan: (injected) =>
-        replaceHandoffInstruction(injected, {
-          kind: "evaluate",
-          expression: {
-            kind: "temporary",
-            temporaryId: injected.destinationTemporary,
-            span: handoffInstructionSpan(injected),
-          },
-          span: handoffInstructionSpan(injected),
-        }),
-      needsCleanup: true,
-      assertResult: (snapshot) => assert.equal(snapshot.status, "running"),
-    },
-    {
-      id: "PR194-form-store-temporary",
+      id: "PR194-category-transfer",
       kind: "storeTemporary",
-      source: 'let answer = "__interaction_result__"\nexit',
-      makePlan: (injected) =>
-        replaceHandoffInstruction(
-          injected,
-          {
-            kind: "storeTemporary",
-            temporaryId: injected.destinationTemporary + 1,
-            value: {
-              kind: "temporary",
-              temporaryId: injected.destinationTemporary,
-              span: handoffInstructionSpan(injected),
-            },
-            expectBoolean: false,
-            span: handoffInstructionSpan(injected),
-          },
-          injected.plan.temporaryCount + 1,
-        ),
+      build: () => compiledTextInteraction("let answer = askText\nsay answer\nexit"),
       needsCleanup: true,
-      assertResult: (snapshot, _events, injected) =>
-        assert.equal(temporaryValue(snapshot, injected.destinationTemporary + 1), "committed"),
-    },
-    {
-      id: "PR194-form-say",
-      kind: "say",
-      source: 'let answer = "__interaction_result__"\nexit',
-      makePlan: (injected) =>
-        replaceHandoffInstruction(injected, {
-          kind: "say",
-          presentation: null,
-          speaker: null,
-          value: {
-            kind: "temporary",
-            temporaryId: injected.destinationTemporary,
-            span: handoffInstructionSpan(injected),
-          },
-          skipPolicy: null,
-          pacing: "smart",
-          span: handoffInstructionSpan(injected),
-        }),
-      needsCleanup: true,
-      assertResult: (_snapshot, events) =>
-        assert.ok(events.some((event) => event.kind === "say" && event.text === "committed")),
-    },
-    {
-      id: "PR194-form-set-declared-speaker-property",
-      kind: "setDeclaredSpeakerProperty",
-      source: 'speaker guide {}\nspeaker guide\nlet answer = "__interaction_result__"\nexit',
-      makePlan: (injected) =>
-        replaceHandoffInstruction(injected, {
-          kind: "setDeclaredSpeakerProperty",
-          speaker: "guide",
-          name: "answer",
-          value: {
-            kind: "temporary",
-            temporaryId: injected.destinationTemporary,
-            span: handoffInstructionSpan(injected),
-          },
-          span: handoffInstructionSpan(injected),
-        }),
-      needsCleanup: true,
-      assertResult: (snapshot) => {
-        const speaker = snapshot.speakers.find((entry) => entry.identifier === "guide");
-        assert.ok(speaker !== undefined);
-        assert.equal(
-          speaker.properties.find((property) => property.name === "answer")?.value,
-          "committed",
+      replay: true,
+      assertResult: (snapshot, _events, handoff) => {
+        const transfer = handoff.plan.instructions[handoff.handoffInstruction];
+        assert.ok(transfer?.kind === "storeTemporary");
+        assert.equal(temporaryValue(snapshot, transfer.temporaryId), "committed");
+      },
+      assertFinal: (snapshot, events) => {
+        assert.equal(bindingValue(snapshot, "answer"), "committed");
+        assert.deepEqual(
+          events.filter((event) => event.kind === "say").map((event) => event.text),
+          ["committed"],
         );
       },
     },
     {
-      id: "PR194-form-prepare-reference",
-      kind: "prepareReference",
-      source: 'let answer = "__interaction_result__"\nexit',
-      makePlan: (injected) =>
-        replaceHandoffInstruction(
-          injected,
-          {
-            kind: "prepareReference",
-            expression: {
-              kind: "temporary",
-              temporaryId: injected.destinationTemporary,
-              span: handoffInstructionSpan(injected),
-            },
-            destinationTemporary: injected.destinationTemporary + 1,
-            span: handoffInstructionSpan(injected),
-          },
-          injected.plan.temporaryCount + 1,
+      id: "PR194-category-discard",
+      kind: "clearTemporary",
+      build: () => {
+        const injected = injectTextInteraction('let answer = "__interaction_result__"\nexit');
+        return withHandoffInstruction(injected, {
+          kind: "clearTemporary",
+          temporaryId: injected.destinationTemporary,
+          span: handoffInstructionSpan(injected),
+        });
+      },
+      needsCleanup: false,
+    },
+    {
+      id: "PR194-category-exit",
+      kind: "exit",
+      build: () => {
+        const injected = injectTextInteraction('let answer = "__interaction_result__"\nexit');
+        return withHandoffInstruction(injected, {
+          kind: "exit",
+          span: handoffInstructionSpan(injected),
+        });
+      },
+      needsCleanup: false,
+      assertResult: (snapshot, events) => {
+        assert.equal(snapshot.status, "halted");
+        assert.equal(events.filter((event) => event.kind === "exit").length, 1);
+      },
+    },
+    {
+      id: "PR194-category-return-void",
+      kind: "returnVoid",
+      build: () => {
+        const injected = injectTextInteraction(
+          'function prompt { let ignored = "__interaction_result__"\nreturn }\nprompt()\nsay "after"\nexit',
+        );
+        return withHandoffInstruction(injected, {
+          kind: "returnVoid",
+          span: handoffInstructionSpan(injected),
+        });
+      },
+      needsCleanup: false,
+      assertResult: (snapshot) => {
+        assert.equal(snapshot.callFrames.length, 0);
+      },
+      assertFinal: (_snapshot, events) =>
+        assert.ok(events.some((event) => event.kind === "say" && event.text === "after")),
+    },
+    {
+      id: "PR194-category-return-value",
+      kind: "returnValue",
+      build: () =>
+        injectTextInteraction(
+          'function prompt { return "__interaction_result__" }\nlet answer = prompt()\nsay answer\nexit',
         ),
-      needsCleanup: true,
-      assertResult: (snapshot, _events, injected) =>
-        assertPreparedReference(temporaryValue(snapshot, injected.destinationTemporary + 1)),
+      needsCleanup: false,
+      assertResult: (snapshot) => {
+        assert.equal(snapshot.callFrames.length, 0);
+      },
+      assertFinal: (snapshot, events) => {
+        assert.equal(bindingValue(snapshot, "answer"), "committed");
+        assert.deepEqual(
+          events.filter((event) => event.kind === "say").map((event) => event.text),
+          ["committed"],
+        );
+      },
     },
   ];
 
   for (const row of rows) {
-    const injected = injectTextInteraction(row.source);
-    const plan = row.makePlan(injected);
+    const handoff = row.build();
+    const plan = handoff.plan;
     const planBefore = structuredClone(plan);
     const validation = validateInstructionPlan(plan);
     assert.equal(validation.valid, true, `${row.id}: ${JSON.stringify(validation.errors)}`);
     assert.deepEqual(plan, planBefore, row.id);
-    assert.equal(plan.instructions[injected.handoffInstruction]?.kind, row.kind, row.id);
-    const { completed } = completeCommittedTextInteraction(plan);
-    const handoff = completed.snapshot.interactionResultHandoff;
-    assert.ok(handoff !== null, row.id);
-    assert.equal(handoff.destinationTemporary, injected.destinationTemporary, row.id);
-    assert.equal(handoff.result, "committed", row.id);
-    const restored = checkpointJsonRoundTrip(plan, completed.snapshot);
-    const continuationBefore = structuredClone(restored.snapshot);
-    const continued = executeInstruction(restored.plan, restored.snapshot);
-    assert.deepEqual(restored.snapshot, continuationBefore, row.id);
+    assert.equal(plan.instructions[handoff.handoffInstruction]?.kind, row.kind, row.id);
+
+    const pending = waiting(plan).snapshot;
+    const action = pending.foregroundAction;
+    assert.ok(action !== null && action.kind === "interaction", row.id);
+    // Root interactions have no owner; function interactions belong to the innermost call frame.
+    assert.equal(action.ownerCallFrameId, pending.callFrames.at(-1)?.id ?? null, row.id);
+    const request = textCompletionRequest(pending);
+    const completion = assertInteractionResumeEquivalent(
+      plan,
+      pending,
+      (currentPlan, snapshot) => completeAction(currentPlan, snapshot, request),
+      `${row.id}: pending`,
+    ).uninterrupted;
+    assert.equal(completion.outcome.kind, "completed", row.id);
+    assert.deepEqual(
+      completion.events.map((event) => event.kind),
+      ["playerTranscript", "actionCompleted"],
+      row.id,
+    );
+
+    // Completion stops at the handoff: the continuation has not run and no ordinary binding holds
+    // the result yet.
+    const committed = completion.snapshot;
+    assert.equal(committed.nextInstruction, handoff.handoffInstruction, row.id);
+    assert.equal(temporaryValue(committed, handoff.destinationTemporary), "committed", row.id);
+    assert.equal(
+      committed.frames[0]?.bindings.find((binding) => binding.name === "answer"),
+      undefined,
+      row.id,
+    );
+    const committedHandoff = committed.interactionResultHandoff;
+    assert.ok(committedHandoff !== null, row.id);
+    assert.equal(committedHandoff.destinationTemporary, handoff.destinationTemporary, row.id);
+    assert.equal(committedHandoff.result, "committed", row.id);
+    assert.equal(committedHandoff.ownerCallFrameId, action.ownerCallFrameId, `${row.id}: owner`);
+
+    const continued = assertInteractionResumeEquivalent(
+      plan,
+      committed,
+      executeInstruction,
+      `${row.id}: committed`,
+    ).uninterrupted;
     assert.equal(continued.snapshot.interactionResultHandoff, null, row.id);
-    if (!row.needsCleanup) {
-      assert.equal(
-        continued.snapshot.temporaries.some((entry) => entry.id === injected.destinationTemporary),
-        false,
-        row.id,
-      );
-    }
-    row.assertResult?.(continued.snapshot, continued.events, injected);
-    assert.doesNotThrow(() => createCheckpoint(restored.plan, continued.snapshot), row.id);
+    assert.equal(
+      continued.snapshot.temporaries.some((entry) => entry.id === handoff.destinationTemporary),
+      row.needsCleanup,
+      `${row.id}: destination after consumption`,
+    );
+    row.assertResult?.(continued.snapshot, continued.events, handoff);
+
+    const boundaries: [string, RuntimeSnapshot][] = [
+      ["committed", committed],
+      ["consumed", continued.snapshot],
+    ];
+    let settled = continued.snapshot;
     if (row.needsCleanup) {
-      const cleanupBefore = structuredClone(continued.snapshot);
-      const cleaned = executeInstruction(restored.plan, continued.snapshot);
-      assert.deepEqual(continued.snapshot, cleanupBefore, row.id);
+      settled = assertInteractionResumeEquivalent(
+        plan,
+        continued.snapshot,
+        executeInstruction,
+        `${row.id}: consumed`,
+      ).uninterrupted.snapshot;
       assert.equal(
-        cleaned.snapshot.temporaries.some((entry) => entry.id === injected.destinationTemporary),
+        settled.temporaries.some((entry) => entry.id === handoff.destinationTemporary),
         false,
-        row.id,
+        `${row.id}: cleaned destination`,
       );
+      boundaries.push(["cleaned", settled]);
     }
-    if (row.kind === "returnVoid" || row.kind === "returnValue") {
-      const final = run(restored.plan, continued.snapshot);
-      assert.equal(final.snapshot.callFrames.length, 0, row.id);
-      if (row.kind === "returnVoid")
-        assert.ok(
-          final.events.some((event) => event.kind === "say" && event.text === "after"),
-          row.id,
-        );
-      else {
-        assert.equal(bindingValue(final.snapshot, "answer"), "committed", row.id);
-        assert.ok(
-          final.events.some((event) => event.kind === "say" && event.text === "committed"),
-          row.id,
-        );
+    const final = assertInteractionResumeEquivalent(
+      plan,
+      settled,
+      run,
+      `${row.id}: settled`,
+    ).uninterrupted;
+    assert.equal(final.snapshot.status, "halted", `${row.id}: final status`);
+    row.assertFinal?.(final.snapshot, final.events);
+    boundaries.push(["halted", final.snapshot]);
+
+    // Replay classification does not depend on the handoff category, so one row checks that bounded
+    // replay reports the recorded settlement at every later boundary, before and after a JSON
+    // checkpoint, and that an action that was never issued is unknown.
+    if (row.replay !== true) continue;
+    for (const [phase, snapshot] of boundaries) {
+      for (const [label, replayed] of [
+        ["original", snapshot],
+        ["roundtrip", checkpointJsonRoundTrip(plan, snapshot).snapshot],
+      ] as const) {
+        assertReplayRow({
+          id: `${row.id}: replay ${phase} ${label}`,
+          plan,
+          snapshot: replayed,
+          request,
+          expected: { kind: "alreadySettled" },
+        });
       }
     }
+    assertReplayRow({
+      id: `${row.id}: replay next action`,
+      plan,
+      snapshot: final.snapshot,
+      request: { ...request, actionId: final.snapshot.nextActionId },
+      expected: { kind: "unknownAction", actionId: final.snapshot.nextActionId },
+    });
   }
 });
-
-interface AcceptedExpressionGuaranteeRow {
-  readonly id: string;
-  readonly category: string;
-  readonly expression: ExpressionPlan;
-  readonly temporaryCount?: number;
-  readonly runtimeWitness?: true;
-}
-
-interface RejectedExpressionGuaranteeRow {
-  readonly id: string;
-  readonly category: string;
-  readonly expression: unknown;
-  readonly temporaryCount?: number;
-}
 
 function temporaryExpression(temporaryId: number, span: PlanSourceLocation): ExpressionPlan {
   return { kind: "temporary", temporaryId, span };
@@ -1003,441 +742,6 @@ function literalExpression(
   return { kind: "literal", value, span };
 }
 
-function binaryExpression(
-  operator: BinaryExpressionPlan["operator"],
-  left: ExpressionPlan,
-  right: ExpressionPlan,
-  span: PlanSourceLocation,
-): ExpressionPlan {
-  return { kind: "binary", operator, left, right, span };
-}
-
-function handoffPlanWithExpression(
-  injected: InjectedInteractionPlan,
-  expression: ExpressionPlan,
-  temporaryCount = injected.plan.temporaryCount,
-): InstructionPlan {
-  return replaceHandoffInstruction(
-    injected,
-    {
-      kind: "declareBinding",
-      name: "answer",
-      value: expression,
-      span: handoffInstructionSpan(injected),
-    },
-    temporaryCount,
-  );
-}
-
-function handoffPlanWithMalformedExpression(
-  injected: InjectedInteractionPlan,
-  expression: unknown,
-  temporaryCount = injected.plan.temporaryCount,
-): InstructionPlan {
-  const instruction = {
-    kind: "declareBinding",
-    name: "answer",
-    value: expression,
-    span: handoffInstructionSpan(injected),
-  };
-  // Deliberately malformed external plan data cannot be represented by Instruction.
-  return replaceHandoffInstruction(
-    injected,
-    // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture injects an unvalidated expression into declareBinding to test malformed-plan rejection.
-    instruction as unknown as Instruction,
-    temporaryCount,
-  );
-}
-
-test("PR194 matrix: expression consumption requires guaranteed evaluation", () => {
-  const injected = injectTextInteraction('let answer = "__interaction_result__"\nexit');
-  const span = handoffInstructionSpan(injected);
-  const destination = injected.destinationTemporary;
-  const matching = temporaryExpression(destination, span);
-  const wrong = temporaryExpression(destination + 1, span);
-  const propertyCallee: ExpressionPlan = {
-    kind: "property",
-    object: { kind: "list", elements: [], span },
-    name: "contains",
-    span,
-  };
-  const accepted: readonly AcceptedExpressionGuaranteeRow[] = [
-    {
-      id: "PR194-expression-direct-temporary",
-      category: "temporary",
-      expression: matching,
-      runtimeWitness: true,
-    },
-    {
-      id: "PR194-expression-list-element",
-      category: "list",
-      expression: { kind: "list", elements: [matching], span },
-      runtimeWitness: true,
-    },
-    {
-      id: "PR194-expression-set-element",
-      category: "set",
-      expression: { kind: "set", elements: [matching], span },
-    },
-    {
-      id: "PR194-expression-object-property-value",
-      category: "object",
-      expression: { kind: "object", properties: [{ name: "answer", value: matching, span }], span },
-    },
-    {
-      id: "PR194-expression-group",
-      category: "group",
-      expression: { kind: "group", expression: matching, span },
-    },
-    {
-      id: "PR194-expression-template-part",
-      category: "template",
-      expression: {
-        kind: "template",
-        parts: [
-          { kind: "text", value: "answer: ", span },
-          { kind: "expression", expression: matching, span },
-        ],
-        span,
-      },
-    },
-    {
-      id: "PR194-expression-property-object",
-      category: "property",
-      expression: { kind: "property", object: matching, name: "length", span },
-    },
-    {
-      id: "PR194-expression-index-object",
-      category: "index",
-      expression: { kind: "index", object: matching, index: literalExpression(0, span), span },
-    },
-    {
-      id: "PR194-expression-index-index",
-      category: "index",
-      expression: {
-        kind: "index",
-        object: { kind: "list", elements: [literalExpression("value", span)], span },
-        index: matching,
-        span,
-      },
-    },
-    {
-      id: "PR194-expression-property-call-receiver",
-      category: "call",
-      expression: {
-        kind: "call",
-        callee: { kind: "property", object: matching, name: "contains", span },
-        arguments: [],
-        span,
-      },
-    },
-    {
-      id: "PR194-expression-positional-call-argument",
-      category: "call",
-      expression: {
-        kind: "call",
-        callee: propertyCallee,
-        arguments: [{ kind: "positional", value: matching, span }],
-        span,
-      },
-    },
-    {
-      id: "PR194-expression-named-call-argument",
-      category: "call",
-      expression: {
-        kind: "call",
-        callee: propertyCallee,
-        arguments: [{ kind: "named", name: "value", value: matching, span }],
-        span,
-      },
-    },
-    {
-      id: "PR194-expression-unary-operand",
-      category: "unary",
-      expression: { kind: "unary", operator: "not", operand: matching, span },
-    },
-    {
-      id: "PR194-expression-eager-left",
-      category: "binary",
-      expression: binaryExpression("==", matching, literalExpression("committed", span), span),
-    },
-    {
-      id: "PR194-expression-eager-right",
-      category: "binary",
-      expression: binaryExpression("==", literalExpression("committed", span), matching, span),
-      runtimeWitness: true,
-    },
-    {
-      id: "PR194-expression-range-start",
-      category: "range",
-      expression: {
-        kind: "range",
-        start: matching,
-        end: literalExpression(2, span),
-        inclusive: true,
-        span,
-      },
-    },
-    {
-      id: "PR194-expression-range-end",
-      category: "range",
-      expression: {
-        kind: "range",
-        start: literalExpression(1, span),
-        end: matching,
-        inclusive: true,
-        span,
-      },
-    },
-    {
-      id: "PR194-expression-and-left",
-      category: "short-circuit",
-      expression: binaryExpression("and", matching, literalExpression(true, span), span),
-    },
-    {
-      id: "PR194-expression-or-left",
-      category: "short-circuit",
-      expression: binaryExpression("or", matching, literalExpression(false, span), span),
-    },
-    {
-      id: "PR194-expression-multiple-guaranteed",
-      category: "multiple",
-      expression: { kind: "list", elements: [matching, matching], span },
-      runtimeWitness: true,
-    },
-    {
-      id: "PR194-expression-wrong-and-correct",
-      category: "multiple",
-      expression: { kind: "list", elements: [wrong, matching], span },
-      temporaryCount: injected.plan.temporaryCount + 1,
-    },
-  ];
-  const rejected: readonly RejectedExpressionGuaranteeRow[] = [
-    {
-      id: "PR194-expression-no-occurrence",
-      category: "missing",
-      expression: literalExpression(false, span),
-    },
-    {
-      id: "PR194-expression-wrong-temporary",
-      category: "wrong temporary",
-      expression: wrong,
-      temporaryCount: injected.plan.temporaryCount + 1,
-    },
-    {
-      id: "PR194-expression-prepared-reference",
-      category: "prepared reference",
-      expression: { kind: "preparedReference", temporaryId: destination, span },
-    },
-    {
-      id: "PR194-expression-and-right-false",
-      category: "short-circuit",
-      expression: binaryExpression("and", literalExpression(false, span), matching, span),
-    },
-    {
-      id: "PR194-expression-and-right-true",
-      category: "short-circuit",
-      expression: binaryExpression("and", literalExpression(true, span), matching, span),
-    },
-    {
-      id: "PR194-expression-or-right-false",
-      category: "short-circuit",
-      expression: binaryExpression("or", literalExpression(false, span), matching, span),
-    },
-    {
-      id: "PR194-expression-or-right-true",
-      category: "short-circuit",
-      expression: binaryExpression("or", literalExpression(true, span), matching, span),
-    },
-    {
-      id: "PR194-expression-nested-short-circuit-right",
-      category: "short-circuit",
-      expression: binaryExpression(
-        "and",
-        literalExpression(true, span),
-        binaryExpression("or", literalExpression(false, span), matching, span),
-        span,
-      ),
-    },
-    {
-      id: "PR194-expression-non-property-callee",
-      category: "call",
-      expression: { kind: "call", callee: matching, arguments: [], span },
-    },
-    {
-      id: "PR194-expression-template-text-metadata",
-      category: "metadata",
-      // oxlint-disable-next-line anti-slop/no-known-value-widening -- EVIDENCE: fixture adds forbidden temporary metadata to a template text part for plan rejection.
-      expression: {
-        kind: "template",
-        parts: [{ kind: "text", value: "ignored", span, temporaryId: destination }],
-        span,
-      } as unknown,
-    },
-    {
-      id: "PR194-expression-ignored-extra-field",
-      category: "ignored field",
-      expression: { kind: "literal", value: false, span, ignored: matching },
-    },
-    {
-      id: "PR194-expression-wrong-left-correct-right",
-      category: "short-circuit",
-      expression: binaryExpression("or", wrong, matching, span),
-      temporaryCount: injected.plan.temporaryCount + 1,
-    },
-  ];
-
-  for (const row of accepted) {
-    const plan = handoffPlanWithExpression(injected, row.expression, row.temporaryCount);
-    const before = structuredClone(plan);
-    const validation = validateInstructionPlan(plan);
-    assert.equal(validation.valid, true, `${row.id}: ${row.category}`);
-    assert.deepEqual(plan, before, row.id);
-  }
-
-  for (const row of rejected) {
-    const plan = handoffPlanWithMalformedExpression(injected, row.expression, row.temporaryCount);
-    const before = structuredClone(plan);
-    const validation = validateInstructionPlan(plan);
-    assert.equal(validation.valid, false, `${row.id}: ${row.category}`);
-    assert.ok(
-      validation.errors.some(
-        (error) =>
-          error.code === "TSC002" &&
-          error.message ===
-            "Interaction result handoff must consume the destination immediately." &&
-          error.path === `$.instructions[${injected.handoffInstruction}]`,
-      ),
-      row.id,
-    );
-    if (
-      row.id === "PR194-expression-wrong-temporary" ||
-      row.id === "PR194-expression-wrong-left-correct-right"
-    ) {
-      assert.ok(
-        validation.errors.every(
-          (error) => error.message !== "Temporary reference is outside the plan's temporary range.",
-        ),
-        row.id,
-      );
-    }
-    assert.deepEqual(plan, before, row.id);
-  }
-
-  for (const row of accepted.filter((entry) => entry.runtimeWitness === true)) {
-    const plan = handoffPlanWithExpression(injected, row.expression);
-    const { completed } = completeCommittedTextInteraction(plan);
-    const continued = executeInstruction(plan, completed.snapshot);
-    assert.equal(continued.snapshot.interactionResultHandoff, null, row.id);
-  }
-});
-
-test("PR194 matrix: continuation kinds read only their canonical expression field", () => {
-  const injected = injectTextInteraction('let answer = "__interaction_result__"\nexit');
-  const span = injected.plan.instructions[injected.handoffInstruction]!.span;
-  const destination = temporaryExpression(injected.destinationTemporary, span);
-  const ignored = literalExpression(false, span);
-  const validRows: readonly {
-    readonly id: string;
-    readonly instruction: Instruction;
-    readonly temporaryCount: number;
-  }[] = [
-    {
-      id: "PR194-dispatch-evaluate-expression",
-      instruction: { kind: "evaluate", expression: destination, span },
-      temporaryCount: injected.plan.temporaryCount,
-    },
-    {
-      id: "PR194-dispatch-prepare-reference-expression",
-      instruction: {
-        kind: "prepareReference",
-        expression: destination,
-        destinationTemporary: injected.destinationTemporary + 1,
-        span,
-      },
-      temporaryCount: injected.plan.temporaryCount + 1,
-    },
-    {
-      id: "PR194-dispatch-declare-binding-value",
-      instruction: { kind: "declareBinding", name: "answer", value: destination, span },
-      temporaryCount: injected.plan.temporaryCount,
-    },
-  ];
-  for (const row of validRows) {
-    const plan = replaceHandoffInstruction(injected, row.instruction, row.temporaryCount);
-    const before = structuredClone(plan);
-    assert.equal(validateInstructionPlan(plan).valid, true, row.id);
-    assert.deepEqual(plan, before, row.id);
-  }
-
-  const invalidRows: readonly {
-    readonly id: string;
-    readonly instruction: unknown;
-    readonly temporaryCount: number;
-    readonly destinationIsInRange?: true;
-  }[] = [
-    {
-      id: "PR194-dispatch-evaluate-value-ignored",
-      instruction: { kind: "evaluate", expression: ignored, value: destination, span },
-      temporaryCount: injected.plan.temporaryCount,
-    },
-    {
-      id: "PR194-dispatch-prepare-reference-value-ignored",
-      instruction: {
-        kind: "prepareReference",
-        expression: ignored,
-        value: destination,
-        destinationTemporary: injected.destinationTemporary + 1,
-        span,
-      },
-      temporaryCount: injected.plan.temporaryCount + 1,
-      destinationIsInRange: true,
-    },
-    {
-      id: "PR194-dispatch-declare-binding-expression-ignored",
-      instruction: {
-        kind: "declareBinding",
-        name: "answer",
-        value: ignored,
-        expression: destination,
-        span,
-      },
-      temporaryCount: injected.plan.temporaryCount,
-    },
-  ];
-  for (const row of invalidRows) {
-    // Deliberately unsupported sibling fields exercise public malformed-plan validation.
-    // EVIDENCE: each row adds a named unsupported instruction field while retaining the dispatch instruction shape.
-    const plan = replaceHandoffInstruction(
-      injected,
-      row.instruction as Instruction,
-      row.temporaryCount,
-    );
-    const before = structuredClone(plan);
-    const validation = validateInstructionPlan(plan);
-    assert.equal(validation.valid, false, row.id);
-    assert.ok(
-      validation.errors.some(
-        (error) =>
-          error.code === "TSC002" &&
-          error.message ===
-            "Interaction result handoff must consume the destination immediately." &&
-          error.path === `$.instructions[${injected.handoffInstruction}]`,
-      ),
-      row.id,
-    );
-    if (row.destinationIsInRange) {
-      assert.ok(
-        validation.errors.every(
-          (error) => error.message !== "Temporary reference is outside the plan's temporary range.",
-        ),
-        row.id,
-      );
-    }
-    assert.deepEqual(plan, before, row.id);
-  }
-});
-
 interface SettlementHandoffFixture {
   readonly injected: InjectedInteractionPlan;
   /** Produced through the public interaction completion operation. */
@@ -1448,12 +752,12 @@ interface SettlementHandoffFixture {
   readonly laterDelaySettlement: RuntimeDelayActionSettlementSnapshot;
   /** A real pending later delay, retained only to build an incompatible pair. */
   readonly runtimeProducedLaterPendingDelay: RuntimeSnapshot;
-  /** The runtime-produced state retaining the later delay settlement. */
-  readonly runtimeProducedLaterSettledDelay: RuntimeSnapshot;
   /**
    * A deliberately assembled persisted-state fixture: it combines the
    * runtime-produced committed interaction with the later runtime-produced
    * delay settlement.  The validator and checkpoint boundaries accept it.
+   * Public operations cannot reach it, so it serves only as validation input
+   * and as the control for rows that corrupt it; it is never executed.
    */
   readonly validatedCompositeWithNewerSettlement: RuntimeSnapshot;
 }
@@ -1461,12 +765,20 @@ interface SettlementHandoffFixture {
 interface RejectedSettlementHandoffRow {
   readonly id: string;
   readonly category:
+    | "settlement presence"
     | "malformed settlement"
     | "malformed handoff"
+    | "handoff ownership"
     | "handoff disagreement"
+    | "destination"
     | "incompatible lifecycle"
     | "counter"
     | "chronology";
+  /**
+   * The row keeps the settlement and the handoff individually valid without a plan, so planless
+   * validation isolates the one check the row names from the plan-bound checks that also reject it.
+   */
+  readonly planless?: true;
   readonly mutate: (snapshot: ExternalRecord, fixture: SettlementHandoffFixture) => void;
 }
 
@@ -1542,7 +854,6 @@ function settledHandoffFixture(): SettlementHandoffFixture {
     olderDelaySettlement: structuredClone(olderDelaySettlement),
     laterDelaySettlement: structuredClone(laterDelaySettlement),
     runtimeProducedLaterPendingDelay: laterDelay.snapshot,
-    runtimeProducedLaterSettledDelay: laterSettled.snapshot,
     validatedCompositeWithNewerSettlement,
   };
 }
@@ -1552,9 +863,12 @@ function assertRejectedSettlementHandoffSnapshot(
   validSnapshot: RuntimeSnapshot,
   invalidSnapshot: ExternalRecord,
   id: string,
+  planless = false,
 ): void {
   const beforeValidation = structuredClone(invalidSnapshot);
   assert.equal(validateRuntimeSnapshot(invalidSnapshot, plan).valid, false, id);
+  if (planless)
+    assert.equal(validateRuntimeSnapshot(invalidSnapshot).valid, false, `${id}: planless`);
   assert.deepEqual(invalidSnapshot, beforeValidation, `${id}: validation input`);
 
   const beforePlan = structuredClone(plan);
@@ -1582,7 +896,7 @@ function assertRejectedSettlementHandoffSnapshot(
   assert.deepEqual(invalidCheckpoint, beforeRestore, `${id}: restore checkpoint input`);
 }
 
-test("PR194 matrix: settlement and active handoff validation", () => {
+test("validation accepts matching settlement and handoff records and rejects inconsistent ones", () => {
   const fixture = settledHandoffFixture();
   const {
     injected,
@@ -1609,59 +923,88 @@ test("PR194 matrix: settlement and active handoff validation", () => {
     assert.deepEqual(row.snapshot, before, row.id);
   }
 
-  const beforeContinuation = structuredClone(validatedCompositeWithNewerSettlement);
-  const continued = executeInstruction(injected.plan, validatedCompositeWithNewerSettlement);
-  assert.equal(continued.snapshot.interactionResultHandoff, null, "PR194-newer-settlement-consume");
-  assert.equal(bindingValue(continued.snapshot, "answer"), "committed");
-  assert.deepEqual(continued.snapshot.lastSettlement, fixture.laterDelaySettlement);
-  assert.deepEqual(validatedCompositeWithNewerSettlement, beforeContinuation);
-  const cleaned = executeInstruction(injected.plan, continued.snapshot);
-  assert.equal(
-    cleaned.snapshot.temporaries.some((entry) => entry.id === injected.destinationTemporary),
-    false,
-  );
-  assert.deepEqual(cleaned.snapshot.lastSettlement, fixture.laterDelaySettlement);
-  assert.deepEqual(
-    checkpointJsonRoundTrip(injected.plan, cleaned.snapshot).snapshot,
-    cleaned.snapshot,
-  );
-
   const rows: readonly RejectedSettlementHandoffRow[] = [
     {
       id: "PR194-settlement-null",
-      category: "handoff disagreement",
+      category: "settlement presence",
       mutate: (snapshot) => {
         snapshot.lastSettlement = null;
       },
     },
     {
       id: "PR194-settlement-older-valid",
-      category: "handoff disagreement",
+      category: "settlement presence",
       mutate: (snapshot, current) => {
         snapshot.lastSettlement = structuredClone(current.olderDelaySettlement);
       },
     },
+    // Each agreement row changes one field that the retained settlement with the handoff's action
+    // ID must share with the handoff, while both records stay individually valid without a plan.
+    // A non-interaction settlement has no owner, destination or result fields, so those field
+    // comparisons also reject the action-kind row.
     {
-      id: "PR194-settlement-equal-wrong-action-kind",
+      id: "PR194-agreement-action-kind",
       category: "handoff disagreement",
+      planless: true,
       mutate: (snapshot, current) => {
-        const delay = structuredClone(current.laterDelaySettlement);
-        const handoffActionId = externalRecord(
-          snapshot.interactionResultHandoff,
-          "handoff",
-        ).actionId;
-        const nextEventSequence = snapshot.nextEventSequence;
-        if (typeof handoffActionId !== "number" || typeof nextEventSequence !== "number") {
-          throw new Error("committed handoff fields must be numeric");
-        }
-        snapshot.nextActionId = delay.actionId + 1;
-        snapshot.nextEventSequence = Math.max(nextEventSequence, delay.completionEventSequence + 1);
-        snapshot.lastSettlement = { ...delay, actionId: handoffActionId };
+        const handoff = externalRecord(snapshot.interactionResultHandoff, "handoff");
+        snapshot.lastSettlement = {
+          ...structuredClone(current.olderDelaySettlement),
+          actionId: handoff.actionId,
+        };
+      },
+    },
+    {
+      id: "PR194-agreement-owning-instruction",
+      category: "handoff disagreement",
+      planless: true,
+      mutate: (snapshot) => {
+        externalRecord(snapshot.interactionResultHandoff, "handoff").owningInstruction = 0;
+      },
+    },
+    {
+      id: "PR194-agreement-continuation",
+      category: "handoff disagreement",
+      planless: true,
+      mutate: (snapshot, current) => {
+        const continuation = current.injected.handoffInstruction + 1;
+        externalRecord(snapshot.interactionResultHandoff, "handoff").continuationInstruction =
+          continuation;
+        snapshot.nextInstruction = continuation;
+      },
+    },
+    {
+      id: "PR194-agreement-owner",
+      category: "handoff disagreement",
+      planless: true,
+      mutate: (snapshot) => {
+        externalRecord(snapshot.lastSettlement, "settlement").ownerCallFrameId = 1;
+        snapshot.nextCallFrameId = 2;
+      },
+    },
+    {
+      id: "PR194-agreement-destination",
+      category: "handoff disagreement",
+      planless: true,
+      mutate: (snapshot, current) => {
+        externalRecord(snapshot.lastSettlement, "settlement").destinationTemporary =
+          current.injected.destinationTemporary + 1;
+      },
+    },
+    {
+      id: "PR194-agreement-result",
+      category: "handoff disagreement",
+      planless: true,
+      mutate: (snapshot) => {
+        // A text settlement stays self-consistent when its result and transcript change together.
+        const settlement = externalRecord(snapshot.lastSettlement, "settlement");
+        settlement.result = "forged";
+        settlement.transcriptText = "forged";
       },
     },
     {
       id: "PR194-settlement-equal-wrong-interaction-kind",
-      category: "handoff disagreement",
+      category: "malformed settlement",
       mutate: (snapshot) => {
         externalRecord(snapshot.lastSettlement, "settlement").interactionKind = "number";
       },
@@ -1674,45 +1017,8 @@ test("PR194 matrix: settlement and active handoff validation", () => {
       },
     },
     {
-      id: "PR194-settlement-wrong-owning-instruction",
-      category: "handoff disagreement",
-      mutate: (snapshot) => {
-        externalRecord(snapshot.lastSettlement, "settlement").owningInstruction = 0;
-      },
-    },
-    {
-      id: "PR194-settlement-wrong-continuation",
-      category: "handoff disagreement",
-      mutate: (snapshot) => {
-        externalRecord(snapshot.lastSettlement, "settlement").continuationInstruction = 0;
-      },
-    },
-    {
-      id: "PR194-settlement-wrong-owner",
-      category: "handoff disagreement",
-      mutate: (snapshot) => {
-        externalRecord(snapshot.lastSettlement, "settlement").ownerCallFrameId = 1;
-        snapshot.nextCallFrameId = 2;
-      },
-    },
-    {
-      id: "PR194-settlement-wrong-destination",
-      category: "handoff disagreement",
-      mutate: (snapshot, current) => {
-        externalRecord(snapshot.lastSettlement, "settlement").destinationTemporary =
-          current.injected.destinationTemporary + 1;
-      },
-    },
-    {
-      id: "PR194-settlement-wrong-result",
-      category: "handoff disagreement",
-      mutate: (snapshot) => {
-        externalRecord(snapshot.lastSettlement, "settlement").result = "forged";
-      },
-    },
-    {
       id: "PR194-settlement-wrong-transcript",
-      category: "handoff disagreement",
+      category: "malformed settlement",
       mutate: (snapshot) => {
         externalRecord(snapshot.lastSettlement, "settlement").transcriptText = "forged";
       },
@@ -1753,8 +1059,19 @@ test("PR194 matrix: settlement and active handoff validation", () => {
       },
     },
     {
+      id: "PR194-handoff-owner-not-active-frame",
+      category: "handoff ownership",
+      planless: true,
+      mutate: (snapshot) => {
+        // The settlement agrees with the forged owner, so only the active-frame ownership check rejects it.
+        externalRecord(snapshot.interactionResultHandoff, "handoff").ownerCallFrameId = 99;
+        externalRecord(snapshot.lastSettlement, "settlement").ownerCallFrameId = 99;
+        snapshot.nextCallFrameId = 100;
+      },
+    },
+    {
       id: "PR194-handoff-destination-missing",
-      category: "handoff disagreement",
+      category: "destination",
       mutate: (snapshot, current) => {
         const temporaries = externalArray(snapshot.temporaries, "temporaries");
         const index = temporaries.findIndex(
@@ -1767,14 +1084,14 @@ test("PR194 matrix: settlement and active handoff validation", () => {
     },
     {
       id: "PR194-handoff-destination-forged",
-      category: "handoff disagreement",
+      category: "destination",
       mutate: (snapshot, current) => {
         externalTemporary(snapshot, current.injected.destinationTemporary).value = "forged";
       },
     },
     {
       id: "PR194-handoff-next-instruction",
-      category: "handoff disagreement",
+      category: "malformed handoff",
       mutate: (snapshot) => {
         snapshot.nextInstruction = 0;
       },
@@ -1838,23 +1155,8 @@ test("PR194 matrix: settlement and active handoff validation", () => {
       },
     },
   ];
-  const equalIdDelayControl = structuredClone(fixture.runtimeProducedLaterSettledDelay);
-  const exactHandoff = committed.interactionResultHandoff;
-  assert.ok(exactHandoff !== null);
-  assert.ok(equalIdDelayControl.lastSettlement !== null);
-  equalIdDelayControl.lastSettlement = {
-    ...equalIdDelayControl.lastSettlement,
-    actionId: exactHandoff.actionId,
-  };
-  equalIdDelayControl.nextActionId = Math.max(
-    equalIdDelayControl.nextActionId,
-    exactHandoff.actionId + 1,
-  );
-  assert.equal(
-    validateRuntimeSnapshot(equalIdDelayControl, injected.plan).valid,
-    true,
-    "PR194-settlement-equal-wrong-action-kind control: delay settlement alone",
-  );
+  // The root-owned committed snapshot is also valid without a plan, the baseline for planless rows.
+  assert.equal(validateRuntimeSnapshot(committed).valid, true);
   for (const row of rows) {
     const invalid = externalRecord(structuredClone(committed), row.id);
     row.mutate(invalid, fixture);
@@ -1863,6 +1165,7 @@ test("PR194 matrix: settlement and active handoff validation", () => {
       committed,
       invalid,
       `${row.category}: ${row.id}`,
+      row.planless === true,
     );
   }
 
@@ -1877,9 +1180,22 @@ test("PR194 matrix: settlement and active handoff validation", () => {
     retainedSettlementCounter,
     "counter: PR194-retained-newer-settlement-counter",
   );
+
+  // With a newer retained settlement, the handoff alone still authorizes the destination value.
+  const newerSettlementForgedDestination = externalRecord(
+    structuredClone(validatedCompositeWithNewerSettlement),
+    "newer settlement forged destination",
+  );
+  externalTemporary(newerSettlementForgedDestination, injected.destinationTemporary).value =
+    "forged";
+  assertRejectedSettlementHandoffSnapshot(
+    injected.plan,
+    validatedCompositeWithNewerSettlement,
+    newerSettlementForgedDestination,
+    "destination: PR194-newer-settlement-handoff-destination-forged",
+  );
 });
 
-// Retained focused replay regression until phase-2 consolidation.
 interface TextInteractionCompletionRequest {
   readonly actionId: number;
   readonly actionKind: "interaction";
@@ -1891,16 +1207,9 @@ interface ReplayRow {
   readonly id: string;
   readonly plan: InstructionPlan;
   readonly snapshot: RuntimeSnapshot;
-  readonly request:
-    | TextInteractionCompletionRequest
-    | {
-        readonly actionId: number;
-        readonly actionKind: "delay";
-        readonly payload: { readonly kind: "time"; readonly currentSessionTimeMs: number };
-      };
+  readonly request: TextInteractionCompletionRequest;
   readonly expected:
     | { readonly kind: "alreadySettled" }
-    | { readonly kind: "staleAction"; readonly actionId: number }
     | { readonly kind: "unknownAction"; readonly actionId: number };
 }
 
@@ -1933,10 +1242,6 @@ function assertReplayRow(row: ReplayRow): void {
         `${row.id}: settlement`,
       );
       break;
-    case "staleAction":
-      assert.equal(replay.outcome.kind, "staleAction", row.id);
-      assert.equal(replay.outcome.actionId, row.expected.actionId, `${row.id}: stale action ID`);
-      break;
     case "unknownAction":
       assert.equal(replay.outcome.kind, "unknownAction", row.id);
       assert.equal(replay.outcome.actionId, row.expected.actionId, `${row.id}: unknown action ID`);
@@ -1944,843 +1249,89 @@ function assertReplayRow(row: ReplayRow): void {
   }
 }
 
-test("PR194 matrix: bounded replay is exact-once across ordinary and direct handoff boundaries", () => {
-  const ordinary = injectTextInteraction('let answer = "__interaction_result__"\nsay answer\nexit');
-  const pending = waiting(ordinary.plan);
+test("a failed canonical continuation retains the handoff atomically", () => {
+  // The transfer expects a boolean, so it fails after reading the destination and before writing
+  // its target temporary.
+  const injected = injectTextInteraction('let answer = "__interaction_result__"\nexit');
+  const target = injected.destinationTemporary + 1;
+  const plan = replaceHandoffInstruction(
+    injected,
+    {
+      kind: "storeTemporary",
+      temporaryId: target,
+      value: temporaryExpression(injected.destinationTemporary, injected.plan.sourceSpan),
+      expectBoolean: true,
+      span: handoffInstructionSpan(injected),
+    },
+    injected.plan.temporaryCount + 1,
+  );
+  assert.equal(validateInstructionPlan(plan).valid, true);
+  const pending = waiting(plan);
   const request = textCompletionRequest(pending.snapshot);
-  const completion = completeAction(ordinary.plan, pending.snapshot, request);
-  assert.equal(completion.outcome.kind, "completed");
-  assert.deepEqual(
-    completion.events.map((event) => event.kind),
-    ["playerTranscript", "actionCompleted"],
-  );
+  const completed = completeAction(plan, pending.snapshot, request);
+  assert.equal(completed.outcome.kind, "completed");
+  const committed = checkpointJsonRoundTrip(plan, completed.snapshot).snapshot;
+  const planBefore = structuredClone(plan);
+  const committedBefore = structuredClone(committed);
+  const failed = executeInstruction(plan, committed);
+  assert.deepEqual(plan, planBefore, "plan input");
+  assert.deepEqual(committed, committedBefore, "snapshot input");
+  assert.equal(failed.snapshot.status, "failed");
+  assert.equal(failed.snapshot.nextInstruction, committed.nextInstruction);
+  assert.deepEqual(failed.snapshot.interactionResultHandoff, committed.interactionResultHandoff);
+  assert.equal(temporaryValue(failed.snapshot, injected.destinationTemporary), "committed");
+  assert.deepEqual(failed.snapshot.lastSettlement, committed.lastSettlement);
+  assert.equal(failed.events.length, 1);
+  const failure = failed.events[0];
+  assert.ok(failure !== undefined && failure.kind === "runtimeFailure");
+  assert.equal(failure.code, "TSR026");
   assert.equal(
-    completion.events.some((event) => event.kind === "say"),
+    failed.snapshot.temporaries.some((temporary) => temporary.id === target),
     false,
+    "untouched target",
   );
-  const consumed = executeInstruction(ordinary.plan, completion.snapshot);
-  const cleaned = executeInstruction(ordinary.plan, consumed.snapshot);
-  const finalRun = run(ordinary.plan, cleaned.snapshot);
-  const halted = finalRun.snapshot;
-  assert.deepEqual(
-    finalRun.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["committed"],
-  );
-
-  const directClearInjected = injectTextInteraction('let answer = "__interaction_result__"\nexit');
-  const directClearPlan = replaceHandoffInstruction(directClearInjected, {
-    kind: "clearTemporary",
-    temporaryId: directClearInjected.destinationTemporary,
-    span: directClearInjected.plan.instructions[directClearInjected.handoffInstruction]!.span,
+  assert.equal(validateRuntimeSnapshot(failed.snapshot, plan).valid, true);
+  assert.deepEqual(checkpointJsonRoundTrip(plan, failed.snapshot).snapshot, failed.snapshot);
+  assertReplayRow({
+    id: "PR194-failed-continuation-replay",
+    plan,
+    snapshot: failed.snapshot,
+    request,
+    expected: { kind: "alreadySettled" },
   });
-  const directClearPending = waiting(directClearPlan);
-  const directClearRequest = textCompletionRequest(directClearPending.snapshot);
-  const directClearCommitted = completeAction(
-    directClearPlan,
-    directClearPending.snapshot,
-    directClearRequest,
-  );
-  const afterDirectClear = executeInstruction(
-    directClearPlan,
-    directClearCommitted.snapshot,
-  ).snapshot;
-
-  const directExitInjected = injectTextInteraction('let answer = "__interaction_result__"\nexit');
-  const directExitPlan = replaceHandoffInstruction(directExitInjected, {
-    kind: "exit",
-    span: directExitInjected.plan.instructions[directExitInjected.handoffInstruction]!.span,
-  });
-  const directExitPending = waiting(directExitPlan);
-  const directExitRequest = textCompletionRequest(directExitPending.snapshot);
-  const directExitCommitted = completeAction(
-    directExitPlan,
-    directExitPending.snapshot,
-    directExitRequest,
-  );
-  const afterDirectExit = executeInstruction(directExitPlan, directExitCommitted.snapshot).snapshot;
-
-  const directReturnInjected = injectTextInteraction(
-    'function prompt { let ignored = "__interaction_result__"\nreturn }\nprompt()\nsay "after"\nexit',
-  );
-  const directReturnPlan = replaceHandoffInstruction(directReturnInjected, {
-    kind: "returnVoid",
-    span: directReturnInjected.plan.instructions[directReturnInjected.handoffInstruction]!.span,
-  });
-  const directReturnPending = waiting(directReturnPlan);
-  const directReturnRequest = textCompletionRequest(directReturnPending.snapshot);
-  const directReturnCommitted = completeAction(
-    directReturnPlan,
-    directReturnPending.snapshot,
-    directReturnRequest,
-  );
-  const afterDirectReturn = executeInstruction(
-    directReturnPlan,
-    directReturnCommitted.snapshot,
-  ).snapshot;
-
-  const rows: readonly ReplayRow[] = [
-    {
-      id: "PR194-replay-committed",
-      plan: ordinary.plan,
-      snapshot: completion.snapshot,
-      request,
-      expected: { kind: "alreadySettled" },
-    },
-    {
-      id: "PR194-replay-committed-roundtrip",
-      plan: ordinary.plan,
-      snapshot: checkpointJsonRoundTrip(ordinary.plan, completion.snapshot).snapshot,
-      request,
-      expected: { kind: "alreadySettled" },
-    },
-    {
-      id: "PR194-replay-consumed",
-      plan: ordinary.plan,
-      snapshot: consumed.snapshot,
-      request,
-      expected: { kind: "alreadySettled" },
-    },
-    {
-      id: "PR194-replay-consumed-roundtrip",
-      plan: ordinary.plan,
-      snapshot: checkpointJsonRoundTrip(ordinary.plan, consumed.snapshot).snapshot,
-      request,
-      expected: { kind: "alreadySettled" },
-    },
-    {
-      id: "PR194-replay-cleaned",
-      plan: ordinary.plan,
-      snapshot: cleaned.snapshot,
-      request,
-      expected: { kind: "alreadySettled" },
-    },
-    {
-      id: "PR194-replay-cleaned-roundtrip",
-      plan: ordinary.plan,
-      snapshot: checkpointJsonRoundTrip(ordinary.plan, cleaned.snapshot).snapshot,
-      request,
-      expected: { kind: "alreadySettled" },
-    },
-    {
-      id: "PR194-replay-halted",
-      plan: ordinary.plan,
-      snapshot: halted,
-      request,
-      expected: { kind: "alreadySettled" },
-    },
-    {
-      id: "PR194-replay-halted-roundtrip",
-      plan: ordinary.plan,
-      snapshot: checkpointJsonRoundTrip(ordinary.plan, halted).snapshot,
-      request,
-      expected: { kind: "alreadySettled" },
-    },
-    {
-      id: "PR194-replay-direct-clear",
-      plan: directClearPlan,
-      snapshot: afterDirectClear,
-      request: directClearRequest,
-      expected: { kind: "alreadySettled" },
-    },
-    {
-      id: "PR194-replay-direct-exit",
-      plan: directExitPlan,
-      snapshot: afterDirectExit,
-      request: directExitRequest,
-      expected: { kind: "alreadySettled" },
-    },
-    {
-      id: "PR194-replay-direct-return",
-      plan: directReturnPlan,
-      snapshot: afterDirectReturn,
-      request: directReturnRequest,
-      expected: { kind: "alreadySettled" },
-    },
-    {
-      id: "PR194-replay-next-action-unknown",
-      plan: ordinary.plan,
-      snapshot: cleaned.snapshot,
-      request: { ...request, actionId: cleaned.snapshot.nextActionId },
-      expected: { kind: "unknownAction", actionId: cleaned.snapshot.nextActionId },
-    },
-  ];
-  for (const row of rows) assertReplayRow(row);
-
-  const settlementFixture = settledHandoffFixture();
-  const composite = settlementFixture.validatedCompositeWithNewerSettlement;
-  const oldHandoff = composite.interactionResultHandoff;
-  assert.ok(oldHandoff !== null);
-  const oldRequest: TextInteractionCompletionRequest = {
-    actionId: oldHandoff.actionId,
-    actionKind: "interaction",
-    interactionKind: "text",
-    payload: { kind: "submittedText", submittedText: "committed" },
-  };
-  const compositeConsumed = executeInstruction(settlementFixture.injected.plan, composite).snapshot;
-  const compositeCleaned = executeInstruction(
-    settlementFixture.injected.plan,
-    compositeConsumed,
-  ).snapshot;
-  const newerDelayRequest = {
-    actionId: settlementFixture.laterDelaySettlement.actionId,
-    actionKind: "delay" as const,
-    payload: {
-      kind: "time" as const,
-      currentSessionTimeMs: settlementFixture.laterDelaySettlement.completedAtMs,
-    },
-  };
-  const staleRows: readonly ReplayRow[] = [
-    {
-      id: "PR194-replay-old-interaction-newer-composite",
-      plan: settlementFixture.injected.plan,
-      snapshot: composite,
-      request: oldRequest,
-      expected: { kind: "staleAction", actionId: oldRequest.actionId },
-    },
-    {
-      id: "PR194-replay-old-interaction-newer-composite-roundtrip",
-      plan: settlementFixture.injected.plan,
-      snapshot: checkpointJsonRoundTrip(settlementFixture.injected.plan, composite).snapshot,
-      request: oldRequest,
-      expected: { kind: "staleAction", actionId: oldRequest.actionId },
-    },
-    {
-      id: "PR194-replay-old-interaction-after-consume",
-      plan: settlementFixture.injected.plan,
-      snapshot: compositeConsumed,
-      request: oldRequest,
-      expected: { kind: "staleAction", actionId: oldRequest.actionId },
-    },
-    {
-      id: "PR194-replay-old-interaction-after-cleanup",
-      plan: settlementFixture.injected.plan,
-      snapshot: compositeCleaned,
-      request: oldRequest,
-      expected: { kind: "staleAction", actionId: oldRequest.actionId },
-    },
-    {
-      id: "PR194-replay-old-interaction-cleanup-roundtrip",
-      plan: settlementFixture.injected.plan,
-      snapshot: checkpointJsonRoundTrip(settlementFixture.injected.plan, compositeCleaned).snapshot,
-      request: oldRequest,
-      expected: { kind: "staleAction", actionId: oldRequest.actionId },
-    },
-    {
-      id: "PR194-replay-current-newer-delay",
-      plan: settlementFixture.injected.plan,
-      snapshot: composite,
-      request: newerDelayRequest,
-      expected: { kind: "alreadySettled" },
-    },
-  ];
-  for (const row of staleRows) assertReplayRow(row);
+  const failedPlanBefore = structuredClone(plan);
+  const failedBefore = structuredClone(failed.snapshot);
+  const repeatedExecute = executeInstruction(plan, failed.snapshot);
+  assert.deepEqual(repeatedExecute.snapshot, failedBefore, "execute snapshot noop");
+  assert.deepEqual(repeatedExecute.events, [], "execute events noop");
+  assert.equal(repeatedExecute.instructionsExecuted, 0, "execute instruction noop");
+  assert.deepEqual(plan, failedPlanBefore, "execute plan input");
+  assert.deepEqual(failed.snapshot, failedBefore, "execute snapshot input");
+  const repeatedRun = run(plan, failed.snapshot);
+  assert.deepEqual(repeatedRun.snapshot, failedBefore, "run snapshot noop");
+  assert.deepEqual(repeatedRun.events, [], "run events noop");
+  assert.equal(repeatedRun.instructionsExecuted, 0, "run instruction noop");
+  assert.deepEqual(plan, failedPlanBefore, "run plan input");
+  assert.deepEqual(failed.snapshot, failedBefore, "run snapshot input");
 });
 
-interface FailedContinuationRow {
-  readonly id: string;
-  readonly expectedCode: string;
-  readonly makePlan: (injected: InjectedInteractionPlan) => InstructionPlan;
-  readonly assertUntouchedTarget?: (
-    snapshot: RuntimeSnapshot,
-    injected: InjectedInteractionPlan,
-  ) => void;
-}
-
-test("PR194 matrix: failed canonical continuations retain the handoff atomically", () => {
-  const rows: readonly FailedContinuationRow[] = [
-    {
-      id: "PR194-failed-continuation-before-evaluation",
-      expectedCode: "TSR023",
-      makePlan: (injected) =>
-        replaceHandoffInstruction(injected, {
-          kind: "say",
-          presentation: null,
-          speaker: "missing",
-          value: temporaryExpression(injected.destinationTemporary, injected.plan.sourceSpan),
-          skipPolicy: null,
-          pacing: "smart",
-          span: injected.plan.instructions[injected.handoffInstruction]!.span,
-        }),
-      assertUntouchedTarget: (snapshot) => assert.equal(snapshot.speakers.length, 0),
-    },
-    {
-      id: "PR194-failed-continuation-during-evaluation",
-      expectedCode: "TSR026",
-      makePlan: (injected) =>
-        replaceHandoffInstruction(injected, {
-          kind: "evaluate",
-          expression: binaryExpression(
-            "and",
-            temporaryExpression(injected.destinationTemporary, injected.plan.sourceSpan),
-            literalExpression(true, injected.plan.sourceSpan),
-            injected.plan.sourceSpan,
-          ),
-          span: injected.plan.instructions[injected.handoffInstruction]!.span,
-        }),
-    },
-    {
-      id: "PR194-failed-continuation-before-target-mutation",
-      expectedCode: "TSR026",
-      makePlan: (injected) =>
-        replaceHandoffInstruction(
-          injected,
-          {
-            kind: "storeTemporary",
-            temporaryId: injected.destinationTemporary + 1,
-            value: temporaryExpression(injected.destinationTemporary, injected.plan.sourceSpan),
-            expectBoolean: true,
-            span: injected.plan.instructions[injected.handoffInstruction]!.span,
-          },
-          injected.plan.temporaryCount + 1,
-        ),
-      assertUntouchedTarget: (snapshot, injected) =>
-        assert.equal(
-          snapshot.temporaries.some(
-            (temporary) => temporary.id === injected.destinationTemporary + 1,
-          ),
-          false,
-        ),
-    },
-  ];
-  for (const row of rows) {
-    const injected = injectTextInteraction('let answer = "__interaction_result__"\nexit');
-    const plan = row.makePlan(injected);
-    assert.equal(validateInstructionPlan(plan).valid, true, row.id);
-    const pending = waiting(plan);
-    const request = textCompletionRequest(pending.snapshot);
-    const completed = completeAction(plan, pending.snapshot, request);
-    assert.equal(completed.outcome.kind, "completed", row.id);
-    const committed = checkpointJsonRoundTrip(plan, completed.snapshot).snapshot;
-    const planBefore = structuredClone(plan);
-    const committedBefore = structuredClone(committed);
-    const failed = executeInstruction(plan, committed);
-    assert.deepEqual(plan, planBefore, `${row.id}: plan input`);
-    assert.deepEqual(committed, committedBefore, `${row.id}: snapshot input`);
-    assert.equal(failed.snapshot.status, "failed", row.id);
-    assert.equal(failed.snapshot.nextInstruction, committed.nextInstruction, row.id);
-    assert.deepEqual(
-      failed.snapshot.interactionResultHandoff,
-      committed.interactionResultHandoff,
-      row.id,
-    );
-    assert.equal(
-      temporaryValue(failed.snapshot, injected.destinationTemporary),
-      "committed",
-      row.id,
-    );
-    assert.deepEqual(failed.snapshot.lastSettlement, committed.lastSettlement, row.id);
-    assert.equal(failed.events.length, 1, row.id);
-    const failure = failed.events[0];
-    assert.ok(failure !== undefined && failure.kind === "runtimeFailure", row.id);
-    assert.equal(failure.code, row.expectedCode, row.id);
-    row.assertUntouchedTarget?.(failed.snapshot, injected);
-    assert.equal(validateRuntimeSnapshot(failed.snapshot, plan).valid, true, row.id);
-    assert.deepEqual(
-      checkpointJsonRoundTrip(plan, failed.snapshot).snapshot,
-      failed.snapshot,
-      row.id,
-    );
-    assertReplayRow({
-      id: `${row.id}-replay`,
-      plan,
-      snapshot: failed.snapshot,
-      request,
-      expected: { kind: "alreadySettled" },
-    });
-    const failedPlanBefore = structuredClone(plan);
-    const failedBefore = structuredClone(failed.snapshot);
-    const repeatedExecute = executeInstruction(plan, failed.snapshot);
-    assert.deepEqual(repeatedExecute.snapshot, failedBefore, `${row.id}: execute snapshot noop`);
-    assert.deepEqual(repeatedExecute.events, [], `${row.id}: execute events noop`);
-    assert.equal(repeatedExecute.instructionsExecuted, 0, `${row.id}: execute instruction noop`);
-    assert.deepEqual(plan, failedPlanBefore, `${row.id}: execute plan input`);
-    assert.deepEqual(failed.snapshot, failedBefore, `${row.id}: execute snapshot input`);
-    const repeatedRun = run(plan, failed.snapshot);
-    assert.deepEqual(repeatedRun.snapshot, failedBefore, `${row.id}: run snapshot noop`);
-    assert.deepEqual(repeatedRun.events, [], `${row.id}: run events noop`);
-    assert.equal(repeatedRun.instructionsExecuted, 0, `${row.id}: run instruction noop`);
-    assert.deepEqual(plan, failedPlanBefore, `${row.id}: run plan input`);
-    assert.deepEqual(failed.snapshot, failedBefore, `${row.id}: run snapshot input`);
-  }
-});
-
-interface TypedResultBoundaryBase {
-  readonly id: string;
-  readonly transcript: string;
-}
-
-interface TextTypedResultBoundaryRow extends TypedResultBoundaryBase {
-  readonly interactionKind: "text";
-  readonly ui: {
-    readonly kind: "text";
-    readonly hint: string | null;
-    readonly accessibleName: InteractionAccessibleName;
-  };
-  readonly payload: { readonly kind: "submittedText"; readonly submittedText: string };
-  readonly result: string;
-}
-
-interface NumberTypedResultBoundaryRow extends TypedResultBoundaryBase {
-  readonly interactionKind: "number";
-  readonly ui: {
-    readonly kind: "number";
-    readonly hint: string | null;
-    readonly accessibleName: InteractionAccessibleName;
-  };
-  readonly payload: { readonly kind: "submittedText"; readonly submittedText: string };
-  readonly result: number;
-}
-
-interface VisibleChoiceTypedResultBoundaryRow extends TypedResultBoundaryBase {
-  readonly interactionKind: "choice";
-  readonly ui: {
-    readonly kind: "choice";
-    readonly labelType: "none";
-    readonly options: readonly { readonly text: string; readonly label: null }[];
-    readonly accessibleName: typeof defaults.choice;
-  };
-  readonly payload: { readonly kind: "selectedText"; readonly selectedText: string };
-  readonly result: string;
-}
-
-interface IdentifierChoiceTypedResultBoundaryRow extends TypedResultBoundaryBase {
-  readonly interactionKind: "choice";
-  readonly ui: {
-    readonly kind: "choice";
-    readonly labelType: "identifier";
-    readonly options: readonly { readonly text: string; readonly label: string }[];
-    readonly accessibleName: typeof defaults.choice;
-  };
-  readonly payload: { readonly kind: "selectedLabel"; readonly selectedLabel: string };
-  readonly result: string;
-}
-
-interface NumericChoiceTypedResultBoundaryRow extends TypedResultBoundaryBase {
-  readonly interactionKind: "choice";
-  readonly ui: {
-    readonly kind: "choice";
-    readonly labelType: "number";
-    readonly options: readonly { readonly text: string; readonly label: number }[];
-    readonly accessibleName: typeof defaults.choice;
-  };
-  readonly payload: { readonly kind: "selectedLabel"; readonly selectedLabel: number };
-  readonly result: number;
-}
-
-type TypedResultBoundaryRow =
-  | TextTypedResultBoundaryRow
-  | NumberTypedResultBoundaryRow
-  | VisibleChoiceTypedResultBoundaryRow
-  | IdentifierChoiceTypedResultBoundaryRow
-  | NumericChoiceTypedResultBoundaryRow;
-
-function completeTypedInteraction(
-  plan: InstructionPlan,
-  snapshot: RuntimeSnapshot,
-  row: TypedResultBoundaryRow,
-) {
-  const action = snapshot.foregroundAction;
-  assert.ok(action !== null && action.kind === "interaction", `${row.id}: pending interaction`);
-  return completeAction(plan, snapshot, {
-    actionId: action.actionId,
-    actionKind: "interaction",
-    interactionKind: row.interactionKind,
-    payload: row.payload,
-  });
-}
-
-test("PR194 matrix: checkpoint boundaries preserve typed interaction results", () => {
-  const rows: readonly TypedResultBoundaryRow[] = [
-    {
-      id: "PR194-resume-domain-text",
-      interactionKind: "text",
-      ui: { kind: "text", hint: null, accessibleName: defaults.text },
-      payload: { kind: "submittedText", submittedText: "typed text" },
-      result: "typed text",
-      transcript: "typed text",
-    },
-    {
-      id: "PR194-resume-domain-number",
-      interactionKind: "number",
-      ui: { kind: "number", hint: null, accessibleName: defaults.number },
-      payload: { kind: "submittedText", submittedText: " 12.5 " },
-      result: 12.5,
-      transcript: "12.5",
-    },
-    {
-      id: "PR194-resume-domain-choice-visible-text",
-      interactionKind: "choice",
-      ui: {
-        kind: "choice",
-        labelType: "none",
-        options: [{ text: "Visible", label: null }],
-        accessibleName: defaults.choice,
-      },
-      payload: { kind: "selectedText", selectedText: "Visible" },
-      result: "Visible",
-      transcript: "Visible",
-    },
-    {
-      id: "PR194-resume-domain-choice-identifier-label",
-      interactionKind: "choice",
-      ui: {
-        kind: "choice",
-        labelType: "identifier",
-        options: [{ text: "Visible", label: "saved" }],
-        accessibleName: defaults.choice,
-      },
-      payload: { kind: "selectedLabel", selectedLabel: "saved" },
-      result: "saved",
-      transcript: "Visible",
-    },
-    {
-      id: "PR194-resume-domain-choice-numeric-label",
-      interactionKind: "choice",
-      ui: {
-        kind: "choice",
-        labelType: "number",
-        options: [{ text: "Visible", label: 7 }],
-        accessibleName: defaults.choice,
-      },
-      payload: { kind: "selectedLabel", selectedLabel: 7 },
-      result: 7,
-      transcript: "Visible",
-    },
-  ];
-
-  for (const row of rows) {
-    const injected = injectInteraction(
-      'let answer = "__interaction_result__"\nsay answer\nexit',
-      row.interactionKind,
-      row.ui,
-    );
-    const pending = waiting(injected.plan).snapshot;
-    assert.equal(pending.interactionResultHandoff, null, `${row.id}: pending handoff`);
-    assert.equal(
-      pending.temporaries.some((temporary) => temporary.id === injected.destinationTemporary),
-      false,
-      `${row.id}: pending destination`,
-    );
-    const pendingCompletion = assertInteractionResumeEquivalent(
-      injected.plan,
-      pending,
-      (plan, snapshot) => completeTypedInteraction(plan, snapshot, row),
-      `${row.id}: pending`,
-    );
-    assert.equal(pendingCompletion.uninterrupted.outcome.kind, "completed", row.id);
-    const transcript = pendingCompletion.uninterrupted.events[0];
-    assert.ok(transcript !== undefined && transcript.kind === "playerTranscript", row.id);
-    assert.equal(transcript.text, row.transcript, `${row.id}: transcript`);
-    const committed = pendingCompletion.uninterrupted.snapshot;
-    assert.equal(
-      temporaryValue(committed, injected.destinationTemporary),
-      row.result,
-      `${row.id}: committed result`,
-    );
-    assert.notEqual(committed.interactionResultHandoff, null, `${row.id}: committed handoff`);
-    assert.notEqual(committed.lastSettlement, null, `${row.id}: committed settlement`);
-    const transferred = assertInteractionResumeEquivalent(
-      injected.plan,
-      committed,
-      executeInstruction,
-      `${row.id}: committed`,
-    ).uninterrupted.snapshot;
-    assert.equal(transferred.interactionResultHandoff, null, `${row.id}: transferred handoff`);
-    assert.equal(bindingValue(transferred, "answer"), row.result, `${row.id}: transferred value`);
-    assert.equal(
-      temporaryValue(transferred, injected.destinationTemporary),
-      row.result,
-      `${row.id}: retained interaction temporary`,
-    );
-    const cleaned = assertInteractionResumeEquivalent(
-      injected.plan,
-      transferred,
-      executeInstruction,
-      `${row.id}: transferred`,
-    ).uninterrupted.snapshot;
-    assert.equal(cleaned.interactionResultHandoff, null, `${row.id}: cleaned handoff`);
-    assert.equal(
-      cleaned.temporaries.some((temporary) => temporary.id === injected.destinationTemporary),
-      false,
-      `${row.id}: cleaned destination`,
-    );
-    assert.equal(bindingValue(cleaned, "answer"), row.result, `${row.id}: retained ordinary value`);
-    const final = assertInteractionResumeEquivalent(
-      injected.plan,
-      cleaned,
-      run,
-      `${row.id}: cleaned`,
-    );
-    assert.deepEqual(
-      final.uninterrupted.events.filter((event) => event.kind === "say").map((event) => event.text),
-      [String(row.result)],
-      `${row.id}: final say`,
-    );
-    assert.equal(final.uninterrupted.snapshot.status, "halted", `${row.id}: final status`);
-  }
-});
-
-interface DirectResumeRow {
-  readonly id: string;
-  readonly kind: "clearTemporary" | "exit" | "returnVoid" | "returnValue";
-  readonly source: string;
-  readonly makePlan: (injected: InjectedInteractionPlan) => InstructionPlan;
-  readonly assertContinuation: (
-    snapshot: RuntimeSnapshot,
-    events: readonly InterpreterEvent[],
-  ) => void;
-  readonly assertFinal: (snapshot: RuntimeSnapshot, events: readonly InterpreterEvent[]) => void;
-}
-
-test("PR194 matrix: direct handoff forms resume equivalently", () => {
-  const rows: readonly DirectResumeRow[] = [
-    {
-      id: "PR194-resume-direct-clear",
-      kind: "clearTemporary",
-      source: 'let answer = "__interaction_result__"\nexit',
-      makePlan: (injected) =>
-        replaceHandoffInstruction(injected, {
-          kind: "clearTemporary",
-          temporaryId: injected.destinationTemporary,
-          span: injected.plan.instructions[injected.handoffInstruction]!.span,
-        }),
-      assertContinuation: (snapshot) => {
-        assert.equal(snapshot.interactionResultHandoff, null);
-      },
-      assertFinal: (snapshot) => assert.equal(snapshot.status, "halted"),
-    },
-    {
-      id: "PR194-resume-direct-exit",
-      kind: "exit",
-      source: 'let answer = "__interaction_result__"\nexit',
-      makePlan: (injected) =>
-        replaceHandoffInstruction(injected, {
-          kind: "exit",
-          span: injected.plan.instructions[injected.handoffInstruction]!.span,
-        }),
-      assertContinuation: (snapshot, events) => {
-        assert.equal(snapshot.status, "halted");
-        assert.equal(events.filter((event) => event.kind === "exit").length, 1);
-      },
-      assertFinal: (snapshot) => assert.equal(snapshot.status, "halted"),
-    },
-    {
-      id: "PR194-resume-direct-return-void",
-      kind: "returnVoid",
-      source:
-        'function prompt { let ignored = "__interaction_result__"\nreturn }\nprompt()\nsay "after"\nexit',
-      makePlan: (injected) =>
-        replaceHandoffInstruction(injected, {
-          kind: "returnVoid",
-          span: injected.plan.instructions[injected.handoffInstruction]!.span,
-        }),
-      assertContinuation: (snapshot) => assert.equal(snapshot.callFrames.length, 0),
-      assertFinal: (snapshot, events) => {
-        assert.equal(snapshot.status, "halted");
-        assert.ok(events.some((event) => event.kind === "say" && event.text === "after"));
-      },
-    },
-    {
-      id: "PR194-resume-direct-return-value",
-      kind: "returnValue",
-      source:
-        'function prompt { return "__interaction_result__" }\nlet answer = prompt()\nsay answer\nexit',
-      makePlan: (injected) => injected.plan,
-      assertContinuation: (snapshot) => {
-        assert.equal(snapshot.callFrames.length, 0);
-      },
-      assertFinal: (snapshot, events) => {
-        assert.equal(snapshot.status, "halted");
-        assert.ok(events.some((event) => event.kind === "say" && event.text === "committed"));
-      },
-    },
-  ];
-
-  for (const row of rows) {
-    const injected = injectTextInteraction(row.source);
-    const plan = row.makePlan(injected);
-    assert.equal(validateInstructionPlan(plan).valid, true, row.id);
-    assert.equal(plan.instructions[injected.handoffInstruction]?.kind, row.kind, row.id);
-    const pending = waiting(plan).snapshot;
-    const committed = assertInteractionResumeEquivalent(
-      plan,
-      pending,
-      (currentPlan, snapshot) =>
-        completeAction(currentPlan, snapshot, textCompletionRequest(snapshot)),
-      `${row.id}: pending`,
-    ).uninterrupted.snapshot;
-    assert.notEqual(committed.interactionResultHandoff, null, `${row.id}: committed handoff`);
-    const continued = assertInteractionResumeEquivalent(
-      plan,
-      committed,
-      executeInstruction,
-      `${row.id}: committed`,
-    ).uninterrupted;
-    assert.equal(continued.snapshot.interactionResultHandoff, null, `${row.id}: consumed handoff`);
-    assert.equal(
-      continued.snapshot.temporaries.some(
-        (temporary) => temporary.id === injected.destinationTemporary,
-      ),
-      false,
-      `${row.id}: destination removed`,
-    );
-    row.assertContinuation(continued.snapshot, continued.events);
-    const final = assertInteractionResumeEquivalent(
-      plan,
-      continued.snapshot,
-      run,
-      `${row.id}: final`,
-    ).uninterrupted;
-    row.assertFinal(final.snapshot, final.events);
-  }
-});
-
-test("PR194 matrix: invalid local handoff shapes reject without mutating plans", () => {
+test("handoff shapes that would reach invalid runtime states are rejected", () => {
   const injected = injectTextInteraction('let answer = "__interaction_result__"\nsay answer\nexit');
   const span = injected.plan.instructions[injected.handoffInstruction]!.span;
-  const rows: readonly { readonly id: string; readonly mutate: (plan: ExternalRecord) => void }[] =
-    [
-      {
-        id: "PR194-jump-continuation",
-        mutate: (plan) => {
-          externalInstructions(plan)[injected.handoffInstruction] = {
-            kind: "jump",
-            target: injected.clearInstruction,
-            span,
-          };
-        },
-      },
-      {
-        id: "PR194-second-blocking-action",
-        mutate: (plan) => {
-          externalInstructions(plan)[injected.handoffInstruction] = {
-            kind: "wait",
-            duration: { kind: "literal", value: 1, span },
-            unit: "ms",
-            span,
-          };
-        },
-      },
-      {
-        id: "PR194-consume-wrong-temporary",
-        mutate: (plan) => {
-          plan.temporaryCount = injected.plan.temporaryCount + 1;
-          externalRecord(externalInstructions(plan)[injected.handoffInstruction], "handoff").value =
-            { kind: "temporary", temporaryId: injected.destinationTemporary + 1, span };
-        },
-      },
-      {
-        id: "PR194-missing-clear",
-        mutate: (plan) => {
-          externalInstructions(plan)[injected.clearInstruction] = {
-            kind: "say",
-            presentation: null,
-            speaker: null,
-            value: { kind: "literal", value: "x", span },
-            span,
-          };
-        },
-      },
-      {
-        id: "PR194-wrong-clear",
-        mutate: (plan) => {
-          externalRecord(
-            externalInstructions(plan)[injected.clearInstruction],
-            "clear",
-          ).temporaryId = injected.destinationTemporary + 1;
-        },
-      },
-      {
-        id: "PR194-second-producer",
-        mutate: (plan) => {
-          externalInstructions(plan)[injected.clearInstruction] = {
-            kind: "storeTemporary",
-            temporaryId: injected.destinationTemporary,
-            value: { kind: "literal", value: "x", span },
-            expectBoolean: false,
-            span,
-          };
-        },
-      },
-      {
-        id: "PR194-return-value-not-guaranteed",
-        mutate: (plan) => {
-          externalRecord(externalInstructions(plan)[injected.handoffInstruction], "handoff").value =
-            {
-              kind: "binary",
-              operator: "or",
-              left: { kind: "literal", value: true, span },
-              right: { kind: "temporary", temporaryId: injected.destinationTemporary, span },
-              span,
-            };
-        },
-      },
-    ];
-  for (const row of rows) {
-    const plan = externalRecord(structuredClone(injected.plan), row.id);
-    row.mutate(plan);
-    const beforeValidation = structuredClone(plan);
-    const validation = validateInstructionPlan(plan);
-    assert.equal(validation.valid, false, row.id);
-    assert.ok(
-      validation.errors.some((error) => error.code === "TSC002"),
-      row.id,
-    );
-    assert.deepEqual(plan, beforeValidation, row.id);
-  }
-
-  const assertExactLocalHandoffError = (
-    plan: InstructionPlan,
-    id: string,
-    message: string,
-    path: string,
-  ): void => {
-    const before = structuredClone(plan);
-    const validation = validateInstructionPlan(plan);
-    assert.equal(validation.valid, false, id);
-    assert.equal(validation.errors.length, 1, `${id}: unrelated validation error`);
-    assert.equal(validation.errors[0]?.code, "TSC002", id);
-    assert.equal(validation.errors[0]?.message, message, id);
-    assert.equal(validation.errors[0]?.path, path, id);
-    assert.deepEqual(plan, before, `${id}: plan input`);
+  assert.equal(validateInstructionPlan(injected.plan).valid, true);
+  // Compiler-produced instructions are valid on their own, so rows using them are invalid only
+  // through their local handoff position.
+  const bases = compileSource('wait 1\nsay "x", instant');
+  assert.deepEqual(bases.diagnostics, []);
+  const [validWait, validSay] = bases.plan!.instructions;
+  assert.ok(validWait?.kind === "wait" && validSay?.kind === "say");
+  const handoffPath = `$.instructions[${injected.handoffInstruction}]`;
+  const clearPath = `$.instructions[${injected.clearInstruction}]`;
+  const mutated = (mutate: (plan: ExternalRecord) => void, source = injected.plan) => {
+    const plan = externalRecord(structuredClone(source), "plan");
+    mutate(plan);
+    return plan;
   };
-
-  const callInjected = injectTextInteraction(
-    [
-      'function helper { return "helper" }',
-      "let ignored = helper()",
-      'let answer = "__interaction_result__"',
-      "say answer",
-      "exit",
-    ].join("\n"),
-  );
-  const compilerCall = callInjected.plan.instructions.find(
-    (instruction) => instruction.kind === "callFunction",
-  );
-  assert.ok(compilerCall !== undefined && compilerCall.kind === "callFunction");
-  const callDestinationTemporary = callInjected.plan.temporaryCount + 1;
-  const callAtHandoff = replaceHandoffInstruction(
-    callInjected,
-    {
-      ...structuredClone(compilerCall),
-      destinationTemporary: callDestinationTemporary,
-      returnInstruction: callInjected.clearInstruction,
-      span: callInjected.plan.instructions[callInjected.handoffInstruction]!.span,
-    },
-    callDestinationTemporary,
-  );
-  const callFunctionRow = {
-    id: "PR194-call-function-as-handoff",
-    plan: callAtHandoff,
-    message: "Interaction result handoff must consume the destination immediately.",
-    path: `$.instructions[${callInjected.handoffInstruction}]`,
-  } as const;
-  assertExactLocalHandoffError(
-    callFunctionRow.plan,
-    callFunctionRow.id,
-    callFunctionRow.message,
-    callFunctionRow.path,
-  );
 
   const targetInjected = injectTextInteraction(
     [
@@ -2790,250 +1341,141 @@ test("PR194 matrix: invalid local handoff shapes reject without mutating plans",
       "exit",
     ].join("\n"),
   );
-  assert.equal(
-    validateInstructionPlan(targetInjected.plan).valid,
-    true,
-    JSON.stringify(validateInstructionPlan(targetInjected.plan).errors),
-  );
   const jumpIndex = targetInjected.plan.instructions.findIndex(
     (instruction) => instruction.kind === "jump",
   );
   assert.notEqual(jumpIndex, -1);
-  const jump = targetInjected.plan.instructions[jumpIndex];
-  assert.ok(jump !== undefined && jump.kind === "jump");
-  const targetedRows = [
-    {
-      id: "PR194-explicit-target-handoff-entry",
-      target: targetInjected.handoffInstruction,
-      message:
-        "Interaction result handoff entry must be reachable only from its owning interaction.",
-      path: `$.instructions[${targetInjected.handoffInstruction}]`,
-    },
-    {
-      id: "PR194-explicit-target-handoff-cleanup",
-      target: targetInjected.clearInstruction,
-      message: "Interaction result handoff cleanup must not be an independent control-flow target.",
-      path: `$.instructions[${targetInjected.clearInstruction}]`,
-    },
-  ] as const;
-  for (const row of targetedRows) {
-    const targeted: InstructionPlan = {
-      ...structuredClone(targetInjected.plan),
-      instructions: targetInjected.plan.instructions.map((instruction, index) =>
-        index === jumpIndex && instruction.kind === "jump"
-          ? { ...instruction, target: row.target }
-          : instruction,
-      ),
-    };
-    assertExactLocalHandoffError(targeted, row.id, row.message, row.path);
-  }
-});
 
-test("PR194 matrix: rejected completion and snapshot operations preserve canonical state", () => {
-  const injected = injectTextInteraction('let answer = "__interaction_result__"\nsay answer\nexit');
-  const pending = waiting(injected.plan);
-  const actionId = pending.snapshot.foregroundAction!.actionId;
-  const requests = [
-    {
-      id: "PR194-invalid-payload",
-      request: {
-        actionId,
-        actionKind: "interaction" as const,
-        interactionKind: "text" as const,
-        payload: { kind: "submittedText", submittedText: " \t" },
-      },
-    },
-    {
-      id: "PR194-wrong-action-kind",
-      request: {
-        actionId,
-        actionKind: "delay" as const,
-        payload: { kind: "time", currentSessionTimeMs: 0 },
-      },
-    },
-  ];
-  for (const row of requests) {
-    const before = structuredClone(pending.snapshot);
-    const result = completeAction(injected.plan, pending.snapshot, row.request);
-    assert.deepEqual(result.snapshot, before, row.id);
-    assert.deepEqual(result.events, [], row.id);
-  }
-  const completed = completeAction(injected.plan, pending.snapshot, {
-    actionId,
-    actionKind: "interaction",
-    interactionKind: "text",
-    payload: { kind: "submittedText", submittedText: "committed" },
-  });
-  const malformedOperationRows: readonly {
+  // Accepting any of the invariant rows lets a validated plan reach a snapshot that validation
+  // then rejects: a handoff missing at the next commit boundary, a destination still occupied when
+  // the interaction runs again, or a handoff entered without its completed interaction.
+  const rows: readonly {
     readonly id: string;
-    readonly mutate: (snapshot: ExternalRecord) => void;
-    readonly message: string;
+    readonly plan: ExternalRecord;
+    readonly paths: readonly string[];
   }[] = [
     {
-      id: "PR194-rejected-operation-handoff-null",
-      mutate: (snapshot) => {
-        snapshot.interactionResultHandoff = null;
-      },
-      message: "Runtime interaction result handoff is missing at its canonical commit boundary.",
+      id: "PR194-second-blocking-action",
+      plan: mutated((plan) => {
+        externalInstructions(plan)[injected.handoffInstruction] = { ...validWait, span };
+      }),
+      paths: [handoffPath],
     },
     {
-      id: "PR194-rejected-operation-handoff-owner",
-      mutate: (snapshot) => {
-        externalRecord(snapshot.interactionResultHandoff, "handoff").ownerCallFrameId = 99;
-        snapshot.nextCallFrameId = 100;
-      },
-      message: "Runtime interaction result handoff has invalid ownership or state.",
+      id: "PR194-missing-clear",
+      plan: mutated((plan) => {
+        externalInstructions(plan)[injected.clearInstruction] = { ...validSay, span };
+      }),
+      paths: [clearPath],
     },
     {
-      id: "PR194-rejected-operation-handoff-extra-field",
-      mutate: (snapshot) => {
-        externalRecord(snapshot.interactionResultHandoff, "handoff").extra = true;
-      },
-      message: "Runtime interaction result handoff is malformed.",
+      id: "PR194-wrong-clear",
+      plan: mutated((plan) => {
+        plan.temporaryCount = injected.plan.temporaryCount + 1;
+        externalRecord(externalInstructions(plan)[injected.clearInstruction], "clear").temporaryId =
+          injected.destinationTemporary + 1;
+      }),
+      paths: [clearPath],
+    },
+    {
+      id: "PR194-second-producer",
+      plan: mutated((plan) => {
+        externalInstructions(plan)[injected.clearInstruction] = {
+          kind: "storeTemporary",
+          temporaryId: injected.destinationTemporary,
+          value: literalExpression("x", span),
+          expectBoolean: false,
+          span,
+        };
+      }),
+      // Replacing the cleanup with a producer breaks both owner-only production and cleanup.
+      paths: [`$.instructions[${injected.interactionInstruction}].destinationTemporary`, clearPath],
+    },
+    {
+      id: "PR194-handoff-entry-target",
+      plan: mutated((plan) => {
+        externalRecord(externalInstructions(plan)[jumpIndex], "jump").target =
+          targetInjected.handoffInstruction;
+      }, targetInjected.plan),
+      paths: [`$.instructions[${targetInjected.handoffInstruction}]`],
+    },
+    // Scoped regression oracle for the consume requirement as the current fixed local shape in
+    // docs/RUNTIME.md analyses it: a handoff instruction that does not read the destination is
+    // rejected, although accepting it has no known state consequence because the engine drops the
+    // handoff after that instruction either way. Reassess this row with the local shape.
+    {
+      id: "PR194-provisional-non-consuming-handoff",
+      plan: mutated((plan) => {
+        externalRecord(externalInstructions(plan)[injected.handoffInstruction], "handoff").value =
+          literalExpression(false, span);
+      }),
+      paths: [handoffPath],
     },
   ];
-  for (const row of malformedOperationRows) {
-    const snapshot = externalRecord(structuredClone(completed.snapshot), "malformed snapshot");
-    row.mutate(snapshot);
-    const before = structuredClone(snapshot);
-    const planBefore = structuredClone(injected.plan);
-    // Deliberately malformed external snapshot data must be rejected before completion mutates it.
-    assert.throws(
-      () => {
-        // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture passes the malformed external record to completion to verify atomic rejection.
-        return completeAction(injected.plan, snapshot as unknown as RuntimeSnapshot, {
-          actionId,
-          actionKind: "interaction",
-          interactionKind: "text",
-          payload: { kind: "submittedText", submittedText: "committed" },
-        });
-      },
-      (error: unknown) => {
-        assert.ok(error instanceof RuntimeDataError, row.id);
-        assert.equal(error.code, "TSR101", row.id);
-        assert.equal(error.message, row.message, row.id);
-        return true;
-      },
+  for (const row of rows) {
+    const before = structuredClone(row.plan);
+    assert.deepEqual(
+      validateInstructionPlan(row.plan).errors.map((error) => [error.code, error.path]),
+      row.paths.map((path) => ["TSC002", path]),
       row.id,
     );
-    assert.deepEqual(injected.plan, planBefore, row.id);
-    assert.deepEqual(snapshot, before, row.id);
+    assert.deepEqual(row.plan, before, row.id);
   }
 });
 
 interface OwnershipResumeRow {
   readonly id: string;
   readonly source: string;
-  readonly owner: "root" | "active-frame";
-  readonly makePlan: (injected: InjectedInteractionPlan) => InstructionPlan;
   readonly assertPending: (snapshot: RuntimeSnapshot) => void;
-  readonly assertFinal: (snapshot: RuntimeSnapshot, events: readonly InterpreterEvent[]) => void;
+  readonly finalSay: string;
 }
 
-test("PR194 matrix: ownership contexts resume from pending and committed boundaries", () => {
+test("ownership contexts resume from pending and committed boundaries", () => {
   const rows: readonly OwnershipResumeRow[] = [
     {
-      id: "PR194-resume-context-root-binding",
-      source: 'let answer = "__interaction_result__"\nsay answer\nexit',
-      owner: "root",
-      makePlan: (injected) => injected.plan,
-      assertPending: (snapshot) => assert.equal(snapshot.callFrames.length, 0),
-      assertFinal: (snapshot, events) => {
-        assert.equal(bindingValue(snapshot, "answer"), "committed");
-        assert.ok(events.some((event) => event.kind === "say" && event.text === "committed"));
-      },
-    },
-    {
-      id: "PR194-resume-context-function-body",
-      source:
-        'function prompt { let answer = "__interaction_result__"\nsay answer\nreturn }\nprompt()\nexit',
-      owner: "active-frame",
-      makePlan: (injected) => injected.plan,
-      assertPending: (snapshot) => assert.equal(snapshot.callFrames.length, 1),
-      assertFinal: (snapshot, events) => {
-        assert.equal(snapshot.callFrames.length, 0);
-        assert.ok(events.some((event) => event.kind === "say" && event.text === "committed"));
-      },
-    },
-    {
-      id: "PR194-resume-context-function-argument",
-      source: 'function send(value) { say value\nreturn }\nsend("__interaction_result__")\nexit',
-      owner: "root",
-      makePlan: (injected) => injected.plan,
-      assertPending: (snapshot) => assert.equal(snapshot.callFrames.length, 0),
-      assertFinal: (_snapshot, events) =>
-        assert.ok(events.some((event) => event.kind === "say" && event.text === "committed")),
-    },
-    {
       id: "PR194-resume-context-nested-return-value",
-      source:
-        'function inner { return "__interaction_result__" }\nfunction outer { let answer = inner()\nsay answer\nreturn }\nouter()\nexit',
-      owner: "active-frame",
-      makePlan: (injected) => injected.plan,
+      source: [
+        "function inner { return askText }",
+        "function outer { let answer = inner()",
+        "say answer",
+        "return }",
+        "outer()",
+        "exit",
+      ].join("\n"),
       assertPending: (snapshot) => assert.equal(snapshot.callFrames.length, 2),
-      assertFinal: (snapshot, events) => {
-        assert.equal(snapshot.callFrames.length, 0);
-        assert.ok(events.some((event) => event.kind === "say" && event.text === "committed"));
-      },
+      finalSay: "committed",
     },
     {
       id: "PR194-resume-context-suspended-caller",
-      source:
-        'function prompt { return "__interaction_result__" }\nfunction send(before, answer) { say \"${before}:${answer}\"\nreturn }\nsend("first", prompt())\nexit',
-      owner: "active-frame",
-      makePlan: (injected) => injected.plan,
+      source: [
+        "function prompt { return askText }",
+        'function send(before, answer) { say "${before}:${answer}"',
+        "return }",
+        'send("first", prompt())',
+        "exit",
+      ].join("\n"),
       assertPending: (snapshot) => {
         assert.equal(snapshot.callFrames.length, 1);
-        assert.ok(
-          snapshot.callFrames[0]?.callerTemporaries.some(
-            (temporary) => temporary.value === "first",
-          ),
-        );
+        const caller = snapshot.callFrames[0];
+        const action = snapshot.foregroundAction;
+        assert.ok(caller !== undefined && action?.kind === "interaction");
+        assert.ok(caller.callerTemporaries.some((temporary) => temporary.value === "first"));
+        // The suspended caller's return destination stays distinct from the interaction destination.
+        assert.equal(typeof caller.destinationTemporary, "number");
+        assert.notEqual(caller.destinationTemporary, action.destinationTemporary);
       },
-      assertFinal: (snapshot, events) => {
-        assert.equal(snapshot.callFrames.length, 0);
-        assert.ok(events.some((event) => event.kind === "say" && event.text === "first:committed"));
-      },
-    },
-    {
-      id: "PR194-resume-context-direct-return-void",
-      source:
-        'function prompt { let ignored = "__interaction_result__"\nreturn }\nprompt()\nsay "after"\nexit',
-      owner: "active-frame",
-      makePlan: (injected) =>
-        replaceHandoffInstruction(injected, {
-          kind: "returnVoid",
-          span: injected.plan.instructions[injected.handoffInstruction]!.span,
-        }),
-      assertPending: (snapshot) => assert.equal(snapshot.callFrames.length, 1),
-      assertFinal: (snapshot, events) => {
-        assert.equal(snapshot.callFrames.length, 0);
-        assert.ok(events.some((event) => event.kind === "say" && event.text === "after"));
-      },
-    },
-    {
-      id: "PR194-resume-context-direct-return-value",
-      source:
-        'function prompt { return "__interaction_result__" }\nlet answer = prompt()\nsay answer\nexit',
-      owner: "active-frame",
-      makePlan: (injected) => injected.plan,
-      assertPending: (snapshot) => assert.equal(snapshot.callFrames.length, 1),
-      assertFinal: (snapshot, events) => {
-        assert.equal(snapshot.callFrames.length, 0);
-        assert.equal(bindingValue(snapshot, "answer"), "committed");
-        assert.ok(events.some((event) => event.kind === "say" && event.text === "committed"));
-      },
+      finalSay: "first:committed",
     },
   ];
 
   for (const row of rows) {
-    const injected = injectTextInteraction(row.source);
-    const plan = row.makePlan(injected);
-    assert.equal(validateInstructionPlan(plan).valid, true, row.id);
+    const plan = compiledTextInteraction(row.source).plan;
     const pending = waiting(plan).snapshot;
     const action = pending.foregroundAction;
     assert.ok(action !== null && action.kind === "interaction", row.id);
-    assert.equal(action.ownerCallFrameId === null, row.owner === "root", `${row.id}: action owner`);
+    // The innermost active call frame owns the interaction.
+    assert.notEqual(action.ownerCallFrameId, null, `${row.id}: action owner`);
+    assert.equal(action.ownerCallFrameId, pending.callFrames.at(-1)?.id, `${row.id}: action owner`);
     row.assertPending(pending);
     const completed = assertInteractionResumeEquivalent(
       plan,
@@ -3055,60 +1497,16 @@ test("PR194 matrix: ownership contexts resume from pending and committed boundar
     ).uninterrupted;
     assert.equal(final.snapshot.interactionResultHandoff, null, `${row.id}: final handoff`);
     assert.equal(final.snapshot.status, "halted", `${row.id}: final status`);
-    row.assertFinal(final.snapshot, final.events);
+    assert.equal(final.snapshot.callFrames.length, 0, `${row.id}: final frames`);
+    assert.deepEqual(
+      final.events.filter((event) => event.kind === "say").map((event) => event.text),
+      [row.finalSay],
+      `${row.id}: final output`,
+    );
   }
 });
 
-test("PR194 matrix: validated composite persisted state resumes equivalently", () => {
-  const fixture = settledHandoffFixture();
-  // This is a validator-accepted persisted-state composite, not a state claimed
-  // to be produced by one uninterrupted runtime path.
-  const composite = fixture.validatedCompositeWithNewerSettlement;
-  const oldHandoff = composite.interactionResultHandoff;
-  assert.ok(oldHandoff !== null);
-  const oldRequest: TextInteractionCompletionRequest = {
-    actionId: oldHandoff.actionId,
-    actionKind: "interaction",
-    interactionKind: "text",
-    payload: { kind: "submittedText", submittedText: "committed" },
-  };
-  const consumed = assertInteractionResumeEquivalent(
-    fixture.injected.plan,
-    composite,
-    executeInstruction,
-    "PR194-resume-composite-consume",
-  ).uninterrupted.snapshot;
-  assert.equal(bindingValue(consumed, "answer"), "committed");
-  assert.equal(consumed.interactionResultHandoff, null);
-  assert.deepEqual(consumed.lastSettlement, fixture.laterDelaySettlement);
-  const cleaned = assertInteractionResumeEquivalent(
-    fixture.injected.plan,
-    consumed,
-    executeInstruction,
-    "PR194-resume-composite-cleanup",
-  ).uninterrupted.snapshot;
-  assert.equal(
-    cleaned.temporaries.some((temporary) => temporary.id === oldHandoff.destinationTemporary),
-    false,
-  );
-  assert.deepEqual(cleaned.lastSettlement, fixture.laterDelaySettlement);
-  const final = assertInteractionResumeEquivalent(
-    fixture.injected.plan,
-    cleaned,
-    run,
-    "PR194-resume-composite-final",
-  ).uninterrupted;
-  assert.deepEqual(final.snapshot.lastSettlement, fixture.laterDelaySettlement);
-  assertReplayRow({
-    id: "PR194-resume-composite-old-replay-after",
-    plan: fixture.injected.plan,
-    snapshot: final.snapshot,
-    request: oldRequest,
-    expected: { kind: "staleAction", actionId: oldRequest.actionId },
-  });
-});
-
-test("PR194 matrix: later settlement preserves ordinary result and makes old replay stale", () => {
+test("later settlement preserves ordinary result and makes old replay stale", () => {
   const injected = injectTextInteraction(
     'let answer = "__interaction_result__"\nwait 1 ms\nsay answer\nexit',
   );

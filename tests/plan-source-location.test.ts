@@ -19,7 +19,6 @@ test("compiler stores compact locations and validator requires their exact shape
   assert.deepEqual(compiled.diagnostics, []);
   assert.notEqual(compiled.plan, null);
   const plan = compiled.plan!;
-  assert.equal(plan.version, 22);
   assert.deepEqual(plan.sourceSpan, { so: 0, sl: 0, sc: 0, eo: 14, el: 1, ec: 4 });
 
   for (const location of [
@@ -32,6 +31,9 @@ test("compiler stores compact locations and validator requires their exact shape
   ]) {
     const validation = validateInstructionPlan({ ...plan, sourceSpan: location });
     assert.equal(validation.valid, false, JSON.stringify(location));
-    assert.equal(validation.errors[0]?.path, "$.sourceSpan");
+    assert.ok(
+      validation.errors.some((error) => error.code === "TSC002" && error.path === "$.sourceSpan"),
+      JSON.stringify(location),
+    );
   }
 });

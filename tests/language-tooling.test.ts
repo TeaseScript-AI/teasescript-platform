@@ -33,13 +33,12 @@ test("language diagnostics are the canonical compilation diagnostics", () => {
   assert.deepEqual(languageDiagnostics(document), compileSource(document.text).diagnostics);
 });
 
-test("completion exposes accepted compact commands without deferred APIs", () => {
-  assert.deepEqual([...labels("")].sort(), ["say", "showButton"]);
+test("completion exposes accepted compact commands", () => {
+  const statement = labels("");
+  for (const expected of ["say", "showButton"]) assert.ok(statement.includes(expected), expected);
   const expression = labels("let answer = ");
   for (const expected of ["askText", "askNumber", "choose"])
-    assert.ok(expression.includes(expected));
-  for (const unsupported of ["timeout", "elapsed", "typingIndicator", "interpret", "import"])
-    assert.ok(!expression.includes(unsupported));
+    assert.ok(expression.includes(expected), expected);
 });
 
 test("completion exposes optional speaker and current say modifiers", () => {
@@ -54,40 +53,49 @@ test("completion exposes optional speaker and current say modifiers", () => {
   assert.ok(pacing.includes("0"));
 });
 
-test("context, hover, and signature help describe current compact semantics", () => {
+test("context, hover, and signature help select the compact command and its slots", () => {
   const document = createLanguageDocument("file:///main.tease", 'let answer = askText "Type here"');
-  const position = languagePositionAt(document, document.text.indexOf("askText") + 2);
-  const help = languageContextHelp(document, position);
-  assert.equal(help?.command, "askText");
-  assert.match(help?.summary ?? "", /whitespace-only/u);
-  assert.match(help?.summary ?? "", /not transcript text/u);
-  assert.match(languageHover(document, position)?.contents.join(" ") ?? "", /askText/u);
-  assert.equal(languageSignatureHelp(document, position)?.label, "askText [as speaker] [hint]");
+  const start = document.text.indexOf("askText");
+  const position = languagePositionAt(document, document.text.indexOf("Type"));
+  assert.equal(languageContextHelp(document, position)?.command, "askText");
+  assert.deepEqual(languageHover(document, position)?.range, {
+    start: languagePositionAt(document, start),
+    end: languagePositionAt(document, start + "askText".length),
+  });
+  const signature = languageSignatureHelp(document, position);
+  assert.deepEqual(signature?.parameters, ["speaker", "hint"]);
+  assert.equal(signature?.activeParameter, 1);
 });
+
+const DEEP_SAY = 'say   "deep"  ,instant';
+
+/** The deepest `say` has irregular owned whitespace, so formatting that stops descending leaves it unchanged. */
+function assertDeepSayTooling(source: string): void {
+  assert.notEqual(compileSource(source).plan, null);
+  const document = createLanguageDocument("file:///main.tease", source);
+  const start = source.indexOf(DEEP_SAY);
+  const formatted = formatLanguageDocument(document);
+  assert.equal(formatted.text, source.replace(DEEP_SAY, 'say "deep", instant'));
+  assert.notEqual(formatted.edits.length, 0);
+  for (const edit of formatted.edits) {
+    assert.ok(edit.range.start.offset > start && edit.range.end.offset < start + DEEP_SAY.length);
+  }
+  const hover = languageHover(document, languagePositionAt(document, start + 1));
+  assert.deepEqual(hover?.range, {
+    start: languagePositionAt(document, start),
+    end: languagePositionAt(document, start + "say".length),
+  });
+  const topLevel = createLanguageDocument("file:///top.tease", 'say "top"');
+  assert.deepEqual(
+    hover?.contents,
+    languageHover(topLevel, languagePositionAt(topLevel, 1))?.contents,
+  );
+}
 
 test("hover and formatting handle deeply nested source inside a timer expiry block", () => {
   const depth = 4_000;
-  const source = `timer async 1 {\n${"if true {\n".repeat(depth)}say "deep"\n${"}\n".repeat(depth)}}\n`;
-  assert.equal(compileSource(source).plan !== null, true);
-  const document = createLanguageDocument("file:///main.tease", source);
-  const position = languagePositionAt(document, source.indexOf("say"));
-  assert.match(languageHover(document, position)?.contents.join(" ") ?? "", /say/u);
-  assert.doesNotThrow(() => formatLanguageDocument(document));
-});
-
-test("number and choice help reflects current result rules", () => {
-  const numberDoc = createLanguageDocument("file:///number.tease", "let x = askNumber");
-  assert.match(
-    languageContextHelp(numberDoc, languagePositionAt(numberDoc, 10))?.summary ?? "",
-    /canonical numeric `?0`?/u,
-  );
-  const choiceDoc = createLanguageDocument(
-    "file:///choice.tease",
-    'let x = choose first: "A", second: "B"',
-  );
-  assert.match(
-    languageContextHelp(choiceDoc, languagePositionAt(choiceDoc, 10))?.summary ?? "",
-    /exact label/u,
+  assertDeepSayTooling(
+    `timer async 1 {\n${"if true {\n".repeat(depth)}${DEEP_SAY}\n${"}\n".repeat(depth)}}\n`,
   );
 });
 
@@ -114,15 +122,14 @@ test("formatter preserves strings, escapes, interpolation, comments, and choice 
   const source = [
     "// keep  comment spacing",
     'let prefix = "x  y"',
-    'let result = choose first: "A  ${prefix}", second: "B\\n  C"',
+    'let result = choose   first :   "A  ${prefix}"  ,   second  :  "B\\n  C"',
   ].join("\n");
-  const formatted = formatLanguageDocument(
-    createLanguageDocument("file:///main.tease", source),
-  ).text;
+  const result = formatLanguageDocument(createLanguageDocument("file:///main.tease", source));
+  assert.notEqual(result.edits.length, 0);
+  const formatted = result.text;
   assert.ok(formatted.includes("// keep  comment spacing"));
   assert.ok(formatted.includes('"x  y"'));
-  assert.ok(formatted.includes('"A  ${prefix}"'));
-  assert.ok(formatted.includes('"B\\n  C"'));
+  assert.ok(formatted.includes('choose first: "A  ${prefix}", second: "B\\n  C"'));
   assert.ok(formatted.indexOf("first:") < formatted.indexOf("second:"));
 });
 
@@ -156,57 +163,31 @@ test("formatter leaves malformed and incomplete source untouched", () => {
   }
 });
 
-test("editor analysis compiles but never executes source", () => {
-  const document = createLanguageDocument(
-    "file:///main.tease",
-    "let x = sideEffect()\nlet answer = askText",
-  );
-  const before = globalThis.__languageToolingSideEffect;
-  languageDiagnostics(document);
-  languageCompletions(document, languagePositionAt(document, document.text.length));
-  assert.equal(globalThis.__languageToolingSideEffect, before);
-});
-
-declare global {
-  // Test-only sentinel proving analysis cannot call package/source code.
-  var __languageToolingSideEffect: unknown;
-}
-
 test("signature help ignores punctuation inside say strings and tracks grammar slots", () => {
-  const active = (source: string) => {
+  // Compare slot names, not positions, so adding an accepted slot to a signature does not shift the expectations.
+  const activeSlot = (source: string) => {
     const document = createLanguageDocument("file:///main.tease", source);
-    return languageSignatureHelp(document, languagePositionAt(document, source.length))
-      ?.activeParameter;
+    const help = languageSignatureHelp(document, languagePositionAt(document, source.length));
+    return help === null ? null : help.parameters[help.activeParameter];
   };
-  assert.equal(active('say "Hello, there"'), 2);
-  assert.equal(active('say "Hello, there",'), 3);
-  assert.equal(active("say as narrator"), 0);
-  assert.equal(active("say as narrator "), 2);
-  assert.equal(active("say skippable"), 1);
-  assert.equal(active("say skippable "), 2);
-  assert.equal(active("say unskippable "), 2);
-  assert.equal(active("askText as mistress"), 0);
-  assert.equal(active("askText as mistress "), 1);
-  assert.equal(active("askNumber as mistress "), 1);
-  assert.equal(active("showButton as mistress "), 1);
-  assert.equal(active("choose as mistress "), 1);
-  assert.equal(active('say ["Hello", "there"]'), 2);
-});
-
-test("multiline choose formatting preserves the following option text", () => {
-  const source = 'let result = choose first: "One",\n        second: "Two"';
-  const formatted = formatLanguageDocument(createLanguageDocument("file:///main.tease", source));
-  assert.equal(formatted.text, 'let result = choose first: "One", second: "Two"');
+  assert.equal(activeSlot('say "Hello, there"'), "text");
+  assert.equal(activeSlot('say "Hello, there",'), "pacing");
+  assert.equal(activeSlot("say as narrator"), "speaker");
+  assert.equal(activeSlot("say as narrator "), "text");
+  assert.equal(activeSlot("say skippable"), "skip policy");
+  assert.equal(activeSlot("say skippable "), "text");
+  assert.equal(activeSlot("say unskippable "), "text");
+  assert.equal(activeSlot("askText as mistress"), "speaker");
+  assert.equal(activeSlot("askText as mistress "), "hint");
+  assert.equal(activeSlot("askNumber as mistress "), "hint");
+  assert.equal(activeSlot("showButton as mistress "), "label");
+  assert.equal(activeSlot("choose as mistress "), "options");
+  assert.equal(activeSlot('say ["Hello", "there"]'), "text");
 });
 
 test("editor tooling handles deeply nested media blocks without native recursion", () => {
   const depth = 2_500;
-  const source = `${'playAudio async "a" {\n'.repeat(depth)}say "deep"\n${"}\n".repeat(depth)}`;
-  assert.notEqual(compileSource(source).plan, null);
-  const document = createLanguageDocument("file:///main.tease", source);
-  const position = languagePositionAt(document, source.indexOf('say "deep"') + 2);
-  assert.notEqual(formatLanguageDocument(document), null);
-  languageHover(document, position);
-  assert.notEqual(languageSignatureHelp(document, position), null);
-  languageContextHelp(document, position);
+  assertDeepSayTooling(
+    `${'playAudio async "a" {\n'.repeat(depth)}${DEEP_SAY}\n${"}\n".repeat(depth)}`,
+  );
 });

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { Statement } from "../src/ast.js";
 import { parse } from "../src/parser.js";
 
 test("parses an empty immutable program", () => {
@@ -39,6 +40,27 @@ test("parses a speaker declaration with exact nested spans", () => {
   );
 });
 
+test("continues a speaker property across a newline after ':'", () => {
+  const source = 'speaker vera {\n    displayName:\n\n        // continued\n        "Vera"\n}';
+  const result = parse(source);
+  const valueStart = source.indexOf('"Vera"');
+
+  assert.deepEqual(result.diagnostics, []);
+  assert.deepEqual(result.program.statements[0], {
+    kind: "speakerDeclaration",
+    name: { kind: "identifier", name: "vera", span: sourceSpan(source, 8, 12) },
+    properties: [
+      {
+        kind: "speakerProperty",
+        name: { kind: "identifier", name: "displayName", span: sourceSpan(source, 19, 30) },
+        value: stringNode(source, valueStart, valueStart + 6, "Vera"),
+        span: sourceSpan(source, 19, valueStart + 6),
+      },
+    ],
+    span: sourceSpan(source, 0, source.length),
+  });
+});
+
 test("distinguishes a speaker setter from a declaration using lookahead", () => {
   const source = "speaker mistressVera\nspeaker cashier {}";
   const result = parse(source);
@@ -61,23 +83,17 @@ test("parses say, say as, and exit statements", () => {
   const result = parse(source);
 
   assert.deepEqual(result.diagnostics, []);
-  assert.deepEqual(result.program.statements, [
+  assert.deepEqual(result.program.statements.map(projectSayStatement), [
     {
       kind: "sayStatement",
-      presentation: null,
       speaker: null,
-      skipPolicy: null,
       value: stringNode(source, 4, 12, "Kneel."),
-      pacing: null,
       span: sourceSpan(source, 0, 12),
     },
     {
       kind: "sayStatement",
-      presentation: null,
       speaker: { kind: "identifier", name: "cashier", span: sourceSpan(source, 20, 27) },
-      skipPolicy: null,
       value: stringNode(source, 28, 55, "Your total is five euros."),
-      pacing: null,
       span: sourceSpan(source, 13, 55),
     },
     { kind: "exitStatement", span: sourceSpan(source, 56, 60) },
@@ -165,11 +181,8 @@ test("treats say skip words as modifiers only when the existing expression canno
 test("rejects missing say pacing expressions", () => {
   const result = parse('say "later",');
   assert.equal(result.program.statements.length, 0);
-  assert.ok(
-    result.diagnostics.some(
-      (diagnostic) => diagnostic.message === "Expected a pacing value after ','.",
-    ),
-  );
+  const missingPacing = result.diagnostics.find((diagnostic) => diagnostic.code === "TSP012");
+  assert.deepEqual(missingPacing?.span, sourceSpan('say "later",', 12, 12));
 });
 
 test("preserves template text and identifier interpolation", () => {
@@ -177,11 +190,9 @@ test("preserves template text and identifier interpolation", () => {
   const result = parse(source);
 
   assert.deepEqual(result.diagnostics, []);
-  assert.deepEqual(result.program.statements[0], {
+  assert.deepEqual(projectSayStatement(result.program.statements[0]), {
     kind: "sayStatement",
-    presentation: null,
     speaker: null,
-    skipPolicy: null,
     value: {
       kind: "stringLiteral",
       form: "singleLine",
@@ -196,7 +207,6 @@ test("preserves template text and identifier interpolation", () => {
       ],
       span: sourceSpan(source, 4, 22),
     },
-    pacing: null,
     span: sourceSpan(source, 0, 22),
   });
 });
@@ -296,6 +306,18 @@ test("preserves decoded block values and forms", () => {
     "three\nfour",
   );
 });
+
+function projectSayStatement(statement: Statement | undefined) {
+  if (statement?.kind !== "sayStatement") {
+    return statement;
+  }
+  return {
+    kind: statement.kind,
+    speaker: statement.speaker,
+    value: statement.value,
+    span: statement.span,
+  };
+}
 
 function stringNode(source: string, start: number, end: number, value: string) {
   return {

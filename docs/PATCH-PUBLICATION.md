@@ -179,10 +179,6 @@ python3 -B tools/local-agent/prepare-patch-publication.py \
   --show-next-action
 ```
 
-`--show-next-upload` remains an exact compatibility alias for the canonical
-`--show-next-action`; both names invoke the same implementation and print the
-same next action.
-
 The command verifies the local file again and prints one connector-ready argument object for the GitHub action that creates a UTF-8 Git blob from text, currently `GitHub.create_blob`. Call that connector immediately. Do not Base64-encode, pre-open, or manually regenerate the part. Compare its returned Git blob SHA with `expectedGitBlobSha`, record the result, and do not perform another repository write until the match is recorded:
 
 ```shell
@@ -348,7 +344,24 @@ A malformed or unauthorized command fails before accepting a transfer ref and is
 bash tools/local-agent/check-local-agent.sh
 ```
 
-The first suite covers the multipart format, compact deterministic byte-fallback and UTF-8 boundary regressions, token-bounded splitting through an injected deterministic counter, the exact PR #174 splitter regression with the optional local tokenizer, minimum-part preservation while preferring readable boundaries, multi-commit ranges, sequential one-file exposure, exact Git blob SHA recording, strict part paths, missing and extra files, per-part size and digest failures, UTF-8 validation, exact reconstruction, targeted one-part repair, patch and tree validation, forbidden paths, and bundle tampering. The second combines static workflow-contract checks with a real bare remote for transfer cleanup and executes the exact trusted repository request, preparation, cleanup, and summary scripts against mocked GitHub API responses. It covers retry preservation, target-race rejection, exact-base publication, changed-ref preservation, exact-SHA deletion, PR binding, separated permissions, successful HTTP-204 deletion, already-absent comments before either the read or delete call, changed or mismatched identities, visible deletion failures, the 12-KiB workflow upload budget, immutable Action pins, read-only built-in publish permissions, non-persisted checkout credentials, exact App variable and secret routing, current-repository token scope, explicit App-token permissions, post-verification token creation, and App-authenticated push wiring. Live GitHub App installation behavior, actual workflow triggering, comment deletion, artifact transport, and exact `tiktoken` integration with the separately stored vocabulary remain environment-specific verification concerns.
+The first suite covers the multipart format, compact deterministic byte-fallback and UTF-8 boundary regressions,
+token-bounded splitting through an injected deterministic counter, the exact PR #174 splitter regression with the
+optional local tokenizer, minimum-part preservation while preferring readable boundaries, the per-upload byte and token
+budgets for every part and the unsplittable manifest, multi-commit ranges, sequential one-file exposure, exact Git blob
+SHA recording, strict part paths, missing and extra files, per-part size and digest failures, UTF-8 validation, exact
+reconstruction, targeted one-part repair, patch and tree validation, forbidden paths, and bundle tampering. The second
+combines static workflow-contract checks with executed fixtures: it runs the trusted request and comment-cleanup scripts
+against recorded GitHub API mocks, runs the trusted preparation driver, the transfer cleanup script, and the publish
+step's own `run` body against a local bare remote, where a fixture Git wrapper rewrites only the App-authenticated
+GitHub URL, and runs the summary script on fixture job results. It covers PR binding, request rejection, retry
+preservation, target-race rejection, exact-base publication, changed-ref preservation, exact-SHA deletion, successful
+HTTP-204 deletion, already-absent comments before either the read or delete call, changed or mismatched identities, and
+visible deletion failures. Its static checks cover separated permissions, read-only built-in publish permissions,
+trusted-revision checkouts without persisted credentials, exact App variable and secret routing, current-repository
+token scope, explicit App-token permissions, post-verification token creation, and App-authenticated push wiring. The
+source-bundle workflow suite checks immutable Action pins and checkout `contents` access in every workflow. Live GitHub
+App installation behavior, actual workflow triggering, comment deletion, artifact transport, and exact `tiktoken`
+integration with the separately stored vocabulary remain environment-specific verification concerns.
 
 ## Current limits and follow-ups
 

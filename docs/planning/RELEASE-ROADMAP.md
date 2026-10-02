@@ -61,7 +61,9 @@ architecture may change substantially while correctness and the basic model are 
     Standard interactions, timers, status/errors, and the media capabilities selected for the POC. Keep development and
     debug controls secondary to the actual Player experience.
   - **Reference:** [`PRODUCT.md`](../PRODUCT.md), [`DEBUGGER.md`](../DEBUGGER.md),
-    [`PLAYER-UI.md`](../ui/PLAYER-UI.md), and [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md).
+    [`PLAYER-UI.md`](../ui/PLAYER-UI.md), and [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md). The Vue Player is the
+    selected direction; its foundation landed in #418, its runtime timers in #444, Stage image/audio in #446, and the
+    single-script demo on `/player/` with legacy Player retirement in #448.
 
 - [ ] **Iframe development host and virtual viewport**
   - **Outcome:** Run the Player through a small local host shell using the product's iframe boundary without requiring a
@@ -81,7 +83,8 @@ architecture may change substantially while correctness and the basic model are 
 - [ ] **Audio and video playback**
   - **Outcome:** Support real Player audio playback and the Stage image for the POC, including blocking and background
     use, simultaneous identified resources, and targeted lifecycle control. The video authoring API is defined with
-    audio; browser video playback may follow the POC (#445, #446). Keep exact media APIs and persistence details in the
+    audio; browser video playback may follow the POC. The language/runtime foundation landed for #445 in #452 and the
+    Player audio and Stage-image integration in #446. Keep exact media APIs and persistence details in the
     runtime/specification rather than defining them in the roadmap.
   - **Reference:** [`RUNTIME.md`](../RUNTIME.md), [`LIBRARIES.md`](../LIBRARIES.md), and
     [`WISHES.xml` W-044](../../WISHES.xml).
@@ -197,6 +200,11 @@ subsystems may still have different maturity levels.
     workloads hit a retained boundary or new performance/security evidence shows that a current policy is materially wrong.
   - **Reference:** Issues #288 and #304, PR #293, [ADR 0019](../decisions/0019-resource-limit-governance.md),
     `docs/RESOURCE-LIMITS.md`, and **Establish a runtime performance baseline and optimization plan**.
+
+- [ ] **Bundle supported author fonts**
+  - **Outcome:** Provide a product-carried font set so supported authored font choices render consistently across
+    devices.
+  - **Reference:** Issue #421 and [`PLAYER-UI.md`](../ui/PLAYER-UI.md).
 
 ## Release Candidate
 

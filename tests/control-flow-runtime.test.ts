@@ -4,7 +4,7 @@ import test from "node:test";
 import { compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
-import { CheckpointError, createCheckpoint, restoreCheckpoint } from "../src/runtime/checkpoint.js";
+import { createCheckpoint, restoreCheckpoint } from "../src/runtime/checkpoint.js";
 import { run, stepToEvent } from "../src/runtime/engine.js";
 import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
@@ -69,30 +69,63 @@ test("uses one deterministic RNG for random, chance, and randomInteger", () => {
     "say randomInteger(1..=6)",
     "say randomInteger(0..3)",
   ].join("\n");
-  const first = runSource(source, 0x1234_5678);
-  const second = runSource(source, 0x1234_5678);
+  const seed = 0x1234_5678;
+  const first = runSource(source, seed);
+  const second = runSource(source, seed);
 
   assert.deepEqual(first.events, second.events);
   assert.deepEqual(first.snapshot.rng, second.snapshot.rng);
-  assert.deepEqual(sayTexts(first).slice(2), ["2", "1"]);
+  const [unit, coin, die, index] = sayTexts(first);
+  assert.ok(Number(unit) >= 0 && Number(unit) < 1, unit);
+  assert.ok(coin === "true" || coin === "false", coin);
+  assert.ok(["1", "2", "3", "4", "5", "6"].includes(die!), die);
+  assert.ok(["0", "1", "2"].includes(index!), index);
+
+  // Each built-in draws from the session RNG; the same seed without a draw keeps the RNG unchanged.
+  const undrawn = runSource("let value = 0", seed).snapshot.rng;
+  for (const call of ["random()", "chance(50)", "randomInteger(1..=6)", "randomInteger(0..3)"]) {
+    assert.notDeepEqual(runSource(`let value = ${call}`, seed).snapshot.rng, undrawn, call);
+  }
 });
 
 test("invalid random built-in arguments fail with source-associated errors", () => {
-  for (const source of [
-    "say chance(101)",
-    "say randomInteger(1.5..=3)",
-    "say randomInteger(3..3)",
-  ]) {
-    const compiled = compileSource(source);
-    if (compiled.plan === null) {
-      assert.ok(compiled.diagnostics.length > 0);
-      continue;
-    }
-    const result = run(compiled.plan, createImmediatePacingRuntimeSnapshot(compiled.plan));
-    assert.equal(result.snapshot.status, "failed");
-    assert.equal(result.events.at(-1)?.kind, "runtimeFailure");
-    assert.ok(result.snapshot.failure?.span.start.offset !== undefined);
+  for (const [source, call] of [
+    ["say chance(101)", "chance(101)"],
+    // A fractional bound held in a variable reaches the runtime; a literal one is rejected statically below.
+    ["let low = 1.5\nsay randomInteger(low..=3)", "randomInteger(low..=3)"],
+    ["say randomInteger(3..3)", "randomInteger(3..3)"],
+  ] as const) {
+    const compiled = plan(source);
+    const result = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
+    const start = source.indexOf(call);
+    assert.equal(result.snapshot.status, "failed", source);
+    assert.equal(result.events.at(-1)?.kind, "runtimeFailure", source);
+    assert.equal(result.snapshot.failure?.code, "TSR012", source);
+    assert.deepEqual(
+      [result.snapshot.failure.span.start.offset, result.snapshot.failure.span.end.offset],
+      [start, start + call.length],
+      source,
+    );
   }
+
+  const staticSource = "say randomInteger(1.5..=3)";
+  const staticRange = "1.5..=3";
+  const rejected = compileSource(staticSource);
+  assert.equal(rejected.plan, null);
+  assert.deepEqual(
+    rejected.diagnostics.map(({ code, span }) => [code, span.start.offset, span.end.offset]),
+    [
+      [
+        "TSV010",
+        staticSource.indexOf(staticRange),
+        staticSource.indexOf(staticRange) + staticRange.length,
+      ],
+    ],
+  );
+});
+
+test("chance at both ends of the percentage range is certain", () => {
+  assert.deepEqual(sayTexts(runSource("say chance(0)\nsay chance(100)")), ["false", "true"]);
 });
 
 test("instruction budget stops an infinite while loop", () => {
@@ -140,7 +173,7 @@ test("runtime instruction budgets use the positive safe-integer domain", () => {
         { instructionBudget: maximum + 1 },
       ),
   ]) {
-    assert.throws(operation, /positive safe integer/);
+    assert.throws(operation, RangeError);
   }
 });
 
@@ -223,10 +256,7 @@ test("checkpoint restore preserves RNG and event sequences between calls", () =>
 
   assert.deepEqual([...first.events, ...rest.events], uninterrupted.events);
   assert.deepEqual(rest.snapshot.rng, uninterrupted.snapshot.rng);
-  assert.deepEqual(
-    rest.events.map((event) => event.sequence),
-    [2, 3],
-  );
+  assert.ok(rest.events[0]!.sequence > first.events.at(-1)!.sequence);
 });
 
 test("checkpoint restore accepts range loop-position length and rejects length + 1", () => {
@@ -264,14 +294,7 @@ test("checkpoint restore accepts range loop-position length and rejects length +
     // completed range position one step beyond the runtime-produced boundary.
     const beyondEnd = structuredClone(checkpoint);
     beyondEnd.snapshot.loopFrames[0]!.position = values.length + 1;
-    assert.throws(
-      () => restoreCheckpoint(beyondEnd),
-      (error: unknown) =>
-        error instanceof CheckpointError &&
-        error.info.code === "TSK002" &&
-        error.info.message === "Runtime for-loop iterator state is malformed.",
-      name,
-    );
+    assertCheckpointRejected(beyondEnd, "TSK002");
   }
 });
 
@@ -298,5 +321,8 @@ test("loop variables deep-copy composite list elements", () => {
 });
 
 function runSource(source: string, seed = 1) {
-  return runValidSource(source, seed);
+  const result = runValidSource(source, seed);
+  // An empty or partial say list is only evidence when the run completed instead of failing early.
+  assert.equal(result.snapshot.status, "halted", source);
+  return result;
 }

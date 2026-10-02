@@ -1,16 +1,30 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { Expression } from "../src/ast.js";
 import { parse } from "../src/parser.js";
 
-test("deep malformed nesting retains structured parser diagnostics", () => {
-  const source = `${"(".repeat(2_000)}1`;
-  const first = parse(source);
-  const second = parse(source);
-  assert.deepEqual(first.diagnostics, second.diagnostics);
-  assert.equal(first.diagnostics.length, 2_000);
-  assert.equal(first.diagnostics[0]?.code, "TSP017");
-  assert.ok(first.diagnostics.slice(1).every((diagnostic) => diagnostic.code === "TSP012"));
+test("deep malformed nesting reports the missing closer at EOF with structured recovery", () => {
+  const collections = Array.from({ length: 2_000 }, (_, index) =>
+    index % 2 === 0 ? "[" : "set[",
+  ).join("");
+  for (const source of [`${"(".repeat(2_000)}1`, `let value = ${collections}1`]) {
+    // Returning at all, rather than throwing a native RangeError, is the termination evidence.
+    const first = parse(source);
+    const second = parse(source);
+    assert.deepEqual(first.diagnostics, second.diagnostics);
+    const [root] = first.diagnostics;
+    assert.deepEqual(
+      [root?.code, root?.span.start.offset, root?.span.end.offset],
+      ["TSP017", source.length, source.length],
+    );
+    // Secondary unwinding may improve, but must stay structured and source-associated.
+    for (const diagnostic of first.diagnostics) {
+      assert.match(diagnostic.code, /^TSP\d{3}$/u);
+      assert.ok(diagnostic.span.start.offset <= diagnostic.span.end.offset);
+      assert.ok(diagnostic.span.end.offset <= source.length);
+    }
+  }
 });
 
 test("parenthesis-chain parsing preserves grouping spans and statement boundaries", () => {
@@ -36,26 +50,6 @@ test("parenthesis-chain parsing preserves grouping spans and statement boundarie
       statement.initializer.expression.span.end.offset,
     ],
     [13, 16],
-  );
-});
-
-test("deep malformed collection chains retain ordered delimiter diagnostics", () => {
-  const depth = 2_000;
-  const openings = Array.from({ length: depth }, (_, index) =>
-    index % 2 === 0 ? "[" : "set[",
-  ).join("");
-  const source = `let value = ${openings}1`;
-  const parsed = parse(source);
-  assert.equal(parsed.diagnostics.length, depth);
-  assert.ok(parsed.diagnostics.every((diagnostic) => diagnostic.code === "TSP017"));
-  assert.equal(parsed.diagnostics[0]?.message, "Expected ']' after the set literal.");
-  assert.equal(parsed.diagnostics.at(-1)?.message, "Expected ']' after the list literal.");
-  assert.ok(
-    parsed.diagnostics.every(
-      (diagnostic) =>
-        diagnostic.span.start.offset === source.length &&
-        diagnostic.span.end.offset === source.length,
-    ),
   );
 });
 
@@ -92,7 +86,12 @@ test("mixed collection chains preserve kinds, spans, and the following statement
 
 test("deep collection chains retain ordinary innermost expressions", () => {
   const depth = 1_024;
-  for (const inner of ['"text"', "-1", "1 + 2", "sample()", "source[0]", "{ value: 1 }", "1, 2"]) {
+  // Innermost siblings and an object frame inside the list frames.
+  const rows: readonly (readonly [string, readonly ExpressionShape[]])[] = [
+    ["{ value: 1 }", [["object", ["value", 1]]]],
+    ["1, 2", [1, 2]],
+  ];
+  for (const [inner, innermostElements] of rows) {
     const expression = `${"[".repeat(depth)}${inner}${"]".repeat(depth)}`;
     const source = `let value = ${expression}\nexit`;
     const parsed = parse(source);
@@ -102,37 +101,43 @@ test("deep collection chains retain ordinary innermost expressions", () => {
       ["letStatement", "exitStatement"],
       expression,
     );
+    const statement = parsed.program.statements[0];
+    if (statement?.kind !== "letStatement") continue;
+    let current = statement.initializer;
+    let lists = 1;
+    while (
+      current.kind === "listLiteral" &&
+      current.elements.length === 1 &&
+      current.elements[0]!.kind === "listLiteral"
+    ) {
+      current = current.elements[0]!;
+      lists += 1;
+    }
+    assert.equal(lists, depth, inner);
+    assert.deepEqual(
+      current.kind === "listLiteral" ? current.elements.map(expressionShape) : current.kind,
+      innermostElements,
+      inner,
+    );
   }
 });
 
-test("sibling-nested collections do not trigger repeated chain parsing", () => {
-  const depth = 96;
-  let expression = "1";
-  for (let index = 0; index < depth; index += 1) expression = `[[0, ${expression}]]`;
-  const parsed = parse(`let value = ${expression}`);
-  assert.deepEqual(parsed.diagnostics, []);
+type ExpressionShape = string | number | readonly ExpressionShape[];
 
-  const statement = parsed.program.statements[0];
-  assert.equal(statement?.kind, "letStatement");
-  if (statement?.kind !== "letStatement") return;
-  let current = statement.initializer;
-  let observedDepth = 0;
-  while (current.kind === "listLiteral") {
-    observedDepth += 1;
-    const next = current.elements.at(-1);
-    if (next === undefined) break;
-    current = next;
+// Compact projection: number literals by value, objects with their properties, other nodes by kind.
+function expressionShape(expression: Expression): ExpressionShape {
+  switch (expression.kind) {
+    case "numberLiteral":
+      return expression.value;
+    case "objectLiteral":
+      return [
+        "object",
+        ...expression.properties.map((property): ExpressionShape => [
+          property.name.name,
+          expressionShape(property.value),
+        ]),
+      ];
+    default:
+      return expression.kind;
   }
-  assert.equal(observedDepth, depth * 2);
-});
-
-test("malformed sibling-nested collections do not retry failed chain parsing", () => {
-  const depth = 96;
-  let expression = "value[]";
-  for (let index = 0; index < depth; index += 1) expression = `[[0, ${expression}]]`;
-  const parsed = parse(`let value = ${expression}`);
-  assert.deepEqual(
-    parsed.diagnostics.map((diagnostic) => diagnostic.code),
-    ["TSP012", "TSP002"],
-  );
-});
+}

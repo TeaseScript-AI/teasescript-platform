@@ -2,6 +2,9 @@ import { compileChild, runCompileTask, type CompileTask } from "../src/compiler/
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { run } from "../src/runtime/engine.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
+import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 test("downstream expression frames traverse each public stage and resume on a constrained stack", () => {
@@ -52,16 +55,20 @@ test("downstream expression frames traverse each public stage and resume on a co
       for(let level=0;level<depth;level++) {invalid={kind:'group',expression:invalid,span};valid={kind:'group',expression:valid,span};}
       const external=value=>({...base,instructions:[{...base.instructions[0],value},...base.instructions.slice(1)]});
       const rejected=validateInstructionPlan(external({kind:'property',object:invalid,name:7,span}));
-      assert.equal(rejected.valid,false);assert.equal(rejected.errors.length,2);
-      assert.equal(rejected.errors[0].message,"Unknown expression kind 'unsupported'.");
-      assert.ok(rejected.errors[0].path.endsWith('.kind'));
-      assert.ok(rejected.errors[1].path.endsWith('.name'));
+      assert.equal(rejected.valid,false);
+      assert.deepEqual(rejected.errors.map(error=>[error.code,error.path]),[
+        ['TSC002','$.instructions[0].value.object'+'.expression'.repeat(depth)+'.kind'],
+        ['TSC002','$.instructions[0].value.name'],
+      ]);
       const grouped=external(valid);assert.equal(validateInstructionPlan(grouped).valid,true);
-      assert.equal(run(grouped,createFreshRuntimeSnapshot(grouped)).snapshot.status,'halted');
+      const groupedRun=run(grouped,createFreshRuntimeSnapshot(grouped));
+      assert.equal(groupedRun.snapshot.status,'halted');
+      assert.equal(groupedRun.snapshot.frames[0].bindings.find(binding=>binding.name==='result').value,1);
       // Static choice analysis consumes the same accepted arithmetic trees.
       const choice=compileSource('let selected=choose '+Array(depth).fill('1').join('+')+', 2\\nexit');
       assert.deepEqual(choice.diagnostics,[]);
       const waiting=run(choice.plan,createFreshRuntimeSnapshot(choice.plan));assert.equal(waiting.snapshot.status,'waiting');
+      assert.deepEqual(waiting.snapshot.foregroundAction.ui.options.map(option=>option.text),[String(depth),'2']);
       deserializeCheckpoint(serializeCheckpoint(createCheckpoint(choice.plan,waiting.snapshot)));
     }
     console.log('all downstream stages and resume passed');
@@ -86,17 +93,30 @@ test("expression continuations preserve short circuit, references, RNG, and user
       "let skipped = false and mark(true)",
       "let kept = true or mark(false)",
       'let output = [mark(1), {nested: mark(2) + mark(3)}, "x${mark(4)}"]',
-      "say order.length",
-      "say order[0]",
+      "for item in order { say item }",
       "say output[1].nested",
       "say output[2]",
+      "say values[0].value[0]",
+      "say values[1].value[0]",
       "exit",
     ].join("\n"),
     { scenarioName: "expression frames and prepared references", seed: 42 },
   );
+  const texts = result.events.filter((event) => event.kind === "say").map((event) => event.text);
+  assert.deepEqual(texts.slice(0, 7), ["7", "1", "2", "3", "4", "5", "x4"]);
+  // `values.random` selects one object; the assignment changes exactly that object.
+  assert.ok(
+    [
+      ["7", "2"],
+      ["1", "7"],
+    ].some((selected) => selected.join() === texts.slice(7).join()),
+    texts.join(),
+  );
+  // The random target is drawn exactly once, whatever value the seeded generator produces.
+  const oneDraw = compileValidPlan("random()");
   assert.deepEqual(
-    result.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["5", "7", "5", "x4"],
+    result.finalSnapshot.rng,
+    run(oneDraw, createFreshRuntimeSnapshot(oneDraw, { seed: 42 })).snapshot.rng,
   );
 });
 

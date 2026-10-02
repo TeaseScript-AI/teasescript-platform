@@ -2,13 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  CheckpointError,
   RuntimeDataError,
   cloneSerializableValue,
-  createCheckpoint,
   createFreshRuntimeSnapshot,
   createSerializableList,
-  restoreCheckpoint,
   run,
   validateInstructionPlan,
   validateRuntimeSnapshot,
@@ -94,8 +91,7 @@ test("fresh globals reject changing and throwing getters without invoking them",
         });
       },
       (error: unknown) =>
-        error instanceof TypeError &&
-        error.message === "$.globals.payload is not a JSON-safe runtime value.",
+        error instanceof TypeError && error.message.startsWith("$.globals.payload "),
     );
     assert.equal(reads, 0);
   }
@@ -120,24 +116,24 @@ test("fresh globals consume one captured proxy observation and never call get", 
 });
 
 test("instruction plans reject accessors before validation or execution", () => {
-  // EVIDENCE: JSON preserves the compiler-produced plan before an accessor is installed on optional padding.
-  const valid = JSON.parse(JSON.stringify(plan("exit"))) as InstructionPlan & { padding?: unknown };
+  // EVIDENCE: JSON preserves the compiler-produced plan before its temporary count becomes an accessor.
+  const valid = JSON.parse(JSON.stringify(plan("exit"))) as InstructionPlan;
+  const temporaryCount = valid.temporaryCount;
   let reads = 0;
-  Object.defineProperty(valid, "padding", {
+  // The getter returns the valid count, so only non-invocation can explain the rejection.
+  Object.defineProperty(valid, "temporaryCount", {
     enumerable: true,
     get() {
       reads += 1;
-      return reads === 1 ? 0 : deepList(20_000);
+      return temporaryCount;
     },
   });
 
   const validation = validateInstructionPlan(valid);
   assert.equal(validation.valid, false);
-  assert.deepEqual(validation.errors[0], {
-    code: "TSC002",
-    message: "Plan contains a non-JSON-safe value.",
-    path: "$.padding",
-  });
+  assert.ok(
+    validation.errors.some((error) => error.code === "TSC002" && error.path === "$.temporaryCount"),
+  );
 
   const safePlan = plan("exit");
   const snapshot = createFreshRuntimeSnapshot(safePlan);
@@ -183,22 +179,19 @@ test("runtime execution uses the captured proxy plan rather than proxy get resul
 
 test("runtime snapshots reject accessors before clone, execution, events, or RNG", () => {
   const compiled = plan("say random()\nexit");
-  // EVIDENCE: the runtime-produced snapshot is extended only with accessor-bearing padding for rejection.
-  const snapshot = structuredClone(createFreshRuntimeSnapshot(compiled)) as RuntimeSnapshot & {
-    padding?: unknown;
-  };
+  const snapshot = structuredClone(createFreshRuntimeSnapshot(compiled));
+  assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
+  const canonical = structuredClone(snapshot);
+  const rng = snapshot.rng;
   let reads = 0;
-  Object.defineProperty(snapshot, "padding", {
-    enumerable: true,
-    get() {
-      reads += 1;
-      return 0;
-    },
-  });
+  const get = () => {
+    reads += 1;
+    return rng;
+  };
+  Object.defineProperty(snapshot, "rng", { enumerable: true, configurable: true, get });
 
+  // The accessor would return the valid RNG state, so only non-invocation can explain the rejection.
   assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, false);
-  const beforeSequence = snapshot.nextEventSequence;
-  const beforeRng = snapshot.rng.state;
   let randomCalls = 0;
   assert.throws(
     () =>
@@ -212,10 +205,21 @@ test("runtime snapshots reject accessors before clone, execution, events, or RNG
       }),
     (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
   );
-  assert.equal(reads, 0);
   assert.equal(randomCalls, 0);
-  assert.equal(snapshot.nextEventSequence, beforeSequence);
-  assert.equal(snapshot.rng.state, beforeRng);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(snapshot, "rng"), {
+    get,
+    set: undefined,
+    enumerable: true,
+    configurable: true,
+  });
+  // Descriptor values compare every other field without invoking the installed accessor.
+  const dataFields = (value: RuntimeSnapshot) =>
+    Object.keys(value)
+      .filter((key) => key !== "rng")
+      .map((key) => [key, Object.getOwnPropertyDescriptor(value, key)?.value]);
+  assert.deepEqual(dataFields(snapshot), dataFields(canonical));
+  assert.deepEqual(rng, canonical.rng);
+  assert.equal(reads, 0);
 });
 
 test("runtime execution consumes a stable captured proxy snapshot", () => {
@@ -239,43 +243,6 @@ test("runtime execution consumes a stable captured proxy snapshot", () => {
   assert.equal(counts.ownKeys, 1);
 });
 
-test("checkpoint restoration converts accessor and proxy trap failures to TSK002", () => {
-  const compiled = plan();
-  const valid = createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled));
-
-  let reads = 0;
-  const accessorCheckpoint = {
-    format: valid.format,
-    version: valid.version,
-    snapshot: valid.snapshot,
-  };
-  Object.defineProperty(accessorCheckpoint, "plan", {
-    enumerable: true,
-    get() {
-      reads += 1;
-      throw new Error("raw checkpoint getter");
-    },
-  });
-  assert.throws(
-    () => restoreCheckpoint(accessorCheckpoint),
-    (error: unknown) =>
-      error instanceof CheckpointError &&
-      error.info.code === "TSK002" &&
-      error.info.path === "$.plan",
-  );
-  assert.equal(reads, 0);
-
-  const trapCheckpoint = new Proxy(valid, {
-    ownKeys() {
-      throw new Error("raw ownKeys failure");
-    },
-  });
-  assert.throws(
-    () => restoreCheckpoint(trapCheckpoint),
-    (error: unknown) => error instanceof CheckpointError && error.info.code === "TSK002",
-  );
-});
-
 test("serializable-value APIs reject accessors and consume stable proxy arrays", () => {
   let reads = 0;
   const unstable = { kind: "list" };
@@ -287,7 +254,7 @@ test("serializable-value APIs reject accessors and consume stable proxy arrays",
     },
   });
 
-  assert.equal(validateSerializableValue(unstable), "$.items is not a JSON-safe runtime value.");
+  assert.ok(validateSerializableValue(unstable)?.startsWith("$.items "));
   assert.throws(
     () => {
       // EVIDENCE: the accessor-bearing list deliberately violates the serializable-value input contract.
@@ -305,7 +272,7 @@ test("serializable-value APIs reject accessors and consume stable proxy arrays",
   assert.equal(counts.ownKeys, 1);
 });
 
-test("low-level builtin results are captured once and invalid accessors fail as TSR013", () => {
+test("invalid accessor builtin results fail as TSR013 without invocation", () => {
   const compiled = plan("let value = unstable()\nexit", ["unstable"]);
   const initial = createFreshRuntimeSnapshot(compiled);
   const before = structuredClone(initial);

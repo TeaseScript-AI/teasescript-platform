@@ -1,0 +1,77 @@
+// TeaseScript demo: a short first lesson with Mistress Vera, exercising chat pacing, interactions, Stage images,
+// audio, and timers. References such as "images/playroom.svg" are relative to this package; the Player's host
+// resolves them.
+speaker mistressVera {
+    title: "Mistress"
+    firstName: "Vera"
+    color: "#c2185b"
+    avatar: "avatars/mistress-vera.svg"
+}
+speaker session {
+    displayName: "Session"
+}
+
+speaker mistressVera
+
+showImage "images/playroom.svg"
+let room = playAudio(file: "sounds/room-ambience.wav", async: true, repeat: true, volume: 0.4)
+say unskippable "Eyes on me.", 2
+say unskippable "You move when I tell you. Not before.", 3
+say as session "Some of her messages make you wait. Press Space or click an empty part of the Player to hurry the others along."
+
+say "First things first. Tell me what you call me."
+let patience = timer async hidden 12 s {
+    say "Too slow. Stop typing and listen.", instant
+    say "When I ask, you answer. Promptly."
+    showButton "Yes, Mistress"
+}
+let answer = askText "What you call her"
+patience.stop()
+say "${answer}. Good. Don't forget it."
+
+let position = choose kneel: "Kneel", attention: { text: "Stand at attention", background: "#7a1f45" }
+if position == "kneel" {
+    say "On your knees, then. Slowly."
+} else {
+    say "Straight back. Hands behind you. Chin up."
+}
+
+room.volume = 0.15
+playAudio "sounds/command-chime.wav" {
+    at 0.2 s {
+        say "When you hear that bell, you listen.", instant
+    }
+}
+room.volume = 0.4
+
+showImage "images/restraint-chair.svg"
+say "Now the chair. Sit down and put your wrists on the armrests."
+showButton "I'm ready, Mistress"
+
+let hold = timer async 60 s "Hold still"
+let mine = timer async mystery 90 s "Mistress's timer"
+say "You hold still until that clock runs out."
+say "The other one is mine. You don't need to know how long."
+
+hold.pause()
+say "I've paused your clock. You hold still anyway."
+wait 3
+hold.resume()
+hold.remaining -= 20 s
+say "Twenty seconds less. Don't thank me yet."
+
+mine.remaining -= 30 s
+mine.display = "visible"
+say "Fine. You may see mine too. I took thirty seconds off it."
+
+room.pause()
+timer 3 "Stay exactly like that"
+room.resume()
+hold.stop()
+mine.stop()
+
+hideImage
+say "Good. That's enough for your first lesson."
+room.stop()
+showButton "Finish"
+exit

@@ -255,47 +255,68 @@ class PatchPublicationTests(unittest.TestCase):
                 "GIT_COMMITTER_DATE": "2000-01-01T00:00:00+00:00",
             }
         )
-        completed = run(
-            self.command(
-                "prepare", "--output-directory", str(self.output)
-            ),
-            cwd=self.repo,
-            env=env,
-        )
-        self.assertIn("prepared patch publication", completed.stdout)
-        metadata = json.loads(
-            (self.output / "publication.json").read_text(encoding="utf-8")
-        )
-        self.assertEqual(metadata["expectedBaseSha"], self.base_sha)
-        self.assertEqual(metadata["expectedResultTreeSha"], self.result_tree)
-        self.assertEqual(metadata["formatVersion"], 2)
-        self.assertEqual(metadata["validationProfile"], "full")
-        self.assertTrue((self.output / "publication.bundle").is_file())
+        direct_manifest, direct_patch = self.manifest, self.patch
+        for mode in ("direct", "materialized"):
+            with self.subTest(mode):
+                # prepare leaves its applied result staged; each row starts from the base.
+                git(self.repo, "reset", "--hard", "-q", self.base_sha)
+                git(self.repo, "clean", "-fdq")
+                self.manifest, self.patch = direct_manifest, direct_patch
+                if mode == "materialized":
+                    manifest, transfer_ref, _parts = self.create_transfer_payload()
+                    materialized = self.root / "materialized-v2.patch"
+                    run(
+                        self.materialize_command(manifest, transfer_ref, materialized),
+                        cwd=self.repo,
+                    )
+                    self.assertEqual(
+                        materialized.read_bytes(), direct_patch.read_bytes()
+                    )
+                    self.manifest, self.patch = manifest, materialized
 
-        verify_repo = self.root / "verify"
-        run(["git", "clone", "-q", str(self.repo), str(verify_repo)], cwd=self.root)
-        verified = run(
-            [
-                *STDLIB_PYTHON,
-                str(SCRIPT),
-                "verify-bundle",
-                "--repository",
-                str(verify_repo),
-                "--metadata",
-                str(self.output / "publication.json"),
-                "--bundle",
-                str(self.output / "publication.bundle"),
-            ],
-            cwd=verify_repo,
-        )
-        self.assertIn("verified publication bundle", verified.stdout)
-        candidate = metadata["candidateCommitSha"]
-        self.assertEqual(
-            git(verify_repo, "show", "-s", "--format=%P", candidate), self.base_sha
-        )
-        self.assertEqual(
-            git(verify_repo, "show", "-s", "--format=%T", candidate), self.result_tree
-        )
+                output = self.root / f"output-{mode}"
+                run(
+                    self.command("prepare", "--output-directory", str(output)),
+                    cwd=self.repo,
+                    env=env,
+                )
+                metadata = json.loads(
+                    (output / "publication.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(metadata["expectedBaseSha"], self.base_sha)
+                self.assertEqual(metadata["expectedResultTreeSha"], self.result_tree)
+                self.assertEqual(metadata["formatVersion"], 2)
+                self.assertEqual(metadata["validationProfile"], "full")
+                self.assertTrue((output / "publication.bundle").is_file())
+
+                verify_repo = self.root / f"verify-{mode}"
+                run(
+                    ["git", "clone", "-q", str(self.repo), str(verify_repo)],
+                    cwd=self.root,
+                )
+                run(
+                    [
+                        *STDLIB_PYTHON,
+                        str(SCRIPT),
+                        "verify-bundle",
+                        "--repository",
+                        str(verify_repo),
+                        "--metadata",
+                        str(output / "publication.json"),
+                        "--bundle",
+                        str(output / "publication.bundle"),
+                    ],
+                    cwd=verify_repo,
+                )
+                candidate = metadata["candidateCommitSha"]
+                self.assertEqual(
+                    git(verify_repo, "show", "-s", "--format=%P", candidate),
+                    self.base_sha,
+                )
+                self.assertEqual(
+                    git(verify_repo, "show", "-s", "--format=%T", candidate),
+                    self.result_tree,
+                )
 
     def test_validation_profiles_are_conservative(self) -> None:
         cases = (
@@ -366,23 +387,6 @@ class PatchPublicationTests(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 1)
         self.assertIn("patch SHA-256 mismatch", completed.stderr)
-
-    def test_materializes_parts_and_prepares_candidate(self) -> None:
-        manifest, transfer_ref, _parts = self.create_transfer_payload()
-        materialized = self.root / "materialized-v2.patch"
-        completed = run(
-            self.materialize_command(manifest, transfer_ref, materialized),
-            cwd=self.repo,
-        )
-        self.assertIn("format=2", completed.stdout)
-        self.assertEqual(materialized.read_bytes(), self.patch.read_bytes())
-        self.manifest = manifest
-        self.patch = materialized
-        run(
-            self.command("prepare", "--output-directory", str(self.output)),
-            cwd=self.repo,
-        )
-        self.assertTrue((self.output / "publication.bundle").is_file())
 
     def test_transfer_payload_modes_fail_closed(self) -> None:
         cases = (
@@ -468,6 +472,11 @@ class PatchPublicationTests(unittest.TestCase):
                 self.assertIn(expected, completed.stderr)
 
     def test_part_size_hash_and_utf8_errors_name_the_part(self) -> None:
+        classification = {
+            "size": "size mismatch",
+            "hash": "SHA-256 mismatch",
+            "utf8": "not UTF-8",
+        }
         for kind in ("size", "hash", "utf8"):
             with self.subTest(kind=kind):
                 if kind == "utf8":
@@ -487,18 +496,18 @@ class PatchPublicationTests(unittest.TestCase):
                     )
                     git(manifest.parents[1], "add", str(manifest.relative_to(manifest.parents[1])))
                     git(manifest.parents[1], "commit", "-q", "-m", f"Corrupt {kind}")
+                output = self.root / f"bad-{kind}.patch"
                 completed = run(
-                    self.materialize_command(
-                        manifest, transfer_ref, self.root / f"bad-{kind}.patch"
-                    ),
+                    self.materialize_command(manifest, transfer_ref, output),
                     cwd=self.repo,
                     check=False,
                 )
                 self.assertEqual(completed.returncode, 1)
-                self.assertIn(
-                    parts[1].relative_to(manifest.parents[1]).as_posix(),
-                    completed.stderr,
-                )
+                part_path = parts[1].relative_to(manifest.parents[1]).as_posix()
+                self.assertIn(classification[kind], completed.stderr)
+                self.assertIn(part_path, completed.stderr)
+                self.assertFalse(output.exists())
+                self.assertEqual(list(self.root.glob(f".{output.name}.*")), [])
 
     def test_final_digest_and_canonical_order_fail_closed(self) -> None:
         manifest, transfer_ref, _parts = self.create_transfer_payload()

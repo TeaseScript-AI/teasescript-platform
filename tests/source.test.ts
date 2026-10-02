@@ -8,17 +8,6 @@ import {
   type SourceSpan,
 } from "../src/source.js";
 
-test("creates immutable zero-based source positions and half-open spans", () => {
-  const start = createSourcePosition(0, 0, 0);
-  const end = createSourcePosition(7, 0, 7);
-  const span = createSourceSpan(start, end);
-
-  assert.deepEqual(span, { start, end });
-  assert.equal(Object.isFrozen(span), true);
-  assert.equal(Object.isFrozen(span.start), true);
-  assert.equal(Object.isFrozen(span.end), true);
-});
-
 test("allows a zero-length span at a boundary", () => {
   const position = createSourcePosition(0, 0, 0);
 

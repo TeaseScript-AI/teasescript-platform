@@ -47,8 +47,23 @@ test("ends each inline style before adjacent plain text and honors nested weight
   if (blocks[0]?.kind !== "paragraph") throw new Error("Expected paragraph markup.");
   const pieces = blocks[0].lines[0]?.pieces ?? [];
   const byText = (text: string) => pieces.filter((piece) => piece.text.trim() === text);
-  assert.equal(byText("bold")[0]?.style.fontWeight, "700");
-  assert.equal(byText("light")[0]?.style.fontWeight, "300");
+  const presentation = (piece: { classes: unknown; style: unknown } | undefined) => [
+    piece?.classes,
+    piece?.style,
+  ];
+  const unnested = (source: string) => {
+    const [block] = preparePlayerMessageMarkup(parseMessageMarkup(source));
+    if (block?.kind !== "paragraph") throw new Error("Expected paragraph markup.");
+    return presentation(block.lines[0]?.pieces[0]);
+  };
+  const light = unnested("[weight=light]x[/weight]");
+  const bold = unnested("**x**");
+  assert.notDeepEqual(light, bold);
+  assert.deepEqual(presentation(byText("bold")[0]), bold);
+  assert.deepEqual(
+    byText("light").map((piece) => presentation(piece)),
+    [light, light],
+  );
   assert.deepEqual(
     byText("plain").map((piece) => [piece.classes, piece.style]),
     [

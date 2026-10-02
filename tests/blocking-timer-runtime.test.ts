@@ -18,6 +18,7 @@ import {
   validateRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
+import type { SourceSpan } from "../src/source.js";
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -37,10 +38,24 @@ function start(source: string, seed = SEEDS[0]!) {
   return { compiled, ...operation };
 }
 
+/** Rejected-source diagnostics as code plus source offsets. */
 function diagnostics(source: string): string[] {
   const result = compileSource(source);
   assert.equal(result.plan, null, `${JSON.stringify(source)} must not compile`);
-  return result.diagnostics.map((diagnostic) => `${diagnostic.code} ${diagnostic.message}`);
+  return result.diagnostics.map(({ code, span }) =>
+    located(code, span.start.offset, span.end.offset),
+  );
+}
+
+function located(code: string, start: number, end: number): string {
+  return `${code} ${start}-${end}`;
+}
+
+/** Expected code at the last occurrence of `subject`; an empty subject names the source end. */
+function expectedAt(source: string, code: string, subject: string): string {
+  const start = source.lastIndexOf(subject);
+  assert.ok(start >= 0, `${JSON.stringify(subject)} must occur in ${JSON.stringify(source)}`);
+  return located(code, start, start + subject.length);
 }
 
 test("timer compiles fixed seconds and integer-second ranges into visible foreground delays", () => {
@@ -49,13 +64,8 @@ test("timer compiles fixed seconds and integer-second ranges into visible foregr
     (instruction): instruction is WaitInstruction => instruction.kind === "wait",
   );
   assert.deepEqual(
-    waits.map((instruction) => [instruction.display, instruction.unit]),
-    [
-      ["visible", null],
-      ["visible", null],
-      ["visible", null],
-      ["hidden", null],
-    ],
+    waits.map((instruction) => instruction.display),
+    ["visible", "visible", "visible", "hidden"],
   );
 
   const { snapshot, events } = start('timer 3\nsay "after"\nexit');
@@ -229,63 +239,108 @@ test("zero timers are immediate and create no action", () => {
   );
 });
 
-test("unsupported and invalid timer forms fail with structured diagnostics", () => {
-  const cases: ReadonlyArray<readonly [string, string]> = [
-    ["timer", "TSP012 Expected a timer duration"],
-    ["timer(10)", "TSP034 The parenthesized timer form uses named arguments"],
-    ["timer(duration: 1, repeat: yes)", "TSP034 Timer argument 'repeat' must be the literal"],
-    ["timer(duration: 1, speed: 2)", "TSP034 Unknown timer argument 'speed'"],
-    ['timer(label: "x")', "TSP034 The parenthesized timer form requires a 'duration'"],
-    ["timer 10 { exit }", "TSV033 Only an async timer may have an expiry block"],
-    ["timer(duration: 1, repeat: true)", "TSV033 Only an async timer may have an expiry block"],
-    ["let t = timer 10", "TSV033 A blocking timer returns no handle"],
-    ['timer(duration: 1, display: "loud")', "TSV033 Timer display must be"],
-    ["timer 10 s ms", "TSV033 This duration already has a unit."],
-    ["timer 1 day", "TSP033"],
-    ["timer 5..10 min", "TSV010 A timer range counts whole seconds"],
-    ["let n = 10\ntimer 5..n min", "TSV010 A timer range counts whole seconds"],
-    ["timer -1", "TSV011 Timer duration must not be negative."],
-    ["timer 1.5..3", "TSV010 A statically known timer range must have integer second bounds."],
-    ["timer -2..3", "TSV010 A timer range must not start below zero seconds."],
-    ["timer 5..5", "TSV010 A timer range must contain at least one whole second."],
-    ["timer 6..=5", "TSV010 A timer range must contain at least one whole second."],
-    ["let timer = 1", "TSV001"],
+test("unsupported and invalid timer forms, members, and handler scope fail with located diagnostics", () => {
+  const cases: ReadonlyArray<readonly [source: string, code: string, subject: string]> = [
+    ["timer", "TSP012", ""],
+    ["timer(10)", "TSP034", "10"],
+    ["timer(duration: 1, repeat: yes)", "TSP034", "yes"],
+    ["timer(duration: 1, speed: 2)", "TSP034", "speed"],
+    ['timer(label: "x")', "TSP034", 'timer(label: "x")'],
+    ["timer 10 { exit }", "TSV033", "{ exit }"],
+    ["timer(duration: 1, repeat: true)", "TSV033", "timer(duration: 1, repeat: true)"],
+    ["let t = timer 10", "TSV033", "timer 10"],
+    ['timer(duration: 1, display: "loud")', "TSV033", '"loud"'],
+    ["timer 10 s ms", "TSV033", "10 s"],
+    ["timer -1", "TSV011", "-1"],
+    ["timer 1.5..3", "TSV010", "1.5..3"],
+    ["timer -2..3", "TSV010", "-2..3"],
+    ["timer 5..5", "TSV010", "5..5"],
+    ["timer 6..=5", "TSV010", "6..=5"],
+    ["let timer = 1", "TSV001", "timer"],
+    // Async handle members, handler scope, and repeating-timer rules.
+    ["let t = timer async 5\nsay t.nope", "TSV034", "nope"],
+    ["let t = timer async 5\nt.elapsed = 1 s", "TSV034", "elapsed"],
+    ["let t = timer async 5\nt.restart()", "TSV034", "restart"],
+    ['function f {\n  let local = 1\n  timer async 1 { say "${local}" }\n}', "TSV002", "local"],
+    ["timer async 1 { return 5 }", "TSV033", "5"],
+    [
+      "timer(duration: 1, async: true, repeat: true)\ntimer(duration: 0, async: true, repeat: true)",
+      "TSV011",
+      "0",
+    ],
+    ["timer(duration: 1, display: 5)", "TSV033", "5"],
+    ["let t = timer async 5\n(t).bogus()", "TSV034", "bogus"],
+    ["let t = timer async 5\nt.remaining = 1", "TSV034", "remaining"],
+    ["let t = timer async 5\nt.display = 1", "TSV034", "display"],
+    ["let t = timer async 5\nt.pause(1)", "TSV034", "pause"],
+    ["timer(duration: 0..2, async: true, repeat: true)", "TSV010", "0..2"],
   ];
-  for (const [source, expected] of cases) {
+  for (const [source, code, subject] of cases) {
     const found = diagnostics(source);
+    const expected = expectedAt(source, code, subject);
     assert.ok(
-      found.some((diagnostic) => diagnostic.startsWith(expected)),
-      `${JSON.stringify(source)}: ${found.join(" | ")}`,
+      found.includes(expected),
+      `${JSON.stringify(source)}: ${expected} not in ${found.join(" | ")}`,
     );
   }
 });
 
-test("invalid dynamic timer durations fail deterministically before any action", () => {
-  const cases: ReadonlyArray<readonly [string, string, string]> = [
+test("accepted duration forms without an implementation are never read as another duration", () => {
+  // Calendar units (§35) and timer ranges with other units (§27) are not implemented yet. They may fail with a compile
+  // or runtime error located in the duration, but a started timer must have the accepted meaning, never for example
+  // plain seconds.
+  const minutesFiveToTen = (deadlineMs: number): boolean =>
+    deadlineMs >= 5 * 60_000 && deadlineMs < 10 * 60_000;
+  const cases: ReadonlyArray<
+    readonly [source: string, subject: string, accepted: (deadlineMs: number) => boolean]
+  > = [
+    // A calendar day spans 23, 24, or 25 elapsed hours around daylight-saving transitions.
     [
-      'let d = "soon"\ntimer d',
-      "TSR050",
-      "Timer duration must be a non-negative duration, number of seconds, or range of whole seconds.",
+      "timer 1 day",
+      "1 day",
+      (deadlineMs) => deadlineMs >= 23 * 3_600_000 && deadlineMs <= 25 * 3_600_000,
     ],
-    [
-      "let d = -1\ntimer d",
-      "TSR050",
-      "Timer duration must be a non-negative duration, number of seconds, or range of whole seconds.",
-    ],
-    ["let a = 3\ntimer a..a", "TSR041", "timer requires a non-empty range."],
-    ["let a = 0.5\ntimer a..3", "TSR045", "Range iteration requires safe integer bounds."],
-    [
-      "let a = -3\ntimer a..3",
-      "TSR050",
-      "Timer duration must be a non-negative duration, number of seconds, or range of whole seconds.",
-    ],
-    [
-      "let d = 1..3\nwait d",
-      "TSR050",
-      "Wait duration must be a non-negative duration or finite number.",
-    ],
+    ["timer 5..10 min", "5..10 min", minutesFiveToTen],
+    ["let n = 10\ntimer 5..n min", "5..n min", minutesFiveToTen],
   ];
-  for (const [source, code, message] of cases) {
+  for (const [source, subject, accepted] of cases) {
+    const start = source.lastIndexOf(subject);
+    const inSubject = (span: SourceSpan): boolean =>
+      span.start.offset >= start && span.end.offset <= start + subject.length;
+    const message = `${JSON.stringify(source)}: an error must be located in ${JSON.stringify(subject)}`;
+    const compiled = compileSource(source);
+    if (compiled.plan === null) {
+      assert.ok(
+        compiled.diagnostics.some(({ span }) => inSubject(span)),
+        message,
+      );
+      continue;
+    }
+    const { snapshot, events } = run(
+      compiled.plan,
+      createImmediatePacingRuntimeSnapshot(compiled.plan, { seed: SEEDS[0]! }),
+    );
+    const failure = events.at(-1);
+    if (failure?.kind === "runtimeFailure") {
+      assert.ok(inSubject(failure.span), message);
+      continue;
+    }
+    const { deadlineMs } = delayAction(snapshot);
+    assert.ok(accepted(deadlineMs), `${JSON.stringify(source)} must not mean ${deadlineMs} ms`);
+  }
+});
+
+test("invalid dynamic timer durations fail deterministically before any action", () => {
+  // The subject is the rejected duration or range operand of the timer or wait.
+  const cases: ReadonlyArray<readonly [source: string, code: string, subject: string]> = [
+    ['let d = "soon"\ntimer d', "TSR050", "d"],
+    ["let d = -1\ntimer d", "TSR050", "d"],
+    ["let a = 3\ntimer a..a", "TSR041", "a..a"],
+    ["let a = 0.5\ntimer a..3", "TSR045", "a..3"],
+    ["let a = -3\ntimer a..3", "TSR050", "a..3"],
+    ["let d = 1..3\nwait d", "TSR050", "d"],
+  ];
+  for (const [source, code, subject] of cases) {
     for (const seed of SEEDS) {
       const { compiled, snapshot, events } = start(source, seed);
       assert.equal(snapshot.status, "failed", source);
@@ -297,8 +352,11 @@ test("invalid dynamic timer durations fail deterministically before any action",
       );
       const failure = events.at(-1);
       assert.ok(failure?.kind === "runtimeFailure", source);
-      assert.equal(failure.code, code, source);
-      assert.ok(failure.message.startsWith(message), `${source}: ${failure.message}`);
+      assert.equal(
+        located(failure.code, failure.span.start.offset, failure.span.end.offset),
+        expectedAt(source, code, subject),
+        source,
+      );
     }
   }
 });
@@ -318,25 +376,39 @@ test("restored timer display data is validated against its owning instruction", 
     assertCheckpointRejected(candidate, "TSK002");
   }
 
-  const planVariants: Array<(instruction: Record<string, unknown>) => void> = [
-    (instruction) => delete instruction.display,
-    (instruction) => (instruction.display = "loud"),
-    (instruction) => (instruction.unit = "days"),
-    (instruction) => delete instruction.label,
-    (instruction) => (instruction.command = "sleep"),
-    (instruction) => (instruction.extra = true),
+  // Each variant names the rejected field; an unknown key is reported at the instruction itself.
+  const planVariants: ReadonlyArray<
+    readonly [field: string, mutate: (instruction: Record<string, unknown>) => void]
+  > = [
+    ["display", (instruction) => delete instruction.display],
+    ["display", (instruction) => (instruction.display = "loud")],
+    ["unit", (instruction) => (instruction.unit = "days")],
+    ["label", (instruction) => delete instruction.label],
+    ["command", (instruction) => (instruction.command = "sleep")],
+    ["", (instruction) => (instruction.extra = true)],
   ];
-  for (const mutate of planVariants) {
+  for (const [field, mutate] of planVariants) {
     const candidate = jsonRecord(JSON.parse(checkpointJson));
     const instructions = jsonRecord(candidate.plan).instructions;
     assert.ok(Array.isArray(instructions));
-    const instruction = instructions.map(jsonRecord).find((entry) => entry.kind === "wait");
-    assert.ok(instruction !== undefined);
-    mutate(instruction);
-    assert.equal(validateInstructionPlan(candidate.plan).valid, false);
+    const index = instructions.findIndex((entry) => jsonRecord(entry).kind === "wait");
+    mutate(jsonRecord(instructions[index]));
+    const instructionPath = `instructions[${index}]`;
+    const fieldPath = `$.${instructionPath}${field === "" ? "" : `.${field}`}`;
+    assert.ok(
+      validateInstructionPlan(candidate.plan).errors.some(
+        (error) => error.code === "TSC002" && error.path === fieldPath,
+      ),
+      `plan validation must reject ${fieldPath}`,
+    );
+    const checkpointPath = `$.plan.${instructionPath}`;
     assert.throws(
       () => deserializeCheckpoint(JSON.stringify(candidate)),
-      (error: unknown) => error instanceof CheckpointError,
+      (error: unknown) =>
+        error instanceof CheckpointError &&
+        error.info.code === "TSK002" &&
+        (error.info.path === checkpointPath || error.info.path.startsWith(`${checkpointPath}.`)),
+      `checkpoint restore must reject the plan at ${checkpointPath}`,
     );
   }
 });

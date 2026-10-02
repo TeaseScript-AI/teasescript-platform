@@ -29,7 +29,20 @@ The repository currently has no browser-automation dependency and no external pr
 tests, preserving actionable failure information. `npm run format` applies the formatter policy;
 `npm run format:check` verifies it without writing. `npm run lint` applies the [type-evidence policy](LINTING.md);
 `npm run test:lint` type-checks and tests the maintained rule implementation; `npm run knip` checks the selected
-unused-code and dependency categories.
+unused-code and dependency categories. `npm run lint:design` and `npm run test:lint:design`
+check the [Player design contracts](LINTING.md#player-design-lint) and their positive/negative fixtures;
+both are included in `npm run check`.
+Independent pre-test gates and UI checks/builds run concurrently through `tools/run-parallel.mjs`.
+TypeScript compilation precedes UI work; compiled tests run only after all builds pass. Each command's output is
+printed together, including warnings. A failure stops the group and subsequent stages; SIGINT/SIGTERM also terminate
+child process groups, escalating after a grace period. `npm run test:verification` checks scheduling, diagnostics and
+process cleanup (POSIX cleanup assertions run on CI; Windows uses `taskkill /t /f`).
+
+Use `VERIFY_SERIAL=1 npm run check` for serial diagnosis or constrained machines; it runs the same commands.
+No additional verification caches are enabled. Standard checks omit UI source maps because no configured check
+consumes them; direct `npm run build` and `npm test` runs retain source maps. UI builds write separate `dist`
+subdirectories, Vue typechecking emits nothing, and the clean-build regression uses an isolated temporary directory.
+
 `npm run test:full-output` and `npm run check:full-output`
 are diagnostic reruns only when compact output is insufficient for a failure or
 specific investigation. Do not run a normal and full-output variant by default
@@ -42,10 +55,6 @@ and real machine-checkable boundaries. They must not freeze living documentation
 prose, headings, routing wording, lifecycle wording, or equivalent Markdown
 content as required string assertions. Documentation correctness and ownership
 remain implementation, review, and explicitly assigned audit responsibilities.
-
-Use the smallest representative bounded fixture that proves the invariant,
-and reserve maximum-size or worst-form fixtures for cases where size or form is
-itself under test.
 
 The ChatGPT project-settings prompt has an owner-confirmed hard acceptance limit
 of 8,000 characters. CI may enforce that quantitative external interface
@@ -71,6 +80,34 @@ build/tests, while strict documentation-only changes retain exact candidate
 identity verification without executing Node. The normal pull-request CI starts
 again after publication and still runs the complete canonical command on the
 published commit.
+
+## Test admission and consolidation
+
+Give each maintained test family a distinct evidence obligation: accepted behavior, a real public/trusted boundary,
+confirmed regression, deterministic invariant, or material browser-only risk. Choose the cheapest layer that proves it;
+keep representative source-to-runtime integration where isolated tests cannot prove the connection. Browser tests own
+rendering, focus, input, scrolling and accessibility semantics, not repeated runtime normalization/checkpoint matrices.
+
+Use the smallest representative fixture; retain large inputs when scale itself caused the defect. Separate expensive
+setup from the boundary under test when a small integration case plus direct boundary evidence proves both obligations.
+Measure changed suites and record revision, environment, command and timings in the issue/PR rather than imposing local
+measurements as permanent limits.
+
+Before removing or consolidating a family, record its obligation and remaining evidence in the issue/PR. Delete checks
+that only freeze provisional geometry, development-fixture content, private implementation details, or temporary
+incompleteness (for example an accepted or intended capability being absent, unsuggested, disabled, or represented by a
+placeholder); preserve genuine regressions and browser risks exercised *through* fixtures. Replace numeric tuning
+assertions with observable behavior where possible. A POC check needs reassessment when its experiment changes or ends,
+not automatic repair to preserve an obsolete expectation. Repeated input/viewport cases need distinct failure modes, not
+merely different values.
+
+Tests do not establish product policy. Each test must identify the desirable behavior that would regress if it failed;
+"the code currently does this" is not enough. Derive expected values from specification or independent reasoning where
+possible. A value captured from the current implementation is acceptable only as an explicitly scoped regression oracle
+and does not by itself make that value a broader product requirement. For example, a numeric oracle tied to a current
+algorithm, such as a plan-size baseline, may detect regression without making that number a project-wide accessibility,
+performance, or compatibility requirement; identify that scope explicitly. The baseline may be reviewed and updated when
+an intentional implementation change legitimately changes it.
 
 ## Test layers
 
@@ -102,9 +139,15 @@ End-to-end testing does not replace focused unit, validator, and invariant tests
 ## Player browser and visual verification
 
 Use focused unit tests for deterministic presentation logic and the repository's local Chromium smoke route for changed
-browser behavior, including layout, focus, input, scrolling, overlays, and accessibility state. The current smoke route
-is a dependency-free development check outside `npm run check`; it is not a final cross-browser or production-host E2E
-suite.
+browser behavior, including layout, focus, input, scrolling, overlays, and accessibility state. The existing Chromium
+DevTools smoke route has no browser-automation package dependency; it plays the repository demo end to end (see
+[Local browser smoke](#local-browser-smoke-and-future-host-e2e-gate)). For the development preview, run
+`npm run test:player:preview -- <preview-url>` against a running `npm run dev:player` server; it requires
+`playwright-cli` on `PATH` and an available Chromium browser. Both run outside `npm run check` and are not a final
+cross-browser or production-host E2E suite. Preview groups use fresh browser contexts. On failure the runner reports a
+retained scratch directory with a screenshot and Playwright trace for the failing group; delete it after diagnosis.
+`npm test` separately checks that the default Player build does not statically load development preview content, and
+`tests/player-demo.test.ts` plays the repository demo to its exit through the runtime adapter and media device.
 
 After every visible UI change, the implementer must also open the affected flow with interactive browser tooling
 (computer use where available) and inspect the changed state plus its immediate responsive/interaction neighbors. This
@@ -203,13 +246,13 @@ A matrix or equivalent model should:
   boundaries when those boundaries are relevant;
 - permit later consolidation without losing any unique evidence obligation.
 
-Unsupported or out-of-scope combinations do not automatically require
-executable cases. For obligations included in the bounded coverage model,
-accepted behavior and required rejection through a real supported or trusted
-boundary require executable evidence. When a real boundary must reject an
-otherwise unsupported composition, classify that cell as a rejected obligation
-and test it as such. Other unsupported or out-of-scope cells may remain
-classified but unexecuted.
+Unsupported or out-of-scope combinations do not automatically require executable cases. For obligations included in the
+bounded coverage model, accepted behavior and required rejection through a real supported or trusted boundary require
+executable evidence. When accepted behavior or a real validation boundary requires durable rejection of an otherwise
+unsupported composition, classify that cell as a rejected obligation and test it as such. Behavior that is merely not
+yet implemented is not a rejected obligation; any test for it follows
+[test admission](#test-admission-and-consolidation). Other unsupported or out-of-scope cells may remain classified but
+unexecuted.
 
 An additive evidence phase may temporarily retain overlapping regressions while
 the behavior space is being mapped. Once an independent check confirms that the
@@ -287,7 +330,11 @@ tests/property/
 
 `tests/property.test.ts` is a root test entrypoint, so normal compiled-test
 discovery executes the required 128-case campaign through `npm run check`.
-The replay implementation imports only public exports from `src/index.ts`.
+The fixed operation, rejected-completion, checkpoint, and malformed-input
+fixtures consume no randomness, so they run once each in that entrypoint and
+before the campaign in a full CLI run; the generated cases cover same-seed
+determinism and source fuzzing. The replay implementation imports only public
+exports from `src/index.ts`.
 
 ### Commands and budgets
 
@@ -308,9 +355,11 @@ unbounded generated inputs.
 The command accepts `--seed`, `--runs`, and optional zero-based `--case`.
 `--case` replays one generated case from the stated campaign on the same
 repository revision and campaign implementation. The small internal property
-ordering is not a compatibility contract. Every failure reports seed, run
-count, case number, property ID, boundary, property-specific context, the
-generated source when applicable, cause, and a working replay command such as:
+ordering is not a compatibility contract. A fixed-fixture failure reports its
+property ID, boundary, variant, and cause; `--case` skips the fixed fixtures.
+Every generated-case failure reports seed, run count, case number, property ID,
+boundary, property-specific context, the generated source when applicable,
+cause, and a working replay command such as:
 
 ```shell
 npm run test:property -- --seed 12345 --runs 250 --case 17
@@ -462,15 +511,18 @@ The implemented ADR 0018 interaction slice covers button, text, number, unlabell
 and numeric-labelled choice through both direct validated plans and real compact source. Tests cover exact parser spans
 and recovery, V30 comma-newline continuation and enclosing-delimiter composition for compact `choose`, protected prelude
 names, choice domains and duplicates, requesting-speaker capture, prepared UI provenance while preparation state exists,
-intrinsic post-cleanup settlement checks, source-order evaluation, sequential blocking expressions, function arguments, root/function checkpoint
-resume, typed completion, transcript behavior, downstream guard delegation, and atomic rejection. The single-use handoff
-regressions prove that a newer retained settlement cannot remove destination/result mismatch rejection before consumption,
-that the handoff disappears immediately after the first successful consume or discard instruction, and that later ordinary
-state no longer carries interaction provenance. Non-canonical branches, loops, second actions, unrelated writers, duplicate
-producers, and independent targets inside the handoff are rejected locally rather than supported through global
-interaction-result liveness. Current interaction-guard cases remain implementation-boundary regressions for the
-provisional POC policies and structural separation; they are not source-capacity evidence and must move with later
-evidence-based reassessment. Every rejected completion compares
+intrinsic post-cleanup settlement checks, source-order evaluation, sequential blocking expressions, function arguments,
+root/function checkpoint resume, typed completion, transcript behavior, located diagnostics for compiled interaction
+data that plan validation rejects, and atomic rejection. The single-use handoff tests cover one row per accepted handoff
+category and prove that the handoff must agree with its settlement on owning and continuation positions, owner,
+destination, and result, that a newer retained settlement cannot remove destination/result mismatch rejection before
+consumption, that the handoff disappears immediately after the first successful consume or discard instruction, and that
+later ordinary state no longer carries interaction provenance. Handoff shapes that would let a validated plan reach a
+rejected snapshot (a second blocking action, a missing or different cleanup, a second producer, an independent entry)
+are rejected locally rather than supported through global interaction-result liveness; one explicitly scoped regression
+row covers the consume requirement as the fixed local shape analyses it. Current interaction-guard cases remain
+implementation-boundary regressions for the provisional POC policies and structural separation; they are not
+source-capacity evidence and must move with later evidence-based reassessment. Every rejected completion compares
 the complete canonical snapshot so RNG state, event/action counters, destinations, ownership, and continuation cannot
 change unnoticed. The local playground Player slice adds deterministic controller coverage for active-presentation
 inspection, all four interaction completions and rejections, pacing skip, explicit time, and checkpoint reconstruction.
@@ -499,24 +551,34 @@ Media coverage starts with real `.tease` source and exercises accepted and rejec
 blocking and asynchronous waits including terminal ones, bounded and indefinite repetition, seeks and endpoint cues,
 `elapsed` excluding pauses and stalls, one-late versus many-small progress observations, same-time ordering across
 media and timers, cue blocks with self-handles, Stage replacement, pacing barriers, playback projections, JSON
-checkpoint/restore equivalence with a simulated Player, and rejection of malformed media state. Browser Stage
-rendering, audible playback, and Start/Continue/retry verification belong to #446.
+checkpoint/restore equivalence with a simulated Player, and rejection of malformed media state.
+`tests/player-media-device.test.ts` drives the Player's media device against real sessions with deterministic element
+stand-ins: single load reports, stalls, range repetition and terminal stop, pause/resume/seek repositioning, refused
+playback and retry, failed video and unavailable sources, and restore reconnection without repeated cues. The preview
+browser checks cover Start activation, the runtime Stage image, refused-audio retry, and actually played audio.
 
 ## Local browser smoke and future host E2E gate
 
-The local Standard Player POC has a reproducible Chromium smoke route after `npm run build`:
+The playground and the Player's repository demo have a reproducible Chromium smoke route after `npm run build`:
 
 ```shell
 node tools/player-browser-smoke.mjs
 ```
 
-It drives the real playground and runtime-backed Vue Player at representative desktop
-and 390 × 844 CSS-pixel viewports. The Vue runtime scenario covers interactions, pacing, focus, transcript chronology,
-checkpoint/restore, and responsive behavior. The development-only route
-`/player/?fixture=transcript-stress` retains 2,000 entries while asserting bounded rendered DOM, variable-height
-measurement, stable keyed prepend/append anchoring, pinned and scroll-away resize behavior, and
-follow-latest/scroll-away return-to-latest behavior. An unavailable Chromium executable is an explicit skip; an
-available browser must pass these checks.
+It covers the technical playground and plays `examples/demo/` on the built `/player/` route with trusted input: Start
+gating, rendered Stage images, the rendered speaker avatar and letter fallback, runtime timers in the rail, audible
+playback, a script pause reaching the playing element, pacing skips from a press on unused Player space or Space in the
+empty composer but not from a Player control, message text or Space while the composer holds text, a press held past
+one message's pacing that must not skip the next message's pacing, Finish ending the session, and a narrow viewport
+that keeps the first question's input visible. Development preview presentation is covered by the [Player browser
+verification route](#player-browser-and-visual-verification). `CHROMIUM_BIN` is tried before the `/usr/bin` Chromium
+paths; an unusable value falls back to them. An unavailable Chromium executable is an explicit skip; an available
+browser must pass the configured smoke checks.
+
+The Monaco editor has a separate route outside `npm run check`: `npm run test:editor-browser` builds the editor and runs
+`tools/editor-browser-smoke.mjs`. Chromium may resolve only the local preview, so a build that needs remote code to
+start fails, and the editor must become ready with an accessible name. The script uses `CHROMIUM_BIN` (an unusable value
+fails), `/usr/bin`, or a Playwright Chromium; without a browser it reports an explicit skip.
 
 Production browser E2E coverage becomes required after the cross-origin host shell and player exist. It should then
 include:

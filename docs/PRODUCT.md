@@ -13,7 +13,7 @@ ideas within the platform's accepted execution and capability boundaries. The
 support that progression in the language and editor.
 
 The current implementation focus includes the deterministic TypeScript language/runtime core, the local development
-playground, and the production-direction Vue Player foundation. Laravel, PostgreSQL, accounts, publishing, and
+playground, and the Vue Player. Laravel, PostgreSQL, accounts, publishing, and
 production hosting are later milestones.
 
 ## Terminology

@@ -73,13 +73,17 @@ test("parameters are deep copies of caller lists, objects, and sets", () => {
       "let setValue = set[1, 2]",
       "function mutate(listInput, objectInput, setInput) {",
       "  listInput[0][0] = 9",
-      "  objectInput.nested[0] = 9",
+      "  objectInput.nested[0] = 8",
       "  setInput.add(3)",
+      '  return "${listInput[0][0]}:${objectInput.nested[0]}:${setInput.contains(3)}"',
       "}",
-      "mutate(listValue, objectValue, setValue)",
+      "say mutate(listValue, objectValue, setValue)",
     ].join("\n"),
   );
 
+  // The callee changed its copies, so the unchanged caller values below are not merely a failed call.
+  assert.equal(result.snapshot.status, "halted");
+  assert.deepEqual(sayTexts(result), ["9:8:true"]);
   assert.deepEqual(rootValue(result.snapshot, "listValue"), {
     kind: "list",
     items: [{ kind: "list", items: [1] }],
@@ -367,31 +371,41 @@ test("keeps a prepared collection receiver attached through argument side effect
 });
 
 test("fails an invalid prepared receiver before evaluating a user-call argument", () => {
-  const result = runSource(
-    [
-      "let order = []",
-      "let scalar = 1",
-      'function argument { order.add("argument")\nreturn 2 }',
-      "scalar.add(argument())",
-    ].join("\n"),
-  );
+  const source = [
+    "let order = []",
+    "let scalar = 1",
+    'function argument { order.add("argument")\nreturn 2 }',
+    "scalar.add(argument())",
+  ].join("\n");
+  const result = runSource(source);
+  const method = source.indexOf("scalar.add");
 
   assert.equal(result.snapshot.status, "failed");
+  assert.equal(result.snapshot.failure?.code, "TSR016");
+  assert.deepEqual(
+    [result.snapshot.failure.span.start.offset, result.snapshot.failure.span.end.offset],
+    [method, method + "scalar.add".length],
+  );
   // EVIDENCE: source fixture initializes order as a list before the failing function call.
   assert.deepEqual((rootValue(result.snapshot, "order") as SerializableRuntimeList).items, []);
 });
 
 test("fails an earlier ordinary expression before a later user-call side effect", () => {
-  const result = runSource(
-    [
-      "let order = []",
-      'function later { order.add("later")\nreturn 1 }',
-      "let values = [randomInteger(1..1), later()]",
-    ].join("\n"),
-  );
+  const source = [
+    "let order = []",
+    'function later { order.add("later")\nreturn 1 }',
+    "let values = [randomInteger(1..1), later()]",
+  ].join("\n");
+  const result = runSource(source);
+  const call = source.indexOf("randomInteger(1..1)");
 
   assert.equal(result.snapshot.status, "failed");
-  // EVIDENCE: source fixture initializes order as a list before the failing recursive call.
+  assert.equal(result.snapshot.failure?.code, "TSR012");
+  assert.deepEqual(
+    [result.snapshot.failure.span.start.offset, result.snapshot.failure.span.end.offset],
+    [call, call + "randomInteger(1..1)".length],
+  );
+  // EVIDENCE: source fixture initializes order as a list before the failing built-in call.
   assert.deepEqual((rootValue(result.snapshot, "order") as SerializableRuntimeList).items, []);
 });
 

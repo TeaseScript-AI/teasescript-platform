@@ -1,3 +1,4 @@
+import { isMessagePresentationOption } from "./message-presentation.js";
 import { parseChild, runParse, type ParseTask } from "./parse-continuation.js";
 import type {
   AssignmentStatement,
@@ -68,6 +69,13 @@ export interface ParseResult {
   readonly program: Program;
   readonly diagnostics: readonly Diagnostic[];
 }
+
+// Commands that #parseStatement dispatches by name and that have no expression form.
+const statementOnlyCommands: ReadonlySet<string> = new Set([
+  "showButton",
+  "showImage",
+  "hideImage",
+]);
 
 const parserDiagnosticCode = {
   expectedStatement: "TSP001",
@@ -267,6 +275,33 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
+    let background: Expression | null = null;
+    if (this.#match(TokenKind.Comma)) {
+      const separatorSpan = this.#previous().span;
+      this.#skipContinuationNewlines();
+      if (!this.#checkIdentifier("background") || this.#peek(1).kind !== TokenKind.Colon) {
+        this.#reportSpan(
+          parserDiagnosticCode.unsupportedInteractionForm,
+          "Expected background: colour after the button text.",
+          separatorSpan,
+        );
+        this.#synchronizeStatement();
+        return null;
+      }
+      this.#advance();
+      this.#advance();
+      background = runParse(this.#parseColonValueTask(false));
+      if (background === null) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedInteractionText,
+          "Expected a button background colour.",
+        );
+        // A statement at the start of a continued line is kept, as for choice values.
+        if (this.#previous().kind === TokenKind.Newline && this.#atStatementStart())
+          this.#recoveredAtStatementBoundary = true;
+        return null;
+      }
+    }
     if (this.#check(TokenKind.KeywordAs)) {
       this.#reportSpan(
         parserDiagnosticCode.unsupportedInteractionForm,
@@ -288,7 +323,8 @@ class Parser {
       asSpan,
       speaker,
       label,
-      span: spanFrom(command.span, label.span),
+      background,
+      span: spanFrom(command.span, background?.span ?? label.span),
     });
   }
 
@@ -340,6 +376,7 @@ class Parser {
         lastSpan = property.span;
       }
       if (
+        property !== null &&
         !this.#check(TokenKind.Newline) &&
         !this.#check(TokenKind.RightBrace) &&
         !this.#check(TokenKind.EndOfFile)
@@ -377,13 +414,14 @@ class Parser {
       this.#synchronizeProperty();
       return null;
     }
-    const value = this.#parseExpression();
+    const value = runParse(this.#parseColonValueTask(false));
     if (value === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedString,
         "Expected a string for the speaker property.",
       );
-      this.#synchronizeProperty();
+      // At the start of a continued line, the declaration recovers at the token left there.
+      if (this.#previous().kind !== TokenKind.Newline) this.#synchronizeProperty();
       return null;
     }
     return Object.freeze({
@@ -495,10 +533,10 @@ class Parser {
           break;
         }
         const name = this.#identifier(this.#advance());
-        if (!["position", "align", "color", "background", "font"].includes(name.name))
+        if (!isMessagePresentationOption(mode.lexeme === "prose" ? "prose" : "bubble", name.name))
           this.#reportInsertion(
             parserDiagnosticCode.expectedPropertyName,
-            `Unknown presentation option '${name.name}'.`,
+            `Unknown ${mode.lexeme} presentation option '${name.name}'.`,
           );
         if (properties.some((property) => property.name.name === name.name))
           this.#reportInsertion(
@@ -512,8 +550,7 @@ class Parser {
           );
           break;
         }
-        this.#skipContinuationNewlines();
-        const value = this.#parseExpression();
+        const value = runParse(this.#parseColonValueTask(true));
         if (value === null) break;
         properties.push({
           kind: "objectProperty",
@@ -901,8 +938,7 @@ class Parser {
       } else {
         const name = this.#identifier(this.#advance());
         this.#advance();
-        this.#skipContinuationNewlines();
-        const value = yield* parseChild(this.#parseRequiredExpressionTask());
+        const value = yield* parseChild(this.#parseColonValueTask(true));
         if (value === null) {
           valid = false;
           break;
@@ -1609,6 +1645,45 @@ class Parser {
     return expression;
   }
 
+  /**
+   * Parses the value after a `:` that requires one. Newlines after the colon continue the statement unless the next
+   * line plainly starts something else; the value is then missing, and the token stays for the enclosing recovery.
+   */
+  *#parseColonValueTask(required: boolean): ParseTask<Expression | null> {
+    if (this.#check(TokenKind.Newline)) {
+      this.#skipContinuationNewlines();
+      if (this.#startsNonValueLine()) {
+        if (required) {
+          this.#reportInsertion(parserDiagnosticCode.expectedExpression, "Expected an expression.");
+        }
+        return null;
+      }
+    }
+    return yield* parseChild(required ? this.#parseRequiredExpressionTask() : this.#parseOr());
+  }
+
+  /** A statement, a property or choice key, a closing delimiter, or the end of the file. */
+  #startsNonValueLine(): boolean {
+    const token = this.#peek();
+    const next = this.#peek(1).kind;
+    if (
+      (isPropertyName(token) || token.kind === TokenKind.NumberLiteral) &&
+      next === TokenKind.Colon
+    )
+      return true;
+    switch (token.kind) {
+      case TokenKind.EndOfFile:
+      case TokenKind.RightBrace:
+      case TokenKind.RightParenthesis:
+      case TokenKind.RightBracket:
+        return true;
+      case TokenKind.KeywordSpeaker:
+        return next === TokenKind.Identifier;
+      default:
+        return this.#atStatementStart();
+    }
+  }
+
   *#parseOr(): ParseTask<Expression | null> {
     let expression = yield* parseChild(this.#parseAnd());
     while (expression !== null && this.#match(TokenKind.KeywordOr)) {
@@ -1859,8 +1934,7 @@ class Parser {
       if (isPropertyName(this.#peek()) && this.#peek(1).kind === TokenKind.Colon) {
         const name = this.#identifier(this.#advance());
         this.#advance();
-        this.#skipContinuationNewlines();
-        const value = yield* parseChild(this.#parseRequiredExpressionTask());
+        const value = yield* parseChild(this.#parseColonValueTask(true));
         if (value !== null) {
           argument = Object.freeze({
             kind: "namedArgument",
@@ -2079,7 +2153,9 @@ class Parser {
         this.#advance();
         colonSpan = copySpan(this.#previous().span);
       }
-      const value = yield* parseChild(this.#parseOr());
+      const value = yield* parseChild(
+        label === null ? this.#parseOr() : this.#parseColonValueTask(false),
+      );
       if (value === null) {
         missingChoiceOptionWasReported = true;
         this.#reportInsertion(
@@ -2088,7 +2164,7 @@ class Parser {
             ? "Expected at least one choice option."
             : "Expected a choice option expression after ':'.",
         );
-        if (isStatementStart(this.#peek().kind)) {
+        if (this.#atStatementStart()) {
           this.#recoveredAtStatementBoundary = true;
         }
         break;
@@ -2110,6 +2186,7 @@ class Parser {
       if (separatorSpan === null) {
         if (
           !this.#isInteractionChoiceTerminator() &&
+          !this.#recoveredAtStatementBoundary &&
           !(this.#inCuePosition && this.#check(TokenKind.LeftBrace))
         ) {
           if (this.#check(TokenKind.KeywordAs)) {
@@ -2263,8 +2340,7 @@ class Parser {
         this.#synchronizeDelimited(TokenKind.RightBrace);
         break;
       }
-      this.#skipContinuationNewlines();
-      const value = yield* parseChild(this.#parseRequiredExpressionTask());
+      const value = yield* parseChild(this.#parseColonValueTask(true));
       if (value === null) break;
       properties.push(
         Object.freeze({
@@ -2515,7 +2591,16 @@ class Parser {
   }
 
   #isRecoveredTopLevelStatement(): boolean {
-    return isStatementStart(this.#peek().kind) && this.#peek(1).kind !== TokenKind.Colon;
+    return this.#atStatementStart() && this.#peek(1).kind !== TokenKind.Colon;
+  }
+
+  /** A statement keyword, or a protected statement-only command, which can never be a value. */
+  #atStatementStart(): boolean {
+    const token = this.#peek();
+    return (
+      isStatementStart(token.kind) ||
+      (token.kind === TokenKind.Identifier && statementOnlyCommands.has(token.lexeme))
+    );
   }
 
   #skipNewlines(): void {

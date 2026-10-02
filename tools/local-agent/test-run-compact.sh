@@ -8,9 +8,13 @@ trap 'rm -rf "$tmp"' EXIT
 
 success_output=$(
   "$runner" --label sample-success --log "$tmp/success.log" -- \
-    bash -c 'printf "hidden success noise\n"'
+    bash -c 'printf "hidden success noise\n"; printf "hidden success stderr noise\n" >&2' \
+    2>"$tmp/success.stderr"
 )
-[[ "$success_output" == 'sample-success: PASS' ]]
+[[ -n $success_output && $success_output != *$'\n'* ]]
+[[ $success_output == *sample-success* && $success_output == *PASS* ]]
+if [[ $success_output == *'hidden success'* ]]; then exit 1; fi
+if grep -q 'hidden success' "$tmp/success.stderr"; then exit 1; fi
 [[ ! -e "$tmp/success.log" ]]
 
 set +e
@@ -21,22 +25,29 @@ status=$?
 set -e
 [[ $status -eq 7 ]]
 [[ ! -s "$tmp/failure.stdout" ]]
-grep -q '^sample-failure: FAIL (exit 7)$' "$tmp/failure.stderr"
+grep -F sample-failure "$tmp/failure.stderr" | grep -F FAIL | grep -w 7 >/dev/null
 grep -q '^command:' "$tmp/failure.stderr"
 grep -q 'diagnostic line' "$tmp/failure.stderr"
 [[ -f "$tmp/failure.log" ]]
 
+# The payload is read from a file so the printed command cannot contain the middle sentinel.
+printf 'HEAD-%s%s%s-TAIL' "$(printf 'x%.0s' {1..300})" MIDDLE-SENTINEL "$(printf 'y%.0s' {1..300})" \
+  >"$tmp/large.payload"
 set +e
 "$runner" --label large-failure --log "$tmp/large.log" --max-output-bytes 120 -- \
-  python3 -c 'import sys; print("HEAD-" + "a" * 300 + "-TAIL"); sys.exit(9)' \
+  bash -c 'cat "$1"; exit 9' large-failure "$tmp/large.payload" \
   >"$tmp/large.stdout" 2>"$tmp/large.stderr"
 status=$?
 set -e
 [[ $status -eq 9 ]]
+[[ ! -s "$tmp/large.stdout" ]]
 grep -q 'output truncated' "$tmp/large.stderr"
 grep -q 'complete log:' "$tmp/large.stderr"
-grep -q 'HEAD-' "$tmp/large.stderr"
-grep -q -- '-TAIL' "$tmp/large.stderr"
-[[ $(wc -c <"$tmp/large.log") -gt 120 ]]
+if grep -q 'MIDDLE-SENTINEL' "$tmp/large.stderr"; then exit 1; fi
+cmp -s "$tmp/large.payload" "$tmp/large.log"
+excerpt_head=$(grep -o 'HEAD-x*' "$tmp/large.stderr")
+excerpt_tail=$(grep -o 'y*-TAIL' "$tmp/large.stderr")
+[[ -n "$excerpt_head" && -n "$excerpt_tail" ]]
+((${#excerpt_head} + ${#excerpt_tail} <= 120))
 
 printf 'run-compact: PASS\n'

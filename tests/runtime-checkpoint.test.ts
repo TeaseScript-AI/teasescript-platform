@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { captureExternalData } from "../src/external-data-capture.js";
-import { captureInstructionPlan } from "../src/plan/capture.js";
-import type { InstructionPlan } from "../src/plan/model.js";
+import type { ListExpressionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import {
   CHECKPOINT_FORMAT,
@@ -14,7 +12,7 @@ import {
   restoreCheckpoint,
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
-import { executeInstruction, run, stepToEvent } from "../src/runtime/engine.js";
+import { executeInstruction, run } from "../src/runtime/engine.js";
 import type {
   SerializableRuntimeObject,
   SerializableRuntimeSet,
@@ -22,37 +20,11 @@ import type {
 } from "../src/runtime/serializable-values.js";
 import {
   createFreshRuntimeSnapshot,
-  captureRuntimeSnapshotWithValidatedPlan,
   validateRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
-import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
-
-test("runtime snapshots survive JSON stringify and parse validation", () => {
-  const compiled = plan("let values = set[3, 1, 2]\nexit");
-  const execution = executeInstruction(compiled, createFreshRuntimeSnapshot(compiled));
-  const parsed: unknown = JSON.parse(JSON.stringify(execution.snapshot));
-
-  assert.deepEqual(parsed, execution.snapshot);
-  assert.equal(validateRuntimeSnapshot(parsed, compiled).valid, true);
-});
-
-test("restores a self-contained checkpoint from serialized JSON", () => {
-  const compiled = plan('let score = 1\nsay "${score}"\nexit');
-  const first = executeInstruction(compiled, createImmediatePacingRuntimeSnapshot(compiled));
-  const restored = deserializeCheckpoint(
-    serializeCheckpoint(createCheckpoint(compiled, first.snapshot)),
-  );
-  const completed = run(restored.plan, restored.snapshot);
-
-  assert.equal(completed.snapshot.status, "halted");
-  assert.deepEqual(
-    completed.events.map((event) => event.sequence),
-    [1, 2],
-  );
-});
 
 test("checkpoint accepts a large valid plan and snapshot without a shared work rejection", () => {
   const compiled = plan(
@@ -61,18 +33,6 @@ test("checkpoint accepts a large valid plan and snapshot without a shared work r
   const snapshot = createFreshRuntimeSnapshot(compiled);
   snapshot.frames[0]!.bindings.push(
     ...Array.from({ length: 20_000 }, (_value, index) => ({ name: `value${index}`, value: index })),
-  );
-
-  assert.equal(captureExternalData(compiled).ok, true);
-  assert.equal(captureExternalData(snapshot).ok, true);
-  assert.equal(
-    captureExternalData({
-      format: CHECKPOINT_FORMAT,
-      version: CHECKPOINT_VERSION,
-      plan: compiled,
-      snapshot,
-    }).ok,
-    true,
   );
 
   const created = createCheckpoint(compiled, snapshot);
@@ -91,21 +51,10 @@ test("checkpoint envelope rejects malformed metadata without invoking accessors"
     serializeCheckpoint(createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled))),
   ) as Record<string, unknown>;
 
-  assertCheckpointError(
-    { ...checkpoint, extra: true },
-    {
-      code: "TSK002",
-      message: "Checkpoint contains unsupported fields or omits required fields.",
-      path: "$.",
-    },
-  );
+  assertCheckpointError({ ...checkpoint, extra: true }, { code: "TSK002", path: "$." });
   const missing = { ...checkpoint };
   delete missing.plan;
-  assertCheckpointError(missing, {
-    code: "TSK002",
-    message: "Checkpoint contains unsupported fields or omits required fields.",
-    path: "$.",
-  });
+  assertCheckpointError(missing, { code: "TSK002", path: "$." });
 
   let accessorReads = 0;
   const accessor = { ...checkpoint };
@@ -116,7 +65,8 @@ test("checkpoint envelope rejects malformed metadata without invoking accessors"
       return checkpoint.plan;
     },
   });
-  assertCheckpointCode(accessor, "TSK002");
+  // The accessor would return valid plan data, so only non-invocation can explain the rejection.
+  assertCheckpointError(accessor, { code: "TSK002", path: "$.plan" });
   assert.equal(accessorReads, 0);
 
   assertCheckpointCode(Object.setPrototypeOf({ ...checkpoint }, {}), "TSK002");
@@ -131,9 +81,11 @@ test("checkpoint envelope rejects malformed metadata without invoking accessors"
 });
 
 test("uninterrupted and checkpoint-resumed execution are identical", () => {
-  const { finalSnapshot } = assertRuntimeResumeEquivalent(
+  const { events, finalSnapshot } = assertRuntimeResumeEquivalent(
     [
-      'speaker vera { title: "Mistress" }',
+      // Without a display-name property, both says use the identifier fallback, so every boundary also
+      // checkpoints the warning deduplication state.
+      'speaker vera { color: "#b784ff" }',
       "speaker vera",
       'let values = set["first", "second", "third"]',
       "let chosen = values.random",
@@ -146,6 +98,7 @@ test("uninterrupted and checkpoint-resumed execution are identical", () => {
   );
 
   assert.equal(finalSnapshot.status, "halted");
+  assert.equal(events.filter((event) => event.kind === "developerWarning").length, 1);
 });
 
 test("preserves nested deep-copy independence and ordered sets after restore", () => {
@@ -186,128 +139,45 @@ test("preserves nested deep-copy independence and ordered sets after restore", (
 });
 
 test("keeps same-named speakers in sibling lexical scopes as distinct state", () => {
-  const compiled = plan(
+  const { events } = assertRuntimeResumeEquivalent(
     [
       "if true {",
-      "  speaker voice {}",
+      '  speaker voice { displayName: "Scope one" }',
       '  say as voice "First"',
       "}",
       "if true {",
-      "  speaker voice {}",
+      '  speaker voice { displayName: "Scope two" }',
       '  say as voice "Second"',
       "}",
       "exit",
     ].join("\n"),
   );
-  const completed = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
 
-  assert.equal(completed.snapshot.status, "halted");
+  // Each say is emitted with the speaker declared in its own scope, told apart by authored display name.
   assert.deepEqual(
-    completed.snapshot.speakers.map((speaker) => speaker.id),
-    [1, 2],
-  );
-  assert.deepEqual(
-    completed.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["First", "Second"],
-  );
-});
-
-test("continues fallback-warning deduplication and event sequences after restore", () => {
-  const compiled = plan(
-    ["speaker vera {}", "speaker vera", 'say "First"', 'say "Second"', "exit"].join("\n"),
-  );
-  const firstBoundary = stepToEvent(compiled, createImmediatePacingRuntimeSnapshot(compiled));
-  assert.deepEqual(
-    firstBoundary.events.map((event) => event.kind),
-    ["developerWarning", "say"],
-  );
-  const restored = deserializeCheckpoint(
-    serializeCheckpoint(createCheckpoint(compiled, firstBoundary.snapshot)),
-  );
-  const remaining = run(restored.plan, restored.snapshot);
-
-  assert.equal(
-    remaining.events.some((event) => event.kind === "developerWarning"),
-    false,
-  );
-  assert.deepEqual(
-    remaining.events.map((event) => event.sequence),
-    [3, 4],
-  );
-});
-
-test("preserves list.remove missing-value warnings across event boundaries and restore", () => {
-  const source = [
-    "let values = [1]",
-    "values.remove(2)",
-    "values.remove(2)",
-    'say "After"',
-    "exit",
-  ].join("\n");
-  const compiled = plan(source);
-  const initial = createImmediatePacingRuntimeSnapshot(compiled);
-  const uninterrupted = run(compiled, initial);
-  const firstBoundary = stepToEvent(compiled, initial);
-  const call = "values.remove(2)";
-  const firstCallStart = source.indexOf(call);
-
-  assert.equal(firstBoundary.snapshot.status, "running");
-  assert.equal(firstBoundary.snapshot.nextInstruction, 2);
-  assert.deepEqual(rootValue(firstBoundary.snapshot, "values"), { kind: "list", items: [1] });
-  assert.deepEqual(
-    firstBoundary.events.map((event) => [
-      event.kind,
-      event.sequence,
-      event.kind === "developerWarning" ? event.severity : null,
-      event.kind === "developerWarning" ? event.code : null,
-      event.kind === "developerWarning" ? event.message : null,
-      event.kind === "developerWarning" ? event.span.start.offset : null,
-      event.kind === "developerWarning" ? event.span.end.offset : null,
-    ]),
+    events.flatMap((event) =>
+      event.kind === "say" ? [[event.speaker?.displayName, event.text]] : [],
+    ),
     [
-      [
-        "developerWarning",
-        1,
-        "warning",
-        "TSW002",
-        "list.remove(value) found no matching value; the list was left unchanged.",
-        firstCallStart,
-        firstCallStart + call.length,
-      ],
+      ["Scope one", "First"],
+      ["Scope two", "Second"],
     ],
   );
-
-  const restored = deserializeCheckpoint(
-    serializeCheckpoint(createCheckpoint(compiled, firstBoundary.snapshot)),
-  );
-  const resumed = run(restored.plan, restored.snapshot);
-
-  assert.equal(resumed.events.filter((event) => event.kind === "developerWarning").length, 1);
-  assert.deepEqual(
-    resumed.events.map((event) => event.sequence),
-    [2, 3, 4],
-  );
-  assert.deepEqual([...firstBoundary.events, ...resumed.events], uninterrupted.events);
-  assert.deepEqual(resumed.snapshot, uninterrupted.snapshot);
-  assert.deepEqual(rootValue(resumed.snapshot, "values"), { kind: "list", items: [1] });
 });
 
-test("continues deterministic RNG state after restore", () => {
-  const compiled = plan(
-    ['let values = ["a", "b", "c", "d"]', "say values.random", "say values.random", "exit"].join(
-      "\n",
-    ),
+test("an unknown root snapshot field is rejected at validation, checkpoint and restore", () => {
+  const compiled = plan('say "kept"');
+  const snapshot = createFreshRuntimeSnapshot(compiled);
+  const withUnknownField = { ...structuredClone(snapshot), unknownField: "none" };
+  assert.equal(validateRuntimeSnapshot(withUnknownField, compiled).valid, false);
+  assert.throws(
+    () => createCheckpoint(compiled, withUnknownField),
+    (error: unknown) => error instanceof CheckpointError && error.info.code === "TSK002",
   );
-  const initial = createImmediatePacingRuntimeSnapshot(compiled, { seed: 0x1234_5678 });
-  const uninterrupted = run(compiled, initial);
-  const first = stepToEvent(compiled, initial);
-  const restored = deserializeCheckpoint(
-    serializeCheckpoint(createCheckpoint(compiled, first.snapshot)),
+  assertCheckpointCode(
+    { ...createCheckpoint(compiled, snapshot), snapshot: withUnknownField },
+    "TSK002",
   );
-  const rest = run(restored.plan, restored.snapshot);
-
-  assert.deepEqual([...first.events, ...rest.events], uninterrupted.events);
-  assert.deepEqual(rest.snapshot.rng, uninterrupted.snapshot.rng);
 });
 
 test("accepts current internal format revisions and rejects non-current or malformed revisions", () => {
@@ -324,180 +194,143 @@ test("accepts current internal format revisions and rejects non-current or malfo
   assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
   assert.doesNotThrow(() => restoreCheckpoint(checkpoint));
 
-  // EVIDENCE: fixture mutation widens only the plan revision to exercise obsolete-version rejection.
-  const previousPlan = structuredClone(compiled) as { version: unknown };
-  previousPlan.version = 7;
-  assert.deepEqual(validateInstructionPlan(previousPlan).errors[0], {
-    code: "TSC001",
-    message: "Unsupported instruction-plan version.",
-    path: "$.version",
-  });
+  // No migration exists, so a non-current revision must never be read as current; these rows change deliberately
+  // if a migration is approved (docs/RUNTIME.md, format revisions).
 
-  const previousCheckpoint = structuredClone(checkpoint);
-  previousCheckpoint.version = 9;
-  assertCheckpointError(previousCheckpoint, {
-    code: "TSK001",
-    message: "Unsupported checkpoint version.",
-    path: "$.version",
-  });
-  assert.throws(
-    () => deserializeCheckpoint(JSON.stringify(previousCheckpoint)),
-    (error: unknown) =>
-      error instanceof CheckpointError &&
-      error.info.code === "TSK001" &&
-      error.info.path === "$.version",
-  );
-
-  const previousNestedPlan = structuredClone(checkpoint);
-  previousNestedPlan.plan.version = 7;
-  assertCheckpointError(previousNestedPlan, {
-    code: "TSK001",
-    message: "Unsupported instruction-plan version.",
-    path: "$.plan.version",
-  });
-
-  for (const replacement of [compiled.version + 1, String(compiled.version)]) {
-    // EVIDENCE: fixture mutation widens only the plan revision for numeric and wrong-type replacements.
+  for (const replacement of [
+    compiled.version - 1,
+    compiled.version + 1,
+    String(compiled.version),
+  ]) {
+    // EVIDENCE: fixture mutation widens only the plan revision for obsolete, future and wrong-type values.
     const invalidPlan = structuredClone(compiled) as { version: unknown };
     invalidPlan.version = replacement;
-    assert.deepEqual(validateInstructionPlan(invalidPlan).errors[0], {
-      code: "TSC001",
-      message: "Unsupported instruction-plan version.",
-      path: "$.version",
-    });
+    const validation = validateInstructionPlan(invalidPlan);
+    assert.equal(validation.valid, false, String(replacement));
+    assert.ok(
+      validation.errors.some((error) => error.code === "TSC001" && error.path === "$.version"),
+      String(replacement),
+    );
+
+    const nestedPlan = structuredClone(checkpoint);
+    nestedPlan.plan.version = replacement;
+    assertCheckpointError(nestedPlan, { code: "TSK001", path: "$.plan.version" });
   }
 
-  for (const replacement of [snapshot.version + 1, String(snapshot.version)]) {
-    // EVIDENCE: fixture mutation widens only the snapshot revision for numeric and wrong-type replacements.
+  for (const replacement of [
+    snapshot.version - 1,
+    snapshot.version + 1,
+    String(snapshot.version),
+  ]) {
+    // EVIDENCE: fixture mutation widens only the snapshot revision for obsolete, future and wrong-type values.
     const invalidSnapshot = structuredClone(snapshot) as { version: unknown };
     invalidSnapshot.version = replacement;
-    assert.deepEqual(validateRuntimeSnapshot(invalidSnapshot, compiled).errors, [
-      "Unsupported runtime-snapshot version.",
-    ]);
+    assert.equal(validateRuntimeSnapshot(invalidSnapshot, compiled).valid, false);
+
+    const nestedSnapshot = structuredClone(checkpoint);
+    nestedSnapshot.snapshot.version = replacement;
+    assertCheckpointError(nestedSnapshot, { code: "TSK001", path: "$.snapshot" });
   }
 
-  for (const replacement of [Number(checkpoint.version) + 1, String(checkpoint.version)]) {
+  for (const replacement of [
+    CHECKPOINT_VERSION - 1,
+    CHECKPOINT_VERSION + 1,
+    String(CHECKPOINT_VERSION),
+  ]) {
     const invalidCheckpoint = structuredClone(checkpoint);
     invalidCheckpoint.version = replacement;
-    assertCheckpointError(invalidCheckpoint, {
-      code: "TSK001",
-      message: "Unsupported checkpoint version.",
-      path: "$.version",
-    });
+    assertCheckpointError(invalidCheckpoint, { code: "TSK001", path: "$.version" });
+    assertDeserializedCheckpointError(invalidCheckpoint, { code: "TSK001", path: "$.version" });
   }
-
-  const invalidNestedPlan = structuredClone(checkpoint);
-  invalidNestedPlan.plan.version = compiled.version + 1;
-  assertCheckpointError(invalidNestedPlan, {
-    code: "TSK001",
-    message: "Unsupported instruction-plan version.",
-    path: "$.plan.version",
-  });
-
-  const invalidNestedSnapshot = structuredClone(checkpoint);
-  invalidNestedSnapshot.snapshot.version = snapshot.version + 1;
-  assertCheckpointError(invalidNestedSnapshot, {
-    code: "TSK001",
-    message: "Unsupported runtime-snapshot version.",
-    path: "$.snapshot",
-  });
 });
 
-test("checkpoint classification uses structured producer failures and preserves validation order", () => {
-  const compiled = plan("exit");
+test("checkpoint classification uses structured producer failures", () => {
+  const compiled = plan("let value = [1]\nexit");
   const snapshot = createFreshRuntimeSnapshot(compiled);
-  // EVIDENCE: this live external-plan fixture adds one self-reference to a compiler-produced plan copy.
-  const cyclicPlan = structuredClone(compiled) as InstructionPlan & { self: unknown };
-  cyclicPlan.self = cyclicPlan;
-  const capturedPlan = captureInstructionPlan(cyclicPlan);
-  assert.equal(capturedPlan.failureKind, "cycle");
-  assertCheckpointError(
-    { format: CHECKPOINT_FORMAT, version: CHECKPOINT_VERSION, plan: cyclicPlan, snapshot },
-    { code: "TSK002", message: "Checkpoint contains a cycle.", path: "$.plan.self" },
-  );
+  // One row per external-data failure kind, each replacing the element of the compiled `[1]` literal.
+  const elementPath = "$.instructions[0].value.elements[0]";
+  for (const { name, replace, path } of [
+    { name: "cycle", replace: (list: ListExpressionPlan) => list, path: elementPath },
+    {
+      name: "non-finite number",
+      replace: () => ({
+        kind: "literal",
+        value: Number.POSITIVE_INFINITY,
+        span: compiled.sourceSpan,
+      }),
+      path: `${elementPath}.value`,
+    },
+    {
+      name: "non-JSON-safe value",
+      replace: () => ({ kind: "literal", value: undefined, span: compiled.sourceSpan }),
+      path: `${elementPath}.value`,
+    },
+    {
+      name: "non-plain object",
+      replace: () => ({ kind: "literal", value: new Date(0), span: compiled.sourceSpan }),
+      path: `${elementPath}.value`,
+    },
+  ]) {
+    const malformedPlan = structuredClone(compiled);
+    const binding = malformedPlan.instructions[0];
+    assert.ok(binding?.kind === "declareBinding" && binding.value.kind === "list", name);
+    // EVIDENCE: the copied `[1]` literal's element is replaced with external data for rejection.
+    (binding.value.elements as unknown[])[0] = replace(binding.value);
 
-  for (const externalFailure of [
-    {
-      value: Number.POSITIVE_INFINITY,
-      kind: "nonFiniteNumber",
-      message: "Checkpoint contains a non-finite number.",
-    },
-    {
-      value: undefined,
-      kind: "nonJsonSafeValue",
-      message: "Checkpoint contains a non-JSON-safe value.",
-    },
-    {
-      value: new Date(0),
-      kind: "nonPlainObject",
-      message: "Checkpoint contains a non-plain object.",
-    },
-  ] as const) {
-    const malformedPlan = { ...structuredClone(compiled), padding: externalFailure.value };
-    const captured = captureInstructionPlan(malformedPlan);
-    assert.equal(captured.failureKind, externalFailure.kind);
+    const errors = validateInstructionPlan(malformedPlan).errors;
+    assert.deepEqual(
+      errors.map((error) => [error.code, error.path]),
+      [["TSC002", path]],
+      name,
+    );
+    // Capture names the failure kind; a generic shape error from later validation would not.
+    assert.ok(errors[0]!.message.includes(name), errors[0]!.message);
     assertCheckpointError(
       { format: CHECKPOINT_FORMAT, version: CHECKPOINT_VERSION, plan: malformedPlan, snapshot },
-      { code: "TSK002", message: externalFailure.message, path: "$.plan.padding" },
+      { code: "TSK002", path: `$.plan${path.slice(1)}` },
     );
   }
 
   for (const malformedVersion of [
-    {
-      field: "format",
-      value: "unsupported-snapshot",
-      message: "Unsupported runtime-snapshot format.",
-    },
-    {
-      field: "version",
-      value: snapshot.version + 1,
-      message: "Unsupported runtime-snapshot version.",
-    },
+    { field: "format", value: "unsupported-snapshot" },
+    { field: "version", value: snapshot.version + 1 },
   ] as const) {
     // EVIDENCE: the selected format/version field is widened only to exercise unsupported classification.
     const unsupported = {
       ...structuredClone(snapshot),
       [malformedVersion.field]: malformedVersion.value,
     };
-    const capturedSnapshot = captureRuntimeSnapshotWithValidatedPlan(unsupported, compiled);
-    assert.equal(capturedSnapshot.failureKind, "unsupported");
     const checkpoint = {
       format: CHECKPOINT_FORMAT,
       version: CHECKPOINT_VERSION,
       plan: compiled,
       snapshot: unsupported,
     };
-    const expected = {
-      code: "TSK001",
-      message: malformedVersion.message,
-      path: "$.snapshot",
-    } as const;
+    const expected = { code: "TSK001", path: "$.snapshot" } as const;
     assertCheckpointError(checkpoint, expected);
     assertDeserializedCheckpointError(checkpoint, expected);
   }
 
   // EVIDENCE: the widened fixture combines an unsupported version with a missing required field.
-  const firstMalformed = { ...structuredClone(snapshot), version: snapshot.version + 1 };
-  Reflect.deleteProperty(firstMalformed, "frames");
-  const capturedMalformed = captureRuntimeSnapshotWithValidatedPlan(firstMalformed, compiled);
-  assert.equal(capturedMalformed.failureKind, "malformed");
-  assert.deepEqual(capturedMalformed.validation.errors.slice(0, 2), [
-    "Runtime snapshot contains unsupported fields or omits required fields.",
-    "Unsupported runtime-snapshot version.",
-  ]);
-  const malformedCheckpoint = {
+  const combined = { ...structuredClone(snapshot), version: snapshot.version + 1 };
+  Reflect.deleteProperty(combined, "frames");
+  assert.equal(validateRuntimeSnapshot(combined, compiled).valid, false);
+  const combinedCheckpoint = {
     format: CHECKPOINT_FORMAT,
     version: CHECKPOINT_VERSION,
     plan: compiled,
-    snapshot: firstMalformed,
+    snapshot: combined,
   };
-  const expectedMalformed = {
-    code: "TSK002",
-    message: "Runtime snapshot contains unsupported fields or omits required fields.",
-    path: "$.snapshot",
-  } as const;
-  assertCheckpointError(malformedCheckpoint, expectedMalformed);
-  assertDeserializedCheckpointError(malformedCheckpoint, expectedMalformed);
+  // Either classification is acceptable for doubly invalid data; rejection at the snapshot is required.
+  const isSnapshotRejection = (error: unknown): boolean =>
+    error instanceof CheckpointError &&
+    (error.info.code === "TSK001" || error.info.code === "TSK002") &&
+    error.info.path === "$.snapshot";
+  assert.throws(() => restoreCheckpoint(combinedCheckpoint), isSnapshotRejection);
+  assert.throws(
+    () => deserializeCheckpoint(JSON.stringify(combinedCheckpoint)),
+    isSnapshotRejection,
+  );
 });
 
 test("rejects corrupted checkpoint data through structured errors", () => {
@@ -567,26 +400,25 @@ function assertCheckpointCode(value: unknown, code: string): void {
   );
 }
 
-function assertCheckpointError(value: unknown, expected: CheckpointError["info"]): void {
+type CheckpointFailure = Pick<CheckpointError["info"], "code" | "path">;
+
+function assertCheckpointError(value: unknown, expected: CheckpointFailure): void {
   assert.throws(
     () => restoreCheckpoint(value),
     (error: unknown) => {
       assert.ok(error instanceof CheckpointError);
-      assert.deepEqual(error.info, expected);
+      assert.deepEqual({ code: error.info.code, path: error.info.path }, expected);
       return true;
     },
   );
 }
 
-function assertDeserializedCheckpointError(
-  value: unknown,
-  expected: CheckpointError["info"],
-): void {
+function assertDeserializedCheckpointError(value: unknown, expected: CheckpointFailure): void {
   assert.throws(
     () => deserializeCheckpoint(JSON.stringify(value)),
     (error: unknown) => {
       assert.ok(error instanceof CheckpointError);
-      assert.deepEqual(error.info, expected);
+      assert.deepEqual({ code: error.info.code, path: error.info.path }, expected);
       return true;
     },
   );

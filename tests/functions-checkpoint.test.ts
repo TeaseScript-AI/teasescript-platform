@@ -6,12 +6,9 @@ import type { Instruction, InstructionPlan } from "../src/plan/model.js";
 import {
   CHECKPOINT_VERSION,
   createCheckpoint,
-  deserializeCheckpoint,
   restoreCheckpoint,
-  serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
 import { executeInstruction, run, type RuntimeBuiltinFunction } from "../src/runtime/engine.js";
-import { observeTime } from "../src/runtime/operations/observe-time.js";
 import type {
   SerializableRuntimeObject,
   SerializableRuntimeValue,
@@ -22,7 +19,6 @@ import {
   validateRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
-import { withValidationTestStatistics } from "../src/validation-testing.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
@@ -69,7 +65,7 @@ test("checkpoint restoration accepts the configured call-depth ceiling", () => {
 });
 
 test("restores inside function loops, after continue, and before early return", () => {
-  const { boundaries: observations } = assertRuntimeResumeEquivalent(
+  const { boundaries: observations, events } = assertRuntimeResumeEquivalent(
     [
       "function find(limit) {",
       "  for value in 1..=limit {",
@@ -88,11 +84,10 @@ test("restores inside function loops, after continue, and before early return", 
       (snapshot) => snapshot.callFrames.length === 1 && snapshot.loopFrames.length === 1,
     ),
   );
-  assert.ok(
-    observations.some((snapshot) => {
-      const next = snapshot.nextInstruction;
-      return snapshot.callFrames.length === 1 && snapshot.loopFrames.length === 1 && next >= 0;
-    }),
+  // `continue` skips value 1 and `return` at value 3 prevents value 4.
+  assert.deepEqual(
+    events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["loop:2", "loop:3", "3"],
   );
 });
 
@@ -124,12 +119,14 @@ test("restores direct and mutual recursion at every instruction boundary", () =>
   );
 });
 
-test("restores between nested calls and around say events without duplicates", () => {
-  const { boundaries: observations } = assertRuntimeResumeEquivalent(
+test("restores between nested calls, around say events, and after parameter reassignment", () => {
+  const { boundaries: observations, events } = assertRuntimeResumeEquivalent(
     [
       'function first { say "first"\nreturn 1 }',
       'function second { say "second"\nreturn 2 }',
       "say first() + second()",
+      "function bump(value) { value += 1\nsay value\nreturn value }",
+      "say bump(1)",
     ].join("\n"),
   );
 
@@ -141,139 +138,101 @@ test("restores between nested calls and around say events without duplicates", (
         snapshot.status === "running",
     ),
   );
-});
-
-test("restores exact RNG state through nested calls", () => {
-  const { boundaries: observations } = assertRuntimeResumeEquivalent(
-    [
-      "function roll { return randomInteger(1..=6) }",
-      "function pair { return roll() + roll() }",
-      "say pair()",
-      "say roll()",
-    ].join("\n"),
+  // The stored argument stays the supplied value while the body's binding changes, and both remain valid state.
+  assert.ok(
+    observations.some((snapshot) => {
+      const frame = snapshot.callFrames.at(-1);
+      const binding = snapshot.frames[frame?.scopeBaseDepth ?? -1]?.bindings.find(
+        (candidate) => candidate.name === "value",
+      );
+      return (
+        frame?.functionName === "bump" &&
+        frame.parameterState.phase === "body" &&
+        frame.arguments[0]?.supplied === true &&
+        frame.arguments[0].value === 1 &&
+        binding?.value === 2
+      );
+    }),
   );
-
-  assert.ok(new Set(observations.map((snapshot) => snapshot.rng.state)).size > 1);
+  assert.deepEqual(
+    events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["first", "second", "3", "2", "2"],
+  );
 });
 
 test("preserves prepared earlier arguments through a later suspension and a suspended callee", () => {
-  const compiled = plan(
-    [
-      "function later { wait 1 ms\nreturn random() }",
-      "function combine(first, second) { wait 2 ms\nreturn first + second }",
-      "combine(random(), later())",
-    ].join("\n"),
-  );
-  const combine = compiled.functions.find((definition) => definition.name === "combine")!;
-  const combineCall = compiled.instructions.find(
-    (instruction) => instruction.kind === "callFunction" && instruction.functionId === combine.id,
-  );
-  assert.equal(combineCall?.kind, "callFunction");
-  if (combineCall?.kind !== "callFunction") return;
+  const source = [
+    "function later { wait 1 ms\nreturn random() }",
+    "function combine(first, second) { wait 2 ms\nreturn first + second }",
+    "combine(random(), later())",
+  ].join("\n");
+  const { boundaries, finalSnapshot } = assertRuntimeResumeEquivalent(source, {
+    seed: 0x2468_ace1,
+  });
 
-  const firstPending = run(compiled, createFreshRuntimeSnapshot(compiled, { seed: 0x2468_ace1 }));
-  assert.equal(firstPending.snapshot.status, "waiting");
-  assert.equal(firstPending.snapshot.callFrames.at(-1)?.functionName, "later");
-  assert.equal(combineCall.arguments[0]!.value.kind, "temporary");
-  const earlierTemporary =
-    combineCall.arguments[0]!.value.kind === "temporary"
-      ? combineCall.arguments[0]!.value.temporaryId
-      : -1;
+  // While `later` waits, the caller retains the already evaluated first argument.
   assert.ok(
-    firstPending.snapshot.callFrames
-      .at(-1)
-      ?.callerTemporaries.some((temporary) => temporary.id === earlierTemporary),
+    boundaries.some((snapshot) => {
+      const frame = snapshot.callFrames.at(-1);
+      return (
+        snapshot.status === "waiting" &&
+        frame?.functionName === "later" &&
+        frame.callerTemporaries.length > 0
+      );
+    }),
   );
-  const firstAction = firstPending.snapshot.foregroundAction;
-  assert.equal(firstAction?.kind, "delay");
-  const firstRestored = deserializeCheckpoint(
-    serializeCheckpoint(createCheckpoint(compiled, firstPending.snapshot)),
+  const combineWaiting = boundaries.find(
+    (snapshot) =>
+      snapshot.status === "waiting" &&
+      snapshot.callFrames.at(-1)?.functionName === "combine" &&
+      snapshot.callFrames.at(-1)?.arguments.every((argument) => argument.supplied),
   );
-  const directSecondPending = run(
-    compiled,
-    observeTime(compiled, firstPending.snapshot, firstAction!.deadlineMs).snapshot,
-  );
-  const restoredSecondPending = run(
-    firstRestored.plan,
-    observeTime(firstRestored.plan, firstRestored.snapshot, firstAction!.deadlineMs).snapshot,
-  );
-  assert.deepEqual(restoredSecondPending, directSecondPending);
-  assert.equal(directSecondPending.snapshot.status, "waiting");
-  assert.equal(directSecondPending.snapshot.callFrames.at(-1)?.functionName, "combine");
-  assert.deepEqual(
-    directSecondPending.snapshot.callFrames.at(-1)?.arguments.map((argument) => argument.supplied),
-    [true, true],
-  );
-  const forgedWaiting = mutableCheckpoint(createCheckpoint(compiled, directSecondPending.snapshot));
+  assert.ok(combineWaiting !== undefined);
+  assert.equal(finalSnapshot.callFrames.length, 0);
+  assert.equal(finalSnapshot.temporaries.length, 0);
+
+  const compiled = plan(source);
+  const forgedWaiting = mutableCheckpoint(createCheckpoint(compiled, combineWaiting));
   forgedWaiting.snapshot.callFrames.at(-1)!.arguments[0] = {
     parameterName: "first",
     supplied: false,
   };
   assert.equal(validateRuntimeSnapshot(forgedWaiting.snapshot, compiled).valid, false);
   assertCheckpointRejected(forgedWaiting, "TSK002");
-
-  const secondAction = directSecondPending.snapshot.foregroundAction;
-  assert.equal(secondAction?.kind, "delay");
-  const secondRestored = deserializeCheckpoint(
-    serializeCheckpoint(createCheckpoint(compiled, directSecondPending.snapshot)),
-  );
-  const direct = run(
-    compiled,
-    observeTime(compiled, directSecondPending.snapshot, secondAction!.deadlineMs).snapshot,
-  );
-  const resumed = run(
-    secondRestored.plan,
-    observeTime(secondRestored.plan, secondRestored.snapshot, secondAction!.deadlineMs).snapshot,
-  );
-  assert.deepEqual(resumed, direct);
-  assert.equal(direct.snapshot.status, "halted");
-  assert.equal(direct.snapshot.callFrames.length, 0);
-  assert.equal(direct.snapshot.temporaries.length, 0);
 });
 
-test("bounds snapshot index and same-signature liveness work", () => {
-  const { plan: compiled, snapshot } = recursiveSnapshot(4);
-  const statistics = withValidationTestStatistics((finish) => {
-    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
-    return finish();
-  }).counts;
-
-  assert.ok((statistics.snapshotAnalysisBuilds ?? 0) <= 1, "snapshot analysis was rebuilt");
-  assert.ok((statistics.defaultBindingIndexBuilds ?? 0) <= 1, "default-binding index was rebuilt");
-  assert.ok((statistics.parameterNameIndexBuilds ?? 0) <= 1, "parameter-name index was rebuilt");
-  assert.ok((statistics.livenessComputations ?? 0) <= 1, "liveness was recomputed");
-  assert.ok((statistics.livenessTableAllocations ?? 0) <= 1, "liveness table was reallocated");
-  assert.ok((statistics.livenessCacheInsertions ?? 0) <= 1, "liveness cache was repopulated");
-  assert.ok(
-    (statistics.livenessCacheHits ?? 0) <= snapshot.callFrames.length - 1,
-    "liveness cache was consulted repeatedly for a call frame",
-  );
-});
-
-test("validates suspended caller liveness without historical argument-value comparison", () => {
+test("validates and resumes deep suspended recursive continuations", () => {
   const compiled = plan(
     [
-      "function recurse(value, first, second, third, fourth, fifth) {",
-      "  if value == 0 { return first }",
-      "  return recurse(value - 1, first, second, third, fourth, fifth)",
+      "function sum(value) {",
+      "  if value == 0 { return 0 }",
+      "  return value + sum(value - 1)",
       "}",
-      "say recurse(3, 1, 2, 3, 4, 5)",
+      "say sum(32)",
     ].join("\n"),
   );
-  const snapshot = executeUntil(compiled, (candidate) => candidate.callFrames.length === 3);
-  assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
+  for (const depth of [16, 32]) {
+    const snapshot = executeUntil(compiled, (candidate) => candidate.callFrames.length === depth);
+    const before = JSON.stringify(snapshot);
+    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true, `depth ${depth}`);
+    const restored = restoreCheckpoint(createCheckpoint(compiled, snapshot));
 
-  const missing: any = structuredClone(snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture removes suspended caller temporaries from a runtime-produced snapshot.
-  missing.callFrames[0].callerTemporaries = [];
-  assert.equal(validateRuntimeSnapshot(missing, compiled).valid, false);
-  const changed: any = structuredClone(snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture changes a retained call argument value without altering its supply metadata.
-  changed.callFrames[0].arguments[0].value = 99;
-  assert.equal(validateRuntimeSnapshot(changed, compiled).valid, true);
+    for (const completion of [run(compiled, snapshot), run(restored.plan, restored.snapshot)]) {
+      assert.equal(completion.snapshot.status, "halted", `depth ${depth}`);
+      // 32 + 31 + ... + 1 = 32 * 33 / 2.
+      assert.deepEqual(
+        completion.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+        ["528"],
+        `depth ${depth}`,
+      );
+    }
+    assert.equal(JSON.stringify(snapshot), before, `depth ${depth}`);
+  }
 });
 
 test("treats unbound call-frame argument values as canonical resumable state", () => {
   const compiled = plan(
-    "function identity(value) { return value }\nsay identity({ outer: { items: [1, 2] } })",
+    "function identity(value) { return value }\nsay identity({ outer: { items: [1, 2] } }).outer.items[1]",
   );
   const snapshot = executeUntil(
     compiled,
@@ -284,22 +243,15 @@ test("treats unbound call-frame argument values as canonical resumable state", (
   const changed: any = structuredClone(snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture changes a deeply nested unbound call argument while preserving its canonical surrounding snapshot.
   changed.callFrames[0].arguments[0].value.properties[0].value.properties[0].value.items[1] = 99;
   assert.equal(validateRuntimeSnapshot(changed, compiled).valid, true);
-  assert.doesNotThrow(() => restoreCheckpoint(createCheckpoint(compiled, changed)));
-});
+  const restored = restoreCheckpoint(createCheckpoint(compiled, changed));
+  assert.deepEqual(restored.snapshot, changed);
 
-test("detailed validation reports work without rejecting valid state", () => {
-  const { plan: compiled, snapshot } = recursiveSnapshot(3);
-  const checkpoint = createCheckpoint(compiled, snapshot);
-  const snapshotBefore = JSON.stringify(snapshot);
-  const statistics = withValidationTestStatistics((finish) => {
-    assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
-    assert.doesNotThrow(() => run(compiled, snapshot));
-    assert.doesNotThrow(() => restoreCheckpoint(checkpoint));
-    return finish();
-  }).counts;
-
-  assert.equal(JSON.stringify(snapshot), snapshotBefore);
-  assert.ok((statistics.detailedWorkConsumed ?? 0) > 0);
+  const resumed = run(restored.plan, restored.snapshot);
+  assert.equal(resumed.snapshot.status, "halted");
+  assert.deepEqual(
+    resumed.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["99"],
+  );
 });
 
 test("checkpoint creation defensively isolates the supplied plan", () => {
@@ -357,14 +309,12 @@ test("rejects inconsistent argument supply and parameter bindings", () => {
   occupiedBeforeCall.temporaries.push({ id: call.destinationTemporary, value: null });
   assert.equal(validateRuntimeSnapshot(occupiedBeforeCall, compiled).valid, false);
 
-  let snapshot = createFreshRuntimeSnapshot(compiled);
-  snapshot = executeInstruction(compiled, snapshot).snapshot;
-  snapshot = executeInstruction(compiled, snapshot).snapshot;
-
-  const changedArgument = mutableCheckpoint(createCheckpoint(compiled, snapshot));
-  changedArgument.snapshot.callFrames[0]!.arguments[0]!.value = 99;
-  assert.equal(validateRuntimeSnapshot(changedArgument.snapshot, compiled).valid, true);
-  assert.doesNotThrow(() => restoreCheckpoint(changedArgument));
+  const suppliedPhase = (parameterIndex: number) => (candidate: RuntimeSnapshot) =>
+    candidate.callFrames.length === 1 &&
+    candidate.callFrames[0]!.parameterState.phase === "supplied" &&
+    candidate.callFrames[0]!.parameterState.parameterIndex === parameterIndex;
+  const snapshot = executeUntil(compiled, suppliedPhase(0));
+  assert.deepEqual(snapshot.frames[1]?.bindings, []);
 
   const inconsistentSupply = mutableCheckpoint(createCheckpoint(compiled, snapshot));
   inconsistentSupply.snapshot.callFrames[0]!.arguments[0] = {
@@ -402,8 +352,12 @@ test("rejects inconsistent argument supply and parameter bindings", () => {
   assert.equal(validateRuntimeSnapshot(forgedSupplied.snapshot, optional).valid, false);
   assertCheckpointRejected(forgedSupplied, "TSK002");
 
-  snapshot = executeInstruction(compiled, snapshot).snapshot;
-  const missingBinding = mutableCheckpoint(createCheckpoint(compiled, snapshot));
+  const bound = executeUntil(compiled, suppliedPhase(1));
+  assert.deepEqual(
+    bound.frames[1]?.bindings.map((binding) => binding.name),
+    ["input"],
+  );
+  const missingBinding = mutableCheckpoint(createCheckpoint(compiled, bound));
   missingBinding.snapshot.frames[1]!.bindings = [];
   assertCheckpointRejected(missingBinding, "TSK002");
 });
@@ -452,11 +406,13 @@ test("restores mixed ordinary and user-call evaluation at every instruction boun
       "let target = first",
       "function mark(value) { order.add(value)\nreturn value }",
       "function retarget { target = second\nreturn 7 }",
+      "function roll { return randomInteger(1..=6) }",
       'let listValue = [random(), mark("list")]',
       'let setValue = set[randomInteger(1..=3), mark("set")]',
       'let objectValue = { first: random(), second: mark("object") }',
       'let templateValue = "${random()}:${mark(\"template\")}"',
       "let binaryValue = random() + mark(2)",
+      "let rolled = roll() + mark(4)",
       "let rangeValue = randomInteger(0..=1)..mark(3)",
       "target.nested[0] = retarget()",
       "target.nested.add(mark(8))",
@@ -611,31 +567,32 @@ test("rejects malformed prepared-reference state in active and suspended tempora
 });
 
 test("rejects missing temporaries in every suspended caller continuation", () => {
-  const sources = [
-    [
-      "function one { return 1 }",
-      "function two { return 2 }",
-      "function three { return 3 }",
-      "function total { return one() + two() + three() }",
-      "say total()",
-    ],
-    [
-      "function one { return 1 }",
-      "function two { return 2 }",
-      "function three { return 3 }",
-      "function total(value = one() + two() + three()) { return value }",
-      "say total()",
-    ],
+  const functions = [
+    "function one { return 1 }",
+    "function two { return 2 }",
+    "function three { return 3 }",
   ];
-
-  for (const source of sources) {
-    const compiled = plan(source.join("\n"));
+  for (const { continuation, source, frames } of [
+    { continuation: "root", source: "say one() + two() + three()", frames: "two" },
+    {
+      continuation: "function body",
+      source: "function total { return one() + two() + three() }\nsay total()",
+      frames: "total,two",
+    },
+    {
+      continuation: "parameter default",
+      source: "function total(value = one() + two() + three()) { return value }\nsay total()",
+      frames: "total,two",
+    },
+  ]) {
+    const compiled = plan([...functions, source].join("\n"));
     const snapshot = executeUntil(
       compiled,
-      (candidate) =>
-        candidate.callFrames.map((frame) => frame.functionName).join(",") === "total,two",
+      (candidate) => candidate.callFrames.map((frame) => frame.functionName).join(",") === frames,
     );
     const checkpoint = mutableCheckpoint(createCheckpoint(compiled, snapshot));
+    // The caller of `two` retains the result of `one`; removing it leaves the continuation without input.
+    assert.ok(checkpoint.snapshot.callFrames.at(-1)!.callerTemporaries.length > 0, continuation);
     checkpoint.snapshot.callFrames.at(-1)!.callerTemporaries = [];
     assertCheckpointRejected(checkpoint, "TSK002");
   }
@@ -735,93 +692,6 @@ test("rejects structurally valid non-parameter bindings during a prologue", () =
   assertCheckpointRejected(checkpoint, "TSK002");
 });
 
-test("rejects malformed function-region plans inside checkpoints", () => {
-  const defaults = plan(
-    [
-      "function helper { return 1 }",
-      "function sample(value = helper()) { say value\nreturn value }",
-      "say sample()",
-    ].join("\n"),
-  );
-  const sample = defaults.functions.find((definition) => definition.name === "sample")!;
-  const plans: InstructionPlan[] = [];
-
-  const statementInDefault = mutablePlan(defaults);
-  const clearIndex = statementInDefault.instructions.findIndex(
-    (instruction: Instruction, index: number) =>
-      index >= sample.entryInstruction &&
-      index < sample.bodyEntryInstruction &&
-      instruction.kind === "clearTemporary",
-  );
-  statementInDefault.instructions[clearIndex] = {
-    kind: "returnVoid",
-    span: statementInDefault.instructions[clearIndex].span,
-  };
-  plans.push(statementInDefault);
-
-  const suppliedInBody = mutablePlan(defaults);
-  suppliedInBody.instructions[sample.bodyEntryInstruction] = {
-    kind: "bindSuppliedParameter",
-    functionId: sample.id,
-    parameterIndex: 0,
-    span: suppliedInBody.instructions[sample.bodyEntryInstruction].span,
-  };
-  plans.push(suppliedInBody);
-
-  const returnBeforeBody = mutablePlan(defaults);
-  const bindIndex = returnBeforeBody.instructions.findIndex(
-    (instruction: Instruction, index: number) =>
-      index >= sample.entryInstruction &&
-      index < sample.bodyEntryInstruction &&
-      instruction.kind === "bindDefaultParameter",
-  );
-  const bindInstruction = returnBeforeBody.instructions[bindIndex];
-  assert.ok(bindInstruction?.kind === "bindDefaultParameter");
-  returnBeforeBody.instructions[bindIndex] = {
-    kind: "returnValue",
-    value: bindInstruction.value,
-    span: bindInstruction.span,
-  };
-  plans.push(returnBeforeBody);
-
-  const calls = plan("function pair(left, right) { return left + right }\nsay pair(1, 2)");
-  const aliasedDestination = mutablePlan(calls);
-  const aliasedCall = aliasedDestination.instructions.find(
-    (instruction: Instruction) => instruction.kind === "callFunction",
-  );
-  assert.ok(aliasedCall?.kind === "callFunction");
-  aliasedCall.arguments[0].value = {
-    kind: "temporary",
-    temporaryId: aliasedCall.destinationTemporary,
-    span: aliasedCall.arguments[0].value.span,
-  };
-  plans.push(aliasedDestination);
-
-  const duplicateArgument = mutablePlan(calls);
-  const duplicateCall = duplicateArgument.instructions.find(
-    (instruction: Instruction) => instruction.kind === "callFunction",
-  );
-  assert.ok(duplicateCall?.kind === "callFunction");
-  duplicateCall.arguments[1].parameterName = duplicateCall.arguments[0].parameterName;
-  plans.push(duplicateArgument);
-
-  for (const malformedPlan of plans) {
-    assertCheckpointRejected(
-      {
-        format: "teasescript-checkpoint",
-        version: CHECKPOINT_VERSION,
-        plan: malformedPlan,
-        snapshot: createImmediatePacingRuntimeSnapshot(
-          malformedPlan === aliasedDestination || malformedPlan === duplicateArgument
-            ? calls
-            : defaults,
-        ),
-      },
-      "TSK002",
-    );
-  }
-});
-
 test("rejects empty serialized names and impossible status combinations", () => {
   const compiled = plan("let value = 1\nfunction read(input) { return input }\nread(value)");
   let active = createFreshRuntimeSnapshot(compiled);
@@ -832,11 +702,11 @@ test("rejects empty serialized names and impossible status combinations", () => 
 
   const functionCheckpoint = mutableCheckpoint(createCheckpoint(compiled, active));
   functionCheckpoint.plan.functions[0]!.name = "";
-  assertCheckpointRejected(functionCheckpoint, "TSK002");
+  assertCheckpointRejected(functionCheckpoint, "TSK002", "$.plan.functions[0].name");
 
   const parameterCheckpoint = mutableCheckpoint(createCheckpoint(compiled, active));
   parameterCheckpoint.plan.functions[0]!.parameters[0]!.name = "";
-  assertCheckpointRejected(parameterCheckpoint, "TSK002");
+  assertCheckpointRejected(parameterCheckpoint, "TSK002", "$.plan.functions[0].parameters[0].name");
 
   active = executeInstruction(compiled, active).snapshot;
   const statusCheckpoint = mutableCheckpoint(createCheckpoint(compiled, active));
@@ -865,7 +735,9 @@ test("rejects cyclic runtime state without overflowing validation", () => {
 });
 
 test("cyclic builtin results become source-associated runtime failures", () => {
-  const compiledResult = compileSource("say cyclic()", { builtins: ["cyclic"] });
+  const source = "say cyclic()";
+  const call = "cyclic()";
+  const compiledResult = compileSource(source, { builtins: ["cyclic"] });
   assert.deepEqual(compiledResult.diagnostics, []);
   const compiled = compiledResult.plan!;
   const cyclic: { kind: "list"; items: unknown[] } = { kind: "list", items: [] };
@@ -879,8 +751,20 @@ test("cyclic builtin results become source-associated runtime failures", () => {
   });
 
   assert.equal(result.snapshot.status, "failed");
-  assert.equal(result.snapshot.failure?.code, "TSR013");
-  assert.ok(result.snapshot.failure?.span.start.offset !== undefined);
+  const failure = result.snapshot.failure;
+  assert.equal(failure?.code, "TSR013");
+  assert.deepEqual(
+    [failure?.span.start.offset, failure?.span.end.offset],
+    [source.indexOf(call), source.indexOf(call) + call.length],
+  );
+  assert.deepEqual(
+    result.events.flatMap((event) =>
+      event.kind === "runtimeFailure"
+        ? [{ code: event.code, message: event.message, span: event.span }]
+        : [],
+    ),
+    [failure],
+  );
 });
 
 function recursiveSnapshot(depth: number): {

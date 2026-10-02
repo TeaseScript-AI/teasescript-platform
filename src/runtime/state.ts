@@ -44,7 +44,6 @@ import {
   type SerializableRuntimeSet,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
-import { recordValidationTestWork } from "../validation-testing.js";
 import { validateTimerState } from "./timer-validation.js";
 import { validateMediaState } from "./media-validation.js";
 import {
@@ -60,7 +59,7 @@ import {
 import { expressionPlanChildren } from "../plan/expression-children.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 23;
+export const RUNTIME_SNAPSHOT_VERSION = 25;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -649,10 +648,20 @@ function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPayload {
     return {
       kind: "choice",
       labelType: ui.labelType,
-      options: ui.options.map((option) => ({ text: option.text, label: option.label })),
+      options: ui.options.map((option) => ({
+        text: option.text,
+        label: option.label,
+        ...(option.background === undefined ? {} : { background: option.background }),
+      })),
       accessibleName,
     };
-  if (ui.kind === "button") return { kind: "button", buttonLabel: ui.buttonLabel, accessibleName };
+  if (ui.kind === "button")
+    return {
+      kind: "button",
+      buttonLabel: ui.buttonLabel,
+      ...(ui.background === undefined ? {} : { background: ui.background }),
+      accessibleName,
+    };
   return { kind: ui.kind, hint: ui.hint, accessibleName };
 }
 
@@ -730,7 +739,6 @@ export function captureRuntimeSnapshotWithValidatedPlan(
   value: unknown,
   plan?: InstructionPlan,
 ): CapturedRuntimeSnapshotResult {
-  recordValidationTestWork("runtimeSnapshotCaptureCalls");
   const snapshotCapture = captureExternalData(value);
   if (!snapshotCapture.ok) {
     return Object.freeze({
@@ -1977,7 +1985,6 @@ function validateCallArgumentSupply(
 function createTemporaryMap(
   temporaries: readonly unknown[],
 ): ReadonlyMap<number, Record<string, unknown>> {
-  recordValidationTestWork("temporaryMapBuilds");
   const result = new Map<number, Record<string, unknown>>();
   for (const temporary of temporaries) {
     if (isPlainRecord(temporary) && nonNegativeSafeInteger(temporary.id)) {
@@ -2166,7 +2173,6 @@ interface SnapshotValidationAnalysis {
 }
 
 function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValidationAnalysis {
-  recordValidationTestWork("snapshotAnalysisBuilds");
   const functionsById = new Map<number, InstructionPlan["functions"][number]>();
   const regionEnds = new Array<number>(plan.instructions.length).fill(plan.rootEndInstruction);
   const functionIdsByInstruction = new Array<number | null>(plan.instructions.length).fill(null);
@@ -2178,7 +2184,6 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
     }
   }
   const defaultBindingPositions = new Map<string, number>();
-  recordValidationTestWork("defaultBindingIndexBuilds");
   for (let index = 0; index < plan.instructions.length; index += 1) {
     const instruction = plan.instructions[index];
     if (instruction?.kind === "bindDefaultParameter") {
@@ -2195,7 +2200,6 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
       ]),
     ]),
   );
-  recordValidationTestWork("parameterNameIndexBuilds");
   return {
     plan,
     functionsById,
@@ -2235,14 +2239,8 @@ function requiredContinuationTemporaries(
       : "none";
   let liveIn = analysis.continuationLiveness.get(loopSignature);
   if (liveIn === undefined) {
-    recordDetailedValidationWork(analysis.plan.instructions.length);
-    recordValidationTestWork("livenessComputations");
-    recordValidationTestWork("livenessTableAllocations");
     liveIn = computeContinuationLiveness(analysis, loopFrames);
     analysis.continuationLiveness.set(loopSignature, liveIn);
-    recordValidationTestWork("livenessCacheInsertions");
-  } else {
-    recordValidationTestWork("livenessCacheHits");
   }
   return liveIn[startInstruction] ?? new Set<number>();
 }
@@ -2258,12 +2256,10 @@ function computeContinuationLiveness(
   while (changed) {
     changed = false;
     for (let index = count - 1; index >= 0; index -= 1) {
-      recordDetailedValidationWork();
       const instruction = plan.instructions[index]!;
       const liveOut = new Set<number>();
       for (const successor of instructionSuccessors(analysis, index)) {
         for (const temporaryId of liveIn[successor] ?? []) {
-          recordDetailedValidationWork();
           liveOut.add(temporaryId);
         }
       }
@@ -2280,10 +2276,6 @@ function computeContinuationLiveness(
     }
   }
   return liveIn;
-}
-
-function recordDetailedValidationWork(amount = 1): void {
-  recordValidationTestWork("detailedWorkConsumed", amount);
 }
 
 function instructionSuccessors(
@@ -2692,9 +2684,11 @@ function requiredInstructionTemporaries(
     case "interaction":
       if ("preparedUi" in instruction) {
         output.add(instruction.speakerTemporary);
-        if (instruction.preparedUi.kind === "button")
+        if (instruction.preparedUi.kind === "button") {
           output.add(instruction.preparedUi.buttonLabelTemporary);
-        else if (
+          if (instruction.preparedUi.backgroundTemporary !== undefined)
+            output.add(instruction.preparedUi.backgroundTemporary);
+        } else if (
           instruction.preparedUi.kind === "text" ||
           instruction.preparedUi.kind === "number"
         ) {

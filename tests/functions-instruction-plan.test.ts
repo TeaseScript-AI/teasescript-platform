@@ -1,73 +1,45 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { InstructionPlan } from "../src/plan/model.js";
+import type { ExpressionPlan, Instruction, InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
+import { runValidSource as runSource } from "./helpers/run-valid-source.js";
+import { sayTexts } from "./helpers/runtime-events.js";
 
 test("assigns deterministic function and temporary IDs", () => {
   const source = [
     "function first { return 1 }",
     "function second { return 2 }",
     "let result = first() + second()",
+    "result = result + 1",
+    'say "${result}"',
+    "exit",
   ].join("\n");
   const first = plan(source);
   const second = plan(source);
 
   assert.deepEqual(second, first);
+  const ids = first.functions.map((definition) => definition.id);
+  assert.equal(new Set(ids).size, ids.length);
   assert.deepEqual(
-    first.functions.map((definition) => [definition.id, definition.name]),
-    [
-      [1, "first"],
-      [2, "second"],
-    ],
+    first.functions.map((definition) => definition.name),
+    ["first", "second"],
   );
-  assert.equal(first.temporaryCount, 2);
+  const calls = first.instructions.filter((instruction) => instruction.kind === "callFunction");
   assert.deepEqual(
-    first.instructions
-      .filter((instruction) => instruction.kind === "callFunction")
-      .map((instruction) => [instruction.functionId, instruction.destinationTemporary]),
-    [
-      [1, 1],
-      [2, 2],
-    ],
+    calls.map((instruction) => functionName(first, instruction.functionId)),
+    ["first", "second"],
   );
-});
-
-test("lowers nested calls and arguments in source order", () => {
-  const compiled = plan(
-    [
-      "function first { return 1 }",
-      "function second { return 2 }",
-      "function outer(left, right) { return left + right }",
-      "let result = outer(first(), second())",
-    ].join("\n"),
-  );
-  const root = compiled.instructions.slice(0, compiled.rootEndInstruction);
-  const calls = root.filter((instruction) => instruction.kind === "callFunction");
-
-  assert.deepEqual(
-    calls.map((instruction) => instruction.functionId),
-    [1, 2, 3],
-  );
-  const outer = calls[2];
-  assert.equal(outer?.kind, "callFunction");
-  if (outer?.kind !== "callFunction") return;
-  assert.deepEqual(
-    outer.arguments.map((argument) => argument.parameterName),
-    ["left", "right"],
-  );
-  assert.equal(outer.arguments[0]!.value.kind, "temporary");
-  assert.equal(outer.arguments[1]!.value.kind, "temporary");
-  if (
-    outer.arguments[0]!.value.kind === "temporary" &&
-    outer.arguments[1]!.value.kind === "temporary"
-  ) {
-    assert.ok(outer.arguments[0]!.value.temporaryId < outer.arguments[1]!.value.temporaryId);
-  }
+  // Both results are live at the addition, so they need independent destinations.
+  const destinations = calls.map((instruction) => instruction.destinationTemporary);
+  assert.equal(new Set(destinations).size, 2);
 });
 
 test("embeds synchronous call arguments without preparation instructions", () => {
+  // Scoped regression oracle for a plan-size optimization, not a product limit or compatibility
+  // contract. Review and update this baseline when an intentional lowering change legitimately
+  // moves it.
   const compiled = plan(
     [
       "function combine(first, second, third) { return first + second + third }",
@@ -75,8 +47,7 @@ test("embeds synchronous call arguments without preparation instructions", () =>
     ].join("\n"),
   );
   const root = compiled.instructions.slice(0, compiled.rootEndInstruction);
-  const callIndex = root.findIndex((instruction) => instruction.kind === "callFunction");
-  const call = root[callIndex];
+  const call = root.find((instruction) => instruction.kind === "callFunction");
   assert.equal(call?.kind, "callFunction");
   if (call?.kind !== "callFunction") return;
 
@@ -88,111 +59,23 @@ test("embeds synchronous call arguments without preparation instructions", () =>
   );
   assert.equal(root.filter((instruction) => instruction.kind === "storeTemporary").length, 0);
   assert.equal(root.filter((instruction) => instruction.kind === "clearTemporaries").length, 0);
-  assert.deepEqual(
-    root.map((instruction) => instruction.kind),
-    ["callFunction", "evaluate", "clearTemporary"],
-  );
 });
 
-test("repeated synchronous multi-argument calls do not emit per-argument preparation", () => {
-  const argumentCount = 12;
-  const callCount = 25;
-  const parameters = Array.from({ length: argumentCount }, (_, index) => `p${index}`).join(", ");
-  const argumentsList = Array.from({ length: argumentCount }, (_, index) => String(index + 1)).join(
-    ", ",
-  );
-  const compiled = plan(
+test("evaluates composite and nested user-call arguments in source order", () => {
+  const result = runSource(
     [
-      `function sink(${parameters}) { return p0 }`,
-      ...Array.from({ length: callCount }, () => `sink(${argumentsList})`),
+      "let order = []",
+      "function mark(value) { order.add(value)\nreturn value }",
+      'function pair(left, right) { return "${left}-${right}" }',
+      "say pair(mark(2) + 1, 5)",
+      "say pair(mark(3), mark(4) * 2)",
+      'say "${order[0]}${order[1]}${order[2]}"',
     ].join("\n"),
   );
-  const root = compiled.instructions.slice(0, compiled.rootEndInstruction);
-  const calls = root.filter((instruction) => instruction.kind === "callFunction");
 
-  assert.equal(calls.length, callCount);
-  assert.equal(compiled.temporaryCount, callCount);
-  assert.equal(root.filter((instruction) => instruction.kind === "storeTemporary").length, 0);
-  assert.equal(root.filter((instruction) => instruction.kind === "clearTemporaries").length, 0);
-  assert.ok(
-    calls.every(
-      (call) =>
-        call.arguments.length === argumentCount &&
-        call.arguments.every((argument) => argument.value.kind === "literal"),
-    ),
-  );
-});
-
-test("materializes only arguments that must survive a later user call", () => {
-  const compiled = plan(
-    [
-      "function later { return 2 }",
-      "function combine(first, second, third) { return first + second + third }",
-      "combine(random(), later(), 3)",
-    ].join("\n"),
-  );
-  const root = compiled.instructions.slice(0, compiled.rootEndInstruction);
-  const outer = root.find(
-    (instruction) => instruction.kind === "callFunction" && instruction.functionId === 2,
-  );
-  assert.equal(outer?.kind, "callFunction");
-  if (outer?.kind !== "callFunction") return;
-
-  assert.deepEqual(
-    outer.arguments.map((argument) => argument.value.kind),
-    ["temporary", "temporary", "literal"],
-  );
-  assert.equal(root.filter((instruction) => instruction.kind === "storeTemporary").length, 1);
-  assert.equal(root.filter((instruction) => instruction.kind === "clearTemporaries").length, 1);
-});
-
-test("materializes a complete composite argument that emits instructions", () => {
-  const compiled = plan(
-    [
-      "function inner { return 2 }",
-      "function outer(value) { return value }",
-      "outer(inner() + 1)",
-    ].join("\n"),
-  );
-  const root = compiled.instructions.slice(0, compiled.rootEndInstruction);
-  const outer = root.find(
-    (instruction) => instruction.kind === "callFunction" && instruction.functionId === 2,
-  );
-  assert.equal(outer?.kind, "callFunction");
-  if (outer?.kind !== "callFunction") return;
-
-  assert.equal(outer.arguments[0]!.value.kind, "temporary");
-  assert.deepEqual(
-    root.map((instruction) => instruction.kind),
-    [
-      "callFunction",
-      "storeTemporary",
-      "callFunction",
-      "clearTemporaries",
-      "evaluate",
-      "clearTemporary",
-    ],
-  );
-});
-
-test("lowers property receivers and assignment targets in source order", () => {
-  const compiled = plan(
-    [
-      "let items = [0]",
-      "function receiver { return items }",
-      "function argument { return 1 }",
-      "function indexFunction { return 0 }",
-      "function valueFunction { return 7 }",
-      "receiver().add(argument())",
-      "items[indexFunction()] = valueFunction()",
-    ].join("\n"),
-  );
-  const calls = compiled.instructions
-    .slice(0, compiled.rootEndInstruction)
-    .filter((instruction) => instruction.kind === "callFunction")
-    .map((instruction) => instruction.functionId);
-
-  assert.deepEqual(calls, [1, 2, 3, 4]);
+  assert.equal(result.snapshot.status, "halted");
+  assert.deepEqual(sayTexts(result), ["3-5", "3-8", "234"]);
+  assert.deepEqual(result.snapshot.temporaries, []);
 });
 
 test("lowers calls in templates, conditions, loop conditions, and returns", () => {
@@ -204,67 +87,80 @@ test("lowers calls in templates, conditions, loop conditions, and returns", () =
       "while truth() { break }",
     ].join("\n"),
   );
-
-  assert.ok(compiled.instructions.some((instruction) => instruction.kind === "jumpIfFalse"));
-  assert.ok(compiled.instructions.some((instruction) => instruction.kind === "loopStart"));
-  assert.ok(compiled.instructions.some((instruction) => instruction.kind === "returnValue"));
-  assert.ok(
-    compiled.instructions.some(
+  const { instructions } = compiled;
+  // Names the function whose earlier call writes the temporary that the consumer reads.
+  const calledFor = (consumer: number, value: ExpressionPlan) => {
+    const callIndex = instructions.findIndex(
       (instruction) =>
-        instruction.kind === "say" &&
-        instruction.value.kind === "template" &&
-        instruction.value.parts.some(
-          (part) => part.kind === "expression" && part.expression.kind === "temporary",
-        ),
-    ),
-  );
+        instruction.kind === "callFunction" &&
+        value.kind === "temporary" &&
+        instruction.destinationTemporary === value.temporaryId,
+    );
+    const call = instructions[callIndex];
+    return callIndex < consumer && call?.kind === "callFunction"
+      ? compiled.functions.find((definition) => definition.id === call.functionId)?.name
+      : null;
+  };
+  const nested = compiled.functions.find((definition) => definition.name === "nested")!;
+  const consumers = instructions.flatMap((instruction, index) => {
+    switch (instruction.kind) {
+      case "jumpIfFalse":
+        return [["condition", calledFor(index, instruction.condition)]];
+      case "loopStart":
+        return [["loop", calledFor(index, instruction.expression)]];
+      case "say":
+        return instruction.value.kind === "template"
+          ? instruction.value.parts.flatMap((part) =>
+              part.kind === "expression" ? [["template", calledFor(index, part.expression)]] : [],
+            )
+          : [];
+      case "returnValue":
+        return index >= nested.entryInstruction && index < nested.endInstruction
+          ? [["return", calledFor(index, instruction.value)]]
+          : [];
+      default:
+        return [];
+    }
+  });
+
+  assert.deepEqual(consumers, [
+    ["condition", "truth"],
+    ["template", "nested"],
+    ["loop", "truth"],
+    ["return", "truth"],
+  ]);
 });
 
-test("compiles defaults as executable prologues and inserts implicit returns", () => {
-  const compiled = plan(
+test("evaluates a parameter default only when its argument is omitted", () => {
+  const result = runSource(
     [
-      "function helper(value) { return value }",
-      "function sample(required, optional = helper(2)) { say optional }",
-      "sample(1)",
+      "let counter = 0",
+      "function next { counter = counter + 1\nreturn counter }",
+      'function describe(name, count = next()) { return "${name}${count}" }',
+      'say describe("a")',
+      'say describe("b", 9)',
+      'say describe("c")',
+      "say counter",
     ].join("\n"),
   );
-  const sample = compiled.functions[1]!;
-  const prologue = compiled.instructions.slice(
-    sample.entryInstruction,
-    sample.bodyEntryInstruction,
-  );
 
-  assert.deepEqual(
-    sample.parameters.map((parameter) => parameter.hasDefault),
-    [false, true],
-  );
-  assert.ok(prologue.some((instruction) => instruction.kind === "bindSuppliedParameter"));
-  assert.ok(prologue.some((instruction) => instruction.kind === "prepareParameterDefault"));
-  assert.ok(prologue.some((instruction) => instruction.kind === "callFunction"));
-  assert.ok(prologue.some((instruction) => instruction.kind === "bindDefaultParameter"));
-  assert.equal(compiled.instructions[sample.implicitReturnInstruction]?.kind, "returnVoid");
+  assert.deepEqual(sayTexts(result), ["a1", "b9", "c2", "2"]);
 });
 
-test("accepts nested calls and short-circuit lowering inside defaults", () => {
-  const compiled = plan(
+test("keeps short-circuit evaluation of user calls inside parameter defaults", () => {
+  const result = runSource(
     [
-      "function truth { return true }",
-      "function sample(value = truth() and truth()) { return value }",
+      'let calls = ""',
+      'function falsy { calls = "${calls}f"\nreturn false }',
+      'function mark { calls = "${calls}m"\nreturn true }',
+      "function sample(value = falsy() and mark()) { return value }",
       "say sample()",
+      "say sample(true)",
+      'say "calls:${calls}"',
     ].join("\n"),
   );
 
-  assert.equal(validateInstructionPlan(compiled).valid, true);
-  const sample = compiled.functions.find((definition) => definition.name === "sample")!;
-  const prologue = compiled.instructions.slice(
-    sample.entryInstruction,
-    sample.bodyEntryInstruction,
-  );
-  assert.ok(prologue.some((instruction) => instruction.kind === "jumpIfFalse"));
-  assert.equal(
-    prologue.filter((instruction) => instruction.kind === "bindDefaultParameter").length,
-    1,
-  );
+  assert.deepEqual(sayTexts(result), ["false", "true", "calls:f"]);
 });
 
 test("function plans survive JSON round trips with preserved spans", () => {
@@ -292,11 +188,11 @@ test("rejects malformed function metadata, targets, and temporaries", () => {
 
   const duplicateId = mutable(original);
   duplicateId.functions.push({ ...duplicateId.functions[0]! });
-  assertInvalid(duplicateId, /Function IDs|ranges/u);
+  assertInvalid(duplicateId, `$.functions[${duplicateId.functions.length - 1}].id`, "unique");
 
   const badEntry = mutable(original);
   badEntry.functions[0]!.entryInstruction = 999;
-  assertInvalid(badEntry, /range|entry/u);
+  assertInvalid(badEntry, "$.functions[0]");
 
   const badTemporary = mutable(original);
   const declaration = badTemporary.instructions.find(
@@ -307,13 +203,19 @@ test("rejects malformed function metadata, targets, and temporaries", () => {
     // EVIDENCE: fixture: expose the compiler-produced temporary reference for malformed-ID validation.
     (declaration.value as { temporaryId: number }).temporaryId = 999;
   }
-  assertInvalid(badTemporary, /Temporary/u);
+  assertInvalid(
+    badTemporary,
+    `$.instructions[${firstIndex(badTemporary, "declareBinding")}].value.temporaryId`,
+  );
 
   const badReturn = mutable(original);
   const call = badReturn.instructions.find((instruction) => instruction.kind === "callFunction");
   assert.ok(call?.kind === "callFunction");
   if (call?.kind === "callFunction") call.returnInstruction += 1;
-  assertInvalid(badReturn, /return target/u);
+  assertInvalid(
+    badReturn,
+    `$.instructions[${firstIndex(badReturn, "callFunction")}].returnInstruction`,
+  );
 
   const unknownFunction = mutable(original);
   const unknownCall = unknownFunction.instructions.find(
@@ -321,7 +223,10 @@ test("rejects malformed function metadata, targets, and temporaries", () => {
   );
   assert.ok(unknownCall?.kind === "callFunction");
   if (unknownCall?.kind === "callFunction") unknownCall.functionId = 999;
-  assertInvalid(unknownFunction, /unknown function/u);
+  assertInvalid(
+    unknownFunction,
+    `$.instructions[${firstIndex(unknownFunction, "callFunction")}].functionId`,
+  );
 
   const malformedPrologue = mutable(original);
   const prepare = malformedPrologue.instructions.find(
@@ -330,7 +235,7 @@ test("rejects malformed function metadata, targets, and temporaries", () => {
   assert.ok(prepare?.kind === "beginFunctionDefaults");
   const malformedPrepare: { kind: string } = prepare;
   malformedPrepare.kind = "enterFunctionBody";
-  assertInvalid(malformedPrologue, /prologue|entry/u);
+  assertInvalid(malformedPrologue, "$.functions[0].entryInstruction");
 });
 
 test("rejects malformed function regions and aliased call temporaries", () => {
@@ -355,7 +260,7 @@ test("rejects malformed function regions and aliased call temporaries", () => {
     kind: "returnVoid",
     span: statementInDefault.instructions[clearIndex]!.span,
   };
-  assertInvalid(statementInDefault, /default-expression region/u);
+  assertInvalid(statementInDefault, `$.instructions[${clearIndex}]`, "default-expression region");
 
   const suppliedInBody = mutable(defaults);
   suppliedInBody.instructions[sample.bodyEntryInstruction] = {
@@ -364,7 +269,7 @@ test("rejects malformed function regions and aliased call temporaries", () => {
     parameterIndex: 0,
     span: suppliedInBody.instructions[sample.bodyEntryInstruction]!.span,
   };
-  assertInvalid(suppliedInBody, /prologue instruction.*body/u);
+  assertInvalid(suppliedInBody, `$.instructions[${sample.bodyEntryInstruction}]`);
 
   const returnBeforeBody = mutable(defaults);
   const bindIndex = returnBeforeBody.instructions.findIndex(
@@ -381,7 +286,7 @@ test("rejects malformed function regions and aliased call temporaries", () => {
     value: bind.value,
     span: bind.span,
   };
-  assertInvalid(returnBeforeBody, /default-expression region|default/u);
+  assertInvalid(returnBeforeBody, `$.instructions[${bindIndex}]`);
 
   const calls = plan("function pair(left, right) { return left + right }\nsay pair(1, 2)");
   const aliasedDestination = mutable(calls);
@@ -393,14 +298,20 @@ test("rejects malformed function regions and aliased call temporaries", () => {
     temporaryId: aliasedCall.destinationTemporary,
     span: aliasedCall.arguments[0]!.value.span,
   };
-  assertInvalid(aliasedDestination, /must not alias/u);
+  assertInvalid(
+    aliasedDestination,
+    `$.instructions[${firstIndex(aliasedDestination, "callFunction")}].destinationTemporary`,
+  );
 
   const duplicateArgument = mutable(calls);
   const duplicateCall = duplicateArgument.instructions.find(
     (instruction) => instruction.kind === "callFunction",
   )!;
   duplicateCall.arguments[1]!.parameterName = duplicateCall.arguments[0]!.parameterName;
-  assertInvalid(duplicateArgument, /more than once/u);
+  assertInvalid(
+    duplicateArgument,
+    `$.instructions[${firstIndex(duplicateArgument, "callFunction")}].arguments[1].parameterName`,
+  );
 
   const callsWithCleanup = plan(
     [
@@ -414,21 +325,30 @@ test("rejects malformed function regions and aliased call temporaries", () => {
     (instruction) => instruction.kind === "clearTemporaries",
   )!;
   emptyBatch.temporaryIds = [];
-  assertInvalid(emptyCleanup, /non-empty array/u);
+  assertInvalid(
+    emptyCleanup,
+    `$.instructions[${firstIndex(emptyCleanup, "clearTemporaries")}].temporaryIds`,
+  );
 
   const duplicateCleanup = mutable(callsWithCleanup);
   const duplicateBatch = duplicateCleanup.instructions.find(
     (instruction) => instruction.kind === "clearTemporaries",
   )!;
   duplicateBatch.temporaryIds.push(duplicateBatch.temporaryIds[0]!);
-  assertInvalid(duplicateCleanup, /must not contain duplicates/u);
+  assertInvalid(
+    duplicateCleanup,
+    `$.instructions[${firstIndex(duplicateCleanup, "clearTemporaries")}].temporaryIds[${duplicateBatch.temporaryIds.length - 1}]`,
+  );
 
   const unknownCleanup = mutable(callsWithCleanup);
   const unknownBatch = unknownCleanup.instructions.find(
     (instruction) => instruction.kind === "clearTemporaries",
   )!;
   unknownBatch.temporaryIds[0] = unknownCleanup.temporaryCount + 1;
-  assertInvalid(unknownCleanup, /Temporary/u);
+  assertInvalid(
+    unknownCleanup,
+    `$.instructions[${firstIndex(unknownCleanup, "clearTemporaries")}].temporaryIds[0]`,
+  );
 
   const unpreparedAssignment = mutable(plan("let items = [0]\nitems[0] = 1"));
   const assignment = unpreparedAssignment.instructions.find(
@@ -436,7 +356,10 @@ test("rejects malformed function regions and aliased call temporaries", () => {
   );
   assert.ok(assignment?.kind === "assign" && assignment.target.kind === "index");
   assignment.target.index = { kind: "literal", value: 0, span: assignment.target.index.span };
-  assertInvalid(unpreparedAssignment, /indexes must be prepared/u);
+  assertInvalid(
+    unpreparedAssignment,
+    `$.instructions[${firstIndex(unpreparedAssignment, "assign")}].target.index`,
+  );
 });
 
 type Mutable<Value> = Value extends readonly (infer Item)[]
@@ -447,16 +370,33 @@ type Mutable<Value> = Value extends readonly (infer Item)[]
 
 type MutablePlan = Mutable<InstructionPlan>;
 
+function functionName(compiled: InstructionPlan, id: number): string | undefined {
+  return compiled.functions.find((definition) => definition.id === id)?.name;
+}
+
 function mutable(value: InstructionPlan): MutablePlan {
   // EVIDENCE: fixture: JSON round-trip preserves the plan shape while removing readonly ownership for malformed-field tests.
   return JSON.parse(JSON.stringify(value)) as MutablePlan;
 }
 
-function assertInvalid(value: unknown, message: RegExp): void {
+function firstIndex(value: MutablePlan, kind: Instruction["kind"]): number {
+  return value.instructions.findIndex((instruction) => instruction.kind === kind);
+}
+
+/**
+ * Plan errors share TSC002, so the affected path identifies the rule; a short
+ * fragment is added only where two rules report the same path.
+ */
+function assertInvalid(value: unknown, path: string, fragment?: string): void {
   const validation = validateInstructionPlan(value);
   assert.equal(validation.valid, false);
   assert.ok(
-    validation.errors.some((error) => message.test(error.message)),
-    JSON.stringify(validation.errors),
+    validation.errors.some(
+      (error) =>
+        error.code === "TSC002" &&
+        error.path === path &&
+        (fragment === undefined || error.message.includes(fragment)),
+    ),
+    `${path}: ${JSON.stringify(validation.errors)}`,
   );
 }

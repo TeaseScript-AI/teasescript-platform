@@ -7,9 +7,7 @@ test("reports a missing speaker identifier and parses the next statement", () =>
   const source = "speaker\nexit";
   const result = parse(source);
 
-  assert.deepEqual(compactDiagnostics(result), [
-    ["TSP003", "Expected a speaker identifier after 'speaker'.", [7, 0, 7, 7, 0, 7]],
-  ]);
+  assert.deepEqual(compactDiagnostics(result), [["TSP003", "error", [7, 0, 7, 7, 0, 7]]]);
   assert.deepEqual(statementKinds(result), ["exitStatement"]);
 });
 
@@ -17,9 +15,7 @@ test("reports a missing say-as identifier without consuming the next line", () =
   const source = 'say as "wrong"\nexit';
   const result = parse(source);
 
-  assert.deepEqual(compactDiagnostics(result), [
-    ["TSP003", "Expected a speaker identifier after 'as'.", [7, 0, 7, 7, 0, 7]],
-  ]);
+  assert.deepEqual(compactDiagnostics(result), [["TSP003", "error", [7, 0, 7, 7, 0, 7]]]);
   assert.deepEqual(statementKinds(result), ["exitStatement"]);
 });
 
@@ -27,9 +23,7 @@ test("reports a missing say string and recovers at LF", () => {
   const source = "say\nexit";
   const result = parse(source);
 
-  assert.deepEqual(compactDiagnostics(result), [
-    ["TSP006", "Expected a string after 'say'.", [3, 0, 3, 3, 0, 3]],
-  ]);
+  assert.deepEqual(compactDiagnostics(result), [["TSP006", "error", [3, 0, 3, 3, 0, 3]]]);
   assert.deepEqual(statementKinds(result), ["exitStatement"]);
 });
 
@@ -45,9 +39,9 @@ test("reports missing property names, colons, and strings at bounded lines", () 
   const result = parse(source);
 
   assert.deepEqual(compactDiagnostics(result), [
-    ["TSP004", "Expected a speaker property name.", [15, 1, 0, 15, 1, 0]],
-    ["TSP005", "Expected ':' after the speaker property name.", [39, 2, 12, 39, 2, 12]],
-    ["TSP006", "Expected a string for the speaker property.", [56, 3, 6, 56, 3, 6]],
+    ["TSP004", "error", [15, 1, 0, 15, 1, 0]],
+    ["TSP005", "error", [39, 2, 12, 39, 2, 12]],
+    ["TSP006", "error", [57, 4, 0, 57, 4, 0]],
   ]);
   assert.deepEqual(statementKinds(result), ["speakerDeclaration", "exitStatement"]);
 });
@@ -56,9 +50,7 @@ test("recovers a missing closing brace before a valid statement", () => {
   const source = ["speaker vera {", 'displayName: "Vera"', 'say "Still parsed"', "exit"].join("\n");
   const result = parse(source);
 
-  assert.deepEqual(compactDiagnostics(result), [
-    ["TSP007", "Expected '}' to close the speaker declaration.", [35, 2, 0, 35, 2, 0]],
-  ]);
+  assert.deepEqual(compactDiagnostics(result), [["TSP007", "error", [35, 2, 0, 35, 2, 0]]]);
   assert.deepEqual(statementKinds(result), ["speakerDeclaration", "sayStatement", "exitStatement"]);
   assert.deepEqual(result.program.statements[0]?.span, {
     start: { offset: 0, line: 0, column: 0 },
@@ -70,9 +62,7 @@ test("reports a missing closing brace at EOF once", () => {
   const source = 'speaker vera {\r\n  displayName: "Vera"';
   const result = parse(source);
 
-  assert.deepEqual(compactDiagnostics(result), [
-    ["TSP007", "Expected '}' to close the speaker declaration.", [37, 1, 21, 37, 1, 21]],
-  ]);
+  assert.deepEqual(compactDiagnostics(result), [["TSP007", "error", [37, 1, 21, 37, 1, 21]]]);
   assert.deepEqual(statementKinds(result), ["speakerDeclaration"]);
 });
 
@@ -80,23 +70,15 @@ test("reports an empty string interpolation and parses a later statement", () =>
   const source = 'say "Hello ${}"\r\nexit';
   const result = parse(source);
 
-  assert.deepEqual(compactDiagnostics(result), [
-    ["TSP008", "Expected an expression inside the string interpolation.", [13, 0, 13, 13, 0, 13]],
-  ]);
+  assert.deepEqual(compactDiagnostics(result), [["TSP008", "error", [13, 0, 13, 13, 0, 13]]]);
   assert.deepEqual(statementKinds(result), ["exitStatement"]);
 });
 
-test("rejects unsupported interpolation expressions deterministically", () => {
+test("rejects invalid interpolation punctuation deterministically", () => {
   const source = 'say "${player: other}"\nexit';
   const result = parse(source);
 
-  assert.deepEqual(compactDiagnostics(result), [
-    [
-      "TSP009",
-      "Only identifiers and chained property access are supported in string interpolation.",
-      [13, 0, 13, 14, 0, 14],
-    ],
-  ]);
+  assert.deepEqual(compactDiagnostics(result), [["TSP009", "error", [13, 0, 13, 14, 0, 14]]]);
   assert.deepEqual(statementKinds(result), ["exitStatement"]);
 });
 
@@ -104,9 +86,7 @@ test("reports a missing property after dot without cascading", () => {
   const source = 'say "${player.}"\nexit';
   const result = parse(source);
 
-  assert.deepEqual(compactDiagnostics(result), [
-    ["TSP010", "Expected a property name after '.'.", [14, 0, 14, 14, 0, 14]],
-  ]);
+  assert.deepEqual(compactDiagnostics(result), [["TSP010", "error", [14, 0, 14, 14, 0, 14]]]);
   assert.deepEqual(statementKinds(result), ["exitStatement"]);
 });
 
@@ -114,9 +94,7 @@ test("does not duplicate lexer diagnostics for an unterminated interpolation", (
   const source = 'say "Hello ${player"\nexit';
   const result = parse(source);
 
-  assert.deepEqual(compactDiagnostics(result), [
-    ["TSL005", "Unterminated string interpolation.", [11, 0, 11, 19, 0, 19]],
-  ]);
+  assert.deepEqual(compactDiagnostics(result), [["TSL005", "error", [11, 0, 11, 19, 0, 19]]]);
   assert.deepEqual(statementKinds(result), ["exitStatement"]);
 });
 
@@ -128,13 +106,11 @@ test("accepts physical continuation lines inside block-string interpolation", ()
   assert.deepEqual(statementKinds(result), ["sayStatement", "exitStatement"]);
 });
 
-test("rejects a non-slice statement and recovers at the next CRLF line", () => {
+test("rejects an invalid statement shape and recovers at the next CRLF line", () => {
   const source = "unknown thing\r\nexit";
   const result = parse(source);
 
-  assert.deepEqual(compactDiagnostics(result), [
-    ["TSP001", "Expected a supported TeaseScript statement.", [0, 0, 0, 7, 0, 7]],
-  ]);
+  assert.deepEqual(compactDiagnostics(result), [["TSP001", "error", [0, 0, 0, 7, 0, 7]]]);
   assert.deepEqual(statementKinds(result), ["exitStatement"]);
 });
 
@@ -143,7 +119,7 @@ function compactDiagnostics(
 ): Array<[string, string, [number, number, number, number, number, number]]> {
   return result.diagnostics.map((diagnostic) => [
     diagnostic.code,
-    diagnostic.message,
+    diagnostic.severity,
     [
       diagnostic.span.start.offset,
       diagnostic.span.start.line,

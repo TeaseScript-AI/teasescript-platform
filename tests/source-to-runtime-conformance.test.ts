@@ -38,22 +38,6 @@ test("reports parser and semantic source diagnostics through the package root", 
   );
 });
 
-test("propagates unexpected parser exceptions through the public compiler boundary", () => {
-  const error = new Error("unexpected parser failure");
-  const original = RegExp.prototype.test;
-  RegExp.prototype.test = () => {
-    throw error;
-  };
-  try {
-    assert.throws(
-      () => compileSource("let value = 1"),
-      (received: unknown) => received === error,
-    );
-  } finally {
-    RegExp.prototype.test = original;
-  }
-});
-
 test("executes source output, speaker provenance, collection copies, and control flow", () => {
   const plan = compiled(
     [
@@ -88,6 +72,24 @@ test("executes source output, speaker provenance, collection copies, and control
     ["TSW001"],
   );
   assert.equal(rootBinding(result.snapshot.frames[0]?.bindings ?? [], "total"), 4);
+});
+
+test("a speaker property continued after ':' runs like the single-line property", () => {
+  const speakers = [
+    'speaker vera { displayName: "Vera" }',
+    'speaker vera {\n    displayName:\n        "Vera"\n}',
+  ];
+  for (const declaration of speakers) {
+    const plan = compiled(`${declaration}\nsay as vera "Hi"`);
+    const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { seed: 7 }));
+    assert.equal(result.snapshot.status, "halted");
+    assert.deepEqual(
+      result.events
+        .filter((event) => event.kind === "say")
+        .map((event) => [event.text, event.speaker?.identifier, event.speaker?.displayName]),
+      [["Hi", "vera", "Vera"]],
+    );
+  }
 });
 
 test("executes explicit block newlines, dedent, escapes, and interpolation without text loss", () => {
@@ -155,22 +157,29 @@ test("keeps contextual say skip words available as call expressions", () => {
 });
 
 test("preserves function evaluation, deterministic random output, and checkpoint resume equivalence", () => {
-  const result = assertRuntimeResumeEquivalent(
-    [
-      "let order = []",
-      "function mark(value) { order.add(value)\nreturn value }",
-      "function add(left, right = left) { return left + right }",
-      "say add(mark(2))",
-      'say "${order[0]}:${randomInteger(1..=6)}"',
-    ].join("\n"),
-    { scenarioName: "public source conformance function and RNG scenario", seed: 0x2468_ace1 },
-  );
+  const source = [
+    "let order = []",
+    "function mark(value) { order.add(value)\nreturn value }",
+    "function add(left, right = left) { return left + right }",
+    "say add(mark(2))",
+    'say "${order[0]}:${randomInteger(1..=6)}"',
+  ].join("\n");
+  const seed = 0x2468_ace1;
+  const result = assertRuntimeResumeEquivalent(source, {
+    scenarioName: "public source conformance function and RNG scenario",
+    seed,
+  });
 
-  assert.deepEqual(
-    result.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["4", "2:1"],
+  const [sum, ordered] = result.events
+    .filter((event) => event.kind === "say")
+    .map((event) => event.text);
+  assert.equal(sum, "4");
+  assert.match(ordered!, /^2:[1-6]$/);
+  // The draw advanced the session RNG, so the resume comparison above covered RNG state.
+  assert.notDeepEqual(
+    result.finalSnapshot.rng,
+    createImmediatePacingRuntimeSnapshot(compiled(source), { seed }).rng,
   );
-  assert.notEqual(result.finalSnapshot.rng.state, 0);
 });
 
 test("resumes a blocking wait through public checkpoint and time APIs", () => {

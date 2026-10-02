@@ -22,45 +22,57 @@ test("general expression continuations parse valid and malformed nesting on a co
       ['hint', 'askText ', ''],
       ['choice', 'choose first:', ''],
     ];
+    // One depth far beyond the old guard proves stack safety; smaller depths add no failure mode.
+    const depth = 4096;
     for (const [name, open, close] of families) {
-      for (const depth of [256, 1024, 4096]) {
-        const source = 'let value = ' + open.repeat(depth) + '1' + close.repeat(depth) + '\\nexit';
-        const parsed = parse(source);
-        assert.deepEqual(parsed.diagnostics, [], name + ':' + depth);
-        assert.equal(parsed.program.statements.length, 2);
-        const declaration = parsed.program.statements[0];
-        assert.equal(declaration.kind, 'letStatement');
-        assert.equal(declaration.initializer.span.start.offset, 12);
-        assert.equal(declaration.initializer.span.end.offset, source.length - 5);
-        assert.equal(parsed.program.statements[1].kind, 'exitStatement');
-        // Inspect without native JSON/deepEqual recursion, which is not parser evidence.
-        const pending = [declaration.initializer];
-        let nodes = 0;
-        while (pending.length) {
-          const value = pending.pop();
-          if (value === null || typeof value !== 'object') continue;
-          assert.equal(Object.isFrozen(value), true);
-          if ('kind' in value) nodes++;
-          for (const child of Object.values(value)) {
-            if (child !== null && typeof child === 'object') pending.push(child);
-          }
+      const source = 'let value = ' + open.repeat(depth) + '1' + close.repeat(depth) + '\\nexit';
+      const parsed = parse(source);
+      assert.deepEqual(parsed.diagnostics, [], name);
+      assert.equal(parsed.program.statements.length, 2);
+      const declaration = parsed.program.statements[0];
+      assert.equal(declaration.kind, 'letStatement');
+      assert.equal(declaration.initializer.span.start.offset, 12);
+      assert.equal(declaration.initializer.span.end.offset, source.length - 5);
+      assert.equal(parsed.program.statements[1].kind, 'exitStatement');
+      // Inspect without native JSON/deepEqual recursion, which is not parser evidence.
+      const pending = [declaration.initializer];
+      let nodes = 0;
+      while (pending.length) {
+        const value = pending.pop();
+        if (value === null || typeof value !== 'object') continue;
+        assert.equal(Object.isFrozen(value), true);
+        if ('kind' in value) nodes++;
+        for (const child of Object.values(value)) {
+          if (child !== null && typeof child === 'object') pending.push(child);
         }
-        assert.ok(nodes >= depth);
-        // Missing inner operand/property values and closers exercise recovery at
-        // every suspended level without any optimized-path retry/reparse.
-        const malformed = 'let value = ' + open.repeat(depth) + (name === 'hint' ? 'as' : '') + '\\nexit';
-        const rejected = parse(malformed);
-        const repeats = (code, count) => Array(count).fill(code);
-        const codes = name === 'groups' ? repeats('TSP012', depth * 2 + 1)
-          : name === 'interpolation' ? ['TSL008', ...Array.from({length: depth}, () => ['TSL005', 'TSL003']).flat(), ...repeats('TSP009', depth), 'TSP012']
-          : name === 'hint' ? ['TSP029']
-          : name === 'choice' ? ['TSP030']
-          : ['TSP012', ...repeats('TSP017', name === 'mixed' ? depth * 2 : name === 'index' ? depth - 1 : depth), ...(name === 'sets' ? [] : ['TSP002'])];
-        assert.deepEqual(rejected.diagnostics.map(d => d.code), codes, name + ':' + depth);
-        const statements = name === 'groups' || name === 'interpolation' ? []
-          : name === 'hint' || name === 'choice' ? ['letStatement', 'exitStatement'] : ['letStatement'];
-        assert.deepEqual(rejected.program.statements.map(s => s.kind), statements, name);
-
+      }
+      assert.ok(nodes >= depth);
+      // Missing inner operand/property values and closers exercise recovery at
+      // every suspended level without any optimized-path retry/reparse.
+      const malformed = 'let value = ' + open.repeat(depth) + (name === 'hint' ? 'as' : '') + '\\nexit';
+      const rejected = parse(malformed);
+      if (name === 'hint' || name === 'choice') {
+        // The missing hint or option is the only diagnostic, and 'exit' survives.
+        assert.deepEqual(rejected.diagnostics.map((d) => d.code), [name === 'hint' ? 'TSP029' : 'TSP030'], name);
+        assert.deepEqual(rejected.program.statements.map((s) => s.kind), ['letStatement', 'exitStatement'], name);
+        continue;
+      }
+      // Only the root diagnostic is fixed: the missing value before 'exit', or
+      // the physical newline inside the innermost string. Secondary unwinding
+      // may improve but must stay structured, source-associated and deterministic.
+      const compact = (d) => [d.code, d.span.start.offset, d.span.end.offset];
+      const root = name === 'interpolation'
+        ? ['TSL008', malformed.indexOf('\\n'), malformed.indexOf('\\n') + 1]
+        : ['TSP012', malformed.lastIndexOf('exit'), malformed.lastIndexOf('exit')];
+      assert.deepEqual(compact(rejected.diagnostics[0]), root, name);
+      for (const d of rejected.diagnostics) {
+        assert.match(d.code, /^TS[LP][0-9]{3}$/u, name);
+        assert.ok(0 <= d.span.start.offset && d.span.start.offset <= d.span.end.offset
+          && d.span.end.offset <= malformed.length, name);
+      }
+      assert.deepEqual(parse(malformed).diagnostics.map(compact), rejected.diagnostics.map(compact));
+      for (const s of rejected.program.statements) {
+        assert.ok(['letStatement', 'exitStatement'].includes(s.kind), name);
       }
     }
     console.log('all expression families passed');
@@ -86,116 +98,104 @@ test("nested expression parsing preserves runtime order, grouping, interpolation
       "say value.child[1].nested",
       "say (10 - (3 - 2)) * 2",
       "say text",
-      "say order.length",
-      "say order[0]",
-      "say order[7]",
+      "for item in order { say item }",
       "exit",
     ].join("\n"),
     { scenarioName: "general expression parser continuations", seed: 42 },
   );
   assert.deepEqual(
     result.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["12", "18", "outer inner 15", "8", "1", "8"],
+    ["12", "18", "outer inner 15", "1", "2", "3", "4", "5", "6", "7", "8"],
   );
 });
 
-// Expected recovery results captured from main before the continuation repair.
-// These rows cover distinct grammar continuations; the complete differential
-// campaign also compared ASTs and every span against that baseline.
-test("nested malformed expressions retain diagnostic order, messages, spans, and statement recovery", () => {
+// Each row covers a distinct grammar continuation. Root diagnostics follow from the grammar: the first missing or
+// unexpected token. A value missing after a `:` that ends its line is reported at the start of the continued line,
+// the position chosen when newline continuation after `:` was added. Rows with `root` fix only that first diagnostic,
+// because secondary unwinding may improve; their recovery must still keep the final `exit`.
+test("nested malformed expressions retain root diagnostics, spans, and statement recovery", () => {
   const fixtures = [
     {
       expression: "{a:1,b:{x:},c:2}",
-      diagnostics: [["TSP012", "Expected an expression.", 22, 22]],
+      diagnostics: [["TSP012", 22, 22]],
       statements: ["letStatement", "exitStatement"],
     },
     {
       expression: "[0,{value:[1,]},2]",
-      diagnostics: [["TSP012", "Expected a collection element after ','.", 25, 25]],
+      diagnostics: [["TSP012", 25, 25]],
       statements: ["letStatement", "exitStatement"],
     },
-    {
-      expression: "(1 + (2 * ))",
-      diagnostics: [
-        ["TSP012", "Expected an expression after the arithmetic operator.", 22, 22],
-        ["TSP012", "Expected an expression.", 22, 22],
-        ["TSP012", "Expected an expression after the arithmetic operator.", 22, 22],
-        ["TSP012", "Expected an expression.", 22, 22],
-        ["TSP012", "Expected an expression.", 22, 22],
-      ],
-      statements: ["exitStatement"],
-    },
+    { expression: "(1 + (2 * ))", root: ["TSP012", 22, 22] },
     {
       expression: "f(0,f(a:1,2),2)",
-      diagnostics: [
-        ["TSP019", "Positional and named arguments may not be mixed in one call.", 22, 23],
-      ],
+      diagnostics: [["TSP019", 22, 23]],
       statements: ["letStatement", "exitStatement"],
     },
-    {
-      expression: '"a${"b${1:2}"}c"',
-      diagnostics: [
-        [
-          "TSP009",
-          "Only identifiers and chained property access are supported in string interpolation.",
-          21,
-          22,
-        ],
-        ["TSP009", "Expected a supported expression inside the string interpolation.", 25, 26],
-        ["TSP012", "Expected an expression.", 28, 28],
-      ],
-      statements: ["exitStatement"],
-    },
-    {
-      expression: "a[b[]].p",
-      diagnostics: [
-        ["TSP012", "Expected an expression.", 16, 16],
-        ["TSP002", "Expected a newline after the statement.", 17, 17],
-      ],
-      statements: ["letStatement", "exitStatement"],
-    },
+    { expression: '"a${"b${1:2}"}c"', root: ["TSP009", 21, 22] },
+    { expression: "a[b[]].p", root: ["TSP012", 16, 16] },
     {
       expression: "askText askText as",
-      diagnostics: [["TSP029", "Expected a speaker identifier after 'as'.", 30, 30]],
+      diagnostics: [["TSP029", 30, 30]],
       statements: ["letStatement", "exitStatement"],
     },
     {
       expression: "choose first:choose second:",
-      diagnostics: [["TSP030", "Expected a choice option expression after ':'.", 39, 39]],
+      diagnostics: [["TSP030", 40, 40]],
       statements: ["letStatement", "exitStatement"],
     },
     {
       expression: "(1 < 2 < 3) and true",
-      diagnostics: [["TSP020", "Comparisons may not be chained.", 19, 20]],
+      diagnostics: [["TSP020", 19, 20]],
       statements: ["letStatement", "exitStatement"],
     },
     {
       expression: "(1..2..3)",
-      diagnostics: [["TSP022", "Ranges may not be chained.", 17, 19]],
+      diagnostics: [["TSP022", 17, 19]],
       statements: ["letStatement", "exitStatement"],
     },
     {
       expression: "{a:1,b:{x 2},c:2}",
-      diagnostics: [["TSP005", "Expected ':' after the object property name.", 22, 22]],
+      diagnostics: [["TSP005", 22, 22]],
       statements: ["letStatement", "exitStatement"],
+      outerProperties: ["a", "b", "c"],
     },
     {
       expression: "{a:1,b:{:2},c:2}",
-      diagnostics: [["TSP004", "Expected an object property name.", 20, 20]],
+      diagnostics: [["TSP004", 20, 20]],
       statements: ["letStatement", "exitStatement"],
+      outerProperties: ["a", "b", "c"],
     },
   ];
   for (const fixture of fixtures) {
     const parsed = parse(`let value = ${fixture.expression}\nexit`);
-    assert.deepEqual(
-      parsed.diagnostics.map((d) => [d.code, d.message, d.span.start.offset, d.span.end.offset]),
-      fixture.diagnostics,
-      fixture.expression,
-    );
-    assert.deepEqual(
-      parsed.program.statements.map((s) => s.kind),
-      fixture.statements,
-      fixture.expression,
-    );
+    const diagnostics = parsed.diagnostics.map((d) => [
+      d.code,
+      d.span.start.offset,
+      d.span.end.offset,
+    ]);
+    const statements = parsed.program.statements.map((s) => s.kind);
+    if ("root" in fixture) {
+      assert.deepEqual(diagnostics[0], fixture.root, fixture.expression);
+      assert.equal(statements.at(-1), "exitStatement", fixture.expression);
+      assert.ok(
+        statements.every((kind) => kind === "letStatement" || kind === "exitStatement"),
+        fixture.expression,
+      );
+    } else {
+      assert.deepEqual(diagnostics, fixture.diagnostics, fixture.expression);
+      assert.deepEqual(statements, fixture.statements, fixture.expression);
+    }
+    if ("outerProperties" in fixture) {
+      // The inner object error must not discard the outer siblings around it.
+      const [declaration] = parsed.program.statements;
+      const outer = declaration?.kind === "letStatement" ? declaration.initializer : undefined;
+      assert.deepEqual(
+        outer?.kind === "objectLiteral"
+          ? outer.properties.map((property) => property.name.name)
+          : null,
+        fixture.outerProperties,
+        fixture.expression,
+      );
+    }
   }
 });

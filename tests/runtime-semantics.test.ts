@@ -273,39 +273,38 @@ test("does not advance RNG state for empty list or set random", () => {
 test("uses the speaker identifier fallback and warns only once per speaker", () => {
   const source = [
     "speaker mistressVera {}",
+    "speaker guest {}",
     "speaker mistressVera",
     'say "First"',
-    'say "Second"',
-    'say as mistressVera "Third"',
+    'say as guest "Second"',
+    'say "Third"',
+    'say as guest "Fourth"',
+    'say as mistressVera "Fifth"',
   ].join("\n");
   const result = executeSource(source);
-  const firstSayStart = source.indexOf('say "First"');
+  const warningSpan = (statement: string) => {
+    const start = source.indexOf(statement);
+    return [start, start + statement.length];
+  };
 
   assert.deepEqual(result.errors, []);
   assert.deepEqual(
     result.events
       .filter((event) => event.kind === "say")
       .map((event) => event.speaker?.displayName),
-    ["mistressVera", "mistressVera", "mistressVera"],
+    ["mistressVera", "guest", "mistressVera", "guest", "mistressVera"],
   );
   assert.deepEqual(
     result.warnings.map((warning) => [
       warning.kind,
       warning.severity,
       warning.code,
-      warning.message,
       warning.span.start.offset,
       warning.span.end.offset,
     ]),
     [
-      [
-        "developerWarning",
-        "warning",
-        "TSW001",
-        "Speaker 'mistressVera' uses its identifier as the display name.",
-        firstSayStart,
-        firstSayStart + 'say "First"'.length,
-      ],
+      ["developerWarning", "warning", "TSW001", ...warningSpan('say "First"')],
+      ["developerWarning", "warning", "TSW001", ...warningSpan('say as guest "Second"')],
     ],
   );
 });
@@ -356,52 +355,58 @@ test("warns when list.remove cannot find a matching value", () => {
     result.warnings.map((warning) => [
       warning.severity,
       warning.code,
-      warning.message,
       warning.span.start.offset,
       warning.span.end.offset,
     ]),
-    [
-      [
-        "warning",
-        "TSW002",
-        "list.remove(value) found no matching value; the list was left unchanged.",
-        start,
-        start + call.length,
-      ],
-    ],
+    [["warning", "TSW002", start, start + call.length]],
   );
 });
 
-test("removes only the first matching list value without a missing-value warning", () => {
+test("removes only the first matching list value and present-value removals do not warn", () => {
   const captured: unknown[] = [];
   const result = executeSource(
-    ["let values = [1, 1, 2]", "values.remove(1)", "capture(values)", "exit"],
+    [
+      "let values = [1, 1, 2]",
+      "values.remove(1)",
+      "capture(values)",
+      "values.removeFirst()",
+      "capture(values)",
+      "values.clear()",
+      "capture(values)",
+      "exit",
+    ],
     { capture: captureInto(captured) },
   );
 
   assert.deepEqual(result.errors, []);
-  assert.deepEqual(captured, [[1, 2]]);
+  assert.deepEqual(captured, [[1, 2], [2], []]);
   assert.equal(
     result.warnings.some((warning) => warning.code === "TSW002"),
     false,
   );
 });
 
-test("does not apply the list.remove warning to sets or other list removals", () => {
-  const result = executeSource([
-    "let values = [1]",
-    "let setValue = set[1]",
-    "setValue.remove(2)",
-    "values.removeFirst()",
-    "values.removeLast()",
-    "values.clear()",
-    "exit",
-  ]);
+test("set remove of an absent value and removeFirst or removeLast on an empty list are no-ops", () => {
+  const captured: unknown[] = [];
+  const result = executeSource(
+    [
+      "let setValue = set[1]",
+      "setValue.remove(2)",
+      "let emptyList = []",
+      "emptyList.removeFirst()",
+      "emptyList.removeLast()",
+      "capture(setValue.toList())",
+      "capture(emptyList)",
+      "exit",
+    ],
+    { capture: captureInto(captured) },
+  );
 
-  assert.deepEqual(result.errors, []);
-  assert.equal(
-    result.warnings.some((warning) => warning.code === "TSW002"),
-    false,
+  assert.deepEqual(captured, [[1], []]);
+  // Unlike list remove(value), these no-ops report neither an error nor a warning.
+  assert.deepEqual(
+    result.events.map((event) => event.kind),
+    ["exit"],
   );
 });
 

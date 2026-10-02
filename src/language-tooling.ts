@@ -539,6 +539,8 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
     case "showButtonStatement":
       visitor.showButton(statement);
       children.push({ kind: "expression", node: statement.label });
+      if (statement.background !== null)
+        children.push({ kind: "expression", node: statement.background });
       return;
     case "sayStatement":
       visitor.say(statement);

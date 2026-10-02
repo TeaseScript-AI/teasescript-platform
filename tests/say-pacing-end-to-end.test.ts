@@ -26,8 +26,7 @@ test("multiple pacing cycles preserve prepared output, identities, replay, and c
   const first = run(compiled, initial);
   const firstGate = first.snapshot.foregroundAction;
   assert.equal(firstGate?.kind, "chatPacingGate");
-  assert.equal(firstGate?.actionId, 1);
-  assert.equal(firstGate?.preparedOutput?.owningInstruction, 1);
+  assert.deepEqual(said(first.events), ["one"]);
   assert.equal(first.events.filter((event) => event.kind === "actionRequested").length, 1);
   assert.equal(validateRuntimeSnapshot(first.snapshot, compiled).valid, true);
 
@@ -37,36 +36,39 @@ test("multiple pacing cycles preserve prepared output, identities, replay, and c
     payload: { kind: "skip" },
   });
   assert.equal(releasedFirst.outcome.kind, "completed");
-  assert.equal(releasedFirst.snapshot.lastSettlement?.actionId, 1);
+  assert.equal(releasedFirst.snapshot.lastSettlement?.actionId, firstGate!.actionId);
   assert.equal(
     completeAction(compiled, releasedFirst.snapshot, {
-      actionId: 1,
+      actionId: firstGate!.actionId,
       actionKind: "chatPacingGate",
       payload: { kind: "skip" },
     }).outcome.kind,
     "alreadySettled",
   );
 
+  // Each released message is emitted from the text prepared before its wait.
   const second = run(compiled, releasedFirst.snapshot);
   const secondGate = second.snapshot.foregroundAction;
   assert.equal(secondGate?.kind, "chatPacingGate");
-  assert.equal(secondGate?.actionId, 2);
-  assert.equal(second.events.filter((event) => event.kind === "say").length, 1);
+  assert.ok(secondGate!.actionId > firstGate!.actionId);
+  assert.deepEqual(said(second.events), [firstGate?.preparedOutput?.text]);
   assert.equal(second.events.filter((event) => event.kind === "actionRequested").length, 1);
   assert.notEqual(secondGate?.preparedOutput, null);
   assert.equal(validateRuntimeSnapshot(second.snapshot, compiled).valid, true);
 
   const releasedSecond = observeTime(compiled, second.snapshot, secondGate!.deadlineMs);
-  assert.equal(releasedSecond.snapshot.lastSettlement?.actionId, 2);
+  assert.equal(releasedSecond.snapshot.lastSettlement?.actionId, secondGate!.actionId);
   assert.equal(releasedSecond.snapshot.preparedSayOutput?.text, secondGate?.preparedOutput?.text);
   assert.equal(validateRuntimeSnapshot(releasedSecond.snapshot, compiled).valid, true);
 
   const third = run(compiled, releasedSecond.snapshot);
   const thirdGate = third.snapshot.foregroundAction;
   assert.equal(thirdGate?.kind, "chatPacingGate");
-  assert.equal(thirdGate?.actionId, 3);
-  assert.equal(third.events.filter((event) => event.kind === "say").length, 1);
+  assert.ok(thirdGate!.actionId > secondGate!.actionId);
+  assert.deepEqual(said(third.events), [secondGate?.preparedOutput?.text]);
   assert.equal(third.events.filter((event) => event.kind === "actionRequested").length, 1);
+  // Emitting the selected list item and preparing the literal "four" draw nothing.
+  assert.deepEqual(third.snapshot.rng, releasedSecond.snapshot.rng);
 
   const releasedThird = completeAction(compiled, third.snapshot, {
     actionId: thirdGate!.actionId,
@@ -74,14 +76,24 @@ test("multiple pacing cycles preserve prepared output, identities, replay, and c
     payload: { kind: "skip" },
   });
   const fourthOutput = executeInstruction(compiled, releasedThird.snapshot);
+  assert.deepEqual(said(fourthOutput.events), [thirdGate?.preparedOutput?.text]);
   assert.equal(fourthOutput.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
-  assert.equal(fourthOutput.snapshot.backgroundActions[0]?.actionId, 4);
-  assert.equal(fourthOutput.snapshot.lastSettlement?.actionId, 3);
+  assert.ok(fourthOutput.snapshot.backgroundActions[0]!.actionId > thirdGate!.actionId);
+  assert.equal(fourthOutput.snapshot.lastSettlement?.actionId, thirdGate!.actionId);
   assert.equal(validateRuntimeSnapshot(fourthOutput.snapshot, compiled).valid, true);
   assert.doesNotThrow(() => createCheckpoint(compiled, fourthOutput.snapshot));
   const finalRun = executeInstruction(compiled, fourthOutput.snapshot);
   assert.equal(finalRun.snapshot.status, "halted");
   assert.equal(finalRun.snapshot.backgroundActions.length, 0);
+
+  const transcript = [first, second, third, fourthOutput, finalRun].flatMap((step) =>
+    said(step.events),
+  );
+  assert.equal(transcript.length, 4);
+  assert.equal(transcript[0], "one");
+  assert.ok(["two alpha", "two beta"].includes(transcript[1]!), transcript[1]);
+  assert.ok(["three", "three-alt"].includes(transcript[2]!), transcript[2]);
+  assert.equal(transcript[3], "four");
 
   const cuts = [
     first.snapshot,
@@ -170,6 +182,10 @@ test("mixed wait, interaction, instant, and pacing composition keeps event order
     deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, finalRun.snapshot))),
   );
 });
+
+function said(events: ReturnType<typeof run>["events"]): string[] {
+  return events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
+}
 
 function finishPacingChain(
   compiled: ReturnType<typeof plan>,

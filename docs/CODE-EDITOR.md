@@ -18,11 +18,11 @@ The technical workspace/controller implementation lives at `playground/workspace
 entrypoints use that controller directly. Player rendering remains in the browser presentation layer and does not create
 a second canonical runtime state model.
 
-The Player implementation lives under `player/` and is served by the same development server. The maintained Vue Player
-at `/player/` uses the framework-independent `player/runtime-adapter.ts` to translate canonical
-runtime state and events into Player presentation and typed Player input into runtime operations. The playground
-controller shares its action lookup/completion path without creating a second canonical runtime state model. The local
-route does not define the still-future cross-origin production Player/host protocol.
+The Player implementation lives under `player/vue/src/`. Its framework-independent `player/runtime-adapter.ts`
+translates canonical runtime state/events into presentation and typed input into runtime operations. The playground
+controller shares its action lookup/completion path without creating a second canonical runtime state model. See
+[`player/README.md`](../player/README.md) for local inspection; that route does not define the future cross-origin
+production Player/host protocol.
 
 The browser stores authoring text under the versioned `teasescript-playground-draft-v1` localStorage key. Drafts are
 separate from runtime checkpoints. Storage failures are bounded technical messages; explicit example reload discards the
@@ -81,4 +81,4 @@ The editor may preview the Player application's dynamic choice presentation, but
 
 Editor metadata must not imply that the first POC supports imports, package manifests, Standard Library replacement, or checkpoint migration.
 
-The advanced detailed-result option, `showButton` timeout/elapsed return, typing-indicator options, accessibility override field, concrete limit values, LLM interpretation options, and exact choice-layout thresholds remain deferred and must not appear as accepted completion suggestions before their contracts are approved.
+Completion follows accepted TeaseScript syntax, not the completeness of the current implementation slice. Accepted syntax may therefore appear before its implementation slice is complete, such as the accepted V30 `showButton` timeout/elapsed-time return; implementation status must not be encoded as a negative completion requirement. Completion, hover, and help text must not claim that an unimplemented capability already executes. The advanced detailed-result option, typing-indicator options, accessibility override field, and LLM interpretation options are not yet accepted syntax; concrete limit values and exact choice-layout thresholds remain deferred.

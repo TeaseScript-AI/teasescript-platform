@@ -3,8 +3,12 @@ import test from "node:test";
 
 import { checkEvidenceComments } from "./check-evidence.mjs";
 
-function messages(sourceText) {
-  return checkEvidenceComments("fixture.ts", sourceText).map((diagnostic) => diagnostic.message);
+function rejectedLocations(sourceText) {
+  const diagnostics = checkEvidenceComments("fixture.ts", sourceText);
+  for (const { message } of diagnostics) {
+    assert.ok(message.trim().length > 0);
+  }
+  return diagnostics.map(({ line, column }) => ({ line, column }));
 }
 
 test("allows rule-specific line exceptions with evidence", () => {
@@ -27,9 +31,9 @@ const first = value;
 const second = value;
 `;
 
-  assert.deepEqual(messages(sourceText), [
-    "Oxlint exceptions must include `-- EVIDENCE: <factual explanation>`.",
-    "Oxlint exceptions must include `-- EVIDENCE: <factual explanation>`.",
+  assert.deepEqual(rejectedLocations(sourceText), [
+    { line: 2, column: 1 },
+    { line: 4, column: 1 },
   ]);
 });
 
@@ -45,12 +49,12 @@ const third = value;
 // oxlint-enable anti-slop/example
 `;
 
-  assert.deepEqual(messages(sourceText), [
-    "Block, file-wide, and enable-style Oxlint directives are not allowed.",
-    "Oxlint exceptions must name one or more explicit rules.",
-    "Oxlint exceptions must name one or more explicit rules.",
-    "Oxlint exceptions must name one or more explicit rules.",
-    "Block, file-wide, and enable-style Oxlint directives are not allowed.",
+  assert.deepEqual(rejectedLocations(sourceText), [
+    { line: 2, column: 1 },
+    { line: 3, column: 1 },
+    { line: 5, column: 1 },
+    { line: 7, column: 1 },
+    { line: 9, column: 1 },
   ]);
 });
 
@@ -68,14 +72,14 @@ const second = value; // eslint-disable-line anti-slop/example
 // eslint-enable anti-slop/example
 `;
 
-  const foundMessages = messages(sourceText);
-  assert.equal(foundMessages.length, 6);
-  assert.ok(
-    foundMessages.every(
-      (message) =>
-        message === "ESLint suppression and inline rule configuration comments are not allowed.",
-    ),
-  );
+  assert.deepEqual(rejectedLocations(sourceText), [
+    { line: 2, column: 1 },
+    { line: 4, column: 23 },
+    { line: 5, column: 1 },
+    { line: 6, column: 1 },
+    { line: 7, column: 1 },
+    { line: 11, column: 1 },
+  ]);
 });
 
 test("rejects multiline and empty-block suppression comments", () => {
@@ -89,9 +93,9 @@ const first = value;
 }
 `;
 
-  assert.deepEqual(messages(sourceText), [
-    "Oxlint exceptions must use single-line comments.",
-    "Oxlint exceptions must use single-line comments.",
+  assert.deepEqual(rejectedLocations(sourceText), [
+    { line: 2, column: 1 },
+    { line: 7, column: 3 },
   ]);
 });
 

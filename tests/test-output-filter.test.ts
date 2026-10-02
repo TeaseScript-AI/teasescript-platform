@@ -79,6 +79,7 @@ test("filter preserves failures, stacks, the summary, and the exit code", () => 
   assert.doesNotMatch(result.stdout, /✔|passing test stays hidden/);
   assert.match(result.stdout, /✖ failing test stays visible/);
   assert.match(result.stdout, /AssertionError/);
+  assert.match(result.stdout, /^\s+at .*mixed\.test\.mjs:\d+:\d+/mu);
   assert.match(result.stdout, /ℹ tests 2/);
   assert.match(result.stdout, /ℹ pass 1/);
   assert.match(result.stdout, /ℹ fail 1/);

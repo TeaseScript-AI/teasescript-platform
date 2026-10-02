@@ -50,6 +50,11 @@ outside the repository.
 - Validate external, checkpoint, host, package, and future integration data at runtime.
 - Do not add a dependency without documenting its need, alternatives, maintenance impact, and security impact.
 - Do not weaken tests to hide failures.
+- Do not record an experiment or inferred preference as accepted syntax or design. New syntax requires explicit Owner
+  acceptance; after acceptance, synchronize the implementation and its canonical specification in the same change.
+- Do not use tests to turn unsettled behavior or temporary implementation state into an implicit requirement. An
+  accepted but unimplemented, deferred, or placeholder capability is not behavior to preserve; test what users rely on
+  meanwhile, not an inventory of what is absent.
 
 ## Requirements, simplicity, and review
 
@@ -73,7 +78,7 @@ execution, serializable checkpoints, or validation at real external, host,
 checkpoint, persistence, package, and security boundaries. When repeated
 sibling findings stop reducing uncertainty, report the pattern and reassess the
 implementation or evidence strategy instead of continuing isolated repairs.
-Use `docs/TESTING.md` for systematic coverage when it is proportionate.
+Before adding, removing, or materially changing tests, read `docs/TESTING.md#test-admission-and-consolidation`.
 
 Before claiming a project limitation, proposing infrastructure, or presenting
 owner options, verify the relevant capability through the smallest authoritative

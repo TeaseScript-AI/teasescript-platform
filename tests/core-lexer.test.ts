@@ -52,7 +52,7 @@ test("distinguishes dots from leading-dot numbers with exact spans", () => {
 
 test("lexes core keywords, delimiters, and operators", () => {
   const result = lex(
-    "let if else true false null not and or set () [] , ? + - * / % = == != < <= > >=",
+    "let if else true false null not and or set function return () [] , ? + - * / % = == != < <= > >=",
   );
 
   assert.deepEqual(result.diagnostics, []);
@@ -69,6 +69,8 @@ test("lexes core keywords, delimiters, and operators", () => {
       TokenKind.KeywordAnd,
       TokenKind.KeywordOr,
       TokenKind.KeywordSet,
+      TokenKind.KeywordFunction,
+      TokenKind.KeywordReturn,
       TokenKind.LeftParenthesis,
       TokenKind.RightParenthesis,
       TokenKind.LeftBracket,

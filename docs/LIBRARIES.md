@@ -346,7 +346,7 @@ ADR 0018 compact forms therefore require parser-owned syntax support in addition
 The current engine/compiler implements compact `showButton`, `askText`, `askNumber`, and `choose` plus ADR 0018
 `say` smart/exact pacing and skip policy. Positive pacing uses the resumable `chatPacingGate` lifecycle described above;
 `0`/`instant`, interaction consumption, `wait` coexistence, prepared output, and checkpoint/restore are implemented on
-that same deterministic runtime model. The Vue reference reconstructs and runs these Standard interaction and pacing
+that same deterministic runtime model. The Player presents these Standard interaction and pacing
 controls through the framework-independent Player adapter. Editor/formatter/simulator support and final
 package/import/version/replacement design remain deferred. The production cross-origin Player/host protocol remains
 separate future work.

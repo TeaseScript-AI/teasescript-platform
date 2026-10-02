@@ -112,6 +112,7 @@ A statement continues across a newline when the parser can see that it is not co
 - inside `()` and `[]`;
 - inside object literals;
 - after `=`, a comma, or a binary operator;
+- after the `:` of a named argument, option, property, or choice key, before its value;
 - before the closing delimiter of a multiline call, list, or object.
 
 Examples:
@@ -140,6 +141,9 @@ let total = score +
 
 let result =
     calculateDamage(player, weapon)
+
+let answer = choose stay:
+    "Stay", leave: "Leave"
 ```
 
 The same calls and objects may remain on one line:
@@ -1083,6 +1087,8 @@ Runtime behavior:
 - Automatic visible-text selection from an empty list raises a runtime error because no element can be selected.
 - The empty-list error identifies the list expression and explains that the visible-text context requires at least one eligible element.
 - `remove(value)` leaves the list unchanged when the value is absent and emits a warning to the developer log.
+- `removeFirst()` and `removeLast()` on an empty list, and set `remove(value)` of an absent value, are no-ops: the
+  collection stays unchanged and execution continues without an error or warning.
 - Mutating methods change the existing list.
 - Recoverable index and empty-selection errors follow the runtime recovery rules described later in this document.
 
@@ -2085,7 +2091,8 @@ modifiers mean visible and blocking. `async`, `visible`, `mystery`, and `hidden`
 A duration is a bare number of seconds, a [§35](#35-date-time-durations-and-unix-time) elapsed duration such as
 `500 ms` or `2 min`, or a number followed by a trailing unit as for `wait` (`timer n ms`). A range such as `5..10` or
 `5..=10` counts whole seconds and is drawn once per round from the session RNG after the timer's operands are
-evaluated; ranges with other units are not yet supported. `timer 0` and `wait 0` continue immediately.
+evaluated. Ranges with other units, such as `5..10 min`, are not implemented yet. `timer 0` and `wait 0` continue
+immediately.
 
 ### Named form
 
@@ -2489,7 +2496,7 @@ Recovery is not offered for structural errors such as malformed syntax, unknown 
 TeaseScript has separate `date`, `time`, `datetime`, and `duration` types. The current runtime implements elapsed
 duration literals and values using `ms`, `s`, `min`, and `h`, including their singular and plural long forms.
 Calendar durations, date/time APIs, technical conversions, and locale-aware presentation remain deferred.
-Calendar duration units are rejected by the current compiler.
+Until calendar durations are implemented, a calendar unit fails compilation instead of being read as another value.
 
 Current values:
 
@@ -2762,7 +2769,12 @@ say [as speaker] [bubble(options) | prose(options)] [skippable | unskippable] te
 ```
 
 Brackets denote optional parts. `bubble` and `prose` may appear without parentheses; parentheses contain ordinary
-comma-separated named arguments. Supported options are `position`, `align`, `color`, `background`, and `font`.
+comma-separated named arguments. Both modes accept `color`, `background`, and `font`; only `prose` accepts
+`position` and `align`. Bubble placement and text alignment belong to the Player: received messages appear on the left
+and player-authored replies on the right. Bubble options cannot override them, including through speaker defaults or
+explicit `null` values. Direct `say` options and literal speaker-declaration defaults are checked at compile time.
+Speaker option objects supplied or reassigned at runtime are validated when used to prepare a message and fail with
+`TSR050` if they contain unsupported options.
 Each value is an ordinary expression, including variables and function calls. Unknown or repeated options are errors.
 The mode words remain usable as ordinary identifiers when the complete `say` value parses without a modifier.
 
@@ -2774,7 +2786,7 @@ speaker vera {
     presentation: "bubble"
     color: "white"
     font: "Georgia"
-    bubble: { background: "#334455", position: "right", align: "left" }
+    bubble: { background: "#334455" }
     prose: { align: "left" }
 }
 speaker vera
@@ -2785,16 +2797,16 @@ say prose(background: "ivory", color: "#302820") "A letter."
 The compiler retains omitted message options as inheritance, not as frozen effective values. The runtime selects the
 explicit mode, then the speaker's mode, then `bubble`. Each option resolves from the message, then the selected
 speaker-mode object, then the platform default. `color` and `font` additionally fall back to the general speaker fields.
-Overrides affect only that message. Explicit `null` behaves as omission; an explicit transparent colour overrides an
-inherited background.
+Overrides affect only that message. Explicit `null` behaves as omission.
 
-After message and speaker inheritance, an unchosen `position` or `align` remains `null` in the emitted presentation.
-The runtime does not supply a default for either field; the Player selects their defaults in #421. Explicit choices
-remain distinguishable from omission. `position` places the whole block; `align` sets the text within it. Both accept
+For prose, after message and speaker inheritance, an unchosen `position` or `align` remains `null` in the emitted
+presentation. The Player selects their defaults. Explicit choices remain distinguishable from omission. For bubbles,
+both resolved fields are always `null` and only the Player determines placement. For prose, `position` places the whole
+block; `align` sets the text within it. Both accept
 `"left"`, `"center"`, or `"right"`. Bubble backgrounds and unspecified text/font use Player theme
-roles; the runtime represents these theme selections with `null`. Prose background defaults to transparent, independently
-of the speaker's bubble background. Prose retains speaker provenance but has no avatar by default; visible name treatment
-belongs to the Player presentation design. These defaults do not introduce a new avatar/name visibility syntax.
+roles; the runtime represents these theme selections with `null`. Prose has no background default: a prose message
+whose background was never chosen reports `null`. Prose retains speaker provenance; avatar and visible name treatment
+belong to the Player presentation design. These defaults do not introduce a new avatar/name visibility syntax.
 
 Option expressions evaluate once in written order before the text and pacing expressions, under the selected speaker
 context. Effective style defaults are resolved when the runtime prepares the output, using that speaker's current
@@ -2804,16 +2816,21 @@ properties. The resulting presentation is captured with the message across pacin
 
 **Status:** Accepted (Owner-approved extension for #422).
 
-Concrete colour values accept CSS colour names (including `transparent`), 3/4/6/8-digit hex, `rgb()`/`rgba()`,
-`hsl()`/`hsla()`, `hwb()`, `lab()`, `lch()`, `oklab()`, and `oklch()`, including their alpha forms. Hex and RGB use standard
-sRGB. Host-dependent values such as `var()` and `currentColor`, relative colours, and explicit linear RGB are excluded.
+Authored colours are always opaque. Concrete colour values accept CSS colour names, 3/4/6/8-digit hex,
+`rgb()`/`rgba()`, `hsl()`/`hsla()`, `hwb()`, `lab()`, `lch()`, `oklab()`, and `oklch()`. Hex and RGB use standard sRGB.
+Host-dependent values such as `var()` and `currentColor`, relative colours, and explicit linear RGB are excluded.
+
+`transparent` and alpha below full opacity are invalid; full-opacity forms such as `#ff0000ff` and
+`rgb(255 0 0 / 1)` are accepted. This keeps authored colours independent of the Player's underlying theme surface.
+The restriction covers static and dynamic text/background colours in speaker properties and message options,
+not Player interface transparency.
 
 The compiler validates constant speaker-declaration and message-option colours while retaining their authored values.
-The runtime normalizes both constant and dynamic colours to OKLCH with alpha when preparing output. Converted values
+The runtime normalizes both constant and dynamic colours to OKLCH when preparing output. Converted values
 are not parsed again as authored input: CSS input-channel clamping must not alter previously converted coordinates.
 Message markup follows its existing complete-string parse after interpolation. Invalid statically known colours in these authored positions produce source-associated compiler
 errors. Valid out-of-gamut coordinates are retained without a gamut warning or silent gamut mapping; display mapping
-belongs to the browser. CSS colour parsing rules still govern the input notation's channels and alpha.
+belongs to the browser. CSS colour parsing rules still govern the input notation's channels.
 
 An invalid runtime colour falls back to the next applicable default without aborting the story. General warning,
 logging, and recovery policy is separate work in #427. This fallback does not suppress failures evaluating the expression

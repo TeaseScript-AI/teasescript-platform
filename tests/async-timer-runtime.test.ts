@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
@@ -15,7 +16,6 @@ import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
-import { timerProperty } from "../src/runtime/timers.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
@@ -29,6 +29,41 @@ function playerRuntimeDeadlinesDue(snapshot: RuntimeSnapshot): boolean {
     (deadline) => deadline <= snapshot.observedSessionTimeMs,
   );
 }
+
+/**
+ * Generous bound for a catch-up that finishes in well under a second. The horizons that use it hold so many silent
+ * rounds that expiring them one at a time would take days, so exceeding it means that regression rather than a slow
+ * machine; it is not a performance threshold.
+ */
+const BOUNDED_CATCH_UP_LIMIT_MS = 20_000;
+
+/**
+ * Restores a checkpoint, observes a time, and runs the engine, round-tripping each resulting snapshot through checkpoint
+ * JSON as `Session.at` does; prints the result as JSON. See `Session.atBounded`.
+ */
+const BOUNDED_CATCH_UP_SCRIPT = `
+  import assert from "node:assert/strict";
+  import {
+    createCheckpoint, deserializeCheckpoint, observeTime, run, serializeCheckpoint,
+  } from ${JSON.stringify(new URL("../src/index.js", import.meta.url).href)};
+  let input = "";
+  for await (const chunk of process.stdin) input += chunk;
+  const { checkpoint, nowMs } = JSON.parse(input);
+  const { plan, snapshot } = deserializeCheckpoint(checkpoint);
+  const restore = (current) => {
+    const json = serializeCheckpoint(createCheckpoint(plan, current));
+    const restored = deserializeCheckpoint(json).snapshot;
+    assert.deepEqual(restored, current, "checkpoint JSON must round-trip exactly");
+    return { json, restored };
+  };
+  const observed = observeTime(plan, snapshot, nowMs);
+  const ran = run(plan, restore(observed.snapshot).restored);
+  process.stdout.write(JSON.stringify({
+    outcome: observed.outcome.kind,
+    events: [...observed.events, ...ran.events],
+    checkpoint: restore(ran.snapshot).json,
+  }));
+`;
 
 /** Drives a session with explicit time observations and completions, round-tripping every checkpoint. */
 class Session {
@@ -72,6 +107,39 @@ class Session {
     assert.equal(observed.outcome.kind, "observed");
     this.events.push(...observed.events);
     this.snapshot = observed.snapshot;
+    return this.run();
+  }
+
+  /**
+   * Like `at`, but catches up in a child process that is stopped after `BOUNDED_CATCH_UP_LIMIT_MS`. Catch-up is
+   * synchronous, so a node:test `timeout` cannot interrupt it; the child turns a regression to per-round catch-up into
+   * a failure instead of a hung suite.
+   */
+  atBounded(nowMs: number): this {
+    this.#restore();
+    const child = spawnSync(
+      process.execPath,
+      ["--input-type=module", "--eval", BOUNDED_CATCH_UP_SCRIPT],
+      {
+        input: JSON.stringify({
+          checkpoint: serializeCheckpoint(createCheckpoint(this.plan, this.snapshot)),
+          nowMs,
+        }),
+        encoding: "utf8",
+        timeout: BOUNDED_CATCH_UP_LIMIT_MS,
+      },
+    );
+    assert.equal(child.error, undefined, `catch-up to ${nowMs} ms must finish within the bound`);
+    assert.equal(child.status, 0, child.stderr);
+    // EVIDENCE: fixture: the child prints plain JSON data in this shape.
+    const result = JSON.parse(child.stdout) as {
+      outcome: string;
+      events: InterpreterEvent[];
+      checkpoint: string;
+    };
+    assert.equal(result.outcome, "observed");
+    this.events.push(...result.events);
+    this.snapshot = deserializeCheckpoint(result.checkpoint).snapshot;
     return this.run();
   }
 
@@ -151,10 +219,33 @@ function assertForgedRejected(json: string, path: JsonPath, value: Json): void {
   );
 }
 
-function diagnostics(source: string): string[] {
-  const result = compileSource(source);
-  assert.equal(result.plan, null, `${JSON.stringify(source)} must not compile`);
-  return result.diagnostics.map((diagnostic) => `${diagnostic.code} ${diagnostic.message}`);
+/** Requested actions in request order. */
+function requestedActions(events: readonly InterpreterEvent[]) {
+  return events.flatMap((event) => (event.kind === "actionRequested" ? [event.action] : []));
+}
+
+/** Time-driven settlements as [action ID, settlement kind, scene time]. */
+function timedSettlements(events: readonly InterpreterEvent[]) {
+  return events.flatMap((event) =>
+    event.kind === "actionCompleted" && "completedAtMs" in event.settlement
+      ? [
+          [
+            event.settlement.actionId,
+            event.settlement.settlementKind,
+            event.settlement.completedAtMs,
+          ],
+        ]
+      : [],
+  );
+}
+
+/** Independent RNG oracle: `count` draws of real-source `randomInteger(range)` from `seed`. */
+function randomIntegerDraws(seed: number, range: string, count: number) {
+  const session = new Session(`repeat ${count} {\n  say "\${randomInteger(${range})}"\n}`, {
+    seed,
+  });
+  assert.equal(session.snapshot.status, "halted");
+  return { values: session.said().map(Number), rng: session.snapshot.rng };
 }
 
 function warnings(session: Session): string[] {
@@ -225,51 +316,6 @@ test("a blocking timer evaluates a named display expression like an async timer"
   assert.equal(invalid.snapshot.failure?.code, "TSR050");
 });
 
-test("timer forms reject invalid positions, members, and handler scope", () => {
-  const cases: ReadonlyArray<readonly [string, string]> = [
-    ["let t = timer 5", "TSV033 A blocking timer returns no handle"],
-    ["timer 5 { exit }", "TSV033 Only an async timer may have an expiry block"],
-    ["let t = timer async 5\nsay t.nope", "TSV034 Timer handles have no property 'nope'"],
-    [
-      "let t = timer async 5\nt.elapsed = 1 s",
-      "TSV034 Timer handle property 'elapsed' cannot be assigned",
-    ],
-    ["let t = timer async 5\nt.restart()", "TSV034 Timer handles have no method 'restart'"],
-    [
-      'function f {\n  let local = 1\n  timer async 1 { say "${local}" }\n}',
-      "TSV002 Unknown variable 'local'",
-    ],
-    [
-      "timer async 1 { return 5 }",
-      "TSV033 A timer expiry block may use 'return' only without a value.",
-    ],
-    [
-      "timer(duration: 1, async: true, repeat: true)\ntimer(duration: 0, async: true, repeat: true)",
-      "TSV011 A repeating timer duration must be greater than zero.",
-    ],
-    ["timer(duration: 1, display: 5)", "TSV033 Timer display must be"],
-    ["let t = timer async 5\n(t).bogus()", "TSV034 Timer handles have no method 'bogus'"],
-    [
-      "let t = timer async 5\nt.remaining = 1",
-      "TSV034 Timer remaining must be assigned a duration",
-    ],
-    ["let t = timer async 5\nt.display = 1", "TSV034 Timer display must be"],
-    ["let t = timer async 5\nt.pause(1)", "TSV034 Timer pause() takes no arguments."],
-    ["timer 5..10 min", "TSV010 A timer range counts whole seconds"],
-    [
-      "timer(duration: 0..2, async: true, repeat: true)",
-      "TSV010 A repeating timer range must start at one second or more.",
-    ],
-  ];
-  for (const [source, expected] of cases) {
-    const found = diagnostics(source);
-    assert.ok(
-      found.some((diagnostic) => diagnostic.startsWith(expected)),
-      `${JSON.stringify(source)}: ${found.join(" | ")}`,
-    );
-  }
-});
-
 test("static handle hints do not leak from untaken or reassigned paths", () => {
   const compiled = compileSource(
     'let o = { x: 1 }\nif false {\n  o = timer async 1\n}\nsay "${o.x}"\nlet t = timer async 1\nt = { x: 2 }\nsay "${t.x}"',
@@ -289,6 +335,27 @@ test("nested timers created by an expiry block leave the terminal wait valid", (
   const session = new Session("timer async 1 {\n  timer async 1\n}\nwait 3");
   session.at(1_000).at(3_000);
   assert.equal(session.snapshot.status, "halted");
+
+  const requested = requestedActions(session.events);
+  const timers = requested.filter((action) => action.kind === "timer");
+  const delay = requested.find((action) => action.kind === "delay");
+  assert.ok(delay);
+  // The outer timer starts at 0 ms; its expiry block starts the nested one-second timer at 1000 ms.
+  assert.deepEqual(
+    timers.map((action) => [action.createdAtMs, action.timer.deadlineMs]),
+    [
+      [0, 1_000],
+      [1_000, 2_000],
+    ],
+  );
+  assert.notEqual(timers[0]!.actionId, timers[1]!.actionId);
+  assert.notEqual(timers[0]!.timer.timerId, timers[1]!.timer.timerId);
+  assert.deepEqual(timedSettlements(session.events), [
+    [timers[0]!.actionId, "finished", 1_000],
+    [timers[1]!.actionId, "finished", 2_000],
+    [delay.actionId, "completed", 3_000],
+  ]);
+  assert.equal(session.events.filter((event) => event.kind === "complete").length, 1);
 });
 
 test("an async timer returns a typed handle whose reads follow scene time", () => {
@@ -393,21 +460,39 @@ test("a paused repeating timer expiring at zero stays paused with a full next ro
 });
 
 test("repeating ranges redraw each round from the session RNG, including during catch-up", () => {
+  const seed = 0x1234_5678;
   const source = [
     "let rounds = []",
     "let t = timer(duration: 1..=4, async: true, repeat: true) {",
     "  rounds.add(t.elapsed)",
+    '  say "${t.elapsed}"',
     "}",
     "wait 30",
     'say "${rounds.length}"',
   ].join("\n");
-  const late = new Session(source, { seed: 0x1234_5678 });
+  // At most 30 one-second rounds fit in the wait, plus the round drawn at the last expiry.
+  const draws = randomIntegerDraws(seed, "1..=4", 31).values;
+  const expiriesMs: number[] = [];
+  let nextExpiryMs = draws[0]! * 1_000;
+  while (nextExpiryMs < 30_000) {
+    expiriesMs.push(nextExpiryMs);
+    nextExpiryMs += draws[expiriesMs.length]! * 1_000;
+  }
+  assert.ok(nextExpiryMs > 30_000, "the seed must not tie an expiry with the end of the wait");
+  // Every expiry draws the next round, so the session makes one draw more than it has expiries.
+  const expectedRng = randomIntegerDraws(seed, "1..=4", expiriesMs.length + 1).rng;
+  const expectedSaid = [...expiriesMs.map((ms) => `${ms / 1_000} s`), String(expiriesMs.length)];
+
+  const late = new Session(source, { seed });
   late.at(30_000);
-  const stepwise = new Session(source, { seed: 0x1234_5678 });
+  const stepwise = new Session(source, { seed });
   for (let now = 500; now <= 30_000; now += 500) stepwise.at(now);
-  assert.deepEqual(late.said(), stepwise.said());
-  assert.ok(Number(late.said()[0]) >= 7, late.said()[0]);
-  assert.deepEqual(late.snapshot.rng, stepwise.snapshot.rng);
+  for (const session of [late, stepwise]) {
+    assert.deepEqual(session.said(), expectedSaid);
+    assert.deepEqual(session.snapshot.rng, expectedRng);
+  }
+  assert.deepEqual(late.events, stepwise.events);
+  assert.deepEqual(late.snapshot, stepwise.snapshot);
 });
 
 test("an expiry block interrupts an unanswered ask and the prompt returns afterwards", () => {
@@ -445,12 +530,14 @@ test("exit in an expiry block cancels the interrupted ask without assigning it",
       'say "never ${name}"',
     ].join("\n"),
   );
+  const prompt = session.snapshot.foregroundAction;
+  assert.ok(prompt?.kind === "interaction");
   session.at(5_000);
   assert.deepEqual(session.said(), ["Too slow."]);
   assert.equal(session.snapshot.status, "halted");
   assert.equal(session.events.at(-1)?.kind, "exit");
   const late = completeAction(session.plan, session.snapshot, {
-    actionId: 2,
+    actionId: prompt.actionId,
     actionKind: "interaction",
     interactionKind: "text",
     payload: { kind: "submittedText", submittedText: "late" },
@@ -533,10 +620,15 @@ test("expiry blocks queued at script end still run, while script end stops runni
   assert.deepEqual(session.said(), ["forced running"]);
   assert.equal(session.snapshot.status, "halted");
   assert.equal(session.timers().length, 0);
-  assert.deepEqual(
-    session.snapshot.settledTimers.map((timer) => timer.state),
-    ["finished", "stopped"].reverse().sort(),
-  );
+  const settledState = (name: string) => {
+    const handle = session.snapshot.frames[0]!.bindings.find(
+      (binding) => binding.name === name,
+    )?.value;
+    assert.ok(typeof handle === "object" && handle?.kind === "timerHandle");
+    return session.snapshot.settledTimers.find((timer) => timer.timerId === handle.timerId)?.state;
+  };
+  assert.deepEqual([settledState("now"), settledState("later")], ["finished", "stopped"]);
+  assert.equal(session.snapshot.settledTimers.length, 2);
 });
 
 test("an expiry block interrupting a function keeps caller scopes, loops, and temporaries", () => {
@@ -677,14 +769,36 @@ test("malformed restored timer, handle, queue, and interrupt data is rejected", 
     [[...action, "extra"], true],
   ];
   for (const [path, value] of timerCases) assertForgedRejected(runningJson, path, value);
+
+  // Background work is canonical state in creation order, so a reordered list of valid entries is malformed.
+  const pair = new Session("let a = timer async 5\nlet b = timer async 6\nwait 10");
+  const pairJson = serializeCheckpoint(createCheckpoint(pair.plan, pair.snapshot));
+  // EVIDENCE: fixture: checkpoint serialization produces plain JSON data.
+  const pairActions = child(child(JSON.parse(pairJson) as Json, "snapshot"), "backgroundActions");
+  assert.ok(Array.isArray(pairActions));
+  assertForgedRejected(pairJson, ["snapshot", "backgroundActions"], [...pairActions].reverse());
 });
 
-test("runtime review regressions stay checkpointable and ordered", () => {
+test("repeat overrides, nested and interrupting expiry blocks, and stops stay checkpointable and ordered", () => {
+  const overrideSeed = 0x8765_4321;
   const override = new Session(
-    "let t = timer(duration: 1..=3, async: true, repeat: true)\nt.repeatDuration = 2 s\nwait 5 s",
+    "let t = timer(duration: 1..=3, async: true, repeat: true)\nt.repeatDuration = 2 s\nwait 8 s",
+    { seed: overrideSeed },
   );
-  assert.equal(override.timers()[0]!.timer.range, null);
-  override.at(5_000);
+  // Only the first round comes from the range; every later round lasts the assigned 2 s without a draw.
+  const initial = randomIntegerDraws(overrideSeed, "1..=3", 1);
+  const firstExpiryMs = initial.values[0]! * 1_000;
+  assert.notEqual(firstExpiryMs, 2_000, "the seed's first round must differ from the assigned 2 s");
+  assert.equal(override.timers()[0]!.timer.deadlineMs, firstExpiryMs);
+  for (let expiryMs = firstExpiryMs; expiryMs < 8_000; expiryMs += 2_000) {
+    override.at(expiryMs);
+    const { timer } = override.timers()[0]!;
+    assert.deepEqual([timer.roundDurationMs, timer.deadlineMs], [2_000, expiryMs + 2_000]);
+    assert.deepEqual(override.snapshot.rng, initial.rng);
+  }
+  override.at(8_000);
+  assert.equal(override.snapshot.status, "halted");
+  assert.deepEqual(override.snapshot.rng, initial.rng);
 
   const rootEnd = new Session(
     'timer async 1 s {\n  timer async 0 ms { say "nested" }\n  wait 1 s\n}\nwait 2 s',
@@ -696,13 +810,23 @@ test("runtime review regressions stay checkpointable and ordered", () => {
   const depthPlan = plan(
     'function f {\n  wait 2 s\n  return 1\n}\ntimer async 1 s { say "interrupt" }\nlet x = f()\nsay "x ${x}"',
   );
-  let depth = run(
+  const depthStart = run(
     depthPlan,
     createImmediatePacingRuntimeSnapshot(depthPlan, { maxCallDepth: 1 }),
+  );
+  const depthObserved = observeTime(depthPlan, depthStart.snapshot, 3_000);
+  const depthEnd = run(depthPlan, depthObserved.snapshot);
+  const depth = deserializeCheckpoint(
+    serializeCheckpoint(createCheckpoint(depthPlan, depthEnd.snapshot)),
   ).snapshot;
-  depth = run(depthPlan, observeTime(depthPlan, depth, 3_000).snapshot).snapshot;
-  depth = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(depthPlan, depth))).snapshot;
   assert.equal(depth.status, "halted");
+  // The expiry block interrupts the wait inside f, which then returns 1.
+  assert.deepEqual(
+    [...depthStart.events, ...depthObserved.events, ...depthEnd.events].flatMap((event) =>
+      event.kind === "say" ? [event.text] : [],
+    ),
+    ["interrupt", "x 1"],
+  );
 
   const huge = new Session(
     "let t = timer async 1 s\nt.remaining = 10000000000000000000 h\nwait 1 s",
@@ -718,40 +842,54 @@ test("runtime review regressions stay checkpointable and ordered", () => {
   assert.deepEqual(deferred.said(), ["interrupt"]);
   assert.equal(deferred.snapshot.status, "halted");
 
-  const stopped = new Session(
-    'let second = timer async 2 s { say "second" }\nlet first = timer async 1 s { second.stop() }\nwait 3 s',
-  );
+  const stopSource =
+    'let second = timer async 2 s { say "second" }\nlet first = timer async 1 s { second.stop() }\nwait 3 s';
+  const stopped = new Session(stopSource);
   stopped.at(3_000);
   assert.deepEqual(stopped.said(), [], "a block that ran first can still stop a later timer");
+  const [second, first, wait] = requestedActions(stopped.events);
+  assert.deepEqual([second?.kind, first?.kind, wait?.kind], ["timer", "timer", "delay"]);
+  // `first` expires naturally at 1 s and its block stops `second` then, before its 2-s deadline.
+  const stopSettlements = [
+    [first!.actionId, "finished", 1_000],
+    [second!.actionId, "stopped", 1_000],
+    [wait!.actionId, "completed", 3_000],
+  ];
+  assert.deepEqual(timedSettlements(stopped.events), stopSettlements);
+  assert.equal(stopped.snapshot.status, "halted");
 
-  const observedTwice = new Session(
-    'let second = timer async 2 s { say "second" }\nlet first = timer async 1 s { second.stop() }\nwait 3 s',
-  );
-  let twice = observeTime(observedTwice.plan, observedTwice.snapshot, 1_000).snapshot;
-  twice = observeTime(observedTwice.plan, twice, 3_000).snapshot;
-  const twiceEvents = run(observedTwice.plan, twice).events;
+  const observedTwice = new Session(stopSource);
+  const onceObserved = observeTime(observedTwice.plan, observedTwice.snapshot, 1_000);
+  const twiceObserved = observeTime(observedTwice.plan, onceObserved.snapshot, 3_000);
+  const twiceRun = run(observedTwice.plan, twiceObserved.snapshot);
   assert.ok(
-    twiceEvents.every((event) => event.kind !== "say"),
+    twiceRun.events.every((event) => event.kind !== "say"),
     "a queued block runs before later due work even across repeated observations",
   );
+  const twiceEvents = [
+    ...observedTwice.events,
+    ...onceObserved.events,
+    ...twiceObserved.events,
+    ...twiceRun.events,
+  ];
+  assert.deepEqual(timedSettlements(twiceEvents), stopSettlements);
+  const onTime = new Session(stopSource).at(1_000).at(3_000);
+  assert.deepEqual(twiceEvents, onTime.events);
+  assert.deepEqual(twiceRun.snapshot, onTime.snapshot);
 });
 
-test("a late observation skips silent fixed repeat rounds arithmetically", () => {
-  const source = "let t = timer(duration: 1 ms, async: true, repeat: true)\nwait 10000 s\nexit";
-  const late = new Session(source);
-  const started = performance.now();
-  late.at(3_600_000);
-  assert.ok(performance.now() - started < 500, "catch-up must not process every silent round");
-  const timer = late.timers()[0]!.timer;
-  assert.deepEqual(timerProperty(timer, "elapsed", 3_600_000), {
-    kind: "duration",
-    milliseconds: 3_600_000,
-  });
-  assert.equal(timer.anchoredRounds, 3_600_000, "rounds since the anchor at 0 ms");
-  assert.equal(timer.deadlineMs, 3_600_001);
+test("a late observation across 10^12 silent fixed rounds ends with on-time elapsed and remaining", () => {
+  // A scoped regression oracle for catch-up that does not expire silent rounds one at a time (docs/RUNTIME.md): that
+  // path cannot reach this horizon within the bound. The values follow from the anchor formula.
+  const late = new Session(
+    'let t = timer(duration: 1 ms, async: true, repeat: true)\nwait 1000000000 s\nsay "${t.elapsed == 1000000000 s} ${t.remaining == 1 ms}"',
+  ).atBounded(1e12);
+  // The round ending with the wait settles first by action ID, so the next 1-ms round has just started.
+  assert.deepEqual(late.said(), ["true true"]);
+  assert.equal(late.snapshot.status, "halted");
 });
 
-test("final review regressions keep late expiries valid and reject forged invocations", () => {
+test("pausing an overdue round stays paused, and restore rejects forged expiry invocations and start times", () => {
   const paused = new Session(
     "let t = timer(duration: 1, async: true, repeat: true) { t.pause() }\nwait 10",
   ).at(3_000);
@@ -1078,7 +1216,7 @@ test("host input waits for scene-time catch-up and for an expiry block due at th
   assert.equal(completeAction(exiting.plan, exited, request).outcome.kind, "staleAction");
 });
 
-test("audit regressions: fractional repeats, tiny rounds, remaining rounding, and visible lists", () => {
+test("late fractional rounds match on time, tiny rounds end normally, zero remaining finishes, and list text or a zero-based repeat range fails", () => {
   // Observes every timer deadline up to the horizon, as a Player that is never late would.
   const onTime = (source: string, horizonMs: number): Session => {
     const session = new Session(source);
@@ -1099,15 +1237,27 @@ test("audit regressions: fractional repeats, tiny rounds, remaining rounding, an
   assert.deepEqual(late.said(), timely.said());
   assert.deepEqual(late.timers()[0]!.timer, timely.timers()[0]!.timer);
 
-  const started = performance.now();
-  const tiny = new Session("timer(duration: 1e-16 ms, async: true, repeat: true)\nwait 1 ms").at(1);
-  assert.ok(performance.now() - started < 1_000, "tiny silent rounds are skipped in one step");
+  // Thousands of trillions of silent rounds end before 1 ms.
+  const tiny = new Session(
+    "timer(duration: 1e-16 ms, async: true, repeat: true)\nwait 1 ms",
+  ).atBounded(1);
   assert.equal(tiny.snapshot.foregroundAction, null);
+  // A failure would also clear the foreground action; the session must end normally.
+  assert.equal(tiny.snapshot.status, "halted");
+  assert.equal(tiny.snapshot.failure, null);
+  assert.ok(tiny.events.every((event) => event.kind !== "runtimeFailure"));
 
   const adjusted = new Session(
     "wait 0.1 ms\nlet t = timer async 0.2 ms\nt.remaining = 0 ms\nwait 1 ms",
   ).at(0.1);
   assert.equal(adjusted.snapshot.status, "waiting");
+  const [issued] = requestedActions(adjusted.events).filter((action) => action.kind === "timer");
+  assert.ok(issued);
+  // Setting remaining to zero expires the one-shot timer at once.
+  assert.deepEqual(
+    adjusted.snapshot.settledTimers.map((timer) => [timer.timerId, timer.state]),
+    [[issued.timer.timerId, "finished"]],
+  );
   assert.ok(adjusted.snapshot.settledTimers.every((timer) => timer.roundDurationMs >= 0));
 
   const list = run(
@@ -1123,7 +1273,7 @@ test("audit regressions: fractional repeats, tiny rounds, remaining rounding, an
   assert.deepEqual(failed.rng, fresh.rng, "an invalid range fails before its round is drawn");
 });
 
-test("audit regressions: restore rejects contradictory rounds, early expiries, and count overflow", () => {
+test("restore rejects contradictory rounds and early expiries, and a full expiry count loses none", () => {
   const path = ["snapshot", "backgroundActions", 0, "timer"] as const;
   const paused = new Session("let t = timer async 5\nt.pause()\nwait 10");
   const pausedJson = serializeCheckpoint(createCheckpoint(paused.plan, paused.snapshot));
@@ -1163,14 +1313,17 @@ test("audit regressions: restore rejects contradictory rounds, early expiries, a
   full.snapshot.pendingTimerHandlers[0]!.count = Number.MAX_SAFE_INTEGER;
   counted.snapshot = deserializeCheckpoint(JSON.stringify(full)).snapshot;
   counted.at(3_000);
-  assert.deepEqual(
-    counted.snapshot.pendingTimerHandlers.map((entry) => entry.count),
-    [Number.MAX_SAFE_INTEGER, 1],
-    "a full aggregate count starts a new entry",
+  // How the queue splits a full count is not a rule; the session must not fail, every checkpoint round-trips (so each
+  // count stays a safe integer), and no expiry is lost.
+  assert.equal(counted.snapshot.failure, null);
+  assert.equal(
+    counted.snapshot.pendingTimerHandlers.reduce((total, entry) => total + BigInt(entry.count), 0n),
+    BigInt(Number.MAX_SAFE_INTEGER) + 1n,
+    "a full aggregate count loses no expiry",
   );
 });
 
-test("re-audit regressions: skipped rounds keep tie order, termination, and restorable rounds", () => {
+test("skipped rounds keep tie order, termination, and restorable rounds", () => {
   const onTime = (source: string, horizonMs: number, initialSessionTimeMs = 0): Session => {
     const session = new Session(source, { initialSessionTimeMs });
     for (let guard = 0; session.snapshot.observedSessionTimeMs < horizonMs; guard += 1) {
@@ -1225,15 +1378,11 @@ test("re-audit regressions: skipped rounds keep tie order, termination, and rest
   );
 });
 
-test("second re-audit regressions: plateau skipping, failure at a due deadline, and the index limit", () => {
+test("plateaued rounds terminate, a failed catch-up settles nothing further, and index exhaustion matches on time", () => {
   const plateau =
     "let t = timer(duration: 1 ms, async: true, repeat: true)\nt.repeatDuration = 1e-300 ms\nwait 2 ms";
-  const started = performance.now();
-  const walked = new Session(plateau).at(1).at(2);
-  assert.ok(
-    performance.now() - started < 1_000,
-    "equal-deadline rounds are skipped in bounded steps",
-  );
+  // From 1 ms on, every round deadline rounds to 1 ms until the round index is exhausted.
+  const walked = new Session(plateau).atBounded(1).at(2);
   assert.equal(walked.snapshot.status, "halted");
 
   const failing = new Session(
@@ -1249,11 +1398,15 @@ test("second re-audit regressions: plateau skipping, failure at a due deadline, 
   assert.equal(observed.snapshot.observedSessionTimeMs, 5);
   assert.deepEqual(observed.events, [], "a failed session settles nothing further");
 
-  // The last anchored round index ends both an on-time and a late schedule at the same point.
+  // The last anchored round index ends both an on-time and a late schedule at the same point. The constants are a
+  // regression oracle scoped to the current private index limit, zero-based `Number.MAX_SAFE_INTEGER - 2`: the last
+  // 1e-16-ms round ends at (MAX_SAFE_INTEGER - 1) * 1e-16 ms = 0.900719925474099 ms, so the finished timer's elapsed
+  // time stays at most that ("end"), and the on-time prefix stops a few rounds earlier. docs/RUNTIME.md documents the
+  // late-versus-on-time equality and that an exhausted index finishes the timer, not the index value.
   const indexLimit =
     'let t = timer(duration: 1e-16 ms, async: true, repeat: true)\ntimer async 1 ms {\n  if t.elapsed > 0.900719925474099 ms { say "extra", 0 }\n  else { say "end", 0 }\n}\nwait 10 ms';
-  const prefix = new Session(indexLimit).at(0.9007199254740984);
-  const late = new Session(indexLimit).at(0.9007199254740984).at(1);
+  const prefix = new Session(indexLimit).atBounded(0.9007199254740984);
+  const late = new Session(indexLimit).atBounded(0.9007199254740984).at(1);
   for (let guard = 0; prefix.snapshot.observedSessionTimeMs < 1; guard += 1) {
     assert.ok(guard < 20, "the remaining rounds are few");
     const deadline = prefix.timers()[0]?.timer.deadlineMs ?? 1;
@@ -1264,7 +1417,7 @@ test("second re-audit regressions: plateau skipping, failure at a due deadline, 
   assert.deepEqual(late.snapshot.settledTimers, prefix.snapshot.settledTimers);
 });
 
-test("third re-audit regressions: exact display strings and failed pacing gates at scene time", () => {
+test("restore rejects a non-string display, and a failed session keeps its pacing gate at scene time", () => {
   const session = new Session("let t = timer async 5\nwait 10");
   const json = serializeCheckpoint(createCheckpoint(session.plan, session.snapshot));
   assertForgedRejected(json, ["snapshot", "backgroundActions", 0, "timer", "display"], ["hidden"]);

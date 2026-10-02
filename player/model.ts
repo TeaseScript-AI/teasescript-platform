@@ -1,32 +1,7 @@
 import type { MessagePresentation } from "../src/message-presentation.js";
 import type { MessageMarkup } from "../src/message-markup.js";
 
-export type MediaFit = "contain" | "cover";
-export type PlayerMediaTransitionFixture = "direct" | "fade" | "crossfade";
-export type PlayerToolId = "visuals" | "layout-debug" | "runtime-session";
 export type PlayerTimerKind = "visible" | "mystery" | "hidden";
-
-export interface PlayerToolDefinition {
-  readonly id: PlayerToolId;
-  readonly label: string;
-}
-
-export interface PlayerToolColumnState {
-  readonly id: string;
-  readonly toolId: PlayerToolId | null;
-}
-
-export interface PlayerPackagePresentation {
-  readonly accentColor: string;
-}
-
-export interface PlayerMediaPresentation {
-  readonly id: string;
-  readonly src: string;
-  readonly fit: MediaFit;
-  readonly title: string;
-  readonly ambientColor: string;
-}
 
 /** One presented timer. Hidden timers are never presented, so they have no entry. */
 export interface PlayerTimerPresentation {
@@ -41,8 +16,12 @@ export interface PlayerTimerPresentation {
 export interface PlayerSpeakerPresentation {
   readonly name: string;
   readonly accent: string;
+  /** Letter glyph shown when no authored avatar image is available or it fails to load. */
   readonly avatar: string;
+  /** Authored, package-relative speaker `avatar` reference; the Player resolves it through its host. */
+  readonly avatarImage?: string;
   readonly fontFamily: string;
+  readonly identityId?: string;
 }
 
 export interface PlayerMessagePresentation {
@@ -52,6 +31,8 @@ export interface PlayerMessagePresentation {
   readonly text: string;
   /** Present only for authored runtime output; player-authored entries remain plain text. */
   readonly content?: MessageMarkup;
+  /** Completed choice/button, distinct from a free-text or numeric response. */
+  readonly responseKind?: "choice" | "button";
   readonly presentation?: MessagePresentation;
 }
 
@@ -84,50 +65,3 @@ export type PlayerForegroundPresentation =
     }
   | { readonly kind: "ask-text"; readonly accessibleName: string; readonly hint: string }
   | { readonly kind: "ask-number"; readonly accessibleName: string; readonly hint: string };
-
-interface PlayerRightControlBase {
-  readonly id: string;
-  readonly label: string;
-  readonly priority?: number;
-}
-
-export interface PlayerRightActionPresentation extends PlayerRightControlBase {
-  readonly kind: "action";
-  readonly authoredFill?: string;
-}
-
-export interface PlayerRightTogglePresentation extends PlayerRightControlBase {
-  readonly kind: "toggle";
-  readonly value: boolean;
-  readonly recordUserHistory: boolean;
-}
-
-export interface PlayerRightSelectPresentation extends PlayerRightControlBase {
-  readonly kind: "select";
-  readonly value: string;
-  readonly options: readonly (readonly [value: string, label: string])[];
-  readonly recordUserHistory: boolean;
-}
-
-export interface PlayerRightStatusPresentation extends PlayerRightControlBase {
-  readonly kind: "status";
-  readonly detail: string;
-  readonly progress?: number;
-}
-
-export type PlayerRightControlPresentation =
-  | PlayerRightActionPresentation
-  | PlayerRightTogglePresentation
-  | PlayerRightSelectPresentation
-  | PlayerRightStatusPresentation;
-
-export interface PlayerPresentation {
-  readonly package: PlayerPackagePresentation;
-  readonly media: PlayerMediaPresentation;
-  readonly timer: PlayerTimerPresentation;
-  readonly speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
-  readonly rightControls: readonly PlayerRightControlPresentation[];
-}
-
-export type LeftPanelMode = "auto" | "open" | "closed";
-export type RightPanelMode = "auto" | "docked" | "overlay";
