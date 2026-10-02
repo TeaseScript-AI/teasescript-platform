@@ -955,3 +955,28 @@ test("generates ordinary TeaseScript helpers for legacy loadFirstTrue and list i
   assert.match(output, /let index = sexscriptLegacyIndexOf\(items, "b"\)/);
   assert.match(output, /let key = sexscriptLegacyLoadFirstTrue\(\["a", "b"\]\)/);
 });
+
+
+test("maps legacy getBooleans to accepted askBooleans", () => {
+  const source = file([
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("selected"),
+      right: call(
+        "getBooleans",
+        constant("Choose"),
+        { kind: "list", span, items: [constant("A"), constant("B")] },
+        { kind: "list", span, items: [constant(true), constant(false)] },
+      ),
+    }),
+  ]);
+
+  const program = lowerParsedFile(source);
+  assert.deepEqual(program.diagnostics, []);
+  assert.equal(
+    emitTease(program),
+    'let selected = askBooleans(message: "Choose", texts: ["A", "B"], defaults: [true, false])\n',
+  );
+});
