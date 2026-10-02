@@ -157,6 +157,17 @@ function lowerHelperCompilationUnit(file: ParsedGroovyFile, baseContext: LowerCo
     return { sourceName: file.sourceName, metadata: null, statements: [], diagnostics: baseContext.diagnostics };
   }
   const helperClass = classes[0]!;
+  const fields = nodeArray(helperClass.fields);
+  if (fields.length > 0) {
+    addDiagnostic(
+      baseContext,
+      "SX_HELPER_SHARED_STATE",
+      "error",
+      "Auxiliary Groovy helper classes with fields may carry shared or static state and require explicit migration.",
+      helperClass.span,
+    );
+    return { sourceName: file.sourceName, metadata: null, statements: [], diagnostics: baseContext.diagnostics };
+  }
   const methods = nodeArray(helperClass.methods);
   const helperFunctions = collectHelperFunctionInfo(methods);
   const statements: IrStatement[] = [];
@@ -1171,6 +1182,10 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
       if (args.length === 1) return { kind: "call", name: "askBoolean", positional: args, named: {} };
       if (args.length === 3) return { kind: "call", name: "askBoolean", positional: [], named: { message: args[0]!, yesText: args[1]!, noText: args[2]! } };
       return unsupportedExpression(context, node, "SX_BOOLEAN_ARITY", "getBoolean() must have one or three arguments.");
+    case "getBooleans":
+      return args.length === 3
+        ? { kind: "call", name: "askBooleans", positional: [], named: { message: args[0]!, texts: args[1]!, defaults: args[2]! } }
+        : unsupportedExpression(context, node, "SX_BOOLEANS_ARITY", "getBooleans() must have exactly three arguments.");
     case "showButton":
       return args.length === 1 || args.length === 2
         ? { kind: "call", name: "showButton", positional: args, named: {} }
