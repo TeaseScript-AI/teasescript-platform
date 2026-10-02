@@ -73,13 +73,17 @@ test("parameters are deep copies of caller lists, objects, and sets", () => {
       "let setValue = set[1, 2]",
       "function mutate(listInput, objectInput, setInput) {",
       "  listInput[0][0] = 9",
-      "  objectInput.nested[0] = 9",
+      "  objectInput.nested[0] = 8",
       "  setInput.add(3)",
+      '  return "${listInput[0][0]}:${objectInput.nested[0]}:${setInput.contains(3)}"',
       "}",
-      "mutate(listValue, objectValue, setValue)",
+      "say mutate(listValue, objectValue, setValue)",
     ].join("\n"),
   );
 
+  // The callee changed its copies, so the unchanged caller values below are not merely a failed call.
+  assert.equal(result.snapshot.status, "halted");
+  assert.deepEqual(sayTexts(result), ["9:8:true"]);
   assert.deepEqual(rootValue(result.snapshot, "listValue"), {
     kind: "list",
     items: [{ kind: "list", items: [1] }],

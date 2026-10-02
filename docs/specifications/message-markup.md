@@ -142,7 +142,7 @@ Examples:
 | `[color=red]x[/color]` | `x` has the normalized red foreground colour |
 | `[b]x[/b]` | the complete text remains literal |
 | `[u]x` | `[u]` is literal and `x` is ordinary text |
-| `[spoiler]x[/spoiler]` | the complete text remains literal; spoiler markup has been removed |
+| `[unknown]**x**[/unknown]` | both tags remain literal and `x` is bold |
 
 ## Links
 
