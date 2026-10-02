@@ -811,6 +811,34 @@ retained event history and restored snapshots do not trigger persistence writes.
 Restoring an older checkpoint carries its older storage view. A later read-modify-write can overwrite newer durable
 data; reconciliation belongs to #469 and is not implemented here.
 
+## Camera capture
+
+`takePhoto()` implements specification
+[§33](specifications/accepted-syntaxes-v30.md#33-browser-api-file-folder-camera-and-url-references). It is a reserved
+call, not a builtin: hosts cannot inject or override it, it takes no arguments (`TSV020`), it is not a value (`TSV028`),
+and it cannot run in a parameter default (`TSV032`). It lowers to a `capture` instruction whose result is handed off
+through a temporary like an interaction result; plan validation rejects an unlowered `takePhoto` call.
+
+Executing it creates a foreground `capture` action and waits. The host answers through `completeAction`:
+
+```text
+{ actionId, actionKind: "capture", payload: { kind: "captured", media: { kind: "image", reference } } }
+{ actionId, actionKind: "capture", payload: { kind: "unavailable", reason } }
+```
+
+`reason` is `unconfigured`, `denied`, `notFound`, `busy`, `unsupported`, `revoked`, or `failed`. A captured reference is
+accepted only when the trusted host's `ActionCompletionOptions.capturedMedia.holds(reference, "image")` vouches for it,
+so a well-formed string from anywhere else never becomes a captured photo; the engine does not inspect the reference's
+private spelling. An unavailable camera yields `null` and one `TSW014` developer warning, and the script continues.
+A settled capture is retained as `lastSettlement`, so a repeated completion replays as `alreadySettled`. Captures are
+not interrupted: a due timer expiry block runs once the capture settles. They emit no transcript.
+
+The Player opens the session camera after Start when the trusted host grants the camera capability, answers each
+capture once from that open stream, and delivers the answer until the runtime settles it. Captured photos are session
+media; a save stores the photos its value references durably before the value is persisted, and media no saved value
+references is reclaimed later (`player/captured-media-persistence.ts`). The technical playground has no camera and
+answers a pending capture as `unconfigured` when execution continues.
+
 ## Visible text boundary
 
 Ordinary scalar visible-text conversion accepts strings, finite numbers, booleans, `null`, and elapsed duration values.
@@ -895,9 +923,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 25 | Script storage: `storageLoad` expressions with lazy defaults and direct typed-initializer checks, and `storageWrite` instructions (`save`; `delete` when the value is `null`). Revision 24: message preparation accepts authored position and alignment only for prose. Media instructions `pacingBarrier`, `showImage`, and `playMedia`; handler regions carry `handler` (`timer` or `media`) and `selfHandle`. Revision 21 added the timer instructions. |
-| Runtime snapshot | 26 | The validated `scriptStorage` session view. Revision 25: captured bubble presentations require null position and alignment; placement is Player-owned. Media state: `stageImage`, background `media` actions, `settledMedia`, `nextMediaId`, foreground `mediaPlayback` waits and settlements, media cue invocations and interrupt frames, barrier-promoted pacing gates, and media handles. Revision 22 added timer state. |
-| Checkpoint | 34 | Updated the self-contained bundle for the script-storage plan and snapshot contracts. Revision 33: prose-only authored placement, bubble presentation validation, and the media plan and snapshot contracts. |
+| Instruction plan | 26 | Camera capture: the `capture` instruction for `takePhoto()`, and rejection of an unlowered `takePhoto` call. Revision 25: script storage: `storageLoad` expressions with lazy defaults and direct typed-initializer checks, and `storageWrite` instructions (`save`; `delete` when the value is `null`). Revision 24: message preparation accepts authored position and alignment only for prose. Media instructions `pacingBarrier`, `showImage`, and `playMedia`; handler regions carry `handler` (`timer` or `media`) and `selfHandle`. Revision 21 added the timer instructions. |
+| Runtime snapshot | 27 | Foreground `capture` actions and their replayable settlements. Revision 26: the validated `scriptStorage` session view. Revision 25: captured bubble presentations require null position and alignment; placement is Player-owned. Media state: `stageImage`, background `media` actions, `settledMedia`, `nextMediaId`, foreground `mediaPlayback` waits and settlements, media cue invocations and interrupt frames, barrier-promoted pacing gates, and media handles. Revision 22 added timer state. |
+| Checkpoint | 35 | Updated the self-contained bundle for the capture plan and snapshot contracts. Revision 34: the script-storage plan and snapshot contracts. Revision 33: prose-only authored placement, bubble presentation validation, and the media plan and snapshot contracts. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
