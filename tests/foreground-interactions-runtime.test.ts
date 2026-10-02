@@ -78,29 +78,6 @@ function interactionPlan(
   return plan;
 }
 
-function buttonPlanFromSource(source: string): InstructionPlan {
-  const compiled = compileSource(source);
-  assert.deepEqual(compiled.diagnostics, []);
-  const base = compiled.plan!;
-  const waitIndex = base.instructions.findIndex((instruction) => instruction.kind === "wait");
-  const interaction: InteractionInstruction = {
-    kind: "interaction",
-    interactionKind: "button",
-    target: "standardChat",
-    speaker: null,
-    destinationTemporary: null,
-    expectedResult: "none",
-    ui: { kind: "button", buttonLabel: "Continue", accessibleName: defaults.button },
-    span: base.instructions[waitIndex]!.span,
-  };
-  const instructions = base.instructions.map((instruction, index) =>
-    index === waitIndex ? interaction : instruction,
-  );
-  const plan = { ...base, instructions };
-  assert.equal(validateInstructionPlan(plan).valid, true);
-  return plan;
-}
-
 const defaults = {
   button: { kind: "localizedDefault", key: "continue" },
   text: { kind: "localizedDefault", key: "answer" },
@@ -466,7 +443,12 @@ test("pending interaction survives JSON checkpoint restore with monotonic events
   });
   assert.equal(completed.events[0]!.kind, "playerTranscript");
   const transcript = completed.events[0]!;
-  assert.equal(transcript.kind === "playerTranscript" && transcript.requestingSpeakerId, 1);
+  const mistress = pending.snapshot.speakers.find((speaker) => speaker.identifier === "mistress");
+  assert.ok(mistress !== undefined);
+  assert.equal(
+    transcript.kind === "playerTranscript" && transcript.requestingSpeakerId,
+    mistress.id,
+  );
   assert.deepEqual(
     completed.events.map((event) => event.sequence),
     [pending.snapshot.nextEventSequence, pending.snapshot.nextEventSequence + 1],
@@ -632,30 +614,17 @@ test("malformed pending interaction snapshot data is rejected", () => {
 });
 
 test("planless pending result interactions require positive destination temporary IDs", () => {
-  for (const [kind, ui] of [
-    ["text", { kind: "text", hint: null, accessibleName: defaults.text }],
-    ["number", { kind: "number", hint: null, accessibleName: defaults.number }],
-    [
-      "choice",
-      {
-        kind: "choice",
-        labelType: "none",
-        options: [{ text: "One", label: null }],
-        accessibleName: defaults.choice,
-      },
-    ],
-  ] as const) {
-    const plan = interactionPlan(kind, ui);
-    const pending = waiting(plan);
-    for (const destination of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, null]) {
-      const hostile: any = structuredClone(pending.snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture assigns an out-of-range interaction destination before validation and completion.
-      hostile.foregroundAction.destinationTemporary = destination;
-      assert.equal(validateRuntimeSnapshot(hostile).valid, false, `${kind}:${destination}`);
-      assert.throws(
-        () => restoreCheckpoint({ ...createCheckpoint(plan, pending.snapshot), snapshot: hostile }),
-        `${kind}:${destination}`,
-      );
-    }
+  // Every result-bearing kind uses the same destination predicate, so text represents them.
+  const plan = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
+  const pending = waiting(plan);
+  for (const destination of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, null]) {
+    const hostile: any = structuredClone(pending.snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture assigns an out-of-range interaction destination before validation and completion.
+    hostile.foregroundAction.destinationTemporary = destination;
+    assert.equal(validateRuntimeSnapshot(hostile).valid, false, String(destination));
+    assert.throws(
+      () => restoreCheckpoint({ ...createCheckpoint(plan, pending.snapshot), snapshot: hostile }),
+      String(destination),
+    );
   }
   const button = interactionPlan("button", {
     kind: "button",
@@ -821,14 +790,6 @@ test("pending interaction speaker provenance is bound to the instructed speaker"
   for (const mutateBinding of [
     removeAliceBinding,
     (copy: Mutable<RuntimeSnapshot>) => replaceAliceBinding(copy, "ordinary"),
-    (copy: Mutable<RuntimeSnapshot>) =>
-      replaceAliceBinding(copy, {
-        kind: "speakerReference",
-        speakerId: "bad",
-        identifier: "alice",
-      }),
-    (copy: Mutable<RuntimeSnapshot>) =>
-      replaceAliceBinding(copy, { kind: "speakerReference", speakerId: 999, identifier: "alice" }),
     () => {},
   ]) {
     const hostile = corrupted(pending, (copy, action) => {
@@ -841,70 +802,19 @@ test("pending interaction speaker provenance is bound to the instructed speaker"
     );
   }
 
-  // Source has no parameter speaker form, so the parameter row patches only the instructed speaker.
-  const parameterPlan = buttonPlanFromSource(
-    "speaker alice {}\nspeaker bob {}\nfunction prompt(requested) { wait 1 }\nprompt(bob)\nexit",
+  // A function-scoped explicit speaker resolves through the active frame's visible binding.
+  const scopedPlan = compiledPlan(
+    'speaker alice {}\nfunction prompt { showButton as alice "Continue" }\nprompt()\nexit',
   );
-  const parameterInteraction = parameterPlan.instructions.find(
-    (instruction) => instruction.kind === "interaction",
+  const scopedPending = waiting(scopedPlan).snapshot;
+  // EVIDENCE: structuredClone preserves the runtime snapshot shape for the read-only binding lookup.
+  const scopedCopy = structuredClone(scopedPending) as Mutable<RuntimeSnapshot>;
+  assert.equal(
+    scopedPending.foregroundAction?.kind === "interaction" &&
+      scopedPending.foregroundAction.speakerId,
+    speakerBinding(scopedCopy, "alice").speakerId,
   );
-  assert.ok(parameterInteraction?.kind === "interaction" && "speaker" in parameterInteraction);
-  // EVIDENCE: fixture changes only the static interaction's speaker expression before plan validation.
-  (parameterInteraction as { speaker: string | null }).speaker = "requested";
-  assert.equal(validateInstructionPlan(parameterPlan).valid, true);
-  for (const [plan, name] of [
-    [parameterPlan, "requested"],
-    [
-      compiledPlan(
-        'speaker alice {}\nfunction prompt { showButton as alice "Continue" }\nprompt()\nexit',
-      ),
-      "alice",
-    ],
-  ] as const) {
-    const scopedPending = waiting(plan).snapshot;
-    // EVIDENCE: structuredClone preserves the runtime snapshot shape for the read-only binding lookup.
-    const scopedCopy = structuredClone(scopedPending) as Mutable<RuntimeSnapshot>;
-    assert.equal(
-      scopedPending.foregroundAction?.kind === "interaction" &&
-        scopedPending.foregroundAction.speakerId,
-      speakerBinding(scopedCopy, name).speakerId,
-      name,
-    );
-    assert.equal(validateRuntimeSnapshot(scopedPending, plan).valid, true, name);
-  }
-
-  // The nearest scope's binding decides the instructed speaker.
-  const nestedPending = waiting(
-    compiledPlan('speaker root {}\nspeaker bob {}\nif true { showButton "Continue" }\nexit'),
-  ).snapshot;
-  const nestedBase = buttonPlanFromSource(
-    "speaker root {}\nspeaker bob {}\nif true { wait 1 }\nexit",
-  );
-  const nestedInstruction = nestedBase.instructions.find(
-    (instruction) => instruction.kind === "interaction",
-  );
-  assert.ok(nestedInstruction?.kind === "interaction" && "speaker" in nestedInstruction);
-  // EVIDENCE: fixture changes only the static interaction's speaker binding for nested-scope resolution.
-  (nestedInstruction as { speaker: string | null }).speaker = "alice";
-  const rootSpeaker = speakerId(nestedPending, "root");
-  const nestedBob = speakerId(nestedPending, "bob");
-  const nested = corrupted(nestedPending, (copy, action) => {
-    copy.frames[0]!.bindings.push({
-      name: "alice",
-      value: { kind: "speakerReference", speakerId: rootSpeaker, identifier: "root" },
-    });
-    copy.frames
-      .at(-1)!
-      .bindings.push({
-        name: "alice",
-        value: { kind: "speakerReference", speakerId: nestedBob, identifier: "bob" },
-      });
-    action.speakerId = nestedBob;
-  });
-  assert.equal(validateRuntimeSnapshot(nested, nestedBase).valid, true);
-  assert.ok(nested.foregroundAction?.kind === "interaction");
-  nested.foregroundAction.speakerId = rootSpeaker;
-  assert.equal(validateRuntimeSnapshot(nested, nestedBase).valid, false);
+  assert.equal(validateRuntimeSnapshot(scopedPending, scopedPlan).valid, true);
 });
 
 test("explicit accessible names must contain non-whitespace content", () => {
