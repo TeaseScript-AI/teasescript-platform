@@ -125,3 +125,23 @@ test("self-contained package output includes only transitively required helper f
     ].join("\n"),
   );
 });
+
+
+test("flags package calls whose helper implementation cannot be emitted", () => {
+  const helper = helperUnit();
+  if (helper.root?.kind !== "compilationUnit") throw new Error("fixture has no helper class");
+  const helperClass = (helper.root.classes as AstNode[])[0]!;
+  helperClass.fields = [{
+    kind: "field",
+    span,
+    name: "counter",
+    type: "java.lang.Integer",
+    modifiers: 9,
+    static: true,
+    final: false,
+    initialExpression: constant(0),
+  }];
+
+  const [, script] = lowerSelfContainedPackage([helper, scriptBody()]);
+  assert.ok(script.diagnostics.some((diagnostic) => diagnostic.code === "SX_UNRESOLVED_PACKAGE_CALL"));
+});
