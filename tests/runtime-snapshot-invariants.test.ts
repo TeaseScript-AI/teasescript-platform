@@ -225,14 +225,22 @@ test("rejects unsafe source positions and out-of-range nested identities", () =>
     "failure span starts after it ends",
   );
 
-  for (const field of ["offset", "line", "column"] as const) {
+  // An unsafe start offset would also reverse the span, so the start is probed through line and column.
+  const unsafePositions = [
+    ["start", "line"],
+    ["start", "column"],
+    ["end", "offset"],
+    ["end", "line"],
+    ["end", "column"],
+  ] as const;
+  for (const [position, field] of unsafePositions) {
     const unsafe = structuredClone(failed);
-    // EVIDENCE: fixture: expose one readonly end-position field; the span stays ordered.
-    (unsafe.failure!.span.end as Record<typeof field, number>)[field] = MAX_SAFE + 1;
+    // EVIDENCE: fixture: expose one readonly position field; the span stays ordered.
+    (unsafe.failure!.span[position] as Record<typeof field, number>)[field] = MAX_SAFE + 1;
     assert.equal(
       validateRuntimeSnapshot(unsafe, failedPlan).valid,
       false,
-      `unsafe failure end ${field}`,
+      `unsafe failure ${position} ${field}`,
     );
   }
 });

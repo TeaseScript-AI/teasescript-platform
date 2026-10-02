@@ -108,9 +108,6 @@ test("invalid random built-in arguments fail with source-associated errors", () 
     );
   }
 
-  // Both ends of the accepted percentage range are valid and certain.
-  assert.deepEqual(sayTexts(runSource("say chance(0)\nsay chance(100)")), ["false", "true"]);
-
   const staticSource = "say randomInteger(1.5..=3)";
   const staticRange = "1.5..=3";
   const rejected = compileSource(staticSource);
@@ -125,6 +122,10 @@ test("invalid random built-in arguments fail with source-associated errors", () 
       ],
     ],
   );
+});
+
+test("chance at both ends of the percentage range is certain", () => {
+  assert.deepEqual(sayTexts(runSource("say chance(0)\nsay chance(100)")), ["false", "true"]);
 });
 
 test("instruction budget stops an infinite while loop", () => {
