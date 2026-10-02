@@ -590,7 +590,7 @@ test("the Player answers takePhoto() with a vouched reference or an unavailable 
   assert.equal(unavailable.session.snapshot.status, "halted");
   assert.ok(
     unavailable.session.events.some(
-      (event) => event.kind === "developerWarning" && event.code === "TSW014",
+      (event) => event.kind === "developerWarning" && event.code === "TSW015",
     ),
   );
 });

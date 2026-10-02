@@ -7,6 +7,7 @@ import type {
 import type { MessageMarkup } from "../../message-markup.js";
 import type { RuntimeTimerSnapshot } from "../timers.js";
 import type { RuntimeMediaSnapshot } from "../media.js";
+import type { SerializableRuntimeValue } from "../serializable-values.js";
 
 /** Shared serializable pending-action and settlement contracts. */
 export interface RuntimeDelayActionSnapshot {
@@ -118,6 +119,25 @@ export interface RuntimeMediaPlaybackActionSnapshot {
 }
 
 /**
+ * A `save` or `delete` waits for the host to acknowledge persisting it; the session's storage view changes only after
+ * a `stored` acknowledgement. Timer and media blocks wait until it settles.
+ */
+export interface RuntimeStorageWriteActionSnapshot {
+  readonly kind: "storageWrite";
+  readonly actionId: number;
+  readonly owningInstruction: number;
+  readonly continuationInstruction: number;
+  readonly ownerCallFrameId: number | null;
+  readonly scopeDepth: number;
+  readonly loopDepth: number;
+  readonly createdAtMs: number;
+  readonly key: string;
+  /** The value to store, or `null` to remove the key. */
+  readonly value: SerializableRuntimeValue;
+  readonly requestEventSequence: number;
+}
+
+/**
  * `takePhoto()` waits for the Player to capture a still from the session camera. The Player completes it with the
  * captured image reference or reports the camera unavailable, which yields `null`. Expiry blocks wait until it
  * settles, so it is never suspended.
@@ -156,6 +176,7 @@ export type RuntimeForegroundActionSnapshot =
   | RuntimeInteractionActionSnapshot
   | RuntimeChatPacingGateActionSnapshot
   | RuntimeMediaPlaybackActionSnapshot
+  | RuntimeStorageWriteActionSnapshot
   | RuntimeCaptureActionSnapshot;
 
 export type RuntimePendingActionSnapshot =
@@ -163,14 +184,20 @@ export type RuntimePendingActionSnapshot =
   | RuntimeInteractionActionSnapshot
   | RuntimeChatPacingGateActionSnapshot
   | RuntimeMediaPlaybackActionSnapshot
+  | RuntimeStorageWriteActionSnapshot
   | RuntimeCaptureActionSnapshot
   | RuntimeTimerActionSnapshot
   | RuntimeMediaActionSnapshot;
 
 /** Completion events that an active action must still be able to publish. */
 export function requiredActionCompletionEvents(action: { readonly kind?: unknown } | null): number {
-  // An interaction publishes its transcript; an unavailable capture its developer warning.
-  if (action?.kind === "interaction" || action?.kind === "capture") return 2;
+  // An interaction publishes its transcript entry; a failed storage write or an unavailable capture its warning.
+  if (
+    action?.kind === "interaction" ||
+    action?.kind === "storageWrite" ||
+    action?.kind === "capture"
+  )
+    return 2;
   if (
     action?.kind === "delay" ||
     action?.kind === "chatPacingGate" ||
@@ -219,6 +246,20 @@ export interface RuntimeMediaPlaybackSettlementSnapshot {
   readonly settlementKind: "completed";
   readonly outcome: "loaded" | "finished" | "stopped" | "failed";
   readonly mediaId: number;
+  readonly owningInstruction: number;
+  readonly continuationInstruction: number;
+  readonly requestEventSequence: number;
+  readonly completionEventSequence: number;
+  readonly completedAtMs: number;
+}
+
+/** A settled storage write; `failed` kept the previous stored value. */
+export interface RuntimeStorageWriteSettlementSnapshot {
+  readonly actionId: number;
+  readonly actionKind: "storageWrite";
+  readonly settlementKind: "completed";
+  readonly outcome: "stored" | "failed";
+  readonly key: string;
   readonly owningInstruction: number;
   readonly continuationInstruction: number;
   readonly requestEventSequence: number;
@@ -294,4 +335,5 @@ export type RuntimeActionSettlementSnapshot =
   | RuntimeInteractionActionSettlementSnapshot
   | RuntimeChatPacingGateSettlementSnapshot
   | RuntimeMediaPlaybackSettlementSnapshot
+  | RuntimeStorageWriteSettlementSnapshot
   | RuntimeCaptureActionSettlementSnapshot;

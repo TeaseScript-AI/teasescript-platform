@@ -2044,7 +2044,13 @@ Delete a value:
 delete "player.name"
 ```
 
-Deleting an absent key is a no-op. Saving then loading in the same session sees the saved value immediately.
+Deleting an absent key is a no-op.
+
+A write is atomic. Without persistent storage, such as in tests or a development preview, storage is session-local:
+a later `load` in the session sees the saved value at once. When the host persists storage, `save` and `delete` wait
+until the host acknowledges the write, and only a successful write changes what later `load` calls see. A failed write
+keeps the previous value, or leaves the key absent, reports developer warning `TSW014`, and the script continues. A
+timer or media block due while a write waits runs after the write settles, at its own due time.
 
 Rules:
 
@@ -2476,10 +2482,10 @@ including a reference nested inside a saved composite value; `load` in a later r
 which resolves to the same photo. Several saved values may share one photo: removing or overwriting one of them keeps
 the photo while another still references it, and once no saved value references it the photo may be reclaimed, lazily.
 Clearing a script's saved data releases photos retained only by that data. If a saved photo cannot be stored durably,
-the script continues with a non-fatal developer warning, the photo stays usable for the current session, and no
-reference is persisted that would look valid after a reload without its photo. A string is a usable media reference only
-when the trusted Player media store resolves it; a well-formed string, including one returned by `load`, grants no
-access by itself.
+the `save` fails like any failed persistent write (§25): the script continues with a non-fatal developer warning and the
+previous value, the photo stays usable for the current session, and no reference is persisted that would look valid
+after a reload without its photo. A string is a usable media reference only when the trusted Player media store resolves
+it; a well-formed string, including one returned by `load`, grants no access by itself.
 
 ## 34. Runtime warnings and recoverable values
 **Status:** Accepted

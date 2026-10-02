@@ -101,7 +101,7 @@ test("an unavailable camera yields null with a developer warning and the script 
     const completion = unavailable(plan, snapshot, reason);
     assert.equal(completion.outcome.kind, "completed", reason);
     const warning = completion.events.find((event) => event.kind === "developerWarning");
-    assert.ok(warning?.kind === "developerWarning" && warning.code === "TSW014", reason);
+    assert.ok(warning?.kind === "developerWarning" && warning.code === "TSW015", reason);
     assert.match(warning.message, /takePhoto\(\) returned null/u);
     const finished = run(plan, completion.snapshot);
     assert.equal(finished.snapshot.status, "halted", reason);

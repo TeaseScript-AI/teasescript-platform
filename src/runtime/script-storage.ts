@@ -33,51 +33,52 @@ export function storageKey(
 }
 
 /**
- * Key positions in the session's storage view for one runtime operation, so reads and writes do not scan every
- * entry. The view stays a plain entry array in snapshots; the index is rebuilt when that array is replaced, such as
- * after a staged `say` commits its cloned state.
+ * The entry for a key. The view is kept sorted by key in UTF-16 code-unit order, so lookups and writes do not scan
+ * every entry and the representation does not depend on the order of earlier writes.
  */
-export class ScriptStorageIndex {
-  #entries: RuntimeScriptStorageEntrySnapshot[] | null = null;
-  readonly #positions = new Map<string, number>();
+export function findScriptStorageEntry(
+  view: ScriptStorageView,
+  key: string,
+): RuntimeScriptStorageEntrySnapshot | undefined {
+  const position = entryPosition(view.scriptStorage, key);
+  return view.scriptStorage[position]?.key === key ? view.scriptStorage[position] : undefined;
+}
 
-  public find(view: ScriptStorageView, key: string): RuntimeScriptStorageEntrySnapshot | undefined {
-    const position = this.#positionsFor(view.scriptStorage).get(key);
-    return position === undefined ? undefined : view.scriptStorage[position];
+/** Stores a copy of a persistable value, or removes the key when the value is `null`. */
+export function writeScriptStorage(
+  view: ScriptStorageView,
+  key: string,
+  value: SerializableRuntimeValue,
+): void {
+  const entries = view.scriptStorage;
+  const position = entryPosition(entries, key);
+  const present = entries[position]?.key === key;
+  if (value === null) {
+    if (present) entries.splice(position, 1);
+    return;
   }
+  const stored = cloneCapturedSerializableValue(value);
+  if (present) entries[position]!.value = stored;
+  else entries.splice(position, 0, { key, value: stored });
+}
 
-  /** Stores a copy of a persistable value, or removes the key when the value is `null`. */
-  public write(view: ScriptStorageView, key: string, value: SerializableRuntimeValue): void {
-    const entries = view.scriptStorage;
-    const positions = this.#positionsFor(entries);
-    const position = positions.get(key);
-    if (value === null) {
-      if (position === undefined) return;
-      // Move the last entry into the removed slot; entry order carries no meaning.
-      const last = entries.pop()!;
-      positions.delete(key);
-      if (position < entries.length) {
-        entries[position] = last;
-        positions.set(last.key, position);
-      }
-      return;
-    }
-    const stored = cloneCapturedSerializableValue(value);
-    if (position !== undefined) entries[position]!.value = stored;
-    else {
-      positions.set(key, entries.length);
-      entries.push({ key, value: stored });
-    }
-  }
+/** Host-supplied entries in the view's key order; the entries were validated to have unique keys. */
+export function sortScriptStorage(
+  entries: readonly RuntimeScriptStorageEntrySnapshot[],
+): RuntimeScriptStorageEntrySnapshot[] {
+  return [...entries].sort((left, right) => (left.key < right.key ? -1 : 1));
+}
 
-  #positionsFor(entries: RuntimeScriptStorageEntrySnapshot[]): Map<string, number> {
-    if (this.#entries !== entries) {
-      this.#entries = entries;
-      this.#positions.clear();
-      for (const [position, entry] of entries.entries()) this.#positions.set(entry.key, position);
-    }
-    return this.#positions;
+/** The first position whose key is not below `key`. */
+function entryPosition(entries: readonly RuntimeScriptStorageEntrySnapshot[], key: string): number {
+  let low = 0;
+  let high = entries.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (entries[middle]!.key < key) low = middle + 1;
+    else high = middle;
   }
+  return low;
 }
 
 export function assertPersistable(
@@ -119,11 +120,17 @@ export function assertStoredType(
 
 /**
  * Validates host-supplied or restored script storage: an array of `{ key, value }` entries with unique string keys
- * and persistable, non-null values. Returns the first failure message, or `null`.
+ * and persistable, non-null values. A runtime view (`sorted`) must also be in key order. Returns the first failure
+ * message, or `null`.
  */
-export function validateScriptStorageEntries(value: unknown, path: string): string | null {
+export function validateScriptStorageEntries(
+  value: unknown,
+  path: string,
+  sorted = false,
+): string | null {
   if (!Array.isArray(value)) return `${path} must be an array of { key, value } entries.`;
   const keys = new Set<string>();
+  let previousKey: string | null = null;
   for (let index = 0; index < value.length; index += 1) {
     const entry: unknown = value[index];
     const entryPath = `${path}[${index}]`;
@@ -141,7 +148,10 @@ export function validateScriptStorageEntries(value: unknown, path: string): stri
     const { key, value: stored } = entry as { key: unknown; value: unknown };
     if (typeof key !== "string") return `${entryPath}.key must be a string.`;
     if (keys.has(key)) return `${path} contains the key ${JSON.stringify(key)} more than once.`;
+    if (sorted && previousKey !== null && !(previousKey < key))
+      return `${path} must be sorted by key.`;
     keys.add(key);
+    previousKey = key;
     const failure = validateCapturedSerializableValue(stored, `${entryPath}.value`);
     if (failure !== null) return failure;
     // EVIDENCE: validation: validateCapturedSerializableValue accepted this stored value above.

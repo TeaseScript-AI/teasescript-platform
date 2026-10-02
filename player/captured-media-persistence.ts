@@ -43,8 +43,8 @@ export interface CapturedMediaStorage extends ScriptStorageProvider {
 /**
  * Wraps the script-storage provider so saved captured media stays resolvable in later runs: every write first stores
  * the session media it references durably, then persists the value. When the media cannot be stored, the write is not
- * persisted at all, so no saved reference outlives its media; the key keeps its previous durable value and the write
- * rejects with `CapturedMediaNotStoredError`. All operations run in issue order, so a clear cannot be refilled by an
+ * persisted at all, so no saved reference outlives its media: the write rejects with `CapturedMediaNotStoredError`, and
+ * the host acknowledges the runtime's `storageWrite` as failed, which keeps the previous value. All operations run in issue order, so a clear cannot be refilled by an
  * earlier write of the same Player. Nothing is deleted here; unreferenced media is removed by `sweepCapturedMedia`.
  */
 export function withCapturedMedia(

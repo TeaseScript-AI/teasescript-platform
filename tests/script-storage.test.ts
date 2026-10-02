@@ -7,10 +7,10 @@ import {
   createCheckpoint,
   createFreshRuntimeSnapshot,
   deserializeCheckpoint,
+  observeTime,
   reportMediaLoad,
   run,
   serializeCheckpoint,
-  type InterpreterEvent,
   type RuntimeSnapshot,
   type SerializableRuntimeValue,
 } from "../src/index.js";
@@ -30,11 +30,13 @@ function binding(snapshot: RuntimeSnapshot, name: string): SerializableRuntimeVa
   return found.value;
 }
 
-function changes(events: readonly InterpreterEvent[]) {
-  return events.filter((event) => event.kind === "scriptStorageChanged");
+function storageWrite(snapshot: RuntimeSnapshot) {
+  const action = snapshot.foregroundAction;
+  assert.ok(action?.kind === "storageWrite");
+  return action;
 }
 
-test("emitted saves seed a new session without losing stored value types", () => {
+test("host-acknowledged saves seed a new session without losing stored value types", () => {
   const writer = plan(
     [
       'save "Ada" as "name"',
@@ -48,8 +50,6 @@ test("emitted saves seed a new session without losing stored value types", () =>
       "exit",
     ].join("\n"),
   );
-  const written = run(writer, createFreshRuntimeSnapshot(writer));
-  assert.equal(written.snapshot.status, "halted");
   const expected: { key: string; value: SerializableRuntimeValue }[] = [
     { key: "name", value: "Ada" },
     { key: "score", value: 2.5 },
@@ -66,23 +66,328 @@ test("emitted saves seed a new session without losing stored value types", () =>
     { key: "range", value: { kind: "range", start: 2, end: 5, inclusive: true } },
     { key: "duration", value: { kind: "duration", milliseconds: 1_500 } },
   ];
-  const persisted = new Map<string, SerializableRuntimeValue>();
-  for (const event of changes(written.events)) {
-    if (event.value === null) persisted.delete(event.key);
-    else persisted.set(event.key, event.value);
+  const recorded: { key: string; value: SerializableRuntimeValue }[] = [];
+  let written = run(writer, createFreshRuntimeSnapshot(writer, { persistentScriptStorage: true }));
+  for (const entry of expected) {
+    const action = storageWrite(written.snapshot);
+    assert.deepEqual({ key: action.key, value: action.value }, entry);
+    const acknowledged = completeAction(writer, written.snapshot, {
+      actionId: action.actionId,
+      actionKind: "storageWrite",
+      payload: { kind: "stored" },
+    });
+    assert.equal(acknowledged.outcome.kind, "completed");
+    recorded.push({ key: action.key, value: action.value });
+    written = run(writer, acknowledged.snapshot);
   }
-  const scriptStorage = Array.from(persisted, ([key, value]) => ({ key, value }));
-  assert.deepEqual(scriptStorage, expected);
+  assert.equal(written.snapshot.status, "halted");
+  assert.deepEqual(recorded, expected);
+  assert.deepEqual(
+    written.snapshot.scriptStorage,
+    [...expected].sort((a, b) => a.key.localeCompare(b.key)),
+  );
 
   const reader = plan(
     expected.map(({ key }, index) => `let loaded${index} = load "${key}"`).join("\n"),
   );
-  const read = run(reader, createFreshRuntimeSnapshot(reader, { scriptStorage }));
+  const read = run(reader, createFreshRuntimeSnapshot(reader, { scriptStorage: recorded }));
   assert.equal(read.snapshot.status, "halted");
   for (const [index, entry] of expected.entries()) {
     assert.deepEqual(binding(read.snapshot, `loaded${index}`), entry.value, entry.key);
   }
-  assert.deepEqual(changes(read.events), []);
+  assert.deepEqual(read.snapshot.scriptStorage, written.snapshot.scriptStorage);
+});
+
+test("persistent writes wait with the old view until stored acknowledges the evaluated operands", () => {
+  for (const [command, value, initial] of [
+    ['save 2 + 1 as "${key}"', 3, [{ key: "k", value: 1 }]],
+    ['delete "${key}"', null, [{ key: "k", value: 1 }]],
+    ['save null as "${key}"', null, [{ key: "k", value: 1 }]],
+    ['delete "${key}"', null, []],
+  ] as const) {
+    const compiled = plan(`let key = "k"\n${command}\nlet loaded = load "k"\nexit`);
+    const pending = run(
+      compiled,
+      createFreshRuntimeSnapshot(compiled, {
+        persistentScriptStorage: true,
+        scriptStorage: initial,
+      }),
+    );
+    assert.equal(pending.snapshot.status, "waiting", command);
+    assert.deepEqual(pending.snapshot.scriptStorage, initial, command);
+    const action = storageWrite(pending.snapshot);
+    assert.deepEqual({ key: action.key, value: action.value }, { key: "k", value });
+    assert.deepEqual(pending.snapshot.backgroundActions, []);
+    assert.equal(pending.events.length, 1);
+    const requested = pending.events[0]!;
+    assert.ok(requested.kind === "actionRequested");
+    assert.deepEqual(requested.action, action);
+    assert.equal(action.requestEventSequence, requested.sequence);
+
+    const acknowledged = completeAction(compiled, pending.snapshot, {
+      actionId: action.actionId,
+      actionKind: "storageWrite",
+      payload: { kind: "stored" },
+    });
+    assert.ok(acknowledged.outcome.kind === "completed");
+    assert.equal(acknowledged.events.length, 1);
+    const completed = acknowledged.events[0]!;
+    assert.ok(completed.kind === "actionCompleted");
+    const settlement = {
+      actionId: action.actionId,
+      actionKind: "storageWrite",
+      settlementKind: "completed",
+      outcome: "stored",
+      key: "k",
+      owningInstruction: action.owningInstruction,
+      continuationInstruction: action.continuationInstruction,
+      requestEventSequence: requested.sequence,
+      completionEventSequence: completed.sequence,
+      completedAtMs: 0,
+    };
+    assert.deepEqual(completed.settlement, settlement);
+    assert.deepEqual(acknowledged.outcome.settlement, settlement);
+    assert.deepEqual(acknowledged.snapshot.lastSettlement, settlement);
+    const committed = value === null ? [] : [{ key: "k", value }];
+    assert.deepEqual(acknowledged.snapshot.scriptStorage, committed);
+    const finished = run(compiled, acknowledged.snapshot);
+    assert.equal(finished.snapshot.status, "halted");
+    assert.equal(binding(finished.snapshot, "loaded"), value);
+    assert.deepEqual(finished.snapshot.scriptStorage, committed);
+  }
+});
+
+test("failed persistent saves and deletes keep the old value or absence and allow lazy fallback", () => {
+  for (const command of ['save 2 as "k"', 'delete "k"']) {
+    for (const previous of [7, null]) {
+      const initial = previous === null ? [] : [{ key: "k", value: previous }];
+      const compiled = plan(
+        [
+          "let calls = 0",
+          "function fallback { calls += 1\nreturn 9 }",
+          command,
+          'let plain = load "k"',
+          'let withDefault = load "k" default fallback()',
+          'let stillMissing = load "k"',
+          "exit",
+        ].join("\n"),
+      );
+      const pending = run(
+        compiled,
+        createFreshRuntimeSnapshot(compiled, {
+          persistentScriptStorage: true,
+          scriptStorage: initial,
+        }),
+      );
+      const action = storageWrite(pending.snapshot);
+      const failed = completeAction(compiled, pending.snapshot, {
+        actionId: action.actionId,
+        actionKind: "storageWrite",
+        payload: { kind: "failed" },
+      });
+      assert.ok(failed.outcome.kind === "completed");
+      assert.deepEqual(failed.snapshot.scriptStorage, initial);
+      const completed = failed.events.find((event) => event.kind === "actionCompleted");
+      assert.ok(completed?.kind === "actionCompleted");
+      assert.deepEqual(failed.snapshot.lastSettlement, {
+        actionId: action.actionId,
+        actionKind: "storageWrite",
+        settlementKind: "completed",
+        outcome: "failed",
+        key: "k",
+        owningInstruction: action.owningInstruction,
+        continuationInstruction: action.continuationInstruction,
+        requestEventSequence: action.requestEventSequence,
+        completionEventSequence: completed.sequence,
+        completedAtMs: 0,
+      });
+      assert.deepEqual(completed.settlement, failed.snapshot.lastSettlement);
+      assert.deepEqual(failed.outcome.settlement, failed.snapshot.lastSettlement);
+      const finished = run(compiled, failed.snapshot);
+      assert.equal(finished.snapshot.status, "halted");
+      assert.equal(binding(finished.snapshot, "plain"), previous);
+      assert.equal(binding(finished.snapshot, "withDefault"), previous ?? 9);
+      assert.equal(binding(finished.snapshot, "calls"), previous === null ? 1 : 0);
+      assert.equal(binding(finished.snapshot, "stillMissing"), previous);
+      assert.deepEqual(finished.snapshot.scriptStorage, initial);
+      assert.deepEqual(
+        failed.events
+          .filter((event) => event.kind === "developerWarning")
+          .map(({ code, message }) => ({ code, message })),
+        [
+          {
+            code: "TSW014",
+            message: `${command.startsWith("save") ? "save" : "delete"} could not persist "k"; the previous value is kept.`,
+          },
+        ],
+      );
+      assert.deepEqual(
+        finished.events.filter((event) => event.kind === "developerWarning"),
+        [],
+      );
+    }
+  }
+});
+
+test("storage write completion rejects invalid payloads and wrong action kinds, then settles only once", () => {
+  const compiled = plan('save 2 as "k"\nexit');
+  const pending = run(
+    compiled,
+    createFreshRuntimeSnapshot(compiled, { persistentScriptStorage: true }),
+  );
+  const action = storageWrite(pending.snapshot);
+  const request = { actionId: action.actionId, actionKind: "storageWrite" };
+  for (const payload of [null, {}, { kind: "unknown" }]) {
+    const invalid = completeAction(compiled, pending.snapshot, { ...request, payload });
+    assert.equal(invalid.outcome.kind, "invalidPayload");
+    assert.deepEqual(invalid.snapshot, pending.snapshot);
+    assert.deepEqual(invalid.events, []);
+  }
+  const wrong = completeAction(compiled, pending.snapshot, {
+    ...request,
+    actionKind: "interaction",
+    payload: { kind: "stored" },
+  });
+  assert.equal(wrong.outcome.kind, "wrongActionKind");
+  assert.deepEqual(wrong.snapshot, pending.snapshot);
+  assert.deepEqual(wrong.events, []);
+  const completion = { ...request, payload: { kind: "stored" } };
+  const settled = completeAction(compiled, pending.snapshot, completion);
+  assert.equal(settled.outcome.kind, "completed");
+  const repeated = completeAction(compiled, settled.snapshot, completion);
+  assert.deepEqual(repeated.outcome, {
+    kind: "alreadySettled",
+    settlement: settled.snapshot.lastSettlement,
+  });
+  assert.deepEqual(repeated.snapshot, settled.snapshot);
+  assert.deepEqual(repeated.events, []);
+});
+
+test("default session-local storage changes immediately without actions, events, or warnings", () => {
+  const compiled = plan(
+    'save 1 as "z"\nsave 2 as "a"\nlet saved = load "z"\ndelete "z"\nlet deleted = load "z"\nexit',
+  );
+  const result = run(compiled, createFreshRuntimeSnapshot(compiled));
+  assert.equal(result.snapshot.status, "halted");
+  assert.equal(result.snapshot.scriptStoragePersistent, false);
+  assert.equal(binding(result.snapshot, "saved"), 1);
+  assert.equal(binding(result.snapshot, "deleted"), null);
+  assert.deepEqual(result.snapshot.scriptStorage, [{ key: "a", value: 2 }]);
+  assert.equal(result.snapshot.foregroundAction, null);
+  assert.deepEqual(result.snapshot.backgroundActions, []);
+  assert.deepEqual(
+    result.events.map(({ kind }) => kind),
+    ["exit"],
+  );
+});
+
+test("pending persistent writes complete identically after a JSON checkpoint round trip", () => {
+  const compiled = plan('save [1, null] as "list"\nlet loaded = load "list"\nexit');
+  const pending = run(
+    compiled,
+    createFreshRuntimeSnapshot(compiled, { persistentScriptStorage: true }),
+  );
+  const action = storageWrite(pending.snapshot);
+  const restored = deserializeCheckpoint(
+    serializeCheckpoint(createCheckpoint(compiled, pending.snapshot)),
+  );
+  assert.deepEqual(restored.snapshot, pending.snapshot);
+  for (const kind of ["stored", "failed"]) {
+    const completion = { actionId: action.actionId, actionKind: "storageWrite", payload: { kind } };
+    const directCompletion = completeAction(compiled, pending.snapshot, completion);
+    const restoredCompletion = completeAction(restored.plan, restored.snapshot, completion);
+    assert.equal(directCompletion.outcome.kind, "completed");
+    assert.deepEqual(restoredCompletion, directCompletion);
+    const direct = run(compiled, directCompletion.snapshot);
+    const resumed = run(restored.plan, restoredCompletion.snapshot);
+    assert.equal(resumed.snapshot.status, "halted");
+    assert.deepEqual(resumed.snapshot, direct.snapshot);
+    assert.deepEqual(
+      [...pending.events, ...restoredCompletion.events, ...resumed.events],
+      [...pending.events, ...directCompletion.events, ...direct.events],
+    );
+  }
+});
+
+test("a due timer block waits for the write and reads the acknowledged value at its due scene time", () => {
+  const compiled = plan(
+    [
+      "let seen = null",
+      "let elapsed = null",
+      "let clock = timer async 20 s",
+      'timer async 1 s { seen = load "k"\nelapsed = clock.elapsed }',
+      'save 2 as "k"',
+      "wait 10 s",
+    ].join("\n"),
+  );
+  const pending = run(
+    compiled,
+    createImmediatePacingRuntimeSnapshot(compiled, {
+      persistentScriptStorage: true,
+      scriptStorage: [{ key: "k", value: 1 }],
+    }),
+  );
+  const action = storageWrite(pending.snapshot);
+  const late = observeTime(compiled, pending.snapshot, 5_000);
+  assert.equal(late.outcome.kind, "observed");
+  const held = run(compiled, late.snapshot);
+  assert.equal(held.snapshot.status, "waiting");
+  assert.deepEqual(storageWrite(held.snapshot), action);
+  assert.equal(held.snapshot.currentSessionTimeMs, 1_000);
+  assert.equal(held.snapshot.observedSessionTimeMs, 5_000);
+  assert.equal(binding(held.snapshot, "seen"), null);
+  assert.deepEqual(held.snapshot.scriptStorage, [{ key: "k", value: 1 }]);
+  const later = observeTime(compiled, held.snapshot, 6_000);
+  assert.equal(later.outcome.kind, "observed");
+  assert.equal(later.snapshot.currentSessionTimeMs, 1_000);
+  assert.equal(later.snapshot.observedSessionTimeMs, 6_000);
+  const completed = completeAction(compiled, later.snapshot, {
+    actionId: action.actionId,
+    actionKind: "storageWrite",
+    payload: { kind: "stored" },
+  });
+  assert.equal(completed.outcome.kind, "completed");
+  assert.ok(completed.snapshot.lastSettlement?.actionKind === "storageWrite");
+  assert.equal(completed.snapshot.lastSettlement.completedAtMs, 1_000);
+  assert.equal(binding(completed.snapshot, "seen"), null);
+  const caughtUp = run(compiled, completed.snapshot);
+  assert.equal(binding(caughtUp.snapshot, "seen"), 2);
+  assert.deepEqual(binding(caughtUp.snapshot, "elapsed"), {
+    kind: "duration",
+    milliseconds: 1_000,
+  });
+  assert.equal(caughtUp.snapshot.currentSessionTimeMs, 6_000);
+  assert.equal(caughtUp.snapshot.observedSessionTimeMs, 6_000);
+});
+
+test("a terminal save completes the root after acknowledgement even with background chat pacing", () => {
+  for (const source of ['save 2 as "k"', 'say "Before"\nsave 2 as "k"']) {
+    const compiled = plan(source);
+    const pending = run(
+      compiled,
+      createFreshRuntimeSnapshot(compiled, { persistentScriptStorage: true }),
+    );
+    assert.equal(pending.snapshot.status, "waiting");
+    const action = storageWrite(pending.snapshot);
+    if (source.startsWith("say")) {
+      assert.ok(pending.snapshot.backgroundActions.some((item) => item.kind === "chatPacingGate"));
+    }
+    const completed = completeAction(compiled, pending.snapshot, {
+      actionId: action.actionId,
+      actionKind: "storageWrite",
+      payload: { kind: "stored" },
+    });
+    assert.equal(completed.outcome.kind, "completed");
+    const finished = run(compiled, completed.snapshot);
+    assert.equal(finished.snapshot.status, "halted");
+    assert.deepEqual(finished.snapshot.scriptStorage, [{ key: "k", value: 2 }]);
+    assert.deepEqual(
+      [...completed.events, ...finished.events]
+        .filter((event) => event.kind === "complete")
+        .map(({ kind }) => kind),
+      ["complete"],
+    );
+  }
 });
 
 test("absent loads return null or the default without storing it", () => {
@@ -92,7 +397,6 @@ test("absent loads return null or the default without storing it", () => {
   assert.equal(binding(result.finalSnapshot, "missing"), null);
   assert.equal(binding(result.finalSnapshot, "fallback"), 7);
   assert.equal(binding(result.finalSnapshot, "stillMissing"), null);
-  assert.deepEqual(changes(result.events), []);
   assert.deepEqual(result.finalSnapshot.scriptStorage, []);
 });
 
@@ -130,7 +434,7 @@ test("an absent load resumes its blocking function default at every instruction 
   assert.equal(binding(result.finalSnapshot, "calls"), 1);
   assert.equal(binding(result.finalSnapshot, "name"), "Ada");
   assert.equal(binding(result.finalSnapshot, "missing"), null);
-  assert.deepEqual(changes(result.events), []);
+  assert.deepEqual(result.finalSnapshot.scriptStorage, []);
 });
 
 test("an absent load suspends for askText and resumes after a JSON checkpoint round trip", () => {
@@ -143,7 +447,7 @@ test("an absent load suspends for askText and resumes after a JSON checkpoint ro
   assert.equal(action?.kind, "interaction");
   assert.ok(action?.kind === "interaction");
   assert.equal(action.interactionKind, "text");
-  assert.deepEqual(changes(pending.events), []);
+  assert.deepEqual(pending.snapshot.scriptStorage, []);
   const restored = deserializeCheckpoint(
     serializeCheckpoint(createCheckpoint(compiled, pending.snapshot)),
   );
@@ -169,10 +473,7 @@ test("an absent load suspends for askText and resumes after a JSON checkpoint ro
   );
   assert.equal(binding(resumed.snapshot, "name"), "Ada");
   assert.equal(binding(resumed.snapshot, "stillMissing"), null);
-  assert.deepEqual(
-    changes(resumed.events).map(({ key, value }) => ({ key, value })),
-    [{ key: "name", value: "Ada" }],
-  );
+  assert.deepEqual(resumed.snapshot.scriptStorage, [{ key: "name", value: "Ada" }]);
 });
 
 test("same-session loads see saves and copy nested collections in both directions", () => {
@@ -195,10 +496,6 @@ test("same-session loads see saves and copy nested collections in both direction
   };
   assert.deepEqual(binding(result.finalSnapshot, "reloaded"), stored);
   assert.deepEqual(result.finalSnapshot.scriptStorage, [{ key: "k", value: stored }]);
-  assert.deepEqual(
-    changes(result.events).map((event) => event.value),
-    [stored],
-  );
   assert.deepEqual(binding(result.finalSnapshot, "original"), {
     kind: "list",
     items: [
@@ -213,20 +510,12 @@ test("same-session loads see saves and copy nested collections in both direction
   });
 });
 
-test("save null and delete remove keys and emit ordered mutations even for an absent key", () => {
+test("session-local save null and delete remove keys, including an absent key", () => {
   const result = assertRuntimeResumeEquivalent(
-    'save 1 as "k"\nsave null as "k"\nsave 2 as "k"\ndelete "k"\ndelete "absent"\nlet missing = load "k"\nexit',
+    'save 1 as "k"\nsave null as "k"\nlet afterNull = load "k"\nsave 2 as "k"\nlet replaced = load "k"\ndelete "k"\ndelete "absent"\nlet missing = load "k"\nexit',
   );
-  assert.deepEqual(
-    changes(result.events).map(({ sequence, key, value }) => [sequence, key, value]),
-    [
-      [1, "k", 1],
-      [2, "k", null],
-      [3, "k", 2],
-      [4, "k", null],
-      [5, "absent", null],
-    ],
-  );
+  assert.equal(binding(result.finalSnapshot, "afterNull"), null);
+  assert.equal(binding(result.finalSnapshot, "replaced"), 2);
   assert.equal(binding(result.finalSnapshot, "missing"), null);
   assert.deepEqual(result.finalSnapshot.scriptStorage, []);
 });
@@ -332,7 +621,7 @@ test("dynamic non-string keys fail with TSR054 and the command's message", () =>
     assert.equal(result.snapshot.status, "failed", command);
     assert.equal(result.snapshot.failure?.code, "TSR054", command);
     assert.equal(result.snapshot.failure?.message, message, command);
-    assert.deepEqual(changes(result.events), [], command);
+    assert.deepEqual(result.snapshot.scriptStorage, [], command);
   }
 });
 
@@ -359,7 +648,7 @@ test("save rejects session handles and speaker references at the top level and n
       assert.equal(result.snapshot.status, "failed", `${declaration}: ${value}`);
       assert.equal(result.snapshot.failure?.code, "TSR055");
       assert.equal(result.snapshot.failure?.message, unstorableMessage);
-      assert.deepEqual(changes(result.events), []);
+      assert.deepEqual(result.snapshot.scriptStorage, []);
     }
   }
 });
@@ -436,7 +725,7 @@ test("persisted-value type checks exclude missing keys, defaults, and non-direct
   assert.equal(binding(result.snapshot, "fallback"), "fallback");
   assert.equal(binding(result.snapshot, "assigned"), "stored");
   assert.equal(binding(result.snapshot, "indirect"), "stored");
-  assert.deepEqual(changes(result.events), []);
+  assert.deepEqual(result.snapshot.scriptStorage, [{ key: "k", value: "stored" }]);
 });
 
 test("compact interactions end at the save 'as' and the load 'default' delimiters", () => {
@@ -453,7 +742,6 @@ test("compact interactions end at the save 'as' and the load 'default' delimiter
     compiled,
     createFreshRuntimeSnapshot(compiled, { scriptStorage: [{ key: "second", value: "stored" }] }),
   );
-  const saved: { key: string; value: SerializableRuntimeValue }[] = [];
   for (const answer of ["Bare", "Ada", "Addy"]) {
     const action = result.snapshot.foregroundAction;
     assert.ok(action?.kind === "interaction" && action.interactionKind === "text", answer);
@@ -464,13 +752,12 @@ test("compact interactions end at the save 'as' and the load 'default' delimiter
       payload: { kind: "submittedText", submittedText: answer },
     });
     result = run(compiled, completed.snapshot);
-    for (const { key, value } of changes([...completed.events, ...result.events]))
-      saved.push({ key, value });
   }
-  assert.deepEqual(saved, [
+  assert.deepEqual(result.snapshot.scriptStorage, [
     { key: "bare", value: "Bare" },
     { key: "name", value: "Ada" },
     { key: "nick", value: "Addy" },
+    { key: "second", value: "stored" },
   ]);
   const choice = result.snapshot.foregroundAction;
   assert.ok(choice?.kind === "interaction" && choice.interactionKind === "choice");
@@ -491,10 +778,7 @@ test("compact interactions end at the save 'as' and the load 'default' delimiter
     createFreshRuntimeSnapshot(present, { scriptStorage: [{ key: "nick", value: "Addy" }] }),
   );
   assert.equal(rerun.snapshot.status, "halted");
-  assert.deepEqual(
-    changes(rerun.events).map(({ key, value }) => ({ key, value })),
-    [{ key: "nick", value: "Addy" }],
-  );
+  assert.deepEqual(rerun.snapshot.scriptStorage, [{ key: "nick", value: "Addy" }]);
 
   // Inside a save value, `as` belongs to save; a speaker clause needs parentheses.
   const speakerSource = 'speaker mistress {\n  name: "M"\n}\n';
@@ -530,14 +814,11 @@ test("deleting a key keeps every other stored key readable and writable", () => 
   assert.equal(binding(result.finalSnapshot, "b"), 20);
   assert.equal(binding(result.finalSnapshot, "c"), 3);
   assert.equal(binding(result.finalSnapshot, "d"), 4);
-  assert.deepEqual(
-    new Map(result.finalSnapshot.scriptStorage.map(({ key, value }) => [key, value])),
-    new Map([
-      ["b", 20],
-      ["c", 3],
-      ["d", 4],
-    ]),
-  );
+  assert.deepEqual(result.finalSnapshot.scriptStorage, [
+    { key: "b", value: 20 },
+    { key: "c", value: 3 },
+    { key: "d", value: 4 },
+  ]);
 });
 
 test("compact interactions parse in every storage operand position", () => {
@@ -584,10 +865,6 @@ test("save keeps the value it evaluated before its key expression runs", () => {
     const result = assertRuntimeResumeEquivalent(source);
     const kept = { kind: "list", items: [1] };
     assert.deepEqual(binding(result.finalSnapshot, "stored"), kept, source);
-    assert.deepEqual(
-      changes(result.events).map(({ key, value }) => ({ key, value })),
-      [{ key: "knull", value: kept }],
-      source,
-    );
+    assert.deepEqual(result.finalSnapshot.scriptStorage, [{ key: "knull", value: kept }], source);
   }
 });

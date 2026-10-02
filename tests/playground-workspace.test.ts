@@ -319,7 +319,7 @@ test("the workspace has no camera, so continuing past takePhoto() yields null wi
   const continued = executeValidatedWorkspaceSnapshot(compiled.plan, waiting.snapshot!, "run");
   assert.equal(continued.status, "halted");
   assert.ok(
-    continued.events.some((event) => event.kind === "developerWarning" && event.code === "TSW014"),
+    continued.events.some((event) => event.kind === "developerWarning" && event.code === "TSW015"),
   );
   const missing = continued.snapshot?.frames[0]?.bindings.find(
     (binding) => binding.name === "missing",

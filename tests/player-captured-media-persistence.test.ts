@@ -159,7 +159,10 @@ test("a sweep runs only when no Player is live, against a fresh read of the save
   assert.equal(repository.size, 0);
 });
 
-/** Runs a script, answering each `takePhoto()` from `media`, and persists its saves through `storage`. */
+/**
+ * Runs a script like the Player: answers each `takePhoto()` from `media`, and acknowledges each persistent `save` once
+ * `storage` persisted it, or as failed when it rejected.
+ */
 async function runWithCamera(
   source: string,
   media: CapturedMediaStore,
@@ -168,17 +171,30 @@ async function runWithCamera(
   const compiled = compileSource(source);
   assert.deepEqual(compiled.diagnostics, []);
   const plan = compiled.plan!;
-  let snapshot = createFreshRuntimeSnapshot(plan, { scriptStorage: await storage.load() });
+  let snapshot = createFreshRuntimeSnapshot(plan, {
+    scriptStorage: await storage.load(),
+    persistentScriptStorage: true,
+  });
   for (;;) {
-    const operation = run(plan, snapshot);
-    for (const event of operation.events)
-      if (event.kind === "scriptStorageChanged") await storage.write(event.key, event.value);
-    const action = operation.snapshot.foregroundAction;
-    if (action?.kind !== "capture") return operation.snapshot;
+    snapshot = run(plan, snapshot).snapshot;
+    const action = snapshot.foregroundAction;
+    if (action?.kind === "storageWrite") {
+      const outcome = await storage.write(action.key, action.value).then(
+        () => "stored" as const,
+        () => "failed" as const,
+      );
+      snapshot = completeAction(plan, snapshot, {
+        actionId: action.actionId,
+        actionKind: "storageWrite",
+        payload: { kind: outcome },
+      }).snapshot;
+      continue;
+    }
+    if (action?.kind !== "capture") return snapshot;
     const reference = media.add("image", png("the photo")).reference;
     snapshot = completeAction(
       plan,
-      operation.snapshot,
+      snapshot,
       {
         actionId: action.actionId,
         actionKind: "capture",
@@ -315,4 +331,20 @@ test("references are found in a stored value too wide for a spread", () => {
     [...capturedMediaReferences({ kind: "list", items })],
     ["captured-media:wide:1"],
   );
+});
+
+test("a save whose photo cannot be stored fails atomically and the script keeps the previous value", async () => {
+  const repository = new FakeMediaRepository();
+  const provider = new FakeProvider();
+  provider.entries.set("photo", "previous");
+  const media = new CapturedMediaStore(repository, urls, "package");
+  repository.failWrites = true;
+  const finished = await runWithCamera(
+    'let photo = takePhoto()\nsave photo as "photo"\nlet seen = load "photo"',
+    media,
+    withCapturedMedia(provider, media),
+  );
+  assert.equal(provider.entries.get("photo"), "previous");
+  const seen = finished.frames[0]?.bindings.find((binding) => binding.name === "seen")?.value;
+  assert.equal(seen, "previous");
 });

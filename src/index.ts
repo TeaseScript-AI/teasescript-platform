@@ -115,7 +115,6 @@ export type {
   OutputSpeaker,
   RuntimeFailureEvent,
   SayEvent,
-  ScriptStorageChangedEvent,
 } from "./runtime/events.js";
 export type { RuntimeScriptStorageEntrySnapshot } from "./runtime/script-storage.js";
 export {
@@ -202,6 +201,8 @@ export type {
   RuntimeInteractionActionSettlementSnapshot,
   RuntimePendingActionSnapshot,
   RuntimePreparedSayOutputSnapshot,
+  RuntimeStorageWriteActionSnapshot,
+  RuntimeStorageWriteSettlementSnapshot,
 } from "./runtime/actions/model.js";
 export {
   DEFAULT_PLAYGROUND_SEED,
