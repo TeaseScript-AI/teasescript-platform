@@ -106,8 +106,8 @@ Tests do not establish product policy. Each test must identify the desirable beh
 possible. A value captured from the current implementation is acceptable only as an explicitly scoped regression oracle
 and does not by itself make that value a broader product requirement. For example, a numeric oracle tied to a current
 algorithm, such as a plan-size baseline, may detect regression without making that number a project-wide accessibility,
-performance, or compatibility requirement; identify that scope explicitly, and review and update the baseline when an
-intentional implementation change legitimately changes it.
+performance, or compatibility requirement; identify that scope explicitly. The baseline may be reviewed and updated when
+an intentional implementation change legitimately changes it.
 
 ## Test layers
 
@@ -246,15 +246,13 @@ A matrix or equivalent model should:
   boundaries when those boundaries are relevant;
 - permit later consolidation without losing any unique evidence obligation.
 
-Unsupported or out-of-scope combinations do not automatically require
-executable cases. For obligations included in the bounded coverage model,
-accepted behavior and required rejection through a real supported or trusted
-boundary require executable evidence. When accepted behavior or a real
-validation boundary requires durable rejection of an otherwise unsupported
-composition, classify that cell as a rejected obligation and test it as such.
-Behavior that is merely not yet implemented is not a rejected obligation; test
-it under [test admission](#test-admission-and-consolidation). Other unsupported
-or out-of-scope cells may remain classified but unexecuted.
+Unsupported or out-of-scope combinations do not automatically require executable cases. For obligations included in the
+bounded coverage model, accepted behavior and required rejection through a real supported or trusted boundary require
+executable evidence. When accepted behavior or a real validation boundary requires durable rejection of an otherwise
+unsupported composition, classify that cell as a rejected obligation and test it as such. Behavior that is merely not
+yet implemented is not a rejected obligation; any test for it follows
+[test admission](#test-admission-and-consolidation). Other unsupported or out-of-scope cells may remain classified but
+unexecuted.
 
 An additive evidence phase may temporarily retain overlapping regressions while
 the behavior space is being mapped. Once an independent check confirms that the
