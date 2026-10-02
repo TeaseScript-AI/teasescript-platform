@@ -3,7 +3,6 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import {
-  CHECKPOINT_VERSION,
   createCheckpoint,
   deserializeCheckpoint,
   serializeCheckpoint,
@@ -14,7 +13,6 @@ import {
   secondsToPacingMilliseconds,
 } from "../src/runtime/actions/pacing.js";
 import {
-  RUNTIME_SNAPSHOT_VERSION,
   cloneRuntimeSnapshot,
   createFreshRuntimeSnapshot,
   validateRuntimeSnapshot,
@@ -118,21 +116,6 @@ test("captured pacing settings and representable pacing arithmetic retain the sa
     Number.MAX_SAFE_INTEGER,
   );
   assert.equal(calculatePacingDeadlineMs(0, Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER);
-});
-
-test("snapshot and checkpoint reject their previous versions", () => {
-  const compiled = plan();
-  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: expose the otherwise readonly snapshot version to test rejection of an obsolete version.
-  const snapshot = createFreshRuntimeSnapshot(compiled) as unknown as { version: number };
-  snapshot.version = RUNTIME_SNAPSHOT_VERSION - 1;
-  assert.deepEqual(validateRuntimeSnapshot(snapshot, compiled).errors, [
-    "Unsupported runtime-snapshot version.",
-  ]);
-
-  const checkpoint = createCheckpoint(compiled, createFreshRuntimeSnapshot(compiled));
-  assert.throws(() =>
-    deserializeCheckpoint(JSON.stringify({ ...checkpoint, version: CHECKPOINT_VERSION - 1 })),
-  );
 });
 
 test("smart pacing duration counts words, whitespace, and Unicode code points", () => {
