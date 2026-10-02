@@ -7,14 +7,22 @@ import {
   isCapturedMediaReference,
   type CapturedMediaRepository,
 } from "../../captured-media.js";
-import { browserCapturedMediaLocks } from "../../captured-media-persistence.js";
+import {
+  browserCapturedMediaLocks,
+  capturedMediaStorage,
+} from "../../captured-media-persistence.js";
 import { MediaDevice, MediaLoadQueue, type MediaDeviceElement } from "../../media-device.js";
 import {
+  completePlayerRuntimeStorageWrite,
+  pendingPlayerRuntimeStorageWrite,
   playerRuntimeMedia,
   reportPlayerRuntimeMediaLoad,
   type PlayerRuntimeSession,
+  type PlayerRuntimeSessionOptions,
 } from "../../runtime-adapter.js";
+import type { ScriptStorageProvider } from "../../script-storage.js";
 import { CaptureService, SessionCamera, type PlayerDiagnostic } from "../../session-camera.js";
+import type { RuntimeScriptStorageEntrySnapshot } from "../../../src/index.js";
 import { silence } from "./generatedAudio";
 import { useRuntimeSceneClock } from "./useRuntimeSceneClock";
 
@@ -32,15 +40,20 @@ export interface PlayerSessionOptions {
    */
   resolveAsset?: (path: string) => string | null;
   /**
+   * Persistent script storage for `save`/`load`/`delete` in the host's stable, opaque scope for this script and player.
+   * Without it, saves last only for the session.
+   */
+  scriptStorage?: ScriptStorageProvider;
+  /**
    * Trusted session capabilities. This is a temporary host bridge until package capability metadata exists; it is
    * neither author syntax nor a manifest format.
    */
   capabilities?: { readonly camera?: boolean };
   /**
-   * Durable captured-media storage and the trusted script scope that owns it; without a repository, captures stay
-   * session media and saved photos do not resolve in later runs.
+   * Durable storage for captured photos that a saved value references, in the script storage's scope. Without a
+   * repository, captures stay session media, and a persistent save that references one fails.
    */
-  capturedMedia?: { readonly repository: CapturedMediaRepository | null; readonly scope: string };
+  capturedMedia?: { readonly repository: CapturedMediaRepository | null };
 }
 
 type Activation = {
@@ -60,18 +73,21 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   };
   // Bumped when a stored photo finished loading, so presentation resolves its reference again.
   const mediaRevision = ref(0);
-  const scope = options.capturedMedia?.scope ?? "player";
   const capturedMedia = new CapturedMediaStore(
     options.capturedMedia?.repository ?? null,
     browserMediaUrls,
-    scope,
+    options.scriptStorage?.scope ?? "player",
     () => mediaRevision.value++,
   );
-  // While this Player lives, no other Player of the scope may reclaim media it might still use.
-  const liveMedia = browserCapturedMediaLocks().holdLive(scope);
-  void liveMedia.granted.then((lease) => {
-    if (lease === "failed") capturedMedia.disableDurable();
-  });
+  // A Player that can capture or read stored photos saves a value only after storing the photos it references, and
+  // only while it holds the scope's live lock, so no other Player reclaims media it might still use. Without either,
+  // no captured photo can exist here, and storage is used directly.
+  const capturedMediaPersistence =
+    options.scriptStorage &&
+    (options.capabilities?.camera === true || options.capturedMedia?.repository)
+      ? capturedMediaStorage(options.scriptStorage, capturedMedia, browserCapturedMediaLocks())
+      : undefined;
+  const scriptStorage = capturedMediaPersistence ?? options.scriptStorage;
   const camera: SessionCamera<MediaStreamTrack> = new SessionCamera(
     new CaptureDevice(
       createBrowserCaptureHost((kind, state) => {
@@ -186,9 +202,88 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     }
     captures.stop();
     camera.release();
-    capturedMedia.close();
-    liveMedia.release();
+    // Issued saves still finish and store their photos before the live lock and the session media are released.
+    void (capturedMediaPersistence?.close() ?? Promise.resolve()).finally(() =>
+      capturedMedia.close(),
+    );
   });
+
+  // The stored values that seed the next session, or `null` when storage is session-local: no provider, or one that
+  // could not load, such as a browser that denies storage. A session-local run plays normally and keeps nothing.
+  const storedEntries = shallowRef<readonly RuntimeScriptStorageEntrySnapshot[] | null>(null);
+  /**
+   * Reads the stored values freshly for the next Start; call it before each `prepare`. Reading ahead keeps Start
+   * synchronous within the player's activation.
+   */
+  async function loadScriptStorage(): Promise<void> {
+    if (!scriptStorage) return;
+    try {
+      storedEntries.value = await scriptStorage.load();
+    } catch {
+      storedEntries.value = null;
+    }
+  }
+  /** Session options for the script's storage; call it from the Start factory. */
+  function scriptStorageOptions(): PlayerRuntimeSessionOptions {
+    return storedEntries.value === null
+      ? {}
+      : { scriptStorage: storedEntries.value, persistentScriptStorage: true };
+  }
+  // Each pending write is persisted once through the provider and then reported to the runtime, which keeps the
+  // previous value when it failed (warning TSW014). Every published session is observed, whichever operation made it.
+  // Keyed by session generation too: a newer session reuses action IDs.
+  const writesInFlight = new Set<string>();
+  watch(
+    session,
+    (current) => {
+      const write = current && pendingPlayerRuntimeStorageWrite(current.snapshot);
+      if (!scriptStorage || !write) return;
+      const sessionGeneration = generation.value;
+      const flight = `${sessionGeneration}:${write.actionId}`;
+      if (writesInFlight.has(flight)) return;
+      writesInFlight.add(flight);
+      void scriptStorage.write(write.key, write.value).then(
+        () => yieldThenReport(true),
+        () => yieldThenReport(false),
+      );
+      // Continue in a later task: a script that saves in a loop must not starve input and rendering.
+      function yieldThenReport(stored: boolean) {
+        setTimeout(() => report(stored), 0);
+      }
+      function report(stored: boolean) {
+        writesInFlight.delete(flight);
+        // A write that settles after unmount must not continue the session.
+        if (disposed) return;
+        const latest = session.value;
+        // The report must belong to the session that requested it.
+        if (generation.value !== sessionGeneration || latest === null) return;
+        if (pendingPlayerRuntimeStorageWrite(latest.snapshot)?.actionId !== write!.actionId) return;
+        session.value = completePlayerRuntimeStorageWrite(latest, write!.actionId, stored).session;
+      }
+    },
+    { flush: "sync" },
+  );
+  // A running or resumable session keeps its own view of the stored values, so clearing waits until it ends.
+  const canClearScriptStorage = computed(
+    () =>
+      scriptStorage !== undefined &&
+      storedEntries.value !== null &&
+      activation.value?.kind !== "continue" &&
+      (session.value === null ||
+        session.value.snapshot.status === "halted" ||
+        session.value.snapshot.status === "failed"),
+  );
+  /** Removes this script's saved data; resolves to whether it was cleared. */
+  async function clearScriptStorage(): Promise<boolean> {
+    if (!scriptStorage || !canClearScriptStorage.value) return false;
+    try {
+      await scriptStorage.clear();
+    } catch {
+      return false;
+    }
+    storedEntries.value = [];
+    return true;
+  }
 
   // Starts or restores a session; its scene time continues from the persisted observation, so a
   // gap while no Player ran is not consumed.
@@ -231,12 +326,20 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (!pending) return;
     activation.value = null;
     const token = ++activationToken;
+    if (options.capabilities?.camera !== true) {
+      // Without the capability nothing waits: `takePhoto()` is unconfigured (settled before `open` returns), and the
+      // session starts within the activating click.
+      void camera.open(false);
+      captures.reset();
+      start(pending.begin());
+      return;
+    }
     // Retire the previous session first: its elements return to the pool before priming, so the new session never
     // receives an element the browser still blocks, and it cannot project media while the camera opens.
     session.value = null;
     device.reset();
     primeAudio();
-    const opened = await camera.open(options.capabilities?.camera === true);
+    const opened = await camera.open(true);
     // Replaced, re-prepared, or unmounted while the browser answered: an obsolete session never starts.
     if (!opened || disposed || token !== activationToken) return;
     captures.reset();
@@ -252,6 +355,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     /** Whether the browser refused audible playback; `retryAudio` must run from a user activation. */
     audioBlocked: computed(() => audioBlocked.value),
     retryAudio: () => device.retryBlocked(),
+    /** Whether the host persists script storage, so the Player offers to clear it. */
+    hasScriptStorage: scriptStorage !== undefined,
+    canClearScriptStorage,
+    clearScriptStorage,
+    loadScriptStorage,
+    scriptStorageOptions,
     resolveAsset,
     /** Bounded developer diagnostics, for example an unavailable session camera. */
     diagnostics: computed(() => diagnostics.value),

@@ -1,17 +1,6 @@
-import type { RuntimeScriptStorageEntrySnapshot, SerializableRuntimeValue } from "../src/index.js";
+import type { SerializableRuntimeValue } from "../src/index.js";
 import { isCapturedMediaReference, type CapturedMediaStore } from "./captured-media.js";
-
-/**
- * The Player's durable script storage for one trusted script scope, as the storage track provides it. `load` returns
- * a complete fresh view or rejects; it never reports unavailable storage as empty. `write` and `clear` resolve once
- * persisted; a `null` value removes the key, like `save null`.
- */
-export interface ScriptStorageProvider {
-  readonly scope: string;
-  load(): Promise<readonly RuntimeScriptStorageEntrySnapshot[]>;
-  write(key: string, value: SerializableRuntimeValue): Promise<void>;
-  clear(): Promise<void>;
-}
+import type { ScriptStorageProvider } from "./script-storage.js";
 
 /**
  * Captured-media references inside a stored value: list and set items, object property names and values. A match is

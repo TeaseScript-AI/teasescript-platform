@@ -267,6 +267,12 @@ These are presentation preferences, not canonical runtime state. The Player keep
 across reloads, treats stored text as external input that falls back to the default when unknown, and works without
 storage when the host frame denies it. Account settings may later take over or synchronize them.
 
+When the host persists script storage, Player Settings also contains a **Saved script data** section. Its **Clear saved
+script data** control removes, after a confirmation, only the values the current script saved for later runs; Player
+Settings, checkpoints, account data, and other scripts are unaffected, and the next new session starts without them. It
+is available before Start and after the session has ended, but not while a session runs or waits for Continue, because
+a running session keeps its own view of the saved values, and not when this browser's storage could not be read.
+
 ## Left tools area
 
 The Standard Player owns the tools menu, sidebar visibility, temporary/pinned panels, shared headers, panel order and

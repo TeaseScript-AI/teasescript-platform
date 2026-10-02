@@ -1,7 +1,8 @@
 import { useStorage } from "@vueuse/core";
 import { shallowRef, type Ref } from "vue";
 
-function browserStorage(): Storage | undefined {
+/** This browser's local storage, or `undefined` when the host frame denies it. */
+export function browserStorage(): Storage | undefined {
   try {
     // A sandboxed host frame without same-origin access throws on this read.
     return window.localStorage;

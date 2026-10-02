@@ -116,7 +116,10 @@ export type {
   RuntimeFailureEvent,
   SayEvent,
 } from "./runtime/events.js";
-export type { RuntimeScriptStorageEntrySnapshot } from "./runtime/script-storage.js";
+export {
+  validateScriptStorageEntries,
+  type RuntimeScriptStorageEntrySnapshot,
+} from "./runtime/script-storage.js";
 export {
   executeInstruction,
   run,

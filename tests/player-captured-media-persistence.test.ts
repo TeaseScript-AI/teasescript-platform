@@ -8,8 +8,8 @@ import {
   sweepCapturedMedia,
   withCapturedMedia,
   type CapturedMediaLocks,
-  type ScriptStorageProvider,
 } from "../player/captured-media-persistence.js";
+import type { ScriptStorageProvider } from "../player/script-storage.js";
 import {
   compileSource,
   completeAction,

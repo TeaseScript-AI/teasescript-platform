@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import type { CapturedMediaRepository } from "../../captured-media.js";
 import type { PlayerTimerKind } from "../../model.js";
 import { createPlayerRuntimeSession } from "../../runtime-adapter.js";
+import { createLocalScriptStorage } from "../../script-storage.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
 import BackgroundControlsFixture from "./BackgroundControlsFixture.vue";
 import LayoutDebug from "./LayoutDebug.vue";
@@ -17,6 +18,7 @@ import StageRightRail from "./StageRightRail.vue";
 import ThemeLab from "./ThemeLab.vue";
 import TimerFixtureRegion from "./TimerFixtureRegion.vue";
 import TimerRegion from "./TimerRegion.vue";
+import { browserStorage } from "./usePlayerPreference";
 import { usePlayerSession } from "./usePlayerSession";
 import { defaultPlayerThemeIntents } from "./usePlayerTheme";
 
@@ -39,16 +41,26 @@ const backgroundControlsReset = ref(0);
 const themeIntent = ref<PlayerThemeIntent>(defaultPlayerThemeIntents.light);
 
 const props = defineProps<{ capturedMediaRepository?: CapturedMediaRepository | null }>();
-// `?scenario=camera` opens the camera scenario with the session camera capability.
+// `?scenario=camera` opens the camera scenario with the session camera capability and persistent script storage, so
+// a saved photo is shown again in a later run.
 const cameraScenario = new URLSearchParams(window.location.search).get("scenario") === "camera";
 const player = usePlayerSession({
   resolveAsset: resolveDevelopmentAsset,
   capabilities: { camera: cameraScenario },
-  capturedMedia: { repository: props.capturedMediaRepository ?? null, scope: "development-preview" },
+  ...(cameraScenario && {
+    scriptStorage: createLocalScriptStorage(browserStorage(), "development-camera"),
+    capturedMedia: { repository: props.capturedMediaRepository ?? null },
+  }),
 });
-player.prepare(() =>
-  createPlayerRuntimeSession(cameraScenario ? cameraScenarioSource : openingScenario),
-);
+if (cameraScenario)
+  void player
+    .loadScriptStorage()
+    .then(() =>
+      player.prepare(() =>
+        createPlayerRuntimeSession(cameraScenarioSource, player.scriptStorageOptions()),
+      ),
+    );
+else player.prepare(() => createPlayerRuntimeSession(openingScenario));
 </script>
 
 <template>
