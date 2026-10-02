@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import org.codehaus.groovy.ast.ASTNode;
 import org.codehaus.groovy.ast.ClassNode;
+import org.codehaus.groovy.ast.FieldNode;
 import org.codehaus.groovy.ast.MethodNode;
 import org.codehaus.groovy.ast.Parameter;
 import org.codehaus.groovy.ast.builder.AstBuilder;
@@ -160,6 +161,13 @@ public final class SexScriptAstExporter {
     }
 
     private Map<String, Object> classNode(ClassNode node) {
+        List<Object> fields = new ArrayList<>();
+        for (FieldNode field : node.getFields()) {
+            if (field.getOwner() != node) {
+                continue;
+            }
+            fields.add(fieldNode(field));
+        }
         List<Object> methods = new ArrayList<>();
         for (MethodNode method : node.getMethods()) {
             if (method.getDeclaringClass() != node || method.isSynthetic()) {
@@ -171,7 +179,19 @@ public final class SexScriptAstExporter {
                 "class",
                 "name", node.getName(),
                 "modifiers", node.getModifiers(),
+                "fields", fields,
                 "methods", methods);
+    }
+
+    private Map<String, Object> fieldNode(FieldNode node) {
+        return nodeMap(node,
+                "field",
+                "name", node.getName(),
+                "type", node.getType().getName(),
+                "modifiers", node.getModifiers(),
+                "static", node.isStatic(),
+                "final", node.isFinal(),
+                "initialExpression", node.hasInitialExpression() ? expression(node.getInitialExpression()) : null);
     }
 
     private Map<String, Object> methodNode(MethodNode node) {
@@ -405,11 +425,11 @@ public final class SexScriptAstExporter {
                     "true", expression(child.getTrueExpression()),
                     "false", expression(child.getFalseExpression()));
         }
-        if (node instanceof BooleanExpression child) {
-            return nodeMap(node, "boolean", "value", expression(child.getExpression()));
-        }
         if (node instanceof NotExpression child) {
             return nodeMap(node, "not", "value", expression(child.getExpression()));
+        }
+        if (node instanceof BooleanExpression child) {
+            return nodeMap(node, "boolean", "value", expression(child.getExpression()));
         }
         if (node instanceof UnaryMinusExpression child) {
             return nodeMap(node, "unaryMinus", "value", expression(child.getExpression()));
