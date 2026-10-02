@@ -2,6 +2,34 @@ import type { ParsedGroovyFile, SourceSpan } from "./ast.ts";
 import type { IrExpression, IrStatement, MigrationDiagnostic, MigrationProgram } from "./ir.ts";
 import { buildHelperRegistry, lowerParsedFile } from "./lower.ts";
 
+const ACCEPTED_EXTERNAL_CALLS = new Set([
+  "askBoolean",
+  "askBooleans",
+  "askInteger",
+  "askNumber",
+  "askText",
+  "ceil",
+  "chance",
+  "floor",
+  "getDate",
+  "getDateTime",
+  "getMilliseconds",
+  "getSeconds",
+  "getTime",
+  "openUrl",
+  "random",
+  "randomInteger",
+  "round",
+  "showButton",
+  "toBoolean",
+  "toDate",
+  "toDateTime",
+  "toInteger",
+  "toNumber",
+  "toString",
+  "toTime",
+]);
+
 export function lowerSelfContainedPackage(files: readonly ParsedGroovyFile[]): MigrationProgram[] {
   const helperRegistry = buildHelperRegistry(files);
   const lowered = files.map((file) => lowerParsedFile(file, { helperRegistry }));
@@ -72,11 +100,30 @@ function composeProgram(
     diagnostics.push(...entry.diagnostics);
   }
 
+  const statements = [...helperStatements, ...program.statements];
+  diagnostics.push(...packageDependencyDiagnostics(statements));
   return {
     ...program,
-    statements: [...helperStatements, ...program.statements],
+    statements,
     diagnostics: deduplicateDiagnostics(diagnostics),
   };
+}
+
+export function packageDependencyDiagnostics(statements: readonly IrStatement[]): MigrationDiagnostic[] {
+  const defined = new Set(
+    statements.flatMap((statement) => (statement.kind === "function" ? [statement.name] : [])),
+  );
+  const diagnostics: MigrationDiagnostic[] = [];
+  for (const name of collectCallNames(statements)) {
+    if (defined.has(name) || ACCEPTED_EXTERNAL_CALLS.has(name)) continue;
+    diagnostics.push({
+      code: "SX_UNRESOLVED_PACKAGE_CALL",
+      severity: "error",
+      message: `Generated package call ${name}() does not resolve to generated package code or a known accepted TeaseScript capability.`,
+      span: null,
+    });
+  }
+  return diagnostics;
 }
 
 function collectCallNames(value: unknown): Set<string> {
