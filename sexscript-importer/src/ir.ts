@@ -65,6 +65,8 @@ export type IrStatement =
       file: IrExpression;
       async: boolean;
       repeatCount: IrExpression | null;
+      /** Declares a variable holding the handle of async media. */
+      handle?: string;
     })
   | (IrBase & { kind: "save"; key: IrExpression; value: IrExpression })
   | (IrBase & { kind: "delete"; key: IrExpression })

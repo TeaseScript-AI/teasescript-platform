@@ -1,0 +1,51 @@
+// MIGRATION INCOMPLETE: 1 error diagnostic.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+let sexscriptBackgroundSounds = []
+function sexscriptLegacyPlayBackgroundSound(file, passes) {
+  let sound = playAudio(file: file, async: true, repeat: passes times)
+  sexscriptBackgroundSounds.add(sound)
+}
+function sexscriptLegacyStopBackgroundSounds {
+  for sound in sexscriptBackgroundSounds {
+    sound.stop()
+  }
+  sexscriptBackgroundSounds = []
+}
+function sexscriptLegacyRandom(max) {
+  if max == null {
+    return randomInteger(0..100)
+  }
+  if max > 0 {
+    return randomInteger(0..max)
+  }
+  if max < 0 {
+    return -randomInteger(0..-max)
+  }
+  return 0
+}
+function loadGreetingModule {
+}
+function greet {
+  say "Hello"
+  rounds = rounds + sexscriptLegacyRandom(rounds - 2)
+  sexscriptLegacyPlayBackgroundSound("bell.wav", 1)
+  return pause()
+}
+function loadPauseModule {
+}
+function pause {
+  wait sexscriptLegacyRandom(rounds - 2) + 1
+  sexscriptLegacyStopBackgroundSounds()
+}
+// TODO SX_UNSUPPORTED_SEXSCRIPT_EXPRESSION line 2: Unsupported SexScript expression call: getDataFolder
+// | final DATAFOLDER = getDataFolder();
+function loadModules {
+  // NOTE SX_MODULE_LOADER line 3: Replaced runtime loading of scripts/demo/*.groovy (directory listing and Groovy evaluation) with direct calls to its 2 modules in file-name order, the order Windows lists them.
+  loadGreetingModule()
+  return loadPauseModule()
+}
+let rounds = 2
+loadModules()
+greet()
+say "Rounds: ${rounds}"

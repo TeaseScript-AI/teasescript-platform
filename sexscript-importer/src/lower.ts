@@ -69,6 +69,11 @@ export interface LowerOptions {
   /** Value types of package globals defined in other files, such as anonymous-object fields. */
   globalTypes?: ReadonlyMap<string, number>;
   /**
+   * Whether the package stops all background sounds somewhere, so background sounds keep their handles. Without
+   * package context, the file itself decides.
+   */
+  stopsBackgroundSounds?: boolean;
+  /**
    * Rename identifiers TeaseScript rejects (default). Package composition disables this per file and renames
    * the composed program once.
    */
@@ -116,6 +121,7 @@ interface LowerContext {
   ignoredInputs: number;
   /** Counter for temporaries that hold a switch value evaluated once for an if chain. */
   switchValues: number;
+  stopsBackgroundSounds: boolean;
 }
 
 /** Source comments not yet emitted; shared by every context lowering the same file. */
@@ -193,6 +199,7 @@ export function lowerParsedFile(
     actions: new Set(),
     ignoredInputs: 0,
     switchValues: 0,
+    stopsBackgroundSounds: options.stopsBackgroundSounds ?? packageStopsBackgroundSounds([file]),
   };
   if (file.diagnostics.length > 0 || file.root === null) {
     for (const diagnostic of file.diagnostics) {
@@ -426,6 +433,7 @@ function lowerHelperMethod(
     stableNames: baseContext.stableNames,
     mixinModules: baseContext.mixinModules,
     loadsModuleDirectories: baseContext.loadsModuleDirectories,
+    stopsBackgroundSounds: baseContext.stopsBackgroundSounds,
     currentFunction: {
       name,
       locals: functionLocalNames(
@@ -1317,6 +1325,9 @@ function returnsValue(expression: AstNode): boolean {
   if (call.inherited && VOID_API_CALLS.has(call.name)) return false;
   // Compact showButton has no result; only the timeout form returns the elapsed time.
   if (call.inherited && call.name === "showButton" && call.arguments.length < 2) return false;
+  if (!call.inherited && call.name === "exit" && variableName(expression.object) === "System") {
+    return false;
+  }
   return call.inherited || !EFFECT_COLLECTION_CALLS.has(call.name);
 }
 
@@ -1439,6 +1450,27 @@ function lowerAssignment(
         },
       ];
     }
+  }
+  const leftNode = asNode(node.left);
+  const rightNode = asNode(node.right);
+  const voidCall = leftNode === null ? null : legacyApiCall(leftNode, context);
+  if (
+    operator === "+" &&
+    leftNode !== null &&
+    rightNode !== null &&
+    voidCall !== null &&
+    VOID_API_CALLS.has(voidCall.name) &&
+    isPure(rightNode, context)
+  ) {
+    // `show(a) + (b)`: Groovy appended b to the call's null result and discarded it, so b was never shown.
+    addDiagnostic(
+      context,
+      "SX_DISCARDED_CONCATENATION",
+      "warning",
+      `Groovy appended text to the result of ${voidCall.name}(), which returns nothing, and discarded it; the appended text was never shown and is dropped here.`,
+      span,
+    );
+    return lowerStatement({ kind: "expressionStatement", span, expression: leftNode }, context);
   }
   if (
     operator !== "=" &&
@@ -1819,6 +1851,19 @@ function lowerCallStatement(
       }));
     case "playBackgroundSound":
       return lowerBackgroundSound(args, node, span, context);
+    case "stopSoundThreads":
+      if (args.length !== 0)
+        return [
+          unsupportedStatement(
+            context,
+            node,
+            "SX_STOP_SOUND_ARITY",
+            "stopSoundThreads() must have no arguments.",
+          ),
+        ];
+      return [
+        { kind: "expression", expression: useHelper(context, "stopBackgroundSounds", []), span },
+      ];
     case "save":
       return lowerSave(args, node, span, context);
     case "exit":
@@ -2212,13 +2257,18 @@ function lowerBackgroundSound(
   span: SourceSpan | null,
   context: LowerContext,
 ): IrStatement[] {
+  if (args.length === 1 && isNullConstant(args[0])) {
+    return [
+      { kind: "expression", expression: useHelper(context, "stopBackgroundSounds", []), span },
+    ];
+  }
   if (args.length < 1 || args.length > 2 || isNullConstant(args[0])) {
     return [
       unsupportedStatement(
         context,
         node,
         "SX_BACKGROUND_SOUND_CONTROL",
-        "Null/global stop behavior for background sound needs manual migration.",
+        "This background sound call needs manual migration.",
       ),
     ];
   }
@@ -2234,7 +2284,32 @@ function lowerBackgroundSound(
       ),
     ];
   }
+  if (context.stopsBackgroundSounds) {
+    // Keep the handle so a later playBackgroundSound(null) can stop this sound.
+    const passes = repeatCount ?? { kind: "literal", value: 1 };
+    return [
+      {
+        kind: "expression",
+        expression: useHelper(context, "playBackgroundSound", [file, passes]),
+        span,
+      },
+    ];
+  }
   return [{ kind: "playAudio", file, async: true, repeatCount, span }];
+}
+
+/** Whether any file stops all background sounds with playBackgroundSound(null) or stopSoundThreads(). */
+export function packageStopsBackgroundSounds(files: readonly ParsedGroovyFile[]): boolean {
+  let stops = false;
+  for (const file of files) {
+    walkAst(file.root, (node) => {
+      const call = node.kind === "methodCall" ? callParts(node) : null;
+      if (call === null || !call.inherited) return;
+      if (call.name === "stopSoundThreads") stops = true;
+      if (call.name === "playBackgroundSound" && isNullConstant(call.arguments[0])) stops = true;
+    });
+  }
+  return stops;
 }
 
 function lowerSave(
@@ -2309,21 +2384,44 @@ function lowerBranch(node: AstNode, context: LowerContext): IrStatement[] {
 function lowerWhile(node: AstNode, context: LowerContext): IrStatement[] {
   const conditionNode = asNode(node.condition);
   const body = asNode(node.body);
-  const [prelude, condition] = withPrelude(context, () =>
-    conditionNode === null ? null : lowerCondition(conditionNode, context),
-  );
-  if (condition !== null && body?.kind === "block" && prelude.length > 0) {
-    // The prompt must be shown before every evaluation of the condition, not once before the loop.
+  const always: IrExpression = { kind: "literal", value: true };
+  const effect = conditionNode?.kind === "binary" ? asNode(conditionNode.left) : null;
+  if (
+    body !== null &&
+    effect !== null &&
+    conditionNode?.operator === "||" &&
+    isTrueConstant(asNode(conditionNode.right))
+  ) {
+    // `while (effect() || true)` performs the effect before every iteration of an endless loop.
+    const statement: AstNode = {
+      kind: "expressionStatement",
+      span: effect.span,
+      expression: effect,
+    };
     return [
       {
         kind: "while",
-        condition: { kind: "literal", value: true },
-        body: [...prelude, breakUnless(condition), ...lowerBlock(body, context)],
+        condition: always,
+        body: [...lowerStatement(statement, context), ...lowerBranch(body, context)],
         span: node.span,
       },
     ];
   }
-  if (condition === null || body?.kind !== "block") {
+  const [prelude, condition] = withPrelude(context, () =>
+    conditionNode === null ? null : lowerCondition(conditionNode, context),
+  );
+  if (condition !== null && body !== null && prelude.length > 0) {
+    // The prompt must be shown before every evaluation of the condition, not once before the loop.
+    return [
+      {
+        kind: "while",
+        condition: always,
+        body: [...prelude, breakUnless(condition), ...lowerBranch(body, context)],
+        span: node.span,
+      },
+    ];
+  }
+  if (condition === null || body === null) {
     return [
       unsupportedStatement(
         context,
@@ -2333,7 +2431,7 @@ function lowerWhile(node: AstNode, context: LowerContext): IrStatement[] {
       ),
     ];
   }
-  return [{ kind: "while", condition, body: lowerBlock(body, context), span: node.span }];
+  return [{ kind: "while", condition, body: lowerBranch(body, context), span: node.span }];
 }
 
 function breakUnless(condition: IrExpression): IrStatement {
@@ -5047,6 +5145,10 @@ function isLiteral(value: unknown): value is string | number | boolean | null {
 
 function constantValue(node: AstNode | undefined): string | number | boolean | null | undefined {
   return node?.kind === "constant" && isLiteral(node.value) ? node.value : undefined;
+}
+
+function isTrueConstant(node: AstNode | null): boolean {
+  return node?.kind === "constant" && node.value === true;
 }
 
 function isNullConstant(node: AstNode | undefined): boolean {

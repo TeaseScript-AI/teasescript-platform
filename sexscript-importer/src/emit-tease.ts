@@ -72,11 +72,12 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
       return;
     case "playAudio": {
       const file = emitExpression(statement.file);
+      const handle = statement.handle === undefined ? "" : `let ${statement.handle} = `;
       if (statement.repeatCount === null) {
-        lines.push(`${pad}playAudio${statement.async ? " async" : ""} ${file}`);
+        lines.push(`${pad}${handle}playAudio${statement.async ? " async" : ""} ${file}`);
       } else {
         lines.push(
-          `${pad}playAudio(file: ${file}, async: ${statement.async}, repeat: ${emitExpression(statement.repeatCount)} times)`,
+          `${pad}${handle}playAudio(file: ${file}, async: ${statement.async}, repeat: ${emitExpression(statement.repeatCount)} times)`,
         );
       }
       return;

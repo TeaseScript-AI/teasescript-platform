@@ -7,8 +7,9 @@ import {
   packageFunctionNames,
   packageGlobalTypes,
   packageStableNames,
+  packageStopsBackgroundSounds,
 } from "./lower.ts";
-import { withActionDispatcher } from "./helpers.ts";
+import { helperDefinitionOrder, withActionDispatcher } from "./helpers.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 
 const ACCEPTED_EXTERNAL_CALLS = new Set([
@@ -56,6 +57,7 @@ export function lowerPackage(files: readonly ParsedGroovyFile[]): LoweredPackage
   const packageFunctions = packageFunctionNames(files);
   const stableNames = packageStableNames(files);
   const globalTypes = packageGlobalTypes(files);
+  const stopsBackgroundSounds = packageStopsBackgroundSounds(files);
   const lowered = files.map((file) =>
     lowerParsedFile(file, {
       helperRegistry,
@@ -63,6 +65,7 @@ export function lowerPackage(files: readonly ParsedGroovyFile[]): LoweredPackage
       packageFunctions,
       stableNames,
       globalTypes,
+      stopsBackgroundSounds,
       renameIdentifiers: false,
     }),
   );
@@ -90,6 +93,16 @@ function withLoadedModules(
 ): MigrationProgram {
   const directories = new Set(program.loadsModuleDirectories ?? []);
   if (directories.size === 0) return program;
+  // Generated helpers are identical in every program: keep one definition of each, first in the file.
+  const helpers = new Map<number, IrStatement>();
+  const withoutHelpers = (statements: readonly IrStatement[]): IrStatement[] =>
+    statements.filter((statement) => {
+      const order = helperDefinitionOrder(statement);
+      if (order < 0) return true;
+      if (!helpers.has(order)) helpers.set(order, statement);
+      return false;
+    });
+  const programStatements = withoutHelpers(program.statements);
   const taken = new Set(rootNames(program.statements));
   const moduleStatements: IrStatement[] = [];
   const diagnostics = [...program.diagnostics];
@@ -98,7 +111,8 @@ function withLoadedModules(
     .toSorted((left, right) => left.module!.name.localeCompare(right.module!.name));
   const actions = new Set(program.actions ?? []);
   for (const module of modules) {
-    const renamed = renameConflictingIdentifiers(module, taken, false);
+    const statements = withoutHelpers(module.statements);
+    const renamed = renameConflictingIdentifiers({ ...module, statements }, taken, false);
     for (const name of rootNames(renamed.statements)) taken.add(name);
     moduleStatements.push(...renamed.statements);
     diagnostics.push(...renamed.diagnostics);
@@ -106,7 +120,11 @@ function withLoadedModules(
   }
   return {
     ...program,
-    statements: [...moduleStatements, ...program.statements],
+    statements: [
+      ...[...helpers].sort(([left], [right]) => left - right).map(([, statement]) => statement),
+      ...moduleStatements,
+      ...programStatements,
+    ],
     diagnostics,
     actions: [...actions],
   };

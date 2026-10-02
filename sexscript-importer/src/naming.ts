@@ -177,12 +177,18 @@ function renameStatement(
       return { ...statement, message: expression(statement.message) };
     case "showImage":
       return { ...statement, file: expression(statement.file) };
-    case "playAudio":
-      return {
-        ...statement,
-        file: expression(statement.file),
-        repeatCount: statement.repeatCount === null ? null : expression(statement.repeatCount),
-      };
+    case "playAudio": {
+      const file = expression(statement.file);
+      const repeatCount = statement.repeatCount === null ? null : expression(statement.repeatCount);
+      return statement.handle === undefined
+        ? { ...statement, file, repeatCount }
+        : {
+            ...statement,
+            file,
+            repeatCount,
+            handle: declare(statement.handle, scope, inFunction, renamer),
+          };
+    }
     case "save":
       return { ...statement, key: expression(statement.key), value: expression(statement.value) };
     case "delete":

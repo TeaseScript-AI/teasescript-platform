@@ -43,6 +43,7 @@ export function withActionDispatcher(program: MigrationProgram): MigrationProgra
 export type HelperName =
   | "abs"
   | "array"
+  | "backgroundSounds"
   | "concat"
   | "indexOf"
   | "join"
@@ -52,21 +53,39 @@ export type HelperName =
   | "loadFirstTrue"
   | "max"
   | "min"
+  | "playBackgroundSound"
   | "random"
   | "removeAt"
   | "shuffled"
+  | "stopBackgroundSounds"
   | "unique";
 
 export function helperCall(name: HelperName, args: IrExpression[]): IrExpression {
   return { kind: "call", name: HELPERS[name].name, positional: args, named: {} };
 }
 
+/**
+ * Position of a generated helper definition in the stable helper order, or -1 for other statements. Every program
+ * that needs a helper generates the same definition.
+ */
+export function helperDefinitionOrder(statement: IrStatement): number {
+  if (statement.kind !== "function" && statement.kind !== "let") return -1;
+  return HELPER_ORDER.findIndex((name) => HELPERS[name].name === statement.name);
+}
+
 /** Helper functions in a stable order, so generated files do not depend on discovery order. */
 export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] {
-  return HELPER_ORDER.filter((name) => names.has(name)).map((name) => HELPERS[name].build());
+  const needed = new Set(names);
+  if (needed.has("playBackgroundSound") || needed.has("stopBackgroundSounds")) {
+    needed.add("backgroundSounds");
+  }
+  return HELPER_ORDER.filter((name) => needed.has(name)).map((name) => HELPERS[name].build());
 }
 
 const HELPER_ORDER: readonly HelperName[] = [
+  "backgroundSounds",
+  "playBackgroundSound",
+  "stopBackgroundSounds",
   "random",
   "loadFirstTrue",
   "indexOf",
@@ -173,6 +192,49 @@ const randomBelow = (max: IrExpression): IrExpression => ({
 });
 
 const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = {
+  // Legacy background sounds overlapped and playBackgroundSound(null) stopped them all; TeaseScript stops async
+  // media through its handle, so the handles are collected.
+  backgroundSounds: {
+    name: "sexscriptBackgroundSounds",
+    build: () => letS("sexscriptBackgroundSounds", { kind: "list", items: [] }),
+  },
+  playBackgroundSound: {
+    name: "sexscriptLegacyPlayBackgroundSound",
+    build: () =>
+      fn(
+        "sexscriptLegacyPlayBackgroundSound",
+        ["file", "passes"],
+        [
+          {
+            kind: "playAudio",
+            file: v("file"),
+            async: true,
+            repeatCount: v("passes"),
+            handle: "sound",
+            span: null,
+          },
+          add("sexscriptBackgroundSounds", v("sound")),
+        ],
+      ),
+  },
+  stopBackgroundSounds: {
+    name: "sexscriptLegacyStopBackgroundSounds",
+    build: () =>
+      fn(
+        "sexscriptLegacyStopBackgroundSounds",
+        [],
+        [
+          forS("sound", v("sexscriptBackgroundSounds"), [
+            {
+              kind: "expression",
+              expression: { kind: "methodCall", target: v("sound"), name: "stop", arguments: [] },
+              span: null,
+            },
+          ]),
+          set(v("sexscriptBackgroundSounds"), { kind: "list", items: [] }),
+        ],
+      ),
+  },
   random: {
     // SexScript getRandom(max) computed (int) (Math.random() * max): 0 for 0, toward zero for a negative max,
     // and 0..99 for null. randomInteger() rejects the empty range 0..0.

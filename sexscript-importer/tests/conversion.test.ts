@@ -187,6 +187,39 @@ test(
   },
 );
 
+// A package whose script loads `metaClass` mixin modules at runtime, like the Toy package.
+test(
+  "converts a package with runtime-loaded mixin modules into one runnable script",
+  {
+    skip:
+      parserUnavailable ||
+      ("reason" in compilerResult ? compilerResult.reason : false) ||
+      ("reason" in runnerResult ? runnerResult.reason : false),
+  },
+  async () => {
+    if (!("compiler" in compilerResult) || !("runner" in runnerResult)) return;
+    const directory = fileURLToPath(new URL("./fixtures/packages/mixin-modules/", import.meta.url));
+    const sources = ["demo.groovy", "demo/greeting.groovy", "demo/pause.groovy"].map((name) =>
+      path.join(directory, "scripts", name),
+    );
+    const files = await Promise.all(sources.map((source) => parseGroovySource(source)));
+    const script = lowerSelfContainedPackage(files)[0];
+    assert.ok(script !== undefined);
+    const source = emitTease(script);
+    assert.equal(source, readFileSync(path.join(directory, "demo.tease"), "utf8"));
+    const compiled = compilerResult.compiler(source);
+    assert.deepEqual(
+      compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+      [],
+    );
+    const run = runnerResult.runner(source, {});
+    assert.deepEqual(
+      { status: run.status, failure: run.failure },
+      { status: "halted", failure: null },
+    );
+  },
+);
+
 async function convert(sourcePath: string): Promise<MigrationProgram> {
   const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)]);
   assert.ok(program !== undefined);
