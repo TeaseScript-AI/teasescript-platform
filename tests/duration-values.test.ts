@@ -9,6 +9,7 @@ import {
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
+import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { validateSerializableValue } from "../src/runtime/serializable-values.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -147,10 +148,12 @@ test("duration values persist through checkpoint JSON and reject malformed data"
   const restored = deserializeCheckpoint(
     serializeCheckpoint(createCheckpoint(plan, waiting.snapshot)),
   );
-  assert.deepEqual(restored.snapshot.frames[0]!.bindings[0]!.value, {
-    kind: "duration",
-    milliseconds: 90_000,
-  });
+  const resumed = run(restored.plan, observeTime(restored.plan, restored.snapshot, 1_000).snapshot);
+  assert.equal(resumed.snapshot.status, "halted");
+  assert.deepEqual(
+    resumed.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["1 min 30 s"],
+  );
   assert.equal(
     validateSerializableValue({ kind: "duration", milliseconds: Number.NaN }) === null,
     false,
