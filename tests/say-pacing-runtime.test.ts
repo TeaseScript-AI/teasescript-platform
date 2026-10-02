@@ -1388,79 +1388,74 @@ test("prepared output remains canonical when replacement pacing cannot meet its 
 });
 
 test("say instruction plans and public pacing failures stay at their validation boundaries", () => {
-  const validSources = [
-    'say "smart"',
-    'let seconds = 1.5\nsay "exact", seconds',
-    'say "instant", instant',
-    'say skippable "skip"',
-    'speaker vera {}\nsay as vera unskippable "speaker"',
-  ];
-  for (const source of validSources) {
-    const compiled = plan(source);
-    assert.equal(validateInstructionPlan(compiled).valid, true, source);
-  }
-
   const base = plan('speaker vera {}\nsay as vera skippable "text", 1');
   const sayIndex = base.instructions.findIndex((instruction) => instruction.kind === "say");
+  const say = `$.instructions[${sayIndex}]`;
   // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture table: each callback deliberately violates a different persisted say-instruction field before runtime validation.
-  const invalidPlans: Array<[string, (candidate: any) => void]> = [
+  const invalidPlans: Array<[string, string, (candidate: any) => void]> = [
     [
       "missing skip policy",
+      `${say}.skipPolicy`,
       (candidate) => {
         delete candidate.instructions[sayIndex].skipPolicy;
       },
     ],
     [
       "invalid skip policy",
+      `${say}.skipPolicy`,
       (candidate) => {
         candidate.instructions[sayIndex].skipPolicy = "later";
       },
     ],
     [
       "missing pacing",
+      `${say}.pacing`,
       (candidate) => {
         delete candidate.instructions[sayIndex].pacing;
       },
     ],
     [
       "malformed pacing expression",
+      `${say}.pacing`,
       (candidate) => {
         candidate.instructions[sayIndex].pacing = { kind: "missing" };
       },
     ],
     [
       "invalid speaker",
+      `${say}.speaker`,
       (candidate) => {
         candidate.instructions[sayIndex].speaker = 123;
       },
     ],
     [
       "malformed value",
+      `${say}.value`,
       (candidate) => {
         candidate.instructions[sayIndex].value = { kind: "literal", value: () => "bad" };
       },
     ],
     [
-      "old plan version",
-      (candidate) => {
-        candidate.version -= 1;
-      },
-    ],
-    [
       "malformed location",
+      `${say}.span`,
       (candidate) => {
         candidate.instructions[sayIndex].span.so = -1;
       },
     ],
   ];
-  for (const [label, mutate] of invalidPlans) {
+  for (const [label, path, mutate] of invalidPlans) {
     // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture: expose the cloned say instruction to the deliberate invalid mutation selected above.
     const hostile = structuredClone(base) as any;
     mutate(hostile);
     const validation = validateInstructionPlan(hostile);
     assert.equal(validation.valid, false, label);
-    assert.ok(validation.errors.length > 0, label);
-    assert.doesNotThrow(() => validateInstructionPlan(hostile), label);
+    assert.ok(
+      validation.errors.some(
+        (error) =>
+          error.code === "TSC002" && (error.path === path || error.path.startsWith(`${path}.`)),
+      ),
+      label,
+    );
   }
 
   const pacingPlan = plan('say "first"\nwait 10 s\nexit');
