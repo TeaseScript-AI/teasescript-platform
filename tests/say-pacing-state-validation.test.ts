@@ -1336,7 +1336,7 @@ test("active pacing locations allow only runtime-produced foreground and backgro
     ),
   );
 
-  // Each forged gate takes fresh identities, so only the one-active-gate rule can reject it.
+  // Each forged gate takes fresh identities, so only the active-location rules can reject it.
   const corruptions = [
     {
       name: "background cannot retain two pacing gates",

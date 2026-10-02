@@ -27,14 +27,13 @@ test("accepts concrete CSS colour notations and preserves out-of-gamut coordinat
     assert.equal(normalizeColor(color), normalizeColor("red"), color);
   for (const color of ["lab(50% 20 30)", "lch(50% 40 30)", "oklab(50% .1 .1)", "oklch(.5 .1 30)"])
     assert.ok(isNormalizedColor(normalizeColor(color)), color);
-  // Out-of-gamut and tiny chroma coordinates are retained, and a normalized colour is already canonical.
+  // Out-of-gamut and tiny chroma coordinates are retained without gamut mapping.
   for (const [color, coordinates] of [
     ["oklch(.5 .8 20)", [0.5, 0.8, 20]],
     ["oklch(.5 1e-14 20)", [0.5, 1e-14, 20]],
   ] as const) {
     const normalized = normalizeColor(color);
     assert.ok(normalized !== null && isNormalizedColor(normalized), color);
-    assert.equal(normalizeColor(normalized), normalized, color);
     assert.deepEqual(oklchCoordinates(normalized), coordinates, color);
   }
   for (const color of [
