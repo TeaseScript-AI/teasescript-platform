@@ -34,7 +34,7 @@ const sites = {
 } as const;
 
 // Next lines that can hold the value; every other next line leaves the value missing.
-const valueLines: ReadonlySet<keyof typeof nextLines> = new Set([
+const valueLines: ReadonlySet<string> = new Set([
   "value",
   "speakerExpression",
   "expressionCommand",
@@ -42,7 +42,7 @@ const valueLines: ReadonlySet<keyof typeof nextLines> = new Set([
 
 // The diagnostic each site reports for a missing value. A site whose value sits inside an open delimiter cannot
 // return the next line to the enclosing statement list; the others must keep it as its own statement.
-const missingValueCode: Readonly<Record<keyof typeof sites, string>> = {
+const missingValueCode: Readonly<Record<string, string>> = {
   speaker: "TSP006",
   choice: "TSP030",
   presentation: "TSP012",
@@ -51,13 +51,8 @@ const missingValueCode: Readonly<Record<keyof typeof sites, string>> = {
   object: "TSP012",
   showButton: "TSP028",
 };
-const delimitedSites: ReadonlySet<keyof typeof sites> = new Set([
-  "presentation",
-  "call",
-  "media",
-  "object",
-]);
-const statementLines: ReadonlySet<keyof typeof nextLines> = new Set([
+const delimitedSites: ReadonlySet<string> = new Set(["presentation", "call", "media", "object"]);
+const statementLines: ReadonlySet<string> = new Set([
   "statement",
   "speakerDeclaration",
   "statementCommand",
@@ -77,8 +72,8 @@ function shape(source: string): string {
 }
 
 function assertCell(
-  site: keyof typeof sites,
-  kind: keyof typeof nextLines,
+  site: string,
+  kind: string,
   source: string,
   statementsOf: (program: Program) => readonly Statement[] | undefined,
   cell: string,
@@ -111,10 +106,9 @@ function assertCell(
 
 test("each continued colon leaves a non-value next line to the enclosing recovery", () => {
   // Root diagnostics and surviving constructs are fixed; secondary diagnostics after the root may improve.
-  for (const site of Object.keys(sites) as (keyof typeof sites)[]) {
-    for (const kind of Object.keys(nextLines) as (keyof typeof nextLines)[]) {
-      const line = nextLines[kind];
-      const source = sites[site](line) + (line === null ? "" : "\nexit");
+  for (const [site, build] of Object.entries(sites)) {
+    for (const [kind, line] of Object.entries(nextLines)) {
+      const source = build(line) + (line === null ? "" : "\nexit");
       assertCell(site, kind, source, (program) => program.statements, `${site}/${kind}`);
       // Inside a block, the next line and a closing brace must still reach the enclosing block.
       if (kind === "statement" || kind === "closeBrace") {
