@@ -5,6 +5,7 @@ import { rootDiagnostics } from "./diagnostics.ts";
 import type { IrStatement } from "./ir.ts";
 import { buildHelperRegistry, lowerParsedFile } from "./lower.ts";
 import { lowerSelfContainedPackage } from "./package.ts";
+import { shimPendingCapabilities } from "./pending.ts";
 
 const SOURCE_STATEMENT_KINDS = new Set([
   "expressionStatement",
@@ -32,6 +33,14 @@ export interface FeasibilityFileReport {
   dependencyClosed: boolean;
   /** Null when no compiler was supplied or the file is not a script body. */
   compilerClean: boolean | null;
+  /**
+   * Compiler-clean once accepted-but-unimplemented TeaseScript capabilities are replaced by placeholder
+   * calls; null when no compiler was supplied or the file is not a script body.
+   */
+  compilerCleanExceptPending: boolean | null;
+  /** Accepted TeaseScript capabilities used by the output that the current compiler does not implement. */
+  pendingCapabilities: string[];
+  /** Compiler diagnostics that remain after the pending-capability placeholders. */
   compilerDiagnostics: TeaseCompileDiagnostic[];
 }
 
@@ -48,6 +57,8 @@ export interface FeasibilityReport {
   dependencyClosedScriptFileCount: number;
   /** Null when no compiler was supplied. */
   compilerCleanScriptFileCount: number | null;
+  /** Null when no compiler was supplied. */
+  compilerCleanExceptPendingScriptFileCount: number | null;
   parseErrorFileCount: number;
   migrationCleanFileCount: number;
   sourceStatementNodes: number;
@@ -57,8 +68,18 @@ export interface FeasibilityReport {
   rootMigrationErrors: number;
   diagnosticsByCode: Record<string, number>;
   rootDiagnosticsByCode: Record<string, number>;
-  /** Compiler diagnostics for all generated script bodies, grouped by code and message. */
+  /**
+   * Compiler diagnostics that remain after pending-capability placeholders, grouped by code and message.
+   * These point at importer output rather than at known TeaseScript implementation gaps.
+   */
   compilerDiagnosticsByMessage: Record<string, number>;
+  /** Script files using each pending TeaseScript capability. */
+  pendingCapabilityFileCounts: Record<string, number>;
+  /**
+   * Dependency-closed script files that would compile except for pending capabilities, counted per capability
+   * they use: the implementation gaps that block otherwise convertible content.
+   */
+  blockingPendingCapabilityFileCounts: Record<string, number>;
   files: FeasibilityFileReport[];
 }
 
@@ -75,6 +96,7 @@ export function analyzeFeasibility(
     loweredScriptFileCount: 0,
     dependencyClosedScriptFileCount: 0,
     compilerCleanScriptFileCount: options.compiler === undefined ? null : 0,
+    compilerCleanExceptPendingScriptFileCount: options.compiler === undefined ? null : 0,
     parseErrorFileCount: 0,
     migrationCleanFileCount: 0,
     sourceStatementNodes: 0,
@@ -85,6 +107,8 @@ export function analyzeFeasibility(
     diagnosticsByCode: emptyCounts(),
     rootDiagnosticsByCode: emptyCounts(),
     compilerDiagnosticsByMessage: emptyCounts(),
+    pendingCapabilityFileCounts: emptyCounts(),
+    blockingPendingCapabilityFileCounts: emptyCounts(),
     files: [],
   };
 
@@ -117,18 +141,36 @@ export function analyzeFeasibility(
     const lowered = isScriptBody && errors.length === 0;
     const dependencyClosed = lowered && packageErrors.length === 0;
     let compilerClean: boolean | null = null;
+    let compilerCleanExceptPending: boolean | null = null;
     let compilerDiagnostics: TeaseCompileDiagnostic[] = [];
+    const shim = shimPendingCapabilities(packageProgram);
+    const pendingCapabilities = [...shim.capabilities].sort();
+    if (isScriptBody) {
+      for (const capability of pendingCapabilities) {
+        increment(report.pendingCapabilityFileCounts, capability);
+      }
+    }
     if (options.compiler !== undefined && isScriptBody && recognized) {
-      const compiled = options.compiler(emitTease(packageProgram));
-      compilerDiagnostics = compiled.diagnostics;
-      compilerClean =
+      const clean = (result: ReturnType<typeof options.compiler>): boolean =>
         dependencyClosed &&
-        compiled.compiled &&
-        compiled.diagnostics.every((diagnostic) => diagnostic.severity !== "error");
+        result.compiled &&
+        result.diagnostics.every((diagnostic) => diagnostic.severity !== "error");
+      compilerClean = clean(options.compiler(emitTease(packageProgram)));
+      const shimmed = options.compiler(emitTease(shim.program), shim.builtins);
+      compilerCleanExceptPending = clean(shimmed);
+      compilerDiagnostics = shimmed.diagnostics;
       if (compilerClean && report.compilerCleanScriptFileCount !== null) {
         report.compilerCleanScriptFileCount += 1;
       }
-      for (const diagnostic of compiled.diagnostics) {
+      if (compilerCleanExceptPending && report.compilerCleanExceptPendingScriptFileCount !== null) {
+        report.compilerCleanExceptPendingScriptFileCount += 1;
+      }
+      if (compilerCleanExceptPending && !compilerClean) {
+        for (const capability of pendingCapabilities) {
+          increment(report.blockingPendingCapabilityFileCounts, capability);
+        }
+      }
+      for (const diagnostic of shimmed.diagnostics) {
         increment(report.compilerDiagnosticsByMessage, `${diagnostic.code} ${diagnostic.message}`);
       }
     }
@@ -156,6 +198,8 @@ export function analyzeFeasibility(
       lowered,
       dependencyClosed,
       compilerClean,
+      compilerCleanExceptPending,
+      pendingCapabilities,
       compilerDiagnostics,
     });
   }
@@ -163,6 +207,10 @@ export function analyzeFeasibility(
   report.diagnosticsByCode = sortCounts(report.diagnosticsByCode);
   report.rootDiagnosticsByCode = sortCounts(report.rootDiagnosticsByCode);
   report.compilerDiagnosticsByMessage = sortCounts(report.compilerDiagnosticsByMessage);
+  report.pendingCapabilityFileCounts = sortCounts(report.pendingCapabilityFileCounts);
+  report.blockingPendingCapabilityFileCounts = sortCounts(
+    report.blockingPendingCapabilityFileCounts,
+  );
   report.files.sort((left, right) => {
     if (left.rootMigrationErrors !== right.rootMigrationErrors)
       return right.rootMigrationErrors - left.rootMigrationErrors;

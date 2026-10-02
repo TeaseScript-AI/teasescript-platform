@@ -15,7 +15,8 @@ export interface TeaseCompileResult {
   diagnostics: TeaseCompileDiagnostic[];
 }
 
-export type TeaseCompiler = (source: string) => TeaseCompileResult;
+/** `builtins` registers additional host function names, as the compiler's `builtins` option does. */
+export type TeaseCompiler = (source: string, builtins?: readonly string[]) => TeaseCompileResult;
 
 const repositoryCompilerUrl = new URL("../../dist/src/index.js", import.meta.url);
 
@@ -37,8 +38,8 @@ export async function loadRepositoryCompiler(): Promise<TeaseCompiler> {
     throw new Error("Repository build does not export compileSource().");
   }
   const compileSource = module.compileSource;
-  return (source) => {
-    const result: unknown = compileSource(source);
+  return (source, builtins = []) => {
+    const result: unknown = compileSource(source, { builtins: [...builtins] });
     return readCompilationResult(result);
   };
 }

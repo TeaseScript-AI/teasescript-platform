@@ -290,8 +290,10 @@ test("reports recognized, lowered, and dependency-closed script stages separatel
       };
     },
   });
-  assert.deepEqual(compiledSources, ['say "hello"\n']);
+  // Once as generated and once with pending-capability placeholders (none are needed here).
+  assert.deepEqual(compiledSources, ['say "hello"\n', 'say "hello"\n']);
   assert.equal(rejecting.compilerCleanScriptFileCount, 0);
+  assert.equal(rejecting.compilerCleanExceptPendingScriptFileCount, 0);
   assert.equal(rejecting.files[0]?.compilerClean, false);
   assert.deepEqual(rejecting.compilerDiagnosticsByMessage, { "TSP001 x": 1 });
 
@@ -299,5 +301,7 @@ test("reports recognized, lowered, and dependency-closed script stages separatel
     compiler: () => ({ compiled: true, diagnostics: [] }),
   });
   assert.equal(accepting.compilerCleanScriptFileCount, 1);
+  assert.equal(accepting.compilerCleanExceptPendingScriptFileCount, 1);
   assert.equal(accepting.files[0]?.compilerClean, true);
+  assert.deepEqual(accepting.files[0]?.pendingCapabilities, []);
 });

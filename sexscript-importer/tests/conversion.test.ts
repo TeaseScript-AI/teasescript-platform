@@ -9,7 +9,9 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { loadRepositoryCompiler, type TeaseCompiler } from "../src/compile-check.ts";
 import { emitTease } from "../src/emit-tease.ts";
+import type { MigrationProgram } from "../src/ir.ts";
 import { lowerSelfContainedPackage } from "../src/package.ts";
+import { shimPendingCapabilities } from "../src/pending.ts";
 import { parseGroovySource } from "../src/source-parser.ts";
 
 const parserUnavailable = groovyParserUnavailableReason();
@@ -18,13 +20,14 @@ const compilerResult = await loadRepositoryCompiler().then(
   (error: unknown) => ({ reason: error instanceof Error ? error.message : String(error) }),
 );
 
-// Output that uses only implemented TeaseScript must also compile.
-registerFixtures("conversion", true);
+// Output that uses only implemented TeaseScript must compile as generated.
+registerFixtures("conversion", false);
 // Output that deliberately targets accepted TeaseScript the current compiler does not implement yet
-// (storage, script chaining, popups, boolean/integer input, ...): compared as text only.
-registerFixtures("conversion-accepted", false);
+// (storage, script chaining, popups, boolean/integer input, ...) must compile once those capabilities are
+// replaced by placeholder calls, so everything except the pending capabilities is compiler-checked.
+registerFixtures("conversion-accepted", true);
 
-function registerFixtures(directoryName: string, mustCompile: boolean): void {
+function registerFixtures(directoryName: string, usesPendingCapabilities: boolean): void {
   const directory = fileURLToPath(new URL(`./fixtures/${directoryName}/`, import.meta.url));
   const names = readdirSync(directory)
     .filter((name) => name.endsWith(".groovy"))
@@ -38,21 +41,27 @@ function registerFixtures(directoryName: string, mustCompile: boolean): void {
       `converts ${directoryName}/${name}.groovy to the expected TeaseScript`,
       { skip: parserUnavailable },
       async () => {
-        const parsed = await parseGroovySource(sourcePath);
-        const [program] = lowerSelfContainedPackage([parsed]);
-        assert.ok(program !== undefined);
-        assert.equal(emitTease(program), expected);
+        assert.equal(emitTease(await convert(sourcePath)), expected);
       },
     );
 
-    if (!mustCompile) continue;
     const compilerSkip = "reason" in compilerResult ? compilerResult.reason : false;
     test(
-      `expected ${directoryName}/${name}.tease compiles with the TeaseScript compiler`,
-      { skip: compilerSkip },
-      () => {
+      usesPendingCapabilities
+        ? `${directoryName}/${name} output compiles apart from pending TeaseScript capabilities`
+        : `expected ${directoryName}/${name}.tease compiles with the TeaseScript compiler`,
+      { skip: compilerSkip || (usesPendingCapabilities && parserUnavailable) },
+      async () => {
         if (!("compiler" in compilerResult)) return;
-        const result = compilerResult.compiler(expected);
+        let source = expected;
+        let builtins: string[] = [];
+        if (usesPendingCapabilities) {
+          const shim = shimPendingCapabilities(await convert(sourcePath));
+          assert.ok(shim.capabilities.size > 0, "fixture group expects pending capabilities");
+          source = emitTease(shim.program);
+          builtins = shim.builtins;
+        }
+        const result = compilerResult.compiler(source, builtins);
         assert.deepEqual(
           result.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
           [],
@@ -61,6 +70,12 @@ function registerFixtures(directoryName: string, mustCompile: boolean): void {
       },
     );
   }
+}
+
+async function convert(sourcePath: string): Promise<MigrationProgram> {
+  const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)]);
+  assert.ok(program !== undefined);
+  return program;
 }
 
 function groovyParserUnavailableReason(): string | false {
