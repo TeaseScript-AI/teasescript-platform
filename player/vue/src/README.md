@@ -24,10 +24,10 @@ specification.
   the explicit Start control (`SessionActivation.vue`) and creates it only on that click; a restored session waits for
   Continue. The host also owns the framework-independent `player/media-device.ts`: it reconciles the session's media
   projection onto `Audio` elements, reports loading through the adapter, and contributes measured progress to every
-  clock observation, which runs every 100 ms while media loads or plays. The host reuses released elements and plays
-  silence on two of them within the Start or Continue click, because some browsers (Safari) allow playback per element
-  only from a user activation, which the session may outlive while a camera permission prompt is open; further
-  concurrent elements fall back to the refused-playback retry. With the camera capability, Start first opens the
+  clock observation, which runs every 100 ms while media loads or plays. The host reuses released elements and, within
+  the Start or Continue click, plays silence on every spare one, ensuring at least two, because some browsers (Safari)
+  allow playback per element only from a user activation, which the session may outlive while a camera permission
+  prompt is open; elements allocated beyond the pool fall back to the refused-playback retry. With the camera capability, Start first opens the
   session camera (`player/session-camera.ts`) before the session is created. Authored media references resolve only through
   the host-supplied `resolveAsset`. `PlayerApp.vue` derives the Stage image from runtime state and provides the same
   resolver to `TranscriptMessage.vue` for speaker avatars.

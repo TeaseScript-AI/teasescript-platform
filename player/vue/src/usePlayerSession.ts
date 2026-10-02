@@ -231,6 +231,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (!pending) return;
     activation.value = null;
     const token = ++activationToken;
+    // Retire the previous session first: its elements return to the pool before priming, so the new session never
+    // receives an element the browser still blocks, and it cannot project media while the camera opens.
+    session.value = null;
+    device.reset();
     primeAudio();
     const opened = await camera.open(options.capabilities?.camera === true);
     // Replaced, re-prepared, or unmounted while the browser answered: an obsolete session never starts.
