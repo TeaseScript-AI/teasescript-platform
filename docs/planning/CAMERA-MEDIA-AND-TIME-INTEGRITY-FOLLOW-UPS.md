@@ -65,19 +65,15 @@ simultaneous-camera design.
 
 A preview candidate is not runtime-visible until accepted. Retaking may delete the candidate immediately.
 
-Accepted or directly captured media is session-scoped by default:
+The accepted lifetime of directly captured photos is recorded with `takePhoto()` in the
+[accepted specification, §33](../specifications/accepted-syntaxes-v30.md#33-browser-api-file-folder-camera-and-url-references):
+session media at first, durable while reachable from saved script storage, and reclaimable once no saved value
+references it. Runtime and UI state reference stable engine-managed identity rather than raw bytes or browser objects.
+This replaces the earlier direction that captured media stays session-scoped until session cleanup.
 
-- runtime and UI state reference stable engine-managed identity rather than raw bytes or browser objects;
-- checkpoints preserve that identity and the storage needed to restore it;
-- overwriting one variable does not establish that the media is unreachable elsewhere;
-- the first implementation may retain session media until session cleanup instead of introducing incomplete reference
-  counting;
-- later reclamation requires complete reachability across variables, scopes, temporaries, actions, views, edits,
-  handlers, checkpoints, and persistence.
-
-Persistent media requires a separate platform design for stable identity, collections, labels, ordering, retrieval,
-visibility, encryption, retention, deletion, export, moderation, quotas, package access, and original/edited-copy
-relationships. Exact save and retrieval APIs remain open.
+A persistent media library remains a separate platform design: collections, labels, ordering, retrieval, visibility,
+encryption, retention beyond saved references, export, moderation, quotas, package access, and original/edited-copy
+relationships.
 
 ## Time integrity
 
