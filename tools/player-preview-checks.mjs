@@ -2520,12 +2520,16 @@ async function markupLinkChecks(page) {
     'say "Literal <b>tags</b> & <img src=x onerror=window.markupInjected=1> [Docs](https://example.com/docs) and https://example.com/bare", instant',
     'showButton "Done"',
   ].join("\n");
-  await page.route("**/src/runtimeScenario.ts*", (route) =>
-    route.fulfill({
+  await page.route("**/src/runtimeScenario.ts*", (route) => {
+    const original = new URL(route.request().url());
+    if (original.searchParams.has("original")) return route.continue();
+    original.searchParams.set("original", "");
+    // Only the opening scenario is replaced; the module's other exports stay available.
+    return route.fulfill({
       contentType: "text/javascript",
-      body: `export const openingScenario = ${JSON.stringify(source)};`,
-    }),
-  );
+      body: `export * from ${JSON.stringify(original.href)};\nexport const openingScenario = ${JSON.stringify(source)};`,
+    });
+  });
   await page
     .context()
     .route("https://example.com/**", (route) =>
