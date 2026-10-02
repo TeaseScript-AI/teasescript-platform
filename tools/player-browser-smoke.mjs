@@ -821,6 +821,11 @@ async function typeAndSubmit(cdp, text) {
   );
 }
 
+// Whether the user can see the element: rendered, not `display: none`, `visibility: hidden` or fully transparent.
+function visible(selector) {
+  return `document.querySelector(${JSON.stringify(selector)})?.checkVisibility({ opacityProperty: true, visibilityProperty: true }) === true`;
+}
+
 async function activeActionId(cdp) {
   return value(
     cdp,
@@ -833,11 +838,6 @@ async function transcriptTexts(cdp) {
     cdp,
     `[...document.querySelectorAll('#transcript li')].map((item) => [...item.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join('').trim())`,
   );
-}
-
-// Whether the user can see the element: rendered, not `display: none`, `visibility: hidden` or fully transparent.
-function visible(selector) {
-  return `document.querySelector(${JSON.stringify(selector)})?.checkVisibility({ opacityProperty: true, visibilityProperty: true }) === true`;
 }
 
 function documentTextIncludes(values, text) {
