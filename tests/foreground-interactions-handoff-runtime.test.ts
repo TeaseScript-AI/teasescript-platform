@@ -1282,8 +1282,6 @@ interface SettlementHandoffFixture {
   readonly laterDelaySettlement: RuntimeDelayActionSettlementSnapshot;
   /** A real pending later delay, retained only to build an incompatible pair. */
   readonly runtimeProducedLaterPendingDelay: RuntimeSnapshot;
-  /** The runtime-produced state retaining the later delay settlement. */
-  readonly runtimeProducedLaterSettledDelay: RuntimeSnapshot;
   /**
    * A deliberately assembled persisted-state fixture: it combines the
    * runtime-produced committed interaction with the later runtime-produced
@@ -1295,12 +1293,20 @@ interface SettlementHandoffFixture {
 interface RejectedSettlementHandoffRow {
   readonly id: string;
   readonly category:
+    | "settlement presence"
     | "malformed settlement"
     | "malformed handoff"
+    | "handoff ownership"
     | "handoff disagreement"
+    | "destination"
     | "incompatible lifecycle"
     | "counter"
     | "chronology";
+  /**
+   * The row keeps the settlement and the handoff individually valid without a plan, so planless
+   * validation isolates the one check the row names from the plan-bound checks that also reject it.
+   */
+  readonly planless?: true;
   readonly mutate: (snapshot: ExternalRecord, fixture: SettlementHandoffFixture) => void;
 }
 
@@ -1376,7 +1382,6 @@ function settledHandoffFixture(): SettlementHandoffFixture {
     olderDelaySettlement: structuredClone(olderDelaySettlement),
     laterDelaySettlement: structuredClone(laterDelaySettlement),
     runtimeProducedLaterPendingDelay: laterDelay.snapshot,
-    runtimeProducedLaterSettledDelay: laterSettled.snapshot,
     validatedCompositeWithNewerSettlement,
   };
 }
@@ -1386,9 +1391,12 @@ function assertRejectedSettlementHandoffSnapshot(
   validSnapshot: RuntimeSnapshot,
   invalidSnapshot: ExternalRecord,
   id: string,
+  planless = false,
 ): void {
   const beforeValidation = structuredClone(invalidSnapshot);
   assert.equal(validateRuntimeSnapshot(invalidSnapshot, plan).valid, false, id);
+  if (planless)
+    assert.equal(validateRuntimeSnapshot(invalidSnapshot).valid, false, `${id}: planless`);
   assert.deepEqual(invalidSnapshot, beforeValidation, `${id}: validation input`);
 
   const beforePlan = structuredClone(plan);
@@ -1476,39 +1484,85 @@ test("PR194 matrix: settlement and active handoff validation", () => {
   const rows: readonly RejectedSettlementHandoffRow[] = [
     {
       id: "PR194-settlement-null",
-      category: "handoff disagreement",
+      category: "settlement presence",
       mutate: (snapshot) => {
         snapshot.lastSettlement = null;
       },
     },
     {
       id: "PR194-settlement-older-valid",
-      category: "handoff disagreement",
+      category: "settlement presence",
       mutate: (snapshot, current) => {
         snapshot.lastSettlement = structuredClone(current.olderDelaySettlement);
       },
     },
+    // Each agreement row changes one field that the retained settlement with the handoff's action
+    // ID must share with the handoff, while both records stay individually valid without a plan.
+    // A non-interaction settlement has no owner, destination or result fields, so those field
+    // comparisons also reject the action-kind row.
     {
-      id: "PR194-settlement-equal-wrong-action-kind",
+      id: "PR194-agreement-action-kind",
       category: "handoff disagreement",
+      planless: true,
       mutate: (snapshot, current) => {
-        const delay = structuredClone(current.laterDelaySettlement);
-        const handoffActionId = externalRecord(
-          snapshot.interactionResultHandoff,
-          "handoff",
-        ).actionId;
-        const nextEventSequence = snapshot.nextEventSequence;
-        if (typeof handoffActionId !== "number" || typeof nextEventSequence !== "number") {
-          throw new Error("committed handoff fields must be numeric");
-        }
-        snapshot.nextActionId = delay.actionId + 1;
-        snapshot.nextEventSequence = Math.max(nextEventSequence, delay.completionEventSequence + 1);
-        snapshot.lastSettlement = { ...delay, actionId: handoffActionId };
+        const handoff = externalRecord(snapshot.interactionResultHandoff, "handoff");
+        snapshot.lastSettlement = {
+          ...structuredClone(current.olderDelaySettlement),
+          actionId: handoff.actionId,
+        };
+      },
+    },
+    {
+      id: "PR194-agreement-owning-instruction",
+      category: "handoff disagreement",
+      planless: true,
+      mutate: (snapshot) => {
+        externalRecord(snapshot.interactionResultHandoff, "handoff").owningInstruction = 0;
+      },
+    },
+    {
+      id: "PR194-agreement-continuation",
+      category: "handoff disagreement",
+      planless: true,
+      mutate: (snapshot, current) => {
+        const continuation = current.injected.handoffInstruction + 1;
+        externalRecord(snapshot.interactionResultHandoff, "handoff").continuationInstruction =
+          continuation;
+        snapshot.nextInstruction = continuation;
+      },
+    },
+    {
+      id: "PR194-agreement-owner",
+      category: "handoff disagreement",
+      planless: true,
+      mutate: (snapshot) => {
+        externalRecord(snapshot.lastSettlement, "settlement").ownerCallFrameId = 1;
+        snapshot.nextCallFrameId = 2;
+      },
+    },
+    {
+      id: "PR194-agreement-destination",
+      category: "handoff disagreement",
+      planless: true,
+      mutate: (snapshot, current) => {
+        externalRecord(snapshot.lastSettlement, "settlement").destinationTemporary =
+          current.injected.destinationTemporary + 1;
+      },
+    },
+    {
+      id: "PR194-agreement-result",
+      category: "handoff disagreement",
+      planless: true,
+      mutate: (snapshot) => {
+        // A text settlement stays self-consistent when its result and transcript change together.
+        const settlement = externalRecord(snapshot.lastSettlement, "settlement");
+        settlement.result = "forged";
+        settlement.transcriptText = "forged";
       },
     },
     {
       id: "PR194-settlement-equal-wrong-interaction-kind",
-      category: "handoff disagreement",
+      category: "malformed settlement",
       mutate: (snapshot) => {
         externalRecord(snapshot.lastSettlement, "settlement").interactionKind = "number";
       },
@@ -1521,45 +1575,8 @@ test("PR194 matrix: settlement and active handoff validation", () => {
       },
     },
     {
-      id: "PR194-settlement-wrong-owning-instruction",
-      category: "handoff disagreement",
-      mutate: (snapshot) => {
-        externalRecord(snapshot.lastSettlement, "settlement").owningInstruction = 0;
-      },
-    },
-    {
-      id: "PR194-settlement-wrong-continuation",
-      category: "handoff disagreement",
-      mutate: (snapshot) => {
-        externalRecord(snapshot.lastSettlement, "settlement").continuationInstruction = 0;
-      },
-    },
-    {
-      id: "PR194-settlement-wrong-owner",
-      category: "handoff disagreement",
-      mutate: (snapshot) => {
-        externalRecord(snapshot.lastSettlement, "settlement").ownerCallFrameId = 1;
-        snapshot.nextCallFrameId = 2;
-      },
-    },
-    {
-      id: "PR194-settlement-wrong-destination",
-      category: "handoff disagreement",
-      mutate: (snapshot, current) => {
-        externalRecord(snapshot.lastSettlement, "settlement").destinationTemporary =
-          current.injected.destinationTemporary + 1;
-      },
-    },
-    {
-      id: "PR194-settlement-wrong-result",
-      category: "handoff disagreement",
-      mutate: (snapshot) => {
-        externalRecord(snapshot.lastSettlement, "settlement").result = "forged";
-      },
-    },
-    {
       id: "PR194-settlement-wrong-transcript",
-      category: "handoff disagreement",
+      category: "malformed settlement",
       mutate: (snapshot) => {
         externalRecord(snapshot.lastSettlement, "settlement").transcriptText = "forged";
       },
@@ -1600,8 +1617,19 @@ test("PR194 matrix: settlement and active handoff validation", () => {
       },
     },
     {
+      id: "PR194-handoff-owner-not-active-frame",
+      category: "handoff ownership",
+      planless: true,
+      mutate: (snapshot) => {
+        // The settlement agrees with the forged owner, so only the active-frame ownership check rejects it.
+        externalRecord(snapshot.interactionResultHandoff, "handoff").ownerCallFrameId = 99;
+        externalRecord(snapshot.lastSettlement, "settlement").ownerCallFrameId = 99;
+        snapshot.nextCallFrameId = 100;
+      },
+    },
+    {
       id: "PR194-handoff-destination-missing",
-      category: "handoff disagreement",
+      category: "destination",
       mutate: (snapshot, current) => {
         const temporaries = externalArray(snapshot.temporaries, "temporaries");
         const index = temporaries.findIndex(
@@ -1614,14 +1642,14 @@ test("PR194 matrix: settlement and active handoff validation", () => {
     },
     {
       id: "PR194-handoff-destination-forged",
-      category: "handoff disagreement",
+      category: "destination",
       mutate: (snapshot, current) => {
         externalTemporary(snapshot, current.injected.destinationTemporary).value = "forged";
       },
     },
     {
       id: "PR194-handoff-next-instruction",
-      category: "handoff disagreement",
+      category: "malformed handoff",
       mutate: (snapshot) => {
         snapshot.nextInstruction = 0;
       },
@@ -1685,23 +1713,8 @@ test("PR194 matrix: settlement and active handoff validation", () => {
       },
     },
   ];
-  const equalIdDelayControl = structuredClone(fixture.runtimeProducedLaterSettledDelay);
-  const exactHandoff = committed.interactionResultHandoff;
-  assert.ok(exactHandoff !== null);
-  assert.ok(equalIdDelayControl.lastSettlement !== null);
-  equalIdDelayControl.lastSettlement = {
-    ...equalIdDelayControl.lastSettlement,
-    actionId: exactHandoff.actionId,
-  };
-  equalIdDelayControl.nextActionId = Math.max(
-    equalIdDelayControl.nextActionId,
-    exactHandoff.actionId + 1,
-  );
-  assert.equal(
-    validateRuntimeSnapshot(equalIdDelayControl, injected.plan).valid,
-    true,
-    "PR194-settlement-equal-wrong-action-kind control: delay settlement alone",
-  );
+  // The root-owned committed snapshot is also valid without a plan, the baseline for planless rows.
+  assert.equal(validateRuntimeSnapshot(committed).valid, true);
   for (const row of rows) {
     const invalid = externalRecord(structuredClone(committed), row.id);
     row.mutate(invalid, fixture);
@@ -1710,6 +1723,7 @@ test("PR194 matrix: settlement and active handoff validation", () => {
       committed,
       invalid,
       `${row.category}: ${row.id}`,
+      row.planless === true,
     );
   }
 
