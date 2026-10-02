@@ -40,15 +40,22 @@ test("wait lowers to a foreground delay and settles only after an explicit obser
 });
 
 test("negative static waits fail compilation and backward observations never move session time backward", () => {
-  // ADR 0016: a statically provable negative duration is a compile-time error at the duration.
-  assert.deepEqual(
-    compileSource("wait -1").diagnostics.map((diagnostic) => [
-      diagnostic.code,
-      diagnostic.span.start.offset,
-      diagnostic.span.end.offset,
-    ]),
-    [["TSV011", 5, 7]],
-  );
+  // ADR 0016: a statically provable negative duration is a compile-time error at the duration, whether it is a
+  // negated literal or folded from arithmetic.
+  for (const [source, end] of [
+    ["wait -1", 7],
+    ["wait 1 - 2", 10],
+  ] as const) {
+    assert.deepEqual(
+      compileSource(source).diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.span.start.offset,
+        diagnostic.span.end.offset,
+      ]),
+      [["TSV011", 5, end]],
+      source,
+    );
+  }
   const compiled = plan("wait 1 ms\nexit");
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled, { initialSessionTimeMs: 10 }));
   const observation = observeTime(compiled, waiting.snapshot, 2);
