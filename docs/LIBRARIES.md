@@ -230,7 +230,7 @@ A positive gate is an ADR 0016 `chatPacingGate` action. It begins in `background
 
 `showButton`, `askText`, `askNumber`, and `choose` settle and consume a background gate before creating their foreground interaction. `wait` does not consume it; both may coexist and use the persisted session-time coordinate.
 
-A skippable gate may be completed by a primary click/tap within the player iframe viewport or by Space while the focused empty composer is active. This completes only the gate. Interactive controls have event priority, and unskippable gates reject those completion attempts.
+A skippable gate may be completed by a primary click/tap on Player background or other unused Player space or by Space while the focused empty composer is active. This completes only the gate. Interactive controls have event priority, and unskippable gates reject those completion attempts.
 
 ### Standard UI and transcript conventions
 
