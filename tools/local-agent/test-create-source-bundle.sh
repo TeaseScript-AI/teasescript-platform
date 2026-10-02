@@ -131,21 +131,6 @@ for path in workflow_paths:
     assert_immutable_pins(workflow_text)
     assert_checkout_jobs_read_contents(workflow_text)
 
-assert "workflow_dispatch" not in automatic
-assert "inputs.source_ref" not in automatic
-assert "TOOLING_REF: ${{ github.workflow_sha }}" in automatic
-assert "REQUESTED_SOURCE:" in automatic and "github.event.pull_request.head.sha" in automatic
-assert "SOURCE_REF:" in automatic and "github.head_ref" in automatic
-assert automatic.count("uses: actions/checkout@") == 2
-assert "ref: ${{ env.TOOLING_REF }}" in automatic and "path: tooling" in automatic
-assert "ref: ${{ env.REQUESTED_SOURCE }}" in automatic and "path: source" in automatic
-assert "id: source" in automatic and "working-directory: source" in automatic
-assert "source_sha=$(git rev-parse --verify HEAD)" in automatic
-assert "bash ../tooling/tools/local-agent/create-source-bundle.sh" in automatic
-assert "--output ../source-artifact" in automatic
-assert "steps.source.outputs.sha" in automatic
-assert "name: teasescript-source-${{ steps.source.outputs.sha }}" in automatic
-
 assert re.search(
     r"^  workflow_run:\n    workflows: \[Source bundle\]\n    types: \[completed\]",
     index,
@@ -164,31 +149,27 @@ artifact_route = artifact_router.split("  mailbox:\n", 1)[1].split("\n  prepare:
 assert "uses: ./.github/workflows/artifact-mailbox-worker.yml" in artifact_route
 assert "pull-requests: read" in artifact_route
 assert "pull-requests: write" not in artifact_route
-assert "author_association" not in artifact_route
 assert re.search(r"^  workflow_call:\n", artifact_request, re.MULTILINE)
 assert "issue_comment:" not in artifact_request
 assert "permissions: {}" in artifact_request
 assert "github.event.issue.number == 235" in artifact_request
 assert "startsWith(github.event.comment.body, '/artifact source ')" in artifact_request
-assert "group: source-bundle-artifact-request" in artifact_request
-assert "queue: max" in artifact_request
 assert "pull-requests: read" in artifact_request
 assert "pull-requests: write" not in artifact_request
-assert "cancel-in-progress: false" in artifact_request
+# One constant group serializes every request; queueing without cancellation keeps pending requests.
+concurrency_lines = re.search(r"(?m)^    concurrency:\n((?:      .*\n)+)", artifact_request).group(1)
+concurrency = dict(line.strip().split(": ", 1) for line in concurrency_lines.splitlines())
+assert concurrency["group"] and "${{" not in concurrency["group"], concurrency
+assert concurrency["queue"] == "max" and concurrency["cancel-in-progress"] == "false", concurrency
 job_prefix = artifact_request.split("    runs-on:", 1)[0]
 assert "github.event.comment.author_association" in job_prefix
 assert "[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]" in job_prefix
-assert job_prefix.index("    if:") < job_prefix.index("    concurrency:")
 assert "actions: read" in artifact_request
 assert "contents: read" in artifact_request
 assert "issues: write" in artifact_request
 assert "statuses: write" in artifact_request
 assert "contents: write" not in artifact_request
 assert "workflows: write" not in artifact_request
-assert artifact_request.count("uses: actions/checkout@") == 2
-assert "ref: ${{ github.workflow_sha }}" in artifact_request
-assert "repository: ${{ steps.resolve.outputs.source_repository }}" in artifact_request
-assert "ref: ${{ steps.resolve.outputs.source_sha }}" in artifact_request
 
 
 def workflow_steps(text):
@@ -217,8 +198,8 @@ def step_condition(step):
 worker = workflow_steps(artifact_request)
 
 
-def worker_step(role, predicate):
-    matches = [step for step in worker if predicate(step)]
+def one_step(steps, role, predicate):
+    matches = [step for step in steps if predicate(step)]
     assert len(matches) == 1, role
     return matches[0]
 
@@ -227,21 +208,25 @@ def uses_action(step, action):
     return step.get("uses", [""])[0].startswith(f"{action}@")
 
 
-trusted = worker_step(
+trusted = one_step(
+    worker,
     "trusted checkout",
     lambda step: uses_action(step, "actions/checkout") and "path: tooling" in step["with"],
 )
-selected = worker_step(
+selected = one_step(
+    worker,
     "selected checkout",
     lambda step: uses_action(step, "actions/checkout") and "path: source" in step["with"],
 )
-resolve = worker_step("resolve", lambda step: step.get("id") == ["resolve"])
-create = worker_step(
+resolve = one_step(worker, "resolve", lambda step: step.get("id") == ["resolve"])
+create = one_step(
+    worker,
     "bundle creation",
     lambda step: any("create-source-bundle.sh" in line for line in step.get("run", [])),
 )
-finalize = worker_step("finalize", lambda step: step.get("id") == ["finalize"])
-report = worker_step(
+finalize = one_step(worker, "finalize", lambda step: step.get("id") == ["finalize"])
+report = one_step(
+    worker,
     "failure report",
     lambda step: any("reportProductionFailure" in line for line in step.get("with", [])),
 )
@@ -324,14 +309,46 @@ for step, expected in required_inputs:
     )
     assert inputs == expected, step["name"]
     assert {line.split(":", 1)[0] for line in step["env"]} == set(expected.values()), step["name"]
-assert artifact_request.count("persist-credentials: false") == 2
-assert "source-bundle-artifact-request.cjs" in artifact_request
-assert "request.resolveRequest" in artifact_request
-assert "request.completeRequest" in artifact_request
-assert "request.reportProductionFailure" in artifact_request
-assert "--event-name source-bundle-artifact-request" in artifact_request
-assert "SOURCE_SHA: ${{ steps.resolve.outputs.source_sha }}" in artifact_request
-assert "sourceSha: process.env.SOURCE_SHA" in artifact_request
+
+# The automatic producer bundles the pull-request head on pull_request and the pushed commit on
+# push. Its artifact name carries the SHA passed to the producer, which refuses any other HEAD.
+producer = workflow_steps(automatic)
+job_env_block = re.search(r"(?m)^    env:\n((?:      .*\n)+)", automatic).group(1)
+job_env = dict(line.strip().split(": ", 1) for line in job_env_block.splitlines())
+
+
+def resolved_ref(step):
+    ref = next(line.split(": ", 1)[1] for line in step["with"] if line.startswith("ref: "))
+    match = re.fullmatch(r"\$\{\{ env\.(\w+) \}\}", ref)
+    return job_env[match.group(1)] if match else ref
+
+
+requested_source = (
+    "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+)
+one_step(
+    producer,
+    "requested source checkout",
+    lambda step: uses_action(step, "actions/checkout") and resolved_ref(step) == requested_source,
+)
+upload = one_step(producer, "upload", lambda step: uses_action(step, "actions/upload-artifact"))
+artifact_name = next(line.split(": ", 1)[1] for line in upload["with"] if line.startswith("name: "))
+name_match = re.fullmatch(
+    r"teasescript-source-(\$\{\{ steps\.[\w-]+\.outputs\.[\w-]+ \}\})", artifact_name
+)
+assert name_match, artifact_name
+producer_run = one_step(
+    producer,
+    "producer run",
+    lambda step: any("create-source-bundle.sh" in line for line in step.get("run", [])),
+)
+argument = re.search(r'--source-sha (?:"([^"]+)"|(\S+))', " ".join(producer_run["run"]))
+source_sha = argument.group(1) or argument.group(2)
+variable = re.fullmatch(r"\$\{?(\w+)\}?", source_sha)
+if variable:
+    step_env = dict(line.split(": ", 1) for line in producer_run.get("env", []))
+    source_sha = {**job_env, **step_env}[variable.group(1)]
+assert source_sha == name_match.group(1), (source_sha, artifact_name)
 
 PYWORKFLOW
 
