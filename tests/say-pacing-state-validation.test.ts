@@ -1157,7 +1157,13 @@ test("ready snapshots reject pacing progress", () => {
 
 test("runtime-produced pacing states validate and checkpoint through their lifecycle", () => {
   const positive = plan('say "first"\nexit');
-  const background = run(positive, createFreshRuntimeSnapshot(positive));
+  const background = executeInstruction(positive, createFreshRuntimeSnapshot(positive));
+  assert.equal(background.snapshot.status, "running");
+  assert.equal(background.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
+  const naturalEnd = plan('say "first"');
+  const halted = run(naturalEnd, createFreshRuntimeSnapshot(naturalEnd));
+  assert.equal(halted.snapshot.status, "halted");
+  assert.equal(halted.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
 
   const waitPlan = plan('say "first"\nwait 10 s\nexit');
   const withWait = run(waitPlan, createFreshRuntimeSnapshot(waitPlan));
@@ -1192,15 +1198,19 @@ test("runtime-produced pacing states validate and checkpoint through their lifec
   });
   const replacement = run(promotionPlan, releasedBySkip.snapshot);
 
+  // No trailing exit: an explicit exit clears pacing work, and these rows must keep the unwound gate.
   const unwoundPlans = [
-    plan('if true { say "branch" }\nexit'),
-    plan('repeat 1 { say "loop" }\nexit'),
-    plan('function f { say "call" }\nf()\nexit'),
+    plan('if true { say "branch" }'),
+    plan('repeat 1 { say "loop" }'),
+    plan('function f { say "call" }\nf()'),
   ];
   const unwound = unwoundPlans.map((compiled) => ({
     compiled,
     snapshot: run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot,
   }));
+  for (const { snapshot } of unwound) {
+    assert.equal(snapshot.backgroundActions[0]?.kind, "chatPacingGate");
+  }
 
   const states: Array<[string, ReturnType<typeof plan>, RuntimeSnapshot]> = [
     ["initial background gate", positive, background.snapshot],
@@ -1221,7 +1231,7 @@ test("runtime-produced pacing states validate and checkpoint through their lifec
     ["branch unwind", unwound[0]!.compiled, unwound[0]!.snapshot],
     ["loop unwind", unwound[1]!.compiled, unwound[1]!.snapshot],
     ["function unwind", unwound[2]!.compiled, unwound[2]!.snapshot],
-    ["halted execution with a background gate", positive, background.snapshot],
+    ["halted execution with a background gate", naturalEnd, halted.snapshot],
   ];
 
   for (const [label, compiled, snapshot] of states) {
