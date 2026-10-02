@@ -116,21 +116,23 @@ test("fresh globals consume one captured proxy observation and never call get", 
 });
 
 test("instruction plans reject accessors before validation or execution", () => {
-  // EVIDENCE: JSON preserves the compiler-produced plan before an accessor is installed on optional padding.
-  const valid = JSON.parse(JSON.stringify(plan("exit"))) as InstructionPlan & { padding?: unknown };
+  // EVIDENCE: JSON preserves the compiler-produced plan before its temporary count becomes an accessor.
+  const valid = JSON.parse(JSON.stringify(plan("exit"))) as InstructionPlan;
+  const temporaryCount = valid.temporaryCount;
   let reads = 0;
-  Object.defineProperty(valid, "padding", {
+  // The getter returns the valid count, so only non-invocation can explain the rejection.
+  Object.defineProperty(valid, "temporaryCount", {
     enumerable: true,
     get() {
       reads += 1;
-      return reads === 1 ? 0 : deepList(20_000);
+      return temporaryCount;
     },
   });
 
   const validation = validateInstructionPlan(valid);
   assert.equal(validation.valid, false);
   assert.ok(
-    validation.errors.some((error) => error.code === "TSC002" && error.path === "$.padding"),
+    validation.errors.some((error) => error.code === "TSC002" && error.path === "$.temporaryCount"),
   );
 
   const safePlan = plan("exit");
