@@ -37,8 +37,12 @@ function playerRuntimeDeadlinesDue(snapshot: RuntimeSnapshot): boolean {
  */
 const BOUNDED_CATCH_UP_LIMIT_MS = 20_000;
 
-/** Restores a checkpoint, observes a time, runs the engine, and prints the result as JSON; see `Session.atBounded`. */
+/**
+ * Restores a checkpoint, observes a time, and runs the engine, round-tripping each resulting snapshot through checkpoint
+ * JSON as `Session.at` does; prints the result as JSON. See `Session.atBounded`.
+ */
 const BOUNDED_CATCH_UP_SCRIPT = `
+  import assert from "node:assert/strict";
   import {
     createCheckpoint, deserializeCheckpoint, observeTime, run, serializeCheckpoint,
   } from ${JSON.stringify(new URL("../src/index.js", import.meta.url).href)};
@@ -46,12 +50,18 @@ const BOUNDED_CATCH_UP_SCRIPT = `
   for await (const chunk of process.stdin) input += chunk;
   const { checkpoint, nowMs } = JSON.parse(input);
   const { plan, snapshot } = deserializeCheckpoint(checkpoint);
+  const restore = (current) => {
+    const json = serializeCheckpoint(createCheckpoint(plan, current));
+    const restored = deserializeCheckpoint(json).snapshot;
+    assert.deepEqual(restored, current, "checkpoint JSON must round-trip exactly");
+    return { json, restored };
+  };
   const observed = observeTime(plan, snapshot, nowMs);
-  const ran = run(plan, observed.snapshot);
+  const ran = run(plan, restore(observed.snapshot).restored);
   process.stdout.write(JSON.stringify({
     outcome: observed.outcome.kind,
     events: [...observed.events, ...ran.events],
-    checkpoint: serializeCheckpoint(createCheckpoint(plan, ran.snapshot)),
+    checkpoint: restore(ran.snapshot).json,
   }));
 `;
 
@@ -1387,8 +1397,8 @@ test("second re-audit regressions: plateau skipping, failure at a due deadline, 
   // late-versus-on-time equality and that an exhausted index finishes the timer, not the index value.
   const indexLimit =
     'let t = timer(duration: 1e-16 ms, async: true, repeat: true)\ntimer async 1 ms {\n  if t.elapsed > 0.900719925474099 ms { say "extra", 0 }\n  else { say "end", 0 }\n}\nwait 10 ms';
-  const prefix = new Session(indexLimit).at(0.9007199254740984);
-  const late = new Session(indexLimit).at(0.9007199254740984).at(1);
+  const prefix = new Session(indexLimit).atBounded(0.9007199254740984);
+  const late = new Session(indexLimit).atBounded(0.9007199254740984).at(1);
   for (let guard = 0; prefix.snapshot.observedSessionTimeMs < 1; guard += 1) {
     assert.ok(guard < 20, "the remaining rounds are few");
     const deadline = prefix.timers()[0]?.timer.deadlineMs ?? 1;
