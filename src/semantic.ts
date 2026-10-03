@@ -1095,7 +1095,8 @@ class SemanticValidator {
           if (declaration !== undefined && binding?.kind === "function") {
             this.#validateFunctionCall(expression, declaration);
           } else if (this.#builtins.has(name)) {
-            // Injected and core built-ins validate their values at runtime.
+            // Built-ins validate their parameter names and values at runtime; a repeated name is always an error.
+            this.#validateDistinctNamedArguments(expression);
           } else if (binding !== undefined) {
             this.#report(
               semanticCode.nonCallable,
@@ -1110,6 +1111,7 @@ class SemanticValidator {
             );
           }
         } else if (expression.callee.kind === "propertyAccessExpression") {
+          this.#validateDistinctNamedArguments(expression);
           yield* compileChild(
             this.#validateExpressionTask(expression.callee.object, scope, contextualSpeaker),
           );
@@ -1412,6 +1414,23 @@ class SemanticValidator {
           expression.span,
         );
       }
+    }
+  }
+
+  /** Reports a parameter name given twice in a call whose parameters only the callee knows. */
+  #validateDistinctNamedArguments(
+    expression: Extract<Expression, { kind: "callExpression" }>,
+  ): void {
+    const names = new Set<string>();
+    for (const argument of expression.arguments) {
+      if (argument.kind !== "namedArgument") continue;
+      if (names.has(argument.name.name))
+        this.#report(
+          semanticCode.duplicateNamedArgument,
+          `Duplicate named argument '${argument.name.name}'.`,
+          argument.name.span,
+        );
+      names.add(argument.name.name);
     }
   }
 

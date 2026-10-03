@@ -67,6 +67,35 @@ test("a positional argument after a named one and a parameter given twice are re
   ]);
 });
 
+test("a name given twice to a built-in or method is rejected at compile time", () => {
+  const builtin = 'say pack(1, mode: "x", mode: "y")';
+  const result = compileSource(builtin, { builtins: ["pack"] });
+  assert.equal(result.plan, null);
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => [
+      diagnostic.code,
+      diagnostic.message,
+      diagnostic.span.start.offset,
+      diagnostic.span.end.offset,
+    ]),
+    [
+      [
+        "TSV023",
+        "Duplicate named argument 'mode'.",
+        builtin.lastIndexOf("mode"),
+        builtin.lastIndexOf("mode") + 4,
+      ],
+    ],
+  );
+  assert.deepEqual(diagnostics('let items = ["a"]\nsay items.contains(x: 1, x: 2)'), [
+    ["TSV023", "Duplicate named argument 'x'.", "x"],
+  ]);
+  assert.deepEqual(
+    compileSource('say pack(1, mode: "x", size: 2)', { builtins: ["pack"] }).diagnostics,
+    [],
+  );
+});
+
 test("plan validation rejects a function call that gives one parameter two arguments", () => {
   const plan = structuredClone(compileValidPlan(SHOW + "let shown = show(1, c: 3)"));
   const call = plan.instructions.find((instruction) => instruction.kind === "callFunction");

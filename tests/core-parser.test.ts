@@ -96,7 +96,7 @@ test("parses left-associated property, index, and call postfix operations", () =
   ]);
 });
 
-test("parses positional and named arguments and rejects mixing", () => {
+test("parses positional, named, and positional-then-named arguments and rejects positional after named", () => {
   const result = parse(
     ["moveTo(10, 20)", "moveTo(x: 10, y: 20)", "moveTo(10, y: 20)", "moveTo(x: 10, 20)"].join("\n"),
   );
