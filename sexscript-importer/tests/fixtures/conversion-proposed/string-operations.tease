@@ -1,0 +1,16 @@
+// Text handling with proposed string operations.
+let line = "  write this line  "
+let typed = line.trim()
+say "Characters: ${typed.length}"
+say "${typed.upper()} / ${typed.lower()}"
+say "ok".capitalize()
+if typed.startsWith("write") and not typed.endsWith("!") {
+  say typed.replace("line", "sentence")
+}
+say typed.replace(" ", "_")
+// NOTE SX_SPLIT_TRAILING_EMPTY line 11: Java split() drops trailing empty parts; the proposed split() keeps them.
+let parts = "red,green,blue".split(",")
+say "${parts[1]} ${typed.substring(0, 5)}"
+if "Yes".lower() == "YES".lower() {
+  say "same"
+}

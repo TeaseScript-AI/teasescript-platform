@@ -7,6 +7,7 @@ import {
 import { emitTease } from "./emit-tease.ts";
 import type { IrExpression, IrStatement, IrSwitchCase, MigrationProgram } from "./ir.ts";
 import { proposalCapability } from "./proposals.ts";
+import { isRecord } from "./ast.ts";
 
 /**
  * Accepted TeaseScript the importer emits although the current compiler does not implement it yet. The
@@ -81,7 +82,11 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
     named: Record<string, IrExpression> = {},
   ): IrExpression => {
     capabilities.add(capability);
-    const shim = shimName(`${SHIM_PREFIX}${name[0]!.toUpperCase()}${name.slice(1)}`);
+    // Operation names of proposed members (`string-operations.length`) become identifier-safe shim names.
+    const words = name.split(/[^A-Za-z0-9]+/u).filter((word) => word !== "");
+    const shim = shimName(
+      `${SHIM_PREFIX}${words.map((word) => `${word[0]!.toUpperCase()}${word.slice(1)}`).join("")}`,
+    );
     operations.set(shim, name);
     builtins.add(shim);
     return { kind: "call", name: shim, positional, named };
@@ -130,8 +135,19 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
       case "index":
         return { ...value, target: expression(value.target), index: expression(value.index) };
       case "property":
+        if (value.proposed !== undefined) {
+          return call(proposalCapability(value.proposed), `${value.proposed}.${value.name}`, [
+            expression(value.target),
+          ]);
+        }
         return { ...value, target: expression(value.target) };
       case "methodCall":
+        if (value.proposed !== undefined) {
+          return call(proposalCapability(value.proposed), `${value.proposed}.${value.name}()`, [
+            expression(value.target),
+            ...value.arguments.map(expression),
+          ]);
+        }
         return {
           ...value,
           target: expression(value.target),
@@ -528,7 +544,72 @@ export function pendingHostFunctions(
       if (typeof value !== "number") throw new Error(`${name}() needs a number.`);
       return round(value);
     };
+  const text = (operation: string, value: RuntimeValue | undefined): string => {
+    if (typeof value !== "string") throw new Error(`${operation} needs text.`);
+    return value;
+  };
+  const items = (value: RuntimeValue[]): RuntimeValue => {
+    const list = { kind: "list", items: value };
+    return list;
+  };
   const implementations = new Map<string, HostFunction>([
+    // Proposed string operations (#508): the length also counts list elements and, for dictionaries, keys.
+    [
+      "string-operations.length",
+      ([value]) => {
+        if (typeof value === "string") return value.length;
+        const composite: unknown = value;
+        if (isRecord(composite) && Array.isArray(composite.items)) return composite.items.length;
+        if (isRecord(composite) && Array.isArray(composite.properties)) {
+          return composite.properties.length;
+        }
+        throw new Error("length needs text, a list, or a dictionary.");
+      },
+    ],
+    ["string-operations.upper()", ([value]) => text("upper()", value).toUpperCase()],
+    ["string-operations.lower()", ([value]) => text("lower()", value).toLowerCase()],
+    [
+      "string-operations.capitalize()",
+      ([value]) => {
+        const source = text("capitalize()", value);
+        return source.slice(0, 1).toUpperCase() + source.slice(1);
+      },
+    ],
+    ["string-operations.trim()", ([value]) => text("trim()", value).trim()],
+    [
+      "string-operations.startsWith()",
+      ([value, prefix]) => text("startsWith()", value).startsWith(text("startsWith()", prefix)),
+    ],
+    [
+      "string-operations.endsWith()",
+      ([value, suffix]) => text("endsWith()", value).endsWith(text("endsWith()", suffix)),
+    ],
+    [
+      "string-operations.replace()",
+      ([value, search, replacement]) =>
+        text("replace()", value).replaceAll(
+          text("replace()", search),
+          text("replace()", replacement),
+        ),
+    ],
+    [
+      "string-operations.split()",
+      ([value, separator]) => items(text("split()", value).split(text("split()", separator))),
+    ],
+    [
+      "string-operations.substring()",
+      ([value, start, end]) => {
+        const source = text("substring()", value);
+        if (typeof start !== "number" || (end !== undefined && typeof end !== "number")) {
+          throw new Error("substring() needs numeric positions.");
+        }
+        const stop = end ?? source.length;
+        if (start < 0 || stop > source.length || start > stop) {
+          throw new Error("substring() positions are out of range.");
+        }
+        return source.slice(start, stop);
+      },
+    ],
     ["run", ([script]) => ((state.transfer = String(script)), null)],
     ["end", () => null],
     ["showPopup", () => null],

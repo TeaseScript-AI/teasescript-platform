@@ -4524,6 +4524,10 @@ function lowerObjectMethodCallExpression(
     STRING_METHODS.has(name) &&
     !isKnownListExpression(targetNode, context)
   ) {
+    if (context.proposals.has("string-operations")) {
+      const proposed = proposedStringOperation(node, targetNode, name, argumentsNodes, context);
+      if (proposed !== undefined) return proposed;
+    }
     return unsupportedExpression(
       context,
       node,
@@ -4600,6 +4604,105 @@ function lowerObjectMethodCallExpression(
     "SX_UNSUPPORTED_LIST_METHOD",
     `Groovy list method ${name}() is not safely mapped yet.`,
   );
+}
+
+/**
+ * Groovy string methods as proposed built-in string operations (string-operations, #508), in a working syntax that
+ * follows the list members: `text.length` like `items.length`, verbs such as `text.trim()` like `items.sort()`. The
+ * length also counts list elements, so receivers that may be text or a list need no proof; receivers that may be
+ * maps need the dictionaries proposal, which counts keys. Returns undefined for methods or arguments the working
+ * syntax does not cover (regular expressions, tokenize).
+ */
+function proposedStringOperation(
+  node: AstNode,
+  targetNode: AstNode,
+  name: string,
+  argumentsNodes: AstNode[],
+  context: LowerContext,
+): IrExpression | null | undefined {
+  const mayBeMap = (inferType(targetNode, context.types) & OBJECT) !== 0;
+  const member = (operation: string, args: IrExpression[], target: IrExpression): IrExpression => ({
+    kind: "methodCall",
+    target,
+    name: operation,
+    arguments: args,
+    proposed: "string-operations",
+  });
+  const literalText = (argument: AstNode | undefined): string | null => {
+    const value = argument === undefined ? undefined : constantValue(argument);
+    return typeof value === "string" ? value : null;
+  };
+  let operation: string;
+  switch (name) {
+    case "size":
+    case "length": {
+      if (argumentsNodes.length !== 0) return undefined;
+      if (mayBeMap && !context.proposals.has("dictionaries")) return undefined;
+      const target = lowerExpression(targetNode, context);
+      return target === null
+        ? null
+        : { kind: "property", target, name: "length", proposed: "string-operations" };
+    }
+    case "toUpperCase":
+    case "toLowerCase":
+    case "capitalize":
+    case "trim":
+      if (argumentsNodes.length !== 0) return undefined;
+      operation = name === "toUpperCase" ? "upper" : name === "toLowerCase" ? "lower" : name;
+      break;
+    case "startsWith":
+    case "endsWith":
+    case "replace":
+      if (argumentsNodes.length !== (name === "replace" ? 2 : 1)) return undefined;
+      operation = name;
+      break;
+    case "replaceAll": {
+      // Java replaceAll() takes a regular expression and a replacement pattern; only plain text is covered.
+      const pattern = literalText(argumentsNodes[0]);
+      const replacement = literalText(argumentsNodes[1]);
+      if (argumentsNodes.length !== 2 || pattern === null || replacement === null) return undefined;
+      if (/[\\^$.|?*+()[\]{}]/u.test(pattern) || /[\\$]/u.test(replacement)) return undefined;
+      operation = "replace";
+      break;
+    }
+    case "split": {
+      // Java split() takes a regular expression and drops trailing empty parts.
+      const separator = literalText(argumentsNodes[0]);
+      if (argumentsNodes.length !== 1 || separator === null || separator === "") return undefined;
+      if (/[\\^$.|?*+()[\]{}]/u.test(separator)) return undefined;
+      addDiagnostic(
+        context,
+        "SX_SPLIT_TRAILING_EMPTY",
+        "warning",
+        "Java split() drops trailing empty parts; the proposed split() keeps them.",
+        node.span,
+      );
+      operation = "split";
+      break;
+    }
+    case "substring":
+      if (argumentsNodes.length !== 1 && argumentsNodes.length !== 2) return undefined;
+      operation = "substring";
+      break;
+    case "equalsIgnoreCase": {
+      if (argumentsNodes.length !== 1) return undefined;
+      const left = lowerExpression(targetNode, context);
+      const right = lowerExpression(argumentsNodes[0]!, context);
+      if (left === null || right === null) return null;
+      return {
+        kind: "binary",
+        operator: "==",
+        left: member("lower", [], left),
+        right: member("lower", [], right),
+      };
+    }
+    default:
+      return undefined;
+  }
+  const target = lowerExpression(targetNode, context);
+  if (target === null) return null;
+  const lowered = lowerArguments(argumentsNodes, context);
+  return lowered === null ? null : member(operation, lowered, target);
 }
 
 /** Groovy/Java string methods; `size`/`length` also measure lists, which are handled when proven. */

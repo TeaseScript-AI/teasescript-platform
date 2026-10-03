@@ -1,4 +1,5 @@
 import type { SourceSpan } from "./ast.ts";
+import type { ProposalId } from "./proposals.ts";
 
 export type DiagnosticSeverity = "info" | "warning" | "error";
 
@@ -133,8 +134,15 @@ export type IrExpression =
   | { kind: "list"; items: IrExpression[] }
   | { kind: "object"; properties: Array<{ name: string; value: IrExpression }> }
   | { kind: "index"; target: IrExpression; index: IrExpression }
-  | { kind: "property"; target: IrExpression; name: string }
-  | { kind: "methodCall"; target: IrExpression; name: string; arguments: IrExpression[] }
+  /** `proposed` marks a member that only a proposed language change defines (see proposals.ts). */
+  | { kind: "property"; target: IrExpression; name: string; proposed?: ProposalId }
+  | {
+      kind: "methodCall";
+      target: IrExpression;
+      name: string;
+      arguments: IrExpression[];
+      proposed?: ProposalId;
+    }
   /** `load key` returns null for a missing key; `defaultValue` replaces that null without writing storage. */
   | { kind: "load"; key: IrExpression; defaultValue?: IrExpression }
   /**
