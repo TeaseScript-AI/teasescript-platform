@@ -870,7 +870,7 @@ function materializeInteractionUi(
       );
     }
     const presentations = source.value.items.map((value) => {
-      if (!isObject(value)) return { text: evaluator.fieldText(value, span) };
+      if (!isObject(value)) return { text: evaluator.fieldText(value, span, true) };
       if (
         value.properties.some(
           (property) => property.name !== "text" && property.name !== "background",
@@ -879,7 +879,7 @@ function materializeInteractionUi(
         throw fault("TSR052", "Choice options support text and background only.", span);
       const textValue = getSerializableProperty(value, "text");
       if (textValue === undefined) throw fault("TSR052", "A choice object requires text.", span);
-      const text = evaluator.fieldText(textValue, span);
+      const text = evaluator.fieldText(textValue, span, true);
       const background = getSerializableProperty(value, "background");
       return {
         text,

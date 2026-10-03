@@ -910,11 +910,13 @@ export class Evaluator {
   }
 
   /** Text of an interaction field such as a button label, input hint, or choice option. A list is not selected. */
-  public fieldText(value: SerializableRuntimeValue, span: SourceSpan): string {
+  public fieldText(value: SerializableRuntimeValue, span: SourceSpan, choice = false): string {
     if (isList(value))
       throw fault(
         "TSR021",
-        'A list cannot be used as this text. Select one element with "${list}" or list.random.',
+        choice
+          ? 'A list cannot be a choice option yet. Write each option separately, or select one element with "${list}" or list.random.'
+          : 'A list cannot be used as this text. Select one element with "${list}" or list.random.',
         span,
       );
     return visibleText(value, span);

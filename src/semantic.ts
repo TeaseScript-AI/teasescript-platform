@@ -1223,7 +1223,9 @@ class SemanticValidator {
     if (unwrapParentheses(expression).kind === "listLiteral")
       this.#report(
         semanticCode.listInInteractionText,
-        `A list cannot be ${field}. Select one element with "\${...}" or .random.`,
+        field === "a choice option"
+          ? `A list cannot be a choice option yet. Write each option separately, or select one element with "\${...}" or .random.`
+          : `A list cannot be ${field}. Select one element with "\${...}" or .random.`,
         expression.span,
       );
   }
