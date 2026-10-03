@@ -1528,22 +1528,12 @@ function validateCallArguments(
     errors.push(planError("TSC002", "Function arguments must be an array.", path));
     return;
   }
-  const parameterNames = new Set<unknown>();
   value.forEach((argument, index) => {
     const argumentPath = `${path}[${index}]`;
     if (!isRecord(argument)) {
       errors.push(planError("TSC002", "Function argument must be an object.", argumentPath));
       return;
     }
-    if (parameterNames.has(argument.parameterName))
-      errors.push(
-        planError(
-          "TSC002",
-          "A function parameter receives more than one argument.",
-          `${argumentPath}.parameterName`,
-        ),
-      );
-    parameterNames.add(argument.parameterName);
     if (!hasExactKeys(argument, ["parameterName", "value", "span"])) {
       errors.push(
         planError("TSC002", "Function argument contains unsupported fields.", argumentPath),
