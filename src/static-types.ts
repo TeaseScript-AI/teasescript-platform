@@ -108,7 +108,7 @@ export function describeValue(type: StaticType): string {
       case "integer":
         return "a whole number (integer)";
       case "number":
-        return "a number with a fraction (number)";
+        return "a number";
       case "boolean":
         return "true or false (boolean)";
       case "duration":
@@ -189,22 +189,22 @@ function* expressionTypeTask(
       );
       return object.kind === "list" ? object.element : UNKNOWN_TYPE;
     }
-    case "callExpression":
-      if (expression.callee.kind === "identifier" && context.isBuiltin(expression.callee.name)) {
-        if (expression.callee.name === "random") return scalar("number");
-        if (expression.callee.name === "randomInteger") return scalar("integer");
-        if (expression.callee.name === "chance") return scalar("boolean");
+    case "callExpression": {
+      let callee = expression.callee;
+      while (callee.kind === "parenthesizedExpression") callee = callee.expression;
+      if (callee.kind === "identifier" && context.isBuiltin(callee.name)) {
+        if (callee.name === "random") return scalar("number");
+        if (callee.name === "randomInteger") return scalar("integer");
+        if (callee.name === "chance") return scalar("boolean");
       }
-      if (
-        expression.callee.kind === "propertyAccessExpression" &&
-        expression.callee.property.name === "contains"
-      ) {
+      if (callee.kind === "propertyAccessExpression" && callee.property.name === "contains") {
         const receiver = nonNullType(
-          yield* compileChild(expressionTypeTask(expression.callee.object, context)),
+          yield* compileChild(expressionTypeTask(callee.object, context)),
         );
         if (receiver.kind === "list" || receiver.kind === "set") return scalar("boolean");
       }
       return UNKNOWN_TYPE;
+    }
     case "unaryExpression": {
       if (expression.operator === "not") return scalar("boolean");
       const operand = nonNullType(
