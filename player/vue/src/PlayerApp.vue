@@ -7,6 +7,7 @@ import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
 import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 import type { PlayerSpeakerPresentation } from "../../model.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
+import FloatingViewfinder, { type FloatingPlace } from "./FloatingViewfinder.vue";
 import PlayerComposition from "./PlayerComposition.vue";
 import PlayerToolsShell, { type PlayerTool } from "./PlayerToolsShell.vue";
 import PlayerTopBar from "./PlayerTopBar.vue";
@@ -31,9 +32,13 @@ const props = withDefaults(
     title?: string;
     media?: { src: string; alt: string } | undefined;
     tools?: readonly PlayerTool[];
+    /** DEMO: whether the viewfinder floats over the Player as a movable window or leads the Stage. */
+    viewfinderLayout?: "floating" | "stage";
   }>(),
-  { title: "", tools: () => [] },
+  { title: "", tools: () => [], viewfinderLayout: "floating" },
 );
+// The floating viewfinder keeps the place the user gave it while the Player is mounted.
+const floatingPlace = ref<FloatingPlace | null>(null);
 const themeIntent = defineModel<PlayerThemeIntent>("themeIntent", {
   default: () => defaultPlayerThemeIntents.light,
 });
@@ -174,11 +179,16 @@ async function toggleFullscreen() {
           <Stage
             ref="stage"
             :media="stageMedia"
-            :viewfinder="player.viewfinder.value"
+            :viewfinder="viewfinderLayout === 'stage' ? player.viewfinder.value : null"
             @media-aspect="mediaAspect = $event"
           />
         </template>
         <template #overlay>
+          <FloatingViewfinder
+            v-if="viewfinderLayout === 'floating' && player.viewfinder.value"
+            v-model:place="floatingPlace"
+            :track="player.viewfinder.value"
+          />
           <SessionActivation :activation="player.activation.value" @activate="player.activate" />
         </template>
         <template #right-rail>

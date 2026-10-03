@@ -18,7 +18,7 @@ import StageRightRail from "./StageRightRail.vue";
 import ThemeLab from "./ThemeLab.vue";
 import TimerFixtureRegion from "./TimerFixtureRegion.vue";
 import TimerRegion from "./TimerRegion.vue";
-import { browserStorage } from "./usePlayerPreference";
+import { browserStorage, usePlayerPreference } from "./usePlayerPreference";
 import { usePlayerSession } from "./usePlayerSession";
 import { defaultPlayerThemeIntents } from "./usePlayerTheme";
 
@@ -40,6 +40,12 @@ const timerReset = ref(0);
 const timerPaused = ref(true);
 const backgroundControlsReset = ref(0);
 const themeIntent = ref<PlayerThemeIntent>(defaultPlayerThemeIntents.light);
+// Owner comparison of viewfinder presentations; the choice survives reloads.
+const viewfinderLayout = usePlayerPreference(
+  "player-viewfinder-layout",
+  ["floating", "stage"],
+  "floating",
+);
 
 const props = defineProps<{ capturedMediaRepository?: CapturedMediaRepository | null }>();
 // `?scenario=camera` opens the camera scenario with the session camera capability and persistent script storage, so
@@ -84,6 +90,7 @@ else if (viewfinderScenario) {
     :tools="tools"
     title="Evening by the coast"
     :media="mediaFixture === 'Runtime' ? undefined : stageFixtures[mediaFixture]"
+    :viewfinder-layout="viewfinderLayout"
   >
     <template #tool="{ tool, player: playerElement }">
       <LayoutDebug v-if="tool === 'Layout Debug' && playerElement" :player="playerElement" />
@@ -99,6 +106,17 @@ else if (viewfinderScenario) {
       </ul>
       <div v-if="tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
         <ThemeLab v-model:intent="themeIntent" />
+        <label class="grid gap-2">
+          Viewfinder
+          <select
+            v-model="viewfinderLayout"
+            data-viewfinder-layout
+            class="min-w-0 rounded border bg-card p-2"
+          >
+            <option value="floating">E: floating window</option>
+            <option value="stage">D: leads the Stage</option>
+          </select>
+        </label>
         <label class="grid gap-2">
           Stage media fixture
           <select v-model="mediaFixture" class="min-w-0 rounded border bg-card p-2">

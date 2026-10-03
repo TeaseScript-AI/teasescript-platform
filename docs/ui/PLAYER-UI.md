@@ -406,10 +406,14 @@ runtime Stage and media state; browser media callbacks are observations reported
 
 An optional viewfinder lets the user see what the session camera sees, for example to get into frame before a photo the
 script announces. It is off by default and is only a preview: it has no capture control, and the script alone takes
-photos with `takePhoto()`. While shown, it leads the Stage as a live, mirrored (selfie-view) image at the camera's aspect
-ratio, labelled "Camera preview", and the Stage image stays visible as a small reference in its lower corner; captured
-photos are not mirrored. Without an available camera it is not shown. No syntax requests it yet: the Player host shows
-and hides it, and every new session starts with it hidden.
+photos with `takePhoto()`. It shows a live, mirrored (selfie-view) image at the camera's aspect ratio, labelled "Camera
+preview"; captured photos are not mirrored. Without an available camera it is not shown. No syntax requests it yet: the
+Player host shows and hides it, and every new session starts with it hidden. Its presentation is a demo under Owner
+evaluation in the development preview's Visual Lab. By default it floats over the Player as a window that the user moves
+by dragging it or with its grip's arrow keys and resizes from its corner; it keeps its place while the Player is
+mounted. The alternative leads the Stage, with the Stage image as a small reference in its lower corner. Where the
+browser offers it to pages, a button opens the viewfinder in the browser's own picture-in-picture window, which also
+floats over other apps; hiding the viewfinder closes that window.
 
 Media playback is script-controlled. Audio and video elements show no native browser controls, and the Player offers
 no seek, scrub, pause, or skip control of its own: playback the runtime did not command would make reported progress

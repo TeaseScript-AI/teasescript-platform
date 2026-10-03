@@ -575,9 +575,10 @@ viewport that keeps the first question's input visible. With Chromium's fake cam
 card it also runs the development preview's camera scenario (`/player/?dev&scenario=camera`): granted, the session camera
 opens at Start, `takePhoto()` puts a photo of the test card on the Stage, and the saved photo is shown again in a new
 run, after which the next mount reclaims a replaced photo; denied, the script continues without a photo; a forged
-reference in saved data shows no photo. The viewfinder scenario (`?scenario=viewfinder`) checks that the viewfinder
-plays the test card mirrored at the camera's aspect while the script waits, keeps that aspect when the Stage image
-changes, goes when the script takes its unmirrored photo, and is absent with a denied camera. Development preview presentation is covered by the [Player browser
+reference in saved data shows no photo. The viewfinder scenario (`?scenario=viewfinder`) checks in both presentations
+that the viewfinder plays the test card mirrored while the script waits and goes when the script takes its unmirrored
+photo, that a viewfinder leading the Stage gives it the camera's aspect and keeps it when the Stage image changes, and
+that a denied camera shows none. Development preview presentation is covered by the [Player browser
 verification route](#player-browser-and-visual-verification).
 
 Firefox captures camera frames differently, so the same scenario has a Firefox route after `npm run build`: `npm run

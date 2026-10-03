@@ -51,8 +51,9 @@ async function checks(page, url) {
           localStorage.getItem('player-storage:["development-camera","camera.photo"]') ?? "null",
         )?.value ?? null,
     );
-  // `video` replaces the Player's camera constraints, for example to get a wide camera.
-  async function start(unsizedMilliseconds, scenario = url, video = undefined) {
+  // `video` replaces the Player's camera constraints, for example to get a wide camera; `layout` selects the
+  // development preview's viewfinder presentation.
+  async function start(unsizedMilliseconds, scenario = url, video = undefined, layout = undefined) {
     const tab = await context.newPage();
     const messages = [];
     tab.on(
@@ -60,6 +61,11 @@ async function checks(page, url) {
       (message) => message.text().startsWith("[player]") && messages.push(message.text()),
     );
     tab.on("pageerror", (error) => messages.push(`pageerror: ${error.message}`));
+    if (layout)
+      await tab.addInitScript(
+        (layout) => localStorage.setItem("player-viewfinder-layout", layout),
+        layout,
+      );
     if (unsizedMilliseconds !== undefined) {
       // A real Firefox camera reports the video playable before its first frame has a size.
       await tab.addInitScript(
@@ -131,12 +137,14 @@ async function checks(page, url) {
   );
   check((await savedPhoto(tab)) === second, "A camera without frames replaced the saved photo");
   await tab.close();
-  // The viewfinder plays the same camera, also when its first frames have no size yet, and the photo follows. Its frame
-  // and the Stage adopt the wide camera's aspect once the frames have a size.
-  ({ tab, messages } = await start(1_500, url.replace("scenario=camera", "scenario=viewfinder"), {
-    width: 1280,
-    height: 720,
-  }));
+  // The viewfinder plays the same camera, also when its first frames have no size yet, and the photo follows. Leading
+  // the Stage, its frame and the Stage adopt the wide camera's aspect once the frames have a size.
+  ({ tab, messages } = await start(
+    1_500,
+    url.replace("scenario=camera", "scenario=viewfinder"),
+    { width: 1280, height: 720 },
+    "stage",
+  ));
   await tab.waitForFunction(() => {
     const video = document.querySelector("[data-viewfinder] video");
     const frame = document.querySelector("[data-viewfinder]")?.getBoundingClientRect();
