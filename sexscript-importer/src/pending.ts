@@ -72,12 +72,31 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
   const generated: { choose: ProposedChooseNames | null } = { choose: null };
   const proposedChoose = (): ProposedChooseNames =>
     (generated.choose ??= {
-      choose: shimName("sxProposedChoose"),
       textOptions: shimName("sxProposedTextOptions"),
-      show: [shimName("sxProposedShowA"), shimName("sxProposedShowB")],
-      turn: shimName("sxProposedTurn"),
-      locals: shimName("sxProposedOptions"),
+      collect: shimName("sxProposedCollect"),
+      locals: {
+        texts: shimName("sxProposedTexts"),
+        list: shimName("sxProposedList"),
+        text: shimName("sxProposedText"),
+        parts: shimName("sxProposedParts"),
+        part: shimName("sxProposedPart"),
+        option: shimName("sxProposedOption"),
+        pick: shimName("sxProposedPick"),
+      },
+      sites: [],
     });
+  const prefills: Array<{ name: string; input: "askText" | "askNumber" }> = [];
+  const chooseSite = (): ProposedChooseSite => {
+    const names = proposedChoose();
+    const number = names.sites.length + 1;
+    const site: ProposedChooseSite = {
+      choose: shimName(`sxProposedChoose${number}`),
+      show: [shimName(`sxProposedShow${number}A`), shimName(`sxProposedShow${number}B`)],
+      turn: shimName(`sxProposedTurn${number}`),
+    };
+    names.sites.push(site);
+    return site;
+  };
   const call = (
     capability: string,
     name: string,
@@ -195,6 +214,7 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
       case "listChoice": {
         capabilities.add(proposalCapability("choose-lists"));
         const names = proposedChoose();
+        const site = chooseSite();
         const textOptions = (list: IrExpression): IrExpression => ({
           kind: "call",
           name: names.textOptions,
@@ -235,7 +255,7 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         flushTexts();
         return {
           kind: "call",
-          name: names.choose,
+          name: site.choose,
           positional: [{ kind: "list", items: parts }],
           named: {},
           local: true,
@@ -256,9 +276,18 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         };
       case "input": {
         if (value.defaultValue === undefined) return value;
-        // The stand-in answers the input itself, so the proposed prefill only needs to leave the copy.
+        // A generated function per input takes the prefill as its argument, so it is evaluated before the question
+        // as legacy evaluated its arguments, and then asks; answers keep rotating per input.
         capabilities.add(proposalCapability("input-defaults"));
-        return { kind: "input", input: value.input };
+        const name = shimName(`sxProposedPrefill${prefills.length + 1}`);
+        prefills.push({ name, input: value.input });
+        return {
+          kind: "call",
+          name,
+          positional: [expression(value.defaultValue)],
+          named: {},
+          local: true,
+        };
       }
       case "literal":
       case "variable":
@@ -420,24 +449,23 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
 
   const shimmedStatements = statements(program.statements);
   const chooseNames = generated.choose;
-  const shimmed = {
-    ...program,
-    statements:
-      chooseNames === null
-        ? shimmedStatements
-        : [
-            {
-              kind: "let" as const,
-              name: chooseNames.turn,
-              value: { kind: "literal" as const, value: 0 },
-              span: null,
-            },
-            ...shimmedStatements,
-          ],
-  };
+  const turns: IrStatement[] = (chooseNames?.sites ?? []).map((site) => ({
+    kind: "let",
+    name: site.turn,
+    value: { kind: "literal", value: 0 },
+    span: null,
+  }));
+  const shimmed = { ...program, statements: [...turns, ...shimmedStatements] };
+  const prefillParameter = prefills.length === 0 ? "" : shimName("sxProposedDefault");
+  const prefillSource = prefills
+    .map(({ name, input }) => `\nfunction ${name}(${prefillParameter}) {\n    return ${input}\n}\n`)
+    .join("");
   return {
     program: shimmed,
-    source: emitTease(shimmed) + (chooseNames === null ? "" : proposedChooseSource(chooseNames)),
+    source:
+      emitTease(shimmed) +
+      (chooseNames === null ? "" : proposedChooseSource(chooseNames)) +
+      prefillSource,
     builtins: [...builtins].sort(),
     operations,
     capabilities,
@@ -445,14 +473,20 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
 }
 
 interface ProposedChooseNames {
-  choose: string;
   textOptions: string;
+  collect: string;
+  /** Local variable names of the generated functions, unique in the program. */
+  locals: Record<"texts" | "list" | "text" | "parts" | "part" | "option" | "pick", string>;
+  sites: ProposedChooseSite[];
+}
+
+/** One proposed `choose` of the program, so the smoke run rotates answers per legacy menu. */
+interface ProposedChooseSite {
+  choose: string;
   /** Two identical functions that show the options; consecutive calls alternate between them. */
   show: [string, string];
   /** Global that selects the next of the two. */
   turn: string;
-  /** Prefix of the generated functions' local variables, unique in the program. */
-  locals: string;
 }
 
 /** Largest number of options the stand-in for a proposed `choose` supports; more fail the smoke run. */
@@ -469,50 +503,59 @@ const PROPOSED_CHOOSE_LIMIT = 40;
  * `choose` options computed in a loop); with two copies the last choice's instruction is not the one being reused.
  */
 function proposedChooseSource(names: ProposedChooseNames): string {
-  const local = (name: string): string => `${names.locals}${name}`;
+  const { texts, list, text, parts, part, option, pick } = names.locals;
   const lines = [
     "",
-    `function ${names.textOptions}(${local("Texts")}) {`,
-    `    let ${local("List")} = []`,
-    `    for ${local("Text")} in ${local("Texts")} {`,
-    `        ${local("List")}.add({ label: ${local("Text")}, text: ${local("Text")} })`,
+    `function ${names.textOptions}(${texts}) {`,
+    `    let ${list} = []`,
+    `    for ${text} in ${texts} {`,
+    `        ${list}.add({ label: ${text}, text: ${text} })`,
     "    }",
-    `    return ${local("List")}`,
+    `    return ${list}`,
     "}",
     "",
-    `function ${names.choose}(${local("Parts")}) {`,
-    `    let ${local("List")} = []`,
-    `    for ${local("Part")} in ${local("Parts")} {`,
-    `        for ${local("Option")} in ${local("Part")} {`,
-    `            ${local("List")}.add(${local("Option")})`,
+    `function ${names.collect}(${parts}) {`,
+    `    let ${list} = []`,
+    `    for ${part} in ${parts} {`,
+    `        for ${option} in ${part} {`,
+    `            ${list}.add(${option})`,
     "        }",
     "    }",
-    `    ${names.turn} = 1 - ${names.turn}`,
-    `    if ${names.turn} == 1 {`,
-    `        return ${names.show[0]}(${local("List")})`,
-    "    }",
-    `    return ${names.show[1]}(${local("List")})`,
+    `    return ${list}`,
     "}",
   ];
-  for (const show of names.show) {
-    lines.push("", `function ${show}(${local("List")}) {`);
-    for (let count = 1; count <= PROPOSED_CHOOSE_LIMIT; count += 1) {
-      const options = Array.from(
-        { length: count },
-        (_, index) => `${index}: ${local("List")}[${index}].text`,
-      ).join(", ");
-      lines.push(
-        `    if ${local("List")}.length == ${count} {`,
-        `        let ${local("Pick")} = choose ${options}`,
-        `        return ${local("List")}[${local("Pick")}].label`,
-        "    }",
-      );
-    }
+  for (const site of names.sites) {
     lines.push(
-      "    // No options, or more than the stand-in supports: the invalid index fails the run.",
-      `    return ${local("List")}[${local("List")}.length].label`,
+      "",
+      `function ${site.choose}(${parts}) {`,
+      `    let ${list} = ${names.collect}(${parts})`,
+      `    ${site.turn} = 1 - ${site.turn}`,
+      `    if ${site.turn} == 1 {`,
+      `        return ${site.show[0]}(${list})`,
+      "    }",
+      `    return ${site.show[1]}(${list})`,
       "}",
     );
+    for (const show of site.show) {
+      lines.push("", `function ${show}(${list}) {`);
+      for (let count = 1; count <= PROPOSED_CHOOSE_LIMIT; count += 1) {
+        const options = Array.from(
+          { length: count },
+          (_, index) => `${index}: ${list}[${index}].text`,
+        ).join(", ");
+        lines.push(
+          `    if ${list}.length == ${count} {`,
+          `        let ${pick} = choose ${options}`,
+          `        return ${list}[${pick}].label`,
+          "    }",
+        );
+      }
+      lines.push(
+        "    // No options, or more than the stand-in supports: the invalid index fails the run.",
+        `    return ${list}[${list}.length].label`,
+        "}",
+      );
+    }
   }
   return `${lines.join("\n")}\n`;
 }
@@ -788,9 +831,10 @@ export function pendingHostFunctions(
         for (const pair of listItems(pairs) ?? []) {
           const [key, value] = listItems(runtimeValue(pair)) ?? [];
           const name = keyText(runtimeValue(key));
+          // A repeated key keeps its first position and takes the later value, as in a Groovy map.
           const index = properties.findIndex((property) => property.name === name);
-          if (index >= 0) properties.splice(index, 1);
-          properties.push({ name, value: runtimeValue(value) });
+          if (index >= 0) properties[index] = { name, value: runtimeValue(value) };
+          else properties.push({ name, value: runtimeValue(value) });
         }
         return dictionary(properties);
       },
@@ -828,11 +872,11 @@ export function pendingHostFunctions(
     ],
     [
       "string-operations.replace()",
-      ([value, search, replacement]) =>
-        text("replace()", value).replaceAll(
-          text("replace()", search),
-          text("replace()", replacement),
-        ),
+      ([value, search, replacement]) => {
+        const literal = text("replace()", replacement);
+        // A callback keeps `$&` and similar patterns literal.
+        return text("replace()", value).replaceAll(text("replace()", search), () => literal);
+      },
     ],
     [
       "string-operations.split()",

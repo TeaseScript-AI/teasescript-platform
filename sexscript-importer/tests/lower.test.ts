@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { emitTease } from "../src/emit-tease.ts";
+import { rootDiagnostics } from "../src/diagnostics.ts";
 import { lowerParsedFile } from "../src/lower.ts";
 import type { AstNode, ParsedGroovyFile, SourceSpan } from "../src/ast.ts";
 
@@ -1116,4 +1117,26 @@ test("maps legacy getBooleans to accepted askBooleans", () => {
     emitTease(program),
     'let selected = askBooleans(message: "Choose", texts: ["A", "B"], defaults: [true, false])\n',
   );
+});
+
+test("counts an unsupported map key write once, at its root cause", () => {
+  const position = (column: number, endColumn: number): SourceSpan => ({
+    line: 1,
+    column,
+    endLine: 1,
+    endColumn,
+  });
+  const lookup = {
+    code: "SX_DYNAMIC_MAP_ACCESS",
+    severity: "error" as const,
+    message: "runtime key",
+    span: position(1, 5),
+  };
+  const target = {
+    code: "SX_UNSUPPORTED_ASSIGNMENT_TARGET",
+    severity: "error" as const,
+    message: "target",
+    span: position(1, 9),
+  };
+  assert.deepEqual(rootDiagnostics([lookup, target]), [lookup]);
 });

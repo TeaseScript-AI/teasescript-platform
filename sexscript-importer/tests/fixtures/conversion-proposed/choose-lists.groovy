@@ -13,3 +13,8 @@ show("Level " + levels[level])
 def toys = [[lbl: "Plug", id: "plug"], [lbl: "Clamps", id: "clamps"]]
 def toy = toys[getSelectedValue(null, toys.collect { it.lbl })].id
 show("Toy: " + toy)
+
+def again = 0
+while (again == 0) {
+	again = getSelectedValue("Again?", ["Back"] + levels)
+}

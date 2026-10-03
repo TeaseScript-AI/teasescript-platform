@@ -14,3 +14,5 @@ show("Toys: " + owned.size())
 owned.remove(GAG)
 if (!owned.isEmpty()) show("Still owned: " + owned.values()[0])
 owned.clear()
+def sizes = [length: 99]
+show("" + sizes["length"] + " in " + sizes.size())

@@ -14,3 +14,4 @@ say "${parts[1]} ${typed.substring(0, 5)}"
 if "Yes".lower() == "YES".lower() {
   say "same"
 }
+say "x".replace("x", "$&")

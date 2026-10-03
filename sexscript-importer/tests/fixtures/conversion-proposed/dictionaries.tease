@@ -4,17 +4,23 @@ let GAG = "gag"
 let toyNames = { [COLLAR]: "leather collar", [GAG]: "ball gag" }
 let owned = {}
 let chosen = COLLAR
+// NOTE SX_SHARED_MAP_WRITE line 7: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
 if not owned.has(chosen) {
   owned[chosen] = 1
 }
+// NOTE SX_SHARED_MAP_WRITE line 8: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
 owned[GAG] = 2
 say "You wear the ${toyNames[chosen]}"
 for name in owned.keys {
   say "${name}: ${owned[name]}"
 }
 say "Toys: ${owned.length}"
+// NOTE SX_SHARED_MAP_WRITE line 14: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
 owned.remove(GAG)
 if owned.length != 0 {
   say "Still owned: ${owned.values[0]}"
 }
+// NOTE SX_SHARED_MAP_WRITE line 16: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
 owned.clear()
+let sizes = { length: 99 }
+say "${sizes["length"]} in ${sizes.length}"

@@ -28,3 +28,9 @@ for it in toys {
 }
 let toy = toys[(choose sexscriptLegacyMenuOptions(menuTexts, 0))].id
 say "Toy: ${toy}"
+
+let again = 0
+while again == 0 {
+  say "Again?"
+  again = choose 0: "Back", sexscriptLegacyMenuOptions(levels, 1)
+}

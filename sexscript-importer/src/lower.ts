@@ -2085,17 +2085,12 @@ function lowerAssignment(
       target = lowerExpression(targetNode, context);
     }
     if (target !== null) noteSharedListWrite(asNode(targetNode.left), node, context);
+    if (target?.kind === "index" && target.proposed === "dictionaries") {
+      noteSharedMapWrite(node.span, context);
+    }
   } else if (operator === "=" && targetNode.kind === "property") {
     target = lowerExpression(targetNode, context);
-    if (target !== null) {
-      addDiagnostic(
-        context,
-        "SX_SHARED_MAP_WRITE",
-        "warning",
-        "Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).",
-        node.span,
-      );
-    }
+    if (target !== null) noteSharedMapWrite(node.span, context);
   }
   if (target === null) {
     return [
@@ -3924,6 +3919,24 @@ function lowerMapExpression(node: AstNode, context: LowerContext): IrExpression 
     ) {
       // A computed or non-identifier key: a proposed dictionary literal entry `[key]: value`.
       const keyNode = asNode(entry.key);
+      const keyType = inferType(keyNode, context.types);
+      if (name === "" || (keyType & NULL) !== 0) {
+        return unsupportedExpression(
+          context,
+          entry,
+          "SX_DICTIONARY_KEY",
+          "This map key may be empty or null; proposed dictionary keys are non-empty text.",
+        );
+      }
+      if (!onlyOf(keyType, STRING)) {
+        addDiagnostic(
+          context,
+          "SX_DICTIONARY_KEY_TEXT",
+          "warning",
+          'Groovy kept this key\'s type, so 1 and "1" were different keys; proposed dictionary keys are text.',
+          entry.span,
+        );
+      }
       const key = keyNode === null ? null : lowerExpression(keyNode, context);
       const value = valueNode === null ? null : lowerExpression(valueNode, context);
       if (key === null || value === null) return null;
@@ -3996,7 +4009,14 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     }
     const propertyName = constantString(indexNode);
     if (propertyName !== null) {
-      if (!isTeaseObjectPropertyName(propertyName) && context.proposals.has("dictionaries")) {
+      // A key that is not a property name, or that a dictionary member would shadow, stays a lookup.
+      const dictionaryLookup =
+        context.proposals.has("dictionaries") &&
+        (!isTeaseObjectPropertyName(propertyName) ||
+          (DICTIONARY_MEMBERS.has(propertyName) &&
+            targetNode !== null &&
+            mayBeMap(targetNode, context)));
+      if (dictionaryLookup) {
         return {
           kind: "index",
           target,
@@ -4028,7 +4048,13 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
       return key === null ? null : { kind: "index", target, index: key, proposed: "dictionaries" };
     }
     const index = lowerExpression(indexNode, context);
-    return index === null ? null : { kind: "index", target, index };
+    if (index === null) return null;
+    // `[key]` reads lists and dictionaries alike; a receiver that may be a map gets dictionary semantics.
+    return context.proposals.has("dictionaries") &&
+      targetNode !== null &&
+      mayBeMap(targetNode, context)
+      ? { kind: "index", target, index, proposed: "dictionaries" }
+      : { kind: "index", target, index };
   }
   if (operator === "&&" || operator === "||") {
     const leftNode = asNode(node.left);
@@ -4526,6 +4552,22 @@ function lowerPropertyExpression(node: AstNode, context: LowerContext): IrExpres
     const target = lowerExpression(targetNode, context);
     return target === null ? null : { kind: "property", target, name: "length" };
   }
+  if (
+    context.proposals.has("dictionaries") &&
+    DICTIONARY_MEMBERS.has(property) &&
+    isKnownMapExpression(targetNode, context)
+  ) {
+    // Groovy `map.length` reads the key "length", which the proposed dictionary member would shadow.
+    const target = lowerExpression(targetNode, context);
+    return target === null
+      ? null
+      : {
+          kind: "index",
+          target,
+          index: { kind: "literal", value: property },
+          proposed: "dictionaries",
+        };
+  }
   if (!isRecordFieldAccess(targetNode, property, context)) {
     return unsupportedExpression(
       context,
@@ -4861,7 +4903,9 @@ function proposedStringOperation(
       operation = "substring";
       break;
     case "equalsIgnoreCase": {
+      // Groovy returns false for a null argument, which lower() would not survive.
       if (argumentsNodes.length !== 1) return undefined;
+      if (!onlyOf(inferType(argumentsNodes[0]!, context.types), STRING)) return undefined;
       const left = lowerExpression(targetNode, context);
       const right = lowerExpression(argumentsNodes[0]!, context);
       if (left === null || right === null) return null;
@@ -5166,6 +5210,13 @@ function isKnownMapExpression(node: AstNode, context: LowerContext): boolean {
   return onlyOf(type, OBJECT | NULL) && (type & OBJECT) !== 0;
 }
 
+function mayBeMap(node: AstNode, context: LowerContext): boolean {
+  return (inferType(node, context.types) & OBJECT) !== 0;
+}
+
+/** Members of a proposed dictionary; a map key with one of these names is read as `map["name"]`. */
+const DICTIONARY_MEMBERS = new Set(["clear", "has", "keys", "length", "remove", "values"]);
+
 /**
  * `new File(folder).listFiles()`, optionally filtered by file name, then `.size()`, over a package image folder as a
  * proposed tag count (media-tags, M1): every folder below `images/` is a tag of the images it holds (matched without
@@ -5192,7 +5243,8 @@ function proposedImageCount(
       (test.operator !== "==~" && test.operator !== "=~") ||
       tested?.kind !== "property" ||
       constantString(tested.property) !== "name" ||
-      variableName(tested.object) !== closure!.parameter
+      variableName(tested.object) !== closure!.parameter ||
+      !isPure(test, context)
     ) {
       return undefined;
     }
@@ -5224,15 +5276,15 @@ function proposedImageCount(
     }
     tags.push(templateOrLiteral(parts));
   }
-  if (nameFilter !== null) {
-    addDiagnostic(
-      context,
-      "SX_IMAGE_NAME_FILTER",
-      "warning",
-      "The legacy count included only files whose names matched a pattern; the proposed tag count counts every image in the folder.",
-      nameFilter.span,
-    );
-  }
+  addDiagnostic(
+    context,
+    "SX_IMAGE_COUNT",
+    "warning",
+    nameFilter === null
+      ? "The legacy count listed every entry directly in the folder; the proposed tag count counts the images tagged with the folder names, including images in subfolders."
+      : "The legacy count included only files directly in the folder whose names matched a pattern; the proposed tag count counts every image tagged with the folder names, including images in subfolders.",
+    node.span,
+  );
   return {
     kind: "call",
     name: "countImages",
@@ -5304,6 +5356,16 @@ function imagePathSegments(
   return folders.slice(1);
 }
 
+function noteSharedMapWrite(span: SourceSpan | null, context: LowerContext): void {
+  addDiagnostic(
+    context,
+    "SX_SHARED_MAP_WRITE",
+    "warning",
+    "Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).",
+    span,
+  );
+}
+
 /** Groovy methods that only maps have, so the receiver is a map even when its type is not inferred. */
 const MAP_ONLY_METHODS = new Set(["containsKey", "keySet", "values"]);
 
@@ -5369,9 +5431,12 @@ function proposedDictionaryOperation(
         : { kind: "index", target: lowered, index: key, proposed: "dictionaries" };
     }
     case "remove":
-      return wholeStatement && argumentsNodes.length === 1 ? method("remove") : undefined;
-    case "clear":
-      return wholeStatement && argumentsNodes.length === 0 ? method("clear") : undefined;
+    case "clear": {
+      if (!wholeStatement || argumentsNodes.length !== (name === "remove" ? 1 : 0))
+        return undefined;
+      noteSharedMapWrite(node.span, context);
+      return method(name);
+    }
     default:
       return undefined;
   }
@@ -5843,8 +5908,10 @@ function proposedSelectedValue(
   let loop: IrStatement[] = [];
   let list: IrExpression;
   if (callParts(listNode)?.name === "collect") {
+    // The loop runs before the statement, so written options before it must not have effects.
     const root = context.statementRoot;
     if (root === null || !isHoistable(root, node, context, listNode)) return undefined;
+    if (!writtenItems.every((item) => isPure(item, context))) return undefined;
     const name = freshName("menuTexts", context);
     const lowered = lowerCollectionAssignment(true, name, listNode, node.span, context);
     if (lowered === null) return undefined;
