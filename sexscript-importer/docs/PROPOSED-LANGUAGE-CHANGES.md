@@ -48,8 +48,8 @@ let names = player.petNames         // a list copy, as today
 
 Spec impact: V30 §8 and §16 (the "approved visible-text contexts" and opt-in wording go away).
 
-**Open: `say player.petNames` without `${...}`.** Recommendation: a compile error with a hint naming
-`"${player.petNames}"` and `player.petNames.random`; at runtime, when the type is unknown, the same message as an error.
+**`say player.petNames` without `${...}`: option C, it shows all elements** (owner, 2026-10-03, also for debugging).
+The options considered:
 
 - Option A, error with hint: one visible place for the magic, as the owner intends. It costs one extra line change for
   authors used to V30 examples (none exist outside the spec).
@@ -96,9 +96,10 @@ let answer = choose back: "Back", "Spanking", "Lines"
 
 Common practice: this is how HTML's `<option>` works; without a `value` attribute the option's value is its text.
 
-**Open: numeric labels.** Recommendation: numeric labels stay all-or-nothing, so one `choose` always returns one type
-(`string`, or `number` when every option has a numeric label). Identifier labels and text-derived labels mix freely
-because both are text.
+**Numeric labels: option B** (owner, 2026-10-03). Mixing numeric labels with text is allowed only when the result goes
+into an explicit union-typed variable (`let rounds: integer | string = choose ...`); otherwise it is an error, so one
+`choose` returns one type. This depends on union types (#504). Identifier labels and text-derived labels mix freely
+because both are text. The considerations:
 
 - Pro: follows the single-type principle the owner adopted for #504: a variable keeps one inferred type, so
   `let answer = choose ...` must have one. It prevents code that works for the button the author tested and breaks for
@@ -114,8 +115,11 @@ lengths differ, a missing label is the button text and extra labels are ignored.
 compiler warning when both lists are known at compile time, otherwise a runtime developer warning. A length mismatch
 often means a label was forgotten in the middle and every later label shifted, which is why the warning matters.
 
-**Open: the notation.** `choose ids: texts` cannot be used: an identifier before `:` is a literal label, so that
-already means one button labelled `"ids"`. Recommendation: a list of records, each with `label` and `text`.
+**Notation: option A, a list of records with `label` and `text`** (owner agreed in principle, 2026-10-03; the POC uses
+it). `choose ids: texts` cannot be used: an identifier before `:` is a literal label, so that already means one button
+labelled `"ids"`. Records are the common practice well beyond HTML: Django `choices` pairs, Rails `options_for_select`,
+Qt `addItem(text, data)`, Flutter `DropdownMenuItem(value:, child:)`, Windows Forms `DisplayMember`/`ValueMember`, and
+Ren'Py `renpy.display_menu([(caption, value), ...])`. Removing a record from a list needs #509.
 
 ```tease
 let offenses = [
