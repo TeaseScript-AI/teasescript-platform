@@ -23,6 +23,11 @@ watch(
     if (!track) emit("mediaAspect", 0);
   },
 );
+// An image shown meanwhile measures its own aspect; an empty Stage keeps none of the camera's.
+function steppedAside(value: boolean) {
+  away.value = value;
+  if (value) emit("mediaAspect", 0);
+}
 function mediaLoaded(event: Event) {
   const image = event.currentTarget;
   if (image instanceof HTMLImageElement && image.naturalHeight)
@@ -39,7 +44,7 @@ function mediaLoaded(event: Event) {
         :track="viewfinder"
         class="stage-viewfinder"
         @aspect="emit('mediaAspect', $event)"
-        @away="away = $event"
+        @away="steppedAside"
       >
         <img v-if="media && !away" :src="media.src" :alt="media.alt" class="stage-viewfinder-reference" />
       </Viewfinder>

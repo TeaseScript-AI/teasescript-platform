@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from "vue";
+import { nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { PictureInPicture2, Video } from "@lucide/vue";
 
 // A live, local preview of the session camera. It never captures: the script takes photos through `takePhoto()`.
@@ -10,6 +10,7 @@ const props = withDefaults(defineProps<{ track: MediaStreamTrack; label?: boolea
 });
 const emit = defineEmits<{ aspect: [ratio: number]; away: [away: boolean] }>();
 const video = ref<HTMLVideoElement | null>(null);
+const pipButton = ref<HTMLButtonElement | null>(null);
 // The camera's aspect ratio once a frame has a size; webcams commonly deliver 4:3. A browser may play frames before
 // they have a size, as Firefox does with some cameras, so playing frames are measured too; only a change is reported.
 const ratio = ref(4 / 3);
@@ -56,7 +57,13 @@ function setAway(value: boolean) {
   emit("away", value);
   // A returning preview reports its aspect again, for a Stage that followed the image meanwhile.
   reported = null;
-  if (!value) measured();
+  if (value) return;
+  measured();
+  // Focus that the inert preview lost returns to its picture-in-picture button.
+  void nextTick(() => {
+    if (!unmounted && (document.activeElement === null || document.activeElement === document.body))
+      pipButton.value?.focus();
+  });
 }
 async function openPictureInPicture() {
   if (!documentPip) {
@@ -92,6 +99,7 @@ async function openPictureInPicture() {
   opened.document.body.append(copy, back);
   copy.play().catch(() => {});
   setAway(true);
+  back.focus();
   opened.addEventListener("pagehide", () => {
     copy.srcObject = null;
     if (pipWindow !== opened) return;
@@ -141,6 +149,7 @@ onBeforeUnmount(() => {
     </figcaption>
     <button
       v-if="pictureInPicture"
+      ref="pipButton"
       type="button"
       class="viewfinder-pip"
       aria-label="Open camera preview in picture-in-picture"
