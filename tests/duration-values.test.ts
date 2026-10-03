@@ -194,7 +194,7 @@ test("+= and -= apply to variables, properties, and indexes with one target eval
   assert.deepEqual(
     sayTexts(
       [
-        "let x = 1",
+        "let x: number = 1",
         "x += 2",
         "x -= 0.5",
         "let o = { a: 1 }",
@@ -230,6 +230,10 @@ test("compound assignment reads the target before an instruction-emitting operan
     ),
     ["2"],
   );
-  assert.equal(runtimeFailure("let x = 1\nx += true"), "TSR027");
+  assert.deepEqual(diagnostics("let x = 1\nx += true"), ["TSV041"]);
+  assert.equal(
+    runtimeFailure('let flag = load "flag" default true\nlet x = 1\nx += flag'),
+    "TSR027",
+  );
   assert.deepEqual(diagnostics("y += 1"), ["TSV003"]);
 });

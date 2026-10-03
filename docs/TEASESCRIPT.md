@@ -234,6 +234,11 @@ The current function subset includes:
 - lexical function scope with package-global access;
 - deep-copy ordinary arguments/returns and speaker-reference identity preservation.
 
+The compiler enforces that a variable keeps its declared or inferred type (V30 §12) wherever both types are known:
+`let`, assignment, `+=`/`-=`, list and set elements (`add`, index assignment), and loop variables. An `integer` value may
+be stored where a `number` is expected; every other mismatch is compile error `TSV041`. Values the compiler cannot know,
+such as untyped storage, host data, and function results, are not yet checked at runtime.
+
 Complete static typing and the wider V30 Standard Library/runtime APIs are not implemented yet. Until function-signature
 types are checked, a typed function signature parses but does not compile, so its declared types are never silently
 ignored.

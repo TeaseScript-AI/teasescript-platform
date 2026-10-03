@@ -2070,9 +2070,9 @@ Rules:
 
 Storage currently supports strings, finite numbers, booleans, lists, objects, sets, ranges, and durations, including
 nested `null`. Wider persistent-data support is not yet implemented; this subset is not a permanent language limit.
-Persisted-value type checking is partially implemented: it currently checks only the stored value in a direct
-`let x: T = load ...` initializer (parentheses around `load` are allowed), not defaults, assignments, arguments, or
-returns. Full `integer`/`number` type preservation is not yet implemented because the runtime represents both as one
+Persisted-value type checking is partially implemented: at runtime it currently checks only the stored value in a
+direct `let x: T = load ...` initializer (parentheses around `load` are allowed), not defaults, assignments, arguments,
+or returns. The compiler rejects a default whose type is known and does not match `T`. Full `integer`/`number` type preservation is not yet implemented because the runtime represents both as one
 number. Replacement-value recovery under [§34](#34-runtime-warnings-and-recoverable-values) is not yet implemented.
 
 Examples:
