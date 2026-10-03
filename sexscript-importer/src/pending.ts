@@ -76,13 +76,13 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
   const expression = (value: IrExpression): IrExpression => {
     switch (value.kind) {
       case "load":
-        return call(
-          "storage",
-          "load",
-          value.defaultValue === undefined
-            ? [expression(value.key)]
-            : [expression(value.key), expression(value.defaultValue)],
-        );
+        return {
+          ...value,
+          key: expression(value.key),
+          ...(value.defaultValue === undefined
+            ? {}
+            : { defaultValue: expression(value.defaultValue) }),
+        };
       case "call": {
         const capability = PENDING_CALLS.get(value.name);
         const positional = value.positional.map(expression);
@@ -155,14 +155,9 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
   const statement = (item: IrStatement): IrStatement[] => {
     switch (item.kind) {
       case "save":
-        return [
-          callStatement(
-            call("storage", "save", [expression(item.key), expression(item.value)]),
-            item.span,
-          ),
-        ];
+        return [{ ...item, key: expression(item.key), value: expression(item.value) }];
       case "delete":
-        return [callStatement(call("storage", "delete", [expression(item.key)]), item.span)];
+        return [{ ...item, key: expression(item.key) }];
       // Transfer and end leave the current file, so the shimmed copy stops there.
       case "run":
         return [
@@ -312,8 +307,7 @@ function collectNames(value: unknown, names: Set<string>): void {
 }
 
 /**
- * Host stand-ins for the pending capabilities of a shimmed program, for smoke runs only: storage follows the owner
- * semantics (a missing key reads as null or the supplied default, reads never write), `run` records its target in
+ * Host stand-ins for the pending capabilities of a shimmed program, for smoke runs only: `run` records its target in
  * the flow state, time and dates follow the simulated clock from 2026-10-02 12:00 UTC, conversions fail without a
  * `default` like the accepted functions, and a timed button answers quickly, then at its timeout, without advancing
  * the clock. Integer input is a real number input in the shimmed program.
@@ -322,8 +316,6 @@ export function pendingHostFunctions(
   shim: PendingShim,
   state: FlowState = newFlowState(),
 ): Record<string, HostFunction> {
-  const storage = state.storage;
-  const key = (value: RuntimeValue | undefined): string => String(value);
   const next = <T>(operation: string, answers: readonly T[]): T => {
     const visit = state.answers.get(operation) ?? 0;
     state.answers.set(operation, visit + 1);
@@ -383,17 +375,6 @@ export function pendingHostFunctions(
       return round(value);
     };
   const implementations = new Map<string, HostFunction>([
-    // V30 leaves `save null` open; the stand-in removes the key as legacy SexScript did.
-    [
-      "save",
-      ([name, value]) => {
-        if (value === undefined || value === null) storage.delete(key(name));
-        else storage.set(key(name), value);
-        return null;
-      },
-    ],
-    ["load", ([name, fallback]) => storage.get(key(name)) ?? fallback ?? null],
-    ["delete", ([name]) => (storage.delete(key(name)), null)],
     ["run", ([script]) => ((state.transfer = String(script)), null)],
     ["end", () => null],
     ["showPopup", () => null],
@@ -413,7 +394,8 @@ export function pendingHostFunctions(
     ["getDateTime", () => date(true)],
     ["getDate", () => date(false)],
     ["openUrl", () => null],
-    ["round", rounded("round", Math.round)],
+    // Owner decision (#507): ties round away from zero.
+    ["round", rounded("round", (value) => Math.sign(value) * Math.round(Math.abs(value)))],
     ["floor", rounded("floor", Math.floor)],
     ["ceil", rounded("ceil", Math.ceil)],
     [

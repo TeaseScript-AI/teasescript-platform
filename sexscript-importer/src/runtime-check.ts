@@ -40,6 +40,8 @@ export interface SmokeRunOptions {
   visits?: Map<unknown, number>;
   /** Advanced with simulated time; a flow passes one clock through all of its scripts. */
   clock?: SmokeClock;
+  /** Script storage the run starts with and leaves its writes in; a flow passes one map through its scripts. */
+  storage?: Map<string, RuntimeValue>;
 }
 
 export type TeaseRunner = (
@@ -136,6 +138,7 @@ export function smokeRunFlow(
       maxSteps: maxSteps - steps,
       visits: scriptVisits,
       clock: state.clock,
+      storage: state.storage,
     });
     // A transfer counts as a step, so scripts that transfer immediately cannot loop forever.
     steps += run.steps + 1;
@@ -198,6 +201,7 @@ export async function loadRepositoryRunner(): Promise<TeaseRunner> {
       options.maxSteps ?? 2000,
       options.visits ?? new Map(),
       options.clock ?? { nowMs: 0 },
+      options.storage ?? new Map(),
     );
 }
 
@@ -221,6 +225,7 @@ function smokeRun(
   maxSteps: number,
   visits: Map<unknown, number>,
   clock: SmokeClock,
+  storage: Map<string, RuntimeValue>,
 ): SmokeRunResult {
   const compiled = api.call("compileSource", source, { builtins: Object.keys(builtins) });
   if (!isRecord(compiled.plan)) {
@@ -258,11 +263,16 @@ function smokeRun(
       ]),
     ),
   };
+  // Session-local storage, sorted by key as the runtime keeps it; stored values are never null.
+  const scriptStorage = [...storage]
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([key, value]) => ({ key, value }));
   let snapshot: RuntimeData = api.call("createFreshRuntimeSnapshot", plan, {
     seed: 12345,
     baseDelayMs: 0,
     delayPerWordMs: 0,
     delayPerCharacterMs: 0,
+    scriptStorage,
   });
   const clockStart = clock.nowMs;
   let now = 0;
@@ -315,51 +325,68 @@ function smokeRun(
       steps,
     };
   };
-  advance({ snapshot });
-  for (let steps = 0; steps < maxSteps; steps += 1) {
-    const done = terminal(steps);
-    if (done !== null) return done;
-    const action = isRecord(snapshot.foregroundAction) ? snapshot.foregroundAction : null;
-    if (action === null) return { status: "stuck", failure: null, steps };
-    if (action.kind === "interaction") {
-      const visit = visits.get(action.owningInstruction) ?? 0;
-      const completion = api.call("completeAction", plan, snapshot, {
-        actionId: action.actionId,
-        actionKind: "interaction",
-        interactionKind: action.interactionKind,
-        payload: interactionAnswer(action, visit),
-      });
-      const outcome = isRecord(completion.outcome) ? completion.outcome : {};
-      if (outcome.kind === "completed") {
-        visits.set(action.owningInstruction, visit + 1);
-      } else if (outcome.kind !== "executionPending") {
-        return harness(`Interaction answer rejected: ${JSON.stringify(outcome)}`, steps);
+  // Leaves the run's storage writes in the shared map however the run ends.
+  const keepStorage = (): void => {
+    storage.clear();
+    const entries = Array.isArray(snapshot.scriptStorage) ? snapshot.scriptStorage : [];
+    for (const entry of entries.filter(isRecord)) {
+      if (typeof entry.key === "string" && isRuntimeValue(entry.value)) {
+        storage.set(entry.key, entry.value);
       }
-      advance(completion);
-      continue;
     }
-    if (typeof action.deadlineMs === "number") {
-      advance(observe(Math.max(now + 1, action.deadlineMs)));
-      continue;
-    }
-    if (action.kind === "mediaPlayback") {
-      const media = api.media(snapshot).find((entry) => entry.mediaId === action.mediaId);
-      if (media !== undefined && media.loaded !== true) {
-        const loaded = api.call("reportMediaLoad", plan, snapshot, action.mediaId, {
-          kind: "loaded",
-          durationMs: MEDIA_PASS_MS,
+  };
+  const runActions = (): SmokeRunResult => {
+    advance({ snapshot });
+    for (let steps = 0; steps < maxSteps; steps += 1) {
+      const done = terminal(steps);
+      if (done !== null) return done;
+      const action = isRecord(snapshot.foregroundAction) ? snapshot.foregroundAction : null;
+      if (action === null) return { status: "stuck", failure: null, steps };
+      if (action.kind === "interaction") {
+        const visit = visits.get(action.owningInstruction) ?? 0;
+        const completion = api.call("completeAction", plan, snapshot, {
+          actionId: action.actionId,
+          actionKind: "interaction",
+          interactionKind: action.interactionKind,
+          payload: interactionAnswer(action, visit),
         });
-        const outcome = isRecord(loaded.outcome) ? loaded.outcome : {};
-        if (outcome.kind === "invalidReport") {
-          return harness(`Media load report rejected: ${JSON.stringify(outcome)}`, steps);
+        const outcome = isRecord(completion.outcome) ? completion.outcome : {};
+        if (outcome.kind === "completed") {
+          visits.set(action.owningInstruction, visit + 1);
+        } else if (outcome.kind !== "executionPending") {
+          return harness(`Interaction answer rejected: ${JSON.stringify(outcome)}`, steps);
         }
-        advance(loaded);
+        advance(completion);
         continue;
       }
+      if (typeof action.deadlineMs === "number") {
+        advance(observe(Math.max(now + 1, action.deadlineMs)));
+        continue;
+      }
+      if (action.kind === "mediaPlayback") {
+        const media = api.media(snapshot).find((entry) => entry.mediaId === action.mediaId);
+        if (media !== undefined && media.loaded !== true) {
+          const loaded = api.call("reportMediaLoad", plan, snapshot, action.mediaId, {
+            kind: "loaded",
+            durationMs: MEDIA_PASS_MS,
+          });
+          const outcome = isRecord(loaded.outcome) ? loaded.outcome : {};
+          if (outcome.kind === "invalidReport") {
+            return harness(`Media load report rejected: ${JSON.stringify(outcome)}`, steps);
+          }
+          advance(loaded);
+          continue;
+        }
+      }
+      advance(observe(now + MEDIA_PASS_MS));
     }
-    advance(observe(now + MEDIA_PASS_MS));
+    return terminal(maxSteps) ?? { status: "stepLimit", failure: null, steps: maxSteps };
+  };
+  try {
+    return runActions();
+  } finally {
+    keepStorage();
   }
-  return terminal(maxSteps) ?? { status: "stepLimit", failure: null, steps: maxSteps };
 }
 
 const TEXT_ANSWERS = ["answer", "yes", "no"];
