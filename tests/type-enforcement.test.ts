@@ -43,14 +43,14 @@ test("integer values widen to number, but not the reverse", () => {
   assert.deepEqual(mismatches("let count = 10\ncount = count / 4"), [
     [
       "TSV041",
-      "'count' holds a whole number (integer), so it cannot be set to a number with a fraction (number). To allow fractions, declare it as 'let count: number = ...'.",
+      "'count' holds a whole number (integer), so it cannot be set to a number. To allow fractions, declare it as 'let count: number = ...'.",
       "count / 4",
     ],
   ]);
   assert.deepEqual(mismatches("let count: integer = 2.5"), [
     [
       "TSV041",
-      "'count' is declared as integer, so it cannot start as a number with a fraction (number). To allow fractions, declare it as 'let count: number = ...'.",
+      "'count' is declared as integer, so it cannot start as a number. To allow fractions, declare it as 'let count: number = ...'.",
       "2.5",
     ],
   ]);
@@ -61,21 +61,21 @@ test("compound assignment keeps the variable's type", () => {
   assert.deepEqual(mismatches("let count = 1\ncount += 0.5"), [
     [
       "TSV041",
-      "'count' holds a whole number (integer), so '+=' cannot make it a number with a fraction (number). To allow fractions, declare it as 'let count: number = ...'.",
+      "'count' holds a whole number (integer), so '+=' cannot make it a number. To allow fractions, declare it as 'let count: number = ...'.",
       "0.5",
     ],
   ]);
   assert.deepEqual(mismatches('let count = 1\ncount += "x"'), [
     [
       "TSV041",
-      "'count' holds a whole number (integer), so text (string) cannot be added to it.",
+      "'count' holds a whole number (integer), so text (string) cannot be added to it. Use a number instead.",
       '"x"',
     ],
   ]);
   assert.deepEqual(mismatches("let pause = 5 s\npause -= 2"), [
     [
       "TSV041",
-      "'pause' holds a duration, so a whole number (integer) cannot be subtracted from it.",
+      "'pause' holds a duration, so a whole number (integer) cannot be subtracted from it. Use a duration such as '2 s' instead.",
       "2",
     ],
   ]);
@@ -97,12 +97,12 @@ test("lists keep their element type, and loop variables take it", () => {
   assert.deepEqual(mismatches('let scores = [1, 2]\nscores.add("x")\nscores[0] = "y"'), [
     [
       "TSV041",
-      "'scores' holds integer values (integer[]), so it cannot contain text (string).",
+      "'scores' holds integer values (integer[]), so it cannot contain text (string). Use a separate list for values of another type.",
       '"x"',
     ],
     [
       "TSV041",
-      "'scores' holds integer values (integer[]), so an element cannot be set to text (string).",
+      "'scores' holds integer values (integer[]), so it cannot contain text (string). Use a separate list for values of another type.",
       '"y"',
     ],
   ]);
@@ -110,7 +110,7 @@ test("lists keep their element type, and loop variables take it", () => {
   assert.deepEqual(mismatches('let names: string set = set[]\nnames.add("Ada")\nnames.add(1)'), [
     [
       "TSV041",
-      "'names' holds string values (string set), so it cannot contain a whole number (integer).",
+      "'names' holds string values (string set), so it cannot contain a whole number (integer). Use a separate set for values of another type.",
       "1",
     ],
   ]);
@@ -142,7 +142,7 @@ test("a list or set literal is checked element by element against a known elemen
   assert.deepEqual(mismatches('let names: string[] = ["a", 1]'), [
     [
       "TSV041",
-      "'names' holds string values (string[]), so it cannot contain a whole number (integer).",
+      "'names' holds string values (string[]), so it cannot contain a whole number (integer). Use a separate list for values of another type.",
       "1",
     ],
   ]);
@@ -158,7 +158,7 @@ test("optional types keep their non-null type in operations, elements, and loops
   assert.deepEqual(mismatches("let count: integer? = 1\ncount += 0.5"), [
     [
       "TSV041",
-      "'count' holds a whole number (integer) or null, so '+=' cannot make it a number with a fraction (number). To allow fractions, declare it as 'let count: number? = ...'.",
+      "'count' holds a whole number (integer) or null, so '+=' cannot make it a number. To allow fractions, declare it as 'let count: number? = ...'.",
       "0.5",
     ],
   ]);
@@ -187,6 +187,25 @@ test("null suggestions name only annotations that exist", () => {
     mismatches("let items = [1]\nitems = null")[0]?.[1],
     "'items' holds a list (integer[]), so it cannot be set to null. To allow null, declare it as 'let items: integer[]? = ...'.",
   );
+});
+
+test("an optional operand and a parenthesized method keep their checks", () => {
+  assert.deepEqual(mismatches('let count = 1\nlet text: string? = "x"\ncount += text'), [
+    [
+      "TSV041",
+      "'count' holds a whole number (integer), so text (string) or null cannot be added to it. Use a number instead.",
+      "text",
+    ],
+  ]);
+  assert.deepEqual(mismatches('let items = [1]\n(items.add)("x")'), [
+    [
+      "TSV041",
+      "'items' holds integer values (integer[]), so it cannot contain text (string). Use a separate list for values of another type.",
+      '"x"',
+    ],
+  ]);
+  assert.deepEqual(mismatches('let tags = set["a"]\n(tags.add)(1)')[0]?.[0], "TSV041");
+  assert.deepEqual(mismatches("let count = 1\nlet extra: integer? = 2\ncount += extra"), []);
 });
 
 test("function bodies check assignments to script variables", () => {
