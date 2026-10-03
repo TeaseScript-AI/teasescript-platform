@@ -36,3 +36,21 @@ if photo != null {
 showButton as guide "Finish"
 exit
 `;
+
+// Development viewfinder content: the preview shows the viewfinder while the script waits on "Take photo", standing in
+// for a viewfinder request the language cannot express yet. The script alone takes the photo, right after the press.
+export const viewfinderScenarioSource = `
+speaker guide { title: "Camera Guide" }
+showImage "images/coast.svg"
+say as guide "Time for a photo. Get into the frame and face the camera.", instant
+showButton as guide "Take photo"
+let photo: string? = takePhoto()
+if photo != null {
+    showImage photo
+    say as guide "Captured.", instant
+} else {
+    say as guide "No camera; continuing without a photo.", instant
+}
+showButton as guide "Finish"
+exit
+`;

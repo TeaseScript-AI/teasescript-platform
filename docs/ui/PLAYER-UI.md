@@ -404,6 +404,19 @@ video temporarily occupies the Stage over that image; when the video ends or is 
 ([§22](../specifications/accepted-syntaxes-v30.md#22-stage-image-audio-and-video)). Presentation follows canonical
 runtime Stage and media state; browser media callbacks are observations reported to the runtime, not settlement.
 
+An optional viewfinder lets the user see what the session camera sees, for example to get into frame before a photo the
+script announces. It is off by default and is only a preview: it has no capture control, and the script alone takes
+photos with `takePhoto()`. It shows a live, mirrored (selfie-view) image at the camera's aspect ratio, labelled "Camera
+preview"; captured photos are not mirrored. Without an available camera it is not shown. No syntax requests it yet: the
+Player host shows and hides it, and every new session starts with it hidden. Its presentation is a demo under Owner
+evaluation in the development preview's Visual Lab. By default it floats over the Player as a window that the user moves
+by dragging it or with its grip's arrow keys and resizes from its corner; it keeps its place while the Player is
+mounted. The alternative leads the Stage, with the Stage image as a small reference in its lower corner. Where the
+browser offers it to pages, a button opens the viewfinder in the browser's own picture-in-picture window, which also
+floats over other apps. Meanwhile the Player's own viewfinder steps aside, and a viewfinder leading the Stage returns the
+Stage to its image; closing that window, or its "Back to Player" button, brings the viewfinder back where it was, and
+hiding the viewfinder closes it.
+
 Media playback is script-controlled. Audio and video elements show no native browser controls, and the Player offers
 no seek, scrub, pause, or skip control of its own: playback the runtime did not command would make reported progress
 disagree with the canonical timeline. A progress indicator may extrapolate between reports for display only. Whether

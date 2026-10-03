@@ -51,7 +51,9 @@ async function checks(page, url) {
           localStorage.getItem('player-storage:["development-camera","camera.photo"]') ?? "null",
         )?.value ?? null,
     );
-  async function start(unsizedMilliseconds) {
+  // `video` replaces the Player's camera constraints, for example to get a wide camera; `layout` selects the
+  // development preview's viewfinder presentation.
+  async function start(unsizedMilliseconds, scenario = url, video = undefined, layout = undefined) {
     const tab = await context.newPage();
     const messages = [];
     tab.on(
@@ -59,28 +61,36 @@ async function checks(page, url) {
       (message) => message.text().startsWith("[player]") && messages.push(message.text()),
     );
     tab.on("pageerror", (error) => messages.push(`pageerror: ${error.message}`));
+    if (layout)
+      await tab.addInitScript(
+        (layout) => localStorage.setItem("player-viewfinder-layout", layout),
+        layout,
+      );
     if (unsizedMilliseconds !== undefined) {
       // A real Firefox camera reports the video playable before its first frame has a size.
-      await tab.addInitScript((milliseconds) => {
-        let sizedAt = Infinity;
-        for (const name of ["videoWidth", "videoHeight"]) {
-          const native = Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, name);
-          Object.defineProperty(HTMLVideoElement.prototype, name, {
-            configurable: true,
-            get() {
-              return performance.now() < sizedAt ? 0 : native.get.call(this);
-            },
-          });
-        }
-        const getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-        navigator.mediaDevices.getUserMedia = async (constraints) => {
-          const stream = await getUserMedia(constraints);
-          sizedAt = performance.now() + milliseconds;
-          return stream;
-        };
-      }, unsizedMilliseconds);
+      await tab.addInitScript(
+        ([milliseconds, video]) => {
+          let sizedAt = Infinity;
+          for (const name of ["videoWidth", "videoHeight"]) {
+            const native = Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, name);
+            Object.defineProperty(HTMLVideoElement.prototype, name, {
+              configurable: true,
+              get() {
+                return performance.now() < sizedAt ? 0 : native.get.call(this);
+              },
+            });
+          }
+          const getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+          navigator.mediaDevices.getUserMedia = async (constraints) => {
+            const stream = await getUserMedia(video ? { ...constraints, video } : constraints);
+            sizedAt = performance.now() + milliseconds;
+            return stream;
+          };
+        },
+        [unsizedMilliseconds, video],
+      );
     }
-    await tab.goto(url);
+    await tab.goto(scenario);
     await tab.locator("[data-session-activation] button").click();
     return { tab, messages };
   }
@@ -127,7 +137,38 @@ async function checks(page, url) {
   );
   check((await savedPhoto(tab)) === second, "A camera without frames replaced the saved photo");
   await tab.close();
-  return "PASS a late-sized first frame, the saved photo in a new run, and a camera without frames";
+  // The viewfinder plays the same camera, also when its first frames have no size yet, and the photo follows. Leading
+  // the Stage, its frame and the Stage adopt the wide camera's aspect once the frames have a size.
+  ({ tab, messages } = await start(
+    1_500,
+    url.replace("scenario=camera", "scenario=viewfinder"),
+    { width: 1280, height: 720 },
+    "stage",
+  ));
+  await tab.waitForFunction(() => {
+    const video = document.querySelector("[data-viewfinder] video");
+    const frame = document.querySelector("[data-viewfinder]")?.getBoundingClientRect();
+    const stageAspect = getComputedStyle(document.querySelector("#player-shell")).getPropertyValue(
+      "--media-aspect",
+    );
+    return (
+      video?.videoWidth === 1280 &&
+      !video.paused &&
+      getComputedStyle(video).transform === "matrix(-1, 0, 0, 1, 0, 0)" &&
+      Math.abs(frame.width / frame.height - 16 / 9) < 0.02 &&
+      Math.abs(Number(stageAspect) - 16 / 9) < 0.01
+    );
+  });
+  await tab.locator("button", { hasText: "Take photo" }).click();
+  await shows(tab, "Captured.");
+  await tab.waitForFunction(decodedPhotos);
+  check(
+    (await tab.locator("[data-viewfinder]").count()) === 0,
+    "The viewfinder stayed after the photo",
+  );
+  check(messages.length === 0, `The viewfinder run reported: ${messages.join(" | ")}`);
+  await tab.close();
+  return "PASS a late-sized first frame, the saved photo in a new run, a camera without frames, and the viewfinder";
 }
 
 let passed = false;

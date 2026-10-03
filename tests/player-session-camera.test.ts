@@ -133,6 +133,36 @@ test("a revoked or failing camera stays unavailable for the rest of the session"
   );
 });
 
+test("the viewfinder previews only the open camera's live track", async () => {
+  const track = new FakeTrack();
+  const open = harness(async () => [track]);
+  assert.equal(open.camera.previewTrack, null);
+  await open.camera.open(true);
+  assert.equal(open.camera.previewTrack, track);
+  // Taking a photo uses the same stream and keeps the preview.
+  assert.equal((await open.camera.answer()).kind, "captured");
+  assert.equal(open.camera.previewTrack, track);
+  track.end();
+  assert.equal(open.camera.previewTrack, null);
+
+  const denied = harness(async () => {
+    throw Object.assign(new Error(), { name: "NotAllowedError" });
+  });
+  await denied.camera.open(true);
+  assert.equal(denied.camera.previewTrack, null);
+
+  const failing = harness(async () => [new FakeTrack()]);
+  await failing.camera.open(true);
+  failing.frames.fail = true;
+  await failing.camera.answer();
+  assert.equal(failing.camera.previewTrack, null);
+
+  const released = harness(async () => [new FakeTrack()]);
+  await released.camera.open(true);
+  released.camera.release();
+  assert.equal(released.camera.previewTrack, null);
+});
+
 test("a session released while the browser answers never reports its camera as opened", async () => {
   let grant = (_tracks: readonly FakeTrack[]) => {};
   const track = new FakeTrack();

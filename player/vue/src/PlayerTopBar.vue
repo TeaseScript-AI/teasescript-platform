@@ -224,14 +224,8 @@ onBeforeUnmount(cancelHide);
 
 <!-- Selectors are rooted at this component; slotted controls keep the same material. -->
 <style>
-/* Title and all top-media controls share one polarity-aware translucent material.
+/* Title and all top-media controls share the media material (style.css).
    The surrounding top bar stays transparent so Stage content remains visible. */
-[data-player-top-bar] {
-  --media-surface: var(--theme-media-surface, oklch(96% 0.01 70 / 58%));
-  --media-text: var(--theme-media-text, oklch(15% 0 0));
-  --media-border: var(--theme-media-border, oklch(15% 0 0 / 22%));
-  --media-shadow: var(--theme-media-shadow, rgb(0 0 0 / 22%));
-}
 [data-player-top-bar] button {
   --button-rest: transparent;
   --button-hover: var(--theme-media-hover, oklch(86% 0.01 70 / 68%));

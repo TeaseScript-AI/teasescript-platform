@@ -575,14 +575,17 @@ viewport that keeps the first question's input visible. With Chromium's fake cam
 card it also runs the development preview's camera scenario (`/player/?dev&scenario=camera`): granted, the session camera
 opens at Start, `takePhoto()` puts a photo of the test card on the Stage, and the saved photo is shown again in a new
 run, after which the next mount reclaims a replaced photo; denied, the script continues without a photo; a forged
-reference in saved data shows no photo. Development preview presentation is covered by the [Player browser
+reference in saved data shows no photo. The viewfinder scenario (`?scenario=viewfinder`) checks in both presentations
+that the viewfinder plays the test card mirrored while the script waits and goes when the script takes its unmirrored
+photo, that a viewfinder leading the Stage gives it the camera's aspect and keeps it when the Stage image changes, and
+that a denied camera shows none. Development preview presentation is covered by the [Player browser
 verification route](#player-browser-and-visual-verification).
 
 Firefox captures camera frames differently, so the same scenario has a Firefox route after `npm run build`: `npm run
 test:player:firefox-camera` drives Firefox's fake camera through `playwright-cli` and a Playwright-managed Firefox, and
 skips explicitly when either is missing. It checks a capture whose first frames have no size yet, as a real Firefox
-camera delivers them; the saved photo in a new run; and a camera without frames, after which the script continues
-without a photo. Neither route needs a physical or virtual camera device. `CHROMIUM_BIN` is tried before the `/usr/bin` Chromium
+camera delivers them; the saved photo in a new run; a camera without frames, after which the script continues
+without a photo; and the viewfinder with such first frames from a wide camera, whose aspect it adopts. Neither route needs a physical or virtual camera device. `CHROMIUM_BIN` is tried before the `/usr/bin` Chromium
 paths and then the newest Playwright-managed Chromium; an unusable value falls back to them. An unavailable Chromium
 executable is an explicit skip; an available browser must pass the configured smoke checks.
 

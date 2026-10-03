@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type { CapturedMediaRepository } from "../../captured-media.js";
 import type { PlayerTimerKind } from "../../model.js";
-import { createPlayerRuntimeSession } from "../../runtime-adapter.js";
+import { createPlayerRuntimeSession, playerRuntimeForeground } from "../../runtime-adapter.js";
 import { createLocalScriptStorage } from "../../script-storage.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
 import BackgroundControlsFixture from "./BackgroundControlsFixture.vue";
@@ -12,13 +12,13 @@ import LayoutDebug from "./LayoutDebug.vue";
 import PlayerApp from "./PlayerApp.vue";
 import type { PlayerTool } from "./PlayerToolsShell.vue";
 import { resolveDevelopmentAsset } from "./developmentMedia";
-import { cameraScenarioSource, openingScenario } from "./runtimeScenario";
+import { cameraScenarioSource, openingScenario, viewfinderScenarioSource } from "./runtimeScenario";
 import { stageFixtures } from "./stageFixtures";
 import StageRightRail from "./StageRightRail.vue";
 import ThemeLab from "./ThemeLab.vue";
 import TimerFixtureRegion from "./TimerFixtureRegion.vue";
 import TimerRegion from "./TimerRegion.vue";
-import { browserStorage } from "./usePlayerPreference";
+import { browserStorage, usePlayerPreference } from "./usePlayerPreference";
 import { usePlayerSession } from "./usePlayerSession";
 import { defaultPlayerThemeIntents } from "./usePlayerTheme";
 
@@ -40,14 +40,22 @@ const timerReset = ref(0);
 const timerPaused = ref(true);
 const backgroundControlsReset = ref(0);
 const themeIntent = ref<PlayerThemeIntent>(defaultPlayerThemeIntents.light);
+// Owner comparison of viewfinder presentations; the choice survives reloads.
+const viewfinderLayout = usePlayerPreference(
+  "player-viewfinder-layout",
+  ["floating", "stage"],
+  "floating",
+);
 
 const props = defineProps<{ capturedMediaRepository?: CapturedMediaRepository | null }>();
 // `?scenario=camera` opens the camera scenario with the session camera capability and persistent script storage, so
-// a saved photo is shown again in a later run.
-const cameraScenario = new URLSearchParams(window.location.search).get("scenario") === "camera";
+// a saved photo is shown again in a later run. `?scenario=viewfinder` opens the viewfinder scenario with the camera.
+const scenario = new URLSearchParams(window.location.search).get("scenario");
+const cameraScenario = scenario === "camera";
+const viewfinderScenario = scenario === "viewfinder";
 const player = usePlayerSession({
   resolveAsset: resolveDevelopmentAsset,
-  capabilities: { camera: cameraScenario },
+  capabilities: { camera: cameraScenario || viewfinderScenario },
   ...(cameraScenario && {
     scriptStorage: createLocalScriptStorage(browserStorage(), "development-camera"),
     capturedMedia: { repository: props.capturedMediaRepository ?? null },
@@ -61,7 +69,18 @@ if (cameraScenario)
         createPlayerRuntimeSession(cameraScenarioSource, player.scriptStorageOptions()),
       ),
     );
-else player.prepare(() => createPlayerRuntimeSession(openingScenario));
+else if (viewfinderScenario) {
+  player.prepare(() => createPlayerRuntimeSession(viewfinderScenarioSource));
+  // Shown while the script waits on its photo button, until the language can request the viewfinder itself.
+  watch(
+    () => {
+      const current = player.session.value;
+      const foreground = current && playerRuntimeForeground(current);
+      return foreground?.kind === "show-button" && foreground.label === "Take photo";
+    },
+    (shown) => player.showViewfinder(shown),
+  );
+} else player.prepare(() => createPlayerRuntimeSession(openingScenario));
 </script>
 
 <template>
@@ -71,6 +90,7 @@ else player.prepare(() => createPlayerRuntimeSession(openingScenario));
     :tools="tools"
     title="Evening by the coast"
     :media="mediaFixture === 'Runtime' ? undefined : stageFixtures[mediaFixture]"
+    :viewfinder-layout="viewfinderLayout"
   >
     <template #tool="{ tool, player: playerElement }">
       <LayoutDebug v-if="tool === 'Layout Debug' && playerElement" :player="playerElement" />
@@ -86,6 +106,17 @@ else player.prepare(() => createPlayerRuntimeSession(openingScenario));
       </ul>
       <div v-if="tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
         <ThemeLab v-model:intent="themeIntent" />
+        <label class="grid gap-2">
+          Viewfinder
+          <select
+            v-model="viewfinderLayout"
+            data-viewfinder-layout
+            class="min-w-0 rounded border bg-card p-2"
+          >
+            <option value="floating">E: floating window</option>
+            <option value="stage">D: leads the Stage</option>
+          </select>
+        </label>
         <label class="grid gap-2">
           Stage media fixture
           <select v-model="mediaFixture" class="min-w-0 rounded border bg-card p-2">

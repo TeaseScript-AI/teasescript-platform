@@ -111,6 +111,15 @@
   border-color: var(--button-pressed-border);
 }
 
+/* One polarity-aware translucent material for chrome over Stage media: the title, top-media controls, and the
+   viewfinder. */
+:is([data-player-top-bar], [data-viewfinder]) {
+  --media-surface: var(--theme-media-surface, oklch(96% 0.01 70 / 58%));
+  --media-text: var(--theme-media-text, oklch(15% 0 0));
+  --media-border: var(--theme-media-border, oklch(15% 0 0 / 22%));
+  --media-shadow: var(--theme-media-shadow, rgb(0 0 0 / 22%));
+}
+
 /* The development Theme Lab resolves canonical roles; this adapter lets the
    standalone Player and its body-portaled controls act as the live preview. */
 :root[data-player-theme] {
