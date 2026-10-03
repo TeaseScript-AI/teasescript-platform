@@ -301,6 +301,7 @@ function completeInteraction(
     completionEventSequence: completionSequence,
     result: resolved.result,
     transcriptText: resolved.transcriptText,
+    ui: action.ui,
   });
   const handoff: RuntimeInteractionResultHandoffSnapshot | null =
     action.destinationTemporary === null || resolved.result === null

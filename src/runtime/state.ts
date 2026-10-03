@@ -65,7 +65,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 26;
+export const RUNTIME_SNAPSHOT_VERSION = 27;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -676,7 +676,7 @@ function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendin
   };
 }
 
-function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPayload {
+export function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPayload {
   const accessibleName =
     ui.accessibleName.kind === "text"
       ? { kind: "text" as const, text: ui.accessibleName.text }
@@ -737,6 +737,7 @@ function cloneSettlement(
     completionEventSequence: settlement.completionEventSequence,
     result: settlement.result,
     transcriptText: settlement.transcriptText,
+    ui: cloneInteractionUi(settlement.ui),
   };
 }
 

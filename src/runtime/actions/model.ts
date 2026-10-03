@@ -253,6 +253,8 @@ export interface RuntimeInteractionActionSettlementSnapshot {
   readonly completionEventSequence: number;
   readonly result: string | number | null;
   readonly transcriptText: string;
+  /** The UI the player answered, so the settlement validates against what was presented. */
+  readonly ui: InteractionUiPayload;
 }
 
 export interface RuntimeChatPacingGateSettlementSnapshot {

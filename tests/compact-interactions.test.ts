@@ -1252,7 +1252,7 @@ test("function-owned interaction result survives checkpoint completion and expli
   assert.deepEqual(done.snapshot.callFrames, []);
 });
 
-test("dynamic settlement uses prepared UI provenance while available and intrinsic rules after cleanup", () => {
+test("a retained dynamic settlement validates against the UI it recorded, before and after cleanup", () => {
   const buttonPlan = compiled("showButton label", { globals: ["label"] });
   const buttonPending = run(
     buttonPlan,
@@ -1320,10 +1320,11 @@ test("dynamic settlement uses prepared UI provenance while available and intrins
   const labelledAfterCleanup = run(labelledPlan, labelledCompleted.snapshot).snapshot;
   const differentPossibleHistory = structuredClone(labelledAfterCleanup);
   assert.ok(differentPossibleHistory.lastSettlement?.actionKind === "interaction");
-  // EVIDENCE: post-cleanup validation deliberately permits alternate historical transcript text.
+  // EVIDENCE: fixture changes only the transcript to the text the recorded UI shows for the other label.
   (differentPossibleHistory.lastSettlement as { transcriptText: string | null }).transcriptText =
     "Beta";
-  assert.equal(validateRuntimeSnapshot(differentPossibleHistory, labelledPlan).valid, true);
+  // The settlement records the presented options, so the contradiction stays detectable after cleanup.
+  assert.equal(validateRuntimeSnapshot(differentPossibleHistory, labelledPlan).valid, false);
   const mismatchedLabel = structuredClone(labelledAfterCleanup);
   assert.ok(mismatchedLabel.lastSettlement?.actionKind === "interaction");
   // EVIDENCE: fixture mutates only the retained label result to a label absent from the interaction domain.

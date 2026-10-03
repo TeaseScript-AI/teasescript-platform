@@ -298,7 +298,8 @@ test("choice completion snapshots validate without a plan for every result domai
   wrongForExactPlan.lastSettlement.result = 1;
   wrongForExactPlan.interactionResultHandoff.result = 1;
   wrongForExactPlan.temporaries[0].value = 1;
-  assert.equal(validateRuntimeSnapshot(wrongForExactPlan).valid, true);
+  // The settlement records the presented options, which offer no label 1, so this fails even without the plan.
+  assert.equal(validateRuntimeSnapshot(wrongForExactPlan).valid, false);
   assert.equal(validateRuntimeSnapshot(wrongForExactPlan, cases[1]).valid, false);
   const wrongChoiceDestination: any = structuredClone(identifier.snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture makes the stored destination disagree with its retained choice settlement.
   wrongChoiceDestination.temporaries[0].value = "other";
