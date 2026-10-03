@@ -1681,7 +1681,9 @@ function validSettlementKindData(
       instruction.preparedUi,
       settlement.result,
       settlement.transcriptText,
-      Array.isArray(snapshot.temporaries) ? snapshot.temporaries : [],
+      atSettlementContinuation(settlement, snapshot) && Array.isArray(snapshot.temporaries)
+        ? snapshot.temporaries
+        : [],
     );
   }
   if (instruction.ui.kind === "button")
@@ -1771,6 +1773,24 @@ function validNonTimePacingSettlementChronology(
     validSessionTime(snapshot.currentSessionTimeMs) &&
     settlement.completedAtMs <= settlement.deadlineMs &&
     settlement.completedAtMs <= snapshot.currentSessionTimeMs
+  );
+}
+
+/**
+ * Whether execution still stands at the settled interaction's continuation in its owner frame. Only then do the
+ * prepared temporaries hold the presented UI: cleanup clears them afterwards, and a later run of the same instruction
+ * prepares other values in them while this settlement is still retained.
+ */
+function atSettlementContinuation(
+  settlement: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+): boolean {
+  const callFrames = Array.isArray(snapshot.callFrames) ? snapshot.callFrames : [];
+  const currentFrame = callFrames.at(-1);
+  const currentFrameId = isPlainRecord(currentFrame) ? currentFrame.id : null;
+  return (
+    snapshot.nextInstruction === settlement.continuationInstruction &&
+    currentFrameId === settlement.ownerCallFrameId
   );
 }
 
