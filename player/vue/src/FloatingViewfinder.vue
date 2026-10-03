@@ -21,6 +21,8 @@ const STEP = 16;
 const root = ref<HTMLElement | null>(null);
 const bounds = ref({ width: 0, height: 0 });
 const ratio = ref(4 / 3);
+// While the browser's picture-in-picture window shows the camera, the window keeps its place but is not shown.
+const away = ref(false);
 
 useResizeObserver(
   () => root.value?.parentElement,
@@ -121,11 +123,19 @@ function measured(next: number) {
   <div
     ref="root"
     class="floating-viewfinder"
+    :class="{ 'floating-viewfinder-away': away }"
+    :inert="away || undefined"
     data-floating-viewfinder
     :style="style"
     @pointerdown="drag($event, 'move')"
   >
-    <Viewfinder :track="track" :label="false" class="floating-viewfinder-frame" @aspect="measured">
+    <Viewfinder
+      :track="track"
+      :label="false"
+      class="floating-viewfinder-frame"
+      @aspect="measured"
+      @away="away = $event"
+    >
       <!-- The label is the window's grip; the whole window drags too. -->
       <button
         type="button"
@@ -160,6 +170,7 @@ function measured(next: number) {
   user-select: none;
 }
 .floating-viewfinder:active { cursor: grabbing; }
+.floating-viewfinder-away { pointer-events: none; }
 .floating-viewfinder-frame { width: 100%; box-shadow: 0 8px 28px var(--media-shadow); }
 .floating-viewfinder-grip,
 .floating-viewfinder-resize {

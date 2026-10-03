@@ -413,7 +413,9 @@ evaluation in the development preview's Visual Lab. By default it floats over th
 by dragging it or with its grip's arrow keys and resizes from its corner; it keeps its place while the Player is
 mounted. The alternative leads the Stage, with the Stage image as a small reference in its lower corner. Where the
 browser offers it to pages, a button opens the viewfinder in the browser's own picture-in-picture window, which also
-floats over other apps; hiding the viewfinder closes that window.
+floats over other apps. Meanwhile the Player's own viewfinder steps aside, and a viewfinder leading the Stage returns the
+Stage to its image; closing that window, or its "Back to Player" button, brings the viewfinder back where it was, and
+hiding the viewfinder closes it.
 
 Media playback is script-controlled. Audio and video elements show no native browser controls, and the Player offers
 no seek, scrub, pause, or skip control of its own: playback the runtime did not command would make reported progress
