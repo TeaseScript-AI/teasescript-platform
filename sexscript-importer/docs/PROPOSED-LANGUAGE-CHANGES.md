@@ -28,7 +28,7 @@ with the direction TeaseScript already took, and common practice in other langua
 | C3 | Labels from a list | Option A (objects) agreed in principle; needs #509 for removal |
 | C4 | Effective labels are unique | Owner agreed |
 | C5 | Warning when a choice result is compared with an impossible label | Owner agreed |
-| T1 | Type enforcement, union types, type tests, narrowing | Issue #504 |
+| T1 | Type enforcement, union types, type tests, narrowing | Issue #504, in tracker #512 |
 | D1 | Dictionaries: objects with runtime keys (`toys[name]`) | POC tests option A later |
 | M1 | Media selected by tags (include/exclude tags, count matches) | POC working implementation; covers optional content packs |
 
