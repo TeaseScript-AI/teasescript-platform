@@ -13,6 +13,7 @@ import {
 } from "./lower.ts";
 import { helperDefinitionOrder, withActionDispatcher } from "./helpers.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
+import type { ProposalId } from "./proposals.ts";
 
 const ACCEPTED_EXTERNAL_CALLS = new Set([
   "askBoolean",
@@ -42,8 +43,16 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
   "toTime",
 ]);
 
-export function lowerSelfContainedPackage(files: readonly ParsedGroovyFile[]): MigrationProgram[] {
-  return lowerPackage(files).composed;
+export interface PackageOptions {
+  /** Proposed language changes to emit in their working syntax (see proposals.ts). */
+  proposals?: ReadonlySet<ProposalId>;
+}
+
+export function lowerSelfContainedPackage(
+  files: readonly ParsedGroovyFile[],
+  options: PackageOptions = {},
+): MigrationProgram[] {
+  return lowerPackage(files, options).composed;
 }
 
 export interface LoweredPackage {
@@ -53,7 +62,10 @@ export interface LoweredPackage {
   composed: MigrationProgram[];
 }
 
-export function lowerPackage(files: readonly ParsedGroovyFile[]): LoweredPackage {
+export function lowerPackage(
+  files: readonly ParsedGroovyFile[],
+  options: PackageOptions = {},
+): LoweredPackage {
   const helperRegistry = buildHelperRegistry(files);
   const mixinModules = files.flatMap((file) => describeMixinModule(file) ?? []);
   const stableNames = packageStableNames(files);
@@ -77,6 +89,7 @@ export function lowerPackage(files: readonly ParsedGroovyFile[]): LoweredPackage
       resultUses,
       directoryFiles,
       renameIdentifiers: false,
+      ...(options.proposals === undefined ? {} : { proposals: options.proposals }),
     }),
   );
   const helperPrograms = lowered.filter(

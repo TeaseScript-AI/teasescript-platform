@@ -242,6 +242,7 @@ export function emitExpression(expression: IrExpression): string {
     case "input":
       return expression.input;
     case "choice":
+    case "listChoice":
       // `choose a: x, b: y` extends over following commas, so it is parenthesized unless it is a whole
       // statement value (see emitValue).
       return `(${emitChoice(expression)})`;
@@ -337,7 +338,15 @@ function precedence(expression: IrExpression): number {
   }
 }
 
-function emitChoice(expression: Extract<IrExpression, { kind: "choice" }>): string {
+function emitChoice(expression: Extract<IrExpression, { kind: "choice" | "listChoice" }>): string {
+  if (expression.kind === "listChoice") {
+    const options = expression.options.map((option) => {
+      if (option.kind === "list") return emitExpression(option.list);
+      const text = emitExpression(option.text);
+      return option.label === null ? text : `${option.label}: ${text}`;
+    });
+    return `choose ${options.join(", ")}`;
+  }
   const options = expression.options.map(
     (option, index) => `${expression.labels?.[index] ?? index}: ${emitExpression(option)}`,
   );
@@ -346,7 +355,9 @@ function emitChoice(expression: Extract<IrExpression, { kind: "choice" }>): stri
 
 /** A complete statement value, where a compact choice needs no parentheses. */
 function emitValue(expression: IrExpression): string {
-  return expression.kind === "choice" ? emitChoice(expression) : emitExpression(expression);
+  return expression.kind === "choice" || expression.kind === "listChoice"
+    ? emitChoice(expression)
+    : emitExpression(expression);
 }
 
 function operand(expression: IrExpression, minimum: number): string {

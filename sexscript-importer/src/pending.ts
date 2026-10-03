@@ -4,7 +4,9 @@ import {
   type HostFunction,
   type RuntimeValue,
 } from "./runtime-check.ts";
+import { emitTease } from "./emit-tease.ts";
 import type { IrExpression, IrStatement, IrSwitchCase, MigrationProgram } from "./ir.ts";
+import { proposalCapability } from "./proposals.ts";
 
 /**
  * Accepted TeaseScript the importer emits although the current compiler does not implement it yet. The
@@ -34,6 +36,8 @@ const SHIM_PREFIX = "sxPending";
 
 export interface PendingShim {
   program: MigrationProgram;
+  /** The shimmed program as TeaseScript, followed by the functions that stand in for proposed constructs. */
+  source: string;
   /** Placeholder names to register as host builtins when compiling the shimmed program. */
   builtins: string[];
   /** Placeholder name to the TeaseScript operation it stands for (`save`, `askBooleans`, ...). */
@@ -60,6 +64,16 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
     return candidate;
   };
   let switchCount = 0;
+  // Generated functions standing in for proposed constructs, by the name the copy calls them with.
+  const generated: { choose: ProposedChooseNames | null } = { choose: null };
+  const proposedChoose = (): ProposedChooseNames =>
+    (generated.choose ??= {
+      choose: shimName("sxProposedChoose"),
+      textOptions: shimName("sxProposedTextOptions"),
+      show: [shimName("sxProposedShowA"), shimName("sxProposedShowB")],
+      turn: shimName("sxProposedTurn"),
+      locals: shimName("sxProposedOptions"),
+    });
   const call = (
     capability: string,
     name: string,
@@ -125,6 +139,55 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         };
       case "choice":
         return { ...value, options: value.options.map(expression) };
+      case "listChoice": {
+        capabilities.add(proposalCapability("choose-lists"));
+        const names = proposedChoose();
+        const textOptions = (list: IrExpression): IrExpression => ({
+          kind: "call",
+          name: names.textOptions,
+          positional: [list],
+          named: {},
+          local: true,
+        });
+        // Each part is a list of `{ label, text }` options; unlabelled texts get their text as label.
+        const parts: IrExpression[] = [];
+        let texts: IrExpression[] = [];
+        const flushTexts = (): void => {
+          if (texts.length > 0) parts.push(textOptions({ kind: "list", items: texts }));
+          texts = [];
+        };
+        for (const option of value.options) {
+          if (option.kind === "list") {
+            flushTexts();
+            const list = expression(option.list);
+            parts.push(option.records ? list : textOptions(list));
+          } else if (option.label === null) {
+            texts.push(expression(option.text));
+          } else {
+            flushTexts();
+            parts.push({
+              kind: "list",
+              items: [
+                {
+                  kind: "object",
+                  properties: [
+                    { name: "label", value: { kind: "literal", value: option.label } },
+                    { name: "text", value: expression(option.text) },
+                  ],
+                },
+              ],
+            });
+          }
+        }
+        flushTexts();
+        return {
+          kind: "call",
+          name: names.choose,
+          positional: [{ kind: "list", items: parts }],
+          named: {},
+          local: true,
+        };
+      }
       case "range":
         return { ...value, from: expression(value.from), to: expression(value.to) };
       case "unary":
@@ -244,12 +307,103 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
     }
   };
 
+  const shimmedStatements = statements(program.statements);
+  const chooseNames = generated.choose;
+  const shimmed = {
+    ...program,
+    statements:
+      chooseNames === null
+        ? shimmedStatements
+        : [
+            {
+              kind: "let" as const,
+              name: chooseNames.turn,
+              value: { kind: "literal" as const, value: 0 },
+              span: null,
+            },
+            ...shimmedStatements,
+          ],
+  };
   return {
-    program: { ...program, statements: statements(program.statements) },
+    program: shimmed,
+    source: emitTease(shimmed) + (chooseNames === null ? "" : proposedChooseSource(chooseNames)),
     builtins: [...builtins].sort(),
     operations,
     capabilities,
   };
+}
+
+interface ProposedChooseNames {
+  choose: string;
+  textOptions: string;
+  /** Two identical functions that show the options; consecutive calls alternate between them. */
+  show: [string, string];
+  /** Global that selects the next of the two. */
+  turn: string;
+  /** Prefix of the generated functions' local variables, unique in the program. */
+  locals: string;
+}
+
+/** Largest number of options the stand-in for a proposed `choose` supports; more fail the smoke run. */
+const PROPOSED_CHOOSE_LIMIT = 40;
+
+/**
+ * Stand-ins for a proposed `choose` in current TeaseScript: the options are collected at runtime, and a compact
+ * `choose` with numeric labels per option count shows them, so the interaction stays real. The chosen option's
+ * label is the result.
+ *
+ * Consecutive calls alternate between two copies of the showing function. The runtime revalidates the retained
+ * settlement of the last choice against the option texts its instruction currently holds, so one `choose` reached
+ * again with other texts makes the next completion fail with TSR101 (a runtime defect, also for accepted
+ * `choose` options computed in a loop); with two copies the last choice's instruction is not the one being reused.
+ */
+function proposedChooseSource(names: ProposedChooseNames): string {
+  const local = (name: string): string => `${names.locals}${name}`;
+  const lines = [
+    "",
+    `function ${names.textOptions}(${local("Texts")}) {`,
+    `    let ${local("List")} = []`,
+    `    for ${local("Text")} in ${local("Texts")} {`,
+    `        ${local("List")}.add({ label: ${local("Text")}, text: ${local("Text")} })`,
+    "    }",
+    `    return ${local("List")}`,
+    "}",
+    "",
+    `function ${names.choose}(${local("Parts")}) {`,
+    `    let ${local("List")} = []`,
+    `    for ${local("Part")} in ${local("Parts")} {`,
+    `        for ${local("Option")} in ${local("Part")} {`,
+    `            ${local("List")}.add(${local("Option")})`,
+    "        }",
+    "    }",
+    `    ${names.turn} = 1 - ${names.turn}`,
+    `    if ${names.turn} == 1 {`,
+    `        return ${names.show[0]}(${local("List")})`,
+    "    }",
+    `    return ${names.show[1]}(${local("List")})`,
+    "}",
+  ];
+  for (const show of names.show) {
+    lines.push("", `function ${show}(${local("List")}) {`);
+    for (let count = 1; count <= PROPOSED_CHOOSE_LIMIT; count += 1) {
+      const options = Array.from(
+        { length: count },
+        (_, index) => `${index}: ${local("List")}[${index}].text`,
+      ).join(", ");
+      lines.push(
+        `    if ${local("List")}.length == ${count} {`,
+        `        let ${local("Pick")} = choose ${options}`,
+        `        return ${local("List")}[${local("Pick")}].label`,
+        "    }",
+      );
+    }
+    lines.push(
+      "    // No options, or more than the stand-in supports: the invalid index fails the run.",
+      `    return ${local("List")}[${local("List")}.length].label`,
+      "}",
+    );
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 /** Accepted switch semantics (literal or range cases, no fallthrough) expressed as an equivalent if chain. */

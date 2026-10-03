@@ -20,6 +20,7 @@ import {
   type HelperName,
 } from "./helpers.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
+import type { ProposalId } from "./proposals.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
 import {
   BOOLEAN,
@@ -37,6 +38,7 @@ import {
 import type {
   MixinModuleInfo,
   IrExpression,
+  IrListChoiceOption,
   IrFunctionParameter,
   IrStatement,
   IrSwitchCase,
@@ -83,6 +85,8 @@ export interface LowerOptions {
    * the composed program once.
    */
   renameIdentifiers?: boolean;
+  /** Proposed language changes to emit in their working syntax instead of reporting the construct. */
+  proposals?: ReadonlySet<ProposalId>;
 }
 
 interface LowerContext {
@@ -149,6 +153,7 @@ interface LowerContext {
   dateValues: ReadonlySet<string>;
   /** List variables that Groovy shared with another variable by an assignment of one to the other. */
   aliasedLists: ReadonlySet<string>;
+  proposals: ReadonlySet<ProposalId>;
 }
 
 /** Source comments not yet emitted; shared by every context lowering the same file. */
@@ -235,6 +240,7 @@ export function lowerParsedFile(
     directoryFiles: options.directoryFiles ?? new Map(),
     dateValues: new Set(),
     aliasedLists: new Set(),
+    proposals: options.proposals ?? new Set(),
   };
   if (file.diagnostics.length > 0 || file.root === null) {
     for (const diagnostic of file.diagnostics) {
@@ -477,6 +483,7 @@ function lowerHelperMethod(
     directoryFiles: baseContext.directoryFiles,
     dateValues: new Set(),
     aliasedLists: new Set(),
+    proposals: baseContext.proposals,
     currentFunction: {
       name,
       locals: functionLocalNames(
@@ -5279,6 +5286,10 @@ function lowerSelectedValue(
   if (message === null) return null;
   const optionsNode = args[1]!;
   if (optionsNode.kind !== "list") {
+    if (context.proposals.has("choose-lists")) {
+      const proposed = proposedSelectedValue(node, args[0]!, message, optionsNode, context);
+      if (proposed !== undefined) return proposed;
+    }
     return unsupportedExpression(
       context,
       node,
@@ -5302,6 +5313,67 @@ function lowerSelectedValue(
   }
   if (!pushPrompt(context, node, args[0]!, message)) return null;
   return { kind: "choice", options };
+}
+
+/**
+ * getSelectedValue() over a runtime list as a proposed `choose` (choose-lists): written options before one runtime
+ * list keep their zero-based index as numeric label and the list's elements get the following ones, so the result
+ * stays the legacy index. A `collect` that builds the list becomes a loop before the statement. Returns undefined
+ * when the options do not have that shape.
+ */
+function proposedSelectedValue(
+  node: AstNode,
+  messageNode: AstNode,
+  message: IrExpression,
+  optionsNode: AstNode,
+  context: LowerContext,
+): IrExpression | null | undefined {
+  const pieces = listPlusOperands(optionsNode);
+  const listNode = pieces.at(-1)!;
+  const written = pieces.slice(0, -1);
+  if (listNode.kind === "list" || written.some((piece) => piece.kind !== "list")) return undefined;
+  const writtenItems = written.flatMap((piece) => nodeArray(piece.items));
+  let loop: IrStatement[] = [];
+  let list: IrExpression;
+  if (callParts(listNode)?.name === "collect") {
+    const root = context.statementRoot;
+    if (root === null || !isHoistable(root, node, context, listNode)) return undefined;
+    const name = freshName("menuTexts", context);
+    const lowered = lowerCollectionAssignment(true, name, listNode, node.span, context);
+    if (lowered === null) return undefined;
+    loop = lowered;
+    list = { kind: "variable", name };
+  } else {
+    if (!isKnownListExpression(listNode, context)) return undefined;
+    const lowered = lowerExpression(listNode, context);
+    if (lowered === null) return null;
+    list = lowered;
+  }
+  const options: IrListChoiceOption[] = [];
+  for (const [index, item] of writtenItems.entries()) {
+    const text = lowerExpression(item, context);
+    if (text === null) return null;
+    options.push({ kind: "option", label: index, text });
+  }
+  context.prelude.push(...loop);
+  if (!pushPrompt(context, node, messageNode, message)) return null;
+  const first: IrExpression = { kind: "literal", value: writtenItems.length };
+  options.push({
+    kind: "list",
+    list: useHelper(context, "menuOptions", [list, first]),
+    records: true,
+  });
+  return { kind: "listChoice", options };
+}
+
+/** The operands of a Groovy `a + b + c` chain, or the node itself. */
+function listPlusOperands(node: AstNode): AstNode[] {
+  const left = asNode(node.left);
+  const right = asNode(node.right);
+  if (node.kind === "binary" && node.operator === "+" && left !== null && right !== null) {
+    return [...listPlusOperands(left), right];
+  }
+  return [node];
 }
 
 function lowerArguments(args: AstNode[], context: LowerContext): IrExpression[] | null {

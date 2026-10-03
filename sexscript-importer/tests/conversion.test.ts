@@ -20,6 +20,7 @@ import { emitTease } from "../src/emit-tease.ts";
 import type { MigrationProgram } from "../src/ir.ts";
 import { lowerSelfContainedPackage } from "../src/package.ts";
 import { pendingHostFunctions, shimPendingCapabilities } from "../src/pending.ts";
+import { PROPOSALS, type ProposalId } from "../src/proposals.ts";
 import { analyzeFeasibility } from "../src/report.ts";
 import {
   flowKey,
@@ -45,8 +46,15 @@ registerFixtures("conversion", false);
 // (storage, script chaining, popups, boolean/integer input, ...) must compile once those capabilities are
 // replaced by placeholder calls, so everything except the pending capabilities is compiler-checked.
 registerFixtures("conversion-accepted", true);
+// Output in the working syntax of proposed language changes (not accepted TeaseScript) must compile and run once
+// the shim replaces the proposed constructs with stand-ins in current TeaseScript.
+registerFixtures("conversion-proposed", true, new Set(PROPOSALS));
 
-function registerFixtures(directoryName: string, usesPendingCapabilities: boolean): void {
+function registerFixtures(
+  directoryName: string,
+  usesPendingCapabilities: boolean,
+  proposals: ReadonlySet<ProposalId> = new Set(),
+): void {
   const directory = fileURLToPath(new URL(`./fixtures/${directoryName}/`, import.meta.url));
   const names = readdirSync(directory)
     .filter((name) => name.endsWith(".groovy"))
@@ -60,7 +68,7 @@ function registerFixtures(directoryName: string, usesPendingCapabilities: boolea
       `converts ${directoryName}/${name}.groovy to the expected TeaseScript`,
       { skip: parserUnavailable },
       async () => {
-        assert.equal(emitTease(await convert(sourcePath)), expected);
+        assert.equal(emitTease(await convert(sourcePath, proposals)), expected);
       },
     );
 
@@ -75,9 +83,9 @@ function registerFixtures(directoryName: string, usesPendingCapabilities: boolea
         let source = expected;
         let builtins: string[] = [];
         if (usesPendingCapabilities) {
-          const shim = shimPendingCapabilities(await convert(sourcePath));
+          const shim = shimPendingCapabilities(await convert(sourcePath, proposals));
           assert.ok(shim.capabilities.size > 0, "fixture group expects pending capabilities");
-          source = emitTease(shim.program);
+          source = shim.source;
           builtins = shim.builtins;
         }
         const result = compilerResult.compiler(source, builtins);
@@ -100,8 +108,8 @@ function registerFixtures(directoryName: string, usesPendingCapabilities: boolea
         let source = expected;
         let builtins: Record<string, HostFunction> = {};
         if (usesPendingCapabilities) {
-          const shim = shimPendingCapabilities(await convert(sourcePath));
-          source = emitTease(shim.program);
+          const shim = shimPendingCapabilities(await convert(sourcePath, proposals));
+          source = shim.source;
           builtins = pendingHostFunctions(shim);
         }
         const result = runnerResult.runner(source, builtins);
@@ -356,8 +364,13 @@ test(
   },
 );
 
-async function convert(sourcePath: string): Promise<MigrationProgram> {
-  const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)]);
+async function convert(
+  sourcePath: string,
+  proposals: ReadonlySet<ProposalId> = new Set(),
+): Promise<MigrationProgram> {
+  const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], {
+    proposals,
+  });
   assert.ok(program !== undefined);
   return program;
 }

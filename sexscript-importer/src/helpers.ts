@@ -71,6 +71,7 @@ export type HelperName =
   | "listSum"
   | "loadFirstTrue"
   | "max"
+  | "menuOptions"
   | "min"
   | "playBackgroundSound"
   | "random"
@@ -112,6 +113,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "shuffled",
   "unique",
   "removeAt",
+  "menuOptions",
   "listMax",
   "listMin",
   "listSum",
@@ -422,6 +424,31 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             ]),
           ]),
           ret(v("remaining")),
+        ],
+      ),
+  },
+  menuOptions: {
+    // Options of a proposed `choose` (choose-lists) labelled with consecutive numbers from `first`, as the
+    // zero-based index that legacy getSelectedValue() returns.
+    name: "sexscriptLegacyMenuOptions",
+    build: () =>
+      fn(
+        "sexscriptLegacyMenuOptions",
+        ["texts", "first"],
+        [
+          letS("options", { kind: "list", items: [] }),
+          letS("label", v("first")),
+          forS("text", v("texts"), [
+            add("options", {
+              kind: "object",
+              properties: [
+                { name: "label", value: v("label") },
+                { name: "text", value: v("text") },
+              ],
+            }),
+            set(v("label"), lit(1), "+="),
+          ]),
+          ret(v("options")),
         ],
       ),
   },

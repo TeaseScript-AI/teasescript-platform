@@ -5,6 +5,7 @@ import { emitTease } from "./emit-tease.ts";
 import { rootDiagnostics } from "./diagnostics.ts";
 import type { IrStatement } from "./ir.ts";
 import { lowerPackage } from "./package.ts";
+import type { ProposalId } from "./proposals.ts";
 import { pendingHostFunctions, shimPendingCapabilities } from "./pending.ts";
 import {
   flowKey,
@@ -63,6 +64,8 @@ export interface FeasibilityOptions {
    * directory when absent.
    */
   packageRoot?: string;
+  /** Proposed language changes to emit in their working syntax; the shim makes them compile and run. */
+  proposals?: ReadonlySet<ProposalId>;
 }
 
 export interface FeasibilityReport {
@@ -115,7 +118,10 @@ export function analyzeFeasibility(
   files: ParsedGroovyFile[],
   options: FeasibilityOptions = {},
 ): FeasibilityReport {
-  const { lowered: filePrograms, composed: packagePrograms } = lowerPackage(files);
+  const { lowered: filePrograms, composed: packagePrograms } = lowerPackage(
+    files,
+    options.proposals === undefined ? {} : { proposals: options.proposals },
+  );
   const report: FeasibilityReport = {
     fileCount: files.length,
     scriptBodyFileCount: 0,
@@ -190,7 +196,7 @@ export function analyzeFeasibility(
         result.compiled &&
         result.diagnostics.every((diagnostic) => diagnostic.severity !== "error");
       compilerClean = clean(options.compiler(emitTease(packageProgram)));
-      const shimmed = options.compiler(emitTease(shim.program), shim.builtins);
+      const shimmed = options.compiler(shim.source, shim.builtins);
       compilerCleanExceptPending = clean(shimmed);
       compilerDiagnostics = shimmed.diagnostics;
       if (compilerClean && report.compilerCleanScriptFileCount !== null) {
@@ -210,7 +216,7 @@ export function analyzeFeasibility(
     }
     // A file that does not parse may be a script; flows that reach it are blocked.
     if (isScriptBody || file.root === null) {
-      const source = compilerCleanExceptPending === true ? emitTease(shim.program) : null;
+      const source = compilerCleanExceptPending === true ? shim.source : null;
       flowScripts.push({
         sourceName: file.sourceName,
         transfers: ir.transfers,

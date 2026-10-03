@@ -6,6 +6,7 @@ import { emitTease } from "./emit-tease.ts";
 import { inventoryFiles } from "./inventory.ts";
 import { lowerParsedFile } from "./lower.ts";
 import { lowerSelfContainedPackage } from "./package.ts";
+import { parseProposals, type ProposalId } from "./proposals.ts";
 import { analyzeFeasibility, type FeasibilityOptions } from "./report.ts";
 import { loadRepositoryRunner } from "./runtime-check.ts";
 import { parseGroovySource } from "./source-parser.ts";
@@ -13,7 +14,15 @@ import { parseGroovySource } from "./source-parser.ts";
 const [command, ...rawArgs] = process.argv.slice(2);
 const runRequested = rawArgs.includes("--run");
 const compileRequested = runRequested || rawArgs.includes("--compile");
-const args = rawArgs.filter((arg) => arg !== "--compile" && arg !== "--run");
+// `--proposed` emits every proposed language change in its working syntax, `--proposed=a,b` the listed ones.
+const proposedArgument = rawArgs.find(
+  (arg) => arg === "--proposed" || arg.startsWith("--proposed="),
+);
+const proposals: ReadonlySet<ProposalId> =
+  proposedArgument === undefined ? new Set() : parseProposals(proposedArgument.slice(11));
+const args = rawArgs.filter(
+  (arg) => arg !== "--compile" && arg !== "--run" && arg !== proposedArgument,
+);
 
 if (command === "inventory") {
   if (args.length === 0) {
@@ -24,11 +33,11 @@ if (command === "inventory") {
 } else if (command === "report") {
   if (args.length === 0) {
     fail(
-      "Usage: node src/cli.ts report [--compile | --run] <ast.json|script.groovy|source-dir> [...]",
+      "Usage: node src/cli.ts report [--compile | --run] [--proposed[=ids]] <ast.json|script.groovy|source-dir> [...]",
     );
   }
   const files = await readReportInputs(args);
-  const options: FeasibilityOptions = {};
+  const options: FeasibilityOptions = { proposals };
   if (compileRequested) options.compiler = await loadRepositoryCompiler();
   if (runRequested) options.runner = await loadRepositoryRunner();
   // One scripts folder is the package root that script transfers are relative to.
@@ -41,7 +50,7 @@ if (command === "inventory") {
   const parsed = input.toLowerCase().endsWith(".groovy")
     ? await parseGroovySource(input)
     : await readParsedFile(input);
-  const program = lowerParsedFile(parsed);
+  const program = lowerParsedFile(parsed, { proposals });
   process.stdout.write(emitTease(program));
   reportDiagnostics(program);
 } else if (command === "convert-package") {
@@ -86,7 +95,7 @@ async function convertPackage(
   const sourcePaths = await findGroovyFiles(sourceRoot);
   if (sourcePaths.length === 0) fail(`No .groovy files found under ${sourceRoot}`);
   const parsed = await parseGroovyFiles(sourcePaths);
-  const programs = lowerSelfContainedPackage(parsed);
+  const programs = lowerSelfContainedPackage(parsed, { proposals });
   let errors = 0;
   let written = 0;
   let compilerClean = 0;

@@ -112,6 +112,14 @@ export type IrStatement =
   /** Preserved paragraph break between legacy statements. */
   | (IrBase & { kind: "blank" });
 
+/**
+ * One entry of a proposed `choose`: a written option, or a list whose elements are texts (each its own label) or,
+ * with `records`, `{ label, text }` objects.
+ */
+export type IrListChoiceOption =
+  | { kind: "option"; label: number | null; text: IrExpression }
+  | { kind: "list"; list: IrExpression; records: boolean };
+
 export interface IrSwitchCase {
   span: SourceSpan | null;
   match: IrExpression;
@@ -134,6 +142,11 @@ export type IrExpression =
    * option gets the identifier label that `choose` returns.
    */
   | { kind: "choice"; options: IrExpression[]; labels?: string[] }
+  /**
+   * Proposed `choose`, not accepted TeaseScript (PROPOSED-LANGUAGE-CHANGES.md C1–C3): options may mix written
+   * labels with unlabelled ones (whose label is their text), and a list option contributes one option per element.
+   */
+  | { kind: "listChoice"; options: IrListChoiceOption[] }
   /** Compact single-field input whose prompt, if any, was emitted as a preceding `say`. */
   | { kind: "input"; input: "askText" | "askNumber" }
   | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean }

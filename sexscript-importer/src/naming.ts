@@ -269,6 +269,15 @@ function renameExpression(expression: IrExpression, scope: Scope, renamer: Renam
       };
     case "choice":
       return { ...expression, options: expression.options.map(child) };
+    case "listChoice":
+      return {
+        ...expression,
+        options: expression.options.map((option) =>
+          option.kind === "list"
+            ? { ...option, list: child(option.list) }
+            : { ...option, text: child(option.text) },
+        ),
+      };
     case "range":
       return { ...expression, from: child(expression.from), to: child(expression.to) };
     case "unary":
