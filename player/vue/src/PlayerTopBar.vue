@@ -82,6 +82,7 @@ onBeforeUnmount(cancelHide);
       <span v-if="title"><span class="player-top-bar-title-text">{{ title }}</span></span>
     </h1>
     <div class="player-top-bar-actions" role="group" aria-label="Player display controls">
+      <slot name="notifications" />
       <Tooltip>
         <TooltipTrigger as-child>
           <Button
@@ -161,12 +162,14 @@ onBeforeUnmount(cancelHide);
   block-size: calc(var(--player-top-control-size) - 2px);
   border-radius: 0;
 }
-/* Match the shared shell without clipping the buttons' keyboard focus rings. */
-.player-top-bar-actions :deep(button:first-of-type) {
+/* Match the shared shell without clipping the buttons' keyboard focus rings. A slotted control may wrap its button. */
+.player-top-bar-actions > :deep(:first-child),
+.player-top-bar-actions > :deep(:first-child button) {
   border-start-start-radius: calc(var(--action-group-radius) - 1px);
   border-end-start-radius: calc(var(--action-group-radius) - 1px);
 }
-.player-top-bar-actions :deep(button:last-of-type) {
+.player-top-bar-actions > :deep(:last-child),
+.player-top-bar-actions > :deep(:last-child button) {
   border-start-end-radius: calc(var(--action-group-radius) - 1px);
   border-end-end-radius: calc(var(--action-group-radius) - 1px);
 }

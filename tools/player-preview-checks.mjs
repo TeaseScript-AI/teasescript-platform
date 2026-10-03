@@ -1290,7 +1290,8 @@ async function composerNoticeChecks(page) {
     const input = page.locator("[data-runtime-interaction] textarea");
     await input.fill("Not an option");
     await input.press("Enter");
-    await page.locator("[data-runtime-interaction]").getByRole("status").waitFor();
+    // The composer's own feedback; the Player notice live regions are separate status regions.
+    await page.locator("[data-runtime-interaction] .composer-notice[role='status']").waitFor();
     const placement = await page.evaluate(() => {
       const notice = document.querySelector(".composer-notice").getBoundingClientRect();
       const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
@@ -1617,6 +1618,169 @@ async function playerSettingsChecks(page) {
   return "PASS Player Settings apply, persist, validate stored and cross-tab values, and fit short screens";
 }
 
+// Player notices show as temporary toasts beside the timer and stay in the notification panel until resolved.
+async function noticeChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  const keys = (locator, attribute) =>
+    locator.evaluateAll(
+      (elements, name) => elements.map((element) => element.getAttribute(name)),
+      attribute,
+    );
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).first().click();
+  await page.getByRole("button", { name: "Show every notice level" }).click();
+  // At most three toasts, newest first; the oldest publication waits in the panel.
+  const toasts = page.locator("[data-player-toast]");
+  check(
+    JSON.stringify(await keys(toasts, "data-player-toast")) ===
+      JSON.stringify(["storage-write-failed", "audio-blocked", "storage-unavailable"]),
+    "The newest three notices show as toasts, newest first",
+  );
+  // Each level has its own status colour; equal levels share it.
+  const borders = await toasts.evaluateAll((elements) =>
+    elements.map((element) => getComputedStyle(element).borderTopColor),
+  );
+  check(
+    borders[0] === borders[1] && borders[1] !== borders[2],
+    `Toasts take their level's colour: ${JSON.stringify(borders)}`,
+  );
+  const timer = await page.locator(".timer-display").first().boundingBox();
+  for (const box of await toasts.evaluateAll((elements) =>
+    elements.map((element) => element.getBoundingClientRect().toJSON()),
+  ))
+    check(
+      timer && box.right <= timer.x && box.left >= 0 && box.top >= 0,
+      `A toast must stay in view left of the timer: ${JSON.stringify({ box, timer })}`,
+    );
+  const bell = page.locator("[data-notification-bell]");
+  check(
+    (await bell.locator(".player-notification-dot").count()) === 1,
+    "The bell marks unseen notices",
+  );
+  check(
+    /need attention/.test((await bell.getAttribute("aria-label")) ?? ""),
+    "The bell's name reports attention",
+  );
+  // Hiding a toast keeps its notice.
+  await page.locator('[data-player-toast="storage-write-failed"] [data-toast-hide]').click();
+  await page.locator('[data-player-toast="storage-write-failed"]').waitFor({ state: "detached" });
+  // Pointer and focus each hold a toast: focus keeps it after the pointer leaves, beyond its 5 s expiry.
+  const infoToast = page.locator('[data-player-toast="storage-unavailable"]');
+  await infoToast.hover();
+  await infoToast.locator("[data-toast-hide]").focus();
+  await page.mouse.move(0, 899);
+  await page.waitForTimeout(6000);
+  check(
+    (await infoToast.count()) === 1,
+    "A focused toast must not expire after the pointer leaves",
+  );
+  // Released, an info toast expires on its own.
+  await page.evaluate(() => document.activeElement.blur());
+  await infoToast.waitFor({ state: "detached", timeout: 8000 });
+
+  // The panel lists every notice, newest first, and replaces the toasts.
+  await bell.click();
+  const panel = page.locator("[data-player-notification-panel]");
+  await panel.waitFor();
+  const items = panel.locator("[data-player-notice]");
+  check(
+    JSON.stringify(await keys(items, "data-player-notice")) ===
+      JSON.stringify([
+        "storage-write-failed",
+        "audio-blocked",
+        "storage-unavailable",
+        "preview-error",
+      ]),
+    "The panel lists every notice, newest first",
+  );
+  check((await toasts.count()) === 0, "Opening the panel replaces the toasts");
+  const tints = await items.evaluateAll((elements) =>
+    elements.map((element) => getComputedStyle(element).backgroundColor),
+  );
+  check(
+    tints[0] === tints[1] && new Set(tints).size === 3,
+    `Panel entries take their level's colour: ${JSON.stringify(tints)}`,
+  );
+  check(
+    (await panel.locator('[data-player-notice="audio-blocked"] [data-notice-dismiss]').count()) ===
+      0,
+    "A notice the player must act on offers no dismissal",
+  );
+  await panel.locator('[data-player-notice="preview-error"] [data-notice-dismiss]').click();
+  await panel.locator('[data-player-notice="preview-error"]').waitFor({ state: "detached" });
+  check(
+    await panel.evaluate(
+      (element) =>
+        element.contains(document.activeElement) && document.activeElement.matches("button"),
+    ),
+    "Dismissal moves focus to a remaining control in the panel",
+  );
+  await panel.locator("[data-notifications-clear]").focus();
+  await page.keyboard.press("Enter");
+  await panel.locator('[data-player-notice="storage-write-failed"]').waitFor({ state: "detached" });
+  check(
+    JSON.stringify(await keys(items, "data-player-notice")) === JSON.stringify(["audio-blocked"]),
+    "Clear all keeps only the notice the player must act on",
+  );
+  check(
+    await panel.evaluate(
+      (element) =>
+        document.activeElement?.closest("[data-player-notification-panel]") === element &&
+        document.activeElement.matches("[data-notice-action]"),
+    ),
+    "Clear all moves focus to the remaining notice's action",
+  );
+  await page.keyboard.press("Escape");
+  await panel.waitFor({ state: "detached" });
+  check(
+    (await bell.locator(".player-notification-dot").count()) === 1,
+    "A notice the player must act on keeps the bell marked after the panel was seen",
+  );
+  // Its producer withdraws it once resolved.
+  await page.getByRole("button", { name: "Clear notices" }).click();
+  await bell.locator(".player-notification-dot").waitFor({ state: "detached" });
+
+  // Resolving the last notice from the panel closes it and returns focus to the bell.
+  await page.getByRole("button", { name: "Show every notice level" }).click();
+  await bell.click();
+  await panel.locator("[data-notifications-clear]").focus();
+  await page.keyboard.press("Enter");
+  await panel.locator('[data-player-notice="audio-blocked"] [data-notice-action]').waitFor();
+  await page.keyboard.press("Enter");
+  await panel.waitFor({ state: "detached" });
+  check(
+    await bell.evaluate((element) => element === document.activeElement),
+    "With no notice left, focus returns to the bell",
+  );
+
+  // On a small phone with a timer, toasts keep a readable width and stay in view.
+  await page.getByRole("button", { name: "Show every notice level" }).click();
+  await page.setViewportSize({ width: 320, height: 568 });
+  for (const box of await toasts.evaluateAll((elements) =>
+    elements.map((element) => element.getBoundingClientRect().toJSON()),
+  ))
+    check(
+      box.left >= 0 && box.right <= 320 && box.width >= 200,
+      `A toast must fit a small screen: ${JSON.stringify(box)}`,
+    );
+  // On a short screen the stack scrolls, so every toast can come fully into view.
+  await page.setViewportSize({ width: 568, height: 320 });
+  for (let index = 0; index < (await toasts.count()); index += 1) {
+    await toasts.nth(index).scrollIntoViewIfNeeded();
+    const box = await toasts.nth(index).boundingBox();
+    check(
+      box && box.y >= 0 && box.y + box.height <= 320,
+      `A toast must scroll fully into view on a short screen: ${JSON.stringify(box)}`,
+    );
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole("button", { name: "Clear notices" }).click();
+  return "PASS notices toast beside the timer, expire, and stay in the panel until resolved or dismissed";
+}
+
 async function mediaPlaybackChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -1654,7 +1818,16 @@ async function mediaPlaybackChecks(page) {
     await page.evaluate(() => window.__played.length === 0),
     "Refused audio was reported as playing",
   );
-  await retry.click();
+  // The toast may expire, so the panel keeps the retry; it is the only way to continue, so it has no dismissal.
+  await page.locator("[data-notification-bell]").click();
+  const panelNotice = page.locator(
+    '[data-player-notification-panel] [data-player-notice="audio-blocked"]',
+  );
+  check(
+    (await panelNotice.locator("[data-notice-dismiss]").count()) === 0,
+    "The blocked-audio notice must not be dismissible",
+  );
+  await panelNotice.getByRole("button", { name: "Enable audio", exact: true }).click();
   await page.waitForFunction(() => window.__played[0]?.currentTime > 0.2);
   await retry.waitFor({ state: "hidden" });
   check(
@@ -1949,6 +2122,7 @@ const groups = [
   focusIndicatorChecks,
   backgroundControlPlacementChecks,
   mediaPlaybackChecks,
+  noticeChecks,
   directDemoLatestChecks,
   markupLinkChecks,
   timerChecks,

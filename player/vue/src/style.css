@@ -446,3 +446,18 @@ html:fullscreen { background: var(--background); }
   /* Focus scrolling keeps the outline and its separation inside the clip. */
   scroll-padding-block: calc(2px + var(--player-focus-offset));
 }
+
+/* Player notice levels (PLAYER-UI "Player notices") use the theme status colours: info blue, warning orange, error
+   red. Without a Player theme they fall back to the system canvas colours. */
+[data-notice-level="info"] {
+  --notice-solid: var(--theme-status-info, CanvasText);
+  --notice-soft: var(--theme-status-info-soft, Canvas);
+}
+[data-notice-level="warning"] {
+  --notice-solid: var(--theme-status-warning, CanvasText);
+  --notice-soft: var(--theme-status-warning-soft, Canvas);
+}
+[data-notice-level="error"] {
+  --notice-solid: var(--theme-status-error, CanvasText);
+  --notice-soft: var(--theme-status-error-soft, Canvas);
+}

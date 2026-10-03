@@ -18,6 +18,8 @@ This is a local inspection route, not the production cross-origin Player/host pr
 
 - `runtime-adapter.ts` contains framework-independent runtime-to-Player translation and shared action helpers used by
   the Player and playground workspace controller, including reporting a persisted script-storage write.
+- `notices.ts` contains the Player notice channel and its fixed wording per condition; see
+  [`PLAYER-UI.md`](../docs/ui/PLAYER-UI.md#player-notices).
 - `script-storage.ts` contains the asynchronous script-storage provider boundary and its browser-local
   implementation; see [`DATA-AND-API.md`](../docs/DATA-AND-API.md#script-storage-in-the-browser).
 - `vue/src/` contains the Player composition, components, shared layout/theme CSS, demo host, and development preview;

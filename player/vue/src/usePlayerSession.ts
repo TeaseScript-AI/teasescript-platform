@@ -10,6 +10,12 @@ import {
   type PlayerRuntimeSessionOptions,
 } from "../../runtime-adapter.js";
 import type { ScriptStorageProvider } from "../../script-storage.js";
+import {
+  PlayerNotices,
+  playerNoticeKeys,
+  playerNotices,
+  type PlayerNotice,
+} from "../../notices.js";
 import type { RuntimeScriptStorageEntrySnapshot } from "../../../src/index.js";
 import { useRuntimeSceneClock } from "./useRuntimeSceneClock";
 
@@ -45,7 +51,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const generation = ref(0);
   const interactionReset = ref(0);
   const activation = shallowRef<Activation | null>(null);
-  const audioBlocked = ref(false);
+  const notices = new PlayerNotices();
+  const noticeList = shallowRef<readonly PlayerNotice[]>([]);
+  notices.subscribe((current) => (noticeList.value = current));
   const scriptStorage = options.scriptStorage;
 
   const pendingLoadCount = ref(0);
@@ -68,7 +76,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       pendingLoadCount.value = loads.size;
     },
     requestObservation: () => clock.observe(),
-    blockedChanged: (blocked) => (audioBlocked.value = blocked),
+    blockedChanged: (blocked) =>
+      blocked
+        ? notices.publish(playerNotices.audioBlocked(() => device.retryBlocked()))
+        : notices.dismiss(playerNoticeKeys.audioBlocked),
   });
   const clock = useRuntimeSceneClock(session, () => device.sample());
 
@@ -105,8 +116,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (!scriptStorage) return;
     try {
       storedEntries.value = await scriptStorage.load();
+      notices.dismiss(playerNoticeKeys.storageUnavailable);
     } catch {
       storedEntries.value = null;
+      notices.publish(playerNotices.storageUnavailable());
     }
   }
   /** Session options for the script's storage; call it from the Start factory. */
@@ -146,6 +159,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         // The report must belong to the session that requested it.
         if (generation.value !== sessionGeneration || latest === null) return;
         if (pendingPlayerRuntimeStorageWrite(latest.snapshot)?.actionId !== write!.actionId) return;
+        if (!stored) notices.publish(playerNotices.storageWriteFailed());
         session.value = completePlayerRuntimeStorageWrite(latest, write!.actionId, stored).session;
       }
     },
@@ -182,6 +196,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // Starts or restores a session; its scene time continues from the persisted observation, so a
   // gap while no Player ran is not consumed.
   function start(next: PlayerRuntimeSession) {
+    // A failed write concerns the run it happened in.
+    notices.dismiss(playerNoticeKeys.storageWriteFailed);
     device.reset();
     loads.clear();
     pendingLoadCount.value = 0;
@@ -219,9 +235,17 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     interactionReset: computed(() => interactionReset.value),
     /** The prepared Start or Continue, or `null` once the session runs or while saved data is being cleared. */
     activation: computed(() => (clearing.value ? null : (activation.value?.kind ?? null))),
-    /** Whether the browser refused audible playback; `retryAudio` must run from a user activation. */
-    audioBlocked: computed(() => audioBlocked.value),
-    retryAudio: () => device.retryBlocked(),
+    /** Current Player notices, such as blocked audio; a notice's action runs from the player's click. */
+    notices: computed(() => noticeList.value),
+    /** Reports a host condition to the player; publishing the same key again replaces that notice. */
+    publishNotice: (notice: PlayerNotice) => notices.publish(notice),
+    /** Withdraws a notice once its producer's condition resolves, including one the player cannot dismiss. */
+    withdrawNotice: (key: string) => notices.dismiss(key),
+    /** Dismisses a notice for the player; a notice that is the only way to recover stays until it resolves. */
+    dismissNotice: (key: string) => {
+      if (notices.list.some((notice) => notice.key === key && notice.dismissible !== false))
+        notices.dismiss(key);
+    },
     /** Whether the host persists script storage, so the Player offers to clear it. */
     hasScriptStorage: scriptStorage !== undefined,
     canClearScriptStorage,
