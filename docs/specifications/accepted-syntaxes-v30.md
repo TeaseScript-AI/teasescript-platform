@@ -673,6 +673,43 @@ delimiter trims nothing. Additional blank lines remain after the two structural 
 `"""\n\n\n"""` has the value `"\n"`. Inside block content, one or two unescaped `"` characters are text; the first
 unescaped `"""` closes the block. Escaping one quote can break a would-be delimiter.
 
+### Text operations
+
+Strings are immutable: every operation returns a new value and leaves the original unchanged. `length` is a property;
+the other operations are methods:
+
+```text
+let name = "  ada lovelace  "
+let clean = name.trim()            // "ada lovelace"
+say clean.capitalize()             // Ada lovelace
+say clean.length                   // 12
+if clean.startsWith("ada") {
+    say clean.uppercase()          // ADA LOVELACE
+}
+let parts = "red,green,blue".split(",")   // ["red", "green", "blue"]
+```
+
+| Operation | Result |
+| --- | --- |
+| `text.length` | the number of characters, counted as Unicode code points |
+| `text.contains(part)` | `true` when `part` occurs in `text` |
+| `text.startsWith(part)`, `text.endsWith(part)` | `true` when `text` starts or ends with `part` |
+| `text.indexOf(part)` | the position of the first occurrence of `part`, or `-1` |
+| `text.substring(start)`, `text.substring(start, end)` | the characters from `start` up to, but not including, `end`; without `end`, up to the end of the text |
+| `text.split(separator)` | a `string[]` of the parts between separators, keeping empty parts; `split("")` returns the single characters |
+| `text.replace(search, replacement)` | the text with every occurrence of `search` replaced |
+| `text.trim()`, `text.trimStart()`, `text.trimEnd()` | the text without whitespace at both ends, at the start, or at the end |
+| `text.uppercase()`, `text.lowercase()` | the text in upper or lower case |
+| `text.capitalize()` | the text with its first character in upper case and the rest unchanged |
+
+Rules:
+
+- Positions count characters from `0`, like list indexes. A position must be an integer from `0` through the length, and
+  `end` may not be before `start`; otherwise a runtime error is raised.
+- Searching and replacing compare text literally and case-sensitively. `replace` needs a non-empty `search`.
+- Case conversion uses the locale-independent Unicode mapping: `"Straße".uppercase()` is `"STRASSE"`.
+- An argument that must be text but is another value raises a runtime error.
+
 ## 9. Commands
 **Status:** Accepted
 
@@ -960,7 +997,11 @@ items.removeLast()
 items.clear()
 items.sort()
 items.contains("map")
+items.join(", ")
 ```
+
+`items.join(separator)` returns the elements as text, separated by `separator`, which defaults to `", "`. Elements are
+converted as `say` converts a single value; a list that contains lists, sets, or objects raises a runtime error.
 
 List properties:
 
