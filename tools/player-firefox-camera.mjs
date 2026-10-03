@@ -44,6 +44,13 @@ async function checks(page, url) {
     [...document.querySelectorAll("img")].filter(
       (image) => image.src.startsWith("blob:") && image.complete && image.naturalWidth > 0,
     ).length;
+  const savedPhoto = (tab) =>
+    tab.evaluate(
+      () =>
+        JSON.parse(
+          localStorage.getItem('player-storage:["development-camera","camera.photo"]') ?? "null",
+        )?.value ?? null,
+    );
   async function start(unsizedMilliseconds) {
     const tab = await context.newPage();
     const messages = [];
@@ -88,6 +95,8 @@ async function checks(page, url) {
   await shows(tab, "Captured.");
   await tab.waitForFunction(decodedPhotos);
   check(messages.length === 0, `A late-sized first frame reported: ${messages.join(" | ")}`);
+  const first = await savedPhoto(tab);
+  check(String(first).startsWith("captured-media:"), `The photo was not saved: ${first}`);
   await tab.close();
 
   // A new run shows the saved photo, and a new photo replaces it.
@@ -96,7 +105,13 @@ async function checks(page, url) {
   await tab.waitForFunction(decodedPhotos);
   await tab.locator("button", { hasText: "Take a new photo" }).click();
   await shows(tab, "Captured.");
+  await tab.waitForFunction(decodedPhotos);
   check(messages.length === 0, `A new run reported: ${messages.join(" | ")}`);
+  const second = await savedPhoto(tab);
+  check(
+    second !== first && String(second).startsWith("captured-media:"),
+    `The new photo was not saved: ${second}`,
+  );
   await tab.close();
 
   // A camera that never delivers a sized frame cannot hold the script: it continues without a photo.
@@ -104,12 +119,13 @@ async function checks(page, url) {
   await shows(tab, "Your previous photo.");
   await tab.locator("button", { hasText: "Take a new photo" }).click();
   await shows(tab, "No camera; continuing without a photo.", 20_000);
+  // Exactly the capture diagnostic: an unhandled rejection from releasing the video would add a page error.
   check(
-    messages.some((message) =>
-      message.includes("could not capture a photo (failed, NotReadableError)"),
-    ),
+    messages.length === 1 &&
+      messages[0].includes("could not capture a photo (failed, NotReadableError)"),
     `A camera without frames reported: ${messages.join(" | ")}`,
   );
+  check((await savedPhoto(tab)) === second, "A camera without frames replaced the saved photo");
   await tab.close();
   return "PASS a late-sized first frame, the saved photo in a new run, and a camera without frames";
 }
