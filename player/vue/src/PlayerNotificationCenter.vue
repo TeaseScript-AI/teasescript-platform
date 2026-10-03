@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
 import { Bell, CircleAlert, Info, TriangleAlert, X } from "@lucide/vue";
-import PlayerActionButton from "@/components/PlayerActionButton.vue";
 import { Button } from "@/components/ui/button";
 import Popover from "@/components/ui/popover/Popover.vue";
 import PopoverContent from "@/components/ui/popover/PopoverContent.vue";
@@ -88,34 +87,34 @@ function clearAll() {
                 :data-player-notice="entry.notice.key"
                 :data-notice-level="entry.notice.level"
               >
-                <div class="player-notification-row">
-                  <component :is="icons[entry.notice.level]" class="size-4 shrink-0" aria-hidden="true" />
-                  <span class="player-notification-message">
+                <component :is="icons[entry.notice.level]" class="player-notification-icon size-4" aria-hidden="true" />
+                <div class="player-notification-body">
+                  <p>
                     <span class="sr-only">{{ levelLabels[entry.notice.level] }}: </span>{{ entry.notice.message }}
+                  </p>
+                  <p class="player-notification-meta">
+                    <template v-if="entry.notice.dismissible === false">
+                      <span class="player-notification-needs-action">Needs action</span>
+                      <span aria-hidden="true">·</span>
+                    </template>
+                    <time :datetime="new Date(entry.publishedAt).toISOString()">{{ age(entry.publishedAt) }}</time>
+                  </p>
+                  <span v-if="entry.notice.action" class="player-notification-action">
+                    <Button variant="outline" size="sm" :data-notice-action="entry.notice.key" @click="entry.notice.action.run()">
+                      {{ entry.notice.action.label }}
+                    </Button>
                   </span>
-                  <span v-if="entry.notice.dismissible === false" class="player-notification-tag">Needs action</span>
-                  <Button
-                    v-else
-                    variant="ghost"
-                    size="icon-xs"
-                    :aria-label="`Dismiss: ${entry.notice.message}`"
-                    data-notice-dismiss
-                    @click="dismiss(entry.notice.key)"
-                  >
-                    <X />
-                  </Button>
                 </div>
-                <div class="player-notification-row player-notification-meta">
-                  <time :datetime="new Date(entry.publishedAt).toISOString()">{{ age(entry.publishedAt) }}</time>
-                  <PlayerActionButton
-                    v-if="entry.notice.action"
-                    class="shrink-0"
-                    :data-notice-action="entry.notice.key"
-                    @click="entry.notice.action.run()"
-                  >
-                    {{ entry.notice.action.label }}
-                  </PlayerActionButton>
-                </div>
+                <Button
+                  v-if="entry.notice.dismissible !== false"
+                  variant="ghost"
+                  size="icon-xs"
+                  :aria-label="`Dismiss: ${entry.notice.message}`"
+                  data-notice-dismiss
+                  @click="dismiss(entry.notice.key)"
+                >
+                  <X />
+                </Button>
               </li>
             </ul>
           </PopoverContent>
@@ -179,8 +178,10 @@ function clearAll() {
 }
 .player-notification {
   display: grid;
-  gap: 6px;
-  padding: 10px 14px 10px 11px;
+  grid-template-columns: 1rem minmax(0, 1fr) 1.5rem;
+  column-gap: 10px;
+  align-items: start;
+  padding: 10px 10px 10px 11px;
   /* The level's tint and mark, as on its toast. */
   border-inline-start: 3px solid var(--notice-solid);
   background: var(--notice-soft);
@@ -188,32 +189,28 @@ function clearAll() {
 .player-notification + .player-notification {
   border-block-start: 1px solid var(--border);
 }
-.player-notification-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-.player-notification-row > svg {
-  margin-block-start: 1px;
+.player-notification-icon {
+  grid-column: 1;
+  margin-block-start: 2px;
   color: var(--notice-solid);
 }
-.player-notification-message {
-  flex: 1;
-  min-inline-size: 0;
-}
-.player-notification-tag {
-  flex-shrink: 0;
-  padding: 0 6px;
-  border: 1px solid var(--notice-solid);
-  background: var(--notice-soft);
-  border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 600;
+.player-notification-body {
+  grid-column: 2;
+  display: grid;
+  justify-items: start;
+  gap: 2px;
 }
 .player-notification-meta {
-  align-items: center;
-  justify-content: space-between;
+  display: flex;
+  gap: 6px;
   color: var(--text-muted);
   font-size: 0.75rem;
+}
+.player-notification-needs-action {
+  color: var(--notice-solid);
+  font-weight: 600;
+}
+.player-notification-action {
+  margin-block-start: 6px;
 }
 </style>

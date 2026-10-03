@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { CircleAlert, Info, SquarePlay, TriangleAlert, X } from "@lucide/vue";
-import PlayerActionButton from "@/components/PlayerActionButton.vue";
 import { Button } from "@/components/ui/button";
 import type { PlayerNotification } from "./usePlayerNotifications.js";
 
@@ -60,13 +59,19 @@ function leave(event: FocusEvent) {
         </Button>
       </div>
       <div class="player-toast-row">
-        <component :is="icons[entry.notice.level]" class="size-4 shrink-0" aria-hidden="true" />
-        <span class="player-toast-message">{{ entry.notice.message }}</span>
-      </div>
-      <div v-if="entry.notice.action" class="player-toast-actions">
-        <PlayerActionButton :data-notice-action="entry.notice.key" @click="entry.notice.action.run()">
-          {{ entry.notice.action.label }}
-        </PlayerActionButton>
+        <component :is="icons[entry.notice.level]" class="player-toast-icon size-4" aria-hidden="true" />
+        <div class="player-toast-body">
+          <p>{{ entry.notice.message }}</p>
+          <Button
+            v-if="entry.notice.action"
+            variant="outline"
+            size="sm"
+            :data-notice-action="entry.notice.key"
+            @click="entry.notice.action.run()"
+          >
+            {{ entry.notice.action.label }}
+          </Button>
+        </div>
       </div>
     </div>
   </div>
@@ -117,22 +122,20 @@ function leave(event: FocusEvent) {
   font-weight: 600;
 }
 .player-toast-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: start;
   padding-inline-end: 4px;
 }
-.player-toast-row > svg {
-  margin-block-start: 1px;
+.player-toast-icon {
+  margin-block-start: 2px;
   color: var(--notice-solid);
 }
-.player-toast-message {
-  min-inline-size: 0;
-}
-.player-toast-actions {
-  display: flex;
-  justify-content: flex-end;
-  padding-inline-end: 4px;
+.player-toast-body {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
 }
 </style>
 

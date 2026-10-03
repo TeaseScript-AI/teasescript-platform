@@ -72,9 +72,9 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
   const mediaSurface = surface(dark ? 24 : 94);
   const mediaText = neutral(dark ? 100 : 15);
   // Player notice levels use the conventional fixed hues (info blue, warning orange, error red), independent of the
-  // accent: a solid tone for icons, borders and marks, and a soft tone for a level-tinted surface.
+  // accent: a solid tone for icons, borders, marks and short labels, and a soft tone for a level-tinted surface.
   const status = (hue: number, chroma: number) => ({
-    solid: tonalColor(hue, chroma, dark ? (high ? 85 : 78) : high ? 35 : 48),
+    solid: tonalColor(hue, chroma, dark ? (high ? 85 : 78) : high ? 30 : 45),
     soft: tonalColor(hue, chroma / 4, dark ? 22 : 95),
   });
   const info = status(260, 56);
@@ -164,7 +164,8 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
   }
   for (const level of ["info", "warning", "error"] as const) {
     inspect(`status-${level}`, "surface-floating", high ? 4.5 : 3);
-    inspect(`status-${level}`, `status-${level}-soft`, high ? 4.5 : 3);
+    // The solid tone also labels text on the tint, such as "Needs action".
+    inspect(`status-${level}`, `status-${level}-soft`, textTarget);
     inspect("text-primary", `status-${level}-soft`, textTarget);
   }
   inspect("text-disabled", "surface-disabled", null);
