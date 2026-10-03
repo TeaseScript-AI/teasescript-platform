@@ -27,6 +27,20 @@ export function typeFromAnnotation(annotation: TypeAnnotation): StaticType {
   return annotation.optional ? { kind: "optional", value: collection } : collection;
 }
 
+/** The type without `null`: operations on an optional value act on its non-null type. */
+export function nonNullType(type: StaticType): StaticType {
+  return type.kind === "optional" ? type.value : type;
+}
+
+/** Whether a type can be written as an annotation: a scalar type, or a list or set of one. */
+export function isAnnotatable(type: StaticType): boolean {
+  const value = nonNullType(type);
+  return (
+    value.kind === "scalar" ||
+    ((value.kind === "list" || value.kind === "set") && value.element.kind === "scalar")
+  );
+}
+
 /** The type of a list or set element, of a loop variable over an iterable, or `undefined` for other types. */
 export function elementType(type: StaticType): StaticType | undefined {
   if (type.kind === "list" || type.kind === "set") return type.element;
@@ -107,7 +121,10 @@ export function describeValue(type: StaticType): string {
         return "a date and time";
     }
   }
-  if (type.kind === "list" || type.kind === "set") return `a ${type.kind} (${typeName(type)})`;
+  if (type.kind === "list" || type.kind === "set")
+    return type.element.kind === "unknown"
+      ? `a ${type.kind}`
+      : `a ${type.kind} (${typeName(type)})`;
   if (type.kind === "optional") return `${describeValue(type.value)} or null`;
   if (type.kind === "null") return "null";
   if (type.kind === "object") return "an object";
@@ -157,7 +174,9 @@ function* expressionTypeTask(
     case "identifier":
       return context.identifier(expression.name) ?? UNKNOWN_TYPE;
     case "propertyAccessExpression": {
-      const object = yield* compileChild(expressionTypeTask(expression.object, context));
+      const object = nonNullType(
+        yield* compileChild(expressionTypeTask(expression.object, context)),
+      );
       if (object.kind !== "list" && object.kind !== "set") return UNKNOWN_TYPE;
       if (expression.property.name === "length") return scalar("integer");
       return ["first", "last", "random"].includes(expression.property.name)
@@ -165,7 +184,9 @@ function* expressionTypeTask(
         : UNKNOWN_TYPE;
     }
     case "indexExpression": {
-      const object = yield* compileChild(expressionTypeTask(expression.object, context));
+      const object = nonNullType(
+        yield* compileChild(expressionTypeTask(expression.object, context)),
+      );
       return object.kind === "list" ? object.element : UNKNOWN_TYPE;
     }
     case "callExpression":
@@ -178,13 +199,17 @@ function* expressionTypeTask(
         expression.callee.kind === "propertyAccessExpression" &&
         expression.callee.property.name === "contains"
       ) {
-        const receiver = yield* compileChild(expressionTypeTask(expression.callee.object, context));
+        const receiver = nonNullType(
+          yield* compileChild(expressionTypeTask(expression.callee.object, context)),
+        );
         if (receiver.kind === "list" || receiver.kind === "set") return scalar("boolean");
       }
       return UNKNOWN_TYPE;
     case "unaryExpression": {
       if (expression.operator === "not") return scalar("boolean");
-      const operand = yield* compileChild(expressionTypeTask(expression.operand, context));
+      const operand = nonNullType(
+        yield* compileChild(expressionTypeTask(expression.operand, context)),
+      );
       return operand.kind === "scalar" &&
         (operand.name === "integer" || operand.name === "number" || operand.name === "duration")
         ? operand
@@ -223,9 +248,11 @@ const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "
  */
 export function arithmeticType(
   operator: string,
-  left: StaticType,
-  right: StaticType,
+  leftType: StaticType,
+  rightType: StaticType,
 ): StaticType | undefined {
+  const left = nonNullType(leftType);
+  const right = nonNullType(rightType);
   if (left.kind !== "scalar" || right.kind !== "scalar") return undefined;
   const numeric = (name: ScalarTypeName): boolean => name === "integer" || name === "number";
   if (numeric(left.name) && numeric(right.name)) {
@@ -239,6 +266,8 @@ export function arithmeticType(
     return undefined;
   }
   if (left.name === "duration" && numeric(right.name) && (operator === "*" || operator === "/"))
+    return scalar("duration");
+  if (numeric(left.name) && right.name === "duration" && operator === "*")
     return scalar("duration");
   return undefined;
 }
