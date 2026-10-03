@@ -138,6 +138,22 @@ test("handles, speakers, and a typed load default keep their types", () => {
   ]);
 });
 
+test("a list or set literal is checked element by element against a known element type", () => {
+  assert.deepEqual(mismatches('let names: string[] = ["a", 1]'), [
+    [
+      "TSV041",
+      "'names' holds string values (string[]), so it cannot contain a whole number (integer).",
+      "1",
+    ],
+  ]);
+  assert.deepEqual(mismatches('let scores = [1, 2]\nscores = ["a", 3]')[0]?.[2], '"a"');
+  assert.deepEqual(mismatches('let tags: string set = set["a", 2]')[0]?.[2], "2");
+  assert.deepEqual(
+    mismatches('let mixed = ["Level", 2, 3.5]\nlet ratios: number[] = [1, 2.5]'),
+    [],
+  );
+});
+
 test("optional types keep their non-null type in operations, elements, and loops", () => {
   assert.deepEqual(mismatches("let count: integer? = 1\ncount += 0.5"), [
     [
