@@ -25,7 +25,7 @@ with the direction TeaseScript already took, and common practice in other langua
 | C2 | Labels may be mixed; a missing label is the button text | Owner agreed; numeric-label rule awaits confirmation |
 | C3 | Labels from a list | Length rule and warnings decided; notation open |
 | C4 | Effective labels are unique | Owner agreed |
-| C5 | Warning when a choice result is compared with an impossible label | Recommended, not yet discussed |
+| C5 | Warning when a choice result is compared with an impossible label | Owner agreed |
 | T1 | Type enforcement, union types, type tests, narrowing | Issue #504 |
 
 ## L1. Random list selection only inside `${...}`
@@ -122,7 +122,9 @@ let offenses = [
 let answer = choose back: "Back", offenses
 ```
 
-- Option A, records: no new syntax (C1 expands the list; the element supplies label and text) and no notation clash.
+- Option A, records: lists of object literals are already accepted (V30 §15 and §16) and run today
+  (`offenses[1].text`); only `choose` reading `text` and `label` from an element is new (today such an element fails
+  with TSR021). No new syntax and no notation clash.
   Label and text stay together, so they cannot shift apart and the length rule never applies. `label` and `text` are
   the terms ADR 0018 and the runtime's choice options already use. Con: authors must know the two property names, and
   object literals are a step beyond plain lists. The plain-text list from C1 stays the simple path.
@@ -136,6 +138,8 @@ let answer = choose back: "Back", offenses
   V30 uses for media commands: a compact form for the common case, a named form for less common options.
 - Common practice: option lists are value/label records in HTML (`<option value>`) and in common UI libraries (items
   shaped like `{ value, label }`). Parallel arrays are a known anti-pattern because they drift apart.
+- Elements with different shapes (`{ text: "Corner" }` next to elements with a `label`) compile today; whether they
+  stay allowed depends on how #504 types objects. Otherwise every element writes both properties.
 - Whether label lists may hold numbers follows C2. The recommendation is text labels only, because a missing label
   falls back to text.
 
@@ -152,7 +156,7 @@ several options remains invalid there and the player selects a button.
 
 ## C5. Warning when a choice result is compared with an impossible label
 
-Recommended, not yet discussed. When a `choose` has its labels in the source, the compiler can warn at
+Owner agreed (2026-10-03). When a `choose` has its labels in the source, the compiler can warn at
 `if answer == "Open"` when `"Open"` is none of them. That catches the button text being compared instead of the
 label, and typos such as `"bratyy"`. TypeScript reports the same mistake for literal union types ("This comparison
 appears to be unintentional because the types have no overlap"). It depends on the type information from #504.
