@@ -94,12 +94,20 @@ test("a name given twice to a built-in or method is rejected at compile time", (
     compileSource('say pack(1, mode: "x", size: 2)', { builtins: ["pack"] }).diagnostics,
     [],
   );
+  for (const callee of ["(items.contains)", "[items.contains][0]", "pick().contains"])
+    assert.deepEqual(
+      diagnostics(
+        `let items = ["a"]\nfunction pick {\n    return items\n}\nsay ${callee}(x: 1, x: 2)`,
+      ).map(([code]) => code),
+      ["TSV023"],
+      callee,
+    );
 });
 
 test("argument count errors name the parameters and the fix", () => {
   assert.deepEqual(diagnostics(SHOW + "say show(1, 2, 3, 4)")[0]?.slice(0, 2), [
     "TSV020",
-    "Function 'show' takes 1 to 3 arguments (a, b, c), received 4. Remove the extra arguments.",
+    "Function 'show' takes 1 to 3 arguments (a, b, c), received 4 positional arguments. Remove the extra positional arguments.",
   ]);
   assert.deepEqual(diagnostics(SHOW + "say show()")[0]?.slice(0, 2), [
     "TSV020",

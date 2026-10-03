@@ -1087,7 +1087,13 @@ class SemanticValidator {
           this.#validateExpressionTask(expression.index, scope, contextualSpeaker),
         );
         return;
-      case "callExpression":
+      case "callExpression": {
+        const authorFunction =
+          expression.callee.kind === "identifier" &&
+          scope.resolve(expression.callee.name)?.kind === "function" &&
+          this.#functions.has(expression.callee.name);
+        // Only an author function's parameters are known here; for every other callee a repeated name is still an error.
+        if (!authorFunction) this.#validateDistinctNamedArguments(expression);
         if (expression.callee.kind === "identifier") {
           const name = expression.callee.name;
           const binding = scope.resolve(name);
@@ -1095,8 +1101,7 @@ class SemanticValidator {
           if (declaration !== undefined && binding?.kind === "function") {
             this.#validateFunctionCall(expression, declaration);
           } else if (this.#builtins.has(name)) {
-            // Built-ins validate their parameter names and values at runtime; a repeated name is always an error.
-            this.#validateDistinctNamedArguments(expression);
+            // Built-ins validate their parameter names and values at runtime.
           } else if (binding !== undefined) {
             this.#report(
               semanticCode.nonCallable,
@@ -1111,7 +1116,6 @@ class SemanticValidator {
             );
           }
         } else if (expression.callee.kind === "propertyAccessExpression") {
-          this.#validateDistinctNamedArguments(expression);
           yield* compileChild(
             this.#validateExpressionTask(expression.callee.object, scope, contextualSpeaker),
           );
@@ -1151,6 +1155,7 @@ class SemanticValidator {
           }
         }
         return;
+      }
       case "binaryExpression": {
         yield* compileChild(
           this.#validateExpressionTask(expression.left, scope, contextualSpeaker),
@@ -1363,7 +1368,7 @@ class SemanticValidator {
     if (positional.length > parameterNames.length) {
       this.#report(
         semanticCode.argumentCount,
-        `Function '${functionName}' takes ${argumentRange(required, parameterNames)}, received ${positional.length}. Remove the extra arguments.`,
+        `Function '${functionName}' takes ${argumentRange(required, parameterNames)}, received ${positional.length} positional argument${positional.length === 1 ? "" : "s"}. Remove the extra positional arguments.`,
         expression.span,
       );
       return;
