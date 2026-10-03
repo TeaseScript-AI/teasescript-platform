@@ -438,17 +438,21 @@ test("does not retarget prepared assignments after nested path replacement", () 
       "function replaceTarget { target = second\nreturn 5 }",
       "function replaceChild { root.child = { value: 2 }\nreturn 7 }",
       "function shiftItems { items.removeFirst()\nreturn 9 }",
+      "let positions = [{ value: 0 }, { value: 1 }]",
+      "function removePosition { positions.removeAt(0)\nreturn 9 }",
       "target.value = replaceTarget()",
       "root.child.value = replaceChild()",
       "items[0].value = shiftItems()",
+      "positions[0].value = removePosition()",
       "say first.value",
       "say second.value",
       "say root.child.value",
       "say items[0].value",
+      "say positions[0].value",
     ].join("\n"),
   );
 
-  assert.deepEqual(sayTexts(result), ["0", "0", "2", "1"]);
+  assert.deepEqual(sayTexts(result), ["0", "0", "2", "1", "1"]);
 });
 
 test("rebases prepared list descendants when earlier removals shift retained items", () => {
@@ -457,17 +461,20 @@ test("rebases prepared list descendants when earlier removals shift retained ite
       "let firstItems = [{ value: 0 }, { value: 1 }]",
       "let middleItems = [0, 1, { value: 2 }]",
       "let lastItems = [{ value: 0 }, { value: 1 }]",
+      "let positionItems = [{ value: 0 }, { value: 1 }, { value: 2 }]",
       "function removeFirstItem { firstItems.removeFirst()\nreturn 9 }",
       "function removeMiddleItem { middleItems.remove(1)\nreturn 8 }",
       "function removeLastItem { lastItems.removeLast()\nreturn 7 }",
+      "function removeItemAt { positionItems.removeAt(1)\nreturn 6 }",
       "firstItems[1].value = removeFirstItem()",
       "middleItems[2].value = removeMiddleItem()",
       "lastItems[0].value = removeLastItem()",
-      'say "${firstItems[0].value}:${middleItems[1].value}:${lastItems[0].value}"',
+      "positionItems[2].value = removeItemAt()",
+      'say "${firstItems[0].value}:${middleItems[1].value}:${lastItems[0].value}:${positionItems[1].value}"',
     ].join("\n"),
   );
 
-  assert.deepEqual(sayTexts(result), ["9:8:7"]);
+  assert.deepEqual(sayTexts(result), ["9:8:7:6"]);
 });
 
 test("rebases prepared list descendants through speaker aliases", () => {

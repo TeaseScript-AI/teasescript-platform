@@ -1096,11 +1096,13 @@ Runtime behavior:
 - Automatic visible-text selection from an empty list raises a runtime error because no element can be selected.
 - The empty-list error identifies the list expression and explains that the visible-text context requires at least one eligible element.
 - Two lists are equal (`==`) when they have the same length and equal elements in the same order; two sets are equal
-  when they have the same members in any order. `contains(value)` and `remove(value)` use this equality, so they also
-  find objects and nested lists. `remove(value)` removes the first equal element.
+  when they have the same members in any order; two ranges are equal when they have the same bounds and the same
+  inclusiveness. Values of different kinds, such as a list and a set, are never equal. List `contains(value)` and
+  `remove(value)` use this equality, so they also find objects and nested lists; `remove(value)` removes the first equal
+  element. Set elements remain scalar values.
 - `remove(value)` leaves the list unchanged when the value is absent and emits a warning to the developer log.
-- `removeAt(index)` removes the element at a zero-based index and moves later elements forward. An invalid index raises
-  the same runtime error as indexing.
+- `removeAt(index)` removes the element at a zero-based index and moves later elements forward. Like the other mutating
+  methods, it returns `null`. An invalid index raises the same runtime error as indexing.
 - `removeFirst()` and `removeLast()` on an empty list, and set `remove(value)` of an absent value, are no-ops: the
   collection stays unchanged and execution continues without an error or warning.
 - Mutating methods change the existing list.
