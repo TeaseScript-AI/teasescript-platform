@@ -35,8 +35,9 @@ watch(
 );
 
 // DEMO: the browser's own picture-in-picture window, which also floats over other apps. Browsers open it only from a
-// user's click. Document picture-in-picture (Chromium) keeps the mirrored view; video picture-in-picture (Safari)
-// shows the camera unmirrored; Firefox offers neither to pages, so there is no button there.
+// user's click. Document picture-in-picture (Chromium, current Firefox) keeps the mirrored view, and the browser's own
+// pop-out toggle on the video then stays off; video picture-in-picture (Safari) shows the camera unmirrored. Without
+// either there is no button.
 interface DocumentPictureInPicture {
   requestWindow(options: { width: number; height: number }): Promise<Window>;
 }
@@ -47,7 +48,11 @@ let pipWindow: Window | null = null;
 let unmounted = false;
 async function openPictureInPicture() {
   if (!documentPip) {
-    await video.value?.requestPictureInPicture().catch(() => {});
+    const element = video.value;
+    await element?.requestPictureInPicture().catch(() => {});
+    // Hidden while the browser opened the window: the camera must not stay on view.
+    if (unmounted && element && document.pictureInPictureElement === element)
+      await document.exitPictureInPicture();
     return;
   }
   pipWindow?.close();
@@ -93,13 +98,15 @@ onBeforeUnmount(() => {
       autoplay
       playsinline
       aria-hidden="true"
+      :disablePictureInPicture.prop="documentPip !== undefined"
       @loadedmetadata="measured"
       @resize="measured"
       @timeupdate="measured"
     />
     <slot />
-    <figcaption v-if="label" class="viewfinder-label">
-      <Video aria-hidden="true" class="size-3.5" />Camera preview
+    <!-- Without its visible label the preview keeps its name. -->
+    <figcaption :class="label ? 'viewfinder-label' : 'sr-only'">
+      <Video v-if="label" aria-hidden="true" class="size-3.5" />Camera preview
     </figcaption>
     <button
       v-if="pictureInPicture"

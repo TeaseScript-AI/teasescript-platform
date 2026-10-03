@@ -42,8 +42,9 @@ onMounted(() => {
 
 function clamp({ x, y, width }: FloatingPlace): FloatingPlace {
   const { width: maxWidth, height: maxHeight } = bounds.value;
-  const largest = Math.max(MIN_WIDTH, Math.min(maxWidth - 2 * EDGE, (maxHeight - 2 * EDGE) * ratio.value));
-  const clampedWidth = Math.min(Math.max(width, MIN_WIDTH), largest);
+  // The available space wins over the preferred minimum, so the corner stays reachable in a small Player.
+  const largest = Math.max(0, Math.min(maxWidth - 2 * EDGE, (maxHeight - 2 * EDGE) * ratio.value));
+  const clampedWidth = Math.min(Math.max(width, Math.min(MIN_WIDTH, largest)), largest);
   const height = clampedWidth / ratio.value;
   return {
     width: clampedWidth,
@@ -57,32 +58,43 @@ const style = computed(() =>
     : { visibility: "hidden" as const },
 );
 
-// One pointer drag moves the window or, from the corner, resizes it with the camera's aspect.
+// One pointer drag moves the window or, from the corner, resizes it with the camera's aspect. Further pointers, such as
+// a second finger, are ignored until it ends.
+let dragging = false;
 function drag(event: PointerEvent, mode: "move" | "resize") {
   const start = place.value;
-  if (!start || event.button !== 0) return;
+  if (!start || event.button !== 0 || dragging) return;
   event.preventDefault();
   event.stopPropagation();
+  dragging = true;
   const target = event.currentTarget as HTMLElement;
-  target.setPointerCapture(event.pointerId);
+  const pointer = event.pointerId;
+  target.setPointerCapture(pointer);
   const origin = { x: event.clientX, y: event.clientY };
   const moved = (next: PointerEvent) => {
+    if (next.pointerId !== pointer) return;
     const dx = next.clientX - origin.x;
     const dy = next.clientY - origin.y;
+    // A corner drag resizes by the movement along the window's diagonal, so it grows and shrinks.
+    const grown = (dx + dy / ratio.value) / (1 + 1 / ratio.value ** 2);
     place.value = clamp(
       mode === "move"
         ? { ...start, x: start.x + dx, y: start.y + dy }
-        : { ...start, width: start.width + Math.max(dx, dy * ratio.value) },
+        : { ...start, width: start.width + grown },
     );
   };
-  const ended = () => {
+  const ended = (next: PointerEvent) => {
+    if (next.pointerId !== pointer) return;
+    dragging = false;
     target.removeEventListener("pointermove", moved);
     target.removeEventListener("pointerup", ended);
     target.removeEventListener("pointercancel", ended);
+    target.removeEventListener("lostpointercapture", ended);
   };
   target.addEventListener("pointermove", moved);
   target.addEventListener("pointerup", ended);
   target.addEventListener("pointercancel", ended);
+  target.addEventListener("lostpointercapture", ended);
 }
 function keyboard(event: KeyboardEvent, mode: "move" | "resize") {
   const current = place.value;
