@@ -384,7 +384,9 @@ source_path = next(line.split(": ", 1)[1] for line in source_checkout["with"] if
 resolver_id = re.fullmatch(r"\$\{\{ steps\.([\w-]+)\.outputs\.[\w-]+ \}\}", source_sha).group(1)
 resolver = one_step(producer, "source resolver", lambda step: step.get("id") == [resolver_id])
 assert resolver.get("working-directory") == [source_path], resolver["name"]
-assert any("git rev-parse --verify HEAD" in line for line in resolver["run"]), resolver["name"]
+assert any(
+    re.fullmatch(r"\w+=\$\(git rev-parse --verify HEAD\)", line) for line in resolver["run"]
+), resolver["name"]
 assert f"cd {source_path}" in producer_run["run"], producer_run["name"]
 
 PYWORKFLOW

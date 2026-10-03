@@ -1877,7 +1877,8 @@ async function markupLinkChecks(page) {
   await page.route("**/src/runtimeScenario.ts*", (route) => {
     // Playwright CLI `run-code` provides no `URL` global, so the marker query is handled as text.
     const requested = route.request().url();
-    if (/[?&]original(?:[=&]|$)/u.test(requested)) return route.continue();
+    const query = requested.includes("?") ? requested.slice(requested.indexOf("?") + 1) : "";
+    if (query.split("&").some((part) => part.split("=")[0] === "original")) return route.continue();
     const original = `${requested}${requested.includes("?") ? "&" : "?"}original`;
     // Only the opening scenario is replaced; the module's other exports stay available.
     return route.fulfill({
