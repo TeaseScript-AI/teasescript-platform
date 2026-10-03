@@ -24,7 +24,7 @@ explicit unsupported nodes: `EmptyExpression` (29, a declaration without initial
 
 ## Feasibility snapshot
 
-Measured on 2026-10-03 at importer commit `a6d47053` with `node src/cli.ts report --run <package scripts>` (default
+Measured on 2026-10-03 at importer commit `d713b469` with `node src/cli.ts report --run <package scripts>` (default
 conversion, without proposals). Toy's 21 runtime-loaded modules are part of its single script `toy.groovy`, so Toy
 counts as one script whose statements include all module code.
 
@@ -33,10 +33,10 @@ counts as one script whose statements include all module code.
 | Distribution | 14 | 10 | 10 | 10 | 15 | 13 |
 | Domme3 | 24 | 13 | 10 | 10 | 35 | 37 |
 | DisciplineClinic | 6 | 3 | 3 | 3 | 17 | 17 |
-| Toy expanded | 1 | 0 | 0 | 0 | 284 | 465 |
+| Toy expanded | 1 | 0 | 0 | 0 | 267 | 465 |
 
 Root errors count independent causes that need manual work; placeholders count unconverted statements. Converting a
-statement can expose more root causes inside it, so the two counts can rise while coverage improves. Toy's 284 come
+statement can expose more root causes inside it, so the two counts can rise while coverage improves. Toy's 267 come
 from about 4,800 source statements, mostly map (dictionary) operations and lookups with runtime keys, Java objects,
 conditionals in positions where moving them would change evaluation order, string methods, and menus from runtime
 lists. The earlier snapshot counted 229: lookups and writes with runtime keys on maps were emitted as list indexing,

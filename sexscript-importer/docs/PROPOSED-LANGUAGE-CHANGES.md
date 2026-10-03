@@ -34,7 +34,7 @@ with the direction TeaseScript already took, and common practice in other langua
 
 ## Corpus evaluation
 
-Measured on 2026-10-03 at importer commit `a6d47053` with `node src/cli.ts report --run [--proposed=<id>] <package
+Measured on 2026-10-03 at importer commit `d713b469` with `node src/cli.ts report --run [--proposed=<id>] <package
 scripts>`. The importer emits a working syntax of its own choosing (the owner discusses exact syntax only for
 capabilities that prove valuable); the report compiles and smoke-runs it through stand-ins in current TeaseScript, so
 "converted" means converted, compiled, and run, not just emitted. Each cell: root errors / lowered scripts /
@@ -42,10 +42,11 @@ compiler-clean except pending / scripts reached by smoke runs.
 
 | Proposal | Distribution | Domme3 | DisciplineClinic | Toy |
 | --- | --- | --- | --- | --- |
-| none (baseline) | 15 / 10 / 10 / 10 | 35 / 13 / 10 / 10 | 17 / 3 / 3 / 3 | 284 / 0 / 0 / 0 |
-| choose-lists (C1–C3) | 14 / 10 / 10 / 10 | 35 / 13 / 10 / 10 | 10 / 3 / 3 / 3 | 277 / 0 / 0 / 0 |
+| none (baseline) | 15 / 10 / 10 / 10 | 35 / 13 / 10 / 10 | 17 / 3 / 3 / 3 | 267 / 0 / 0 / 0 |
+| choose-lists (C1–C3) | 14 / 10 / 10 / 10 | 35 / 13 / 10 / 10 | 10 / 3 / 3 / 3 | 260 / 0 / 0 / 0 |
 | dictionaries (D1) | unchanged | unchanged | unchanged | 202 / 0 / 0 / 0 |
-| string-operations (#508) | unchanged | unchanged | unchanged | 277 / 0 / 0 / 0 |
+| string-operations (#508) | unchanged | unchanged | unchanged | 260 / 0 / 0 / 0 |
+| dictionaries + strings | unchanged | 28 / 13 / 10 / 10 | unchanged | 190 / 0 / 0 / 0 |
 | input-defaults (#510) | unchanged | unchanged | unchanged | unchanged |
 | media-tags (M1) | unchanged | 32 / 16 / 12 / 12 | unchanged | unchanged |
 | all together | 14 / 10 / 10 / 10 | 25 / 16 / 12 / 12 | 10 / 3 / 3 / 3 | 183 / 0 / 0 / 0 |
@@ -66,18 +67,22 @@ The generated helper builds `{ label: position, text: text }` records. A form th
 make this shorter, but the records work. Unconverted: two DisciplineClinic menus whose option variable also holds text
 elsewhere (a type question, #504), and Toy menus built inside larger expressions.
 
-**D1 dictionaries: valuable, single-package evidence.** Toy's root count drops by 82 net: 40 lookups and 17 writes
-with runtime keys, 23 map method calls (`containsKey`, `keySet`, `values`, `remove`, `clear`), and 5 map literals with
+**D1 dictionaries: valuable, single-package evidence.** Toy's root count drops by 65 net: 40 lookups and writes with
+runtime keys, 23 map method calls (`containsKey`, `keySet`, `values`, `remove`, `clear`), and 5 map literals with
 computed or numeric keys convert, and 3 inner causes surface. The lookups and writes were previously emitted as list
-indexing that fails at runtime; the default conversion now reports them. No map key in the corpus clashed with a
-dictionary member name. The working syntax needed a literal with computed keys for 34 entries such as
-`{ [COLLAR]: "leather collar" }`, and treats Groovy's numeric keys (12 sites) as text. No other package uses maps as
-dictionaries.
+indexing that fails at runtime; the default conversion now reports them. No literal map key in the corpus has a
+dictionary member name; when one does, the output reads it as `map["length"]` so the member keeps its meaning. The
+working syntax needed a literal with computed keys for 34 entries such as `{ [COLLAR]: "leather collar" }`. It treats
+Groovy's numeric keys (12 sites) as text, with a note, and keeps Groovy's copy-on-write difference for maps shared by
+two variables visible as a note. No other package uses maps as dictionaries.
 
 **String operations (#508): valuable, cheap.** Alone they remove 8 of Toy's 14 string roots (the rest need regular
 expressions or `tokenize`). Making `.length` count text, list elements, and dictionary keys alike removes Domme3's six
 `size()` calls on record fields of unknown type when combined with dictionaries: Domme3 drops from 35 to 28 roots with
-both.
+both. The working operations follow JavaScript text semantics, which differ from Java in rare cases the output does
+not mark: `trim()` also removes non-breaking spaces, `capitalize()` turns a leading `ß` into `SS`, and case-insensitive
+comparison does not fold the Turkish dotted `İ`. `equalsIgnoreCase` converts only when the argument is known text, since
+Groovy returned `false` for `null`.
 
 **Prefill (#510): worthwhile for fidelity.** It restores all 62 defaults that the conversion now drops with a warning
 (distribution 18, Domme3 15, DisciplineClinic 24, Toy 5); it removes no root error. Working syntax: `askText default
@@ -91,7 +96,9 @@ routines; `intro`, `introfirst`, and `settings` become lowered, and the entry fl
 return countImages(tags: ["Domme3", "Domme${pack}"])
 ```
 
-The legacy count also filtered by file name (`Domme(\d+).jpg`), which tags cannot express; the output carries a note.
+The legacy count listed the folder's direct entries and filtered them by file name (`Domme(\d+).jpg`); the tag count
+counts the images tagged with the folder names, including subfolders, and cannot filter by name, so the output carries
+a note.
 With the importer now turning Domme3's busy-wait countdown into a visible `timer` (commit `4d0d9cb3`), the entry flow
 with all proposals runs `Domme3` → `introfirst` → `implements` and stops at `ask`, whose remaining causes are legacy
 bugs (helper methods called without the script host, which failed in SexScript too) and Java date formatting. Toy's
