@@ -126,11 +126,12 @@ Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `
 
 Successful completion emits the canonical `playerTranscript` event first and `actionCompleted` second. Both receive
 monotonic sequences, and the bounded settlement retains both sequences, the canonical result, transcript text,
-destination temporary, and owning call-frame identity for duplicate replay. The separate single-use handoff, not that
-settlement, is the persisted authority for the still-unconsumed destination. Prepared dynamic UI is checked against its
-preparation temporaries while those temporaries remain; after canonical cleanup, snapshot validation does not
-reconstruct or authenticate the historical dynamic-UI evaluation, consistent with the general snapshot-history rule
-below. Delay creation preflights its request plus future completion sequence; interaction creation preflights its
+destination temporary, owning call-frame identity, and the UI the player answered, for duplicate replay. The separate
+single-use handoff, not that settlement, is the persisted authority for the still-unconsumed destination. A pending
+action's prepared dynamic UI is checked against its preparation temporaries. A retained settlement is checked against
+its recorded UI and the plan instead, because cleanup clears those temporaries and a later run of the same instruction
+prepares them anew. Snapshot validation does not authenticate the historical dynamic-UI evaluation itself: a recorded
+UI and transcript edited together consistently are accepted, in line with the general snapshot-history rule below. Delay creation preflights its request plus future completion sequence; interaction creation preflights its
 request plus future transcript and completion sequences. Interaction completion rechecks both required sequences and
 validates the complete destination mutation before publishing any write, handoff, settlement, event, or continuation
 change. Continuation execution remains eligible only through a later normal runtime entry.
@@ -901,8 +902,8 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
 | Instruction plan | 25 | Script storage: `storageLoad` expressions with lazy defaults and direct typed-initializer checks, and `storageWrite` instructions (`save`; `delete` when the value is `null`). Revision 24: message preparation accepts authored position and alignment only for prose. Media instructions `pacingBarrier`, `showImage`, and `playMedia`; handler regions carry `handler` (`timer` or `media`) and `selfHandle`. Revision 21 added the timer instructions. |
-| Runtime snapshot | 26 | The validated, key-sorted `scriptStorage` session view, `scriptStoragePersistent`, and foreground `storageWrite` actions and settlements. Revision 25: captured bubble presentations require null position and alignment; placement is Player-owned. Media state: `stageImage`, background `media` actions, `settledMedia`, `nextMediaId`, foreground `mediaPlayback` waits and settlements, media cue invocations and interrupt frames, barrier-promoted pacing gates, and media handles. Revision 22 added timer state. |
-| Checkpoint | 34 | Updated the self-contained bundle for the script-storage plan and snapshot contracts. Revision 33: prose-only authored placement, bubble presentation validation, and the media plan and snapshot contracts. |
+| Runtime snapshot | 27 | An interaction settlement records the `ui` the player answered, and validates against it instead of the prepared temporaries, which a later run of the same instruction may fill anew. Revision 26: the validated, key-sorted `scriptStorage` session view, `scriptStoragePersistent`, and foreground `storageWrite` actions and settlements. Revision 25: captured bubble presentations require null position and alignment; placement is Player-owned. Media state: `stageImage`, background `media` actions, `settledMedia`, `nextMediaId`, foreground `mediaPlayback` waits and settlements, media cue invocations and interrupt frames, barrier-promoted pacing gates, and media handles. Revision 22 added timer state. |
+| Checkpoint | 35 | Updated the self-contained bundle for the recorded interaction settlement UI. Revision 34: the script-storage plan and snapshot contracts. Revision 33: prose-only authored placement, bubble presentation validation, and the media plan and snapshot contracts. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
