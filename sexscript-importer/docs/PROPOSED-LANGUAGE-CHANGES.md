@@ -8,7 +8,9 @@ syntax: accepted behavior lives in `docs/specifications/accepted-syntaxes-v30.md
 
 1. A proposal is recorded here with the owner decisions so far and its open questions.
 2. The importer emits the proposed form and the corpus is converted again, to check that the proposal resolves the
-   problems it targets: resolved diagnostics, newly converted scripts, and readable output.
+   problems it targets: resolved diagnostics, newly converted scripts, and readable output. For this test the importer
+   uses a well-reasoned working syntax of its own; the owner discusses the exact syntax only for capabilities that
+   prove valuable (owner, 2026-10-03).
 3. If the proposal proves valuable, the owner decides whether it becomes an issue. Issues are added to the
    syntax-change tracker only with the owner's permission.
 4. The compiler implements the change from that issue, so each change is implemented once.
@@ -20,13 +22,15 @@ with the direction TeaseScript already took, and common practice in other langua
 
 | ID | Proposal | Status |
 | --- | --- | --- |
-| L1 | Random list selection only inside `${...}` | Owner intent; the `say list` rule awaits confirmation |
+| L1 | Random list selection only inside `${...}`; `say list` shows all elements | Owner-decided; issue #511 |
 | C1 | A list as a `choose` option gives one button per element | Owner agreed |
-| C2 | Labels may be mixed; a missing label is the button text | Owner agreed; numeric-label rule awaits confirmation |
-| C3 | Labels from a list | Length rule and warnings decided; notation open |
+| C2 | Labels may be mixed; a missing label is the button text | Owner agreed; numeric labels: option B (needs #504) |
+| C3 | Labels from a list | Option A (objects) agreed in principle; needs #509 for removal |
 | C4 | Effective labels are unique | Owner agreed |
 | C5 | Warning when a choice result is compared with an impossible label | Owner agreed |
 | T1 | Type enforcement, union types, type tests, narrowing | Issue #504 |
+| D1 | Dictionaries: objects with runtime keys (`toys[name]`) | POC tests option A later |
+| M1 | Media selected by tags (include/exclude tags, count matches) | POC working implementation; covers optional content packs |
 
 ## L1. Random list selection only inside `${...}`
 
@@ -185,6 +189,24 @@ if reward is integer {
   (lodash `_.isNumber`, `Array.isArray`).
 
 Advice for the remaining #504 questions is still to be written.
+
+## Decided for `main` (tracker #512)
+
+Owner decisions that do not depend on the importer test go straight to `main` through tracker #512: the `round()` tie
+rule (ties away from zero, `-0.5` is `-1`), the `showButton` elapsed `duration`, and `set` as a protected name (#507);
+built-in string operations (#508); removing objects and positions from lists (#509); a prefilled default for every
+single-field `ask` input (#510); and L1 (#511). `save null` already removes the key on `main` (#484). Text utilities as
+a `.ts` system library and localized script variants are future work; one language is enough for now.
+
+## Later
+
+- **D1 dictionaries.** The owner always meant objects to work as dictionaries: lookup with a runtime key fails today
+  (`toys[k]` raises TSR008 at runtime). The POC tests objects with runtime keys (`toys[name]`, `has`, `remove`, keys),
+  watching for name clashes with built-in members and for typing against #504; a separate dictionary type is the
+  fallback.
+- **M1 media by tags.** The owner plans to tag every image and select a random image matching included and excluded
+  tags, with a count of matches. No tagged media exists yet. The POC may use a working form of it for Domme3's image
+  packs and Toy's persona folders instead of directory listing.
 
 ## Not yet discussed
 
