@@ -132,6 +132,21 @@ test("a default of the wrong type or a blank text default is a compile error", (
       "The default answer of askText must contain a non-whitespace character.",
     ],
     [
+      "let answer = askText default: 1 + 2",
+      "TSV039",
+      "The default answer of askText must be text. Write a number as text, such as 'default: \"10\"'.",
+    ],
+    [
+      "let answer = askNumber default: not false",
+      "TSV039",
+      "The default answer of askNumber must be a number, such as 'default: 10'.",
+    ],
+    [
+      "let answer = askNumber default: 1 == 1",
+      "TSV039",
+      "The default answer of askNumber must be a number, such as 'default: 10'.",
+    ],
+    [
       'let answer = askText "Name?", default:',
       "TSP028",
       "Expected a default answer after 'default:'.",
@@ -167,6 +182,16 @@ test("an invalid dynamic default fails before the field opens", () => {
       failed.events.some((event) => event.kind === "actionRequested"),
       false,
     );
+  }
+});
+
+test("a computed default keeps its runtime arithmetic errors whether or not the hint is constant", () => {
+  for (const hint of ['"N"', "hint"]) {
+    const source = `let answer = askNumber ${hint}, default: 1 / (1e308 * 10)`;
+    const plan = compileValidPlan(source, { globals: ["hint"] });
+    const failed = run(plan, createFreshRuntimeSnapshot(plan, { globals: { hint: "N" } }));
+    assert.equal(failed.snapshot.failure?.code, "TSR036", source);
+    assert.equal(failed.snapshot.foregroundAction, null, source);
   }
 });
 

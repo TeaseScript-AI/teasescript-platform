@@ -1228,7 +1228,7 @@ class SemanticValidator {
   /** A default answer must be an answer the field accepts; dynamic values are checked when the field opens. */
   #validateInteractionDefault(kind: "text" | "number", expression: Expression): void {
     if (kind === "number") {
-      if (isDefinitelyNonNumeric(expression))
+      if (isDefinitelyNonNumeric(expression) || isDefinitelyBoolean(expression))
         this.#report(
           semanticCode.invalidInteractionDefault,
           "The default answer of askNumber must be a number, such as 'default: 10'.",
@@ -1236,7 +1236,7 @@ class SemanticValidator {
         );
       return;
     }
-    if (isDefinitelyNonString(expression)) {
+    if (isDefinitelyNonString(expression) || isArithmetic(expression)) {
       this.#report(
         semanticCode.invalidInteractionDefault,
         "The default answer of askText must be text. Write a number as text, such as 'default: \"10\"'.",
@@ -1623,6 +1623,24 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
     expression.kind === "durationLiteral" ||
     expression.kind === "timerExpression" ||
     expression.kind === "playMediaExpression"
+  );
+}
+
+const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "%"]);
+
+/** Arithmetic yields a number or a duration, never text. */
+function isArithmetic(expression: Expression): boolean {
+  expression = unwrapParentheses(expression);
+  return expression.kind === "binaryExpression" && ARITHMETIC_OPERATORS.has(expression.operator);
+}
+
+/** A boolean literal, `not`, a comparison, or `and`/`or`. */
+function isDefinitelyBoolean(expression: Expression): boolean {
+  expression = unwrapParentheses(expression);
+  return (
+    expression.kind === "booleanLiteral" ||
+    (expression.kind === "unaryExpression" && expression.operator === "not") ||
+    (expression.kind === "binaryExpression" && NON_STRING_OPERATORS.has(expression.operator))
   );
 }
 
