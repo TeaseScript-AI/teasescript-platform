@@ -125,7 +125,14 @@ test("invalid random built-in arguments fail with source-associated errors", () 
 });
 
 test("chance at both ends of the percentage range is certain", () => {
-  assert.deepEqual(sayTexts(runSource("say chance(0)\nsay chance(100)")), ["false", "true"]);
+  const compiled = plan("say chance(0)\nsay chance(100)\nexit");
+  // The lowest draw and the highest draw below 1.
+  for (const draw of [0, 1 - Number.EPSILON / 2]) {
+    const result = run(compiled, createImmediatePacingRuntimeSnapshot(compiled), {
+      random: { next: () => draw },
+    });
+    assert.deepEqual(sayTexts(result), ["false", "true"], String(draw));
+  }
 });
 
 test("instruction budget stops an infinite while loop", () => {

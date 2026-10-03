@@ -709,7 +709,13 @@ async function carouselChecks(page) {
   const box = await strip.boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + 180);
   await page.mouse.wheel(state.width * 0.9, 0);
-  await page.waitForFunction(() => document.querySelector(".tool-panel-strip").scrollLeft > 0);
+  // A partial wheel scroll settles with a later panel's start at the strip's edge, not between panels.
+  await page.waitForFunction(() => {
+    const s = document.querySelector(".tool-panel-strip");
+    const edge = s.getBoundingClientRect().left;
+    const panels = [...s.querySelectorAll(".tool-panel-content > [data-tool]")].slice(1);
+    return panels.some((p) => Math.abs(p.getBoundingClientRect().left - edge) < 2);
+  });
   const body = page.locator('[data-tool="Visual Lab"] [data-tool-body]');
   await body.hover();
   await page.mouse.wheel(0, 220);
@@ -733,7 +739,7 @@ async function carouselChecks(page) {
     await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
     await cdp.detach();
   }
-  return "PASS bounded carousel, horizontal wheel and touch scrolling and vertical body scroll";
+  return "PASS bounded carousel, wheel snapping to a panel, touch scrolling and vertical body scroll";
 }
 
 async function toolContentChecks(page) {
@@ -1187,6 +1193,20 @@ async function contentContainmentChecks(page) {
     if (!value) throw new Error(message);
   };
   const verify = async (label) => {
+    // Viewport and tool changes re-lay out the Player asynchronously; measure once it has settled.
+    await page
+      .waitForFunction(
+        () => {
+          const stage = document.querySelector(".player-stage")?.getBoundingClientRect();
+          return [".stage-media-frame", ".transcript-native-overlay"].every((selector) => {
+            const rect = document.querySelector(selector)?.getBoundingClientRect();
+            return stage && rect && rect.left >= stage.left - 1 && rect.right <= stage.right + 1;
+          });
+        },
+        null,
+        { timeout: 5000 },
+      )
+      .catch(() => {});
     const { stage, media, conversation } = await page.evaluate(() => {
       const bounds = (selector) => {
         const rect = document.querySelector(selector).getBoundingClientRect();
@@ -1855,13 +1875,14 @@ async function markupLinkChecks(page) {
     'showButton "Done"',
   ].join("\n");
   await page.route("**/src/runtimeScenario.ts*", (route) => {
-    const original = new URL(route.request().url());
-    if (original.searchParams.has("original")) return route.continue();
-    original.searchParams.set("original", "");
+    // Playwright CLI `run-code` provides no `URL` global, so the marker query is handled as text.
+    const requested = route.request().url();
+    if (/[?&]original(?:[=&]|$)/u.test(requested)) return route.continue();
+    const original = `${requested}${requested.includes("?") ? "&" : "?"}original`;
     // Only the opening scenario is replaced; the module's other exports stay available.
     return route.fulfill({
       contentType: "text/javascript",
-      body: `export * from ${JSON.stringify(original.href)};\nexport const openingScenario = ${JSON.stringify(source)};`,
+      body: `export * from ${JSON.stringify(original)};\nexport const openingScenario = ${JSON.stringify(source)};`,
     });
   });
   await page

@@ -89,7 +89,8 @@ def grants_contents(text, indent):
     match = re.search(rf"(?m)^{indent}permissions:(.*)\n((?:{indent}  .*\n)*)", text)
     if match is None:
         return None
-    entries = match.group(1) + match.group(2)
+    # A commented-out entry grants nothing.
+    entries = re.sub(r"(?m)#.*$", "", match.group(1) + "\n" + match.group(2))
     return re.search(r"\bcontents:[ \t]*(?:read|write)\b", entries) is not None
 
 
@@ -137,7 +138,12 @@ def checkout_workflow(job_permissions, step):
 checkout = f"uses: actions/checkout@{pin}"
 read_contents = ["    permissions:", "      contents: read"]
 assert_checkout_jobs_read_contents(checkout_workflow(read_contents, checkout))
-for job_permissions in ([], ["    permissions:", "      issues: write"]):
+for job_permissions in (
+    [],
+    ["    permissions:", "      issues: write"],
+    ["    permissions:", "      # contents: read", "      issues: write"],
+    ["    permissions: # contents: read", "      issues: write"],
+):
     workflow_text = checkout_workflow(job_permissions, checkout)
     assert rejected(assert_checkout_jobs_read_contents, workflow_text), job_permissions
 assert_checkout_jobs_read_contents(checkout_workflow([], f"run: echo actions/checkout@{pin}"))
@@ -350,7 +356,7 @@ def resolved_ref(step):
 requested_source = (
     "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
 )
-one_step(
+source_checkout = one_step(
     producer,
     "requested source checkout",
     lambda step: uses_action(step, "actions/checkout") and resolved_ref(step) == requested_source,
@@ -373,6 +379,13 @@ if variable:
     step_env = dict(line.split(": ", 1) for line in producer_run.get("env", []))
     source_sha = {**job_env, **step_env}[variable.group(1)]
 assert source_sha == name_match.group(1), (source_sha, artifact_name)
+# That SHA is HEAD of the requested checkout, and the producer bundles that same checkout.
+source_path = next(line.split(": ", 1)[1] for line in source_checkout["with"] if line.startswith("path: "))
+resolver_id = re.fullmatch(r"\$\{\{ steps\.([\w-]+)\.outputs\.[\w-]+ \}\}", source_sha).group(1)
+resolver = one_step(producer, "source resolver", lambda step: step.get("id") == [resolver_id])
+assert resolver.get("working-directory") == [source_path], resolver["name"]
+assert any("git rev-parse --verify HEAD" in line for line in resolver["run"]), resolver["name"]
+assert f"cd {source_path}" in producer_run["run"], producer_run["name"]
 
 PYWORKFLOW
 
