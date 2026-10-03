@@ -873,7 +873,19 @@ toInteger(2.7)   // 2
 toInteger(-2.7)  // -2
 ```
 
-Use `round`, `floor`, or `ceil` when that rounding intent is required explicitly.
+Use `round`, `floor`, or `ceil` when that rounding intent is required explicitly. `round` returns the nearest whole
+number; a value exactly halfway between two whole numbers rounds away from zero. `floor` rounds toward negative
+infinity and `ceil` toward positive infinity, so they have no tie case:
+
+```text
+round(2.4)   // 2
+round(2.5)   // 3
+round(-2.5)  // -3
+round(0.5)   // 1
+round(-0.5)  // -1
+floor(-2.5)  // -3
+ceil(-2.5)   // -2
+```
 
 ## 14. Scope
 **Status:** Accepted
@@ -1623,14 +1635,25 @@ let elapsed = showButton(
 )
 ```
 
+The elapsed time is a `duration` ([§35](#35-date-time-durations-and-unix-time)), so it is compared with duration
+values:
+
+```text
+let elapsed = showButton("Continue", 5)
+if elapsed < 2 s {
+    say "That was quick."
+}
+```
+
 Rules:
 
-- `timeout` is optional.
+- `timeout` is optional. A bare number counts seconds, as for `wait` and `timer` ([§27](#27-timers)); an elapsed
+  duration such as `500 ms` or `2 min` may also be used. `5` and `5 s` are the same timeout.
 - Without a timeout, the command waits until the user clicks.
 - With a timeout, execution continues after the click or when the timeout is reached.
-- The function returns the actual elapsed waiting time.
+- The function returns the actual elapsed waiting time as a `duration`.
 - If the caller does not need the elapsed time, the return value may be ignored.
-- When the timeout is reached, the returned value equals the timeout.
+- When the timeout is reached, the returned duration equals the timeout; a timeout of `5` returns `5 s`.
 - `showButton` belongs to the core language/runtime API, not specifically to the browser-picker API.
 
 ## 22. Stage image, audio, and video
@@ -3425,6 +3448,7 @@ continue
 and
 or
 not
+set
 true
 false
 null

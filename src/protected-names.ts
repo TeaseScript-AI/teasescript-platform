@@ -17,6 +17,7 @@ const TEASESCRIPT_GRAMMAR_KEYWORDS = Object.freeze([
   "and",
   "or",
   "not",
+  "set",
   "true",
   "false",
   "null",

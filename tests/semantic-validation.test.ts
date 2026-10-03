@@ -209,3 +209,33 @@ test("preserves existing function, unknown-name, callable, and protected-name di
     ["TSV001"],
   );
 });
+
+test("reports a declaration named after the set keyword as a protected name", () => {
+  for (const source of [
+    "let set = 1",
+    "for set in [1] {\n}",
+    "function set {\n}",
+    "function pick(set) {\n    return 1\n}",
+    'speaker set {\n    name: "Set"\n}',
+  ]) {
+    const result = compileSource(source);
+    const start = source.indexOf("set");
+    assert.deepEqual(
+      result.diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.message,
+        diagnostic.span.start.offset,
+        diagnostic.span.end.offset,
+      ]),
+      [
+        [
+          "TSV001",
+          "Declaration 'set' conflicts with a protected TeaseScript name.",
+          start,
+          start + 3,
+        ],
+      ],
+      source,
+    );
+  }
+});

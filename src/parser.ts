@@ -351,7 +351,7 @@ class Parser {
 
   #parseSpeakerStatement(): SpeakerDeclaration | SpeakerSetterStatement | null {
     const keyword = this.#advance();
-    if (!this.#check(TokenKind.Identifier)) {
+    if (!this.#checkDeclarationName()) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedSpeakerIdentifier,
         "Expected a speaker identifier after 'speaker'.",
@@ -1315,7 +1315,7 @@ class Parser {
 
   #parseLetStatement(): LetStatement | null {
     const keyword = this.#advance();
-    if (!this.#check(TokenKind.Identifier)) {
+    if (!this.#checkDeclarationName()) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedIdentifier,
         "Expected a variable identifier after 'let'.",
@@ -1448,7 +1448,7 @@ class Parser {
 
   *#parseForStatement(): ParseTask<ForStatement | null> {
     const keyword = this.#advance();
-    if (!this.#check(TokenKind.Identifier)) {
+    if (!this.#checkDeclarationName()) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedIdentifier,
         "Expected a loop-variable identifier after 'for'.",
@@ -1509,7 +1509,7 @@ class Parser {
 
   *#parseFunctionDeclaration(): ParseTask<FunctionDeclaration | null> {
     const keyword = this.#advance();
-    if (!this.#check(TokenKind.Identifier) && !this.#check(TokenKind.KeywordWait)) {
+    if (!this.#checkDeclarationName() && !this.#check(TokenKind.KeywordWait)) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedFunctionName,
         "Expected a function identifier after 'function'.",
@@ -1574,7 +1574,7 @@ class Parser {
   }
 
   #parseFunctionParameter(): FunctionParameter | null {
-    if (!this.#check(TokenKind.Identifier)) {
+    if (!this.#checkDeclarationName()) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedParameter,
         "Expected a function parameter identifier.",
@@ -2819,6 +2819,11 @@ class Parser {
 
   #checkIdentifier(name: string): boolean {
     return this.#check(TokenKind.Identifier) && this.#peek().lexeme === name;
+  }
+
+  /** The protected keyword `set` parses as a declared name so that its declaration gets the protected-name diagnostic. */
+  #checkDeclarationName(): boolean {
+    return this.#check(TokenKind.Identifier) || this.#check(TokenKind.KeywordSet);
   }
 
   #advance(): Token {

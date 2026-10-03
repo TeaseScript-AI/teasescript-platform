@@ -44,6 +44,11 @@ test("completion exposes accepted compact commands", () => {
 test("completion exposes optional speaker and current say modifiers", () => {
   const speakers = labels('speaker mistress { name: "Mistress" }\nlet answer = askText as');
   assert.ok(speakers.includes("mistress"));
+  const protectedSpeaker = labels(
+    'speaker set { name: "Set" }\nspeaker mistress { name: "Mistress" }\nsay as',
+  );
+  assert.ok(protectedSpeaker.includes("mistress"));
+  assert.ok(!protectedSpeaker.includes("set"));
   const say = labels("say");
   assert.ok(say.includes("as"));
   assert.ok(say.includes("skippable"));
