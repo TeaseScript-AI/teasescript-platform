@@ -171,6 +171,13 @@ package helpers, `java.io.File` access and directory listing other than a recogn
 reports instead of repairing: calls to undefined functions, helper calls with missing arguments, and closures
 referenced without `()` (which Groovy evaluated as a no-op or as `true`).
 
+Toy-specific owner decisions (2026-10-03): speech output is ignored for now; the Cornertime workflow (custom
+punishment and report files exchanged with the external Cornertime webcam tool) stays manual work, and showing the
+tool's link in the chat is acceptable if it is converted later. Toy's personas are data files evaluated at runtime:
+`images/toy/domme.groovy` holds the shared title and session plans (with requirement conditions written as Groovy
+expression strings), and each persona folder holds `person.groovy` plus image sets. The supplied packs contain the
+Emily persona; the code's default owner `ancilla` is not included.
+
 ## Accepted but not implemented
 
 The importer emits these accepted forms although the current compiler rejects them; the compiler gate counts them

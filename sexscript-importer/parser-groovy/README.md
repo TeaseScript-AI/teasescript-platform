@@ -38,6 +38,18 @@ Parse an auxiliary Groovy class such as `Domme3Class.groovy` as a compilation un
 
 The generated `.class` file is written under `.tmp/` and remains local.
 
+## Check legacy behavior
+
+To confirm what a legacy construct did, run it with the same Groovy runtime. Groovy 2.5 parses on newer Java but
+compiles scripts only up to Java 17, so `run-groovy.sh` pins Java 17 (mise's `java@temurin-17`, or the java executable
+in `SEXSCRIPT_GROOVY_JAVA`):
+
+```sh
+./parser-groovy/bin/run-groovy.sh -e 'def m = null; println(m >= 5)'
+```
+
+SexScript API calls such as `show()` are not available there; check plain Groovy semantics only.
+
 Besides the AST, the output contains the original source text and its comments. The Groovy AST drops comments, so the
 helper re-lexes the source with Groovy's own lexer; string, GString, and slashy-string contents are therefore never
 mistaken for comments.
