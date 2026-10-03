@@ -8,6 +8,8 @@ import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 import type { PlayerSpeakerPresentation } from "../../model.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
 import PlayerComposition from "./PlayerComposition.vue";
+import PlayerNotificationCenter from "./PlayerNotificationCenter.vue";
+import PlayerToasts from "./PlayerToasts.vue";
 import PlayerToolsShell, { type PlayerTool } from "./PlayerToolsShell.vue";
 import PlayerTopBar from "./PlayerTopBar.vue";
 import { playerRuntimeMedia } from "../../runtime-adapter.js";
@@ -19,6 +21,7 @@ import TimerRegion from "./TimerRegion.vue";
 import { speakerAvatarSource } from "./speakerAvatar";
 import { enhancedTranscriptContrast } from "./transcriptContrast";
 import { usePlayerKeyboardFocus } from "./usePlayerKeyboardFocus";
+import { usePlayerNotifications } from "./usePlayerNotifications";
 import { usePlayerPreference } from "./usePlayerPreference";
 import type { PlayerSessionHost } from "./usePlayerSession";
 import { defaultPlayerThemeIntents, usePlayerTheme } from "./usePlayerTheme";
@@ -39,6 +42,7 @@ const themeIntent = defineModel<PlayerThemeIntent>("themeIntent", {
 });
 
 usePlayerKeyboardFocus();
+const notifications = usePlayerNotifications(props.player.notices);
 provide(
   enhancedTranscriptContrast,
   computed(() => themeIntent.value.contrast === "high"),
@@ -160,6 +164,15 @@ async function toggleFullscreen() {
             @toggle-fullscreen="toggleFullscreen"
             @toggle-theme-mode="toggleThemeMode"
           >
+            <template #notifications>
+              <PlayerNotificationCenter
+                :notifications="notifications.notifications.value"
+                :attention-level="notifications.attentionLevel.value"
+                :attention-count="notifications.attentionCount.value"
+                @dismiss="player.dismissNotice"
+                @open="notifications.markSeen"
+              />
+            </template>
             <template v-if="!sidebarVisible" #tools>
               <Tooltip>
                 <TooltipTrigger as-child>
@@ -175,6 +188,12 @@ async function toggleFullscreen() {
         </template>
         <template #overlay>
           <SessionActivation :activation="player.activation.value" @activate="player.activate" />
+          <PlayerToasts
+            :notifications="notifications.notifications.value"
+            :toasts="notifications.toasts.value"
+            @hide="notifications.hideToast"
+            @hold="notifications.holdToasts"
+          />
         </template>
         <template #right-rail>
           <!-- Runtime timers are runtime-owned content; the preview may add fixtures around them. -->
@@ -195,8 +214,6 @@ async function toggleFullscreen() {
           :speakers="transcript.speakers"
           :revision="transcript.revision"
           :observe-time="player.observe"
-          :notices="player.notices.value"
-          @dismiss-notice="player.dismissNotice"
           @update:session="player.update"
         />
       </PlayerComposition>

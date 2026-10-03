@@ -397,20 +397,27 @@ which are creator diagnostics about a script location. Host features publish the
 (`player/notices.ts`) with fixed Player wording per condition; a condition has one notice, which it replaces or
 withdraws, so repeated causes do not stack.
 
-The notices appear in one region directly above the composer, centred, each as a compact card with a level icon (info,
-warning, or error), its text, at most one action control that runs from the player's click (such as **Enable
-audio**), and a dismiss control. Cards keep publication order whatever their level. Separate status and alert live
-regions announce the messages; both exist before any notice, so the first notice is announced too, and errors use the
-alert region. A notice stays until its condition resolves or the
-player dismisses it, and dismissal moves focus to the nearest remaining notice control. A notice whose action is the
-only way to continue, such as **Enable audio** while the script waits for that audio, offers no dismiss control and
-disappears once its condition resolves. The stack may use the conversation space above the composer and scrolls
-within it, so every notice stays reachable on small screens; the text wraps beside the icon and controls.
+Notices belong to the Player, not the story, so they never appear in the conversation. A new or replaced notice shows
+as a temporary toast below the Player's top controls, right-aligned and left of the timer rail when timers occupy the
+top right; on a screen too narrow for that, the toast keeps a readable width and may cover the timer. Each toast names
+the Player as its source and shows a level icon (info, warning, or error), its text, at most one action control that
+runs from the player's click (such as **Enable audio**), and a hide control. At most three toasts show, newest first.
+Info toasts expire after 5 seconds, warnings after 8, and errors after 10; pointer or focus on a toast pauses expiry.
+Hiding or expiry removes only the toast.
+
+The notification bell in the top controls opens the notification panel, which lists every current notice, newest
+first, with its age, its action, and a dismiss control; **Clear all** dismisses every dismissible notice. A dot on the
+bell marks notices published since the panel was last opened and any notice the player must act on. Opening the panel
+marks the notices seen and replaces the toasts. Dismissal moves focus to the nearest remaining control in the panel. A
+notice whose action is the only way to continue, such as **Enable audio** while the script waits for that audio, is
+tagged **Needs action**, offers no dismiss control, and disappears once its condition resolves. Separate status and
+alert live regions announce the messages; both exist before any notice, so the first notice is announced too, and
+errors use the alert region.
 
 The current conditions are blocked audio (warning, with **Enable audio**), browser storage unavailable at session start
 (info: saved progress is not kept), and a failed script-storage write (warning, for the run it happened in; a new
-Start withdraws it). The level colours and the region's placement await Owner review in #492; the development
-preview's Visual Lab shows every level.
+Start withdraws it). Levels differ by icon; level colours await an Owner decision on theme roles (#492). The
+development preview's Visual Lab shows every level.
 
 ## Stage and media presentation
 
