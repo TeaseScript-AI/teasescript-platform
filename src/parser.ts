@@ -2042,7 +2042,8 @@ class Parser {
 
   *#finishCall(callee: Expression, left: Token): ParseTask<CallExpression> {
     const argumentsList: CallArgument[] = [];
-    let style: "none" | "positional" | "named" = "none";
+    let sawPositional = false;
+    let sawNamed = false;
     this.#skipNewlines();
     while (!this.#check(TokenKind.RightParenthesis) && !this.#check(TokenKind.EndOfFile)) {
       let argument: CallArgument | null = null;
@@ -2058,8 +2059,7 @@ class Parser {
             span: spanFrom(name.span, value.span),
           } satisfies NamedArgument);
         }
-        if (style === "positional") this.#reportMixedArguments(name.span);
-        style = "named";
+        sawNamed = true;
       } else {
         const value = yield* parseChild(this.#parseRequiredExpressionTask());
         if (value !== null) {
@@ -2069,10 +2069,8 @@ class Parser {
             span: copySpan(value.span),
           } satisfies PositionalArgument);
         }
-        if (style === "named" && value !== null) {
-          this.#reportMixedArguments(value.span);
-        }
-        style = "positional";
+        if (sawNamed && value !== null) this.#reportPositionalAfterNamed(value.span);
+        sawPositional = true;
       }
       if (argument !== null) argumentsList.push(argument);
       this.#skipNewlines();
@@ -2100,7 +2098,13 @@ class Parser {
       kind: "callExpression",
       callee,
       arguments: Object.freeze(argumentsList),
-      argumentStyle: style,
+      argumentStyle: sawNamed
+        ? sawPositional
+          ? "mixed"
+          : "named"
+        : sawPositional
+          ? "positional"
+          : "none",
       span: spanFrom(callee.span, end),
     });
   }
@@ -2768,10 +2772,10 @@ class Parser {
     this.#skipNewlines();
   }
 
-  #reportMixedArguments(span: SourceSpan): void {
+  #reportPositionalAfterNamed(span: SourceSpan): void {
     this.#reportSpan(
       parserDiagnosticCode.mixedArguments,
-      "Positional and named arguments may not be mixed in one call.",
+      "A positional argument may not follow a named argument. Move it before the named arguments, or name it too.",
       span,
     );
   }

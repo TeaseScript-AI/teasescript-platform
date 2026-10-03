@@ -96,14 +96,16 @@ test("parses left-associated property, index, and call postfix operations", () =
   ]);
 });
 
-test("parses positional and named arguments and rejects mixing", () => {
-  const result = parse(["moveTo(10, 20)", "moveTo(x: 10, y: 20)", "moveTo(10, y: 20)"].join("\n"));
+test("parses positional, named, and positional-then-named arguments and rejects positional after named", () => {
+  const result = parse(
+    ["moveTo(10, 20)", "moveTo(x: 10, y: 20)", "moveTo(10, y: 20)", "moveTo(x: 10, 20)"].join("\n"),
+  );
 
   assert.deepEqual(
     result.program.statements.map((statement) =>
       statement.kind === "expressionStatement" ? statement.expression.argumentStyle : null,
     ),
-    ["positional", "named", "named"],
+    ["positional", "named", "mixed", "mixed"],
   );
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => diagnostic.code),

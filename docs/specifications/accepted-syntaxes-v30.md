@@ -725,6 +725,13 @@ moveTo(
 )
 ```
 
+Positional arguments may be followed by named arguments:
+
+```text
+moveTo(10, y: 20)
+let amount = toNumber(text, default: 0)
+```
+
 Rules:
 
 - Positional arguments fill parameters from left to right.
@@ -732,7 +739,9 @@ Rules:
 - Trailing parameters with defaults may be omitted.
 - To skip an earlier parameter while setting a later one, use named arguments.
 - Named arguments use `name: value`.
-- Positional and named arguments may not be mixed in one call.
+- Positional arguments come first; named arguments may follow them. A positional argument after a named one is an
+  error: `moveTo(x: 10, 20)`.
+- A parameter receives at most one value: naming a parameter that a positional argument already fills is an error.
 - A grammar keyword may still be used as an API field label when it appears in the unambiguous `name:` position of a named argument, object property, or engine configuration block. This permits accepted labels such as `default:`, `repeat:`, and account-operation labels such as `save:` without permitting those words as variable or function identifiers.
 
 ## 11. Function definitions

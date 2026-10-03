@@ -90,7 +90,6 @@ const semanticCode = {
   unknownFunction: "TSV018",
   nonCallable: "TSV019",
   argumentCount: "TSV020",
-  mixedArguments: "TSV021",
   unknownNamedArgument: "TSV022",
   duplicateNamedArgument: "TSV023",
   missingNamedArgument: "TSV024",
@@ -1088,7 +1087,13 @@ class SemanticValidator {
           this.#validateExpressionTask(expression.index, scope, contextualSpeaker),
         );
         return;
-      case "callExpression":
+      case "callExpression": {
+        const authorFunction =
+          expression.callee.kind === "identifier" &&
+          scope.resolve(expression.callee.name)?.kind === "function" &&
+          this.#functions.has(expression.callee.name);
+        // Only an author function's parameters are known here; for every other callee a repeated name is still an error.
+        if (!authorFunction) this.#validateDistinctNamedArguments(expression);
         if (expression.callee.kind === "identifier") {
           const name = expression.callee.name;
           const binding = scope.resolve(name);
@@ -1096,7 +1101,7 @@ class SemanticValidator {
           if (declaration !== undefined && binding?.kind === "function") {
             this.#validateFunctionCall(expression, declaration);
           } else if (this.#builtins.has(name)) {
-            // Injected and core built-ins validate their values at runtime.
+            // Built-ins validate their parameter names and values at runtime.
           } else if (binding !== undefined) {
             this.#report(
               semanticCode.nonCallable,
@@ -1150,6 +1155,7 @@ class SemanticValidator {
           }
         }
         return;
+      }
       case "binaryExpression": {
         yield* compileChild(
           this.#validateExpressionTask(expression.left, scope, contextualSpeaker),
@@ -1342,6 +1348,10 @@ class SemanticValidator {
     }
   }
 
+  /**
+   * Positional arguments fill parameters from left to right; named arguments that follow them fill parameters by name.
+   * Each parameter receives at most one value, and every parameter without a default needs one.
+   */
   #validateFunctionCall(
     expression: Extract<Expression, { kind: "callExpression" }>,
     declaration: FunctionDeclaration,
@@ -1350,55 +1360,79 @@ class SemanticValidator {
       (argument) => argument.kind === "positionalArgument",
     );
     const named = expression.arguments.filter((argument) => argument.kind === "namedArgument");
-    if (positional.length > 0 && named.length > 0) {
+    const functionName = declaration.name.name;
+    const parameterNames = declaration.parameters.map((parameter) => parameter.name.name);
+    const required = declaration.parameters.filter(
+      (parameter) => parameter.defaultValue === null,
+    ).length;
+    if (positional.length > parameterNames.length) {
       this.#report(
-        semanticCode.mixedArguments,
-        "Positional and named arguments may not be mixed in one call.",
+        semanticCode.argumentCount,
+        `Function '${functionName}' takes ${argumentRange(required, parameterNames)}, received ${positional.length} positional argument${positional.length === 1 ? "" : "s"}. Remove the extra positional arguments.`,
         expression.span,
       );
       return;
     }
-    const required = declaration.parameters.filter(
-      (parameter) => parameter.defaultValue === null,
-    ).length;
     if (named.length === 0) {
-      if (positional.length < required || positional.length > declaration.parameters.length) {
+      if (positional.length < required)
         this.#report(
           semanticCode.argumentCount,
-          `Function '${declaration.name.name}' expects ${required} through ${declaration.parameters.length} positional argument(s), received ${positional.length}.`,
+          `Function '${functionName}' takes ${argumentRange(required, parameterNames)}, received ${positional.length}. Add the missing arguments.`,
           expression.span,
         );
-      }
       return;
     }
-    const parameters = new Map(
-      declaration.parameters.map((parameter) => [parameter.name.name, parameter]),
-    );
-    const supplied = new Set<string>();
+    const indexes = new Map(parameterNames.map((name, index) => [name, index]));
+    const supplied = new Set(parameterNames.slice(0, positional.length));
     for (const argument of named) {
-      if (!parameters.has(argument.name.name)) {
+      const name = argument.name.name;
+      const index = indexes.get(name);
+      if (index === undefined) {
         this.#report(
           semanticCode.unknownNamedArgument,
-          `Unknown argument '${argument.name.name}' for function '${declaration.name.name}'.`,
+          `Function '${functionName}' has no parameter '${name}'. ${parameterNames.length === 0 ? "It takes no arguments." : `Its parameters are ${parameterNames.join(", ")}.`}`,
           argument.name.span,
         );
-      } else if (supplied.has(argument.name.name)) {
+      } else if (index < positional.length) {
         this.#report(
           semanticCode.duplicateNamedArgument,
-          `Duplicate named argument '${argument.name.name}'.`,
+          `Parameter '${name}' already receives positional argument ${index + 1}. Remove one of the two.`,
+          argument.name.span,
+        );
+      } else if (supplied.has(name)) {
+        this.#report(
+          semanticCode.duplicateNamedArgument,
+          `Argument '${name}' is given twice. Remove one of them.`,
           argument.name.span,
         );
       }
-      supplied.add(argument.name.name);
+      supplied.add(name);
     }
     for (const parameter of declaration.parameters) {
       if (parameter.defaultValue === null && !supplied.has(parameter.name.name)) {
         this.#report(
           semanticCode.missingNamedArgument,
-          `Missing required named argument '${parameter.name.name}'.`,
+          `Function '${functionName}' needs a value for '${parameter.name.name}'. Add it by position or as '${parameter.name.name}: ...'.`,
           expression.span,
         );
       }
+    }
+  }
+
+  /** Reports a parameter name given twice in a call whose parameters only the callee knows. */
+  #validateDistinctNamedArguments(
+    expression: Extract<Expression, { kind: "callExpression" }>,
+  ): void {
+    const names = new Set<string>();
+    for (const argument of expression.arguments) {
+      if (argument.kind !== "namedArgument") continue;
+      if (names.has(argument.name.name))
+        this.#report(
+          semanticCode.duplicateNamedArgument,
+          `Argument '${argument.name.name}' is given twice. Remove one of them.`,
+          argument.name.span,
+        );
+      names.add(argument.name.name);
     }
   }
 
@@ -1455,6 +1489,16 @@ function literalKind(expression: Expression): Expression["kind"] {
 }
 
 /** The handle kind statically held by a variable initialized from `expression`. */
+/** "2 arguments (a, b)" or "1 to 3 arguments (a, b, c)", naming the parameters so the author sees what is expected. */
+function argumentRange(required: number, parameterNames: readonly string[]): string {
+  const total = parameterNames.length;
+  const count =
+    required === total
+      ? `${total} argument${total === 1 ? "" : "s"}`
+      : `${required} to ${total} arguments`;
+  return total === 0 ? "no arguments" : `${count} (${parameterNames.join(", ")})`;
+}
+
 function handleKind(expression: Expression): "timer" | "media" | null {
   expression = unwrapParentheses(expression);
   if (expression.kind === "timerExpression" && expression.async) return "timer";

@@ -469,7 +469,8 @@ export interface CallExpression {
   readonly kind: "callExpression";
   readonly callee: Expression;
   readonly arguments: readonly CallArgument[];
-  readonly argumentStyle: "none" | "positional" | "named";
+  /** `mixed`: positional arguments followed by named ones. */
+  readonly argumentStyle: "none" | "positional" | "named" | "mixed";
   readonly span: SourceSpan;
 }
 

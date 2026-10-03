@@ -227,7 +227,7 @@ The current function subset includes:
 
 - top-level function declarations;
 - required and trailing-default parameters;
-- positional and named calls;
+- positional and named calls, including positional arguments followed by named ones;
 - earlier-parameter references in defaults, while later-parameter references are rejected;
 - value, bare, and implicit `return`;
 - forward calls, nested calls, direct recursion, and mutual recursion;
