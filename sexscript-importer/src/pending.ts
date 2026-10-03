@@ -125,6 +125,23 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
       case "list":
         return { ...value, items: value.items.map(expression) };
       case "object":
+        if (value.properties.some((property) => property.key !== undefined)) {
+          // A literal with computed keys becomes a dictionary built from key-value pairs.
+          return call(proposalCapability("dictionaries"), "dictionaries.literal", [
+            {
+              kind: "list",
+              items: value.properties.map((property) => ({
+                kind: "list",
+                items: [
+                  property.key === undefined
+                    ? { kind: "literal", value: property.name }
+                    : expression(property.key),
+                  expression(property.value),
+                ],
+              })),
+            },
+          ]);
+        }
         return {
           ...value,
           properties: value.properties.map((property) => ({
@@ -133,6 +150,12 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
           })),
         };
       case "index":
+        if (value.proposed !== undefined) {
+          return call(proposalCapability(value.proposed), `${value.proposed}.get`, [
+            expression(value.target),
+            expression(value.index),
+          ]);
+        }
         return { ...value, target: expression(value.target), index: expression(value.index) };
       case "property":
         if (value.proposed !== undefined) {
@@ -277,10 +300,63 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         return [{ ...item, body: statements(item.body) }];
       case "let":
         return [{ ...item, value: expression(item.value) }];
-      case "assign":
+      case "assign": {
+        const target = item.target;
+        if (target.kind === "index" && target.proposed === "dictionaries") {
+          // A dictionary write replaces the dictionary with an updated copy.
+          const dictionary = expression(target.target);
+          const key = expression(target.index);
+          const assigned = expression(item.value);
+          const value: IrExpression =
+            item.operator === "="
+              ? assigned
+              : {
+                  kind: "binary",
+                  operator: item.operator === "+=" ? "+" : "-",
+                  left: call(proposalCapability("dictionaries"), "dictionaries.get", [
+                    dictionary,
+                    key,
+                  ]),
+                  right: assigned,
+                };
+          return [
+            {
+              ...item,
+              operator: "=",
+              target: dictionary,
+              value: call(proposalCapability("dictionaries"), "dictionaries.set", [
+                dictionary,
+                key,
+                value,
+              ]),
+            },
+          ];
+        }
         return [{ ...item, target: expression(item.target), value: expression(item.value) }];
-      case "expression":
+      }
+      case "expression": {
+        const value = item.expression;
+        if (
+          value.kind === "methodCall" &&
+          value.proposed === "dictionaries" &&
+          (value.name === "remove" || value.name === "clear")
+        ) {
+          const dictionary = expression(value.target);
+          return [
+            {
+              kind: "assign",
+              operator: "=",
+              target: dictionary,
+              value: call(proposalCapability("dictionaries"), `dictionaries.${value.name}()`, [
+                dictionary,
+                ...value.arguments.map(expression),
+              ]),
+              span: item.span,
+            },
+          ];
+        }
         return [{ ...item, expression: expression(item.expression) }];
+      }
       case "say":
         return [{ ...item, value: expression(item.value) }];
       case "wait":
@@ -552,7 +628,137 @@ export function pendingHostFunctions(
     const list = { kind: "list", items: value };
     return list;
   };
+  const composite = (value: RuntimeValue | undefined): Record<string, unknown> | null => {
+    const fields: unknown = value;
+    return isRecord(fields) ? fields : null;
+  };
+  // Proposed dictionaries: objects with runtime keys. Keys are text; Groovy map keys of other types become text.
+  const entries = (operation: string, value: RuntimeValue | undefined) => {
+    const object = composite(value);
+    if (object === null || !Array.isArray(object.properties)) {
+      throw new Error(`${operation} needs a dictionary.`);
+    }
+    return object.properties.filter(isRecord);
+  };
+  const keyText = (key: RuntimeValue | undefined): string => {
+    if (typeof key !== "string" && typeof key !== "number" && typeof key !== "boolean") {
+      throw new Error("A dictionary key must be text, a number, or a boolean.");
+    }
+    if (String(key) === "") throw new Error("A dictionary key must not be empty.");
+    return String(key);
+  };
+  const dictionary = (properties: Array<Record<string, unknown>>): RuntimeValue => {
+    const object = { kind: "object", properties };
+    return object;
+  };
+  const listItems = (value: RuntimeValue | undefined): unknown[] | null => {
+    const object = composite(value);
+    return object !== null && Array.isArray(object.items) ? object.items : null;
+  };
+  const runtimeValue = (value: unknown): RuntimeValue => {
+    if (
+      value === null ||
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      return value;
+    }
+    if (isRecord(value) && typeof value.kind === "string") return { ...value, kind: value.kind };
+    throw new Error("Unexpected runtime value.");
+  };
   const implementations = new Map<string, HostFunction>([
+    [
+      "dictionaries.get",
+      ([target, key]) => {
+        const elements = listItems(target);
+        if (elements !== null) {
+          if (
+            typeof key !== "number" ||
+            !Number.isInteger(key) ||
+            key < 0 ||
+            key >= elements.length
+          ) {
+            throw new Error("Invalid list index.");
+          }
+          return runtimeValue(elements[key]);
+        }
+        const name = keyText(key);
+        const entry = entries("[key]", target).find((property) => property.name === name);
+        return entry === undefined ? null : runtimeValue(entry.value);
+      },
+    ],
+    [
+      "dictionaries.set",
+      ([target, key, value]) => {
+        const elements = listItems(target);
+        if (elements !== null) {
+          if (
+            typeof key !== "number" ||
+            !Number.isInteger(key) ||
+            key < 0 ||
+            key >= elements.length
+          ) {
+            throw new Error("Invalid list index.");
+          }
+          return items(
+            elements.map((element, index) => runtimeValue(index === key ? value : element)),
+          );
+        }
+        const name = keyText(key);
+        const properties = entries("[key] =", target);
+        const replaced = properties.some((property) => property.name === name);
+        return dictionary(
+          replaced
+            ? properties.map((property) => (property.name === name ? { name, value } : property))
+            : [...properties, { name, value }],
+        );
+      },
+    ],
+    [
+      "dictionaries.has()",
+      ([target, key]) =>
+        entries("has()", target).some((property) => property.name === keyText(key)),
+    ],
+    [
+      "dictionaries.keys",
+      ([target]) => items(entries("keys", target).map((property) => runtimeValue(property.name))),
+    ],
+    [
+      "dictionaries.values",
+      ([target]) =>
+        items(entries("values", target).map((property) => runtimeValue(property.value))),
+    ],
+    [
+      "dictionaries.length",
+      ([target]) => listItems(target)?.length ?? entries("length", target).length,
+    ],
+    [
+      "dictionaries.remove()",
+      ([target, key]) =>
+        dictionary(
+          entries("remove()", target).filter((property) => property.name !== keyText(key)),
+        ),
+    ],
+    [
+      "dictionaries.clear()",
+      ([target]) =>
+        listItems(target) === null ? (entries("clear()", target), dictionary([])) : items([]),
+    ],
+    [
+      "dictionaries.literal",
+      ([pairs]) => {
+        const properties: Array<Record<string, unknown>> = [];
+        for (const pair of listItems(pairs) ?? []) {
+          const [key, value] = listItems(runtimeValue(pair)) ?? [];
+          const name = keyText(runtimeValue(key));
+          const index = properties.findIndex((property) => property.name === name);
+          if (index >= 0) properties.splice(index, 1);
+          properties.push({ name, value: runtimeValue(value) });
+        }
+        return dictionary(properties);
+      },
+    ],
     // Proposed string operations (#508): the length also counts list elements and, for dictionaries, keys.
     [
       "string-operations.length",

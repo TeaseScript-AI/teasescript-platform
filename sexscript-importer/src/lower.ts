@@ -3771,7 +3771,7 @@ function lowerGString(node: AstNode, context: LowerContext): IrExpression | null
 }
 
 function lowerMapExpression(node: AstNode, context: LowerContext): IrExpression | null {
-  const properties: Array<{ name: string; value: IrExpression }> = [];
+  const properties: Array<{ name: string; value: IrExpression; key?: IrExpression }> = [];
   for (const entry of nodeArray(node.entries)) {
     if (entry.kind !== "mapEntry") {
       return unsupportedExpression(
@@ -3783,6 +3783,18 @@ function lowerMapExpression(node: AstNode, context: LowerContext): IrExpression 
     }
     const name = constantString(entry.key);
     const valueNode = asNode(entry.value);
+    if (
+      (name === null || !isTeaseObjectPropertyName(name)) &&
+      context.proposals.has("dictionaries")
+    ) {
+      // A computed or non-identifier key: a proposed dictionary literal entry `[key]: value`.
+      const keyNode = asNode(entry.key);
+      const key = keyNode === null ? null : lowerExpression(keyNode, context);
+      const value = valueNode === null ? null : lowerExpression(valueNode, context);
+      if (key === null || value === null) return null;
+      properties.push({ name: "", key, value });
+      continue;
+    }
     if (name === null || !isTeaseObjectPropertyName(name)) {
       return unsupportedExpression(
         context,
@@ -3849,6 +3861,14 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     }
     const propertyName = constantString(indexNode);
     if (propertyName !== null) {
+      if (!isTeaseObjectPropertyName(propertyName) && context.proposals.has("dictionaries")) {
+        return {
+          kind: "index",
+          target,
+          index: { kind: "literal", value: propertyName },
+          proposed: "dictionaries",
+        };
+      }
       if (!isTeaseObjectPropertyName(propertyName)) {
         return unsupportedExpression(
           context,
@@ -3858,6 +3878,19 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
         );
       }
       return { kind: "property", target, name: propertyName };
+    }
+    if (targetNode !== null && isKnownMapExpression(targetNode, context)) {
+      // A runtime key on a map: TeaseScript object properties are fixed, so only a dictionary can look it up.
+      if (!context.proposals.has("dictionaries")) {
+        return unsupportedExpression(
+          context,
+          node,
+          "SX_DYNAMIC_MAP_ACCESS",
+          "Groovy looked up this map key at runtime; TeaseScript objects have fixed properties, so the key needs a written-out property or a list of records.",
+        );
+      }
+      const key = lowerExpression(indexNode, context);
+      return key === null ? null : { kind: "index", target, index: key, proposed: "dictionaries" };
     }
     const index = lowerExpression(indexNode, context);
     return index === null ? null : { kind: "index", target, index };
@@ -4519,6 +4552,10 @@ function lowerObjectMethodCallExpression(
     );
   }
 
+  if (targetNode !== null && context.proposals.has("dictionaries")) {
+    const proposed = proposedDictionaryOperation(node, targetNode, name, argumentsNodes, context);
+    if (proposed !== undefined) return proposed;
+  }
   if (
     targetNode !== null &&
     STRING_METHODS.has(name) &&
@@ -4983,6 +5020,84 @@ function collectShadowingReferences(
 function isKnownListExpression(node: AstNode, context: LowerContext): boolean {
   const type = inferType(node, context.types);
   return onlyOf(type, LIST | NULL) && (type & LIST) !== 0;
+}
+
+function isKnownMapExpression(node: AstNode, context: LowerContext): boolean {
+  const type = inferType(node, context.types);
+  return onlyOf(type, OBJECT | NULL) && (type & OBJECT) !== 0;
+}
+
+/** Groovy methods that only maps have, so the receiver is a map even when its type is not inferred. */
+const MAP_ONLY_METHODS = new Set(["containsKey", "keySet", "values"]);
+
+/**
+ * Groovy map operations as proposed dictionary members (dictionaries, D1): `has(key)`, `keys`, `values`, `length`,
+ * `remove(key)` and `clear()`, plus `[key]` lookups. Removing and clearing change the map, so they are covered only
+ * as whole statements. Returns undefined for operations the working syntax does not cover.
+ */
+function proposedDictionaryOperation(
+  node: AstNode,
+  targetNode: AstNode,
+  name: string,
+  argumentsNodes: AstNode[],
+  context: LowerContext,
+): IrExpression | null | undefined {
+  const knownMap = isKnownMapExpression(targetNode, context);
+  if (!knownMap && !(MAP_ONLY_METHODS.has(name) && !isKnownListExpression(targetNode, context))) {
+    return undefined;
+  }
+  const wholeStatement = asNode(context.statementRoot?.expression) === node;
+  const target = (): IrExpression | null => lowerExpression(targetNode, context);
+  const property = (member: string): IrExpression | null => {
+    const lowered = target();
+    return lowered === null
+      ? null
+      : { kind: "property", target: lowered, name: member, proposed: "dictionaries" };
+  };
+  const method = (member: string): IrExpression | null => {
+    const lowered = target();
+    const args = lowered === null ? null : lowerArguments(argumentsNodes, context);
+    return lowered === null || args === null
+      ? null
+      : {
+          kind: "methodCall",
+          target: lowered,
+          name: member,
+          arguments: args,
+          proposed: "dictionaries",
+        };
+  };
+  switch (name) {
+    case "containsKey":
+      return argumentsNodes.length === 1 ? method("has") : undefined;
+    case "keySet":
+      return argumentsNodes.length === 0 ? property("keys") : undefined;
+    case "values":
+      return argumentsNodes.length === 0 ? property("values") : undefined;
+    case "size":
+      return argumentsNodes.length === 0 ? property("length") : undefined;
+    case "isEmpty": {
+      if (argumentsNodes.length !== 0) return undefined;
+      const length = property("length");
+      return length === null
+        ? null
+        : { kind: "binary", operator: "==", left: length, right: { kind: "literal", value: 0 } };
+    }
+    case "get": {
+      if (argumentsNodes.length !== 1) return undefined;
+      const lowered = target();
+      const key = lowerExpression(argumentsNodes[0]!, context);
+      return lowered === null || key === null
+        ? null
+        : { kind: "index", target: lowered, index: key, proposed: "dictionaries" };
+    }
+    case "remove":
+      return wholeStatement && argumentsNodes.length === 1 ? method("remove") : undefined;
+    case "clear":
+      return wholeStatement && argumentsNodes.length === 0 ? method("clear") : undefined;
+    default:
+      return undefined;
+  }
 }
 
 function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpression | null {

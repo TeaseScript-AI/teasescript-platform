@@ -186,7 +186,12 @@ function withLoadedModules(
     const renamed = renameConflictingIdentifiers({ ...module, statements }, taken, false);
     for (const name of rootNames(renamed.statements)) taken.add(name);
     moduleStatements.push(...renamed.statements);
-    diagnostics.push(...renamed.diagnostics);
+    diagnostics.push(
+      ...renamed.diagnostics.map((diagnostic) => ({
+        ...diagnostic,
+        sourceName: diagnostic.sourceName ?? module.sourceName,
+      })),
+    );
     for (const action of renamed.actions ?? []) actions.add(action);
   }
   return {
@@ -326,7 +331,7 @@ function deduplicateDiagnostics(diagnostics: MigrationDiagnostic[]): MigrationDi
   const seen = new Set<string>();
   return diagnostics.filter((diagnostic) => {
     const span = diagnostic.span;
-    const key = `${diagnostic.code}|${diagnostic.severity}|${diagnostic.message}|${span?.line ?? ""}|${span?.column ?? ""}|${span?.endLine ?? ""}|${span?.endColumn ?? ""}`;
+    const key = `${diagnostic.sourceName ?? ""}|${diagnostic.code}|${diagnostic.severity}|${diagnostic.message}|${span?.line ?? ""}|${span?.column ?? ""}|${span?.endLine ?? ""}|${span?.endColumn ?? ""}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

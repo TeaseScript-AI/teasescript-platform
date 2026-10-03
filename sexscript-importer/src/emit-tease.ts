@@ -228,7 +228,12 @@ export function emitExpression(expression: IrExpression): string {
     case "object":
       return expression.properties.length === 0
         ? "{}"
-        : `{ ${expression.properties.map((property) => `${property.name}: ${emitExpression(property.value)}`).join(", ")} }`;
+        : `{ ${expression.properties
+            .map(
+              (property) =>
+                `${property.key === undefined ? property.name : `[${emitExpression(property.key)}]`}: ${emitExpression(property.value)}`,
+            )
+            .join(", ")} }`;
     case "index":
       return `${operand(expression.target, POSTFIX)}[${emitExpression(expression.index)}]`;
     case "property":

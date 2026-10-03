@@ -146,7 +146,7 @@ function reportDiagnostics(program: ReturnType<typeof lowerParsedFile>): number 
     const location =
       diagnostic.span === null ? "" : `:${diagnostic.span.line}:${diagnostic.span.column}`;
     process.stderr.write(
-      `${diagnostic.severity} ${diagnostic.code} ${program.sourceName}${location} ${diagnostic.message}\n`,
+      `${diagnostic.severity} ${diagnostic.code} ${diagnostic.sourceName ?? program.sourceName}${location} ${diagnostic.message}\n`,
     );
     if (diagnostic.severity === "error") errors += 1;
   }

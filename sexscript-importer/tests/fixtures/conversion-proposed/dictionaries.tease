@@ -1,0 +1,20 @@
+// Registries keyed by runtime strings, as proposed dictionaries.
+let COLLAR = "collar"
+let GAG = "gag"
+let toyNames = { [COLLAR]: "leather collar", [GAG]: "ball gag" }
+let owned = {}
+let chosen = COLLAR
+if not owned.has(chosen) {
+  owned[chosen] = 1
+}
+owned[GAG] = 2
+say "You wear the ${toyNames[chosen]}"
+for name in owned.keys {
+  say "${name}: ${owned[name]}"
+}
+say "Toys: ${owned.length}"
+owned.remove(GAG)
+if owned.length != 0 {
+  say "Still owned: ${owned.values[0]}"
+}
+owned.clear()

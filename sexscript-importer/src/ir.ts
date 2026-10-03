@@ -8,6 +8,8 @@ export interface MigrationDiagnostic {
   severity: DiagnosticSeverity;
   message: string;
   span: SourceSpan | null;
+  /** The file the span refers to when it is not the program's own source, as for a composed module. */
+  sourceName?: string;
 }
 
 export interface LegacyMetadata {
@@ -132,8 +134,9 @@ export type IrExpression =
   | { kind: "literal"; value: string | number | boolean | null; action?: true }
   | { kind: "variable"; name: string }
   | { kind: "list"; items: IrExpression[] }
-  | { kind: "object"; properties: Array<{ name: string; value: IrExpression }> }
-  | { kind: "index"; target: IrExpression; index: IrExpression }
+  /** A property with `key` (proposed dictionaries) has a computed key, written `[key]: value`; `name` is unused. */
+  | { kind: "object"; properties: Array<{ name: string; value: IrExpression; key?: IrExpression }> }
+  | { kind: "index"; target: IrExpression; index: IrExpression; proposed?: ProposalId }
   /** `proposed` marks a member that only a proposed language change defines (see proposals.ts). */
   | { kind: "property"; target: IrExpression; name: string; proposed?: ProposalId }
   | {

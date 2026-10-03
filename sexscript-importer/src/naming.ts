@@ -247,6 +247,7 @@ function renameExpression(expression: IrExpression, scope: Scope, renamer: Renam
         properties: expression.properties.map((property) => ({
           ...property,
           value: child(property.value),
+          ...(property.key === undefined ? {} : { key: child(property.key) }),
         })),
       };
     case "index":

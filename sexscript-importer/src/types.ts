@@ -73,6 +73,7 @@ const OBJECT_METHOD_RESULT_TYPES = new Map<string, ValueType>([
   ["values", LIST],
   ["capitalize", STRING],
   ["contains", BOOLEAN],
+  ["containsKey", BOOLEAN],
   ["endsWith", BOOLEAN],
   ["equals", BOOLEAN],
   ["equalsIgnoreCase", BOOLEAN],
