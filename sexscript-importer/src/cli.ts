@@ -7,6 +7,7 @@ import { inventoryFiles } from "./inventory.ts";
 import { lowerParsedFile } from "./lower.ts";
 import { lowerSelfContainedPackage } from "./package.ts";
 import { parseProposals, type ProposalId } from "./proposals.ts";
+import type { MediaFile } from "./pending.ts";
 import { analyzeFeasibility, type FeasibilityOptions } from "./report.ts";
 import { loadRepositoryRunner } from "./runtime-check.ts";
 import { parseGroovySource } from "./source-parser.ts";
@@ -40,8 +41,12 @@ if (command === "inventory") {
   const options: FeasibilityOptions = { proposals };
   if (compileRequested) options.compiler = await loadRepositoryCompiler();
   if (runRequested) options.runner = await loadRepositoryRunner();
-  // One scripts folder is the package root that script transfers are relative to.
-  if (args.length === 1 && (await stat(args[0]!)).isDirectory()) options.packageRoot = args[0]!;
+  // One scripts folder is the package root that script transfers are relative to; its sibling images folder
+  // holds the media that proposed media tags count.
+  if (args.length === 1 && (await stat(args[0]!)).isDirectory()) {
+    options.packageRoot = args[0]!;
+    options.media = await packageMedia(path.join(args[0]!, "..", "images"));
+  }
   const report = analyzeFeasibility(files, options);
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } else if (command === "convert") {
@@ -128,6 +133,22 @@ async function convertPackage(
     process.stderr.write(`${compilerClean}/${written} generated file(s) compile without errors.\n`);
   }
   if (errors > 0) process.exitCode = 1;
+}
+
+/** The images below `root`, each tagged with the lower-case names of the folders it is in. */
+async function packageMedia(root: string): Promise<MediaFile[]> {
+  const imageExtensions = new Set([".gif", ".jpeg", ".jpg", ".png", ".webp"]);
+  const files = await readdir(root, { recursive: true, withFileTypes: true }).catch(() => []);
+  return files
+    .filter(
+      (entry) => entry.isFile() && imageExtensions.has(path.extname(entry.name).toLowerCase()),
+    )
+    .map((entry) => {
+      const relative = path.relative(root, path.join(entry.parentPath, entry.name));
+      const folders = relative.split(path.sep).slice(0, -1);
+      return { path: relative, tags: folders.map((folder) => folder.toLowerCase()) };
+    })
+    .sort((left, right) => left.path.localeCompare(right.path));
 }
 
 async function findGroovyFiles(directory: string): Promise<string[]> {

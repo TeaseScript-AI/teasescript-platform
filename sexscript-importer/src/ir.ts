@@ -158,8 +158,11 @@ export type IrExpression =
    * labels with unlabelled ones (whose label is their text), and a list option contributes one option per element.
    */
   | { kind: "listChoice"; options: IrListChoiceOption[] }
-  /** Compact single-field input whose prompt, if any, was emitted as a preceding `say`. */
-  | { kind: "input"; input: "askText" | "askNumber" }
+  /**
+   * Compact single-field input whose prompt, if any, was emitted as a preceding `say`. `defaultValue` is a
+   * proposed prefill (input-defaults, #510), written `askText default value`.
+   */
+  | { kind: "input"; input: "askText" | "askNumber"; defaultValue?: IrExpression }
   | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean }
   | { kind: "unary"; operator: "not" | "+" | "-"; value: IrExpression }
   | { kind: "binary"; operator: string; left: IrExpression; right: IrExpression }

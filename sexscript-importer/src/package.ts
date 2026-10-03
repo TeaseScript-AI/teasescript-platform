@@ -23,6 +23,8 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
   "askText",
   "ceil",
   "chance",
+  // Proposed media-tags capability; emitted only when the proposal is selected.
+  "countImages",
   "floor",
   "getDate",
   "getDateTime",

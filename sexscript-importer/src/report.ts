@@ -6,7 +6,7 @@ import { rootDiagnostics } from "./diagnostics.ts";
 import type { IrStatement } from "./ir.ts";
 import { lowerPackage } from "./package.ts";
 import type { ProposalId } from "./proposals.ts";
-import { pendingHostFunctions, shimPendingCapabilities } from "./pending.ts";
+import { pendingHostFunctions, shimPendingCapabilities, type MediaFile } from "./pending.ts";
 import {
   flowKey,
   smokeRunFlow,
@@ -66,6 +66,8 @@ export interface FeasibilityOptions {
   packageRoot?: string;
   /** Proposed language changes to emit in their working syntax; the shim makes them compile and run. */
   proposals?: ReadonlySet<ProposalId>;
+  /** The package's images, for smoke runs of proposed media tags. */
+  media?: readonly MediaFile[];
 }
 
 export interface FeasibilityReport {
@@ -223,7 +225,7 @@ export function analyzeFeasibility(
         script:
           source === null
             ? null
-            : { source, builtins: (state) => pendingHostFunctions(shim, state) },
+            : { source, builtins: (state) => pendingHostFunctions(shim, state, options.media) },
       });
     }
 

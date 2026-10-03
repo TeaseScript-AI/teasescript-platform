@@ -6,7 +6,7 @@ import {
 } from "./runtime-check.ts";
 import { emitTease } from "./emit-tease.ts";
 import type { IrExpression, IrStatement, IrSwitchCase, MigrationProgram } from "./ir.ts";
-import { proposalCapability } from "./proposals.ts";
+import { proposalCapability, type ProposalId } from "./proposals.ts";
 import { isRecord } from "./ast.ts";
 
 /**
@@ -32,6 +32,9 @@ const PENDING_CALLS = new Map<string, string>([
   ["toNumber", "toNumber()"],
   ["toString", "toString()"],
 ]);
+
+/** Calls that only a proposed language change defines, by the proposal (see proposals.ts). */
+const PROPOSED_CALLS = new Map<string, ProposalId>([["countImages", "media-tags"]]);
 
 const SHIM_PREFIX = "sxPending";
 
@@ -103,6 +106,17 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
             : { defaultValue: expression(value.defaultValue) }),
         };
       case "call": {
+        const proposal = PROPOSED_CALLS.get(value.name);
+        if (proposal !== undefined && value.local !== true) {
+          return call(
+            proposalCapability(proposal),
+            `${proposal}.${value.name}`,
+            value.positional.map(expression),
+            Object.fromEntries(
+              Object.entries(value.named).map(([name, child]) => [name, expression(child)]),
+            ),
+          );
+        }
         const capability = PENDING_CALLS.get(value.name);
         const positional = value.positional.map(expression);
         const named = Object.fromEntries(
@@ -240,9 +254,14 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
             "text" in part ? part : { value: expression(part.value) },
           ),
         };
+      case "input": {
+        if (value.defaultValue === undefined) return value;
+        // The stand-in answers the input itself, so the proposed prefill only needs to leave the copy.
+        capabilities.add(proposalCapability("input-defaults"));
+        return { kind: "input", input: value.input };
+      }
       case "literal":
       case "variable":
-      case "input":
         return value;
     }
   };
@@ -552,6 +571,12 @@ function collectNames(value: unknown, names: Set<string>): void {
   }
 }
 
+/** An image of the package for proposed media tags: its path and the lower-case folder names that tag it. */
+export interface MediaFile {
+  path: string;
+  tags: string[];
+}
+
 /**
  * Host stand-ins for the pending capabilities of a shimmed program, for smoke runs only: `run` records its target in
  * the flow state, time and dates follow the simulated clock from 2026-10-02 12:00 UTC, conversions fail without a
@@ -561,6 +586,7 @@ function collectNames(value: unknown, names: Set<string>): void {
 export function pendingHostFunctions(
   shim: PendingShim,
   state: FlowState = newFlowState(),
+  media: readonly MediaFile[] = [],
 ): Record<string, HostFunction> {
   const next = <T>(operation: string, answers: readonly T[]): T => {
     const visit = state.answers.get(operation) ?? 0;
@@ -668,6 +694,16 @@ export function pendingHostFunctions(
     throw new Error("Unexpected runtime value.");
   };
   const implementations = new Map<string, HostFunction>([
+    // Proposed media tags (M1): images counted by the folders they are in, compared without regard to case.
+    [
+      "media-tags.countImages",
+      (_, named) => {
+        const wanted = listItems(named.tags);
+        if (wanted === null) throw new Error("countImages() needs a list of tags.");
+        const tags = wanted.map((tag) => String(runtimeValue(tag)).toLowerCase());
+        return media.filter((file) => tags.every((tag) => file.tags.includes(tag))).length;
+      },
+    ],
     [
       "dictionaries.get",
       ([target, key]) => {

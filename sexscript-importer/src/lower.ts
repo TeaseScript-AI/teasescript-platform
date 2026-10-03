@@ -4552,6 +4552,10 @@ function lowerObjectMethodCallExpression(
     );
   }
 
+  if (context.proposals.has("media-tags")) {
+    const proposed = proposedImageCount(node, name, argumentsNodes, context);
+    if (proposed !== undefined) return proposed;
+  }
   if (targetNode !== null && context.proposals.has("dictionaries")) {
     const proposed = proposedDictionaryOperation(node, targetNode, name, argumentsNodes, context);
     if (proposed !== undefined) return proposed;
@@ -5027,6 +5031,144 @@ function isKnownMapExpression(node: AstNode, context: LowerContext): boolean {
   return onlyOf(type, OBJECT | NULL) && (type & OBJECT) !== 0;
 }
 
+/**
+ * `new File(folder).listFiles()`, optionally filtered by file name, then `.size()`, over a package image folder as a
+ * proposed tag count (media-tags, M1): every folder below `images/` is a tag of the images it holds (matched without
+ * regard to case), so `images/Domme3/Domme${pack}/` counts images tagged `Domme3` and `Domme<pack>`. Tags cannot
+ * filter by file name, so a name filter is dropped with a note. Returns undefined for other shapes.
+ */
+function proposedImageCount(
+  node: AstNode,
+  name: string,
+  argumentsNodes: AstNode[],
+  context: LowerContext,
+): IrExpression | null | undefined {
+  if (name !== "size" || argumentsNodes.length !== 0) return undefined;
+  let receiver = asNode(node.object);
+  const filter = receiver === null ? null : callParts(receiver);
+  let nameFilter: AstNode | null = null;
+  if (receiver !== null && filter?.name === "findAll" && !filter.inherited) {
+    const closure = filter.arguments.length === 1 ? closureExpression(filter.arguments[0]!) : null;
+    const test = closure === null ? null : closure.expression;
+    const tested = test === null ? null : asNode(test.left);
+    if (
+      test === null ||
+      test.kind !== "binary" ||
+      (test.operator !== "==~" && test.operator !== "=~") ||
+      tested?.kind !== "property" ||
+      constantString(tested.property) !== "name" ||
+      variableName(tested.object) !== closure!.parameter
+    ) {
+      return undefined;
+    }
+    nameFilter = test;
+    receiver = asNode(receiver.object);
+  }
+  const listing = receiver === null ? null : callParts(receiver);
+  if (receiver === null || listing?.name !== "listFiles" || listing.inherited) return undefined;
+  if (listing.arguments.length !== 0) return undefined;
+  const file = asNode(receiver.object);
+  if (file?.kind !== "constructorCall" || (file.type !== "File" && file.type !== "java.io.File")) {
+    return undefined;
+  }
+  const pathArguments = nodeArray(asNode(file.arguments)?.items);
+  if (pathArguments.length !== 1) return undefined;
+  const segments = imagePathSegments(pathArguments[0]!);
+  if (segments === null || segments.length === 0) return undefined;
+  const tags: IrExpression[] = [];
+  for (const segment of segments) {
+    const parts: Array<{ text: string } | { value: IrExpression }> = [];
+    for (const part of segment) {
+      if ("text" in part) {
+        parts.push(part);
+        continue;
+      }
+      const value = lowerExpression(part.node, context);
+      if (value === null) return null;
+      parts.push({ value });
+    }
+    tags.push(templateOrLiteral(parts));
+  }
+  if (nameFilter !== null) {
+    addDiagnostic(
+      context,
+      "SX_IMAGE_NAME_FILTER",
+      "warning",
+      "The legacy count included only files whose names matched a pattern; the proposed tag count counts every image in the folder.",
+      nameFilter.span,
+    );
+  }
+  return {
+    kind: "call",
+    name: "countImages",
+    positional: [],
+    named: { tags: { kind: "list", items: tags } },
+  };
+}
+
+/**
+ * The folders below `images/` in a literal, interpolated, or `sprintf("...%s...", [values])` path, each as text and
+ * value parts; null when the path is not inside the package's images folder or has another shape.
+ */
+function imagePathSegments(
+  node: AstNode,
+): Array<Array<{ text: string } | { node: AstNode }>> | null {
+  const parts: Array<{ text: string } | { node: AstNode }> = [];
+  if (node.kind === "constant" && typeof node.value === "string") {
+    parts.push({ text: node.value });
+  } else if (node.kind === "gstring") {
+    const strings = Array.isArray(node.strings) ? node.strings : [];
+    const values = nodeArray(node.values);
+    for (let index = 0; index < Math.max(strings.length, values.length); index += 1) {
+      const text: unknown = strings[index];
+      if (typeof text === "string" && text !== "") parts.push({ text });
+      if (values[index] !== undefined) parts.push({ node: values[index]! });
+    }
+  } else {
+    const call = callParts(node);
+    const format = call?.arguments[0];
+    const values = call?.arguments[1];
+    if (
+      call?.name !== "sprintf" ||
+      !call.inherited ||
+      call.arguments.length !== 2 ||
+      format?.kind !== "constant" ||
+      typeof format.value !== "string" ||
+      values?.kind !== "list"
+    ) {
+      return null;
+    }
+    const items = nodeArray(values.items);
+    const pieces = format.value.split(/%[sd]/u);
+    if (
+      pieces.length !== items.length + 1 ||
+      format.value.replaceAll(/%[sd]/gu, "").includes("%")
+    ) {
+      return null;
+    }
+    pieces.forEach((piece, index) => {
+      if (piece !== "") parts.push({ text: piece });
+      if (index < items.length) parts.push({ node: items[index]! });
+    });
+  }
+  const segments: Array<Array<{ text: string } | { node: AstNode }>> = [[]];
+  for (const part of parts) {
+    if (!("text" in part)) {
+      segments.at(-1)!.push(part);
+      continue;
+    }
+    const pieces = part.text.split("/");
+    pieces.forEach((piece, index) => {
+      if (index > 0) segments.push([]);
+      if (piece !== "") segments.at(-1)!.push({ text: piece });
+    });
+  }
+  const folders = segments.filter((segment) => segment.length > 0);
+  const first = folders[0];
+  if (first?.length !== 1 || !("text" in first[0]!) || first[0].text !== "images") return null;
+  return folders.slice(1);
+}
+
 /** Groovy methods that only maps have, so the receiver is a map even when its type is not inferred. */
 const MAP_ONLY_METHODS = new Set(["containsKey", "keySet", "values"]);
 
@@ -5400,7 +5542,13 @@ function lowerSingleInput(
       `${name}() computes its pre-filled value with side effects; TeaseScript input has no prefill, so keep that computation explicitly before the question.`,
     );
   }
-  if (defaultNode !== undefined && !isEmptyDefault(defaultNode)) {
+  const prefill =
+    defaultNode !== undefined &&
+    !isEmptyDefault(defaultNode) &&
+    context.proposals.has("input-defaults")
+      ? args[1]!
+      : null;
+  if (defaultNode !== undefined && !isEmptyDefault(defaultNode) && prefill === null) {
     addDiagnostic(
       context,
       "SX_INPUT_PREFILL",
@@ -5415,10 +5563,16 @@ function lowerSingleInput(
     const message = isNullConstant(argumentNodes[0])
       ? { kind: "literal" as const, value: "" }
       : args[0]!;
-    return { kind: "call", name: "askInteger", positional: [message], named: {} };
+    // Positional and named arguments may not be mixed, so a prefill uses the named form throughout.
+    return prefill === null
+      ? { kind: "call", name: "askInteger", positional: [message], named: {} }
+      : { kind: "call", name: "askInteger", positional: [], named: { message, default: prefill } };
   }
   if (!pushPrompt(context, node, argumentNodes[0]!, args[0]!)) return null;
-  return { kind: "input", input: name === "getString" ? "askText" : "askNumber" };
+  const input = name === "getString" ? "askText" : "askNumber";
+  return prefill === null
+    ? { kind: "input", input }
+    : { kind: "input", input, defaultValue: prefill };
 }
 
 function isEmptyDefault(node: AstNode): boolean {

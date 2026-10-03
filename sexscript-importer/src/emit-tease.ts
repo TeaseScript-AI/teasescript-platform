@@ -245,7 +245,9 @@ export function emitExpression(expression: IrExpression): string {
         ? `load ${operand(expression.key, POSTFIX)}`
         : `load ${operand(expression.key, POSTFIX)} default ${operand(expression.defaultValue, POSTFIX)}`;
     case "input":
-      return expression.input;
+      return expression.defaultValue === undefined
+        ? expression.input
+        : `${expression.input} default ${operand(expression.defaultValue, POSTFIX)}`;
     case "choice":
     case "listChoice":
       // `choose a: x, b: y` extends over following commas, so it is parenthesized unless it is a whole
@@ -335,9 +337,11 @@ function precedence(expression: IrExpression): number {
     case "property":
     case "methodCall":
       return POSTFIX;
-    // `load` extends to the end of its operands, so it is always parenthesized as an operand.
+    // `load` and a prefilled input extend to the end of their operands, so they are parenthesized as operands.
     case "load":
       return 0;
+    case "input":
+      return expression.defaultValue === undefined ? PRIMARY : 0;
     default:
       return PRIMARY;
   }
