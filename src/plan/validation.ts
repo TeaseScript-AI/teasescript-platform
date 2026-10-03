@@ -1,4 +1,5 @@
 import { isNormalizedOpaqueColor } from "../color.js";
+import { isValidInteractionPrefill } from "../interaction-answers.js";
 import {
   boundedInteractionUtf8ByteLength,
   interactionStringHasNonWhitespace,
@@ -828,7 +829,7 @@ function validateStaticInteractionUi(
     kind === "button"
       ? ["kind", "buttonLabel", "accessibleName", ...("background" in ui ? ["background"] : [])]
       : kind === "text" || kind === "number"
-        ? ["kind", "hint", "accessibleName"]
+        ? ["kind", "hint", "accessibleName", ...("prefill" in ui ? ["prefill"] : [])]
         : ["kind", "labelType", "options", "accessibleName"];
   if (!hasExactKeys(ui, uiKeys)) {
     errors.push(planError("TSC002", "Interaction UI payload contains unsupported fields.", path));
@@ -887,6 +888,14 @@ function validateStaticInteractionUi(
   }
   if (kind === "text" || kind === "number") {
     if (ui.hint !== null) countString(ui.hint, `${path}.hint`);
+    if (
+      "prefill" in ui &&
+      countString(ui.prefill, `${path}.prefill`) &&
+      !isValidInteractionPrefill(kind, ui.prefill)
+    )
+      errors.push(
+        planError("TSC002", "Interaction prefill is not a valid answer.", `${path}.prefill`),
+      );
   }
   if (kind === "choice") {
     const labelType = ui.labelType;
@@ -1000,7 +1009,12 @@ function validatePreparedInteractionUi(
           ...("backgroundTemporary" in ui ? ["backgroundTemporary"] : []),
         ]
       : kind === "text" || kind === "number"
-        ? ["kind", "hintTemporary", "accessibleName"]
+        ? [
+            "kind",
+            "hintTemporary",
+            "accessibleName",
+            ...("prefillTemporary" in ui ? ["prefillTemporary"] : []),
+          ]
         : ["kind", "labelType", "optionsTemporary", "optionCount", "labels", "accessibleName"];
   if (!hasExactKeys(ui, keys)) {
     errors.push(
@@ -1078,6 +1092,7 @@ function validatePreparedInteractionUi(
   }
   if (kind === "text" || kind === "number") {
     if (ui.hintTemporary !== null) addTemporary(ui.hintTemporary, `${path}.hintTemporary`);
+    if ("prefillTemporary" in ui) addTemporary(ui.prefillTemporary, `${path}.prefillTemporary`);
     return;
   }
   if (kind !== "choice") return;

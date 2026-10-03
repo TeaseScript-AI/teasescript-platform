@@ -1,3 +1,4 @@
+import { isBlankTextAnswer, isNumberAnswerText } from "../../interaction-answers.js";
 import { interactionStringFits } from "../../interaction-limits.js";
 import { recordValidationTestWork } from "../../validation-testing.js";
 import type { RuntimeInteractionActionSnapshot } from "./model.js";
@@ -30,7 +31,7 @@ export function resolveInteractionCompletion(
       };
     }
     const normalized = payload.submittedText.replace(/\r\n?/gu, "\n");
-    if (/^\s*$/u.test(normalized)) {
+    if (isBlankTextAnswer(normalized)) {
       return { ok: false, message: "Text completion must contain a non-whitespace character." };
     }
     return { ok: true, result: normalized, transcriptText: normalized };
@@ -48,7 +49,7 @@ export function resolveInteractionCompletion(
       };
     }
     const submitted = payload.submittedText.trim();
-    if (!/^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?$/u.test(submitted)) {
+    if (!isNumberAnswerText(submitted)) {
       return {
         ok: false,
         message: "Number completion is not an accepted decimal or scientific number.",

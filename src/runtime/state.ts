@@ -699,7 +699,12 @@ function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPayload {
       ...(ui.background === undefined ? {} : { background: ui.background }),
       accessibleName,
     };
-  return { kind: ui.kind, hint: ui.hint, accessibleName };
+  return {
+    kind: ui.kind,
+    hint: ui.hint,
+    ...(ui.prefill === undefined ? {} : { prefill: ui.prefill }),
+    accessibleName,
+  };
 }
 
 function cloneSettlement(
@@ -2754,6 +2759,8 @@ function requiredInstructionTemporaries(
         ) {
           if (instruction.preparedUi.hintTemporary !== null)
             output.add(instruction.preparedUi.hintTemporary);
+          if (instruction.preparedUi.prefillTemporary !== undefined)
+            output.add(instruction.preparedUi.prefillTemporary);
         } else output.add(instruction.preparedUi.optionsTemporary);
       }
       break;

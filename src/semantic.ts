@@ -22,6 +22,7 @@ import {
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
   TEASESCRIPT_PROTECTED_NAMES,
 } from "./protected-names.js";
+import { isBlankTextAnswer } from "./interaction-answers.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
 import { runCompileTask, compileChild, type CompileTask } from "./compiler/continuation.js";
 import { expressionChildren, mediaHandlerBlocks, mediaOperands } from "./expression-children.js";
@@ -107,6 +108,7 @@ const semanticCode = {
   invalidMedia: "TSV036",
   invalidMediaHandleMember: "TSV037",
   invalidStorageKey: "TSV038",
+  invalidInteractionDefault: "TSV039",
 } as const;
 
 export function validateSemantics(
@@ -1014,10 +1016,18 @@ class SemanticValidator {
         const contextualSpeaker = this.#interactionSpeaker(expression.speaker, scope);
         if (expression.interactionKind === "choice") {
           yield* compileChild(this.#validateChoiceTask(expression, scope, contextualSpeaker));
-        } else if (expression.hint !== null) {
-          yield* compileChild(
-            this.#validateExpressionTask(expression.hint, scope, contextualSpeaker),
-          );
+        } else {
+          if (expression.hint !== null) {
+            yield* compileChild(
+              this.#validateExpressionTask(expression.hint, scope, contextualSpeaker),
+            );
+          }
+          if (expression.defaultValue !== null) {
+            yield* compileChild(
+              this.#validateExpressionTask(expression.defaultValue, scope, contextualSpeaker),
+            );
+            this.#validateInteractionDefault(expression.interactionKind, expression.defaultValue);
+          }
         }
         return;
       }
@@ -1213,6 +1223,34 @@ class SemanticValidator {
       : this.#validateSpeakerReference(speaker.name, speaker.span, scope)
         ? speaker.name
         : null;
+  }
+
+  /** A default answer must be an answer the field accepts; dynamic values are checked when the field opens. */
+  #validateInteractionDefault(kind: "text" | "number", expression: Expression): void {
+    if (kind === "number") {
+      if (isDefinitelyNonNumeric(expression) || isDefinitelyBoolean(expression))
+        this.#report(
+          semanticCode.invalidInteractionDefault,
+          "The default answer of askNumber must be a number, such as 'default: 10'.",
+          expression.span,
+        );
+      return;
+    }
+    if (isDefinitelyNonString(expression) || isArithmetic(expression)) {
+      this.#report(
+        semanticCode.invalidInteractionDefault,
+        "The default answer of askText must be text. Write a number as text, such as 'default: \"10\"'.",
+        expression.span,
+      );
+      return;
+    }
+    const text = staticVisibleText(expression);
+    if (text !== undefined && isBlankTextAnswer(text))
+      this.#report(
+        semanticCode.invalidInteractionDefault,
+        "The default answer of askText must contain a non-whitespace character.",
+        expression.span,
+      );
   }
 
   #validateButtonBackground(expression: Expression): void {
@@ -1588,6 +1626,24 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
   );
 }
 
+const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "%"]);
+
+/** Arithmetic yields a number or a duration, never text. */
+function isArithmetic(expression: Expression): boolean {
+  expression = unwrapParentheses(expression);
+  return expression.kind === "binaryExpression" && ARITHMETIC_OPERATORS.has(expression.operator);
+}
+
+/** A boolean literal, `not`, a comparison, or `and`/`or`. */
+function isDefinitelyBoolean(expression: Expression): boolean {
+  expression = unwrapParentheses(expression);
+  return (
+    expression.kind === "booleanLiteral" ||
+    (expression.kind === "unaryExpression" && expression.operator === "not") ||
+    (expression.kind === "binaryExpression" && NON_STRING_OPERATORS.has(expression.operator))
+  );
+}
+
 const LOAD_KEY_MESSAGE =
   "Storage key must be a string. To compare the loaded value, write '(load \"k\") == null'.";
 
@@ -1658,6 +1714,7 @@ function visitExpression(
         ? [
             ...(current.speaker === null ? [] : [current.speaker]),
             ...(current.hint === null ? [] : [current.hint]),
+            ...(current.defaultValue === null ? [] : [current.defaultValue]),
             ...current.options.map((option) => option.value),
           ]
         : expressionChildren(current);
