@@ -55,15 +55,15 @@ test("a positional argument after a named one and a parameter given twice are re
     ["TSV023", "Parameter 'a' already receives positional argument 1. Remove one of the two.", "a"],
   ]);
   assert.deepEqual(diagnostics(SHOW + "say show(1, c: 2, c: 3)"), [
-    ["TSV023", "Duplicate named argument 'c'.", "c"],
+    ["TSV023", "Argument 'c' is given twice. Remove one of them.", "c"],
   ]);
   assert.deepEqual(diagnostics(SHOW + "say show(1, d: 2)")[0]?.slice(0, 2), [
     "TSV022",
-    "Unknown argument 'd' for function 'show'.",
+    "Function 'show' has no parameter 'd'. Its parameters are a, b, c.",
   ]);
   assert.deepEqual(diagnostics(SHOW + "say show(b: 2)")[0]?.slice(0, 2), [
     "TSV024",
-    "Missing required named argument 'a'.",
+    "Function 'show' needs a value for 'a'. Add it by position or as 'a: ...'.",
   ]);
 });
 
@@ -81,19 +81,30 @@ test("a name given twice to a built-in or method is rejected at compile time", (
     [
       [
         "TSV023",
-        "Duplicate named argument 'mode'.",
+        "Argument 'mode' is given twice. Remove one of them.",
         builtin.lastIndexOf("mode"),
         builtin.lastIndexOf("mode") + 4,
       ],
     ],
   );
   assert.deepEqual(diagnostics('let items = ["a"]\nsay items.contains(x: 1, x: 2)'), [
-    ["TSV023", "Duplicate named argument 'x'.", "x"],
+    ["TSV023", "Argument 'x' is given twice. Remove one of them.", "x"],
   ]);
   assert.deepEqual(
     compileSource('say pack(1, mode: "x", size: 2)', { builtins: ["pack"] }).diagnostics,
     [],
   );
+});
+
+test("argument count errors name the parameters and the fix", () => {
+  assert.deepEqual(diagnostics(SHOW + "say show(1, 2, 3, 4)")[0]?.slice(0, 2), [
+    "TSV020",
+    "Function 'show' takes 1 to 3 arguments (a, b, c), received 4. Remove the extra arguments.",
+  ]);
+  assert.deepEqual(diagnostics(SHOW + "say show()")[0]?.slice(0, 2), [
+    "TSV020",
+    "Function 'show' takes 1 to 3 arguments (a, b, c), received 0. Add the missing arguments.",
+  ]);
 });
 
 test("plan validation rejects a function call that gives one parameter two arguments", () => {

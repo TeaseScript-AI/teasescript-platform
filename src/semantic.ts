@@ -1356,13 +1356,14 @@ class SemanticValidator {
     );
     const named = expression.arguments.filter((argument) => argument.kind === "namedArgument");
     const functionName = declaration.name.name;
+    const parameterNames = declaration.parameters.map((parameter) => parameter.name.name);
     const required = declaration.parameters.filter(
       (parameter) => parameter.defaultValue === null,
     ).length;
-    if (positional.length > declaration.parameters.length) {
+    if (positional.length > parameterNames.length) {
       this.#report(
         semanticCode.argumentCount,
-        `Function '${functionName}' expects ${required} through ${declaration.parameters.length} positional argument(s), received ${positional.length}.`,
+        `Function '${functionName}' takes ${argumentRange(required, parameterNames)}, received ${positional.length}. Remove the extra arguments.`,
         expression.span,
       );
       return;
@@ -1371,24 +1372,20 @@ class SemanticValidator {
       if (positional.length < required)
         this.#report(
           semanticCode.argumentCount,
-          `Function '${functionName}' expects ${required} through ${declaration.parameters.length} positional argument(s), received ${positional.length}.`,
+          `Function '${functionName}' takes ${argumentRange(required, parameterNames)}, received ${positional.length}. Add the missing arguments.`,
           expression.span,
         );
       return;
     }
-    const indexes = new Map(
-      declaration.parameters.map((parameter, index) => [parameter.name.name, index]),
-    );
-    const supplied = new Set(
-      declaration.parameters.slice(0, positional.length).map((parameter) => parameter.name.name),
-    );
+    const indexes = new Map(parameterNames.map((name, index) => [name, index]));
+    const supplied = new Set(parameterNames.slice(0, positional.length));
     for (const argument of named) {
       const name = argument.name.name;
       const index = indexes.get(name);
       if (index === undefined) {
         this.#report(
           semanticCode.unknownNamedArgument,
-          `Unknown argument '${name}' for function '${functionName}'.`,
+          `Function '${functionName}' has no parameter '${name}'. ${parameterNames.length === 0 ? "It takes no arguments." : `Its parameters are ${parameterNames.join(", ")}.`}`,
           argument.name.span,
         );
       } else if (index < positional.length) {
@@ -1400,7 +1397,7 @@ class SemanticValidator {
       } else if (supplied.has(name)) {
         this.#report(
           semanticCode.duplicateNamedArgument,
-          `Duplicate named argument '${name}'.`,
+          `Argument '${name}' is given twice. Remove one of them.`,
           argument.name.span,
         );
       }
@@ -1410,7 +1407,7 @@ class SemanticValidator {
       if (parameter.defaultValue === null && !supplied.has(parameter.name.name)) {
         this.#report(
           semanticCode.missingNamedArgument,
-          `Missing required named argument '${parameter.name.name}'.`,
+          `Function '${functionName}' needs a value for '${parameter.name.name}'. Add it by position or as '${parameter.name.name}: ...'.`,
           expression.span,
         );
       }
@@ -1427,7 +1424,7 @@ class SemanticValidator {
       if (names.has(argument.name.name))
         this.#report(
           semanticCode.duplicateNamedArgument,
-          `Duplicate named argument '${argument.name.name}'.`,
+          `Argument '${argument.name.name}' is given twice. Remove one of them.`,
           argument.name.span,
         );
       names.add(argument.name.name);
@@ -1487,6 +1484,16 @@ function literalKind(expression: Expression): Expression["kind"] {
 }
 
 /** The handle kind statically held by a variable initialized from `expression`. */
+/** "2 arguments (a, b)" or "1 to 3 arguments (a, b, c)", naming the parameters so the author sees what is expected. */
+function argumentRange(required: number, parameterNames: readonly string[]): string {
+  const total = parameterNames.length;
+  const count =
+    required === total
+      ? `${total} argument${total === 1 ? "" : "s"}`
+      : `${required} to ${total} arguments`;
+  return total === 0 ? "no arguments" : `${count} (${parameterNames.join(", ")})`;
+}
+
 function handleKind(expression: Expression): "timer" | "media" | null {
   expression = unwrapParentheses(expression);
   if (expression.kind === "timerExpression" && expression.async) return "timer";
