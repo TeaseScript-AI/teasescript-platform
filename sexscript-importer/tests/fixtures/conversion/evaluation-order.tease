@@ -1,0 +1,52 @@
+// MIGRATION INCOMPLETE: 5 error diagnostics.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+let flag = false
+function change {
+  flag = true
+  return ""
+}
+// TODO SX_CONDITIONAL_POSITION line 3: This conditional expression cannot be evaluated first without changing behavior: it is guarded by && / || / ?:, follows side effects, or has side effects that values read earlier in the statement would observe. Rewrite it with an explicit if.
+// | show(change() + (flag ? "yes" : "no"))
+// TODO SX_CONDITIONAL_POSITION line 4: This conditional expression cannot be evaluated first without changing behavior: it is guarded by && / || / ?:, follows side effects, or has side effects that values read earlier in the statement would observe. Rewrite it with an explicit if.
+// | show(false && (flag ? true : false))
+// TODO SX_PROMPT_POSITION line 5: This input's question cannot be shown at the right moment: the input is guarded by && / || / ?:, follows side effects in the same statement, or has arguments with side effects. Split the statement so the input comes first.
+// | if (false && getString("Never ask")) { show("yes") }
+let value = "old"
+let answer = "yes"
+if flag != true {
+  answer = value
+}
+let combined: string? = null
+if flag {
+  combined = "AB"
+} else {
+  combined = "AC"
+}
+say "${combined}${answer}"
+let n = 0
+function bump {
+  n += 1
+  return "prefill"
+}
+// TODO SX_INPUT_PREFILL_EFFECT line 12: getString() computes its pre-filled value with side effects; TeaseScript input has no prefill, so keep that computation explicitly before the question.
+// | def typed = getString("Question", bump())
+say "Strict?"
+if (choose yes: "Yes", no: "No") == "yes" {
+  say "Strict"
+} else {
+  say "Gentle"
+}
+let i = 0
+while i < 2 {
+  say "Round"
+  say "Next"
+  i = askNumber
+}
+// An increment used as a value follows the statement when nothing else in it reads the variable.
+let rules = ["Kneel", "Wait"]
+let r = 0
+say rules[r]
+r += 1
+// TODO SX_INCREMENT_POSITION line 19: This ++/-- result is used where the increment cannot simply follow the statement: the variable is used again in the statement, the increment is guarded by && / || / ?:, or a function called in the statement could read the variable. Move the increment to its own statement.
+// | show(rules[r++] + " " + r)

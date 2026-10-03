@@ -1,0 +1,19 @@
+def setImageImplement = { -> setImage("implement.jpg") }
+def startFast = { -> show("Fast start") }
+if (getRandom(2) == 0) {
+  def startFast = getRandom(2)
+  if (startFast == 1) show("Local value")
+}
+setImageImplement
+if (setImageImplement) show("Always shown")
+startFast()
+mistressInfo()
+// A comparison used as a statement had no effect.
+def amPm = "A"
+if (amPm == "A") amPm = "P" else amPm == "A"
+// A labelled continue leaves the outer loop.
+outer: for (def i = 0; i < 2; i++) {
+	for (def j = 0; j < 2; j++) {
+		if (j == 0) continue outer
+	}
+}

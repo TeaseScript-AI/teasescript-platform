@@ -1,0 +1,40 @@
+// MIGRATION INCOMPLETE: 2 error diagnostics.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+function sexscriptLegacyConcat(lists) {
+  let combined = []
+  for list in lists {
+    for item in list {
+      combined.add(item)
+    }
+  }
+  return combined
+}
+function randomIntegerValue(range) {
+  return 99
+}
+say "Roll: ${randomInteger(0..3)}, ${randomIntegerValue(1)}"
+function getString {
+  return false
+}
+// NOTE SX_CONDITION_TYPE line 4: Condition is not proven boolean; TeaseScript conditions must be boolean, unlike Groovy truthiness. Verify or compare explicitly.
+if getString() {
+  say "wrong"
+} else {
+  say "right"
+}
+let empty = {}
+// TODO SX_MAP_TRUTHINESS line 6: Groovy treats an empty map as false; TeaseScript records have no emptiness test and a record is not a condition. Test a specific field or keep an explicit flag.
+// | if (empty) { show("Has entries") }
+let items = ["a", "b"]
+// TODO SX_COLLECTION_TEXT line 8: Groovy turned this list into text like [a, b]; TeaseScript interpolation shows one random element instead. Format the list explicitly.
+// | show("Items: " + items)
+let more = sexscriptLegacyConcat([items, ["c"]])
+let check = (1 < 2) == true
+function pick(a, b) {
+  return b
+}
+say "Pick"
+say "Picked ${pick((choose 0: "A", 1: "B"), 3)}"
+say "hello"
+// final return

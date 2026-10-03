@@ -1,0 +1,28 @@
+function sexscriptLegacyConcat(lists) {
+  let combined = []
+  for list in lists {
+    for item in list {
+      combined.add(item)
+    }
+  }
+  return combined
+}
+let text = "Start"
+text = "${text} and more"
+let menu = ["Back"]
+let extra = ["One", "Two"]
+menu = sexscriptLegacyConcat([["Back"], extra, ["Last"]])
+menu = sexscriptLegacyConcat([menu, extra])
+menu.add("Tail")
+let n = 1
+n += 2
+let dateValue = getDateTime()
+let month = dateValue.month
+let hour = getDateTime().hour
+let dow = getDateTime().weekdayNumber % 7 + 1
+// NOTE SX_ROUNDING_TIES line 14: Java Math.round() rounds .5 toward positive infinity (-1.5 becomes -1); TeaseScript round() rounds ties away from zero (-1.5 becomes -2; owner decision, #507).
+let days = round(n / 2)
+// NOTE SX_SYSTEM_EXIT line 15: System.exit() closed the legacy application; TeaseScript exit ends the session but leaves the Player open.
+if hour > 22 {
+  exit
+}

@@ -1,0 +1,22 @@
+// Legacy SexScript metadata
+// Title: Training
+// Author: Anna
+// Summary: A short session
+// Language: EN
+// Tags: training
+
+let visits = load "training.visits"
+if visits == null {
+  visits = 0
+}
+save visits + 1 as "training.visits"
+let title = load "training.title"
+if title == null or title == "" {
+  title = "pet"
+}
+if (load "training.finished") == true {
+  say "Welcome back, ${title}"
+  run "finished.tease"
+}
+delete "training.old"
+say "Visit ${visits + 1}"

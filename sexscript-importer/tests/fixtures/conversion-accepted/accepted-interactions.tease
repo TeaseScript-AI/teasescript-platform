@@ -1,0 +1,33 @@
+say "Are you ready?"
+let ready = (choose yes: "Yes", no: "No") == "yes"
+say "Really?"
+let sure = (choose yes: "Yes, Mistress", no: "No") == "yes"
+// NOTE SX_INPUT_PREFILL line 3: getInteger() pre-filled its field with a default value; TeaseScript single-field input has no prefill, so the player must type it.
+let count = askInteger("How many?")
+showPopup "Session starts now"
+let elapsed = showButton("Done", 30)
+if elapsed >= 30 {
+  say "Too slow"
+}
+openUrl("https://example.com")
+let start = getSeconds()
+if ready and sure {
+  say "Starting ${count} rounds at ${start}"
+}
+// showPopup() returned the seconds until the player closed it.
+// NOTE SX_POPUP_ELAPSED line 11: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getSeconds(), in whole seconds.
+let popupStart = getSeconds()
+showPopup "Come here!"
+let late = getSeconds() - popupStart
+if late > 60 {
+  say "What took you so long?"
+}
+function title {
+  wait 1
+  return "Ready?"
+}
+// NOTE SX_POPUP_ELAPSED line 14: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getSeconds(), in whole seconds.
+let popupMessage2 = title()
+let popupStart2 = getSeconds()
+showPopup popupMessage2
+let slow = getSeconds() - popupStart2
