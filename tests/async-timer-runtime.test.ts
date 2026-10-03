@@ -310,7 +310,8 @@ test("a blocking timer evaluates a named display expression like an async timer"
 
 test("static handle hints do not leak from untaken or reassigned paths", () => {
   const compiled = compileSource(
-    'let o = { x: 1 }\nif false {\n  o = timer async 1\n}\nsay "${o.x}"\nlet t = timer async 1\nt = { x: 2 }\nsay "${t.x}"',
+    // `load` values have no static type, so these variables may hold a handle on one path and an object on another.
+    'let o = load "o"\nif false {\n  o = timer async 1\n}\nsay "${o.x}"\nlet t = timer async 1\nt = load "t"\nsay "${t.x}"',
   );
   assert.deepEqual(compiled.diagnostics, []);
 });
