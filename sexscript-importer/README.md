@@ -59,6 +59,12 @@ path executes; `stepLimit` is inconclusive (for example a loop that waits until 
 `TSR037` means the work between two events exceeds the product's instruction budget, which fails in the Player too.
 With a single directory argument, that directory is the package root that script transfers are relative to.
 
+`--proposed` (every proposal) or `--proposed=choose-lists,dictionaries,...` on `convert`, `convert-package`, and `report`
+emits a working syntax for proposed TeaseScript language changes instead of reporting the construct, to measure what
+they would resolve ([`docs/PROPOSED-LANGUAGE-CHANGES.md`](docs/PROPOSED-LANGUAGE-CHANGES.md)). That output is not
+accepted TeaseScript: the report compiles and runs it through stand-ins in current TeaseScript, counted as `proposed
+...` capabilities, and proposed media tags count the images in the package's sibling `images/` folder.
+
 Generated files follow these conventions:
 
 - legacy comments and paragraph breaks are kept; `setInfos()` metadata becomes a header comment;

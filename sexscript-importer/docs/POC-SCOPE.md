@@ -27,7 +27,7 @@ stable enough to test lowering independently from a particular Groovy parser imp
 ## Target policy
 
 The importer targets accepted TeaseScript (V30 plus accepted ADRs and the owner storage decision below), not the
-subset the current compiler implements. Storage and script chaining have no faithful implemented substitute, so
+subset the current compiler implements. Script chaining, for example, has no faithful implemented substitute, so
 avoiding accepted-but-unimplemented forms would only trade compiler errors for wrong behavior. Within that target:
 
 - prefer an implemented compact form when it is equally faithful, such as `say` plus `askText`, `askNumber`, or a
@@ -58,8 +58,7 @@ Owner decision (2026-10-02):
 - neither form writes storage;
 - only `save` writes storage.
 
-The current canonical V30 storage text still describes older default-and-write behavior. The importer records the
-owner-selected target semantics here without modifying core TeaseScript documentation from this isolated subproject.
+`main` implements and specifies these semantics (#484); saving `null` removes the key.
 
 ## Required diagnostics
 

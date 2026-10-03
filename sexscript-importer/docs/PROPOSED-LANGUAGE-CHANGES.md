@@ -29,8 +29,75 @@ with the direction TeaseScript already took, and common practice in other langua
 | C4 | Effective labels are unique | Owner agreed |
 | C5 | Warning when a choice result is compared with an impossible label | Owner agreed |
 | T1 | Type enforcement, union types, type tests, narrowing | Issue #504, in tracker #512 |
-| D1 | Dictionaries: objects with runtime keys (`toys[name]`) | POC tests option A later |
-| M1 | Media selected by tags (include/exclude tags, count matches) | POC working implementation; covers optional content packs |
+| D1 | Dictionaries: objects with runtime keys (`toys[name]`) | Evaluated on the corpus; syntax later |
+| M1 | Media selected by tags (include/exclude tags, count matches) | Evaluated (counting); syntax later |
+
+## Corpus evaluation
+
+Measured on 2026-10-03 at importer commit `a6d47053` with `node src/cli.ts report --run [--proposed=<id>] <package
+scripts>`. The importer emits a working syntax of its own choosing (the owner discusses exact syntax only for
+capabilities that prove valuable); the report compiles and smoke-runs it through stand-ins in current TeaseScript, so
+"converted" means converted, compiled, and run, not just emitted. Each cell: root errors / lowered scripts /
+compiler-clean except pending / scripts reached by smoke runs.
+
+| Proposal | Distribution | Domme3 | DisciplineClinic | Toy |
+| --- | --- | --- | --- | --- |
+| none (baseline) | 15 / 10 / 10 / 10 | 35 / 13 / 10 / 10 | 17 / 3 / 3 / 3 | 284 / 0 / 0 / 0 |
+| choose-lists (C1–C3) | 14 / 10 / 10 / 10 | 35 / 13 / 10 / 10 | 10 / 3 / 3 / 3 | 277 / 0 / 0 / 0 |
+| dictionaries (D1) | unchanged | unchanged | unchanged | 202 / 0 / 0 / 0 |
+| string-operations (#508) | unchanged | unchanged | unchanged | 277 / 0 / 0 / 0 |
+| input-defaults (#510) | unchanged | unchanged | unchanged | unchanged |
+| media-tags (M1) | unchanged | 32 / 16 / 12 / 12 | unchanged | unchanged |
+| all together | 14 / 10 / 10 / 10 | 25 / 16 / 12 / 12 | 10 / 3 / 3 / 3 | 183 / 0 / 0 / 0 |
+
+Toy remains one script with many independent causes (Java objects, captured closures, evaluation order, persona
+files), so no proposal makes it runnable; its root count shows how much each removes.
+
+**C1–C3 choose over runtime lists: valuable.** 23 menus in the corpus build their options at runtime, 11 with a
+truly variable number of options. The working form converts 15 of them (DisciplineClinic 7 of 9, Toy 7 of 13, the
+distribution's font menu). Legacy `getSelectedValue` returns the position, which the scripts use to index parallel
+data, so faithful output needs C3's records with numeric labels, and the "Back" button needs C2's mixing:
+
+```tease
+pickOffense = choose 0: "Back", sexscriptLegacyMenuOptions(offenseTextArray, 1)
+```
+
+The generated helper builds `{ label: position, text: text }` records. A form that returns the position directly would
+make this shorter, but the records work. Unconverted: two DisciplineClinic menus whose option variable also holds text
+elsewhere (a type question, #504), and Toy menus built inside larger expressions.
+
+**D1 dictionaries: valuable, single-package evidence.** Toy's root count drops by 82 net: 40 lookups and 17 writes
+with runtime keys, 23 map method calls (`containsKey`, `keySet`, `values`, `remove`, `clear`), and 5 map literals with
+computed or numeric keys convert, and 3 inner causes surface. The lookups and writes were previously emitted as list
+indexing that fails at runtime; the default conversion now reports them. No map key in the corpus clashed with a
+dictionary member name. The working syntax needed a literal with computed keys for 34 entries such as
+`{ [COLLAR]: "leather collar" }`, and treats Groovy's numeric keys (12 sites) as text. No other package uses maps as
+dictionaries.
+
+**String operations (#508): valuable, cheap.** Alone they remove 8 of Toy's 14 string roots (the rest need regular
+expressions or `tokenize`). Making `.length` count text, list elements, and dictionary keys alike removes Domme3's six
+`size()` calls on record fields of unknown type when combined with dictionaries: Domme3 drops from 35 to 28 roots with
+both.
+
+**Prefill (#510): worthwhile for fidelity.** It restores all 62 defaults that the conversion now drops with a warning
+(distribution 18, Domme3 15, DisciplineClinic 24, Toy 5); it removes no root error. Working syntax: `askText default
+value` for compact inputs and `askInteger(message: ..., default: ...)` for the named form, because positional and named
+arguments may not be mixed.
+
+**M1 media tags: valuable for startup flows.** Counting images by folder tags converts Domme3's three pack-detection
+routines; `intro`, `introfirst`, and `settings` become lowered, and the entry flow now runs past pack detection:
+
+```tease
+return countImages(tags: ["Domme3", "Domme${pack}"])
+```
+
+The legacy count also filtered by file name (`Domme(\d+).jpg`), which tags cannot express; the output carries a note.
+The flow then stops at a legacy busy-wait countdown that loops on `getSeconds()` and exceeds the instruction budget
+(TSR037); converting that to a timer is importer work. Toy's imagery (outfit folders with tag files, random selection
+by persona, outfit, and tags) fits the owner's tag idea but needs tag ingestion from those files; not converted yet.
+
+**No corpus evidence:** removing objects or positions from lists (#509) has zero sites, and no output depends on
+`say` of a whole list (L1). Both remain language-consistency decisions; C3 records need #509 in general.
 
 ## L1. Random list selection only inside `${...}`
 
@@ -205,12 +272,12 @@ a `.ts` system library and localized script variants are future work; one langua
 ## Later
 
 - **D1 dictionaries.** The owner always meant objects to work as dictionaries: lookup with a runtime key fails today
-  (`toys[k]` raises TSR008 at runtime). The POC tests objects with runtime keys (`toys[name]`, `has`, `remove`, keys),
-  watching for name clashes with built-in members and for typing against #504; a separate dictionary type is the
-  fallback.
+  (`toys[k]` raises TSR008 at runtime). Evaluated above with objects as dictionaries (`toys[name]`, `has`, `keys`,
+  `values`, `length`, `remove`, `clear`, computed keys); the exact syntax and typing against #504 come later, with a
+  separate dictionary type as the fallback.
 - **M1 media by tags.** The owner plans to tag every image and select a random image matching included and excluded
-  tags, with a count of matches. No tagged media exists yet. The POC may use a working form of it for Domme3's image
-  packs and Toy's persona folders instead of directory listing.
+  tags, with a count of matches. No tagged media exists yet. Evaluated above for counting; random selection by tags
+  and Toy's tag files come later.
 
 ## Not yet discussed
 

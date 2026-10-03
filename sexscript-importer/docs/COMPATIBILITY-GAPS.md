@@ -25,7 +25,7 @@ Importer progress is measured at package level rather than by requiring every ge
 3. **Dependency-closed** — every generated function call resolves to generated package code or a known accepted
    TeaseScript/Standard-Library capability. This includes transitive helper dependencies.
 4. **Compiler-clean** — the generated script passes the real compiler. The report also compiles a copy in which
-   accepted-but-unimplemented TeaseScript (storage, `run`/`end`, `switch`, ...) is replaced by placeholder host calls;
+   accepted-but-unimplemented TeaseScript (`run`/`end`, `switch`, ...) is replaced by placeholder host calls;
    a file that is clean only in that copy is blocked by TeaseScript implementation work, not by importer output.
 5. **Runnable/verified** — relevant execution paths have actually run without unresolved runtime behavior. The
    report's smoke run (`report --run`) executes one deterministic path per package entry in the real runtime,
@@ -154,14 +154,19 @@ calls; exceptions only guard desktop APIs.
 
 Concrete points the migration surfaced in TeaseScript itself:
 
-- **`save null as "key"` is unspecified.** If it deletes the key (as legacy SexScript and most key-value stores do),
-  `load "key" default value` becomes exact for migrated read-then-default code and the importer can use it again.
-- **`set` is a parser keyword** (ADR 0013 set literals) but missing from `TEASESCRIPT_PROTECTED_NAMES`; the importer
-  reserves it itself. Declarations named `set` fail to parse instead of getting the protected-name diagnostic.
-- **`round()` tie rule.** Java `Math.round` rounds `.5` toward positive infinity; the accepted `round()` does not say.
-- **`showButton` elapsed result** type (number or duration) is still open in V30 section 21.
-- **Storage semantics.** The owner-selected `load` semantics (no write on read) still differ from the canonical V30
-  text (default-and-write).
+- **`set` as a protected name, the `round()` tie rule, and the `showButton` elapsed type** are owner-decided and
+  tracked in #507: `set` becomes protected, ties round away from zero (`-0.5` is `-1`; Java rounded `-0.5` to `0`),
+  and the elapsed result is a `duration`.
+- **Storage** now matches the owner decision on `main` (#484): `load` never writes, and `save null` removes the key.
+- **Positional and named arguments.** V30 section 10 forbids mixing them in one call, but section 13's example
+  `toNumber(text, default: 0)` mixes them, and the parser rejects it (TSP019).
+- **Types are not enforced.** `let score: number = "high"` compiles and runs, against V30 sections 12 and 13 (#504).
+  Two DisciplineClinic menus stay unconverted because one variable holds text in one place and a list in another.
+- **Runtime defect: a `choose` reached again with other option texts.** The runtime revalidates the retained
+  settlement of the last choice against the option texts its instruction currently holds, so the next completion
+  fails with TSR101 ("Runtime lastSettlement is malformed") once the same `choose` ran again with other texts, as in
+  `for pair in [["Low", "High"], ["Plug", "Clamps"]] { let pick = choose 0: pair[0], 1: pair[1] }`. The proposal
+  shim works around it; accepted output with computed option texts in a loop hits it.
 
 ## Legacy baggage
 
@@ -183,9 +188,6 @@ Emily persona; the code's default owner `ancilla` is not included.
 ## Accepted but not implemented
 
 The importer emits these accepted forms although the current compiler rejects them; the compiler gate counts them
-separately: storage (`save`/`load`/`delete`), `run`/`end`, `switch`, `showPopup`, `showButton` with timeout or elapsed
-result, `askInteger`, `askBooleans`, `getSeconds`/`getDateTime`, `openUrl`, `round`/`floor`/`ceil`, and conversions.
-Storage and `run`/`end` dominate: they are the only blockers of most otherwise compiler-clean corpus scripts.
-
-The owner-selected storage semantics (`load` returns `null` or the default without writing) still differ from the
-canonical V30 text, which describes default-and-write behavior.
+separately: `run`/`end`, `switch`, `showPopup`, `showButton` with timeout or elapsed result, `askInteger`,
+`askBooleans`, `getSeconds`/`getDateTime`, `openUrl`, `round`/`floor`/`ceil`, and conversions. `run`/`end` dominates:
+it blocks 19 otherwise compiler-clean corpus scripts.

@@ -24,21 +24,23 @@ explicit unsupported nodes: `EmptyExpression` (29, a declaration without initial
 
 ## Feasibility snapshot
 
-Measured on 2026-10-02 at importer commit `32d8241b` with `node src/cli.ts report --run <package scripts>`.
-Toy's 21 runtime-loaded modules are part of its single script `toy.groovy`, so Toy counts as one script whose
-statements include all module code.
+Measured on 2026-10-03 at importer commit `a6d47053` with `node src/cli.ts report --run <package scripts>` (default
+conversion, without proposals). Toy's 21 runtime-loaded modules are part of its single script `toy.groovy`, so Toy
+counts as one script whose statements include all module code.
 
 | Package | Scripts | Lowered | Dependency-closed | Compiler-clean except pending | Root errors | Placeholders |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Distribution | 14 | 10 | 10 | 10 | 15 | 13 |
 | Domme3 | 24 | 13 | 10 | 10 | 35 | 37 |
 | DisciplineClinic | 6 | 3 | 3 | 3 | 17 | 17 |
-| Toy expanded | 1 | 0 | 0 | 0 | 229 | 397 |
+| Toy expanded | 1 | 0 | 0 | 0 | 284 | 465 |
 
 Root errors count independent causes that need manual work; placeholders count unconverted statements. Converting a
-statement can expose more root causes inside it, so the two counts can rise while coverage improves. Toy's 229 come
-from about 4,800 source statements, mostly method calls on maps (dictionaries) and Java objects, conditionals in
-positions where moving them would change evaluation order, string methods, and menus from runtime lists.
+statement can expose more root causes inside it, so the two counts can rise while coverage improves. Toy's 284 come
+from about 4,800 source statements, mostly map (dictionary) operations and lookups with runtime keys, Java objects,
+conditionals in positions where moving them would change evaluation order, string methods, and menus from runtime
+lists. The earlier snapshot counted 229: lookups and writes with runtime keys on maps were emitted as list indexing,
+which fails at runtime, and are now reported (`SX_DYNAMIC_MAP_ACCESS`).
 
 Runtime smoke runs of the compiler-clean scripts (placeholder copies with host stand-ins):
 
@@ -56,12 +58,12 @@ Runtime smoke runs of the compiler-clean scripts (placeholder copies with host s
 Smoke runs found two importer defects before they reached a snapshot: `getRandom(0)` (fixed with the legacy result)
 and range switch cases tested as lists.
 
-No script is compiler-clean as generated, because almost all use storage or script chaining. Scripts using each
-accepted-but-unimplemented capability, and how many otherwise compiler-clean scripts use it:
+Two scripts compile as generated (a distribution example and DisciplineClinic's entry script), now that `main`
+implements storage (#484); script chaining is the main remaining gap. Scripts using each accepted-but-unimplemented
+capability, and how many otherwise compiler-clean scripts use it:
 
 | Capability | Scripts using it | Otherwise compiler-clean scripts using it |
 | --- | ---: | ---: |
-| storage (`save`/`load`/`delete`) | 45 | 23 |
 | `run`/`end` | 41 | 19 |
 | `switch` | 26 | 9 |
 | `getSeconds()` | 18 | 3 |
@@ -70,6 +72,8 @@ accepted-but-unimplemented capability, and how many otherwise compiler-clean scr
 | `askBooleans()` | 10 | 8 |
 | `showPopup` | 10 | 4 |
 | `askInteger()` | 9 | 0 |
+
+The proposal mode's measurements are in [`PROPOSED-LANGUAGE-CHANGES.md`](PROPOSED-LANGUAGE-CHANGES.md).
 
 ## SexScript API usage
 

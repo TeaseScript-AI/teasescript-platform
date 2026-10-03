@@ -4497,7 +4497,7 @@ function lowerObjectMethodCallExpression(
         context,
         "SX_ROUNDING_TIES",
         "warning",
-        "Java Math.round() rounds .5 toward positive infinity (-1.5 becomes -1); TeaseScript round() does not specify its tie rule yet.",
+        "Java Math.round() rounds .5 toward positive infinity (-1.5 becomes -1); TeaseScript round() rounds ties away from zero (-1.5 becomes -2; owner decision, #507).",
         node.span,
       );
       return { kind: "call", name: "round", positional: args, named: {} };
