@@ -126,11 +126,12 @@ Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `
 
 Successful completion emits the canonical `playerTranscript` event first and `actionCompleted` second. Both receive
 monotonic sequences, and the bounded settlement retains both sequences, the canonical result, transcript text,
-destination temporary, and owning call-frame identity for duplicate replay. The separate single-use handoff, not that
-settlement, is the persisted authority for the still-unconsumed destination. Prepared dynamic UI is checked against its
-preparation temporaries while those temporaries remain; after canonical cleanup, snapshot validation does not
-reconstruct or authenticate the historical dynamic-UI evaluation, consistent with the general snapshot-history rule
-below. Delay creation preflights its request plus future completion sequence; interaction creation preflights its
+destination temporary, owning call-frame identity, and the UI the player answered, for duplicate replay. The separate
+single-use handoff, not that settlement, is the persisted authority for the still-unconsumed destination. A pending
+action's prepared dynamic UI is checked against its preparation temporaries. A retained settlement is checked against
+its recorded UI and the plan instead, because cleanup clears those temporaries and a later run of the same instruction
+prepares them anew. Snapshot validation does not authenticate the historical dynamic-UI evaluation itself: a recorded
+UI and transcript edited together consistently are accepted, in line with the general snapshot-history rule below. Delay creation preflights its request plus future completion sequence; interaction creation preflights its
 request plus future transcript and completion sequences. Interaction completion rechecks both required sequences and
 validates the complete destination mutation before publishing any write, handoff, settlement, event, or continuation
 change. Continuation execution remains eligible only through a later normal runtime entry.

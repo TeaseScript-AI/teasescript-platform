@@ -1499,7 +1499,7 @@ function executeSayAtomically(
   evaluator: Evaluator,
   events: InterpreterEvent[],
 ): void {
-  const stagedSnapshot = cloneCapturedRuntimeSnapshot(snapshot);
+  const stagedSnapshot = stagingClone(snapshot);
   const stagedEvents: InterpreterEvent[] = [];
   const stagedEvaluator = evaluator.forSnapshot(stagedSnapshot, stagedEvents);
 
@@ -1527,13 +1527,23 @@ function validateTerminalCompletionCapacityAfterSay(
   assertEventSequenceCapacity(snapshot, requiredEventSequencesForRootCompletion(snapshot), span);
 }
 
+/**
+ * A private clone for atomic staging. Retained settlements are replaced, never changed in place, so the clone shares
+ * the current one instead of copying its recorded UI for every staged output.
+ */
+function stagingClone(snapshot: RuntimeSnapshot): RuntimeSnapshot {
+  const staged = cloneCapturedRuntimeSnapshot({ ...snapshot, lastSettlement: null });
+  staged.lastSettlement = snapshot.lastSettlement;
+  return staged;
+}
+
 function executeSpeakerAtomically(
   snapshot: RuntimeSnapshot,
   evaluator: Evaluator,
   events: InterpreterEvent[],
   operation: (stagedSnapshot: RuntimeSnapshot, stagedEvaluator: Evaluator) => void,
 ): void {
-  const stagedSnapshot = cloneCapturedRuntimeSnapshot(snapshot);
+  const stagedSnapshot = stagingClone(snapshot);
   const stagedEvents: InterpreterEvent[] = [];
   const stagedEvaluator = evaluator.forSnapshot(stagedSnapshot, stagedEvents);
 
