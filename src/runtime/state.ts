@@ -57,6 +57,7 @@ import {
   type RuntimeMediaSnapshot,
 } from "./media.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
+import { explicitInstructionTargets } from "../plan/instruction-stream-analyses.js";
 import {
   cloneScriptStorage,
   sortScriptStorage,
@@ -2217,6 +2218,8 @@ interface SnapshotValidationAnalysis {
   readonly functionsById: ReadonlyMap<number, InstructionPlan["functions"][number]>;
   readonly regionEnds: readonly number[];
   readonly functionIdsByInstruction: readonly (number | null)[];
+  /** Instructions that a jump, loop, or call return can enter other than by falling through. */
+  readonly explicitTargets: ReadonlySet<number>;
   readonly continuationLiveness: Map<string, readonly ReadonlySet<number>[]>;
   readonly defaultBindingPositions: ReadonlyMap<string, number>;
   readonly parameterNames: ReadonlyMap<number, ReadonlySet<string>>;
@@ -2233,6 +2236,10 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
       functionIdsByInstruction[index] = definition.id;
     }
   }
+  const explicitTargets = new Set<number>();
+  for (const instruction of plan.instructions)
+    for (const target of explicitInstructionTargets(instruction))
+      if (typeof target === "number") explicitTargets.add(target);
   const defaultBindingPositions = new Map<string, number>();
   for (let index = 0; index < plan.instructions.length; index += 1) {
     const instruction = plan.instructions[index];
@@ -2255,6 +2262,7 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
     functionsById,
     regionEnds,
     functionIdsByInstruction,
+    explicitTargets,
     continuationLiveness: new Map(),
     defaultBindingPositions,
     parameterNames,

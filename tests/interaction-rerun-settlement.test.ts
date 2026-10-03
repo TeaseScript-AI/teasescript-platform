@@ -6,7 +6,9 @@ import {
   deserializeCheckpoint,
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
-import { run } from "../src/runtime/engine.js";
+import { compileSource } from "../src/compiler.js";
+import { validateInstructionPlan } from "../src/plan/validation.js";
+import { executeInstruction, run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
@@ -107,4 +109,77 @@ test("a forged retained choice is still rejected right after the second completi
   // EVIDENCE: fixture changes only the retained transcript to the other option presented with label 0.
   (checkpoint.snapshot.lastSettlement as { transcriptText: string }).transcriptText = "Plug";
   assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)));
+});
+
+test("a forged retained choice is rejected until cleanup clears the presented options", () => {
+  const plan = compileValidPlan(
+    'let x = "Alpha"\nlet y = "Beta"\nlet pick = choose first: x, second: y\nsay pick, instant',
+  );
+  const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
+  const action = pending.foregroundAction;
+  assert.ok(action !== null && action.kind === "interaction");
+  const completed = completeAction(plan, pending, {
+    actionId: action.actionId,
+    actionKind: "interaction",
+    interactionKind: "choice",
+    payload: { kind: "selectedLabel", selectedLabel: "first" },
+  }).snapshot;
+  // The result is handed off, but the cleanup that clears the presented options has not run yet.
+  const consumed = executeInstruction(plan, completed).snapshot;
+  assert.equal(validateRuntimeSnapshot(consumed, plan).valid, true);
+  const checkpoint = structuredClone(createCheckpoint(plan, consumed));
+  assert.ok(checkpoint.snapshot.lastSettlement?.actionKind === "interaction");
+  // EVIDENCE: fixture changes only the retained transcript to the other presented option.
+  (checkpoint.snapshot.lastSettlement as { transcriptText: string }).transcriptText = "Beta";
+  assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)));
+});
+
+test("a valid plan that refills a button label and jumps back to its continuation keeps running", () => {
+  const compiled = compileSource(
+    'let word = "Go"\nshowButton word\nword = "Run"\nsay "end", instant',
+  );
+  const plan = structuredClone(compiled.plan!);
+  const continuation =
+    plan.instructions.findIndex((instruction) => instruction.kind === "interaction") + 1;
+  const assignIndex = plan.instructions.findIndex((instruction) => instruction.kind === "assign");
+  const assign = plan.instructions[assignIndex];
+  const interaction = plan.instructions[continuation - 1];
+  assert.ok(
+    assign?.kind === "assign" && interaction?.kind === "interaction" && "preparedUi" in interaction,
+  );
+  assert.ok(interaction.preparedUi.kind === "button");
+  // EVIDENCE: fixture refills the label temporary and jumps back to the settled button's continuation.
+  (plan.instructions as unknown[])[assignIndex] = {
+    kind: "storeTemporary",
+    temporaryId: interaction.preparedUi.buttonLabelTemporary,
+    value: assign.value,
+    expectBoolean: false,
+    span: assign.span,
+  };
+  // EVIDENCE: fixture replaces only the following instruction with a jump to the old continuation.
+  (plan.instructions as unknown[])[assignIndex + 1] = {
+    kind: "jump",
+    target: continuation,
+    span: assign.span,
+  };
+  assert.equal(validateInstructionPlan(plan).valid, true);
+
+  const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
+  assert.ok(pending.foregroundAction?.kind === "interaction");
+  let snapshot = completeAction(plan, pending, {
+    actionId: pending.foregroundAction.actionId,
+    actionKind: "interaction",
+    interactionKind: "button",
+    payload: { kind: "activate" },
+  }).snapshot;
+  // Run until execution stands at the old continuation with the refilled label, then validate it.
+  let steps = 0;
+  do {
+    snapshot = executeInstruction(plan, snapshot).snapshot;
+    steps += 1;
+  } while (snapshot.nextInstruction !== continuation && steps < 8);
+  assert.equal(snapshot.nextInstruction, continuation);
+  assert.ok(snapshot.temporaries.some((temporary) => temporary.value === "Run"));
+  assert.equal(validateRuntimeSnapshot(snapshot, plan).valid, true);
+  assert.doesNotThrow(() => executeInstruction(plan, snapshot));
 });

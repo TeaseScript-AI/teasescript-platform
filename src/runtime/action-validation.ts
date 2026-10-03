@@ -20,6 +20,7 @@ import { validateScriptStorageEntries } from "./script-storage.js";
 
 interface ActionValidationAnalysis {
   readonly functionIdsByInstruction: readonly (number | null)[];
+  readonly explicitTargets: ReadonlySet<number>;
 }
 
 const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -1681,7 +1682,8 @@ function validSettlementKindData(
       instruction.preparedUi,
       settlement.result,
       settlement.transcriptText,
-      atSettlementContinuation(settlement, snapshot) && Array.isArray(snapshot.temporaries)
+      presentsSettledUi(plan, analysis, instruction.preparedUi, settlement, snapshot) &&
+        Array.isArray(snapshot.temporaries)
         ? snapshot.temporaries
         : [],
     );
@@ -1776,22 +1778,58 @@ function validNonTimePacingSettlementChronology(
   );
 }
 
+const PRESENTED_UI_WINDOW_KINDS: ReadonlySet<string> = new Set([
+  "storeTemporary",
+  "clearTemporary",
+  "clearTemporaries",
+  "declareBinding",
+  "assign",
+  "evaluate",
+  "prepareReference",
+  "setDeclaredSpeakerProperty",
+]);
+
 /**
- * Whether execution still stands at the settled interaction's continuation in its owner frame. Only then do the
- * prepared temporaries hold the presented UI: cleanup clears them afterwards, and a later run of the same instruction
- * prepares other values in them while this settlement is still retained.
+ * Whether the prepared temporaries still hold the UI the retained settlement was chosen from. They do between the
+ * settled interaction's continuation and the cleanup that clears them, in the owner frame, when execution can only
+ * have fallen through from the interaction: no instruction in that stretch is a control-flow target. Afterwards, or
+ * when a later run of the same instruction may have prepared other values, the intrinsic settlement rules apply.
  */
-function atSettlementContinuation(
+function presentsSettledUi(
+  plan: InstructionPlan,
+  analysis: ActionValidationAnalysis | undefined,
+  prepared: import("../plan/model.js").PreparedInteractionUiPayload,
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
 ): boolean {
+  if (analysis === undefined || (prepared.kind !== "button" && prepared.kind !== "choice"))
+    return false;
+  const uiTemporary =
+    prepared.kind === "button" ? prepared.buttonLabelTemporary : prepared.optionsTemporary;
   const callFrames = Array.isArray(snapshot.callFrames) ? snapshot.callFrames : [];
   const currentFrame = callFrames.at(-1);
   const currentFrameId = isPlainRecord(currentFrame) ? currentFrame.id : null;
-  return (
-    snapshot.nextInstruction === settlement.continuationInstruction &&
-    currentFrameId === settlement.ownerCallFrameId
-  );
+  const next = snapshot.nextInstruction;
+  const continuation = settlement.continuationInstruction;
+  if (
+    currentFrameId !== settlement.ownerCallFrameId ||
+    !nonNegativeSafeInteger(next) ||
+    !nonNegativeSafeInteger(continuation) ||
+    next < continuation
+  )
+    return false;
+  for (let index = continuation; index <= next; index += 1) {
+    const instruction = plan.instructions[index];
+    if (instruction === undefined || analysis.explicitTargets.has(index)) return false;
+    if (index === next) return true;
+    if (
+      !PRESENTED_UI_WINDOW_KINDS.has(instruction.kind) ||
+      (instruction.kind === "clearTemporary" && instruction.temporaryId === uiTemporary) ||
+      (instruction.kind === "clearTemporaries" && instruction.temporaryIds.includes(uiTemporary))
+    )
+      return false;
+  }
+  return false;
 }
 
 function preparedInteractionSettlementMatches(
