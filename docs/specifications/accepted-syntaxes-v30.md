@@ -681,7 +681,7 @@ the other operations are methods:
 ```text
 let name = "  ada lovelace  "
 let clean = name.trim()            // "ada lovelace"
-say clean.capitalize()             // Ada lovelace
+say clean.uppercaseFirst()         // Ada lovelace
 say clean.length                   // 12
 if clean.startsWith("ada") {
     say clean.uppercase()          // ADA LOVELACE
@@ -700,7 +700,7 @@ let parts = "red,green,blue".split(",")   // ["red", "green", "blue"]
 | `text.replace(search, replacement)` | the text with every occurrence of `search` replaced |
 | `text.trim()`, `text.trimStart()`, `text.trimEnd()` | the text without whitespace at both ends, at the start, or at the end |
 | `text.uppercase()`, `text.lowercase()` | the text in upper or lower case |
-| `text.capitalize()` | the text with its first character in upper case and the rest unchanged |
+| `text.uppercaseFirst()` | the text with its first character in upper case and the rest unchanged |
 
 Rules:
 

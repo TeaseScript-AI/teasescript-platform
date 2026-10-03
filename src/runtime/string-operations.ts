@@ -26,7 +26,7 @@ export const STRING_METHODS: ReadonlySet<string> = new Set([
   "trimEnd",
   "uppercase",
   "lowercase",
-  "capitalize",
+  "uppercaseFirst",
 ]);
 
 export function stringLength(text: string): number {
@@ -173,7 +173,7 @@ export function callStringMethod(
     case "lowercase":
       expect(0);
       return text.toLowerCase();
-    case "capitalize": {
+    case "uppercaseFirst": {
       expect(0);
       const first = text.codePointAt(0);
       if (first === undefined) return text;

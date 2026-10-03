@@ -21,12 +21,12 @@ test("text operations return new values and leave the original unchanged", () =>
         'let name = "  ada lovelace  "',
         "let clean = name.trim()",
         'say "[${clean}] [${name}]"',
-        'say "${clean.capitalize()}|${clean.uppercase()}|${"MiXeD".lowercase()}"',
+        'say "${clean.uppercaseFirst()}|${clean.uppercase()}|${"MiXeD".lowercase()}"',
         'say "[${name.trimStart()}] [${name.trimEnd()}]"',
         'say "${clean.contains("love")} ${clean.contains("Love")} ${clean.startsWith("ada")} ${clean.endsWith("ace")}"',
         'say "${clean.indexOf("l")} ${clean.indexOf("z")} ${clean.substring(4)} ${clean.substring(0, 3)}"',
         'say clean.replace("a", "A")',
-        'say "${"".capitalize().length} ${"".trim().length}"',
+        'say "${"".uppercaseFirst().length} ${"".trim().length}"',
       ].join("\n"),
     ),
     [
@@ -56,7 +56,7 @@ test("lengths and positions count code points", () => {
 
 test("case conversion is locale independent", () => {
   assert.deepEqual(
-    said('say "Straße".uppercase()\nsay "TITLE".lowercase()\nsay "ß".capitalize()'),
+    said('say "Straße".uppercase()\nsay "TITLE".lowercase()\nsay "ß".uppercaseFirst()'),
     ["STRASSE", "title", "SS"],
   );
 });
@@ -172,7 +172,7 @@ test("text operations are checkpoint and resume equivalent", () => {
       'let words = "one two three".split(" ")',
       "let shouted = []",
       "for word in words {",
-      "    shouted.add(word.capitalize())",
+      "    shouted.add(word.uppercaseFirst())",
       "}",
       'say shouted.join(" ")',
       'say "${words.join("").length}"',
