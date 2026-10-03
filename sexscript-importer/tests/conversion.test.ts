@@ -368,9 +368,7 @@ async function convert(
   sourcePath: string,
   proposals: ReadonlySet<ProposalId> = new Set(),
 ): Promise<MigrationProgram> {
-  const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], {
-    proposals,
-  });
+  const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], { proposals });
   assert.ok(program !== undefined);
   return program;
 }
