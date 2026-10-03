@@ -734,7 +734,16 @@ export class Evaluator {
     }
     const supported = isSet(receiver)
       ? new Set(["add", "remove", "clear", "contains", "toList"])
-      : new Set(["add", "remove", "removeFirst", "removeLast", "clear", "contains", "toSet"]);
+      : new Set([
+          "add",
+          "remove",
+          "removeAt",
+          "removeFirst",
+          "removeLast",
+          "clear",
+          "contains",
+          "toSet",
+        ]);
     if (!supported.has(method)) {
       throw fault("TSR016", `Unsupported method '${method}'.`, span);
     }
@@ -897,13 +906,8 @@ export class Evaluator {
       return right;
     }
     if (expression.operator === "==" || expression.operator === "!=") {
-      try {
-        const equal = serializableEquals(left, right);
-        return expression.operator === "==" ? equal : !equal;
-      } catch (error) {
-        if (error instanceof RuntimeFault) throw error;
-        throw this.#translateValueError(error, expression.span);
-      }
+      const equal = serializableEquals(left, right);
+      return expression.operator === "==" ? equal : !equal;
     }
     if (isDuration(left) || isDuration(right)) return this.#durationBinary(expression, left, right);
     if (["<", "<=", ">", ">="].includes(expression.operator)) {
@@ -1121,7 +1125,7 @@ export class Evaluator {
           return null;
         case "remove": {
           expect(1);
-          const index = this.#findValue(receiver.items, positional[0]!, span);
+          const index = this.#findValue(receiver.items, positional[0]!);
           if (index >= 0) {
             const rebased = preparePreparedReferencesForListRemoval(this.snapshot, receiver, index);
             receiver.items.splice(index, 1);
@@ -1133,6 +1137,15 @@ export class Evaluator {
               span,
             );
           }
+          return null;
+        }
+        case "removeAt": {
+          expect(1);
+          const index = this.#index(positional[0]!, span);
+          this.#assertIndex(receiver, index, span);
+          const rebased = preparePreparedReferencesForListRemoval(this.snapshot, receiver, index);
+          receiver.items.splice(index, 1);
+          refreshPreparedReferenceFallbacks(this.snapshot, rebased);
           return null;
         }
         case "removeFirst":
@@ -1165,7 +1178,7 @@ export class Evaluator {
           return null;
         case "contains":
           expect(1);
-          return this.#findValue(receiver.items, positional[0]!, span) >= 0;
+          return this.#findValue(receiver.items, positional[0]!) >= 0;
         case "toSet":
           expect(0);
           return createCapturedSerializableSet(receiver.items);
@@ -1468,17 +1481,9 @@ export class Evaluator {
     }
   }
 
-  #findValue(
-    items: readonly SerializableRuntimeValue[],
-    value: SerializableRuntimeValue,
-    span: SourceSpan,
-  ): number {
+  #findValue(items: readonly SerializableRuntimeValue[], value: SerializableRuntimeValue): number {
     for (let index = 0; index < items.length; index += 1) {
-      try {
-        if (serializableEquals(items[index]!, value)) return index;
-      } catch (error) {
-        throw this.#translateValueError(error, span);
-      }
+      if (serializableEquals(items[index]!, value)) return index;
     }
     return -1;
   }
@@ -1550,9 +1555,7 @@ export class Evaluator {
 
   #translateValueError(error: unknown, span: SourceSpan): RuntimeFault {
     if (error instanceof SerializableValueError) {
-      const code =
-        error.code === "setElement" ? "TSR032" : error.code === "equality" ? "TSR029" : "TSR031";
-      return fault(code, error.message, span);
+      return fault(error.code === "setElement" ? "TSR032" : "TSR031", error.message, span);
     }
     throw error;
   }
