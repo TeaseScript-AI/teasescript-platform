@@ -17,6 +17,7 @@ import type {
 } from "./ast.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import type { SourceSpan } from "./source.js";
+import type { ValueTypePlan } from "./plan/model.js";
 import {
   CORE_RUNTIME_BUILTINS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
@@ -31,6 +32,7 @@ import {
   isAnnotatable,
   isAssignable,
   nonNullType,
+  runtimeCheckType,
   typeFromAnnotation,
   typeName,
   type StaticType,
@@ -46,6 +48,8 @@ export interface SemanticValidationOptions {
 
 export interface SemanticValidationResult {
   readonly diagnostics: readonly Diagnostic[];
+  /** Runtime type checks for `let` and variable assignments whose value type the compiler cannot know. */
+  readonly valueChecks: ReadonlyMap<Statement, ValueTypePlan>;
 }
 
 type BindingKind = "variable" | "speaker" | "global" | "function";
@@ -130,7 +134,10 @@ export function validateSemantics(
 ): SemanticValidationResult {
   const validator = new SemanticValidator(options);
   validator.validate(program);
-  return Object.freeze({ diagnostics: Object.freeze([...validator.diagnostics]) });
+  return Object.freeze({
+    diagnostics: Object.freeze([...validator.diagnostics]),
+    valueChecks: validator.valueChecks,
+  });
 }
 
 class SemanticScope {
@@ -157,6 +164,9 @@ class SemanticScope {
 
 class SemanticValidator {
   readonly diagnostics: Diagnostic[] = [];
+
+  /** Declarations and variable assignments whose value type is only known at runtime. */
+  readonly valueChecks = new Map<Statement, ValueTypePlan>();
 
   readonly #builtins: ReadonlySet<string>;
 
@@ -1252,6 +1262,9 @@ class SemanticValidator {
         ? undefined
         : initializer;
     const declared = typeFromAnnotation(statement.typeAnnotation);
+    const check = runtimeCheckType(declared);
+    if (initializer.kind === "unknown" && check !== undefined)
+      this.valueChecks.set(statement, check);
     const load = unwrapParentheses(statement.initializer);
     const checked =
       load.kind === "loadExpression" && load.defaultValue !== null
@@ -1320,7 +1333,12 @@ class SemanticValidator {
     if (target.kind !== "identifier") return;
     const binding = scope.resolve(target.name);
     const type = binding?.kind === "variable" ? binding.type : undefined;
-    if (type === undefined || value.kind === "unknown") return;
+    if (type === undefined) return;
+    if (value.kind === "unknown") {
+      const check = runtimeCheckType(type);
+      if (check !== undefined) this.valueChecks.set(statement, check);
+      return;
+    }
     this.#validateStoredType(
       statement,
       scope,

@@ -8,6 +8,7 @@ import type {
   InteractionUiPayload,
   PlanSourceLocation,
   PreparedInteractionUiPayload,
+  ValueTypePlan,
 } from "../plan/model.js";
 import { parseMessageMarkup, type MessageMarkup } from "../message-markup.js";
 import {
@@ -56,7 +57,10 @@ import type {
 } from "./events.js";
 import {
   assertPersistable,
+  describeRuntimeValue,
+  matchesValueType,
   storageKey,
+  valueTypeName,
   WRITE_KEY_MESSAGE,
   writeScriptStorage,
 } from "./script-storage.js";
@@ -396,9 +400,17 @@ function executePlannedInstruction(
           instruction.span,
         );
       }
+      const value = evaluator.evaluate(instruction.value);
+      if (instruction.expectedType !== undefined)
+        assertVariableValueType(
+          instruction.name,
+          value,
+          instruction.expectedType,
+          instruction.span,
+        );
       currentFrame(snapshot).bindings.push({
         name: instruction.name,
-        value: cloneCapturedSerializableValue(evaluator.evaluate(instruction.value)),
+        value: cloneCapturedSerializableValue(value),
       });
       advance(snapshot);
       return;
@@ -415,10 +427,19 @@ function executePlannedInstruction(
       evaluator.validateAssignmentTarget(instruction.target);
       advance(snapshot);
       return;
-    case "assign":
-      evaluator.assign(instruction.target, evaluator.evaluate(instruction.value));
+    case "assign": {
+      const value = evaluator.evaluate(instruction.value);
+      if (instruction.expectedType !== undefined && instruction.target.kind === "identifier")
+        assertVariableValueType(
+          instruction.target.name,
+          value,
+          instruction.expectedType,
+          instruction.span,
+        );
+      evaluator.assign(instruction.target, value);
       advance(snapshot);
       return;
+    }
     case "validateCallReceiver":
       evaluator.validateCallReceiver(
         evaluator.evaluate(instruction.receiver),
@@ -2410,6 +2431,28 @@ function executePacingBarrier(
 export function timerDisplay(value: SerializableRuntimeValue, span: SourceSpan): DelayDisplay {
   if (value === "visible" || value === "mystery" || value === "hidden") return value;
   throw fault("TSR050", 'Timer display must be "visible", "mystery", or "hidden".', span);
+}
+
+/** A value the compiler could not type must still fit the variable's declared or inferred type (V30 §12, §13). */
+function assertVariableValueType(
+  name: string,
+  value: SerializableRuntimeValue,
+  type: ValueTypePlan,
+  span: SourceSpan,
+): void {
+  if (matchesValueType(value, type)) return;
+  const sameCollection =
+    type.collection !== null &&
+    typeof value === "object" &&
+    value !== null &&
+    value.kind === type.collection;
+  throw fault(
+    "TSR058",
+    sameCollection
+      ? `'${name}' holds ${valueTypeName(type)}, but this ${type.collection} also contains other values.`
+      : `'${name}' holds ${valueTypeName(type)}, so it cannot take ${describeRuntimeValue(value)}.`,
+    span,
+  );
 }
 
 function fault(code: string, message: string, span: SourceSpan): RuntimeFault {

@@ -1,5 +1,5 @@
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 25;
+export const INSTRUCTION_PLAN_VERSION = 26;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -129,12 +129,16 @@ export interface DeclareBindingInstruction extends InstructionBase {
   readonly kind: "declareBinding";
   readonly name: string;
   readonly value: ExpressionPlan;
+  /** The variable's type, checked at runtime because the compiler cannot know the value's type. */
+  readonly expectedType?: ValueTypePlan;
 }
 
 export interface AssignInstruction extends InstructionBase {
   readonly kind: "assign";
   readonly target: AssignmentTargetPlan;
   readonly value: ExpressionPlan;
+  /** The variable's type, checked at runtime because the compiler cannot know the value's type. */
+  readonly expectedType?: ValueTypePlan;
 }
 
 export interface ValidateAssignmentTargetInstruction extends InstructionBase {
@@ -559,6 +563,11 @@ export interface StorageTypePlan {
   readonly name:
     "string" | "boolean" | "integer" | "number" | "date" | "time" | "datetime" | "duration";
   readonly collection: "list" | "set" | null;
+}
+
+/** A variable type that the runtime can check; `optional` also accepts `null`. */
+export interface ValueTypePlan extends StorageTypePlan {
+  readonly optional: boolean;
 }
 
 export interface PreparedReferenceExpressionPlan extends ExpressionPlanBase {

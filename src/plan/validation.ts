@@ -120,10 +120,10 @@ const INSTRUCTION_FIELDS = fieldsByKind([
   ["enterScope"],
   ["leaveScope"],
   ["exit"],
-  ["declareBinding", "name", "value"],
+  ["declareBinding", "name", "value", "expectedType"],
   ["prepareReference", "expression", "destinationTemporary"],
   ["validateAssignmentTarget", "target"],
-  ["assign", "target", "value"],
+  ["assign", "target", "value", "expectedType"],
   ["validateCallReceiver", "receiver", "method"],
   ["evaluate", "expression"],
   ["jumpIfFalse", "condition", "target"],
@@ -229,6 +229,7 @@ function validateInstruction(
     case "declareBinding":
       requireString(value.name, `${path}.name`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      validateExpectedValueType(value, path, errors);
       return;
     case "prepareReference":
       validateExpression(value.expression, `${path}.expression`, errors, false, temporaryCount);
@@ -247,6 +248,15 @@ function validateInstruction(
       validateExpression(value.target, `${path}.target`, errors, true, temporaryCount);
       validatePreparedAssignmentTarget(value.target, `${path}.target`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      validateExpectedValueType(value, path, errors);
+      if ("expectedType" in value && isRecord(value.target) && value.target.kind !== "identifier")
+        errors.push(
+          planError(
+            "TSC002",
+            "Only a variable assignment carries an expected type.",
+            `${path}.expectedType`,
+          ),
+        );
       return;
     case "validateCallReceiver":
       validateExpression(value.receiver, `${path}.receiver`, errors, false, temporaryCount);
@@ -1303,6 +1313,22 @@ function validateExpression(
       pending,
     );
   }
+}
+
+function validateExpectedValueType(
+  instruction: Record<string, unknown>,
+  path: string,
+  errors: PlanValidationError[],
+): void {
+  if (!("expectedType" in instruction)) return;
+  const type = instruction.expectedType;
+  if (
+    !isRecord(type) ||
+    !hasExactKeys(type, ["name", "collection", "optional"]) ||
+    typeof type.optional !== "boolean" ||
+    !validStorageType({ name: type.name, collection: type.collection })
+  )
+    errors.push(planError("TSC002", "Expected value type is invalid.", `${path}.expectedType`));
 }
 
 function validStorageType(value: unknown): boolean {

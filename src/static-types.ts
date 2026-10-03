@@ -1,4 +1,5 @@
 import type { Expression, ScalarTypeName, TypeAnnotation } from "./ast.js";
+import type { ValueTypePlan } from "./plan/model.js";
 import { compileChild, runCompileTask, type CompileTask } from "./compiler/continuation.js";
 
 /**
@@ -73,6 +74,21 @@ export function isAssignable(target: StaticType, source: StaticType): boolean {
 
 function unwrapOptional(type: StaticType): StaticType {
   return type.kind === "optional" ? type.value : type;
+}
+
+/**
+ * The runtime check for a variable of `type`, or `undefined` when the runtime cannot check it: unknown types, objects,
+ * handles, speakers, ranges, and date/time types, which have no runtime values yet.
+ */
+export function runtimeCheckType(type: StaticType): ValueTypePlan | undefined {
+  const optional = type.kind === "optional";
+  const value = type.kind === "optional" ? type.value : type;
+  const checkable = (element: StaticType): element is StaticType & { kind: "scalar" } =>
+    element.kind === "scalar" && !["date", "time", "datetime"].includes(element.name);
+  if (checkable(value)) return { name: value.name, collection: null, optional };
+  if ((value.kind === "list" || value.kind === "set") && checkable(value.element))
+    return { name: value.element.name, collection: value.kind, optional };
+  return undefined;
 }
 
 /** The author-facing type name, as written in an annotation where one exists. */
