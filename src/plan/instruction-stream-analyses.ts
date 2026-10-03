@@ -10,7 +10,6 @@ import {
   validateSpan,
   validInstructionBoundary,
 } from "./validation-support.js";
-import type { Instruction } from "./model.js";
 
 export function analyzeInstructionStream(
   instructions: readonly unknown[],
@@ -1011,10 +1010,7 @@ function producedTemporaryId(instruction: Record<string, unknown>): number | nul
   return Number.isSafeInteger(value) ? (value as number) : null;
 }
 
-/** Targets a jump, loop, parameter default, or call return can enter; works on validated and unvalidated plans. */
-export function explicitInstructionTargets(
-  instruction: Readonly<Record<string, unknown>> | Instruction,
-): readonly unknown[] {
+function explicitInstructionTargets(instruction: Record<string, unknown>): readonly unknown[] {
   switch (instruction.kind) {
     case "jump":
     case "jumpIfFalse":

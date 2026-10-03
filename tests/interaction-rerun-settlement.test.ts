@@ -219,3 +219,36 @@ test("a valid plan that overwrites the button label right after the settlement k
   );
   assert.doesNotThrow(() => executeInstruction(plan, overwritten));
 });
+
+test("a forged button transcript is rejected at its first completion even when the plan jumps back later", () => {
+  const compiled = compileSource(
+    'let word = "Go"\nshowButton word\nword = "Run"\nsay "end", instant',
+  );
+  const plan = structuredClone(compiled.plan!);
+  const continuation =
+    plan.instructions.findIndex((instruction) => instruction.kind === "interaction") + 1;
+  const assignIndex = plan.instructions.findIndex((instruction) => instruction.kind === "assign");
+  const assign = plan.instructions[assignIndex];
+  assert.ok(assign?.kind === "assign");
+  // EVIDENCE: fixture adds a later jump back to the settled button's continuation.
+  (plan.instructions as unknown[])[assignIndex + 1] = {
+    kind: "jump",
+    target: continuation,
+    span: assign.span,
+  };
+  assert.equal(validateInstructionPlan(plan).valid, true);
+  const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
+  assert.ok(pending.foregroundAction?.kind === "interaction");
+  const settled = completeAction(plan, pending, {
+    actionId: pending.foregroundAction.actionId,
+    actionKind: "interaction",
+    interactionKind: "button",
+    payload: { kind: "activate" },
+  }).snapshot;
+  const checkpoint = structuredClone(createCheckpoint(plan, settled));
+  assert.ok(checkpoint.snapshot.lastSettlement?.actionKind === "interaction");
+  // EVIDENCE: fixture changes only the retained transcript to a label that was never presented.
+  (checkpoint.snapshot.lastSettlement as { transcriptText: string }).transcriptText =
+    "Never presented";
+  assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)));
+});

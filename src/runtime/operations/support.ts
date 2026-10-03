@@ -11,6 +11,7 @@ import {
 } from "../serializable-values.js";
 import {
   captureRuntimeSnapshotWithValidatedPlan,
+  cloneInteractionUi,
   type RuntimeSnapshot,
   type RuntimeTemporarySnapshot,
 } from "../state.js";
@@ -99,6 +100,7 @@ export function cloneSettlement(
     completionEventSequence: settlement.completionEventSequence,
     result: settlement.result,
     transcriptText: settlement.transcriptText,
+    ui: cloneInteractionUi(settlement.ui),
   };
 }
 

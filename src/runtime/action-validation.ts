@@ -20,7 +20,6 @@ import { validateScriptStorageEntries } from "./script-storage.js";
 
 interface ActionValidationAnalysis {
   readonly functionIdsByInstruction: readonly (number | null)[];
-  readonly explicitTargets: ReadonlySet<number>;
 }
 
 const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -1588,6 +1587,7 @@ function validSettlementKindData(
       "completionEventSequence",
       "result",
       "transcriptText",
+      "ui",
     ])
   )
     return false;
@@ -1600,6 +1600,13 @@ function validSettlementKindData(
     !positiveSafeInteger(settlement.completionEventSequence) ||
     settlement.requestEventSequence >= settlement.transcriptEventSequence ||
     settlement.transcriptEventSequence >= settlement.completionEventSequence
+  )
+    return false;
+  const interactionKind = settlement.interactionKind;
+  if (
+    !isInteractionKind(interactionKind) ||
+    !validInteractionUiShape(interactionKind, settlement.ui) ||
+    !settlementMatchesPresentedUi(settlement)
   )
     return false;
   const settlementInstruction =
@@ -1677,26 +1684,58 @@ function validSettlementKindData(
     !validInteractionSettlementOwner(settlement, snapshot, analysis)
   )
     return false;
-  if ("preparedUi" in instruction) {
-    return preparedInteractionSettlementMatches(
-      instruction.preparedUi,
-      settlement.result,
-      settlement.transcriptText,
-      presentsSettledUi(plan, analysis, instruction.preparedUi, settlement, snapshot) &&
-        Array.isArray(snapshot.temporaries)
-        ? snapshot.temporaries
-        : [],
-    );
-  }
-  if (instruction.ui.kind === "button")
-    return settlement.transcriptText === instruction.ui.buttonLabel;
-  if (instruction.ui.kind === "text") return settlement.result === settlement.transcriptText;
-  if (instruction.ui.kind === "number") return true;
-  if (instruction.ui.kind !== "choice") return false;
-  return instruction.ui.options.some(
-    (option) =>
-      option.text === settlement.transcriptText &&
-      (option.label ?? option.text) === settlement.result,
+  return "preparedUi" in instruction
+    ? preparedUiFitsPresentedUi(instruction.preparedUi, settlement.ui)
+    : interactionUiEqual(instruction.ui, settlement.ui);
+}
+
+function isInteractionKind(value: unknown): value is "button" | "text" | "number" | "choice" {
+  return isOneOf(value, ["button", "text", "number", "choice"]);
+}
+
+/**
+ * The settled transcript and result must be what the recorded UI offered. The settlement carries that UI because the
+ * instruction's prepared temporaries are cleared after completion and may be prepared anew by a later run.
+ */
+function settlementMatchesPresentedUi(settlement: Record<string, unknown>): boolean {
+  const ui = settlement.ui;
+  if (!isPlainRecord(ui)) return false;
+  if (ui.kind === "button") return settlement.transcriptText === ui.buttonLabel;
+  if (ui.kind !== "choice") return true;
+  return (
+    Array.isArray(ui.options) &&
+    ui.options.some(
+      (option) =>
+        isPlainRecord(option) &&
+        option.text === settlement.transcriptText &&
+        (option.label ?? option.text) === settlement.result,
+    )
+  );
+}
+
+/** The recorded UI has the shape the prepared instruction produces: kind, accessible name, labels, and option count. */
+function preparedUiFitsPresentedUi(
+  prepared: import("../plan/model.js").PreparedInteractionUiPayload,
+  ui: unknown,
+): boolean {
+  if (
+    !isPlainRecord(ui) ||
+    ui.kind !== prepared.kind ||
+    !accessibleNameEqual(prepared.accessibleName, ui.accessibleName)
+  )
+    return false;
+  if (prepared.kind === "button")
+    return "background" in ui === (prepared.backgroundTemporary !== undefined);
+  if (prepared.kind === "text" || prepared.kind === "number")
+    return (ui.hint === null) === (prepared.hintTemporary === null);
+  if (
+    ui.labelType !== prepared.labelType ||
+    !Array.isArray(ui.options) ||
+    ui.options.length !== prepared.optionCount
+  )
+    return false;
+  return ui.options.every(
+    (option, index) => isPlainRecord(option) && option.label === (prepared.labels?.[index] ?? null),
   );
 }
 
@@ -1776,104 +1815,6 @@ function validNonTimePacingSettlementChronology(
     settlement.completedAtMs <= settlement.deadlineMs &&
     settlement.completedAtMs <= snapshot.currentSessionTimeMs
   );
-}
-
-const PRESENTED_UI_WINDOW_KINDS: ReadonlySet<string> = new Set([
-  "storeTemporary",
-  "clearTemporary",
-  "clearTemporaries",
-  "declareBinding",
-  "assign",
-  "evaluate",
-  "prepareReference",
-  "setDeclaredSpeakerProperty",
-]);
-
-/**
- * Whether the prepared temporaries still hold the UI the retained settlement was chosen from. They do between the
- * settled interaction's continuation and the cleanup that clears them, in the owner frame, when execution can only
- * have fallen through from the interaction: no instruction in that stretch is a control-flow target. Afterwards, or
- * when a later run of the same instruction may have prepared other values, the intrinsic settlement rules apply.
- */
-function presentsSettledUi(
-  plan: InstructionPlan,
-  analysis: ActionValidationAnalysis | undefined,
-  prepared: import("../plan/model.js").PreparedInteractionUiPayload,
-  settlement: Record<string, unknown>,
-  snapshot: Record<string, unknown>,
-): boolean {
-  if (analysis === undefined || (prepared.kind !== "button" && prepared.kind !== "choice"))
-    return false;
-  const uiTemporary =
-    prepared.kind === "button" ? prepared.buttonLabelTemporary : prepared.optionsTemporary;
-  const callFrames = Array.isArray(snapshot.callFrames) ? snapshot.callFrames : [];
-  const currentFrame = callFrames.at(-1);
-  const currentFrameId = isPlainRecord(currentFrame) ? currentFrame.id : null;
-  const next = snapshot.nextInstruction;
-  const continuation = settlement.continuationInstruction;
-  if (
-    currentFrameId !== settlement.ownerCallFrameId ||
-    !nonNegativeSafeInteger(next) ||
-    !nonNegativeSafeInteger(continuation) ||
-    next < continuation
-  )
-    return false;
-  for (let index = continuation; index <= next; index += 1) {
-    const instruction = plan.instructions[index];
-    if (instruction === undefined || analysis.explicitTargets.has(index)) return false;
-    if (index === next) return true;
-    // Clearing or rewriting the UI temporary ends the stretch: afterwards it no longer holds the presented UI.
-    if (
-      !PRESENTED_UI_WINDOW_KINDS.has(instruction.kind) ||
-      (instruction.kind === "clearTemporary" && instruction.temporaryId === uiTemporary) ||
-      (instruction.kind === "clearTemporaries" && instruction.temporaryIds.includes(uiTemporary)) ||
-      (instruction.kind === "storeTemporary" && instruction.temporaryId === uiTemporary) ||
-      (instruction.kind === "prepareReference" && instruction.destinationTemporary === uiTemporary)
-    )
-      return false;
-  }
-  return false;
-}
-
-function preparedInteractionSettlementMatches(
-  prepared: import("../plan/model.js").PreparedInteractionUiPayload,
-  result: unknown,
-  transcriptText: string,
-  temporaries: readonly unknown[],
-): boolean {
-  if (prepared.kind === "button") {
-    const label = runtimeTemporaryValue(temporaries, prepared.buttonLabelTemporary);
-    return label === undefined || label === transcriptText;
-  }
-  if (prepared.kind === "text") return result === transcriptText;
-  if (prepared.kind === "number") return true;
-
-  const labels = prepared.labelType === "none" ? null : prepared.labels;
-  if (prepared.labelType === "identifier") {
-    if (typeof result !== "string" || labels?.includes(result) !== true) return false;
-  } else if (prepared.labelType === "number") {
-    if (typeof result !== "number" || labels?.includes(result) !== true) return false;
-  } else if (result !== transcriptText) {
-    return false;
-  }
-
-  const raw = runtimeTemporaryValue(temporaries, prepared.optionsTemporary);
-  if (raw === undefined) return true;
-  if (
-    !isPlainRecord(raw) ||
-    raw.kind !== "list" ||
-    !Array.isArray(raw.items) ||
-    raw.items.length !== prepared.optionCount
-  )
-    return false;
-  return raw.items.some((value, index) => {
-    const presentation = capturedChoicePresentation(value);
-    return (
-      presentation !== null &&
-      presentation.text === transcriptText &&
-      (labels?.[index] ?? presentation.text) === result
-    );
-  });
 }
 
 function validInteractionSettlementOwner(

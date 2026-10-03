@@ -57,7 +57,6 @@ import {
   type RuntimeMediaSnapshot,
 } from "./media.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
-import { explicitInstructionTargets } from "../plan/instruction-stream-analyses.js";
 import {
   cloneScriptStorage,
   sortScriptStorage,
@@ -66,7 +65,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 26;
+export const RUNTIME_SNAPSHOT_VERSION = 27;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -677,7 +676,7 @@ function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendin
   };
 }
 
-function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPayload {
+export function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPayload {
   const accessibleName =
     ui.accessibleName.kind === "text"
       ? { kind: "text" as const, text: ui.accessibleName.text }
@@ -738,6 +737,7 @@ function cloneSettlement(
     completionEventSequence: settlement.completionEventSequence,
     result: settlement.result,
     transcriptText: settlement.transcriptText,
+    ui: cloneInteractionUi(settlement.ui),
   };
 }
 
@@ -2218,8 +2218,6 @@ interface SnapshotValidationAnalysis {
   readonly functionsById: ReadonlyMap<number, InstructionPlan["functions"][number]>;
   readonly regionEnds: readonly number[];
   readonly functionIdsByInstruction: readonly (number | null)[];
-  /** Instructions that a jump, loop, or call return can enter other than by falling through. */
-  readonly explicitTargets: ReadonlySet<number>;
   readonly continuationLiveness: Map<string, readonly ReadonlySet<number>[]>;
   readonly defaultBindingPositions: ReadonlyMap<string, number>;
   readonly parameterNames: ReadonlyMap<number, ReadonlySet<string>>;
@@ -2236,10 +2234,6 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
       functionIdsByInstruction[index] = definition.id;
     }
   }
-  const explicitTargets = new Set<number>();
-  for (const instruction of plan.instructions)
-    for (const target of explicitInstructionTargets(instruction))
-      if (typeof target === "number") explicitTargets.add(target);
   const defaultBindingPositions = new Map<string, number>();
   for (let index = 0; index < plan.instructions.length; index += 1) {
     const instruction = plan.instructions[index];
@@ -2262,7 +2256,6 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
     functionsById,
     regionEnds,
     functionIdsByInstruction,
-    explicitTargets,
     continuationLiveness: new Map(),
     defaultBindingPositions,
     parameterNames,
