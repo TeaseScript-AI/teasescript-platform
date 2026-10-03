@@ -4,6 +4,7 @@ import type {
   BinaryExpressionPlan,
   ExpressionPlan,
   PlanSourceLocation,
+  TypeCheckPlan,
 } from "../plan/model.js";
 import { escapeMarkup } from "../message-markup.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
@@ -26,12 +27,7 @@ import {
 import { nextXorShift32, type RandomSource } from "./random.js";
 import { isVisibleScalar, quotedText, valueNotation, visibleText } from "./value-text.js";
 import { formatDuration } from "../duration.js";
-import {
-  assertStoredType,
-  LOAD_KEY_MESSAGE,
-  findScriptStorageEntry,
-  storageKey,
-} from "./script-storage.js";
+import { LOAD_KEY_MESSAGE, findScriptStorageEntry, storageKey } from "./script-storage.js";
 import {
   addSerializableSetValue,
   cloneCapturedSerializableValue,
@@ -71,6 +67,7 @@ import {
   isTimerHandle,
   isMediaHandle,
 } from "./value-predicates.js";
+import { assertValueType } from "./value-types.js";
 import {
   mediaEndMs,
   mediaProperty,
@@ -590,8 +587,6 @@ export class Evaluator {
             const key = storageKey(result.value, LOAD_KEY_MESSAGE, expression.key.span);
             const entry = findScriptStorageEntry(this.snapshot, key);
             if (entry !== undefined) {
-              if (expression.expectedType !== null)
-                assertStoredType(entry, expression.expectedType, expression.span);
               value = entry.value;
               break;
             }
@@ -1124,6 +1119,9 @@ export class Evaluator {
         positional,
         named,
         expression.span,
+        expression.typeCheck === undefined
+          ? null
+          : { check: expression.typeCheck, span: expression.arguments[0]!.value.span },
       );
     }
     throw fault(
@@ -1133,12 +1131,14 @@ export class Evaluator {
     );
   }
 
+  /** `added` is the check of an element that `add` inserts, from the compiler (ADR 0021 rule 1.7). */
   #callCollection(
     receiver: SerializableRuntimeValue,
     name: string,
     positional: readonly SerializableRuntimeValue[],
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
+    added: { readonly check: TypeCheckPlan; readonly span: SourceSpan } | null,
   ): SerializableRuntimeValue {
     this.#referenceEpoch++;
     if (!isList(receiver) && !isSet(receiver))
@@ -1158,6 +1158,7 @@ export class Evaluator {
         switch (name) {
           case "add":
             expect(1);
+            if (added !== null) assertValueType(positional[0]!, added.check, added.span);
             addSerializableSetValue(receiver, positional[0]!);
             return null;
           case "remove":
@@ -1181,6 +1182,7 @@ export class Evaluator {
       switch (name) {
         case "add":
           expect(1);
+          if (added !== null) assertValueType(positional[0]!, added.check, added.span);
           receiver.items.push(cloneCapturedSerializableValue(positional[0]!));
           return null;
         case "remove": {

@@ -112,6 +112,7 @@ import {
 import { cloneMedia, type RuntimeMediaRepeatSnapshot } from "./media.js";
 import { executionRunnable, processDueWork } from "./operations/observe-time.js";
 import { cloneTimer } from "./timers.js";
+import { assertValueType } from "./value-types.js";
 import {
   isDuration,
   isList,
@@ -399,9 +400,12 @@ function executePlannedInstruction(
           instruction.span,
         );
       }
+      const value = evaluator.evaluate(instruction.value);
+      if (instruction.typeCheck !== undefined)
+        assertValueType(value, instruction.typeCheck, instruction.value.span);
       currentFrame(snapshot).bindings.push({
         name: instruction.name,
-        value: cloneCapturedSerializableValue(evaluator.evaluate(instruction.value)),
+        value: cloneCapturedSerializableValue(value),
       });
       advance(snapshot);
       return;
@@ -418,10 +422,14 @@ function executePlannedInstruction(
       evaluator.validateAssignmentTarget(instruction.target);
       advance(snapshot);
       return;
-    case "assign":
-      evaluator.assign(instruction.target, evaluator.evaluate(instruction.value));
+    case "assign": {
+      const value = evaluator.evaluate(instruction.value);
+      if (instruction.typeCheck !== undefined)
+        assertValueType(value, instruction.typeCheck, instruction.value.span);
+      evaluator.assign(instruction.target, value);
       advance(snapshot);
       return;
+    }
     case "validateCallReceiver":
       evaluator.validateCallReceiver(
         evaluator.evaluate(instruction.receiver),
@@ -573,15 +581,13 @@ function executePlannedInstruction(
     case "enterFunctionBody":
       enterFunctionBody(plan, instruction.functionId, snapshot, instruction.span);
       return;
-    case "returnValue":
-      returnFromFunction(
-        plan,
-        snapshot,
-        evaluator.evaluate(instruction.value),
-        instruction.span,
-        events,
-      );
+    case "returnValue": {
+      const value = evaluator.evaluate(instruction.value);
+      if (instruction.typeCheck !== undefined)
+        assertValueType(value, instruction.typeCheck, instruction.value.span);
+      returnFromFunction(plan, snapshot, value, instruction.span, events);
       return;
+    }
     case "returnVoid":
       returnFromFunction(plan, snapshot, null, instruction.span, events);
       return;
@@ -1003,6 +1009,14 @@ function enterFunction(
       cloneCapturedSerializableValue(evaluator.evaluate(argument.value)),
     ]),
   );
+  // Parameters are bound only after every argument is evaluated, so the arguments are checked then too.
+  for (const argument of instruction.arguments)
+    if (argument.typeCheck !== undefined)
+      assertValueType(
+        supplied.get(argument.parameterName)!,
+        argument.typeCheck,
+        argument.value.span,
+      );
   if (snapshot.callFrames.length >= snapshot.maxCallDepth) {
     throw fault(
       "TSR047",
@@ -1133,12 +1147,10 @@ function bindDefaultParameter(
   if (parameter === undefined || !parameter.hasDefault) {
     throw fault("TSR048", "Default-parameter metadata is inconsistent.", instruction.span);
   }
-  declareFunctionBinding(
-    snapshot,
-    parameter.name,
-    evaluator.evaluate(instruction.value),
-    instruction.span,
-  );
+  const value = evaluator.evaluate(instruction.value);
+  if (instruction.typeCheck !== undefined)
+    assertValueType(value, instruction.typeCheck, instruction.value.span);
+  declareFunctionBinding(snapshot, parameter.name, value, instruction.span);
   frame.parameterState.parameterIndex += 1;
   advance(snapshot);
 }

@@ -60,15 +60,15 @@ function compileParsedSource(
   // Types are checked once every name resolves, so a type message never repeats a name or structure error.
   const types =
     hasParserErrors || hasErrors(names.diagnostics)
-      ? Object.freeze({ diagnostics: Object.freeze([]) })
+      ? null
       : checkTypes(parsed.program, validationOptions);
   const semantic = Object.freeze({
-    diagnostics: Object.freeze([...names.diagnostics, ...types.diagnostics]),
+    diagnostics: Object.freeze([...names.diagnostics, ...(types?.diagnostics ?? [])]),
   });
   let plan: InstructionPlan | null = null;
   const loweringDiagnostics: Diagnostic[] = [];
   if (!hasParserErrors && !hasErrors(semantic.diagnostics)) {
-    const compiled = compileStableProgram(parsed.program);
+    const compiled = compileStableProgram(parsed.program, types?.runtimeChecks);
     const diagnostic = compiledPlanValidationDiagnostic(compiled);
     if (diagnostic === null) {
       plan = markValidatedImmutableInstructionPlan(compiled);

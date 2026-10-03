@@ -122,10 +122,10 @@ const INSTRUCTION_FIELDS = fieldsByKind([
   ["enterScope"],
   ["leaveScope"],
   ["exit"],
-  ["declareBinding", "name", "value"],
+  ["declareBinding", "name", "value", "typeCheck"],
   ["prepareReference", "expression", "destinationTemporary"],
   ["validateAssignmentTarget", "target"],
-  ["assign", "target", "value"],
+  ["assign", "target", "value", "typeCheck"],
   ["validateCallReceiver", "receiver", "method"],
   ["evaluate", "expression"],
   ["jumpIfFalse", "condition", "target"],
@@ -139,9 +139,9 @@ const INSTRUCTION_FIELDS = fieldsByKind([
   ["bindSuppliedParameter", "functionId", "parameterIndex"],
   ["beginFunctionDefaults", "functionId"],
   ["prepareParameterDefault", "functionId", "parameterIndex", "target"],
-  ["bindDefaultParameter", "functionId", "parameterIndex", "value"],
+  ["bindDefaultParameter", "functionId", "parameterIndex", "value", "typeCheck"],
   ["enterFunctionBody", "functionId"],
-  ["returnValue", "value"],
+  ["returnValue", "value", "typeCheck"],
   ["returnVoid"],
   [
     "say",
@@ -180,7 +180,7 @@ const EXPRESSION_FIELDS = fieldsByKind([
   ["template", "parts"],
   ["property", "object", "name"],
   ["index", "object", "index"],
-  ["call", "callee", "arguments"],
+  ["call", "callee", "arguments", "typeCheck"],
   ["unary", "operator", "operand"],
   ["binary", "operator", "left", "right"],
   ["range", "start", "end", "inclusive"],
@@ -231,6 +231,7 @@ function validateInstruction(
     case "declareBinding":
       requireString(value.name, `${path}.name`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      validateOptionalTypeCheck(value, path, errors);
       return;
     case "prepareReference":
       validateExpression(value.expression, `${path}.expression`, errors, false, temporaryCount);
@@ -249,6 +250,7 @@ function validateInstruction(
       validateExpression(value.target, `${path}.target`, errors, true, temporaryCount);
       validatePreparedAssignmentTarget(value.target, `${path}.target`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      validateOptionalTypeCheck(value, path, errors);
       return;
     case "validateCallReceiver":
       validateExpression(value.receiver, `${path}.receiver`, errors, false, temporaryCount);
@@ -450,9 +452,11 @@ function validateInstruction(
       validateFunctionId(value.functionId, `${path}.functionId`, functionIds, errors);
       requireNonNegativeInteger(value.parameterIndex, `${path}.parameterIndex`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      validateOptionalTypeCheck(value, path, errors);
       return;
     case "returnValue":
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      validateOptionalTypeCheck(value, path, errors);
       return;
     case "returnVoid":
       return;
@@ -1255,24 +1259,108 @@ function validateExpression(
   }
 }
 
-function validStorageType(value: unknown): boolean {
-  return (
-    value === null ||
-    (isRecord(value) &&
-      hasExactKeys(value, ["name", "collection"]) &&
-      isOneOf(value.name, [
-        "string",
-        "boolean",
-        "integer",
-        "number",
-        "date",
-        "time",
-        "datetime",
-        "duration",
-      ]) &&
-      (value.collection === null || isOneOf(value.collection, ["list", "set"])))
-  );
+/** Validates the optional `typeCheck` of a receiving instruction, call argument, or `add` call. */
+function validateOptionalTypeCheck(
+  owner: Record<string, unknown>,
+  path: string,
+  errors: PlanValidationError[],
+): void {
+  if (!("typeCheck" in owner)) return;
+  const check = owner.typeCheck;
+  const checkPath = `${path}.typeCheck`;
+  if (!isRecord(check)) {
+    errors.push(planError("TSC002", "A type check must be an object.", checkPath));
+    return;
+  }
+  rejectUnknownFields(check, ["type", "place"], checkPath, errors);
+  requireString(check.place, `${checkPath}.place`, errors);
+  const pending: { readonly value: unknown; readonly path: string }[] = [
+    { value: check.type, path: `${checkPath}.type` },
+  ];
+  while (pending.length > 0) {
+    const { value: type, path: typePath } = pending.pop()!;
+    if (!isRecord(type)) {
+      errors.push(planError("TSC002", "A type must be an object.", typePath));
+      continue;
+    }
+    switch (type.kind) {
+      case "list":
+      case "set":
+        rejectUnknownFields(type, ["kind", "element"], typePath, errors);
+        if (type.element !== null)
+          pending.push({ value: type.element, path: `${typePath}.element` });
+        break;
+      case "object": {
+        rejectUnknownFields(type, ["kind", "properties"], typePath, errors);
+        if (!Array.isArray(type.properties)) {
+          errors.push(
+            planError(
+              "TSC002",
+              "Object type properties must be an array.",
+              `${typePath}.properties`,
+            ),
+          );
+          break;
+        }
+        const names = new Set<unknown>();
+        type.properties.forEach((property: unknown, index) => {
+          const propertyPath = `${typePath}.properties[${index}]`;
+          if (!isRecord(property)) {
+            errors.push(
+              planError("TSC002", "An object type property must be an object.", propertyPath),
+            );
+            return;
+          }
+          rejectUnknownFields(property, ["name", "type"], propertyPath, errors);
+          requireString(property.name, `${propertyPath}.name`, errors);
+          if (names.has(property.name))
+            errors.push(
+              planError(
+                "TSC002",
+                "Object type property names must be unique.",
+                `${propertyPath}.name`,
+              ),
+            );
+          names.add(property.name);
+          pending.push({ value: property.type, path: `${propertyPath}.type` });
+        });
+        break;
+      }
+      case "union":
+        rejectUnknownFields(type, ["kind", "members"], typePath, errors);
+        if (!Array.isArray(type.members) || type.members.length === 0) {
+          errors.push(
+            planError("TSC002", "A union type needs at least one member.", `${typePath}.members`),
+          );
+          break;
+        }
+        type.members.forEach((member: unknown, index) =>
+          pending.push({ value: member, path: `${typePath}.members[${index}]` }),
+        );
+        break;
+      default:
+        if (isOneOf(type.kind, TYPE_PLAN_NAMES))
+          rejectUnknownFields(type, ["kind"], typePath, errors);
+        else errors.push(planError("TSC002", "Unknown type kind.", `${typePath}.kind`));
+    }
+  }
 }
+
+const TYPE_PLAN_NAMES = [
+  "string",
+  "boolean",
+  "integer",
+  "number",
+  "duration",
+  "date",
+  "time",
+  "datetime",
+  "null",
+  "range",
+  "speaker",
+  "timer",
+  "media",
+];
 
 function validateExpressionNode(
   value: unknown,
@@ -1363,6 +1451,14 @@ function validateExpressionNode(
       pending.push({ value: value.object, path: `${path}.object`, assignmentTarget: false });
       return;
     case "call":
+      validateOptionalTypeCheck(value, path, errors);
+      if (
+        "typeCheck" in value &&
+        !(isRecord(value.callee) && value.callee.kind === "property" && value.callee.name === "add")
+      )
+        errors.push(
+          planError("TSC002", "Only a list or set 'add' call checks a type.", `${path}.typeCheck`),
+        );
       pending.push({ kind: "arguments", value: value.arguments, path: `${path}.arguments` });
       pending.push({ value: value.callee, path: `${path}.callee`, assignmentTarget: false });
       return;
@@ -1387,10 +1483,7 @@ function validateExpressionNode(
       pending.push({ value: value.start, path: `${path}.start`, assignmentTarget: false });
       return;
     case "storageLoad":
-      if (
-        !hasExactKeys(value, ["kind", "key", "default", "expectedType", "span"]) ||
-        !validStorageType(value.expectedType)
-      ) {
+      if (!hasExactKeys(value, ["kind", "key", "default", "span"])) {
         errors.push(planError("TSC002", "Storage-load expression has an invalid shape.", path));
       }
       if (value.default !== null) {
@@ -1484,7 +1577,8 @@ function validateCallArguments(
       errors.push(planError("TSC002", "Function argument must be an object.", argumentPath));
       return;
     }
-    if (!hasExactKeys(argument, ["parameterName", "value", "span"])) {
+    const fields = ["parameterName", "value", "span"];
+    if (!hasExactKeys(argument, "typeCheck" in argument ? [...fields, "typeCheck"] : fields)) {
       errors.push(
         planError("TSC002", "Function argument contains unsupported fields.", argumentPath),
       );
@@ -1492,6 +1586,7 @@ function validateCallArguments(
     requireString(argument.parameterName, `${argumentPath}.parameterName`, errors);
     validateExpression(argument.value, `${argumentPath}.value`, errors, false, temporaryCount);
     validateSpan(argument.span, `${argumentPath}.span`, errors);
+    validateOptionalTypeCheck(argument, argumentPath, errors);
   });
 }
 
