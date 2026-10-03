@@ -192,3 +192,20 @@ The importer emits these accepted forms although the current compiler rejects th
 separately: `run`/`end`, `switch`, `showPopup`, `showButton` with timeout or elapsed result, `askInteger`,
 `askBooleans`, `getSeconds`/`getDateTime`, `openUrl`, `round`/`floor`/`ceil`, and conversions. `run`/`end` dominates:
 it blocks 19 otherwise compiler-clean corpus scripts.
+
+## Open importer work
+
+Found while evaluating the proposals; none needs a language decision:
+
+- **`int` declarations lose truncation.** `int m = 7 / 2` becomes `let m = 7 / 2`, but Groovy stores `3`; the cast form
+  `(int) (7 / 2)` is already converted with `toInteger`. Domme3's countdown helper uses the declaration form.
+- **Two DisciplineClinic menus** stay unconverted because one variable holds text in one place and a list in another;
+  the flow-insensitive type inference cannot prove the list.
+- **Toy menus built inside larger expressions,** whose `collect` cannot move before the statement.
+- **Toy imagery** (outfit folders with tag files) could map to proposed media tags once tags are ingested from those
+  files.
+- **Regular expressions** in `replaceAll`, `split`, and `tokenize` remain manual work (Toy).
+- **`load "key" default value`** is now exact for legacy read-then-default code, because `save null` removes the key on
+  `main` (#484); the importer does not use it for that pattern yet.
+- **The stand-in `choose` alternation** in `src/pending.ts` works around the runtime defect #521; remove it once #521
+  is fixed on `main`.

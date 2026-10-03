@@ -288,9 +288,18 @@ a `.ts` system library and localized script variants are future work; one langua
   tags, with a count of matches. No tagged media exists yet. Evaluated above for counting; random selection by tags
   and Toy's tag files come later.
 
-## Not yet discussed
+## Next steps
 
-The other capability candidates and specification observations in [`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md)
-(text utilities, dictionaries, single-field input prefill, localized script variants, `save null`, `set` as a
-protected name, the `round()` tie rule, the `showButton` elapsed type, storage semantics) have not been discussed with
-the owner.
+- **Exact syntax for the capabilities that proved valuable.** C1–C3 (`choose` over lists with mixed labels and
+  `{ label, text }` records) and M1 (media tags) first; D1 dictionaries later. After the owner settles a syntax, the
+  owner decides whether it becomes an issue in tracker #512.
+- **Open decisions on `main` work.** These are posted as issue comments by the agent working through tracker #512:
+  #504, #508–#511, and #522.
+- **Re-measure the corpus** once `main` merges tracker work that changes accepted behavior (#507, #511, #521, #522,
+  #504); the importer then targets the new rules.
+- C4 (unique labels) and C5 (impossible-label warning) are compiler checks; the corpus evaluation does not measure
+  them.
+
+All capability candidates and specification observations from the first corpus analysis have been discussed with the
+owner. Text utilities, dictionaries, and prefill are covered above. Localized script variants are future work: one
+language is enough for now. `save null`, `set`, `round()`, `showButton`, and storage are settled (#484, #507).
