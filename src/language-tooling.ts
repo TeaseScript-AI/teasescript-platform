@@ -77,14 +77,14 @@ const HELP = Object.freeze({
   askText: Object.freeze({
     command: "askText" as const,
     summary:
-      "Waits for submitted text. Line endings are normalized while other whitespace is preserved; whitespace-only input is rejected and retried. The optional hint is UI guidance, not transcript text.",
-    syntax: "askText [as speaker] [hint]",
+      "Waits for submitted text. Line endings are normalized while other whitespace is preserved; whitespace-only input is rejected and retried. The optional hint is UI guidance, not transcript text. An optional default answer prefills the field; submitting it unchanged returns it.",
+    syntax: "askText [as speaker] [hint] [, default: answer]",
   }),
   askNumber: Object.freeze({
     command: "askNumber" as const,
     summary:
-      "Waits for numeric text, trims surrounding whitespace, accepts the TeaseScript numeric grammar, requires a finite value, and returns negative zero as canonical numeric 0 while preserving the trimmed submitted text in the transcript.",
-    syntax: "askNumber [as speaker] [hint]",
+      "Waits for numeric text, trims surrounding whitespace, accepts the TeaseScript numeric grammar, requires a finite value, and returns negative zero as canonical numeric 0 while preserving the trimmed submitted text in the transcript. An optional default number prefills the field.",
+    syntax: "askNumber [as speaker] [hint] [, default: number]",
   }),
   choose: Object.freeze({
     command: "choose" as const,
@@ -430,7 +430,7 @@ function signatureParameters(command: CompactCommand): readonly string[] {
       return Object.freeze(["speaker", "label"]);
     case "askText":
     case "askNumber":
-      return Object.freeze(["speaker", "hint"]);
+      return Object.freeze(["speaker", "hint", "default"]);
     case "choose":
       return Object.freeze(["speaker", "options"]);
     case "say":
@@ -457,6 +457,15 @@ function activeParameterFor(
     (tail.length === asIndex + 1 || (tail.length === asIndex + 2 && !cursorAfterLastToken))
   )
     return 0;
+  if (command === "askText" || command === "askNumber") {
+    const defaultIndex = tail.findIndex(
+      (token, index) =>
+        token.kind === TokenKind.Identifier &&
+        token.lexeme === "default" &&
+        tail[index + 1]?.kind === TokenKind.Colon,
+    );
+    return defaultIndex >= 0 ? 2 : 1;
+  }
   if (command !== "say") return 1;
 
   let depth = 0;
@@ -652,6 +661,8 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
     case "interactionExpression":
       visitor.interaction(expression);
       if (expression.hint !== null) children.push({ kind: "expression", node: expression.hint });
+      if (expression.defaultValue !== null)
+        children.push({ kind: "expression", node: expression.defaultValue });
       for (const option of expression.options)
         children.push({ kind: "expression", node: option.value });
       return;

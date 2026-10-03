@@ -2245,9 +2245,25 @@ class Parser {
 
     if (interactionKind !== "choice") {
       const hint =
-        isExpressionStart(this.#peek()) && !this.#atStorageDelimiter()
+        isExpressionStart(this.#peek()) &&
+        !this.#atStorageDelimiter() &&
+        !this.#atInteractionDefault(0)
           ? yield* parseChild(this.#parseOr())
           : null;
+      let defaultValue: Expression | null = null;
+      const defaultOffset = hint === null ? 0 : this.#interactionDefaultAfterComma();
+      if (defaultOffset !== null && this.#atInteractionDefault(defaultOffset)) {
+        for (let skipped = 0; skipped < defaultOffset + 2; skipped += 1) this.#advance();
+        defaultValue = yield* parseChild(this.#parseColonValueTask(false));
+        if (defaultValue === null) {
+          this.#reportInsertion(
+            parserDiagnosticCode.expectedInteractionText,
+            "Expected a default answer after 'default:'.",
+          );
+          if (this.#previous().kind === TokenKind.Newline && this.#atStatementStart())
+            this.#recoveredAtStatementBoundary = true;
+        }
+      }
       if (this.#check(TokenKind.KeywordAs) && !this.#atStorageDelimiter()) {
         this.#reportSpan(
           parserDiagnosticCode.unsupportedInteractionForm,
@@ -2256,7 +2272,7 @@ class Parser {
         );
         this.#synchronizeStatement();
       }
-      const end = hint?.span ?? speaker?.span ?? command.span;
+      const end = defaultValue?.span ?? hint?.span ?? speaker?.span ?? command.span;
       return Object.freeze({
         kind: "interactionExpression",
         interactionKind,
@@ -2264,6 +2280,7 @@ class Parser {
         asSpan,
         speaker,
         hint,
+        defaultValue,
         options: Object.freeze([]),
         span: spanFrom(command.span, end),
       });
@@ -2359,6 +2376,7 @@ class Parser {
       asSpan,
       speaker,
       hint: null,
+      defaultValue: null,
       options: Object.freeze(options),
       span: spanFrom(command.span, end),
     });
@@ -2374,6 +2392,24 @@ class Parser {
       this.#check(TokenKind.InterpolationEnd) ||
       this.#atStorageDelimiter()
     );
+  }
+
+  /** `default:` at `offset` tokens ahead, the named default answer of `askText` or `askNumber`. */
+  #atInteractionDefault(offset: number): boolean {
+    const token = this.#peek(offset);
+    return (
+      token.kind === TokenKind.Identifier &&
+      token.lexeme === "default" &&
+      this.#peek(offset + 1).kind === TokenKind.Colon
+    );
+  }
+
+  /** The offset of the token after a `,` and any continuation newlines, or `null` without a comma. */
+  #interactionDefaultAfterComma(): number | null {
+    if (!this.#check(TokenKind.Comma)) return null;
+    let offset = 1;
+    while (this.#peek(offset).kind === TokenKind.Newline) offset += 1;
+    return offset;
   }
 
   #atStorageDelimiter(): boolean {

@@ -22,6 +22,7 @@ import {
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
   TEASESCRIPT_PROTECTED_NAMES,
 } from "./protected-names.js";
+import { isBlankTextAnswer } from "./interaction-answers.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
 import {
   arithmeticType,
@@ -120,6 +121,7 @@ const semanticCode = {
   invalidMedia: "TSV036",
   invalidMediaHandleMember: "TSV037",
   invalidStorageKey: "TSV038",
+  invalidInteractionDefault: "TSV039",
   typeMismatch: "TSV041",
 } as const;
 
@@ -1039,10 +1041,18 @@ class SemanticValidator {
         const contextualSpeaker = this.#interactionSpeaker(expression.speaker, scope);
         if (expression.interactionKind === "choice") {
           yield* compileChild(this.#validateChoiceTask(expression, scope, contextualSpeaker));
-        } else if (expression.hint !== null) {
-          yield* compileChild(
-            this.#validateExpressionTask(expression.hint, scope, contextualSpeaker),
-          );
+        } else {
+          if (expression.hint !== null) {
+            yield* compileChild(
+              this.#validateExpressionTask(expression.hint, scope, contextualSpeaker),
+            );
+          }
+          if (expression.defaultValue !== null) {
+            yield* compileChild(
+              this.#validateExpressionTask(expression.defaultValue, scope, contextualSpeaker),
+            );
+            this.#validateInteractionDefault(expression.interactionKind, expression.defaultValue);
+          }
         }
         return;
       }
@@ -1451,6 +1461,34 @@ class SemanticValidator {
       : this.#validateSpeakerReference(speaker.name, speaker.span, scope)
         ? speaker.name
         : null;
+  }
+
+  /** A default answer must be an answer the field accepts; dynamic values are checked when the field opens. */
+  #validateInteractionDefault(kind: "text" | "number", expression: Expression): void {
+    if (kind === "number") {
+      if (isDefinitelyNonNumeric(expression))
+        this.#report(
+          semanticCode.invalidInteractionDefault,
+          "The default answer of askNumber must be a number, such as 'default: 10'.",
+          expression.span,
+        );
+      return;
+    }
+    if (isDefinitelyNonString(expression)) {
+      this.#report(
+        semanticCode.invalidInteractionDefault,
+        "The default answer of askText must be text. Write a number as text, such as 'default: \"10\"'.",
+        expression.span,
+      );
+      return;
+    }
+    const text = staticVisibleText(expression);
+    if (text !== undefined && isBlankTextAnswer(text))
+      this.#report(
+        semanticCode.invalidInteractionDefault,
+        "The default answer of askText must contain a non-whitespace character.",
+        expression.span,
+      );
   }
 
   #validateButtonBackground(expression: Expression): void {
@@ -1986,6 +2024,7 @@ function visitExpression(
         ? [
             ...(current.speaker === null ? [] : [current.speaker]),
             ...(current.hint === null ? [] : [current.hint]),
+            ...(current.defaultValue === null ? [] : [current.defaultValue]),
             ...current.options.map((option) => option.value),
           ]
         : expressionChildren(current);

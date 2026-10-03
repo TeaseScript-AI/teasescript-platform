@@ -342,6 +342,8 @@ export interface InteractionExpression {
   readonly asSpan: SourceSpan | null;
   readonly speaker: Identifier | null;
   readonly hint: Expression | null;
+  /** The `default:` answer that prefills an `askText` or `askNumber` field. */
+  readonly defaultValue: Expression | null;
   readonly options: readonly InteractionChoiceOption[];
   readonly span: SourceSpan;
 }

@@ -63,5 +63,10 @@ export type PlayerForegroundPresentation =
       readonly accessibleName: string;
       readonly options: readonly PlayerForegroundOptionPresentation[];
     }
-  | { readonly kind: "ask-text"; readonly accessibleName: string; readonly hint: string }
-  | { readonly kind: "ask-number"; readonly accessibleName: string; readonly hint: string };
+  | {
+      readonly kind: "ask-text" | "ask-number";
+      readonly accessibleName: string;
+      readonly hint: string;
+      /** The default answer that initially fills the composer. */
+      readonly prefill?: string;
+    };

@@ -119,7 +119,12 @@ watch(
     const returnToChoice = restoreChoiceFocus;
     restoreChoiceFocus = false;
     const keyboardNavigation = document.documentElement.dataset.playerKeyboardFocus === "true";
-    draft.value = "";
+    // A default answer starts in the composer; the player submits it unchanged or edits it first.
+    const presentedInput = foreground.value;
+    draft.value =
+      presentedInput?.kind === "ask-text" || presentedInput?.kind === "ask-number"
+        ? (presentedInput.prefill ?? "")
+        : "";
     clearFeedback();
     await nextTick();
     // Completion releases the disabled guard after publishing the session.

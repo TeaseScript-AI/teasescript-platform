@@ -34,7 +34,8 @@ import type {
   PlanSourceLocation,
 } from "../../plan/model.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
-import { staticVisibleText } from "../../static-evaluation.js";
+import { numberAnswerText } from "../../interaction-answers.js";
+import { staticNumber, staticVisibleText } from "../../static-evaluation.js";
 import { durationLiteralMilliseconds } from "../../duration.js";
 import { runCompileTask, compileChild, type CompileTask } from "../continuation.js";
 import {
@@ -1193,8 +1194,13 @@ export class InstructionCompiler {
         ? ("number" as const)
         : ("string" as const);
 
-    if (staticValues.every((value): value is string => value !== undefined)) {
-      const ui = staticInteractionUi(expression, staticValues, labelType);
+    const staticPrefill =
+      expression.defaultValue === null ? null : staticInteractionPrefill(expression);
+    if (
+      staticValues.every((value): value is string => value !== undefined) &&
+      staticPrefill !== undefined
+    ) {
+      const ui = staticInteractionUi(expression, staticValues, labelType, staticPrefill);
       return this.#emitResultInteraction(
         {
           interactionKind: expression.interactionKind,
@@ -1226,9 +1232,20 @@ export class InstructionCompiler {
               expression.hint.span,
             );
       if (hint !== null) preparedTemporaryIds.push(hint.temporaryId);
+      const prefill =
+        expression.defaultValue === null
+          ? null
+          : this.#materializeDedicatedInteractionValue(
+              yield* compileChild(
+                this.#lowerInteractionPayloadTask(expression.defaultValue, speakerTemporary),
+              ),
+              expression.defaultValue.span,
+            );
+      if (prefill !== null) preparedTemporaryIds.push(prefill.temporaryId);
       preparedUi = {
         kind: expression.interactionKind,
         hintTemporary: hint?.temporaryId ?? null,
+        ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
         accessibleName: {
           kind: "localizedDefault",
           key: expression.interactionKind === "text" ? "answer" : "number",
@@ -1891,15 +1908,32 @@ function interactionLabelValue(
   return label.kind === "identifier" ? label.name : Object.is(label.value, -0) ? 0 : label.value;
 }
 
+/**
+ * The prefill text of a constant default answer, or `undefined` when the default is only known at runtime. Semantic
+ * validation has already rejected constants of the wrong type.
+ */
+function staticInteractionPrefill(expression: InteractionExpression): string | undefined {
+  const value = expression.defaultValue!;
+  if (expression.interactionKind === "number") {
+    const number = staticNumber(value);
+    return number === undefined || !Number.isFinite(number) ? undefined : numberAnswerText(number);
+  }
+  let literal = value;
+  while (literal.kind === "parenthesizedExpression") literal = literal.expression;
+  return literal.kind === "stringLiteral" ? staticVisibleText(literal) : undefined;
+}
+
 function staticInteractionUi(
   expression: InteractionExpression,
   staticValues: readonly string[],
   labelType: "none" | "identifier" | "number",
+  prefill: string | null,
 ): InteractionUiPayload {
   if (expression.interactionKind === "text" || expression.interactionKind === "number") {
     return {
       kind: expression.interactionKind,
       hint: staticValues[0] ?? null,
+      ...(prefill === null ? {} : { prefill }),
       accessibleName: {
         kind: "localizedDefault",
         key: expression.interactionKind === "text" ? "answer" : "number",
