@@ -750,7 +750,7 @@ With parameters:
 
 ```text
 function openDoor(doorName) {
-    say `The ${doorName} opens`
+    say "The ${doorName} opens"
 }
 ```
 
@@ -986,7 +986,7 @@ Accepted contexts include:
 
 ```text
 say player.petNames
-say `${player.petNames}`
+say "${player.petNames}"
 ```
 
 Other visible-text fields may opt into the same behavior when their API documentation explicitly says so.
@@ -1016,8 +1016,8 @@ A selected `integer` or `number` is converted to text for that visible-text use.
 Each evaluation selects again:
 
 ```text
-say `Good ${player.petNames}`
-say `Come closer, ${player.petNames}`
+say "Good ${player.petNames}"
+say "Come closer, ${player.petNames}"
 ```
 
 The two evaluations may choose different elements. Selection uses the deterministic session RNG, so replay and debugging can reproduce the same session sequence.
@@ -1026,7 +1026,7 @@ To choose a specific element, use its index:
 
 ```text
 say player.petNames[0]
-say `Today I will call you ${player.petNames[1]}`
+say "Today I will call you ${player.petNames[1]}"
 ```
 
 To reuse one random choice, select it explicitly and store the resulting value:
@@ -1034,8 +1034,8 @@ To reuse one random choice, select it explicitly and store the resulting value:
 ```text
 let chosenName = player.petNames.random
 
-say `From now on, you are my ${chosenName}`
-say `Come here, ${chosenName}`
+say "From now on, you are my ${chosenName}"
+say "Come here, ${chosenName}"
 ```
 
 Normal assignment does not perform random selection:
@@ -2514,7 +2514,7 @@ A replacement value may be supplied for `item`.
 ### Empty list in visible-text selection
 
 ```text
-say `${names}`
+say "${names}"
 ```
 
 When `names` is empty, execution reports that no eligible text value can be selected. A replacement text value may be supplied when runtime recovery is enabled.
@@ -2654,8 +2654,8 @@ Current elapsed duration values use deterministic English visible-text formattin
 remains accepted future direction:
 
 ```text
-say `Your punishment ends ${chastityEnd}.`
-say `You still have ${remaining} remaining.`
+say "Your punishment ends ${chastityEnd}."
+say "You still have ${remaining} remaining."
 ```
 
 The following explicit presentation methods are deferred; their accepted return type is `string`:
@@ -2740,14 +2740,14 @@ Ordinary `say` uses the current default speaker:
 
 ```text
 say "Kneel."
-say `Good morning, ${player.alias}.`
+say "Good morning, ${player.alias}."
 ```
 
 Use one explicit speaker for one message:
 
 ```text
 say as mistressVera "Kneel."
-say as mistressVera `You will obey your ${speaker.title}.`
+say as mistressVera "You will obey your ${speaker.title}."
 ```
 
 During the second message, `speaker` resolves to `mistressVera`. `say as` does not change the default speaker after that message.
@@ -2755,7 +2755,7 @@ During the second message, `speaker` resolves to `mistressVera`. `say as` does n
 A speaker can refer to another speaker explicitly:
 
 ```text
-say as cashier `Please speak to ${mistressVera.shortTitle} ${mistressVera.lastName}.`
+say as cashier "Please speak to ${mistressVera.shortTitle} ${mistressVera.lastName}."
 ```
 
 Set the current default speaker with the same `speaker` keyword followed by an existing speaker reference:
@@ -2911,15 +2911,15 @@ player.lovingNames
 In an approved visible-text context, a list automatically returns one random eligible element according to the list rules:
 
 ```text
-say `Come here, ${player.petNames}.`
-say `Good ${player.lovingNames}.`
-say `You are such a ${player.degradingNames}.`
+say "Come here, ${player.petNames}."
+say "Good ${player.lovingNames}."
+say "You are such a ${player.degradingNames}."
 ```
 
 Every evaluation may select a different element. Use an index for a specific value:
 
 ```text
-say `Today I will call you ${player.petNames[0]}.`
+say "Today I will call you ${player.petNames[0]}."
 ```
 
 Use `.random` and store the result when the same selection must be reused:
@@ -2927,8 +2927,8 @@ Use `.random` and store the result when the same selection must be reused:
 ```text
 let chosenName = player.petNames.random
 
-say `From now on, you are ${chosenName}.`
-say `Come here, ${chosenName}.`
+say "From now on, you are ${chosenName}."
+say "Come here, ${chosenName}."
 ```
 
 The lists are editable like ordinary lists:
@@ -2962,8 +2962,8 @@ Setting `gender` fills the default values of the derived terms below:
 Examples:
 
 ```text
-say `You are a good ${player.boyGirl}.`
-say `${mistressVera.heShe} is waiting for you.`
+say "You are a good ${player.boyGirl}."
+say "${mistressVera.heShe} is waiting for you."
 ```
 
 Every derived term is independently editable:
@@ -3001,13 +3001,13 @@ The confirmed anatomical and arousal terms are:
 Examples:
 
 ```text
-say `Touch your ${player.cockPussy}.`
-say `${player.strokeRub} your ${player.cockClit}.`
-say `Focus on your ${player.glansClitoris}.`
-say `Gently tap your ${player.ballsLabia}.`
-say `Pull back your ${player.foreskinClitoralHood}.`
-say `Touch your ${player.nippleBreast}.`
-say `Keep going until you are ${player.hardWet}.`
+say "Touch your ${player.cockPussy}."
+say "${player.strokeRub} your ${player.cockClit}."
+say "Focus on your ${player.glansClitoris}."
+say "Gently tap your ${player.ballsLabia}."
+say "Pull back your ${player.foreskinClitoralHood}."
+say "Touch your ${player.nippleBreast}."
+say "Keep going until you are ${player.hardWet}."
 ```
 
 Terms that normally remain the same do not need artificial dynamic pairs. Examples include:
@@ -3039,12 +3039,12 @@ Actions and anatomical targets remain separate so the same terms can be recombin
 Examples:
 
 ```text
-say `${player.strokeRub} your ${player.cockClit}.`
-say `Keep ${player.strokingRubbing} your ${player.cockClit}.`
-say `${player.wankRub} your ${player.cockClit}.`
-say `You ${player.strokedRubbed} a lot today.`
-say `You ${player.wankedRubbed} earlier.`
-say `You are my ${player.strokerMasturbator}.`
+say "${player.strokeRub} your ${player.cockClit}."
+say "Keep ${player.strokingRubbing} your ${player.cockClit}."
+say "${player.wankRub} your ${player.cockClit}."
+say "You ${player.strokedRubbed} a lot today."
+say "You ${player.wankedRubbed} earlier."
+say "You are my ${player.strokerMasturbator}."
 ```
 
 The generic words `masturbate`, `masturbating`, and `masturbated` need no dynamic replacement when the same wording is suitable for every player. `strokerMasturbator` follows the same gender-default and explicit-override rules as the other dynamic speaker terms.
