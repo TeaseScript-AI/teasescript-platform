@@ -1,4 +1,5 @@
 import { createApp, h } from "vue";
+import { openIndexedDbMediaRepository } from "../../indexeddb-media-repository.js";
 import { createPlayerRuntimeSession } from "../../runtime-adapter.js";
 import { createLocalScriptStorage } from "../../script-storage.js";
 import { demoSource, demoStorageScope, resolveDemoAsset } from "./demoHost";
@@ -12,7 +13,10 @@ import "./style.css";
 const developmentPreview =
   import.meta.env.DEV || new URLSearchParams(window.location.search).has("dev");
 const app = developmentPreview
-  ? createApp((await import("./DevelopmentPreview.vue")).default)
+  ? createApp((await import("./DevelopmentPreview.vue")).default, {
+      // Durable captured media; when IndexedDB is unavailable, captures stay session media.
+      capturedMediaRepository: await openIndexedDbMediaRepository().catch(() => null),
+    })
   : // The session host lives in a component scope, so unmounting stops its media, clock and listeners.
     createApp({
       setup: () => {

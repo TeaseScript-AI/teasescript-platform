@@ -28,6 +28,11 @@ function wav(durationMs: number, sample: (time: number) => number): string {
   return `data:audio/wav;base64,${btoa(binary)}`;
 }
 
+/** Silence, for example to let a browser allow later playback on an element from a user activation. */
+export function silence(durationMs: number): string {
+  return wav(durationMs, () => 0);
+}
+
 /** A soft decaying chime. */
 export function chime(durationMs: number, frequency: number): string {
   return wav(durationMs, (time) => {

@@ -877,8 +877,10 @@ function validateCanonicalInteractionResultHandoffs(
   instructions.forEach((instruction, instructionIndex) => {
     if (
       !isRecord(instruction) ||
-      instruction.kind !== "interaction" ||
-      instruction.interactionKind === "button" ||
+      !(
+        (instruction.kind === "interaction" && instruction.interactionKind !== "button") ||
+        instruction.kind === "capture"
+      ) ||
       !Number.isSafeInteger(instruction.destinationTemporary)
     )
       return;
@@ -1001,6 +1003,7 @@ function producedTemporaryId(instruction: Record<string, unknown>): number | nul
     instruction.kind === "prepareReference" ||
     instruction.kind === "callFunction" ||
     instruction.kind === "interaction" ||
+    instruction.kind === "capture" ||
     instruction.kind === "startTimer" ||
     instruction.kind === "playMedia"
   ) {

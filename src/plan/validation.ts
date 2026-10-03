@@ -600,6 +600,19 @@ function validateInstruction(
     case "interaction":
       validateInteractionInstruction(value, path, temporaryCount, errors);
       return;
+    case "capture":
+      if (!hasExactKeys(value, ["kind", "capture", "destinationTemporary", "span"])) {
+        errors.push(planError("TSC002", "Capture instruction has an invalid shape.", path));
+      }
+      if (value.capture !== "photo")
+        errors.push(planError("TSC002", "Capture kind is invalid.", `${path}.capture`));
+      validateTemporaryId(
+        value.destinationTemporary,
+        `${path}.destinationTemporary`,
+        temporaryCount,
+        errors,
+      );
+      return;
     default:
       errors.push(planError("TSC002", `Unknown instruction kind '${value.kind}'.`, `${path}.kind`));
   }
@@ -1413,6 +1426,16 @@ function validateExpressionNode(
       pending.push({ value: value.object, path: `${path}.object`, assignmentTarget: false });
       return;
     case "call":
+      // `takePhoto()` waits for the Player; it lowers to a capture instruction and is never an ordinary call.
+      if (
+        isRecord(value.callee) &&
+        value.callee.kind === "identifier" &&
+        value.callee.name === "takePhoto"
+      ) {
+        errors.push(
+          planError("TSC002", "takePhoto() must be lowered to a capture instruction.", path),
+        );
+      }
       pending.push({ kind: "arguments", value: value.arguments, path: `${path}.arguments` });
       pending.push({ value: value.callee, path: `${path}.callee`, assignmentTarget: false });
       return;

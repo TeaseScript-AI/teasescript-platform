@@ -2,20 +2,23 @@
 import { ref } from "vue";
 import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
+import type { CapturedMediaRepository } from "../../captured-media.js";
 import type { PlayerTimerKind } from "../../model.js";
 import { createPlayerRuntimeSession } from "../../runtime-adapter.js";
+import { createLocalScriptStorage } from "../../script-storage.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
 import BackgroundControlsFixture from "./BackgroundControlsFixture.vue";
 import LayoutDebug from "./LayoutDebug.vue";
 import PlayerApp from "./PlayerApp.vue";
 import type { PlayerTool } from "./PlayerToolsShell.vue";
 import { resolveDevelopmentAsset } from "./developmentMedia";
-import { openingScenario } from "./runtimeScenario";
+import { cameraScenarioSource, openingScenario } from "./runtimeScenario";
 import { stageFixtures } from "./stageFixtures";
 import StageRightRail from "./StageRightRail.vue";
 import ThemeLab from "./ThemeLab.vue";
 import TimerFixtureRegion from "./TimerFixtureRegion.vue";
 import TimerRegion from "./TimerRegion.vue";
+import { browserStorage } from "./usePlayerPreference";
 import { usePlayerSession } from "./usePlayerSession";
 import { defaultPlayerThemeIntents } from "./usePlayerTheme";
 
@@ -24,7 +27,8 @@ import { defaultPlayerThemeIntents } from "./usePlayerTheme";
 const tools: readonly PlayerTool[] = [
   { name: "Visual Lab", icon: FlaskConical },
   { name: "Layout Debug", icon: ScanLine },
-  // Empty panels that exercise multi-panel arrangement and drawer behavior.
+  // Panels that exercise multi-panel arrangement and drawer behavior; Playback Diagnostics also lists the Player's
+  // developer diagnostics, such as why the session camera is unavailable.
   { name: "Playback Diagnostics", icon: Activity },
   { name: "Media Playback Configuration", icon: SlidersHorizontal },
 ];
@@ -37,8 +41,27 @@ const timerPaused = ref(true);
 const backgroundControlsReset = ref(0);
 const themeIntent = ref<PlayerThemeIntent>(defaultPlayerThemeIntents.light);
 
-const player = usePlayerSession({ resolveAsset: resolveDevelopmentAsset });
-player.prepare(() => createPlayerRuntimeSession(openingScenario));
+const props = defineProps<{ capturedMediaRepository?: CapturedMediaRepository | null }>();
+// `?scenario=camera` opens the camera scenario with the session camera capability and persistent script storage, so
+// a saved photo is shown again in a later run.
+const cameraScenario = new URLSearchParams(window.location.search).get("scenario") === "camera";
+const player = usePlayerSession({
+  resolveAsset: resolveDevelopmentAsset,
+  capabilities: { camera: cameraScenario },
+  ...(cameraScenario && {
+    scriptStorage: createLocalScriptStorage(browserStorage(), "development-camera"),
+    capturedMedia: { repository: props.capturedMediaRepository ?? null },
+  }),
+});
+if (cameraScenario)
+  void player
+    .loadScriptStorage()
+    .then(() =>
+      player.prepare(() =>
+        createPlayerRuntimeSession(cameraScenarioSource, player.scriptStorageOptions()),
+      ),
+    );
+else player.prepare(() => createPlayerRuntimeSession(openingScenario));
 </script>
 
 <template>
@@ -51,6 +74,16 @@ player.prepare(() => createPlayerRuntimeSession(openingScenario));
   >
     <template #tool="{ tool, player: playerElement }">
       <LayoutDebug v-if="tool === 'Layout Debug' && playerElement" :player="playerElement" />
+      <ul
+        v-if="tool === 'Playback Diagnostics' && player.diagnostics.value.length > 0"
+        class="space-y-2 p-4 text-sm"
+        data-player-diagnostics
+      >
+        <li v-for="(diagnostic, index) in player.diagnostics.value" :key="index">
+          <code>{{ diagnostic.code }}</code
+          >: {{ diagnostic.message }}
+        </li>
+      </ul>
       <div v-if="tool === 'Visual Lab'" class="space-y-4 p-4 text-sm">
         <ThemeLab v-model:intent="themeIntent" />
         <label class="grid gap-2">

@@ -126,10 +126,22 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
   (including optional Shadow DOM), and reconstructible-state declaration/validation; ADR 0012 fixes capability
   semantics.
 - Involved-speaker and conversation metadata for one visible chat with selectively separated future LLM contexts.
-- Camera capability declarations, stream ownership, device switching, quality negotiation, restore, privacy
-  indicators, and simultaneous-camera policy.
-- Camera UI and lifecycle around accepted `askImage(...)` and nullable `takePhoto(...)`, including preview, countdown,
-  retake, permission, and restore behavior.
+- Camera and microphone capability declaration metadata, device switching, quality negotiation, reload and restore,
+  failure recovery, and simultaneous-device policy; the permission and lifecycle model is accepted in
+  [`SECURITY.md`](SECURITY.md).
+- The isolation mechanism that enforces brokered camera/microphone acquisition and capability authorization against
+  package code calling browser capture APIs directly, such as a separate execution realm or trusted code
+  transformation; a wrapper API or manifest field alone cannot.
+- Camera and file UI around accepted `askImage(...)`, including source selection, preview, countdown, accept/retake,
+  denied-permission recovery, and restore behavior; `takePhoto()` has no such UI (`SECURITY.md`).
+- The public advanced-TypeScript media surface for arbitrary local image, video, and audio processing, author-facing
+  recording APIs and results, how authors request recording composition (it is explicit; see `SECURITY.md`), and
+  explicit session-media deletion. The Player capture foundation's shapes are implementation details, not this API;
+  ephemeral handles are not restored after reload (ADR 0017).
+- Captured-media quotas and reclamation timing; captured media stored on a server. Saved-reference durability is
+  accepted in the specification (§33). Before durable checkpoint restore (#469) can restore a checkpoint whose state
+  holds unsaved session media after a reload, its design must preserve or explicitly reconcile that media, and a
+  restored reference must never silently alias different media.
 - Motion detection, sampling, camera resource limits, and scene ownership.
 - User control of media playback: whether players may seek, pause, or skip script media, whether authors can allow or
   forbid it per media, and its Player UI. The Player currently offers no media controls; accepted controls would enter

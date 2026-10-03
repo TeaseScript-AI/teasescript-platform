@@ -13,29 +13,34 @@ or accept final TeaseScript APIs.
 
 ## Camera ownership
 
-When a package declares and receives camera permission, the Player should prefer to keep the selected stream open while
-the package owns that capability instead of reopening the device for every capture. The browser or operating system may
-still display its normal camera-use indicator. The Player owns browser streams and gives TeaseScript only validated,
+The permission and lifecycle model is accepted in [`SECURITY.md`](../SECURITY.md): browser permission is the boundary,
+requested on first activation according to the browser's current permission state, with the camera acquired after Start
+and kept open for the session rather than reopened for every capture. For platform-brokered acquisition the Player owns
+the browser streams, without its own prompt, indicator, or stop control, and gives TeaseScript only validated,
 engine-managed media references.
 
-A camera/media decision must define:
+A camera/media decision must still define:
 
-- package capability declarations and permission UX;
-- acquisition, idle close, switching, revocation, reload, restore, reconnect, and fatal-failure behavior;
+- capability declaration metadata in package or script packaging;
+- how brokered acquisition and capability authorization are enforced against package code calling browser capture APIs
+  directly; a wrapper API cannot prevent that in the same realm, so this needs a concrete isolation mechanism such as a
+  separate execution realm or trusted code transformation;
+- switching, revocation handling, reload, restore, reconnect, and failure recovery;
 - quality negotiation and default resolution;
-- cleanup across `goto`, `run`, `call`, `end`, `exit`, navigation, and session shutdown;
-- privacy indicators and player-visible camera status;
+- Player cleanup details beyond the accepted release on session teardown, unmount, navigation, `end`, and `exit`;
 - recording, still capture, motion detection, sampling, and resource limits.
 
 ## Interactive and direct image capture
 
 The [accepted V30 baseline](../specifications/accepted-syntaxes-v30.md) defines mandatory `askImage(...)` and nullable
 direct `takePhoto(...)`; this planning does not redefine their names or return contracts. The remaining Player design
-must decide source selection, preview, countdown, accept/retake, validation, permission, retry, and recovery behavior. A
+must decide source selection, preview, countdown, accept/retake, validation, retry, and recovery behavior, including
+after a denied permission. A
 rejected preview candidate is not runtime-visible.
 
-`takePhoto(...)` should use the selected active stream without a source question or interactive acceptance flow. Its
-camera options, transcript behavior, and Standard Library composition require a later accepted camera decision.
+`takePhoto(...)` captures silently from the camera stream the Player opened at session start, without a source question,
+preview, or interactive acceptance flow ([`SECURITY.md`](../SECURITY.md)). Its camera options, transcript behavior, and
+Standard Library composition require a later accepted camera decision.
 
 ## Multiple cameras
 
@@ -60,19 +65,15 @@ simultaneous-camera design.
 
 A preview candidate is not runtime-visible until accepted. Retaking may delete the candidate immediately.
 
-Accepted or directly captured media is session-scoped by default:
+The accepted lifetime of directly captured photos is recorded with `takePhoto()` in the
+[accepted specification, §33](../specifications/accepted-syntaxes-v30.md#33-browser-api-file-folder-camera-and-url-references):
+session media at first, durable while reachable from saved script storage, and reclaimable once no saved value
+references it. Runtime and UI state reference stable engine-managed identity rather than raw bytes or browser objects.
+This replaces the earlier direction that captured media stays session-scoped until session cleanup.
 
-- runtime and UI state reference stable engine-managed identity rather than raw bytes or browser objects;
-- checkpoints preserve that identity and the storage needed to restore it;
-- overwriting one variable does not establish that the media is unreachable elsewhere;
-- the first implementation may retain session media until session cleanup instead of introducing incomplete reference
-  counting;
-- later reclamation requires complete reachability across variables, scopes, temporaries, actions, views, edits,
-  handlers, checkpoints, and persistence.
-
-Persistent media requires a separate platform design for stable identity, collections, labels, ordering, retrieval,
-visibility, encryption, retention, deletion, export, moderation, quotas, package access, and original/edited-copy
-relationships. Exact save and retrieval APIs remain open.
+A persistent media library remains a separate platform design: collections, labels, ordering, retrieval, visibility,
+encryption, retention beyond saved references, export, moderation, quotas, package access, and original/edited-copy
+relationships.
 
 ## Time integrity
 
@@ -86,11 +87,11 @@ a separate decision covering event shape, permissions, privacy, severity, and ga
 
 ## Remaining design questions
 
-- exact camera and file capability declarations;
-- role declaration, default selection, switching, and idle ownership;
+- camera, microphone, and file capability declaration metadata;
+- role declaration, default selection, and switching;
 - image interaction and direct-capture API shapes;
-- recording and still-capture handles;
-- simultaneous camera limits;
+- author-facing recording and still-capture APIs;
+- simultaneous-device policy;
 - motion-detection APIs and resource bounds;
 - session media storage and complete reachability;
 - persistent collections, indexing, privacy, retention, and quotas;

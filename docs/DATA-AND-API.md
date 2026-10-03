@@ -102,8 +102,9 @@ active foreground/background action
 The exact cross-origin envelope, field names, capability-negotiation schema, reconnect protocol, and save acknowledgement remain open. They are not defined by ADR 0016.
 
 Camera and file APIs continue to return engine-managed references rather than browser objects. Package-defined camera
-roles, player device aliases, long-lived stream ownership, and persistent media collections remain separate follow-up
-designs recorded in
+roles, player device aliases, captured-media recovery after reload or restore, and persistent media collections remain
+separate follow-up designs; the camera and microphone permission and ownership model is in [`SECURITY.md`](SECURITY.md).
+Follow-ups are recorded in
 [`planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md`](planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md).
 
 ## Player session persistence modes

@@ -82,7 +82,8 @@ export function cloneSettlement(
   if (
     settlement.actionKind === "chatPacingGate" ||
     settlement.actionKind === "mediaPlayback" ||
-    settlement.actionKind === "storageWrite"
+    settlement.actionKind === "storageWrite" ||
+    settlement.actionKind === "capture"
   )
     return { ...settlement };
   return {

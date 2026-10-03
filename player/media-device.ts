@@ -17,14 +17,19 @@ export interface MediaDeviceElement {
   pause(): void;
   load(): void;
   removeAttribute(name: "src"): void;
-  addEventListener(
-    type: "loadedmetadata" | "error" | "seeked" | "ended",
-    listener: () => void,
-  ): void;
+  addEventListener(type: MediaDeviceEvent, listener: () => void): void;
+  removeEventListener(type: MediaDeviceEvent, listener: () => void): void;
 }
+
+type MediaDeviceEvent = "loadedmetadata" | "error" | "seeked" | "ended";
 
 export interface MediaDeviceHost {
   createElement(): MediaDeviceElement;
+  /**
+   * Receives an element the device no longer uses, with its source cleared, so the host may reuse it: a browser that
+   * allowed playback on an element keeps allowing it after its source changes.
+   */
+  releaseElement?(element: MediaDeviceElement): void;
   /** Maps an authored, package-relative media reference to a playable URL, or `null` when it is not available. */
   resolveSource(source: string): string | null;
   /** Forwards a load report to the runtime; the device sends at most one per media instance. */
@@ -56,6 +61,8 @@ interface Entry {
   failed: boolean;
   blocked: boolean;
   finished: boolean;
+  /** Listeners this entry added, removed again before the element is released. */
+  readonly listeners: Array<readonly [MediaDeviceEvent, () => void]>;
 }
 
 /**
@@ -74,15 +81,15 @@ export class MediaDevice {
 
   /** Applies the latest projection: creates, loads, positions, plays, pauses and removes elements. */
   reconcile(media: readonly MediaPlaybackProjection[]): void {
-    const present = new Set<number>();
+    const present = new Set(media.map((projection) => projection.mediaId));
+    // Release ended instances first, so new instances can reuse their elements.
+    for (const [mediaId, entry] of this.#entries) {
+      if (!present.has(mediaId)) this.#remove(entry);
+    }
     for (const projection of media) {
-      present.add(projection.mediaId);
       const entry = this.#entries.get(projection.mediaId) ?? this.#create(projection);
       entry.projection = projection;
       this.#apply(entry);
-    }
-    for (const [mediaId, entry] of this.#entries) {
-      if (!present.has(mediaId)) this.#remove(entry);
     }
     this.#updateBlocked();
   }
@@ -150,6 +157,7 @@ export class MediaDevice {
       failed: false,
       blocked: false,
       finished: false,
+      listeners: [],
     };
     this.#entries.set(projection.mediaId, entry);
     if (entry.element === null) {
@@ -162,8 +170,12 @@ export class MediaDevice {
       return entry;
     }
     const element = entry.element;
-    element.addEventListener("loadedmetadata", () => this.#loadedMetadata(entry, element));
-    element.addEventListener("error", () => {
+    const listen = (type: MediaDeviceEvent, listener: () => void) => {
+      entry.listeners.push([type, listener]);
+      element.addEventListener(type, listener);
+    };
+    listen("loadedmetadata", () => this.#loadedMetadata(entry, element));
+    listen("error", () => {
       if (this.#entries.get(entry.mediaId) !== entry) return;
       // Before loading this is the canonical failure; after it no protocol exists, so progress simply stalls.
       entry.failed = true;
@@ -174,10 +186,10 @@ export class MediaDevice {
       if (!entry.projection.loaded)
         this.#reportLoad(entry, { kind: "failed", message: LOAD_FAILED_MESSAGE });
     });
-    element.addEventListener("seeked", () => {
+    listen("seeked", () => {
       if (entry.pendingPositionMs === null) entry.lastPositionMs = element.currentTime * 1000;
     });
-    element.addEventListener("ended", () => this.#host.requestObservation());
+    listen("ended", () => this.#host.requestObservation());
     element.preload = "auto";
     element.src = url ?? "";
     return entry;
@@ -287,6 +299,8 @@ export class MediaDevice {
   #play(entry: Entry, element: MediaDeviceElement): void {
     element.play().then(
       () => {
+        // A released element may already play another instance; never touch it for this one.
+        if (this.#entries.get(entry.mediaId) !== entry) return;
         // The runtime may have paused or stopped the instance while play() was pending.
         if (!this.#wantsPlayback(entry)) element.pause();
         if (!entry.blocked) return;
@@ -311,9 +325,11 @@ export class MediaDevice {
     this.#entries.delete(entry.mediaId);
     const { element } = entry;
     if (element === null) return;
+    for (const [type, listener] of entry.listeners) element.removeEventListener(type, listener);
     element.pause();
     element.removeAttribute("src");
     element.load();
+    this.#host.releaseElement?.(element);
   }
 
   #updateBlocked(): void {

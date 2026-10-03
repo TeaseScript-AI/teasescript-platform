@@ -96,7 +96,7 @@ measurements as permanent limits.
 Before removing or consolidating a family, record its obligation and remaining evidence in the issue/PR. Delete checks
 that only freeze provisional geometry, development-fixture content, private implementation details, or temporary
 incompleteness (for example an accepted or intended capability being absent, unsuggested, disabled, or represented by a
-placeholder); preserve genuine regressions and browser risks exercised *through* fixtures. Replace numeric tuning
+placeholder); preserve genuine regressions and browser risks exercised _through_ fixtures. Replace numeric tuning
 assertions with observable behavior where possible. A POC check needs reassessment when its experiment changes or ends,
 not automatic repair to preserve an obsolete expectation. Repeated input/viewport cases need distinct failure modes, not
 merely different values.
@@ -553,7 +553,8 @@ media and timers, cue blocks with self-handles, Stage replacement, pacing barrie
 checkpoint/restore equivalence with a simulated Player, and rejection of malformed media state.
 `tests/player-media-device.test.ts` drives the Player's media device against real sessions with deterministic element
 stand-ins: single load reports, stalls, range repetition and terminal stop, pause/resume/seek repositioning, refused
-playback and retry, failed video and unavailable sources, and restore reconnection without repeated cues. The preview
+playback and retry, failed video and unavailable sources, restore reconnection without repeated cues, and element reuse
+without stale listeners or late `play()` results reaching the next media. The preview
 browser checks cover Start activation, the runtime Stage image, refused-audio retry, and actually played audio.
 
 ## Local browser smoke and future host E2E gate
@@ -569,9 +570,19 @@ gating, rendered Stage images, the rendered speaker avatar and letter fallback, 
 playback, a script pause reaching the playing element, pacing skips from a press on unused Player space or Space in the
 empty composer but not from a Player control, a press on message text, or Space while the composer holds text, smart
 follow that keeps a scrolled-up reader in place while a message arrives and resumes through Return to latest, a press
-held past one message's pacing that must not skip the next message's pacing, Finish ending the session, and a narrow viewport
-that keeps the first question's input visible. Development preview presentation is covered by the [Player browser
-verification route](#player-browser-and-visual-verification). `CHROMIUM_BIN` is tried before the `/usr/bin` Chromium
+held past one message's pacing that must not skip the next message's pacing, Finish ending the session, and a narrow
+viewport that keeps the first question's input visible. With Chromium's fake camera showing a generated four-color test
+card it also runs the development preview's camera scenario (`/player/?dev&scenario=camera`): granted, the session camera
+opens at Start, `takePhoto()` puts a photo of the test card on the Stage, and the saved photo is shown again in a new
+run, after which the next mount reclaims a replaced photo; denied, the script continues without a photo; a forged
+reference in saved data shows no photo. Development preview presentation is covered by the [Player browser
+verification route](#player-browser-and-visual-verification).
+
+Firefox captures camera frames differently, so the same scenario has a Firefox route after `npm run build`: `npm run
+test:player:firefox-camera` drives Firefox's fake camera through `playwright-cli` and a Playwright-managed Firefox, and
+skips explicitly when either is missing. It checks a capture whose first frames have no size yet, as a real Firefox
+camera delivers them; the saved photo in a new run; and a camera without frames, after which the script continues
+without a photo. Neither route needs a physical or virtual camera device. `CHROMIUM_BIN` is tried before the `/usr/bin` Chromium
 paths and then the newest Playwright-managed Chromium; an unusable value falls back to them. An unavailable Chromium
 executable is an explicit skip; an available browser must pass the configured smoke checks.
 

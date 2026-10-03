@@ -19,6 +19,9 @@ class FakeElement implements MediaDeviceElement {
   paused = true;
   ended = false;
   refuse = false;
+  /** When set, `play()` waits for `resolvePlays()`. */
+  deferPlays = false;
+  readonly pendingPlays: Array<() => void> = [];
   plays = 0;
   readonly listeners = new Map<string, Array<() => void>>();
   get currentTime() {
@@ -36,6 +39,13 @@ class FakeElement implements MediaDeviceElement {
       error.name = "NotAllowedError";
       return Promise.reject(error);
     }
+    if (this.deferPlays)
+      return new Promise((resolve) =>
+        this.pendingPlays.push(() => {
+          this.paused = false;
+          resolve();
+        }),
+      );
     this.paused = false;
     return Promise.resolve();
   }
@@ -48,6 +58,12 @@ class FakeElement implements MediaDeviceElement {
   }
   addEventListener(type: string, listener: () => void) {
     this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+  }
+  removeEventListener(type: string, listener: () => void) {
+    this.listeners.set(
+      type,
+      (this.listeners.get(type) ?? []).filter((candidate) => candidate !== listener),
+    );
   }
   emit(type: string) {
     for (const listener of this.listeners.get(type) ?? []) listener();
@@ -65,17 +81,25 @@ class FakeElement implements MediaDeviceElement {
 export function harness(
   source: string,
   resolve: (path: string) => string | null = (path) => `asset:${path}`,
+  { reuse = false }: { readonly reuse?: boolean } = {},
 ) {
   const elements: FakeElement[] = [];
+  const released: FakeElement[] = [];
   const loads: Array<[number, MediaLoadReport]> = [];
   let blocked = false;
   let session: PlayerRuntimeSession = createPlayerRuntimeSession(source);
   let now = 0;
   const device = new MediaDevice({
     createElement: () => {
+      const reused = reuse ? released.pop() : undefined;
+      if (reused !== undefined) return reused;
       const element = new FakeElement();
       elements.push(element);
       return element;
+    },
+    releaseElement: (element) => {
+      const fake = elements.find((candidate) => candidate === element);
+      if (fake !== undefined) released.push(fake);
     },
     resolveSource: resolve,
     reportLoad: (mediaId, report) => {

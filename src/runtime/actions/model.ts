@@ -137,13 +137,47 @@ export interface RuntimeStorageWriteActionSnapshot {
   readonly requestEventSequence: number;
 }
 
+/**
+ * `takePhoto()` waits for the Player to capture a still from the session camera. The Player completes it with the
+ * captured image reference or reports the camera unavailable, which yields `null`. Expiry blocks wait until it
+ * settles, so it is never suspended.
+ */
+export interface RuntimeCaptureActionSnapshot {
+  readonly kind: "capture";
+  readonly capture: "photo";
+  readonly actionId: number;
+  readonly owningInstruction: number;
+  readonly continuationInstruction: number;
+  readonly ownerCallFrameId: number | null;
+  readonly scopeDepth: number;
+  readonly loopDepth: number;
+  readonly destinationTemporary: number;
+  readonly createdAtMs: number;
+  readonly requestEventSequence: number;
+}
+
+/** Why the Player had no usable camera for a capture; every reason yields `null` and the script continues. */
+export type CaptureUnavailableReason =
+  "unconfigured" | "denied" | "notFound" | "busy" | "unsupported" | "revoked" | "failed";
+
+export const CAPTURE_UNAVAILABLE_REASONS: readonly CaptureUnavailableReason[] = [
+  "unconfigured",
+  "denied",
+  "notFound",
+  "busy",
+  "unsupported",
+  "revoked",
+  "failed",
+];
+
 /** Timers and media are background work; a media wait blocks the foreground path. */
 export type RuntimeForegroundActionSnapshot =
   | RuntimeDelayActionSnapshot
   | RuntimeInteractionActionSnapshot
   | RuntimeChatPacingGateActionSnapshot
   | RuntimeMediaPlaybackActionSnapshot
-  | RuntimeStorageWriteActionSnapshot;
+  | RuntimeStorageWriteActionSnapshot
+  | RuntimeCaptureActionSnapshot;
 
 export type RuntimePendingActionSnapshot =
   | RuntimeDelayActionSnapshot
@@ -151,13 +185,19 @@ export type RuntimePendingActionSnapshot =
   | RuntimeChatPacingGateActionSnapshot
   | RuntimeMediaPlaybackActionSnapshot
   | RuntimeStorageWriteActionSnapshot
+  | RuntimeCaptureActionSnapshot
   | RuntimeTimerActionSnapshot
   | RuntimeMediaActionSnapshot;
 
 /** Completion events that an active action must still be able to publish. */
 export function requiredActionCompletionEvents(action: { readonly kind?: unknown } | null): number {
-  // An interaction publishes its transcript entry; a failed storage write its warning.
-  if (action?.kind === "interaction" || action?.kind === "storageWrite") return 2;
+  // An interaction publishes its transcript entry; a failed storage write or an unavailable capture its warning.
+  if (
+    action?.kind === "interaction" ||
+    action?.kind === "storageWrite" ||
+    action?.kind === "capture"
+  )
+    return 2;
   if (
     action?.kind === "delay" ||
     action?.kind === "chatPacingGate" ||
@@ -270,9 +310,30 @@ export interface RuntimeChatPacingGateSettlementSnapshot {
   readonly releasedPreparedOutputInstruction: number | null;
 }
 
+/** A settled capture, retained so a repeated Player completion replays instead of capturing twice. */
+export interface RuntimeCaptureActionSettlementSnapshot {
+  readonly actionId: number;
+  readonly actionKind: "capture";
+  readonly capture: "photo";
+  readonly settlementKind: "completed";
+  readonly owningInstruction: number;
+  readonly continuationInstruction: number;
+  readonly ownerCallFrameId: number | null;
+  readonly destinationTemporary: number;
+  readonly requestEventSequence: number;
+  /** The developer warning of an unavailable camera; `null` for a captured photo. */
+  readonly warningEventSequence: number | null;
+  readonly completionEventSequence: number;
+  readonly completedAtMs: number;
+  /** The captured image reference, or `null` when the camera was unavailable. */
+  readonly result: string | null;
+  readonly unavailableReason: CaptureUnavailableReason | null;
+}
+
 export type RuntimeActionSettlementSnapshot =
   | RuntimeDelayActionSettlementSnapshot
   | RuntimeInteractionActionSettlementSnapshot
   | RuntimeChatPacingGateSettlementSnapshot
   | RuntimeMediaPlaybackSettlementSnapshot
-  | RuntimeStorageWriteSettlementSnapshot;
+  | RuntimeStorageWriteSettlementSnapshot
+  | RuntimeCaptureActionSettlementSnapshot;

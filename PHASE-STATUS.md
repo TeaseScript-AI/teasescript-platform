@@ -32,6 +32,10 @@ accept syntax, architecture, or implementation details.
   with playback ranges, repetition, volume, handles, seeks, timeline cues, Player load/progress observations, and
   checkpoint restore at the language, compiler, and runtime level. The Player shows the Stage image and plays
   audio after explicit Start; browser video playback remains deferred.
+- **Camera capture:** `takePhoto()` as a typed capture action with trusted reference admission and non-fatal
+  unavailability under [Runtime](docs/RUNTIME.md#camera-capture). With a trusted host capability the Player opens the
+  session camera after Start and captures silently; a photo saved through script storage is stored in the browser and
+  shown again in a later run. `askImage`, recording APIs, and the advanced package media API remain deferred.
 - **Player:** the POC Player is the Vue implementation under `player/vue/src/` (#418), served on `/player/`. It uses
   Vue/Vite, Tailwind CSS 4, repository-owned shadcn-vue/Reka primitives, and TanStack Vue Virtual as the transcript
   owner. A framework-independent adapter connects it to the implemented transcript, foreground-interaction, pacing,
@@ -55,7 +59,7 @@ contracts and boundaries.
   generalized duration ranges, and locale-aware duration presentation;
 - production cross-origin Player/host integration, richer editor support, and final browser acceptance coverage;
 - pending-action capabilities beyond the implemented timer, interaction, pacing, and media families; browser video
-  playback, the layered scene, camera lifecycle, and custom views;
+  playback, the layered scene, camera capture beyond `takePhoto()`, and custom views;
 - the cross-origin player-host protocol and production browser security integration;
 - TypeScript library linkage, final Standard Library/package identity and compatibility, richer module selection, and
   community dependency resolution;

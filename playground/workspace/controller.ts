@@ -6,6 +6,7 @@ import {
   type RuntimeSnapshot,
 } from "../../src/index.js";
 import { runValidatedState, stepValidatedStateToEvent } from "../../src/runtime/engine.js";
+import { completeAction } from "../../src/runtime/operations/complete-action.js";
 import { observeTime } from "../../src/runtime/operations/observe-time.js";
 import type {
   ActionCompletionOutcome,
@@ -221,19 +222,38 @@ export function executeValidatedWorkspaceSnapshot(
   snapshot: RuntimeSnapshot,
   mode: "run" | "step",
 ): WorkspaceResult {
-  const workingSnapshot = cloneCapturedRuntimeSnapshot(snapshot);
+  const answered = answerWorkspaceCapture(plan, cloneCapturedRuntimeSnapshot(snapshot));
   const operation =
     mode === "run"
-      ? runValidatedState(plan, workingSnapshot)
-      : stepValidatedStateToEvent(plan, workingSnapshot);
+      ? runValidatedState(plan, answered.snapshot)
+      : stepValidatedStateToEvent(plan, answered.snapshot);
   return freezeResult({
     diagnostics: [],
     plan,
     snapshot: operation.snapshot,
-    events: operation.events,
+    events: [...answered.events, ...operation.events],
     status: operation.snapshot.status,
     instructionsExecuted: operation.instructionsExecuted,
   });
+}
+
+/**
+ * The workspace has no camera: continuing past a pending `takePhoto()` answers it as unavailable, so the script gets
+ * `null` and the warning a Player without a camera would produce. Each continuation answers at most the one capture
+ * that is already waiting.
+ */
+function answerWorkspaceCapture(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+): { readonly snapshot: RuntimeSnapshot; readonly events: readonly InterpreterEvent[] } {
+  const action = snapshot.foregroundAction;
+  if (snapshot.status !== "waiting" || action?.kind !== "capture") return { snapshot, events: [] };
+  const operation = completeAction(plan, snapshot, {
+    actionId: action.actionId,
+    actionKind: "capture",
+    payload: { kind: "unavailable", reason: "unconfigured" },
+  });
+  return { snapshot: operation.snapshot, events: operation.events };
 }
 
 function assertWorkspaceSource(source: unknown): asserts source is string {

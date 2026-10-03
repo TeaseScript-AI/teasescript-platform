@@ -1,3 +1,4 @@
+import { isTakePhotoCall } from "./capture-call.js";
 import { normalizeOpaqueColor } from "./color.js";
 import {
   presentationPropertyDiagnostics,
@@ -168,7 +169,7 @@ class SemanticValidator {
   public constructor(options: SemanticValidationOptions) {
     this.#invalidConfiguredNames = Object.freeze(
       [...(options.globals ?? []), ...(options.builtins ?? [])].filter((name) =>
-        ["showButton", "askText", "askNumber", "choose"].includes(name),
+        ["showButton", "askText", "askNumber", "choose", "takePhoto"].includes(name),
       ),
     );
     this.#builtins = new Set([
@@ -923,7 +924,9 @@ class SemanticValidator {
             semanticCode.unsupportedBlockingContext,
             blockingInteraction.kind === "playMediaExpression"
               ? "Media playback is not supported in function parameter defaults."
-              : "Blocking interactions are not supported in function parameter defaults.",
+              : isTakePhotoCall(blockingInteraction)
+                ? "Camera capture is not supported in function parameter defaults."
+                : "Blocking interactions are not supported in function parameter defaults.",
             blockingInteraction.span,
           );
         }
@@ -1025,7 +1028,7 @@ class SemanticValidator {
         if (expression.name === "speaker" && contextualSpeaker !== null) return;
         const binding = scope.resolve(expression.name);
         if (binding === undefined) {
-          if (this.#builtins.has(expression.name)) {
+          if (this.#builtins.has(expression.name) || expression.name === "takePhoto") {
             this.#report(
               semanticCode.functionValue,
               `Builtin '${expression.name}' is not a first-class runtime value.`,
@@ -1093,7 +1096,15 @@ class SemanticValidator {
           const name = expression.callee.name;
           const binding = scope.resolve(name);
           const declaration = this.#functions.get(name);
-          if (declaration !== undefined && binding?.kind === "function") {
+          if (isTakePhotoCall(expression)) {
+            if (expression.arguments.length !== 0) {
+              this.#report(
+                semanticCode.argumentCount,
+                "takePhoto() takes no arguments.",
+                expression.span,
+              );
+            }
+          } else if (declaration !== undefined && binding?.kind === "function") {
             this.#validateFunctionCall(expression, declaration);
           } else if (this.#builtins.has(name)) {
             // Injected and core built-ins validate their values at runtime.
@@ -1547,14 +1558,24 @@ function isKnownInteger(expression: Expression): boolean {
   return value === undefined || Number.isInteger(value);
 }
 
-/** The first interaction or media playback in a parameter default, which cannot pause a default's evaluation. */
+/**
+ * The first interaction, media playback, or camera capture in a parameter default, which cannot pause a default's
+ * evaluation.
+ */
 function findFirstInteraction(
   expression: Expression,
-): Extract<Expression, { kind: "interactionExpression" | "playMediaExpression" }> | null {
+): Extract<
+  Expression,
+  { kind: "interactionExpression" | "playMediaExpression" | "callExpression" }
+> | null {
   const work = [expression];
   while (work.length) {
     const current = work.pop()!;
-    if (current.kind === "interactionExpression" || current.kind === "playMediaExpression")
+    if (
+      current.kind === "interactionExpression" ||
+      current.kind === "playMediaExpression" ||
+      (current.kind === "callExpression" && isTakePhotoCall(current))
+    )
       return current;
     const children = expressionChildren(current);
     for (let i = children.length - 1; i >= 0; i--) work.push(children[i]!);
