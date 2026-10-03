@@ -66,7 +66,7 @@ export type SerializableRuntimeValue =
 
 export class SerializableValueError extends Error {
   public constructor(
-    readonly code: "cyclic" | "invalid" | "setElement" | "equality",
+    readonly code: "cyclic" | "invalid" | "setElement",
     message: string,
   ) {
     super(message);
@@ -299,39 +299,68 @@ export function serializableSetContains(
   return new Set(set.items).has(value);
 }
 
+/**
+ * Structural equality. Objects compare property names and values regardless of property order, lists compare elements
+ * in order, and sets compare members regardless of insertion order. Handles and speaker references compare identity.
+ * Nested values use an explicit stack, so deep values never exhaust the native call stack.
+ */
 export function serializableEquals(
   left: SerializableRuntimeValue,
   right: SerializableRuntimeValue,
 ): boolean {
-  if (typeof left !== typeof right) return false;
-  if (left === null || right === null) return left === right;
-  if (typeof left !== "object" || typeof right !== "object") return left === right;
-  if (left.kind === "speakerReference" && right.kind === "speakerReference") {
-    return left.speakerId === right.speakerId;
+  const pending: [SerializableRuntimeValue, SerializableRuntimeValue][] = [[left, right]];
+  while (pending.length > 0) {
+    const [nextLeft, nextRight] = pending.pop()!;
+    if (!shallowEqualsDeferringChildren(nextLeft, nextRight, pending)) return false;
   }
-  if (left.kind === "duration" && right.kind === "duration") {
-    return left.milliseconds === right.milliseconds;
+  return true;
+}
+
+/** Compares one level and queues the child pairs that must also be equal. */
+function shallowEqualsDeferringChildren(
+  left: SerializableRuntimeValue,
+  right: SerializableRuntimeValue,
+  pending: [SerializableRuntimeValue, SerializableRuntimeValue][],
+): boolean {
+  if (left === null || right === null || typeof left !== "object" || typeof right !== "object")
+    return left === right;
+  switch (left.kind) {
+    case "list":
+      if (right.kind !== "list" || right.items.length !== left.items.length) return false;
+      left.items.forEach((item, index) => pending.push([item, right.items[index]!]));
+      return true;
+    case "object": {
+      if (right.kind !== "object" || right.properties.length !== left.properties.length)
+        return false;
+      const rightValues = new Map(right.properties.map((property) => [property.name, property]));
+      for (const property of left.properties) {
+        const match = rightValues.get(property.name);
+        if (match === undefined) return false;
+        pending.push([property.value, match.value]);
+      }
+      return true;
+    }
+    case "set": {
+      if (right.kind !== "set" || right.items.length !== left.items.length) return false;
+      const members = new Set(right.items);
+      return left.items.every((item) => members.has(item));
+    }
+    case "range":
+      return (
+        right.kind === "range" &&
+        right.start === left.start &&
+        right.end === left.end &&
+        right.inclusive === left.inclusive
+      );
+    case "duration":
+      return right.kind === "duration" && right.milliseconds === left.milliseconds;
+    case "timerHandle":
+      return right.kind === "timerHandle" && right.timerId === left.timerId;
+    case "mediaHandle":
+      return right.kind === "mediaHandle" && right.mediaId === left.mediaId;
+    case "speakerReference":
+      return right.kind === "speakerReference" && right.speakerId === left.speakerId;
   }
-  if (left.kind === "timerHandle" && right.kind === "timerHandle") {
-    return left.timerId === right.timerId;
-  }
-  if (left.kind === "mediaHandle" && right.kind === "mediaHandle") {
-    return left.mediaId === right.mediaId;
-  }
-  if (
-    left.kind === "duration" ||
-    right.kind === "duration" ||
-    left.kind === "timerHandle" ||
-    right.kind === "timerHandle" ||
-    left.kind === "mediaHandle" ||
-    right.kind === "mediaHandle"
-  ) {
-    return false;
-  }
-  throw new SerializableValueError(
-    "equality",
-    "Equality for object, list, and set values is not accepted in this milestone.",
-  );
 }
 
 export function validateSerializableValue(value: unknown, path = "$"): string | null {
