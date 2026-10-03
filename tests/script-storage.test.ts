@@ -707,28 +707,36 @@ test("typed load initializers accept matching scalars, collections, integers, an
   }
 });
 
-test("persisted-value type checks exclude missing keys, defaults, and non-direct loads", () => {
-  const compiled = plan(
-    [
-      "function identity(value) { return value }",
-      'let missing: number = load "missing"',
-      'let fallback: number = load "missing" default identity("fallback")',
-      "let assigned: number = 0",
-      'assigned = load "k"',
-      'let indirect: number = identity(load "k")',
-      "exit",
-    ].join("\n"),
-  );
-  const result = run(
-    compiled,
-    createFreshRuntimeSnapshot(compiled, { scriptStorage: [{ key: "k", value: "stored" }] }),
-  );
+test("loaded values are checked against the variable's type, including missing keys, defaults, and indirect loads", () => {
+  const storage = [{ key: "k", value: "stored" }];
+  const failure = (source: string) => {
+    const compiled = plan(`function identity(value) { return value }\n${source}\nexit`);
+    const result = run(compiled, createFreshRuntimeSnapshot(compiled, { scriptStorage: storage }));
+    return [result.snapshot.failure?.code, result.snapshot.failure?.message];
+  };
+  assert.deepEqual(failure('let missing: number = load "missing"'), [
+    "TSR058",
+    "'missing' holds number, so it cannot take null.",
+  ]);
+  assert.deepEqual(failure('let fallback: number = load "missing" default identity("fallback")'), [
+    "TSR058",
+    "'fallback' holds number, so it cannot take text (string).",
+  ]);
+  assert.deepEqual(failure('let assigned: number = 0\nassigned = load "k"'), [
+    "TSR058",
+    "'assigned' holds number, so it cannot take text (string).",
+  ]);
+  assert.deepEqual(failure('let indirect: number = identity(load "k")'), [
+    "TSR058",
+    "'indirect' holds number, so it cannot take text (string).",
+  ]);
+
+  const optional = plan('let missing: number? = load "missing"\nlet text: string = load "k"\nexit');
+  const result = run(optional, createFreshRuntimeSnapshot(optional, { scriptStorage: storage }));
   assert.equal(result.snapshot.status, "halted");
   assert.equal(binding(result.snapshot, "missing"), null);
-  assert.equal(binding(result.snapshot, "fallback"), "fallback");
-  assert.equal(binding(result.snapshot, "assigned"), "stored");
-  assert.equal(binding(result.snapshot, "indirect"), "stored");
-  assert.deepEqual(result.snapshot.scriptStorage, [{ key: "k", value: "stored" }]);
+  assert.equal(binding(result.snapshot, "text"), "stored");
+  assert.deepEqual(result.snapshot.scriptStorage, storage);
 });
 
 test("compact interactions end at the save 'as' and the load 'default' delimiters", () => {

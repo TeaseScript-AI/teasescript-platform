@@ -50,7 +50,7 @@ function compileParsedSource(
   ]);
   const hasParserErrors = hasErrors(parserDiagnostics);
   const semantic = hasParserErrors
-    ? Object.freeze({ diagnostics: Object.freeze([]) })
+    ? Object.freeze({ diagnostics: Object.freeze([]), valueChecks: new Map() })
     : validateSemantics(parsed.program, {
         ...options,
         builtins: Object.freeze([...CORE_RUNTIME_BUILTINS, ...(options.builtins ?? [])]),
@@ -58,7 +58,7 @@ function compileParsedSource(
   let plan: InstructionPlan | null = null;
   const loweringDiagnostics: Diagnostic[] = [];
   if (!hasParserErrors && !hasErrors(semantic.diagnostics)) {
-    const compiled = compileStableProgram(parsed.program);
+    const compiled = compileStableProgram(parsed.program, semantic.valueChecks);
     const diagnostic = compiledPlanValidationDiagnostic(compiled);
     if (diagnostic === null) {
       plan = markValidatedImmutableInstructionPlan(compiled);

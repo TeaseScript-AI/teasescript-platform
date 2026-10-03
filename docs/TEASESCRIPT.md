@@ -236,8 +236,9 @@ The current function subset includes:
 
 The compiler enforces that a variable keeps its declared or inferred type (V30 §12) wherever both types are known:
 `let`, assignment, `+=`/`-=`, list and set elements (`add`, index assignment), and loop variables. An `integer` value may
-be stored where a `number` is expected; every other mismatch is compile error `TSV041`. Values the compiler cannot know,
-such as untyped storage, host data, and function results, are not yet checked at runtime.
+be stored where a `number` is expected; every other mismatch is compile error `TSV041`. A value the compiler cannot know,
+such as untyped storage, host data, or a function result, is checked at runtime when it is stored in a variable of a
+known type (`TSR058`): scalar types, lists and sets of scalars, and their optional forms.
 
 Complete static typing and the wider V30 Standard Library/runtime APIs are not implemented yet. Until function-signature
 types are checked, a typed function signature parses but does not compile, so its declared types are never silently

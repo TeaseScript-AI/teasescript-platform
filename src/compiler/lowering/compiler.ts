@@ -28,6 +28,7 @@ import type {
   CallArgumentPlan,
   TemplatePartPlan,
   StorageTypePlan,
+  ValueTypePlan,
   TemporaryExpressionPlan,
   InteractionUiPayload,
   PreparedInteractionUiPayload,
@@ -66,7 +67,10 @@ export class InstructionCompiler {
 
   #contextualSpeakerTemporary: number | null = null;
 
-  public constructor(private readonly declarations: readonly FunctionDeclaration[]) {
+  public constructor(
+    private readonly declarations: readonly FunctionDeclaration[],
+    private readonly valueChecks: ReadonlyMap<Statement, ValueTypePlan> = new Map(),
+  ) {
     this.#functionByName = new Map(
       declarations.map((declaration, index) => [
         declaration.name.name,
@@ -355,10 +359,12 @@ export class InstructionCompiler {
                 }),
               )
             : this.#lowerExpression(statement.initializer);
+        const expectedType = this.valueChecks.get(statement);
         this.instructions.push({
           kind: "declareBinding",
           name: statement.name.name,
           value: lowered.plan,
+          ...(expectedType === undefined ? {} : { expectedType }),
           span: copySpan(statement.span),
         });
         this.#emitTemporaryCleanup(lowered.temporaryIds, statement.span);
@@ -396,10 +402,12 @@ export class InstructionCompiler {
                 right: value.plan,
                 span: copySpan(statement.span),
               };
+        const expectedType = this.valueChecks.get(statement);
         this.instructions.push({
           kind: "assign",
           target: target.plan,
           value: assigned,
+          ...(expectedType === undefined ? {} : { expectedType }),
           span: copySpan(statement.span),
         });
         this.#emitTemporaryCleanup(

@@ -1,9 +1,10 @@
-import type { FunctionDeclaration, Program } from "../ast.js";
+import type { FunctionDeclaration, Program, Statement } from "../ast.js";
 import type { SourceSpan } from "../source.js";
 import {
   INSTRUCTION_PLAN_FORMAT,
   INSTRUCTION_PLAN_VERSION,
   type InstructionPlan,
+  type ValueTypePlan,
 } from "../plan/model.js";
 import { freezeInstructionPlan } from "../plan/freeze.js";
 import { sourceSpanToPlanLocation } from "../plan/source-location.js";
@@ -13,11 +14,14 @@ export type { InstructionPlan } from "../plan/model.js";
 export { InstructionCompilationError } from "./errors.js";
 
 /** Lowers parser-owned AST data after source parsing and semantic validation. */
-export function compileStableProgram(program: Program): InstructionPlan {
+export function compileStableProgram(
+  program: Program,
+  valueChecks: ReadonlyMap<Statement, ValueTypePlan> = new Map(),
+): InstructionPlan {
   const declarations = program.statements.filter(
     (statement): statement is FunctionDeclaration => statement.kind === "functionDeclaration",
   );
-  const compiler = new InstructionCompiler(declarations);
+  const compiler = new InstructionCompiler(declarations, valueChecks);
   compiler.compileStatements(
     program.statements.filter((statement) => statement.kind !== "functionDeclaration"),
   );

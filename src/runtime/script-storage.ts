@@ -1,4 +1,4 @@
-import type { PlanSourceLocation, StorageTypePlan } from "../plan/model.js";
+import type { PlanSourceLocation, StorageTypePlan, ValueTypePlan } from "../plan/model.js";
 import type { SourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
@@ -171,6 +171,51 @@ export function cloneScriptStorage(
     key: entry.key,
     value: cloneCapturedSerializableValue(entry.value),
   }));
+}
+
+/** Whether a value fits a variable's type (V30 §12); a list or set must contain only matching elements. */
+export function matchesValueType(value: SerializableRuntimeValue, type: ValueTypePlan): boolean {
+  if (value === null) return type.optional;
+  if (type.collection === null) return matchesScalarType(value, type.name);
+  return (
+    typeof value === "object" &&
+    value.kind === type.collection &&
+    value.items.every((item) => matchesScalarType(item, type.name))
+  );
+}
+
+/** The author-facing name of a checked variable type, as in an annotation. */
+export function valueTypeName(type: ValueTypePlan): string {
+  const collection =
+    type.collection === "list"
+      ? `${type.name}[]`
+      : type.collection === "set"
+        ? `${type.name} set`
+        : type.name;
+  return type.optional ? `${collection}?` : collection;
+}
+
+/** A plain-language description of a runtime value's kind, matching the compiler's wording. */
+export function describeRuntimeValue(value: SerializableRuntimeValue): string {
+  if (value === null) return "null";
+  if (typeof value === "string") return "text (string)";
+  if (typeof value === "boolean") return "true or false (boolean)";
+  if (typeof value === "number")
+    return Number.isInteger(value)
+      ? "a whole number (integer)"
+      : "a number with a fraction (number)";
+  switch (value.kind) {
+    case "object":
+      return "an object";
+    case "timerHandle":
+      return "a timer handle";
+    case "mediaHandle":
+      return "a media handle";
+    case "speakerReference":
+      return "a speaker";
+    default:
+      return `a ${value.kind}`;
+  }
 }
 
 function matchesScalarType(
