@@ -7,8 +7,12 @@ const props = defineProps<{
   viewfinder?: MediaStreamTrack | null;
 }>();
 const emit = defineEmits<{ mediaAspect: [ratio: number] }>();
-// Only a new source needs measuring again; an equal source keeps its loaded image and aspect.
-watch(() => props.media?.src, () => emit("mediaAspect", 0));
+// Only a new source needs measuring again; an equal source keeps its loaded image and aspect. A leading viewfinder
+// keeps the camera's aspect while its reference image changes.
+watch(
+  () => props.media?.src,
+  () => props.viewfinder || emit("mediaAspect", 0),
+);
 // A hidden viewfinder leaves no camera aspect behind; a returning image measures its own again.
 watch(
   () => props.viewfinder,

@@ -1174,6 +1174,17 @@ async function viewfinderScenario(cdp, origin) {
     );
   const video = `document.querySelector('[data-viewfinder] video')`;
   const viewfinders = `document.querySelectorAll('[data-viewfinder]').length`;
+  const stageAspect = `Number(getComputedStyle(document.querySelector('#player-shell')).getPropertyValue('--media-aspect'))`;
+  const reference = `document.querySelector('.stage-viewfinder-reference')?.getAttribute('src') ?? null`;
+  const pickStageFixture = (name) =>
+    evaluate(
+      cdp,
+      `const select = [...document.querySelectorAll('label')].find((label) => label.textContent.includes('Stage media fixture')).querySelector('select');
+      select.value = ${JSON.stringify(name)};
+      select.dispatchEvent(new Event('change'));`,
+    );
+
+  await setViewport(cdp, 1440, 900);
 
   await cdp.call("Browser.setPermission", {
     origin,
@@ -1197,6 +1208,25 @@ async function viewfinderScenario(cdp, origin) {
     "matrix(-1, 0, 0, 1, 0, 0)",
     "The viewfinder is not mirrored",
   );
+  // The Stage follows the camera's aspect, also when the reference image is replaced meanwhile.
+  await waitFor(
+    cdp,
+    `Math.abs(${stageAspect} - 4 / 3) < 0.01`,
+    8_000,
+    "The Stage did not adopt the camera's aspect",
+  );
+  await click(cdp, '[data-launcher] button[aria-label="Visual Lab"]');
+  await waitFor(cdp, `!!document.querySelector('select')`);
+  const runtimeReference = await value(cdp, reference);
+  await pickStageFixture("Portrait");
+  await waitFor(cdp, `${reference} !== ${JSON.stringify(runtimeReference)}`);
+  assertEqual(
+    Math.abs((await value(cdp, stageAspect)) - 4 / 3) < 0.01,
+    true,
+    "Replacing the reference image changed the viewfinder's aspect",
+  );
+  // The fixture would cover the photo.
+  await pickStageFixture("Runtime");
   // The script takes the photo from the same open camera; the viewfinder goes, and the photo is not mirrored.
   await takePhoto();
   await waitFor(cdp, `document.body.innerText.includes('Captured.')`);

@@ -8,13 +8,17 @@ import { Video } from "@lucide/vue";
 const props = defineProps<{ track: MediaStreamTrack }>();
 const emit = defineEmits<{ aspect: [ratio: number] }>();
 const video = ref<HTMLVideoElement | null>(null);
-// The camera's aspect ratio once its first frame is known; webcams commonly deliver 4:3.
+// The camera's aspect ratio once a frame has a size; webcams commonly deliver 4:3. A browser may play frames before
+// they have a size, as Firefox does with some cameras, so playing frames are measured too; only a change is reported.
 const ratio = ref(4 / 3);
+let reported: number | null = null;
 function measured() {
   const element = video.value;
   if (!element?.videoWidth || !element.videoHeight) return;
-  ratio.value = element.videoWidth / element.videoHeight;
-  emit("aspect", ratio.value);
+  const measuredRatio = element.videoWidth / element.videoHeight;
+  if (measuredRatio === reported) return;
+  reported = ratio.value = measuredRatio;
+  emit("aspect", measuredRatio);
 }
 
 watch(
@@ -44,6 +48,7 @@ onBeforeUnmount(() => {
       aria-hidden="true"
       @loadedmetadata="measured"
       @resize="measured"
+      @timeupdate="measured"
     />
     <slot />
     <figcaption class="viewfinder-label">
