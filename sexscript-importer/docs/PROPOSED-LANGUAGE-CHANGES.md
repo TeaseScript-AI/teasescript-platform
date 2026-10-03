@@ -92,9 +92,11 @@ return countImages(tags: ["Domme3", "Domme${pack}"])
 ```
 
 The legacy count also filtered by file name (`Domme(\d+).jpg`), which tags cannot express; the output carries a note.
-The flow then stops at a legacy busy-wait countdown that loops on `getSeconds()` and exceeds the instruction budget
-(TSR037); converting that to a timer is importer work. Toy's imagery (outfit folders with tag files, random selection
-by persona, outfit, and tags) fits the owner's tag idea but needs tag ingestion from those files; not converted yet.
+With the importer now turning Domme3's busy-wait countdown into a visible `timer` (commit `4d0d9cb3`), the entry flow
+with all proposals runs `Domme3` → `introfirst` → `implements` and stops at `ask`, whose remaining causes are legacy
+bugs (helper methods called without the script host, which failed in SexScript too) and Java date formatting. Toy's
+imagery (outfit folders with tag files, random selection by persona, outfit, and tags) fits the owner's tag idea but
+needs tag ingestion from those files; not converted yet.
 
 **No corpus evidence:** removing objects or positions from lists (#509) has zero sites, and no output depends on
 `say` of a whole list (L1). Both remain language-consistency decisions; C3 records need #509 in general.
