@@ -708,7 +708,7 @@ Rules:
   `end` may not be before `start`; otherwise a runtime error is raised.
 - Searching and replacing compare text literally and case-sensitively. `replace` needs a non-empty `search`.
 - Case conversion uses the locale-independent Unicode mapping: `"Straße".uppercase()` is `"STRASSE"`.
-- An argument that must be text but is another value raises a runtime error.
+- Arguments are positional, and an argument that must be text but is another value raises a runtime error.
 
 ## 9. Commands
 **Status:** Accepted
@@ -1000,7 +1000,7 @@ items.contains("map")
 items.join(", ")
 ```
 
-`items.join(separator)` returns the elements as text, separated by `separator`, which defaults to `", "`. Elements are
+`items.join(separator)` returns the elements as text, separated by the text `separator`, which defaults to `", "`. Elements are
 converted as `say` converts a single value; a list that contains lists, sets, or objects raises a runtime error.
 
 List properties:

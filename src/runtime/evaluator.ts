@@ -1207,7 +1207,7 @@ export class Evaluator {
               `Expected 0 to 1 positional arguments, received ${positional.length}.`,
               span,
             );
-          const separator = positional[0] ?? ", ";
+          const separator = positional.length === 0 ? ", " : positional[0];
           if (typeof separator !== "string")
             throw fault("TSR057", "join() expects text as its separator.", span);
           return receiver.items.map((item) => this.#joinedText(item, span)).join(separator);

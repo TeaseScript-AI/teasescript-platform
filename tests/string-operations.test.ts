@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { run } from "../src/runtime/engine.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
+import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 import { sayTexts } from "./helpers/runtime-events.js";
@@ -73,6 +76,30 @@ test("split keeps empty parts, replace is literal, and list join converts scalar
   );
 });
 
+test("positions stay on code points for combining marks, expanding case, and lone surrogates", () => {
+  assert.deepEqual(
+    said(
+      [
+        'let accent = "cafe\u0301!"',
+        'say "${accent.length} ${accent.substring(4, 5).length} ${accent.substring(5)} ${"abc".substring(3, 3).length}"',
+        'say "${"İ".lowercase().length} ${"ﬀ".uppercase()}"',
+      ].join("\n"),
+    ),
+    ["6 1 ! 0", "2 FF"],
+  );
+
+  const surrogates = compileValidPlan(
+    'say "${emoji.indexOf(low)} ${emoji.contains(low)} ${emoji.endsWith(low)} ${emoji.split(low).length} ${emoji.replace(low, "x")} ${low.contains(low)}"',
+    { globals: ["emoji", "low"] },
+  );
+  const result = run(
+    surrogates,
+    createFreshRuntimeSnapshot(surrogates, { globals: { emoji: "a😀", low: "\udE00" } }),
+  );
+  assert.equal(result.snapshot.failure, null);
+  assert.deepEqual(sayTexts(result), ["-1 false false 1 a😀 true"]);
+});
+
 test("misused text operations raise source-located runtime errors", () => {
   const cases = [
     [
@@ -90,6 +117,7 @@ test("misused text operations raise source-located runtime errors", () => {
     ['say "abc".replace("", "x")', "TSR057", "replace() needs non-empty text to search for."],
     ['say "abc".contains(1)', "TSR057", "contains() expects text as argument 1."],
     ['say ["a"].join(1)', "TSR057", "join() expects text as its separator."],
+    ['say ["a"].join(null)', "TSR057", "join() expects text as its separator."],
     [
       'say [["a"]].join()',
       "TSR021",
