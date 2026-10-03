@@ -122,8 +122,9 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
 Evidence for owner evaluation, ordered by corpus weight:
 
 1. **Choice from a runtime list.** DisciplineClinic builds menus from data (`getSelectedValue(dialog, ["Back"] +
-   offenseTextArray)`), and Toy builds its menus from registered options; 23 corpus calls. Compact `choose` needs every
-   option in the source, and `choose someList` presents one random option (visible-text list conversion). For a
+   offenseTextArray)`), and Toy builds its menus from registered options; 23 corpus calls. Each compact `choose` option
+   may be any expression (`choose back, offenses[0]`), but the number of options is fixed in the source, and
+   `choose someList` presents one button with one random element (visible-text list conversion). For a
    bounded package a helper that branches on the list length (`choose 0: rows[0].label, 1: rows[1].label, ...` per
    length) works, so this is an ergonomic gap rather than an inexpressible one; menus over data are ordinary script
    logic, which makes it the strongest candidate.
