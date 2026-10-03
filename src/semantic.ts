@@ -90,7 +90,6 @@ const semanticCode = {
   unknownFunction: "TSV018",
   nonCallable: "TSV019",
   argumentCount: "TSV020",
-  mixedArguments: "TSV021",
   unknownNamedArgument: "TSV022",
   duplicateNamedArgument: "TSV023",
   missingNamedArgument: "TSV024",
@@ -1342,6 +1341,10 @@ class SemanticValidator {
     }
   }
 
+  /**
+   * Positional arguments fill parameters from left to right; named arguments that follow them fill parameters by name.
+   * Each parameter receives at most one value, and every parameter without a default needs one.
+   */
   #validateFunctionCall(
     expression: Extract<Expression, { kind: "callExpression" }>,
     declaration: FunctionDeclaration,
@@ -1350,46 +1353,56 @@ class SemanticValidator {
       (argument) => argument.kind === "positionalArgument",
     );
     const named = expression.arguments.filter((argument) => argument.kind === "namedArgument");
-    if (positional.length > 0 && named.length > 0) {
+    const functionName = declaration.name.name;
+    const required = declaration.parameters.filter(
+      (parameter) => parameter.defaultValue === null,
+    ).length;
+    if (positional.length > declaration.parameters.length) {
       this.#report(
-        semanticCode.mixedArguments,
-        "Positional and named arguments may not be mixed in one call.",
+        semanticCode.argumentCount,
+        `Function '${functionName}' expects ${required} through ${declaration.parameters.length} positional argument(s), received ${positional.length}.`,
         expression.span,
       );
       return;
     }
-    const required = declaration.parameters.filter(
-      (parameter) => parameter.defaultValue === null,
-    ).length;
     if (named.length === 0) {
-      if (positional.length < required || positional.length > declaration.parameters.length) {
+      if (positional.length < required)
         this.#report(
           semanticCode.argumentCount,
-          `Function '${declaration.name.name}' expects ${required} through ${declaration.parameters.length} positional argument(s), received ${positional.length}.`,
+          `Function '${functionName}' expects ${required} through ${declaration.parameters.length} positional argument(s), received ${positional.length}.`,
           expression.span,
         );
-      }
       return;
     }
-    const parameters = new Map(
-      declaration.parameters.map((parameter) => [parameter.name.name, parameter]),
+    const indexes = new Map(
+      declaration.parameters.map((parameter, index) => [parameter.name.name, index]),
     );
-    const supplied = new Set<string>();
+    const supplied = new Set(
+      declaration.parameters.slice(0, positional.length).map((parameter) => parameter.name.name),
+    );
     for (const argument of named) {
-      if (!parameters.has(argument.name.name)) {
+      const name = argument.name.name;
+      const index = indexes.get(name);
+      if (index === undefined) {
         this.#report(
           semanticCode.unknownNamedArgument,
-          `Unknown argument '${argument.name.name}' for function '${declaration.name.name}'.`,
+          `Unknown argument '${name}' for function '${functionName}'.`,
           argument.name.span,
         );
-      } else if (supplied.has(argument.name.name)) {
+      } else if (index < positional.length) {
         this.#report(
           semanticCode.duplicateNamedArgument,
-          `Duplicate named argument '${argument.name.name}'.`,
+          `Parameter '${name}' already receives positional argument ${index + 1}. Remove one of the two.`,
+          argument.name.span,
+        );
+      } else if (supplied.has(name)) {
+        this.#report(
+          semanticCode.duplicateNamedArgument,
+          `Duplicate named argument '${name}'.`,
           argument.name.span,
         );
       }
-      supplied.add(argument.name.name);
+      supplied.add(name);
     }
     for (const parameter of declaration.parameters) {
       if (parameter.defaultValue === null && !supplied.has(parameter.name.name)) {
