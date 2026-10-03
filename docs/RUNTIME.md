@@ -820,10 +820,16 @@ data; reconciliation belongs to #469 and is not implemented here.
 
 Ordinary scalar visible-text conversion accepts strings, finite numbers, booleans, `null`, and elapsed duration values.
 Duration formatting is defined in specification
-[§35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-unix-time). When the value is a list, the
-runtime selects exactly one item and then accepts only a string or finite number. Selected booleans, `null`, objects,
-sets, ranges, and nested collections fail with structured runtime error `TSR021`; the runtime does not recursively
-select or stringify them.
+[§35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-unix-time). List text follows
+[§16](specifications/accepted-syntaxes-v30.md#lists-in-text):
+
+- `${...}` interpolation checks that every element is a string or finite number, then selects exactly one element with
+  the session RNG. An empty list fails with `TSR019` and any other element with `TSR021`, both before any RNG draw.
+- `say` joins the scalar text of every element with `, `. A list, set, or object element fails with `TSR021`.
+- Button labels, input hints, and choice options reject a list with `TSR021`; a list literal there is compile error
+  `TSV040`. Materializing an interaction draws no RNG.
+
+The runtime never recursively selects or stringifies nested values.
 
 The earlier proposal for automatic chat pacing at 17 visible characters per second is superseded. ADR 0018 defines the
 accepted deterministic first-POC smart-autoplay and pacing-action contract. The current engine/compiler and playground
@@ -900,9 +906,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 25 | Script storage: `storageLoad` expressions with lazy defaults and direct typed-initializer checks, and `storageWrite` instructions (`save`; `delete` when the value is `null`). Revision 24: message preparation accepts authored position and alignment only for prose. Media instructions `pacingBarrier`, `showImage`, and `playMedia`; handler regions carry `handler` (`timer` or `media`) and `selfHandle`. Revision 21 added the timer instructions. |
+| Instruction plan | 26 | List text: `say` shows a whole list, only `${...}` interpolation selects an element, and interaction text fields reject lists. Revision 25: script storage `storageLoad` expressions with lazy defaults and direct typed-initializer checks, and `storageWrite` instructions (`save`; `delete` when the value is `null`). Revision 24: message preparation accepts authored position and alignment only for prose. Media instructions `pacingBarrier`, `showImage`, and `playMedia`; handler regions carry `handler` (`timer` or `media`) and `selfHandle`. Revision 21 added the timer instructions. |
 | Runtime snapshot | 26 | The validated, key-sorted `scriptStorage` session view, `scriptStoragePersistent`, and foreground `storageWrite` actions and settlements. Revision 25: captured bubble presentations require null position and alignment; placement is Player-owned. Media state: `stageImage`, background `media` actions, `settledMedia`, `nextMediaId`, foreground `mediaPlayback` waits and settlements, media cue invocations and interrupt frames, barrier-promoted pacing gates, and media handles. Revision 22 added timer state. |
-| Checkpoint | 34 | Updated the self-contained bundle for the script-storage plan and snapshot contracts. Revision 33: prose-only authored placement, bubble presentation validation, and the media plan and snapshot contracts. |
+| Checkpoint | 35 | Updated the self-contained bundle for the list-text plan contract. Revision 34: the script-storage plan and snapshot contracts. Revision 33: prose-only authored placement, bubble presentation validation, and the media plan and snapshot contracts. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 

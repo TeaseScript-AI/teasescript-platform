@@ -21,7 +21,7 @@ import {
   type PreparedReferenceDescriptor,
   type PreparedReferenceStep,
 } from "./prepared-references.js";
-import { nextXorShift32, type RandomSource, type XorShift32State } from "./random.js";
+import { nextXorShift32, type RandomSource } from "./random.js";
 import {
   assertStoredType,
   LOAD_KEY_MESSAGE,
@@ -134,6 +134,20 @@ export class RuntimeExecutionContext {
     this.#evaluator = new Evaluator(this.snapshot, this.capabilities, this.events);
     return this.#evaluator;
   }
+}
+
+/** Scalar visible text: strings, finite numbers, booleans, `null`, and elapsed durations. */
+function visibleText(value: SerializableRuntimeValue, span: SourceSpan): string {
+  if (typeof value === "string") return value;
+  if (isFiniteNumber(value)) return String(Object.is(value, -0) ? 0 : value);
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (value === null) return "null";
+  if (isDuration(value)) return formatDuration(value.milliseconds);
+  throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
+}
+
+function isFiniteNumber(value: SerializableRuntimeValue): value is number {
+  return typeof value === "number" && Number.isFinite(value);
 }
 
 export class Evaluator {
@@ -419,7 +433,7 @@ export class Evaluator {
           if (frame.stage === 1) {
             const part = expression.parts[frame.index - 1]!;
             if (part.kind === "expression")
-              frame.text += this.visibleText(result.value, part.expression.span);
+              frame.text += this.interpolationText(result.value, part.expression.span);
           }
           while (
             frame.index < expression.parts.length &&
@@ -861,29 +875,51 @@ export class Evaluator {
     });
   }
 
-  public visibleText(value: SerializableRuntimeValue, span: SourceSpan): string {
-    return this.visibleTextWithRng(value, span, this.snapshot.rng);
+  /** `${...}` text. A list selects one element with the session RNG, again at every evaluation. */
+  public interpolationText(value: SerializableRuntimeValue, span: SourceSpan): string {
+    if (!isList(value)) return visibleText(value, span);
+    if (value.items.length === 0)
+      throw fault(
+        "TSR019",
+        "An interpolated list must contain at least one element to select from.",
+        span,
+      );
+    if (!value.items.every((item) => typeof item === "string" || isFiniteNumber(item)))
+      throw fault(
+        "TSR021",
+        "An interpolated list may contain only text and numbers, because one element is selected as text.",
+        span,
+      );
+    return visibleText(this.#randomItem(value.items, span), span);
   }
 
-  public visibleTextWithRng(
-    value: SerializableRuntimeValue,
-    span: SourceSpan,
-    rng: XorShift32State,
-  ): string {
-    if (isList(value)) {
-      const selected = this.#randomItem(value.items, span, rng);
-      if (typeof selected === "string") return selected;
-      if (typeof selected === "number" && Number.isFinite(selected))
-        return String(Object.is(selected, -0) ? 0 : selected);
-      throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
-    }
-    if (typeof value === "string") return value;
-    if (typeof value === "number" && Number.isFinite(value))
-      return String(Object.is(value, -0) ? 0 : value);
-    if (typeof value === "boolean") return value ? "true" : "false";
-    if (value === null) return "null";
-    if (isDuration(value)) return formatDuration(value.milliseconds);
-    throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
+  /** `say` text. A list shows every element in order, separated by `, `. */
+  public sayText(value: SerializableRuntimeValue, span: SourceSpan): string {
+    if (!isList(value)) return visibleText(value, span);
+    return value.items
+      .map((item) => {
+        if (isList(item) || isSet(item) || isObject(item))
+          throw fault(
+            "TSR021",
+            "say shows a list only when it contains no lists, sets, or objects. Select an element or a property first.",
+            span,
+          );
+        return visibleText(item, span);
+      })
+      .join(", ");
+  }
+
+  /** Text of an interaction field such as a button label, input hint, or choice option. A list is not selected. */
+  public fieldText(value: SerializableRuntimeValue, span: SourceSpan, choice = false): string {
+    if (isList(value))
+      throw fault(
+        "TSR021",
+        choice
+          ? 'A list cannot be a choice option yet. Write each option separately, or select one element with "${list}" or list.random.'
+          : 'A list cannot be used as this text. Select one element with "${list}" or list.random.',
+        span,
+      );
+    return visibleText(value, span);
   }
 
   #binary(
@@ -1399,10 +1435,10 @@ export class Evaluator {
     return value;
   }
 
-  #findRandom(span: SourceSpan, rng = this.snapshot.rng): number {
+  #findRandom(span: SourceSpan): number {
     const random =
       this.capabilities.random === undefined
-        ? nextXorShift32(rng)
+        ? nextXorShift32(this.snapshot.rng)
         : this.capabilities.random.next();
     if (!Number.isFinite(random) || random < 0 || random >= 1) {
       throw fault("TSR020", "The injected random source must return a number in [0, 1).", span);
@@ -1486,11 +1522,10 @@ export class Evaluator {
   #randomItem(
     items: readonly SerializableRuntimeValue[],
     span: SourceSpan,
-    rng = this.snapshot.rng,
   ): SerializableRuntimeValue {
     if (items.length === 0)
       throw fault("TSR019", "Cannot select '.random' from an empty collection.", span);
-    return items[Math.floor(this.#findRandom(span, rng) * items.length)]!;
+    return items[Math.floor(this.#findRandom(span) * items.length)]!;
   }
 
   #getProperty(

@@ -107,6 +107,7 @@ const semanticCode = {
   invalidMedia: "TSV036",
   invalidMediaHandleMember: "TSV037",
   invalidStorageKey: "TSV038",
+  listInInteractionText: "TSV040",
 } as const;
 
 export function validateSemantics(
@@ -684,6 +685,7 @@ class SemanticValidator {
       case "showButtonStatement": {
         const contextualSpeaker = this.#interactionSpeaker(statement.speaker, scope);
         this.#validateExpression(statement.label, scope, contextualSpeaker);
+        this.#validateInteractionText(statement.label, "a button label");
         if (statement.background !== null) {
           this.#validateExpression(statement.background, scope, contextualSpeaker);
           this.#validateButtonBackground(statement.background);
@@ -1018,6 +1020,7 @@ class SemanticValidator {
           yield* compileChild(
             this.#validateExpressionTask(expression.hint, scope, contextualSpeaker),
           );
+          this.#validateInteractionText(expression.hint, "an input hint");
         }
         return;
       }
@@ -1215,6 +1218,18 @@ class SemanticValidator {
         : null;
   }
 
+  /** Only `${...}` selects from a list; a list literal in an interaction text field is always rejected at runtime. */
+  #validateInteractionText(expression: Expression, field: string): void {
+    if (unwrapParentheses(expression).kind === "listLiteral")
+      this.#report(
+        semanticCode.listInInteractionText,
+        field === "a choice option"
+          ? `A list cannot be a choice option yet. Write each option separately, or select one element with "\${...}" or .random.`
+          : `A list cannot be ${field}. Select one element with "\${...}" or .random.`,
+        expression.span,
+      );
+  }
+
   #validateButtonBackground(expression: Expression): void {
     const text = staticVisibleText(expression);
     if (text !== undefined && normalizeOpaqueColor(text) === null)
@@ -1262,6 +1277,7 @@ class SemanticValidator {
       yield* compileChild(this.#validateExpressionTask(option.value, scope, contextualSpeaker));
       let value = option.value;
       while (value.kind === "parenthesizedExpression") value = value.expression;
+      this.#validateInteractionText(value, "a choice option");
       if (value.kind === "objectLiteral") {
         if (!value.properties.some((property) => property.name.name === "text"))
           this.#report(
@@ -1271,6 +1287,8 @@ class SemanticValidator {
           );
         for (const property of value.properties) {
           if (property.name.name === "background") this.#validateButtonBackground(property.value);
+          else if (property.name.name === "text")
+            this.#validateInteractionText(property.value, "a choice option");
           else if (property.name.name !== "text")
             this.#report(
               semanticCode.invalidInteractionChoice,

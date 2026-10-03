@@ -336,7 +336,7 @@ test("first smart say creates a background gate and later say promotes it withou
 });
 
 test("pacing skip settles a promoted gate and emits its prepared output once, directly and after checkpoint restore", () => {
-  const compiled = plan('say ["first", "first-alt"]\nsay ["second", "second-alt"]');
+  const compiled = plan('say "${["first", "first-alt"]}"\nsay "${["second", "second-alt"]}"');
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled, { seed: 77 }));
   const gate = waiting.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
@@ -431,7 +431,7 @@ test("background pacing survives scope, loop, and call unwinding through checkpo
 });
 
 test("a pacing gate created by a returned function promotes and resumes later output", () => {
-  const compiled = plan('function f { say "first" }\nf()\nsay ["second", "second-alt"]');
+  const compiled = plan('function f { say "first" }\nf()\nsay "${["second", "second-alt"]}"');
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled, { seed: 77 }));
   const gate = waiting.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
@@ -503,7 +503,7 @@ test("smart pacing uses the final visible text and captured settings", () => {
       deadlineMs: 2_100,
     },
     {
-      source: 'say ["short", "selected text"]',
+      source: 'let texts = ["short", "selected text"]\nsay "${texts}"',
       options: { seed: 77 },
       text: "short",
       deadlineMs: 1_800,
@@ -897,7 +897,7 @@ test("exact and zero pacing create only the required actions", () => {
 });
 
 test("a background pacing gate restores before promotion and preserves prepared output equivalence", () => {
-  const compiled = plan('say ["first", "first-alt"]\nsay ["second", "second-alt"]');
+  const compiled = plan('say "${["first", "first-alt"]}"\nsay "${["second", "second-alt"]}"');
   const initial = createFreshRuntimeSnapshot(compiled, { seed: 77 });
   const first = executeInstruction(compiled, initial);
   const originalGate = first.snapshot.backgroundActions[0];
