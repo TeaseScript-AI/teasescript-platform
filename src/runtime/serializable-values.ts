@@ -302,44 +302,68 @@ export function serializableSetContains(
 /**
  * Structural equality. Objects compare property names and values regardless of property order, lists compare elements
  * in order, and sets compare members regardless of insertion order. Handles and speaker references compare identity.
- * Nested values use an explicit stack, so deep values never exhaust the native call stack.
+ * Scalar children are compared as soon as their container is visited, before any nested list or object, and nested
+ * values use an explicit stack, so deep values never exhaust the native call stack.
  */
 export function serializableEquals(
   left: SerializableRuntimeValue,
   right: SerializableRuntimeValue,
 ): boolean {
-  const pending: [SerializableRuntimeValue, SerializableRuntimeValue][] = [[left, right]];
+  const pending: DeferredComparison[] = [];
+  if (!equalsOrDefer(left, right, pending)) return false;
   while (pending.length > 0) {
-    const [nextLeft, nextRight] = pending.pop()!;
-    if (!shallowEqualsDeferringChildren(nextLeft, nextRight, pending)) return false;
+    const next = pending.pop()!;
+    if (next.kind === "list") {
+      for (let index = 0; index < next.left.items.length; index += 1) {
+        if (!equalsOrDefer(next.left.items[index]!, next.right.items[index]!, pending))
+          return false;
+      }
+    } else {
+      const rightValues = new Map(
+        next.right.properties.map((property) => [property.name, property.value]),
+      );
+      for (const property of next.left.properties) {
+        if (!rightValues.has(property.name)) return false;
+        if (!equalsOrDefer(property.value, rightValues.get(property.name)!, pending)) return false;
+      }
+    }
   }
   return true;
 }
 
-/** Compares one level and queues the child pairs that must also be equal. */
-function shallowEqualsDeferringChildren(
+/**
+ * Compares two values without descending: a pair of lists of equal length or objects with equal property counts is
+ * queued in `pending`, and everything else is decided now.
+ */
+type DeferredComparison =
+  | {
+      readonly kind: "list";
+      readonly left: SerializableRuntimeList;
+      readonly right: SerializableRuntimeList;
+    }
+  | {
+      readonly kind: "object";
+      readonly left: SerializableRuntimeObject;
+      readonly right: SerializableRuntimeObject;
+    };
+
+function equalsOrDefer(
   left: SerializableRuntimeValue,
   right: SerializableRuntimeValue,
-  pending: [SerializableRuntimeValue, SerializableRuntimeValue][],
+  pending: DeferredComparison[],
 ): boolean {
   if (left === null || right === null || typeof left !== "object" || typeof right !== "object")
     return left === right;
   switch (left.kind) {
     case "list":
       if (right.kind !== "list" || right.items.length !== left.items.length) return false;
-      left.items.forEach((item, index) => pending.push([item, right.items[index]!]));
+      pending.push({ kind: "list", left, right });
       return true;
-    case "object": {
+    case "object":
       if (right.kind !== "object" || right.properties.length !== left.properties.length)
         return false;
-      const rightValues = new Map(right.properties.map((property) => [property.name, property]));
-      for (const property of left.properties) {
-        const match = rightValues.get(property.name);
-        if (match === undefined) return false;
-        pending.push([property.value, match.value]);
-      }
+      pending.push({ kind: "object", left, right });
       return true;
-    }
     case "set": {
       if (right.kind !== "set" || right.items.length !== left.items.length) return false;
       const members = new Set(right.items);
