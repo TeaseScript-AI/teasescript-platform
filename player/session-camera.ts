@@ -45,6 +45,14 @@ export class SessionCamera<Track extends CaptureTrack> {
   }
 
   /**
+   * The open camera's track for a viewfinder; never part of runtime state. Every way the camera becomes unavailable
+   * stops its stream, so an unavailable camera has none.
+   */
+  get previewTrack(): Track | null {
+    return this.#device.track("camera");
+  }
+
+  /**
    * Opens the camera for a starting session; resolves once the browser answered, also after a permission prompt.
    * Keeps an already open camera, for example when the same page continues a session. Returns `false` when the
    * session was released meanwhile.

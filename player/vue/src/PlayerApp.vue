@@ -171,7 +171,12 @@ async function toggleFullscreen() {
           </PlayerTopBar>
         </template>
         <template #stage>
-          <Stage ref="stage" :media="stageMedia" @media-aspect="mediaAspect = $event" />
+          <Stage
+            ref="stage"
+            :media="stageMedia"
+            :viewfinder="player.viewfinder.value"
+            @media-aspect="mediaAspect = $event"
+          />
         </template>
         <template #overlay>
           <SessionActivation :activation="player.activation.value" @activate="player.activate" />

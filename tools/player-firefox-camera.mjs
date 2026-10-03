@@ -51,7 +51,7 @@ async function checks(page, url) {
           localStorage.getItem('player-storage:["development-camera","camera.photo"]') ?? "null",
         )?.value ?? null,
     );
-  async function start(unsizedMilliseconds) {
+  async function start(unsizedMilliseconds, scenario = url) {
     const tab = await context.newPage();
     const messages = [];
     tab.on(
@@ -80,7 +80,7 @@ async function checks(page, url) {
         };
       }, unsizedMilliseconds);
     }
-    await tab.goto(url);
+    await tab.goto(scenario);
     await tab.locator("[data-session-activation] button").click();
     return { tab, messages };
   }
@@ -127,7 +127,26 @@ async function checks(page, url) {
   );
   check((await savedPhoto(tab)) === second, "A camera without frames replaced the saved photo");
   await tab.close();
-  return "PASS a late-sized first frame, the saved photo in a new run, and a camera without frames";
+  // The viewfinder plays the same camera, also when its first frames have no size yet, and the photo follows.
+  ({ tab, messages } = await start(1_500, url.replace("scenario=camera", "scenario=viewfinder")));
+  await tab.waitForFunction(() => {
+    const video = document.querySelector("[data-viewfinder] video");
+    return (
+      video?.videoWidth > 0 &&
+      !video.paused &&
+      getComputedStyle(video).transform === "matrix(-1, 0, 0, 1, 0, 0)"
+    );
+  });
+  await tab.locator("button", { hasText: "Take photo" }).click();
+  await shows(tab, "Captured.");
+  await tab.waitForFunction(decodedPhotos);
+  check(
+    (await tab.locator("[data-viewfinder]").count()) === 0,
+    "The viewfinder stayed after the photo",
+  );
+  check(messages.length === 0, `The viewfinder run reported: ${messages.join(" | ")}`);
+  await tab.close();
+  return "PASS a late-sized first frame, the saved photo in a new run, a camera without frames, and the viewfinder";
 }
 
 let passed = false;
