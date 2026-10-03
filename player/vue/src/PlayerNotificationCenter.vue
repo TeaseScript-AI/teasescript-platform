@@ -180,7 +180,10 @@ function clearAll() {
 .player-notification {
   display: grid;
   gap: 6px;
-  padding: 10px 14px;
+  padding: 10px 14px 10px 11px;
+  /* The level's tint and mark, as on its toast. */
+  border-inline-start: 3px solid var(--notice-solid);
+  background: var(--notice-soft);
 }
 .player-notification + .player-notification {
   border-block-start: 1px solid var(--border);

@@ -1689,6 +1689,13 @@ async function noticeChecks(page) {
     "The panel lists every notice, newest first",
   );
   check((await toasts.count()) === 0, "Opening the panel replaces the toasts");
+  const tints = await items.evaluateAll((elements) =>
+    elements.map((element) => getComputedStyle(element).backgroundColor),
+  );
+  check(
+    tints[0] === tints[1] && new Set(tints).size === 3,
+    `Panel entries take their level's colour: ${JSON.stringify(tints)}`,
+  );
   check(
     (await panel.locator('[data-player-notice="audio-blocked"] [data-notice-dismiss]').count()) ===
       0,
