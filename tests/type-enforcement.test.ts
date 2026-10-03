@@ -1,0 +1,168 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { compileSource } from "../src/compiler.js";
+
+function mismatches(source: string): [string, string, string][] {
+  return compileSource(source).diagnostics.map((diagnostic) => [
+    diagnostic.code,
+    diagnostic.message,
+    source.slice(diagnostic.span.start.offset, diagnostic.span.end.offset),
+  ]);
+}
+
+test("a variable keeps its declared or inferred type", () => {
+  assert.deepEqual(mismatches('let score: number = "high"'), [
+    [
+      "TSV041",
+      "'score' is declared as number, so it cannot start as text (string). Use a separate variable for a value of another type.",
+      '"high"',
+    ],
+  ]);
+  assert.deepEqual(mismatches('let score = 10\nscore = "high"'), [
+    [
+      "TSV041",
+      "'score' holds a whole number (integer), so it cannot be set to text (string). Use a separate variable for a value of another type.",
+      '"high"',
+    ],
+  ]);
+  assert.deepEqual(mismatches('let answer = askText "Name?"\nanswer = 5'), [
+    [
+      "TSV041",
+      "'answer' holds text (string), so it cannot be set to a whole number (integer). Use a separate variable for a value of another type.",
+      "5",
+    ],
+  ]);
+});
+
+test("integer values widen to number, but not the reverse", () => {
+  assert.deepEqual(
+    mismatches("let ratio: number = 3\nratio = 2\nratio = ratio / 4\nratio += 1"),
+    [],
+  );
+  assert.deepEqual(mismatches("let count = 10\ncount = count / 4"), [
+    [
+      "TSV041",
+      "'count' holds a whole number (integer), so it cannot be set to a number with a fraction (number). To allow fractions, declare it as 'let count: number = ...'.",
+      "count / 4",
+    ],
+  ]);
+  assert.deepEqual(mismatches("let count: integer = 2.5"), [
+    [
+      "TSV041",
+      "'count' is declared as integer, so it cannot start as a number with a fraction (number). To allow fractions, declare it as 'let count: number = ...'.",
+      "2.5",
+    ],
+  ]);
+});
+
+test("compound assignment keeps the variable's type", () => {
+  assert.deepEqual(mismatches("let count = 1\ncount += 2\ncount -= 1"), []);
+  assert.deepEqual(mismatches("let count = 1\ncount += 0.5"), [
+    [
+      "TSV041",
+      "'count' holds a whole number (integer), so '+=' cannot make it a number with a fraction (number). To allow fractions, declare it as 'let count: number = ...'.",
+      "0.5",
+    ],
+  ]);
+  assert.deepEqual(mismatches('let count = 1\ncount += "x"'), [
+    [
+      "TSV041",
+      "'count' holds a whole number (integer), so text (string) cannot be added to it.",
+      '"x"',
+    ],
+  ]);
+  assert.deepEqual(mismatches("let pause = 5 s\npause -= 2"), [
+    [
+      "TSV041",
+      "'pause' holds a duration, so a whole number (integer) cannot be subtracted from it.",
+      "2",
+    ],
+  ]);
+  assert.deepEqual(mismatches("let pause = 5 s\npause -= 2 s"), []);
+});
+
+test("null needs an optional type", () => {
+  assert.deepEqual(mismatches("let name: string = null"), [
+    [
+      "TSV041",
+      "'name' is declared as string, so it cannot start as null. To allow null, declare it as 'let name: string? = ...'.",
+      "null",
+    ],
+  ]);
+  assert.deepEqual(mismatches('let name: string? = null\nname = "Ada"\nname = null'), []);
+});
+
+test("lists keep their element type, and loop variables take it", () => {
+  assert.deepEqual(mismatches('let scores = [1, 2]\nscores.add("x")\nscores[0] = "y"'), [
+    [
+      "TSV041",
+      "'scores' holds integer values (integer[]), so it cannot contain text (string).",
+      '"x"',
+    ],
+    [
+      "TSV041",
+      "'scores' holds integer values (integer[]), so it cannot contain text (string).",
+      '"y"',
+    ],
+  ]);
+  assert.deepEqual(mismatches("let ratios = [1, 2.5]\nratios.add(3)"), []);
+  assert.deepEqual(mismatches('let names: string set = set[]\nnames.add("Ada")\nnames.add(1)'), [
+    [
+      "TSV041",
+      "'names' holds string values (string set), so it cannot contain a whole number (integer).",
+      "1",
+    ],
+  ]);
+  assert.deepEqual(mismatches('for step in 1..=3 {\n    step = "x"\n}'), [
+    [
+      "TSV041",
+      "'step' holds a whole number (integer), so it cannot be set to text (string). Use a separate variable for a value of another type.",
+      '"x"',
+    ],
+  ]);
+});
+
+test("handles, speakers, and a typed load default keep their types", () => {
+  assert.deepEqual(
+    mismatches('speaker mistress { name: "Mistress" }\nlet voice = mistress\nvoice = "x"')[0]?.[0],
+    "TSV041",
+  );
+  assert.deepEqual(mismatches("let clock = timer async 5\nclock = 3")[0]?.[0], "TSV041");
+  assert.deepEqual(mismatches('let level: integer = load "level" default "high"'), [
+    [
+      "TSV041",
+      "'level' is declared as integer, so it cannot start as text (string). Use a separate variable for a value of another type.",
+      '"high"',
+    ],
+  ]);
+});
+
+test("function bodies check assignments to script variables", () => {
+  assert.deepEqual(
+    mismatches('let count = 0\nfunction reset {\n    count = "none"\n}')[0]?.[0],
+    "TSV041",
+  );
+});
+
+test("values the compiler cannot know are not rejected at compile time", () => {
+  assert.deepEqual(
+    mismatches(
+      [
+        "function pick(value) {",
+        "    return value",
+        "}",
+        "let count = 0",
+        'count = pick("x")',
+        'count = load "count"',
+        'let stored: integer = load "stored"',
+      ].join("\n"),
+    ),
+    [],
+  );
+});
+
+test("type inference handles deeply nested expressions without native recursion", () => {
+  const source = `let total = ${Array.from({ length: 20_000 }, () => "1").join(" + ")}\ntotal = 2`;
+  assert.deepEqual(compileSource(source).diagnostics, []);
+});

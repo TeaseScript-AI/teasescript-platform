@@ -710,11 +710,11 @@ test("typed load initializers accept matching scalars, collections, integers, an
 test("persisted-value type checks exclude missing keys, defaults, and non-direct loads", () => {
   const compiled = plan(
     [
+      "function identity(value) { return value }",
       'let missing: number = load "missing"',
-      'let fallback: number = load "missing" default "fallback"',
+      'let fallback: number = load "missing" default identity("fallback")',
       "let assigned: number = 0",
       'assigned = load "k"',
-      "function identity(value) { return value }",
       'let indirect: number = identity(load "k")',
       "exit",
     ].join("\n"),
