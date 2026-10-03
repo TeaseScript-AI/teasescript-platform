@@ -1822,10 +1822,13 @@ function presentsSettledUi(
     const instruction = plan.instructions[index];
     if (instruction === undefined || analysis.explicitTargets.has(index)) return false;
     if (index === next) return true;
+    // Clearing or rewriting the UI temporary ends the stretch: afterwards it no longer holds the presented UI.
     if (
       !PRESENTED_UI_WINDOW_KINDS.has(instruction.kind) ||
       (instruction.kind === "clearTemporary" && instruction.temporaryId === uiTemporary) ||
-      (instruction.kind === "clearTemporaries" && instruction.temporaryIds.includes(uiTemporary))
+      (instruction.kind === "clearTemporaries" && instruction.temporaryIds.includes(uiTemporary)) ||
+      (instruction.kind === "storeTemporary" && instruction.temporaryId === uiTemporary) ||
+      (instruction.kind === "prepareReference" && instruction.destinationTemporary === uiTemporary)
     )
       return false;
   }

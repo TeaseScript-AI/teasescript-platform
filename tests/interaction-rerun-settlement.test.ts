@@ -183,3 +183,39 @@ test("a valid plan that refills a button label and jumps back to its continuatio
   assert.equal(validateRuntimeSnapshot(snapshot, plan).valid, true);
   assert.doesNotThrow(() => executeInstruction(plan, snapshot));
 });
+
+test("a valid plan that overwrites the button label right after the settlement keeps running", () => {
+  const compiled = compileSource(
+    'let word = "Go"\nshowButton word\nword = "Run"\nsay "end", instant',
+  );
+  const plan = structuredClone(compiled.plan!);
+  const owning = plan.instructions.findIndex((instruction) => instruction.kind === "interaction");
+  const interaction = plan.instructions[owning];
+  const assign = plan.instructions.find((instruction) => instruction.kind === "assign");
+  assert.ok(interaction?.kind === "interaction" && "preparedUi" in interaction);
+  assert.ok(interaction.preparedUi.kind === "button" && assign?.kind === "assign");
+  // EVIDENCE: fixture replaces only the first cleanup with a store of new text into the button-label temporary.
+  (plan.instructions as unknown[])[owning + 1] = {
+    kind: "storeTemporary",
+    temporaryId: interaction.preparedUi.buttonLabelTemporary,
+    value: assign.value,
+    expectBoolean: false,
+    span: assign.span,
+  };
+  assert.equal(validateInstructionPlan(plan).valid, true);
+
+  const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
+  assert.ok(pending.foregroundAction?.kind === "interaction");
+  const settled = completeAction(plan, pending, {
+    actionId: pending.foregroundAction.actionId,
+    actionKind: "interaction",
+    interactionKind: "button",
+    payload: { kind: "activate" },
+  }).snapshot;
+  const overwritten = executeInstruction(plan, settled).snapshot;
+  assert.equal(validateRuntimeSnapshot(overwritten, plan).valid, true);
+  assert.doesNotThrow(() =>
+    deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, overwritten))),
+  );
+  assert.doesNotThrow(() => executeInstruction(plan, overwritten));
+});
