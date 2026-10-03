@@ -102,7 +102,7 @@ test("lists keep their element type, and loop variables take it", () => {
     ],
     [
       "TSV041",
-      "'scores' holds integer values (integer[]), so it cannot contain text (string).",
+      "'scores' holds integer values (integer[]), so an element cannot be set to text (string).",
       '"y"',
     ],
   ]);
@@ -136,6 +136,41 @@ test("handles, speakers, and a typed load default keep their types", () => {
       '"high"',
     ],
   ]);
+});
+
+test("optional types keep their non-null type in operations, elements, and loops", () => {
+  assert.deepEqual(mismatches("let count: integer? = 1\ncount += 0.5"), [
+    [
+      "TSV041",
+      "'count' holds a whole number (integer) or null, so '+=' cannot make it a number with a fraction (number). To allow fractions, declare it as 'let count: number? = ...'.",
+      "0.5",
+    ],
+  ]);
+  assert.deepEqual(
+    mismatches(
+      'let items: integer[]? = [1]\nitems.add("bad")\nitems[0] += "x"\nfor item in items {\n    item = "x"\n}',
+    ).map(([code]) => code),
+    ["TSV041", "TSV041", "TSV041"],
+  );
+});
+
+test("number times duration is a duration, and a media cue's own handle keeps its type", () => {
+  assert.deepEqual(mismatches('let pause = 2 * (1 s)\npause = "x"')[0]?.[0], "TSV041");
+  assert.deepEqual(
+    mismatches('let music = playAudio async "music.mp3" {\n    at 1 s { music = 1 }\n}')[0]?.[0],
+    "TSV041",
+  );
+});
+
+test("null suggestions name only annotations that exist", () => {
+  assert.deepEqual(
+    mismatches("let items = []\nitems = null")[0]?.[1],
+    "'items' holds a list, so it cannot be set to null. Use a separate variable for null.",
+  );
+  assert.deepEqual(
+    mismatches("let items = [1]\nitems = null")[0]?.[1],
+    "'items' holds a list (integer[]), so it cannot be set to null. To allow null, declare it as 'let items: integer[]? = ...'.",
+  );
 });
 
 test("function bodies check assignments to script variables", () => {

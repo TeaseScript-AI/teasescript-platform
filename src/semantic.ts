@@ -28,7 +28,9 @@ import {
   describeValue,
   elementType,
   expressionType,
+  isAnnotatable,
   isAssignable,
+  nonNullType,
   typeFromAnnotation,
   typeName,
   type StaticType,
@@ -249,7 +251,11 @@ class SemanticValidator {
     try {
       const scope = new SemanticScope(this.#root);
       if (handler.selfHandle !== null) {
-        scope.bindings.set(handler.selfHandle, { kind: "variable", handle: "media" });
+        scope.bindings.set(handler.selfHandle, {
+          kind: "variable",
+          handle: "media",
+          type: { kind: "mediaHandle" },
+        });
       }
       runCompileTask(this.#validateStatements(handler.block.statements, scope, 0));
     } finally {
@@ -827,7 +833,7 @@ class SemanticValidator {
         const loopScope = new SemanticScope(scope);
         if (this.#declare(statement.variable.name, "variable", statement.variable.span, loopScope))
           loopScope.bindings.get(statement.variable.name)!.type = elementType(
-            this.#expressionType(statement.iterable, scope),
+            nonNullType(this.#expressionType(statement.iterable, scope)),
           );
         yield* compileChild(
           this.#validateStatements(statement.body.statements, loopScope, loopDepth + 1),
@@ -1273,30 +1279,53 @@ class SemanticValidator {
     const target = statement.target;
     const value = this.#expressionType(statement.value, scope);
     if (target.kind === "indexExpression") {
-      const list = this.#expressionType(target.object, scope);
-      if (list.kind === "list" && !isAssignable(list.element, value))
-        this.#reportElementMismatch(target.object, list, value, statement.value.span);
+      const list = nonNullType(this.#expressionType(target.object, scope));
+      if (list.kind !== "list" || list.element.kind === "unknown") return;
+      const subject = `${subjectName(target.object, "This list")} holds ${typeName(list.element)} values (${typeName(list)})`;
+      this.#validateStoredType(statement, list.element, value, subject, "an element");
       return;
     }
     if (target.kind !== "identifier") return;
     const binding = scope.resolve(target.name);
     const type = binding?.kind === "variable" ? binding.type : undefined;
     if (type === undefined || value.kind === "unknown") return;
+    this.#validateStoredType(
+      statement,
+      type,
+      value,
+      `'${target.name}' holds ${describeValue(type)}`,
+      "it",
+      target.name,
+    );
+  }
+
+  /** Checks `=`, `+=`, or `-=` of `value` into a place of `type`; `subject` and `place` phrase the message. */
+  #validateStoredType(
+    statement: Extract<Statement, { kind: "assignmentStatement" }>,
+    type: StaticType,
+    value: StaticType,
+    subject: string,
+    place: string,
+    variable?: string,
+  ): void {
+    const fix = (result: StaticType) =>
+      variable === undefined ? "" : typeFix(variable, type, result);
     if (statement.operator === "=") {
       if (!isAssignable(type, value))
         this.#report(
           semanticCode.typeMismatch,
-          `'${target.name}' holds ${describeValue(type)}, so it cannot be set to ${describeValue(value)}.${typeFix(target.name, type, value)}`,
+          `${subject}, so ${place === "it" ? "it" : place} cannot be set to ${describeValue(value)}.${fix(value)}`,
           statement.value.span,
         );
       return;
     }
     const result = arithmeticType(statement.operator === "+=" ? "+" : "-", type, value);
     if (result === undefined) {
-      if (type.kind === "scalar" && value.kind === "scalar")
+      const operand = nonNullType(type);
+      if (operand.kind === "scalar" && value.kind === "scalar")
         this.#report(
           semanticCode.typeMismatch,
-          `'${target.name}' holds ${describeValue(type)}, so ${describeValue(value)} cannot be ${statement.operator === "+=" ? "added to" : "subtracted from"} it.`,
+          `${subject}, so ${describeValue(value)} cannot be ${statement.operator === "+=" ? "added to" : "subtracted from"} ${place}.`,
           statement.value.span,
         );
       return;
@@ -1304,7 +1333,7 @@ class SemanticValidator {
     if (!isAssignable(type, result))
       this.#report(
         semanticCode.typeMismatch,
-        `'${target.name}' holds ${describeValue(type)}, so '${statement.operator}' cannot make it ${describeValue(result)}.${typeFix(target.name, type, result)}`,
+        `${subject}, so '${statement.operator}' cannot make ${place} ${describeValue(result)}.${fix(result)}`,
         statement.value.span,
       );
   }
@@ -1321,7 +1350,7 @@ class SemanticValidator {
       expression.arguments[0]!.kind !== "positionalArgument"
     )
       return;
-    const collection = this.#expressionType(expression.callee.object, scope);
+    const collection = nonNullType(this.#expressionType(expression.callee.object, scope));
     if (collection.kind !== "list" && collection.kind !== "set") return;
     const argument = expression.arguments[0]!.value;
     const value = this.#expressionType(argument, scope);
@@ -1335,10 +1364,7 @@ class SemanticValidator {
     value: StaticType,
     span: SourceSpan,
   ): void {
-    const subject =
-      collectionExpression.kind === "identifier"
-        ? `'${collectionExpression.name}'`
-        : `This ${collection.kind}`;
+    const subject = subjectName(collectionExpression, `This ${collection.kind}`);
     this.#report(
       semanticCode.typeMismatch,
       `${subject} holds ${typeName(collection.element)} values (${typeName(collection)}), so it cannot contain ${describeValue(value)}.`,
@@ -1639,17 +1665,24 @@ function argumentRange(required: number, parameterNames: readonly string[]): str
   return total === 0 ? "no arguments" : `${count} (${parameterNames.join(", ")})`;
 }
 
+function subjectName(expression: Expression, fallback: string): string {
+  return expression.kind === "identifier" ? `'${expression.name}'` : fallback;
+}
+
 /** A short suggestion for the most common mismatches: null, and fractions in a whole-number variable. */
 function typeFix(name: string, target: StaticType, value: StaticType): string {
   if (value.kind === "null" && target.kind !== "optional")
-    return ` To allow null, declare it as 'let ${name}: ${typeName(target)}? = ...'.`;
+    return isAnnotatable(target)
+      ? ` To allow null, declare it as 'let ${name}: ${typeName(target)}? = ...'.`
+      : " Use a separate variable for null.";
+  const nonNull = nonNullType(target);
   if (
-    target.kind === "scalar" &&
-    target.name === "integer" &&
+    nonNull.kind === "scalar" &&
+    nonNull.name === "integer" &&
     value.kind === "scalar" &&
     value.name === "number"
   )
-    return ` To allow fractions, declare it as 'let ${name}: number = ...'.`;
+    return ` To allow fractions, declare it as 'let ${name}: number${target.kind === "optional" ? "?" : ""} = ...'.`;
   return " Use a separate variable for a value of another type.";
 }
 
