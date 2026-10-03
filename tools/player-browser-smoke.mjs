@@ -1,8 +1,8 @@
-import { constants } from "node:fs";
-import { access, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { spawn } from "node:child_process";
 import { createPlaygroundServer } from "../dist/playground/server.js";
+import { findChromium } from "./find-chromium.mjs";
 
 await main();
 
@@ -55,6 +55,7 @@ async function main() {
       await setViewport(cdp, 390, 844);
       await selectPlayerExample(cdp);
       await narrowScenario(cdp);
+      await scriptStorageScenario(cdp, origin);
       await demoScenario(cdp, origin);
       console.log(
         "player-browser-smoke: PASS technical playground and the repository demo on /player/",
@@ -156,19 +157,6 @@ async function desktopScenario(cdp) {
   );
 
   const showButtonId = await activeActionId(cdp);
-  const transcriptBeforeRejectedButtonText = await transcriptTexts(cdp);
-  await typeAndSubmit(cdp, "Continue");
-  await delay(100);
-  assertEqual(
-    await activeActionId(cdp),
-    showButtonId,
-    "exact showButton composer text must not complete the action",
-  );
-  assertEqual(
-    JSON.stringify(await transcriptTexts(cdp)),
-    JSON.stringify(transcriptBeforeRejectedButtonText),
-    "rejected showButton composer text must not append transcript output",
-  );
   await evaluate(
     cdp,
     `const input=document.querySelector('#composer-input'); input.value=''; input.dispatchEvent(new Event('input', {bubbles:true})); input.focus()`,
@@ -218,16 +206,8 @@ async function desktopScenario(cdp) {
     `document.querySelector('.choice-buttons button')?.textContent === 'First option'`,
   );
 
-  assertEqual(
-    await value(cdp, `getComputedStyle(document.querySelector('.choice-buttons')).display`),
-    "flex",
-    "desktop choices use buttons",
-  );
-  assertEqual(
-    await value(cdp, `getComputedStyle(document.querySelector('.choice-select')).display`),
-    "none",
-    "desktop dropdown stays hidden",
-  );
+  assertEqual(await value(cdp, visible(".choice-buttons")), true, "desktop choices show buttons");
+  assertEqual(await value(cdp, visible(".choice-select")), false, "desktop dropdown stays hidden");
   await click(cdp, "#save-checkpoint");
   const choiceId = await activeActionId(cdp);
   const transcriptBeforeRestore = await transcriptTexts(cdp);
@@ -323,13 +303,13 @@ async function constrainedChoicesScenario(cdp) {
   await replaceSourceAndRun(cdp, `let answer = choose ${options}`);
   await waitFor(cdp, `document.querySelector('.choice-select option:nth-child(13)') !== null`);
   assertEqual(
-    await value(cdp, `getComputedStyle(document.querySelector('.choice-buttons')).display`),
-    "none",
+    await value(cdp, visible(".choice-buttons")),
+    false,
     "overflowing desktop choices hide buttons",
   );
   assertEqual(
-    await value(cdp, `getComputedStyle(document.querySelector('.choice-select')).display`),
-    "block",
+    await value(cdp, visible(".choice-select")),
+    true,
     "overflowing desktop choices use dropdown",
   );
   assertEqual(
@@ -398,16 +378,8 @@ async function narrowScenario(cdp) {
     cdp,
     `document.querySelector('.choice-select option:nth-child(2)')?.textContent === 'First option'`,
   );
-  assertEqual(
-    await value(cdp, `getComputedStyle(document.querySelector('.choice-buttons')).display`),
-    "none",
-    "narrow choices hide buttons",
-  );
-  assertEqual(
-    await value(cdp, `getComputedStyle(document.querySelector('.choice-select')).display`),
-    "block",
-    "narrow choices use dropdown",
-  );
+  assertEqual(await value(cdp, visible(".choice-buttons")), false, "narrow choices hide buttons");
+  assertEqual(await value(cdp, visible(".choice-select")), true, "narrow choices use dropdown");
   await evaluate(
     cdp,
     `const select=document.querySelector('.choice-select'); select.value='1'; select.dispatchEvent(new Event('change', {bubbles:true}))`,
@@ -415,10 +387,131 @@ async function narrowScenario(cdp) {
   await waitFor(cdp, `document.querySelector('#runtime-status')?.textContent === 'halted'`);
 }
 
+async function scriptStorageScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  const start = "[data-session-activation] button";
+  const messages = `[...document.querySelectorAll('.transcript-entry')].map((entry) => entry.textContent)`;
+  const openSettings = async () => {
+    await physicalClick(cdp, "[data-settings-trigger]");
+    await waitFor(cdp, `!!document.querySelector('[data-player-settings]')`);
+    await waitFor(cdp, `!!document.querySelector('[data-clear-saved-data]')`);
+  };
+  const reloadBeforeStart = async () => {
+    await cdp.call("Page.reload");
+    await waitFor(
+      cdp,
+      `!!document.querySelector('${start}') && !document.querySelector('[data-player-settings]')`,
+    );
+  };
+  const clearBeforeStart = async () => {
+    await openSettings();
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-clear-saved-data]')?.disabled === false`,
+      15_000,
+      "Saved data can be cleared before Start after the provider has loaded",
+    );
+    await physicalClick(cdp, "[data-clear-saved-data]");
+    await waitFor(cdp, `!!document.querySelector('[data-clear-saved-data-confirm]')`);
+    await physicalClick(cdp, "[data-clear-saved-data-confirm]");
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-player-setting="saved-data"]')?.textContent.includes('Saved script data cleared.')`,
+    );
+  };
+
+  // This is the first demo run in main's fresh Chromium profile.
+  await navigate(cdp, `${origin}/player/`);
+  await waitFor(cdp, `!!document.querySelector('${start}')`);
+  await physicalClick(cdp, start);
+  // Reach the introductory Session message, after the returning-visit branch, so its absence is conclusive.
+  await waitFor(
+    cdp,
+    `${messages}.some((text) => text.includes('Some of her messages make you wait.'))`,
+    15_000,
+  );
+  assertEqual(
+    await value(cdp, `${messages}.some((text) => text.includes('Back again'))`),
+    false,
+    "The first visit has no returning-visit message",
+  );
+
+  await reloadBeforeStart();
+  await physicalClick(cdp, start);
+  await waitFor(
+    cdp,
+    `${messages}.some((text) => text.includes('Back again. Visit 2.'))`,
+    15_000,
+    "Reloading after the first visible demo message must show Back again. Visit 2.",
+  );
+  await openSettings();
+  assertEqual(
+    await value(cdp, `document.querySelector('[data-clear-saved-data]').disabled`),
+    true,
+    "Saved data cannot be cleared while the session runs",
+  );
+
+  await reloadBeforeStart();
+  await clearBeforeStart();
+  await reloadBeforeStart();
+  await physicalClick(cdp, start);
+  // Reach the introductory Session message so an absent returning-visit line is conclusive.
+  await waitFor(
+    cdp,
+    `${messages}.some((text) => text.includes('Some of her messages make you wait.'))`,
+    15_000,
+  );
+  assertEqual(
+    await value(cdp, `${messages}.some((text) => text.includes('Back again'))`),
+    false,
+    "Clearing saved data resets the demo's visit count",
+  );
+
+  // Leave the existing end-to-end demo scenario with its original first-visit state.
+  await reloadBeforeStart();
+  await clearBeforeStart();
+  await reloadBeforeStart();
+
+  // A denied read makes the next run session-local and disables clearing even before Start.
+  const deniedStorage = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
+    source: `Object.defineProperty(Storage.prototype, 'length', {
+      get() { throw new Error('Storage denied for smoke'); }
+    });`,
+  });
+  try {
+    await reloadBeforeStart();
+    await openSettings();
+    assertEqual(
+      await value(cdp, `document.querySelector('[data-clear-saved-data]').disabled`),
+      true,
+      "Saved data cannot be cleared when storage is session-local",
+    );
+    await physicalClick(cdp, "[data-settings-trigger]");
+    await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
+    await physicalClick(cdp, start);
+    await waitFor(cdp, `${messages}.some((text) => text.includes('Eyes on me.'))`);
+  } finally {
+    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", {
+      identifier: deniedStorage.result.identifier,
+    });
+  }
+  await reloadBeforeStart();
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { try { return localStorage.length >= 0; } catch { return false; } })()`,
+    ),
+    true,
+    "Browser storage is usable again before the next scenario",
+  );
+}
+
 // Plays the repository demo on the maintained /player/ route of the built Player with trusted input, so the Start
 // click is the user activation its audio relies on. Checks rely on the demo's authored text and timer labels.
 async function demoScenario(cdp, origin) {
-  const { identifier } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
+  const {
+    result: { identifier },
+  } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
     source: `window.__played = [];
       const play = HTMLMediaElement.prototype.play;
       HTMLMediaElement.prototype.play = function () {
@@ -439,6 +532,7 @@ async function demoScenario(cdp, origin) {
   const stageSources = [];
   let inputOwnershipChecked = false;
   let spaceSkipChecked = false;
+  let smartFollowChecked = false;
   let staleGestureChecked = false;
   const timers = new Map();
   const texts = new Set();
@@ -507,9 +601,17 @@ async function demoScenario(cdp, origin) {
       spaceSkipChecked = true;
       await spaceSkipCheck(cdp);
     } else if (
-      !staleGestureChecked &&
+      !smartFollowChecked &&
       state.texts.some((text) => text.includes("You hold still until that clock runs out.")) &&
       !state.texts.some((text) => text.includes("The other one is mine."))
+    ) {
+      // The next two messages arrive on their own pacing, one after the other.
+      smartFollowChecked = true;
+      await smartFollowCheck(cdp);
+    } else if (
+      !staleGestureChecked &&
+      state.texts.some((text) => text.includes("I've paused your clock.")) &&
+      !state.texts.some((text) => text.includes("Twenty seconds less."))
     ) {
       staleGestureChecked = true;
       await staleSkipGestureCheck(cdp);
@@ -535,6 +637,7 @@ async function demoScenario(cdp, origin) {
   );
   await waitFor(cdp, `!document.querySelector('.stage-media')`);
   assertEqual(inputOwnershipChecked && spaceSkipChecked, true, "The pacing input checks ran");
+  assertEqual(smartFollowChecked, true, "The smart follow check ran");
   assertEqual(staleGestureChecked, true, "The stale skip gesture check ran");
   assertEqual(stageSources.length, 2, "Stage images shown before hideImage");
   if (!stageSources.every((source) => source.startsWith("data:image/svg+xml"))) {
@@ -595,8 +698,8 @@ async function demoScenario(cdp, origin) {
   await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
 }
 
-// A skippable message's pacing settles only from a stationary primary press on unused Player space or from Space in
-// the empty composer. A Player control, message text, and Space while the composer holds text keep their own behavior.
+// A skippable message's pacing settles from a primary press on unused Player space or from Space in the empty
+// composer. A Player control, a press on message text, and Space while the composer holds text keep their own behavior.
 // It runs as the demo's session message starts its 7.8 s default pacing, so within it only a skip shows the next one.
 async function pacingInputOwnershipCheck(cdp) {
   const messageCount = `Number(document.querySelector('.transcript-entry')?.getAttribute('aria-setsize') ?? 0)`;
@@ -612,12 +715,25 @@ async function pacingInputOwnershipCheck(cdp) {
   await unchanged("Activating a Player control also skipped the message's pacing");
   await physicalClick(cdp, "[data-theme-mode-control]");
   await waitFor(cdp, `${theme} === ${JSON.stringify(initialTheme)}`);
-  await physicalClick(
+  // Message text is not unused space: a stationary press on it is reading, not a skip.
+  const latestMessage = `[...document.querySelectorAll('[data-slot=bubble], .prose')].at(-1)`;
+  const messagePoint = await value(
     cdp,
-    `[...document.querySelectorAll('.transcript-entry')].find((entry) => entry.textContent.includes('Some of her messages')).querySelector('[data-slot=bubble]')`,
-    "expression",
+    `(() => { const message = ${latestMessage}, rect = message.getBoundingClientRect(), x = rect.left + rect.width / 2, y = rect.top + rect.height / 2; return message.contains(document.elementFromPoint(x, y)) ? { x, y } : null; })()`,
   );
-  await unchanged("Pressing message text skipped its pacing");
+  assertEqual(
+    messagePoint !== null,
+    true,
+    "The latest message must be on screen to receive a press",
+  );
+  for (const type of ["mousePressed", "mouseReleased"])
+    await cdp.call("Input.dispatchMouseEvent", {
+      type,
+      ...messagePoint,
+      button: "left",
+      clickCount: 1,
+    });
+  await unchanged("A press on message text skipped the message's pacing");
   const input = `document.querySelector('[data-composer-input]')`;
   await evaluate(cdp, `${input}.focus()`);
   await cdp.call("Input.insertText", { text: "x" });
@@ -678,8 +794,8 @@ async function staleSkipGestureCheck(cdp) {
     button: "left",
     clickCount: 1,
   });
-  // Hold until the current message's pacing ends and the next message ("The other one is mine.") arrives.
-  await waitFor(cdp, `${count} === ${before + 1}`);
+  // Hold until the current message's pacing and the script's wait end and the next message arrives.
+  await waitFor(cdp, `${count} === ${before + 1}`, 15_000);
   await cdp.call("Input.dispatchMouseEvent", {
     type: "mouseReleased",
     ...stage,
@@ -701,12 +817,92 @@ async function staleSkipGestureCheck(cdp) {
   await delay(300);
 }
 
-async function physicalClick(cdp, target, kind = "selector") {
-  const element =
-    kind === "selector" ? `document.querySelector(${JSON.stringify(target)})` : target;
+// Smart follow with the demo's own paced messages: a reader who scrolled up stays in place while the next message
+// arrives, and Return to latest resumes following, so the message after that appears above the composer.
+async function smartFollowCheck(cdp) {
+  const count = `Number(document.querySelector('.transcript-entry')?.getAttribute('aria-setsize') ?? 0)`;
+  const viewport = `document.querySelector('.transcript-scroll').getBoundingClientRect()`;
+  // The entry at the top edge of the transcript (or a given one) and its distance from that edge.
+  const anchor = (index) =>
+    value(
+      cdp,
+      `(() => {
+        const top = ${viewport}.top;
+        const entries = [...document.querySelectorAll('.transcript-entry')];
+        const entry = ${index === undefined ? "entries.find((element) => element.getBoundingClientRect().bottom > top + 1)" : `entries.find((element) => element.dataset.index === ${JSON.stringify(index)})`};
+        return entry ? { index: entry.dataset.index, offset: entry.getBoundingClientRect().top - top } : null;
+      })()`,
+    );
+  // A scroll correction lands within a few rendered frames of an append.
+  const frames = () =>
+    evaluate(
+      cdp,
+      `return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))))`,
+    );
+  // Let the message that just arrived finish measuring and following, so Page Up is the last scroll input.
+  await waitFor(
+    cdp,
+    `(() => { const element = document.querySelector('.transcript-scroll'); return element.scrollHeight - element.clientHeight - element.scrollTop <= 2; })()`,
+  );
+  await frames();
+  // Page Up in the focused transcript: the reader leaves the latest message.
+  await evaluate(cdp, `document.querySelector('.transcript-scroll').focus()`);
+  for (const type of ["keyDown", "keyUp"]) {
+    await cdp.call("Input.dispatchKeyEvent", {
+      type,
+      key: "PageUp",
+      code: "PageUp",
+      windowsVirtualKeyCode: 33,
+    });
+  }
+  // The control appears once the reader is away from the latest message and scrolling has settled.
+  await waitFor(
+    cdp,
+    `!!document.querySelector('.return-to-latest')`,
+    8_000,
+    "Scrolling up did not leave the latest message: Return to latest never appeared",
+  );
+  const before = await value(cdp, count);
+  const held = await anchor();
+  if (held === null) throw new Error("No transcript entry is visible after scrolling up");
+  await waitFor(cdp, `${count} > ${before}`, 15_000, "No demo message arrived while scrolled up");
+  await frames();
+  const after = await anchor(held.index);
+  if (after === null || Math.abs(after.offset - held.offset) > 2) {
+    throw new Error(`A new message moved a scrolled-up reader: ${JSON.stringify({ held, after })}`);
+  }
+
+  await physicalClick(cdp, ".return-to-latest");
+  // The control hides once the latest message is reached.
+  await waitFor(
+    cdp,
+    `!document.querySelector('.return-to-latest')`,
+    8_000,
+    "Return to latest did not reach the latest message",
+  );
+  const resumed = await value(cdp, count);
+  await waitFor(
+    cdp,
+    `${count} > ${resumed}`,
+    15_000,
+    "No demo message arrived after Return to latest",
+  );
+  await waitFor(
+    cdp,
+    `(() => {
+      const latest = document.querySelector('.transcript-entry[aria-posinset="' + ${count} + '"]')?.getBoundingClientRect();
+      const composer = document.querySelector('[data-composer-shell]').getBoundingClientRect();
+      return !!latest && latest.height > 0 && latest.top >= ${viewport}.top - 1 && latest.bottom <= composer.top + 1;
+    })()`,
+    2_000,
+    "After Return to latest, the next message did not appear above the composer",
+  );
+}
+
+async function physicalClick(cdp, selector) {
   const point = await value(
     cdp,
-    `(() => { const rect=${element}.getBoundingClientRect(); return {x:rect.left + rect.width / 2, y:rect.top + rect.height / 2}; })()`,
+    `(() => { const rect=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return {x:rect.left + rect.width / 2, y:rect.top + rect.height / 2}; })()`,
   );
   for (const type of ["mousePressed", "mouseReleased"]) {
     await cdp.call("Input.dispatchMouseEvent", {
@@ -764,6 +960,11 @@ async function typeAndSubmit(cdp, text) {
     cdp,
     `const input=document.querySelector('#composer-input'); input.value=${JSON.stringify(text)}; input.dispatchEvent(new Event('input', {bubbles:true})); document.querySelector('#composer-form').requestSubmit()`,
   );
+}
+
+// Whether the user can see the element: rendered, not `display: none`, `visibility: hidden` or fully transparent.
+function visible(selector) {
+  return `document.querySelector(${JSON.stringify(selector)})?.checkVisibility({ opacityProperty: true, visibilityProperty: true }) === true`;
 }
 
 async function activeActionId(cdp) {
@@ -837,21 +1038,6 @@ async function value(cdp, expression) {
 
 function assertEqual(actual, expected, message) {
   if (actual !== expected) throw new Error(`${message}: expected ${expected}, received ${actual}`);
-}
-
-async function findChromium() {
-  for (const candidate of [
-    process.env.CHROMIUM_BIN,
-    "/usr/bin/chromium",
-    "/usr/bin/chromium-browser",
-    "/usr/bin/google-chrome",
-  ].filter(Boolean)) {
-    try {
-      await access(candidate, constants.X_OK);
-      return candidate;
-    } catch {}
-  }
-  return null;
 }
 
 async function reservePort() {

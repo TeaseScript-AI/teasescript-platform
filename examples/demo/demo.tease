@@ -13,10 +13,18 @@ speaker session {
 
 speaker mistressVera
 
+// Script storage keeps the visit count in this browser; a visit counts as soon as the session starts.
+let visits = (load "demo.visits" default 0) + 1
+save visits as "demo.visits"
+
 showImage "images/playroom.svg"
 let room = playAudio(file: "sounds/room-ambience.wav", async: true, repeat: true, volume: 0.4)
 say unskippable "Eyes on me.", 2
 say unskippable "You move when I tell you. Not before.", 3
+
+if visits > 1 {
+    say "Back again. Visit ${visits}. You remember the rules."
+}
 say as session "Some of her messages make you wait. Press Space or click an empty part of the Player to hurry the others along."
 
 say "First things first. Tell me what you call me."

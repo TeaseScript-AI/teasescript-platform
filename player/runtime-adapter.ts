@@ -21,7 +21,9 @@ import {
   type StageProjection,
   type PendingActionOperationResult,
   type RuntimeInteractionActionSnapshot,
+  type RuntimeScriptStorageEntrySnapshot,
   type RuntimeSnapshot,
+  type RuntimeStorageWriteActionSnapshot,
   type TimeObservationOutcome,
 } from "../src/index.js";
 import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
@@ -51,6 +53,16 @@ export interface PlayerRuntimeSession {
   readonly speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
 }
 
+export interface PlayerRuntimeSessionOptions {
+  /** The script's stored values from the host's storage provider. */
+  readonly scriptStorage?: readonly RuntimeScriptStorageEntrySnapshot[];
+  /**
+   * Whether the host persists script storage. Then every `save` and `delete` waits until the host reports the write
+   * through `completePlayerRuntimeStorageWrite`; otherwise storage is session-local.
+   */
+  readonly persistentScriptStorage?: boolean;
+}
+
 /** Runtime checkpoint plus an in-memory presentation cache; only checkpointJson is canonical save data. */
 export interface PlayerRuntimeRestorePoint {
   readonly checkpointJson: string;
@@ -62,15 +74,26 @@ export interface PlayerRuntimeControlResult<T = ActionCompletionOutcome | TimeOb
   readonly outcome: T;
 }
 
-export function createPlayerRuntimeSession(source: string): PlayerRuntimeSession {
+export function createPlayerRuntimeSession(
+  source: string,
+  options: PlayerRuntimeSessionOptions = {},
+): PlayerRuntimeSession {
   const compilation = compileSource(source);
   if (compilation.plan === null) {
     const diagnostic = compilation.diagnostics[0];
     throw new Error(diagnostic?.message ?? "Player source did not compile.");
   }
-  const snapshot = createFreshRuntimeSnapshot(compilation.plan);
+  const snapshot = createFreshRuntimeSnapshot(compilation.plan, {
+    ...(options.scriptStorage === undefined ? {} : { scriptStorage: options.scriptStorage }),
+    persistentScriptStorage: options.persistentScriptStorage ?? false,
+  });
   const operation = run(compilation.plan, snapshot);
-  return appendRuntimeEvents(emptySession(compilation.plan, operation.snapshot), operation.events);
+  return applyOperation(
+    emptySession(compilation.plan, snapshot),
+    operation.snapshot,
+    operation.events,
+    false,
+  );
 }
 
 export function createPlayerRuntimeRestorePoint(
@@ -302,13 +325,14 @@ export function observePlayerRuntimeTime(
   mediaReports: readonly MediaProgressReport[] = [],
 ): PlayerRuntimeControlResult<TimeObservationOutcome> {
   const operation = observeTime(session.plan, session.snapshot, currentSessionTimeMs, mediaReports);
-  const observed = appendRuntimeEvents(
-    { ...session, snapshot: operation.snapshot },
-    operation.events,
-  );
   // A settlement or a queued timer expiry block may make execution eligible; `run` returns at once otherwise.
   return Object.freeze({
-    session: operation.outcome.kind === "observed" ? continuePlayerRuntime(observed) : observed,
+    session: applyOperation(
+      session,
+      operation.snapshot,
+      operation.events,
+      operation.outcome.kind === "observed",
+    ),
     outcome: operation.outcome,
   });
 }
@@ -320,12 +344,13 @@ export function reportPlayerRuntimeMediaLoad(
   report: MediaLoadReport,
 ): PlayerRuntimeControlResult<MediaReportOutcome> {
   const operation = reportMediaLoad(session.plan, session.snapshot, mediaId, report);
-  const reported = appendRuntimeEvents(
-    { ...session, snapshot: operation.snapshot },
-    operation.events,
-  );
   return Object.freeze({
-    session: operation.outcome.kind === "accepted" ? continuePlayerRuntime(reported) : reported,
+    session: applyOperation(
+      session,
+      operation.snapshot,
+      operation.events,
+      operation.outcome.kind === "accepted",
+    ),
     outcome: operation.outcome,
   });
 }
@@ -347,19 +372,61 @@ function completePlayerAction(
   payload: Record<string, unknown>,
 ): PlayerRuntimeControlResult<ActionCompletionOutcome> {
   const operation = completePlayerRuntimeAction(session.plan, session.snapshot, action, payload);
-  const completed = appendRuntimeEvents(
-    { ...session, snapshot: operation.snapshot },
-    operation.events,
-  );
   return Object.freeze({
-    session: operation.outcome.kind === "completed" ? continuePlayerRuntime(completed) : completed,
+    session: applyOperation(
+      session,
+      operation.snapshot,
+      operation.events,
+      operation.outcome.kind === "completed",
+    ),
     outcome: operation.outcome,
   });
 }
 
-function continuePlayerRuntime(session: PlayerRuntimeSession): PlayerRuntimeSession {
-  const operation = run(session.plan, session.snapshot);
-  return appendRuntimeEvents({ ...session, snapshot: operation.snapshot }, operation.events);
+/** The `save`/`delete` waiting for the host to persist it, if any. */
+export function pendingPlayerRuntimeStorageWrite(
+  snapshot: RuntimeSnapshot,
+): RuntimeStorageWriteActionSnapshot | null {
+  const foreground = snapshot.foregroundAction;
+  return foreground?.kind === "storageWrite" ? foreground : null;
+}
+
+/**
+ * Reports whether the host persisted a pending write, then continues execution. A failed write keeps the previous
+ * value and the runtime reports warning TSW014. A report for a write that is no longer pending changes nothing.
+ */
+export function completePlayerRuntimeStorageWrite(
+  session: PlayerRuntimeSession,
+  actionId: number,
+  stored: boolean,
+): PlayerRuntimeControlResult<ActionCompletionOutcome> {
+  const operation = completeAction(session.plan, session.snapshot, {
+    actionId,
+    actionKind: "storageWrite",
+    payload: { kind: stored ? "stored" : "failed" },
+  });
+  return Object.freeze({
+    session: applyOperation(
+      session,
+      operation.snapshot,
+      operation.events,
+      operation.outcome.kind === "completed",
+    ),
+    outcome: operation.outcome,
+  });
+}
+
+/** Publishes one runtime operation, optionally followed by the run it makes eligible. */
+function applyOperation(
+  session: PlayerRuntimeSession,
+  snapshot: RuntimeSnapshot,
+  events: readonly InterpreterEvent[],
+  continueRun: boolean,
+): PlayerRuntimeSession {
+  const next = appendRuntimeEvents({ ...session, snapshot }, events);
+  if (!continueRun) return Object.freeze(next);
+  const continuation = run(next.plan, next.snapshot);
+  return appendRuntimeEvents({ ...next, snapshot: continuation.snapshot }, continuation.events);
 }
 
 function emptySession(plan: InstructionPlan, snapshot: RuntimeSnapshot): PlayerRuntimeSession {

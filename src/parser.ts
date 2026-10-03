@@ -40,6 +40,9 @@ import type {
   MediaParts,
   MediaRepeat,
   PlayMediaStatement,
+  DeleteStatement,
+  LoadExpression,
+  SaveStatement,
   ShowImageStatement,
   DurationUnit,
   ListLiteral,
@@ -75,6 +78,8 @@ const statementOnlyCommands: ReadonlySet<string> = new Set([
   "showButton",
   "showImage",
   "hideImage",
+  "save",
+  "delete",
 ]);
 
 const parserDiagnosticCode = {
@@ -112,9 +117,14 @@ const parserDiagnosticCode = {
   unsupportedDurationUnit: "TSP033",
   invalidTimerForm: "TSP034",
   invalidMediaForm: "TSP035",
+  expectedStorageKey: "TSP036",
 } as const;
 
 const MEDIA_ARGUMENTS = ["file", "async", "repeat", "startAt", "endAt", "volume"] as const;
+
+type StorageDelimiter = "as" | "default";
+const NO_STORAGE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set();
+const SAVE_VALUE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set(["as"]);
 
 /** Parses the accepted core-language milestone. */
 export function parse(source: string): ParseResult {
@@ -134,6 +144,11 @@ class Parser {
   #recoveredAtStatementBoundary = false;
   /** Inside a media cue position, whose block `{` ends a compact choice. */
   #inCuePosition = false;
+  /**
+   * The `save` `as` and `load` `default` that end an enclosing storage operand. A compact interaction stops at them, and
+   * a bare interaction leaves the `as` to `save`; groupings such as parentheses start without them.
+   */
+  #storageDelimiters: ReadonlySet<StorageDelimiter> = NO_STORAGE_DELIMITERS;
 
   public constructor(private readonly tokens: readonly Token[]) {}
 
@@ -177,6 +192,12 @@ class Parser {
     }
     if (this.#checkIdentifier("hideImage")) {
       return this.#parseHideImageStatement();
+    }
+    if (this.#checkIdentifier("save")) {
+      return this.#parseSaveStatement();
+    }
+    if (this.#checkIdentifier("delete")) {
+      return this.#parseDeleteStatement();
     }
     if (this.#checkIdentifier("playAudio") || this.#checkIdentifier("playVideo")) {
       const parts = yield* parseChild(this.#parseMediaParts());
@@ -665,7 +686,7 @@ class Parser {
       this.#check(TokenKind.LeftParenthesis) &&
       this.#peek().span.start.offset === command.span.end.offset
     ) {
-      return yield* parseChild(this.#parseNamedTimer(command));
+      return yield* parseChild(this.#withoutStorageDelimiters(this.#parseNamedTimer(command)));
     }
     const async = this.#checkIdentifier("async");
     if (async) this.#advance();
@@ -843,6 +864,92 @@ class Parser {
     });
   }
 
+  /** `save <value> as <key>`; both operands are full expressions. */
+  #parseSaveStatement(): SaveStatement | null {
+    const command = this.#advance();
+    const value = this.#parseStorageOperand(SAVE_VALUE_DELIMITERS);
+    if (value === null) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedExpression,
+        "Expected a value to save after 'save'.",
+      );
+      this.#synchronizeStatement(true);
+      return null;
+    }
+    if (!this.#match(TokenKind.KeywordAs)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedStorageKey,
+        "Expected 'as' and a storage key, such as 'save score as \"player.score\"'.",
+      );
+      this.#synchronizeStatement(true);
+      return null;
+    }
+    const key = this.#parseStorageOperand(NO_STORAGE_DELIMITERS);
+    if (key === null) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedStorageKey,
+        "Expected a storage key after 'as'.",
+      );
+      this.#synchronizeStatement(true);
+      return null;
+    }
+    return Object.freeze({
+      kind: "saveStatement",
+      value,
+      key,
+      span: spanFrom(command.span, key.span),
+    });
+  }
+
+  #parseDeleteStatement(): DeleteStatement | null {
+    const command = this.#advance();
+    const key = this.#parseStorageOperand(NO_STORAGE_DELIMITERS);
+    if (key === null) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedStorageKey,
+        "Expected a storage key after 'delete'.",
+      );
+      this.#synchronizeStatement(true);
+      return null;
+    }
+    return Object.freeze({ kind: "deleteStatement", key, span: spanFrom(command.span, key.span) });
+  }
+
+  /**
+   * `load <key> [default <value>]`; both operands are full expressions, so `(load "k") == null` needs parentheses.
+   * The default is evaluated only when the key is absent.
+   */
+  *#parseLoadExpression(): ParseTask<LoadExpression | null> {
+    const command = this.#advance();
+    // The key ends at this load's `default` and at any delimiter of an enclosing storage operand; the default
+    // ends only at the enclosing ones.
+    const enclosing = this.#storageDelimiters;
+    this.#storageDelimiters = new Set([...enclosing, "default"]);
+    const key = yield* parseChild(this.#parseOr());
+    this.#storageDelimiters = enclosing;
+    let defaultValue: Expression | null = null;
+    let missingDefault = false;
+    if (key !== null && this.#checkIdentifier("default")) {
+      this.#advance();
+      defaultValue = yield* parseChild(this.#parseRequiredExpressionTask());
+      missingDefault = defaultValue === null;
+    }
+    if (key === null) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedStorageKey,
+        "Expected a storage key after 'load'.",
+      );
+      return null;
+    }
+    if (missingDefault) return null;
+    return Object.freeze({
+      kind: "loadExpression",
+      key,
+      defaultValue,
+      span: spanFrom(command.span, (defaultValue ?? key).span),
+    });
+  }
+
   #parseHideImageStatement(): HideImageStatement | null {
     const command = this.#advance();
     if (
@@ -883,7 +990,9 @@ class Parser {
       this.#check(TokenKind.LeftParenthesis) &&
       this.#peek().span.start.offset === command.span.end.offset
     ) {
-      return yield* parseChild(this.#parseNamedMedia(command, media));
+      return yield* parseChild(
+        this.#withoutStorageDelimiters(this.#parseNamedMedia(command, media)),
+      );
     }
     const async = this.#checkIdentifier("async");
     if (async) this.#advance();
@@ -1040,7 +1149,9 @@ class Parser {
     if (!this.#check(TokenKind.LeftBrace)) return null;
     const enclosingCuePosition = this.#inCuePosition;
     this.#inCuePosition = false;
-    const handlers = yield* parseChild(this.#parseMediaHandlerBlock());
+    const handlers = yield* parseChild(
+      this.#withoutStorageDelimiters(this.#parseMediaHandlerBlock()),
+    );
     this.#inCuePosition = enclosingCuePosition;
     return handlers;
   }
@@ -1526,7 +1637,7 @@ class Parser {
   *#parseBlock(): ParseTask<Block | null> {
     const enclosingCuePosition = this.#inCuePosition;
     this.#inCuePosition = false;
-    const block = yield* parseChild(this.#parseBlockStatements());
+    const block = yield* parseChild(this.#withoutStorageDelimiters(this.#parseBlockStatements()));
     this.#inCuePosition = enclosingCuePosition;
     return block;
   }
@@ -1897,7 +2008,9 @@ class Parser {
       if (this.#match(TokenKind.LeftBracket)) {
         const start = expression;
         this.#skipNewlines();
-        const index = yield* parseChild(this.#parseRequiredExpressionTask());
+        const index = yield* parseChild(
+          this.#withoutStorageDelimiters(this.#parseRequiredExpressionTask()),
+        );
         this.#skipNewlines();
         if (index === null || !this.#match(TokenKind.RightBracket)) {
           if (index !== null) {
@@ -1917,7 +2030,9 @@ class Parser {
         continue;
       }
       if (this.#match(TokenKind.LeftParenthesis)) {
-        expression = yield* parseChild(this.#finishCall(expression, this.#previous()));
+        expression = yield* parseChild(
+          this.#withoutStorageDelimiters(this.#finishCall(expression, this.#previous())),
+        );
         continue;
       }
       break;
@@ -2033,6 +2148,9 @@ class Parser {
       const parts = yield* parseChild(this.#parseMediaParts());
       return parts === null ? null : Object.freeze({ kind: "playMediaExpression", ...parts });
     }
+    if (this.#checkIdentifier("load")) {
+      return yield* parseChild(this.#parseLoadExpression());
+    }
     if (this.#match(TokenKind.NumberLiteral)) {
       const amount: NumberLiteral = Object.freeze({
         kind: "numberLiteral",
@@ -2060,23 +2178,27 @@ class Parser {
       return this.#identifier(token);
     }
     if (this.#match(TokenKind.StringStart)) {
-      return yield* parseChild(this.#parseStringLiteral(token));
+      return yield* parseChild(this.#withoutStorageDelimiters(this.#parseStringLiteral(token)));
     }
     if (this.#match(TokenKind.LeftParenthesis)) {
-      return yield* parseChild(this.#parseParenthesized(token));
+      return yield* parseChild(this.#withoutStorageDelimiters(this.#parseParenthesized(token)));
     }
     if (this.#match(TokenKind.LeftBracket)) {
-      return yield* parseChild(this.#parseCollectionLiteralElements(token, "listLiteral"));
+      return yield* parseChild(
+        this.#withoutStorageDelimiters(this.#parseCollectionLiteralElements(token, "listLiteral")),
+      );
     }
     if (this.#match(TokenKind.LeftBrace)) {
-      return yield* parseChild(this.#parseObjectLiteral(token));
+      return yield* parseChild(this.#withoutStorageDelimiters(this.#parseObjectLiteral(token)));
     }
     if (this.#match(TokenKind.KeywordSet)) {
       if (!this.#match(TokenKind.LeftBracket)) {
         this.#reportInsertion(parserDiagnosticCode.expectedDelimiter, "Expected '[' after 'set'.");
         return null;
       }
-      return yield* parseChild(this.#parseCollectionLiteralElements(token, "setLiteral"));
+      return yield* parseChild(
+        this.#withoutStorageDelimiters(this.#parseCollectionLiteralElements(token, "setLiteral")),
+      );
     }
     return null;
   }
@@ -2096,7 +2218,7 @@ class Parser {
       command.lexeme === "askText" ? "text" : command.lexeme === "askNumber" ? "number" : "choice";
     let asSpan: SourceSpan | null = null;
     let speaker: Identifier | null = null;
-    if (this.#match(TokenKind.KeywordAs)) {
+    if (!this.#atStorageDelimiter() && this.#match(TokenKind.KeywordAs)) {
       asSpan = copySpan(this.#previous().span);
       if (!this.#check(TokenKind.Identifier)) {
         this.#reportInsertion(
@@ -2118,8 +2240,11 @@ class Parser {
     }
 
     if (interactionKind !== "choice") {
-      const hint = isExpressionStart(this.#peek()) ? yield* parseChild(this.#parseOr()) : null;
-      if (this.#check(TokenKind.KeywordAs)) {
+      const hint =
+        isExpressionStart(this.#peek()) && !this.#atStorageDelimiter()
+          ? yield* parseChild(this.#parseOr())
+          : null;
+      if (this.#check(TokenKind.KeywordAs) && !this.#atStorageDelimiter()) {
         this.#reportSpan(
           parserDiagnosticCode.unsupportedInteractionForm,
           `The 'as speaker' clause must appear immediately after '${command.lexeme}'.`,
@@ -2242,8 +2367,38 @@ class Parser {
       this.#check(TokenKind.RightBrace) ||
       this.#check(TokenKind.RightParenthesis) ||
       this.#check(TokenKind.RightBracket) ||
-      this.#check(TokenKind.InterpolationEnd)
+      this.#check(TokenKind.InterpolationEnd) ||
+      this.#atStorageDelimiter()
     );
+  }
+
+  #atStorageDelimiter(): boolean {
+    return (
+      (this.#storageDelimiters.has("as") && this.#check(TokenKind.KeywordAs)) ||
+      // `default:` is a contextual label, such as a choice option label, not the delimiter.
+      (this.#storageDelimiters.has("default") &&
+        this.#checkIdentifier("default") &&
+        this.#peek(1).kind !== TokenKind.Colon)
+    );
+  }
+
+  *#withoutStorageDelimiters<T>(task: ParseTask<T>): ParseTask<T> {
+    const enclosing = this.#storageDelimiters;
+    this.#storageDelimiters = NO_STORAGE_DELIMITERS;
+    try {
+      return yield* parseChild(task);
+    } finally {
+      this.#storageDelimiters = enclosing;
+    }
+  }
+
+  /** Parses a `save` or `delete` operand that ends at the given delimiters. */
+  #parseStorageOperand(delimiters: ReadonlySet<StorageDelimiter>): Expression | null {
+    const enclosing = this.#storageDelimiters;
+    this.#storageDelimiters = delimiters;
+    const operand = this.#parseExpression();
+    this.#storageDelimiters = enclosing;
+    return operand;
   }
 
   #interactionChoiceLabel(token: Token): Identifier | import("./ast.js").NumberLiteral {

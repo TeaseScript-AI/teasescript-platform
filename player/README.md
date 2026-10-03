@@ -17,7 +17,9 @@ This is a local inspection route, not the production cross-origin Player/host pr
 ## Implementation seams
 
 - `runtime-adapter.ts` contains framework-independent runtime-to-Player translation and shared action helpers used by
-  the Player and playground workspace controller.
+  the Player and playground workspace controller, including reporting a persisted script-storage write.
+- `script-storage.ts` contains the asynchronous script-storage provider boundary and its browser-local
+  implementation; see [`DATA-AND-API.md`](../docs/DATA-AND-API.md#script-storage-in-the-browser).
 - `vue/src/` contains the Player composition, components, shared layout/theme CSS, demo host, and development preview;
   its [component map](vue/src/README.md) records responsibility boundaries.
 - `model.ts` and `presentation.ts` contain shared presentation shapes and timer formatting helpers.

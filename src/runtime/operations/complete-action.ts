@@ -5,8 +5,15 @@ import type {
   RuntimeActionSettlementSnapshot,
   RuntimeChatPacingGateActionSnapshot,
   RuntimeInteractionActionSnapshot,
+  RuntimeStorageWriteActionSnapshot,
 } from "../actions/model.js";
-import type { ActionCompletedEvent, InterpreterEvent, PlayerTranscriptEvent } from "../events.js";
+import type {
+  ActionCompletedEvent,
+  DeveloperWarningEvent,
+  InterpreterEvent,
+  PlayerTranscriptEvent,
+} from "../events.js";
+import { writeScriptStorage } from "../script-storage.js";
 import { resolveInteractionCompletion } from "../actions/interaction.js";
 import type { ActionCompletionOutcome, PendingActionOperationResult } from "./model.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
@@ -100,6 +107,10 @@ export function completeAction(
       message: "The session has failed and accepts no further input.",
     });
   }
+  // A storage write settles at the current scene time: catch-up may hold behind it for a queued block.
+  if (active.kind === "storageWrite") {
+    return completeStorageWrite(captured.plan, current, active, value);
+  }
   // Host input happens at the observed time: scene time must have caught up, and a due expiry block runs first.
   if (
     current.currentSessionTimeMs < current.observedSessionTimeMs ||
@@ -169,8 +180,79 @@ function completePacingGate(
   return pendingResult(current, events, { kind: "completed", settlement });
 }
 
-function validRequestedActionKind(value: unknown): value is "interaction" | "chatPacingGate" {
-  return value === "interaction" || value === "chatPacingGate";
+function validRequestedActionKind(
+  value: unknown,
+): value is "interaction" | "chatPacingGate" | "storageWrite" {
+  return value === "interaction" || value === "chatPacingGate" || value === "storageWrite";
+}
+
+/**
+ * The host reports whether it persisted a `save` or `delete`. Only a stored write changes the session's view; a
+ * failed one keeps the previous value and warns.
+ */
+function completeStorageWrite(
+  plan: InstructionPlan,
+  current: RuntimeSnapshot,
+  action: RuntimeStorageWriteActionSnapshot,
+  request: Record<string, unknown>,
+): PendingActionOperationResult<ActionCompletionOutcome> {
+  const payload = request.payload;
+  if (
+    !isPlainRecord(payload) ||
+    Object.keys(payload).length !== 1 ||
+    (payload.kind !== "stored" && payload.kind !== "failed")
+  ) {
+    return pendingResult(current, [], {
+      kind: "invalidPayload",
+      message: "Storage write completion payload must be { kind: 'stored' } or { kind: 'failed' }.",
+    });
+  }
+  const outcome = payload.kind;
+  assertEventSequenceCapacity(current, outcome === "failed" ? 2 : 1);
+  const span = copySpan(plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan);
+  const events: InterpreterEvent[] = [];
+  if (outcome === "stored") {
+    writeScriptStorage(current, action.key, action.value);
+  } else {
+    events.push(
+      Object.freeze({
+        kind: "developerWarning",
+        sequence: takeSequence(current, 2),
+        severity: "warning",
+        code: "TSW014",
+        message: `${action.value === null ? "delete" : "save"} could not persist ${JSON.stringify(
+          action.key,
+        )}; the previous value is kept.`,
+        span,
+      } satisfies DeveloperWarningEvent),
+    );
+  }
+  const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
+    actionId: action.actionId,
+    actionKind: "storageWrite",
+    settlementKind: "completed",
+    outcome,
+    key: action.key,
+    owningInstruction: action.owningInstruction,
+    continuationInstruction: action.continuationInstruction,
+    requestEventSequence: action.requestEventSequence,
+    completionEventSequence: takeSequence(current, 2),
+    completedAtMs: current.currentSessionTimeMs,
+  });
+  current.foregroundAction = null;
+  current.lastSettlement = settlement;
+  current.terminalContinuationHandoff = terminalContinuationHandoffFor(plan, action);
+  current.status = "running";
+  current.nextInstruction = action.continuationInstruction;
+  events.push(
+    Object.freeze({
+      kind: "actionCompleted",
+      sequence: settlement.completionEventSequence,
+      settlement,
+      span,
+    } satisfies ActionCompletedEvent),
+  );
+  return pendingResult(current, events, { kind: "completed", settlement });
 }
 
 function completeInteraction(

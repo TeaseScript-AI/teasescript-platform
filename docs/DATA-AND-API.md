@@ -117,6 +117,22 @@ Both modes use the same canonical engine/checkpoint model. Storage location does
 format. Production preferences will select local-only versus server-backed behavior through typed platform contracts;
 the exact records, encryption, retention, synchronization, conflict, and migration policy remain open.
 
+### Script storage in the browser
+
+The Player persists TeaseScript `save`/`load`/`delete` values ([§25](specifications/accepted-syntaxes-v30.md#25-persistent-storage-and-keys))
+through a host-owned, asynchronous `ScriptStorageProvider` for one storage scope (`player/script-storage.ts`); the
+runtime boundary is [Runtime script storage](RUNTIME.md#script-storage). The host chooses a stable, opaque scope per
+script and player. Before each Start the Player loads the scope; during the session it persists every pending write
+through the provider and then reports it to the runtime, which keeps the previous value when the write failed. When
+loading fails, for example because the browser denies storage, the session plays session-local and nothing is kept for
+a later run. Script storage is separate from checkpoint persistence (#469).
+
+The browser-local provider keeps one local-storage item per key, named `player-storage:` plus the JSON array
+`[scope, key]`, holding `{ v: 1, value }`; it validates items as external input and skips unreadable ones. Providers
+treat values as ordinary TeaseScript values and never interpret them, for example as media references; a layer such
+as durable captured media wraps a provider instead. Clearing a scope removes only that script's stored values.
+Storage quotas are not enforced yet; all writes pass through the provider, so quota policy can be added there.
+
 Ordinary Player use does not expose arbitrary manual checkpoint/restore points as a rewind mechanism. The runtime/Player
 creates and restores supported checkpoints according to the session lifecycle. Developer/debug tooling may expose
 manual checkpoint and restore operations because those runs are explicitly diagnostic rather than ordinary canonical

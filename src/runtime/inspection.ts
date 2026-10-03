@@ -149,15 +149,23 @@ function instructionSpan(plan: InstructionPlan, index: number): SourceSpan | nul
   return instruction === undefined ? null : planLocationToSourceSpan(instruction.span);
 }
 
+/**
+ * Inspection data comes from the captured snapshot, which is already detached from the caller's data, so it is
+ * reused rather than copied again.
+ */
 function detached<T>(value: T): T {
-  return structuredClone(value);
+  return value;
 }
 
+/** Freezes a graph iteratively, so deeply nested runtime values cannot exhaust the native stack. */
 function deepFreeze<T>(value: T): T {
-  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
-    Object.freeze(value);
+  const work: unknown[] = [value];
+  while (work.length > 0) {
+    const current = work.pop();
+    if (current === null || typeof current !== "object" || Object.isFrozen(current)) continue;
+    Object.freeze(current);
     // EVIDENCE: the object guard narrows this value to a non-null object before enumeration.
-    for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
+    for (const child of Object.values(current as Record<string, unknown>)) work.push(child);
   }
   return value;
 }

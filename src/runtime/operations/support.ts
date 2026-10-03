@@ -79,7 +79,11 @@ export function cloneSettlement(
       deadlineMs: settlement.deadlineMs,
       completedAtMs: settlement.completedAtMs,
     };
-  if (settlement.actionKind === "chatPacingGate" || settlement.actionKind === "mediaPlayback")
+  if (
+    settlement.actionKind === "chatPacingGate" ||
+    settlement.actionKind === "mediaPlayback" ||
+    settlement.actionKind === "storageWrite"
+  )
     return { ...settlement };
   return {
     actionId: settlement.actionId,

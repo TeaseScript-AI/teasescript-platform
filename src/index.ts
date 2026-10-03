@@ -117,6 +117,10 @@ export type {
   SayEvent,
 } from "./runtime/events.js";
 export {
+  validateScriptStorageEntries,
+  type RuntimeScriptStorageEntrySnapshot,
+} from "./runtime/script-storage.js";
+export {
   executeInstruction,
   run,
   RuntimeDataError,
@@ -193,6 +197,8 @@ export type {
   RuntimeInteractionActionSettlementSnapshot,
   RuntimePendingActionSnapshot,
   RuntimePreparedSayOutputSnapshot,
+  RuntimeStorageWriteActionSnapshot,
+  RuntimeStorageWriteSettlementSnapshot,
 } from "./runtime/actions/model.js";
 export {
   DEFAULT_PLAYGROUND_SEED,

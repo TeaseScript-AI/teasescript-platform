@@ -3,6 +3,7 @@ import { tryOnScopeDispose, useEventListener, useIntervalFn } from "@vueuse/core
 import type { MediaProgressReport } from "../../../src/index.js";
 import {
   observePlayerRuntimeTime,
+  pendingPlayerRuntimeStorageWrite,
   playerRuntimeDeadlines,
   playerRuntimeTimers,
   type PlayerRuntimeSession,
@@ -53,6 +54,14 @@ export function useRuntimeSceneClock(
     wakeUp = undefined;
     if (!current) return;
     displayTimeMs.value = sceneTimeMs(current);
+    // A queued timer or media block waits for a pending storage write, and catch-up holds at its due time: an overdue
+    // deadline cannot progress until the acknowledgement, whose published session schedules again. Without a queued
+    // block, deadlines are observed as usual.
+    if (
+      pendingPlayerRuntimeStorageWrite(current.snapshot) &&
+      current.snapshot.pendingTimerHandlers.length > 0
+    )
+      return;
     const deadlines = playerRuntimeDeadlines(current.snapshot);
     if (deadlines.length === 0) return;
     const delay = Math.min(...deadlines) - sceneTimeMs(current);

@@ -34,7 +34,7 @@ This ADR was accepted as documentation and design. Its generic foreground-intera
     does not activate `showButton`.
 13. `say` uses account-configured smart autoplay by default, supports exact seconds, `0`, and `instant`, and supports speaker defaults plus per-message `skippable` or `unskippable` overrides.
 14. Every positive pacing gate is one ADR 0016 pending action. It begins as background work and may become the foreground action when it blocks a prepared later `say`.
-15. A skippable pacing gate may be completed by a primary click or tap inside the player iframe viewport, or by Space while the focused composer is empty. Skip completes only the pacing gate.
+15. A skippable pacing gate may be completed by a primary click or tap on Player background or other unused Player space, or by Space while the focused composer is empty. Skip completes only the pacing gate.
 16. The normal Player application has no player-facing pause control. Developer mode may provide Run, Step, Pause, checkpoint, and debugger controls.
 17. A later deterministic speaker-aware typing indicator is desired but excluded from this POC.
 
@@ -599,8 +599,7 @@ Effective skip policy is:
 
 A skippable gate may be completed by:
 
-- a primary pointer click anywhere inside the player iframe viewport, including its background or unused space;
-- a primary touch activation;
+- a primary click or tap on Player background or other unused Player space;
 - Space when the focused Standard chat composer is empty.
 
 An actual interactive control has priority. Activating a control must not also be interpreted as a viewport-wide pacing skip.
@@ -725,7 +724,7 @@ A player-facing pause command is not deferred; it is excluded by this accepted c
 ### Costs and risks
 
 - several post-V30 compact forms require parser/compiler work rather than metadata-only library exports;
-- click-anywhere and Space-to-advance require careful event precedence, input-method, and accessibility testing;
+- unused-space click/tap skipping and Space-to-advance require careful event precedence, input-method, and accessibility testing;
 - bounded-data guards add maintenance and test cost; under ADR 0019 each retained guard needs a justified local boundary, and semantically distinct boundaries are not coupled merely for consistency;
 - account pacing values become deterministic session inputs that must be persisted correctly;
 - populated background actions and background-to-foreground gate promotion require explicit schema versioning and

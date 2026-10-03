@@ -23,7 +23,12 @@ import {
   type MediaTimelineEvent,
 } from "../media.js";
 import { applyMediaEvent, mediaSpan } from "./media-lifecycle.js";
-import { expireTimerAction, timerHandlerDispatchable, timerSpan } from "./timer-lifecycle.js";
+import {
+  expireTimerAction,
+  timerHandlerAwaitsStorageWrite,
+  timerHandlerDispatchable,
+  timerSpan,
+} from "./timer-lifecycle.js";
 import { terminalContinuationHandoffFor } from "./terminal-continuation.js";
 import { captureExecutableData, copySpan, pendingResult, takeSequence } from "./support.js";
 
@@ -93,7 +98,7 @@ export function processDueWork(
   // A failed session is terminal: later observations record time but settle nothing.
   if (current.status === "failed") return;
   for (;;) {
-    if (executionRunnable(current)) return;
+    if (executionRunnable(current) || timerHandlerAwaitsStorageWrite(current)) return;
     const due = nextDueWork(current);
     if (due === null) {
       current.currentSessionTimeMs = current.observedSessionTimeMs;
