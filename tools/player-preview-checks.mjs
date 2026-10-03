@@ -1639,6 +1639,14 @@ async function noticeChecks(page) {
       JSON.stringify(["storage-write-failed", "audio-blocked", "storage-unavailable"]),
     "The newest three notices show as toasts, newest first",
   );
+  // Each level has its own status colour; equal levels share it.
+  const borders = await toasts.evaluateAll((elements) =>
+    elements.map((element) => getComputedStyle(element).borderTopColor),
+  );
+  check(
+    borders[0] === borders[1] && borders[1] !== borders[2],
+    `Toasts take their level's colour: ${JSON.stringify(borders)}`,
+  );
   const timer = await page.locator(".timer-display").first().boundingBox();
   for (const box of await toasts.evaluateAll((elements) =>
     elements.map((element) => element.getBoundingClientRect().toJSON()),

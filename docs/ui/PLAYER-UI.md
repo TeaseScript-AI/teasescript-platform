@@ -416,8 +416,10 @@ errors use the alert region.
 
 The current conditions are blocked audio (warning, with **Enable audio**), browser storage unavailable at session start
 (info: saved progress is not kept), and a failed script-storage write (warning, for the run it happened in; a new
-Start withdraws it). Levels differ by icon; level colours await an Owner decision on theme roles (#492). The
-development preview's Visual Lab shows every level.
+Start withdraws it). Each level also has a theme status colour, following the usual convention: info blue, warning
+orange, error red. A toast uses the level's soft tint as its surface and its solid tone for the border and icon; the
+panel colours the icon, and the bell's dot takes the most severe level that needs attention. The development
+preview's Visual Lab shows every level.
 
 ## Stage and media presentation
 

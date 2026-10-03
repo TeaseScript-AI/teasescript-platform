@@ -44,7 +44,7 @@ function leave(event: FocusEvent) {
       :key="entry.notice.key"
       class="player-toast"
       :data-player-toast="entry.notice.key"
-      :data-level="entry.notice.level"
+      :data-notice-level="entry.notice.level"
     >
       <div class="player-toast-head">
         <SquarePlay class="size-3.5 shrink-0" aria-hidden="true" />
@@ -95,9 +95,9 @@ function leave(event: FocusEvent) {
   display: grid;
   gap: 6px;
   padding: 8px 8px 10px 12px;
-  border: 1px solid var(--theme-border-floating, var(--border));
+  border: 1px solid var(--notice-solid);
   border-radius: 12px;
-  background: var(--popover);
+  background: var(--notice-soft);
   color: var(--foreground);
   box-shadow: 0 12px 28px -6px var(--theme-floating-shadow, rgb(0 0 0 / 18%)),
     0 2px 6px -2px var(--theme-floating-shadow, rgb(0 0 0 / 12%));
@@ -124,6 +124,7 @@ function leave(event: FocusEvent) {
 }
 .player-toast-row > svg {
   margin-block-start: 1px;
+  color: var(--notice-solid);
 }
 .player-toast-message {
   min-inline-size: 0;

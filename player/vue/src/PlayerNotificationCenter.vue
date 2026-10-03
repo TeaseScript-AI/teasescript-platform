@@ -70,7 +70,7 @@ function clearAll() {
             <Button data-notification-bell variant="ghost" size="icon" :aria-label="bellLabel">
               <span class="player-notification-bell">
                 <Bell class="size-4" />
-                <span v-if="attentionLevel" class="player-notification-dot" :data-level="attentionLevel" aria-hidden="true" />
+                <span v-if="attentionLevel" class="player-notification-dot" :data-notice-level="attentionLevel" aria-hidden="true" />
               </span>
             </Button>
           </PopoverTrigger>
@@ -86,7 +86,7 @@ function clearAll() {
                 :key="entry.notice.key"
                 class="player-notification"
                 :data-player-notice="entry.notice.key"
-                :data-level="entry.notice.level"
+                :data-notice-level="entry.notice.level"
               >
                 <div class="player-notification-row">
                   <component :is="icons[entry.notice.level]" class="size-4 shrink-0" aria-hidden="true" />
@@ -141,8 +141,8 @@ function clearAll() {
   inline-size: 8px;
   block-size: 8px;
   border-radius: 9999px;
-  /* The theme's accent marks attention; the bell's label carries the count. */
-  background: var(--theme-accent-solid, var(--package-accent));
+  /* The most severe level that needs attention colours the mark; the bell's label carries the count. */
+  background: var(--notice-solid);
   box-shadow: 0 0 0 2px var(--media-surface);
 }
 </style>
@@ -192,6 +192,7 @@ function clearAll() {
 }
 .player-notification-row > svg {
   margin-block-start: 1px;
+  color: var(--notice-solid);
 }
 .player-notification-message {
   flex: 1;
@@ -200,7 +201,8 @@ function clearAll() {
 .player-notification-tag {
   flex-shrink: 0;
   padding: 0 6px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--notice-solid);
+  background: var(--notice-soft);
   border-radius: 9999px;
   font-size: 0.75rem;
   font-weight: 600;
