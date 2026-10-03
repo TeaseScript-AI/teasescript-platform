@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import { CircleAlert, Info, SquarePlay, TriangleAlert, X } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
+import { useFocusRecovery } from "./useFocusRecovery.js";
 import type { PlayerNotification } from "./usePlayerNotifications.js";
 
 // Temporary toasts for new Player notices (PLAYER-UI "Player notices"); the notification panel keeps every notice.
@@ -19,9 +20,30 @@ const announcers = computed(() => [
   { role: "alert", notifications: props.notifications.filter((entry) => entry.notice.level === "error") },
 ]);
 
-function leave(event: FocusEvent) {
-  if (!(event.currentTarget as HTMLElement).contains(event.relatedTarget as Node | null)) emit("hold", false);
+// Pointer and focus hold the toasts independently, so leaving one while the other stays keeps them.
+const stack = ref<HTMLElement | null>(null);
+let pointerInside = false;
+let focusInside = false;
+function hold(pointer: boolean, focus: boolean) {
+  const before = pointerInside || focusInside;
+  pointerInside = pointer;
+  focusInside = focus;
+  if (before !== (pointer || focus)) emit("hold", pointer || focus);
 }
+function focusOut(event: FocusEvent) {
+  hold(pointerInside, stack.value?.contains(event.relatedTarget as Node | null) ?? false);
+}
+// Removing the last toast fires no pointer or focus exit, so an empty stack releases its hold.
+watch(
+  () => props.toasts.length,
+  (length) => {
+    if (length === 0) hold(false, false);
+  },
+);
+// With no toast control left, keyboard focus continues at the notification bell, where every notice remains.
+useFocusRecovery(stack, () =>
+  stack.value?.closest(".player-composition")?.querySelector<HTMLElement>("[data-notification-bell]")?.focus(),
+);
 </script>
 
 <template>
@@ -31,12 +53,13 @@ function leave(event: FocusEvent) {
     </p>
   </div>
   <div
+    ref="stack"
     class="player-toasts"
     data-player-toasts
-    @pointerenter="emit('hold', true)"
-    @pointerleave="emit('hold', false)"
-    @focusin="emit('hold', true)"
-    @focusout="leave"
+    @pointerenter="hold(true, focusInside)"
+    @pointerleave="hold(false, focusInside)"
+    @focusin="hold(pointerInside, true)"
+    @focusout="focusOut"
   >
     <div
       v-for="entry in toasts"
@@ -87,13 +110,25 @@ function leave(event: FocusEvent) {
     var(--player-notice-right, var(--player-edge-space)),
     100% - var(--toast-min-width) - var(--player-edge-space)
   );
+  /* Room inside the scroll box for the cards' shadows and focus rings. */
+  --toast-bleed: 12px;
   position: absolute;
   z-index: 25;
-  inset-block-start: calc(var(--player-top-control-size) + 2 * var(--player-edge-space));
-  inset-inline-end: var(--toast-right);
+  inset-block-start: calc(var(--player-top-control-size) + 2 * var(--player-edge-space) - var(--toast-bleed));
+  inset-inline-end: calc(var(--toast-right) - var(--toast-bleed));
   display: grid;
+  align-content: start;
   gap: 8px;
-  inline-size: min(21.25rem, 100% - var(--toast-right) - var(--player-edge-space));
+  box-sizing: border-box;
+  inline-size: calc(min(21.25rem, 100% - var(--toast-right) - var(--player-edge-space)) + 2 * var(--toast-bleed));
+  /* A short screen scrolls the stack, down to the Player's bottom edge, instead of clipping it. Wheel and touch
+     scrolling over a card still reach this box, although the box itself passes pointer input through. */
+  max-block-size: calc(100% - var(--player-top-control-size) - 2 * var(--player-edge-space) + var(--toast-bleed));
+  scroll-padding-block: var(--toast-bleed);
+  padding: var(--toast-bleed);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
   pointer-events: none;
 }
 .player-toast {

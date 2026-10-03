@@ -9,6 +9,7 @@ import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
 import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 import type { PlayerNoticeLevel } from "../../notices.js";
+import { useFocusRecovery } from "./useFocusRecovery.js";
 import type { PlayerNotification } from "./usePlayerNotifications.js";
 
 // The Player's notification bell and panel (PLAYER-UI "Player notices"), part of the Player's own top controls.
@@ -22,7 +23,8 @@ const icons = { info: Info, warning: TriangleAlert, error: CircleAlert } as cons
 const levelLabels = { info: "Info", warning: "Warning", error: "Error" } as const;
 const open = ref(false);
 const now = ref(Date.now());
-const list = ref<HTMLElement | null>(null);
+const panel = ref<HTMLElement | null>(null);
+const trigger = ref<HTMLElement | null>(null);
 const bellLabel = computed(() =>
   props.attentionCount ? `Notifications, ${props.attentionCount} need attention` : "Notifications",
 );
@@ -45,15 +47,13 @@ function changeOpen(value: boolean) {
   emit("open");
 }
 
-// Dismissing removes the focused control, so focus moves to the nearest remaining control in the panel.
-async function dismiss(key: string) {
-  const controls = [...(list.value?.querySelectorAll<HTMLElement>("button") ?? [])];
-  const index = controls.findIndex((control) => control.closest("[data-player-notice]")?.getAttribute("data-player-notice") === key);
-  emit("dismiss", key);
+// Dismissal, Clear all and a resolved condition remove controls; focus moves to a remaining one. With none left, the
+// panel closes and focus returns to the bell.
+useFocusRecovery(panel, async () => {
+  changeOpen(false);
   await nextTick();
-  const remaining = [...(list.value?.querySelectorAll<HTMLElement>("button") ?? [])];
-  remaining[Math.min(Math.max(index, 0), remaining.length - 1)]?.focus();
-}
+  trigger.value?.querySelector<HTMLElement>("[data-notification-bell]")?.focus();
+});
 
 function clearAll() {
   for (const entry of dismissible.value) emit("dismiss", entry.notice.key);
@@ -63,7 +63,7 @@ function clearAll() {
 <template>
   <Tooltip>
     <TooltipTrigger as-child>
-      <span class="player-notification-trigger">
+      <span ref="trigger" class="player-notification-trigger">
         <Popover :open="open" @update:open="changeOpen">
           <PopoverTrigger as-child>
             <Button data-notification-bell variant="ghost" size="icon" :aria-label="bellLabel">
@@ -74,49 +74,51 @@ function clearAll() {
             </Button>
           </PopoverTrigger>
           <PopoverContent align="end" class="player-notification-panel" data-player-notification-panel>
-            <div class="player-notification-head">
-              <h2>Notifications</h2>
-              <Button v-if="dismissible.length" variant="ghost" size="sm" data-notifications-clear @click="clearAll">Clear all</Button>
-            </div>
-            <p v-if="!notifications.length" class="player-notification-empty">No notifications.</p>
-            <ul v-else ref="list" class="player-notification-list">
-              <li
-                v-for="entry in notifications"
-                :key="entry.notice.key"
-                class="player-notification"
-                :data-player-notice="entry.notice.key"
-                :data-notice-level="entry.notice.level"
-              >
-                <component :is="icons[entry.notice.level]" class="player-notification-icon size-4" aria-hidden="true" />
-                <div class="player-notification-body">
-                  <p>
-                    <span class="sr-only">{{ levelLabels[entry.notice.level] }}: </span>{{ entry.notice.message }}
-                  </p>
-                  <p class="player-notification-meta">
-                    <template v-if="entry.notice.dismissible === false">
-                      <span class="player-notification-needs-action">Needs action</span>
-                      <span aria-hidden="true">·</span>
-                    </template>
-                    <time :datetime="new Date(entry.publishedAt).toISOString()">{{ age(entry.publishedAt) }}</time>
-                  </p>
-                  <span v-if="entry.notice.action" class="player-notification-action">
-                    <Button variant="outline" size="sm" :data-notice-action="entry.notice.key" @click="entry.notice.action.run()">
-                      {{ entry.notice.action.label }}
-                    </Button>
-                  </span>
-                </div>
-                <Button
-                  v-if="entry.notice.dismissible !== false"
-                  variant="ghost"
-                  size="icon-xs"
-                  :aria-label="`Dismiss: ${entry.notice.message}`"
-                  data-notice-dismiss
-                  @click="dismiss(entry.notice.key)"
+            <div ref="panel">
+              <div class="player-notification-head">
+                <h2>Notifications</h2>
+                <Button v-if="dismissible.length" variant="ghost" size="sm" data-notifications-clear @click="clearAll">Clear all</Button>
+              </div>
+              <p v-if="!notifications.length" class="player-notification-empty">No notifications.</p>
+              <ul v-else class="player-notification-list">
+                <li
+                  v-for="entry in notifications"
+                  :key="entry.notice.key"
+                  class="player-notification"
+                  :data-player-notice="entry.notice.key"
+                  :data-notice-level="entry.notice.level"
                 >
-                  <X />
-                </Button>
-              </li>
-            </ul>
+                  <component :is="icons[entry.notice.level]" class="player-notification-icon size-4" aria-hidden="true" />
+                  <div class="player-notification-body">
+                    <p>
+                      <span class="sr-only">{{ levelLabels[entry.notice.level] }}: </span>{{ entry.notice.message }}
+                    </p>
+                    <p class="player-notification-meta">
+                      <template v-if="entry.notice.dismissible === false">
+                        <span class="player-notification-needs-action">Needs action</span>
+                        <span aria-hidden="true">·</span>
+                      </template>
+                      <time :datetime="new Date(entry.publishedAt).toISOString()">{{ age(entry.publishedAt) }}</time>
+                    </p>
+                    <span v-if="entry.notice.action" class="player-notification-action">
+                      <Button variant="outline" size="sm" :data-notice-action="entry.notice.key" @click="entry.notice.action.run()">
+                        {{ entry.notice.action.label }}
+                      </Button>
+                    </span>
+                  </div>
+                  <Button
+                    v-if="entry.notice.dismissible !== false"
+                    variant="ghost"
+                    size="icon-xs"
+                    :aria-label="`Dismiss: ${entry.notice.message}`"
+                    data-notice-dismiss
+                    @click="emit('dismiss', entry.notice.key)"
+                  >
+                    <X />
+                  </Button>
+                </li>
+              </ul>
+            </div>
           </PopoverContent>
         </Popover>
       </span>

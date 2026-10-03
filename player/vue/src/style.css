@@ -448,16 +448,16 @@ html:fullscreen { background: var(--background); }
 }
 
 /* Player notice levels (PLAYER-UI "Player notices") use the theme status colours: info blue, warning orange, error
-   red. Without a Player theme they keep the floating material. */
+   red. Without a Player theme they fall back to the system canvas colours. */
 [data-notice-level="info"] {
-  --notice-solid: var(--theme-status-info, var(--theme-border-floating, var(--border)));
-  --notice-soft: var(--theme-status-info-soft, var(--popover));
+  --notice-solid: var(--theme-status-info, CanvasText);
+  --notice-soft: var(--theme-status-info-soft, Canvas);
 }
 [data-notice-level="warning"] {
-  --notice-solid: var(--theme-status-warning, var(--theme-border-floating, var(--border)));
-  --notice-soft: var(--theme-status-warning-soft, var(--popover));
+  --notice-solid: var(--theme-status-warning, CanvasText);
+  --notice-soft: var(--theme-status-warning-soft, Canvas);
 }
 [data-notice-level="error"] {
-  --notice-solid: var(--theme-status-error, var(--theme-border-floating, var(--border)));
-  --notice-soft: var(--theme-status-error-soft, var(--popover));
+  --notice-solid: var(--theme-status-error, CanvasText);
+  --notice-soft: var(--theme-status-error-soft, Canvas);
 }

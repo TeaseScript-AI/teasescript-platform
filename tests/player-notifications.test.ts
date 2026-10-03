@@ -81,3 +81,11 @@ test("seeing the panel clears attention except for a notice the player must act 
   assert.equal(notifications.attentionCount.value, 1);
   assert.deepEqual(notifications.toasts.value, []);
 });
+
+test("publications in one tick toast in publication order", (context) => {
+  const { channel, toastKeys } = setup(context);
+  for (const key of ["a", "b", "c", "d"]) channel.publish({ key, level: "info", message: key });
+  // Replacing the oldest notice publishes it again, so it is the newest toast.
+  channel.publish({ key: "a", level: "error", message: "a again" });
+  assert.deepEqual(toastKeys(), ["a", "d", "c"]);
+});

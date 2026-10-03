@@ -1667,11 +1667,19 @@ async function noticeChecks(page) {
   // Hiding a toast keeps its notice.
   await page.locator('[data-player-toast="storage-write-failed"] [data-toast-hide]').click();
   await page.locator('[data-player-toast="storage-write-failed"]').waitFor({ state: "detached" });
-  // An info toast expires on its own.
+  // Pointer and focus each hold a toast: focus keeps it after the pointer leaves, beyond its 5 s expiry.
+  const infoToast = page.locator('[data-player-toast="storage-unavailable"]');
+  await infoToast.hover();
+  await infoToast.locator("[data-toast-hide]").focus();
   await page.mouse.move(0, 899);
-  await page
-    .locator('[data-player-toast="storage-unavailable"]')
-    .waitFor({ state: "detached", timeout: 8000 });
+  await page.waitForTimeout(6000);
+  check(
+    (await infoToast.count()) === 1,
+    "A focused toast must not expire after the pointer leaves",
+  );
+  // Released, an info toast expires on its own.
+  await page.evaluate(() => document.activeElement.blur());
+  await infoToast.waitFor({ state: "detached", timeout: 8000 });
 
   // The panel lists every notice, newest first, and replaces the toasts.
   await bell.click();
@@ -1710,10 +1718,20 @@ async function noticeChecks(page) {
     ),
     "Dismissal moves focus to a remaining control in the panel",
   );
-  await panel.locator("[data-notifications-clear]").click();
+  await panel.locator("[data-notifications-clear]").focus();
+  await page.keyboard.press("Enter");
+  await panel.locator('[data-player-notice="storage-write-failed"]').waitFor({ state: "detached" });
   check(
     JSON.stringify(await keys(items, "data-player-notice")) === JSON.stringify(["audio-blocked"]),
     "Clear all keeps only the notice the player must act on",
+  );
+  check(
+    await panel.evaluate(
+      (element) =>
+        document.activeElement?.closest("[data-player-notification-panel]") === element &&
+        document.activeElement.matches("[data-notice-action]"),
+    ),
+    "Clear all moves focus to the remaining notice's action",
   );
   await page.keyboard.press("Escape");
   await panel.waitFor({ state: "detached" });
@@ -1725,6 +1743,19 @@ async function noticeChecks(page) {
   await page.getByRole("button", { name: "Clear notices" }).click();
   await bell.locator(".player-notification-dot").waitFor({ state: "detached" });
 
+  // Resolving the last notice from the panel closes it and returns focus to the bell.
+  await page.getByRole("button", { name: "Show every notice level" }).click();
+  await bell.click();
+  await panel.locator("[data-notifications-clear]").focus();
+  await page.keyboard.press("Enter");
+  await panel.locator('[data-player-notice="audio-blocked"] [data-notice-action]').waitFor();
+  await page.keyboard.press("Enter");
+  await panel.waitFor({ state: "detached" });
+  check(
+    await bell.evaluate((element) => element === document.activeElement),
+    "With no notice left, focus returns to the bell",
+  );
+
   // On a small phone with a timer, toasts keep a readable width and stay in view.
   await page.getByRole("button", { name: "Show every notice level" }).click();
   await page.setViewportSize({ width: 320, height: 568 });
@@ -1735,6 +1766,16 @@ async function noticeChecks(page) {
       box.left >= 0 && box.right <= 320 && box.width >= 200,
       `A toast must fit a small screen: ${JSON.stringify(box)}`,
     );
+  // On a short screen the stack scrolls, so every toast can come fully into view.
+  await page.setViewportSize({ width: 568, height: 320 });
+  for (let index = 0; index < (await toasts.count()); index += 1) {
+    await toasts.nth(index).scrollIntoViewIfNeeded();
+    const box = await toasts.nth(index).boundingBox();
+    check(
+      box && box.y >= 0 && box.y + box.height <= 320,
+      `A toast must scroll fully into view on a short screen: ${JSON.stringify(box)}`,
+    );
+  }
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole("button", { name: "Clear notices" }).click();
   return "PASS notices toast beside the timer, expire, and stay in the panel until resolved or dismissed";

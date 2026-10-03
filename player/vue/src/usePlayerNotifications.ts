@@ -69,7 +69,8 @@ export function usePlayerNotifications(notices: Readonly<Ref<readonly PlayerNoti
       toasts.value = shown.slice(0, maximumToasts);
       for (const key of published) if (toasts.value.includes(key)) schedule(key);
     },
-    { immediate: true },
+    // Synchronous, so each publication is seen in order even when several happen in one tick.
+    { immediate: true, flush: "sync" },
   );
   onScopeDispose(() => {
     for (const key of [...timers.keys()]) clearTimer(key);
