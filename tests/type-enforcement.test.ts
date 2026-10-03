@@ -80,6 +80,26 @@ test("compound assignment keeps the variable's type", () => {
     ],
   ]);
   assert.deepEqual(mismatches("let pause = 5 s\npause -= 2 s"), []);
+  for (const [target, operator] of [
+    ["count", "+="],
+    ["items[0]", "-="],
+  ])
+    for (const operand of ["[2]", 'set["a"]', "{ a: 1 }", "null", "extra"])
+      assert.deepEqual(
+        mismatches(
+          `let count = 1\nlet items = [1]\nlet extra: integer[]? = [2]\n${target} ${operator} ${operand}`,
+        ).map(([code, , text]) => [code, text]),
+        [["TSV041", operand]],
+        `${target} ${operator} ${operand}`,
+      );
+  assert.deepEqual(
+    mismatches('let count = 1\nlet saved = load "count"\ncount += saved\ncount -= saved'),
+    [],
+  );
+  assert.deepEqual(
+    mismatches("let items = [1]\nitems[0] += 0.5")[0]?.[1],
+    "'items' holds integer values (integer[]), so '+=' cannot make an element a number. To allow fractions, declare it as 'let items: number[] = ...'.",
+  );
 });
 
 test("null needs an optional type", () => {
@@ -167,6 +187,10 @@ test("optional types keep their non-null type in operations, elements, and loops
       'let items: integer[]? = [1]\nitems.add("bad")\nitems[0] += "x"\nfor item in items {\n    item = "x"\n}',
     ).map(([code]) => code),
     ["TSV041", "TSV041", "TSV041"],
+  );
+  assert.deepEqual(
+    mismatches("let items: integer[]? = [1]\nitems.add(2.5)")[0]?.[1],
+    "'items' holds integer values (integer[]), so it cannot contain a number. To allow fractions, declare it as 'let items: number[]? = ...'.",
   );
 });
 

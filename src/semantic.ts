@@ -1298,7 +1298,7 @@ class SemanticValidator {
       if (!isAssignable(collection.element, type))
         this.#report(
           semanticCode.typeMismatch,
-          `'${variable}' holds ${typeName(collection.element)} values (${typeName(collection)}), so it cannot contain ${describeValue(type)}.${elementFix(variable, collection, type)}`,
+          `'${variable}' holds ${typeName(collection.element)} values (${typeName(collection)}), so it cannot contain ${describeValue(type)}.${elementFix(variable, collection, type, target.kind === "optional")}`,
           element.span,
         );
     }
@@ -1312,15 +1312,25 @@ class SemanticValidator {
     const target = statement.target;
     const value = this.#expressionType(statement.value, scope);
     if (target.kind === "indexExpression") {
-      const list = nonNullType(this.#expressionType(target.object, scope));
+      const declared = this.#expressionType(target.object, scope);
+      const list = nonNullType(declared);
       if (list.kind !== "list" || list.element.kind === "unknown") return;
+      const optional = declared.kind === "optional";
       if (statement.operator === "=") {
         if (!isAssignable(list.element, value))
-          this.#reportElementMismatch(target.object, list, value, statement.value.span);
+          this.#reportElementMismatch(target.object, list, optional, value, statement.value.span);
         return;
       }
       const subject = `${subjectName(target.object, "This list")} holds ${typeName(list.element)} values (${typeName(list)})`;
-      this.#validateStoredType(statement, scope, list.element, value, subject, "an element");
+      this.#validateStoredType(
+        statement,
+        scope,
+        list.element,
+        value,
+        subject,
+        "an element",
+        (result) => elementFix(variableName(target.object), list, result, optional),
+      );
       return;
     }
     if (target.kind !== "identifier") return;
@@ -1334,6 +1344,7 @@ class SemanticValidator {
       value,
       `'${target.name}' holds ${describeValue(type)}`,
       "it",
+      (result) => typeFix(target.name, type, result),
       target.name,
     );
   }
@@ -1346,10 +1357,9 @@ class SemanticValidator {
     value: StaticType,
     subject: string,
     place: string,
+    fix: (result: StaticType) => string,
     variable?: string,
   ): void {
-    const fix = (result: StaticType) =>
-      variable === undefined ? "" : typeFix(variable, type, result);
     if (statement.operator === "=") {
       if (
         variable !== undefined &&
@@ -1367,8 +1377,8 @@ class SemanticValidator {
     const result = arithmeticType(statement.operator === "+=" ? "+" : "-", type, value);
     if (result === undefined) {
       const operand = nonNullType(type);
-      const operandValue = nonNullType(value);
-      if (operand.kind === "scalar" && operandValue.kind === "scalar")
+      // Only `integer`, `number`, and `duration` combinations support `+=`/`-=`; a known value of any other kind fails.
+      if (operand.kind !== "unknown" && nonNullType(value).kind !== "unknown")
         this.#report(
           semanticCode.typeMismatch,
           `${subject}, so ${describeValue(value)} cannot be ${statement.operator === "+=" ? "added to" : "subtracted from"} ${place}.${operandFix(operand)}`,
@@ -1397,24 +1407,32 @@ class SemanticValidator {
       expression.arguments[0]!.kind !== "positionalArgument"
     )
       return;
-    const collection = nonNullType(this.#expressionType(callee.object, scope));
+    const declared = this.#expressionType(callee.object, scope);
+    const collection = nonNullType(declared);
     if (collection.kind !== "list" && collection.kind !== "set") return;
     const argument = expression.arguments[0]!.value;
     const value = this.#expressionType(argument, scope);
     if (!isAssignable(collection.element, value))
-      this.#reportElementMismatch(callee.object, collection, value, argument.span);
+      this.#reportElementMismatch(
+        callee.object,
+        collection,
+        declared.kind === "optional",
+        value,
+        argument.span,
+      );
   }
 
   #reportElementMismatch(
     collectionExpression: Expression,
     collection: StaticType & { readonly kind: "list" | "set" },
+    optional: boolean,
     value: StaticType,
     span: SourceSpan,
   ): void {
     const subject = subjectName(collectionExpression, `This ${collection.kind}`);
     this.#report(
       semanticCode.typeMismatch,
-      `${subject} holds ${typeName(collection.element)} values (${typeName(collection)}), so it cannot contain ${describeValue(value)}.${elementFix(collectionExpression.kind === "identifier" ? collectionExpression.name : null, collection, value)}`,
+      `${subject} holds ${typeName(collection.element)} values (${typeName(collection)}), so it cannot contain ${describeValue(value)}.${elementFix(variableName(collectionExpression), collection, value, optional)}`,
       span,
     );
   }
@@ -1725,6 +1743,7 @@ function elementFix(
   variable: string | null,
   collection: StaticType & { readonly kind: "list" | "set" },
   value: StaticType,
+  optional: boolean,
 ): string {
   const element = collection.element;
   if (
@@ -1734,8 +1753,12 @@ function elementFix(
     value.kind === "scalar" &&
     value.name === "number"
   )
-    return ` To allow fractions, declare it as 'let ${variable}: ${collection.kind === "list" ? "number[]" : "number set"} = ...'.`;
+    return ` To allow fractions, declare it as 'let ${variable}: ${collection.kind === "list" ? "number[]" : "number set"}${optional ? "?" : ""} = ...'.`;
   return ` Use a separate ${collection.kind} for values of another type.`;
+}
+
+function variableName(expression: Expression): string | null {
+  return expression.kind === "identifier" ? expression.name : null;
 }
 
 function subjectName(expression: Expression, fallback: string): string {
