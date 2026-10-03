@@ -22,6 +22,7 @@ import {
   type PreparedReferenceStep,
 } from "./prepared-references.js";
 import { nextXorShift32, type RandomSource, type XorShift32State } from "./random.js";
+import { callStringMethod, STRING_METHODS, stringLength } from "./string-operations.js";
 import {
   assertStoredType,
   LOAD_KEY_MESSAGE,
@@ -729,12 +730,26 @@ export class Evaluator {
       }
       return;
     }
+    if (typeof receiver === "string") {
+      if (!STRING_METHODS.has(method))
+        throw fault("TSR016", `Text has no method '${method}'.`, span);
+      return;
+    }
     if (!isList(receiver) && !isSet(receiver)) {
       throw fault("TSR016", `Unsupported method '${method}'.`, span);
     }
     const supported = isSet(receiver)
       ? new Set(["add", "remove", "clear", "contains", "toList"])
-      : new Set(["add", "remove", "removeFirst", "removeLast", "clear", "contains", "toSet"]);
+      : new Set([
+          "add",
+          "remove",
+          "removeFirst",
+          "removeLast",
+          "clear",
+          "contains",
+          "toSet",
+          "join",
+        ]);
     if (!supported.has(method)) {
       throw fault("TSR016", `Unsupported method '${method}'.`, span);
     }
@@ -884,6 +899,17 @@ export class Evaluator {
     if (value === null) return "null";
     if (isDuration(value)) return formatDuration(value.milliseconds);
     throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
+  }
+
+  /** One element of `list.join()`: text and other scalars as visible text, without selecting from nested lists. */
+  #joinedText(item: SerializableRuntimeValue, span: SourceSpan): string {
+    if (isList(item) || isSet(item) || isObject(item))
+      throw fault(
+        "TSR021",
+        "join() needs a list without lists, sets, or objects. Select an element or a property first.",
+        span,
+      );
+    return this.visibleText(item, span);
   }
 
   #binary(
@@ -1053,6 +1079,11 @@ export class Evaluator {
     if (expression.callee.kind === "property" && isMediaHandle(receiver)) {
       return this.#callMedia(receiver, expression.callee.name, positional, named, expression.span);
     }
+    if (expression.callee.kind === "property" && typeof receiver === "string") {
+      if (Object.keys(named).length !== 0)
+        throw fault("TSR015", "Text methods accept positional arguments only.", expression.span);
+      return callStringMethod(receiver, expression.callee.name, positional, expression.span);
+    }
     if (expression.callee.kind === "property") {
       return this.#callCollection(
         receiver!,
@@ -1169,6 +1200,18 @@ export class Evaluator {
         case "toSet":
           expect(0);
           return createCapturedSerializableSet(receiver.items);
+        case "join": {
+          if (positional.length > 1)
+            throw fault(
+              "TSR028",
+              `Expected 0 to 1 positional arguments, received ${positional.length}.`,
+              span,
+            );
+          const separator = positional.length === 0 ? ", " : positional[0];
+          if (typeof separator !== "string")
+            throw fault("TSR057", "join() expects text as its separator.", span);
+          return receiver.items.map((item) => this.#joinedText(item, span)).join(separator);
+        }
         default:
           throw fault("TSR016", `Unsupported method '${name}'.`, span);
       }
@@ -1503,6 +1546,10 @@ export class Evaluator {
       return this.#getSpeakerProperty(this.speakerById(value.speakerId, span), name, span);
     }
     if (isList(value) || isSet(value)) return this.#getCollectionProperty(value, name, span);
+    if (typeof value === "string") {
+      if (name === "length") return stringLength(value);
+      throw fault("TSR017", `Text has no property '${name}'.`, span);
+    }
     if (isMediaHandle(value)) {
       const property = mediaProperty(
         this.#media(value, span),
