@@ -159,14 +159,15 @@ Concrete points the migration surfaced in TeaseScript itself:
   and the elapsed result is a `duration`.
 - **Storage** now matches the owner decision on `main` (#484): `load` never writes, and `save null` removes the key.
 - **Positional and named arguments.** V30 section 10 forbids mixing them in one call, but section 13's example
-  `toNumber(text, default: 0)` mixes them, and the parser rejects it (TSP019).
+  `toNumber(text, default: 0)` mixes them, and the parser rejects it (TSP019). The owner chose to allow positional
+  arguments followed by named ones (#522).
 - **Types are not enforced.** `let score: number = "high"` compiles and runs, against V30 sections 12 and 13 (#504).
   Two DisciplineClinic menus stay unconverted because one variable holds text in one place and a list in another.
 - **Runtime defect: a `choose` reached again with other option texts.** The runtime revalidates the retained
   settlement of the last choice against the option texts its instruction currently holds, so the next completion
   fails with TSR101 ("Runtime lastSettlement is malformed") once the same `choose` ran again with other texts, as in
   `for pair in [["Low", "High"], ["Plug", "Clamps"]] { let pick = choose 0: pair[0], 1: pair[1] }`. The proposal
-  shim works around it; accepted output with computed option texts in a loop hits it.
+  shim works around it; accepted output with computed option texts in a loop hits it (#521).
 
 ## Legacy baggage
 
