@@ -1257,13 +1257,46 @@ class SemanticValidator {
       load.kind === "loadExpression" && load.defaultValue !== null
         ? { expression: load.defaultValue, type: this.#expressionType(load.defaultValue, scope) }
         : { expression: statement.initializer, type: initializer };
-    if (!isAssignable(declared, checked.type))
+    if (
+      !this.#validateLiteralElements(declared, checked.expression, scope, `'${name}'`) &&
+      !isAssignable(declared, checked.type)
+    )
       this.#report(
         semanticCode.typeMismatch,
         `'${name}' is declared as ${typeName(declared)}, so it cannot start as ${describeValue(checked.type)}.${typeFix(name, declared, checked.type)}`,
         checked.expression.span,
       );
     return declared;
+  }
+
+  /**
+   * Checks each element of a list or set literal against a known element type, so a mixed literal cannot slip into a
+   * typed collection. Returns whether the literal was checked element by element.
+   */
+  #validateLiteralElements(
+    target: StaticType,
+    expression: Expression,
+    scope: SemanticScope,
+    subject: string,
+  ): boolean {
+    const collection = nonNullType(target);
+    const literal = unwrapParentheses(expression);
+    if (
+      !(collection.kind === "list" && literal.kind === "listLiteral") &&
+      !(collection.kind === "set" && literal.kind === "setLiteral")
+    )
+      return false;
+    if (collection.element.kind === "unknown") return true;
+    for (const element of literal.elements) {
+      const type = this.#expressionType(element, scope);
+      if (!isAssignable(collection.element, type))
+        this.#report(
+          semanticCode.typeMismatch,
+          `${subject} holds ${typeName(collection.element)} values (${typeName(collection)}), so it cannot contain ${describeValue(type)}.`,
+          element.span,
+        );
+    }
+    return true;
   }
 
   #validateAssignmentType(
@@ -1276,7 +1309,7 @@ class SemanticValidator {
       const list = nonNullType(this.#expressionType(target.object, scope));
       if (list.kind !== "list" || list.element.kind === "unknown") return;
       const subject = `${subjectName(target.object, "This list")} holds ${typeName(list.element)} values (${typeName(list)})`;
-      this.#validateStoredType(statement, list.element, value, subject, "an element");
+      this.#validateStoredType(statement, scope, list.element, value, subject, "an element");
       return;
     }
     if (target.kind !== "identifier") return;
@@ -1285,6 +1318,7 @@ class SemanticValidator {
     if (type === undefined || value.kind === "unknown") return;
     this.#validateStoredType(
       statement,
+      scope,
       type,
       value,
       `'${target.name}' holds ${describeValue(type)}`,
@@ -1296,6 +1330,7 @@ class SemanticValidator {
   /** Checks `=`, `+=`, or `-=` of `value` into a place of `type`; `subject` and `place` phrase the message. */
   #validateStoredType(
     statement: Extract<Statement, { kind: "assignmentStatement" }>,
+    scope: SemanticScope,
     type: StaticType,
     value: StaticType,
     subject: string,
@@ -1305,6 +1340,11 @@ class SemanticValidator {
     const fix = (result: StaticType) =>
       variable === undefined ? "" : typeFix(variable, type, result);
     if (statement.operator === "=") {
+      if (
+        variable !== undefined &&
+        this.#validateLiteralElements(type, statement.value, scope, `'${variable}'`)
+      )
+        return;
       if (!isAssignable(type, value))
         this.#report(
           semanticCode.typeMismatch,
