@@ -561,7 +561,142 @@ function lowerStatementList(
     if (span !== null) previousEndLine = span.endLine;
   }
   emitComments(takeCommentsBefore(context, enclosingSpan === null ? null : endOf(enclosingSpan)));
-  return result;
+  return withVisibleCountdowns(result, context);
+}
+
+/**
+ * A loop that only redraws a countdown until `waited = getSeconds() - start` reaches a limit kept the legacy player
+ * busy for that time; TeaseScript runs it out of its instruction budget. Right after `waited` is computed, with a
+ * body that only shows text and sets its own locals before recomputing `waited`, it becomes a visible timer over the
+ * limit (`timer`, as for waitWithGauge), whose display replaces the redrawn text.
+ */
+function withVisibleCountdowns(statements: IrStatement[], context: LowerContext): IrStatement[] {
+  return statements.flatMap((statement, index): IrStatement[] => {
+    if (statement.kind !== "while") return [statement];
+    const condition = statement.condition;
+    if (
+      condition.kind !== "binary" ||
+      condition.operator !== "<" ||
+      condition.left.kind !== "variable" ||
+      (condition.right.kind !== "variable" && condition.right.kind !== "literal")
+    ) {
+      return [statement];
+    }
+    const waited = condition.left.name;
+    const previous = statements
+      .slice(0, index)
+      .findLast((item) => item.kind !== "comment" && item.kind !== "blank");
+    const start = previous === undefined ? null : elapsedStart(previous, waited);
+    const last = statement.body.at(-1);
+    const locals = new Set<string>();
+    if (
+      start === null ||
+      last === undefined ||
+      elapsedStart(last, waited) !== start ||
+      !statement.body.slice(0, -1).every((item) => isDisplayOnly(item, locals))
+    ) {
+      return [statement];
+    }
+    const firstDiagnostic = context.diagnostics.length;
+    addDiagnostic(
+      context,
+      "SX_BUSY_COUNTDOWN",
+      "warning",
+      "The legacy loop redrew a countdown as fast as it could until the time was up; it became a visible timer over the same time, whose display replaces the redrawn text.",
+      statement.span,
+    );
+    return [
+      ...diagnosticNotes(context, firstDiagnostic),
+      { kind: "wait", duration: condition.right, visible: true, unit: "s", span: statement.span },
+    ];
+  });
+}
+
+/** The start variable of `waited = getSeconds() - start` (declaration or assignment), or null. */
+function elapsedStart(statement: IrStatement, waited: string): string | null {
+  const value =
+    statement.kind === "let" && statement.name === waited
+      ? statement.value
+      : statement.kind === "assign" &&
+          statement.operator === "=" &&
+          statement.target.kind === "variable" &&
+          statement.target.name === waited
+        ? statement.value
+        : null;
+  if (
+    value?.kind !== "binary" ||
+    value.operator !== "-" ||
+    value.left.kind !== "call" ||
+    value.left.name !== "getSeconds" ||
+    value.left.positional.length !== 0 ||
+    value.right.kind !== "variable"
+  ) {
+    return null;
+  }
+  return value.right.name;
+}
+
+/** Whether a loop statement only shows text and computes locals it declares itself. */
+function isDisplayOnly(statement: IrStatement, locals: Set<string>): boolean {
+  switch (statement.kind) {
+    case "say":
+      return !hasIrCall(statement.value);
+    case "let":
+      locals.add(statement.name);
+      return !hasIrCall(statement.value);
+    case "assign":
+      return (
+        statement.target.kind === "variable" &&
+        locals.has(statement.target.name) &&
+        !hasIrCall(statement.value)
+      );
+    case "if":
+      return (
+        !hasIrCall(statement.condition) &&
+        statement.then.every((item) => isDisplayOnly(item, new Set(locals))) &&
+        statement.else.every((item) => isDisplayOnly(item, new Set(locals)))
+      );
+    case "comment":
+    case "blank":
+      return true;
+    default:
+      return false;
+  }
+}
+
+/** Whether an expression calls anything or asks for input, which a display-only loop body may not do. */
+function hasIrCall(expression: IrExpression): boolean {
+  switch (expression.kind) {
+    case "call":
+    case "methodCall":
+    case "input":
+    case "choice":
+    case "listChoice":
+    case "load":
+      return true;
+    case "literal":
+    case "variable":
+      return false;
+    case "list":
+      return expression.items.some(hasIrCall);
+    case "object":
+      return expression.properties.some(
+        (property) =>
+          hasIrCall(property.value) || (property.key !== undefined && hasIrCall(property.key)),
+      );
+    case "index":
+      return hasIrCall(expression.target) || hasIrCall(expression.index);
+    case "property":
+      return hasIrCall(expression.target);
+    case "range":
+      return hasIrCall(expression.from) || hasIrCall(expression.to);
+    case "unary":
+      return hasIrCall(expression.value);
+    case "binary":
+      return hasIrCall(expression.left) || hasIrCall(expression.right);
+    case "template":
+      return expression.parts.some((part) => "value" in part && hasIrCall(part.value));
+  }
 }
 
 /** Keeps one blank line where the legacy source separated statements or comments by blank lines. */
