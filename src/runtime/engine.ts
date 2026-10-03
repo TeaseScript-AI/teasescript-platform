@@ -60,7 +60,6 @@ import {
   WRITE_KEY_MESSAGE,
   writeScriptStorage,
 } from "./script-storage.js";
-import type { XorShift32State } from "./random.js";
 import {
   cloneCapturedSerializableValue,
   createCapturedSerializableList,
@@ -487,7 +486,7 @@ function executePlannedInstruction(
       setCapturedTemporary(
         snapshot.temporaries,
         instruction.destinationTemporary,
-        evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span),
+        evaluator.sayText(evaluator.evaluate(instruction.value), instruction.value.span),
       );
       advance(snapshot);
       return;
@@ -692,11 +691,10 @@ function executePlannedInstruction(
         ? materializeInteractionUi(
             instruction.preparedUi,
             snapshot.temporaries,
-            snapshot.rng,
             evaluator,
             instruction.span,
           )
-        : { ui: instruction.ui, stagedWrites: [] as const, rngState: snapshot.rng.state };
+        : { ui: instruction.ui, stagedWrites: [] as const };
       const backgroundGate = snapshot.backgroundActions.find(
         (action): action is RuntimeChatPacingGateActionSnapshot => action.kind === "chatPacingGate",
       );
@@ -726,7 +724,7 @@ function executePlannedInstruction(
         ui: cloneInteractionUi(materialized.ui),
         requestEventSequence: sequence,
       });
-      commitInteractionMaterialization(snapshot, materialized.stagedWrites, materialized.rngState);
+      commitInteractionMaterialization(snapshot, materialized.stagedWrites);
       const committedSequence = takeSequence(snapshot);
       if (committedSequence !== sequence) {
         throw new Error("Interaction event-sequence staging drifted unexpectedly.");
@@ -814,20 +812,14 @@ interface MaterializedInteractionUi {
     readonly temporaryId: number;
     readonly value: SerializableRuntimeValue;
   }[];
-  readonly rngState: number;
 }
 
 function materializeInteractionUi(
   prepared: PreparedInteractionUiPayload,
   temporaries: RuntimeTemporarySnapshot[],
-  canonicalRng: XorShift32State,
   evaluator: Evaluator,
   span: SourceSpan,
 ): MaterializedInteractionUi {
-  const stagedRng: XorShift32State = {
-    algorithm: canonicalRng.algorithm,
-    state: canonicalRng.state,
-  };
   const stagedWrites: Array<{
     readonly temporaryId: number;
     readonly value: SerializableRuntimeValue;
@@ -840,7 +832,7 @@ function materializeInteractionUi(
   };
   const readText = (temporaryId: number): string => {
     const temporary = read(temporaryId);
-    const text = evaluator.visibleTextWithRng(temporary.value, span, stagedRng);
+    const text = evaluator.fieldText(temporary.value, span);
     stagedWrites.push({ temporaryId: temporary.id, value: text });
     return text;
   };
@@ -878,7 +870,7 @@ function materializeInteractionUi(
       );
     }
     const presentations = source.value.items.map((value) => {
-      if (!isObject(value)) return { text: evaluator.visibleTextWithRng(value, span, stagedRng) };
+      if (!isObject(value)) return { text: evaluator.fieldText(value, span) };
       if (
         value.properties.some(
           (property) => property.name !== "text" && property.name !== "background",
@@ -887,7 +879,7 @@ function materializeInteractionUi(
         throw fault("TSR052", "Choice options support text and background only.", span);
       const textValue = getSerializableProperty(value, "text");
       if (textValue === undefined) throw fault("TSR052", "A choice object requires text.", span);
-      const text = evaluator.visibleTextWithRng(textValue, span, stagedRng);
+      const text = evaluator.fieldText(textValue, span);
       const background = getSerializableProperty(value, "background");
       return {
         text,
@@ -948,7 +940,6 @@ function materializeInteractionUi(
         }),
       ),
     ),
-    rngState: stagedRng.state,
   });
 }
 
@@ -958,7 +949,6 @@ function commitInteractionMaterialization(
     readonly temporaryId: number;
     readonly value: SerializableRuntimeValue;
   }[],
-  rngState: number,
 ): void {
   for (const staged of stagedWrites) {
     const temporary = snapshot.temporaries.find((item) => item.id === staged.temporaryId);
@@ -969,7 +959,6 @@ function commitInteractionMaterialization(
     }
     temporary.value = cloneCapturedSerializableValue(staged.value);
   }
-  snapshot.rng.state = rngState;
 }
 
 function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): void {
@@ -1602,7 +1591,7 @@ function executeSay(
   );
   const authoredText =
     instruction.textTemporary === undefined
-      ? evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span)
+      ? evaluator.sayText(evaluator.evaluate(instruction.value), instruction.value.span)
       : preparedSayText(snapshot.temporaries, instruction.textTemporary, instruction.span);
   const content = parseMessageMarkup(authoredText);
   const text = content.visibleText;

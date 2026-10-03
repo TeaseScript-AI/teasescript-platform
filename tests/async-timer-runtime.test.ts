@@ -1257,11 +1257,13 @@ test("late fractional rounds match on time, tiny rounds end normally, zero remai
   );
   assert.ok(adjusted.snapshot.settledTimers.every((timer) => timer.roundDurationMs >= 0));
 
-  const list = run(
-    plan("say [90 seconds], 0"),
-    createImmediatePacingRuntimeSnapshot(plan("say [90 seconds], 0")),
+  const listSource = 'let durations = [90 seconds]\nsay "${durations}", 0';
+  const list = run(plan(listSource), createImmediatePacingRuntimeSnapshot(plan(listSource)));
+  assert.equal(
+    list.snapshot.failure?.code,
+    "TSR021",
+    "interpolation selects only text and numbers",
   );
-  assert.equal(list.snapshot.failure?.code, "TSR021");
 
   const range = plan("let n = 0\ntimer(duration: n..2, async: true, repeat: true)\nwait 10");
   const fresh = createImmediatePacingRuntimeSnapshot(range, { seed: 0x1234_5678 });

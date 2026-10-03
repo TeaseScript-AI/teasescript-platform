@@ -820,10 +820,16 @@ data; reconciliation belongs to #469 and is not implemented here.
 
 Ordinary scalar visible-text conversion accepts strings, finite numbers, booleans, `null`, and elapsed duration values.
 Duration formatting is defined in specification
-[§35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-unix-time). When the value is a list, the
-runtime selects exactly one item and then accepts only a string or finite number. Selected booleans, `null`, objects,
-sets, ranges, and nested collections fail with structured runtime error `TSR021`; the runtime does not recursively
-select or stringify them.
+[§35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-unix-time). List text follows
+[§16](specifications/accepted-syntaxes-v30.md#lists-in-text):
+
+- `${...}` interpolation checks that every element is a string or finite number, then selects exactly one element with
+  the session RNG. An empty list fails with `TSR019` and any other element with `TSR021`, both before any RNG draw.
+- `say` joins the scalar text of every element with `, `. A list, set, or object element fails with `TSR021`.
+- Button labels, input hints, and choice options reject a list with `TSR021`; a list literal there is compile error
+  `TSV040`. Materializing an interaction draws no RNG.
+
+The runtime never recursively selects or stringifies nested values.
 
 The earlier proposal for automatic chat pacing at 17 visible characters per second is superseded. ADR 0018 defines the
 accepted deterministic first-POC smart-autoplay and pacing-action contract. The current engine/compiler and playground

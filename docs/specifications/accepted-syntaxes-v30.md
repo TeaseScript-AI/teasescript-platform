@@ -368,7 +368,7 @@ Division returns a `number` when necessary:
 
 ### Randomness
 
-All random operations use one deterministic session RNG. This includes list `.random`, automatic visible-text list selection, random ranges, script globs, and the built-in random functions.
+All random operations use one deterministic session RNG. This includes list `.random`, list selection in `${...}` interpolation, random ranges, script globs, and the built-in random functions.
 
 ```text
 let value = random()
@@ -574,15 +574,15 @@ say """
 
 Backticks have no delimiter role. A raw backtick inside either quoted form is ordinary text.
 
-When an eligible list is interpolated into a string, the engine selects one random element for that evaluation:
+When a list is interpolated into a string, the engine selects one random element for that evaluation:
 
 ```text
 let greetings = ["Hello", "Hi", "Welcome"]
 say "${greetings}, ${playerName}"
 ```
 
-This automatic selection is limited to approved visible-text contexts. It is not a general list-to-string conversion.
-The complete rules are defined under [Lists](#16-lists).
+Only `${...}` interpolation selects from a list; it is not a general list-to-string conversion. The complete rules are
+defined under [Lists](#16-lists).
 
 ### String escape sequences
 
@@ -687,7 +687,8 @@ wait 2
 playAudio "door.mp3"
 ```
 
-For `say`, an eligible list expression selects one random text value. Other commands do not gain this behavior unless their API explicitly defines the argument as a visible-text field.
+For `say`, a list expression shows all of its elements; only `${...}` interpolation selects one random element
+([§16](#16-lists)).
 
 Only engine-provided built-ins use command syntax. User-defined behavior uses normal functions.
 
@@ -978,28 +979,25 @@ let chosenName = player.petNames.random
 let stranger = speakers.random
 ```
 
-### Automatic random selection in visible text
+### Lists in text
 
-When a list is used in an approved visible-text context, the engine automatically selects one random element for that evaluation.
-
-Accepted contexts include:
+Interpolation is the only place where a list turns into one random element. Each `${...}` evaluation selects one
+element with the deterministic session RNG:
 
 ```text
-say player.petNames
-say "${player.petNames}"
+say "Good ${player.petNames}"
+say "Come closer, ${player.petNames}"
 ```
 
-Other visible-text fields may opt into the same behavior when their API documentation explicitly says so.
+The two evaluations may choose different elements. Replay and debugging reproduce the same session sequence.
 
-Automatic text selection accepts list elements of these types:
+An interpolated list may contain only these element types, which may be mixed:
 
 ```text
 string
 integer
 number
 ```
-
-Those types may be mixed in one text-selection list:
 
 ```text
 let values = [
@@ -1008,19 +1006,30 @@ let values = [
     3.5
 ]
 
-say values
+say "Current: ${values}"
 ```
 
-A selected `integer` or `number` is converted to text for that visible-text use.
-
-Each evaluation selects again:
+A selected `integer` or `number` is converted to text for that interpolation. The whole list is checked before the
+selection, so a list that also contains a `boolean`, `null`, an object, a nested list, a duration, or a media or
+resource reference is rejected whichever element would have been selected. Object lists remain valid lists; select from
+them explicitly:
 
 ```text
-say "Good ${player.petNames}"
-say "Come closer, ${player.petNames}"
+let stranger = speakers.random
 ```
 
-The two evaluations may choose different elements. Selection uses the deterministic session RNG, so replay and debugging can reproduce the same session sequence.
+`say` with a list shows all elements in order, separated by `, `. Each element is shown as `say` shows that value on its
+own, and an empty list shows empty text. A list in `say` may not contain lists, sets, or objects:
+
+```text
+let petNames = ["pet", "puppy", "toy"]
+say petNames            // pet, puppy, toy
+say "Good ${petNames}"  // one random element
+```
+
+Other text fields, such as a button label, an input hint, or a choice option, do not select from a list. A list there is
+a compile error when it is written directly and a runtime error otherwise; use `${...}` or `.random` to select an
+element.
 
 To choose a specific element, use its index:
 
@@ -1053,7 +1062,8 @@ copiedNames.add("new")
 
 `originalNames` remains unchanged.
 
-Automatic random selection is deliberately not a general list-to-string conversion. It does not apply implicitly to paths, storage keys, URLs, media references, resource references, ordinary type inference, or other program-control values:
+Interpolation is deliberately not a general list-to-string conversion. Paths, storage keys, URLs, media references,
+resource references, ordinary type inference, and other program-control values never select from a list:
 
 ```text
 run scriptPaths
@@ -1064,28 +1074,12 @@ playVideo videos
 
 Those examples require an explicit element or `.random` where the receiving API permits the selected element type.
 
-Automatic visible-text selection also does not accept lists containing:
-
-```text
-boolean
-null
-objects
-nested lists
-media references
-resource references
-```
-
-Object lists remain valid, but selection from them must be explicit:
-
-```text
-let stranger = speakers.random
-```
-
 Runtime behavior:
 
 - An invalid index raises a runtime error rather than returning `null`.
-- Automatic visible-text selection from an empty list raises a runtime error because no element can be selected.
-- The empty-list error identifies the list expression and explains that the visible-text context requires at least one eligible element.
+- Interpolating an empty list raises a runtime error because no element can be selected.
+- The empty-list error identifies the interpolated expression and explains that interpolation needs at least one
+  element to select from.
 - `remove(value)` leaves the list unchanged when the value is absent and emits a warning to the developer log.
 - `removeFirst()` and `removeLast()` on an empty list, and set `remove(value)` of an absent value, are no-ops: the
   collection stays unchanged and execution continues without an error or warning.
@@ -2511,13 +2505,13 @@ let item = items[99]
 
 A replacement value may be supplied for `item`.
 
-### Empty list in visible-text selection
+### Empty list in interpolation
 
 ```text
 say "${names}"
 ```
 
-When `names` is empty, execution reports that no eligible text value can be selected. A replacement text value may be supplied when runtime recovery is enabled.
+When `names` is empty, execution reports that no element can be selected. A replacement text value may be supplied when runtime recovery is enabled.
 
 Recovered errors should record:
 
@@ -2900,7 +2894,7 @@ degradingNames
 lovingNames
 ```
 
-The engine supplies a default list for each player field. The player may customize these account-wide defaults. If a built-in list has nevertheless been emptied, its visible-text fallback is the literal category label: `"pet name"`, `"degrading name"`, or `"loving name"`. This special fallback does not change the general empty-list runtime-error rule for ordinary lists.
+The engine supplies a default list for each player field. The player may customize these account-wide defaults. If a built-in list has nevertheless been emptied, its interpolation fallback is the literal category label: `"pet name"`, `"degrading name"`, or `"loving name"`. This special fallback does not change the general empty-list runtime-error rule for ordinary lists.
 
 ```text
 player.petNames
@@ -2908,7 +2902,7 @@ player.degradingNames
 player.lovingNames
 ```
 
-In an approved visible-text context, a list automatically returns one random eligible element according to the list rules:
+Interpolation selects one random element according to the list rules:
 
 ```text
 say "Come here, ${player.petNames}."

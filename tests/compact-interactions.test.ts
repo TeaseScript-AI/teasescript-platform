@@ -605,7 +605,40 @@ test("authored payloads evaluate once in source order before pending state", () 
   assert.deepEqual(calls, ["First", "Second"]);
 });
 
-test("dynamic interaction UI uses the established visible-text conversion once before waiting", () => {
+test("a list literal in an interaction text field is a compile error", () => {
+  const cases = [
+    ['showButton ["Go", "Run"]', "a button label"],
+    ['let answer = askText ["Name?"]', "an input hint"],
+    ['let answer = askNumber ["Count?"]', "an input hint"],
+    ['let answer = choose ["A", "B"], "C"', "a choice option"],
+    ['let answer = choose first: { text: ["A"] }', "a choice option"],
+  ] as const;
+  for (const [source, field] of cases) {
+    const result = compileSource(source);
+    const start = source.indexOf("[");
+    const end = source.indexOf("]") + 1;
+    assert.equal(result.plan, null, source);
+    assert.deepEqual(
+      result.diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.message,
+        diagnostic.span.start.offset,
+        diagnostic.span.end.offset,
+      ]),
+      [
+        [
+          "TSV040",
+          `A list cannot be ${field}. Select one element with "\${...}" or .random.`,
+          start,
+          end,
+        ],
+      ],
+      source,
+    );
+  }
+});
+
+test("dynamic interaction UI converts scalars once and selects from a list only through interpolation", () => {
   const numberPlan = compiled("showButton 12.5");
   const numberPending = run(numberPlan, createFreshRuntimeSnapshot(numberPlan));
   assert.equal(
@@ -616,7 +649,9 @@ test("dynamic interaction UI uses the established visible-text conversion once b
     "12.5",
   );
 
-  const listPlan = compiled('let result = choose ["left", 2], ["right", 3]');
+  const listPlan = compiled(
+    'let left = ["left", 2]\nlet right = ["right", 3]\nlet result = choose "${left}", "${right}"',
+  );
   const randomValues = [0.75, 0.75];
   let randomCalls = 0;
   const listPending = run(listPlan, createFreshRuntimeSnapshot(listPlan), {
@@ -650,22 +685,28 @@ test("dynamic interaction UI uses the established visible-text conversion once b
   assert.deepEqual(seededFirst.snapshot.foregroundAction, seededSecond.snapshot.foregroundAction);
   assert.deepEqual(seededFirst.snapshot.rng, seededSecond.snapshot.rng);
 
-  const unsupportedPlan = compiled("showButton [true]");
-  const unsupportedFresh = createFreshRuntimeSnapshot(unsupportedPlan);
-  const nextActionId = unsupportedFresh.nextActionId;
-  let unsupportedRandomCalls = 0;
-  const unsupported = run(unsupportedPlan, unsupportedFresh, {
-    random: {
-      next: () => {
-        unsupportedRandomCalls += 1;
-        return 0;
+  for (const source of [
+    'let labels = ["a", "b"]\nshowButton labels',
+    'let hints = ["a", "b"]\nlet answer = askText hints',
+    'let options = ["a", "b"]\nlet answer = choose options, "c"',
+    'let options = ["a", "b"]\nlet answer = choose { text: options }',
+  ]) {
+    const plan = compiled(source);
+    const fresh = createFreshRuntimeSnapshot(plan);
+    let calls = 0;
+    const rejected = run(plan, fresh, {
+      random: {
+        next: () => {
+          calls += 1;
+          return 0;
+        },
       },
-    },
-  });
-  assert.equal(unsupportedRandomCalls, 1);
-  assert.equal(unsupported.snapshot.failure?.code, "TSR021");
-  assert.equal(unsupported.snapshot.foregroundAction, null);
-  assert.equal(unsupported.snapshot.nextActionId, nextActionId);
+    });
+    assert.equal(calls, 0, source);
+    assert.equal(rejected.snapshot.failure?.code, "TSR021", source);
+    assert.equal(rejected.snapshot.foregroundAction, null, source);
+    assert.equal(rejected.snapshot.nextActionId, fresh.nextActionId, source);
+  }
 });
 
 test("static compact interactions compile long mixed unary numeric labels without native recursion", () => {
@@ -685,14 +726,14 @@ test("dynamic interaction UI commits prepared text and serialized RNG only after
     {
       name: "a later dynamic unlabelled duplicate",
       plan: compiled('let result = choose first, "same"', { globals: ["first"] }),
-      globals: { first: createSerializableList(["same"]) },
+      globals: { first: "same" },
       code: "TSR052",
     },
     {
-      name: "an aggregate overflow after list selection",
+      name: "an aggregate overflow across options",
       plan: compiled("let result = choose first, second", { globals: ["first", "second"] }),
       globals: {
-        first: createSerializableList(["a".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES / 2)]),
+        first: "a".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES / 2),
         second: "b".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES / 2 + 1),
       },
       code: "TSR052",
@@ -710,9 +751,9 @@ test("dynamic interaction UI commits prepared text and serialized RNG only after
       code: "TSR052",
     },
     {
-      name: "an unsupported selected list item after an earlier value",
+      name: "a list option after an earlier valid option",
       plan: compiled("let result = choose first, second", { globals: ["first", "second"] }),
-      globals: { first: createSerializableList(["first"]), second: createSerializableList([true]) },
+      globals: { first: "first", second: createSerializableList(["second"]) },
       code: "TSR021",
     },
   ] as const;
@@ -744,8 +785,8 @@ test("dynamic interaction UI commits prepared text and serialized RNG only after
   }
 });
 
-test("dynamic list payload selection is fixed before checkpoint restore and is never reevaluated", () => {
-  const plan = compiled("showButton values()", { builtins: ["values"] });
+test("an interpolated list selection is fixed before checkpoint restore and is never reevaluated", () => {
+  const plan = compiled('showButton "${values()}"', { builtins: ["values"] });
   let calls = 0;
   const pending = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1364229357 }), {
     builtins: {
