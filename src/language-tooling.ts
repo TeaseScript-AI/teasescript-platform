@@ -78,13 +78,13 @@ const HELP = Object.freeze({
     command: "askText" as const,
     summary:
       "Waits for submitted text. Line endings are normalized while other whitespace is preserved; whitespace-only input is rejected and retried. The optional hint is UI guidance, not transcript text. An optional default answer prefills the field; submitting it unchanged returns it.",
-    syntax: "askText [as speaker] [hint] [, default: answer]",
+    syntax: "askText [as speaker] [hint | hint, default: answer | default: answer]",
   }),
   askNumber: Object.freeze({
     command: "askNumber" as const,
     summary:
       "Waits for numeric text, trims surrounding whitespace, accepts the TeaseScript numeric grammar, requires a finite value, and returns negative zero as canonical numeric 0 while preserving the trimmed submitted text in the transcript. An optional default number prefills the field.",
-    syntax: "askNumber [as speaker] [hint] [, default: number]",
+    syntax: "askNumber [as speaker] [hint | hint, default: number | default: number]",
   }),
   choose: Object.freeze({
     command: "choose" as const,
@@ -438,6 +438,17 @@ function signatureParameters(command: CompactCommand): readonly string[] {
   }
 }
 
+const OPENING_DELIMITERS: ReadonlySet<TokenKind> = new Set([
+  TokenKind.LeftParenthesis,
+  TokenKind.LeftBracket,
+  TokenKind.LeftBrace,
+]);
+const CLOSING_DELIMITERS: ReadonlySet<TokenKind> = new Set([
+  TokenKind.RightParenthesis,
+  TokenKind.RightBracket,
+  TokenKind.RightBrace,
+]);
+
 function activeParameterFor(
   source: string,
   command: CompactCommand,
@@ -458,29 +469,27 @@ function activeParameterFor(
   )
     return 0;
   if (command === "askText" || command === "askNumber") {
-    const defaultIndex = tail.findIndex(
-      (token, index) =>
+    let depth = 0;
+    for (const [index, token] of tail.entries()) {
+      if (OPENING_DELIMITERS.has(token.kind)) depth += 1;
+      else if (CLOSING_DELIMITERS.has(token.kind)) depth = Math.max(0, depth - 1);
+      else if (
+        depth === 0 &&
         token.kind === TokenKind.Identifier &&
         token.lexeme === "default" &&
-        tail[index + 1]?.kind === TokenKind.Colon,
-    );
-    return defaultIndex >= 0 ? 2 : 1;
+        tail[index + 1]?.kind === TokenKind.Colon
+      )
+        return 2;
+    }
+    return 1;
   }
   if (command !== "say") return 1;
 
   let depth = 0;
   for (const token of tail) {
-    if (
-      token.kind === TokenKind.LeftParenthesis ||
-      token.kind === TokenKind.LeftBracket ||
-      token.kind === TokenKind.LeftBrace
-    ) {
+    if (OPENING_DELIMITERS.has(token.kind)) {
       depth += 1;
-    } else if (
-      token.kind === TokenKind.RightParenthesis ||
-      token.kind === TokenKind.RightBracket ||
-      token.kind === TokenKind.RightBrace
-    ) {
+    } else if (CLOSING_DELIMITERS.has(token.kind)) {
       depth = Math.max(0, depth - 1);
     } else if (token.kind === TokenKind.Comma && depth === 0) {
       return 3;

@@ -35,7 +35,7 @@ import type {
 } from "../../plan/model.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 import { numberAnswerText } from "../../interaction-answers.js";
-import { staticNumber, staticVisibleText } from "../../static-evaluation.js";
+import { staticVisibleText } from "../../static-evaluation.js";
 import { durationLiteralMilliseconds } from "../../duration.js";
 import { runCompileTask, compileChild, type CompileTask } from "../continuation.js";
 import {
@@ -1909,17 +1909,27 @@ function interactionLabelValue(
 }
 
 /**
- * The prefill text of a constant default answer, or `undefined` when the default is only known at runtime. Semantic
- * validation has already rejected constants of the wrong type.
+ * The prefill text of a literal default answer, or `undefined` when the default is evaluated at runtime, where
+ * arithmetic keeps its ordinary runtime errors. Semantic validation has already rejected literals of the wrong type.
  */
 function staticInteractionPrefill(expression: InteractionExpression): string | undefined {
-  const value = expression.defaultValue!;
-  if (expression.interactionKind === "number") {
-    const number = staticNumber(value);
-    return number === undefined || !Number.isFinite(number) ? undefined : numberAnswerText(number);
+  let literal = expression.defaultValue!;
+  let negative = false;
+  while (
+    literal.kind === "parenthesizedExpression" ||
+    (expression.interactionKind === "number" &&
+      literal.kind === "unaryExpression" &&
+      (literal.operator === "-" || literal.operator === "+"))
+  ) {
+    if (literal.kind === "unaryExpression") {
+      negative = negative !== (literal.operator === "-");
+      literal = literal.operand;
+    } else literal = literal.expression;
   }
-  let literal = value;
-  while (literal.kind === "parenthesizedExpression") literal = literal.expression;
+  if (expression.interactionKind === "number")
+    return literal.kind === "numberLiteral"
+      ? numberAnswerText(negative ? -literal.value : literal.value)
+      : undefined;
   return literal.kind === "stringLiteral" ? staticVisibleText(literal) : undefined;
 }
 

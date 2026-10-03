@@ -187,6 +187,7 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
   assert.equal(activeSlot("askNumber as mistress "), "hint");
   assert.equal(activeSlot('askText "Name?", default: '), "default");
   assert.equal(activeSlot("askNumber default: "), "default");
+  assert.equal(activeSlot('askText { default: "Name?" }.default'), "hint");
   assert.equal(activeSlot("showButton as mistress "), "label");
   assert.equal(activeSlot("choose as mistress "), "options");
   assert.equal(activeSlot('say ["Hello", "there"]'), "text");
