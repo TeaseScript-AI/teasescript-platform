@@ -12,6 +12,7 @@ import { compileSource } from "./compiler.js";
 import { mediaHandlerBlocks, mediaOperands } from "./expression-children.js";
 import type { Diagnostic } from "./diagnostics.js";
 import { lex } from "./lexer.js";
+import { TEASESCRIPT_PROTECTED_NAMES } from "./protected-names.js";
 import {
   createSourcePosition,
   createSourceSpan,
@@ -351,9 +352,14 @@ function tokenToCompactCommand(token: Token): CompactCommand | null {
   return null;
 }
 
+const protectedNames: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_NAMES);
+
+/** Declared speaker names; a protected name such as `set` is an invalid declaration, not a suggestion. */
 function declaredSpeakers(source: string): readonly string[] {
   const speakers = compileSource(source).program.statements.flatMap((statement) =>
-    statement.kind === "speakerDeclaration" ? [statement.name.name] : [],
+    statement.kind === "speakerDeclaration" && !protectedNames.has(statement.name.name)
+      ? [statement.name.name]
+      : [],
   );
   return Object.freeze([...new Set(speakers)]);
 }
