@@ -239,6 +239,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     notices: computed(() => noticeList.value),
     /** Reports a host condition to the player; publishing the same key again replaces that notice. */
     publishNotice: (notice: PlayerNotice) => notices.publish(notice),
+    /** Withdraws a notice once its producer's condition resolves, including one the player cannot dismiss. */
+    withdrawNotice: (key: string) => notices.dismiss(key),
     /** Dismisses a notice for the player; a notice that is the only way to recover stays until it resolves. */
     dismissNotice: (key: string) => {
       if (notices.list.some((notice) => notice.key === key && notice.dismissible !== false))

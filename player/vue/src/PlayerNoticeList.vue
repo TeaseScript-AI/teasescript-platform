@@ -9,8 +9,9 @@ import type { PlayerNotice } from "../../notices.js";
 const props = defineProps<{ notices: readonly PlayerNotice[] }>();
 const emit = defineEmits<{ dismiss: [key: string] }>();
 const icons = { info: Info, warning: TriangleAlert, error: CircleAlert } as const;
-// Both live regions exist before any notice, so assistive technology announces the first one too.
-const regions = computed(() => [
+// The cards keep publication order. Separate announcers carry the messages: both exist before any notice, so assistive
+// technology announces the first one too, and errors use the alert announcer.
+const announcers = computed(() => [
   { role: "status", notices: props.notices.filter((notice) => notice.level !== "error") },
   { role: "alert", notices: props.notices.filter((notice) => notice.level === "error") },
 ]);
@@ -28,10 +29,13 @@ async function dismiss(key: string) {
 </script>
 
 <template>
+  <div v-for="announcer in announcers" :key="announcer.role" class="sr-only" :role="announcer.role">
+    <p v-for="notice in announcer.notices" :key="notice.key">{{ notice.message }}</p>
+  </div>
   <div ref="stack" class="player-notices" data-player-notices>
-    <div v-for="region in regions" :key="region.role" class="player-notice-region" :role="region.role">
+    <div class="player-notice-region">
       <div
-        v-for="notice in region.notices"
+        v-for="notice in notices"
         :key="notice.key"
         class="player-notice rounded-md border bg-card px-3 py-1 text-sm text-foreground shadow-xs"
         :data-player-notice="notice.key"

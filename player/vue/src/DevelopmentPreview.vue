@@ -42,16 +42,16 @@ const player = usePlayerSession({ resolveAsset: resolveDevelopmentAsset });
 
 // Notice preview: the Player's own wording for real conditions, plus an error sample that no condition reports yet.
 const sampleNotices: readonly PlayerNotice[] = [
-  playerNotices.storageUnavailable(),
-  playerNotices.audioBlocked(() => player.dismissNotice(playerNoticeKeys.audioBlocked)),
-  playerNotices.storageWriteFailed(),
   { key: "preview-error", level: "error", message: "The camera stopped unexpectedly." },
+  playerNotices.storageUnavailable(),
+  playerNotices.audioBlocked(() => player.withdrawNotice(playerNoticeKeys.audioBlocked)),
+  playerNotices.storageWriteFailed(),
 ];
 function showSampleNotices() {
   for (const notice of sampleNotices) player.publishNotice(notice);
 }
 function clearSampleNotices() {
-  for (const notice of sampleNotices) player.dismissNotice(notice.key);
+  for (const notice of sampleNotices) player.withdrawNotice(notice.key);
 }
 player.prepare(() => createPlayerRuntimeSession(openingScenario));
 </script>

@@ -27,6 +27,7 @@ interface StorageHost {
     readonly dismissible?: boolean;
   }): void;
   dismissNotice(key: string): void;
+  withdrawNotice(key: string): void;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   prepare(create: () => PlayerRuntimeSession): void;
@@ -456,4 +457,7 @@ test("Vue host keeps a recovery notice until its condition resolves", async (con
     host.notices.value.map(({ key }) => key),
     ["needs-action"],
   );
+  // Its producer withdraws it once the condition resolves.
+  host.withdrawNotice("needs-action");
+  assert.deepEqual(host.notices.value, []);
 });

@@ -1635,7 +1635,18 @@ async function noticeStackChecks(page) {
   const stack = page.locator("[data-player-notices]");
   const conversation = page.locator("[data-conversation-overlay]").locator("xpath=..");
   const notices = page.locator("[data-player-notice]");
-  check((await notices.count()) === 4, "Every published notice is rendered");
+  check(
+    JSON.stringify(
+      await notices.evaluateAll((cards) => cards.map((card) => card.dataset.playerNotice)),
+    ) ===
+      JSON.stringify([
+        "preview-error",
+        "storage-unavailable",
+        "audio-blocked",
+        "storage-write-failed",
+      ]),
+    "Every published notice is rendered in publication order, whatever its level",
+  );
   for (let index = 0; index < (await notices.count()); index += 1) {
     const notice = notices.nth(index);
     await notice.scrollIntoViewIfNeeded();
@@ -1657,7 +1668,14 @@ async function noticeStackChecks(page) {
     (await stack.evaluate((element) => getComputedStyle(element).overflowY)) === "auto",
     "The notice stack scrolls when it overflows",
   );
-  return "PASS notice stack stays reachable in a small conversation";
+  // Producers withdraw their notices, including the blocked-audio notice the player cannot dismiss.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator("[data-sidebar=trigger]").first().click();
+  await page.locator("[data-tools-surface]").waitFor();
+  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).first().click();
+  await page.getByRole("button", { name: "Clear notices" }).click();
+  await notices.first().waitFor({ state: "detached" });
+  return "PASS notice stack keeps publication order, stays reachable in a small conversation and clears";
 }
 
 async function mediaPlaybackChecks(page) {

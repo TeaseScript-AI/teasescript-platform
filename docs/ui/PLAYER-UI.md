@@ -399,8 +399,9 @@ withdraws, so repeated causes do not stack.
 
 The notices appear in one region directly above the composer, centred, each as a compact card with a level icon (info,
 warning, or error), its text, at most one action control that runs from the player's click (such as **Enable
-audio**), and a dismiss control. The region keeps one status and one alert live region in place before any notice, so
-the first notice is announced too; errors use the alert region. A notice stays until its condition resolves or the
+audio**), and a dismiss control. Cards keep publication order whatever their level. Separate status and alert live
+regions announce the messages; both exist before any notice, so the first notice is announced too, and errors use the
+alert region. A notice stays until its condition resolves or the
 player dismisses it, and dismissal moves focus to the nearest remaining notice control. A notice whose action is the
 only way to continue, such as **Enable audio** while the script waits for that audio, offers no dismiss control and
 disappears once its condition resolves. The stack may use the conversation space above the composer and scrolls
