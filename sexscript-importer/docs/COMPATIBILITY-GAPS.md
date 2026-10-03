@@ -127,7 +127,8 @@ Evidence for owner evaluation, ordered by corpus weight:
    `choose someList` presents one button with one random element (visible-text list conversion). For a
    bounded package a helper that branches on the list length (`choose 0: rows[0].label, 1: rows[1].label, ...` per
    length) works, so this is an ergonomic gap rather than an inexpressible one; menus over data are ordinary script
-   logic, which makes it the strongest candidate.
+   logic, which makes it the strongest candidate. Proposed change: C1–C4 in
+   [`PROPOSED-LANGUAGE-CHANGES.md`](PROPOSED-LANGUAGE-CHANGES.md).
 2. **Text utilities.** Toy measures typed lines (`line.size()` for typing speed) and transforms input text; 13 corpus
    string-method calls (`SX_STRING_METHOD`) have no accepted equivalent, not even string length. The corpus does not
    argue for new syntax: a small synchronous `.ts` library of length/case/trim/split functions, once package-library
