@@ -14,6 +14,7 @@ import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { recordContinueCapture } from "../src/runtime/operations/continue-capture.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import type { RuntimeSnapshot } from "../src/runtime/state.js";
+import { temporalCapturesProblem } from "../src/runtime/temporal-captures.js";
 import { DEFAULT_TEMPORAL_CONTEXT, type TemporalContext } from "../src/temporal.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -377,6 +378,30 @@ test("a checkpoint rejects captures out of recording order and an open choice wi
   data.snapshot.temporalCaptures.shift();
   data.snapshot.foregroundAction.ui.options[0]!.text = "2026-10-04";
   assert.throws(() => restoreCheckpoint(data), CheckpointError);
+
+  // Captures that share one context object check it once, but each capture's own fields still count, a later
+  // distinct context is checked too, and every check of a list starts afresh.
+  const shared: { zone: unknown; presentation: { hourCycle: unknown } } = JSON.parse(
+    JSON.stringify(NEUTRAL),
+  );
+  const capture = (boundaryMs: number, sinceEventSequence: number, context: unknown) => ({
+    boundaryMs,
+    sinceEventSequence,
+    epochMs: START + boundaryMs,
+    context,
+  });
+  const captures = [capture(0, 0, shared), capture(10, 1, shared)];
+  assert.equal(temporalCapturesProblem(captures, 10, 10, 3), null);
+  assert.notEqual(
+    temporalCapturesProblem([captures[0], { ...captures[1], epochMs: 1.5 }], 10, 10, 3),
+    null,
+  );
+  assert.notEqual(
+    temporalCapturesProblem([...captures, capture(10, 2, { zone: shared.zone })], 10, 10, 3),
+    null,
+  );
+  shared.presentation.hourCycle = "h99";
+  assert.notEqual(temporalCapturesProblem(captures, 10, 10, 3), null);
 });
 
 test("without a clock the getters fail, and a Continue capture is checked before it is recorded", () => {
