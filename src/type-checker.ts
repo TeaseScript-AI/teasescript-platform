@@ -6251,10 +6251,13 @@ function unwrapGrouping(expression: Expression): Expression {
 }
 
 /** The tag names of a list literal of quoted names, or `null` for anything else, which only runtime knows. */
-function literalTagNames(value: Expression): readonly string[] | null {
+function literalTagNames(written: Expression): readonly string[] | null {
+  // Grouping changes nothing: `(["a"])` and `[("a")]` are literal lists too.
+  const value = unwrapGrouping(written);
   if (value.kind !== "listLiteral") return null;
   const names: string[] = [];
-  for (const element of value.elements) {
+  for (const item of value.elements) {
+    const element = unwrapGrouping(item);
     if (
       element.kind !== "stringLiteral" ||
       element.parts.some((part) => part.kind !== "stringText")

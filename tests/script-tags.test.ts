@@ -142,6 +142,14 @@ test("a pick whose literal tags match no file is a compile error; one that only 
   assert.deepEqual(errors('goto tagged "public", from: "rooms/s*.tease"'), [
     ["TST002", "No file in the project has these tags."],
   ]);
+  // Grouping keeps a written list literal, in every transfer form.
+  for (const main of [
+    'goto tagged all: (["absent"])',
+    'call tagged all: [("absent")]\nexit',
+    'fallback tagged "punishment", none: (["punishment"])\nexit',
+  ]) {
+    assert.deepEqual(errors(main), [["TST002", "No file in the project has these tags."]], main);
+  }
   const plan = compiled('let minimum = 9\ngoto tagged "punishment" > minimum');
   const failed = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   assert.equal(failed.snapshot.status, "failed");

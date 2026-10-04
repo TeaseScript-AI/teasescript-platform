@@ -4456,7 +4456,8 @@ if pool.length > 0 { goto (pool.random) } else { goto "fallback.tease" }
   no random number. A pick (`showImage tagged`, `goto tagged`, `call tagged`, `fallback tagged`) draws once from the
   session random generator, and restoring a checkpoint never draws again.
 - A `goto tagged`, `call tagged`, or `fallback tagged` whose tag tests and literal tag lists match no file, within its
-  `from:`, is a compile error: every file's header is known when the project compiles.
+  `from:`, is a compile error: every file's header is known when the project compiles. Comparisons and computed lists
+  are not evaluated for this.
 - When the compilation is given the package images and no file takes photos with tags, a `showImage tagged` whose tag
   tests and literal tag lists match none of them is a compile error; comparisons and computed lists are not evaluated
   for this. Any other pick that finds no image is a runtime error.
