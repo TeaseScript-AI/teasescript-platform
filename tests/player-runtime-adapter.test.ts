@@ -739,7 +739,7 @@ test("a session records the account's zone and presentation, falling back to the
   const session = createPlayerRuntimeSession('say toDateTime("2026-10-04T18:30")', {
     temporalContext: account,
   });
-  assert.deepEqual(session.snapshot.temporalContext, account);
+  assert.deepEqual(session.snapshot.temporalCaptures[0]?.context, account);
   assert.equal(
     session.events.find((event) => event.kind === "say")?.text,
     new Intl.DateTimeFormat("en-US", {

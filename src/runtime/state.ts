@@ -2,9 +2,16 @@ import { isOneOf } from "../plan/validation-support.js";
 import {
   DEFAULT_TEMPORAL_CONTEXT,
   frozenTemporalContext,
+  isValidEpochMilliseconds,
   temporalContextProblem,
   type TemporalContext,
 } from "../temporal.js";
+import {
+  frozenTemporalCaptures,
+  temporalCaptureAt,
+  temporalCapturesProblem,
+  type RuntimeTemporalCapture,
+} from "./temporal-captures.js";
 import type {
   RuntimeActionSettlementSnapshot,
   RuntimeDelayActionSnapshot,
@@ -74,7 +81,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 33;
+export const RUNTIME_SNAPSHOT_VERSION = 34;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -103,7 +110,7 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "currentSessionTimeMs",
   "observedSessionTimeMs",
   "chatPacingSettings",
-  "temporalContext",
+  "temporalCaptures",
   "foregroundAction",
   "backgroundActions",
   "nextActionId",
@@ -284,8 +291,11 @@ export interface RuntimeSnapshot {
    */
   observedSessionTimeMs: number;
   readonly chatPacingSettings: ChatPacingSettings;
-  /** The player's zone rules and numeric date and time presentation, captured when the session started. */
-  readonly temporalContext: TemporalContext;
+  /**
+   * The player's zone, date and time presentation, and wall clock: captured when the session started and again at each
+   * Continue, each in force from its boundary scene time.
+   */
+  readonly temporalCaptures: RuntimeTemporalCapture[];
   foregroundAction: RuntimeForegroundActionSnapshot | null;
   readonly backgroundActions: RuntimePendingActionSnapshot[];
   nextActionId: number;
@@ -337,6 +347,11 @@ export interface FreshRuntimeOptions {
    * session uses UTC and locale-neutral text such as `2026-10-04 18:30`.
    */
   readonly temporalContext?: TemporalContext;
+  /**
+   * The UTC wall clock in whole epoch milliseconds when the session starts, at `initialSessionTimeMs`. Without one the
+   * current-time getters fail.
+   */
+  readonly wallClockMs?: number;
 }
 
 export interface SnapshotValidationResult {
@@ -387,6 +402,12 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     // EVIDENCE: validation: temporalContextProblem accepted the captured option.
     temporalContext = frozenTemporalContext(capturedOptions.temporalContext as TemporalContext);
   }
+  const wallClockMs = capturedOptions.wallClockMs ?? null;
+  if (
+    wallClockMs !== null &&
+    (typeof wallClockMs !== "number" || !isValidEpochMilliseconds(wallClockMs))
+  )
+    throw new RangeError("wallClockMs must be whole epoch milliseconds in the years 0000 to 9999.");
   if (!validSessionTime(initialSessionTimeMs)) {
     throw new RangeError(
       `initialSessionTimeMs must be a finite number from 0 through ${MAX_RUNTIME_SESSION_TIME_MS}.`,
@@ -453,7 +474,14 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     currentSessionTimeMs: initialSessionTimeMs,
     observedSessionTimeMs: initialSessionTimeMs,
     chatPacingSettings,
-    temporalContext,
+    temporalCaptures: [
+      {
+        boundaryMs: initialSessionTimeMs,
+        sinceEventSequence: 0,
+        epochMs: wallClockMs,
+        context: temporalContext,
+      },
+    ],
     foregroundAction: null,
     backgroundActions: [],
     nextActionId: 1,
@@ -553,7 +581,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     currentSessionTimeMs: snapshot.currentSessionTimeMs,
     observedSessionTimeMs: snapshot.observedSessionTimeMs,
     chatPacingSettings: cloneChatPacingSettings(snapshot.chatPacingSettings),
-    temporalContext: frozenTemporalContext(snapshot.temporalContext),
+    temporalCaptures: frozenTemporalCaptures(snapshot.temporalCaptures),
     foregroundAction:
       snapshot.foregroundAction === null ? null : cloneForegroundAction(snapshot.foregroundAction),
     backgroundActions: snapshot.backgroundActions.map(clonePendingAction),
@@ -834,17 +862,22 @@ export function captureRuntimeSnapshotWithValidatedPlan(
   const captured = classified.validation.valid ? (snapshotCapture.value as RuntimeSnapshot) : null;
   return Object.freeze({
     validation: classified.validation,
-    snapshot: captured === null ? null : withFrozenTemporalContext(captured),
+    snapshot: captured === null ? null : withFrozenTemporalCaptures(captured),
     failureKind: classified.failureKind,
   });
 }
 
 /**
- * A validated snapshot whose temporal context is deeply frozen. A captured or parsed context is a fresh copy; a frozen
- * one is shared by every later snapshot clone instead of copying its zone transitions.
+ * A validated snapshot whose temporal contexts are deeply frozen. A captured or parsed context is a fresh copy; a
+ * frozen one is shared by every later snapshot clone instead of copying its zone transitions.
  */
-export function withFrozenTemporalContext(snapshot: RuntimeSnapshot): RuntimeSnapshot {
-  return { ...snapshot, temporalContext: frozenTemporalContext(snapshot.temporalContext) };
+export function withFrozenTemporalCaptures(snapshot: RuntimeSnapshot): RuntimeSnapshot {
+  return { ...snapshot, temporalCaptures: frozenTemporalCaptures(snapshot.temporalCaptures) };
+}
+
+/** The zone and presentation in force at the scene time where execution stands. */
+export function currentTemporalContext(snapshot: RuntimeSnapshot): TemporalContext {
+  return temporalCaptureAt(snapshot.temporalCaptures, snapshot.currentSessionTimeMs).context;
 }
 
 export function validateRuntimeSnapshot(
@@ -890,9 +923,14 @@ function validateCapturedRuntimeSnapshotDetails(
   if (!validChatPacingSettings(value.chatPacingSettings)) {
     errors.push("Runtime chatPacingSettings is malformed.");
   }
-  const temporalProblem = temporalContextProblem(value.temporalContext);
+  const temporalProblem = temporalCapturesProblem(
+    value.temporalCaptures,
+    typeof value.currentSessionTimeMs === "number" ? value.currentSessionTimeMs : Number.NaN,
+    typeof value.observedSessionTimeMs === "number" ? value.observedSessionTimeMs : Number.NaN,
+    typeof value.nextEventSequence === "number" ? value.nextEventSequence : Number.NaN,
+  );
   if (temporalProblem !== null)
-    errors.push(`Runtime temporalContext is malformed: ${temporalProblem}`);
+    errors.push(`Runtime temporalCaptures is malformed: ${temporalProblem}`);
   const analysis = plan === undefined ? undefined : createSnapshotValidationAnalysis(plan);
   const instructionLimit = plan?.instructions.length;
   if (

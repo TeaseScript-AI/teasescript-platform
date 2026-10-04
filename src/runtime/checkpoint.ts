@@ -6,13 +6,13 @@ import { validateCapturedInstructionPlan } from "../plan/validation.js";
 import {
   captureRuntimeSnapshotWithValidatedPlan,
   classifyCapturedRuntimeSnapshot,
-  withFrozenTemporalContext,
+  withFrozenTemporalCaptures,
   type RuntimeSnapshotValidationFailureKind,
   type RuntimeSnapshot,
 } from "./state.js";
 
 export const CHECKPOINT_FORMAT = "teasescript-checkpoint";
-export const CHECKPOINT_VERSION = 48;
+export const CHECKPOINT_VERSION = 49;
 
 export interface RuntimeCheckpoint {
   readonly format: typeof CHECKPOINT_FORMAT;
@@ -225,7 +225,7 @@ function restoreParsedCheckpoint(value: unknown): RuntimeCheckpoint {
     version: CHECKPOINT_VERSION,
     plan,
     // EVIDENCE: validation: classified snapshot validation accepted this snapshot against the validated plan above.
-    snapshot: withFrozenTemporalContext(envelope.snapshot as RuntimeSnapshot),
+    snapshot: withFrozenTemporalCaptures(envelope.snapshot as RuntimeSnapshot),
   });
 }
 

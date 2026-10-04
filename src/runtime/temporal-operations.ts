@@ -45,11 +45,56 @@ import {
   isTimestamp,
 } from "./value-predicates.js";
 import { describeValue } from "./value-types.js";
+import { wallClockAt, type RuntimeTemporalCapture } from "./temporal-captures.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
 /** Failed temporal conversion or arithmetic: invalid text, a result outside the years 0000–9999 or the zone rules. */
 const TEMPORAL_FAILURE = "TSR063";
+
+export const TEMPORAL_GETTERS: ReadonlySet<string> = new Set([
+  "getDate",
+  "getTime",
+  "getDateTime",
+  "getTimestamp",
+]);
+
+/**
+ * `getDate()`, `getTime()`, `getDateTime()`, or `getTimestamp()` (V30 §35) at scene time `atMs`: the wall clock of the
+ * capture in force, read through its zone for local values.
+ */
+export function temporalNow(
+  name: string,
+  positional: readonly SerializableRuntimeValue[],
+  named: Readonly<Record<string, SerializableRuntimeValue>>,
+  capture: RuntimeTemporalCapture,
+  atMs: number,
+  span: SourceSpan,
+): SerializableRuntimeTemporal {
+  if (positional.length > 0 || Object.keys(named).length > 0)
+    throw fault("TSR028", `${name}() takes no arguments.`, span);
+  const epochMilliseconds = wallClockAt(capture, atMs);
+  if (epochMilliseconds === undefined)
+    throw fault(
+      "TSR064",
+      `${name}() needs the current time, but this Player supplied no clock when the session started or continued.`,
+      span,
+    );
+  const now = timestamp(epochMilliseconds, span);
+  if (name === "getTimestamp") return now;
+  const fields = local(capture.context, now.epochMilliseconds, span);
+  if (name === "getDate")
+    return { kind: "date", year: fields.year, month: fields.month, day: fields.day };
+  if (name === "getTime")
+    return {
+      kind: "time",
+      hour: fields.hour,
+      minute: fields.minute,
+      second: fields.second,
+      millisecond: fields.millisecond,
+    };
+  return { kind: "datetime", ...fields };
+}
 
 /** `value` converted to a date or time value of `kind` (V30 §35), or `undefined` when it does not convert. */
 export function temporalConverted(

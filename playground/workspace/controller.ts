@@ -172,7 +172,11 @@ export function restoreWorkspaceCheckpoint(
   });
 }
 
-export function compileWorkspaceSource(source: string): WorkspaceResult {
+/** `wallClockMs` is the UTC time at session start, which the current-time getters read; without it they fail. */
+export function compileWorkspaceSource(
+  source: string,
+  options: { readonly wallClockMs?: number } = {},
+): WorkspaceResult {
   assertWorkspaceSource(source);
   const compilation = compileSource(source);
   if (compilation.plan === null) {
@@ -185,7 +189,7 @@ export function compileWorkspaceSource(source: string): WorkspaceResult {
       instructionsExecuted: 0,
     });
   }
-  const snapshot = createFreshRuntimeSnapshotWithValidatedPlan(compilation.plan);
+  const snapshot = createFreshRuntimeSnapshotWithValidatedPlan(compilation.plan, options);
   return freezeResult({
     diagnostics: diagnostics(compilation.diagnostics),
     plan: compilation.plan,

@@ -9,11 +9,13 @@ import {
   interactionDeadlineMs,
   mediaPlaybackProjection,
   observeTime,
+  recordContinueCapture,
   reportMediaLoad,
   stageProjection,
   run,
   serializeCheckpoint,
   type ActionCompletionOutcome,
+  type ContinueCaptureOutcome,
   type InstructionPlan,
   type InteractionAccessibleName,
   type InterpreterEvent,
@@ -67,6 +69,8 @@ export interface PlayerRuntimeSessionOptions {
   readonly persistentScriptStorage?: boolean;
   /** The player's zone and date and time presentation, captured when the session starts. */
   readonly temporalContext?: TemporalContext;
+  /** The UTC wall clock when the session starts, in epoch milliseconds. */
+  readonly wallClockMs?: number;
 }
 
 /**
@@ -116,6 +120,7 @@ export function createPlayerRuntimeSession(
     ...(options.scriptStorage === undefined ? {} : { scriptStorage: options.scriptStorage }),
     persistentScriptStorage: options.persistentScriptStorage ?? false,
     ...(options.temporalContext === undefined ? {} : { temporalContext: options.temporalContext }),
+    ...(options.wallClockMs === undefined ? {} : { wallClockMs: options.wallClockMs }),
   });
   const operation = run(compilation.plan, snapshot);
   return applyOperation(
@@ -345,6 +350,21 @@ export function skipPlayerRuntimePacing(
   const action = playerRuntimePacingGate(session);
   if (action === null) return null;
   return completePlayerAction(session, action, { kind: "skip" });
+}
+
+/**
+ * Records the wall clock and the player's zone and presentation when a restored session continues. They apply from the
+ * session's observed time on; call it before the scene clock resumes.
+ */
+export function continuePlayerRuntimeSession(
+  session: PlayerRuntimeSession,
+  capture: { readonly wallClockMs: number; readonly temporalContext: TemporalContext },
+): PlayerRuntimeControlResult<ContinueCaptureOutcome> {
+  const operation = recordContinueCapture(session.plan, session.snapshot, capture);
+  return Object.freeze({
+    session: applyOperation(session, operation.snapshot, operation.events, false),
+    outcome: operation.outcome,
+  });
 }
 
 /**

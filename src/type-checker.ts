@@ -2836,6 +2836,24 @@ class TypeChecker {
             "escapeMarkup(...) takes text (string)",
           );
         return STRING_TYPE;
+      case "getDate":
+      case "getTime":
+      case "getDateTime":
+      case "getTimestamp":
+        // The current date and time take no arguments (V30 §35).
+        if (expression.arguments.length > 0)
+          this.#report(
+            typeCode.argumentCount,
+            `${name}() takes no arguments.`,
+            expression.arguments[0]!.value.span,
+          );
+        return name === "getDate"
+          ? DATE_TYPE
+          : name === "getTime"
+            ? TIME_TYPE
+            : name === "getDateTime"
+              ? DATETIME_TYPE
+              : TIMESTAMP_TYPE;
       default:
         return UNKNOWN_TYPE;
     }
