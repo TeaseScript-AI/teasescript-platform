@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, useId } from "vue";
+import { computed, ref, useId, watch } from "vue";
 import { useResizeObserver } from "@vueuse/core";
 import Viewfinder from "./Viewfinder.vue";
 import ViewfinderMirrorButton from "./ViewfinderMirrorButton.vue";
@@ -49,22 +49,28 @@ useResizeObserver(
     if (place.value) place.value = clamp(place.value);
   },
 );
-onMounted(() => {
-  const parent = root.value?.parentElement;
-  const area = anchor.value?.parentElement;
-  if (!parent || !area) return;
-  bounds.value = { width: parent.clientWidth, height: parent.clientHeight };
-  // First shown in the Player area beside the sidebar, below the title, at a size that leaves the conversation readable.
-  const shell = parent.getBoundingClientRect();
-  const start = area.getBoundingClientRect();
-  place.value = clamp(
-    place.value ?? {
-      x: start.left - shell.left + EDGE * 2,
-      y: start.top - shell.top + 64,
-      width: Math.min(Math.max(start.width * 0.26, 200), 360),
-    },
-  );
-});
+// The window mounts once the shell is in place: deferred, so a shell that is replaced in the same render (as when the
+// development server reloads it) is the one it joins.
+watch(
+  root,
+  (element) => {
+    const parent = element?.parentElement;
+    const area = anchor.value?.parentElement;
+    if (!parent || !area) return;
+    bounds.value = { width: parent.clientWidth, height: parent.clientHeight };
+    // First shown in the Player area beside the sidebar, below the title, leaving the conversation readable.
+    const shell = parent.getBoundingClientRect();
+    const start = area.getBoundingClientRect();
+    place.value = clamp(
+      place.value ?? {
+        x: start.left - shell.left + EDGE * 2,
+        y: start.top - shell.top + 64,
+        width: Math.min(Math.max(start.width * 0.26, 200), 360),
+      },
+    );
+  },
+  { flush: "post" },
+);
 
 const heightOf = (width: number) => width / ratio.value + BAR;
 /** The widest window whose height fits in `height`. */
@@ -174,7 +180,7 @@ function measured(next: number) {
 <template>
   <!-- Marks the Player area the window first appears in; the window itself floats in the whole shell. -->
   <span ref="anchor" class="floating-viewfinder-anchor" aria-hidden="true" />
-  <Teleport to="#player-shell">
+  <Teleport defer to="#player-shell">
     <div
       ref="root"
       class="floating-viewfinder"
