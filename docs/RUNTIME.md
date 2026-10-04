@@ -939,8 +939,9 @@ data; reconciliation belongs to #469 and is not implemented here.
 
 `takePhoto()` implements specification
 [§33](specifications/accepted-syntaxes-v30.md#33-browser-api-file-folder-camera-and-url-references). It is a reserved
-call, not a builtin: hosts cannot inject or override it, it takes no arguments (`TSV020`), it is not a value (`TSV028`),
-and it cannot run in a parameter default (`TSV032`). It lowers to a `capture` instruction whose result is handed off
+call, not a builtin: hosts cannot inject or override it, it takes only an optional `tags:` list (`TSV020` otherwise;
+[§41](specifications/accepted-syntaxes-v30.md#image-tags) gives its validation and catalog rules), it is not a value
+(`TSV028`), and it cannot run in a parameter default (`TSV032`). It lowers to a `capture` instruction whose result is handed off
 through a temporary like an interaction result; plan validation rejects an unlowered `takePhoto` call.
 
 Executing it creates a foreground `capture` action and waits. The host answers through `completeAction`:

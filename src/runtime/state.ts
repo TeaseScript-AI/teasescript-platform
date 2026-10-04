@@ -2791,7 +2791,9 @@ function validateStatusConsistency(
         value.frames[0].file !== 0) ||
       retained !== 0 ||
       value.fallback !== null ||
-      value.failure !== null
+      value.failure !== null ||
+      // A session that has not started has taken no photos.
+      !(Array.isArray(value.capturedImages) && value.capturedImages.length === 0)
     ) {
       errors.push("Ready runtime state contains execution progress.");
     }

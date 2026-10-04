@@ -266,6 +266,14 @@ test("restore rejects capture tags or catalog entries no engine produces", () =>
     false,
   );
 
+  // A session that has not started has taken no photos, also in a plan without startup declarations.
+  const fresh = compileValidPlan('let found = findImages(where: "selfie")\nwait 1\nexit');
+  const saved = JSON.parse(
+    serializeCheckpoint(createCheckpoint(fresh, createFreshRuntimeSnapshot(fresh))),
+  );
+  saved.snapshot.capturedImages = [{ reference: PHOTO, tags: [{ name: "selfie", value: null }] }];
+  assert.throws(() => deserializeCheckpoint(JSON.stringify(saved)));
+
   // An untagged capture holds no tags.
   const untagged = started("let photo = takePhoto()\nexit");
   const action = JSON.parse(JSON.stringify(untagged.snapshot));
