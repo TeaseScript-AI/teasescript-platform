@@ -165,59 +165,6 @@ test("copies sets independently for declaration and assignment", () => {
   assert.deepEqual(captured, [[1, 2], [1, 2, 3], [2]]);
 });
 
-test("rejects list, object, and set values in set literals at the semantic boundary", () => {
-  const cases = [
-    ["let values = set[[1]]", "[1]"],
-    ["let values = set[{ value: 1 }]", "{ value: 1 }"],
-    ["let values = set[set[1]]", "set[1]"],
-  ] as const;
-
-  for (const [source, elementText] of cases) {
-    const start = source.indexOf(elementText);
-    const result = compileSource(source);
-    const diagnostic = result.semanticDiagnostics.find((candidate) => candidate.code === "TSV006");
-    assert.notEqual(diagnostic, undefined);
-    assert.deepEqual(
-      diagnostic === undefined ? null : [diagnostic.span.start.offset, diagnostic.span.end.offset],
-      [start, start + elementText.length],
-    );
-  }
-});
-
-test("set literals reject each value before evaluating the next element", () => {
-  let marked = false;
-  const source = "let values = set[bad(), mark()]";
-  const bad: RuntimeBuiltinFunction = () => ({ kind: "list", items: [] });
-  const mark: RuntimeBuiltinFunction = () => {
-    marked = true;
-    return 1;
-  };
-  const result = executeSource([source], { bad, mark });
-
-  assert.deepEqual(
-    result.errors.map((error) => [error.code, error.span.start.offset, error.span.end.offset]),
-    [["TSR032", source.indexOf("bad()"), source.indexOf("bad()") + "bad()".length]],
-  );
-  assert.equal(marked, false);
-});
-
-test("rejects composite values through set add, contains, and list toSet", () => {
-  // `dynamic` hides each value's type; a known composite value is a compile error (TSV006).
-  const dynamic = "function dynamic(value) { return value }\n";
-  for (const source of [
-    "let values = set[]\nvalues.add(dynamic([1]))",
-    "let values = set[1]\nlet found = values.contains(dynamic([1]))",
-    "let source = dynamic([{ value: 1 }])\nlet values = source.toSet()",
-    "let source = dynamic([set[1]])\nlet values = source.toSet()",
-  ]) {
-    const result = executeSource(dynamic + source);
-    assert.deepEqual(
-      result.errors.map((error) => error.code),
-      ["TSR032"],
-    );
-  }
-});
-
 test("uses scalar equality for set uniqueness and retains insertion order", () => {
   const captured: unknown[] = [];
   const result = executeSource(

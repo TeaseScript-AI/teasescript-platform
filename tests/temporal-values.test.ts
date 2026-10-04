@@ -102,8 +102,8 @@ test("text known only at runtime converts, falls back to default:, or fails with
         [
           'say toDate(dynamic("2026-10-04")).toISO()',
           'say toDate(dynamic("2026-02-30"), default: toDate("2000-01-01")).toISO()',
-          'let fallback = toTimestamp("2000-01-01T00:00:00Z")',
-          'say toTimestamp(dynamic("2026-10-04T12:30"), default: fallback).toISO()',
+          'let backup = toTimestamp("2000-01-01T00:00:00Z")',
+          'say toTimestamp(dynamic("2026-10-04T12:30"), default: backup).toISO()',
         ].join("\n"),
     ),
     ["2026-10-04", "2000-01-01", "2000-01-01T00:00:00Z"],
@@ -182,10 +182,11 @@ test("ordering, equality, and set membership compare kind and value", () => {
         'let days = set[d, toDate("2026-10-04"), toDate("2026-10-05")]',
         "say days.length",
         'say days.contains(toDate("2026-10-04"))',
+        "say set[1 h, 60 min].length",
         'say [d] == [toDate("2026-10-04")]',
       ].join("\n"),
     ),
-    ["true", "true", "true", "true", "true", "2", "true", "true"],
+    ["true", "true", "true", "true", "true", "2", "true", "1", "true"],
   );
   const failure = failureOf(
     `${DYNAMIC}let wrong = dynamic(toDate("2026-10-04")) < dynamic(toTime("14:30"))`,

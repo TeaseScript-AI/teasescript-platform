@@ -408,7 +408,7 @@ function resolvePreparedReferenceStep(
   step: PreparedReferenceStep,
 ): { readonly found: boolean; readonly value: SerializableRuntimeValue } {
   if (step.kind === "index") {
-    if ((!isList(value) && !isSet(value)) || step.index < 0 || step.index >= value.items.length) {
+    if (!isList(value) || step.index < 0 || step.index >= value.items.length) {
       return { found: false, value: null };
     }
     return { found: true, value: value.items[step.index]! };

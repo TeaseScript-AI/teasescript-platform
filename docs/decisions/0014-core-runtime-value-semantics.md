@@ -16,20 +16,15 @@ produces a structured runtime error instead of recursing indefinitely. Future
 opaque engine references are outside this decision. An implementation may use
 copy-on-write later only if observable deep-copy behavior remains unchanged.
 
-Sets contain only these values in the current language version:
-
-- `string`;
-- `boolean`;
-- `integer`;
-- `number`;
-- `null`;
-- `date`, `time`, `datetime`, and `timestamp` (#532).
-
-Lists, objects, sets, dicts, ranges, durations, speakers, and opaque engine
-references are not valid set elements. Other set elements produce a
-deterministic structured runtime error associated with the relevant source span.
-Set uniqueness uses `==` equality, which compares kind and value, and retains
-the first insertion order.
+A set may contain any value a list may contain (owner decision on #568,
+2026-10-04), and collections nest in every direction: sets of lists, objects,
+dicts, or sets, sets in dicts and lists, lists in lists, and so on. Set
+uniqueness uses `==` equality, which compares kind and value structurally, and
+retains the first insertion order. A member is copied when it is added, and
+`.first`, `.last`, `.random`, and iteration give copies, so changing a read
+member never changes the set or its uniqueness. Speakers and timer and media
+handles are members by identity, as they are list elements, and stay
+session-only.
 
 A dict (#536) maps text keys to values in insertion order; storing to an
 existing key keeps its position, and its `keys` and `values` are new lists. Two

@@ -71,6 +71,7 @@ import { LIST_JOIN, unknownTextMemberMessage } from "../text-operations.js";
 import { LOAD_KEY_MESSAGE, findScriptStorageEntry, storageKey } from "./script-storage.js";
 import {
   addSerializableSetValue,
+  clearSerializableSet,
   cloneCapturedSerializableValue,
   cloneSerializableValue,
   containsRuntimeIdentity,
@@ -324,8 +325,21 @@ export class Evaluator {
                     : expression.name === "last"
                       ? base.items.length - 1
                       : Math.floor(this.#findRandom(expression.span) * base.items.length);
-                frame.descriptor.path.push({ kind: "index", index });
-                frame.value = base.items[index]!;
+                if (isSet(base)) {
+                  // A set member is read as a copy: changing it must not change the set or its uniqueness.
+                  const member = cloneCapturedSerializableValue(base.items[index]!);
+                  frame.descriptor = {
+                    rootFrameId: null,
+                    rootName: null,
+                    path: [],
+                    capturedRoot: member,
+                    detached: true,
+                  };
+                  frame.value = member;
+                } else {
+                  frame.descriptor.path.push({ kind: "index", index });
+                  frame.value = base.items[index]!;
+                }
               } else {
                 frame.descriptor.path.push({ kind: "property", name: expression.name });
                 frame.value = this.#getProperty(base, expression.name, expression.span);
@@ -460,13 +474,8 @@ export class Evaluator {
             }
             frame.stage = 1;
           } else {
-            if (expression.kind === "set") {
-              try {
-                addSerializableSetValue(frame.set!, result.value, frame.membership!);
-              } catch (error) {
-                throw this.#translateValueError(error, expression.elements[frame.index - 1]!.span);
-              }
-            } else
+            if (expression.kind === "set") addSerializableSetValue(frame.set!, result.value);
+            else
               frame.results!.push(
                 result.owned ? result.value : cloneCapturedSerializableValue(result.value),
               );
@@ -962,7 +971,8 @@ export class Evaluator {
         value = entry.value;
         continue;
       }
-      if (isList(value) || isSet(value)) {
+      // Only a list is addressed by position; a set member is always read as a copy.
+      if (isList(value)) {
         if (step.index < 0 || step.index >= value.items.length) {
           throw fault("TSR025", `Collection index ${step.index} is outside the valid range.`, span);
         }
@@ -1322,8 +1332,7 @@ export class Evaluator {
         }
       } catch (error) {
         if (error instanceof SerializableValueError) {
-          const code =
-            error.code === "cyclic" ? "TSR031" : error.code === "setElement" ? "TSR032" : "TSR013";
+          const code = error.code === "cyclic" ? "TSR031" : "TSR013";
           throw fault(code, error.message, expression.span);
         }
         const message = error instanceof Error ? error.message : String(error);
@@ -1442,7 +1451,7 @@ export class Evaluator {
             return null;
           case "clear":
             expect(0);
-            receiver.items.length = 0;
+            clearSerializableSet(receiver);
             return null;
           case "contains":
             expect(1);
@@ -2270,7 +2279,7 @@ export class Evaluator {
 
   #translateValueError(error: unknown, span: SourceSpan): RuntimeFault {
     if (error instanceof SerializableValueError) {
-      return fault(error.code === "setElement" ? "TSR032" : "TSR031", error.message, span);
+      return fault("TSR031", error.message, span);
     }
     throw error;
   }
@@ -2478,8 +2487,6 @@ interface EvaluationFrame {
   epoch: number;
   text: string;
   set: SerializableRuntimeSet | null;
-  /** The member keys of `set`, for duplicate checks while its elements are added. */
-  membership: Set<string> | null;
   /** A dict literal's entries so far, and the key of the entry whose value is being evaluated. */
   dict: SerializableRuntimeDict | null;
   key: string | null;
@@ -2525,7 +2532,6 @@ function evaluationFrame(expression: ExpressionPlan, reference = false): Evaluat
     epoch: 0,
     text: "",
     set: expression.kind === "set" ? createCapturedSerializableSet([]) : null,
-    membership: expression.kind === "set" ? new Set() : null,
     dict: expression.kind === "dict" ? { kind: "dict", entries: [] } : null,
     key: null,
     positional: expression.kind === "call" ? [] : null,

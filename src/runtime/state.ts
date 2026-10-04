@@ -81,7 +81,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 36;
+export const RUNTIME_SNAPSHOT_VERSION = 38;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -1668,9 +1668,10 @@ function preparedReferencePathResolves(
   let current = root;
   for (const step of path) {
     if (step.kind === "index") {
+      // Only a list is addressed by position; a set member is read as a copy.
       if (
         !isPlainRecord(current) ||
-        !isOneOf(current.kind, ["list", "set"]) ||
+        current.kind !== "list" ||
         !Array.isArray(current.items) ||
         step.index >= current.items.length
       ) {
@@ -3082,7 +3083,7 @@ function collectSpeakerReferenceIds(
       handleIds.media.add(current.mediaId);
       continue;
     }
-    if (current.kind === "list" && Array.isArray(current.items)) {
+    if ((current.kind === "list" || current.kind === "set") && Array.isArray(current.items)) {
       for (let index = current.items.length - 1; index >= 0; index -= 1) {
         work.push(current.items[index]);
       }

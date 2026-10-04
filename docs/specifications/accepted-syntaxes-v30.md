@@ -929,6 +929,29 @@ picks.add("three")    // compile error
 - A value whose type the compiler cannot know, such as untyped storage, host data, or a parameter of unknown type,
   decides nothing and is not rejected at compile time.
 
+### Global variables
+
+`global` declares a variable that all files of a package share
+([ADR 0022](../decisions/0022-multi-file-scripts.md)):
+
+```text
+global strictness = 2
+global level = load "level", default: 1
+global answer: string? = null
+```
+
+Rules:
+
+- A global may be declared anywhere in any file, including inside `if`, loops, and functions.
+- It is visible in all files. Its name is unique in the project, and no other name may shadow it.
+- Declarations are collected at compile time. Globals are initialized once at session start, before the story runs,
+  whether or not the surrounding block ever runs: `main.tease` first, then the other files in path order, each in
+  source order. Reaching the declaration later does nothing.
+- An initializer may use literals, earlier globals, side-effect-free operators, and `load … , default:`. It may not use
+  local values, interactions, calls, or random numbers, or read a global initialized after it.
+- Types follow the `let` rules above, across all files. Values are checkpointed and live for the session; `save` and
+  `load` keep a value beyond it.
+
 ## 13. Explicit types
 **Status:** Accepted
 
@@ -955,7 +978,8 @@ duration
 ```
 
 The other type names are `null`; `list`, `set`, `dict`, and `object` for any list, set, dict, or object; and the
-program-control types `range`, `speaker`, `timer` (a timer handle), and `media` (a media handle). A type is a type name
+program-control types `range`, `speaker`, `timer` (a timer handle), `media` (a media handle), and `script` (a script
+reference, [§29](#29-script-files-and-paths)). A type is a type name
 or one of these forms ([ADR 0021](../decisions/0021-static-types.md)):
 
 ```text
@@ -970,8 +994,8 @@ integer?[]           // a list of integers or nulls
 integer[]?           // a list of integers, or null
 ```
 
-`[]`, `set`, `dict`, and `?` follow a type and bind tighter than `|`; parentheses group. A set holds only `string`,
-`boolean`, `integer`, `number`, and `null` values, so `integer[] set` is a compile error.
+`[]`, `set`, `dict`, and `?` follow a type and bind tighter than `|`; parentheses group. A set may hold any value a list
+may hold, so `integer[] set` is a set of lists of integers ([§16](#16-lists)).
 
 ### Union types
 
@@ -1174,6 +1198,7 @@ Rules:
 - A nested block may not redeclare a name visible from an outer scope.
 - A nested block may modify a visible outer variable.
 - Separate sibling blocks may declare the same local name.
+- Top-level variables belong to their file. A global ([§12](#global-variables)) is visible in all files.
 
 ```text
 if firstCondition {
@@ -1406,7 +1431,7 @@ Interpolation is deliberately not a general list-to-string conversion. Paths, st
 resource references, ordinary type inference, and other program-control values never select from a list:
 
 ```text
-run scriptPaths
+goto (scriptTargets)
 load storageKeys
 openUrl(urls)
 playVideo videos
@@ -1427,8 +1452,13 @@ Runtime behavior:
   when they have the same members in any order; two ranges are equal when they are written with the same bounds and
   the same inclusiveness, so `1..=2 != 1..3` although both produce `1` and `2`. Values of different kinds, such as a
   list and a set, are never equal. List `contains(value)` and `remove(value)` use this equality, so they also find
-  objects and nested lists; `remove(value)` removes the first equal element. Set elements are scalar values and
-  date and time values ([§35](#35-date-time-durations-and-timestamps)).
+  objects and nested lists; `remove(value)` removes the first equal element.
+- A set may hold any value a list may hold: text, numbers, `true` and `false`, `null`, durations, date and time values
+  ([§35](#35-date-time-durations-and-timestamps)), lists, objects, dicts, sets, ranges, speakers, and timer and media
+  handles. Collections nest in every direction, such as sets of lists, sets in dicts, and lists in lists. A set keeps
+  the first of members that are equal (`==`), in insertion order, so `set[[1, 2], [1, 2]]` has one member, and its
+  `contains(value)` and `remove(value)` use the same equality. A member is copied when it is added, and `.first`,
+  `.last`, `.random`, and a `for` loop give copies, so changing one does not change the set.
 - The operands of `==` and `!=` are read when they are evaluated, left to right, so a change made while evaluating the
   right operand does not affect the left one: `items == [items.removeAt(0)]` is `true` for `items = [1]`.
 - `remove(value)` leaves the list unchanged when the value is absent and emits a warning to the developer log.
@@ -2228,7 +2258,8 @@ playAudio async repeat "music/beat.mp3" {
 - When the Player cannot load a source, or the source leaves an empty playback range, the runtime reports developer
   warning `TSW013`, the media becomes `stopped` without cues or `finish`, and the script continues. A `null` file plays
   nothing, continues at once, and reports `TSW011`.
-- `exit` and the end of the script stop all media; the last Stage image stays.
+- `exit` and the end of the session stop all media; the last Stage image stays. `goto`, `call`, and `end` do not stop
+  media.
 - Checkpoint and restore preserve the Stage image and media state; playback resumes from the persisted position, and
   time without a running Player does not advance media. Restore does not imply cross-device handoff.
 
@@ -2562,9 +2593,12 @@ goto tooLate
 
 Rules:
 
-- Labels are local to the current script.
-- `goto` may not jump into a deeper block or function scope.
-- Unknown labels are compile errors.
+- A label stands only in a file's outer scope, not inside `if`, loops, functions, or handlers. A `goto` may appear
+  anywhere.
+- Labels are local to their file; `goto label` moves within the current file. [§29](#29-script-files-and-paths)
+  defines `goto` to another file.
+- Unknown labels and duplicate labels in one file are compile errors.
+- A `goto` discards the current function, loop, and block continuations.
 - A `goto` triggered by an event aborts the current execution path and does not return.
 
 ## 27. Timers
@@ -2650,11 +2684,10 @@ of the wrong type are rejected.
 - `repeat: true` starts another round when a round expires. A repeating range draws a new duration for each round;
   every round must last longer than zero. Rounds that expire during one late time observation keep their original
   schedule and each run the expiry block once.
-- Every timer stops on `exit` and when the script ends.
-- For future `goto`, `end`, `run`, and `call` transfers, non-persistent timers are removed and persistent timers
-  remain active.
+- Every timer stops on `exit` and when the session ends.
+- On `goto`, `end`, and `call` transfers, non-persistent timers are removed and persistent timers remain active.
 
-The current runtime stores `persist` but it has no effect: `goto`, `end`, `run`, and `call` are not implemented.
+The current runtime stores `persist` but it has no effect: `goto`, `end`, and `call` are not implemented.
 
 ### Expiry blocks
 
@@ -2773,67 +2806,115 @@ let secondButton = showPermanentButton "Unknown" {
 
 Cleanup:
 
-- A non-persistent button is removed on `goto`, `end`, `run`, `call`, or `exit`.
-- A persistent button survives `goto`, `end`, `run`, and `call`.
+- A non-persistent button is removed on `goto`, `end`, `call`, or `exit`.
+- A persistent button survives `goto`, `end`, and `call`.
 - Every permanent button disappears on `exit`.
 
 ## 29. Script files and paths
-**Status:** Accepted
+**Status:** Accepted ([ADR 0022](../decisions/0022-multi-file-scripts.md))
 
-Script files use the `.tease` extension. The fixed project entry file is:
+A package consists of one or more `.tease` files. The fixed entry file is `main.tease`; a session starts at its top.
+Paths are relative to the package root and separate folders with `/`.
+
+Go to another file, from its top or at a label:
 
 ```text
-main.tease
+goto "punishments/strict.tease"
+goto "punishments/strict.tease" start
 ```
 
-Specific script:
+Call another file, from its top or at a label; execution continues after the `call` when that file reaches `end`:
 
 ```text
-run "punishments/strict.tease"
 call "corner-time/short.tease"
+call "corner-time/short.tease" start
 ```
 
-Random matching script selected through a glob pattern:
+A glob pattern picks one matching file at random:
 
 ```text
-run "punishments/*.tease"
+goto "punishments/*.tease"
+goto "punishments/*.tease" start    // only files that have label start
 call "corner-time/*.tease"
+```
+
+A computed target needs the explicit conversion `script(path, label:)`:
+
+```text
+goto script("rooms/${room}.tease")
+goto script("rooms/${room}.tease", label: "start")
+let next = script("rooms/hall.tease")
+goto (next)
 ```
 
 Rules:
 
-- `run` abandons the current execution path, starts the selected script, and does not return.
-- `call` saves the current location, starts the selected script, and returns to the next statement after the called script reaches `end`.
-- A glob that matches no files is a compile or load error.
-- The explicit `random` keyword is not used; a glob pattern performs random matching-file selection.
-- `goto` only moves within the current file and is not a script-file change.
+- `goto` to another file replaces the current file and does not return. Pending `call` returns remain; the current
+  function, loop, and block continuations are discarded.
+- `call` keeps the current position, including an enclosing function or loop, and resumes after the `call` when the
+  called file reaches `end`.
+- A path that leaves the package, a missing file, and a missing label are compile errors.
+- In a glob, `*` stands for any characters within one folder or file name. Globs are expanded at compile time. With a
+  label, the pick is among the matched files that have it. A glob that matches no file, or no file with the label, is a
+  compile error.
+- Each time a glob target runs, one draw from the session random generator picks the file. Restoring a checkpoint
+  never draws again.
+- `script(path)` returns a `script` reference to a file, and `script(path, label: name)` one to a label in it. Plain
+  text is not a jump target. References can be stored in variables, lists, dicts, and globals; a variable as a target is
+  grouped, as in `goto (next)`. A missing file or label is a compile error when the compiler knows the path and label,
+  and otherwise a runtime error.
+- Functions and labels are local to their file.
+- There is no `run` and no automatic selection of a next file; the script states every transfer.
 
 ## 30. Script endings
-**Status:** Accepted
+**Status:** Accepted ([ADR 0022](../decisions/0022-multi-file-scripts.md))
 
-Normal end of the current script file:
+End the current file and return to the file that called it:
 
 ```text
 end
 ```
 
-Complete end of the active tease/session:
+Finish the session:
 
 ```text
 exit
 ```
 
+Set the destination for an `end` without a caller, with the same targets as `goto` ([§29](#29-script-files-and-paths)):
+
+```text
+fallback "menu.tease"
+fallback "menu.tease" start
+if chapter > 3 { fallback script("chapters/${chapter}.tease", label: "recap") }
+```
+
 Behavior:
 
-- In a script entered through `call`, `end` returns to the caller.
-- In a script entered through `run`, `end` returns control to the engine's active script-selection flow, which may select another matching script.
-- `exit` terminates the entire active tease/session, including from a called script or function, and never returns.
-- A script file may contain multiple reachable `end` or `exit` statements.
+- `exit` is the only normal way to finish the session, and it is always required, in `main.tease` too. It works
+  anywhere, including in a called file or a function, and never returns. A project with no reachable `exit` does not
+  compile.
+- `end` ends the current file, also from inside a function or block, and returns to the file that `call`ed it.
+- Reaching `end` with no caller continues at the fallback destination when one is set, and is an error otherwise. The
+  fallback is never implicit.
+- `fallback` may run any number of times, anywhere, including inside `if`; the latest one executed wins. It is session
+  state and is checkpointed. `fallback none` clears it again.
+- A reachable end of a file without `end`, `exit`, or a transfer is a compile error in every file. Branches that all
+  end or transfer need nothing after them:
+
+```text
+if passed {
+    goto "rewards/praise.tease"
+} else {
+    exit
+}
+```
+
+- A file may contain multiple reachable `end` or `exit` statements.
 - `finish` is not used as an alternative to `end`.
 
 Static analysis should warn, but not necessarily fail compilation, when:
 
-- no reachable `end`, `run`, `goto`, or `exit` exists on a path;
 - statements are unreachable;
 - an `exit` is declared but unreachable.
 
@@ -3186,7 +3267,7 @@ There is no construction from a Unix number, because seconds and milliseconds wo
 
 ### Collections and storage
 
-Temporal values can be list and set elements; a set compares kind and value. Typed storage keeps each
+Temporal values and durations can be list and set elements; a set compares kind and value. Typed storage keeps each
 kind distinct from the others and from text: local values without an offset, timestamps as moments in UTC.
 
 ## 36. Scheduling
@@ -3263,7 +3344,7 @@ Set the current default speaker with the same `speaker` keyword followed by an e
 speaker mistressVera
 ```
 
-This does not redeclare the speaker. The parser distinguishes `speaker identifier { ... }` from `speaker identifier` through the following token. The default speaker is session state: it survives `goto`, `end`, `run`, and `call`, remains active until changed again, and is cleared by `exit`.
+This does not redeclare the speaker. The parser distinguishes `speaker identifier { ... }` from `speaker identifier` through the following token. The default speaker is session state: it survives `goto`, `end`, and `call`, remains active until changed again, and is cleared by `exit`.
 
 ### Names, titles, and presentation
 
@@ -3937,10 +4018,11 @@ say
 as
 label
 goto
-run
 call
 end
 exit
+fallback
+global
 save
 load
 delete
@@ -3970,6 +4052,7 @@ dict
 object
 range
 media
+script
 ```
 
 The type names `null`, `set`, `speaker`, and `timer` are protected as grammar keywords or engine names. `dict` also

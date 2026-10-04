@@ -169,10 +169,10 @@ test("failed persistent saves and deletes keep the old value or absence and allo
       const compiled = plan(
         [
           "let calls = 0",
-          "function fallback { calls += 1\nreturn 9 }",
+          "function backup { calls += 1\nreturn 9 }",
           command,
           'let plain = load "k"',
-          'let withDefault = load "k", default: fallback()',
+          'let withDefault = load "k", default: backup()',
           'let stillMissing = load "k"',
           "exit",
         ].join("\n"),
@@ -397,10 +397,10 @@ test("a terminal save completes the root after acknowledgement even with backgro
 
 test("absent loads return null or the default without storing it", () => {
   const result = assertRuntimeResumeEquivalent(
-    'let missing = load "k"\nlet fallback = load "k", default: 7\nlet stillMissing = load "k"\nexit',
+    'let missing = load "k"\nlet backup = load "k", default: 7\nlet stillMissing = load "k"\nexit',
   );
   assert.equal(binding(result.finalSnapshot, "missing"), null);
-  assert.equal(binding(result.finalSnapshot, "fallback"), 7);
+  assert.equal(binding(result.finalSnapshot, "backup"), 7);
   assert.equal(binding(result.finalSnapshot, "stillMissing"), null);
   assert.deepEqual(result.finalSnapshot.scriptStorage, []);
 });
@@ -410,8 +410,8 @@ test("present loads skip side effects and blocking interactions in defaults", ()
     [
       'save "Ada" as "name"',
       "let calls = 0",
-      'function fallback { calls = calls + 1\nreturn "fallback" }',
-      'let fromFunction = load "name", default: fallback()',
+      'function backup { calls = calls + 1\nreturn "backup" }',
+      'let fromFunction = load "name", default: backup()',
       'let fromPrompt = load "name", default: askText "Your name?"',
       "exit",
     ].join("\n"),
@@ -429,8 +429,8 @@ test("an absent load resumes its blocking function default at every instruction 
   const result = assertRuntimeResumeEquivalent(
     [
       "let calls = 0",
-      'function fallback { calls = calls + 1\nwait 1 ms\nreturn "Ada" }',
-      'let name = load "name", default: fallback()',
+      'function backup { calls = calls + 1\nwait 1 ms\nreturn "Ada" }',
+      'let name = load "name", default: backup()',
       'let missing = load "name"',
       "exit",
     ].join("\n"),
@@ -732,10 +732,10 @@ test("loaded values are checked against the variable's type, including missing k
     "TSR058",
     "'missing' holds a number, so it cannot take null.",
   ]);
-  assert.deepEqual(
-    failure('let fallback: number = load "missing", default: identity("fallback")'),
-    ["TSR058", "'fallback' holds a number, so it cannot take text (string)."],
-  );
+  assert.deepEqual(failure('let backup: number = load "missing", default: identity("backup")'), [
+    "TSR058",
+    "'backup' holds a number, so it cannot take text (string).",
+  ]);
   assert.deepEqual(failure('let assigned: number = 0\nassigned = load "k"'), [
     "TSR058",
     "'assigned' holds a number, so it cannot take text (string).",

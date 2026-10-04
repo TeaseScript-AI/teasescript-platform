@@ -397,13 +397,13 @@ test("a dict holds one value type, keyed by text, and its methods take the forms
   assert.deepEqual(
     says(
       [
-        "let fallback = []",
+        "let backup = []",
         "let table = dict{}",
-        'let copy = table.get("missing", default: fallback)',
+        'let copy = table.get("missing", default: backup)',
         "copy.add(1)",
-        'fallback.add("text")',
+        'backup.add("text")',
         "say copy",
-        "say fallback",
+        "say backup",
       ].join("\n"),
     ),
     ["[1]", '["text"]'],
@@ -458,7 +458,7 @@ test("a dict holds one value type, keyed by text, and its methods take the forms
   ]);
 });
 
-test("objects keep fixed properties, and dicts are neither set members nor choices", () => {
+test("objects keep fixed properties, and dicts are not choices", () => {
   assert.deepEqual(
     diagnostics('let door = { name: "x" }\nlet k = "name"\nsay door[k]\nsay door["name"]'),
     [
@@ -470,8 +470,6 @@ test("objects keep fixed properties, and dicts are neither set members nor choic
       ],
     ],
   );
-  assert.deepEqual(codes("let s = set[dict{}]"), [["TSV006", "dict{}"]]);
-  assert.deepEqual(codes("let s: integer dict set = set[]"), [["TSV006", "integer dict set"]]);
   assert.deepEqual(codes('let pick = choose dict{ a: "x" }'), [["TSV029", 'dict{ a: "x" }']]);
   assert.deepEqual(codes("let dict = 1"), [["TSV001", "dict"]]);
 });

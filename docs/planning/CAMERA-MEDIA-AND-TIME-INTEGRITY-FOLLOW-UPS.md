@@ -23,7 +23,7 @@ A camera/media decision must define:
 - package capability declarations and permission UX;
 - acquisition, idle close, switching, revocation, reload, restore, reconnect, and fatal-failure behavior;
 - quality negotiation and default resolution;
-- cleanup across `goto`, `run`, `call`, `end`, `exit`, navigation, and session shutdown;
+- cleanup across `goto`, `call`, `end`, `exit`, navigation, and session shutdown;
 - privacy indicators and player-visible camera status;
 - recording, still capture, motion detection, sampling, and resource limits.
 
