@@ -2370,15 +2370,47 @@ function findBindingLocation(
   const minimum = functionBase ?? 0;
   for (let index = snapshot.frames.length - 1; index >= minimum; index -= 1) {
     const frame = snapshot.frames[index]!;
-    const binding = frame.bindings.find((item) => item.name === name);
+    const binding = frameBinding(frame.bindings, name);
     if (binding !== undefined) return { frame, binding };
   }
   if (functionBase !== undefined) {
     const frame = snapshot.frames[0]!;
-    const binding = frame.bindings.find((item) => item.name === name);
+    const binding = frameBinding(frame.bindings, name);
     return binding === undefined ? undefined : { frame, binding };
   }
   return undefined;
+}
+
+/** Frames up to this size are scanned; larger frames are looked up through a name index. */
+const INDEXED_FRAME_MIN_BINDINGS = 16;
+
+/**
+ * Name indexes of large frames, keyed by the frame's bindings array. A frame's bindings are only ever appended and
+ * their names never change, so an index extends itself when its frame has grown. A captured or staged snapshot has
+ * new arrays and builds its own index. The index is derived data: it finds the same first binding as a scan.
+ */
+const frameBindingIndexes = new WeakMap<
+  readonly RuntimeBindingSnapshot[],
+  { indexed: number; readonly byName: Map<string, RuntimeBindingSnapshot> }
+>();
+
+function frameBinding(
+  bindings: readonly RuntimeBindingSnapshot[],
+  name: string,
+): RuntimeBindingSnapshot | undefined {
+  if (bindings.length <= INDEXED_FRAME_MIN_BINDINGS) {
+    return bindings.find((item) => item.name === name);
+  }
+  let index = frameBindingIndexes.get(bindings);
+  if (index === undefined) {
+    index = { indexed: 0, byName: new Map() };
+    frameBindingIndexes.set(bindings, index);
+  }
+  for (; index.indexed < bindings.length; index.indexed += 1) {
+    const binding = bindings[index.indexed]!;
+    if (!index.byName.has(binding.name)) index.byName.set(binding.name, binding);
+  }
+  return index.byName.get(name);
 }
 
 function readTemporary(

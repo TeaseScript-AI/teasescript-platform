@@ -202,6 +202,13 @@ test("elements and properties of an unannotated variable widen to number like th
     codes("let hero = { score: 0 }\nlet k: integer = hero.score\nhero.score = 2.5"),
     [["TSV041", "hero.score"]],
   );
+  // So is a property that storing a whole object adds, before the assignment that widens it.
+  assert.deepEqual(
+    codes(
+      "let record = { a: 1 }\nlet other = { a: 1, b: 2 }\nrecord = other\nlet k: integer = record.b\nrecord.b = 1.5",
+    ),
+    [["TSV041", "record.b"]],
+  );
   // A value that is not a literal widens what it is stored in as well, and a chain of parts widens in one more check.
   assert.deepEqual(sayTexts("let p = { n: 1 }\nlet q = { n: 1.5 }\np = q\nsay p.n"), ["1.5"]);
   assert.deepEqual(sayTexts("let p = [1]\nlet q = [1.5]\np = q\nsay p"), ["[1.5]"]);

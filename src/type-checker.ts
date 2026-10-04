@@ -88,7 +88,7 @@ import {
   isNumeric,
   isScalar,
   joinTypes,
-  mayEqual,
+  mayEqualAny,
   plainType,
   possibleValues,
   type PossibleValue,
@@ -416,6 +416,9 @@ class TypeChecker {
   }
 
   readonly #widened: Widened;
+
+  /** Variables with a widening recorded in this check since they were last widened again (see {@link #rewiden}). */
+  readonly #unappliedWidening = new Set<Declaration>();
 
   /**
    * For each integer place, by its variable and its path there, the integer places that store its value, with where:
@@ -1170,8 +1173,21 @@ class TypeChecker {
               ? `to keep both, declare it as 'let ${place.label}: ${written} = ...'`
               : ONE_TYPE_FIX,
         );
+      // Widening again repeats earlier work unless settling can add parts (only an undecided, union, collection, or
+      // object type can) or this check recorded a widening for the variable since it last widened it again.
+      const settled = resolved(place.type);
+      const mayGainParts =
+        settled.kind === "open" ||
+        settled.kind === "union" ||
+        settled.kind === "object" ||
+        isCollection(settled);
       if (decides) settle(place.type, value, expression.span);
-      if (decides && place.widening !== undefined) this.#rewiden(place.widening.root);
+      if (
+        decides &&
+        place.widening !== undefined &&
+        (mayGainParts || this.#unappliedWidening.has(place.widening.root))
+      )
+        this.#rewiden(place.widening.root);
       this.#follow(place.widening, value, expression.span);
       return;
     }
@@ -1224,6 +1240,7 @@ class TypeChecker {
     const paths = this.#widened.get(place.root) ?? new Map<string, SourceSpan>();
     paths.set(place.path.join("."), at);
     this.#widened.set(place.root, paths);
+    this.#unappliedWidening.add(place.root);
     this.widenedMore = true;
   }
 
@@ -1265,6 +1282,7 @@ class TypeChecker {
   #rewiden(root: Declaration): void {
     const variable = this.#declared.get(root);
     if (variable === undefined) return;
+    this.#unappliedWidening.delete(root);
     for (const path of this.#widened.get(root)?.keys() ?? [])
       if (path !== "") widenPath(variable.type, path.split("."));
     ownPartOrigins(variable.type, (path) => this.#partOrigin(root, path));
@@ -2221,7 +2239,7 @@ class TypeChecker {
       const possible = possibleValues(type);
       if (possible === undefined) continue;
       const otherValues = possibleValues(otherType) ?? comparedLiteral(other);
-      if (otherValues === undefined || otherValues.some((value) => mayEqual(type, value))) continue;
+      if (otherValues === undefined || mayEqualAny(type, otherValues)) continue;
       const label = expressionLabel(side);
       this.diagnostics.push(
         createDiagnostic(
@@ -2259,11 +2277,7 @@ class TypeChecker {
       return `${holder} holds ${describeValue(subject)} here, after the cases above, so this case never matches.`;
     const possible = possibleValues(subject);
     const literal = comparedLiteral(value);
-    if (
-      possible === undefined ||
-      literal === undefined ||
-      literal.some((one) => mayEqual(subject, one))
-    )
+    if (possible === undefined || literal === undefined || mayEqualAny(subject, literal))
       return undefined;
     return `${holder} is always ${describeLiterals(possible)} here, so this case never matches.`;
   }
