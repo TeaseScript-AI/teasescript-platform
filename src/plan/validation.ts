@@ -1,4 +1,5 @@
 import { isNormalizedOpaqueColor } from "../color.js";
+import { isInteractionChoiceValue } from "../choice-values.js";
 import { isValidInteractionPrefill } from "../interaction-answers.js";
 import {
   boundedInteractionUtf8ByteLength,
@@ -753,13 +754,14 @@ function validateInteractionInstruction(
     errors.push(planError("TSC002", "Interaction target is invalid.", `${path}.target`));
 
   const ui = prepared ? value.preparedUi : value.ui;
-  const labelType = isRecord(ui) && ui.kind === "choice" ? ui.labelType : undefined;
   const expected =
     kind === "button"
       ? "none"
-      : kind === "number" || (kind === "choice" && labelType === "number")
+      : kind === "number"
         ? "number"
-        : "string";
+        : kind === "choice"
+          ? "choice"
+          : "string";
   if (value.expectedResult !== expected) {
     errors.push(
       planError(
@@ -830,7 +832,7 @@ function validateStaticInteractionUi(
       ? ["kind", "buttonLabel", "accessibleName", ...("background" in ui ? ["background"] : [])]
       : kind === "text" || kind === "number"
         ? ["kind", "hint", "accessibleName", ...("prefill" in ui ? ["prefill"] : [])]
-        : ["kind", "labelType", "options", "accessibleName"];
+        : ["kind", "options", "accessibleName"];
   if (!hasExactKeys(ui, uiKeys)) {
     errors.push(planError("TSC002", "Interaction UI payload contains unsupported fields.", path));
   }
@@ -898,10 +900,6 @@ function validateStaticInteractionUi(
       );
   }
   if (kind === "choice") {
-    const labelType = ui.labelType;
-    if (!isOneOf(labelType, ["none", "identifier", "number"])) {
-      errors.push(planError("TSC002", "Choice label type is invalid.", `${path}.labelType`));
-    }
     if (
       !Array.isArray(ui.options) ||
       ui.options.length === 0 ||
@@ -915,8 +913,6 @@ function validateStaticInteractionUi(
         ),
       );
     } else {
-      const labels = new Set<string | number>();
-      const visible = new Set<string>();
       for (let index = 0; index < ui.options.length; index += 1) {
         const option = ui.options[index];
         const optionPath = `${path}.options[${index}]`;
@@ -927,7 +923,7 @@ function validateStaticInteractionUi(
         if (
           !hasExactKeys(option, [
             "text",
-            "label",
+            "value",
             ...("background" in option ? ["background"] : []),
           ])
         ) {
@@ -939,47 +935,16 @@ function validateStaticInteractionUi(
           errors.push(
             planError("TSC002", "Invalid opaque choice background.", `${optionPath}.background`),
           );
-        const textValid = countString(option.text, `${optionPath}.text`);
-        const label = option.label;
-        const validLabel =
-          labelType === "none"
-            ? label === null
-            : labelType === "identifier"
-              ? typeof label === "string" &&
-                countString(label, `${optionPath}.label`) &&
-                (measurementExhausted || /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label))
-              : typeof label === "number" && Number.isFinite(label) && !Object.is(label, -0);
-        if (!validLabel) {
+        countString(option.text, `${optionPath}.text`);
+        const value = option.value;
+        if (!isInteractionChoiceValue(value)) {
           errors.push(
-            planError(
-              "TSC002",
-              "Choice option label does not match the choice label type.",
-              `${optionPath}.label`,
-            ),
+            planError("TSC002", "Choice option value is invalid.", `${optionPath}.value`),
           );
+          continue;
         }
-        if (
-          !measurementExhausted &&
-          validLabel &&
-          (typeof label === "string" || typeof label === "number")
-        ) {
-          if (labels.has(label)) {
-            errors.push(
-              planError("TSC002", "Choice labels must be unique.", `${optionPath}.label`),
-            );
-          }
-          labels.add(label);
-        }
-        if (!measurementExhausted && textValid && labelType === "none") {
-          // EVIDENCE: validation: textValid records the option text string check above.
-          if (visible.has(option.text as string)) {
-            errors.push(
-              planError("TSC002", "Unlabelled choice text must be unique.", `${optionPath}.text`),
-            );
-          }
-          // EVIDENCE: validation: textValid records the option text string check above.
-          visible.add(option.text as string);
-        }
+        if (typeof value === "string" && value !== option.text)
+          countString(value, `${optionPath}.value`);
       }
     }
   }
@@ -1015,7 +980,7 @@ function validatePreparedInteractionUi(
             "accessibleName",
             ...("prefillTemporary" in ui ? ["prefillTemporary"] : []),
           ]
-        : ["kind", "labelType", "optionsTemporary", "optionCount", "labels", "accessibleName"];
+        : ["kind", "optionsTemporary", "values", "accessibleName"];
   if (!hasExactKeys(ui, keys)) {
     errors.push(
       planError("TSC002", "Prepared interaction UI payload contains unsupported fields.", path),
@@ -1096,56 +1061,32 @@ function validatePreparedInteractionUi(
     return;
   }
   if (kind !== "choice") return;
-  if (!isOneOf(ui.labelType, ["none", "identifier", "number"])) {
-    errors.push(planError("TSC002", "Choice label type is invalid.", `${path}.labelType`));
-  }
   addTemporary(ui.optionsTemporary, `${path}.optionsTemporary`);
-  // EVIDENCE: validation: the first condition checks optionCount with Number.isSafeInteger before the lower-bound comparison.
-  // EVIDENCE: validation: the first condition checks optionCount with Number.isSafeInteger before the upper-bound comparison.
   if (
-    !Number.isSafeInteger(ui.optionCount) ||
-    (ui.optionCount as number) < 1 ||
-    (ui.optionCount as number) > MAX_INTERACTION_OPTION_ENTRIES
+    !Array.isArray(ui.values) ||
+    ui.values.length === 0 ||
+    ui.values.length > MAX_INTERACTION_OPTION_ENTRIES
   ) {
     errors.push(
       planError(
         "TSC002",
-        "Prepared choice option count exceeds the shared collection boundary or is empty.",
-        `${path}.optionCount`,
+        "Prepared choice values exceed the shared collection boundary or are empty.",
+        `${path}.values`,
       ),
     );
-  }
-  if (ui.labelType === "none") {
-    if (ui.labels !== null) {
-      errors.push(
-        planError("TSC002", "Unlabelled prepared choice must not carry labels.", `${path}.labels`),
-      );
-    }
     return;
   }
-  if (!Array.isArray(ui.labels) || ui.labels.length !== ui.optionCount) {
-    errors.push(
-      planError("TSC002", "Prepared choice labels must match the option count.", `${path}.labels`),
-    );
-    return;
-  }
-  const labels = new Set<string | number>();
-  for (let index = 0; index < ui.labels.length; index += 1) {
-    const label = ui.labels[index];
-    const labelPath = `${path}.labels[${index}]`;
+  for (let index = 0; index < ui.values.length; index += 1) {
+    const value = ui.values[index];
+    if (value === null) continue;
+    const valuePath = `${path}.values[${index}]`;
     const valid =
-      ui.labelType === "identifier"
-        ? countString(label, labelPath) && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label)
-        : typeof label === "number" && Number.isFinite(label) && !Object.is(label, -0);
+      typeof value === "string"
+        ? countString(value, valuePath) && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(value)
+        : typeof value === "number" && Number.isFinite(value) && !Object.is(value, -0);
     if (!valid) {
-      errors.push(
-        planError("TSC002", "Prepared choice label does not match the label type.", labelPath),
-      );
+      errors.push(planError("TSC002", "Prepared choice value is invalid.", valuePath));
     }
-    if ((typeof label === "string" || typeof label === "number") && labels.has(label)) {
-      errors.push(planError("TSC002", "Prepared choice labels must be unique.", labelPath));
-    }
-    if (typeof label === "string" || typeof label === "number") labels.add(label);
   }
 }
 

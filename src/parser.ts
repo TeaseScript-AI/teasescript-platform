@@ -2296,24 +2296,24 @@ class Parser {
     const options: InteractionChoiceOption[] = [];
     let missingChoiceOptionWasReported = false;
     while (!this.#isInteractionChoiceTerminator()) {
-      const label =
+      const optionValue =
         (this.#check(TokenKind.Identifier) || this.#check(TokenKind.NumberLiteral)) &&
         this.#peek(1).kind === TokenKind.Colon
-          ? this.#interactionChoiceLabel(this.#advance())
+          ? this.#interactionChoiceValue(this.#advance())
           : null;
       let colonSpan: SourceSpan | null = null;
-      if (label !== null) {
+      if (optionValue !== null) {
         this.#advance();
         colonSpan = copySpan(this.#previous().span);
       }
-      const value = yield* parseChild(
-        label === null ? this.#parseOr() : this.#parseColonValueTask(false),
+      const expression = yield* parseChild(
+        optionValue === null ? this.#parseOr() : this.#parseColonValueTask(false),
       );
-      if (value === null) {
+      if (expression === null) {
         missingChoiceOptionWasReported = true;
         this.#reportInsertion(
           parserDiagnosticCode.expectedChoiceOption,
-          label === null
+          optionValue === null
             ? "Expected at least one choice option."
             : "Expected a choice option expression after ':'.",
         );
@@ -2329,11 +2329,11 @@ class Parser {
       options.push(
         Object.freeze({
           kind: "interactionChoiceOption",
-          label,
+          value: optionValue,
           colonSpan,
-          value,
+          expression,
           separatorSpan,
-          span: spanFrom(label?.span ?? value.span, value.span),
+          span: spanFrom(optionValue?.span ?? expression.span, expression.span),
         }),
       );
       if (separatorSpan === null) {
@@ -2375,7 +2375,7 @@ class Parser {
         "Expected at least one choice option.",
       );
     }
-    const end = options.at(-1)?.value.span ?? speaker?.span ?? command.span;
+    const end = options.at(-1)?.expression.span ?? speaker?.span ?? command.span;
     return Object.freeze({
       kind: "interactionExpression",
       interactionKind,
@@ -2448,7 +2448,7 @@ class Parser {
     return operand;
   }
 
-  #interactionChoiceLabel(token: Token): Identifier | import("./ast.js").NumberLiteral {
+  #interactionChoiceValue(token: Token): Identifier | import("./ast.js").NumberLiteral {
     if (token.kind === TokenKind.Identifier) return this.#identifier(token);
     return Object.freeze({
       kind: "numberLiteral",

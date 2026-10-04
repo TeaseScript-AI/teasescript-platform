@@ -1,12 +1,14 @@
 import type { Expression } from "./ast.js";
 import { runCompileTask, compileChild, type CompileTask } from "./compiler/continuation.js";
+import { durationLiteralMilliseconds, formatDuration } from "./duration.js";
 
 export function staticNumber(expression: Expression): number | undefined {
   return runCompileTask(staticNumberTask(expression));
 }
 
 export function staticVisibleText(expression: Expression): string | undefined {
-  return runCompileTask(staticVisibleTextTask(expression));
+  const known = staticScalar(expression);
+  return known === undefined ? undefined : scalarText(known.value);
 }
 
 function unwrapParentheses(expression: Expression): Expression {
@@ -58,7 +60,30 @@ function* staticNumberTask(expression: Expression): CompileTask<number | undefin
   return value === undefined || !negate ? value : -value;
 }
 
-function* staticVisibleTextTask(expression: Expression): CompileTask<string | undefined> {
+/** A scalar known at compile time: text, a finite number, a boolean, `null`, or a duration. */
+export type StaticScalar =
+  string | number | boolean | null | { readonly kind: "duration"; readonly milliseconds: number };
+
+/**
+ * The value of a literal, of interpolated text whose parts are known, or of number and duration arithmetic on known
+ * operands, with the runtime's operations. Anything else is `undefined`.
+ */
+function staticScalar(expression: Expression): { readonly value: StaticScalar } | undefined {
+  return runCompileTask(staticScalarTask(expression));
+}
+
+/** Scalar visible text, as the runtime converts the value. */
+function scalarText(value: StaticScalar): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(Object.is(value, -0) ? 0 : value);
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (value === null) return "null";
+  return formatDuration(value.milliseconds);
+}
+
+function* staticScalarTask(
+  expression: Expression,
+): CompileTask<{ readonly value: StaticScalar } | undefined> {
   expression = unwrapParentheses(expression);
   switch (expression.kind) {
     case "stringLiteral": {
@@ -68,28 +93,100 @@ function* staticVisibleTextTask(expression: Expression): CompileTask<string | un
           parts.push(part.value);
           continue;
         }
-        const value = yield* compileChild(staticVisibleTextTask(part.expression));
-        if (value === undefined) return undefined;
-        parts.push(value);
+        const known = yield* compileChild(staticScalarTask(part.expression));
+        if (known === undefined) return undefined;
+        parts.push(scalarText(known.value));
       }
-      return parts.join("");
+      return { value: parts.join("") };
     }
     case "numberLiteral":
-      return Number.isFinite(expression.value)
-        ? String(Object.is(expression.value, -0) ? 0 : expression.value)
-        : undefined;
+      return Number.isFinite(expression.value) ? { value: expression.value } : undefined;
     case "booleanLiteral":
-      return expression.value ? "true" : "false";
+      return { value: expression.value };
     case "nullLiteral":
-      return "null";
-    case "unaryExpression":
+      return { value: null };
+    case "durationLiteral":
+      return finite({ kind: "duration", milliseconds: durationLiteralMilliseconds(expression) });
+    case "unaryExpression": {
+      if (expression.operator !== "+" && expression.operator !== "-") return undefined;
+      const known = yield* compileChild(staticScalarTask(expression.operand));
+      const value = known?.value;
+      if (typeof value === "number") return { value: expression.operator === "+" ? value : -value };
+      if (!isStaticDuration(value)) return undefined;
+      return expression.operator === "+"
+        ? { value }
+        : { value: { kind: "duration", milliseconds: 0 - value.milliseconds } };
+    }
     case "binaryExpression": {
-      const value = yield* compileChild(staticNumberTask(expression));
-      return value !== undefined && Number.isFinite(value)
-        ? String(Object.is(value, -0) ? 0 : value)
-        : undefined;
+      const left = yield* compileChild(staticScalarTask(expression.left));
+      if (left === undefined) return undefined;
+      const right = yield* compileChild(staticScalarTask(expression.right));
+      if (right === undefined) return undefined;
+      return finite(arithmetic(expression.operator, left.value, right.value));
     }
     default:
       return undefined;
   }
+}
+
+/** Number and duration arithmetic as the runtime performs it; `undefined` for other operands or a zero divisor. */
+function arithmetic(
+  operator: string,
+  left: StaticScalar,
+  right: StaticScalar,
+): StaticScalar | undefined {
+  if (typeof left === "number" && typeof right === "number") {
+    switch (operator) {
+      case "+":
+        return left + right;
+      case "-":
+        return left - right;
+      case "*":
+        return left * right;
+      case "/":
+        return right === 0 ? undefined : left / right;
+      case "%":
+        return right === 0 ? undefined : left % right;
+      default:
+        return undefined;
+    }
+  }
+  const duration = (milliseconds: number) => ({ kind: "duration" as const, milliseconds });
+  if (isStaticDuration(left) && isStaticDuration(right)) {
+    if (operator === "+") return duration(left.milliseconds + right.milliseconds);
+    if (operator === "-") return duration(left.milliseconds - right.milliseconds);
+    if (operator === "/") return left.milliseconds / right.milliseconds;
+    return undefined;
+  }
+  if (isStaticDuration(left) && typeof right === "number") {
+    if (operator === "*") return duration(left.milliseconds * right);
+    if (operator === "/") return duration(left.milliseconds / right);
+    return undefined;
+  }
+  if (typeof left === "number" && isStaticDuration(right) && operator === "*")
+    return duration(left * right.milliseconds);
+  return undefined;
+}
+
+function isStaticDuration(
+  value: StaticScalar | undefined,
+): value is { readonly kind: "duration"; readonly milliseconds: number } {
+  return typeof value === "object" && value !== null;
+}
+
+function finite(value: StaticScalar | undefined): { readonly value: StaticScalar } | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "number") return Number.isFinite(value) ? { value } : undefined;
+  if (isStaticDuration(value)) return Number.isFinite(value.milliseconds) ? { value } : undefined;
+  return { value };
+}
+
+/** A choice option value known at compile time, with `-0` as `0` like a runtime label. */
+export function staticChoiceValue(
+  expression: Expression,
+): { readonly value: StaticScalar } | undefined {
+  const known = staticScalar(expression);
+  return known !== undefined && typeof known.value === "number" && Object.is(known.value, -0)
+    ? { value: 0 }
+    : known;
 }

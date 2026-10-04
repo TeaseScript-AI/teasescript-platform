@@ -89,13 +89,13 @@ const HELP = Object.freeze({
   choose: Object.freeze({
     command: "choose" as const,
     summary:
-      "Waits for one choice. Options may be unlabelled or consistently identifier-labelled or number-labelled; labelled results use the exact label value.",
-    syntax: "choose [as speaker] [label:] option, [label:] option, ...",
+      "Waits for one choice and returns the selected button's value: the value written before ':', or else the option itself with its own type. A list option gives one button per element; an element may be a { value?, text, background? } object.",
+    syntax: "choose [as speaker] [value:] option, [value:] option, ...",
   }),
   say: Object.freeze({
     command: "say" as const,
     summary:
-      "Emits visible chat text. Current pacing supports smart pacing by default, an exact non-negative seconds expression including 0, or instant; skip policy may be skippable or unskippable.",
+      "Emits visible chat text; a list, set, or object shows in literal notation without markup. Current pacing supports smart pacing by default, an exact non-negative seconds expression including 0, or instant; skip policy may be skippable or unskippable.",
     syntax:
       "say [as speaker] [bubble(options)|prose(options)] [skippable|unskippable] text [, pacing|instant]",
   }),
@@ -675,7 +675,7 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
       if (expression.defaultValue !== null)
         children.push({ kind: "expression", node: expression.defaultValue });
       for (const option of expression.options)
-        children.push({ kind: "expression", node: option.value });
+        children.push({ kind: "expression", node: option.expression });
       return;
     case "parenthesizedExpression":
       children.push({ kind: "expression", node: expression.expression });
@@ -783,10 +783,10 @@ function formatInteraction(source: string, node: InteractionExpression, edits: O
   if (first !== undefined) whitespaceEdit(source, cursor, first.span.start.offset, " ", edits);
   for (let index = 0; index < node.options.length; index += 1) {
     const option = node.options[index]!;
-    if (option.label !== null && option.colonSpan !== null) {
+    if (option.value !== null && option.colonSpan !== null) {
       whitespaceEdit(
         source,
-        option.label.span.end.offset,
+        option.value.span.end.offset,
         option.colonSpan.start.offset,
         "",
         edits,
@@ -794,7 +794,7 @@ function formatInteraction(source: string, node: InteractionExpression, edits: O
       whitespaceEdit(
         source,
         option.colonSpan.end.offset,
-        option.value.span.start.offset,
+        option.expression.span.start.offset,
         " ",
         edits,
       );
@@ -802,7 +802,7 @@ function formatInteraction(source: string, node: InteractionExpression, edits: O
     if (option.separatorSpan !== null) {
       whitespaceEdit(
         source,
-        option.value.span.end.offset,
+        option.expression.span.end.offset,
         option.separatorSpan.start.offset,
         "",
         edits,

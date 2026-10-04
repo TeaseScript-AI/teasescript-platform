@@ -1,45 +1,214 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { compileSource } from "../src/compiler.js";
 import { run, type RuntimeOperationResult } from "../src/runtime/engine.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { compileValidPlan as compile } from "./helpers/compile-valid-plan.js";
 import { sayTexts } from "./helpers/runtime-events.js";
+import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
-test("selects an eligible visible list value exactly once", () => {
-  const direct = runSource('say ["left", 2]', 0.75);
-  assert.equal(direct.result.snapshot.failure, null);
-  assert.equal(direct.randomCalls, 1);
-  assert.deepEqual(sayTexts(direct.result), ["2"]);
-
-  const template = runSource(['let values = ["left", 2]', 'say "Value: ${values}"'].join("\n"), 0);
+test("interpolation selects one list element at every evaluation", () => {
+  const template = runSource(
+    ['let values = ["left", 2]', 'say "Value: ${values}"', 'say "${values} and ${values}"'].join(
+      "\n",
+    ),
+    [0, 0.75, 0],
+  );
   assert.equal(template.result.snapshot.failure, null);
-  assert.equal(template.randomCalls, 1);
-  assert.deepEqual(sayTexts(template.result), ["Value: left"]);
+  assert.equal(template.randomCalls, 3);
+  assert.deepEqual(sayTexts(template.result), ["Value: left", "2 and left"]);
+
+  // Any element that `${...}` shows on its own may be selected.
+  const scalars = runSource(
+    'let values = [true, null, 90 seconds]\nsay "${values}, ${values}, ${values}"',
+    [0, 0.5, 0.9],
+  );
+  assert.equal(scalars.result.snapshot.failure, null);
+  assert.deepEqual(sayTexts(scalars.result), ["true, null, 1 min 30 s"]);
 });
 
-test("rejects ineligible automatically selected list values with one RNG call", () => {
+test("say shows lists, sets, and objects in code-like notation without message markup", () => {
   const cases = [
-    "say [true]",
-    "say [null]",
-    "say [{ value: 1 }]",
-    "say [set[1]]",
-    "say [1..2]",
-    'say [["nested"]]',
-    "speaker vera {}\nsay [vera]",
+    ['say ["pet", "puppy"]', '["pet", "puppy"]'],
+    ["say [2.5, true, null]", "[2.5, true, null]"],
+    ['say [["a"], ["b"]]', '[["a"], ["b"]]'],
+    ['say [{ name: "Bo", age: 3 }]', '[{ name: "Bo", age: 3 }]'],
+    ['say { name: "Bo" }', '{ name: "Bo" }'],
+    ['say ["He said \\"hi\\""]', '["He said \\"hi\\""]'],
+    ["say []", "[]"],
+    ["say {}", "{}"],
+    ["say [90 seconds]", "[1 min 30 s]"],
+    ["say set[2, 1, 2]", "[2, 1]"],
+    ["say [2.50, -0, 1e21]", "[2.5, 0, 1e+21]"],
+    ['say ["a\\\\b", "x\\ny\\tz\\r", "\\${name}"]', '["a\\\\b", "x\\ny\\tz\\r", "\\${name}"]'],
+    [
+      'say ["**bold**", "https://example.com", "# heading", "[link](https://example.com)"]',
+      '["**bold**", "https://example.com", "# heading", "[link](https://example.com)"]',
+    ],
   ] as const;
+  for (const [source, text] of cases) {
+    const execution = runSource(source, []);
+    assert.equal(execution.result.snapshot.failure, null, source);
+    assert.equal(execution.randomCalls, 0, source);
+    const said = execution.result.events.filter((event) => event.kind === "say");
+    assert.deepEqual(
+      said.map((event) => [event.text, event.content.blocks]),
+      [[text, [{ kind: "paragraph", lines: [{ text, spans: [], ending: "" }] }]]],
+      source,
+    );
+  }
 
-  for (const source of cases) {
-    const execution = runSource(source, 0);
-    assert.equal(execution.randomCalls, 1, source);
-    assert.equal(execution.result.snapshot.status, "failed", source);
-    assert.equal(execution.result.snapshot.failure?.code, "TSR021", source);
-    assert.deepEqual(sayTexts(execution.result), [], source);
+  // A scalar is shown as before, and its text is still message markup.
+  const scalar = runSource('say "**bold**"', []);
+  assert.deepEqual(sayTexts(scalar.result), ["bold"]);
+});
+
+test("say notation survives prepared pacing and checkpoint resume", () => {
+  const source = [
+    "function pause {",
+    "    return 0",
+    "}",
+    'say ["**a**", { b: [1] }], pause()',
+  ].join("\n");
+  const equivalent = assertRuntimeResumeEquivalent(source);
+  assert.deepEqual(
+    equivalent.events.filter((event) => event.kind === "say").map((event) => event.text),
+    ['["**a**", { b: [1] }]'],
+  );
+});
+
+test("say shows ranges and speakers as code-like notation", () => {
+  const cases = [
+    ["say 1..5", "1..5"],
+    ["say 1..=5", "1..=5"],
+    ["say [-2..3, { r: 0..=1 }]", "[-2..3, { r: 0..=1 }]"],
+    ["speaker mistress {}\nsay mistress", "<speaker mistress>"],
+    ["speaker vera {}\nsay [vera, 1]", "[<speaker vera>, 1]"],
+  ] as const;
+  for (const [source, text] of cases) {
+    const execution = runSource(source, []);
+    assert.equal(execution.result.snapshot.failure, null, source);
+    assert.deepEqual(sayTexts(execution.result), [text], source);
+  }
+});
+
+test("say shows a timer handle with its current state, also after checkpoint resume", () => {
+  const source = [
+    'let beat = timer(duration: 10 s, async: true, label: "Beat")',
+    "let plain = timer(duration: 10 s, async: true)",
+    "wait 3 s",
+    "say [beat, plain], 0",
+    "beat.pause()",
+    "say beat, 0",
+    "plain.stop()",
+    "say plain, 0",
+    "beat.resume()",
+    "wait 8 s",
+    "say beat, 0",
+  ].join("\n");
+  const equivalent = assertRuntimeResumeEquivalent(source);
+  assert.deepEqual(
+    equivalent.events.filter((event) => event.kind === "say").map((event) => event.text),
+    [
+      '[<timer "Beat", 7 s left>, <timer, 7 s left>]',
+      '<timer "Beat", paused, 7 s left>',
+      "<timer, stopped>",
+      '<timer "Beat", finished>',
+    ],
+  );
+});
+
+test("say shows a media handle with its current state, also after checkpoint resume", () => {
+  const source = [
+    'let music = playAudio(file: "music.mp3", async: true)',
+    "wait 12 s",
+    "say [music], 0",
+    "music.pause()",
+    "say music, 0",
+    "music.stop()",
+    "say music, 0",
+    'let beep = playAudio(file: "beep.mp3", async: true)',
+    "wait 61 s",
+    "say beep, 0",
+  ].join("\n");
+  const equivalent = assertRuntimeResumeEquivalent(source, { mediaDurationMs: 60_000 });
+  assert.deepEqual(
+    equivalent.events.filter((event) => event.kind === "say").map((event) => event.text),
+    [
+      '[<media "music.mp3", playing at 12 s>]',
+      '<media "music.mp3", paused at 12 s>',
+      '<media "music.mp3", stopped>',
+      '<media "beep.mp3", finished>',
+    ],
+  );
+});
+
+test("interpolation checks the whole list before selecting, so the outcome does not depend on the seed", () => {
+  const cases = [
+    ['let values = ["ok", { value: 1 }]\nsay "${values}"', "TSR021"],
+    ['let values = ["ok", ["nested"]]\nsay "${values}"', "TSR021"],
+    ['let values = ["ok", set[1]]\nsay "${values}"', "TSR021"],
+    ['let values = ["ok", 1..2]\nsay "${values}"', "TSR021"],
+    ['let values = []\nsay "${values}"', "TSR019"],
+  ] as const;
+  for (const [source, code] of cases) {
+    for (const randomValue of [0, 0.75]) {
+      const execution = runSource(source, [randomValue]);
+      assert.equal(execution.randomCalls, 0, source);
+      assert.equal(execution.result.snapshot.failure?.code, code, source);
+      assert.deepEqual(sayTexts(execution.result), [], source);
+    }
+  }
+  const empty = runSource('let values = []\nsay "${values}"', []);
+  assert.equal(
+    empty.result.snapshot.failure?.message,
+    "An interpolated list must contain at least one element to select from.",
+  );
+});
+
+test("interpolated values the compiler can see are checked when compiling", () => {
+  const cases = [
+    [
+      'say "${["ok", {}]}"',
+      "{}",
+      "An interpolated list may contain only text, numbers, true, false, null, and durations, because one element is shown as text.",
+    ],
+    [
+      'let answer = askText "${[]}"',
+      "[]",
+      "An interpolated list must contain at least one element to select from.",
+    ],
+    [
+      'speaker vera {}\nsay "${[vera]}"',
+      "vera",
+      "An interpolated list may contain only text, numbers, true, false, null, and durations, because one element is shown as text.",
+    ],
+    [
+      'say "${{ name: "Bo" }}"',
+      '{ name: "Bo" }',
+      '"${...}" cannot show an object. It shows text, numbers, true, false, null, and durations, and selects one element of a list.',
+    ],
+  ] as const;
+  for (const [source, at, message] of cases) {
+    const result = compileSource(source);
+    assert.equal(result.plan, null, source);
+    const start = source.lastIndexOf(at);
+    assert.deepEqual(
+      result.diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.message,
+        diagnostic.span.start.offset,
+        diagnostic.span.end.offset,
+      ]),
+      [["TSV042", message, start, start + at.length]],
+      source,
+    );
   }
 });
 
 test("preserves direct scalar visible-text conversion", () => {
-  const execution = runSource(["say true", "say null", "say 3.5"].join("\n"), 0);
+  const execution = runSource(["say true", "say null", "say 3.5"].join("\n"), []);
 
   assert.equal(execution.result.snapshot.failure, null);
   assert.equal(execution.randomCalls, 0);
@@ -48,15 +217,17 @@ test("preserves direct scalar visible-text conversion", () => {
 
 function runSource(
   source: string,
-  randomValue: number,
+  randomValues: readonly number[],
 ): { readonly result: RuntimeOperationResult; readonly randomCalls: number } {
   const plan = compile(source);
   let randomCalls = 0;
   const result = run(plan, createImmediatePacingRuntimeSnapshot(plan), {
     random: {
       next(): number {
+        const value = randomValues[randomCalls];
         randomCalls += 1;
-        return randomValue;
+        if (value === undefined) throw new Error("Unexpected random draw.");
+        return value;
       },
     },
   });

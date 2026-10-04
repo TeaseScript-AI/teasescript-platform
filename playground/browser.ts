@@ -405,21 +405,25 @@ function submitComposer(): void {
   );
 }
 
-function activateButton(): void {
+/** Controls carry the action they were rendered for, so a stale control cannot answer a later interaction. */
+function activateButton(actionId: number): void {
   if (!runtimeIsCurrent()) return;
   // EVIDENCE: runtimeIsCurrent above synchronously proved both retained values are present and current.
   applyWorkspaceControl(
-    activateWorkspaceButton(plan as InstructionPlan, snapshot as RuntimeSnapshot),
+    activateWorkspaceButton(plan as InstructionPlan, snapshot as RuntimeSnapshot, actionId),
   );
 }
 
-function selectChoice(
-  selection: { kind: "label"; value: string | number } | { kind: "text"; value: string },
-): void {
+function selectChoice(actionId: number, optionIndex: number): void {
   if (!runtimeIsCurrent()) return;
   // EVIDENCE: runtimeIsCurrent above synchronously proved both retained values are present and current.
   applyWorkspaceControl(
-    selectWorkspaceChoice(plan as InstructionPlan, snapshot as RuntimeSnapshot, selection),
+    selectWorkspaceChoice(
+      plan as InstructionPlan,
+      snapshot as RuntimeSnapshot,
+      actionId,
+      optionIndex,
+    ),
   );
 }
 
@@ -548,7 +552,8 @@ function renderPlayerControls(presentation: WorkspacePlayerPresentation): void {
     button.type = "button";
     button.textContent = interaction.ui.buttonLabel;
     button.setAttribute("aria-label", accessibleName);
-    button.addEventListener("click", activateButton);
+    const actionId = interaction.actionId;
+    button.addEventListener("click", () => activateButton(actionId));
     elements.interactionControls.append(button);
     elements.composerInput.setAttribute("aria-label", "Chat composer");
     elements.composerHelp.textContent = "Activate the scripted button above to continue.";
@@ -568,12 +573,13 @@ function renderPlayerControls(presentation: WorkspacePlayerPresentation): void {
     return;
   }
 
-  renderChoiceControls(accessibleName, interaction.ui);
+  renderChoiceControls(interaction.actionId, accessibleName, interaction.ui);
   elements.composerHelp.textContent = "Type one exact visible option or select a rendered control.";
   focusNewInteraction(interaction.actionId, elements.composerInput);
 }
 
 function renderChoiceControls(
+  actionId: number,
   accessibleName: string,
   choice: Extract<
     NonNullable<WorkspacePlayerPresentation["activeInteraction"]>["ui"],
@@ -602,11 +608,7 @@ function renderChoiceControls(
     if (option.text.length === 0)
       button.setAttribute("aria-label", `${accessibleName} ${index + 1}`);
     button.addEventListener("click", () => {
-      selectChoice(
-        option.label === null
-          ? { kind: "text", value: option.text }
-          : { kind: "label", value: option.label },
-      );
+      selectChoice(actionId, index);
     });
     buttons.append(button);
     const selectOption = document.createElement("option");
@@ -617,13 +619,9 @@ function renderChoiceControls(
     select.append(selectOption);
   });
   select.addEventListener("change", () => {
-    const option = choice.options[Number(select.value) - 1];
-    if (option === undefined) return;
-    selectChoice(
-      option.label === null
-        ? { kind: "text", value: option.text }
-        : { kind: "label", value: option.label },
-    );
+    const index = Number(select.value) - 1;
+    if (choice.options[index] === undefined) return;
+    selectChoice(actionId, index);
   });
   group.append(legend, buttons, select);
   elements.interactionControls.append(group);

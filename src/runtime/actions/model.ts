@@ -1,6 +1,7 @@
 import type { MessagePresentation } from "../../message-presentation.js";
 import type {
   DelayDisplay,
+  InteractionChoiceValue,
   InteractionResultDomain,
   InteractionUiPayload,
 } from "../../plan/model.js";
@@ -251,7 +252,8 @@ export interface RuntimeInteractionActionSettlementSnapshot {
   readonly requestEventSequence: number;
   readonly transcriptEventSequence: number;
   readonly completionEventSequence: number;
-  readonly result: string | number | null;
+  /** `null` for a button; a choice may also return `null` as an option's label. */
+  readonly result: InteractionChoiceValue;
   readonly transcriptText: string;
   /** The UI the player answered, so the settlement validates against what was presented. */
   readonly ui: InteractionUiPayload;

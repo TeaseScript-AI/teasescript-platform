@@ -15,7 +15,10 @@ import {
 } from "../src/runtime/checkpoint.js";
 import { executeInstruction, run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
-import { createSerializableList } from "../src/runtime/serializable-values.js";
+import {
+  createSerializableList,
+  createSerializableObject,
+} from "../src/runtime/serializable-values.js";
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 
@@ -59,7 +62,7 @@ function rootBinding(snapshot: ReturnType<typeof createFreshRuntimeSnapshot>, na
   return snapshot.frames[0]?.bindings.find((binding) => binding.name === name)?.value;
 }
 
-test("compact interaction forms preserve immutable command, speaker, label, separator, option, and construct spans", () => {
+test("compact interaction forms preserve immutable command, speaker, button label, choice value, separator, option, and construct spans", () => {
   const source =
     'showButton as mistress "Ready"\nlet result = choose as mistress first: "Mystery",  second: "Again"';
   const parsed = parse(source);
@@ -100,7 +103,7 @@ test("compact interaction forms preserve immutable command, speaker, label, sepa
     end: { offset: 53, line: 1, column: 22 },
   });
   assert.equal(choice.options.length, 2);
-  assert.deepEqual(choice.options[0]!.label?.span, {
+  assert.deepEqual(choice.options[0]!.value?.span, {
     start: { offset: 63, line: 1, column: 32 },
     end: { offset: 68, line: 1, column: 37 },
   });
@@ -139,7 +142,7 @@ test("compact choose follows V30 continuation and enclosing-terminator boundarie
   assert.equal(newlineChoice?.kind, "letStatement");
   assert.equal(newlineChoice?.initializer.kind, "interactionExpression");
   assert.deepEqual(
-    newlineChoice?.initializer.options.map((option) => option.value.kind),
+    newlineChoice?.initializer.options.map((option) => option.expression.kind),
     ["stringLiteral", "stringLiteral"],
   );
 
@@ -193,9 +196,10 @@ test("compact choice keys continue across a newline after ':'", () => {
     assert.equal(statement?.kind, "letStatement");
     assert.equal(statement?.initializer.kind, "interactionExpression");
     return statement?.initializer.options.map((option) => [
-      option.label?.kind === "identifier" ? option.label.name : null,
-      option.value.kind === "stringLiteral" && option.value.parts[0]?.kind === "stringText"
-        ? option.value.parts[0].value
+      option.value?.kind === "identifier" ? option.value.name : null,
+      option.expression.kind === "stringLiteral" &&
+      option.expression.parts[0]?.kind === "stringText"
+        ? option.expression.parts[0].value
         : null,
     ]);
   };
@@ -366,7 +370,7 @@ test("every accepted compact interaction variant carries exact command and const
     for (const option of interaction.options) {
       assert.ok(option.span.start.offset >= interaction.commandSpan.end.offset);
       assert.ok(option.span.end.offset <= interaction.span.end.offset);
-      if (option.label === null) assert.equal(option.colonSpan, null);
+      if (option.value === null) assert.equal(option.colonSpan, null);
       else assert.notEqual(option.colonSpan, null);
     }
   }
@@ -456,19 +460,15 @@ test("interaction speaker references use the existing precise unknown-speaker di
   }
 });
 
-test("choice diagnostics reject mixing and duplicates while labelled visible text may repeat", () => {
-  // `at` is the last source occurrence the diagnostic must span: the whole choice for mixing,
-  // the repeated label or visible text for duplicates, and the literal for non-finite labels.
+test("choice diagnostics reject mixed written-value kinds, while values and text may repeat", () => {
+  // `at` is the last source occurrence the diagnostic must span: the whole choice for mixed value kinds and the
+  // literal for a non-finite value.
   const rejected = [
-    { source: 'let x = choose first: "A", "B"', code: "TSV029", at: 'choose first: "A", "B"' },
     {
       source: 'let x = choose first: "A", 2: "B"',
       code: "TSV029",
       at: 'choose first: "A", 2: "B"',
     },
-    { source: 'let x = choose first: "A", first: "B"', code: "TSV030", at: "first" },
-    { source: 'let x = choose 1: "A", 1.0: "B"', code: "TSV030", at: "1.0" },
-    { source: 'let x = choose "Same", "Same"', code: "TSV030", at: '"Same"' },
     { source: 'let x = choose 1e999: "A"', code: "TSC001", at: "1e999" },
   ];
   for (const { source, code, at } of rejected) {
@@ -485,18 +485,21 @@ test("choice diagnostics reject mixing and duplicates while labelled visible tex
       source,
     );
   }
-  assert.notEqual(compileSource('let x = choose first: "Same", second: "Same"').plan, null);
+  for (const accepted of [
+    'let x = choose first: "Same", second: "Same"',
+    'let x = choose back: "Back", "Spanking", ["Lines", { text: "Corner", value: "corner" }]',
+    'let x = choose first: "A", first: "B"',
+    'let x = choose 1: "A", 1.0: "B"',
+    'let x = choose "Same", "Same"',
+    'let x = choose back: "Return", "back"',
+    'let x = choose "A", ["B", "A"]',
+    "let x = choose 1 min, 60 s",
+  ])
+    assert.deepEqual(compileSource(accepted).diagnostics, [], accepted);
 });
 
-test("static choice rules align duplicate diagnostics with direct and prepared interaction UI", () => {
-  const duplicate = compileSource('let result = choose "sum 3", "sum ${1 + 2}"');
-  assert.equal(duplicate.plan, null);
-  assert.deepEqual(
-    duplicate.semanticDiagnostics.map((diagnostic) => diagnostic.code),
-    ["TSV030"],
-  );
-
-  const staticPlan = compiled('let result = choose "sum ${1 + 2}", -0, true, null');
+test("static choice text aligns with direct and prepared interaction UI", () => {
+  const staticPlan = compiled('let result = choose "sum ${1 + 2}", "${-0}", "${true}", "${null}"');
   const staticPending = run(staticPlan, createFreshRuntimeSnapshot(staticPlan));
   assert.deepEqual(
     staticPending.snapshot.foregroundAction?.kind === "interaction"
@@ -504,12 +507,11 @@ test("static choice rules align duplicate diagnostics with direct and prepared i
       : null,
     {
       kind: "choice",
-      labelType: "none",
       options: [
-        { text: "sum 3", label: null },
-        { text: "0", label: null },
-        { text: "true", label: null },
-        { text: "null", label: null },
+        { text: "sum 3", value: "sum 3" },
+        { text: "0", value: "0" },
+        { text: "true", value: "true" },
+        { text: "null", value: "null" },
       ],
       accessibleName: { kind: "localizedDefault", key: "chooseOption" },
     },
@@ -523,10 +525,9 @@ test("static choice rules align duplicate diagnostics with direct and prepared i
       : null,
     {
       kind: "choice",
-      labelType: "none",
       options: [
-        { text: "sum 3", label: null },
-        { text: "other", label: null },
+        { text: "sum 3", value: "sum 3" },
+        { text: "other", value: "other" },
       ],
       accessibleName: { kind: "localizedDefault", key: "chooseOption" },
     },
@@ -539,6 +540,23 @@ test("interaction result domains participate in existing numeric semantic checks
   const textRange = compileSource("let values = askText..3");
   assert.equal(textRange.plan, null);
   assert.ok(textRange.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV010"));
+
+  // A choice returns each button's value; an option without a written value returns itself.
+  assert.notEqual(compileSource("let values = (choose 1, 2)..3").plan, null);
+  assert.notEqual(compileSource("let values = (choose [1, 2])..3").plan, null);
+  assert.notEqual(compileSource("let values = (choose { text: 1 })..3").plan, null);
+  for (const source of [
+    'let values = (choose "a", b: "B")..3',
+    'let values = (choose { text: "A" })..3',
+    'let values = (choose [{ text: "A" }, { text: 1, value: "b" }])..3',
+  ]) {
+    const textChoice = compileSource(source);
+    assert.equal(textChoice.plan, null, source);
+    assert.ok(
+      textChoice.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV010"),
+      source,
+    );
+  }
 });
 
 test("prepared-plan validation rejects malformed prepared interaction shapes", () => {
@@ -589,23 +607,82 @@ test("authored payloads evaluate once in source order before pending state", () 
       : null,
     {
       kind: "choice",
-      labelType: "none",
       options: [
-        { text: "First", label: null },
-        { text: "Second", label: null },
+        { text: "First", value: "First" },
+        { text: "Second", value: "Second" },
       ],
       accessibleName: { kind: "localizedDefault", key: "chooseOption" },
     },
   );
   const completed = completePending(plan, pending.snapshot, "choice", {
-    kind: "selectedText",
-    selectedText: "Second",
+    kind: "selectedOption",
+    optionIndex: 1,
   });
   assert.equal(completed.outcome.kind, "completed");
   assert.deepEqual(calls, ["First", "Second"]);
 });
 
-test("dynamic interaction UI uses the established visible-text conversion once before waiting", () => {
+test("a list in a text field is a compile error when the compiler can see it", () => {
+  // `at` is the last source occurrence the diagnostic must span.
+  const cases = [
+    ['let labels = ["Go"]\nshowButton labels', "a button label", "labels"],
+    ['let hints = ["Name?"]\nlet answer = askText hints', "an input hint", "hints"],
+    ['showButton ["Go", "Run"]', "a button label", '["Go", "Run"]'],
+    ['let answer = askText ["Name?"]', "an input hint", '["Name?"]'],
+    ['let answer = askNumber ["Count?"]', "an input hint", '["Count?"]'],
+    ['let answer = choose first: { text: ["A"] }', "the text of a choice option", '["A"]'],
+    ['timer(duration: 1, label: ["Beat"])', "a timer label", '["Beat"]'],
+    ['speaker coach { title: ["Coach"] }', "the speaker's title", '["Coach"]'],
+    ['speaker coach {}\ncoach.displayName = ["Coach"]', "the speaker's displayName", '["Coach"]'],
+  ] as const;
+  for (const [source, field, at] of cases) {
+    const result = compileSource(source);
+    const start = source.lastIndexOf(at);
+    assert.equal(result.plan, null, source);
+    assert.deepEqual(
+      result.diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.message,
+        diagnostic.span.start.offset,
+        diagnostic.span.end.offset,
+      ]),
+      [
+        [
+          "TSV040",
+          `A list cannot be ${field}. Select one element with "\${list}" or list.random.`,
+          start,
+          start + at.length,
+        ],
+      ],
+      source,
+    );
+  }
+});
+
+test("a text field rejects other values it cannot show when the compiler can see them", () => {
+  const cases = [
+    ["showButton { bad: 1 }", "A button label cannot be an object.", "{ bad: 1 }"],
+    ["showButton 1..2", "A button label cannot be a range.", "1..2"],
+    ["let answer = askText set[1]", "An input hint cannot be a set (integer set).", "set[1]"],
+  ] as const;
+  for (const [source, message, at] of cases) {
+    const result = compileSource(source);
+    assert.equal(result.plan, null, source);
+    const start = source.lastIndexOf(at);
+    assert.deepEqual(
+      result.diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.message,
+        diagnostic.span.start.offset,
+        diagnostic.span.end.offset,
+      ]),
+      [["TSV042", message, start, start + at.length]],
+      source,
+    );
+  }
+});
+
+test("dynamic interaction UI converts scalars once and selects from a list only through interpolation", () => {
   const numberPlan = compiled("showButton 12.5");
   const numberPending = run(numberPlan, createFreshRuntimeSnapshot(numberPlan));
   assert.equal(
@@ -616,7 +693,9 @@ test("dynamic interaction UI uses the established visible-text conversion once b
     "12.5",
   );
 
-  const listPlan = compiled('let result = choose ["left", 2], ["right", 3]');
+  const listPlan = compiled(
+    'let left = ["left", 2]\nlet right = ["right", 3]\nlet result = choose "${left}", "${right}"',
+  );
   const randomValues = [0.75, 0.75];
   let randomCalls = 0;
   const listPending = run(listPlan, createFreshRuntimeSnapshot(listPlan), {
@@ -635,10 +714,9 @@ test("dynamic interaction UI uses the established visible-text conversion once b
       : null,
     {
       kind: "choice",
-      labelType: "none",
       options: [
-        { text: "2", label: null },
-        { text: "3", label: null },
+        { text: "2", value: "2" },
+        { text: "3", value: "3" },
       ],
       accessibleName: { kind: "localizedDefault", key: "chooseOption" },
     },
@@ -650,22 +728,30 @@ test("dynamic interaction UI uses the established visible-text conversion once b
   assert.deepEqual(seededFirst.snapshot.foregroundAction, seededSecond.snapshot.foregroundAction);
   assert.deepEqual(seededFirst.snapshot.rng, seededSecond.snapshot.rng);
 
-  const unsupportedPlan = compiled("showButton [true]");
-  const unsupportedFresh = createFreshRuntimeSnapshot(unsupportedPlan);
-  const nextActionId = unsupportedFresh.nextActionId;
-  let unsupportedRandomCalls = 0;
-  const unsupported = run(unsupportedPlan, unsupportedFresh, {
-    random: {
-      next: () => {
-        unsupportedRandomCalls += 1;
-        return 0;
+  // Lists the compiler cannot see fail before the action opens and without drawing from the RNG.
+  for (const source of [
+    "showButton labels",
+    "let answer = askText labels",
+    "let answer = choose { text: labels }",
+  ]) {
+    const plan = compiled(source, { globals: ["labels"] });
+    const fresh = createFreshRuntimeSnapshot(plan, {
+      globals: { labels: createSerializableList(["a", "b"]) },
+    });
+    let calls = 0;
+    const rejected = run(plan, fresh, {
+      random: {
+        next: () => {
+          calls += 1;
+          return 0;
+        },
       },
-    },
-  });
-  assert.equal(unsupportedRandomCalls, 1);
-  assert.equal(unsupported.snapshot.failure?.code, "TSR021");
-  assert.equal(unsupported.snapshot.foregroundAction, null);
-  assert.equal(unsupported.snapshot.nextActionId, nextActionId);
+    });
+    assert.equal(calls, 0, source);
+    assert.equal(rejected.snapshot.failure?.code, "TSR021", source);
+    assert.equal(rejected.snapshot.foregroundAction, null, source);
+    assert.equal(rejected.snapshot.nextActionId, fresh.nextActionId, source);
+  }
 });
 
 test("static compact interactions compile long mixed unary numeric labels without native recursion", () => {
@@ -683,24 +769,24 @@ test("static compact interactions compile long mixed unary numeric labels withou
 test("dynamic interaction UI commits prepared text and serialized RNG only after full validation", () => {
   const cases = [
     {
-      name: "a later dynamic unlabelled duplicate",
-      plan: compiled('let result = choose first, "same"', { globals: ["first"] }),
-      globals: { first: createSerializableList(["same"]) },
+      name: "a nested list in a list option",
+      plan: compiled('let result = choose "first", options', { globals: ["options"] }),
+      globals: { options: createSerializableList(["a", createSerializableList(["b"])]) },
       code: "TSR052",
     },
     {
-      name: "an aggregate overflow after list selection",
+      name: "an aggregate overflow across options",
       plan: compiled("let result = choose first, second", { globals: ["first", "second"] }),
       globals: {
-        first: createSerializableList(["a".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES / 2)]),
+        first: "a".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES / 2),
         second: "b".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES / 2 + 1),
       },
       code: "TSR052",
     },
     {
-      name: "a scalar unlabelled duplicate",
+      name: "only empty option lists",
       plan: compiled("let result = choose first, second", { globals: ["first", "second"] }),
-      globals: { first: "same", second: "same" },
+      globals: { first: createSerializableList([]), second: createSerializableList([]) },
       code: "TSR052",
     },
     {
@@ -710,9 +796,26 @@ test("dynamic interaction UI commits prepared text and serialized RNG only after
       code: "TSR052",
     },
     {
-      name: "an unsupported selected list item after an earlier value",
-      plan: compiled("let result = choose first, second", { globals: ["first", "second"] }),
-      globals: { first: createSerializableList(["first"]), second: createSerializableList([true]) },
+      name: "a list element with its own value under a written value",
+      plan: compiled('let result = choose "first", key: second', { globals: ["second"] }),
+      globals: {
+        second: createSerializableList([
+          createSerializableObject([
+            { name: "text", value: "second" },
+            { name: "value", value: "own" },
+          ]),
+        ]),
+      },
+      code: "TSR052",
+    },
+    {
+      name: "a list as the text of a choice object",
+      plan: compiled('let result = choose "first", second', { globals: ["second"] }),
+      globals: {
+        second: createSerializableObject([
+          { name: "text", value: createSerializableList(["second"]) },
+        ]),
+      },
       code: "TSR021",
     },
   ] as const;
@@ -744,8 +847,8 @@ test("dynamic interaction UI commits prepared text and serialized RNG only after
   }
 });
 
-test("dynamic list payload selection is fixed before checkpoint restore and is never reevaluated", () => {
-  const plan = compiled("showButton values()", { builtins: ["values"] });
+test("an interpolated list selection is fixed before checkpoint restore and is never reevaluated", () => {
+  const plan = compiled('showButton "${values()}"', { builtins: ["values"] });
   let calls = 0;
   const pending = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1364229357 }), {
     builtins: {
@@ -879,8 +982,8 @@ test("fixed-seed payload RNG is prepared once and restore does not reevaluate it
   assert.ok(action !== null && action.kind === "interaction" && action.ui.kind === "choice");
   const selected = action.ui.options[1]!.text;
   const completed = completePending(restored.plan, rerun.snapshot, "choice", {
-    kind: "selectedText",
-    selectedText: selected,
+    kind: "selectedOption",
+    optionIndex: 1,
   });
   assert.deepEqual(completed.snapshot.rng, savedRng);
   const done = run(restored.plan, completed.snapshot);
@@ -1096,7 +1199,7 @@ test("every compact interaction survives pending checkpoint restore and source-t
     {
       source: 'let result = choose first: "One", second: "Two"',
       interactionKind: "choice" as const,
-      payload: { kind: "selectedLabel" as const, selectedLabel: "second" },
+      payload: { kind: "selectedOption" as const, optionIndex: 1 },
       result: "second",
     },
   ];
@@ -1159,35 +1262,24 @@ test("an authored empty hint remains distinct from an omitted hint", () => {
 
 test("real source preserves button transcript and all choice result domains", () => {
   const cases = [
-    {
-      source: 'let result = choose "A", "B"',
-      payload: { kind: "selectedText", selectedText: "B" },
-      result: "B",
-      text: "B",
-    },
-    {
-      source: 'let result = choose first: "Same", second: "Same"',
-      payload: { kind: "selectedLabel", selectedLabel: "second" },
-      result: "second",
-      text: "Same",
-    },
+    { source: 'let result = choose "A", "B"', result: "B", text: "B" },
+    { source: 'let result = choose first: "Same", second: "Same"', result: "second", text: "Same" },
     {
       source: 'let result = choose first:\n    "Same", second:\n\n    // continued\n    "Same"',
-      payload: { kind: "selectedLabel", selectedLabel: "second" },
       result: "second",
       text: "Same",
     },
-    {
-      source: 'let result = choose 1: "One", 2: "Two"',
-      payload: { kind: "selectedLabel", selectedLabel: 2 },
-      result: 2,
-      text: "Two",
-    },
+    { source: 'let result = choose 1: "One", 2: "Two"', result: 2, text: "Two" },
+    // An option without a written value returns itself, with its own type.
+    { source: "let result = choose 5, 10", result: 10, text: "10" },
   ] as const;
   for (const scenario of cases) {
     const plan = compiled(scenario.source);
     const pending = run(plan, createFreshRuntimeSnapshot(plan));
-    const completed = completePending(plan, pending.snapshot, "choice", scenario.payload);
+    const completed = completePending(plan, pending.snapshot, "choice", {
+      kind: "selectedOption",
+      optionIndex: 1,
+    });
     assert.equal(completed.outcome.kind, "completed");
     assert.equal(
       completed.outcome.kind === "completed" &&
@@ -1281,35 +1373,33 @@ test("a retained dynamic settlement validates against the UI it recorded, before
     createFreshRuntimeSnapshot(choicePlan, { globals: { first: "One", second: "Two" } }),
   );
   const choiceCompleted = completePending(choicePlan, choicePending.snapshot, "choice", {
-    kind: "selectedText",
-    selectedText: "One",
+    kind: "selectedOption",
+    optionIndex: 0,
   });
   const choiceAfterCleanup = run(choicePlan, choiceCompleted.snapshot).snapshot;
   assert.equal(validateRuntimeSnapshot(choiceAfterCleanup, choicePlan).valid, true);
-  const labelledPlan = compiled("let result = choose first: firstText, second: secondText", {
+  const valuedPlan = compiled("let result = choose first: firstText, second: secondText", {
     globals: ["firstText", "secondText"],
   });
-  const labelledPending = run(
-    labelledPlan,
-    createFreshRuntimeSnapshot(labelledPlan, {
-      globals: { firstText: "Alpha", secondText: "Beta" },
-    }),
+  const valuedPending = run(
+    valuedPlan,
+    createFreshRuntimeSnapshot(valuedPlan, { globals: { firstText: "Alpha", secondText: "Beta" } }),
   );
-  const labelledCompleted = completePending(labelledPlan, labelledPending.snapshot, "choice", {
-    kind: "selectedLabel",
-    selectedLabel: "first",
+  const valuedCompleted = completePending(valuedPlan, valuedPending.snapshot, "choice", {
+    kind: "selectedOption",
+    optionIndex: 0,
   });
-  assert.equal(validateRuntimeSnapshot(labelledCompleted.snapshot, labelledPlan).valid, true);
-  // Result, destination and handoff stay the valid label `first`; only the retained transcript
-  // names the other prepared option, so the prepared label/text association must reject it.
-  const wrongTranscript = structuredClone(labelledCompleted.snapshot);
+  assert.equal(validateRuntimeSnapshot(valuedCompleted.snapshot, valuedPlan).valid, true);
+  // Result, destination and handoff stay the valid value `first`; only the retained transcript
+  // names the other prepared option, so the prepared value/text association must reject it.
+  const wrongTranscript = structuredClone(valuedCompleted.snapshot);
   assert.ok(wrongTranscript.lastSettlement?.actionKind === "interaction");
   assert.equal(wrongTranscript.interactionResultHandoff?.result, "first");
   // EVIDENCE: fixture mutates only the retained transcript text to another prepared option text.
   (wrongTranscript.lastSettlement as { transcriptText: string | null }).transcriptText = "Beta";
-  assert.equal(validateRuntimeSnapshot(wrongTranscript, labelledPlan).valid, false);
+  assert.equal(validateRuntimeSnapshot(wrongTranscript, valuedPlan).valid, false);
   const wrongTranscriptCheckpoint = structuredClone(
-    createCheckpoint(labelledPlan, labelledCompleted.snapshot),
+    createCheckpoint(valuedPlan, valuedCompleted.snapshot),
   );
   assert.ok(wrongTranscriptCheckpoint.snapshot.lastSettlement?.actionKind === "interaction");
   // EVIDENCE: fixture mutates only the checkpoint transcript text to another prepared option text.
@@ -1317,26 +1407,26 @@ test("a retained dynamic settlement validates against the UI it recorded, before
     wrongTranscriptCheckpoint.snapshot.lastSettlement as { transcriptText: string | null }
   ).transcriptText = "Beta";
   assert.throws(() => deserializeCheckpoint(JSON.stringify(wrongTranscriptCheckpoint)));
-  const labelledAfterCleanup = run(labelledPlan, labelledCompleted.snapshot).snapshot;
-  const differentPossibleHistory = structuredClone(labelledAfterCleanup);
+  const valuedAfterCleanup = run(valuedPlan, valuedCompleted.snapshot).snapshot;
+  const differentPossibleHistory = structuredClone(valuedAfterCleanup);
   assert.ok(differentPossibleHistory.lastSettlement?.actionKind === "interaction");
-  // EVIDENCE: fixture changes only the transcript to the text the recorded UI shows for the other label.
+  // EVIDENCE: fixture changes only the transcript to the text the recorded UI shows for the other value.
   (differentPossibleHistory.lastSettlement as { transcriptText: string | null }).transcriptText =
     "Beta";
   // The settlement records the presented options, so the contradiction stays detectable after cleanup.
-  assert.equal(validateRuntimeSnapshot(differentPossibleHistory, labelledPlan).valid, false);
-  const mismatchedLabel = structuredClone(labelledAfterCleanup);
-  assert.ok(mismatchedLabel.lastSettlement?.actionKind === "interaction");
-  // EVIDENCE: fixture mutates only the retained label result to a label absent from the interaction domain.
-  (mismatchedLabel.lastSettlement as { result: unknown }).result = "third";
-  assert.equal(validateRuntimeSnapshot(mismatchedLabel, labelledPlan).valid, false);
-  const mismatchedLabelCheckpoint = structuredClone(
-    createCheckpoint(labelledPlan, labelledAfterCleanup),
+  assert.equal(validateRuntimeSnapshot(differentPossibleHistory, valuedPlan).valid, false);
+  const mismatchedValue = structuredClone(valuedAfterCleanup);
+  assert.ok(mismatchedValue.lastSettlement?.actionKind === "interaction");
+  // EVIDENCE: fixture mutates only the retained result to a value absent from the interaction domain.
+  (mismatchedValue.lastSettlement as { result: unknown }).result = "third";
+  assert.equal(validateRuntimeSnapshot(mismatchedValue, valuedPlan).valid, false);
+  const mismatchedValueCheckpoint = structuredClone(
+    createCheckpoint(valuedPlan, valuedAfterCleanup),
   );
-  assert.ok(mismatchedLabelCheckpoint.snapshot.lastSettlement?.actionKind === "interaction");
-  // EVIDENCE: fixture mutates only the checkpoint settlement result to an absent choice label.
-  (mismatchedLabelCheckpoint.snapshot.lastSettlement as { result: unknown }).result = "third";
-  assert.throws(() => deserializeCheckpoint(JSON.stringify(mismatchedLabelCheckpoint)));
+  assert.ok(mismatchedValueCheckpoint.snapshot.lastSettlement?.actionKind === "interaction");
+  // EVIDENCE: fixture mutates only the checkpoint settlement result to an absent choice value.
+  (mismatchedValueCheckpoint.snapshot.lastSettlement as { result: unknown }).result = "third";
+  assert.throws(() => deserializeCheckpoint(JSON.stringify(mismatchedValueCheckpoint)));
 });
 
 test("oversized static compact interactions return no plan and a diagnostic at the interaction span", () => {
@@ -1347,13 +1437,14 @@ test("oversized static compact interactions return no plan and a diagnostic at t
     (_, index) => `"option-${index}"`,
   ).join(", ");
   const oversizedChoice = `let result = choose ${options}`;
-  for (const [source, start] of [
-    [oversizedButton, 0],
-    [oversizedChoice, oversizedChoice.indexOf("choose")],
+  // The compiler sees that the choice has too many buttons before plan validation would.
+  for (const [source, start, code] of [
+    [oversizedButton, 0, "TSC006"],
+    [oversizedChoice, oversizedChoice.indexOf("choose"), "TSV029"],
   ] as const) {
     const result = compileSource(source);
     assert.equal(result.plan, null);
-    const diagnostic = result.diagnostics.find((candidate) => candidate.code === "TSC006");
+    const diagnostic = result.diagnostics.find((candidate) => candidate.code === code);
     assert.deepEqual(diagnostic?.span, {
       start: { offset: start, line: 0, column: start },
       end: { offset: source.length, line: 0, column: source.length },
@@ -1366,7 +1457,7 @@ test("representative static and dynamic root/function choices complete through c
     {
       name: "static-root",
       source: 'let result = choose first: "One", second: "Two", third: "Three"',
-      payload: { kind: "selectedLabel" as const, selectedLabel: "second" },
+      payload: { kind: "selectedOption" as const, optionIndex: 1 },
       binding: "result",
       expected: "second",
     },
@@ -1379,7 +1470,7 @@ test("representative static and dynamic root/function choices complete through c
         "}",
         "let output = prompt()",
       ].join("\n"),
-      payload: { kind: "selectedLabel" as const, selectedLabel: "second" },
+      payload: { kind: "selectedOption" as const, optionIndex: 1 },
       binding: "output",
       expected: "second",
     },
@@ -1389,7 +1480,7 @@ test("representative static and dynamic root/function choices complete through c
         'let prefix = "Option"',
         'let result = choose "${prefix} A", "${prefix} B", "${prefix} C"',
       ].join("\n"),
-      payload: { kind: "selectedText" as const, selectedText: "Option B" },
+      payload: { kind: "selectedOption" as const, optionIndex: 1 },
       binding: "result",
       expected: "Option B",
     },
@@ -1402,7 +1493,7 @@ test("representative static and dynamic root/function choices complete through c
         "}",
         'let output = prompt("Option")',
       ].join("\n"),
-      payload: { kind: "selectedText" as const, selectedText: "Option B" },
+      payload: { kind: "selectedOption" as const, optionIndex: 1 },
       binding: "output",
       expected: "Option B",
     },

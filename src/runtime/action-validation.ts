@@ -1,9 +1,21 @@
 import { isNormalizedOpaqueColor, normalizeOpaqueColor } from "../color.js";
 import { isValidInteractionPrefill } from "../interaction-answers.js";
-import { capturedChoicePresentation } from "./interaction-presentation.js";
+import { choiceValueKey, isInteractionChoiceValue } from "../choice-values.js";
+import { expandChoiceOptions } from "./choice-options.js";
+import { RuntimeFault } from "./errors.js";
+import {
+  validateCapturedSerializableValue,
+  type SerializableRuntimeValue,
+} from "./serializable-values.js";
 import { isOneOf } from "../plan/validation-support.js";
 import { isMessagePresentation } from "../message-presentation.js";
-import type { Instruction, InstructionPlan, InteractionUiPayload } from "../plan/model.js";
+import type {
+  Instruction,
+  InstructionPlan,
+  InteractionChoiceOption,
+  InteractionUiPayload,
+  PlanSourceLocation,
+} from "../plan/model.js";
 import {
   boundedInteractionUtf8ByteLength,
   interactionStringFits,
@@ -895,12 +907,8 @@ export function validateInteractionResultHandoffState(
     !nonNegativeSafeInteger(handoff.continuationInstruction) ||
     !positiveSafeInteger(handoff.destinationTemporary) ||
     (handoff.ownerCallFrameId !== null && !positiveSafeInteger(handoff.ownerCallFrameId)) ||
-    !(
-      (typeof handoff.result === "string" && interactionStringFits(handoff.result)) ||
-      (typeof handoff.result === "number" &&
-        Number.isFinite(handoff.result) &&
-        !Object.is(handoff.result, -0))
-    ) ||
+    !isInteractionChoiceValue(handoff.result) ||
+    (typeof handoff.result === "string" && !interactionStringFits(handoff.result)) ||
     !positiveSafeInteger(snapshot.nextActionId) ||
     handoff.actionId >= snapshot.nextActionId ||
     snapshot.foregroundAction !== null ||
@@ -1078,54 +1086,58 @@ function validInteractionResultForInstruction(
   result: unknown,
   snapshot: Record<string, unknown>,
 ): boolean {
+  if (instruction.interactionKind === "choice") {
+    if (instruction.expectedResult !== "choice" || !isInteractionChoiceValue(result)) return false;
+    const options =
+      "preparedUi" in instruction
+        ? preparedChoiceOptions(instruction.preparedUi, snapshot.temporaries, instruction.span)
+        : instruction.ui.kind === "choice"
+          ? instruction.ui.options
+          : undefined;
+    const key = choiceValueKey(result);
+    return options?.some((option) => choiceValueKey(option.value) === key) === true;
+  }
   if (instruction.expectedResult === "number") {
-    if (typeof result !== "number" || !Number.isFinite(result) || Object.is(result, -0))
-      return false;
-    if (instruction.interactionKind !== "choice") return true;
-    if ("preparedUi" in instruction) {
-      return (
-        instruction.preparedUi.kind === "choice" &&
-        instruction.preparedUi.labelType === "number" &&
-        instruction.preparedUi.labels?.includes(result) === true
-      );
-    }
     return (
-      instruction.ui.kind === "choice" &&
-      instruction.ui.options.some((option) => option.label === result)
-    );
-  }
-  if (
-    instruction.expectedResult !== "string" ||
-    typeof result !== "string" ||
-    !interactionStringFits(result)
-  )
-    return false;
-  if (instruction.interactionKind === "text") {
-    return !result.includes("\r") && interactionStringHasNonWhitespace(result);
-  }
-  if (instruction.interactionKind !== "choice") return false;
-  if ("preparedUi" in instruction) {
-    if (instruction.preparedUi.kind !== "choice") return false;
-    if (instruction.preparedUi.labelType === "identifier") {
-      return instruction.preparedUi.labels?.includes(result) === true;
-    }
-    if (instruction.preparedUi.labelType !== "none" || !Array.isArray(snapshot.temporaries))
-      return false;
-    const raw = runtimeTemporaryValue(
-      snapshot.temporaries,
-      instruction.preparedUi.optionsTemporary,
-    );
-    return (
-      isPlainRecord(raw) &&
-      raw.kind === "list" &&
-      Array.isArray(raw.items) &&
-      raw.items.some((value) => capturedChoicePresentation(value)?.text === result)
+      instruction.interactionKind === "number" &&
+      typeof result === "number" &&
+      Number.isFinite(result) &&
+      !Object.is(result, -0)
     );
   }
   return (
-    instruction.ui.kind === "choice" &&
-    instruction.ui.options.some((option) => (option.label ?? option.text) === result)
+    instruction.expectedResult === "string" &&
+    instruction.interactionKind === "text" &&
+    typeof result === "string" &&
+    interactionStringFits(result) &&
+    !result.includes("\r") &&
+    interactionStringHasNonWhitespace(result)
   );
+}
+
+/** The buttons a prepared choice shows for its captured option values, or `undefined` when they are invalid. */
+function preparedChoiceOptions(
+  prepared: import("../plan/model.js").PreparedInteractionUiPayload,
+  temporaries: unknown,
+  span: PlanSourceLocation,
+): readonly InteractionChoiceOption[] | undefined {
+  if (prepared.kind !== "choice" || !Array.isArray(temporaries)) return undefined;
+  const raw = runtimeTemporaryValue(temporaries, prepared.optionsTemporary);
+  if (
+    validateCapturedSerializableValue(raw) !== null ||
+    !isPlainRecord(raw) ||
+    raw.kind !== "list" ||
+    !Array.isArray(raw.items) ||
+    raw.items.length !== prepared.values.length
+  )
+    return undefined;
+  try {
+    // EVIDENCE: validation: validateCapturedSerializableValue accepted the captured list and its items above.
+    return expandChoiceOptions(raw.items as SerializableRuntimeValue[], prepared.values, span);
+  } catch (error) {
+    if (error instanceof RuntimeFault) return undefined;
+    throw error;
+  }
 }
 
 function validInteractionAction(
@@ -1160,12 +1172,11 @@ function validInteractionAction(
   const expected =
     action.interactionKind === "button"
       ? "none"
-      : action.interactionKind === "number" ||
-          (action.interactionKind === "choice" &&
-            isPlainRecord(action.ui) &&
-            action.ui.labelType === "number")
+      : action.interactionKind === "number"
         ? "number"
-        : "string";
+        : action.interactionKind === "choice"
+          ? "choice"
+          : "string";
   if (
     action.expectedResult !== expected ||
     (action.speakerId !== null && !positiveSafeInteger(action.speakerId))
@@ -1256,6 +1267,7 @@ function validPreparedInteractionAction(
     instruction.preparedUi,
     action.ui,
     snapshot.temporaries,
+    instruction.span,
   );
 }
 
@@ -1271,6 +1283,7 @@ function preparedInteractionUiMatchesAction(
   prepared: import("../plan/model.js").PreparedInteractionUiPayload,
   actual: unknown,
   temporaries: readonly unknown[],
+  span: PlanSourceLocation,
 ): boolean {
   if (
     !isPlainRecord(actual) ||
@@ -1298,33 +1311,8 @@ function preparedInteractionUiMatchesAction(
         : runtimeTemporaryValue(temporaries, prepared.prefillTemporary);
     return hint === actual.hint && prefill === actual.prefill;
   }
-  const raw = runtimeTemporaryValue(temporaries, prepared.optionsTemporary);
-  if (
-    !isPlainRecord(raw) ||
-    raw.kind !== "list" ||
-    !Array.isArray(raw.items) ||
-    raw.items.length !== prepared.optionCount
-  )
-    return false;
-  if (
-    !Array.isArray(actual.options) ||
-    actual.options.length !== prepared.optionCount ||
-    actual.labelType !== prepared.labelType
-  )
-    return false;
-  const options = actual.options;
-  const labels = prepared.labelType === "none" ? null : prepared.labels;
-  return raw.items.every((value, index) => {
-    const presentation = capturedChoicePresentation(value);
-    const option = options[index];
-    return (
-      presentation !== null &&
-      isPlainRecord(option) &&
-      option.text === presentation.text &&
-      option.background === presentation.background &&
-      option.label === (labels?.[index] ?? null)
-    );
-  });
+  const options = preparedChoiceOptions(prepared, temporaries, span);
+  return options !== undefined && choiceOptionsEqual(options, actual.options);
 }
 
 function accessibleNameEqual(
@@ -1376,7 +1364,7 @@ function validInteractionUiShape(
       ? ["kind", "buttonLabel", "accessibleName", ...("background" in value ? ["background"] : [])]
       : kind === "text" || kind === "number"
         ? ["kind", "hint", "accessibleName", ...("prefill" in value ? ["prefill"] : [])]
-        : ["kind", "labelType", "options", "accessibleName"];
+        : ["kind", "options", "accessibleName"];
   if (!hasExactKeys(value, expectedUiKeys)) return false;
   let aggregate = 0;
   let measurementExhausted = false;
@@ -1437,47 +1425,27 @@ function validInteractionUiShape(
   if (
     !Array.isArray(value.options) ||
     value.options.length === 0 ||
-    value.options.length > MAX_INTERACTION_OPTION_ENTRIES ||
-    !isOneOf(value.labelType, ["none", "identifier", "number"])
+    value.options.length > MAX_INTERACTION_OPTION_ENTRIES
   )
     return false;
-  const labels = new Set<string | number>();
-  const texts = new Set<string>();
   for (const option of value.options) {
     if (
       !isPlainRecord(option) ||
-      !hasExactKeys(option, ["text", "label", ...("background" in option ? ["background"] : [])])
+      !hasExactKeys(option, ["text", "value", ...("background" in option ? ["background"] : [])])
     ) {
       return false;
     }
     if ("background" in option && !isNormalizedOpaqueColor(option.background)) return false;
-    const optionText = option.text;
-    const textValid = count(optionText);
-    if (!textValid && !measurementExhausted) return false;
-    const label = option.label;
-    const validLabel =
-      value.labelType === "none"
-        ? label === null
-        : value.labelType === "identifier"
-          ? typeof label === "string" &&
-            count(label) &&
-            (measurementExhausted || /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label))
-          : typeof label === "number" && Number.isFinite(label) && !Object.is(label, -0);
-    if (!validLabel) return false;
+    if (!count(option.text) && !measurementExhausted) return false;
+    const value = option.value;
+    if (!isInteractionChoiceValue(value)) return false;
     if (
-      !measurementExhausted &&
-      label !== null &&
-      (typeof label === "string" || typeof label === "number")
-    ) {
-      if (labels.has(label)) return false;
-      labels.add(label);
-    }
-    if (!measurementExhausted && value.labelType === "none") {
-      // EVIDENCE: validation: the option text passed the string validation before duplicate checking.
-      if (texts.has(optionText as string)) return false;
-      // EVIDENCE: validation: the option text passed the string validation before insertion.
-      texts.add(optionText as string);
-    }
+      typeof value === "string" &&
+      value !== option.text &&
+      !count(value) &&
+      !measurementExhausted
+    )
+      return false;
   }
   return !measurementExhausted;
 }
@@ -1494,16 +1462,22 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
   if (expected.kind === "text" || expected.kind === "number")
     return actual.hint === expected.hint && actual.prefill === expected.prefill;
   if (expected.kind !== "choice") return false;
-  if (actual.labelType !== expected.labelType) return false;
-  if (!Array.isArray(actual.options)) return false;
-  if (actual.options.length !== expected.options.length) return false;
-  const options = actual.options;
-  return expected.options.every((option, index) => {
-    const candidate = options[index];
+  return choiceOptionsEqual(expected.options, actual.options);
+}
+
+/** Whether `actual` holds the same buttons, in order: text, value, and background. */
+function choiceOptionsEqual(
+  expected: readonly InteractionChoiceOption[],
+  actual: unknown,
+): boolean {
+  if (!Array.isArray(actual) || actual.length !== expected.length) return false;
+  return expected.every((option, index) => {
+    const candidate: unknown = actual[index];
     return (
       isPlainRecord(candidate) &&
       candidate.text === option.text &&
-      candidate.label === option.label &&
+      isInteractionChoiceValue(candidate.value) &&
+      choiceValueKey(candidate.value) === choiceValueKey(option.value) &&
       candidate.background === option.background
     );
   });
@@ -1620,36 +1594,22 @@ function validSettlementKindData(
     !settlementMatchesPresentedUi(settlement)
   )
     return false;
-  const settlementInstruction =
-    plan !== undefined && nonNegativeSafeInteger(settlement.owningInstruction)
-      ? plan.instructions[settlement.owningInstruction]
-      : undefined;
-  const numericChoice =
-    settlementInstruction?.kind === "interaction" &&
-    settlementInstruction.interactionKind === "choice" &&
-    ("preparedUi" in settlementInstruction
-      ? settlementInstruction.preparedUi.kind === "choice" &&
-        settlementInstruction.preparedUi.labelType === "number"
-      : settlementInstruction.ui.kind === "choice" &&
-        settlementInstruction.ui.labelType === "number");
-  const validNumberResult =
-    typeof settlement.result === "number" &&
-    Number.isFinite(settlement.result) &&
-    !Object.is(settlement.result, -0);
   let resultValid: boolean;
   if (settlement.interactionKind === "button") {
     resultValid = settlement.result === null;
   } else if (settlement.interactionKind === "text") {
     resultValid =
       typeof settlement.result === "string" && settlement.result === settlement.transcriptText;
-  } else if (settlement.interactionKind === "number" || numericChoice) {
-    resultValid = validNumberResult;
-  } else if (settlement.interactionKind === "choice" && plan === undefined) {
+  } else if (settlement.interactionKind === "number") {
     resultValid =
-      (typeof settlement.result === "string" && interactionStringFits(settlement.result)) ||
-      validNumberResult;
+      typeof settlement.result === "number" &&
+      Number.isFinite(settlement.result) &&
+      !Object.is(settlement.result, -0);
   } else {
-    resultValid = typeof settlement.result === "string" && interactionStringFits(settlement.result);
+    // The recorded UI offered the result; `settlementMatchesPresentedUi` checked that above.
+    resultValid =
+      isInteractionChoiceValue(settlement.result) &&
+      (typeof settlement.result !== "string" || interactionStringFits(settlement.result));
   }
   if (!resultValid) return false;
 
@@ -1713,18 +1673,24 @@ function settlementMatchesPresentedUi(settlement: Record<string, unknown>): bool
   if (!isPlainRecord(ui)) return false;
   if (ui.kind === "button") return settlement.transcriptText === ui.buttonLabel;
   if (ui.kind !== "choice") return true;
+  if (!isInteractionChoiceValue(settlement.result)) return false;
+  const key = choiceValueKey(settlement.result);
   return (
     Array.isArray(ui.options) &&
     ui.options.some(
       (option) =>
         isPlainRecord(option) &&
         option.text === settlement.transcriptText &&
-        (option.label ?? option.text) === settlement.result,
+        isInteractionChoiceValue(option.value) &&
+        choiceValueKey(option.value) === key,
     )
   );
 }
 
-/** The recorded UI has the shape the prepared instruction produces: kind, accessible name, labels, and option count. */
+/**
+ * The recorded UI has the shape the prepared instruction produces. A choice's captured options are cleared after
+ * completion, so its buttons are checked only against the values written in the plan.
+ */
 function preparedUiFitsPresentedUi(
   prepared: import("../plan/model.js").PreparedInteractionUiPayload,
   ui: unknown,
@@ -1742,15 +1708,29 @@ function preparedUiFitsPresentedUi(
       (ui.hint === null) === (prepared.hintTemporary === null) &&
       "prefill" in ui === (prepared.prefillTemporary !== undefined)
     );
-  if (
-    ui.labelType !== prepared.labelType ||
-    !Array.isArray(ui.options) ||
-    ui.options.length !== prepared.optionCount
-  )
-    return false;
-  return ui.options.every(
-    (option, index) => isPlainRecord(option) && option.label === (prepared.labels?.[index] ?? null),
-  );
+  return Array.isArray(ui.options) && buttonsFitWrittenValues(prepared.values, ui.options);
+}
+
+/**
+ * Whether `options` can be the buttons of options with these written values. An option with a written value gives
+ * buttons that all return it, one or, for a list, any number; an option without one may give any buttons. So when
+ * every option has a written value, the buttons are runs of those values in order.
+ */
+function buttonsFitWrittenValues(
+  values: readonly (string | number | null)[],
+  options: readonly unknown[],
+): boolean {
+  if (values.includes(null)) return true;
+  let slot = 0;
+  for (const option of options) {
+    if (!isPlainRecord(option) || !isInteractionChoiceValue(option.value)) return false;
+    const key = choiceValueKey(option.value);
+    // EVIDENCE: validation: the `includes(null)` check above leaves only string and number values.
+    while (slot < values.length && choiceValueKey(values[slot] as string | number) !== key)
+      slot += 1;
+    if (slot === values.length) return false;
+  }
+  return true;
 }
 
 function validPacingGateSettlement(
@@ -1871,7 +1851,11 @@ function sameCanonicalSettlementResult(destination: unknown, result: unknown): b
       Object.is(destination, result)
     );
   }
-  return destination === result;
+  return (
+    isInteractionChoiceValue(destination) &&
+    isInteractionChoiceValue(result) &&
+    choiceValueKey(destination) === choiceValueKey(result)
+  );
 }
 
 function validSettlementProvenance(

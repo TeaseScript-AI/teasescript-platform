@@ -1214,7 +1214,7 @@ test("host input waits for scene-time catch-up and for an expiry block due at th
   assert.equal(completeAction(exiting.plan, exited, request).outcome.kind, "staleAction");
 });
 
-test("late fractional rounds match on time, tiny rounds end normally, zero remaining finishes, and list text or a zero-based repeat range fails", () => {
+test("late fractional rounds match on time, tiny rounds end normally, zero remaining finishes, and a zero-based repeat range fails", () => {
   // Observes every timer deadline up to the horizon, as a Player that is never late would.
   const onTime = (source: string, horizonMs: number): Session => {
     const session = new Session(source);
@@ -1257,12 +1257,6 @@ test("late fractional rounds match on time, tiny rounds end normally, zero remai
     [[issued.timer.timerId, "finished"]],
   );
   assert.ok(adjusted.snapshot.settledTimers.every((timer) => timer.roundDurationMs >= 0));
-
-  const list = run(
-    plan("say [90 seconds], 0"),
-    createImmediatePacingRuntimeSnapshot(plan("say [90 seconds], 0")),
-  );
-  assert.equal(list.snapshot.failure?.code, "TSR021");
 
   const range = plan("let n = 0\ntimer(duration: n..2, async: true, repeat: true)\nwait 10");
   const fresh = createImmediatePacingRuntimeSnapshot(range, { seed: 0x1234_5678 });

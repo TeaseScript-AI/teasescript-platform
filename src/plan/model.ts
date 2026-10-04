@@ -403,17 +403,23 @@ export interface PlayMediaInstruction extends InstructionBase {
 }
 
 export type InteractionKind = "button" | "text" | "number" | "choice";
-export type InteractionResultDomain = "none" | "string" | "number";
+/** `choice` is the value of the selected choice option. */
+export type InteractionResultDomain = "none" | "string" | "number" | "choice";
 export type InteractionAccessibleName =
   | { readonly kind: "text"; readonly text: string }
   | {
       readonly kind: "localizedDefault";
       readonly key: "answer" | "number" | "chooseOption" | "continue";
     };
-export type InteractionChoiceOption =
-  | { readonly text: string; readonly background?: string; readonly label: null }
-  | { readonly text: string; readonly background?: string; readonly label: string }
-  | { readonly text: string; readonly background?: string; readonly label: number };
+/** A value a choice option can show and return: text, a finite number, a boolean, `null`, or a duration. */
+export type InteractionChoiceValue =
+  string | number | boolean | null | { readonly kind: "duration"; readonly milliseconds: number };
+/** One button. `value` is what `choose` returns for it; `text` is what the button shows. */
+export interface InteractionChoiceOption {
+  readonly text: string;
+  readonly value: InteractionChoiceValue;
+  readonly background?: string;
+}
 export type InteractionUiPayload =
   | {
       readonly kind: "button";
@@ -437,12 +443,12 @@ export type InteractionUiPayload =
     }
   | {
       readonly kind: "choice";
-      readonly labelType: "none" | "identifier" | "number";
       readonly options: readonly InteractionChoiceOption[];
       readonly accessibleName: InteractionAccessibleName;
     };
 
-export type PreparedInteractionChoiceLabel = string | number;
+/** An authored choice value before `:`: an identifier is a string, a numeric literal a number. */
+export type PreparedInteractionChoiceValue = string | number;
 export type PreparedInteractionUiPayload =
   | {
       readonly kind: "button";
@@ -466,10 +472,10 @@ export type PreparedInteractionUiPayload =
     }
   | {
       readonly kind: "choice";
-      readonly labelType: "none" | "identifier" | "number";
+      /** A list holding the value of each authored option, in source order. */
       readonly optionsTemporary: number;
-      readonly optionCount: number;
-      readonly labels: readonly PreparedInteractionChoiceLabel[] | null;
+      /** The authored value of each option, or `null`. Its length is the authored option count. */
+      readonly values: readonly (PreparedInteractionChoiceValue | null)[];
       readonly accessibleName: InteractionAccessibleName;
     };
 

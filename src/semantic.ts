@@ -8,6 +8,7 @@ import type {
   Block,
   CallArgument,
   Identifier,
+  InteractionChoiceOption,
   TimerParts,
   Expression,
   MediaParts,
@@ -44,6 +45,7 @@ import {
 import { runCompileTask, compileChild, type CompileTask } from "./compiler/continuation.js";
 import { expressionChildren, mediaHandlerBlocks, mediaOperands } from "./expression-children.js";
 import { durationLiteralMilliseconds } from "./duration.js";
+import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
 
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
@@ -118,7 +120,6 @@ const semanticCode = {
   unsupportedFunctionAnnotation: "TSV027",
   functionValue: "TSV028",
   invalidInteractionChoice: "TSV029",
-  duplicateInteractionChoice: "TSV030",
   unsupportedBlockingContext: "TSV032",
   invalidTimer: "TSV033",
   invalidTimerHandleMember: "TSV034",
@@ -127,7 +128,9 @@ const semanticCode = {
   invalidMediaHandleMember: "TSV037",
   invalidStorageKey: "TSV038",
   invalidInteractionDefault: "TSV039",
+  listInInteractionText: "TSV040",
   typeMismatch: "TSV041",
+  unshowableValue: "TSV042",
   invalidListIndex: "TSV045",
 } as const;
 
@@ -292,7 +295,10 @@ class SemanticValidator {
       }
     }
     this.#validateExpression(timer.duration, scope, null);
-    if (timer.label !== null) this.#validateExpression(timer.label, scope, null);
+    if (timer.label !== null) {
+      this.#validateExpression(timer.label, scope, null);
+      this.#validateInteractionText(timer.label, "a timer label", scope);
+    }
     if (!timer.async) {
       const invalid = timer.handler ?? (timer.repeat || timer.persist ? timer : null);
       if (invalid !== null) {
@@ -511,6 +517,7 @@ class SemanticValidator {
     } else if (
       known === undefined &&
       literalKind(expression) !== "durationLiteral" &&
+      !isDurationChoice(expression) &&
       isDefinitelyNonNumeric(expression)
     ) {
       this.#report(
@@ -675,6 +682,12 @@ class SemanticValidator {
               ...presentationPropertyDiagnostics(property.name.name, property.value),
             );
           this.#validateExpression(property.value, scope, declared ? statement.name.name : null);
+          if (SPEAKER_TEXT_PROPERTIES.has(property.name.name))
+            this.#validateInteractionText(
+              property.value,
+              `the speaker's ${property.name.name}`,
+              scope,
+            );
         }
         return;
       }
@@ -713,9 +726,10 @@ class SemanticValidator {
       case "showButtonStatement": {
         const contextualSpeaker = this.#interactionSpeaker(statement.speaker, scope);
         this.#validateExpression(statement.label, scope, contextualSpeaker);
+        this.#validateInteractionText(statement.label, "a button label", scope);
         if (statement.background !== null) {
           this.#validateExpression(statement.background, scope, contextualSpeaker);
-          this.#validateButtonBackground(statement.background);
+          this.#validateButtonBackground(statement.background, scope);
         }
         return;
       }
@@ -776,6 +790,12 @@ class SemanticValidator {
           // Reassignment may happen on any path, so the variable is no longer known to hold a handle.
           if (binding?.kind === "variable") binding.handle = null;
         } else if (statement.target.kind === "propertyAccessExpression") {
+          const property = statement.target.property.name;
+          if (
+            SPEAKER_TEXT_PROPERTIES.has(property) &&
+            isSpeakerIdentifier(statement.target.object, scope)
+          )
+            this.#validateInteractionText(statement.value, `the speaker's ${property}`, scope);
           this.#validateTimerHandleMember(
             statement.target.object,
             statement.target.property,
@@ -1063,6 +1083,7 @@ class SemanticValidator {
             yield* compileChild(
               this.#validateExpressionTask(part.expression, scope, contextualSpeaker),
             );
+            this.#validateInterpolation(part.expression, scope);
           }
         }
         return;
@@ -1075,6 +1096,7 @@ class SemanticValidator {
             yield* compileChild(
               this.#validateExpressionTask(expression.hint, scope, contextualSpeaker),
             );
+            this.#validateInteractionText(expression.hint, "an input hint", scope);
           }
           if (expression.defaultValue !== null) {
             yield* compileChild(
@@ -1288,6 +1310,8 @@ class SemanticValidator {
     return expressionType(expression, {
       identifier: (name) => {
         const binding = scope.resolve(name);
+        // An unbound `speaker` is the contextual speaker; elsewhere it is already an error.
+        if (binding === undefined && name === "speaker") return { kind: "speaker" };
         if (binding === undefined || binding.kind === "function") return undefined;
         return binding.kind === "speaker" ? { kind: "speaker" } : binding.type;
       },
@@ -1558,9 +1582,69 @@ class SemanticValidator {
       );
   }
 
-  #validateButtonBackground(expression: Expression): void {
+  /** Only `${...}` selects from a list; a list in a text field is an error, at runtime when it is not known here. */
+  #validateInteractionText(expression: Expression, field: string, scope: SemanticScope): void {
+    const type = this.#unshowableType(expression, scope);
+    if (type?.kind === "list")
+      this.#report(
+        semanticCode.listInInteractionText,
+        `A list cannot be ${field}. Select one element with "\${list}" or list.random.`,
+        expression.span,
+      );
+    else if (type !== undefined)
+      this.#report(
+        semanticCode.unshowableValue,
+        `${field.charAt(0).toUpperCase()}${field.slice(1)} cannot be ${describeValue(type)}.`,
+        expression.span,
+      );
+  }
+
+  /**
+   * The type of a value that `${...}` cannot show, as far as it is known: a collection, an object, a range, a handle,
+   * or a speaker.
+   */
+  #unshowableType(expression: Expression, scope: SemanticScope): StaticType | undefined {
+    const type = this.#expressionType(expression, scope);
+    return UNSHOWABLE_KINDS.has(type.kind) ? type : undefined;
+  }
+
+  /** `${...}` shows a value, or one element of a list; a known value it cannot show is an error. */
+  #validateInterpolation(expression: Expression, scope: SemanticScope): void {
+    const value = unwrapParentheses(expression);
+    if (value.kind !== "listLiteral") {
+      const type = this.#unshowableType(value, scope);
+      if (type !== undefined && type.kind !== "list")
+        this.#report(
+          semanticCode.unshowableValue,
+          `"\${...}" cannot show ${describeValue(type)}. It shows text, numbers, true, false, null, and durations, and selects one element of a list.`,
+          expression.span,
+        );
+      return;
+    }
+    if (value.elements.length === 0)
+      this.#report(
+        semanticCode.unshowableValue,
+        "An interpolated list must contain at least one element to select from.",
+        value.span,
+      );
+    for (const element of value.elements) {
+      if (this.#unshowableType(element, scope) !== undefined)
+        this.#report(
+          semanticCode.unshowableValue,
+          "An interpolated list may contain only text, numbers, true, false, null, and durations, because one element is shown as text.",
+          element.span,
+        );
+    }
+  }
+
+  #validateButtonBackground(expression: Expression, scope: SemanticScope): void {
     const text = staticVisibleText(expression);
-    if (text !== undefined && normalizeOpaqueColor(text) === null)
+    // `null` is no colour either, so an optional type is checked by its value type.
+    const type = nonNullType(this.#expressionType(expression, scope));
+    if (
+      (text !== undefined && normalizeOpaqueColor(text) === null) ||
+      (type.kind !== "unknown" && !(type.kind === "scalar" && type.name === "string"))
+    )
       this.#report(
         semanticCode.invalidInteractionChoice,
         "Expected an opaque CSS button background colour.",
@@ -1581,77 +1665,108 @@ class SemanticValidator {
       );
       return;
     }
-    const labelled = expression.options.map((option) => option.label !== null);
-    if (labelled.some(Boolean) && labelled.some((value) => !value)) {
-      this.#report(
-        semanticCode.invalidInteractionChoice,
-        "Labelled and unlabelled choice options may not be mixed.",
-        expression.span,
-      );
-    }
-    const labelKinds = new Set(
-      expression.options.flatMap((option) => (option.label === null ? [] : [option.label.kind])),
+    const valueKinds = new Set(
+      expression.options.flatMap((option) => (option.value === null ? [] : [option.value.kind])),
     );
-    if (labelKinds.size > 1) {
+    if (valueKinds.size > 1) {
       this.#report(
         semanticCode.invalidInteractionChoice,
-        "Identifier and numeric choice labels may not be mixed.",
+        "Identifier and numeric choice values may not be mixed.",
         expression.span,
       );
     }
-    const labels = new Set<string>();
-    const visible = new Map<string, SourceSpan>();
+    let empty = true;
+    let buttons = 0;
     for (const option of expression.options) {
-      yield* compileChild(this.#validateExpressionTask(option.value, scope, contextualSpeaker));
-      let value = option.value;
-      while (value.kind === "parenthesizedExpression") value = value.expression;
-      if (value.kind === "objectLiteral") {
-        if (!value.properties.some((property) => property.name.name === "text"))
+      yield* compileChild(
+        this.#validateExpressionTask(option.expression, scope, contextualSpeaker),
+      );
+      const content = unwrapParentheses(option.expression);
+      if (content.kind !== "listLiteral") {
+        empty = false;
+        // A value of a known type other than a list, `null` included, is exactly one button.
+        const inner = nonNullType(this.#expressionType(content, scope));
+        if (inner.kind !== "unknown" && inner.kind !== "list") buttons += 1;
+        this.#validateChoiceEntry(content, option.value, scope, false);
+        continue;
+      }
+      if (content.elements.length > 0) empty = false;
+      buttons += content.elements.length;
+      for (const element of content.elements)
+        this.#validateChoiceEntry(unwrapParentheses(element), option.value, scope, true);
+    }
+    if (empty)
+      this.#report(
+        semanticCode.invalidInteractionChoice,
+        "A choice needs at least one button, but its option lists are empty.",
+        expression.span,
+      );
+    if (buttons > MAX_INTERACTION_OPTION_ENTRIES)
+      this.#report(
+        semanticCode.invalidInteractionChoice,
+        `A choice can show at most ${MAX_INTERACTION_OPTION_ENTRIES} buttons.`,
+        expression.span,
+      );
+  }
+
+  /**
+   * Checks what gives one button: a whole option or an element of a list option. `value` is the value written before
+   * the option's `:`, which every button of a list option returns.
+   */
+  #validateChoiceEntry(
+    entry: Expression,
+    value: InteractionChoiceOption["value"],
+    scope: SemanticScope,
+    inList: boolean,
+  ): void {
+    const type = this.#unshowableType(entry, scope);
+    if (inList && type?.kind === "list") {
+      this.#report(
+        semanticCode.invalidInteractionChoice,
+        "A choice list element must be a value or a choice object { value?, text, background? }, not a list.",
+        entry.span,
+      );
+      return;
+    }
+    if (type !== undefined && type.kind !== "list" && type.kind !== "object") {
+      this.#report(
+        semanticCode.invalidInteractionChoice,
+        "A choice option must be a value, a choice object { value?, text, background? }, or a list.",
+        entry.span,
+      );
+      return;
+    }
+    if (entry.kind !== "objectLiteral") return;
+    if (!entry.properties.some((property) => property.name.name === "text"))
+      this.#report(
+        semanticCode.invalidInteractionChoice,
+        "A choice object requires text.",
+        entry.span,
+      );
+    for (const property of entry.properties) {
+      const name = property.name.name;
+      if (name === "background") this.#validateButtonBackground(property.value, scope);
+      else if (name === "text")
+        this.#validateInteractionText(property.value, "the text of a choice option", scope);
+      else if (name === "value" && value !== null)
+        this.#report(
+          semanticCode.invalidInteractionChoice,
+          "This choice option has two values, one before ':' and one in its value property. Keep one.",
+          property.name.span,
+        );
+      else if (name === "value") {
+        if (this.#unshowableType(property.value, scope) !== undefined)
           this.#report(
             semanticCode.invalidInteractionChoice,
-            "A choice object requires text.",
-            value.span,
+            "A choice value must be text, a number, true, false, null, or a duration.",
+            property.value.span,
           );
-        for (const property of value.properties) {
-          if (property.name.name === "background") this.#validateButtonBackground(property.value);
-          else if (property.name.name !== "text")
-            this.#report(
-              semanticCode.invalidInteractionChoice,
-              "Choice options support text and background only.",
-              property.name.span,
-            );
-        }
-      }
-      if (option.label !== null) {
-        const key =
-          option.label.kind === "identifier"
-            ? `identifier:${option.label.name}`
-            : `number:${Object.is(option.label.value, -0) ? 0 : option.label.value}`;
-        if (labels.has(key)) {
-          this.#report(
-            semanticCode.duplicateInteractionChoice,
-            "Choice labels must be unique.",
-            option.label.span,
-          );
-        }
-        labels.add(key);
-      } else {
-        const textExpression =
-          value.kind === "objectLiteral"
-            ? value.properties.find((property) => property.name.name === "text")?.value
-            : value;
-        const text = textExpression === undefined ? undefined : staticVisibleText(textExpression);
-        if (text !== undefined) {
-          if (visible.has(text)) {
-            this.#report(
-              semanticCode.duplicateInteractionChoice,
-              "Unlabelled choice text must be unique.",
-              option.value.span,
-            );
-          }
-          visible.set(text, option.value.span);
-        }
-      }
+      } else
+        this.#report(
+          semanticCode.invalidInteractionChoice,
+          "Choice objects support value, text, and background only.",
+          property.name.span,
+        );
     }
   }
 
@@ -2014,7 +2129,12 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
   if (expression.kind === "interactionExpression") {
     if (expression.interactionKind === "number") return false;
     if (expression.interactionKind !== "choice") return true;
-    return expression.options[0]?.label?.kind !== "numberLiteral";
+    // A choice returns the type its values share; see `expressionType`.
+    const type = expressionType(expression, NO_TYPE_CONTEXT);
+    return (
+      type.kind !== "unknown" &&
+      !(type.kind === "scalar" && (type.name === "integer" || type.name === "number"))
+    );
   }
   return (
     expression.kind === "stringLiteral" ||
@@ -2057,6 +2177,30 @@ function numberDefaultFix(expression: Expression): string {
   return text !== undefined && isValidInteractionPrefill("number", text)
     ? ` Write it as a number: 'default: ${text.trim()}'.`
     : " Use a number, such as 'default: 10'.";
+}
+
+/** Value types that `${...}` cannot show. */
+const UNSHOWABLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
+  "list",
+  "set",
+  "object",
+  "range",
+  "timerHandle",
+  "mediaHandle",
+  "speaker",
+]);
+
+/** Types without bindings, for checks that do not see the scope. */
+const NO_TYPE_CONTEXT = Object.freeze({ identifier: () => undefined, isBuiltin: () => false });
+
+/** Whether the expression is a `choose` whose values are all durations. */
+function isDurationChoice(expression: Expression): boolean {
+  const type = expressionType(unwrapParentheses(expression), NO_TYPE_CONTEXT);
+  return (
+    unwrapParentheses(expression).kind === "interactionExpression" &&
+    type.kind === "scalar" &&
+    type.name === "duration"
+  );
 }
 
 const LOAD_KEY_MESSAGE =
@@ -2104,6 +2248,20 @@ function isDefinitelyNonIterable(expression: Expression): boolean {
   );
 }
 
+/** Speaker properties shown as text: the display name and the parts it is derived from. */
+const SPEAKER_TEXT_PROPERTIES: ReadonlySet<string> = new Set([
+  "displayName",
+  "title",
+  "shortTitle",
+  "firstName",
+  "lastName",
+]);
+
+function isSpeakerIdentifier(expression: Expression, scope: SemanticScope): boolean {
+  expression = unwrapParentheses(expression);
+  return expression.kind === "identifier" && scope.resolve(expression.name)?.kind === "speaker";
+}
+
 function isDefinitelyComposite(expression: Expression, scope: SemanticScope): boolean {
   expression = unwrapParentheses(expression);
   if (
@@ -2113,7 +2271,7 @@ function isDefinitelyComposite(expression: Expression, scope: SemanticScope): bo
   ) {
     return true;
   }
-  return expression.kind === "identifier" && scope.resolve(expression.name)?.kind === "speaker";
+  return isSpeakerIdentifier(expression, scope);
 }
 
 function visitExpression(
@@ -2130,7 +2288,7 @@ function visitExpression(
             ...(current.speaker === null ? [] : [current.speaker]),
             ...(current.hint === null ? [] : [current.hint]),
             ...(current.defaultValue === null ? [] : [current.defaultValue]),
-            ...current.options.map((option) => option.value),
+            ...current.options.map((option) => option.expression),
           ]
         : expressionChildren(current);
     for (let i = children.length - 1; i >= 0; i--) work.push(children[i]!);
