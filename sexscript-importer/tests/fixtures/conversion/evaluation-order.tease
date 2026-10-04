@@ -37,7 +37,7 @@ if (choose yes: "Yes", no: "No") == "yes" {
 } else {
   say "Gentle"
 }
-let i = 0
+let i: number = 0
 while i < 2 {
   say "Round"
   say "Next"

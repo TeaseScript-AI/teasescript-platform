@@ -126,7 +126,7 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
       lines.push(`${pad}return${statement.value === null ? "" : ` ${emitValue(statement.value)}`}`);
       return;
     case "let": {
-      const type = statement.optionalType === undefined ? "" : `: ${statement.optionalType}?`;
+      const type = statement.type === undefined ? "" : `: ${statement.type}`;
       lines.push(`${pad}let ${statement.name}${type} = ${emitValue(statement.value)}`);
       return;
     }

@@ -84,8 +84,11 @@ export type IrStatement =
       leadingComments?: string[];
     })
   | (IrBase & { kind: "return"; value: IrExpression | null })
-  /** `optionalType` (such as `string` or `string[]`) declares a nullable type for a null initializer. */
-  | (IrBase & { kind: "let"; name: string; value: IrExpression; optionalType?: string })
+  /**
+   * `type` is a written annotation such as `number`, `string?`, or `string[]?`. `integer` marks a variable Groovy
+   * declared with an integer type (`int`, `long`, ...), which truncates every number stored in it.
+   */
+  | (IrBase & { kind: "let"; name: string; value: IrExpression; type?: string; integer?: true })
   | (IrBase & {
       kind: "assign";
       target: IrExpression;

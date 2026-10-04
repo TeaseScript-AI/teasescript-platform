@@ -20,6 +20,7 @@ import {
   type HelperName,
 } from "./helpers.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
+import { enforceVariableTypes } from "./variable-types.ts";
 import type { ProposalId } from "./proposals.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
 import {
@@ -294,11 +295,11 @@ export function lowerParsedFile(
   const authoredStatements = withoutTrailingEnd(
     body?.kind === "block" ? lowerBlock(body, context) : [],
   );
-  const statements = [
-    ...helperStatements(context.syntheticHelpers),
-    ...context.closureFunctions,
-    ...authoredStatements,
-  ];
+  const typedStatements = withEnforcedTypes(
+    [...context.closureFunctions, ...authoredStatements],
+    context,
+  );
+  const statements = [...helperStatements(context.syntheticHelpers), ...typedStatements];
   if (body?.kind !== "block") {
     addDiagnostic(
       context,
@@ -388,12 +389,94 @@ function lowerHelperCompilationUnit(
       lowered.leadingComments = leadingComments;
     statements.push(lowered);
   }
+  const typedStatements = withEnforcedTypes(statements, baseContext);
   return {
     sourceName: file.sourceName,
     metadata: null,
-    statements: [...helperStatements(baseContext.syntheticHelpers), ...statements],
+    statements: [...helperStatements(baseContext.syntheticHelpers), ...typedStatements],
     diagnostics: baseContext.diagnostics,
   };
+}
+
+/**
+ * Applies TeaseScript's rule that a variable keeps its type (#519): annotates and truncates where a declaration can
+ * express the legacy behavior, and turns the declaration of a variable that held values of two types, or a single
+ * invalid compound assignment, into code that needs manual migration.
+ */
+function withEnforcedTypes(statements: IrStatement[], context: LowerContext): IrStatement[] {
+  const result = enforceVariableTypes(statements);
+  if (result.appended.length > 0) context.syntheticHelpers.add("concat");
+  // A list append no longer needs the note that its `+` operands were not proven numeric.
+  const appendedLines = new Set(result.appended.map((statement) => statement.span?.line));
+  const staleNotes = new Set(
+    context.diagnostics.filter(
+      (diagnostic) =>
+        diagnostic.code === "SX_PLUS_OPERAND_TYPE" && appendedLines.has(diagnostic.span?.line),
+    ),
+  );
+  for (let index = context.diagnostics.length - 1; index >= 0; index -= 1) {
+    if (staleNotes.has(context.diagnostics[index]!)) context.diagnostics.splice(index, 1);
+  }
+  const staleText = new Set(
+    [...staleNotes].map(
+      (diagnostic) => `// NOTE SX_PLUS_OPERAND_TYPE line ${diagnostic.span?.line}:`,
+    ),
+  );
+  const isStale = (statement: IrStatement): boolean =>
+    statement.kind === "comment" && [...staleText].some((text) => statement.text.startsWith(text));
+  const replaced = new Map<IrStatement, IrStatement[]>();
+  for (const conflict of result.conflicts) {
+    const span = conflict.statement.span;
+    const diagnostic: MigrationDiagnostic = {
+      code: "SX_TYPE_CHANGE",
+      severity: "error",
+      message: conflict.message,
+      span,
+    };
+    context.diagnostics.push(diagnostic);
+    context.renderedDiagnostics.add(diagnostic);
+    replaced.set(conflict.statement, [
+      {
+        kind: "comment",
+        text: `// TODO SX_TYPE_CHANGE${span === null ? "" : ` line ${span.line}`}: ${singleLine(conflict.message)}`,
+        trailing: false,
+        span,
+      },
+      {
+        kind: "unsupported",
+        legacySource: span === null ? [] : legacySourceLines(context, span),
+        span,
+      },
+    ]);
+  }
+  if (replaced.size === 0 && staleText.size === 0) return result.statements;
+  const replace = (items: IrStatement[]): IrStatement[] =>
+    items.flatMap((statement): IrStatement[] => {
+      if (isStale(statement)) return [];
+      const replacement = replaced.get(statement);
+      if (replacement !== undefined) return replacement;
+      switch (statement.kind) {
+        case "function":
+          return [{ ...statement, body: replace(statement.body) }];
+        case "if":
+          return [{ ...statement, then: replace(statement.then), else: replace(statement.else) }];
+        case "while":
+        case "repeat":
+        case "for":
+          return [{ ...statement, body: replace(statement.body) }];
+        case "switch":
+          return [
+            {
+              ...statement,
+              cases: statement.cases.map((item) => ({ ...item, body: replace(item.body) })),
+              default: replace(statement.default),
+            },
+          ];
+        default:
+          return [statement];
+      }
+    });
+  return replace(result.statements);
 }
 
 function collectHelperFunctionInfo(methods: AstNode[]): Map<string, HelperFunctionInfo> {
@@ -1351,7 +1434,16 @@ function lowerDeclaration(
   }
   const optionalType =
     value.kind === "literal" && value.value === null ? nullableValueType(name, context) : null;
-  return [{ kind: "let", name, value, span, ...(optionalType === null ? {} : { optionalType }) }];
+  return [
+    {
+      kind: "let",
+      name,
+      value,
+      span,
+      ...(optionalType === null ? {} : { type: `${optionalType}?` }),
+      ...(INTEGER_TYPES.has(declaredType) ? { integer: true as const } : {}),
+    },
+  ];
 }
 
 /**
@@ -4949,6 +5041,9 @@ const MATH_HELPERS = new Map<string, { name: HelperName; arity: number }>([
   ["max", { name: "max", arity: 2 }],
   ["min", { name: "min", arity: 2 }],
 ]);
+
+/** Groovy declared types that store whole numbers: a stored number truncates toward zero, like `toInteger`. */
+const INTEGER_TYPES = new Set(["byte", "Byte", "short", "Short", "int", "Integer", "long", "Long"]);
 
 /** Java default values: null for object types, zero or false for primitives. */
 const PRIMITIVE_DEFAULTS = new Map<string, number | boolean>([

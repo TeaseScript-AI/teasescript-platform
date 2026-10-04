@@ -380,6 +380,22 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
             },
           ];
         }
+        if (item.value.kind === "choice" && item.value.labels === undefined) {
+          // A numeric choice value is an integer (#515); the current compiler still types it as a number, which an
+          // integer variable rejects. The placeholder hides the type and keeps the real interaction.
+          return [
+            {
+              ...item,
+              target: expression(item.target),
+              value: {
+                kind: "binary",
+                operator: "+",
+                left: call("choose integer values", "chooseValue", []),
+                right: expression(item.value),
+              },
+            },
+          ];
+        }
         return [{ ...item, target: expression(item.target), value: expression(item.value) }];
       }
       case "expression": {
@@ -909,6 +925,7 @@ export function pendingHostFunctions(
       },
     ],
     ["askIntegerPrompt", () => 0],
+    ["chooseValue", () => 0],
     ["askBoolean", () => next("askBoolean", [true, false])],
     ["askBooleans", (_, named) => named.defaults ?? emptyList],
     ["getSeconds", () => Math.floor((epochMs + state.clock.nowMs) / 1000)],

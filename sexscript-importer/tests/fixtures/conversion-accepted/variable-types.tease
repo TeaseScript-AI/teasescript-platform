@@ -1,0 +1,20 @@
+// A variable that starts with a whole number and later holds fractions is declared as a number.
+let tempo: number = 1
+tempo = 0.75
+let delay: number = 2
+delay = delay / 4
+let weights: number[] = [1, 2]
+weights.add(2.5)
+// A variable that is later set to null gets an optional type.
+let mood: string? = "calm"
+if tempo < 1 {
+  mood = null
+}
+// Groovy integer declarations truncate every number they store.
+let half = toInteger(7 / 2)
+let rounds = 1
+rounds = toInteger(rounds + tempo)
+let steps = 10
+steps = toInteger(steps / 3)
+say "Tempo ${tempo}, delay ${delay}, ${weights.length} weights, mood ${mood}"
+say "Half ${half}, rounds ${rounds}, steps ${steps}"

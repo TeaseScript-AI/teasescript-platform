@@ -141,6 +141,40 @@ test(
   },
 );
 
+// TeaseScript variables keep one type (#519); Groovy variables that held text and a list need manual work.
+test(
+  "reports a variable that holds values of two types instead of emitting code that does not compile",
+  { skip: parserUnavailable || ("reason" in compilerResult ? compilerResult.reason : false) },
+  async () => {
+    if (!("compiler" in compilerResult)) return;
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-types-"));
+    try {
+      const sourcePath = path.join(directory, "type-change.groovy");
+      writeFileSync(
+        sourcePath,
+        'def lines = ""\nif (getBoolean("Long?")) lines = ["One", "Two"]\nshow("Done")\n',
+      );
+      const program = await convert(sourcePath);
+      assert.deepEqual(
+        program.diagnostics
+          .filter((diagnostic) => diagnostic.severity === "error")
+          .map(({ code, span }) => ({ code, line: span?.line })),
+        [{ code: "SX_TYPE_CHANGE", line: 1 }],
+      );
+      const output = emitTease(program);
+      assert.match(
+        output,
+        /^\/\/ TODO SX_TYPE_CHANGE line 1: 'lines' starts as text \(string\), but is later set to a list \(string\[\]\) \(line 2\)\./mu,
+      );
+      assert.match(output, /^\/\/ \| def lines = ""$/mu);
+      // The rest of the script is still converted.
+      assert.match(output, /^ {2}lines = \["One", "Two"\]$/mu);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 test(
   "package smoke run follows script transfers with shared storage",
   {
@@ -318,7 +352,7 @@ test(
       code: "TSR027",
     });
     // Numbered inputs rotate, so a loop waiting for a larger answer ends.
-    assert.deepEqual(run("let n = 0\nwhile n < 3 {\n  n = askNumber\n}\n"), halted);
+    assert.deepEqual(run("let n: number = 0\nwhile n < 3 {\n  n = askNumber\n}\n"), halted);
   },
 );
 
