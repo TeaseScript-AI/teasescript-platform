@@ -12,6 +12,7 @@ test("assigns deterministic function and temporary IDs", () => {
     "function first { return 1 }",
     "function second { return 2 }",
     "let result = first() + second()",
+    "exit",
   ].join("\n");
   const first = plan(source);
   const second = plan(source);
@@ -38,6 +39,7 @@ test("embeds synchronous call arguments without preparation instructions", () =>
     [
       "function combine(first, second, third) { return first + second + third }",
       "combine(1, 2, 3)",
+      "exit",
     ].join("\n"),
   );
   const root = compiled.instructions.slice(0, compiled.files[0]!.rootEndInstruction);
@@ -64,6 +66,7 @@ test("evaluates composite and nested user-call arguments in source order", () =>
       "say pair(mark(2) + 1, 5)",
       "say pair(mark(3), mark(4) * 2)",
       'say "${order[0]}${order[1]}${order[2]}"',
+      "exit",
     ].join("\n"),
   );
 
@@ -82,6 +85,7 @@ test("evaluates a parameter default only when its argument is omitted", () => {
       'say describe("b", 9)',
       'say describe("c")',
       "say counter",
+      "exit",
     ].join("\n"),
   );
 
@@ -98,6 +102,7 @@ test("keeps short-circuit evaluation of user calls inside parameter defaults", (
       "say sample()",
       "say sample(true)",
       'say "calls:${calls}"',
+      "exit",
     ].join("\n"),
   );
 
@@ -106,7 +111,7 @@ test("keeps short-circuit evaluation of user calls inside parameter defaults", (
 
 test("function plans survive JSON round trips with preserved spans", () => {
   const original = plan(
-    "function add(left, right) { return left + right }\nlet result = add(2, 3)",
+    "function add(left, right) { return left + right }\nlet result = add(2, 3)\nexit",
   );
   const restored: unknown = JSON.parse(JSON.stringify(original));
 
@@ -125,7 +130,7 @@ test("function plans survive JSON round trips with preserved spans", () => {
 });
 
 test("rejects malformed function metadata, targets, and temporaries", () => {
-  const original = plan("function value { return 1 }\nlet result = value()");
+  const original = plan("function value { return 1 }\nlet result = value()\nexit");
 
   const duplicateId = mutable(original);
   duplicateId.functions.push({ ...duplicateId.functions[0]! });
@@ -185,6 +190,7 @@ test("rejects malformed function regions and aliased call temporaries", () => {
       "function helper { return 1 }",
       "function sample(value = helper()) { say value\nreturn value }",
       "say sample()",
+      "exit",
     ].join("\n"),
   );
   const sample = defaults.functions.find((definition) => definition.name === "sample")!;
@@ -229,7 +235,7 @@ test("rejects malformed function regions and aliased call temporaries", () => {
   };
   assertInvalid(returnBeforeBody, `$.instructions[${bindIndex}]`);
 
-  const calls = plan("function pair(left, right) { return left + right }\nsay pair(1, 2)");
+  const calls = plan("function pair(left, right) { return left + right }\nsay pair(1, 2)\nexit");
   const aliasedDestination = mutable(calls);
   const aliasedCall = aliasedDestination.instructions.find(
     (instruction) => instruction.kind === "callFunction",
@@ -259,6 +265,7 @@ test("rejects malformed function regions and aliased call temporaries", () => {
       "function value { return 1 }",
       "function pair(left, right) { return left + right }",
       "say pair(value(), value())",
+      "exit",
     ].join("\n"),
   );
   const emptyCleanup = mutable(callsWithCleanup);
@@ -291,7 +298,7 @@ test("rejects malformed function regions and aliased call temporaries", () => {
     `$.instructions[${firstIndex(unknownCleanup, "clearTemporaries")}].temporaryIds[0]`,
   );
 
-  const unpreparedAssignment = mutable(plan("let items = [0]\nitems[0] = 1"));
+  const unpreparedAssignment = mutable(plan("let items = [0]\nitems[0] = 1\nexit"));
   const assignment = unpreparedAssignment.instructions.find(
     (instruction) => instruction.kind === "assign",
   );

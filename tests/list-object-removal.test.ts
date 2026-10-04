@@ -32,7 +32,7 @@ test("objects, lists, sets, and ranges compare by value", () => {
   for (const [expression, expected] of cases) {
     // Known values of different kinds are never equal, which the compiler warns about (ADR 0021 rule 4.5).
     const result = runValidSource(
-      `function dynamic(value) {\n  return value\n}\nsay "\${${expression}}"`,
+      `function dynamic(value) {\n  return value\n}\nsay "\${${expression}}"\nexit`,
     );
     assert.equal(result.snapshot.failure, null, expression);
     assert.deepEqual(sayTexts(result), [expected], expression);
@@ -41,13 +41,13 @@ test("objects, lists, sets, and ranges compare by value", () => {
 
 test("each operand of == and != is read when it is evaluated, left to right", () => {
   const cases = [
-    ['let items = [1]\nsay "${items == [items.removeAt(0)]}"', "true"],
+    ['let items = [1]\nsay "${items == [items.removeAt(0)]}"\nexit', "true"],
     [
-      'let items = [1]\nfunction take {\n    return items.removeAt(0)\n}\nsay "${items == [take()]}"',
+      'let items = [1]\nfunction take {\n    return items.removeAt(0)\n}\nsay "${items == [take()]}"\nexit',
       "true",
     ],
-    ['let items = [1, 2]\nsay "${items != [items.removeFirst(), 2]}"', "false"],
-    ['let items = [1]\nsay "${[items.removeAt(0)] == items}"', "false"],
+    ['let items = [1, 2]\nsay "${items != [items.removeFirst(), 2]}"\nexit', "false"],
+    ['let items = [1]\nsay "${[items.removeAt(0)] == items}"\nexit', "false"],
   ] as const;
   for (const [source, expected] of cases) {
     const result = runValidSource(source);
@@ -70,6 +70,7 @@ test("list contains and remove find an object by value", () => {
       'say "${offenses.contains({ label: "rude", text: "I was rude" })}"',
       'offenses.remove({ label: "rude" })',
       'say "${offenses.length}"',
+      "exit",
     ].join("\n"),
   );
   assert.equal(result.snapshot.failure, null);
@@ -94,6 +95,7 @@ test("removeAt, removeFirst, and removeLast remove and return an element", () =>
       'let offenses = [{ label: "late" }, { label: "rude" }]',
       "let picked = offenses.removeAt(1)",
       'say "${picked.label} ${offenses.length}"',
+      "exit",
     ].join("\n"),
   );
   assert.equal(result.snapshot.failure, null);
@@ -102,35 +104,43 @@ test("removeAt, removeFirst, and removeLast remove and return an element", () =>
 
 test("removal fails at runtime for an invalid index or an empty list", () => {
   const cases = [
-    ['let items = ["a"]\nitems.removeAt(1)', "TSR025", "List index 1 is outside the valid range."],
     [
-      'let items = ["a"]\nlet index = 0 - 1\nitems.removeAt(index)',
+      'let items = ["a"]\nitems.removeAt(1)\nexit',
+      "TSR025",
+      "List index 1 is outside the valid range.",
+    ],
+    [
+      'let items = ["a"]\nlet index = 0 - 1\nitems.removeAt(index)\nexit',
       "TSR025",
       "List index -1 is outside the valid range.",
     ],
-    ["let items = []\nitems.removeAt(0)", "TSR025", "List index 0 is outside the valid range."],
     [
-      'function dynamic(value) {\n    return value\n}\nlet items = ["a"]\nitems.removeAt(dynamic(1 / 2))',
+      "let items = []\nitems.removeAt(0)\nexit",
+      "TSR025",
+      "List index 0 is outside the valid range.",
+    ],
+    [
+      'function dynamic(value) {\n    return value\n}\nlet items = ["a"]\nitems.removeAt(dynamic(1 / 2))\nexit',
       "TSR024",
       "A list index must be an integer.",
     ],
     [
-      "let items = []\nitems.removeFirst()",
+      "let items = []\nitems.removeFirst()\nexit",
       "TSR018",
       "Cannot call removeFirst() on an empty list. Check that the list's length is above 0 first.",
     ],
     [
-      'let items = ["a"]\nitems.removeLast()\nlet gone = items.removeLast()',
+      'let items = ["a"]\nitems.removeLast()\nlet gone = items.removeLast()\nexit',
       "TSR018",
       "Cannot call removeLast() on an empty list. Check that the list's length is above 0 first.",
     ],
     [
-      'let items = ["a"]\nitems.removeAt()',
+      'let items = ["a"]\nitems.removeAt()\nexit',
       "TSR028",
       "Expected 1 positional argument(s), received 0.",
     ],
     [
-      "function dynamic(value) {\n    return value\n}\nlet items = dynamic(set[1])\nitems.removeAt(0)",
+      "function dynamic(value) {\n    return value\n}\nlet items = dynamic(set[1])\nitems.removeAt(0)\nexit",
       "TSR016",
       "Unsupported method 'removeAt'.",
     ],
@@ -174,7 +184,7 @@ test("the compiler reports a list index it can see is invalid", () => {
     ],
   ] as const;
   for (const [statement, expected] of cases) {
-    const diagnostics = compileSource(`let items = [1]\n${statement}`).diagnostics;
+    const diagnostics = compileSource(`let items = [1]\n${statement}\nexit`).diagnostics;
     assert.deepEqual(
       diagnostics.map((diagnostic) => `${diagnostic.code} ${diagnostic.message}`),
       expected === null ? [] : [expected],
@@ -185,9 +195,9 @@ test("the compiler reports a list index it can see is invalid", () => {
 
 test("a removed element has the static type of the list's elements", () => {
   const cases = [
-    'let next = [1, 2].removeFirst()\nnext = "x"',
-    "let last: string = [1, 2].removeLast()",
-    'let items = [1]\nitems.add(["x"].removeAt(0))',
+    'let next = [1, 2].removeFirst()\nnext = "x"\nexit',
+    "let last: string = [1, 2].removeLast()\nexit",
+    'let items = [1]\nitems.add(["x"].removeAt(0))\nexit',
   ];
   for (const source of cases) {
     assert.deepEqual(
@@ -213,6 +223,7 @@ test("removal by value and position is checkpoint and resume equivalent", () => 
       "let newest = offenses.removeLast()",
       'say "${gone.label} ${newest.label} ${offenses == [{ text: "I was lazy", label: "lazy" }]}"',
       'say "${offenses.removeFirst().label} ${offenses.length}"',
+      "exit",
     ].join("\n"),
   );
 });

@@ -15,9 +15,14 @@ import { runValidSource } from "./helpers/run-valid-source.js";
 import { sayTexts } from "./helpers/runtime-events.js";
 
 test("executes exclusive and inclusive integer ranges", () => {
-  assert.deepEqual(sayTexts(runSource("for value in 1..4 { say value }")), ["1", "2", "3"]);
-  assert.deepEqual(sayTexts(runSource("for value in 1..=4 { say value }")), ["1", "2", "3", "4"]);
-  assert.deepEqual(sayTexts(runSource("for value in 4..1 { say value }")), []);
+  assert.deepEqual(sayTexts(runSource("for value in 1..4 { say value }\nexit")), ["1", "2", "3"]);
+  assert.deepEqual(sayTexts(runSource("for value in 1..=4 { say value }\nexit")), [
+    "1",
+    "2",
+    "3",
+    "4",
+  ]);
+  assert.deepEqual(sayTexts(runSource("for value in 4..1 { say value }\nexit")), []);
 });
 
 test("iterates lists and sets in order and performs zero iterations", () => {
@@ -26,6 +31,7 @@ test("iterates lists and sets in order and performs zero iterations", () => {
       'for item in ["a", "b"] { say item }',
       'for item in set["b", "a", "b"] { say item }',
       'repeat 0 { say "never" }',
+      "exit",
     ].join("\n"),
   );
 
@@ -42,6 +48,7 @@ test("supports nested loops, repeat, break, continue, and lexical variables", ()
       "    say value",
       "  }",
       "}",
+      "exit",
     ].join("\n"),
   );
 
@@ -66,6 +73,7 @@ test("resolves variables in many-binding frames as they grow, from functions, an
       "say sumLocals()",
       "say sumLocals()",
       "say late",
+      "exit",
     ].join("\n"),
     { scenarioName: "many-binding frames" },
   );
@@ -81,6 +89,7 @@ test("executes while and else-if deterministically", () => {
       "let count = 0",
       "while count < 2 { count = count + 1 }",
       'if count == 1 { say "one" } else if count == 2 { say "two" } else { say "other" }',
+      "exit",
     ].join("\n"),
   );
 
@@ -93,6 +102,7 @@ test("uses one deterministic RNG for random, chance, and randomInteger", () => {
     "say chance(50)",
     "say randomInteger(1..=6)",
     "say randomInteger(0..3)",
+    "exit",
   ].join("\n");
   const seed = 0x1234_5678;
   const first = runSource(source, seed);
@@ -107,18 +117,18 @@ test("uses one deterministic RNG for random, chance, and randomInteger", () => {
   assert.ok(["0", "1", "2"].includes(index!), index);
 
   // Each built-in draws from the session RNG; the same seed without a draw keeps the RNG unchanged.
-  const undrawn = runSource("let value = 0", seed).snapshot.rng;
+  const undrawn = runSource("let value = 0\nexit", seed).snapshot.rng;
   for (const call of ["random()", "chance(50)", "randomInteger(1..=6)", "randomInteger(0..3)"]) {
-    assert.notDeepEqual(runSource(`let value = ${call}`, seed).snapshot.rng, undrawn, call);
+    assert.notDeepEqual(runSource(`let value = ${call}\nexit`, seed).snapshot.rng, undrawn, call);
   }
 });
 
 test("invalid random built-in arguments fail with source-associated errors", () => {
   for (const [source, call] of [
-    ["say chance(101)", "chance(101)"],
+    ["say chance(101)\nexit", "chance(101)"],
     // A fractional bound held in a variable reaches the runtime; a literal one is rejected statically below.
-    ["let low = 1.5\nsay randomInteger(low..=3)", "randomInteger(low..=3)"],
-    ["say randomInteger(3..3)", "randomInteger(3..3)"],
+    ["let low = 1.5\nsay randomInteger(low..=3)\nexit", "randomInteger(low..=3)"],
+    ["say randomInteger(3..3)\nexit", "randomInteger(3..3)"],
   ] as const) {
     const compiled = plan(source);
     const result = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
@@ -242,9 +252,13 @@ test("run and stepToEvent do not mutate their caller snapshots", () => {
 });
 
 test("loop plans are deterministic, JSON-safe, and reject malformed targets", () => {
-  const source = ["for value in 1..=3 {", "  if value == 2 { continue }", "  say value", "}"].join(
-    "\n",
-  );
+  const source = [
+    "for value in 1..=3 {",
+    "  if value == 2 { continue }",
+    "  say value",
+    "}",
+    "exit",
+  ].join("\n");
   const first = plan(source);
   const second = plan(source);
   assert.deepEqual(first, second);
@@ -261,12 +275,12 @@ test("loop plans are deterministic, JSON-safe, and reject malformed targets", ()
 
 test("checkpoint restore in every loop kind matches uninterrupted events", () => {
   for (const source of [
-    'repeat 3 { say "repeat" }',
-    'for value in ["a", "b", "c"] { say value }',
-    'for value in set["a", "b", "c"] { say value }',
-    "for value in 1..=3 { say value }",
-    "let value = 0\nwhile value < 3 { value = value + 1\nsay value }",
-    "for value in 1..=3 {\n  if value == 1 { continue }\n  say value\n}",
+    'repeat 3 { say "repeat" }\nexit',
+    'for value in ["a", "b", "c"] { say value }\nexit',
+    'for value in set["a", "b", "c"] { say value }\nexit',
+    "for value in 1..=3 { say value }\nexit",
+    "let value = 0\nwhile value < 3 { value = value + 1\nsay value }\nexit",
+    "for value in 1..=3 {\n  if value == 1 { continue }\n  say value\n}\nexit",
   ]) {
     const { boundaries } = assertRuntimeResumeEquivalent(source, {
       scenarioName: `loop checkpoint corpus: ${source.split("\n")[0]}`,
@@ -293,8 +307,12 @@ test("checkpoint restore preserves RNG and event sequences between calls", () =>
 
 test("checkpoint restore accepts range loop-position length and rejects length + 1", () => {
   for (const { name, source, values } of [
-    { name: "exclusive", source: "for value in 1..4 { say value }", values: ["1", "2", "3"] },
-    { name: "inclusive", source: "for value in 1..=3 { say value }", values: ["1", "2", "3"] },
+    { name: "exclusive", source: "for value in 1..4 { say value }\nexit", values: ["1", "2", "3"] },
+    {
+      name: "inclusive",
+      source: "for value in 1..=3 { say value }\nexit",
+      values: ["1", "2", "3"],
+    },
   ]) {
     const compiled = plan(source);
     let active = createImmediatePacingRuntimeSnapshot(compiled);
@@ -331,7 +349,7 @@ test("checkpoint restore accepts range loop-position length and rejects length +
 });
 
 test("rejects loop frames that do not match the next plan instruction", () => {
-  const compiled = plan('repeat 2 { say "again" }');
+  const compiled = plan('repeat 2 { say "again" }\nexit');
   const active = stepToEvent(compiled, createImmediatePacingRuntimeSnapshot(compiled));
   // EVIDENCE: fixture: parse the serialized active repeat checkpoint into the narrow mutable shape used below.
   const checkpoint = JSON.parse(JSON.stringify(createCheckpoint(compiled, active.snapshot))) as {
@@ -344,9 +362,12 @@ test("rejects loop frames that do not match the next plan instruction", () => {
 
 test("loop variables deep-copy composite list elements", () => {
   const result = runSource(
-    ["let source = [[1], [2]]", "for item in source { item[0] = 9 }", "say source[0][0]"].join(
-      "\n",
-    ),
+    [
+      "let source = [[1], [2]]",
+      "for item in source { item[0] = 9 }",
+      "say source[0][0]",
+      "exit",
+    ].join("\n"),
   );
 
   assert.deepEqual(sayTexts(result), ["1"]);

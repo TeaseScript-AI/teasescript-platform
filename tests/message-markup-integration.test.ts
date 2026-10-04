@@ -22,6 +22,7 @@ test("runs escapeMarkup through the protected Platform Standard Library prelude"
     [
       'let dynamic = "**Mistress**"',
       'say "**Warning:** ${escapeMarkup(dynamic)}, no touching.", instant',
+      "exit",
     ].join("\n"),
   );
   assert.deepEqual(compiled.diagnostics, []);
@@ -40,12 +41,14 @@ test("runs escapeMarkup through the protected Platform Standard Library prelude"
   const protectedName = compileSource('let escapeMarkup = "shadow"');
   assert.ok(protectedName.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV001"));
   assert.deepEqual(
-    compileSource("say escapeMarkup(1), instant").diagnostics.map((diagnostic) => diagnostic.code),
+    compileSource("say escapeMarkup(1), instant\nexit").diagnostics.map(
+      (diagnostic) => diagnostic.code,
+    ),
     ["TSV043"],
   );
   // `dynamic` hides the argument's type from the compiler, so the runtime check rejects it.
   const wrongType = compileValidPlan(
-    "function dynamic(value) { return value }\nsay escapeMarkup(dynamic(1)), instant",
+    "function dynamic(value) { return value }\nsay escapeMarkup(dynamic(1)), instant\nexit",
   );
   const failed = run(wrongType, createFreshRuntimeSnapshot(wrongType));
   assert.equal(failed.snapshot.status, "failed");
@@ -53,7 +56,7 @@ test("runs escapeMarkup through the protected Platform Standard Library prelude"
 });
 
 test("paces, prepares, checkpoints, and emits one parsed authored message", () => {
-  const compiled = compileValidPlan('say "first"\nsay "[u]**second**[/u]"');
+  const compiled = compileValidPlan('say "first"\nsay "[u]**second**[/u]"\nexit');
   const promoted = run(compiled, createFreshRuntimeSnapshot(compiled));
   const gate = promoted.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
@@ -84,7 +87,7 @@ test("paces, prepares, checkpoints, and emits one parsed authored message", () =
   assert.deepEqual(output.content, gate.preparedOutput.content);
   assert.equal(output.text, gate.preparedOutput.text);
 
-  const pacingPlan = compileValidPlan('say "[color=#ff3344]x[/color]"');
+  const pacingPlan = compileValidPlan('say "[color=#ff3344]x[/color]"\nexit');
   const paced = run(pacingPlan, createFreshRuntimeSnapshot(pacingPlan));
   assert.equal(paced.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
   assert.equal(paced.snapshot.backgroundActions[0]?.deadlineMs, 1_800);
@@ -177,7 +180,7 @@ test("preserves message markup through every instruction checkpoint boundary", (
 });
 
 test("validates and restores wide parser-produced prepared markup iteratively", () => {
-  const compiled = compileValidPlan('say "first"\nsay "second"');
+  const compiled = compileValidPlan('say "first"\nsay "second"\nexit');
   const promoted = run(compiled, createFreshRuntimeSnapshot(compiled));
   // EVIDENCE: structuredClone preserves the runtime snapshot shape while producing the mutable test fixture.
   const snapshot = structuredClone(promoted.snapshot) as RuntimeSnapshot;

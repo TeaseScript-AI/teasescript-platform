@@ -171,7 +171,7 @@ test("explicit exit cleans released pacing lineage without admitting forged paci
     forgedPreparedOutput,
   );
 
-  const naturalRoot = plan('say "first", 5');
+  const naturalRoot = plan('say "first", 5\nexit');
   const naturallyHalted = run(naturalRoot, createFreshRuntimeSnapshot(naturalRoot));
   assert.equal(naturallyHalted.snapshot.status, "halted");
   assert.equal(naturallyHalted.snapshot.backgroundActions.length, 1);
@@ -205,7 +205,7 @@ test("branch-local and nested explicit exits reject forged retained pacing work"
 });
 
 test("terminal continuation handoffs reject malformed external state and preserve result-free buttons", () => {
-  const delayPlan = plan('say "first", 5\nwait 1 ms');
+  const delayPlan = plan('say "first", 5\nwait 1 ms\nexit');
   const waiting = run(delayPlan, createFreshRuntimeSnapshot(delayPlan));
   const delay = waiting.snapshot.foregroundAction;
   assert.equal(delay?.kind, "delay");
@@ -283,6 +283,7 @@ test("prepared say text retains caller temporaries through a suspended text call
       "}",
       "function pace { paceCalls = paceCalls + 1\nreturn 1 }",
       'say "${prefix()}${textValue()}", pace()',
+      "exit",
     ].join("\n"),
   );
   const textPreparation = compiled.instructions.find(
@@ -346,6 +347,7 @@ test("prepared say temporary values reject malformed top-level and caller state"
     'function textValue { return "hello" }',
     "function pace { return 1 }",
     'say as vera "${speaker.title} ${textValue()}", speaker.delay + pace()',
+    "exit",
   ].join("\n");
   const compiled = plan(source);
   const say = compiled.instructions.find((instruction) => instruction.kind === "say");
@@ -512,6 +514,7 @@ test("prepared say temporary values reject malformed top-level and caller state"
       'function textValue { return "hello" }',
       "function pace { wait 1 ms\nreturn 1 }",
       'say as vera "${speaker.title} ${textValue()}", speaker.delay + pace()',
+      "exit",
     ].join("\n"),
   );
   const suspendedSay = suspended.instructions.find((instruction) => instruction.kind === "say");
@@ -579,7 +582,12 @@ test("prepared say temporary values reject malformed top-level and caller state"
 
 test("say pacing expression temporaries restore behind an older pacing gate", () => {
   const compiled = plan(
-    ["function pace(value) { return value }", 'say "first", 5', 'say "second", pace(5)'].join("\n"),
+    [
+      "function pace(value) { return value }",
+      'say "first", 5',
+      'say "second", pace(5)',
+      "exit",
+    ].join("\n"),
   );
   const say = compiled.instructions.find(
     (instruction) =>
@@ -619,6 +627,7 @@ test("prepared say text is live instead of its already-consumed source expressio
       'function textValue { return "hello" }',
       "function pace { return 1 }",
       "say textValue(), pace()",
+      "exit",
     ].join("\n"),
   );
   const say = compiled.instructions.find((instruction) => instruction.kind === "say");
@@ -680,7 +689,7 @@ test("pacing creation provenance requires a positive historical scope depth", ()
   assert.equal(validateRuntimeSnapshot(zeroDepth, rootPlan).valid, false);
   assert.throws(() => createCheckpoint(rootPlan, zeroDepth));
 
-  const functionPlan = plan('function f { say "inside", 5 }\nf()');
+  const functionPlan = plan('function f { say "inside", 5 }\nf()\nexit');
   const unwound = run(functionPlan, createFreshRuntimeSnapshot(functionPlan)).snapshot;
   assert.equal(unwound.status, "halted");
   assert.equal(unwound.frames.length, 1);
@@ -692,7 +701,7 @@ test("pacing creation provenance requires a positive historical scope depth", ()
 
 test("snapshot and checkpoint reject malformed pacing prepared output", () => {
   const compiled = plan(
-    'speaker vera { displayName: "Vera" }\nsay as vera "first"\nsay as vera "second"',
+    'speaker vera { displayName: "Vera" }\nsay as vera "first"\nsay as vera "second"\nexit',
   );
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   // EVIDENCE: serialization produces this active pacing action and prepared-output shape before corruption.
@@ -725,15 +734,15 @@ test("snapshot and checkpoint reject malformed pacing prepared output", () => {
 });
 
 test("snapshot and checkpoint reject representative malformed pacing action state", () => {
-  const backgroundPlan = plan('say "first"');
+  const backgroundPlan = plan('say "first"\nexit');
   const background = run(backgroundPlan, createFreshRuntimeSnapshot(backgroundPlan));
-  const foregroundPlan = plan('say "first"\nsay "second"');
+  const foregroundPlan = plan('say "first"\nsay "second"\nexit');
   const foreground = run(foregroundPlan, createFreshRuntimeSnapshot(foregroundPlan));
   const foregroundGate = foreground.snapshot.foregroundAction;
   assert.equal(foregroundGate?.kind, "chatPacingGate");
   if (foregroundGate?.kind !== "chatPacingGate")
     throw new Error("Expected a promoted pacing gate.");
-  const functionPlan = plan('function f { say "first" }\nf()');
+  const functionPlan = plan('function f { say "first" }\nf()\nexit');
   const functionBackground = run(functionPlan, createFreshRuntimeSnapshot(functionPlan));
   const settled = completeAction(backgroundPlan, background.snapshot, {
     actionId: background.snapshot.backgroundActions[0]!.actionId,
@@ -834,7 +843,7 @@ test("snapshot and checkpoint reject representative malformed pacing action stat
 });
 
 test("background pacing actions require dense JSON-safe array entries", () => {
-  const compiled = plan('say "first"');
+  const compiled = plan('say "first"\nexit');
   const background = run(compiled, createFreshRuntimeSnapshot(compiled));
   // EVIDENCE: serialization creates the canonical checkpoint before array-shape corruptions are applied.
   const baselineCheckpoint = JSON.parse(
@@ -846,7 +855,7 @@ test("background pacing actions require dense JSON-safe array entries", () => {
   assert.equal(validateRuntimeSnapshot(sparseSnapshot, compiled).valid, false);
   assert.throws(() => createCheckpoint(compiled, sparseSnapshot));
 
-  const foregroundPlan = plan('say "first"\nsay "second"');
+  const foregroundPlan = plan('say "first"\nsay "second"\nexit');
   const foreground = run(foregroundPlan, createFreshRuntimeSnapshot(foregroundPlan));
   // EVIDENCE: serialization creates the canonical foreground checkpoint used as an envelope baseline below.
   const foregroundCheckpoint = JSON.parse(
@@ -911,7 +920,7 @@ test("background pacing actions require dense JSON-safe array entries", () => {
 });
 
 test("persisted arrays reject custom own keys that JSON would omit", () => {
-  const backgroundPlan = plan('say "first"');
+  const backgroundPlan = plan('say "first"\nexit');
   const background = run(backgroundPlan, createFreshRuntimeSnapshot(backgroundPlan));
   const speakerPlan = plan('speaker vera { custom: "kept" }\nexit');
   const speakerState = run(speakerPlan, createFreshRuntimeSnapshot(speakerPlan));
@@ -969,7 +978,7 @@ test("runtime-produced pacing states validate and checkpoint through their lifec
   const background = executeInstruction(positive, createFreshRuntimeSnapshot(positive));
   assert.equal(background.snapshot.status, "running");
   assert.equal(background.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
-  const naturalEnd = plan('say "first"');
+  const naturalEnd = plan('say "first"\nexit');
   const halted = run(naturalEnd, createFreshRuntimeSnapshot(naturalEnd));
   assert.equal(halted.snapshot.status, "halted");
   assert.equal(halted.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
@@ -989,13 +998,13 @@ test("runtime-produced pacing states validate and checkpoint through their lifec
   const shortWait = run(shortWaitPlan, createFreshRuntimeSnapshot(shortWaitPlan));
   const delaySettled = observeTime(shortWaitPlan, shortWait.snapshot, 1_000);
 
-  const interactionPlan = plan('say "first"\nshowButton "Continue"');
+  const interactionPlan = plan('say "first"\nshowButton "Continue"\nexit');
   const interaction = run(interactionPlan, createFreshRuntimeSnapshot(interactionPlan));
 
   const instantPlan = plan('say "first"\nsay "now", instant');
   const instant = run(instantPlan, createFreshRuntimeSnapshot(instantPlan));
 
-  const promotionPlan = plan('say "first"\nsay "second"');
+  const promotionPlan = plan('say "first"\nsay "second"\nexit');
   const promoted = run(promotionPlan, createFreshRuntimeSnapshot(promotionPlan));
   const promotedGate = promoted.snapshot.foregroundAction;
   assert.equal(promotedGate?.kind, "chatPacingGate");
@@ -1072,7 +1081,7 @@ test("pacing state validation rejects relational identity, property, duration, a
   assert.equal(validateRuntimeSnapshot(falseSpeakerCheckpoint.snapshot, speakerPlan).valid, true);
   assert.doesNotThrow(() => deserializeCheckpoint(JSON.stringify(falseSpeakerCheckpoint)));
 
-  const preparedPlan = plan('say "first"\nsay "second"');
+  const preparedPlan = plan('say "first"\nsay "second"\nexit');
   const promoted = run(preparedPlan, createFreshRuntimeSnapshot(preparedPlan));
   const promotedGate = promoted.snapshot.foregroundAction;
   assert.equal(promotedGate?.kind, "chatPacingGate");
@@ -1201,7 +1210,7 @@ test("pacing state validation rejects relational identity, property, duration, a
 test("cross-field pacing snapshot corruption rejects at direct and checkpoint boundaries", () => {
   const waitPlan = plan('say "first"\nwait 10 s\nexit');
   const waiting = run(waitPlan, createFreshRuntimeSnapshot(waitPlan));
-  const promotedPlan = plan('say "first"\nsay "second"');
+  const promotedPlan = plan('say "first"\nsay "second"\nexit');
   const promoted = run(promotedPlan, createFreshRuntimeSnapshot(promotedPlan));
   const promotedGate = promoted.snapshot.foregroundAction;
   assert.equal(promotedGate?.kind, "chatPacingGate");
@@ -1311,12 +1320,12 @@ test("active pacing locations allow only runtime-produced foreground and backgro
     deserializeCheckpoint(serializeCheckpoint(createCheckpoint(waitPlan, waitState.snapshot))),
   );
 
-  const promotionPlan = plan('say "first"\nsay "second"');
+  const promotionPlan = plan('say "first"\nsay "second"\nexit');
   const promoted = run(promotionPlan, createFreshRuntimeSnapshot(promotionPlan));
   const foregroundPacing = promoted.snapshot.foregroundAction;
   assert.equal(foregroundPacing?.kind, "chatPacingGate");
 
-  const interactionPlan = plan('say "first"\nshowButton "Continue"');
+  const interactionPlan = plan('say "first"\nshowButton "Continue"\nexit');
   const afterFirst = executeInstruction(
     interactionPlan,
     createFreshRuntimeSnapshot(interactionPlan),
@@ -1397,12 +1406,12 @@ test("active pacing locations allow only runtime-produced foreground and backgro
 });
 
 test("pacing settlement release provenance and chronology accept only canonical lifecycle states", () => {
-  const backgroundPlan = plan('say "first"\nsay "second"');
+  const backgroundPlan = plan('say "first"\nsay "second"\nexit');
   const background = executeInstruction(backgroundPlan, createFreshRuntimeSnapshot(backgroundPlan));
   const backgroundGate = background.snapshot.backgroundActions[0];
   assert.equal(backgroundGate?.kind, "chatPacingGate");
   // Time completes a background gate only while the script waits; a runnable script continues first.
-  const waitingPlan = plan('say "first"\nwait 10 s');
+  const waitingPlan = plan('say "first"\nwait 10 s\nexit');
   const waiting = run(waitingPlan, createFreshRuntimeSnapshot(waitingPlan));
   const waitingGate = waiting.snapshot.backgroundActions[0];
   assert.equal(waitingGate?.kind, "chatPacingGate");
@@ -1413,12 +1422,12 @@ test("pacing settlement release provenance and chronology accept only canonical 
     payload: { kind: "skip" },
   });
 
-  const interactionPlan = plan('say "first"\nshowButton "Continue"');
+  const interactionPlan = plan('say "first"\nshowButton "Continue"\nexit');
   const interaction = run(interactionPlan, createFreshRuntimeSnapshot(interactionPlan));
-  const instantPlan = plan('say "first"\nsay "second", instant');
+  const instantPlan = plan('say "first"\nsay "second", instant\nexit');
   const superseded = run(instantPlan, createFreshRuntimeSnapshot(instantPlan));
 
-  const promotionPlan = plan('say "first"\nsay "second"');
+  const promotionPlan = plan('say "first"\nsay "second"\nexit');
   const promoted = run(promotionPlan, createFreshRuntimeSnapshot(promotionPlan));
   const foregroundGate = promoted.snapshot.foregroundAction;
   assert.equal(foregroundGate?.kind, "chatPacingGate");
@@ -1592,7 +1601,7 @@ test("pacing settlement release provenance and chronology accept only canonical 
 });
 
 test("instruction boundaries preserve pacing release provenance before and after promotion", () => {
-  const compiled = plan('say ["first", "first-alt"]\nsay ["second", "second-alt"]');
+  const compiled = plan('say ["first", "first-alt"]\nsay ["second", "second-alt"]\nexit');
   const afterFirst = executeInstruction(
     compiled,
     createFreshRuntimeSnapshot(compiled, { seed: 77 }),
@@ -1649,7 +1658,7 @@ test("instruction boundaries preserve pacing release provenance before and after
 });
 
 test("pacing settlements retain exact prepared-output lineage through release and consumption", () => {
-  const threeSays = plan('say "first"\nsay "second"\nsay "third"');
+  const threeSays = plan('say "first"\nsay "second"\nsay "third"\nexit');
   const promoted = run(threeSays, createFreshRuntimeSnapshot(threeSays));
   const firstGate = promoted.snapshot.foregroundAction;
   assert.equal(firstGate?.kind, "chatPacingGate");

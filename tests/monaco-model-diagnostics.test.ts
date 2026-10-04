@@ -31,7 +31,7 @@ test("model changes replace stale canonical diagnostics", () => {
     publications.push(markers),
   );
   assert.ok(publications[0]!.length > 0);
-  model.text = "let answer = askText";
+  model.text = "let answer = askText\nexit";
   model.emitChange();
   assert.deepEqual(publications[1], []);
   subscription.dispose();

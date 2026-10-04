@@ -32,7 +32,7 @@ test("requires explicit own registration for an inherited builtin name", () => {
 });
 
 test("keeps core builtin precedence over injected names", () => {
-  const compiled = compile("let output = random()", []);
+  const compiled = compile("let output = random()\nexit", []);
   let injectedCalls = 0;
   let randomCalls = 0;
   const result = run(compiled, createFreshRuntimeSnapshot(compiled), {
@@ -57,7 +57,7 @@ test("keeps core builtin precedence over injected names", () => {
 });
 
 test("host values cannot carry handles or speaker references, which only the runtime creates", () => {
-  const compiled = compile("let value = host()", ["host"]);
+  const compiled = compile("let value = host()\nexit", ["host"]);
   const identities: readonly SerializableRuntimeValue[] = [
     { kind: "timerHandle", timerId: 1 },
     { kind: "mediaHandle", mediaId: 1 },
@@ -127,7 +127,10 @@ test("detects duplicate prototype-sensitive named arguments", () => {
 });
 
 test("keeps public single-instruction event results isolated", () => {
-  const compiled = compile(['say "first", instant', 'say "second", instant'].join("\n"), []);
+  const compiled = compile(
+    ['say "first", instant', 'say "second", instant', "exit"].join("\n"),
+    [],
+  );
   const first = executeInstruction(compiled, createFreshRuntimeSnapshot(compiled));
   const second = executeInstruction(compiled, first.snapshot);
 
@@ -150,8 +153,11 @@ test("keeps public single-instruction event results isolated", () => {
 });
 
 test("keeps re-entrant runtime operation contexts isolated", () => {
-  const inner = compile(["let value = randomInteger(1..=1)", "say value, instant"].join("\n"), []);
-  const outer = compile("say nested() + nested(), instant", ["nested"]);
+  const inner = compile(
+    ["let value = randomInteger(1..=1)", "say value, instant", "exit"].join("\n"),
+    [],
+  );
+  const outer = compile("say nested() + nested(), instant\nexit", ["nested"]);
   const innerEvents: string[][] = [];
   const capabilities = {
     builtins: {
@@ -193,7 +199,7 @@ test("keeps re-entrant runtime operation contexts isolated", () => {
 });
 
 function inheritedBuiltinPlan(name: string): InstructionPlan {
-  const compiled = compile("let output = injectedBuiltin()", ["injectedBuiltin"]);
+  const compiled = compile("let output = injectedBuiltin()\nexit", ["injectedBuiltin"]);
   // EVIDENCE: fixture: clone a compiler-produced plan before deliberately changing its builtin identifier.
   const plan = JSON.parse(JSON.stringify(compiled)) as InstructionPlan;
   const call = bindingCall(plan);
@@ -206,7 +212,7 @@ function inheritedBuiltinPlan(name: string): InstructionPlan {
 
 function namedBuiltinPlan(names: readonly string[]): InstructionPlan {
   const argumentsSource = names.map((_, index) => `argument${index}: ${index + 1}`).join(", ");
-  const compiled = compile(`let output = capture(${argumentsSource})`, ["capture"]);
+  const compiled = compile(`let output = capture(${argumentsSource})\nexit`, ["capture"]);
   // EVIDENCE: fixture: clone a compiler-produced plan before deliberately changing its named arguments.
   const plan = JSON.parse(JSON.stringify(compiled)) as InstructionPlan;
   const call = bindingCall(plan);

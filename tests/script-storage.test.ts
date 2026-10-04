@@ -93,7 +93,7 @@ test("host-acknowledged saves seed a new session without losing stored value typ
   );
 
   const reader = plan(
-    expected.map(({ key }, index) => `let loaded${index} = load "${key}"`).join("\n"),
+    [...expected.map(({ key }, index) => `let loaded${index} = load "${key}"`), "exit"].join("\n"),
   );
   const read = run(reader, createFreshRuntimeSnapshot(reader, { scriptStorage: recorded }));
   assert.equal(read.snapshot.status, "halted");
@@ -323,6 +323,7 @@ test("a due timer block waits for the write and reads the acknowledged value at 
       'timer async 1 s { seen = load "k"\nelapsed = clock.elapsed }',
       'save 2 as "k"',
       "wait 10 s",
+      "exit",
     ].join("\n"),
   );
   const pending = run(
@@ -366,7 +367,7 @@ test("a due timer block waits for the write and reads the acknowledged value at 
 });
 
 test("a terminal save completes the root after acknowledgement even with background chat pacing", () => {
-  for (const source of ['save 2 as "k"', 'say "Before"\nsave 2 as "k"']) {
+  for (const source of ['save 2 as "k"\nexit', 'say "Before"\nsave 2 as "k"']) {
     const compiled = plan(source);
     const pending = run(
       compiled,
@@ -623,7 +624,7 @@ test("dynamic non-string keys fail with TSR054 and the command's message", () =>
     ["delete key", keyMessage],
   ]) {
     const compiled = plan(
-      `function dynamic(input) {\n  return input\n}\nlet key = dynamic(1)\n${command}`,
+      `function dynamic(input) {\n  return input\n}\nlet key = dynamic(1)\n${command}\nexit`,
     );
     const result = run(compiled, createFreshRuntimeSnapshot(compiled));
     assert.equal(result.snapshot.status, "failed", command);
@@ -642,7 +643,7 @@ test("save rejects session handles and speaker references at the top level and n
     for (const value of ["handle", "{ nested: [handle] }"]) {
       // `dynamic` hides the value's type from the compiler, which rejects a known speaker or handle before runtime.
       const compiled = plan(
-        `function dynamic(value) {\n  return value\n}\n${declaration}\nsave dynamic(${value}) as "k"`,
+        `function dynamic(value) {\n  return value\n}\n${declaration}\nsave dynamic(${value}) as "k"\nexit`,
       );
       let result = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
       if (declaration.includes("playAudio")) {
@@ -683,7 +684,7 @@ test("typed load initializers reject incompatible stored values with TSR058", ()
     ["time", "12:00", "holds a time, so it cannot take text (string)"],
     ["datetime", "2026-10-02T12:00:00Z", "holds a date and time, so it cannot take text (string)"],
   ] satisfies readonly (readonly [string, SerializableRuntimeValue, string])[]) {
-    const compiled = plan(`let value: ${type} = load "k"`);
+    const compiled = plan(`let value: ${type} = load "k"\nexit`);
     const result = run(
       compiled,
       createFreshRuntimeSnapshot(compiled, { scriptStorage: [{ key: "k", value }] }),
@@ -692,7 +693,7 @@ test("typed load initializers reject incompatible stored values with TSR058", ()
     assert.equal(result.snapshot.failure?.code, "TSR058", type);
     assert.equal(result.snapshot.failure?.message, `'value' ${message}.`);
   }
-  const compiled = plan('let value: number = ((load "k"))');
+  const compiled = plan('let value: number = ((load "k"))\nexit');
   const result = run(
     compiled,
     createFreshRuntimeSnapshot(compiled, { scriptStorage: [{ key: "k", value: "stored" }] }),
@@ -711,7 +712,7 @@ test("typed load initializers accept matching scalars, collections, integers, an
     ["integer set", { kind: "set", items: [1, 2] }],
     ["number?", 3],
   ] satisfies readonly (readonly [string, SerializableRuntimeValue])[]) {
-    const compiled = plan(`let value: ${type} = load "k"`);
+    const compiled = plan(`let value: ${type} = load "k"\nexit`);
     const result = run(
       compiled,
       createFreshRuntimeSnapshot(compiled, { scriptStorage: [{ key: "k", value }] }),
@@ -808,7 +809,7 @@ test("compact interactions end at the save 'as', and a grouped load key leaves t
   // Inside a save value, `as` belongs to save; a speaker clause needs parentheses.
   const speakerSource = 'speaker mistress {\n  name: "M"\n}\n';
   assert.notEqual(
-    compileSource(`${speakerSource}save (askText as mistress "Name?") as "name"`).plan,
+    compileSource(`${speakerSource}save (askText as mistress "Name?") as "name"\nexit`).plan,
     null,
   );
   assert.deepEqual(
@@ -909,8 +910,8 @@ test("a ', default:' belongs to the nearest load or ask before it", () => {
   assert.notDeepEqual(parse('let v = load "k"\n, default: 7').diagnostics, []);
   // Every `()` list counts, also function parameters and say presentation options.
   for (const source of [
-    'function f(x = load "k"\n, default: 7) { return x }\nsay f()',
-    'say bubble(color: load "color"\n, default: "red") "Hi", instant',
+    'function f(x = load "k"\n, default: 7) { return x }\nsay f()\nexit',
+    'say bubble(color: load "color"\n, default: "red") "Hi", instant\nexit',
   ])
     assert.deepEqual(compileSource(source).diagnostics, [], source);
 
@@ -961,7 +962,7 @@ test("compact interactions parse in every storage operand position", () => {
   for (const value of values) {
     for (const [position, key] of positions) {
       const source = position(value);
-      const compiled = compileSource(prelude + source);
+      const compiled = compileSource(`${prelude}${source}\nexit`);
       const numberKey = key && value.startsWith("askNumber");
       assert.deepEqual(
         compiled.diagnostics.map((diagnostic) => diagnostic.code),
@@ -992,6 +993,7 @@ test("a write inside a timer block holds catch-up for the next due block", () =>
       'timer async 1 s { save 2 as "k" }',
       "timer async 2 s { seen = clock.elapsed }",
       "wait 10 s",
+      "exit",
     ].join("\n"),
   );
   let snapshot = run(
@@ -1018,7 +1020,7 @@ test("a write inside a timer block holds catch-up for the next due block", () =>
 });
 
 test("a write reserves the completion events of every active action", () => {
-  const compiled = plan('timer async 100 s\nsave 7 as "k"\nwait 200 s');
+  const compiled = plan('timer async 100 s\nsave 7 as "k"\nwait 200 s\nexit');
   const snapshot = executeInstruction(
     compiled,
     createFreshRuntimeSnapshot(compiled, { persistentScriptStorage: true }),
@@ -1040,7 +1042,7 @@ test("load operands may be quoted strings inside interpolation", () => {
 
 test("inspection of a pending write with a deeply nested value stays detached", () => {
   const depth = 1_024;
-  const compiled = plan(`save ${"[".repeat(depth)}1${"]".repeat(depth)} as "k"`);
+  const compiled = plan(`save ${"[".repeat(depth)}1${"]".repeat(depth)} as "k"\nexit`);
   const pending = run(
     compiled,
     createFreshRuntimeSnapshot(compiled, { persistentScriptStorage: true }),

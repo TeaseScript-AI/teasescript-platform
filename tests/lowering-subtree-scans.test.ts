@@ -42,6 +42,7 @@ test("preserves ordered user calls and interaction resume through the public sou
       'function combine(first, second, third) { return "${first}:${second}:${third}" }',
       'let answer = combine(mark("before"), askText, mark("after"))',
       'say "${answer}|${order[0]}|${order[1]}", instant',
+      "exit",
     ].join("\n"),
   );
   const pending = run(plan, createFreshRuntimeSnapshot(plan));

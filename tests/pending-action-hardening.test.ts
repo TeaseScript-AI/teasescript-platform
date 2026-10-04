@@ -61,7 +61,7 @@ test("due foreground delays are rejected through direct and checkpoint boundarie
 });
 
 test("terminal root waits validate, round-trip, settle, and resume at the root completion boundary", () => {
-  const compiled = plan("wait 1 ms");
+  const compiled = plan("wait 1 ms\nexit");
   const uninterruptedWaiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   assert.equal(uninterruptedWaiting.snapshot.status, "waiting");
   assert.equal(validateRuntimeSnapshot(uninterruptedWaiting.snapshot, compiled).valid, true);
@@ -92,7 +92,7 @@ test("terminal root waits validate, round-trip, settle, and resume at the root c
 });
 
 test("rejects every forged running root-end shape outside the settled terminal delay transition", () => {
-  const compiled = plan("wait 1 ms\nwait 1 ms");
+  const compiled = plan("wait 1 ms\nwait 1 ms\nexit");
   const first = run(compiled, createFreshRuntimeSnapshot(compiled));
   const second = run(compiled, observeTime(compiled, first.snapshot, 1).snapshot);
   const settled = observeTime(compiled, second.snapshot, 2).snapshot;
@@ -148,8 +148,8 @@ test("rejects every forged running root-end shape outside the settled terminal d
 
 test("rejects an earlier delay settlement forged onto a terminal positive or zero wait", () => {
   for (const source of [
-    'wait 1 ms\nsay "must run"\nwait 1 ms',
-    'wait 1 ms\nsay "must run"\nwait 0',
+    'wait 1 ms\nsay "must run"\nwait 1 ms\nexit',
+    'wait 1 ms\nsay "must run"\nwait 0\nexit',
   ]) {
     const compiled = plan(source);
     const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
@@ -175,7 +175,7 @@ test("rejects an earlier delay settlement forged onto a terminal positive or zer
 });
 
 test("terminal delay completion is canonical across execute, event stepping, run, and repeated halted entries", () => {
-  const compiled = plan('function hidden { say "hidden" }\nwait 1 ms');
+  const compiled = plan('function hidden { say "hidden" }\nwait 1 ms\nexit');
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   const settled = observeTime(compiled, waiting.snapshot, 1);
   assert.deepEqual(
@@ -200,7 +200,7 @@ test("terminal delay completion is canonical across execute, event stepping, run
 });
 
 test("zero waits remain immediate while terminal waits use ordinary natural completion", () => {
-  const terminalZero = plan("wait 0");
+  const terminalZero = plan("wait 0\nexit");
   const zeroResult = run(terminalZero, createFreshRuntimeSnapshot(terminalZero));
   assert.equal(zeroResult.snapshot.status, "halted");
   assert.equal(zeroResult.snapshot.nextActionId, 1);
@@ -383,7 +383,7 @@ test("wait uses the keyword path, and validation rejects forged ownership and mi
       delay.foregroundAction?.kind === "delay" && delay.foregroundAction.deadlineMs === 1000,
     );
   }
-  assert.equal(compileSource("wait (1 + 2)").diagnostics.length, 0);
+  assert.equal(compileSource("wait (1 + 2)\nexit").diagnostics.length, 0);
 
   const functionWait = waiting("function pause { wait 1 ms }\npause()\nexit");
   const forgedOwner = mutable(functionWait.snapshot);
