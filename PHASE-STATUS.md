@@ -33,7 +33,7 @@ accept syntax, architecture, or implementation details.
   protected compact interactions on one typed foreground family; and ADR 0018 resumable `say` pacing, prepared
   output, typed skip settlement, and interaction/timer composition.
 - **Stage image and media:** `showImage`/`hideImage` Stage state, tag queries over the compiled package image catalog
-  (`showImage tagged`, `findImages`), and blocking or asynchronous `playAudio`/`playVideo`
+  and photos taken with tags (`showImage tagged`, `findImages`, `takePhoto(tags:)`), and blocking or asynchronous `playAudio`/`playVideo`
   with playback ranges, repetition, volume, handles, seeks, timeline cues, Player load/progress observations, and
   checkpoint restore at the language, compiler, and runtime level. The Player shows the Stage image and plays
   audio after explicit Start; browser video playback remains deferred.

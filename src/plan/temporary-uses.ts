@@ -101,6 +101,9 @@ export function requiredInstructionTemporaries(
     case "showImage":
       if (instruction.image !== null) collect(instruction.image);
       break;
+    case "capture":
+      if (instruction.tags !== null) collect(instruction.tags);
+      break;
     case "storageWrite":
       if (instruction.value !== null) collect(instruction.value);
       collect(instruction.key);

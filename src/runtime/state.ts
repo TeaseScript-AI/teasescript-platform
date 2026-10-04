@@ -27,9 +27,12 @@ import {
   type InstructionPlan,
   type InteractionChoiceValue,
   type InteractionUiPayload,
+  type PlanTag,
   startupDeclarations,
   type PlanTransferDestination,
 } from "../plan/model.js";
+import { interactionStringFits } from "../interaction-limits.js";
+import { isCanonicalTagList } from "../tags.js";
 import { cloneInteractionChoiceValue } from "../choice-values.js";
 import { cloneMessageMarkup } from "../message-markup.js";
 import { captureOrReuseInstructionPlan } from "../plan/capture.js";
@@ -96,7 +99,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 44;
+export const RUNTIME_SNAPSHOT_VERSION = 45;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -139,6 +142,7 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "nextTimerId",
   "pendingTimerHandlers",
   "stageImage",
+  "capturedImages",
   "scriptStorage",
   "scriptStoragePersistent",
   "settledMedia",
@@ -149,6 +153,12 @@ const RUNTIME_SNAPSHOT_KEYS = [
 ] as const;
 
 export type RuntimeStatus = "ready" | "running" | "waiting" | "halted" | "failed";
+
+/** A captured photo in the image catalog: its opaque reference, which only the host store resolves, and its tags. */
+export interface RuntimeCapturedImageSnapshot {
+  readonly reference: string;
+  readonly tags: readonly PlanTag[];
+}
 
 export interface RuntimeBindingSnapshot {
   readonly name: string;
@@ -363,6 +373,11 @@ export interface RuntimeSnapshot {
   )[];
   /** The persistent Stage image reference, or `null` for an empty Stage. */
   stageImage: string | null;
+  /**
+   * Photos taken with `takePhoto(tags: …)`, in capture order, each by its captured reference with its tags in name
+   * order. Tag queries search them after the plan's images (ADR 0023).
+   */
+  readonly capturedImages: RuntimeCapturedImageSnapshot[];
   /** This session's view of script storage: loaded from the host at start, changed by `save` and `delete`. */
   readonly scriptStorage: RuntimeScriptStorageEntrySnapshot[];
   /** Whether a host provider persists script storage, so `save` and `delete` wait for its acknowledgement. */
@@ -546,6 +561,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     nextTimerId: 1,
     pendingTimerHandlers: [],
     stageImage: null,
+    capturedImages: [],
     // EVIDENCE: validation: validateScriptStorageEntries accepted these captured entries above.
     scriptStorage: sortScriptStorage(scriptStorage as RuntimeScriptStorageEntrySnapshot[]),
     scriptStoragePersistent: persistentScriptStorage,
@@ -640,6 +656,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     nextTimerId: snapshot.nextTimerId,
     pendingTimerHandlers: snapshot.pendingTimerHandlers.map((invocation) => ({ ...invocation })),
     stageImage: snapshot.stageImage,
+    capturedImages: snapshot.capturedImages.map(cloneCapturedImage),
     scriptStorage: cloneScriptStorage(snapshot.scriptStorage),
     scriptStoragePersistent: snapshot.scriptStoragePersistent,
     settledMedia: snapshot.settledMedia.map(cloneMedia),
@@ -756,7 +773,12 @@ function cloneForegroundAction<T extends RuntimeForegroundActionSnapshot>(action
 function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendingActionSnapshot {
   if (action.kind === "timer") return { ...action, timer: cloneTimer(action.timer) };
   if (action.kind === "media") return { ...action, media: cloneMedia(action.media) };
-  if (action.kind === "mediaPlayback" || action.kind === "capture") return { ...action };
+  if (action.kind === "mediaPlayback") return { ...action };
+  if (action.kind === "capture")
+    return {
+      ...action,
+      tags: action.tags === null ? null : action.tags.map((tag) => ({ ...tag })),
+    };
   if (action.kind === "storageWrite")
     return { ...action, value: cloneCapturedSerializableValue(action.value) };
   if (action.kind === "delay")
@@ -1168,6 +1190,11 @@ function validateCapturedRuntimeSnapshotDetails(
   validateMediaState(value, plan, handleIds.media, errors);
   if (value.stageImage !== null && typeof value.stageImage !== "string") {
     errors.push("Runtime stageImage must be a string or null.");
+  }
+  if (!validCapturedImages(value.capturedImages)) {
+    errors.push(
+      "Runtime capturedImages must list unique captured references, each with canonical tags in name order.",
+    );
   }
   const scriptStorageFailure = validateScriptStorageEntries(
     value.scriptStorage,
@@ -2764,7 +2791,9 @@ function validateStatusConsistency(
         value.frames[0].file !== 0) ||
       retained !== 0 ||
       value.fallback !== null ||
-      value.failure !== null
+      value.failure !== null ||
+      // A session that has not started has taken no photos.
+      !(Array.isArray(value.capturedImages) && value.capturedImages.length === 0)
     ) {
       errors.push("Ready runtime state contains execution progress.");
     }
@@ -3052,6 +3081,7 @@ function validateStartupPhase(
       !empty(frames[0].bindings) ||
       snapshot.defaultSpeaker !== null ||
       snapshot.stageImage !== null ||
+      !empty(snapshot.capturedImages) ||
       [
         snapshot.nextScopeId,
         snapshot.nextCallFrameId,
@@ -3519,4 +3549,28 @@ function callContextOwner(callFrames: unknown, level: number): number | null | u
   const below: unknown = callFrames[Math.min(level, callFrames.length) - 1];
   if (below === undefined) return null;
   return isPlainRecord(below) && nonNegativeSafeInteger(below.id) ? below.id : undefined;
+}
+
+function cloneCapturedImage(image: RuntimeCapturedImageSnapshot): RuntimeCapturedImageSnapshot {
+  return { reference: image.reference, tags: image.tags.map((tag) => ({ ...tag })) };
+}
+
+/** Captured references are unique, non-empty, and fit an interaction string; each carries canonical tags. */
+function validCapturedImages(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  const references = new Set<string>();
+  return value.every((image: unknown) => {
+    if (
+      !isPlainRecord(image) ||
+      !hasExactKeys(image, ["reference", "tags"]) ||
+      typeof image.reference !== "string" ||
+      image.reference.length === 0 ||
+      !interactionStringFits(image.reference) ||
+      references.has(image.reference) ||
+      !isCanonicalTagList(image.tags)
+    )
+      return false;
+    references.add(image.reference);
+    return true;
+  });
 }
