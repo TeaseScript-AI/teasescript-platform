@@ -565,9 +565,8 @@ class TypeChecker {
         return condition.whenFalse !== null || breaks.length > 0;
       }
       case "repeatStatement": {
-        const count = nonNullTypeForUse(
-          yield* compileChild(this.#expressionTask(statement.count, scope)),
-        );
+        const counted = yield* compileChild(this.#expressionTask(statement.count, scope));
+        const count = nonNullTypeForUse(counted);
         if (isScalar(count, "number"))
           this.#report(
             typeCode.invalidOperand,
@@ -576,7 +575,7 @@ class TypeChecker {
           );
         else
           this.#reportUnless(
-            count,
+            counted,
             (member) => isScalar(member, "integer"),
             statement.count,
             "A repeat count is a whole number (integer)",
@@ -838,7 +837,7 @@ class TypeChecker {
       read ?? (variable === undefined ? place.type : this.#currentType(variable)),
     );
     if (variable !== undefined) this.#flow.set(variable, undefined);
-    // Adding or subtracting null is never supported, even where null is otherwise allowed (V30 §34).
+    // Adding or subtracting null is never supported.
     const outcome =
       resolved(nonNullType(value)).kind === "never"
         ? { failed: [kept, value] }
@@ -1123,7 +1122,7 @@ class TypeChecker {
   ): Place | undefined {
     const name = property.name;
     const label = `${expressionLabel(objectExpression) ?? "this object"}.${name}`;
-    const all = members(nonNullType(object)).map(resolved);
+    const all = members(object).map(resolved);
     const targets = all.map((member) => assignableProperty(member, name));
     let type: StaticType | undefined;
     for (const [index, target] of targets.entries()) {
@@ -1801,7 +1800,7 @@ class TypeChecker {
 
   /**
    * The result of an operator on known operand types: every combination of their members must be supported (ADR 0021
-   * rule 3.5). Possibly null operands act on their other members (V30 §34). An unknown operand gives an unknown result.
+   * rule 3.5). A possibly null operand needs a check first (rule 1.9). An unknown operand gives an unknown result.
    */
   #operation(
     operator: string,
@@ -1835,10 +1834,10 @@ class TypeChecker {
     expressions: readonly Expression[],
     result: (...values: StaticType[]) => StaticType | undefined,
   ): { readonly type: StaticType } | { readonly failed: readonly StaticType[] } {
-    const values = operands.map((operand) => resolved(nonNullType(operand)));
-    if (values.some((value) => value.kind === "unknown" || value.kind === "open"))
+    // An operand that may be null needs a check first (owner decision on #504 Q1), so null is one of its members.
+    if (operands.some((operand) => !isKnown(nonNullTypeForUse(operand))))
       return { type: UNKNOWN_TYPE };
-    if (values.some((value) => value.kind === "never")) return { type: UNKNOWN_TYPE };
+    const values = operands.map((operand) => resolved(operand));
     const lefts = members(values[0]!);
     const rights = values.length > 1 ? members(values[1]!) : [];
     const apply = (left: StaticType, right: StaticType | undefined): StaticType | undefined =>
@@ -1898,7 +1897,7 @@ class TypeChecker {
     }
     const receiver = yield* compileChild(this.#expressionTask(callee.object, scope));
     const method = callee.property.name;
-    const value = resolved(nonNullType(receiver));
+    const value = resolved(receiver);
     // Pausing, resuming, or stopping media first waits for the previous message's pacing.
     if (["pause", "resume", "stop"].includes(method) && mayBe(receiver, "media")) this.#suspend();
     const collections = members(value).every((member) =>
@@ -1998,8 +1997,7 @@ class TypeChecker {
     values: readonly StaticType[],
   ): StaticType {
     const argument = expression.arguments[0];
-    // A possibly null argument is checked by its other members, like other operands (V30 §34).
-    const value = values[0] === undefined ? undefined : nonNullTypeForUse(values[0]);
+    const value = values[0];
     switch (name) {
       case "random":
         return NUMBER_TYPE;
@@ -2065,7 +2063,7 @@ class TypeChecker {
     expression: Extract<Expression, { kind: "propertyAccessExpression" }>,
   ): StaticType | PlaceRead {
     const name = expression.property.name;
-    const all = members(nonNullTypeForUse(object));
+    const all = members(object);
     const types = all.map((member) => memberPropertyType(member, name));
     const passing = all.filter((_, index) => types[index] !== undefined);
     if (passing.length === all.length)
@@ -2096,10 +2094,9 @@ class TypeChecker {
     index: StaticType,
     expression: Expression,
   ): void {
-    const value = nonNullTypeForUse(object);
-    if (members(value).some((member) => isKnown(member) && resolved(member).kind !== "list")) {
+    if (members(object).some((member) => isKnown(member) && resolved(member).kind !== "list")) {
       this.#reportUnless(
-        value,
+        object,
         (member) => !isKnown(member) || resolved(member).kind === "list",
         objectExpression,
         "Only a list can be indexed",
@@ -2115,7 +2112,7 @@ class TypeChecker {
       );
     else
       this.#reportUnless(
-        position,
+        index,
         (member) => isScalar(member, "integer"),
         expression,
         "A list index is a whole number (integer)",
@@ -2363,12 +2360,16 @@ class TypeChecker {
       : name === null
         ? `, not ${describeValue(type)}`
         : `, but '${name}' holds ${describeValue(type)}`;
+    const expected =
+      kind === "integer" ? INTEGER_TYPE : kind === "number" ? NUMBER_TYPE : STRING_TYPE;
     const fix =
       resolved(type).kind === "null"
         ? EMPTY_FIELD_FIX
-        : kind === "number"
-          ? numberDefaultFix(expression)
-          : textDefaultFix(expression, name);
+        : isNullable(type) && isAssignable(expected, nonNullType(type))
+          ? (checkFirstFix(expected, type, expression) ?? "")
+          : kind === "text"
+            ? textDefaultFix(expression, name)
+            : numberDefaultFix(expression);
     if (kind === "integer") {
       // A non-whole default is never rounded; a number variable may be one that widened (rule 1.2).
       if (isScalar(nonNullTypeForUse(type), "number"))
@@ -2380,7 +2381,7 @@ class TypeChecker {
       else if (!isAssignable(INTEGER_TYPE, type))
         this.#report(
           typeCode.invalidInteractionDefault,
-          `The default answer of askInteger must be a whole number (integer)${holds}.${resolved(type).kind === "null" ? EMPTY_FIELD_FIX : " Use a whole number, such as 'default: 10'."}`,
+          `The default answer of askInteger must be a whole number (integer)${holds}.${resolved(type).kind === "null" || isNullable(type) ? fix : " Use a whole number, such as 'default: 10'."}`,
           expression.span,
         );
       else if (!Number.isSafeInteger(staticNumber(expression) ?? 0))
@@ -2560,7 +2561,7 @@ class TypeChecker {
   #requireBoolean(type: StaticType, expression: Expression, rule: string): void {
     const value = nonNullTypeForUse(type);
     this.#reportUnless(
-      value,
+      type,
       (member) => isScalar(member, "boolean"),
       expression,
       rule,
@@ -2581,13 +2582,15 @@ class TypeChecker {
   ): void {
     const value = nonNullTypeForUse(type);
     if (!isKnown(value)) return;
-    const all = members(value);
+    // A possibly null value needs a check first, unless null is accepted too (owner decision on #504 Q1).
+    const all = members(type);
     const passing = all.filter(accepts);
     if (passing.length === all.length) return;
     if (passing.length > 0) {
+      const failing = all.filter((member) => !accepts(member));
       this.#reportMayBe(
         expression,
-        all.find((member) => !accepts(member))!,
+        failing.find((member) => member.kind !== "null") ?? failing[0]!,
         passing,
       );
       return;
@@ -2604,12 +2607,13 @@ class TypeChecker {
     // Only a plain variable narrows, so a property or element is first kept in a variable.
     const node = unwrap(expression);
     const label = node.kind === "identifier" ? node.name : null;
-    const test = typeName(union(passing));
+    // A value that may be null is checked with `!= null`, which also narrows it.
+    const test = failing.kind === "null" ? "!= null" : `is ${typeName(union(passing))}`;
     this.#report(
       typeCode.invalidOperand,
       label === null
-        ? `This value may be ${describeValue(failing)}. Keep it in a variable and check it first, as in: if value is ${test} { ... }`
-        : `'${label}' may be ${describeValue(failing)}. Check it first: if ${label} is ${test} { ... }`,
+        ? `This value may be ${describeValue(failing)}. Keep it in a variable and check it first, as in: if value ${test} { ... }`
+        : `'${label}' may be ${describeValue(failing)}. Check it first: if ${label} ${test} { ... }`,
       expression.span,
     );
   }
@@ -3215,7 +3219,7 @@ function handlePropertyType(
 
 // Messages ------------------------------------------------------------------------------------------------------------
 
-/** Operations on a possibly null value act on its other members (V30 §34); a value that is only null stays null. */
+/** The non-null part of a type, to tell whether it is known; a value that is only null stays null. */
 function nonNullTypeForUse(type: StaticType): StaticType {
   const value = nonNullType(type);
   return value.kind === "never" ? resolved(type) : value;
@@ -3563,11 +3567,19 @@ function checkFirstFix(
   value: StaticType,
   expression: Expression,
 ): string | undefined {
-  const label = expressionLabel(expression);
-  const all = members(nonNullType(value));
+  const all = members(value);
   const passing = all.filter((member) => isAssignable(target, member));
-  if (label === null || all.length < 2 || passing.length === 0) return undefined;
-  return ` Check it first: if ${label} is ${typeName(union(passing))} { ... }`;
+  if (all.length < 2 || passing.length === 0) return undefined;
+  // A value that may be null is checked with `!= null` (owner decision on #504 Q1). Only a plain variable narrows, so
+  // a property or element is first kept in a variable.
+  const node = unwrap(expression);
+  const label = node.kind === "identifier" ? node.name : null;
+  const test = all.every((member) => passing.includes(member) || member.kind === "null")
+    ? "!= null"
+    : `is ${typeName(union(passing))}`;
+  return label === null
+    ? ` Keep it in a variable and check it first, as in: if value ${test} { ... }`
+    : ` Check it first: if ${label} ${test} { ... }`;
 }
 
 /** A short suggestion for the most common mismatches of a variable. */

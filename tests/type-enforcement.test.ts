@@ -311,20 +311,28 @@ test("optional types keep their non-null type in operations, elements, and loops
     mismatches("let items: integer[]? = [1]\nitems.add(2.5)")[0]?.[1],
     "'items' holds integer values (integer[]), so it cannot contain a number. To allow fractions, declare it as 'let items: number[]? = ...'.",
   );
-  // An optional whole number may serve as an index or a repeat count, and an optional value as a built-in's argument;
-  // only a null value fails at runtime.
+  // A possibly null value is used only after a check, which narrows it (owner decision on #504 Q1).
+  const nullable = "let items = [1]\nfunction f(n: integer?) {\n    BODY\n}";
+  for (const body of ['say "${items[n]}"', 'say "${n + 1}"', 'repeat n {\n        say "x"\n    }'])
+    assert.deepEqual(
+      mismatches(nullable.replace("BODY", body)),
+      [["TSV043", "'n' may be null. Check it first: if n != null { ... }", "n"]],
+      body,
+    );
+  assert.deepEqual(mismatches(nullable.replace("BODY", "let m: integer = n")), [
+    [
+      "TSV041",
+      "'m' is declared as integer, so it cannot start as a whole number (integer) or null. Check it first: if n != null { ... }",
+      "n",
+    ],
+  ]);
   assert.deepEqual(
-    codes(
-      'let items = [1]\nfunction f(n: integer?) {\n    say "${items[n]}"\n    repeat n {\n        say "x"\n    }\n}',
-    ),
+    codes(nullable.replace("BODY", 'if n != null {\n        say "${items[n]} ${n + 1}"\n    }')),
     [],
   );
-  assert.deepEqual(
-    codes(
-      'let v: number? = 2.5\nlet r = round(v)\nlet t: string? = "<b>"\nlet e = escapeMarkup(t)',
-    ),
-    [],
-  );
+  assert.deepEqual(mismatches("function f(v: number?) {\n    return round(v)\n}"), [
+    ["TSV043", "'v' may be null. Check it first: if v != null { ... }", "v"],
+  ]);
   assert.deepEqual(codes('let t: string? = "a"\nlet r = round(t)'), [["TSV043", "t"]]);
   // So may an optional time, timer length, media position, or range bound.
   for (const source of [

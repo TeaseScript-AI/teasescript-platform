@@ -1518,7 +1518,9 @@ if file != null {
 }
 ```
 
-Potentially nullable use without an explicit check follows the compiler-warning and runtime-recovery rules in the next section.
+Using a possibly null value where its non-null type is required, such as `n + 1` with `n: integer?`, is a compile
+error. The message names the check to write: `if n != null { ... }`, inside which `n` is an `integer`. A loaded value
+can instead get a default, as in `load "level" default 1`.
 
 ## 19. Choices
 **Status:** Accepted
@@ -2903,10 +2905,9 @@ How the browser internally stores or resolves references, handles permissions, o
 ## 34. Runtime warnings and recoverable values
 **Status:** Accepted
 
-Potentially nullable results produce compiler warnings when used without an explicit check, but they are not automatically hard compile errors.
-
-Nullable-result compiler warnings are accepted future behavior and not yet implemented. Media commands accept `null`
-references at runtime; see the fallback below.
+Using a possibly null value without an explicit check, where its non-null type is required, is a compile error
+([§18](#18-null-and-optional-values)). Commands that accept `null` themselves, such as media commands, still take it;
+see the fallback below.
 
 Compatible built-ins may apply a safe fallback. For example, `showImage null` clears the Stage image, reports developer warning `TSW011` with the source location, and continues ([§22](#22-stage-image-audio-and-video)).
 

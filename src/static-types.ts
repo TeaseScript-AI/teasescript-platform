@@ -356,7 +356,7 @@ export function members(type: StaticType): readonly StaticType[] {
   return value.kind === "union" ? value.members : [value];
 }
 
-/** The type without `null`. Operations on a possibly null value act on its other members (V30 §34). */
+/** The type without `null`, such as what a value holds after `!= null`. */
 export function nonNullType(type: StaticType): StaticType {
   const all = members(type);
   const kept = all.filter((member) => member.kind !== "null");
@@ -414,8 +414,8 @@ function* includesTask(outerType: StaticType, innerType: StaticType): CompileTas
 /**
  * Whether a value of `source` may be stored where `target` is required. Only integer widens, to number. Lists and
  * sets are copied when stored, so an `integer[]` may be stored where a `number[]` is required. Objects may be stored
- * where an object is required when their shared properties fit; other properties are added. A possibly null value is
- * not a definite contradiction, because nullable use is a separate rule (V30 §34). An undecided open target accepts
+ * where an object is required when their shared properties fit; other properties are added. A possibly null value fits
+ * only a place that takes null too (ADR 0021 rule 1.9). An undecided open target accepts
  * any value, and an undecided open source has no values yet.
  */
 export function isAssignable(target: StaticType, source: StaticType): boolean {
@@ -428,8 +428,8 @@ function* assignableTask(targetType: StaticType, sourceType: StaticType): Compil
   if (target.kind === "unknown" || source.kind === "unknown") return true;
   if (target.kind === "open" || source.kind === "open" || source.kind === "never") return true;
   if (source.kind === "union") {
-    const nonNull = source.members.filter((member) => member.kind !== "null");
-    for (const member of nonNull.length === 0 ? source.members : nonNull)
+    // A possibly null value fits only a place that also takes null (owner decision on #504 Q1).
+    for (const member of source.members)
       if (!(yield* compileChild(assignableTask(target, member)))) return false;
     return true;
   }
