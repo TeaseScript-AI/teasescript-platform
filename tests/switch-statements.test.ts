@@ -184,12 +184,14 @@ test("case blocks resume after a checkpoint and keep return, break, and continue
     },
   ];
   for (const { source, expected } of scenarios) {
-    const { events, finalSnapshot } = assertRuntimeResumeEquivalent(source, { seed: 3 });
+    const { events, boundaries } = assertRuntimeResumeEquivalent(source, { seed: 3 });
     assert.deepEqual(
       events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
       expected,
     );
-    assert.deepEqual(finalSnapshot.temporaries, []);
+    // The last boundary runs the exit, which clears temporaries, so the one before it shows what the switch left.
+    assert.equal(events.at(-1)?.kind, "exit");
+    assert.deepEqual(boundaries.at(-2)!.temporaries, []);
   }
 });
 
@@ -522,7 +524,7 @@ test("a type case names its fix when it is not one type", () => {
 });
 
 test("a type case block resumes after a checkpoint", () => {
-  const { events, finalSnapshot } = assertRuntimeResumeEquivalent(
+  const { events, boundaries } = assertRuntimeResumeEquivalent(
     [
       "function f(value) {",
       "  switch value {",
@@ -544,7 +546,9 @@ test("a type case block resumes after a checkpoint", () => {
     events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
     ["4", "other"],
   );
-  assert.deepEqual(finalSnapshot.temporaries, []);
+  // The last boundary runs the exit, which clears temporaries, so the one before it shows what the switch left.
+  assert.equal(events.at(-1)?.kind, "exit");
+  assert.deepEqual(boundaries.at(-2)!.temporaries, []);
 });
 
 test("value cases keep the narrowing of the cases above, and a never-matching case does not continue", () => {

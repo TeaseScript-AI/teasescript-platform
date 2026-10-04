@@ -12,6 +12,7 @@ import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
+import { runValidSourceUntilExit } from "./helpers/run-until-exit.js";
 import { sayTexts } from "./helpers/runtime-events.js";
 
 test("executes exclusive and inclusive integer ranges", () => {
@@ -39,7 +40,7 @@ test("iterates lists and sets in order and performs zero iterations", () => {
 });
 
 test("supports nested loops, repeat, break, continue, and lexical variables", () => {
-  const result = runSource(
+  const result = runValidSourceUntilExit(
     [
       "repeat 2 {",
       "  for value in 1..=4 {",

@@ -21,6 +21,7 @@ import {
 } from "../src/runtime/serializable-values.js";
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { runUntilExit } from "./helpers/run-until-exit.js";
 
 function compiled(source: string, options: Parameters<typeof compileSource>[1] = {}) {
   const plan = compileValidPlan(source, options);
@@ -1361,11 +1362,12 @@ test("function-owned interaction result survives checkpoint completion and expli
     submittedText: " 1.5e2 ",
   });
   assert.equal(validateRuntimeSnapshot(completed.snapshot, restored.plan).valid, true);
-  const done = run(restored.plan, completed.snapshot);
-  assert.equal(done.snapshot.status, "halted");
-  assert.equal(done.events.find((event) => event.kind === "say")?.text, "150");
-  assert.deepEqual(done.snapshot.temporaries, []);
-  assert.deepEqual(done.snapshot.callFrames, []);
+  // Exit clears frames and temporaries, so the state the call leaves behind is observed before it.
+  const beforeExit = runUntilExit(restored.plan, completed.snapshot);
+  assert.equal(beforeExit.events.find((event) => event.kind === "say")?.text, "150");
+  assert.deepEqual(beforeExit.snapshot.temporaries, []);
+  assert.deepEqual(beforeExit.snapshot.callFrames, []);
+  assert.equal(run(restored.plan, beforeExit.snapshot).snapshot.status, "halted");
 });
 
 test("a retained dynamic settlement validates against the UI it recorded, before and after cleanup", () => {

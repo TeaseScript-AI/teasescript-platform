@@ -25,6 +25,7 @@ import type { InterpreterEvent } from "../src/runtime/events.js";
 import type { RuntimeDelayActionSettlementSnapshot } from "../src/runtime/actions/model.js";
 import { type RuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+import { runUntilExit } from "./helpers/run-until-exit.js";
 
 function interactionPlan(
   interactionKind: InteractionInstruction["interactionKind"],
@@ -1478,14 +1479,15 @@ test("ownership contexts resume from pending and committed boundaries", () => {
       action.ownerCallFrameId,
       `${row.id}: handoff owner`,
     );
+    // Exit clears the call frames, so the state the calls leave behind is observed before it.
     const final = assertInteractionResumeEquivalent(
       plan,
       completed,
-      run,
+      runUntilExit,
       `${row.id}: committed`,
     ).uninterrupted;
     assert.equal(final.snapshot.interactionResultHandoff, null, `${row.id}: final handoff`);
-    assert.equal(final.snapshot.status, "halted", `${row.id}: final status`);
+    assert.equal(plan.instructions[final.snapshot.nextInstruction]?.kind, "exit", row.id);
     assert.equal(final.snapshot.callFrames.length, 0, `${row.id}: final frames`);
     assert.deepEqual(
       final.events.filter((event) => event.kind === "say").map((event) => event.text),
