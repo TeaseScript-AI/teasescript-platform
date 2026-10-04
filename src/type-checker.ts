@@ -22,6 +22,7 @@ import type {
   TimerParts,
   TypeAnnotation,
 } from "./ast.js";
+import { MAIN_FILE_PATH } from "./project-paths.js";
 import { compileChild, runCompileTask, type CompileTask } from "./compiler/continuation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import {
@@ -435,7 +436,7 @@ class TypeChecker {
   #flow = new Flow();
 
   /** What functions, blocks, and loops may change, collected before checking: for the file, and for every loop. */
-  #effects: ProgramEffects = { shared: new Set(), loops: new Map() };
+  #effects: Pick<ProgramEffects, "shared" | "loops"> = { shared: new Set(), loops: new Map() };
 
   /** The globals that a function or a timer or media block of any file assigns. */
   #sharedGlobals: ReadonlySet<string> = new Set();
@@ -569,6 +570,10 @@ class TypeChecker {
     const sharedGlobals = new Set<string>();
     for (const fileEffects of effects)
       for (const name of fileEffects.shared) sharedGlobals.add(name);
+    // While a `call` runs, any file's top level may run and assign globals (ADR 0022 §5, §6).
+    if (effects.some((fileEffects) => fileEffects.callsFiles))
+      for (const fileEffects of effects)
+        for (const name of fileEffects.rootAssigned) sharedGlobals.add(name);
     this.#sharedGlobals = sharedGlobals;
     const functionsByFile = programs.map(() => new Map<FunctionDeclaration, FunctionType>());
     for (const [file, program] of programs.entries())
@@ -586,8 +591,11 @@ class TypeChecker {
       runCompileTask(this.#startValueTask(declaration));
       this.#reportMixedLiterals();
     }
-    // main.tease runs right after the start values, so it starts with what they stored; other files start afresh.
-    const startupFlow = this.#flow;
+    // main.tease runs right after the start values, so it starts with what they stored, unless a transfer enters it
+    // again later; other files start afresh.
+    const startupFlow = effects.some((fileEffects) => fileEffects.entersMain)
+      ? new Flow()
+      : this.#flow;
     for (const [file, program] of programs.entries()) {
       this.#enterFile(file);
       this.#effects = { shared: effects[file]!.shared, loops };
@@ -4601,6 +4609,12 @@ const SUSPENDING_STATEMENTS: ReadonlySet<Statement["kind"]> = new Set([
 interface ProgramEffects {
   /** Names that function bodies and timer or media blocks assign. */
   readonly shared: ReadonlySet<string>;
+  /** Names that the file's top level assigns, which another file's `call` may run (ADR 0022 §5). */
+  readonly rootAssigned: ReadonlySet<string>;
+  /** Whether the file calls a file, so another file's top level may run during the call. */
+  readonly callsFiles: boolean;
+  /** Whether the file enters `main.tease` again at its top, after the start values have run. */
+  readonly entersMain: boolean;
   /** The effects of each loop, by its body; a `while` loop includes its condition. */
   readonly loops: ReadonlyMap<Block, LoopEffects>;
 }
@@ -4622,6 +4636,9 @@ type EffectWork =
  */
 function programEffects(program: Program): ProgramEffects {
   const shared = new Set<string>();
+  const rootAssigned = new Set<string>();
+  let callsFiles = false;
+  let entersMain = false;
   const nodes: LoopNode[] = [];
   const work: EffectWork[] = [];
   const enter = (
@@ -4664,6 +4681,7 @@ function programEffects(program: Program): ProgramEffects {
         const root = rootName(callee.object);
         if (root !== null) {
           if (inside) shared.add(root);
+          else rootAssigned.add(root);
           loop?.assigned.add(root);
         }
       }
@@ -4673,11 +4691,25 @@ function programEffects(program: Program): ProgramEffects {
     }
     const statement = item.statement;
     if (loop !== null && SUSPENDING_STATEMENTS.has(statement.kind)) loop.suspends = true;
+    if (statement.kind === "callFileStatement") callsFiles = true;
+    if (
+      (statement.kind === "gotoStatement" ||
+        statement.kind === "callFileStatement" ||
+        statement.kind === "fallbackStatement") &&
+      statement.target?.kind === "fileTarget" &&
+      statement.target.label === null &&
+      statement.target.path === MAIN_FILE_PATH
+    )
+      entersMain = true;
+    // The `default:` form of a global assigns it where the declaration runs.
+    if (statement.kind === "globalStatement" && statement.assignment !== null)
+      (inside ? shared : rootAssigned).add(statement.name.name);
     if (statement.kind === "assignmentStatement") {
       // A store into an element or property changes the variable that holds it, too.
       const root = rootName(statement.target);
       if (root !== null) {
         if (inside) shared.add(root);
+        else rootAssigned.add(root);
         loop?.assigned.add(root);
       }
       // A timer or media property write may run a block at once.
@@ -4713,6 +4745,9 @@ function programEffects(program: Program): ProgramEffects {
   }
   return {
     shared,
+    rootAssigned,
+    callsFiles,
+    entersMain,
     loops: new Map(
       nodes.map((node) => [node.body, { assigned: node.assigned, suspends: node.suspends }]),
     ),

@@ -639,3 +639,55 @@ test("entering main.tease again skips the start values, which run once", () => {
     ["round 1", "round 2", "round 3", "exit"],
   );
 });
+
+test("what a file call or a new entry into main.tease may change about a global is not known", () => {
+  const codes = (main: string, others: Record<string, string>): string[] =>
+    compileProject(project(main, others)).diagnostics.map((diagnostic) => diagnostic.code);
+  const declared = "global value: integer | string = 1\n";
+  // The called file's top level may change the global.
+  assert.notDeepEqual(
+    codes(`${declared}call "b.tease"\nlet count: integer = value\nsay count\nexit`, {
+      "b.tease": 'value = "bad"\nend',
+    }),
+    [],
+  );
+  // Also through a global function of another file that calls it.
+  assert.notDeepEqual(
+    codes(`${declared}relay()\nlet count: integer = value\nsay count\nexit`, {
+      "b.tease": 'value = "bad"\nend',
+      "lib.tease": 'global function relay { call "b.tease" }',
+    }),
+    [],
+  );
+  // And main.tease, entered again, starts after the start values with what the session holds then.
+  assert.notDeepEqual(
+    codes(
+      `${declared}global first = true\nlet count: integer = value\nsay count\nif first {\n    first = false\n    goto "b.tease"\n}\nexit`,
+      { "b.tease": 'value = "bad"\ngoto "main.tease"' },
+    ),
+    [],
+  );
+  // Without a file call or a new entry, what the start values stored is still known.
+  assert.deepEqual(codes(`${declared}let count: integer = value\nsay count\nexit`, {}), []);
+});
+
+test("a root retained for a block cannot bind the name of a global", () => {
+  const plan = compiled(
+    project(
+      [
+        "global score = 7",
+        "let x = 1",
+        'let t = timer(duration: 1, async: true, display: "hidden", persist: true) { say score }',
+        'goto "slow.tease"',
+      ].join("\n"),
+      { "slow.tease": "wait 2\nexit" },
+    ),
+  );
+  const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
+  assert.equal(waiting.retainedScopes.length, 1);
+  assert.deepEqual(validateRuntimeSnapshot(waiting, plan).errors, []);
+  // EVIDENCE: structuredClone preserves the runtime snapshot shape while the fixture adds one binding.
+  const shadowing = structuredClone(waiting) as Mutable<RuntimeSnapshot>;
+  shadowing.retainedScopes[0]!.bindings.push({ name: "score", value: 999 });
+  assert.equal(validateRuntimeSnapshot(shadowing, plan).valid, false);
+});

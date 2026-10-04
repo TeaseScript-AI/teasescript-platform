@@ -2941,9 +2941,9 @@ function validateGlobals(
     const failure = validateCapturedSerializableValue(binding.value);
     if (failure !== null) errors.push(failure);
   }
+  // No scope binds a global's name, also not a root retained for a block.
   if (
-    Array.isArray(snapshot.frames) &&
-    snapshot.frames.some(
+    serializedScopes(snapshot).some(
       (frame) =>
         isPlainRecord(frame) &&
         Array.isArray(frame.bindings) &&
