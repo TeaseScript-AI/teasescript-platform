@@ -1,0 +1,14 @@
+// A C-style loop may leave out its start or name the counter without a value; neither part does anything.
+int count = 3
+int turn = 0
+for (count; count > 0; count--) show("Count ${count}")
+for (; turn < 2; ++turn) show("Turn ${turn}")
+// As a statement, a prefix increment changes the variable as a postfix one does.
+++turn
+// An increment may change a list element or a property.
+def tally = [0, 0, 0, 0]
+tally[turn]++
+tally[0]--
+def stats = [score: 1]
+stats.score++
+show("Tally ${tally[3]} ${tally[0]}, score ${stats.score}")

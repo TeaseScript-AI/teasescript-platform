@@ -2466,7 +2466,9 @@ function lowerExpressionStatement(node: AstNode, context: LowerContext): IrState
     return [];
   }
   if (expression.kind === "binary") return lowerAssignment(expression, node.span, context);
-  if (expression.kind === "postfix") return lowerPostfix(expression, node.span, context);
+  // As a statement, `++count` changes the variable as `count++` does.
+  if (expression.kind === "postfix" || expression.kind === "prefix")
+    return lowerPostfix(expression, node.span, context);
   if (expression.kind === "methodCall") return lowerCallStatement(expression, node.span, context);
 
   if (isUncalledClosure(expression, context)) {
@@ -3471,26 +3473,53 @@ function lowerPostfix(
   context: LowerContext,
 ): IrStatement[] {
   const operator = text(node.operator);
-  const target = variableName(node.value);
-  if ((operator !== "++" && operator !== "--") || target === null) {
+  const targetNode = asNode(node.value);
+  const name = variableName(node.value);
+  if (operator !== "++" && operator !== "--") return [unsupportedPostfix(node, context)];
+  if (name !== null) {
     return [
-      unsupportedStatement(
-        context,
-        node,
-        "SX_UNSUPPORTED_POSTFIX",
-        "Only local-variable ++/-- statements are supported.",
-      ),
+      {
+        kind: "assign",
+        target: { kind: "variable", name },
+        operator: operator === "++" ? "+=" : "-=",
+        value: { kind: "literal", value: 1 },
+        span,
+      },
     ];
   }
+  // `counts[i]++` and `player.score++` on plain references; an index counted from the end needs the list's length.
+  const index = targetNode?.kind === "binary" ? asNode(targetNode.right) : null;
+  if (
+    targetNode === null ||
+    !isRepeatableIndex(targetNode) ||
+    (index !== null && negativeConstantIndex(index) !== null)
+  )
+    return [unsupportedPostfix(node, context)];
+  context.writeTargets.add(targetNode);
+  const target = lowerExpression(targetNode, context);
+  context.writeTargets.delete(targetNode);
+  if (target === null) return [];
+  if (targetNode.kind === "binary") noteSharedListWrite(asNode(targetNode.left), node, context);
+  if (targetNode.kind === "property" || (target.kind === "index" && target.dict === true))
+    noteSharedMapWrite(node.span, context);
   return [
     {
       kind: "assign",
-      target: { kind: "variable", name: target },
+      target,
       operator: operator === "++" ? "+=" : "-=",
       value: { kind: "literal", value: 1 },
       span,
     },
   ];
+}
+
+function unsupportedPostfix(node: AstNode, context: LowerContext): IrStatement {
+  return unsupportedStatement(
+    context,
+    node,
+    "SX_UNSUPPORTED_POSTFIX",
+    "Only ++/-- statements on a variable, list element, or property are supported.",
+  );
 }
 
 function lowerCallStatement(
@@ -4787,7 +4816,14 @@ const STATIC_CONVERSIONS = new Map([
 function lowerForControlExpression(node: AstNode, context: LowerContext): IrStatement[] | null {
   if (node.kind === "declaration") return lowerDeclaration(node, node.span, context);
   if (node.kind === "binary") return lowerAssignment(node, node.span, context);
-  if (node.kind === "postfix") return lowerPostfix(node, node.span, context);
+  if (node.kind === "postfix" || node.kind === "prefix")
+    return lowerPostfix(node, node.span, context);
+  // An omitted part, or a bare variable as in `for (count; count > 0; count--)`, does nothing.
+  if (
+    node.kind === "variable" ||
+    node.groovyType === "org.codehaus.groovy.ast.expr.EmptyExpression"
+  )
+    return [];
   return null;
 }
 

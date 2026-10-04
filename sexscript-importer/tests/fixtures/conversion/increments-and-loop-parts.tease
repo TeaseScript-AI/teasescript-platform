@@ -1,0 +1,22 @@
+// A C-style loop may leave out its start or name the counter without a value; neither part does anything.
+let count = 3
+let turn = 0
+while count > 0 {
+  say "Count ${count}"
+  count -= 1
+}
+while turn < 2 {
+  say "Turn ${turn}"
+  turn += 1
+}
+// As a statement, a prefix increment changes the variable as a postfix one does.
+turn += 1
+// An increment may change a list element or a property.
+let tally = [0, 0, 0, 0]
+tally[turn] += 1
+tally[0] -= 1
+let stats = { score: 1 }
+// NOTE SX_SHARED_MAP_WRITE line 13: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+stats.score += 1
+say "Tally ${tally[3]} ${tally[0]}, score ${stats.score}"
+exit
