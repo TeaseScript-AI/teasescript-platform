@@ -2872,7 +2872,8 @@ Cleanup:
 
 A package consists of one or more `.tease` files. The fixed entry file is `main.tease`; a session starts at its top.
 Paths are relative to the package root and separate folders with `/`. A file may start with a header that describes
-and tags it ([§41](#41-headers-and-tags)).
+and tags it, and `goto tagged`, `call tagged`, and `findScripts` pick files by those tags
+([§41](#tagged-selection)).
 
 Go to another file, from its top or at a label:
 
@@ -4425,6 +4426,12 @@ showImage tagged ("bedroom" or "bathroom") and not "outdoor"
 showImage tagged "bedroom", none: ["outdoor"]
 let photos = findImages(where: "bedroom" and "punishment" >= minimum)
 if photos.length > 0 { showImage photos.random }
+
+goto tagged "punishment", none: ["intense"]                 // a file by the tags of its header
+goto tagged "punishment" > 3 and not "public"
+call tagged "chastity", from: "modules/*.tease"
+let pool = findScripts(from: "modules/*.tease", where: "punishment" > 3)
+if pool.length > 0 { goto (pool.random) } else { goto "fallback.tease" }
 ```
 
 - After `tagged` and in the `where:` argument, a quoted tag name tests whether a candidate has the tag. A quoted name
@@ -4438,9 +4445,18 @@ if photos.length > 0 { showImage photos.random }
   passes every candidate. They join with `and` too, and take computed names: `findImages(all: wanted)`.
 - `findImages` takes the same parts as named arguments `where:`, `all:`, `none:`, and `any:`, and returns the paths of
   all matching images in path order, as a `string[]`, which may be empty. Without arguments it returns every image.
+- `goto tagged`, `call tagged`, and `fallback tagged` pick a file of the project by the tags of its header
+  ([File header](#file-header)) and enter it at its top, as `goto (reference)` does
+  ([§29](#29-script-files-and-paths)). Every file is a candidate, `main.tease` and the current file too. The option
+  `from:` limits the candidates to a path or glob written out in quotes, as for `goto`; one that matches no file is a
+  compile error. `findScripts` takes `where:`, `all:`, `none:`, `any:`, and `from:` as named arguments and returns
+  `script` references to all matching files in project order, as a `script[]`. A `fallback tagged` picks its file
+  when the statement runs.
 - Comparison bounds and tag lists are evaluated once, in written order, before any candidate is matched. Matching draws
-  no random number. `showImage tagged` draws once from the session random generator, and restoring a checkpoint never
-  draws again.
+  no random number. A pick (`showImage tagged`, `goto tagged`, `call tagged`, `fallback tagged`) draws once from the
+  session random generator, and restoring a checkpoint never draws again.
+- A `goto tagged`, `call tagged`, or `fallback tagged` whose tag tests and literal tag lists match no file, within its
+  `from:`, is a compile error: every file's header is known when the project compiles.
 - When the compilation is given the package images and no file takes photos with tags, a `showImage tagged` whose tag
   tests and literal tag lists match none of them is a compile error; comparisons and computed lists are not evaluated
   for this. Any other pick that finds no image is a runtime error.

@@ -4,6 +4,7 @@ import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnos
 import { compileStableProject, type InstructionPlan } from "./compiler/compile-program.js";
 import { parse } from "./parser.js";
 import type { ScriptHeader } from "./script-header.js";
+import type { Tag } from "./tags.js";
 import { validateCapturedInstructionPlan } from "./plan/validation.js";
 import { markValidatedImmutableInstructionPlan } from "./plan/validated-immutable.js";
 import { planLocationToSourceSpan } from "./plan/source-location.js";
@@ -25,6 +26,7 @@ export interface CompileOptions extends SemanticValidationOptions {
 interface ProjectCheckOptions extends CompileOptions {
   readonly imageCatalog?: readonly PlanImage[];
   readonly capturesTaggedPhotos?: boolean;
+  readonly scriptCatalog?: readonly { readonly path: string; readonly tags: readonly Tag[] }[];
 }
 
 export interface CompilationResult {
@@ -112,6 +114,10 @@ function compileProjectFiles(
   const checked = checkProject(files, {
     ...validationOptions,
     capturesTaggedPhotos: capturesTaggedPhotos(files.map((file) => file.result.program)),
+    scriptCatalog: files.map((file) => ({
+      path: file.result.path,
+      tags: headerTags(file.result.header),
+    })),
   });
   if (inventory.diagnostics.length === 0 && !hasErrors(catalog.diagnostics) && checked !== null) {
     if (checked.reachesExit) {
@@ -356,6 +362,7 @@ function lowerProject(
         path: file.result.path,
         program: file.result.program,
         ...(file.picks === undefined ? {} : { picks: file.picks }),
+        tags: headerTags(file.result.header),
       })),
       typeChecks,
       (fileIndex) => {
@@ -496,4 +503,9 @@ function compiledPlanValidationDiagnostic(
 
 function hasErrors(diagnostics: readonly Diagnostic[]): boolean {
   return diagnostics.some((diagnostic) => diagnostic.severity === DiagnosticSeverity.Error);
+}
+
+/** A file's header tags in name order, the form the plan and the script tag queries use. */
+function headerTags(header: ScriptHeader | null): readonly Tag[] {
+  return [...(header?.tags ?? [])].sort((left, right) => (left.name < right.name ? -1 : 1));
 }

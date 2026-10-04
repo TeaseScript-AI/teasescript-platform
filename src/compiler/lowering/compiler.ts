@@ -2556,6 +2556,7 @@ function tagQueryPlan(
   return {
     kind: "tagQuery",
     catalog: expression.catalog,
+    from: expression.from?.pattern ?? null,
     select: expression.select,
     operands: [...operands],
     steps: expression.steps.map((step) =>

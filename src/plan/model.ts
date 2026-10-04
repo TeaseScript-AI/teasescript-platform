@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 51;
+export const INSTRUCTION_PLAN_VERSION = 52;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -51,6 +51,8 @@ export interface PlanFile {
   readonly endInstruction: number;
   /** The labels of the file's outer scope, in source order, each at the root instruction where it stands. */
   readonly labels: readonly PlanLabel[];
+  /** The tags of the file's header, each name once, in name order, which script tag queries search (ADR 0023). */
+  readonly tags: readonly PlanTag[];
 }
 
 export interface PlanLabel {
@@ -755,7 +757,10 @@ export interface StorageLoadExpressionPlan extends ExpressionPlanBase {
  */
 export interface TagQueryExpressionPlan extends ExpressionPlanBase {
   readonly kind: "tagQuery";
-  readonly catalog: "images";
+  /** Images give their paths; scripts give script references to the files, entered at their top. */
+  readonly catalog: "images" | "scripts";
+  /** A script query's `from:` path or glob, which limits the candidate files; `null` for all of them. */
+  readonly from: string | null;
   readonly select: "random" | "list";
   readonly operands: readonly ExpressionPlan[];
   /** The query in postfix order; without steps every image matches. */

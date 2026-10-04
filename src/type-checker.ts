@@ -23,7 +23,13 @@ import type {
   TransferTarget,
   TypeAnnotation,
 } from "./ast.js";
-import { globMatches, MAIN_FILE_PATH } from "./project-paths.js";
+import {
+  globMatches,
+  isPathGlob,
+  MAIN_FILE_PATH,
+  packageGlobProblem,
+  packagePathProblem,
+} from "./project-paths.js";
 import { compileChild, runCompileTask, type CompileTask } from "./compiler/continuation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import {
@@ -37,7 +43,7 @@ import {
   isValidInteractionPrefill,
   numberAnswerText,
 } from "./interaction-answers.js";
-import type { PlanImage, TypeCheckPlan } from "./plan/model.js";
+import type { PlanImage, PlanTag, TypeCheckPlan } from "./plan/model.js";
 import { isTakePhotoCall } from "./capture-call.js";
 import { evaluateTagSteps, passesTagList } from "./tag-query.js";
 import { addTag, normalizeTagName, readTagText, type Tag } from "./tags.js";
@@ -151,6 +157,8 @@ export interface TypeCheckOptions {
   readonly imageCatalog?: readonly PlanImage[];
   /** Whether some file of the project takes photos with tags, which join the catalog at runtime. */
   readonly capturesTaggedPhotos?: boolean;
+  /** The project's files with the tags of their headers, in project order, which script tag queries search. */
+  readonly scriptCatalog?: readonly { readonly path: string; readonly tags: readonly PlanTag[] }[];
 }
 
 export interface TypeCheckResult {
@@ -198,6 +206,7 @@ const typeCode = {
   impossibleCase: "TSV049",
   emptyTagQuery: "TST002",
   invalidCaptureTag: "TST005",
+  invalidTagQueryFrom: "TST006",
   randomStartValue: "TSV055",
 } as const;
 
@@ -400,6 +409,10 @@ class TypeChecker {
 
   readonly #capturesTaggedPhotos: boolean;
 
+  /** The project's files and their tags by name; `null` when the check was not given them. */
+  readonly #scriptCatalog:
+    readonly { readonly path: string; readonly tags: ReadonlyMap<string, number | null> }[] | null;
+
   /** The project's names: host globals, globals, speakers, and global functions. */
   readonly #project = new Scope(null);
 
@@ -527,6 +540,11 @@ class TypeChecker {
     this.fileDiagnostics = Array.from({ length: files }, () => []);
     this.#widened = widened;
     this.#capturesTaggedPhotos = options.capturesTaggedPhotos ?? false;
+    this.#scriptCatalog =
+      options.scriptCatalog?.map((file) => ({
+        path: file.path,
+        tags: new Map(file.tags.map((tag) => [tag.name, tag.value])),
+      })) ?? null;
     this.#imageTags =
       options.imageCatalog?.map(
         (image) => new Map(image.tags.map((tag) => [tag.name, tag.value])),
@@ -2474,7 +2492,12 @@ class TypeChecker {
           }
         }
         this.#checkTagQueryCanMatch(expression);
-        return expression.select === "list" ? { kind: "list", element: STRING_TYPE } : STRING_TYPE;
+        // An image is its path; a file is a script reference to its top.
+        return expression.select === "list"
+          ? { kind: "list", element: expression.catalog === "scripts" ? SCRIPT_TYPE : STRING_TYPE }
+          : expression.catalog === "scripts"
+            ? SCRIPT_TYPE
+            : STRING_TYPE;
     }
   }
 
@@ -2514,9 +2537,18 @@ class TypeChecker {
    * (ADR 0023). Comparisons and other values count as possibly true: this check does no value reasoning.
    */
   #checkTagQueryCanMatch(query: TagQueryExpression): void {
-    // A photo taken with tags may match at runtime, so only a project without them can be proven empty.
-    if (query.select !== "random" || this.#imageTags === null || this.#capturesTaggedPhotos) return;
-    // Each literal tag list is read once for all images.
+    // A script query's from: is checked for lists too.
+    const scripts = query.catalog === "scripts" ? this.#scriptCandidates(query) : null;
+    if (query.select !== "random") return;
+    const candidates =
+      query.catalog === "scripts"
+        ? scripts
+        : // A photo taken with tags may match at runtime, so only a project without them can be proven empty.
+          this.#capturesTaggedPhotos
+          ? null
+          : this.#imageTags;
+    if (candidates === null) return;
+    // Each literal tag list is read once for all candidates.
     const lists = new Map<TagQueryStep, readonly string[] | null>();
     for (const step of query.steps) {
       if (step.kind === "tagList") lists.set(step, literalTagNames(step.value));
@@ -2528,18 +2560,51 @@ class TypeChecker {
       return names === null ? null : passesTagList(step.option, names, tags);
     };
     if (
-      this.#imageTags.some(
-        (tags) => evaluateTagSteps(query.steps, (step) => test(step, tags)) !== false,
-      )
+      candidates.some((tags) => evaluateTagSteps(query.steps, (step) => test(step, tags)) !== false)
     )
       return;
     this.#report(
       typeCode.emptyTagQuery,
-      this.#imageTags.length === 0
-        ? "The package has no images to pick from."
-        : "No image in the package has these tags.",
+      query.catalog === "scripts"
+        ? "No file in the project has these tags."
+        : candidates.length === 0
+          ? "The package has no images to pick from."
+          : "No image in the package has these tags.",
       query.span,
     );
+  }
+
+  /**
+   * The tags of the files a script query may pick: every file, or those its `from:` names. Reports a `from:` that is
+   * not a package path or glob, or matches no file; `null` when the project's files are not known.
+   */
+  #scriptCandidates(query: TagQueryExpression): ReadonlyMap<string, number | null>[] | null {
+    if (this.#scriptCatalog === null) return null;
+    const from = query.from;
+    if (from === null) return this.#scriptCatalog.map((file) => file.tags);
+    const problem = isPathGlob(from.pattern)
+      ? packageGlobProblem(from.pattern)
+      : packagePathProblem(from.pattern);
+    const matched =
+      problem === null
+        ? new Set(
+            globMatches(
+              from.pattern,
+              this.#scriptCatalog.map((file) => file.path),
+            ),
+          )
+        : new Set<string>();
+    if (problem !== null || matched.size === 0) {
+      this.#report(
+        typeCode.invalidTagQueryFrom,
+        problem === null
+          ? `from: '${from.pattern}' matches no file of the project.`
+          : `from: '${from.pattern}' is not a package file path or glob: ${problem}.`,
+        from.span,
+      );
+      return null;
+    }
+    return this.#scriptCatalog.filter((file) => matched.has(file.path)).map((file) => file.tags);
   }
 
   /** The value of a test or logical expression used as a value: the flows of both outcomes join afterwards. */

@@ -776,9 +776,15 @@ class Parser {
         span: spanFrom(keyword.span, none.span),
       });
     }
+    const tagged = this.#checkIdentifier("tagged");
     const target = yield* parseChild(this.#parseTransferTarget(keyword));
     if (target === null) {
-      this.#synchronizeStatement();
+      // A statement at the start of a continued line, after a trailing comma or option name, is kept.
+      if (tagged && this.#previous().kind === TokenKind.Newline && this.#atStatementStart()) {
+        this.#recoveredAtStatementBoundary = true;
+      } else {
+        this.#synchronizeStatement();
+      }
       return null;
     }
     const span = spanFrom(keyword.span, target.span);
@@ -793,6 +799,12 @@ class Parser {
   }
 
   *#parseTransferTarget(keyword: Token): ParseTask<TransferTarget | null> {
+    // `goto tagged "punishment"` picks a file by its tags, a target computed when the statement runs (ADR 0023).
+    if (this.#checkIdentifier("tagged")) {
+      const query = this.#parseTaggedQuery("scripts");
+      if (query === null) return null;
+      return Object.freeze({ kind: "scriptTarget", expression: query, span: copySpan(query.span) });
+    }
     // A computed target is a `script(...)` call or a grouped expression, as in `goto (next)`.
     if (
       this.#check(TokenKind.LeftParenthesis) ||
@@ -1059,7 +1071,7 @@ class Parser {
     )
       return null;
     const tagged = this.#checkIdentifier("tagged");
-    const image = tagged ? this.#parseTaggedImage() : this.#parseExpression();
+    const image = tagged ? this.#parseTaggedQuery("images") : this.#parseExpression();
     if (image === null) {
       if (!tagged) {
         this.#reportInsertion(
@@ -1083,20 +1095,24 @@ class Parser {
   }
 
   /**
-   * `showImage tagged "bedroom", "punishment" > 3, none: ["outdoor"]`: comma-separated tag predicates, then `all:`,
-   * `none:`, or `any:` options. A matching image needs all of them (ADR 0023).
+   * `showImage tagged "bedroom", "punishment" > 3, none: ["outdoor"]` or `goto tagged "punishment", from: "rooms/*.tease"`:
+   * comma-separated tag predicates, then `all:`, `none:`, or `any:` options, and for scripts `from:`. A candidate
+   * needs all of them (ADR 0023).
    */
-  #parseTaggedImage(): TagQueryExpression | null {
+  #parseTaggedQuery(catalog: TagQueryExpression["catalog"]): TagQueryExpression | null {
     const tagged = this.#advance();
+    const example =
+      catalog === "images" ? 'showImage tagged "bedroom"' : 'goto tagged "punishment"';
     if (this.#check(TokenKind.Newline) || this.#check(TokenKind.EndOfFile)) {
       this.#reportInsertion(
         parserDiagnosticCode.invalidTagQuery,
-        "Expected a tag after 'tagged', such as showImage tagged \"bedroom\".",
+        `Expected a tag after 'tagged', such as ${example}.`,
       );
       return null;
     }
     const filters: TagQueryStep[][] = [];
     const options = new Set<string>();
+    let from: TagQueryExpression["from"] = null;
     let end = tagged.span;
     do {
       this.#skipNewlines();
@@ -1110,16 +1126,27 @@ class Parser {
         this.#advance();
         const value = runParse(this.#parseColonValueTask(true));
         if (value === null) return null;
-        const filter = this.#tagListFilter(name.lexeme, name.span, value, options, false);
+        end = value.span;
+        if (catalog === "scripts" && name.lexeme === "from") {
+          from = this.#tagQueryFrom(value, name.span, options);
+          if (from === null) return null;
+          continue;
+        }
+        const filter = this.#tagListFilter(
+          name.lexeme,
+          name.span,
+          value,
+          options,
+          `tagged takes all:, none:, ${catalog === "scripts" ? "any:, and from:" : "and any:"}.`,
+        );
         if (filter === null) return null;
         filters.push([filter]);
-        end = value.span;
         continue;
       }
       if (options.size > 0) {
         this.#reportToken(
           parserDiagnosticCode.invalidTagQuery,
-          "Write the tags before all:, none:, or any:.",
+          `Write the tags before all:, none:, ${catalog === "scripts" ? "any:, or from:" : "or any:"}.`,
           this.#peek(),
         );
         return null;
@@ -1131,32 +1158,36 @@ class Parser {
       filters.push(steps);
       end = predicate.span;
     } while (this.#match(TokenKind.Comma));
-    return tagQuery("random", filters, spanFrom(tagged.span, end));
+    return tagQuery(catalog, "random", filters, from, spanFrom(tagged.span, end));
   }
 
   /**
-   * `findImages(where: …, all: …, none: …, any: …)` after its `(`: the list of matching images (ADR 0023). After a
-   * reported error it is the plain call, so the surrounding expression still parses.
+   * `findImages(where: …, all: …, none: …, any: …)` or `findScripts(…, from: …)` after its `(`: the list of matches
+   * (ADR 0023). After a reported error it is the plain call, so the surrounding expression still parses.
    */
-  *#finishFindImages(
+  *#finishFindQuery(
     callee: Expression,
     left: Token,
+    catalog: TagQueryExpression["catalog"],
   ): ParseTask<TagQueryExpression | CallExpression> {
     const call = yield* parseChild(this.#finishCall(callee, left));
+    const name = catalog === "images" ? "findImages" : "findScripts";
+    const takes = `${name} takes where:, all:, none:, ${catalog === "scripts" ? "any:, and from:" : "and any:"}.`;
     const filters: TagQueryStep[][] = [];
     const options = new Set<string>();
+    let from: TagQueryExpression["from"] = null;
     for (const argument of call.arguments) {
       if (argument.kind === "positionalArgument") {
         this.#reportSpan(
           parserDiagnosticCode.invalidTagQuery,
-          "findImages takes named arguments: where:, all:, none:, and any:.",
+          `${name} takes named arguments: ${takes.slice(name.length + " takes ".length)}`,
           argument.span,
         );
         return call;
       }
-      const name = argument.name.name;
-      if (name === "where") {
-        if (options.has(name)) {
+      const option = argument.name.name;
+      if (option === "where") {
+        if (options.has(option)) {
           this.#reportSpan(
             parserDiagnosticCode.invalidTagQuery,
             "The option 'where' appears more than once; combine the tags with and.",
@@ -1164,17 +1195,61 @@ class Parser {
           );
           return call;
         }
-        options.add(name);
+        options.add(option);
         const steps = this.#tagPredicate(argument.value);
         if (steps === null) return call;
         filters.push(steps);
         continue;
       }
-      const filter = this.#tagListFilter(name, argument.name.span, argument.value, options, true);
+      if (catalog === "scripts" && option === "from") {
+        from = this.#tagQueryFrom(argument.value, argument.name.span, options);
+        if (from === null) return call;
+        continue;
+      }
+      const filter = this.#tagListFilter(
+        option,
+        argument.name.span,
+        argument.value,
+        options,
+        takes,
+      );
       if (filter === null) return call;
       filters.push([filter]);
     }
-    return tagQuery("list", filters, call.span);
+    return tagQuery(catalog, "list", filters, from, call.span);
+  }
+
+  /** A script query's `from:`: a path or glob written out in quotes, as for `goto` (ADR 0022). */
+  #tagQueryFrom(
+    value: Expression,
+    nameSpan: SourceSpan,
+    options: Set<string>,
+  ): TagQueryExpression["from"] {
+    if (options.has("from")) {
+      this.#reportSpan(
+        parserDiagnosticCode.invalidTagQuery,
+        "The option 'from' appears more than once.",
+        nameSpan,
+      );
+      return null;
+    }
+    options.add("from");
+    if (
+      value.kind !== "stringLiteral" ||
+      value.form !== "singleLine" ||
+      value.parts.some((part) => part.kind !== "stringText")
+    ) {
+      this.#reportSpan(
+        parserDiagnosticCode.invalidTagQuery,
+        'from: takes a file path or glob written out in quotes, such as from: "modules/*.tease".',
+        value.span,
+      );
+      return null;
+    }
+    return Object.freeze({
+      pattern: value.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join(""),
+      span: copySpan(value.span),
+    });
   }
 
   #tagPredicate(predicate: Expression): TagQueryStep[] | null {
@@ -1189,12 +1264,12 @@ class Parser {
     nameSpan: SourceSpan,
     value: Expression,
     options: Set<string>,
-    takesWhere: boolean,
+    takes: string,
   ): TagQueryStep | null {
     if (!isTagListOption(name)) {
       this.#reportSpan(
         parserDiagnosticCode.invalidTagQuery,
-        `Unknown option '${name}'. ${takesWhere ? "findImages takes where:, " : "tagged takes "}all:, none:, and any:.`,
+        `Unknown option '${name}'. ${takes}`,
         nameSpan,
       );
       return null;
@@ -2801,9 +2876,18 @@ class Parser {
         continue;
       }
       if (this.#match(TokenKind.LeftParenthesis)) {
-        if (expression.kind === "identifier" && expression.name === "findImages") {
+        if (
+          expression.kind === "identifier" &&
+          (expression.name === "findImages" || expression.name === "findScripts")
+        ) {
           expression = yield* parseChild(
-            this.#withinDelimiters(this.#finishFindImages(expression, this.#previous())),
+            this.#withinDelimiters(
+              this.#finishFindQuery(
+                expression,
+                this.#previous(),
+                expression.name === "findImages" ? "images" : "scripts",
+              ),
+            ),
           );
           continue;
         }
@@ -3884,8 +3968,10 @@ function mediaHandlersSpan(handlers: MediaHandlers): SourceSpan {
 
 /** A query whose candidates must pass every filter, each a complete postfix predicate. */
 function tagQuery(
+  catalog: TagQueryExpression["catalog"],
   select: TagQueryExpression["select"],
   filters: readonly (readonly TagQueryStep[])[],
+  from: TagQueryExpression["from"],
   span: SourceSpan,
 ): TagQueryExpression {
   const steps: TagQueryStep[] = [];
@@ -3895,9 +3981,10 @@ function tagQuery(
   });
   return Object.freeze({
     kind: "tagQueryExpression",
-    catalog: "images",
+    catalog,
     select,
     steps: Object.freeze(steps),
+    from,
     span: copySpan(span),
   });
 }

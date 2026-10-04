@@ -25,6 +25,7 @@ import type {
 } from "../plan/model.js";
 import { compareTagValue, evaluateTagSteps, passesTagList } from "../tag-query.js";
 import { normalizeTagName } from "../tags.js";
+import { globMatches, isPathGlob } from "../project-paths.js";
 import { escapeMarkup } from "../message-markup.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import { CORE_RUNTIME_BUILTINS } from "../protected-names.js";
@@ -1941,14 +1942,38 @@ export class Evaluator {
         if (step.kind === "tagList") return passesTagList(step.option, lists.get(step)!, tags);
         return null;
       });
-    // The package images in path order, then the photos taken with tags in capture order.
-    const found: string[] = [];
-    for (const image of this.plan.images) if (matches(imageTags(image))) found.push(image.path);
-    for (const image of this.snapshot.capturedImages) {
-      if (matches(imageTags(image))) found.push(image.reference);
+    const found: SerializableRuntimeValue[] = [];
+    if (query.catalog === "scripts") {
+      // The project's files in project order, those `from:` names, each as a reference to its top.
+      const named =
+        query.from === null
+          ? null
+          : new Set(
+              isPathGlob(query.from)
+                ? globMatches(
+                    query.from,
+                    this.plan.files.map((file) => file.path),
+                  )
+                : [query.from],
+            );
+      for (const file of this.plan.files) {
+        if ((named === null || named.has(file.path)) && matches(imageTags(file)))
+          found.push({ kind: "script", path: file.path, label: null });
+      }
+    } else {
+      // The package images in path order, then the photos taken with tags in capture order.
+      for (const image of this.plan.images) if (matches(imageTags(image))) found.push(image.path);
+      for (const image of this.snapshot.capturedImages) {
+        if (matches(imageTags(image))) found.push(image.reference);
+      }
     }
     if (query.select === "list") return { kind: "list", items: found };
-    if (found.length === 0) throw fault("TSR082", "No image has these tags.", query.span);
+    if (found.length === 0)
+      throw fault(
+        "TSR082",
+        query.catalog === "scripts" ? "No file has these tags." : "No image has these tags.",
+        query.span,
+      );
     return found[Math.floor(this.#findRandom(query.span) * found.length)]!;
   }
 
