@@ -103,6 +103,8 @@ test("an unannotated integer variable is a number when one of its assignments ca
     (name: string) => `${name} + 1`,
     (name: string) => `choose ${name}, 1`,
     (name: string) => `{ n: ${name} }.n`,
+    (name: string) => `choose { text: ${name} }`,
+    (name: string) => `set[${name}].first`,
     (name: string) => `read_${name}()`,
   ]) {
     const functions = names.map((name) => `function read_${name} {\n    return ${name}\n}`);
@@ -116,6 +118,12 @@ test("an unannotated integer variable is a number when one of its assignments ca
         copy("v"),
       );
   }
+  // Functions that call each other many times share their sources once.
+  const calls = Array.from(
+    { length: 24 },
+    (_, index) => `function f${index + 1} {\n    return f${index}() + f${index}()\n}`,
+  );
+  assert.deepEqual(codes(`let v = 0\nfunction f0 {\n    return v\n}\n${calls.join("\n")}`), []);
   // A variable whose first value may be null widens to `number?`, and a use through arithmetic names the assignment.
   const nullFirst =
     "let items = [10, 20]\nlet first: integer? = 0\nlet i = null\ni = first\ni = 0.5\n";

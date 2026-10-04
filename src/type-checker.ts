@@ -714,13 +714,14 @@ class TypeChecker {
    * function whose result type is inferred. A built-in such as `round(...)` stays whole whatever its argument is.
    */
   #numericSources(expression: Expression): Declaration[] {
-    const sources: Declaration[] = [];
+    // Each variable once: calls of functions that call each other would otherwise repeat their sources.
+    const sources = new Set<Declaration>();
     const pending = [expression];
     while (pending.length > 0) {
       const node = unwrap(pending.pop()!);
       const read = this.#reads.get(node);
       if (read !== undefined) {
-        sources.push(read);
+        sources.add(read);
         continue;
       }
       switch (node.kind) {
@@ -736,37 +737,44 @@ class TypeChecker {
           break;
         case "listLiteral":
         case "setLiteral":
-          pending.push(...node.elements);
+          for (const element of node.elements) pending.push(element);
           break;
-        case "objectLiteral":
-          // A choice object returns its value.
-          for (const property of node.properties)
-            if (property.name.name === "value") pending.push(property.value);
+        case "objectLiteral": {
+          // A choice object returns its value, or else its text.
+          const returned =
+            node.properties.find((property) => property.name.name === "value") ??
+            node.properties.find((property) => property.name.name === "text");
+          if (returned !== undefined) pending.push(returned.value);
           break;
+        }
         case "propertyAccessExpression": {
           const object = unwrap(node.object);
           if (object.kind === "objectLiteral")
             for (const property of object.properties)
               if (property.name.name === node.property.name) pending.push(property.value);
-          if (object.kind === "listLiteral" && LIST_ELEMENT_READS.has(node.property.name))
-            pending.push(...object.elements);
+          if (
+            (object.kind === "listLiteral" || object.kind === "setLiteral") &&
+            LIST_ELEMENT_READS.has(node.property.name)
+          )
+            for (const element of object.elements) pending.push(element);
           break;
         }
         case "indexExpression": {
           const object = unwrap(node.object);
-          if (object.kind === "listLiteral") pending.push(...object.elements);
+          if (object.kind === "listLiteral")
+            for (const element of object.elements) pending.push(element);
           break;
         }
         case "callExpression": {
           const fn = this.#calls.get(node);
-          if (fn !== undefined) sources.push(...fn.sources);
+          if (fn !== undefined) for (const source of fn.sources) sources.add(source);
           break;
         }
         default:
           break;
       }
     }
-    return sources;
+    return [...sources];
   }
 
   /** Why a value is a number when a non-whole number widened a variable it depends on, naming that assignment. */
@@ -899,7 +907,11 @@ class TypeChecker {
     if (continues) context.returnsNull = true;
     fn.result = declared ?? this.#inferredResult(context);
     if (declared === null)
-      fn.sources = context.returns.flatMap((returned) => this.#numericSources(returned.expression));
+      fn.sources = [
+        ...new Set(
+          context.returns.flatMap((returned) => this.#numericSources(returned.expression)),
+        ),
+      ];
     if (
       declared !== null &&
       continues &&
