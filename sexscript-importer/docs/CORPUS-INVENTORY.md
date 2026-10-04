@@ -24,7 +24,7 @@ explicit unsupported nodes: `EmptyExpression` (29, a declaration without initial
 
 ## Feasibility snapshot
 
-Measured on 2026-10-04 at importer commit `f81fd742`, after merging `main` at `540b8f2e` (since `337388d2`: `dict`
+Measured on 2026-10-04 at importer commit `125a2ecf`, after merging `main` at `540b8f2e` (since `337388d2`: `dict`
 #555, date and time #551, #554, #556, #561, and #563, element widening #538, and the conformance fixes #567; before
 that the type pass #526, runtime type checks #520, unions #530 and #535, text operations #518, `sort` #546,
 `min`/`max` #550, `askInteger` #548, `switch` #529 and #557, the `showButton` timeout #534, and `load` defaults
