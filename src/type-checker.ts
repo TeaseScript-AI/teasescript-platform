@@ -480,7 +480,9 @@ class TypeChecker {
     const rootStatements = program.statements.filter(
       (statement) => statement.kind !== "functionDeclaration",
     );
-    if (runCompileTask(this.#statementsTask(rootStatements, this.#root))) {
+    // A file of declarations only runs nothing on its own, so it has no way to its end.
+    const continues = runCompileTask(this.#statementsTask(rootStatements, this.#root));
+    if (rootStatements.length > 0 && continues) {
       this.#report(
         "TSV052",
         "The script can run past the end of this file. Add exit where the session should finish, or end to return to the file that called this one.",

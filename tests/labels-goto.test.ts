@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSource } from "../src/compiler.js";
+import { compileProject, compileSource } from "../src/compiler.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
@@ -145,6 +145,14 @@ test("every file says how it ends, and the project reaches an exit", () => {
     "TSV052 The script can run past the end of this file. Add exit where the session should finish, or end to return to the file that called this one.";
   const format = ([code, , message]: [string, number, string]) => `${code} ${message}`;
   assert.deepEqual(diagnostics('say "hi"').map(format), [runsOff]);
+  // A file of declarations only runs nothing, so it needs no ending; the project still needs an exit.
+  assert.deepEqual(
+    compileProject([
+      { path: "main.tease", source: 'say "hi"\nexit' },
+      { path: "helpers.tease", source: 'function helper {\n    say "helping"\n}' },
+    ]).diagnostics,
+    [],
+  );
   assert.deepEqual(diagnostics('let n = 1\nif n > 0 { exit }\nsay "maybe"').map(format), [runsOff]);
   // Branches that all end need nothing after them, and a label can be reached after a transfer.
   assert.deepEqual(

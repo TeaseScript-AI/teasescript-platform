@@ -2903,8 +2903,9 @@ Behavior:
   fallback is never implicit.
 - `fallback` may run any number of times, anywhere, including inside `if`; the latest one executed wins. It is session
   state and is checkpointed. `fallback none` clears it again.
-- A reachable end of a file without `end`, `exit`, or a transfer is a compile error in every file. Branches that all
-  end or transfer need nothing after them:
+- A reachable end of a file without `end`, `exit`, or a transfer is a compile error in every file. A file of
+  declarations only runs nothing on its own and needs no ending; a `goto` into such a file is a compile error. Branches
+  that all end or transfer need nothing after them:
 
 ```text
 if passed {
