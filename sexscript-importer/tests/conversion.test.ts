@@ -234,6 +234,7 @@ test(
           'def weights = [1, 2]; weights = [3, "four"]',
           "switch (getRandom(9)) { case [1..3, 5]: show('hit'); break; case 7: show('seven') }",
           'def code = getString("Code?", 42)',
+          'def answer = getString("Settings?", [level: 2])',
           "",
         ].join("\n"),
       );
@@ -248,8 +249,9 @@ test(
       assert.match(output, /^\/\/ TODO SX_TYPE_CHANGE line 10: 'weights' holds integer values/mu);
       // A list case holding a range keeps Groovy's membership test.
       assert.match(output, /\[1\.\.=3, 5\]\.contains\(/u);
-      // Legacy showed a number default as text.
+      // Legacy showed a number default as text; a map default has no text form.
       assert.match(output, /^let code = askText default: "42"$/mu);
+      assert.match(output, /^\/\/ TODO SX_INPUT_PREFILL_VALUE line 13: /mu);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

@@ -6138,16 +6138,37 @@ function lowerSingleInput(
       `${name}() computes its pre-filled value with side effects, which legacy ran before showing the question; the question becomes a say before the input, so compute the value explicitly before the question.`,
     );
   }
-  if (prefill !== null) notePrefill(name, defaultNode!, node, context);
-  // Legacy text input showed `String.valueOf(default)`; a text default is text in TeaseScript too (null shows "null").
-  const textPrefill =
-    prefill === null ||
-    name !== "getString" ||
-    onlyOf(inferType(defaultNode!, context.types), STRING)
-      ? prefill
-      : prefill.kind === "literal"
-        ? { kind: "literal" as const, value: String(prefill.value) }
-        : templateOrLiteral([{ value: prefill }]);
+  // Legacy text input showed `String.valueOf(default)`; a text default is text in TeaseScript too (null shows "null"),
+  // and a list shows as Groovy printed it, `[a, b]`.
+  const defaultType = defaultNode === undefined ? UNKNOWN : inferType(defaultNode, context.types);
+  let textPrefill = prefill;
+  if (
+    prefill !== null &&
+    name === "getString" &&
+    defaultType !== UNKNOWN &&
+    (defaultType & (LIST | OBJECT)) !== 0
+  ) {
+    const parts = onlyOf(defaultType, LIST | NULL) ? listText(defaultNode!, context) : undefined;
+    if (parts === null) return null;
+    if (parts === undefined) {
+      return unsupportedExpression(
+        context,
+        node,
+        "SX_INPUT_PREFILL_VALUE",
+        `${name}() prefilled its field with this map or list as Groovy printed it; ` +
+          "a TeaseScript text default has no such form, so build the default text explicitly.",
+      );
+    }
+    textPrefill = templateOrLiteral(parts);
+  } else {
+    if (prefill !== null) notePrefill(name, defaultNode!, node, context);
+    if (prefill !== null && name === "getString" && !onlyOf(defaultType, STRING)) {
+      textPrefill =
+        prefill.kind === "literal"
+          ? { kind: "literal" as const, value: String(prefill.value) }
+          : templateOrLiteral([{ value: prefill }]);
+    }
+  }
   if (name === "getInteger") {
     // Accepted V30 integer input; compact syntax exists only for text and number input. A null legacy
     // message kept the current text, so the field gets no message of its own.
