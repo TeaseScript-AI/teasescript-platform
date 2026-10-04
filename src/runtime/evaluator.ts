@@ -883,12 +883,25 @@ export class Evaluator {
     return speaker;
   }
 
+  /** A speaker's name or title as shown text, like any other shown value, or `null` when it is not set. */
+  #speakerText(speaker: RuntimeSpeakerSnapshot, name: string, span: SourceSpan): string | null {
+    const value = speaker.properties.find((property) => property.name === name)?.value;
+    if (
+      value === undefined ||
+      value === null ||
+      typeof value === "string" ||
+      !isVisibleScalar(value)
+    )
+      return optionalSpeakerString(speaker, name, span);
+    return visibleText(value, span, this.snapshot.temporalContext);
+  }
+
   public outputSpeaker(
     speaker: RuntimeSpeakerSnapshot,
     span: SourceSpan,
     events: InterpreterEvent[],
   ): OutputSpeaker {
-    const explicit = optionalSpeakerString(speaker, "displayName", span);
+    const explicit = this.#speakerText(speaker, "displayName", span);
     let displayName: string;
     let fallback = false;
     if (explicit !== null) {
@@ -902,10 +915,9 @@ export class Evaluator {
       displayName = explicit;
     } else {
       const derived = [
-        optionalSpeakerString(speaker, "title", span) ??
-          optionalSpeakerString(speaker, "shortTitle", span),
-        optionalSpeakerString(speaker, "firstName", span),
-        optionalSpeakerString(speaker, "lastName", span),
+        this.#speakerText(speaker, "title", span) ?? this.#speakerText(speaker, "shortTitle", span),
+        this.#speakerText(speaker, "firstName", span),
+        this.#speakerText(speaker, "lastName", span),
       ]
         .filter((part): part is string => part !== null && part.length > 0)
         .join(" ");

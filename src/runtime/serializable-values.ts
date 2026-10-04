@@ -292,7 +292,13 @@ function cloneSerializableNode(value: SerializableRuntimeValue): SerializableRun
     case "mediaHandle":
       return { ...value };
     case "set":
-      return { kind: "set", items: [...value.items] };
+      // Date and time members and durations are records of their own; each copy gets new ones.
+      return {
+        kind: "set",
+        items: value.items.map((item) =>
+          item !== null && typeof item === "object" ? { ...item } : item,
+        ),
+      };
     case "list":
       return { kind: "list", items: new Array(value.items.length) };
     case "object":
@@ -729,7 +735,8 @@ function setElementObjectProblem(value: Record<string, unknown>): string | null 
       ? null
       : "a malformed duration";
   const keys = typeof value.kind === "string" ? TEMPORAL_KEYS.get(value.kind) : undefined;
-  if (keys === undefined) return `a ${String(value.kind)} value`;
+  if (keys === undefined)
+    return typeof value.kind === "string" ? `a ${value.kind} value` : "a value without a kind";
   if (
     !hasOnlyKeys(value, keys) ||
     keys.some((key) => key !== "kind" && typeof value[key] !== "number")

@@ -563,12 +563,6 @@ export interface TemporalContext {
   readonly presentation: PresentationSettings;
 }
 
-/** UTC with locale-neutral presentation, for hosts that capture nothing, such as tests and command-line tools. */
-export const DEFAULT_TEMPORAL_CONTEXT: TemporalContext = Object.freeze({
-  zone: UTC_ZONE_RULES,
-  presentation: DEFAULT_PRESENTATION_SETTINGS,
-});
-
 /** Why `value` is not a valid temporal context, or `null`. */
 export function temporalContextProblem(value: unknown): string | null {
   if (!isRecord(value) || !hasExactKeys(value, ["zone", "presentation"]))
@@ -576,13 +570,16 @@ export function temporalContextProblem(value: unknown): string | null {
   return zoneRulesProblem(value.zone) ?? presentationSettingsProblem(value.presentation);
 }
 
+/** Contexts that `frozenTemporalContext` made: deeply frozen, so snapshots can share them. */
+const frozenContexts = new WeakSet<TemporalContext>();
+
 /**
- * A deeply frozen copy of a valid temporal context, or the context itself when it is already frozen. Frozen contexts
- * can be shared between snapshots instead of copying their zone transitions.
+ * A deeply frozen copy of a valid temporal context, or the context itself when this function froze it. Frozen contexts
+ * are shared between snapshots instead of copying their zone transitions.
  */
 export function frozenTemporalContext(context: TemporalContext): TemporalContext {
-  if (Object.isFrozen(context) && Object.isFrozen(context.zone.transitions)) return context;
-  return Object.freeze({
+  if (frozenContexts.has(context)) return context;
+  const frozen: TemporalContext = Object.freeze({
     zone: Object.freeze({
       name: context.zone.name,
       initialOffsetSeconds: context.zone.initialOffsetSeconds,
@@ -595,7 +592,15 @@ export function frozenTemporalContext(context: TemporalContext): TemporalContext
       dayPeriods: Object.freeze([...context.presentation.dayPeriods] as const),
     }),
   });
+  frozenContexts.add(frozen);
+  return frozen;
 }
+
+/** UTC with locale-neutral presentation, for hosts that capture nothing, such as tests and command-line tools. */
+export const DEFAULT_TEMPORAL_CONTEXT: TemporalContext = frozenTemporalContext({
+  zone: UTC_ZONE_RULES,
+  presentation: DEFAULT_PRESENTATION_SETTINGS,
+});
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Shared helpers

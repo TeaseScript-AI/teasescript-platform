@@ -13,6 +13,7 @@ import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
 import { DEFAULT_PRESENTATION_SETTINGS, type TemporalContext } from "../src/temporal.js";
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
+import { compileSource } from "../src/compiler.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
@@ -291,6 +292,12 @@ test("a checkpoint keeps temporal values and the captured context, and rejects m
     set.items.push({ kind: "date", year: 2026, month: 10, day: 4 });
   });
   corrupt((snapshot) => {
+    const set = binding(snapshot, "s");
+    assert.ok(set.kind === "set");
+    // A kind that is not text must be reported, not converted into text.
+    Object.assign(set.items[0]!, { kind: { toString: null, valueOf: null } });
+  });
+  corrupt((snapshot) => {
     snapshot.temporalContext.zone.transitions.reverse();
   });
   corrupt((snapshot) => {
@@ -343,4 +350,50 @@ test("a fresh session rejects a malformed temporal context", () => {
       () => createFreshRuntimeSnapshot(plan, JSON.parse(JSON.stringify({ temporalContext }))),
       RangeError,
     );
+});
+
+test("copies of a set hold their own date members", () => {
+  const compiled = compileSource(
+    'let original = set[toDate("2026-10-04")]\nlet copy = original\ninspect(copy)\nsay original\nsay copy',
+    { builtins: ["inspect"] },
+  );
+  assert.ok(compiled.plan !== null);
+  const result = run(compiled.plan, createImmediatePacingRuntimeSnapshot(compiled.plan), {
+    builtins: {
+      inspect: (call) => {
+        const set = call.positional[0];
+        assert.ok(typeof set === "object" && set !== null && set.kind === "set");
+        // The builtin receives its own copy, so changing it changes neither variable.
+        Object.assign(set.items[0]!, { day: 5 });
+        return null;
+      },
+    },
+  });
+  assert.deepEqual(sayTexts(result.events), ["[<date 2026-10-04>]", "[<date 2026-10-04>]"]);
+});
+
+test("a session keeps the context it started with, whatever the host does with its own copy", () => {
+  const context = structuredClone(AMSTERDAM);
+  const plan = compileValidPlan('let d = toDate("2026-10-04")\nwait 1 s\nsay d');
+  const waiting = run(
+    plan,
+    createImmediatePacingRuntimeSnapshot(plan, { temporalContext: context }),
+  );
+  Object.assign(context.presentation, { date: "{year}/{month}/{day}" });
+  const restored = deserializeCheckpoint(
+    serializeCheckpoint(createCheckpoint(plan, waiting.snapshot)),
+  );
+  assert.deepEqual(finish(plan, waiting.snapshot), ["4-10-2026"]);
+  assert.deepEqual(finish(plan, restored.snapshot), ["4-10-2026"]);
+});
+
+test("a speaker's name may be any shown value, in the captured presentation", () => {
+  const { result } = start(
+    'speaker vera { firstName: toDate("2026-10-04") }\nsay as vera "hello"',
+    AMSTERDAM,
+  );
+  assert.equal(result.snapshot.failure, null, JSON.stringify(result.snapshot.failure));
+  const said = result.events.find((event) => event.kind === "say");
+  assert.ok(said?.kind === "say");
+  assert.equal(said.speaker?.displayName, "4-10-2026");
 });

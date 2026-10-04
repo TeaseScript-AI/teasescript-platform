@@ -830,10 +830,15 @@ export function captureRuntimeSnapshotWithValidatedPlan(
   }
 
   const classified = classifyCapturedRuntimeSnapshot(snapshotCapture.value, plan);
+  // EVIDENCE: validation: the preceding snapshot validation accepts this captured graph before it is returned.
+  const captured = classified.validation.valid ? (snapshotCapture.value as RuntimeSnapshot) : null;
   return Object.freeze({
     validation: classified.validation,
-    // EVIDENCE: validation: the preceding snapshot validation accepts this captured graph before it is returned.
-    snapshot: classified.validation.valid ? (snapshotCapture.value as RuntimeSnapshot) : null,
+    // The captured context is a fresh copy; a frozen one can be shared by every later snapshot clone.
+    snapshot:
+      captured === null
+        ? null
+        : { ...captured, temporalContext: frozenTemporalContext(captured.temporalContext) },
     failureKind: classified.failureKind,
   });
 }
