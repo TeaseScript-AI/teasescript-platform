@@ -1008,12 +1008,12 @@ class SemanticValidator {
     this.#validateExpression(target.object, scope, null);
     if (target.kind === "indexExpression") {
       this.#validateExpression(target.index, scope, null);
-      this.#validateListIndex(target.index);
+      this.#validateListIndex(target.index, scope);
     }
   }
 
   /** Reports a list index the compiler can see is negative, fractional, or not a number. */
-  #validateListIndex(index: Expression): void {
+  #validateListIndex(index: Expression, scope: SemanticScope): void {
     const known = staticNumber(index);
     if (known !== undefined && known < 0) {
       this.#report(
@@ -1021,7 +1021,11 @@ class SemanticValidator {
         "A list index cannot be negative. The first element is at index 0, and the last at length - 1.",
         index.span,
       );
-    } else if (known !== undefined ? !Number.isInteger(known) : isDefinitelyNonNumeric(index)) {
+    } else if (
+      known !== undefined
+        ? !Number.isInteger(known)
+        : isDefinitelyNonNumeric(index) || !mayBeNumber(this.#expressionType(index, scope))
+    ) {
       this.#report(
         semanticCode.invalidListIndex,
         "A list index must be a whole number, such as 0 for the first element.",
@@ -1151,7 +1155,7 @@ class SemanticValidator {
         yield* compileChild(
           this.#validateExpressionTask(expression.index, scope, contextualSpeaker),
         );
-        this.#validateListIndex(expression.index);
+        this.#validateListIndex(expression.index, scope);
         return;
       case "callExpression": {
         const authorFunction =
@@ -1211,7 +1215,7 @@ class SemanticValidator {
           expression.arguments.length === 1 &&
           expression.arguments[0]!.kind === "positionalArgument"
         )
-          this.#validateListIndex(expression.arguments[0]!.value);
+          this.#validateListIndex(expression.arguments[0]!.value, scope);
         if (
           expression.callee.kind === "identifier" &&
           expression.callee.name === "randomInteger" &&
@@ -1994,6 +1998,15 @@ function findFirstInteraction(
 function unwrapParentheses(expression: Expression): Expression {
   while (expression.kind === "parenthesizedExpression") expression = expression.expression;
   return expression;
+}
+
+/** Whether a value of this type can be a number; an optional number may be one when it is not `null`. */
+function mayBeNumber(type: StaticType): boolean {
+  const value = nonNullType(type);
+  return (
+    value.kind === "unknown" ||
+    (value.kind === "scalar" && (value.name === "integer" || value.name === "number"))
+  );
 }
 
 function isDefinitelyNonNumeric(expression: Expression): boolean {

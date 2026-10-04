@@ -302,8 +302,8 @@ export function serializableSetContains(
 /**
  * Structural equality. Objects compare property names and values regardless of property order, lists compare elements
  * in order, and sets compare members regardless of insertion order. Handles and speaker references compare identity.
- * Scalar children are compared as soon as their container is visited, before any nested list or object, and nested
- * values use an explicit stack, so deep values never exhaust the native call stack.
+ * Scalar children are compared as soon as their container is visited, before any nested list, object, or set, and
+ * nested values use an explicit stack, so deep values never exhaust the native call stack.
  */
 export function serializableEquals(
   left: SerializableRuntimeValue,
@@ -313,7 +313,10 @@ export function serializableEquals(
   if (!equalsOrDefer(left, right, pending)) return false;
   while (pending.length > 0) {
     const next = pending.pop()!;
-    if (next.kind === "list") {
+    if (next.kind === "set") {
+      const members = new Set(next.right.items);
+      if (!next.left.items.every((item) => members.has(item))) return false;
+    } else if (next.kind === "list") {
       for (let index = 0; index < next.left.items.length; index += 1) {
         if (!equalsOrDefer(next.left.items[index]!, next.right.items[index]!, pending))
           return false;
@@ -331,10 +334,6 @@ export function serializableEquals(
   return true;
 }
 
-/**
- * Compares two values without descending: a pair of lists of equal length or objects with equal property counts is
- * queued in `pending`, and everything else is decided now.
- */
 type DeferredComparison =
   | {
       readonly kind: "list";
@@ -345,8 +344,17 @@ type DeferredComparison =
       readonly kind: "object";
       readonly left: SerializableRuntimeObject;
       readonly right: SerializableRuntimeObject;
+    }
+  | {
+      readonly kind: "set";
+      readonly left: SerializableRuntimeSet;
+      readonly right: SerializableRuntimeSet;
     };
 
+/**
+ * Compares two values without descending: a pair of lists or sets of equal length or objects with equal property
+ * counts is queued in `pending`, and everything else is decided now.
+ */
 function equalsOrDefer(
   left: SerializableRuntimeValue,
   right: SerializableRuntimeValue,
@@ -364,11 +372,10 @@ function equalsOrDefer(
         return false;
       pending.push({ kind: "object", left, right });
       return true;
-    case "set": {
+    case "set":
       if (right.kind !== "set" || right.items.length !== left.items.length) return false;
-      const members = new Set(right.items);
-      return left.items.every((item) => members.has(item));
-    }
+      pending.push({ kind: "set", left, right });
+      return true;
     case "range":
       return (
         right.kind === "range" &&

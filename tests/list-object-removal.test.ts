@@ -127,7 +127,13 @@ test("the compiler reports a list index it can see is invalid", () => {
     ["say items[-1]", negative],
     ["say items[1 / 2]", fractional],
     ["items[-(1)] = 2", negative],
+    ['let index: string = "0"\nitems.removeAt(index)', fractional],
+    ["let flag = true\nsay items[flag]", fractional],
+    ['let name = "a"\nitems[name] = 2', fractional],
+    ["items.removeAt(1 < 2)", fractional],
     ["items.removeAt(1.0)", null],
+    ["let index: number = 0\nsay items[index]", null],
+    ["let index: integer? = null\nitems.removeAt(index)", null],
   ] as const;
   for (const [statement, expected] of cases) {
     const diagnostics = compileSource(`let items = [1]\n${statement}`).diagnostics;
@@ -171,6 +177,32 @@ test("removal by value and position is checkpoint and resume equivalent", () => 
       'say "${offenses.removeFirst().label} ${offenses.length}"',
     ].join("\n"),
   );
+});
+
+test("structural equality stops at a scalar mismatch before visiting nested values", () => {
+  // Only the length of these payloads may be read; visiting an element throws.
+  const unvisited = <T>(length: number): T[] =>
+    new Proxy([] as T[], {
+      get: (_target, key) => {
+        if (key === "length") return length;
+        throw new Error(`Visited payload member ${String(key)}.`);
+      },
+    });
+  const payloads: SerializableRuntimeValue[] = [
+    { kind: "list", items: unvisited(4096) },
+    { kind: "set", items: unvisited(4096) },
+    { kind: "object", properties: unvisited(4096) },
+  ];
+  for (const payload of payloads) {
+    const record = (id: number): SerializableRuntimeValue => ({
+      kind: "object",
+      properties: [
+        { name: "payload", value: payload },
+        { name: "id", value: id },
+      ],
+    });
+    assert.equal(serializableEquals(record(1), record(2)), false);
+  }
 });
 
 test("structural equality compares deeply nested values without native recursion", () => {
