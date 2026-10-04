@@ -33,6 +33,7 @@ import {
   type TimeObservationOutcome,
 } from "../src/index.js";
 import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
+import { runValidatedState } from "../src/runtime/engine.js";
 import type {
   PlayerForegroundPresentation,
   PlayerTimerPresentation,
@@ -477,7 +478,9 @@ function applyOperation(
 ): PlayerRuntimeSession {
   const next = appendRuntimeEvents({ ...session, snapshot }, events);
   if (!continueRun) return Object.freeze(next);
-  const continuation = run(next.plan, next.snapshot);
+  // The operation just captured and validated this snapshot against the session's plan, and nothing has published it,
+  // so the continuation runs on it without a second capture. It returns at once when nothing is runnable.
+  const continuation = runValidatedState(next.plan, next.snapshot);
   return appendRuntimeEvents({ ...next, snapshot: continuation.snapshot }, continuation.events);
 }
 

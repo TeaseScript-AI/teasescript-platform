@@ -277,8 +277,11 @@ test("runtime adapter routes pacing skip and explicit time through canonical ope
   assert.equal(rejected?.outcome.kind, "invalidPayload");
   assert.deepEqual(rejected?.session.snapshot, beforeRejectedSkip);
 
+  const beforeObservation = structuredClone(session.snapshot);
   const observed = observePlayerRuntimeTime(session, firstGate!.deadlineMs);
   assert.equal(observed.outcome.kind, "observed");
+  // The observation continues execution on a new snapshot; the published one stays as it was.
+  assert.deepEqual(session.snapshot, beforeObservation);
   session = observed.session;
   assert.deepEqual(
     session.transcriptEntries.map((entry) => entry.text),
