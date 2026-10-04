@@ -9373,31 +9373,52 @@ function noteUnintendedMarkup(node: AstNode | undefined, context: LowerContext):
   }
 }
 
+/** The legacy names of the setInfos() arguments, in order. */
+const METADATA_FIELDS = [
+  "version",
+  "title",
+  "summary",
+  "author",
+  "status",
+  "color",
+  "language",
+  "tags",
+] as const;
+
+/**
+ * Legacy setInfos(version, title, summary, author, status, color, language, tags) metadata, which becomes the file
+ * header (V30 §41). A value known before the script runs, also text joined with `+`, is kept; a computed one has no
+ * header form and stays a comment with its legacy source.
+ */
 function extractMetadata(args: AstNode[], context: LowerContext, span: SourceSpan | null): void {
   if (args.length !== 8) {
     addDiagnostic(
       context,
       "SX_METADATA_DYNAMIC",
       "warning",
-      "setInfos() metadata could not be extracted statically.",
+      "setInfos() did not have its eight arguments, so its metadata is dropped.",
       span,
     );
     return;
   }
-  const values = args.map(constantValue);
+  const values = args.map(staticMetadataValue);
   const tagsNode = args[7];
-  const tagNames = tagsNode?.kind === "list" ? nodeArray(tagsNode.items).map(constantString) : [];
-  const tags = tagNames.filter((tag) => tag !== null);
-  const tagsValid = tagsNode?.kind === "list" && tags.length === tagNames.length;
-  if (values.slice(0, 7).some((value) => value === undefined) || !tagsValid) {
+  const tagNames =
+    tagsNode?.kind === "list" ? nodeArray(tagsNode.items).map(staticMetadataValue) : [];
+  const tagsKnown = tagsNode?.kind === "list" && tagNames.every((tag) => typeof tag === "string");
+  const computed = METADATA_FIELDS.flatMap((field, index) =>
+    (index === 7 ? tagsKnown : values[index] !== undefined)
+      ? []
+      : [{ field, source: sourceTextOf(args[index]!, context) }],
+  );
+  if (computed.length > 0) {
     addDiagnostic(
       context,
       "SX_METADATA_DYNAMIC",
       "warning",
-      "setInfos() metadata could not be extracted statically.",
+      `setInfos() computed its ${computed.map(({ field }) => field).join(", ")} when the script ran; a file header holds only written values, so ${computed.length === 1 ? "it stays" : "they stay"} a comment after the header.`,
       span,
     );
-    return;
   }
   context.metadata = {
     apiVersion: numberOrNull(values[0]),
@@ -9407,8 +9428,37 @@ function extractMetadata(args: AstNode[], context: LowerContext, span: SourceSpa
     status: stringOrNull(values[4]),
     color: numberOrNull(values[5]),
     language: stringOrNull(values[6]),
-    tags,
+    tags: tagsKnown ? tagNames.filter((tag): tag is string => typeof tag === "string") : null,
+    ...(computed.length === 0 ? {} : { computed }),
   };
+}
+
+/** A metadata value known before the script runs: a literal, or text joined from literals with `+`. */
+function staticMetadataValue(
+  node: AstNode | undefined,
+): string | number | boolean | null | undefined {
+  if (node === undefined) return undefined;
+  const literal = constantValue(node);
+  if (literal !== undefined) return literal;
+  if (node.kind === "binary" && node.operator === "+") {
+    const left = staticMetadataValue(asNode(node.left) ?? undefined);
+    const right = staticMetadataValue(asNode(node.right) ?? undefined);
+    if (typeof left === "string" || typeof right === "string")
+      return left === undefined || right === undefined ? undefined : `${left}${right}`;
+  }
+  return undefined;
+}
+
+/** The legacy source of an expression, on one line. */
+function sourceTextOf(node: AstNode, context: LowerContext): string {
+  const span = node.span;
+  if (span === null) return "?";
+  const lines = context.sourceLines.slice(span.line - 1, span.endLine);
+  if (lines.length === 0) return "?";
+  // Columns are one-based; the end column points past the expression.
+  lines[lines.length - 1] = lines.at(-1)!.slice(0, span.endColumn - 1);
+  lines[0] = lines[0]!.slice(span.column - 1);
+  return singleLine(lines.map((line) => line.trim()).join(" "));
 }
 
 function callParts(

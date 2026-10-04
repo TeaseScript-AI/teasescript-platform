@@ -16,24 +16,45 @@ export function emitTease(program: MigrationProgram): string {
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
-/** Legacy setInfos() metadata has no accepted TeaseScript manifest yet, so it is kept as a readable header. */
+/**
+ * Legacy setInfos() metadata as the file header (V30 §41, ADR 0023): the title, author, and summary as `title`,
+ * `author`, and `description`, and the legacy tags, which named the script in the legacy catalog, as `keywords`. The
+ * version, status, color, language, and any computed field have no header field and stay a comment after it.
+ */
 function metadataComment(program: MigrationProgram): string[] {
   const metadata = program.metadata;
   if (metadata === null) return [];
+  const text = (value: string | null): string | null =>
+    value === null || value.trim() === "" ? null : `"${escapeStringText(value)}"`;
+  const keywords = (metadata.tags ?? []).filter((tag) => tag.trim() !== "");
   const fields: Array<[string, string | null]> = [
-    ["Title", metadata.title],
-    ["Author", metadata.author],
-    ["Summary", metadata.summary],
-    ["Language", metadata.language],
-    [
-      "Tags",
-      metadata.tags === null || metadata.tags.length === 0 ? null : metadata.tags.join(", "),
-    ],
+    ["title", text(metadata.title)],
+    ["author", text(metadata.author)],
+    ["description", text(metadata.summary)],
+    ["keywords", keywords.length === 0 ? null : keywords.map((tag) => text(tag)).join(", ")],
   ];
-  const lines = fields
-    .filter((field): field is [string, string] => field[1] !== null && field[1] !== "")
-    .map(([name, value]) => `// ${name}: ${value.replace(/[\r\n\u2028\u2029]+/gu, " ")}`);
-  return lines.length === 0 ? [] : ["// Legacy SexScript metadata", ...lines, ""];
+  const header = fields
+    .filter((field): field is [string, string] => field[1] !== null)
+    .map(([name, value]) => `${name}: ${value}`);
+  const legacy = [
+    metadata.apiVersion === null ? null : `API version ${metadata.apiVersion}`,
+    metadata.status === null || metadata.status === "" ? null : `status "${metadata.status}"`,
+    metadata.color === null
+      ? null
+      : `color 0x${metadata.color.toString(16).toUpperCase().padStart(6, "0")}`,
+    metadata.language === null || metadata.language === ""
+      ? null
+      : `language "${metadata.language}"`,
+  ].filter((item) => item !== null);
+  return [
+    ...(header.length === 0 ? [] : ["---", ...header, "---"]),
+    ...(legacy.length === 0 ? [] : [`// Legacy setInfos(): ${legacy.join(", ")}`]),
+    ...(metadata.computed ?? []).map(
+      ({ field, source }) =>
+        `// Legacy setInfos() ${field}, computed when the script ran: ${source}`,
+    ),
+    "",
+  ];
 }
 
 function emitStatements(statements: IrStatement[], lines: string[], depth: number): void {

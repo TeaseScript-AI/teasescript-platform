@@ -20,6 +20,8 @@ export interface LegacyMetadata {
   color: number | null;
   language: string | null;
   tags: string[] | null;
+  /** Fields setInfos() computed at runtime, by name, with their legacy source, which no header can hold. */
+  computed?: Array<{ field: string; source: string }>;
 }
 
 export interface MigrationProgram {

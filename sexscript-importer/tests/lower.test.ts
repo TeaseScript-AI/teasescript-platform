@@ -259,16 +259,18 @@ test("extracts static setInfos metadata instead of emitting runtime code", () =>
   const program = lowerParsedFile(source);
   assert.equal(program.metadata?.title, "Example");
   assert.deepEqual(program.metadata?.tags, ["tag-a", "tag-b"]);
-  // No runtime setInfos code; the metadata survives as a header, and the final `return null` ends the chain.
+  // No runtime setInfos code; the metadata becomes the file header (V30 §41), the legacy tags its keywords, and the
+  // fields without a header field a comment; the final `return null` ends the chain.
   assert.equal(
     emitTease(program),
     [
-      "// Legacy SexScript metadata",
-      "// Title: Example",
-      "// Author: Author",
-      "// Summary: Summary",
-      "// Language: en",
-      "// Tags: tag-a, tag-b",
+      "---",
+      'title: "Example"',
+      'author: "Author"',
+      'description: "Summary"',
+      'keywords: "tag-a", "tag-b"',
+      "---",
+      '// Legacy setInfos(): API version 9, status "complete", color 0xFFFFFF, language "en"',
       "",
       "exit",
       "",

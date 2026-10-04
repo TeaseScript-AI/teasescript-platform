@@ -1,9 +1,10 @@
-// Legacy SexScript metadata
-// Title: Training
-// Author: Anna
-// Summary: A short session
-// Language: EN
-// Tags: training
+---
+title: "Training"
+author: "Anna"
+description: "A short session"
+keywords: "training"
+---
+// Legacy setInfos(): API version 9, status "working", color 0x000000, language "EN"
 
 let visits = load "training.visits", default: 0
 save visits + 1 as "training.visits"
