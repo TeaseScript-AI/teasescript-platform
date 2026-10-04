@@ -1170,8 +1170,16 @@ class TypeChecker {
               ? `to keep both, declare it as 'let ${place.label}: ${written} = ...'`
               : ONE_TYPE_FIX,
         );
+      // Only an undecided, union, collection, or object type can gain parts that need widening and origins.
+      const settled = resolved(place.type);
+      const mayGainParts =
+        settled.kind === "open" ||
+        settled.kind === "union" ||
+        settled.kind === "object" ||
+        isCollection(settled);
       if (decides) settle(place.type, value, expression.span);
-      if (decides && place.widening !== undefined) this.#rewiden(place.widening.root);
+      if (decides && mayGainParts && place.widening !== undefined)
+        this.#rewiden(place.widening.root);
       this.#follow(place.widening, value, expression.span);
       return;
     }
