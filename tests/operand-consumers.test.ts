@@ -113,8 +113,13 @@ test("a choice object that is not written in the option is checked by its known 
     ["{ value: 1 }", "integer"],
     ["[{ value: 1 }]", "set"],
     ["[{ value: 1 }]", "null"],
+    ["[{ value: 1 }]", "integer[]"],
   ] as const)
     assert.deepEqual(says(hidden(value, test)), ["done"], hidden(value, test));
+  // A copy taken where the test narrowed it does not bring the literals back behind a written type.
+  const copied =
+    'let box: object = { part: [{ value: 1 }] }\nlet part = box.part\nif part is integer[] {\n    let copy: list = part\n    let answer = choose copy\n}\nsay "done"';
+  assert.deepEqual(says(copied), ["done"]);
   assert.deepEqual(
     errors(hidden("{ value: 1 }", "object")).map(([code]) => code),
     ["TSV029"],
@@ -138,6 +143,13 @@ test("a property that an exact object never gets is an error where it is read", 
     'function read(record = {}) {\n    return record.item\n}\nsay "${read({ item: 1 })}"',
   ])
     assert.deepEqual(errors(source), [], source);
+  // A test that narrows a hidden exact value to another type keeps its literals from a copy taken there.
+  assert.deepEqual(
+    says(
+      'let box: object = { part: dict{ k: { a: 1 } } }\nlet part = box.part\nif part is integer dict {\n    let copy: dict = part\n    say copy["k"].missing\n}\nsay "done"',
+    ),
+    ["done"],
+  );
 });
 
 test("an object that the script stores into, or that a parameter or an unknown value brings, keeps any properties", () => {

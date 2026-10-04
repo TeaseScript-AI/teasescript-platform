@@ -2012,11 +2012,16 @@ class TypeChecker {
       }
       case "identifier": {
         const entry = scope.resolve(expression.name);
-        const literals =
-          entry?.kind === "variable" ? this.#exactLiterals.get(entry.variable) : undefined;
-        if (literals === undefined) this.#exactReads.delete(expression);
-        else this.#exactReads.set(expression, literals);
-        if (entry?.kind === "variable") return placeRead(this.#currentType(entry.variable));
+        this.#exactReads.delete(expression);
+        if (entry?.kind === "variable") {
+          const type = this.#currentType(entry.variable);
+          // A test may narrow the variable to a type its literals do not fit, such as `integer[]` for a list of objects:
+          // then they are not its value here, and neither is any copy taken here.
+          const literals = this.#exactLiterals.get(entry.variable);
+          if (literals?.every((literal) => isAssignable(type, this.#typeOf(literal))))
+            this.#exactReads.set(expression, literals);
+          return placeRead(type);
+        }
         if (entry?.kind === "speaker" || (entry === undefined && expression.name === "speaker"))
           return { kind: "speaker" };
         return UNKNOWN_TYPE;
