@@ -2142,8 +2142,10 @@ class Parser {
   }
 
   *#parseRequiredExpressionTask(): ParseTask<Expression | null> {
+    const diagnosticCount = this.#diagnostics.length;
     const expression = yield* parseChild(this.#parseOr());
-    if (expression === null) {
+    // A failed expression that already reported its own error needs no generic one after it.
+    if (expression === null && this.#diagnostics.length === diagnosticCount) {
       this.#reportInsertion(parserDiagnosticCode.expectedExpression, "Expected an expression.");
     }
     return expression;
@@ -3211,17 +3213,15 @@ class Parser {
     }
     const diagnosticCount = this.#diagnostics.length;
     const expression = yield* parseChild(this.#parseOr());
-    if (expression === null) {
-      this.#reportToken(
-        parserDiagnosticCode.unsupportedStringExpression,
-        "Expected a supported expression inside the string interpolation.",
-        this.#peek(),
-      );
-      this.#synchronizeInterpolation();
-      this.#match(TokenKind.InterpolationEnd);
-      return null;
-    }
-    if (this.#diagnostics.length !== diagnosticCount) {
+    if (expression === null || this.#diagnostics.length !== diagnosticCount) {
+      // Only a failure that reported nothing itself gets this generic error.
+      if (this.#diagnostics.length === diagnosticCount) {
+        this.#reportToken(
+          parserDiagnosticCode.unsupportedStringExpression,
+          "Expected a supported expression inside the string interpolation.",
+          this.#peek(),
+        );
+      }
       this.#synchronizeInterpolation();
       this.#match(TokenKind.InterpolationEnd);
       return null;
