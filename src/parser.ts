@@ -147,7 +147,11 @@ export function parse(source: string): ParseResult {
 class Parser {
   readonly #diagnostics: Diagnostic[] = [];
   #current = 0;
-  #commaLookahead: { readonly at: number; readonly offset: number | null } | null = null;
+  #commaLookahead: {
+    readonly at: number;
+    readonly insideDelimiters: boolean;
+    readonly offset: number | null;
+  } | null = null;
   #recoveredAtStatementBoundary = false;
   /** Inside a media cue position or a switch subject, where the following block `{` ends a compact interaction. */
   #blockEndsCompactInteraction = false;
@@ -157,6 +161,8 @@ class Parser {
    * `save`; groupings such as parentheses start without them.
    */
   #storageDelimiters: ReadonlySet<StorageDelimiter> = NO_STORAGE_DELIMITERS;
+  /** Inside `()`, `[]`, or an object literal, where a line break does not end an expression (V30 §2). */
+  #insideDelimiters = false;
 
   public constructor(private readonly tokens: readonly Token[]) {}
 
@@ -328,9 +334,9 @@ class Parser {
     let background: Expression | null = null;
     let timeout: Expression | null = null;
     for (
-      let offset = this.#interactionDefaultAfterComma();
+      let offset = this.#offsetAfterComma();
       offset !== null;
-      offset = this.#interactionDefaultAfterComma()
+      offset = this.#offsetAfterComma()
     ) {
       const name = this.#peek(offset);
       const option =
@@ -725,7 +731,7 @@ class Parser {
       this.#check(TokenKind.LeftParenthesis) &&
       this.#peek().span.start.offset === command.span.end.offset
     ) {
-      return yield* parseChild(this.#withoutEnclosingDelimiters(this.#parseNamedTimer(command)));
+      return yield* parseChild(this.#withinDelimiters(this.#parseNamedTimer(command)));
     }
     const async = this.#checkIdentifier("async");
     if (async) this.#advance();
@@ -1048,9 +1054,7 @@ class Parser {
       this.#check(TokenKind.LeftParenthesis) &&
       this.#peek().span.start.offset === command.span.end.offset
     ) {
-      return yield* parseChild(
-        this.#withoutEnclosingDelimiters(this.#parseNamedMedia(command, media)),
-      );
+      return yield* parseChild(this.#withinDelimiters(this.#parseNamedMedia(command, media)));
     }
     const async = this.#checkIdentifier("async");
     if (async) this.#advance();
@@ -1205,7 +1209,7 @@ class Parser {
    */
   *#parseMediaHandlers(): ParseTask<MediaHandlers | null | false> {
     if (!this.#check(TokenKind.LeftBrace)) return null;
-    return yield* parseChild(this.#withoutEnclosingDelimiters(this.#parseMediaHandlerBlock()));
+    return yield* parseChild(this.#asStatements(this.#parseMediaHandlerBlock()));
   }
 
   *#parseMediaHandlerBlock(): ParseTask<MediaHandlers | false> {
@@ -1831,7 +1835,7 @@ class Parser {
 
   /** A statement block; statements inside it are not part of an enclosing cue position or switch subject. */
   *#parseBlock(): ParseTask<Block | null> {
-    return yield* parseChild(this.#withoutEnclosingDelimiters(this.#parseBlockStatements()));
+    return yield* parseChild(this.#asStatements(this.#parseBlockStatements()));
   }
 
   *#parseBlockStatements(): ParseTask<Block | null> {
@@ -2201,7 +2205,7 @@ class Parser {
         const start = expression;
         this.#skipNewlines();
         const index = yield* parseChild(
-          this.#withoutEnclosingDelimiters(this.#parseRequiredExpressionTask()),
+          this.#withinDelimiters(this.#parseRequiredExpressionTask()),
         );
         this.#skipNewlines();
         if (index === null || !this.#match(TokenKind.RightBracket)) {
@@ -2223,7 +2227,7 @@ class Parser {
       }
       if (this.#match(TokenKind.LeftParenthesis)) {
         expression = yield* parseChild(
-          this.#withoutEnclosingDelimiters(this.#finishCall(expression, this.#previous())),
+          this.#withinDelimiters(this.#finishCall(expression, this.#previous())),
         );
         continue;
       }
@@ -2382,17 +2386,15 @@ class Parser {
       return yield* parseChild(this.#withoutEnclosingDelimiters(this.#parseStringLiteral(token)));
     }
     if (this.#match(TokenKind.LeftParenthesis)) {
-      return yield* parseChild(this.#withoutEnclosingDelimiters(this.#parseParenthesized(token)));
+      return yield* parseChild(this.#withinDelimiters(this.#parseParenthesized(token)));
     }
     if (this.#match(TokenKind.LeftBracket)) {
       return yield* parseChild(
-        this.#withoutEnclosingDelimiters(
-          this.#parseCollectionLiteralElements(token, "listLiteral"),
-        ),
+        this.#withinDelimiters(this.#parseCollectionLiteralElements(token, "listLiteral")),
       );
     }
     if (this.#match(TokenKind.LeftBrace)) {
-      return yield* parseChild(this.#withoutEnclosingDelimiters(this.#parseObjectLiteral(token)));
+      return yield* parseChild(this.#withinDelimiters(this.#parseObjectLiteral(token)));
     }
     if (this.#match(TokenKind.KeywordSet)) {
       if (!this.#match(TokenKind.LeftBracket)) {
@@ -2400,7 +2402,7 @@ class Parser {
         return null;
       }
       return yield* parseChild(
-        this.#withoutEnclosingDelimiters(this.#parseCollectionLiteralElements(token, "setLiteral")),
+        this.#withinDelimiters(this.#parseCollectionLiteralElements(token, "setLiteral")),
       );
     }
     return null;
@@ -2529,7 +2531,7 @@ class Parser {
         break;
       }
       let separatorSpan: SourceSpan | null = null;
-      // As for a default answer, a comma on the next line continues the options.
+      // As for a default answer, inside delimiters a comma on the next line continues the options.
       const commaOffset = this.#offsetAfterComma();
       if (commaOffset !== null) {
         while (this.#check(TokenKind.Newline)) this.#advance();
@@ -2622,20 +2624,22 @@ class Parser {
   }
 
   /**
-   * The offset of the token after a `,`, with continuation newlines on either side of it, or `null` without a comma. A
-   * line never starts with `,`, so a comma on the next line continues the expression. Nested interactions that end at
-   * the same token reuse one scan of the newlines.
+   * The offset of the token after a `,` and any newlines after it, or `null` without a comma. Inside delimiters a line
+   * break does not end the expression, so the comma may also start the next line there (V30 §2). Nested interactions
+   * that end at the same token reuse one scan of the newlines.
    */
   #offsetAfterComma(): number | null {
-    if (this.#commaLookahead?.at === this.#current) return this.#commaLookahead.offset;
+    const lookahead = this.#commaLookahead;
+    if (lookahead?.at === this.#current && lookahead.insideDelimiters === this.#insideDelimiters)
+      return lookahead.offset;
     let offset: number | null = 0;
-    while (this.#peek(offset).kind === TokenKind.Newline) offset += 1;
+    if (this.#insideDelimiters) while (this.#peek(offset).kind === TokenKind.Newline) offset += 1;
     if (this.#peek(offset).kind !== TokenKind.Comma) offset = null;
     else {
       offset += 1;
       while (this.#peek(offset).kind === TokenKind.Newline) offset += 1;
     }
-    this.#commaLookahead = { at: this.#current, offset };
+    this.#commaLookahead = { at: this.#current, insideDelimiters: this.#insideDelimiters, offset };
     return offset;
   }
 
@@ -2647,6 +2651,28 @@ class Parser {
         this.#checkIdentifier("default") &&
         this.#peek(1).kind !== TokenKind.Colon)
     );
+  }
+
+  /** Parses a `()`, `[]`, or object-literal grouping, where a line break does not end an expression. */
+  *#withinDelimiters<T>(task: ParseTask<T>): ParseTask<T> {
+    const enclosing = this.#insideDelimiters;
+    this.#insideDelimiters = true;
+    try {
+      return yield* parseChild(this.#withoutEnclosingDelimiters(task));
+    } finally {
+      this.#insideDelimiters = enclosing;
+    }
+  }
+
+  /** Parses a block of statements, where a line break ends a complete statement again. */
+  *#asStatements<T>(task: ParseTask<T>): ParseTask<T> {
+    const enclosing = this.#insideDelimiters;
+    this.#insideDelimiters = false;
+    try {
+      return yield* parseChild(this.#withoutEnclosingDelimiters(task));
+    } finally {
+      this.#insideDelimiters = enclosing;
+    }
   }
 
   /**

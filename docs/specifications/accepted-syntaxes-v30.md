@@ -2336,11 +2336,12 @@ without evaluating the default. When absent, it evaluates and returns the defaul
 `load` never writes: the default is not stored. Only `save` creates or changes a stored value. An explicit target
 type may determine the intended numeric type of a literal default, as in the `number` example above.
 
-Key, value, and default operands are full expressions. `as` ends the value of `save`. Like the default answer of an
-ask, `, default:` belongs to the nearest `load` or ask before it, also on the next line, so
-`load (askText "Key?"), default: "none"` groups the ask to give the fallback to `load`. A compact `choose` reads
-`default:` as one of its labelled options, so a choice key needs the same grouping:
-`load (choose a: "x", b: "y"), default: "z"`. Group a `load` before combining its result with another expression:
+Key, value, and default operands are full expressions. `as` ends the value of `save`. A `, default:` belongs to the
+nearest construct before it that takes one: a `load`, the default answer of an ask, or a labelled option of a compact
+`choose`. Group the inner construct to give the fallback to `load`, as in `load (askText "Key?"), default: "none"` or
+`load (choose a: "x", b: "y"), default: "z"`; without the parentheses, the choice gets a third option labelled
+`default`. Inside `()`, `[]`, and object literals, where a line break does not end an expression, the comma may also
+start the next line. Group a `load` before combining its result with another expression:
 
 ```text
 (load "k") == null

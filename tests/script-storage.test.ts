@@ -898,7 +898,8 @@ test("a ', default:' belongs to the nearest load or ask before it", () => {
   assert.ok(list.kind === "listLiteral" && list.elements.length === 2);
   assert.ok(list.elements[0]?.kind === "loadExpression" && list.elements[0].defaultValue !== null);
 
-  // A comma on the next line continues the expression, so the line break does not change the binding.
+  // Inside delimiters a line break does not end the expression, so a comma on the next line binds the same way; outside
+  // them a line may not start with a comma (V30 §2).
   const object = initializer('let v = {first: load "k"\n, default: "x"}');
   assert.ok(object.kind === "objectLiteral" && object.properties.length === 1);
   const grouped = initializer('let v = (load "k"\n, default: 7)');
@@ -906,13 +907,15 @@ test("a ', default:' belongs to the nearest load or ask before it", () => {
   assert.ok(
     grouped.expression.kind === "loadExpression" && grouped.expression.defaultValue !== null,
   );
+  assert.notDeepEqual(parse('let v = load "k"\n, default: 7').diagnostics, []);
 
-  // A compact choice keeps `default:` as an option label; grouping gives the fallback to load.
+  // By the same rule, a compact choice takes `default:` as its own option label; grouping gives the fallback to load.
   for (const source of [
     'let v = load choose a: "x", b: "y", default: "z"',
-    'let v = load choose a: "x", b: "y"\n, default: "z"',
+    'let v = (load choose a: "x", b: "y"\n, default: "z")',
   ]) {
-    const labelled = initializer(source);
+    let labelled = initializer(source);
+    if (labelled.kind === "parenthesizedExpression") labelled = labelled.expression;
     assert.ok(labelled.kind === "loadExpression" && labelled.defaultValue === null, source);
     assert.ok(labelled.key.kind === "interactionExpression", source);
     assert.equal(labelled.key.options.length, 3, source);
