@@ -634,6 +634,22 @@ test("a call of another file's function that is not global cannot be restored", 
   action.owningInstruction += offset;
   action.continuationInstruction += offset;
   assert.equal(validateRuntimeSnapshot(moved, plan).valid, false);
+
+  // Nor can a session that failed in main.tease claim to stand in another file's code.
+  const failing = compiledPlan([
+    { path: "main.tease", source: "let x = [1][2]\nexit" },
+    { path: "lib.tease", source: "let y = 2\nlet z = 3\nfunction local { wait 1 }" },
+  ]);
+  const failed = run(failing, createFreshRuntimeSnapshot(failing)).snapshot;
+  assert.equal(validateRuntimeSnapshot(failed, failing).valid, true);
+  for (const position of [
+    failing.files[1]!.startInstruction,
+    failing.functions.find((definition) => definition.name === "local")!.bodyEntryInstruction,
+  ]) {
+    const elsewhere = mutableCopy(failed);
+    elsewhere.nextInstruction = position;
+    assert.equal(validateRuntimeSnapshot(elsewhere, failing).valid, false);
+  }
 });
 
 test("host globals keep their names, values, and read-only use, before the script's globals", () => {
