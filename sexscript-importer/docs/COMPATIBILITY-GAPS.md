@@ -218,6 +218,11 @@ Concrete points the migration surfaced in TeaseScript itself:
   null (`askInteger(dialog, default: playerLevel)`). TeaseScript rejects a null default when the input opens, so a
   faithful conversion would need an `if` around two inputs; the output keeps one input with a note. A form that
   prefills only when the value is present would fit these settings dialogs.
+- **The date and time design is still being refined.** The owner is settling a local date and time that follows the
+  player and a fixed UTC-based moment for measuring elapsed time; the conversions here keep to what #532 decided and
+  depend on neither. `day` and `week` are calendar units like `month` and `year` (`1 day` is tomorrow's same local
+  clock time), so legacy arithmetic in seconds or milliseconds stays exact: the importer keeps such values as numbers
+  or emits `s` and `ms`, never `day` or `week`.
 - **No conversion from Unix time to a datetime (#532).** Domme3 stores the chastity start as Unix seconds
   (`save("domme3.chastitystart", getTime())`) and later formats it (`new Date((long)chastitystart * 1000)`, 3 sites).
   #532 converts a datetime to seconds but not back, so these stay manual work; storing the datetime itself is the
