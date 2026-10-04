@@ -255,8 +255,11 @@ export function inferVariableTypes(
   /** Results of functions defined elsewhere in the package (packageFunctionResults). */
   knownResults: ReadonlyMap<string, ValueType> = new Map(),
 ): TypeEnvironment {
-  const assignments: Array<{ name: string; type: (environment: TypeEnvironment) => ValueType }> =
-    [];
+  const assignments: Array<{
+    name: string;
+    type: (environment: TypeEnvironment) => ValueType;
+    placeholder?: true;
+  }> = [];
   // Incoming parameter values are unknown; later assignments do not describe them.
   const unknownNames = new Set<string>(parameters);
   const localFunctions = new Set<string>(localFunctionNames);
@@ -274,6 +277,18 @@ export function inferVariableTypes(
     }
   });
 
+  // An empty-text placeholder (`def lines = ""`) adds no type when the variable is assigned elsewhere, since the type
+  // pass starts it with the empty value of its later type.
+  const placeholderNames = new Set(
+    assignments.filter((item) => item.placeholder === true).map((item) => item.name),
+  );
+  for (const name of placeholderNames) {
+    if (assignments.some((item) => item.name === name && item.placeholder !== true)) {
+      for (let index = assignments.length - 1; index >= 0; index -= 1)
+        if (assignments[index]!.name === name && assignments[index]!.placeholder === true)
+          assignments.splice(index, 1);
+    }
+  }
   const variables = new Map<string, ValueType>();
   for (const { name } of assignments) variables.set(name, 0);
   for (const name of unknownNames) variables.set(name, UNKNOWN);
@@ -419,7 +434,9 @@ function inferListElements(body: AstNode, environment: TypeEnvironment): Map<str
     if (name === null || value === null) return;
     if (
       value.kind === "unsupportedExpression" ||
-      (value.kind === "constant" && value.value === null)
+      (value.kind === "constant" && value.value === null) ||
+      // An empty-text placeholder holds no elements (see inferVariableTypes).
+      (node.kind === "declaration" && value.kind === "constant" && value.value === "")
     ) {
       return;
     }
@@ -472,7 +489,11 @@ function inferListElements(body: AstNode, environment: TypeEnvironment): Map<str
 
 function collectAssignments(
   node: AstNode,
-  assignments: Array<{ name: string; type: (environment: TypeEnvironment) => ValueType }>,
+  assignments: Array<{
+    name: string;
+    type: (environment: TypeEnvironment) => ValueType;
+    placeholder?: true;
+  }>,
   unknownNames: Set<string>,
 ): void {
   if (node.kind === "declaration" || (node.kind === "binary" && node.operator === "=")) {
@@ -491,6 +512,10 @@ function collectAssignments(
     if (value.kind === "unsupportedExpression") {
       // A declaration without initializer starts as null in Groovy.
       assignments.push({ name, type: () => NULL });
+      return;
+    }
+    if (node.kind === "declaration" && value.kind === "constant" && value.value === "") {
+      assignments.push({ name, type: () => STRING, placeholder: true });
       return;
     }
     assignments.push({ name, type: (environment) => inferType(value, environment) });

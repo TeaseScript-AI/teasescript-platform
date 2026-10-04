@@ -199,7 +199,7 @@ test(
       const sourcePath = path.join(directory, "type-change.groovy");
       writeFileSync(
         sourcePath,
-        'def lines = ""\nif (getBoolean("Long?")) lines = ["One", "Two"]\nshow("Done")\n',
+        'def lines = "One"\nif (getBoolean("Long?")) lines = ["One", "Two"]\nshow("Done")\nshow("${lines.size()}")\n',
       );
       const program = await convert(sourcePath);
       assert.deepEqual(
@@ -213,7 +213,7 @@ test(
         output,
         /^\/\/ TODO SX_TYPE_CHANGE line 1: 'lines' starts as text \(string\), but is later set to a list \(string\[\]\) \(line 2\)\./mu,
       );
-      assert.match(output, /^\/\/ \| def lines = ""$/mu);
+      assert.match(output, /^\/\/ \| def lines = "One"$/mu);
       // The rest of the script is still converted.
       assert.match(output, /^ {2}lines = \["One", "Two"\]$/mu);
     } finally {
@@ -238,7 +238,8 @@ test(
           "value = [1, 2]",
           'def label = { -> return "x" }',
           "def text = label()",
-          "text = [1]",
+          'if (getBoolean("More?")) text = [1]',
+          "show(text)",
           "",
         ].join("\n"),
       );

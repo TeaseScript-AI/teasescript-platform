@@ -48,6 +48,8 @@ export interface VariableTypeResult {
    * variable stored as its character code, where `toInteger()` reads the number the text spells.
    */
   textIntegers: IrStatement[];
+  /** Declarations whose empty-text placeholder became the empty value of the type the variable later holds. */
+  placeholders: Array<{ statement: IrStatement; name: string; type: string }>;
   /** Declarations that gained a `number` or optional type annotation. */
   annotated: number;
   /** Values truncated with `toInteger` because Groovy declared the variable with an integer type. */
@@ -82,6 +84,11 @@ interface Binding {
   inferred: TeaseType | undefined;
   widened: boolean;
   optional: boolean;
+  /**
+   * The type a Groovy empty-text placeholder (`def lines = ""`) later holds instead, whose empty value the declaration
+   * starts with.
+   */
+  placeholder?: TeaseType;
 }
 
 /** What declares a binding: a `let`, a `for` loop, a media handle, or a function parameter. */
@@ -199,6 +206,7 @@ export function enforceVariableTypes(
     statements: [],
     conflicts: [],
     textIntegers: [],
+    placeholders: [],
     annotated: 0,
     truncated: 0,
     compilerAnnotated: 0,
@@ -236,6 +244,9 @@ export function enforceVariableTypes(
           const binding = bindingOf.get(statement);
           if (binding === undefined || declarationConflicts.has(statement)) return statement;
           let next: LetStatement = statement;
+          const placeholder =
+            binding.placeholder === undefined ? null : emptyValue(binding.placeholder);
+          if (placeholder !== null) next = { ...next, value: placeholder };
           if (truncations.has(statement)) next = { ...next, value: truncate(next.value) };
           if (integerLoads.has(statement)) {
             result.annotated += 1;
@@ -258,8 +269,17 @@ export function enforceVariableTypes(
             result.compilerAnnotated += 1;
             next = { ...next, compilerType: compilerWritten };
           }
+          // An empty list needs its element type written.
+          if (placeholder?.kind === "list" && written !== null && next.type === undefined)
+            next = { ...next, type: written };
           const rewritten = withIntegerIndexes(next, indexes);
           if (textIntegers.has(statement)) result.textIntegers.push(rewritten);
+          if (placeholder !== null && type !== undefined)
+            result.placeholders.push({
+              statement: rewritten,
+              name: statement.name,
+              type: describeValue(type),
+            });
           return rewritten;
         }
         case "assign": {
@@ -449,6 +469,22 @@ function analyse(
       return change(() => (target.optional = true));
     if (declared && canWiden(type, value) && !target.widened)
       return change(() => (target.widened = true));
+    // An empty-text placeholder that later holds values of one other type starts with that type's empty value.
+    const declaration = target.declaration;
+    if (
+      declaration !== null &&
+      target.placeholder === undefined &&
+      target.fixed === undefined &&
+      !target.integer &&
+      declaration.value.kind === "literal" &&
+      declaration.value.value === "" &&
+      emptyValue(nonNull(value)) !== null
+    ) {
+      return change(() => {
+        target.placeholder = nonNull(value);
+        target.initial = nonNull(value);
+      });
+    }
     conflict(
       target,
       statement,
@@ -496,7 +532,7 @@ function analyse(
           else analysis.truncations.add(item);
           initial = scalar("integer");
         }
-        declared.initial = initial;
+        declared.initial = declared.placeholder ?? initial;
         if (fixed !== undefined) store(declared, initial, item);
         scope.names.set(item.name, declared);
         return;
@@ -723,6 +759,14 @@ function resultType(returns: readonly TeaseType[]): TeaseType {
   return values.length < returns.length || values.some((type) => type.kind === "optional")
     ? { kind: "optional", value: shared }
     : shared;
+}
+
+/** The empty value a placeholder of this type starts with: an empty list, false, or 0; null for other types. */
+function emptyValue(type: TeaseType): IrExpression | null {
+  if (type.kind === "list") return { kind: "list", items: [] };
+  if (type.kind !== "scalar") return null;
+  if (type.name === "boolean") return { kind: "literal", value: false };
+  return type.name === "integer" || type.name === "number" ? { kind: "literal", value: 0 } : null;
 }
 
 function isText(type: TeaseType): boolean {

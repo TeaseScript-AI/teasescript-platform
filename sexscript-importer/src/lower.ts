@@ -93,6 +93,8 @@ export interface LowerOptions {
   mapUses?: MapUses;
   /** Legacy result types of the functions of the script and its modules (packageFunctionResults). */
   functionResults?: ReadonlyMap<string, number>;
+  /** Functions that nothing in the package calls or uses as a value (packageUnusedFunctions). */
+  unusedFunctions?: ReadonlySet<string>;
 }
 
 interface LowerContext {
@@ -163,6 +165,10 @@ interface LowerContext {
   mapUses: MapUses;
   /** Binding keys of variables that closures declare (bindingKeys). */
   bindings: ReadonlyMap<AstNode, string>;
+  /** Functions nothing in the package calls or uses as a value (packageUnusedFunctions). */
+  unusedFunctions: ReadonlySet<string>;
+  /** Whether the code being lowered belongs to an unused function, which Groovy never ran. */
+  deadCode: boolean;
   /** Bindings declared with a Groovy integer type (`int`, `long`, ...), which store whole numbers. */
   integerVariables: ReadonlySet<string>;
   /** Initializers of variables assigned once, by their declaration (staticNumber). */
@@ -293,6 +299,38 @@ export function packageFunctionResults(files: readonly ParsedGroovyFile[]): Map<
     if (settled) break;
   }
   return results;
+}
+
+/**
+ * Functions (closures kept in a variable, and object script methods) that nothing in the package names outside their
+ * own body, neither as a call nor as a value, so Groovy never ran them. None when a call names its method at runtime.
+ */
+export function packageUnusedFunctions(files: readonly ParsedGroovyFile[]): Set<string> {
+  const defined = new Set<string>();
+  const referenced = new Set<string>();
+  let dynamicCalls = false;
+  const visit = (node: AstNode, owner: string | null): void => {
+    if (node.kind === "declaration" && asNode(node.right)?.kind === "closure") {
+      const name = variableName(node.left);
+      if (name !== null) defined.add(name);
+      visit(asNode(node.right)!, name ?? owner);
+      return;
+    }
+    const names: Array<string | null> = [];
+    if (node.kind === "variable") names.push(variableName(node));
+    if (node.kind === "methodCall") {
+      if (constantString(node.method) === null) dynamicCalls = true;
+      names.push(constantString(node.method));
+    }
+    if (node.kind === "property") names.push(constantString(node.property));
+    for (const name of names) if (name !== null && name !== owner) referenced.add(name);
+    for (const child of nodeChildren(node)) visit(child, owner);
+  };
+  for (const file of files) {
+    const body = mapAnalysisBody(file);
+    if (body !== null) visit(body, null);
+  }
+  return dynamicCalls ? new Set() : new Set([...defined].filter((name) => !referenced.has(name)));
 }
 
 /** The body the lowering converts: a mixin module's or object script's desugared form, else the script body. */
@@ -603,6 +641,8 @@ export function lowerParsedFile(
     aliasedLists: new Set(),
     mapUses: mapUsesOf([]),
     bindings: new Map(),
+    unusedFunctions: new Set(),
+    deadCode: false,
     integerVariables: new Set(),
     constantInitializers: new Map(),
     knownKeys: [],
@@ -645,7 +685,20 @@ export function lowerParsedFile(
 
   const rawBody = asNode(file.root.body);
   const mixin = rawBody === null ? null : desugarMixinModule(rawBody, file.sourceName);
-  const body = mixin?.body ?? desugarObjectScript(rawBody, nodeArray(file.root.classes), context);
+  const desugared =
+    mixin?.body ?? desugarObjectScript(rawBody, nodeArray(file.root.classes), context);
+  let body = desugared;
+  if (desugared?.kind === "block" && mixin === null) {
+    // Scratch variables split by value type first, so every later analysis sees the split names.
+    context.types = inferVariableTypes(
+      desugared,
+      [],
+      context.packageFunctions,
+      options.functionResults,
+    );
+    context.bindings = bindingKeys(desugared, file.sourceName);
+    body = splitScratchVariables(desugared, context);
+  }
   if (body?.kind === "block") {
     context.functions = collectClosureInfo(body);
     context.shadowingReferences = collectShadowingReferences(body, context.functions);
@@ -656,6 +709,7 @@ export function lowerParsedFile(
     context.dateValues = currentDateVariables(body, context.types);
     context.aliasedLists = aliasedListVariables(body, context.types);
     context.bindings = bindingKeys(body, file.sourceName);
+    context.unusedFunctions = options.unusedFunctions ?? packageUnusedFunctions([file]);
     context.constantInitializers = declarationInitializers(body, context.types);
     context.integerVariables = integerVariables(body, context.bindings);
     context.mapUses =
@@ -808,6 +862,26 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
   const isStale = (statement: IrStatement): boolean =>
     statement.kind === "comment" && [...staleText].some((text) => statement.text.startsWith(text));
   const replaced = new Map<IrStatement, IrStatement[]>();
+  for (const { statement, name, type } of result.placeholders) {
+    const span = statement.span;
+    const diagnostic: MigrationDiagnostic = {
+      code: "SX_PLACEHOLDER_TYPE",
+      severity: "warning",
+      message: `Groovy started '${name}' as empty text and later stored ${type}; TeaseScript variables keep one type, so it starts as the empty value of that type, which differs only where the empty text was read.`,
+      span,
+    };
+    context.diagnostics.push(diagnostic);
+    context.renderedDiagnostics.add(diagnostic);
+    replaced.set(statement, [
+      {
+        kind: "comment",
+        text: `// NOTE ${diagnostic.code}${span === null ? "" : ` line ${span.line}`}: ${diagnostic.message}`,
+        trailing: false,
+        span,
+      },
+      statement,
+    ]);
+  }
   for (const statement of result.textIntegers) {
     const span = statement.span;
     const diagnostic: MigrationDiagnostic = {
@@ -972,6 +1046,8 @@ function lowerHelperMethod(
     aliasedLists: new Set(),
     mapUses: baseContext.mapUses,
     bindings: new Map(),
+    unusedFunctions: new Set(),
+    deadCode: false,
     integerVariables: new Set(),
     constantInitializers: new Map(),
     knownKeys: [],
@@ -2359,6 +2435,9 @@ function lowerClosureDeclaration(
       ),
     ];
   }
+  // Groovy never ran the body of a function nothing calls, so what it cannot convert does not block the script.
+  const outerDead = context.deadCode;
+  context.deadCode ||= context.unusedFunctions.has(name);
   const outerFunction = context.currentFunction;
   context.currentFunction = {
     name,
@@ -2389,6 +2468,7 @@ function lowerClosureDeclaration(
     ];
   } finally {
     context.functionDepth -= 1;
+    context.deadCode = outerDead;
     context.currentFunction = outerFunction;
     context.knownKeys.splice(0, context.knownKeys.length, ...outerKeys);
   }
@@ -3012,6 +3092,9 @@ function lowerAssignment(
       ),
     ];
   }
+  const grown =
+    operator === "=" ? growingListWrite(targetNode, target, value, span, context) : null;
+  if (grown !== null) return grown;
   if (operator === "*=" || operator === "/=") {
     if (variableTarget === null) {
       return [
@@ -4248,10 +4331,15 @@ function lowerFor(node: AstNode, context: LowerContext): IrStatement[] {
 function lowerCStyleFor(
   node: AstNode,
   collection: AstNode,
-  body: AstNode | null,
+  loopBody: AstNode | null,
   context: LowerContext,
 ): IrStatement[] {
   const parts = nodeArray(collection.items);
+  // A single statement as the body is a block of one statement.
+  const body =
+    loopBody !== null && loopBody.kind !== "block" && loopBody.kind !== "empty"
+      ? { kind: "block", span: loopBody.span, statements: [loopBody] }
+      : loopBody;
   if (parts.length !== 3 || body?.kind !== "block") {
     return [
       unsupportedStatement(
@@ -6998,6 +7086,261 @@ function dictionaryVariables(
   return names;
 }
 
+/**
+ * Splits scratch variables: a script variable such as `response` that the script and every function assign before
+ * each read, but with values of different types (text, then a yes/no answer, then a menu position). Each value type
+ * gets its own variable, declared next to the original with its type's empty value, which no read can see. Only for
+ * a script without mixin modules, which could reach the variable by name.
+ */
+function splitScratchVariables(body: AstNode, context: LowerContext): AstNode {
+  if (body.kind !== "block" || context.mixinModules.length > 0) return body;
+  const types = context.types;
+  const declarations = new Map<string, AstNode>();
+  for (const statement of nodeArray(body.statements)) {
+    const expression =
+      statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+    const name = expression?.kind === "declaration" ? variableName(expression.left) : null;
+    if (name !== null && asNode(expression!.right)?.kind !== "closure")
+      declarations.set(name, statement);
+  }
+  const kindOf = (value: AstNode | null): string | null => {
+    const type = inferType(value, types);
+    if (onlyOf(type, STRING)) return "Text";
+    if (onlyOf(type, BOOLEAN)) return "Boolean";
+    if (onlyOf(type, NUMBER)) return "Number";
+    if (onlyOf(type, LIST)) return "List";
+    return null;
+  };
+  // Only names assigned values of several kinds need the analysis.
+  const assignedKinds = new Map<string, Set<string | null>>();
+  walkAst(body, (node) => {
+    if (node.kind !== "declaration" && !(node.kind === "binary" && node.operator === "=")) return;
+    const name = variableName(node.left);
+    if (name === null || !declarations.has(name)) return;
+    assignedKinds.set(name, (assignedKinds.get(name) ?? new Set()).add(kindOf(asNode(node.right))));
+  });
+  const replacements = new Map<AstNode, AstNode>();
+  const added: AstNode[] = [];
+  for (const [name, declaration] of declarations) {
+    if ((assignedKinds.get(name)?.size ?? 0) < 2) continue;
+    const declared = asNode(declaration.expression)!;
+    const initial = asNode(declared.right);
+    const initialKind = kindOf(initial);
+    if (initialKind === null) continue;
+    // Functions that assign the variable; calling one of them, or a function value, leaves its kind unknown.
+    const writers = new Set<string>();
+    walkAst(body, (node) => {
+      const closure = node.kind === "declaration" ? asNode(node.right) : null;
+      const owner = variableName(node.left);
+      if (closure?.kind !== "closure" || owner === null) return;
+      walkAst(closure.body, (inner) => {
+        const assigns =
+          (inner.kind === "binary" &&
+            typeof inner.operator === "string" &&
+            inner.operator.endsWith("=") &&
+            !["==", "!=", "<=", ">="].includes(inner.operator)) ||
+          inner.kind === "postfix" ||
+          inner.kind === "prefix";
+        if (assigns && variableName(inner.kind === "binary" ? inner.left : inner.value) === name)
+          writers.add(owner);
+      });
+    });
+    // Each read takes the kind of the value assigned last; a read whose last value is not known fails the split.
+    const reads = new Map<AstNode, string>();
+    const writes = new Map<AstNode, string>();
+    let valid = true;
+    type State = string | null | "mixed" | "none";
+    const merge = (left: State, right: State): State =>
+      left === "none" ? right : right === "none" ? left : left === right ? left : "mixed";
+    const expression = (node: AstNode | null, state: State): State => {
+      if (node === null || !valid) return state;
+      if (node.kind === "closure") {
+        bodyState(asNode(node.body), null);
+        return state;
+      }
+      if (node === declared) return expression(initial, state) === "none" ? "none" : initialKind;
+      if ((node.kind === "binary" && node.operator === "=") || node.kind === "declaration") {
+        const target = asNode(node.left);
+        const after = expression(asNode(node.right), state);
+        if (variableName(target) === name && bindingKey(target, context.bindings) === name) {
+          const kind = kindOf(asNode(node.right));
+          if (kind === null || node.kind === "declaration") valid = false;
+          else writes.set(target!, kind);
+          return kind;
+        }
+        return target === null ? after : expression(target, after);
+      }
+      if (node.kind === "variable" && variableName(node) === name) {
+        if (bindingKey(node, context.bindings) !== name) return state;
+        if (state === null || state === "mixed" || state === "none") valid = false;
+        else reads.set(node, state);
+        return state;
+      }
+      // Compound assignments and increments read and write the variable; they keep its kind.
+      let current = state;
+      for (const child of evaluationChildren(node)) current = expression(child, current);
+      const call = node.kind === "methodCall" ? callParts(node) : null;
+      const calls =
+        call !== null &&
+        (call.name === "call" ||
+          (call.inherited && (writers.has(call.name) || context.functions.has(call.name))));
+      if (calls && writers.size > 0) return "mixed";
+      return current;
+    };
+    const statements = (items: AstNode[], state: State): State => {
+      let current = state;
+      for (const item of items) current = statementState(item, current);
+      return current;
+    };
+    const branch = (node: unknown, state: State): State => {
+      const item = asNode(node);
+      return item === null || item.kind === "empty" ? state : statementState(item, state);
+    };
+    const statementState = (node: AstNode, state: State): State => {
+      if (!valid || state === "none") return state;
+      switch (node.kind) {
+        case "block":
+          return statements(nodeArray(node.statements), state);
+        case "expressionStatement":
+          return expression(asNode(node.expression), state);
+        case "if": {
+          const condition = expression(asNode(node.condition), state);
+          return merge(branch(node.then, condition), branch(node.else, condition));
+        }
+        case "while":
+        case "for": {
+          // A loop body may run again with what it left, so it runs twice here.
+          const head = (entry: State): State =>
+            expression(asNode(node.kind === "while" ? node.condition : node.collection), entry);
+          const first = branch(node.body, head(state));
+          const entry = merge(state, first);
+          return merge(entry, branch(node.body, head(entry)));
+        }
+        case "switch": {
+          const value = expression(asNode(node.expression), state);
+          let result: State = "none";
+          for (const item of nodeArray(node.cases)) {
+            const matched = expression(asNode(item.expression), value);
+            result = merge(result, branch(item.body, matched));
+          }
+          return merge(result, branch(node.default, value));
+        }
+        case "return":
+          expression(asNode(node.value), state);
+          return "none";
+        case "break":
+        case "continue":
+          return "none";
+        default:
+          walkAst(node, (child) => {
+            if (variableName(child) === name) valid = false;
+          });
+          return state;
+      }
+    };
+    const bodyState = (node: AstNode | null, state: State): void => {
+      if (node !== null) statementState(node, state);
+    };
+    statementState(body, null);
+    const kinds = new Set([...writes.values(), initialKind]);
+    if (!valid || kinds.size < 2) continue;
+    // The declaration keeps its kind and name; each other kind gets a variable of its own.
+    const names = new Map<string, string>([[initialKind, name]]);
+    for (const kind of kinds) {
+      if (kind === initialKind) continue;
+      const split = freshName(`${name}${kind}`, context);
+      names.set(kind, split);
+      const empty: AstNode =
+        kind === "List"
+          ? { kind: "list", span: declaration.span, items: [] }
+          : {
+              kind: "constant",
+              span: declaration.span,
+              value: kind === "Boolean" ? false : kind === "Number" ? 0 : "",
+            };
+      added.push(
+        syntheticAssignment(
+          true,
+          syntheticVariable(split, declaration.span),
+          empty,
+          declaration.span,
+        ),
+      );
+    }
+    for (const [node, kind] of [...reads, ...writes]) {
+      if (kind !== initialKind)
+        replacements.set(node, syntheticVariable(names.get(kind)!, node.span));
+    }
+    addDiagnostic(
+      context,
+      "SX_SCRATCH_VARIABLE",
+      "info",
+      `Groovy reused '${name}' for values of several types, each assigned before it is read; each type has its own variable here (${[...names.values()].join(", ")}).`,
+      declaration.span,
+    );
+  }
+  if (replacements.size === 0) return body;
+  const rewritten = substituteNodes(body, replacements);
+  return { ...rewritten, statements: [...added, ...nodeArray(rewritten.statements)] };
+}
+
+/**
+ * A write at a position of a list that starts empty and is filled by position: Groovy grew the list, padding with
+ * null up to the position, where a TeaseScript list index must exist. The write appends at the end instead, which is
+ * Groovy's result whenever the position is the length; a note says so.
+ */
+function growingListWrite(
+  targetNode: AstNode,
+  target: IrExpression,
+  value: IrExpression,
+  span: SourceSpan | null,
+  context: LowerContext,
+): IrStatement[] | null {
+  const listNode =
+    targetNode.kind === "binary" && targetNode.operator === "[" ? asNode(targetNode.left) : null;
+  const indexNode = asNode(targetNode.right);
+  const name = variableName(listNode);
+  const initializer = name === null ? undefined : context.constantInitializers.get(name);
+  if (
+    target.kind !== "index" ||
+    target.dict === true ||
+    indexNode === null ||
+    !isRepeatableExpression(indexNode) ||
+    initializer?.kind !== "list" ||
+    nodeArray(initializer.items).length !== 0 ||
+    !onlyOf(inferType(indexNode, context.types), NUMBER)
+  )
+    return null;
+  addDiagnostic(
+    context,
+    "SX_LIST_GROWTH",
+    "warning",
+    "Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.",
+    span,
+  );
+  const list = target.target;
+  return [
+    {
+      kind: "if",
+      condition: {
+        kind: "binary",
+        operator: "<",
+        left: target.index,
+        right: { kind: "property", target: list, name: "length" },
+      },
+      then: [{ kind: "assign", target, operator: "=", value, span }],
+      else: [
+        {
+          kind: "expression",
+          expression: { kind: "methodCall", target: list, name: "add", arguments: [value] },
+          span,
+        },
+      ],
+      span,
+    },
+  ];
+}
+
 /** Bindings declared with a Groovy integer type. */
 function integerVariables(body: AstNode, keys: ReadonlyMap<AstNode, string>): Set<string> {
   const names = new Set<string>();
@@ -9263,6 +9606,15 @@ function addDiagnostic(
   message: string,
   span: SourceSpan | null,
 ): void {
+  if (context.deadCode && severity === "error") {
+    context.diagnostics.push({
+      code,
+      severity: "warning",
+      message: `${message} Nothing in the package calls this function, so Groovy never ran this code.`,
+      span,
+    });
+    return;
+  }
   context.diagnostics.push({ code, severity, message, span });
 }
 

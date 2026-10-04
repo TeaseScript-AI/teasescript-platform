@@ -445,7 +445,8 @@ test("maps list-only Groovy size property and size() method to TeaseScript lengt
   );
 });
 
-test("keeps mixed-type Groovy size access as a migration error", () => {
+test("keeps Groovy size access on a value that may be text or a list as a migration error", () => {
+  // The list is stored on one path only, so the read may see either value.
   const source = file([
     statement({
       kind: "declaration",
@@ -454,13 +455,25 @@ test("keeps mixed-type Groovy size access as a migration error", () => {
       left: variable("items"),
       right: constant("text"),
     }),
-    statement({
-      kind: "binary",
+    {
+      kind: "if",
       span,
-      operator: "=",
-      left: variable("items"),
-      right: { kind: "list", span, items: [constant(1)] },
-    }),
+      condition: variable("flag"),
+      then: {
+        kind: "block",
+        span,
+        statements: [
+          statement({
+            kind: "binary",
+            span,
+            operator: "=",
+            left: variable("items"),
+            right: { kind: "list", span, items: [constant(1)] },
+          }),
+        ],
+      },
+      else: { kind: "empty", span },
+    },
     statement({
       kind: "declaration",
       span,

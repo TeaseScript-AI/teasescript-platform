@@ -8,6 +8,7 @@ import {
   packageFunctionNames,
   packageGlobalTypes,
   packageFunctionResults,
+  packageUnusedFunctions,
   packageMapUses,
   packageResultUses,
   packageStableNames,
@@ -90,6 +91,7 @@ export function lowerPackage(
     lowerParsedFile(file, {
       mapUses: mapUses[index]!,
       functionResults: functionResults[index]!,
+      unusedFunctions: packageUnusedFunctions(groups[index]!),
       helperRegistry,
       mixinModules,
       packageFunctions: packageFunctionNames(groups[index]!),
