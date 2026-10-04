@@ -43,3 +43,23 @@ export function isTimerHandle(value: SerializableRuntimeValue): value is Seriali
 export function isMediaHandle(value: SerializableRuntimeValue): value is SerializableMediaHandle {
   return typeof value === "object" && value !== null && value.kind === "mediaHandle";
 }
+
+/** A plain-language description of a runtime value's kind for error messages, such as "a number". */
+export function describeRuntimeValue(value: SerializableRuntimeValue): string {
+  if (value === null) return "null";
+  if (typeof value === "string") return "text (string)";
+  if (typeof value === "number") return "a number";
+  if (typeof value === "boolean") return "true or false (boolean)";
+  switch (value.kind) {
+    case "object":
+      return "an object";
+    case "speakerReference":
+      return "a speaker";
+    case "timerHandle":
+      return "a timer handle";
+    case "mediaHandle":
+      return "a media handle";
+    default:
+      return `a ${value.kind}`;
+  }
+}

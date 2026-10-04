@@ -688,6 +688,52 @@ delimiter trims nothing. Additional blank lines remain after the two structural 
 `"""\n\n\n"""` has the value `"\n"`. Inside block content, one or two unescaped `"` characters are text; the first
 unescaped `"""` closes the block. Escaping one quote can break a would-be delimiter.
 
+### Text operations
+
+Strings are immutable: every operation returns a new value and leaves the original unchanged. `length` is a property;
+the other operations are methods:
+
+```text
+let name = "  ada lovelace  "
+let clean = name.trim()            // "ada lovelace"
+say clean.uppercaseFirst()         // Ada lovelace
+say clean.length                   // 12
+if clean.startsWith("ada") {
+    say clean.uppercase()          // ADA LOVELACE
+}
+let parts = "red,green,blue".split(",")   // ["red", "green", "blue"]
+say toString(7).padStart(3, "0")          // 007
+```
+
+| Operation | Result |
+| --- | --- |
+| `text.length` | the number of characters, counted as Unicode code points |
+| `text.contains(part)` | `true` when `part` occurs in `text` |
+| `text.startsWith(part)`, `text.endsWith(part)` | `true` when `text` starts or ends with `part` |
+| `text.indexOf(part)`, `text.lastIndexOf(part)` | the position of the first or last occurrence of `part`, or `-1` |
+| `text.substring(start)`, `text.substring(start, end)` | the characters from `start` up to, but not including, `end`; without `end`, up to the end of the text |
+| `text.split(separator)` | a `string[]` of the parts between separators, keeping empty parts; `split("")` returns the single characters |
+| `text.replace(search, replacement)` | the text with every occurrence of `search` replaced |
+| `text.trim()`, `text.trimStart()`, `text.trimEnd()` | the text without whitespace at both ends, at the start, or at the end |
+| `text.uppercase()`, `text.lowercase()` | the text in upper or lower case |
+| `text.uppercaseFirst()` | the text with its first character in upper case and the rest unchanged |
+| `text.repeat(count)` | the text repeated `count` times |
+| `text.padStart(length, fill)`, `text.padEnd(length, fill)` | the text with `fill` repeated before or after it up to `length` characters; a text that is already long enough is unchanged |
+
+Rules:
+
+- Positions and lengths count code points from `0`, like list indexes. A position is an integer from `0` through the
+  length, and `end` may not be before `start`. A `count` or padding `length` is an integer of `0` or more.
+- Searching and replacing compare text literally and case-sensitively. A `replace` search and a padding `fill` must be
+  non-empty.
+- Case conversion uses the locale-independent full Unicode mapping: `"Straße".uppercase()` is `"STRASSE"`. It is not
+  case folding and is not reversible: `"ß".uppercase().lowercase()` is `"ss"`. Composed and decomposed forms of the same
+  visible text are different text, and `split("")` returns code points, so a flag emoji gives two parts.
+- Arguments are positional. Misuse the compiler can see is a compile error: an unknown member, a member of a value
+  that has none (`count.uppercase()` on a number), a wrong number of arguments, an argument of the wrong known type, a
+  visibly negative, out-of-range, or empty argument, or an assignment such as `text.length = 0`. A value the compiler
+  cannot know is checked when the operation runs, and an invalid one raises a runtime error.
+
 ## 9. Commands
 **Status:** Accepted
 
@@ -951,7 +997,8 @@ A conversion that cannot succeed raises a runtime error. A caller may provide an
 let amount = toNumber(text, default: 0)
 ```
 
-When the compiler can prove that a conversion is invalid, it reports a compile error instead:
+When the compiler can prove that a conversion is invalid, it reports a compile error instead, also when a `default:`
+is given:
 
 ```text
 toNumber("hello") // compile error
@@ -964,16 +1011,33 @@ that does not fit is runtime error `TSR058`, which names the place and the value
 number, including a stored `2.0`, because the runtime does not keep a number's spelling. A list or set fits when every
 element fits, and an object fits when each known property that it has fits.
 
+`toString`, `toNumber`, `toInteger`, and `toBoolean` convert these values:
+
+| Conversion | Converts | Result |
+| --- | --- | --- |
+| `toString(value)` | text, numbers, `true` and `false`, `null`, and durations | the same text as `"${value}"` |
+| `toNumber(value)` | numbers, and number text | a `number` |
+| `toInteger(value)` | numbers, and number text | an `integer` |
+| `toBoolean(value)` | `true` and `false`, and the text `"true"` or `"false"` | a `boolean` |
+
+- Number text is what `askNumber` accepts: an optional sign, digits with an optional decimal point, and an optional
+  exponent, such as `2.5`, `-3`, `.5`, or `1e3`. Surrounding whitespace is ignored, also around `"true"` and `"false"`.
+  Other text, such as `"2,5"`, `"ten"`, or a number too large to represent, cannot be converted.
+- No other value can be converted: `toNumber(true)` and `toBoolean(1)` are errors, and a list is combined into text with
+  [`join`](#16-lists).
+- A `default:` value must have the conversion's result type; an `integer` may be the default of `toNumber`.
+
 `toInteger` discards the fractional part toward zero:
 
 ```text
-toInteger(2.7)   // 2
-toInteger(-2.7)  // -2
+toInteger(2.7)    // 2
+toInteger(-2.7)   // -2
+toInteger("2.7")  // 2
 ```
 
-Use `round`, `floor`, or `ceil` when that rounding intent is required explicitly. `round` returns the nearest whole
-number; a value exactly halfway between two whole numbers rounds away from zero. `floor` rounds toward negative
-infinity and `ceil` toward positive infinity, so they have no tie case:
+Use `round`, `floor`, or `ceil` when that rounding intent is required explicitly. Each takes one number and returns an
+`integer`. `round` returns the nearest whole number; a value exactly halfway between two whole numbers rounds away from
+zero. `floor` rounds toward negative infinity and `ceil` toward positive infinity, so they have no tie case:
 
 ```text
 round(2.4)   // 2
@@ -1090,6 +1154,7 @@ items.removeLast()
 items.clear()
 items.sort()
 items.contains("map")
+items.join(", ")
 ```
 
 `removeAt`, `removeFirst`, and `removeLast` return the removed element; the result may be ignored:
@@ -1098,6 +1163,11 @@ items.contains("map")
 let next = tasks.removeAt(0)
 let newest = tasks.removeLast()
 ```
+
+`items.join(separator)` returns the elements as text, separated by the text `separator`, which defaults to `", "`:
+`["pet", "puppy"].join()` is `"pet, puppy"`. Use `${items.join()}` to show every element where `${items}` selects one.
+Elements may be text, numbers, `true` or `false`, `null`, and durations, shown as `${...}` shows them; any other element
+raises an error.
 
 List properties:
 

@@ -776,7 +776,7 @@ test("round, floor, and ceil give whole numbers as V30 section 13 specifies", ()
   const dynamic = runValidSource(
     'function dynamic(value) {\n    return value\n}\nsay "${round(dynamic("2"))}"',
   );
-  assert.equal(dynamic.snapshot.failure?.code, "TSR012");
+  assert.equal(dynamic.snapshot.failure?.code, "TSR059");
 });
 
 test("an error inside a stored literal or a typed load default is reported once", () => {

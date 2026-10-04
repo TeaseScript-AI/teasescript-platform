@@ -1155,6 +1155,8 @@ class SemanticValidator {
           this.#functions.has(expression.callee.name);
         // Only an author function's parameters are known here; for every other callee a repeated name is still an error.
         if (!authorFunction) this.#validateDistinctNamedArguments(expression);
+        // Grouping a method does not detach it from its receiver: `(text.trim)()` calls `text.trim()`.
+        const method = unwrapParentheses(expression.callee);
         if (expression.callee.kind === "identifier") {
           const name = expression.callee.name;
           const binding = scope.resolve(name);
@@ -1162,7 +1164,7 @@ class SemanticValidator {
           if (declaration !== undefined && binding?.kind === "function") {
             this.#validateFunctionCall(expression, declaration);
           } else if (this.#builtins.has(name)) {
-            // Built-ins validate their parameter names and values at runtime.
+            // The type check checks the arguments of the core built-ins it knows.
           } else if (binding !== undefined) {
             this.#report(
               semanticCode.nonCallable,
@@ -1176,13 +1178,13 @@ class SemanticValidator {
               expression.callee.span,
             );
           }
-        } else if (expression.callee.kind === "propertyAccessExpression") {
+        } else if (method.kind === "propertyAccessExpression") {
           yield* compileChild(
-            this.#validateExpressionTask(expression.callee.object, scope, contextualSpeaker),
+            this.#validateExpressionTask(method.object, scope, contextualSpeaker),
           );
           this.#validateTimerHandleMember(
-            expression.callee.object,
-            expression.callee.property,
+            method.object,
+            method.property,
             scope,
             "call",
             undefined,
@@ -1198,7 +1200,6 @@ class SemanticValidator {
             this.#validateExpressionTask(argument.value, scope, contextualSpeaker),
           );
         }
-        const method = unwrapParentheses(expression.callee);
         if (
           method.kind === "propertyAccessExpression" &&
           method.property.name === "removeAt" &&

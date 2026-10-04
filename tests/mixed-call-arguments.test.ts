@@ -88,14 +88,14 @@ test("a name given twice to a built-in or method is rejected at compile time", (
       ],
     ],
   );
-  assert.deepEqual(diagnostics('let items = ["a"]\nsay items.contains(x: 1, x: 2)'), [
+  assert.deepEqual(diagnostics('let items = ["a"]\nsay items.remove(x: 1, x: 2)'), [
     ["TSV023", "Argument 'x' is given twice. Remove one of them.", "x"],
   ]);
   assert.deepEqual(
     compileSource('say pack(1, mode: "x", size: 2)', { builtins: ["pack"] }).diagnostics,
     [],
   );
-  for (const callee of ["(items.contains)", "[items.contains][0]", "pick().contains"])
+  for (const callee of ["(items.remove)", "[items.remove][0]", "pick().remove"])
     assert.deepEqual(
       diagnostics(
         `let items = ["a"]\nfunction pick {\n    return items\n}\nsay ${callee}(x: 1, x: 2)`,
