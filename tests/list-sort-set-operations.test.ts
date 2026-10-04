@@ -183,14 +183,14 @@ test("misuse the compiler can see is a compile error", () => {
     ],
     [
       "let tags = set[1]\nsay tags.union([{ n: 1 }])",
-      "TSV043",
-      "A set holds only text, numbers, true or false, and null, so union() cannot add an object. Use toList().union(...) to get a list instead.",
+      "TSV006",
+      "A set holds only text, numbers, true or false, or null, so it cannot hold an object.",
       "[{ n: 1 }]",
     ],
     [
       "let tags = set[]\nsay tags.union([1 s])",
-      "TSV043",
-      "A set holds only text, numbers, true or false, and null, so union() cannot add a duration. Use toList().union(...) to get a list instead.",
+      "TSV006",
+      "A set holds only text, numbers, true or false, or null, so it cannot hold a duration.",
       "[1 s]",
     ],
     [

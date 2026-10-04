@@ -412,25 +412,6 @@ export function collectionMethodProblems(
         span: argument.span,
       },
     ];
-  // A set holds only text, numbers, true or false, and null (ADR 0013), so its union cannot take other list elements.
-  if (name === "union" && receiverType.kind === "set" && type.kind === "list") {
-    const element = members(type.element)
-      .map(resolved)
-      .find(
-        (member) =>
-          isKnown(member) &&
-          member.kind !== "null" &&
-          !isScalar(member, "string", "boolean", "integer", "number"),
-      );
-    if (element !== undefined)
-      return [
-        {
-          kind: "invalidOperand",
-          message: `A set holds only text, numbers, true or false, and null, so union() cannot add ${describeValue(element)}. Use toList().union(...) to get a list instead.`,
-          span: argument.span,
-        },
-      ];
-  }
   return [];
 }
 

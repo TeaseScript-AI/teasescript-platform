@@ -1417,7 +1417,16 @@ class TypeChecker {
       const problems = collectionMethodProblems(method, value, callee.property, expression, typeOf);
       this.#reportProblems(problems);
       if (method === "sort" || method === "shuffle") return NULL_TYPE;
-      return this.#setOperationType(method, value, expression, problems.length === 0);
+      // A set's union adds the argument's elements, which must be values a set can hold.
+      const argument = expression.arguments[0]?.value;
+      const other =
+        argument === undefined ? undefined : resolved(nonNullTypeForUse(typeOf(argument)));
+      const held =
+        method !== "union" ||
+        value.kind !== "set" ||
+        other?.kind !== "list" ||
+        this.#checkSetElement(argument!, other.element);
+      return this.#setOperationType(method, value, expression, problems.length === 0 && held);
     }
     if (value.kind === "list" || value.kind === "set") {
       // A set compares only values it can hold.
