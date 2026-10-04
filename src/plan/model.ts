@@ -573,7 +573,7 @@ export interface TemporaryExpressionPlan extends ExpressionPlanBase {
   readonly temporaryId: number;
 }
 
-/** `load <key> [default <value>]`: the default is evaluated only when the key is absent. */
+/** `load <key>[, default: <value>]`: the default is evaluated only when the key is absent. */
 export interface StorageLoadExpressionPlan extends ExpressionPlanBase {
   readonly kind: "storageLoad";
   readonly key: ExpressionPlan;

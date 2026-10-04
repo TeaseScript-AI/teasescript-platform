@@ -128,7 +128,7 @@ const parserDiagnosticCode = {
 
 const MEDIA_ARGUMENTS = ["file", "async", "repeat", "startAt", "endAt", "volume"] as const;
 
-type StorageDelimiter = "as" | "default";
+type StorageDelimiter = "as";
 const NO_STORAGE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set();
 const SAVE_VALUE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set(["as"]);
 
@@ -152,8 +152,8 @@ class Parser {
   /** Inside a media cue position or a switch subject, where the following block `{` ends a compact interaction. */
   #blockEndsCompactInteraction = false;
   /**
-   * The `save` `as` and `load` `default` that end an enclosing storage operand. A compact interaction stops at them, and
-   * a bare interaction leaves the `as` to `save`; groupings such as parentheses start without them.
+   * The `save` `as` that ends an enclosing storage operand. A compact interaction stops at it, and a bare interaction
+   * leaves the `as` to `save`; groupings such as parentheses start without it.
    */
   #storageDelimiters: ReadonlySet<StorageDelimiter> = NO_STORAGE_DELIMITERS;
 
@@ -954,24 +954,13 @@ class Parser {
   }
 
   /**
-   * `load <key> [default <value>]`; both operands are full expressions, so `(load "k") == null` needs parentheses.
-   * The default is evaluated only when the key is absent.
+   * `load <key>[, default: <value>]`; both operands are full expressions, so `(load "k") == null` needs parentheses.
+   * Like the default answer of an ask, the `, default:` binds to the nearest `load` before it. The default is
+   * evaluated only when the key is absent.
    */
   *#parseLoadExpression(): ParseTask<LoadExpression | null> {
     const command = this.#advance();
-    // The key ends at this load's `default` and at any delimiter of an enclosing storage operand; the default
-    // ends only at the enclosing ones.
-    const enclosing = this.#storageDelimiters;
-    this.#storageDelimiters = new Set([...enclosing, "default"]);
     const key = yield* parseChild(this.#parseOr());
-    this.#storageDelimiters = enclosing;
-    let defaultValue: Expression | null = null;
-    let missingDefault = false;
-    if (key !== null && this.#checkIdentifier("default")) {
-      this.#advance();
-      defaultValue = yield* parseChild(this.#parseRequiredExpressionTask());
-      missingDefault = defaultValue === null;
-    }
     if (key === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedStorageKey,
@@ -979,7 +968,30 @@ class Parser {
       );
       return null;
     }
-    if (missingDefault) return null;
+    let defaultOffset = this.#interactionDefaultAfterComma();
+    if (defaultOffset === null && this.#checkIdentifier("default")) {
+      // The removed V30 form `load "k" default v`, or a missing comma before `default:`.
+      this.#reportToken(
+        parserDiagnosticCode.expectedDelimiter,
+        "Write a fallback for load as 'load key, default: value', with a comma and a colon.",
+        this.#peek(),
+      );
+      // Recover with the fallback as written, so the rest of the statement parses normally.
+      defaultOffset = this.#peek(1).kind === TokenKind.Colon ? 0 : -1;
+    }
+    let defaultValue: Expression | null = null;
+    if (defaultOffset === -1) {
+      this.#advance();
+      defaultValue = yield* parseChild(this.#parseOr());
+    } else if (defaultOffset !== null && this.#atInteractionDefault(defaultOffset)) {
+      for (let skipped = 0; skipped < defaultOffset + 2; skipped += 1) this.#advance();
+      defaultValue = yield* parseChild(this.#parseColonValueTask(false));
+      if (defaultValue === null)
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedExpression,
+          "Expected a fallback value after 'default:'.",
+        );
+    }
     return Object.freeze({
       kind: "loadExpression",
       key,
@@ -2613,13 +2625,7 @@ class Parser {
   }
 
   #atStorageDelimiter(): boolean {
-    return (
-      (this.#storageDelimiters.has("as") && this.#check(TokenKind.KeywordAs)) ||
-      // `default:` is a contextual name, such as a choice option value, not the delimiter.
-      (this.#storageDelimiters.has("default") &&
-        this.#checkIdentifier("default") &&
-        this.#peek(1).kind !== TokenKind.Colon)
-    );
+    return this.#storageDelimiters.has("as") && this.#check(TokenKind.KeywordAs);
   }
 
   /**

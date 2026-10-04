@@ -17,6 +17,7 @@ import {
   type RuntimeSnapshot,
   type SerializableRuntimeValue,
 } from "../src/index.js";
+import { parse } from "../src/parser.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
@@ -172,7 +173,7 @@ test("failed persistent saves and deletes keep the old value or absence and allo
           "function fallback { calls += 1\nreturn 9 }",
           command,
           'let plain = load "k"',
-          'let withDefault = load "k" default fallback()',
+          'let withDefault = load "k", default: fallback()',
           'let stillMissing = load "k"',
           "exit",
         ].join("\n"),
@@ -397,7 +398,7 @@ test("a terminal save completes the root after acknowledgement even with backgro
 
 test("absent loads return null or the default without storing it", () => {
   const result = assertRuntimeResumeEquivalent(
-    'let missing = load "k"\nlet fallback = load "k" default 7\nlet stillMissing = load "k"\nexit',
+    'let missing = load "k"\nlet fallback = load "k", default: 7\nlet stillMissing = load "k"\nexit',
   );
   assert.equal(binding(result.finalSnapshot, "missing"), null);
   assert.equal(binding(result.finalSnapshot, "fallback"), 7);
@@ -411,8 +412,8 @@ test("present loads skip side effects and blocking interactions in defaults", ()
       'save "Ada" as "name"',
       "let calls = 0",
       'function fallback { calls = calls + 1\nreturn "fallback" }',
-      'let fromFunction = load "name" default fallback()',
-      'let fromPrompt = load "name" default askText "Your name?"',
+      'let fromFunction = load "name", default: fallback()',
+      'let fromPrompt = load "name", default: askText "Your name?"',
       "exit",
     ].join("\n"),
   );
@@ -430,7 +431,7 @@ test("an absent load resumes its blocking function default at every instruction 
     [
       "let calls = 0",
       'function fallback { calls = calls + 1\nwait 1 ms\nreturn "Ada" }',
-      'let name = load "name" default fallback()',
+      'let name = load "name", default: fallback()',
       'let missing = load "name"',
       "exit",
     ].join("\n"),
@@ -444,7 +445,7 @@ test("an absent load resumes its blocking function default at every instruction 
 
 test("an absent load suspends for askText and resumes after a JSON checkpoint round trip", () => {
   const compiled = plan(
-    'let name = load "name" default askText "Your name?"\nlet stillMissing = load "name"\nsave name as "name"\nexit',
+    'let name = load "name", default: askText "Your name?"\nlet stillMissing = load "name"\nsave name as "name"\nexit',
   );
   const pending = run(compiled, createFreshRuntimeSnapshot(compiled));
   assert.equal(pending.snapshot.status, "waiting");
@@ -531,9 +532,9 @@ test("storage operands evaluate in source order and present loads skip their def
       "let order = []",
       "function mark(value) { order.add(value)\nreturn value }",
       'save mark("value") as mark("key")',
-      'let present = load mark("key") default mark("unused")',
+      'let present = load mark("key"), default: mark("unused")',
       'delete mark("key")',
-      'let absent = load mark("missing") default mark("default")',
+      'let absent = load mark("missing"), default: mark("default")',
       "exit",
     ].join("\n"),
   );
@@ -732,7 +733,7 @@ test("loaded values are checked against the variable's type, including missing k
     "TSR058",
     "'missing' holds a number, so it cannot take null.",
   ]);
-  assert.deepEqual(failure('let fallback: number = load "missing" default identity("fallback")'), [
+  assert.deepEqual(failure('let fallback: number = load "missing", default: identity("fallback")'), [
     "TSR058",
     "'fallback' holds a number, so it cannot take text (string).",
   ]);
@@ -753,13 +754,13 @@ test("loaded values are checked against the variable's type, including missing k
   assert.deepEqual(result.snapshot.scriptStorage, storage);
 });
 
-test("compact interactions end at the save 'as' and the load 'default' delimiters", () => {
+test("compact interactions end at the save 'as', and a grouped load key leaves the fallback to load", () => {
   const compiled = plan(
     [
       'save askText as "bare"',
       'save askText "Your name?" as "name"',
-      'save load "nick" default askText "Nickname?" as "nick"',
-      'let pick = load choose first: "a", second: "b" default "fallback"',
+      'save load "nick", default: askText "Nickname?" as "nick"',
+      'let pick = load (choose first: "a", second: "b"), default: "fallback"',
       "exit",
     ].join("\n"),
   );
@@ -797,7 +798,7 @@ test("compact interactions end at the save 'as' and the load 'default' delimiter
   assert.equal(binding(finished.snapshot, "pick"), "stored");
 
   // A present key never prompts; its stored value is saved again.
-  const present = plan('save load "nick" default askText "Nickname?" as "nick"\nexit');
+  const present = plan('save load "nick", default: askText "Nickname?" as "nick"\nexit');
   const rerun = run(
     present,
     createFreshRuntimeSnapshot(present, { scriptStorage: [{ key: "nick", value: "Addy" }] }),
@@ -846,6 +847,42 @@ test("deleting a key keeps every other stored key readable and writable", () => 
   ]);
 });
 
+test("load takes its fallback as ', default:', and the earlier form names the fix", () => {
+  const diagnostics = (source: string) =>
+    compileSource(source).diagnostics.map(
+      (item) => `${item.code} ${item.span.start.column + 1} ${item.message}`,
+    );
+  const fix =
+    "TSP017 18 Write a fallback for load as 'load key, default: value', with a comma and a colon.";
+
+  assert.deepEqual(diagnostics('let v = load "k" default 1'), [fix]);
+  assert.deepEqual(diagnostics('let v = load "k" default: 1'), [fix]);
+  assert.deepEqual(diagnostics('let v = load "k", default:'), [
+    "TSP012 27 Expected a fallback value after 'default:'.",
+  ]);
+});
+
+test("a ', default:' belongs to the nearest load or ask before it", () => {
+  const initializer = (source: string) => {
+    const [statement] = parse(source).program.statements;
+    assert.ok(statement?.kind === "letStatement");
+    return statement.initializer;
+  };
+
+  const askKey = initializer('let v = load askText "Key?", default: "x"');
+  assert.ok(askKey.kind === "loadExpression" && askKey.defaultValue === null);
+  assert.ok(askKey.key.kind === "interactionExpression" && askKey.key.defaultValue !== null);
+
+  const loadDefault = initializer('let v = askText "Name?", default: load "name", default: "Ada"');
+  assert.ok(loadDefault.kind === "interactionExpression");
+  assert.ok(loadDefault.defaultValue?.kind === "loadExpression");
+  assert.equal(loadDefault.defaultValue.defaultValue?.kind, "stringLiteral");
+
+  const list = initializer('let v = [load "a", default: 1, 2]');
+  assert.ok(list.kind === "listLiteral" && list.elements.length === 2);
+  assert.ok(list.elements[0]?.kind === "loadExpression" && list.elements[0].defaultValue !== null);
+});
+
 test("compact interactions parse in every storage operand position", () => {
   const prelude =
     'speaker mistress {\n  name: "M"\n}\nfunction wrap(value) { return "${value}" }\n';
@@ -868,11 +905,12 @@ test("compact interactions parse in every storage operand position", () => {
     [(value) => `save ${value} as "k"`, false],
     [(value) => `save [${value}] as "k"`, false],
     [(value) => `let v = load ${value}`, true],
-    [(value) => `let v = load ${value} default "d"`, true],
-    [(value) => `let v = load "k" default ${value}`, false],
-    [(value) => `save load "k" default ${value} as "k"`, false],
+    // A `, default:` after an ungrouped interaction would belong to the interaction, so these keys are grouped.
+    [(value) => `let v = load (${value}), default: "d"`, true],
+    [(value) => `let v = load "k", default: ${value}`, false],
+    [(value) => `save load "k", default: ${value} as "k"`, false],
     [(value) => `save load ${value} as "k"`, true],
-    [(value) => `save load ${value} default "d" as "k"`, true],
+    [(value) => `save load (${value}), default: "d" as "k"`, true],
   ];
   for (const value of values) {
     for (const [position, key] of positions) {
@@ -948,7 +986,7 @@ test("a write reserves the completion events of every active action", () => {
 
 test("load operands may be quoted strings inside interpolation", () => {
   const result = assertRuntimeResumeEquivalent(
-    'save "Ada" as "k"\nlet key = "missing"\nlet present = "${load "k"}"\nlet absent = "${load key default "fallback"}"\nexit',
+    'save "Ada" as "k"\nlet key = "missing"\nlet present = "${load "k"}"\nlet absent = "${load key, default: "fallback"}"\nexit',
   );
   assert.equal(binding(result.finalSnapshot, "present"), "Ada");
   assert.equal(binding(result.finalSnapshot, "absent"), "fallback");

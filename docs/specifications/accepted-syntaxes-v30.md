@@ -2324,11 +2324,11 @@ save playerName as "player.name"
 `save value as key` evaluates the value first, then the key. It creates the key when absent and replaces its value
 when present. Saving `null` removes the key, like `delete`; stored top-level values are never `null`.
 
-`default` is optional:
+The fallback `, default:` is optional:
 
 ```text
 let playerName = load "player.name"              // null when the key is absent
-let score: number = load "player.score" default 0
+let score: number = load "player.score", default: 0
 ```
 
 `load` evaluates its key first. When the key exists, it returns the stored value with its stored TeaseScript type
@@ -2336,19 +2336,21 @@ without evaluating the default. When absent, it evaluates and returns the defaul
 `load` never writes: the default is not stored. Only `save` creates or changes a stored value. An explicit target
 type may determine the intended numeric type of a literal default, as in the `number` example above.
 
-Key, value, and default operands are full expressions; `as` and `default` delimit their operands. Group a `load`
-before combining its result with another expression:
+Key, value, and default operands are full expressions. `as` ends the value of `save`. Like the default answer of an
+ask, `, default:` belongs to the nearest `load` or ask before it, so `load (askText "Key?"), default: "none"` groups
+the ask to give the fallback to `load`. Group a `load` before combining its result with another expression:
 
 ```text
 (load "k") == null
-(load "a" default 0) + 1
+(load "a", default: 0) + 1
 ```
 
 Without parentheses, `load "k" == null` uses `"k" == null` as the key, which is not a string. Group a nested `load`
-used as a key too. A compact interaction inside an operand ends at the enclosing `as` or `default`, and inside a
-`save` value `as` belongs to `save`: `save askText as "name"` asks and stores the answer, while an interaction with
-its own speaker clause is grouped, as in `save (askText as mistress "Name?") as "name"`. A default may suspend, such as `load "name" default askText "Your name?"`; it starts only when
-the key is absent and can resume across checkpoint restore.
+used as a key too. A compact interaction inside a `save` value ends at the `as`, which belongs to `save`:
+`save askText as "name"` asks and stores the answer, while an interaction with its own speaker clause is grouped, as in
+`save (askText as mistress "Name?") as "name"`. A default may suspend, such as
+`load "name", default: askText "Your name?"`; it starts only when the key is absent and can resume across checkpoint
+restore. The earlier form without the comma and colon, `load "k" default 0`, is a compile error that names the fix.
 
 Delete a value:
 
@@ -2829,7 +2831,7 @@ A valid string reference may replace the missing value.
 ### Invalid number from stored or external data
 
 ```text
-let duration: number = load "settings.duration" default 0
+let duration: number = load "settings.duration", default: 0
 ```
 
 A valid number may replace an invalid stored value.
