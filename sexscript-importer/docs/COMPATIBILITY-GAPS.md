@@ -73,12 +73,14 @@ TeaseScript that the compiler gate replaces with stand-ins until it is implement
 | `def x` / `int x` without initializer | `let x: string? = null` (or `string[]?`, ...), and `0` or `false` for primitives |
 | `def x = 0` that later holds a fraction | `let x = 0`, which widens to `number` by itself (#504 option B; the compiler gate writes `: number` until #526 lands) |
 | `def x = "a"` that is later set to `null`; `def x = null` | `let x: string? = "a"`; `let x = null`, which keeps the type of its first value (#504 decision 1a) |
-| `int x = 7 / 2`, `int x = f()`, and later values stored in `x` | `let x = toInteger(7 / 2)`, `let x = toInteger(f())` (Groovy stores 3); `int x = loadInteger(k)` becomes `let x: integer = load k` |
+| `int x = 7 / 2`, `int x = f()`, and later values stored in `x` | `let x = toInteger(7 / 2)`, `let x = toInteger(f())` (Groovy stores 3); `int x = loadInteger(k)` becomes `let x: integer = load k`, and another storage read `toInteger(load k)` |
 | `new Boolean[n]`, `x in list`, boolean `&`/`|` | a generated list helper, `list.contains(x)`, `and`/`or` with a side-effect-free right side |
 | `System.exit(0)` | `exit` (the Player stays open) |
 | `int t = showPopup(m)` (seconds until closed) | `getTimestamp().toSeconds()` before and after `showPopup m`, in whole seconds |
 | `showButton(text, s)` used as a value (seconds until the click) | `(showButton text, timeout: s) / 1 s` (#531) |
-| `showButton(text, 0)` (the button stayed for its 10 ms safety margin; the result was 0) | `showButton text, timeout: 10 ms`, with a note; a used result is `0` |
+| `showButton(text, 0)` (the button stayed for its 10 ms safety margin; the result was 0) | `showButton text, timeout: 10 ms`, with a note, also for a timeout known before the run (`def t = 0`, `1 - 1`); a used result is `0` |
+| `x = loadInteger(k)` followed by `if (x == null) x = d` | `x = load k, default: d` (#541; also `loadString`, `loadBoolean`, `loadFloat`) |
+| `m[k] ?: d`, `m.containsKey(k) ? m[k] : d`, `x = m[k]` followed by `if (x == null) x = d` on a dict | `m.get(k, default: d)` (#536) |
 | `getImage(message)` (webcam picture path or null) | `takePhoto()`, with a note (V30 §33) |
 | `playBackgroundSound(null)`, `stopSoundThreads()` | handles of the async sounds kept in a list and stopped by a generated helper |
 | `f(x++)`, `continue` in a C-style `for`, `return` inside `each()` | `f(x)` then `x += 1`; the update step before each `continue`; `continue` |
@@ -109,11 +111,15 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   `ß` into `SS`. A literal with a character outside the Basic Multilingual Plane, such as an emoji, gets a `NOTE` on a
   length, `substring`, `indexOf`, or `lastIndexOf` (`SX_TEXT_CODE_POINTS`); text known only at runtime does not. Java
   `split()` drops trailing empty parts and TeaseScript `split()` keeps them (`NOTE`). Groovy `join()` printed nested
-  lists and maps, which the accepted `join()` rejects, so a list known to hold them is reported (`SX_LIST_JOIN`).
+  lists and maps, which the accepted `join()` rejects, so a list known to hold them is reported (`SX_LIST_JOIN`), also
+  when they reach it through an alias (`ys = xs`) or a later `add`, `<<`, or `+=`; a list whose element types are not
+  proven gets a note (0 corpus sites).
 - Legacy `save(key, null)` deleted the key and every dotted sub-key (`key.*`), and generic `load()` decoded a stored
-  string `"null"` as null. Generated reads therefore compare with `null` explicitly, which treats a stored null and a
-  missing key alike; `load ... default` is not used because it would keep a stored null (see the specification
-  questions below). TeaseScript keys are flat, so saving a scalar over a former list/map key leaves the old sub-keys.
+  string `"null"` as null. Since `save null` removes the key on `main` too (#484), a typed read followed by a null
+  default (`x = loadInteger(k)`, then `if (x == null) x = d`) becomes `load k, default: d` (#541), 101 corpus sites
+  (100 in DisciplineClinic); other reads compare with `null` explicitly, and generic `load()` keeps that test because
+  of the `"null"` text. TeaseScript keys are flat, so saving a scalar over a former list/map key leaves the old
+  sub-keys.
 - `getRandom(max)` returned 0 for `max` 0 (rounding toward zero for a negative bound, and 0..99 for null), while
   `randomInteger()` rejects the empty range `0..0`. Bounds other than a positive integer literal therefore use a
   generated helper with the legacy results; the smoke run found this on Domme3's default single image pack.
@@ -125,18 +131,28 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   (#517), or `dict.length > 0` for a dict; a map that may also be null is tested with `map != null and map != {}`, and
   reported when the expression cannot be evaluated twice (`SX_MAP_TRUTHINESS`).
 - A Groovy map read a missing key as null; a dict reports it (#536). `map[key] == null` and a lookup used as a
-  condition therefore test `contains(key)` first, and `remove(key)` of a key that may be missing becomes
-  `if map.contains(key) { map.remove(key) }`; any other lookup of a missing key fails where Groovy continued with null.
-  Groovy kept a key's type, so `1` and `"1"` were different keys, while dict keys are text: number keys become text
-  with a note (`SX_DICT_KEY_TEXT`), also a key of unknown type in a dict built with number keys. A repeated literal key
-  kept its first position and its last value, which the dict literal merges with a note (`SX_DICT_DUPLICATE_KEY`). A
-  map whose values have different types, or a runtime key on a map not held in a variable, is reported
-  (`SX_DICT_VALUE_TYPE`, `SX_DYNAMIC_MAP_ACCESS`).
+  condition therefore test `contains(key)` first (with `or map[key] == null` when a value may be null), and
+  `remove(key)` of a key that may be missing becomes `if map.contains(key) { map.remove(key) }`. A fallback for a
+  missing key (`m[k] ?: d`, `m.containsKey(k) ? m[k] : d`, read-then-default) becomes `m.get(k, default: d)`, with a
+  note where Groovy's fallback also replaced a stored null, or with `?:` a stored false, 0, or empty value
+  (`SX_DICT_DEFAULT`). Any other lookup fails where Groovy continued with null, so it gets a note (`SX_DICT_MISSING_KEY`,
+  26 Toy sites) unless its key is proven present: a literal key that every map assigned to the variable has and
+  nothing removes, a key a surrounding test found, a key written earlier in the same block, or the key of a loop over
+  `keySet()`. Groovy kept a key's type, so `1` and `"1"` were different keys, while dict keys are text: number keys
+  become text with a note (`SX_DICT_KEY_TEXT`), at every number key of a dict that text keys reach too, and a key of
+  unknown type becomes text in a dict that number keys reach. A repeated literal key kept its first position and its
+  last value, which the dict literal merges with a note (`SX_DICT_DUPLICATE_KEY`). A map whose values have different
+  types (also through property writes or lists with different element types), a runtime key on a map not held in a
+  variable, and a dict compared with a map that may be an object are reported (`SX_DICT_VALUE_TYPE`,
+  `SX_DYNAMIC_MAP_ACCESS`, `SX_DICT_EQUALITY`); a map literal or variable compared with a dict becomes a dict, since a
+  dict never equals an object. Dict analysis follows bindings, so a closure's own `def m` is apart from a script `m`.
 - Closures kept as values become action IDs called through one dispatcher. Unlike Groovy, the dispatcher ignores extra
   arguments and returns null for an unknown action; Groovy failed in both cases.
 - A `switch` case Groovy tested with `isCase` keeps its meaning only where the case value shows it: equality for
-  scalars, membership for lists, bounds for ranges (tested in both directions when a bound is known only at runtime).
-  Other case values (classes, patterns, closures, values of unknown type) are reported.
+  scalars, membership for lists, bounds for number ranges (tested in both directions when a bound is known only at
+  runtime). A text range holds only the texts its iteration reaches (`"a".."c"` holds `"b"` but not `"ba"`), so a
+  range case with text bounds, or with bounds of unknown type against a subject that may be text, is reported, like
+  other case values (classes, patterns, closures, values of unknown type).
 - Java integer and character arrays convert every written value; they are reported instead of becoming lists.
   Writes to a list that a direct `b = a` assignment shared get a `NOTE` (`SX_SHARED_LIST_WRITE`).
 - `break`/`continue` with a label leave an outer loop; TeaseScript jumps affect only the innermost loop, so they are
@@ -162,9 +178,11 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   so `round(-2.5)` is `-3` where Java gave `-2` (`SX_ROUNDING_TIES`, 7 corpus sites).
 - Legacy `showButton()` returned the seconds until the click as a number; the TeaseScript result is a duration
   (#513, #531), so a used result is divided by `1 s`, 49 corpus sites. A Groovy `int` that stores it truncates, as
-  Groovy did: `t = toInteger((showButton "Done") / 1 s)`, 25 sites in Domme3. A literal zero timeout kept the legacy
-  button for its 10 ms safety margin and returned 0, which the conversion keeps (`SX_BUTTON_TIMEOUT`); a timeout that
-  is zero only at runtime fails in TeaseScript (#531), and a negative literal, which failed in legacy too, is reported.
+  Groovy did: `t = toInteger((showButton "Done") / 1 s)`, 25 sites in Domme3. A zero timeout kept the legacy
+  button for its 10 ms safety margin and returned 0, which the conversion keeps (`SX_BUTTON_TIMEOUT`) when the zero is
+  known before the run (a literal, arithmetic on literals, or a variable assigned one such value once); a computed
+  timeout gets a note, since it fails in TeaseScript (#531) if it is zero or negative (6 corpus sites), and a negative
+  one, which failed in legacy too, is reported.
 - Java date pattern formatting (#532): `yyyy-MM-dd` is a machine format and becomes `toISO()`, exactly; a display
   pattern of a whole date or time becomes `formatDate()`, `formatTime()`, or `formatDateTime()`, which show the
   player's local form instead of the legacy pattern, a deliberate difference with a `NOTE`. Of the corpus's 9
@@ -202,8 +220,12 @@ of its first value (1a) and that an unannotated integer widens to `number` by it
   Variables that start as `null` are no longer annotated from Groovy's number evidence, which cannot tell an integer
   from a fraction; they keep the type of their first value.
 - **Groovy integer declarations coerce:** an `int` stores whole numbers, so every value not known to be an integer
-  truncates with `toInteger`, 55 sites (25 of them `showButton` seconds stored in Domme3's `int t`), and the 52 `int`
-  declarations initialized from storage become `let x: integer = load k`, which checks the stored value.
+  truncates with `toInteger`, 55 sites (25 of them `showButton` seconds stored in Domme3's `int t`). The 53 `int`
+  declarations initialized with `loadInteger()` become `let x: integer = load k`, which checks the stored value; the
+  4 initialized with another read truncate (`toInteger(load k)`), as Groovy did with a stored fraction. Groovy stored a
+  one-character text in an `int` as its character code (`"3"` became 51) and failed for longer text, so a value
+  proven to be text is reported and a truncated value that may be text gets a note (`SX_INTEGER_FROM_TEXT`; 0 corpus
+  sites).
 - **Index rule:** a variable that may hold a fraction cannot index a list (#504 option B); such an index truncates
   with `toInteger`, as Groovy's `getAt(Number)` did. No corpus site remains once null-started variables are inferred.
 - **Importer defects the checks exposed:** 13 Toy `lines += [...]` appends were emitted as numeric `+=` because the
@@ -223,8 +245,10 @@ showed:
   map, Toy's `sessionParams` (booleans, text, numbers), uses fixed names and is a record, as #536 anticipated.
 - **Missing keys need guards:** Groovy read a missing key as null. 10 Toy lookups only test presence or truth and
   become `contains` tests, and 5 `remove` calls on keys that may be missing need `if map.contains(key) { ... }`. The
-  deferred default lookup form would shorten these and `toynames[t] ?: t.replaceAll("_", " ")` (1 site, which also
-  needs a regular expression).
+  default lookup that #536 added, `m.get(k, default: d)`, covers fallbacks for a missing key; Toy has one,
+  `toynames[t] ?: t.replaceAll("_", " ")`, whose fallback still needs a regular expression. 26 Toy lookups have a key
+  the importer cannot prove present (a parameter, a list element, a computed level) and get a note, since they stop
+  the script where Groovy read null.
 - **Number keys:** Toy keeps two tables keyed by level (`[1: 1.25, 2: 1.1, ...][getLevel(DENIAL)]`), so their keys and
   lookups become text (`dict{ "1": 1.25, ... }["${getLevel(DENIAL)}"]`, 4 `SX_DICT_KEY_TEXT` notes). The deferred
   non-text keys would keep such tables as written.
@@ -320,13 +344,13 @@ produce it yet.
 | Gap | Corpus | Clean form |
 | --- | --- | --- |
 | Conditional expressions (`?:`, elvis) inside larger expressions | Toy, about 40 | nested `if` with temporaries, keeping the evaluation order |
-| List methods with closures (`collect`, `findAll`, `every`, `sort { }`, `times`, `each` on unproven receivers) | Toy, about 25 | `for` loops |
+| Collection methods (`times` 7, `collect` 6, `findAll` 5, `isEmpty` 3, `collectEntries` 2, text `toList()` 2, and `every`, `any`, `find`, `intersect`, `sort`, `unique`, `eachWithIndex`, `Collections.shuffle`, `values`, `add`, `remove` once each), mostly with closures or on receivers inference does not prove | Toy 36 of its 59 dynamic calls | `for` loops and the list and text operations |
 | Toy menus built inside larger expressions | Toy 6 | the same loops, before the statement |
 | Non-short-circuit `&` and `\|` on booleans | Toy, about 10 | `and`/`or`, with temporaries when an operand has effects |
-| Closures that capture local state; method pointers | Toy 13 | explicit state parameters; action IDs with a dispatcher |
-| Calls into Toy's plugin modules (`toy.metaClass.name { ... }`, loaded with `Eval.me` from a folder at runtime) | most of Toy's 58 dynamic calls | one function per module method, resolved at import time |
+| Closures that capture local state; method pointers; calls of closures kept in data (`it.cond()`, `e.event.func(...)`, 4 dynamic calls) | Toy 17 | explicit state parameters; action IDs with a dispatcher |
+| Variables that hold values of two types, such as `response = ""` that later holds `true` (valid dynamic Groovy) | DisciplineClinic 8 | a separate variable per type where their lifetimes do not overlap, or union types (#530) |
 | Persona data files with Groovy expression strings | Toy | data converted at import time |
-| `instanceof` | Toy 1 | `is` (#530) |
+| `instanceof`; `asBoolean()`; `Math.floorDiv` | Toy 1 each | `is` (#530); Groovy truth; `floor(a / b)` |
 
 **Workaround possible, but a hack.** Works with current TeaseScript but differs from the intended behavior; the
 accepted implementation is still wanted.
@@ -344,15 +368,13 @@ accepted implementation is still wanted.
 | Gap | Corpus | Why |
 | --- | --- | --- |
 | Script transfers `run`/`call`/`goto`/`end` (syntax under re-evaluation in the tracker) | blocks 21 scripts (distribution 7, Domme3 12, DisciplineClinic 2) | A package is several scripts that transfer to each other. Imitating that means merging every script into one file with a dispatcher loop, with every function passing a pending transfer up to it: a rewrite of the whole package. Only `call` alone maps to a function call within one file. |
-| Desktop and Java APIs (files, OS processes, Java objects, the Cornertime exchange) | Toy, distribution | Outside the product boundary by design (see Legacy baggage). |
-| Legacy bugs (variables nothing assigns 10, helpers without the script host 7, variables that change type 8) | Domme3, DisciplineClinic | Need an author's repair; reporting them is correct. |
+| Desktop and Java APIs: `java.time` formatting and zones (5), files (4), `java.util.Random` (2), JSON and Base64 (2), `Eval.me`, `java.util.function.Function`, `System.getProperty`, OS processes (1 each), Java objects, the Cornertime exchange | Toy 17 of its 59 dynamic calls, distribution | Outside the product boundary by design (see Legacy baggage). `Random.nextInt(n)` alone could become `randomInteger()`, without the seed. |
+| Legacy bugs (variables nothing assigns 10, helpers without the script host 7) | Domme3, DisciplineClinic | Need an author's repair; reporting them is correct. |
 
 ## Open importer work
 
 Found while evaluating the proposals, besides the importer work listed above; none needs a language decision:
 
-- **`load "key" default value`** is now exact for legacy read-then-default code, because `save null` removes the key on
-  `main` (#484); the importer does not use it for that pattern yet.
 - **Groovy type inference is per file and flow-insensitive:** a name used in two functions shares one type set, which
   hides lists (the Toy appends above) and makes `size()` on values of unknown type look like possible maps. The
   never-assigned-variable check is name-based in the same way.

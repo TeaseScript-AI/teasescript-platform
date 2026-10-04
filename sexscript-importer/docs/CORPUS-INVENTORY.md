@@ -82,6 +82,7 @@ scripts use it (capabilities used by fewer than three scripts are omitted):
 | `: number` for integer widening (#526, #515) | 7 | 1 |
 | `dict` (#536) | 1 | 0 |
 | `choose` list options (#515) | 5 | 0 |
+| `load "key", default:` (#541) | 5 | 1 |
 | `round()` (#518) | 4 | 1 |
 | `getDate().toISO()`, `getTime().formatTime()` (#532) | 3 each | 1 each |
 | `openUrl()` | 3 | 0 |

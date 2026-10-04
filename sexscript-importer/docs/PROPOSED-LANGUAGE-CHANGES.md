@@ -98,8 +98,10 @@ key loop from `each { key, value -> }`; 6 object literals declare fields that Gr
 `sessionParams`, a record with mixed field types. The 28 Toy statements that still involve these maps are reported for
 other causes: closures over map entries and method chains on looked-up values (`toys.any { s, t -> ... }`, `findAll`,
 `activityList[name].func()`, 14), Java objects as values (`new Event(...)`, 2), a dict of closures (`funcMap`, 2), and
-boolean `&`, conditionals, and regular expressions around them (10). No runtime map key stays reported. Domme3 drops
-from 31 to 24 because `.length` now covers `size()` on values of unknown type. No other package uses maps as lookup
+boolean `&`, conditionals, and regular expressions around them (10). No runtime map key stays reported. #536 has since added a default lookup,
+`m.get(k, default: d)`, which fallbacks for a missing key now use (`m[k] ?: d`, `m.containsKey(k) ? m[k] : d`,
+read-then-default); a lookup whose key the importer cannot prove present gets a note instead (26 Toy sites). Domme3
+drops from 31 to 24 because `.length` now covers `size()` on values of unknown type. No other package uses maps as lookup
 tables, apart from a reply of the legacy online service in the distribution's `test.groovy`, which stays unconverted.
 The friction this showed is in [`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md).
 
@@ -310,7 +312,9 @@ prefilled `default:` for single-field inputs (#510, as #514); positional argumen
 #524); and the runtime fix for a `choose` reached again with other option texts (#521, as #523). Open: built-in text
 operations (#508, PR #518), L1 with C1–C3 (#511, PR #515), switch with several values per case (#528, PR #529), the
 compact `showButton "Done", timeout: 30` form (#531), and date, time, and datetime values (#532). The importer
-follows all of them in its default output. `save null` already removes the key on `main` (#484). Text utilities
+follows all of them in its default output. `save null` already removes the key on `main` (#484), and
+`load "key", default: value` (#541) replaces `load "key" default value`: the importer emits the new form for typed
+read-then-default code, and the compiler gate writes the old form until #541 lands. Text utilities
 beyond #508, such as regular expressions, are future work as a `.ts` system library, and localized script variants
 too; one language is enough for now.
 
