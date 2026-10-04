@@ -70,12 +70,15 @@ import type {
 } from "./ast.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { lex } from "./lexer.js";
+import { readScriptHeader, type ScriptHeader } from "./script-header.js";
 import { calendarDurationUnit, elapsedDurationUnit } from "./duration.js";
 import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
 import { TokenKind, type Token } from "./token.js";
 
 export interface ParseResult {
   readonly program: Program;
+  /** The file's `---` header, or `null` when it has none. */
+  readonly header: ScriptHeader | null;
   readonly diagnostics: readonly Diagnostic[];
 }
 
@@ -154,12 +157,18 @@ const SAVE_VALUE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set(["as"]);
 /** Parses the accepted core-language milestone. */
 export function parse(source: string): ParseResult {
   const lexResult = lex(source);
-  const parser = new Parser(lexResult.tokens);
+  const header = readScriptHeader(lexResult.tokens);
+  const parser = new Parser(header.programTokens);
   const program = parser.parseProgram();
 
   return Object.freeze({
     program,
-    diagnostics: Object.freeze([...lexResult.diagnostics, ...parser.diagnostics]),
+    header: header.header,
+    diagnostics: Object.freeze([
+      ...lexResult.diagnostics,
+      ...header.diagnostics,
+      ...parser.diagnostics,
+    ]),
   });
 }
 

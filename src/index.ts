@@ -26,6 +26,8 @@ export {
 } from "./interaction-limits.js";
 export { lex, type LexResult } from "./lexer.js";
 export { parse, type ParseResult } from "./parser.js";
+export type { ScriptHeader } from "./script-header.js";
+export { normalizeTagName, type Tag } from "./tags.js";
 export {
   CORE_RUNTIME_BUILTINS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
@@ -89,14 +91,17 @@ export {
   languageDiagnostics,
   languageHover,
   languagePositionAt,
+  languageProjectOverview,
   languageSignatureHelp,
   type LanguageCompletionItem,
   type LanguageContextHelp,
   type LanguageDiagnostic,
   type LanguageDocument,
+  type LanguageFileOverview,
   type LanguageFormatResult,
   type LanguageHover,
   type LanguagePosition,
+  type LanguageProjectFile,
   type LanguageRange,
   type LanguageSignatureHelp,
   type LanguageTextEdit,
