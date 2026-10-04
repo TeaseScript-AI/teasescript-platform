@@ -190,9 +190,10 @@ test(
   },
 );
 
-// TeaseScript variables keep one type (#519); Groovy variables that held text and a list need manual work.
+// A Groovy variable that held values of several types becomes a declared union (ADR 0021 §3), also when it starts as
+// null or holds a function result; types the importer writes no union for are reported.
 test(
-  "reports a variable that holds values of two types instead of emitting code that does not compile",
+  "declares a union for a variable that holds values of several types and reports types without one",
   { skip: parserUnavailable || ("reason" in compilerResult ? compilerResult.reason : false) },
   async () => {
     if (!("compiler" in compilerResult)) return;
@@ -201,40 +202,10 @@ test(
       const sourcePath = path.join(directory, "type-change.groovy");
       writeFileSync(
         sourcePath,
-        'def lines = "One"\nif (getBoolean("Long?")) lines = ["One", "Two"]\nshow("Done")\nshow("${lines.size()}")\n',
-      );
-      const program = await convert(sourcePath);
-      assert.deepEqual(
-        program.diagnostics
-          .filter((diagnostic) => diagnostic.severity === "error")
-          .map(({ code, span }) => ({ code, line: span?.line })),
-        [{ code: "SX_TYPE_CHANGE", line: 1 }],
-      );
-      const output = emitTease(program);
-      assert.match(
-        output,
-        /^\/\/ TODO SX_TYPE_CHANGE line 1: 'lines' starts as text \(string\), but is later set to a list \(string\[\]\) \(line 2\)\./mu,
-      );
-      assert.match(output, /^\/\/ \| def lines = "One"$/mu);
-      // The rest of the script is still converted.
-      assert.match(output, /^ {2}lines = \["One", "Two"\]$/mu);
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
-  },
-);
-
-// A variable that starts as null, or holds a function result, keeps the first type it gets (#504 decision 1a).
-test(
-  "reports type changes of variables that start as null or hold a function result",
-  { skip: parserUnavailable },
-  async () => {
-    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-inferred-"));
-    try {
-      const sourcePath = path.join(directory, "inferred.groovy");
-      writeFileSync(
-        sourcePath,
         [
+          'def lines = "One"',
+          'if (getBoolean("Long?")) lines = ["One", "Two"]',
+          'show("${lines.size()}")',
           "def value = null",
           'value = "text"',
           "value = [1, 2]",
@@ -242,6 +213,9 @@ test(
           "def text = label()",
           'if (getBoolean("More?")) text = [1]',
           "show(text)",
+          'def span = "a"',
+          'if (getBoolean("Range?")) span = 1..3',
+          'show("${span}")',
           "",
         ].join("\n"),
       );
@@ -250,10 +224,28 @@ test(
         program.diagnostics
           .filter((diagnostic) => diagnostic.severity === "error")
           .map(({ code, span }) => ({ code, line: span?.line })),
-        [
-          { code: "SX_TYPE_CHANGE", line: 1 },
-          { code: "SX_TYPE_CHANGE", line: 5 },
-        ],
+        [{ code: "SX_TYPE_CHANGE", line: 11 }],
+      );
+      const output = emitTease(program);
+      assert.match(
+        output,
+        /^\/\/ NOTE SX_UNION_TYPE line 1: .* declares it 'string \| string\[\]'/mu,
+      );
+      assert.match(output, /^let lines: string \| string\[\] = "One"$/mu);
+      assert.match(output, /^let value: string \| integer\[\] \| null = null$/mu);
+      assert.match(output, /^let text: string \| integer\[\] = \w+\(\)$/mu);
+      assert.match(
+        output,
+        /^\/\/ TODO SX_TYPE_CHANGE line 11: 'span' starts as text \(string\), but is later set to a range \(line 12\)\./mu,
+      );
+      // Only the reported variable fails to compile: the uses of the unions need no type test.
+      const errors = compilerResult
+        .compiler(output)
+        .diagnostics.filter((item) => item.severity === "error");
+      assert.ok(errors.length > 0);
+      assert.ok(
+        errors.every((item) => item.message.includes("'span'")),
+        JSON.stringify(errors),
       );
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -365,8 +357,8 @@ test(
       // A value that may be a list or one element is reported; a function result is a list.
       assert.match(output, /^ {2}\/\/ TODO SX_LIST_CONCATENATION line 5: /mu);
       assert.match(output, /^ {2}items = sexscriptLegacyConcat\(\[items, extra\(\)\]\)$/mu);
-      // A list literal is checked element by element, as the compiler does.
-      assert.match(output, /^\/\/ TODO SX_TYPE_CHANGE line 10: 'weights' holds integer values/mu);
+      // A list literal is checked element by element, as the compiler does; mixed elements need a union.
+      assert.match(output, /^let weights: \(integer \| string\)\[\] = \[1, 2\]$/mu);
       // A list case holding a range keeps Groovy's membership test.
       assert.match(output, /\[1\.\.=3, 5\]\.contains\(/u);
       // Legacy showed a number default as text; a map default has no text form.
@@ -608,33 +600,58 @@ test(
 );
 
 // A variable splits by type only in straight-line code of the block that declares it, which no function writes; a
-// write through a function, a function value, or a loop with break is a type change.
+// write through a function, a function value, or a loop with break keeps one variable with a union type.
 test(
-  "reports variables of several types that functions or loops write",
-  { skip: parserUnavailable },
+  "declares a union for variables of several types that functions or loops write",
+  { skip: parserUnavailable || ("reason" in runnerResult ? runnerResult.reason : false) },
   async () => {
+    if (!("runner" in runnerResult)) return;
     const directory = mkdtempSync(path.join(tmpdir(), "sexscript-scratch-"));
     try {
-      const sources = {
-        wrapper:
-          'def response = "seed"\ndef writer = { -> response = [1, 2] }\ndef wrapper = { -> writer() }\nresponse = "ready"\nwrapper()\nsave("result", response)\n',
-        callback:
-          'def response = "seed"\ndef writer = { -> response = [1, 2] }\ndef callback = writer\nresponse = "ready"\ncallback()\nsave("result", response)\n',
-        loop: 'def response = "seed"\nresponse = 1\nwhile (true) { response = "changed"; break }\nsave("result", response)\n',
-        nested:
-          'def response = "seed"\nif (true) { while (false) { break } }\nresponse = 1\nsave("result", response)\n',
-      };
-      for (const [name, source] of Object.entries(sources)) {
+      const writer = 'def response = "seed"\ndef writer = { -> response = [1, 2] }\n';
+      const cases = [
+        {
+          name: "wrapper",
+          source: `${writer}def wrapper = { -> writer() }\nresponse = "ready"\nwrapper()\nsave("result", response)\n`,
+          type: "string | integer[]",
+          result: { kind: "list", items: [1, 2] },
+        },
+        {
+          name: "callback",
+          source: `${writer}def callback = writer\nresponse = "ready"\ncallback()\nsave("result", response)\n`,
+          type: "string | integer[]",
+          result: { kind: "list", items: [1, 2] },
+        },
+        {
+          name: "loop",
+          source:
+            'def response = "seed"\nresponse = 1\nwhile (true) { response = "changed"; break }\nsave("result", response)\n',
+          type: "string | integer",
+          result: "changed",
+        },
+        {
+          name: "nested",
+          source:
+            'def response = "seed"\nif (true) { while (false) { break } }\nresponse = 1\nsave("result", response)\n',
+          type: "string | integer",
+          result: 1,
+        },
+      ];
+      for (const { name, source, type, result } of cases) {
         const sourcePath = path.join(directory, `${name}.groovy`);
         writeFileSync(sourcePath, source);
         const program = await convert(sourcePath);
         assert.deepEqual(
-          program.diagnostics
-            .filter((diagnostic) => diagnostic.severity === "error")
-            .map(({ code, span }) => ({ code, line: span?.line })),
-          [{ code: "SX_TYPE_CHANGE", line: 1 }],
+          program.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+          [],
           name,
         );
+        assert.ok(emitTease(program).includes(`let response: ${type} = "seed"`), name);
+        const storage = new Map();
+        const shim = shimPendingCapabilities(program);
+        const run = runnerResult.runner(shim.source, pendingHostFunctions(shim), { storage });
+        assert.equal(run.status, "halted", name);
+        assert.deepEqual(storage.get("result"), result, name);
       }
     } finally {
       rmSync(directory, { recursive: true, force: true });

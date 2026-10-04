@@ -19,6 +19,8 @@ export type TeaseType =
   | { kind: "scalar"; name: ScalarName }
   | { kind: "list"; element: TeaseType }
   | { kind: "optional"; value: TeaseType }
+  /** A declared union of writable types (ADR 0021 §3), none of them null, optional, or itself a union. */
+  | { kind: "union"; members: TeaseType[] }
   | { kind: "object" | "range" | "handle" | "dict" }
   /** A local date, time, or datetime, or a fixed timestamp (#532). */
   | { kind: "temporal"; name: "date" | "time" | "datetime" | "timestamp" };
@@ -47,8 +49,13 @@ export interface VariableTypeResult {
    * variable stored as its character code, where `toInteger()` reads the number the text spells.
    */
   textIntegers: IrStatement[];
-  /** Declarations whose empty-text placeholder became the empty value of the type the variable later holds. */
-  placeholders: Array<{ statement: IrStatement; name: string; type: string }>;
+  /**
+   * Declarations whose empty-text placeholder became the empty value of the type the variable later holds; `first`
+   * describes the type whose empty value it is when the variable holds a union.
+   */
+  placeholders: Array<{ statement: IrStatement; name: string; type: string; first?: string }>;
+  /** Declarations of variables that Groovy gave values of several types, now declared with a union type. */
+  unions: Array<{ statement: IrStatement; name: string; type: string; example: string }>;
   /** Declarations that gained a `number` or optional type annotation. */
   annotated: number;
   /** Values truncated with `toInteger` because Groovy declared the variable with an integer type. */
@@ -83,6 +90,11 @@ interface Binding {
   inferred: TeaseType | undefined;
   widened: boolean;
   optional: boolean;
+  /**
+   * A union type that keeps every type Groovy stored (ADR 0021 §3): the variable's own type, or a list whose element
+   * type is a union.
+   */
+  union?: TeaseType;
   /**
    * The type a Groovy empty-text placeholder (`def lines = ""`) later holds instead, whose empty value the declaration
    * starts with.
@@ -210,6 +222,7 @@ export function enforceVariableTypes(
     conflicts: [],
     textIntegers: [],
     placeholders: [],
+    unions: [],
     annotated: 0,
     truncated: 0,
     appended: [],
@@ -263,6 +276,10 @@ export function enforceVariableTypes(
           // value later needs its optional type written.
           const needed =
             binding.optional ||
+            binding.union !== undefined ||
+            (type !== undefined &&
+              nonNull(type).kind === "list" &&
+              elementType(type)?.kind === "union") ||
             binding.initial.kind === "optional" ||
             (binding.widened && type !== undefined && nonNull(type).kind === "list");
           if (needed && written !== null) {
@@ -274,11 +291,22 @@ export function enforceVariableTypes(
             next = { ...next, type: written };
           const rewritten = withIntegerIndexes(next, indexes);
           if (textIntegers.has(statement)) result.textIntegers.push(rewritten);
+          const union = binding.union === undefined ? undefined : nonNull(binding.union);
+          if (union?.kind === "union" && written !== null)
+            result.unions.push({
+              statement: rewritten,
+              name: statement.name,
+              type: written,
+              example: typeName(union.members[0]!),
+            });
           if (placeholder !== null && type !== undefined)
             result.placeholders.push({
               statement: rewritten,
               name: statement.name,
               type: describeValue(type),
+              ...(nonNull(type).kind === "union" && binding.placeholder !== undefined
+                ? { first: describeValue(binding.placeholder) }
+                : {}),
             });
           return rewritten;
         }
@@ -374,7 +402,7 @@ function declarationMessage(items: Conflict[]): string {
     lines.length === 0
       ? ""
       : ` (line${lines.length === 1 ? "" : "s"} ${lines.slice(0, 5).join(", ")}${lines.length > 5 ? ", ..." : ""})`;
-  return `${first}${where}. A TeaseScript variable keeps one type (V30 §12) and union types are not accepted yet, while Groovy let '${binding.name}' change type. Use a separate variable for the other values, or give all values one type.`;
+  return `${first}${where}. A TeaseScript variable keeps one type (V30 §12), while Groovy let '${binding.name}' change type, and the importer declares unions only of text, numbers, booleans, durations, lists, and objects. Use a separate variable for the other values, or give all values one type.`;
 }
 
 class Scope {
@@ -508,6 +536,20 @@ function analyse(
       return change(() => (target.optional = true));
     if (declared && canWiden(type, value) && !target.widened)
       return change(() => (target.widened = true));
+    // A variable that Groovy gave values of several types keeps them all in a declared union.
+    const merged =
+      declared && target.fixed === undefined && !target.integer ? unionOf(type, value) : null;
+    if (merged !== null && target.placeholder !== undefined) {
+      const text = scalar("string");
+      // Groovy stored text too, so the empty text it started with was a value rather than a placeholder.
+      if (isAssignable(merged, text))
+        return change(() => {
+          delete target.placeholder;
+          target.initial = text;
+          target.union = unionOf(text, merged) ?? merged;
+        });
+      return change(() => (target.union = merged));
+    }
     // An empty-text placeholder that later holds values of one other type starts with that type's empty value.
     const declaration = target.declaration;
     if (
@@ -524,6 +566,7 @@ function analyse(
         target.initial = nonNull(value);
       });
     }
+    if (merged !== null) return change(() => (target.union = merged));
     conflict(
       target,
       statement,
@@ -723,6 +766,11 @@ function analyse(
     if (isAssignable(collection.element, value)) return;
     if (list.declaration !== null && canWiden(collection.element, value) && !list.widened)
       return change(() => (list.widened = true));
+    const element =
+      list.declaration !== null && list.fixed === undefined
+        ? unionOf(collection.element, value)
+        : null;
+    if (element !== null) return change(() => (list.union = listOf(element)));
     conflict(
       list,
       item,
@@ -786,6 +834,9 @@ function nullTestedNames(value: unknown, names = new Set<string>()): Set<string>
 /** The type a variable keeps, or undefined when the compiler does not check it (a null or unknown initializer). */
 function bindingType(binding: Binding): TeaseType | undefined {
   let type =
+    (binding.union !== undefined && binding.initial.kind === "null"
+      ? ({ kind: "optional", value: binding.union } satisfies TeaseType)
+      : binding.union) ??
     binding.fixed ??
     (binding.initial.kind === "null" && binding.inferred !== undefined
       ? { kind: "optional", value: nonNull(binding.inferred) }
@@ -863,6 +914,9 @@ export function isAssignable(target: TeaseType, source: TeaseType): boolean {
   if (target.kind === "optional")
     return source.kind === "null" || isAssignable(target.value, nonNull(source));
   if (source.kind === "optional") return false;
+  if (source.kind === "union")
+    return source.members.every((member) => isAssignable(target, member));
+  if (target.kind === "union") return target.members.some((member) => isAssignable(member, source));
   switch (target.kind) {
     case "null":
       return source.kind === "null";
@@ -884,8 +938,41 @@ export function isAssignable(target: TeaseType, source: TeaseType): boolean {
 function annotation(type: TeaseType): string | null {
   const value = nonNull(type);
   const writable =
-    value.kind === "scalar" || (value.kind === "list" && value.element.kind === "scalar");
+    value.kind === "scalar" ||
+    (value.kind === "list" && value.element.kind === "scalar") ||
+    (value.kind === "union" && value.members.every(isWritableMember)) ||
+    (value.kind === "list" &&
+      value.element.kind === "union" &&
+      value.element.members.every(isWritableMember));
   return writable ? typeName(type) : null;
+}
+
+/** A type a union annotation can name: a scalar, a list of scalars, any list (`list`), or any object (`object`). */
+function isWritableMember(type: TeaseType): boolean {
+  return (
+    type.kind === "scalar" ||
+    type.kind === "object" ||
+    (type.kind === "list" && (type.element.kind === "scalar" || type.element.kind === "unknown"))
+  );
+}
+
+/**
+ * The union of two types that an annotation can write, such as `string | string[]`, or null. Integers and numbers
+ * together are numbers.
+ */
+function unionOf(left: TeaseType, right: TeaseType): TeaseType | null {
+  const members: TeaseType[] = [];
+  for (const type of [nonNull(left), nonNull(right)]) {
+    for (const member of type.kind === "union" ? type.members : [type]) {
+      if (!isWritableMember(member)) return null;
+      const index = members.findIndex(
+        (known) => isAssignable(known, member) || isAssignable(member, known),
+      );
+      if (index < 0) members.push(member);
+      else if (isAssignable(member, members[index]!)) members[index] = member;
+    }
+  }
+  return members.length < 2 ? null : { kind: "union", members };
 }
 
 function parseAnnotation(text: string): TeaseType {
@@ -904,9 +991,17 @@ function typeName(type: TeaseType): string {
     case "scalar":
       return type.name;
     case "list":
-      return type.element.kind === "unknown" ? "list" : `${typeName(type.element)}[]`;
+      return type.element.kind === "unknown"
+        ? "list"
+        : type.element.kind === "union"
+          ? `(${typeName(type.element)})[]`
+          : `${typeName(type.element)}[]`;
     case "optional":
-      return `${typeName(type.value)}?`;
+      return type.value.kind === "union"
+        ? `${typeName(type.value)} | null`
+        : `${typeName(type.value)}?`;
+    case "union":
+      return type.members.map(typeName).join(" | ");
     case "temporal":
       return type.name;
     default:
@@ -928,6 +1023,8 @@ function describeValue(type: TeaseType): string {
       return type.element.kind === "unknown" ? "a list" : `a list (${typeName(type)})`;
     case "optional":
       return `${describeValue(type.value)} or null`;
+    case "union":
+      return type.members.map(describeValue).join(" or ");
     case "null":
       return "null";
     case "object":
@@ -979,6 +1076,22 @@ function arithmeticType(
   if (numeric(left.name) && right.name === "duration" && operator === "*")
     return scalar("duration");
   return undefined;
+}
+
+/**
+ * The element type of a list literal: the common type, or a union that a declaration can write when Groovy mixed
+ * types, such as `(number | boolean)` (ADR 0021 rule 1.3).
+ */
+function elementsType(types: readonly TeaseType[]): TeaseType {
+  const common = commonType(types);
+  if (common.kind !== "unknown" || types.length < 2) return common;
+  let merged: TeaseType | null = types[0]!;
+  for (const type of types.slice(1)) {
+    if (merged === null) return UNKNOWN;
+    if (isAssignable(merged, type)) continue;
+    merged = isAssignable(type, merged) ? type : unionOf(merged, type);
+  }
+  return merged ?? UNKNOWN;
 }
 
 /** One element type for all elements; integers and numbers together are numbers. Anything else is unknown. */
@@ -1094,7 +1207,7 @@ export function expressionType(
     case "variable":
       return variable(value.name);
     case "list":
-      return listOf(commonType(value.items.map(type)));
+      return listOf(elementsType(value.items.map(type)));
     case "object":
       return { kind: value.dict === true ? "dict" : "object" };
     case "index": {
