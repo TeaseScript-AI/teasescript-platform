@@ -1,4 +1,4 @@
-// A variable that starts with a whole number and later holds fractions is declared as a number.
+// A variable that starts with a whole number and later holds fractions widens to a number by itself (#504 option B).
 def tempo = 1
 tempo = 0.75
 def delay = 2
@@ -27,3 +27,8 @@ def later = null
 later = 1
 later = 2.5
 show("Whole ${whole}, stored ${stored}, later ${later}")
+// A position that may hold a fraction truncates when it indexes a list, as Groovy did.
+def names = ["first", "second"]
+def position = 0
+position = position + 0.5
+show(names[position])

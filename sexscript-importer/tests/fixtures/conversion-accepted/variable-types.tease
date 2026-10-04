@@ -1,7 +1,7 @@
-// A variable that starts with a whole number and later holds fractions is declared as a number.
-let tempo: number = 1
+// A variable that starts with a whole number and later holds fractions widens to a number by itself (#504 option B).
+let tempo = 1
 tempo = 0.75
-let delay: number = 2
+let delay = 2
 delay = delay / 4
 let weights: number[] = [1, 2]
 weights.add(2.5)
@@ -32,3 +32,8 @@ let later: number? = null
 later = 1
 later = 2.5
 say "Whole ${whole}, stored ${stored}, later ${later}"
+// A position that may hold a fraction truncates when it indexes a list, as Groovy did.
+let names = ["first", "second"]
+let position = 0
+position = position + 0.5
+say names[toInteger(position)]

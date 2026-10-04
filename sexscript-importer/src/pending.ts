@@ -369,8 +369,14 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
       }
       case "function":
         return [{ ...item, body: statements(item.body) }];
-      case "let":
-        return [{ ...item, value: expression(item.value) }];
+      case "let": {
+        if (item.compilerType === undefined) return [{ ...item, value: expression(item.value) }];
+        // The current compiler needs `: number` where an integer widens by itself (#504 option B, #526) or a numeric
+        // `choose` is an integer (#515).
+        capabilities.add("number annotations (#515, #526)");
+        const { compilerType, ...declaration } = item;
+        return [{ ...declaration, type: compilerType, value: expression(item.value) }];
+      }
       case "assign": {
         const target = item.target;
         if (target.kind === "index" && target.proposed === "dictionaries") {

@@ -88,7 +88,19 @@ export type IrStatement =
    * `type` is a written annotation such as `number`, `string?`, or `string[]?`. `integer` marks a variable Groovy
    * declared with an integer type (`int`, `long`, ...), which truncates every number stored in it.
    */
-  | (IrBase & { kind: "let"; name: string; value: IrExpression; type?: string; integer?: true })
+  | (IrBase & {
+      kind: "let";
+      name: string;
+      value: IrExpression;
+      type?: string;
+      integer?: true;
+      /**
+       * The annotation the current compiler needs where the accepted rules need none or another one: an integer that
+       * later holds fractions widens by itself (#504 option B, #526), and a numeric `choose` is an integer (#515).
+       * Only the compiler gate writes it.
+       */
+      compilerType?: string;
+    })
   | (IrBase & {
       kind: "assign";
       target: IrExpression;

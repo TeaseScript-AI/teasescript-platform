@@ -26,6 +26,13 @@ export type TeaseType =
 
 const SCALAR_NAMES = ["string", "integer", "number", "boolean", "duration"] as const;
 type ScalarName = (typeof SCALAR_NAMES)[number];
+
+/**
+ * `accepted` follows the owner decisions: a numeric `choose` value is an integer (#515), and an unannotated variable
+ * that starts as a whole number widens to `number` by itself (#504 option B, #526). `main` follows the current
+ * compiler, which types a numeric `choose` as `number` and needs `: number` to widen; the compiler gate uses it.
+ */
+type Rules = "accepted" | "main";
 type LetStatement = Extract<IrStatement, { kind: "let" }>;
 
 export interface TypeConflict {
@@ -46,6 +53,8 @@ export interface VariableTypeResult {
   annotated: number;
   /** Values truncated with `toInteger` because Groovy declared the variable with an integer type. */
   truncated: number;
+  /** Declarations whose type only the current compiler needs (`compilerType`), for the compiler gate. */
+  compilerAnnotated: number;
   /**
    * `list += value` statements, emitted as numeric `+=` because the list was not proven while lowering, that now
    * append with the concatenation helper.
@@ -93,7 +102,7 @@ export function functionResultTypes(statements: IrStatement[]): Map<string, Teas
   const bindings = new Map<BindingKey, Binding>();
   let results = new Map<string, TeaseType>();
   for (let round = 0; round < 50; round += 1) {
-    const analysis = analyse(statements, bindings, results);
+    const analysis = analyse(statements, bindings, results, "accepted");
     const changed = [...analysis.results].some(
       ([name, type]) => typeName(type) !== typeName(results.get(name) ?? UNKNOWN),
     );
@@ -103,24 +112,38 @@ export function functionResultTypes(statements: IrStatement[]): Map<string, Teas
   return results;
 }
 
-export function enforceVariableTypes(
+interface Rounds {
+  bindings: Map<BindingKey, Binding>;
+  conflicts: Conflict[];
+  appends: Map<IrStatement, boolean>;
+  /** Statements whose stored number truncates to an integer. */
+  truncations: Set<IrStatement>;
+  integerLoads: Set<IrStatement>;
+  indexes: Set<IrExpression>;
+}
+
+/** Analysis rounds until no declaration or function result changes. */
+function runRounds(
   statements: IrStatement[],
-  /** Result types of functions defined elsewhere, such as the generated helpers. */
-  knownResults: ReadonlyMap<string, TeaseType> = new Map(),
-): VariableTypeResult {
-  const bindings = new Map<BindingKey, Binding>();
-  let conflicts: Conflict[] = [];
-  // Statements whose stored number truncates to an integer.
-  const truncations = new Set<IrStatement>();
-  const integerLoads = new Set<IrStatement>();
-  let appends = new Map<IrStatement, boolean>();
+  knownResults: ReadonlyMap<string, TeaseType>,
+  rules: Rules,
+): Rounds {
+  const rounds: Rounds = {
+    bindings: new Map(),
+    conflicts: [],
+    appends: new Map(),
+    truncations: new Set(),
+    integerLoads: new Set(),
+    indexes: new Set(),
+  };
   let results = new Map(knownResults);
   for (let round = 0; round < 50; round += 1) {
-    const analysis = analyse(statements, bindings, results);
-    conflicts = analysis.conflicts;
-    appends = analysis.appends;
-    for (const statement of analysis.truncations) truncations.add(statement);
-    for (const statement of analysis.integerLoads) integerLoads.add(statement);
+    const analysis = analyse(statements, rounds.bindings, results, rules);
+    rounds.conflicts = analysis.conflicts;
+    rounds.appends = analysis.appends;
+    rounds.indexes = analysis.indexes;
+    for (const statement of analysis.truncations) rounds.truncations.add(statement);
+    for (const statement of analysis.integerLoads) rounds.integerLoads.add(statement);
     const next = new Map([...knownResults, ...analysis.results]);
     const resultsChanged =
       next.size !== results.size ||
@@ -128,6 +151,19 @@ export function enforceVariableTypes(
     results = next;
     if (!analysis.changed && !resultsChanged) break;
   }
+  return rounds;
+}
+
+export function enforceVariableTypes(
+  statements: IrStatement[],
+  /** Result types of functions defined elsewhere, such as the generated helpers. */
+  knownResults: ReadonlyMap<string, TeaseType> = new Map(),
+): VariableTypeResult {
+  const accepted = runRounds(statements, knownResults, "accepted");
+  // The current compiler needs annotations that the accepted rules make unnecessary.
+  const compiler = runRounds(statements, knownResults, "main");
+  const { bindings, appends, truncations, integerLoads, indexes } = accepted;
+  const conflicts = accepted.conflicts;
   // A repair that needs a type no annotation can write, such as an optional object, becomes a conflict too.
   const conflicting = new Set(conflicts.map((conflict) => conflict.binding));
   for (const binding of bindings.values()) {
@@ -164,6 +200,7 @@ export function enforceVariableTypes(
     conflicts: [],
     annotated: 0,
     truncated: 0,
+    compilerAnnotated: 0,
     appended: [],
   };
   for (const [declaration, items] of declarationConflicts) {
@@ -205,11 +242,27 @@ export function enforceVariableTypes(
           }
           const type = bindingType(binding);
           const written = type === undefined ? null : annotation(type);
-          if ((binding.widened || binding.optional) && written !== null) {
+          // An unannotated variable widens from integer to number by itself (#504 option B); an optional type and a
+          // widened list element type still need an annotation.
+          const needed =
+            binding.optional ||
+            (binding.widened && type !== undefined && nonNull(type).kind === "list");
+          if (needed && written !== null) {
             result.annotated += 1;
             next = { ...next, type: written };
           }
-          return next;
+          // The current compiler needs `: number` to widen, and types a numeric `choose` as a number.
+          const compilerBinding = compiler.bindings.get(statement);
+          const compilerType =
+            compilerBinding !== undefined && (compilerBinding.widened || compilerBinding.optional)
+              ? bindingType(compilerBinding)
+              : undefined;
+          const compilerWritten = compilerType === undefined ? null : annotation(compilerType);
+          if (compilerWritten !== null && compilerWritten !== (next.type ?? null)) {
+            result.compilerAnnotated += 1;
+            next = { ...next, compilerType: compilerWritten };
+          }
+          return withIntegerIndexes(next, indexes);
         }
         case "assign": {
           const appendsList = appends.get(statement);
@@ -224,8 +277,9 @@ export function enforceVariableTypes(
               value: helperCall("concat", [{ kind: "list", items: [statement.target, value] }]),
             };
           }
-          if (!truncations.has(statement)) return statement;
-          if (statement.operator === "=") return { ...statement, value: truncate(statement.value) };
+          if (!truncations.has(statement)) return withIntegerIndexes(statement, indexes);
+          if (statement.operator === "=")
+            return withIntegerIndexes({ ...statement, value: truncate(statement.value) }, indexes);
           return {
             ...statement,
             operator: "=",
@@ -240,11 +294,14 @@ export function enforceVariableTypes(
         case "function":
           return { ...statement, body: rewrite(statement.body) };
         case "if":
-          return { ...statement, then: rewrite(statement.then), else: rewrite(statement.else) };
+          return withIntegerIndexes(
+            { ...statement, then: rewrite(statement.then), else: rewrite(statement.else) },
+            indexes,
+          );
         case "while":
         case "repeat":
         case "for":
-          return { ...statement, body: rewrite(statement.body) };
+          return withIntegerIndexes({ ...statement, body: rewrite(statement.body) }, indexes);
         case "switch":
           return {
             ...statement,
@@ -252,7 +309,9 @@ export function enforceVariableTypes(
             default: rewrite(statement.default),
           };
         default:
-          return statement;
+          return statementConflicts.has(statement)
+            ? statement
+            : withIntegerIndexes(statement, indexes);
       }
     });
   result.statements = rewrite(statements);
@@ -293,6 +352,8 @@ interface Analysis {
   truncations: Set<IrStatement>;
   /** Integer declarations initialized from storage, declared `: integer` so the stored value is checked. */
   integerLoads: Set<IrStatement>;
+  /** List indexes, and `removeAt` calls, whose position may hold a fraction. */
+  indexes: Set<IrExpression>;
   /** `list += value` statements, and whether the value is a list whose elements are appended. */
   appends: Map<IrStatement, boolean>;
 }
@@ -301,6 +362,7 @@ function analyse(
   statements: IrStatement[],
   bindings: Map<BindingKey, Binding>,
   results: ReadonlyMap<string, TeaseType>,
+  rules: Rules,
 ): Analysis {
   const analysis: Analysis = {
     changed: false,
@@ -308,6 +370,7 @@ function analyse(
     results: new Map(),
     truncations: new Set(),
     integerLoads: new Set(),
+    indexes: new Set(),
     appends: new Map(),
   };
   // The `return` value types of the function being walked; null for a bare `return` or falling off the end.
@@ -345,6 +408,7 @@ function analyse(
         return found === undefined ? UNKNOWN : (bindingType(found) ?? UNKNOWN);
       },
       (name) => results.get(name),
+      rules,
     );
   const conflict = (
     target: Binding,
@@ -388,7 +452,21 @@ function analyse(
     );
   };
 
+  /** A position that may hold a fraction cannot index a list (#504 option B); Groovy truncated it. */
+  const findIndexes = (value: IrExpression, scope: Scope): void => {
+    forEachExpression(value, (child) => {
+      const position =
+        child.kind === "index" && child.proposed === undefined
+          ? child.index
+          : child.kind === "methodCall" && child.name === "removeAt" && child.arguments.length === 1
+            ? child.arguments[0]!
+            : null;
+      if (position !== null && isNumber(typeOf(position, scope))) analysis.indexes.add(child);
+    });
+  };
+
   const statement = (item: IrStatement, scope: Scope): void => {
+    for (const value of ownExpressions(item)) findIndexes(value, scope);
     switch (item.kind) {
       case "let": {
         const fixed = item.type === undefined ? undefined : parseAnnotation(item.type);
@@ -834,8 +912,9 @@ export function expressionType(
   value: IrExpression,
   variable: (name: string) => TeaseType,
   result: (name: string) => TeaseType | undefined = () => undefined,
+  rules: Rules = "accepted",
 ): TeaseType {
-  const type = (child: IrExpression): TeaseType => expressionType(child, variable, result);
+  const type = (child: IrExpression): TeaseType => expressionType(child, variable, result, rules);
   switch (value.kind) {
     case "literal":
       if (value.value === null) return NULL;
@@ -891,9 +970,9 @@ export function expressionType(
     case "load":
       return UNKNOWN;
     case "choice":
-      // PR #515 makes numeric choice values integers; until it merges, `main` types them as numbers, and a variable
-      // declared from a whole number that later receives one needs `: number` there.
-      return value.labels === undefined ? scalar("number") : scalar("string");
+      // PR #515 makes numeric choice values integers; `main` still types them as numbers.
+      if (value.labels !== undefined) return scalar("string");
+      return scalar(rules === "accepted" ? "integer" : "number");
     case "listChoice": {
       const values: TeaseType[] = [];
       for (const option of value.options) {
@@ -938,4 +1017,219 @@ export function expressionType(
 /** A choice object's value type is not known from its type alone. */
 function choiceEntryType(type: TeaseType): TeaseType {
   return nonNull(type).kind === "object" ? UNKNOWN : type;
+}
+
+/** The expressions a statement evaluates itself, not those of the statements it contains. */
+function ownExpressions(statement: IrStatement): IrExpression[] {
+  switch (statement.kind) {
+    case "let":
+    case "say":
+    case "return":
+      return "value" in statement && statement.value !== null ? [statement.value] : [];
+    case "assign":
+      return [statement.target, statement.value];
+    case "expression":
+      return [statement.expression];
+    case "if":
+    case "while":
+      return [statement.condition];
+    case "repeat":
+      return [statement.count];
+    case "for":
+      return [statement.collection];
+    case "save":
+      return [statement.key, statement.value];
+    case "wait":
+      return [statement.duration];
+    case "showButton":
+      return statement.timeout === null ? [statement.label] : [statement.label, statement.timeout];
+    case "showPopup":
+      return [statement.message];
+    case "showImage":
+      return [statement.file];
+    case "playAudio":
+      return statement.repeatCount === null
+        ? [statement.file]
+        : [statement.file, statement.repeatCount];
+    case "switch":
+      return [statement.value, ...statement.cases.flatMap((item) => item.matches)];
+    case "run":
+      return [statement.script];
+    case "delete":
+      return [statement.key];
+    default:
+      return [];
+  }
+}
+
+/** Calls `visit` on an expression and every expression inside it. */
+function forEachExpression(value: IrExpression, visit: (expression: IrExpression) => void): void {
+  visit(value);
+  mapChildren(value, (child) => {
+    forEachExpression(child, visit);
+    return child;
+  });
+}
+
+/** Truncates the recorded list positions inside a statement's own expressions with `toInteger`. */
+function withIntegerIndexes<T extends IrStatement>(
+  statement: T,
+  indexes: ReadonlySet<IrExpression>,
+): T {
+  if (indexes.size === 0) return statement;
+  const truncated = (position: IrExpression): IrExpression => ({
+    kind: "call",
+    name: "toInteger",
+    positional: [position],
+    named: {},
+  });
+  const replace = (value: IrExpression): IrExpression => {
+    const copy = mapChildren(value, replace);
+    if (!indexes.has(value)) return copy;
+    if (copy.kind === "index") return { ...copy, index: truncated(copy.index) };
+    if (copy.kind === "methodCall") return { ...copy, arguments: [truncated(copy.arguments[0]!)] };
+    return copy;
+  };
+  return mapOwnExpressions(statement, replace);
+}
+
+/** A copy of a statement with `map` applied to each expression it evaluates itself (see ownExpressions). */
+function mapOwnExpressions<T extends IrStatement>(
+  statement: T,
+  map: (value: IrExpression) => IrExpression,
+): T {
+  const item: IrStatement = statement;
+  const next: IrStatement = (() => {
+    switch (item.kind) {
+      case "let":
+      case "say":
+        return { ...item, value: map(item.value) };
+      case "return":
+        return { ...item, value: item.value === null ? null : map(item.value) };
+      case "assign":
+        return { ...item, target: map(item.target), value: map(item.value) };
+      case "expression":
+        return { ...item, expression: map(item.expression) };
+      case "if":
+      case "while":
+        return { ...item, condition: map(item.condition) };
+      case "repeat":
+        return { ...item, count: map(item.count) };
+      case "for":
+        return { ...item, collection: map(item.collection) };
+      case "save":
+        return { ...item, key: map(item.key), value: map(item.value) };
+      case "wait":
+        return { ...item, duration: map(item.duration) };
+      case "showButton":
+        return {
+          ...item,
+          label: map(item.label),
+          timeout: item.timeout === null ? null : map(item.timeout),
+        };
+      case "showPopup":
+        return { ...item, message: map(item.message) };
+      case "showImage":
+        return { ...item, file: map(item.file) };
+      case "playAudio":
+        return {
+          ...item,
+          file: map(item.file),
+          repeatCount: item.repeatCount === null ? null : map(item.repeatCount),
+        };
+      case "switch":
+        return {
+          ...item,
+          value: map(item.value),
+          cases: item.cases.map((switchCase) => ({
+            ...switchCase,
+            matches: switchCase.matches.map(map),
+          })),
+        };
+      case "run":
+        return { ...item, script: map(item.script) };
+      case "delete":
+        return { ...item, key: map(item.key) };
+      default:
+        return item;
+    }
+  })();
+  // EVIDENCE: each case spreads `item`, so `next` has the kind and fields of `statement` with expressions replaced.
+  return next as T;
+}
+
+/** A copy of an expression with `map` applied to each direct child expression. */
+function mapChildren(
+  value: IrExpression,
+  map: (child: IrExpression) => IrExpression,
+): IrExpression {
+  switch (value.kind) {
+    case "literal":
+    case "variable":
+    case "duration":
+      return value;
+    case "list":
+      return { ...value, items: value.items.map(map) };
+    case "object":
+      return {
+        ...value,
+        properties: value.properties.map((property) => ({
+          ...property,
+          value: map(property.value),
+          ...(property.key === undefined ? {} : { key: map(property.key) }),
+        })),
+      };
+    case "index":
+      return { ...value, target: map(value.target), index: map(value.index) };
+    case "property":
+      return { ...value, target: map(value.target) };
+    case "methodCall":
+      return { ...value, target: map(value.target), arguments: value.arguments.map(map) };
+    case "load":
+      return {
+        ...value,
+        key: map(value.key),
+        ...(value.defaultValue === undefined ? {} : { defaultValue: map(value.defaultValue) }),
+      };
+    case "choice":
+      return { ...value, options: value.options.map(map) };
+    case "listChoice":
+      return {
+        ...value,
+        options: value.options.map((option) =>
+          option.kind === "list"
+            ? { ...option, list: map(option.list) }
+            : { ...option, text: map(option.text) },
+        ),
+      };
+    case "input":
+      return value.defaultValue === undefined
+        ? value
+        : { ...value, defaultValue: map(value.defaultValue) };
+    case "range":
+      return { ...value, from: map(value.from), to: map(value.to) };
+    case "unary":
+      return { ...value, value: map(value.value) };
+    case "binary":
+      return { ...value, left: map(value.left), right: map(value.right) };
+    case "call":
+      return {
+        ...value,
+        positional: value.positional.map(map),
+        named: Object.fromEntries(
+          Object.entries(value.named).map(([name, item]) => [name, map(item)]),
+        ),
+      };
+    case "template":
+      return {
+        ...value,
+        parts: value.parts.map((part) => ("text" in part ? part : { value: map(part.value) })),
+      };
+    case "button":
+      return {
+        ...value,
+        label: map(value.label),
+        timeout: value.timeout === null ? null : map(value.timeout),
+      };
+  }
 }
