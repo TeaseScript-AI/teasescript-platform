@@ -1784,6 +1784,13 @@ askDateTime(...)  // datetime
 
 These inputs use structured date and time controls and do not return unparsed free text. Like the other blocking `ask...` functions, they only complete with a valid value.
 
+The compact forms `askDate`, `askTime`, and `askDateTime [as speaker] [hint] [, default: value]` are implemented
+([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askdate-asktime-and-askdatetime)). The control
+submits strict ISO text ([§35](#35-date-time-durations-and-timestamps)); a local time that the player's zone skips is a
+valid answer. The transcript shows the answer in the player's presentation. The Player's date and date-and-time
+controls cover the years 0001 through 9999, as the browser's native controls do; a default in year 0000 is shown and
+edited as ISO text instead. The value domain stays 0000 through 9999 for conversions, defaults, and text answers.
+
 ### Default answers
 
 Every single-field input accepts an optional named `default:` answer that prefills its field:
@@ -1999,6 +2006,9 @@ Default invalid messages:
 | `askNumbers(...)` | `"That is wrong. Every value must be a number."` |
 | `askInteger(...)` | `"That is wrong. I asked for a whole number."` |
 | `askIntegers(...)` | `"That is wrong. Every value must be a whole number."` |
+| `askDate(...)` | `"That is wrong. I asked for a date."` |
+| `askTime(...)` | `"That is wrong. I asked for a time."` |
+| `askDateTime(...)` | `"That is wrong. I asked for a date and time."` |
 | `askFile(...)` | `"That file is not valid."` |
 | `askFiles(...)` | `"One or more files are not valid."` |
 | `askFolder(...)` | `"That folder is not valid."` |
@@ -2025,7 +2035,7 @@ The developer instruction controls tone and wording. It does not need to repeat 
 
 ### General input rules
 
-- `askText(...)`, `askTyping(...)`, `askNumber(...)`, `askNumbers(...)`, `askInteger(...)`, `askIntegers(...)`, `askBoolean(...)`, `askBooleans(...)`, `askFile(...)`, `askFiles(...)`, `askFolder(...)`, `askImage(...)`, `askVideo(...)`, and `askAudio(...)` do not return `null`.
+- `askText(...)`, `askTyping(...)`, `askNumber(...)`, `askNumbers(...)`, `askInteger(...)`, `askIntegers(...)`, `askDate(...)`, `askTime(...)`, `askDateTime(...)`, `askBoolean(...)`, `askBooleans(...)`, `askFile(...)`, `askFiles(...)`, `askFolder(...)`, `askImage(...)`, `askVideo(...)`, and `askAudio(...)` do not return `null`.
 - Input functions complete only after valid input has been supplied.
 - Cancelling a file, folder, camera, microphone, image, audio, or video picker does not complete the input request.
 - `askInteger(...)` and `askIntegers(...)` reject decimal values.
@@ -3019,8 +3029,8 @@ Recovery is not offered for structural errors such as malformed syntax, unknown 
 
 ## 35. Date, time, durations, and timestamps
 **Status:** Accepted (#532). Implemented: `date`, `time`, `datetime`, and `timestamp` values, their conversions,
-fields, comparison, arithmetic, presentation, collections, and storage, the current-time getters, and calendar
-durations. Deferred: typed date and time input.
+fields, comparison, arithmetic, presentation, collections, and storage, the current-time getters, calendar durations,
+and date and time input ([§20](#date-and-time-input)).
 
 TeaseScript has two kinds of time:
 

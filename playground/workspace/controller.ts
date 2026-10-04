@@ -91,9 +91,9 @@ export function submitWorkspaceComposer(
   snapshot: RuntimeSnapshot,
   submittedText: string,
 ): WorkspaceControlResult {
-  const action = activeInteraction(snapshot, "text", "number", "choice");
+  const action = activeInteraction(snapshot, "text", "number", "temporal", "choice");
   if (action === null)
-    return localRejection(snapshot, "No active text, number, or choice interaction.");
+    return localRejection(snapshot, "No active text, number, date or time, or choice interaction.");
   const payload = { kind: "submittedText", submittedText };
   return completeWorkspaceAction(plan, snapshot, action, payload);
 }

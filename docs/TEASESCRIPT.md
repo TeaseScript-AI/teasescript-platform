@@ -96,15 +96,20 @@ let amount = askNumber
 let amount = askNumber as mistress "Enter a number"
 let minutes = askNumber default: 10
 let count = askInteger "How many?", default: 3
+
+let day = askDate "Which day?"
+let start = askTime as mistress "What time?", default: toTime("20:00")
+let moment = askDateTime "When are you free?"
 ```
 
-For `askText`, `askNumber`, and `askInteger`, the optional string is Standard UI field text or a hint. It is not automatically spoken
+For `askText`, `askNumber`, `askInteger`, and the date and time asks, the optional string is Standard UI field text or a hint. It is not automatically spoken
 into the transcript. The normal question is a preceding `say`. An optional `default:` answer prefills the field; the
 player still submits it, and a cleared field does not fall back to it. See
 [default answers](specifications/accepted-syntaxes-v30.md#default-answers).
 
 All basic interactions are mandatory and blocking, with no cancellation result. `askText` returns `string`;
-`askNumber` returns `number`; `askInteger` returns `integer` and accepts only whole numbers. `showButton` used as a value returns the elapsed waiting time as a `duration`, and an
+`askNumber` returns `number`; `askInteger` returns `integer` and accepts only whole numbers; `askDate`, `askTime`, and
+`askDateTime` return `date`, `time`, and `datetime` from the Player's date and time controls. `showButton` used as a value returns the elapsed waiting time as a `duration`, and an
 optional `timeout:` ends the wait without a chat message; see
 [blocking button](specifications/accepted-syntaxes-v30.md#21-blocking-button).
 Timer interrupts may suspend an interaction; handler `exit` discards its instruction without producing a result

@@ -81,7 +81,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 35;
+export const RUNTIME_SNAPSHOT_VERSION = 36;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -755,6 +755,14 @@ export function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPaylo
       kind: "button",
       buttonLabel: ui.buttonLabel,
       ...(ui.background === undefined ? {} : { background: ui.background }),
+      accessibleName,
+    };
+  if (ui.kind === "temporal")
+    return {
+      kind: "temporal",
+      temporalKind: ui.temporalKind,
+      hint: ui.hint,
+      ...(ui.prefill === undefined ? {} : { prefill: ui.prefill }),
       accessibleName,
     };
   return {
@@ -2869,10 +2877,7 @@ function requiredInstructionTemporaries(
           output.add(instruction.preparedUi.buttonLabelTemporary);
           if (instruction.preparedUi.backgroundTemporary !== undefined)
             output.add(instruction.preparedUi.backgroundTemporary);
-        } else if (
-          instruction.preparedUi.kind === "text" ||
-          instruction.preparedUi.kind === "number"
-        ) {
+        } else if (instruction.preparedUi.kind !== "choice") {
           if (instruction.preparedUi.hintTemporary !== null)
             output.add(instruction.preparedUi.hintTemporary);
           if (instruction.preparedUi.prefillTemporary !== undefined)

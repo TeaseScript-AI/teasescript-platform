@@ -389,6 +389,7 @@ function submitComposer(): void {
     interaction === null ||
     (interaction.interactionKind !== "text" &&
       interaction.interactionKind !== "number" &&
+      interaction.interactionKind !== "temporal" &&
       interaction.interactionKind !== "choice")
   ) {
     setPlayerFeedback("Free chat is unavailable while no scripted text answer is active.");
@@ -529,6 +530,7 @@ function renderPlayerControls(presentation: WorkspacePlayerPresentation): void {
     interaction !== null &&
     (interaction.interactionKind === "text" ||
       interaction.interactionKind === "number" ||
+      interaction.interactionKind === "temporal" ||
       interaction.interactionKind === "choice");
   elements.composerInput.disabled =
     !current || (interaction === null && presentation.pacingGate === null);
@@ -571,6 +573,20 @@ function renderPlayerControls(presentation: WorkspacePlayerPresentation): void {
       interaction.ui.kind === "number"
         ? "Enter the scripted number answer. Engine validation is shown above."
         : "Enter the scripted text answer. Engine validation is shown above.";
+    focusNewInteraction(interaction.actionId, elements.composerInput);
+    return;
+  }
+  // The Player shows a date or time control; here the ISO text it submits is typed.
+  if (interaction.ui.kind === "temporal") {
+    elements.composerInput.placeholder = interaction.ui.hint ?? "";
+    elements.composerInput.inputMode = "text";
+    elements.composerHelp.textContent = `Enter the ${
+      interaction.ui.temporalKind === "date"
+        ? "date as ISO text, such as 2026-10-04"
+        : interaction.ui.temporalKind === "time"
+          ? "time as ISO text, such as 14:30"
+          : "date and time as ISO text, such as 2026-10-04T18:00"
+    }${interaction.ui.prefill === undefined ? "" : `; the default is ${interaction.ui.prefill}`}.`;
     focusNewInteraction(interaction.actionId, elements.composerInput);
     return;
   }

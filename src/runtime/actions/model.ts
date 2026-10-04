@@ -2,6 +2,7 @@ import type { MessagePresentation } from "../../message-presentation.js";
 import type {
   DelayDisplay,
   InteractionChoiceValue,
+  InteractionKind,
   InteractionResultDomain,
   InteractionUiPayload,
 } from "../../plan/model.js";
@@ -31,7 +32,7 @@ export interface RuntimeDelayActionSnapshot {
 
 export interface RuntimeInteractionActionSnapshot {
   readonly kind: "interaction";
-  readonly interactionKind: "button" | "text" | "number" | "choice";
+  readonly interactionKind: InteractionKind;
   readonly actionId: number;
   readonly owningInstruction: number;
   readonly continuationInstruction: number;
@@ -259,7 +260,7 @@ export interface RuntimeDelayActionSettlementSnapshot {
 export interface RuntimeInteractionActionSettlementSnapshot {
   readonly actionId: number;
   readonly actionKind: "interaction";
-  readonly interactionKind: "button" | "text" | "number" | "choice";
+  readonly interactionKind: InteractionKind;
   readonly settlementKind: "completed" | "timedOut";
   readonly owningInstruction: number;
   readonly continuationInstruction: number;

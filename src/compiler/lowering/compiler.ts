@@ -1347,7 +1347,9 @@ export class InstructionCompiler {
         ? ("choice" as const)
         : expression.interactionKind === "number" || expression.interactionKind === "integer"
           ? ("number" as const)
-          : ("string" as const);
+          : expression.interactionKind === "text"
+            ? ("string" as const)
+            : ("temporal" as const);
 
     const ui = staticInteractionUi(expression);
     if (ui !== undefined) {
@@ -1400,13 +1402,21 @@ export class InstructionCompiler {
               ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
               accessibleName: { kind: "localizedDefault", key: "answer" },
             }
-          : {
-              kind: "number",
-              hintTemporary: hint?.temporaryId ?? null,
-              ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
-              ...(expression.interactionKind === "integer" ? { integer: true as const } : {}),
-              accessibleName: { kind: "localizedDefault", key: "number" },
-            };
+          : expression.interactionKind === "number" || expression.interactionKind === "integer"
+            ? {
+                kind: "number",
+                hintTemporary: hint?.temporaryId ?? null,
+                ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
+                ...(expression.interactionKind === "integer" ? { integer: true as const } : {}),
+                accessibleName: { kind: "localizedDefault", key: "number" },
+              }
+            : {
+                kind: "temporal",
+                temporalKind: expression.interactionKind,
+                hintTemporary: hint?.temporaryId ?? null,
+                ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
+                accessibleName: { kind: "localizedDefault", key: "answer" },
+              };
     } else {
       const loweredValues = yield* compileChild(
         this.#lowerInteractionPayloadsTask(values, speakerTemporary),
@@ -2060,6 +2070,9 @@ function authoredChoiceValue(
  * literals of the wrong type.
  */
 function staticInteractionPrefill(expression: InteractionExpression): string | undefined {
+  const kind = expression.interactionKind;
+  // A date or time default is a value that the field shows as ISO text when it opens.
+  if (kind === "date" || kind === "time" || kind === "datetime") return undefined;
   let literal = expression.defaultValue!;
   let negative = false;
   while (
@@ -2083,9 +2096,21 @@ function staticInteractionPrefill(expression: InteractionExpression): string | u
     : undefined;
 }
 
-/** `askInteger` runs as a `number` interaction whose UI only accepts whole numbers. */
+/**
+ * `askInteger` runs as a `number` interaction whose UI only accepts whole numbers, and `askDate`, `askTime`, and
+ * `askDateTime` as a `temporal` interaction whose UI says what it asks for.
+ */
 function planInteractionKind(expression: InteractionExpression): InteractionKind {
-  return expression.interactionKind === "integer" ? "number" : expression.interactionKind;
+  switch (expression.interactionKind) {
+    case "integer":
+      return "number";
+    case "date":
+    case "time":
+    case "datetime":
+      return "temporal";
+    default:
+      return expression.interactionKind;
+  }
 }
 
 /** The UI of an interaction whose text, values, and default answer are all known at compile time. */
@@ -2101,13 +2126,21 @@ function staticInteractionUi(expression: InteractionExpression): InteractionUiPa
           ...(prefill === null ? {} : { prefill }),
           accessibleName: { kind: "localizedDefault", key: "answer" },
         }
-      : {
-          kind: "number",
-          hint,
-          ...(prefill === null ? {} : { prefill }),
-          ...(expression.interactionKind === "integer" ? { integer: true as const } : {}),
-          accessibleName: { kind: "localizedDefault", key: "number" },
-        };
+      : expression.interactionKind === "number" || expression.interactionKind === "integer"
+        ? {
+            kind: "number",
+            hint,
+            ...(prefill === null ? {} : { prefill }),
+            ...(expression.interactionKind === "integer" ? { integer: true as const } : {}),
+            accessibleName: { kind: "localizedDefault", key: "number" },
+          }
+        : {
+            kind: "temporal",
+            temporalKind: expression.interactionKind,
+            hint,
+            ...(prefill === null ? {} : { prefill }),
+            accessibleName: { kind: "localizedDefault", key: "answer" },
+          };
   }
   const options: InteractionChoiceOption[] = [];
   for (const option of expression.options) {

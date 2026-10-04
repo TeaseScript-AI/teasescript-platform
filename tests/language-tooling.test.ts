@@ -37,7 +37,16 @@ test("completion exposes accepted compact commands", () => {
   const statement = labels("");
   for (const expected of ["say", "showButton"]) assert.ok(statement.includes(expected), expected);
   const expression = labels("let answer = ");
-  for (const expected of ["askText", "askNumber", "askInteger", "choose", "showButton"])
+  for (const expected of [
+    "askText",
+    "askNumber",
+    "askInteger",
+    "askDate",
+    "askTime",
+    "askDateTime",
+    "choose",
+    "showButton",
+  ])
     assert.ok(expression.includes(expected), expected);
 });
 
@@ -207,6 +216,7 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
   assert.equal(activeSlot('askText "Name?", default: '), "default");
   assert.equal(activeSlot("askNumber default: "), "default");
   assert.equal(activeSlot('askInteger "How many?", default: '), "default");
+  assert.equal(activeSlot('askDateTime "When?", default: '), "default");
   assert.equal(activeSlot('askText { default: "Name?" }.default'), "hint");
   assert.equal(activeSlot('let answer = askText "${askNumber default: 3}"'), "hint");
   assert.equal(activeSlot("showButton as mistress "), "label");

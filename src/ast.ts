@@ -437,7 +437,7 @@ export interface TypeTestExpression {
 
 export interface InteractionExpression {
   readonly kind: "interactionExpression";
-  readonly interactionKind: "text" | "number" | "integer" | "choice";
+  readonly interactionKind: "text" | "number" | "integer" | "date" | "time" | "datetime" | "choice";
   readonly commandSpan: SourceSpan;
   readonly asSpan: SourceSpan | null;
   readonly speaker: Identifier | null;

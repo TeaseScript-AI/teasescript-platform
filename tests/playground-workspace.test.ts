@@ -273,6 +273,24 @@ test("workspace controls preserve number input and authored choice order", () =>
   assert.deepEqual(resumedSayTexts(choice.plan, selected.snapshot), ["Beta"]);
 });
 
+test("workspace composer answers date and time asks with ISO text", () => {
+  for (const [command, answer] of [
+    ["askDate", "2026-10-04"],
+    ["askTime", "14:30"],
+    ["askDateTime", "2026-10-04T18:00"],
+  ] as const) {
+    const compiled = compileWorkspaceSource(
+      `let value = ${command} "When?"\nsay value.toISO(), instant`,
+    );
+    assert.ok(compiled.plan && compiled.snapshot);
+    const waiting = executeValidatedWorkspaceSnapshot(compiled.plan, compiled.snapshot, "run");
+    assert.ok(waiting.snapshot);
+    const completed = submitWorkspaceComposer(compiled.plan, waiting.snapshot, answer);
+    assert.equal(completed.outcome.kind, "completed", command);
+    assert.deepEqual(resumedSayTexts(compiled.plan, completed.snapshot), [answer], command);
+  }
+});
+
 test("composer text for a choice remains engine-owned and rejects ambiguous visible text", () => {
   const compiled = compileWorkspaceSource('let selected = choose first: "Same", second: "Same"');
   assert.ok(compiled.plan && compiled.snapshot);
