@@ -1093,7 +1093,12 @@ function arithmeticType(
  */
 function elementsType(types: readonly TeaseType[]): TeaseType {
   const common = commonType(types);
-  if (common.kind !== "unknown" || types.length === 0) return common;
+  if (
+    common.kind !== "unknown" ||
+    types.length === 0 ||
+    !types.every((type) => type.kind === "scalar" || type.kind === "list")
+  )
+    return common;
   // Lists of lists keep their elements' list type, such as `(string | integer)[]` for Groovy pairs.
   let merged: TeaseType | null = types[0]!;
   for (const type of types.slice(1)) {

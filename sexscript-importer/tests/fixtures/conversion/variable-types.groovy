@@ -40,3 +40,7 @@ show(names[position])
 def offenses = [["late", 2], ["rude", 4]]
 def single = [["missed", 1]]
 show("First: " + offenses[0][0] + ", then " + single[0][0])
+// A list that starts with a null element takes text later.
+def toys = [null]
+toys[0] = "rope"
+show(toys[0])
