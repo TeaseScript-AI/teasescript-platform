@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileProject, compileSource } from "../src/compiler.js";
+import type { Instruction, InstructionPlan, PlanLabel } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
@@ -260,6 +261,37 @@ test("a goto that skips a let is found where functions and handlers use the vari
   );
   // A function called before the let is checked when it runs, as before labels existed.
   assert.deepEqual(codes("function read { say x }\nread()\nlet x = 1\nread()\nexit"), []);
+  // Nor does a goto in a branch or loop body that certainly does not run, while one that may run does.
+  for (const [start, expected] of [
+    [
+      'function jump: boolean { goto later }\nif true { say "yes" } else if jump() { say "no" }',
+      [],
+    ],
+    ["repeat 0 { goto later }", []],
+    ["for value in [] { goto later }", []],
+    [
+      'function jump: boolean { goto later }\nif false { say "yes" } else if jump() { say "no" }',
+      [["TSV054", 5]],
+    ],
+    ["repeat 1 { goto later }", [["TSV054", 4]]],
+    ["for value in [1] { goto later }", [["TSV054", 4]]],
+  ] as const) {
+    const source = `${start}\nlet x = 1\nlabel later\nsay x\nexit`;
+    assert.deepEqual(codes(source), expected, start);
+  }
+  const deadBranch = compileValidPlan(
+    'function jump: boolean { goto later }\nif true { say "yes" } else if jump() { say "no" }\nlet x = 1\nlabel later\nsay x\nexit',
+  );
+  assert.deepEqual(
+    outputs(run(deadBranch, createImmediatePacingRuntimeSnapshot(deadBranch)).events),
+    ["say yes", "say 1", "exit"],
+  );
+});
+
+test("a goto in deeply nested blocks compiles", () => {
+  const depth = 10_000;
+  const source = `let x = 1\n${"timer async 1 {\n".repeat(depth)}goto done\n${"}\n".repeat(depth)}label done\nsay x\nexit`;
+  assert.deepEqual(compileSource(source).diagnostics, []);
 });
 
 test("a call counts as returning, so the file still says how it ends", () => {
@@ -298,6 +330,51 @@ test("plan validation keeps labels out of blocks, loops, and statements", () => 
     assert.ok(
       errors.includes("A label must stand between statements of its file's outer scope."),
       kind,
+    );
+  }
+});
+
+test("plan validation finds a say presentation or button timeout that a label entry skips", () => {
+  // Without the label the same plans are valid: the operand is set before it is read.
+  const say = compileValidPlan('say "hello", instant\nexit');
+  const sayInstruction = say.instructions.find((instruction) => instruction.kind === "say")!;
+  const span = sayInstruction.span;
+  const sayPlan = (step: Instruction, labels: readonly PlanLabel[]): InstructionPlan => ({
+    ...say,
+    temporaryCount: 1,
+    instructions: [
+      {
+        kind: "storeTemporary",
+        temporaryId: 1,
+        value: { kind: "literal", value: null, span },
+        expectBoolean: false,
+        span,
+      },
+      step,
+      { ...sayInstruction, presentation: { kind: "temporary", temporaryId: 1, span } },
+      ...say.instructions.slice(say.instructions.indexOf(sayInstruction) + 1),
+    ],
+    files: [{ ...say.files[0]!, rootEndInstruction: 5, endInstruction: 5, labels }],
+  });
+  const button = compileValidPlan('let t = 1\nshowButton "Go", timeout: t\nexit');
+  const [, speaker, label, timeout, interaction, ...rest] = button.instructions;
+  assert.equal(timeout?.kind, "storeTemporary");
+  const buttonPlan = (step: Instruction, labels: readonly PlanLabel[]): InstructionPlan => ({
+    ...button,
+    instructions: [timeout!, step, speaker!, label!, interaction!, ...rest],
+    files: [{ ...button.files[0]!, labels }],
+  });
+  for (const plan of [sayPlan, buttonPlan]) {
+    const evaluate: Instruction = {
+      kind: "evaluate",
+      expression: { kind: "literal", value: 1, span },
+      span,
+    };
+    assert.deepEqual(validateInstructionPlan(plan(evaluate, [])).errors, []);
+    const entry = plan({ kind: "goto", target: 2, span }, [{ name: "entry", instruction: 2 }]);
+    assert.deepEqual(
+      validateInstructionPlan(entry).errors.map((error) => error.message),
+      ["A label must stand between statements of its file's outer scope."],
     );
   }
 });

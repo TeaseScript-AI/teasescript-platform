@@ -78,6 +78,7 @@ export function requiredInstructionTemporaries(
       if (typeof instruction.speakerTemporary === "number")
         output.add(instruction.speakerTemporary);
       if (typeof instruction.pacing === "object") collect(instruction.pacing);
+      if (instruction.presentation !== null) collect(instruction.presentation);
       break;
     case "wait":
       collect(instruction.duration);
@@ -115,6 +116,8 @@ export function requiredInstructionTemporaries(
           output.add(instruction.preparedUi.buttonLabelTemporary);
           if (instruction.preparedUi.backgroundTemporary !== undefined)
             output.add(instruction.preparedUi.backgroundTemporary);
+          if (instruction.preparedUi.timeoutTemporary !== undefined)
+            output.add(instruction.preparedUi.timeoutTemporary);
         } else if (instruction.preparedUi.kind !== "choice") {
           if (instruction.preparedUi.hintTemporary !== null)
             output.add(instruction.preparedUi.hintTemporary);

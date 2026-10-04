@@ -1734,9 +1734,11 @@ class SemanticValidator {
    */
   checkInitialization(program: Program, flow: StatementFlow): readonly Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
-    if (this.#gotos.length === 0) return diagnostics;
-    const withGotos = this.#initializedVariables(program, flow, true);
-    const withoutGotos = this.#initializedVariables(program, flow, false);
+    if (this.#gotos.length === 0 || this.#rootAccesses.length === 0) return diagnostics;
+    // Only the variables that are used need following.
+    const used = new Set(this.#rootAccesses.map((access) => access.name));
+    const withGotos = this.#initializedVariables(program, flow, used, true);
+    const withoutGotos = this.#initializedVariables(program, flow, used, false);
     const reported = new Set<string>();
     for (const access of this.#rootAccesses) {
       if (flow.unreachable.has(access.statement)) continue;
@@ -1770,6 +1772,7 @@ class SemanticValidator {
   #initializedVariables(
     program: Program,
     flow: StatementFlow,
+    used: ReadonlySet<string>,
     followGotos: boolean,
   ): (context: FlowContext) => ReadonlySet<string> | null {
     type Known = ReadonlySet<string> | null;
@@ -1788,19 +1791,25 @@ class SemanticValidator {
     const after = (index: number): Known => {
       const known = before[index]!;
       const statement = statements[index]!;
-      return known !== null && statement.kind === "letStatement"
+      return known !== null &&
+        statement.kind === "letStatement" &&
+        used.has(statement.name.name) &&
+        !known.has(statement.name.name)
         ? new Set([...known, statement.name.name])
         : known;
     };
     const functionStart = new Map<string, Known>();
-    const atContext = (context: FlowContext): Known =>
-      context.kind === "root"
+    // A handler starts with what ran where it was created; handlers nest without limit, so this is a loop.
+    const atContext = (start: FlowContext): Known => {
+      let context = start;
+      while (context.kind === "handler") {
+        if (flow.unreachable.has(context.created)) return null;
+        context = context.origin;
+      }
+      return context.kind === "root"
         ? before[context.statement]!
-        : context.kind === "function"
-          ? (functionStart.get(context.name) ?? null)
-          : flow.unreachable.has(context.created)
-            ? null
-            : atContext(context.origin);
+        : (functionStart.get(context.name) ?? null);
+    };
     const calls = this.#calls.filter((call) => !flow.unreachable.has(call.statement));
     const gotos = this.#gotos.filter((goto) => !flow.unreachable.has(goto.statement));
     for (let changed = true; changed;) {

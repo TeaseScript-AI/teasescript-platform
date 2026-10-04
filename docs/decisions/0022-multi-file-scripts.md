@@ -60,9 +60,9 @@ goto script("rooms/${room}.tease", label: "start")
 3. A reachable end of a file without `end`, `exit`, or a transfer is a compile error in every file, with a friendly
    message. Branches that all end or transfer need nothing extra, and loops and recursion are fine. A file of
    declarations only runs nothing on its own, so it needs no ending; a `goto` into such a file is a compile error.
-   The compiler follows the statements, with constant conditions, `while true`, and branches that all end; a call
-   counts as returning, also of a function that always ends the session, so the ending after such a call is still
-   written out.
+   The compiler follows the statements, with constant conditions, loops that certainly run once or never,
+   `while true`, and branches that all end; a call counts as returning, also of a function that always ends the
+   session, so the ending after such a call is still written out.
 4. Reaching `end` with no caller continues at the fallback destination when one is set, and is an error otherwise. The
    fallback is never implicit.
 5. `fallback` sets the fallback destination. It takes the same target forms as `goto`:

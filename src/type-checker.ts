@@ -798,9 +798,11 @@ class TypeChecker {
             statement.count,
             "A repeat count is a whole number (integer)",
           );
-        const ends = yield* compileChild(this.#loopBodyTask(statement.body, scope, null));
-        // A loop that certainly runs once ends normally only when its body or a `break` does.
         const times = staticNumber(statement.count);
+        const ends = yield* compileChild(
+          this.#loopBodyTask(statement.body, scope, null, times === undefined || times >= 1),
+        );
+        // A loop that certainly runs once ends normally only when its body or a `break` does.
         return times === undefined || times < 1 || ends;
       }
       case "forStatement": {
@@ -823,7 +825,9 @@ class TypeChecker {
           declaration: statement,
         };
         this.#declared.set(statement, variable);
-        const ends = yield* compileChild(this.#loopBodyTask(statement.body, scope, variable));
+        const ends = yield* compileChild(
+          this.#loopBodyTask(statement.body, scope, variable, !isEmptyLiteral(statement.iterable)),
+        );
         return !isNonEmptyLiteral(statement.iterable) || ends;
       }
       case "breakStatement": {
@@ -861,6 +865,8 @@ class TypeChecker {
   *#pathTask(block: Block | Statement, scope: Scope, reached: boolean): CompileTask<boolean> {
     const reachable = this.#reachable;
     if (!reached) this.#reachable = false;
+    // An `else if` is a statement outside any statement list; the flow records it like one.
+    if (block.kind !== "block" && !this.#reachable) this.unreachable.add(block);
     const continues =
       block.kind === "block"
         ? yield* compileChild(this.#blockTask(block, scope))
@@ -871,9 +877,17 @@ class TypeChecker {
 
   /**
    * The body of a `repeat` or `for` loop, which may run any number of times, including none. Returns whether the body
-   * can end normally or leave through a `break`.
+   * can end normally or leave through a `break`. A body that certainly runs no time is checked, but nothing in it can
+   * be reached.
    */
-  *#loopBodyTask(body: Block, scope: Scope, variable: Variable | null): CompileTask<boolean> {
+  *#loopBodyTask(
+    body: Block,
+    scope: Scope,
+    variable: Variable | null,
+    reached: boolean,
+  ): CompileTask<boolean> {
+    const reachable = this.#reachable;
+    if (!reached) this.#reachable = false;
     this.#widen(body);
     const start = this.#flow.mark();
     const loopScope = new Scope(scope);
@@ -884,6 +898,7 @@ class TypeChecker {
     this.#flow.restore(start);
     // The body may also run no time at all.
     this.#flow.apply(this.#flow.join([new Map(), ...breaks]));
+    this.#reachable = reachable;
     return continues || continued || breaks.length > 0;
   }
 
@@ -5262,6 +5277,17 @@ function decidedSlot(type: StaticType, at: SourceSpan): StaticType {
 }
 
 /** A literal list, set, dict, or range that certainly has an element, so a loop over it runs at least once. */
+/** A literal or constant range with nothing to go through. */
+function isEmptyLiteral(expression: Expression): boolean {
+  const node = unwrap(expression);
+  if (node.kind === "listLiteral" || node.kind === "setLiteral") return node.elements.length === 0;
+  if (node.kind === "dictLiteral") return node.entries.length === 0;
+  if (node.kind !== "rangeExpression") return false;
+  const start = staticNumber(node.start);
+  const end = staticNumber(node.end);
+  return start !== undefined && end !== undefined && (node.inclusive ? end < start : end <= start);
+}
+
 function isNonEmptyLiteral(expression: Expression): boolean {
   const node = unwrap(expression);
   if (node.kind === "listLiteral" || node.kind === "setLiteral") return node.elements.length > 0;
