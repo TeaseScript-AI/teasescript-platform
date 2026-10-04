@@ -17,3 +17,13 @@ if (toys.any { t -> t == "gag" } && total > 2) show("Gagged")
 // isEmpty() on text, a list, or a dict tests the length.
 def empty = { items -> return items.isEmpty() }
 if (!empty(toys)) show("Total ${total}, both ${both}")
+// A menu built inside a larger expression asks first; a return in times() continues with the next round.
+def opts = []
+opts.add([lbl: "Stop", ID: 1])
+opts.add([lbl: "Back", ID: 0])
+def picked = opts[getSelectedValue(null, opts.collect { it.lbl })].ID
+def rounds = getRandom(3) + 1
+rounds.times { if (it == 1) return; show("Round ${it}") }
+def order = [3, 1, 2]
+order = order.sort()
+show("Picked ${picked}, first ${order[0]}")

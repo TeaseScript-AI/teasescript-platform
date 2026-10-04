@@ -1428,13 +1428,19 @@ function lowerConditionalStatement(node: AstNode, context: LowerContext): IrStat
   const deferred = root === null ? null : findDeferred(root, context);
   if (root === null || deferred === null) return null;
   const span = node.span;
+  // A menu converts in place where its loop may run before the statement.
+  const menu = legacyApiCall(deferred, context)?.name === "getSelectedValue";
+  const menuList = menu ? listPlusOperands(callParts(deferred)!.arguments[1]!).at(-1)! : null;
+  if (menuList !== null && (deferred === root || isHoistable(node, deferred, context, menuList)))
+    return null;
 
   const isAssignment =
     root.kind === "declaration" || (root.kind === "binary" && root.operator === "=");
   const target = isAssignment ? asNode(root.left) : null;
-  // A collection loop that is a variable's whole value already becomes a loop for that variable.
+  // A collection loop that is a variable's whole value already becomes a loop for that variable, and a menu over
+  // one converts as a statement's value.
   if (
-    isCollectionLoop(deferred, context) &&
+    (isCollectionLoop(deferred, context) || menu) &&
     target !== null &&
     variableName(target) !== null &&
     (root.kind === "declaration" || root.operator === "=") &&
@@ -1510,8 +1516,10 @@ function findDeferred(
     const right = asNode(node.right);
     if (right !== null && needsOwnStatement(right, context)) return node;
   }
+  // A menu over a list that a loop builds converts at the start of its own statement (runtimeListSelectedValue).
   const call = node.kind === "methodCall" ? legacyApiCall(node, context) : null;
-  const input = call !== null && (INPUT_CALLS.has(call.name) || call.name === "getBooleans");
+  const input = call?.name === "getSelectedValue";
+  if (input && !inputOptions && isLoopMenu(node, context)) return node;
   for (const child of evaluationChildren(node)) {
     const options = input && child.kind === "arguments" ? nodeArray(child.items) : [];
     const found =
@@ -1553,6 +1561,13 @@ function isCollectionLoop(node: AstNode, context: LowerContext): boolean {
     argument.parameters.length === 1 &&
     closureResult(argument.closure) !== null
   );
+}
+
+/** Whether a getSelectedValue() call takes its options from a collection loop, as `["Back"] + list.collect { }`. */
+function isLoopMenu(node: AstNode, context: LowerContext): boolean {
+  const optionsNode = callParts(node)?.arguments[1];
+  const listNode = optionsNode === undefined ? undefined : listPlusOperands(optionsNode).at(-1);
+  return listNode !== undefined && isCollectionLoop(listNode, context);
 }
 
 /** Whether an expression holds a conditional expression or an input, which need a statement of their own. */
@@ -1641,7 +1656,14 @@ function hoistDeferred(
   const loop = isCollectionLoop(deferred, context) ? callParts(deferred) : null;
   for (const [base, part] of [
     ...moved.map((part) => ["earlier", part] as const),
-    [loop === null ? "conditional" : `${loop.name}Result`, deferred] as const,
+    [
+      loop !== null
+        ? `${loop.name}Result`
+        : legacyApiCall(deferred, context)?.name === "getSelectedValue"
+          ? "selected"
+          : "conditional",
+      deferred,
+    ] as const,
   ]) {
     const name = freshName(base, context);
     // The temporary holds the part's value, so it has the part's legacy type, and the element type of a list that
@@ -1713,7 +1735,8 @@ function deferredMayChange(part: AstNode, deferred: AstNode, context: LowerConte
     if (
       node.kind === "methodCall" &&
       legacyApiCall(node, context) === null &&
-      hasOwnEffect(node, context)
+      hasOwnEffect(node, context) &&
+      !READING_COLLECTION_METHODS.has(constantString(node.method) ?? "")
     )
       calls = true;
   });
@@ -3392,6 +3415,23 @@ function lowerCollectionAssignment(
   const call = callParts(right);
   const receiver = asNode(right.object);
   if (call === null || call.inherited || receiver === null) return null;
+  if (
+    call.name === "sort" &&
+    call.arguments.length === 0 &&
+    !declaration &&
+    variableName(receiver) === target &&
+    isKnownListExpression(receiver, context)
+  ) {
+    // `list = list.sort()` sorts the list in place, which TeaseScript sort() does as well.
+    const list: IrExpression = { kind: "variable", name: target };
+    return [
+      {
+        kind: "expression",
+        expression: { kind: "methodCall", target: list, name: "sort", arguments: [] },
+        span,
+      },
+    ];
+  }
   if (!["collect", "findAll", "find", "any", "every", "sum"].includes(call.name)) return null;
   if (receiver.kind !== "range" && !isKnownListExpression(receiver, context)) return null;
   // The loop reads the receiver after the target is initialized, so the receiver must not mention it.
@@ -3599,12 +3639,17 @@ function lowerCollectionStatement(
   const receiver = asNode(node.object);
   if (receiver === null) return null;
   const body = (closure: AstNode): AstNode => asNode(closure.body)!;
-  if (call.name === "times" && onlyOf(inferType(receiver, context.types), NUMBER)) {
+  // Groovy has times() only on numbers, so a receiver of unknown type is a number whenever the call ran.
+  if (call.name === "times" && (inferType(receiver, context.types) & NUMBER) !== 0) {
     const argument = closureArgument(call.arguments);
+    // A return ends only the current iteration, as in each().
+    const returns = argument === null ? [] : closureReturns(body(argument.closure));
     if (
       argument === null ||
       argument.parameters.length > 1 ||
-      containsReturnForCurrentClosure(body(argument.closure))
+      returns.some(
+        ({ insideLoop, value }) => insideLoop || (value !== null && !isPure(value, context)),
+      )
     ) {
       return null;
     }
@@ -3618,7 +3663,9 @@ function lowerCollectionStatement(
         : lowered;
     const wholeCount =
       count.kind === "literal" || (count.kind === "property" && count.name === "length");
-    const loopBody = lowerBlock(body(argument.closure), context);
+    if (returns.length > 0) noteReturnAsContinue(returns[0]!.node, context);
+    const block = lowerBlock(body(argument.closure), context);
+    const loopBody = returns.length > 0 ? withoutFinalContinue(returnsAsContinue(block)) : block;
     const variable = argument.parameters[0]!;
     const usesIndex = closureUsesName(argument.closure, variable) || !wholeCount;
     return usesIndex
@@ -3694,6 +3741,16 @@ function lowerCollectionStatement(
   }
   if (call.name === "unique" && call.arguments.length === 0)
     return reassign(useHelper(context, "unique", [list]));
+  if (call.name === "sort" && call.arguments.length === 0) {
+    // Groovy sort() sorts the list in place, as TeaseScript sort() does.
+    return [
+      {
+        kind: "expression",
+        expression: { kind: "methodCall", target: list, name: "sort", arguments: [] },
+        span,
+      },
+    ];
+  }
   if (call.name === "remove" && call.arguments.length === 1) {
     // Groovy remove(int) removes a position and remove(Object) the first equal element; TeaseScript list equality
     // is structural like Groovy's equals (#517).
@@ -3830,15 +3887,7 @@ function lowerEachStatement(
       ),
     ];
   }
-  if (returns.length > 0) {
-    addDiagnostic(
-      context,
-      "SX_EACH_RETURN_CONTINUE",
-      "warning",
-      "Groovy return inside each() ended only the current iteration and each() discarded its value; it becomes continue. Check whether leaving the enclosing function was intended.",
-      returns[0]!.node.span,
-    );
-  }
+  if (returns.length > 0) noteReturnAsContinue(returns[0]!.node, context);
   const loopBody = lowerBlock(body, context);
   return [
     {
@@ -3849,6 +3898,16 @@ function lowerEachStatement(
       span,
     },
   ];
+}
+
+function noteReturnAsContinue(node: AstNode, context: LowerContext): void {
+  addDiagnostic(
+    context,
+    "SX_EACH_RETURN_CONTINUE",
+    "warning",
+    "Groovy return inside each() or times() ended only the current iteration and discarded its value; it becomes continue. Check whether leaving the enclosing function was intended.",
+    node.span,
+  );
 }
 
 /** Return statements of a closure body, outside nested closures, and whether a loop encloses them. */

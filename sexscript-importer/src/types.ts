@@ -235,6 +235,11 @@ function methodCallType(node: AstNode, environment: TypeEnvironment): ValueType 
     return SEXSCRIPT_RESULT_TYPES.get(name) ?? UNKNOWN;
   }
   if (receiver === "Math") return NUMBER;
+  // sort(), unique(), and reverse() on a list return a list.
+  if (["sort", "unique", "reverse"].includes(name)) {
+    const type = inferType(asNode(node.object), environment);
+    if (onlyOf(type, LIST | NULL) && (type & LIST) !== 0) return LIST;
+  }
   if (name === "get" && node.arguments !== undefined && isCalendarFieldRead(node)) return NUMBER;
   return OBJECT_METHOD_RESULT_TYPES.get(name) ?? UNKNOWN;
 }

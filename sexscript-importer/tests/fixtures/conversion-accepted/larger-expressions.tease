@@ -1,3 +1,12 @@
+function sexscriptLegacyMenuOptions(texts, first) {
+  let options = []
+  let position = first
+  for text in texts {
+    options.add({ value: position, text: text })
+    position += 1
+  }
+  return options
+}
 // Conditional expressions inside larger expressions compute into a temporary first, in Groovy's evaluation order.
 function likes(kink) {
   return kink == "rope"
@@ -68,3 +77,23 @@ function empty(items) {
 if not empty(toys) {
   say "Total ${total}, both ${both}"
 }
+// A menu built inside a larger expression asks first; a return in times() continues with the next round.
+let opts = []
+opts.add({ lbl: "Stop", ID: 1 })
+opts.add({ lbl: "Back", ID: 0 })
+let menuTexts = []
+for it in opts {
+  menuTexts.add(it.lbl)
+}
+let picked = opts[(choose sexscriptLegacyMenuOptions(menuTexts, 0))].ID
+let rounds = randomInteger(0..3) + 1
+// NOTE SX_EACH_RETURN_CONTINUE line 26: Groovy return inside each() or times() ended only the current iteration and discarded its value; it becomes continue. Check whether leaving the enclosing function was intended.
+for it in 0..rounds {
+  if it == 1 {
+    continue
+  }
+  say "Round ${it}"
+}
+let order = [3, 1, 2]
+order.sort()
+say "Picked ${picked}, first ${order[0]}"

@@ -371,6 +371,23 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
             },
           ];
         }
+        if (
+          value.kind === "methodCall" &&
+          value.name === "sort" &&
+          value.arguments.length === 0 &&
+          value.target.kind === "variable"
+        ) {
+          // List sort() (V30 §16), which main does not implement yet, sorts the list in place.
+          return [
+            {
+              kind: "assign",
+              operator: "=",
+              target: value.target,
+              value: call("list sort()", "list.sort()", [value.target]),
+              span: item.span,
+            },
+          ];
+        }
         return [{ ...item, expression: expression(item.expression) }];
       }
       case "say":
@@ -807,6 +824,22 @@ export function pendingHostFunctions(
             throw new Error("join() shows text, numbers, true, false, and null.");
           })
           .join(separator === undefined ? ", " : text("join()", separator));
+      },
+    ],
+    // Numbers in ascending order, and text in the order of its characters.
+    [
+      "list.sort()",
+      ([value]) => {
+        const elements = (listItems(value) ?? []).map(runtimeValue);
+        if (elements.every((element) => typeof element === "number"))
+          return items([...elements].sort((left, right) => Number(left) - Number(right)));
+        if (elements.every((element) => typeof element === "string"))
+          return items(
+            [...elements].sort((left, right) =>
+              String(left) < String(right) ? -1 : String(left) > String(right) ? 1 : 0,
+            ),
+          );
+        throw new Error("sort() needs a list of numbers or a list of text.");
       },
     ],
     ["run", ([script]) => ((state.transfer = String(script)), null)],

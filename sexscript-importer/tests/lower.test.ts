@@ -751,7 +751,7 @@ test("turns return inside Groovy each() into continue", () => {
   assert.equal(
     emitTease(program),
     [
-      "// NOTE SX_EACH_RETURN_CONTINUE line 1: Groovy return inside each() ended only the current iteration and each() discarded its value; it becomes continue. Check whether leaving the enclosing function was intended.",
+      "// NOTE SX_EACH_RETURN_CONTINUE line 1: Groovy return inside each() or times() ended only the current iteration and discarded its value; it becomes continue. Check whether leaving the enclosing function was intended.",
       "for it in 1..=3 {",
       "  if it == 2 {",
       "    continue",
