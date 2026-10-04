@@ -733,10 +733,10 @@ test("loaded values are checked against the variable's type, including missing k
     "TSR058",
     "'missing' holds a number, so it cannot take null.",
   ]);
-  assert.deepEqual(failure('let fallback: number = load "missing", default: identity("fallback")'), [
-    "TSR058",
-    "'fallback' holds a number, so it cannot take text (string).",
-  ]);
+  assert.deepEqual(
+    failure('let fallback: number = load "missing", default: identity("fallback")'),
+    ["TSR058", "'fallback' holds a number, so it cannot take text (string)."],
+  );
   assert.deepEqual(failure('let assigned: number = 0\nassigned = load "k"'), [
     "TSR058",
     "'assigned' holds a number, so it cannot take text (string).",

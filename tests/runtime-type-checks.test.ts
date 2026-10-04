@@ -166,7 +166,7 @@ test("checked programs resume equivalently from a checkpoint at every instructio
       "    }",
       "    return slow(2)",
       "}",
-      'let count: integer = load "count" default slow(1)',
+      'let count: integer = load "count", default: slow(1)',
       "count += slow(3)",
       "let items = [count]",
       "items.add(slow(5))",
