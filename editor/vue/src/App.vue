@@ -12,7 +12,7 @@ let listener: monaco.IDisposable | null = null;
 onMounted(() => {
   registerTeaseScriptLanguage();
   model = monaco.editor.createModel(
-    'say "Hello, editor!", instant\nshowButton "Continue"\n',
+    'say "Hello, editor!", instant\nshowButton "Continue"\nexit\n',
     "teasescript",
     monaco.Uri.parse("file:///main.tease"),
   );
