@@ -133,7 +133,9 @@ const semanticCode = {
 type FlowContext =
   | { readonly kind: "root"; readonly statement: number }
   | { readonly kind: "function"; readonly name: string }
-  | { readonly kind: "handler"; readonly origin: FlowContext };
+  | { readonly kind: "handler"; readonly origin: FlowContext }
+  /** Code that never runs, such as a block created after a transfer. */
+  | { readonly kind: "never" };
 
 const OVERFLOW_MESSAGES = {
   zero: "This divides by zero, so it has no result. Divide by a value other than zero.",
@@ -200,12 +202,15 @@ class SemanticValidator {
 
   #context: FlowContext = { kind: "root", statement: 0 };
 
-  /** Reads and writes of top-level variables in top-level code, by top-level statement. */
+  /** Reads and writes of top-level variables, with where they run. */
   readonly #rootAccesses: {
     readonly name: string;
     readonly span: SourceSpan;
-    readonly statement: number;
+    readonly context: FlowContext;
   }[] = [];
+
+  /** Set while checking statements that follow a transfer in their block, which never run. */
+  #unreachable = false;
 
   readonly #gotos: { readonly label: string; readonly context: FlowContext }[] = [];
 
@@ -443,7 +448,7 @@ class SemanticValidator {
         block: timer.handler,
         owner: "timer",
         selfHandle: null,
-        origin: this.#context,
+        origin: this.#unreachable ? { kind: "never" } : this.#context,
       });
   }
 
@@ -575,7 +580,7 @@ class SemanticValidator {
         block,
         owner: "media",
         selfHandle: media.async ? selfHandle : null,
-        origin: this.#context,
+        origin: this.#unreachable ? { kind: "never" } : this.#context,
       });
     }
   }
@@ -711,9 +716,19 @@ class SemanticValidator {
     scope: SemanticScope,
     loopDepth: number,
   ): CompileTask<void> {
+    const unreachable = this.#unreachable;
     for (const statement of statements) {
       yield* compileChild(this.#validateStatement(statement, scope, loopDepth));
+      // Later statements of this block never run; a label in the outer scope is reached by a goto again.
+      if (
+        endsInTransfer(statement) ||
+        statement.kind === "breakStatement" ||
+        statement.kind === "continueStatement"
+      )
+        this.#unreachable = true;
+      else if (statement.kind === "labelStatement") this.#unreachable = unreachable;
     }
+    this.#unreachable = unreachable;
   }
 
   *#validateStatement(
@@ -990,7 +1005,8 @@ class SemanticValidator {
         }
         return;
       case "gotoStatement":
-        this.#gotos.push({ label: statement.label.name, context: this.#context });
+        if (!this.#unreachable)
+          this.#gotos.push({ label: statement.label.name, context: this.#context });
         if (!this.#labels.has(statement.label.name)) {
           this.#report(
             semanticCode.invalidLabel,
@@ -1273,7 +1289,7 @@ class SemanticValidator {
           const binding = scope.resolve(name);
           const declaration = this.#functions.get(name);
           if (declaration !== undefined && binding?.kind === "function") {
-            this.#calls.push({ name, context: this.#context });
+            if (!this.#unreachable) this.#calls.push({ name, context: this.#context });
             this.#validateFunctionCall(expression, declaration);
           } else if (this.#builtins.has(name)) {
             // The type check checks the arguments of the core built-ins it knows.
@@ -1665,28 +1681,55 @@ class SemanticValidator {
 
   #recordRootAccess(name: string, binding: Binding | undefined, span: SourceSpan): void {
     if (
-      this.#context.kind === "root" &&
+      !this.#unreachable &&
       binding?.kind === "variable" &&
       this.#root.bindings.get(name) === binding
     ) {
-      this.#rootAccesses.push({ name, span, statement: this.#context.statement });
+      this.#rootAccesses.push({ name, span, context: this.#context });
     }
   }
 
   /**
-   * A goto can reach a label without running the top-level `let`s between the place it starts and the label. A variable
-   * of the file may be used after a label only when every way to the label has run its `let`: the code before it,
-   * and each goto, which has run what came before the statement it is in, or before the call of its function or the
-   * start of its handler. Uses in functions and handlers are checked when they run.
+   * A goto can reach a label without running the top-level `let`s between the place it starts and the label. A use of
+   * a variable of the file is an error when a goto can make it miss its `let`: it has a value on every way there
+   * without gotos, but not on every way with them. A goto has run what came before the statement it stands in, or
+   * before the call of its function or the start of its handler. Other early uses, such as a function called before
+   * the `let`, are checked when they run.
    */
   #checkInitializationAtLabels(program: Program): void {
-    const statements = program.statements;
-    const labelAt = new Map<string, number>();
-    statements.forEach((statement, index) => {
-      if (statement.kind === "labelStatement") labelAt.set(statement.name.name, index);
-    });
-    // `null` stands for "every variable": no way to the place is known, so nothing is missing there.
+    const withGotos = this.#initializedVariables(program, true);
+    const withoutGotos = this.#initializedVariables(program, false);
+    const reported = new Set<string>();
+    for (const access of this.#rootAccesses) {
+      const known = withGotos(access.context);
+      const knownWithoutGotos = withoutGotos(access.context);
+      if (
+        known === null ||
+        known.has(access.name) ||
+        (knownWithoutGotos !== null && !knownWithoutGotos.has(access.name))
+      )
+        continue;
+      const key = `${access.span.start.offset}:${access.name}`;
+      if (reported.has(key)) continue;
+      reported.add(key);
+      this.#report(
+        semanticCode.skippedInitialization,
+        `A goto can reach this line without running 'let ${access.name}' first, so ${access.name} may have no value here. Move the label that the goto jumps to before 'let ${access.name}', or set ${access.name} on every way here.`,
+        access.span,
+      );
+    }
+  }
+
+  /**
+   * The top-level variables that have a value wherever code of a context runs, following gotos or not. `null` stands
+   * for "every variable": no way there is known, so nothing is missing.
+   */
+  #initializedVariables(
+    program: Program,
+    followGotos: boolean,
+  ): (context: FlowContext) => ReadonlySet<string> | null {
     type Known = ReadonlySet<string> | null;
+    const statements = program.statements;
     const meet = (left: Known, right: Known): Known =>
       left === null
         ? right
@@ -1707,7 +1750,9 @@ class SemanticValidator {
         ? before[context.statement]!
         : context.kind === "function"
           ? (functionStart.get(context.name) ?? null)
-          : atContext(context.origin);
+          : context.kind === "handler"
+            ? atContext(context.origin)
+            : null;
     for (let changed = true; changed;) {
       changed = false;
       // A function starts with what every call of it has run; one never called adds nothing.
@@ -1732,7 +1777,7 @@ class SemanticValidator {
       for (let index = 1; index < statements.length; index += 1) {
         let known: Known = continuesAfter(statements[index - 1]!) ? after(index - 1) : null;
         const statement = statements[index]!;
-        if (statement.kind === "labelStatement") {
+        if (followGotos && statement.kind === "labelStatement") {
           for (const goto of this.#gotos) {
             if (goto.label === statement.name.name) known = meet(known, atContext(goto.context));
           }
@@ -1743,18 +1788,7 @@ class SemanticValidator {
         }
       }
     }
-    const reported = new Set<string>();
-    for (const access of this.#rootAccesses) {
-      const known = before[access.statement]!;
-      const key = `${access.statement}:${access.name}`;
-      if (known === null || known.has(access.name) || reported.has(key)) continue;
-      reported.add(key);
-      this.#report(
-        semanticCode.skippedInitialization,
-        `A goto can reach this line without running 'let ${access.name}' first, so ${access.name} may have no value here. Move the label that the goto jumps to before 'let ${access.name}', or set ${access.name} on every way here.`,
-        access.span,
-      );
-    }
+    return atContext;
   }
 
   #validateSpeakerReference(name: string, span: SourceSpan, scope: SemanticScope): boolean {

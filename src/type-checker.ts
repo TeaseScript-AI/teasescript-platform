@@ -1,3 +1,4 @@
+import { callsNeverReturning, neverReturningFunctions } from "./never-returning.js";
 import type {
   AssignmentStatement,
   Block,
@@ -455,7 +456,10 @@ class TypeChecker {
       });
   }
 
+  #neverReturning: ReadonlySet<string> = new Set();
+
   public check(program: Program): void {
+    this.#neverReturning = neverReturningFunctions(program.statements);
     for (const statement of program.statements)
       if (statement.kind === "letStatement" || statement.kind === "speakerDeclaration")
         this.#scriptVariables.add(statement.name.name);
@@ -551,7 +555,8 @@ class TypeChecker {
         return true;
       case "expressionStatement":
         yield* compileChild(this.#expressionTask(statement.expression, scope));
-        return true;
+        // A call of a function that always ends with exit, end, or goto does not continue.
+        return !callsNeverReturning(statement, this.#neverReturning);
       case "speakerDeclaration":
         scope.declare(statement.name.name, { kind: "speaker" });
         for (const property of statement.properties) {

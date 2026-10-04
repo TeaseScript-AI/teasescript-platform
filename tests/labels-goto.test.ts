@@ -205,7 +205,7 @@ test("plan validation keeps gotos on labels and closes each root region with an 
   assert.deepEqual(file.labels, [{ name: "top", instruction: 0 }]);
   assert.equal(plan.instructions[file.rootEndInstruction - 1]!.kind, "end");
 
-  const retarget = (target: number): unknown => ({
+  const retarget = (target: number) => ({
     ...plan,
     instructions: plan.instructions.map((instruction, index) =>
       index === gotoIndex ? { ...instruction, target } : instruction,
@@ -214,7 +214,7 @@ test("plan validation keeps gotos on labels and closes each root region with an 
   assert.deepEqual(errors(retarget(1)), [
     `$.instructions[${gotoIndex}].target A goto must continue at a label of its own file.`,
   ]);
-  const withLabels = (labels: unknown): unknown => ({ ...plan, files: [{ ...file, labels }] });
+  const withLabels = (labels: readonly object[]) => ({ ...plan, files: [{ ...file, labels }] });
   assert.deepEqual(errors(withLabels([{ name: "top", instruction: file.rootEndInstruction }])), [
     "$.files[0].labels[0].instruction Plan labels stand in source order inside their file's root region.",
     `$.instructions[${gotoIndex}].target A goto must continue at a label of its own file.`,
@@ -239,4 +239,47 @@ test("plan validation keeps gotos on labels and closes each root region with an 
   assert.deepEqual(errors(unclosed), [
     "$.files[0].rootEndInstruction A file's root region must close with an end.",
   ]);
+});
+
+test("a goto that skips a let is found where functions and handlers use the variable", () => {
+  for (const use of ["function read { say x }\nread()", "timer async 1 { say x }\nwait 2"]) {
+    assert.deepEqual(codes(`goto later\nlet x = 1\nlabel later\n${use}\nexit`), [["TSV054", 4]]);
+  }
+  // A goto that cannot run adds no way to the label.
+  assert.deepEqual(
+    codes("function f {\n    return\n    goto later\n}\nf()\nlet x = 1\nlabel later\nsay x\nexit"),
+    [],
+  );
+  // A function called before the let is checked when it runs, as before labels existed.
+  assert.deepEqual(codes("function read { say x }\nread()\nlet x = 1\nread()\nexit"), []);
+});
+
+test("a call of a function that always exits ends the file", () => {
+  assert.deepEqual(codes("function finish { exit }\nfinish()"), []);
+  assert.deepEqual(codes("function finish {\n    let n = 1\n    if n > 0 { exit }\n}\nfinish()"), [
+    ["TSV052", 5],
+  ]);
+  assert.deepEqual(codes("function finish { exit }\nfunction leave { finish() }\nleave()"), []);
+});
+
+test("plan validation keeps labels out of blocks, loops, and statements", () => {
+  for (const [source, kind] of [
+    ['let n = 1\nrepeat 2 { say "body" }\nexit', "loopControl"],
+    ['let n = 1\nif n > 0 { say "body" }\nexit', "leaveScope"],
+    ["let answer = askText\nexit", "declareBinding"],
+  ] as const) {
+    const plan = compileValidPlan(source);
+    const target = plan.instructions.findIndex((instruction) => instruction.kind === kind);
+    const errors = validateInstructionPlan({
+      ...plan,
+      files: [{ ...plan.files[0]!, labels: [{ name: "inside", instruction: target }] }],
+      instructions: plan.instructions.map((instruction, index) =>
+        index === 0 ? { kind: "goto", target, span: instruction.span } : instruction,
+      ),
+    }).errors.map((error) => error.message);
+    assert.ok(
+      errors.includes("A label must stand between statements of its file's outer scope."),
+      kind,
+    );
+  }
 });

@@ -28,8 +28,77 @@ export function analyzeInstructionStream(
 ): void {
   validateLoopStructure(instructions, errors);
   validatePreparedReferenceStructure(instructions, errors);
+  if (files !== null) validateLabelPositions(instructions, files, errors);
   const validationIndex = validateFunctionDefinitions(functions, instructions, files, errors);
   validateInstructionControlFlowRegions(instructions, validationIndex, errors);
+}
+
+/**
+ * A goto leaves every block, loop, and temporary value behind, so a label may only stand where none of them is in
+ * use: between two statements of the file's outer scope.
+ */
+function validateLabelPositions(
+  instructions: readonly unknown[],
+  files: readonly PlanFileBoundaries[],
+  errors: PlanValidationError[],
+): void {
+  files.forEach((file, fileIndex) => {
+    if (file.labelInstructions.size === 0) return;
+    const loops: { readonly start: number; readonly end: number }[] = [];
+    for (let index = file.startInstruction; index < file.rootEndInstruction; index += 1) {
+      const instruction = instructions[index];
+      if (
+        isRecord(instruction) &&
+        instruction.kind === "loopStart" &&
+        typeof instruction.target === "number" &&
+        typeof instruction.continueTarget === "number"
+      ) {
+        // A while loop starts where its condition is evaluated, before its loopStart.
+        const start = instruction.loopKind === "while" ? instruction.continueTarget : index;
+        loops.push({ start, end: instruction.target });
+      }
+    }
+    let depth = 0;
+    const live = new Set<number>();
+    for (let index = file.startInstruction; index < file.rootEndInstruction; index += 1) {
+      if (
+        file.labelInstructions.has(index) &&
+        (depth !== 0 ||
+          live.size > 0 ||
+          loops.some((loop) => index > loop.start && index < loop.end))
+      ) {
+        errors.push(
+          planError(
+            "TSC002",
+            "A label must stand between statements of its file's outer scope.",
+            `$.files[${fileIndex}].labels`,
+          ),
+        );
+      }
+      const instruction = instructions[index];
+      if (!isRecord(instruction)) continue;
+      switch (instruction.kind) {
+        case "enterScope":
+          depth += 1;
+          break;
+        case "leaveScope":
+          depth -= 1;
+          break;
+        case "clearTemporary":
+          if (typeof instruction.temporaryId === "number") live.delete(instruction.temporaryId);
+          break;
+        case "clearTemporaries":
+          if (Array.isArray(instruction.temporaryIds))
+            for (const id of instruction.temporaryIds) if (typeof id === "number") live.delete(id);
+          break;
+        case "storeTemporary":
+          if (typeof instruction.temporaryId === "number") live.add(instruction.temporaryId);
+          break;
+      }
+      if (typeof instruction.destinationTemporary === "number")
+        live.add(instruction.destinationTemporary);
+    }
+  });
 }
 
 function validatePreparedReferenceStructure(

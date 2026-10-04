@@ -2708,8 +2708,8 @@ is inert while the block runs, so there are never two active story paths:
 - if the block uses `exit`, the session halts and the interrupted action and source instruction are discarded:
   an interrupted `let answer = askText ...` completes nothing and binds no value.
 
-Future `goto` or `end` transfers must also discard the interrupted action and instruction; those commands are not
-implemented in the current runtime.
+A `goto` from the block, also from a function that the block calls, discards the interrupted action and instruction
+in the same way.
 
 Blocks run one at a time in due order. A block may itself wait; later expiries queue behind it.
 
