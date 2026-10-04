@@ -1,4 +1,4 @@
-import type { Block, Expression, MediaParts, ShowButtonParts } from "./ast.js";
+import type { Block, Expression, MediaParts, ShowButtonParts, TagQueryExpression } from "./ast.js";
 export function expressionChildren(expression: Expression): readonly Expression[] {
   switch (expression.kind) {
     case "booleanLiteral":
@@ -44,6 +44,8 @@ export function expressionChildren(expression: Expression): readonly Expression[
       return expression.defaultValue === null
         ? [expression.key]
         : [expression.key, expression.defaultValue];
+    case "tagQueryExpression":
+      return tagQueryOperands(expression);
     case "timerExpression":
       return [
         ...(typeof expression.display === "object" && expression.display !== null
@@ -53,6 +55,13 @@ export function expressionChildren(expression: Expression): readonly Expression[
         ...(expression.label === null ? [] : [expression.label]),
       ];
   }
+}
+
+/** The comparison bounds and tag lists of a tag query, in written order, which is their evaluation order. */
+export function tagQueryOperands(query: TagQueryExpression): readonly Expression[] {
+  return query.steps.flatMap((step) =>
+    step.kind === "tagCompare" ? [step.bound] : step.kind === "tagList" ? [step.value] : [],
+  );
 }
 
 /**

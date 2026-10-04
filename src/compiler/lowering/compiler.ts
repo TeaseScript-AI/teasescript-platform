@@ -12,6 +12,7 @@ import type {
   ShowButtonParts,
   SwitchCase,
   SwitchStatement,
+  TagQueryExpression,
   TypeTestExpression,
 } from "../../ast.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";
@@ -39,6 +40,7 @@ import type {
   PreparedInteractionUiPayload,
   PlanSourceLocation,
   PlanLabel,
+  TagQueryExpressionPlan,
 } from "../../plan/model.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 import { numberAnswerText } from "../../interaction-answers.js";
@@ -52,6 +54,7 @@ import {
   expressionChildren as instructionEmissionChildren,
   mediaOperands,
   showButtonOptions,
+  tagQueryOperands,
 } from "../../expression-children.js";
 
 /** Plan-wide numbering shared by the compilers of a project's files: loop and temporary IDs are unique in a plan. */
@@ -1060,6 +1063,19 @@ export class InstructionCompiler {
     }
     if (expression.kind === "loadExpression") {
       return yield* compileChild(this.#lowerLoadTask(expression));
+    }
+    if (expression.kind === "tagQueryExpression") {
+      // A bound or tag list that calls a function runs as instructions; the earlier operands wait in temporaries.
+      const operands = yield* compileChild(
+        this.#lowerOrderedExpressionsTask(tagQueryOperands(expression)),
+      );
+      return {
+        plan: tagQueryPlan(
+          expression,
+          operands.map((operand) => operand.plan),
+        ),
+        temporaryIds: operands.flatMap((operand) => operand.temporaryIds),
+      };
     }
     if (
       expression.kind === "binaryExpression" &&
@@ -2351,6 +2367,8 @@ function assembleExpression(
         default: expression.defaultValue === null ? null : child(expression.defaultValue),
         span: copySpan(expression.span),
       };
+    case "tagQueryExpression":
+      return tagQueryPlan(expression, tagQueryOperands(expression).map(child));
     case "interactionExpression":
     case "showButtonExpression":
     case "timerExpression":
@@ -2361,6 +2379,28 @@ function assembleExpression(
     case "typeTestExpression":
       return typeTestPlan(expression, child(expression.value));
   }
+}
+
+function tagQueryPlan(
+  expression: TagQueryExpression,
+  operands: readonly ExpressionPlan[],
+): TagQueryExpressionPlan {
+  return {
+    kind: "tagQuery",
+    catalog: expression.catalog,
+    select: expression.select,
+    operands: [...operands],
+    steps: expression.steps.map((step) =>
+      step.kind === "tag"
+        ? { kind: "tag", name: step.name }
+        : step.kind === "tagCompare"
+          ? { kind: "tagCompare", name: step.name, operator: step.operator }
+          : step.kind === "tagList"
+            ? { kind: "tagList", option: step.option }
+            : { kind: step.kind },
+    ),
+    span: copySpan(expression.span),
+  };
 }
 
 /** A type test; a type the runtime cannot narrow down, which no written type is, makes the test constant. */

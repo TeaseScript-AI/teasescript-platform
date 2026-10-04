@@ -9,7 +9,13 @@ import {
   MAX_INTERACTION_OPTION_ENTRIES,
 } from "../interaction-limits.js";
 import { recordValidationTestWork } from "../validation-testing.js";
-import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "../project-paths.js";
+import {
+  compareProjectPaths,
+  MAIN_FILE_PATH,
+  packageAssetPathProblem,
+  packagePathProblem,
+} from "../project-paths.js";
+import { normalizeTagName } from "../tags.js";
 import { INSTRUCTION_PLAN_FORMAT, INSTRUCTION_PLAN_VERSION, type Instruction } from "./model.js";
 import {
   type PlanFileBoundaries,
@@ -64,6 +70,7 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
   }
   // After the revision checks, so another revision's fields report that revision as unsupported first.
   rejectUnknownFields(value, PLAN_FIELDS, "$", errors);
+  validatePlanImages(value.images, errors);
   const temporaryCount = nonNegativeSafeInteger(value.temporaryCount) ? value.temporaryCount : -1;
   if (temporaryCount < 0) {
     errors.push(
@@ -99,7 +106,66 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
   return Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
 }
 
-const PLAN_FIELDS = ["format", "version", "files", "temporaryCount", "functions", "instructions"];
+const PLAN_FIELDS = [
+  "format",
+  "version",
+  "files",
+  "images",
+  "temporaryCount",
+  "functions",
+  "instructions",
+];
+
+/** The image catalog: unique package paths in order, each with canonical tags in name order (ADR 0023). */
+function validatePlanImages(value: unknown, errors: PlanValidationError[]): void {
+  if (!Array.isArray(value)) {
+    errors.push(planError("TSC002", "Plan images must be an array.", "$.images"));
+    return;
+  }
+  let previousPath: string | null = null;
+  for (let index = 0; index < value.length; index += 1) {
+    const image: unknown = value[index];
+    const path = `$.images[${index}]`;
+    if (!isRecord(image) || !hasExactKeys(image, ["path", "tags"])) {
+      errors.push(planError("TSC002", "A plan image has a path and tags.", path));
+      continue;
+    }
+    if (typeof image.path !== "string" || packageAssetPathProblem(image.path) !== null) {
+      errors.push(planError("TSC002", "A plan image path is a package path.", `${path}.path`));
+    } else if (previousPath !== null && !(previousPath < image.path)) {
+      errors.push(planError("TSC002", "Plan images are unique and in path order.", `${path}.path`));
+    } else {
+      previousPath = image.path;
+    }
+    if (!Array.isArray(image.tags)) {
+      errors.push(planError("TSC002", "Image tags must be an array.", `${path}.tags`));
+      continue;
+    }
+    let previousName: string | null = null;
+    for (let tagIndex = 0; tagIndex < image.tags.length; tagIndex += 1) {
+      const tag: unknown = image.tags[tagIndex];
+      const tagPath = `${path}.tags[${tagIndex}]`;
+      if (
+        !isRecord(tag) ||
+        !hasExactKeys(tag, ["name", "value"]) ||
+        typeof tag.name !== "string" ||
+        normalizeTagName(tag.name) !== tag.name ||
+        (previousName !== null && !(previousName < tag.name)) ||
+        !(tag.value === null || (typeof tag.value === "number" && Number.isFinite(tag.value)))
+      ) {
+        errors.push(
+          planError(
+            "TSC002",
+            "An image tag has a canonical name, unique and in name order, and a finite number or null.",
+            tagPath,
+          ),
+        );
+        continue;
+      }
+      previousName = tag.name;
+    }
+  }
+}
 
 const PROPERTY_FIELDS = ["name", "value", "span"];
 
@@ -325,6 +391,7 @@ const EXPRESSION_FIELDS = fieldsByKind([
   ["typeTest", "value", "type", "negated"],
   ["binary", "operator", "left", "right"],
   ["range", "start", "end", "inclusive"],
+  ["tagQuery", "catalog", "select", "operands", "steps"],
 ]);
 
 function fieldsByKind(
@@ -1709,6 +1776,30 @@ function validateExpressionNode(
       pending.push({ value: value.end, path: `${path}.end`, assignmentTarget: false });
       pending.push({ value: value.start, path: `${path}.start`, assignmentTarget: false });
       return;
+    case "tagQuery": {
+      if (value.catalog !== "images" || !isOneOf(value.select, ["random", "list"])) {
+        errors.push(planError("TSC002", "A tag query searches images for one or a list.", path));
+      }
+      const operandCount = validateTagQuerySteps(value.steps, `${path}.steps`, errors);
+      if (!Array.isArray(value.operands) || value.operands.length !== operandCount) {
+        errors.push(
+          planError(
+            "TSC002",
+            "A tag query has one operand for each comparison and tag list.",
+            `${path}.operands`,
+          ),
+        );
+        return;
+      }
+      for (let index = value.operands.length - 1; index >= 0; index -= 1) {
+        pending.push({
+          value: value.operands[index],
+          path: `${path}.operands[${index}]`,
+          assignmentTarget: false,
+        });
+      }
+      return;
+    }
     case "storageLoad":
       if (!hasExactKeys(value, ["kind", "key", "default", "span"])) {
         errors.push(planError("TSC002", "Storage-load expression has an invalid shape.", path));
@@ -1721,6 +1812,75 @@ function validateExpressionNode(
     default:
       errors.push(planError("TSC002", `Unknown expression kind '${value.kind}'.`, `${path}.kind`));
   }
+}
+
+const TAG_COMPARISON_OPERATORS = ["==", "!=", "<", "<=", ">", ">="];
+
+/**
+ * Checks that tag query steps form one complete postfix expression, or none. Returns the number of operands the steps
+ * read, or -1 when the steps are invalid.
+ */
+function validateTagQuerySteps(
+  value: unknown,
+  path: string,
+  errors: PlanValidationError[],
+): number {
+  if (!Array.isArray(value)) {
+    errors.push(planError("TSC002", "Tag query steps must be an array.", path));
+    return -1;
+  }
+  let depth = 0;
+  let operands = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const step: unknown = value[index];
+    const stepPath = `${path}[${index}]`;
+    let valid = isRecord(step);
+    if (isRecord(step)) {
+      switch (step.kind) {
+        case "tag":
+          valid = hasExactKeys(step, ["kind", "name"]) && isCanonicalTagName(step.name);
+          depth += 1;
+          break;
+        case "tagCompare":
+          valid =
+            hasExactKeys(step, ["kind", "name", "operator"]) &&
+            isCanonicalTagName(step.name) &&
+            isOneOf(step.operator, TAG_COMPARISON_OPERATORS);
+          depth += 1;
+          operands += 1;
+          break;
+        case "tagList":
+          valid =
+            hasExactKeys(step, ["kind", "option"]) && isOneOf(step.option, ["all", "none", "any"]);
+          depth += 1;
+          operands += 1;
+          break;
+        case "not":
+          valid = hasExactKeys(step, ["kind"]) && depth >= 1;
+          break;
+        case "and":
+        case "or":
+          valid = hasExactKeys(step, ["kind"]) && depth >= 2;
+          depth -= 1;
+          break;
+        default:
+          valid = false;
+      }
+    }
+    if (!valid) {
+      errors.push(planError("TSC002", "Invalid tag query step.", stepPath));
+      return -1;
+    }
+  }
+  if (value.length > 0 && depth !== 1) {
+    errors.push(planError("TSC002", "Tag query steps must form one predicate.", path));
+    return -1;
+  }
+  return operands;
+}
+
+function isCanonicalTagName(value: unknown): boolean {
+  return typeof value === "string" && normalizeTagName(value) === value;
 }
 
 function validatePreparedAssignmentTarget(

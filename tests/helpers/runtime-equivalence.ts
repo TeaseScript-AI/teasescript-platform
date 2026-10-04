@@ -14,6 +14,7 @@ import {
   validateInstructionPlan,
   type InstructionPlan,
   type InterpreterEvent,
+  type ProjectImageFile,
   type RuntimeSnapshot,
 } from "../../src/index.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
@@ -31,6 +32,8 @@ export interface RuntimeResumeEquivalenceOptions {
    * normal speed, reporting progress on each time observation.
    */
   readonly mediaDurationMs?: number;
+  /** The package images that tag queries search. */
+  readonly images?: readonly ProjectImageFile[];
 }
 
 /** Spacing of the simulated Player's media progress observations. */
@@ -53,7 +56,7 @@ export function assertRuntimeResumeEquivalent(
     `${scenario}: instructionGuard must be a positive integer`,
   );
 
-  const compiled = compileSource(source);
+  const compiled = compileSource(source, { images: options.images ?? [] });
   assert.deepEqual(
     compiled.diagnostics,
     [],

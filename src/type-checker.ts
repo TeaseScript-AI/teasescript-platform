@@ -15,6 +15,8 @@ import type {
   ShowButtonParts,
   SwitchTypeTest,
   Statement,
+  TagQueryExpression,
+  TagQueryStep,
   TimerParts,
   TypeAnnotation,
 } from "./ast.js";
@@ -31,7 +33,9 @@ import {
   isValidInteractionPrefill,
   numberAnswerText,
 } from "./interaction-answers.js";
-import type { TypeCheckPlan } from "./plan/model.js";
+import type { PlanImage, TypeCheckPlan } from "./plan/model.js";
+import { evaluateTagSteps, passesTagList } from "./tag-query.js";
+import { normalizeTagName } from "./tags.js";
 import { CONVERSION_RESULTS, isTemporalConversionResult } from "./conversions.js";
 import {
   builtinCallProblems,
@@ -136,6 +140,8 @@ import { typePlan } from "./type-plans.js";
 export interface TypeCheckOptions {
   readonly globals?: readonly string[];
   readonly builtins?: readonly string[];
+  /** The package images that tag queries search, when the compilation was given them. */
+  readonly imageCatalog?: readonly PlanImage[];
 }
 
 export interface TypeCheckResult {
@@ -178,6 +184,7 @@ const typeCode = {
   invalidOperand: "TSV043",
   mixedTypes: "TSV044",
   impossibleCase: "TSV049",
+  emptyTagQuery: "TST002",
 } as const;
 
 /**
@@ -354,6 +361,9 @@ class TypeChecker {
 
   readonly #builtins: ReadonlySet<string>;
 
+  /** The tags of each package image, by name; `null` when the compilation was not given the images. */
+  readonly #imageTags: readonly ReadonlyMap<string, number | null>[] | null;
+
   readonly #root = new Scope(null);
 
   readonly #functions: FunctionType[] = [];
@@ -459,6 +469,10 @@ class TypeChecker {
 
   public constructor(options: TypeCheckOptions, widened: Widened) {
     this.#widened = widened;
+    this.#imageTags =
+      options.imageCatalog?.map(
+        (image) => new Map(image.tags.map((tag) => [tag.name, tag.value])),
+      ) ?? null;
     this.#builtins = new Set([
       ...CORE_RUNTIME_BUILTINS,
       ...PLATFORM_STANDARD_LIBRARY_PRELUDE,
@@ -2189,7 +2203,63 @@ class TypeChecker {
       }
       case "typeTestExpression":
         return yield* compileChild(this.#valueOfConditionTask(expression, scope));
+      case "tagQueryExpression":
+        for (const step of expression.steps) {
+          if (step.kind === "tagCompare") {
+            const type = yield* compileChild(this.#expressionTask(step.bound, scope));
+            this.#reportUnless(
+              type,
+              isNumeric,
+              step.bound,
+              "A tag's number is compared with a number",
+            );
+          } else if (step.kind === "tagList") {
+            const type = yield* compileChild(this.#expressionTask(step.value, scope));
+            this.#reportUnless(
+              type,
+              (member) =>
+                (member.kind === "list" || member.kind === "set") &&
+                (!isKnown(member.element) || isScalar(member.element, "string")),
+              step.value,
+              `'${step.option}:' takes a list of tag names`,
+            );
+          }
+        }
+        this.#checkTagQueryCanMatch(expression);
+        return expression.select === "list" ? { kind: "list", element: STRING_TYPE } : STRING_TYPE;
     }
+  }
+
+  /**
+   * A pick from the given images that no image can match by its tag tests and literal tag lists alone is an error
+   * (ADR 0023). Comparisons and other values count as possibly true: this check does no value reasoning.
+   */
+  #checkTagQueryCanMatch(query: TagQueryExpression): void {
+    if (query.select !== "random" || this.#imageTags === null) return;
+    // Each literal tag list is read once for all images.
+    const lists = new Map<TagQueryStep, readonly string[] | null>();
+    for (const step of query.steps) {
+      if (step.kind === "tagList") lists.set(step, literalTagNames(step.value));
+    }
+    const test = (step: TagQueryStep, tags: ReadonlyMap<string, number | null>) => {
+      if (step.kind === "tag") return tags.has(step.name);
+      if (step.kind !== "tagList") return null;
+      const names = lists.get(step)!;
+      return names === null ? null : passesTagList(step.option, names, tags);
+    };
+    if (
+      this.#imageTags.some(
+        (tags) => evaluateTagSteps(query.steps, (step) => test(step, tags)) !== false,
+      )
+    )
+      return;
+    this.#report(
+      typeCode.emptyTagQuery,
+      this.#imageTags.length === 0
+        ? "The package has no images to pick from."
+        : "No image in the package has these tags.",
+      query.span,
+    );
   }
 
   /** The value of a test or logical expression used as a value: the flows of both outcomes join afterwards. */
@@ -5629,4 +5699,23 @@ function scalarType(name: ScalarTypeName): StaticType {
 function unwrapGrouping(expression: Expression): Expression {
   while (expression.kind === "parenthesizedExpression") expression = expression.expression;
   return expression;
+}
+
+/** The tag names of a list literal of quoted names, or `null` for anything else, which only runtime knows. */
+function literalTagNames(value: Expression): readonly string[] | null {
+  if (value.kind !== "listLiteral") return null;
+  const names: string[] = [];
+  for (const element of value.elements) {
+    if (
+      element.kind !== "stringLiteral" ||
+      element.parts.some((part) => part.kind !== "stringText")
+    )
+      return null;
+    const name = normalizeTagName(
+      element.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join(""),
+    );
+    if (name === null) return null;
+    names.push(name);
+  }
+  return names;
 }

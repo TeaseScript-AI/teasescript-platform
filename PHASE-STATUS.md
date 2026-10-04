@@ -31,7 +31,8 @@ accept syntax, architecture, or implementation details.
   labels, opaque handles, lifecycle control, repetition, queued expiry interrupts, and scene-time checkpoint/restore;
   protected compact interactions on one typed foreground family; and ADR 0018 resumable `say` pacing, prepared
   output, typed skip settlement, and interaction/timer composition.
-- **Stage image and media:** `showImage`/`hideImage` Stage state and blocking or asynchronous `playAudio`/`playVideo`
+- **Stage image and media:** `showImage`/`hideImage` Stage state, tag queries over the compiled package image catalog
+  (`showImage tagged`, `findImages`), and blocking or asynchronous `playAudio`/`playVideo`
   with playback ranges, repetition, volume, handles, seeks, timeline cues, Player load/progress observations, and
   checkpoint restore at the language, compiler, and runtime level. The Player shows the Stage image and plays
   audio after explicit Start; browser video playback remains deferred.

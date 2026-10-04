@@ -2125,6 +2125,7 @@ image and audio integration is tracked in #446, and browser video playback is pl
 showImage "images/room.jpg"
 hideImage
 showImage photo            // a file reference string, or null
+showImage tagged "bedroom" // a random package image with these tags, see §41
 ```
 
 `showImage` sets the persistent Stage image; it stays until the next `showImage` or `hideImage`. `hideImage` takes no
@@ -4031,6 +4032,7 @@ end
 exit
 fallback
 global
+tagged
 save
 load
 delete
@@ -4319,6 +4321,44 @@ exit
   [§3](#numeric-literal-forms) with an optional sign. A tag with a number also counts as present.
 - A tag listed more than once counts once, with a warning; a number wins over its absence. Two different numbers for
   one tag are an error.
+
+### Tagged selection
+
+```text
+showImage tagged "bedroom", "punishment"                     // comma = and
+showImage tagged "punishment" > 3 and not "public"
+showImage tagged ("bedroom" or "bathroom") and not "outdoor"
+showImage tagged "bedroom", none: ["outdoor"]
+let photos = findImages(where: "bedroom" and "punishment" >= minimum)
+if photos.length > 0 { showImage photos.random }
+```
+
+- After `tagged` and in the `where:` argument, a quoted tag name tests whether a candidate has the tag. A quoted name
+  followed by `==`, `!=`, `<`, `<=`, `>`, or `>=` compares the tag's number with an ordinary expression, so
+  `"punishment" > minimum` reads the variable `minimum`. A tag without a number makes every comparison false, also
+  `!=`. `and`, `or`, `not`, and parentheses work as in conditions ([§5](#5-logical-and-comparison-operators)).
+- A tag name in a query is written out in full, without `${...}` or a number: query `"punishment" == 4`, not
+  `"punishment: 4"`.
+- In `tagged`, commas join complete predicates with `and`. The options `all:`, `none:`, and `any:` follow them, each at
+  most once, with a list of tag names that a candidate must have all of, none of, or at least one of; an empty list
+  passes every candidate. They join with `and` too, and take computed names: `findImages(all: wanted)`.
+- `findImages` takes the same parts as named arguments `where:`, `all:`, `none:`, and `any:`, and returns the paths of
+  all matching images in path order, as a `string[]`, which may be empty. Without arguments it returns every image.
+- Comparison bounds and tag lists are evaluated once, in written order, before any candidate is matched. Matching draws
+  no random number. `showImage tagged` draws once from the session random generator, and restoring a checkpoint never
+  draws again.
+- When the compilation is given the package images, a `showImage tagged` whose tag tests and literal tag lists match
+  none of them is a compile error; comparisons and computed lists are not evaluated for this. Any other pick that finds
+  no image is a runtime error.
+
+### Image tags
+
+- An image's tags are its XMP keywords ([ADR 0023](../decisions/0023-tags-for-scripts-and-images.md)). A keyword is a
+  tag name, or a name and a number such as `punishment: 4`, with the rules of [Tags](#tags). Another keyword is ignored
+  with a warning. A repeated tag counts once without a warning, because photo tools often keep `punishment` beside
+  `punishment: 4`; two different numbers for one tag are an error.
+- The catalog that tag queries search is generated from the images when the project compiles. It is part of the plan,
+  so a checkpoint keeps it and a restored session searches the same images.
 
 ## Remaining open decisions
 The accepted core syntax is consolidated in this document. Remaining work is primarily detailed API payloads and engine/account behavior.

@@ -926,6 +926,11 @@ function collectExpressionTemporaryReferences(value: unknown, output: Set<number
       case "storageLoad":
         pending.push(current.key, current.default);
         break;
+      case "tagQuery":
+        if (Array.isArray(current.operands)) {
+          for (const operand of current.operands) pending.push(operand);
+        }
+        break;
     }
   }
 }
@@ -1308,6 +1313,14 @@ function expressionGuaranteesTemporaryEvaluation(value: unknown, temporaryId: nu
     case "storageLoad":
       // The default runs only for an absent key.
       return expressionGuaranteesTemporaryEvaluation(value.key, temporaryId);
+    case "tagQuery":
+      // Every operand is evaluated before any image is matched.
+      return (
+        Array.isArray(value.operands) &&
+        value.operands.some((operand) =>
+          expressionGuaranteesTemporaryEvaluation(operand, temporaryId),
+        )
+      );
     default:
       return false;
   }

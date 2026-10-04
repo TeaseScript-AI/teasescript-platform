@@ -98,6 +98,7 @@ export function registerTeaseScriptLanguage(): void {
         "is",
         "label",
         "goto",
+        "tagged",
       ],
       types: [
         "string",
@@ -126,6 +127,7 @@ export function registerTeaseScriptLanguage(): void {
         "timer",
         "showImage",
         "hideImage",
+        "findImages",
         "playAudio",
         "playVideo",
         "save",

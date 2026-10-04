@@ -17,6 +17,23 @@ export function normalizeTagName(text: string): string | null {
   return TAG_NAME.test(name) ? name : null;
 }
 
+/** A finite number in a V30 decimal or scientific form with an optional sign, such as `4`, `-1.5`, or `2e3`. */
+const TAG_NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/u;
+
+/**
+ * Reads a tag written as text, as in an image keyword or a captured photo's tags: `"bedroom"` or `"punishment: 4"`,
+ * with any spaces around the `:`. Returns `null` when the name is not a tag name or the number is not a finite number.
+ */
+export function readTagText(text: string): Tag | null {
+  const colon = text.indexOf(":");
+  const name = normalizeTagName(colon === -1 ? text : text.slice(0, colon));
+  if (name === null) return null;
+  if (colon === -1) return { name, value: null };
+  const written = text.slice(colon + 1).trim();
+  const value = Number(written);
+  return TAG_NUMBER.test(written) && Number.isFinite(value) ? { name, value } : null;
+}
+
 /**
  * Adds `tag` to `tags`, keyed by name. A repeated name is merged: a number wins over its absence. Two different numbers
  * for one name conflict and leave the first.

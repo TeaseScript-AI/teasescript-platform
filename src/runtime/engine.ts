@@ -151,7 +151,11 @@ export function executeInstruction(
   capabilities: RuntimeCapabilities = {},
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, inputSnapshot);
-  const context = new RuntimeExecutionContext(captured.snapshot, capabilities);
+  const context = new RuntimeExecutionContext(
+    captured.snapshot,
+    capabilities,
+    captured.plan.images,
+  );
   const instructionsExecuted = executeCapturedInstruction(
     captured.plan,
     captured.snapshot,
@@ -233,7 +237,7 @@ export function stepValidatedStateToEvent(
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
   const budget = instructionBudget(options.instructionBudget);
-  const context = new RuntimeExecutionContext(snapshot, capabilities);
+  const context = new RuntimeExecutionContext(snapshot, capabilities, plan.images);
   let instructionsExecuted = 0;
   while (executionRunnable(snapshot) && context.events.length === 0) {
     if (instructionsExecuted >= budget) {
@@ -263,7 +267,7 @@ export function runValidatedState(
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
   const budget = instructionBudget(options.instructionBudget);
-  const context = new RuntimeExecutionContext(snapshot, capabilities);
+  const context = new RuntimeExecutionContext(snapshot, capabilities, plan.images);
   let instructionsExecuted = 0;
   while (executionRunnable(snapshot)) {
     if (instructionsExecuted >= budget) {

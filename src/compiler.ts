@@ -7,14 +7,23 @@ import type { ScriptHeader } from "./script-header.js";
 import { validateCapturedInstructionPlan } from "./plan/validation.js";
 import { markValidatedImmutableInstructionPlan } from "./plan/validated-immutable.js";
 import { planLocationToSourceSpan } from "./plan/source-location.js";
-import type { TypeCheckPlan } from "./plan/model.js";
+import type { PlanImage, TypeCheckPlan } from "./plan/model.js";
+import { imageCatalog, type ProjectImageFile } from "./image-catalog.js";
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "./project-paths.js";
 import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
 import { validateFileSemantics, type SemanticValidationOptions } from "./semantic.js";
 import { checkTypes, type RuntimeCheckSite } from "./type-checker.js";
 import { createSourcePosition, createSourceSpan } from "./source.js";
 
-export interface CompileOptions extends SemanticValidationOptions {}
+export interface CompileOptions extends SemanticValidationOptions {
+  /** The package images and their XMP keywords, which tag queries search; none by default. */
+  readonly images?: readonly ProjectImageFile[];
+}
+
+/** What every file of a project is checked with: the options, the built-ins, and the image catalog when given. */
+interface ProjectCheckOptions extends CompileOptions {
+  readonly imageCatalog?: readonly PlanImage[];
+}
 
 export interface CompilationResult {
   readonly program: Program;
@@ -55,9 +64,18 @@ export { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./prot
 
 /** Parses, validates, and compiles one source as the `main.tease` of a single-file project, without executing it. */
 export function compileSource(source: string, options: CompileOptions = {}): CompilationResult {
-  const result = compileProject([{ path: MAIN_FILE_PATH, source }], options);
+  const { result, imageDiagnostics: images } = compileProjectFiles(
+    [{ path: MAIN_FILE_PATH, source }],
+    options,
+  );
   const { path: _path, ...file } = result.files[0]!;
-  return Object.freeze({ ...file, plan: result.plan });
+  // The image catalog's diagnostics name their image; the source's own follow them, as in the project.
+  return Object.freeze({
+    ...file,
+    diagnostics:
+      images.length === 0 ? file.diagnostics : Object.freeze([...images, ...file.diagnostics]),
+    plan: result.plan,
+  });
 }
 
 /**
@@ -68,10 +86,23 @@ export function compileProject(
   sources: readonly ProjectSourceFile[],
   options: CompileOptions = {},
 ): ProjectCompilationResult {
+  return compileProjectFiles(sources, options).result;
+}
+
+/** A project compilation, and the image catalog's share of its diagnostics. */
+function compileProjectFiles(
+  sources: readonly ProjectSourceFile[],
+  options: CompileOptions,
+): {
+  readonly result: ProjectCompilationResult;
+  readonly imageDiagnostics: readonly ProjectDiagnostic[];
+} {
   const inventory = checkProjectFiles(sources);
-  const validationOptions = {
+  const catalog = imageCatalog(options.images ?? []);
+  const validationOptions: ProjectCheckOptions = {
     ...options,
     builtins: Object.freeze([...CORE_RUNTIME_BUILTINS, ...(options.builtins ?? [])]),
+    ...(options.images === undefined ? {} : { imageCatalog: catalog.images }),
   };
   const files = inventory.files.map(({ path, source }) =>
     compileFile(path, source, validationOptions),
@@ -79,10 +110,11 @@ export function compileProject(
   let plan: InstructionPlan | null = null;
   if (
     inventory.diagnostics.length === 0 &&
+    !hasErrors(catalog.diagnostics) &&
     files.every((file) => file.typeChecks !== null && !hasErrors(file.result.diagnostics))
   ) {
     if (files.some((file) => file.reachesExit)) {
-      plan = lowerProject(files);
+      plan = lowerProject(files, catalog.images);
     } else {
       const main = files[0]!.result;
       const noExit = createDiagnostic(
@@ -99,16 +131,18 @@ export function compileProject(
     }
   }
   const results = files.map((file) => file.result);
-  return Object.freeze({
+  const result = Object.freeze({
     files: Object.freeze(results),
     diagnostics: Object.freeze([
       ...inventory.diagnostics,
+      ...catalog.diagnostics,
       ...results.flatMap((file) =>
         file.diagnostics.map((diagnostic) => Object.freeze({ ...diagnostic, path: file.path })),
       ),
     ]),
     plan,
   });
+  return { result, imageDiagnostics: catalog.diagnostics };
 }
 
 interface CompiledProjectFile {
@@ -171,7 +205,11 @@ function projectDiagnostic(path: string, message: string): ProjectDiagnostic {
   });
 }
 
-function compileFile(path: string, source: string, options: CompileOptions): CompiledProjectFile {
+function compileFile(
+  path: string,
+  source: string,
+  options: ProjectCheckOptions,
+): CompiledProjectFile {
   let parsed: ReturnType<typeof parse>;
   try {
     parsed = parse(source);
@@ -206,7 +244,7 @@ function compileFile(path: string, source: string, options: CompileOptions): Com
 function checkParsedFile(
   path: string,
   parsed: ReturnType<typeof parse>,
-  options: CompileOptions,
+  options: ProjectCheckOptions,
 ): CompiledProjectFile {
   const parserDiagnostics = Object.freeze([
     ...parsed.diagnostics,
@@ -243,7 +281,10 @@ function checkParsedFile(
  * Lowers the error-free files into one plan; a lowering diagnostic belongs to the file it arose in, and a failure of the
  * finished plan to `main.tease`.
  */
-function lowerProject(files: CompiledProjectFile[]): InstructionPlan | null {
+function lowerProject(
+  files: CompiledProjectFile[],
+  images: readonly PlanImage[],
+): InstructionPlan | null {
   let current = files[0]!;
   let failure: ReturnType<typeof compiledPlanValidationDiagnostic>;
   try {
@@ -256,6 +297,7 @@ function lowerProject(files: CompiledProjectFile[]): InstructionPlan | null {
       (fileIndex) => {
         current = files[fileIndex]!;
       },
+      images,
     );
     current = files[0]!;
     failure = compiledPlanValidationDiagnostic(compiled);
