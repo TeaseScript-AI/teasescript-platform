@@ -1,4 +1,4 @@
-// MIGRATION INCOMPLETE: 3 error diagnostics.
+// MIGRATION INCOMPLETE: 2 error diagnostics.
 // Review diagnostics before treating this file as behaviorally equivalent.
 
 let value = "old"
@@ -19,8 +19,6 @@ function getRandom(max) {
 }
 let xs = [1, 2, 3]
 say "Pick ${xs[getRandom(xs.length)]}"
-// TODO SX_COLLECTION_TEXT line 9: Groovy turned this list into text like [a, b]; TeaseScript interpolation shows one random element instead. Format the list explicitly.
-// | show("items: ${xs}")
 let count = 0
 let ready = false
 let question = null

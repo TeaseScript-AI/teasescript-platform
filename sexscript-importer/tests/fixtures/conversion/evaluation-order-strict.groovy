@@ -6,7 +6,6 @@ def result = getBoolean("Question", yesText(), "No")
 def getRandom = { max -> return max - 1 }
 def xs = [1, 2, 3]
 show("Pick " + xs[getRandom(xs.size())])
-show("items: ${xs}")
 int count
 boolean ready
 def question = null

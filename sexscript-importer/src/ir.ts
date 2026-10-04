@@ -141,14 +141,18 @@ export type IrExpression =
   /** A property with `key` (proposed dictionaries) has a computed key, written `[key]: value`; `name` is unused. */
   | { kind: "object"; properties: Array<{ name: string; value: IrExpression; key?: IrExpression }> }
   | { kind: "index"; target: IrExpression; index: IrExpression; proposed?: ProposalId }
-  /** `proposed` marks a member that only a proposed language change defines (see proposals.ts). */
-  | { kind: "property"; target: IrExpression; name: string; proposed?: ProposalId }
+  /**
+   * `proposed` marks a member that only a proposed language change defines (see proposals.ts); `pending` marks an
+   * accepted text operation or list `join` that main does not implement yet (V30 §8 and §16 as accepted in PR #518).
+   */
+  | { kind: "property"; target: IrExpression; name: string; proposed?: ProposalId; pending?: true }
   | {
       kind: "methodCall";
       target: IrExpression;
       name: string;
       arguments: IrExpression[];
       proposed?: ProposalId;
+      pending?: true;
     }
   /** `load key` returns null for a missing key; `defaultValue` replaces that null without writing storage. */
   | { kind: "load"; key: IrExpression; defaultValue?: IrExpression }

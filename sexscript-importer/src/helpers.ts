@@ -65,7 +65,6 @@ export type HelperName =
   | "backgroundSounds"
   | "concat"
   | "indexOf"
-  | "join"
   | "listMax"
   | "listMin"
   | "listSum"
@@ -115,7 +114,6 @@ const HELPER_ORDER: readonly HelperName[] = [
   "listMax",
   "listMin",
   "listSum",
-  "join",
   "max",
   "min",
   "abs",
@@ -446,25 +444,6 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           letS("total", lit(0)),
           forS("item", v("items"), [set(v("total"), v("item"), "+=")]),
           ret(v("total")),
-        ],
-      ),
-  },
-  join: {
-    name: "sexscriptLegacyJoin",
-    build: () =>
-      fn(
-        "sexscriptLegacyJoin",
-        ["items", "separator"],
-        [
-          letS("text", lit("")),
-          forS("index", range(prop(v("items"), "length")), [
-            ifS(
-              bin("==", v("index"), lit(0)),
-              [set(v("text"), template(at(v("items"), v("index"))))],
-              [set(v("text"), template(v("text"), v("separator"), at(v("items"), v("index"))))],
-            ),
-          ]),
-          ret(v("text")),
         ],
       ),
   },

@@ -5,7 +5,6 @@ if (getString()) { show("wrong") } else { show("right") }
 def empty = [:]
 if (empty) { show("Has entries") }
 def items = ["a", "b"]
-show("Items: " + items)
 def more = items + "c"
 def check = (1 < 2) == true
 def set = "tools" // protected in TeaseScript

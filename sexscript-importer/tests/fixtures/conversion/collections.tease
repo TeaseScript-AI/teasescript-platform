@@ -25,17 +25,6 @@ function sexscriptLegacyListMax(itemsValue2) {
   }
   return best
 }
-function sexscriptLegacyJoin(itemsValue3, separator) {
-  let text = ""
-  for index in 0..itemsValue3.length {
-    if index == 0 {
-      text = "${itemsValue3[index]}"
-    } else {
-      text = "${text}${separator}${itemsValue3[index]}"
-    }
-  }
-  return text
-}
 function sexscriptLegacyMax(first, second) {
   if first >= second {
     return first
@@ -47,7 +36,7 @@ let upper = []
 for it in items {
   upper.add("${it}!")
 }
-// TODO SX_STRING_METHOD line 3: Groovy string method size() has no TeaseScript equivalent yet (no accepted string library); rewrite this text handling manually.
+// TODO SX_STRING_METHOD line 3: Groovy size() here may measure a map; TeaseScript text and lists have a length, objects do not (dictionaries are only proposed). Prove the receiver is text or a list.
 // | def longOnes = items.findAll { item -> item.size() > 4 }
 let found = null
 for it in items {
@@ -84,7 +73,7 @@ let pairs = [[1, 2], [3, 4]]
 pairs.remove([1, 2])
 let numbers = [5, 6]
 say "Pairs left: ${pairs.length}, took ${numbers.removeAt(0)}"
-say "Best: ${sexscriptLegacyListMax([3, 7, 5])}, joined: ${sexscriptLegacyJoin(items, ", ")}"
+say "Best: ${sexscriptLegacyListMax([3, 7, 5])}"
 let bigger = sexscriptLegacyMax(total, 4)
 if items.length == 0 {
   say "Nothing left"

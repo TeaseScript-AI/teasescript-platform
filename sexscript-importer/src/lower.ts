@@ -2427,6 +2427,22 @@ function lowerCallStatement(
         return [];
       }
       noteUnintendedMarkup(args[0], context);
+      if (args.length === 1) {
+        // `say list` shows code-like notation (PR #515); Groovy showed `[a, b]`.
+        const listParts = listText(args[0]!, context);
+        if (listParts === null) {
+          return [
+            unsupportedStatement(
+              context,
+              node,
+              "SX_UNSUPPORTED_ARGUMENT",
+              "Argument could not be migrated.",
+            ),
+          ];
+        }
+        if (listParts !== undefined)
+          return [{ kind: "say", value: templateOrLiteral(listParts), span }];
+      }
       return oneArgumentStatement(args, context, node, (value) => ({ kind: "say", value, span }));
     case "wait":
       return oneArgumentStatement(args, context, node, (duration) => ({
@@ -3980,14 +3996,11 @@ function lowerGString(node: AstNode, context: LowerContext): IrExpression | null
     if (typeof text === "string" && text !== "") parts.push({ text });
     const valueNode = values[index];
     if (valueNode === undefined) continue;
-    const valueType = inferType(valueNode, context.types);
-    if (onlyOf(valueType, LIST | NULL) && valueType & LIST) {
-      return unsupportedExpression(
-        context,
-        valueNode,
-        "SX_COLLECTION_TEXT",
-        "Groovy turned this list into text like [a, b]; TeaseScript interpolation shows one random element instead. Format the list explicitly.",
-      );
+    const listParts = listText(valueNode, context);
+    if (listParts === null) return null;
+    if (listParts !== undefined) {
+      parts.push(...listParts);
+      continue;
     }
     const value = lowerExpression(valueNode, context);
     if (value === null) return null;
@@ -4453,21 +4466,38 @@ function concatenationParts(node: AstNode, context: LowerContext): TemplatePart[
       return left === null || right === null ? null : [...left, ...right];
     }
   }
-  const valueType = inferType(node, context.types);
-  if (onlyOf(valueType, LIST | NULL) && valueType & LIST) {
-    // Groovy prints the whole list ("[a, b]"); TeaseScript visible-text interpolation picks one element.
-    return unsupportedExpression(
-      context,
-      node,
-      "SX_COLLECTION_TEXT",
-      "Groovy turned this list into text like [a, b]; TeaseScript interpolation shows one random element instead. Format the list explicitly.",
-    );
-  }
+  const listParts = listText(node, context);
+  if (listParts !== undefined) return listParts;
   const value = lowerExpression(node, context);
   if (value === null) return null;
   if (value.kind === "literal" && typeof value.value === "string") return [{ text: value.value }];
   if (value.kind === "template") return value.parts;
   return [{ value }];
+}
+
+/**
+ * Groovy shows a list in text as `[a, b]`, while TeaseScript `${list}` selects one element (V30 §16): a list of text,
+ * numbers, and booleans becomes `[${list.join(", ")}]`. Returns undefined for a value that is not a list.
+ */
+function listText(node: AstNode, context: LowerContext): TemplatePart[] | null | undefined {
+  const type = inferType(node, context.types);
+  if (!(onlyOf(type, LIST | NULL) && type & LIST)) return undefined;
+  const elements = listElementType(node, context);
+  if (!onlyOf(type, LIST) || !onlyOf(elements, STRING | NUMBER | BOOLEAN | NULL)) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_COLLECTION_TEXT",
+      "Groovy turned this list into text like [a, b]; TeaseScript ${...} selects one element, and join() shows only text, numbers, and booleans, which this list is not proven to hold. Format the list explicitly.",
+    );
+  }
+  const list = lowerExpression(node, context);
+  if (list === null) return null;
+  return [
+    { text: "[" },
+    { value: listJoin(list, { kind: "literal", value: ", " }) },
+    { text: "]" },
+  ];
 }
 
 function templateOrLiteral(parts: TemplatePart[]): IrExpression {
@@ -4754,6 +4784,8 @@ function lowerObjectMethodCallExpression(
     return action === null || args === null ? null : actionCall(action, args, context);
   }
   if (name === "toString" && argumentsNodes.length === 0 && targetNode !== null) {
+    const listParts = listText(targetNode, context);
+    if (listParts !== undefined) return listParts === null ? null : templateOrLiteral(listParts);
     const value = lowerExpression(targetNode, context);
     return value === null ? null : templateOrLiteral([{ value }]);
   }
@@ -4837,20 +4869,23 @@ function lowerObjectMethodCallExpression(
     const proposed = proposedDictionaryOperation(node, targetNode, name, argumentsNodes, context);
     if (proposed !== undefined) return proposed;
   }
+  const textReceiver =
+    targetNode !== null &&
+    (TEXT_ONLY_METHODS.has(name) || STRING_METHODS.has(name)) &&
+    onlyOf(inferType(targetNode, context.types), STRING);
   if (
     targetNode !== null &&
-    STRING_METHODS.has(name) &&
-    !isKnownListExpression(targetNode, context)
+    (textReceiver || (STRING_METHODS.has(name) && !isKnownListExpression(targetNode, context)))
   ) {
-    if (context.proposals.has("string-operations")) {
-      const proposed = proposedStringOperation(node, targetNode, name, argumentsNodes, context);
-      if (proposed !== undefined) return proposed;
-    }
+    const operation = textOperation(node, targetNode, name, argumentsNodes, context);
+    if (operation !== undefined) return operation;
     return unsupportedExpression(
       context,
       node,
       "SX_STRING_METHOD",
-      `Groovy string method ${name}() has no TeaseScript equivalent yet (no accepted string library); rewrite this text handling manually.`,
+      name === "size" || name === "length"
+        ? `Groovy ${name}() here may measure a map; TeaseScript text and lists have a length, objects do not (dictionaries are only proposed). Prove the receiver is text or a list.`
+        : `Groovy string method ${name}() has no TeaseScript text operation in this form: regular expressions and tokenize() need manual work (a future .ts text library).`,
     );
   }
   if (targetNode === null || !isKnownListExpression(targetNode, context)) {
@@ -4919,12 +4954,13 @@ function lowerObjectMethodCallExpression(
         // Groovy unique() also deduplicates the receiver in place; as an expression only the result is kept.
         return useHelper(context, "unique", [target]);
       case "join":
-        return useHelper(context, "join", [target, { kind: "literal", value: "" }]);
+        // Groovy join() has no separator; TeaseScript's default separator is ", ".
+        return listJoin(target, { kind: "literal", value: "" });
     }
   }
   if (name === "join" && argumentsNodes.length === 1) {
     const separator = lowerExpression(argumentsNodes[0]!, context);
-    return separator === null ? null : useHelper(context, "join", [target, separator]);
+    return separator === null ? null : listJoin(target, separator);
   }
   return unsupportedExpression(
     context,
@@ -4934,14 +4970,19 @@ function lowerObjectMethodCallExpression(
   );
 }
 
+/** Accepted list `join` (PR #518), which shows each element as `${...}` does. */
+function listJoin(list: IrExpression, separator: IrExpression): IrExpression {
+  return { kind: "methodCall", target: list, name: "join", arguments: [separator], pending: true };
+}
+
 /**
- * Groovy string methods as proposed built-in string operations (string-operations, #508), in a working syntax that
- * follows the list members: `text.length` like `items.length`, verbs such as `text.trim()` like `items.sort()`. The
- * length also counts list elements, so receivers that may be text or a list need no proof; receivers that may be
- * maps need the dictionaries proposal, which counts keys. Returns undefined for methods or arguments the working
- * syntax does not cover (regular expressions, tokenize).
+ * Groovy string methods as accepted TeaseScript text operations (V30 §8 as accepted in PR #518): `text.length`,
+ * `uppercase()`, `trim()`, and so on. Text operations follow Unicode code points and full case mapping, which differ
+ * from Java only for rare text (see COMPATIBILITY-GAPS.md). The length also counts list elements, so receivers that
+ * may be text or a list need no proof; a receiver that may be a map needs the dictionaries proposal, which counts
+ * keys. Returns undefined for methods or arguments without a text operation (regular expressions, tokenize).
  */
-function proposedStringOperation(
+function textOperation(
   node: AstNode,
   targetNode: AstNode,
   name: string,
@@ -4954,7 +4995,7 @@ function proposedStringOperation(
     target,
     name: operation,
     arguments: args,
-    proposed: "string-operations",
+    pending: true,
   });
   const literalText = (argument: AstNode | undefined): string | null => {
     const value = argument === undefined ? undefined : constantValue(argument);
@@ -4967,17 +5008,22 @@ function proposedStringOperation(
       if (argumentsNodes.length !== 0) return undefined;
       if (mayBeMap && !context.proposals.has("dictionaries")) return undefined;
       const target = lowerExpression(targetNode, context);
-      return target === null
-        ? null
-        : { kind: "property", target, name: "length", proposed: "string-operations" };
+      if (target === null) return null;
+      // A dictionary's length counts its keys; that stays with the dictionaries proposal (D1).
+      return mayBeMap
+        ? { kind: "property", target, name: "length", proposed: "dictionaries" }
+        : { kind: "property", target, name: "length", pending: true };
     }
     case "toUpperCase":
     case "toLowerCase":
     case "capitalize":
     case "trim":
       if (argumentsNodes.length !== 0) return undefined;
-      operation = name === "toUpperCase" ? "upper" : name === "toLowerCase" ? "lower" : name;
+      operation = TEXT_OPERATION_NAMES.get(name) ?? name;
       break;
+    case "contains":
+    case "indexOf":
+    case "lastIndexOf":
     case "startsWith":
     case "endsWith":
     case "replace":
@@ -5002,7 +5048,7 @@ function proposedStringOperation(
         context,
         "SX_SPLIT_TRAILING_EMPTY",
         "warning",
-        "Java split() drops trailing empty parts; the proposed split() keeps them.",
+        "Java split() drops trailing empty parts; TeaseScript split() keeps them.",
         node.span,
       );
       operation = "split";
@@ -5013,7 +5059,8 @@ function proposedStringOperation(
       operation = "substring";
       break;
     case "equalsIgnoreCase": {
-      // Groovy returns false for a null argument, which lower() would not survive.
+      // TeaseScript has no case-insensitive comparison (owner, #508): both sides are lowercased. Groovy returns
+      // false for a null argument, which lowercase() would not survive.
       if (argumentsNodes.length !== 1) return undefined;
       if (!onlyOf(inferType(argumentsNodes[0]!, context.types), STRING)) return undefined;
       const left = lowerExpression(targetNode, context);
@@ -5022,8 +5069,8 @@ function proposedStringOperation(
       return {
         kind: "binary",
         operator: "==",
-        left: member("lower", [], left),
-        right: member("lower", [], right),
+        left: member("lowercase", [], left),
+        right: member("lowercase", [], right),
       };
     }
     default:
@@ -5034,6 +5081,13 @@ function proposedStringOperation(
   const lowered = lowerArguments(argumentsNodes, context);
   return lowered === null ? null : member(operation, lowered, target);
 }
+
+/** Groovy/Java string method names whose TeaseScript text operation has another name. */
+const TEXT_OPERATION_NAMES = new Map([
+  ["toUpperCase", "uppercase"],
+  ["toLowerCase", "lowercase"],
+  ["capitalize", "uppercaseFirst"],
+]);
 
 /** Groovy/Java string methods; `size`/`length` also measure lists, which are handled when proven. */
 const STRING_METHODS = new Set([
@@ -5052,6 +5106,9 @@ const STRING_METHODS = new Set([
   "tokenize",
   "trim",
 ]);
+
+/** Methods that lists have too, converted as text operations only on receivers proven to be text. */
+const TEXT_ONLY_METHODS = new Set(["contains", "indexOf", "lastIndexOf"]);
 
 /** Java Math helpers without an accepted TeaseScript built-in. */
 const MATH_HELPERS = new Map<string, { name: HelperName; arity: number }>([

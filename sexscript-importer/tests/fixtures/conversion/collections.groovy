@@ -14,7 +14,7 @@ def pairs = [[1, 2], [3, 4]]
 pairs.remove([1, 2])
 def numbers = [5, 6]
 show("Pairs left: " + pairs.size() + ", took " + numbers.remove(0))
-show("Best: " + [3, 7, 5].max() + ", joined: " + items.join(", "))
+show("Best: " + [3, 7, 5].max())
 def bigger = Math.max(total, 4)
 if (items.isEmpty()) show("Nothing left")
 // A loop that reads its own target keeps the old value until the result is complete.

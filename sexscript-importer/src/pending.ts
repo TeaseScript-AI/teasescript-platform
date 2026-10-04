@@ -92,7 +92,7 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
     named: Record<string, IrExpression> = {},
   ): IrExpression => {
     capabilities.add(capability);
-    // Operation names of proposed members (`string-operations.length`) become identifier-safe shim names.
+    // Operation names of members (`text.length`, `dictionaries.has()`) become identifier-safe shim names.
     const words = name.split(/[^A-Za-z0-9]+/u).filter((word) => word !== "");
     const shim = shimName(
       `${SHIM_PREFIX}${words.map((word) => `${word[0]!.toUpperCase()}${word.slice(1)}`).join("")}`,
@@ -184,10 +184,19 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
             expression(value.target),
           ]);
         }
+        if (value.pending === true) {
+          return call("text operations", `text.${value.name}`, [expression(value.target)]);
+        }
         return { ...value, target: expression(value.target) };
       case "methodCall":
         if (value.proposed !== undefined) {
           return call(proposalCapability(value.proposed), `${value.proposed}.${value.name}()`, [
+            expression(value.target),
+            ...value.arguments.map(expression),
+          ]);
+        }
+        if (value.pending === true) {
+          return call("text operations", `text.${value.name}()`, [
             expression(value.target),
             ...value.arguments.map(expression),
           ]);
@@ -649,6 +658,9 @@ export function pendingHostFunctions(
     if (typeof value !== "string") throw new Error(`${operation} needs text.`);
     return value;
   };
+  // Text positions count code points, as V30 §8 defines.
+  const codePointIndex = (value: RuntimeValue | undefined, unitIndex: number): number =>
+    unitIndex < 0 ? -1 : [...String(value).slice(0, unitIndex)].length;
   const items = (value: RuntimeValue[]): RuntimeValue => {
     const list = { kind: "list", items: value };
     return list;
@@ -766,7 +778,10 @@ export function pendingHostFunctions(
     ],
     [
       "dictionaries.length",
-      ([target]) => listItems(target)?.length ?? entries("length", target).length,
+      ([target]) =>
+        typeof target === "string"
+          ? [...target].length
+          : (listItems(target)?.length ?? entries("length", target).length),
     ],
     [
       "dictionaries.remove()",
@@ -795,39 +810,53 @@ export function pendingHostFunctions(
         return dictionary(properties);
       },
     ],
-    // Proposed string operations (#508): the length also counts list elements and, for dictionaries, keys.
+    // Accepted text operations and list join (PR #518): the length also counts list elements.
     [
-      "string-operations.length",
+      "text.length",
       ([value]) => {
-        if (typeof value === "string") return value.length;
-        const composite: unknown = value;
-        if (isRecord(composite) && Array.isArray(composite.items)) return composite.items.length;
-        if (isRecord(composite) && Array.isArray(composite.properties)) {
-          return composite.properties.length;
-        }
-        throw new Error("length needs text, a list, or a dictionary.");
+        if (typeof value === "string") return [...value].length;
+        const elements = listItems(value);
+        if (elements === null) throw new Error("length needs text or a list.");
+        return elements.length;
       },
     ],
-    ["string-operations.upper()", ([value]) => text("upper()", value).toUpperCase()],
-    ["string-operations.lower()", ([value]) => text("lower()", value).toLowerCase()],
+    ["text.uppercase()", ([value]) => text("uppercase()", value).toUpperCase()],
+    ["text.lowercase()", ([value]) => text("lowercase()", value).toLowerCase()],
     [
-      "string-operations.capitalize()",
+      "text.uppercaseFirst()",
       ([value]) => {
-        const source = text("capitalize()", value);
-        return source.slice(0, 1).toUpperCase() + source.slice(1);
+        const [first = "", ...rest] = [...text("uppercaseFirst()", value)];
+        return first.toUpperCase() + rest.join("");
       },
     ],
-    ["string-operations.trim()", ([value]) => text("trim()", value).trim()],
+    ["text.trim()", ([value]) => text("trim()", value).trim()],
     [
-      "string-operations.startsWith()",
+      "text.contains()",
+      ([value, part]) => text("contains()", value).includes(text("contains()", part)),
+    ],
+    [
+      "text.indexOf()",
+      ([value, part]) =>
+        codePointIndex(value, text("indexOf()", value).indexOf(text("indexOf()", part))),
+    ],
+    [
+      "text.lastIndexOf()",
+      ([value, part]) =>
+        codePointIndex(
+          value,
+          text("lastIndexOf()", value).lastIndexOf(text("lastIndexOf()", part)),
+        ),
+    ],
+    [
+      "text.startsWith()",
       ([value, prefix]) => text("startsWith()", value).startsWith(text("startsWith()", prefix)),
     ],
     [
-      "string-operations.endsWith()",
+      "text.endsWith()",
       ([value, suffix]) => text("endsWith()", value).endsWith(text("endsWith()", suffix)),
     ],
     [
-      "string-operations.replace()",
+      "text.replace()",
       ([value, search, replacement]) => {
         const literal = text("replace()", replacement);
         // A callback keeps `$&` and similar patterns literal.
@@ -835,13 +864,13 @@ export function pendingHostFunctions(
       },
     ],
     [
-      "string-operations.split()",
+      "text.split()",
       ([value, separator]) => items(text("split()", value).split(text("split()", separator))),
     ],
     [
-      "string-operations.substring()",
+      "text.substring()",
       ([value, start, end]) => {
-        const source = text("substring()", value);
+        const source = [...text("substring()", value)];
         if (typeof start !== "number" || (end !== undefined && typeof end !== "number")) {
           throw new Error("substring() needs numeric positions.");
         }
@@ -849,7 +878,21 @@ export function pendingHostFunctions(
         if (start < 0 || stop > source.length || start > stop) {
           throw new Error("substring() positions are out of range.");
         }
-        return source.slice(start, stop);
+        return source.slice(start, stop).join("");
+      },
+    ],
+    [
+      "text.join()",
+      ([value, separator]) => {
+        const elements = listItems(value);
+        if (elements === null) throw new Error("join() needs a list.");
+        return elements
+          .map((element) => {
+            const item = runtimeValue(element);
+            if (item === null || typeof item !== "object") return String(item);
+            throw new Error("join() shows text, numbers, true, false, and null.");
+          })
+          .join(separator === undefined ? ", " : text("join()", separator));
       },
     ],
     ["run", ([script]) => ((state.transfer = String(script)), null)],

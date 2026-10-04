@@ -3,7 +3,7 @@
  * they resolve the problems they target (docs/PROPOSED-LANGUAGE-CHANGES.md). None of them is accepted TeaseScript;
  * output that uses one is an evaluation artifact, and the default conversion never does.
  */
-export const PROPOSALS = ["dictionaries", "string-operations", "media-tags"] as const;
+export const PROPOSALS = ["dictionaries", "media-tags"] as const;
 
 export type ProposalId = (typeof PROPOSALS)[number];
 

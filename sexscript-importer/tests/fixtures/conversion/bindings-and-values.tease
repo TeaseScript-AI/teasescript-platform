@@ -1,6 +1,3 @@
-// MIGRATION INCOMPLETE: 1 error diagnostic.
-// Review diagnostics before treating this file as behaviorally equivalent.
-
 function sexscriptLegacyConcat(lists) {
   let combined = []
   for list in lists {
@@ -28,8 +25,6 @@ if empty != {} {
   say "Has entries"
 }
 let items = ["a", "b"]
-// TODO SX_COLLECTION_TEXT line 8: Groovy turned this list into text like [a, b]; TeaseScript interpolation shows one random element instead. Format the list explicitly.
-// | show("Items: " + items)
 let more = sexscriptLegacyConcat([items, ["c"]])
 let check = (1 < 2) == true
 let setValue = "tools" // protected in TeaseScript
