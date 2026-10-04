@@ -13,6 +13,8 @@ Accepted post-V30 additions:
 - ADR 0017 defines the accepted boundary between official syntax, the public Standard Library, package libraries, privileged platform adapters, and deterministic engine primitives.
 - ADR 0018 defines the accepted first Standard Library POC contract for `showButton`, `askText`, `askNumber`, `choose`, and `say` smart autoplay.
 - ADR 0021 defines static types: enforcement, implicit conversions, union types, type tests, and narrowing.
+- ADR 0022 defines multi-file scripts: `goto` and `call` across files, globs, `script(...)` references, globals, and
+  explicit endings with `end` and `exit`.
 - `specifications/message-markup.md` defines the accepted constrained presentation markup for authored Standard-chat
   `say` output and the `escapeMarkup()` literal-insertion helper.
 
