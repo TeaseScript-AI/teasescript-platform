@@ -400,10 +400,10 @@ export function removeSerializableDictEntry(
 }
 
 /**
- * The member keys of a set, aligned with its items, kept between operations so that adding, finding, or removing one
- * member costs the size of that member, not of the whole set. A set's items change only through the functions below and
- * by `clear()`, which empties them, so a count that no longer matches means the keys must be built again; a copy of a
- * set builds its own when first needed.
+ * The member keys of a set, aligned with its items, kept between operations so that adding or finding a member keys only
+ * that member instead of comparing it with every other one; removing one still shifts the later keys and items. A set's
+ * items change only through the functions below and by `clear()`, which empties them, so a count that no longer matches
+ * means the keys must be built again; a copy of a set builds its own when first needed.
  */
 interface SetMembership {
   readonly keys: string[];

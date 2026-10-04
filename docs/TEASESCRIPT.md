@@ -7,7 +7,7 @@ The complete accepted syntax baseline is `specifications/accepted-syntaxes-v30.m
 Accepted post-V30 additions:
 
 - ADR 0013 defines `set[...]`, `type set`, insertion order, uniqueness, methods/properties, and non-indexability.
-- ADR 0014 defines recursive value-copy behavior, scalar-only sets, empty collection errors, and speaker display-name fallback.
+- ADR 0014 defines recursive value-copy behavior, set members and their copies, empty collection errors, and speaker display-name fallback.
 - ADR 0015 defines the serializable instruction-plan/runtime/checkpoint architecture used to execute the implemented syntax.
 - ADR 0016 defines the shared resumable pending-action contract and selects blocking `wait` as its first implementation slice.
 - ADR 0017 defines the accepted boundary between official syntax, the public Standard Library, package libraries, privileged platform adapters, and deterministic engine primitives.

@@ -1341,11 +1341,12 @@ class TypeChecker {
       if (node.kind === "indexExpression") steps.push("[]");
       else if (node.kind === "propertyAccessExpression") {
         const owner = members(nonNullType(this.#typeOf(node.object))).map(resolved);
-        const element =
-          LIST_ELEMENT_READS.has(node.property.name) &&
-          owner.length === 1 &&
-          (owner[0]!.kind === "list" || owner[0]!.kind === "set");
-        steps.push(element ? "[]" : node.property.name);
+        const read = LIST_ELEMENT_READS.has(node.property.name);
+        // A set member is read as a copy, so what is stored in it is no part of the variable.
+        if (read && owner.some((member) => member.kind === "set")) return undefined;
+        steps.push(
+          read && owner.length === 1 && owner[0]!.kind === "list" ? "[]" : node.property.name,
+        );
       } else break;
       node = unwrap(node.object);
     }
@@ -3085,9 +3086,14 @@ class TypeChecker {
     const all = members(object);
     const types = all.map((member) => memberPropertyType(member, name));
     const passing = all.filter((_, index) => types[index] !== undefined);
-    if (passing.length === all.length)
+    if (passing.length === all.length) {
+      const type = all.length === 1 ? types[0]! : union(types.map((type) => type!));
+      // A set member is read as a copy (ADR 0014), so what changes the copy decides or widens nothing in the set.
+      if (LIST_ELEMENT_READS.has(name) && all.some((member) => resolved(member).kind === "set"))
+        return copyType(type);
       // A property or an element is read from the place that keeps it.
-      return placeRead(all.length === 1 ? types[0]! : union(types.map((type) => type!)));
+      return placeRead(type);
+    }
     const failing = all.find((_, index) => types[index] === undefined)!;
     if (passing.length > 0) {
       this.#reportMayBe(expression.object, failing, passing);

@@ -134,6 +134,30 @@ test("a member is copied on insert, and first, last, random, and iteration give 
   );
 });
 
+test("what changes a read set member decides and widens nothing in the set, unlike a list element", () => {
+  for (const selector of ["first", "last", "random"])
+    assert.deepEqual(
+      says(`${DYNAMIC}let s = set[[]]\ns.${selector}.add("x")\ns.add(dynamic([1]))\nsay s`),
+      ["[[], [1]]"],
+      selector,
+    );
+  assert.deepEqual(
+    says(
+      `${DYNAMIC}let s = set[{ items: [] }]\ns.first.items.add("x")\ns.add(dynamic({ items: [1] }))\nsay s`,
+    ),
+    ["[{ items: [] }, { items: [1] }]"],
+  );
+  // A read member is a computed value like a literal, so a number does not widen the set's integer lists.
+  assert.deepEqual(codes("let s = set[[1]]\ns.first.add(2.5)\nlet xs: integer[] = s.first"), [
+    ["TSV041", "2.5"],
+  ]);
+  // A list element is a place: what changes it also changes the list and its element type.
+  assert.deepEqual(says('let l = [[]]\nl.first.add("x")\nsay l'), ['[["x"]]']);
+  assert.deepEqual(codes("let l = [[1]]\nl.first.add(2.5)\nlet xs: integer[] = l.first"), [
+    ["TSV041", "l.first"],
+  ]);
+});
+
 test("collections nest in every direction", () => {
   assert.deepEqual(
     says(
