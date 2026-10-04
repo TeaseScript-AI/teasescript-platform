@@ -161,7 +161,7 @@ class TypeChecker {
   readonly #types = new Map<Expression, StaticType>();
 
   /** One flag per enclosing loop: whether a reachable `break` leaves it. */
-  readonly #loops: boolean[] = [];
+  readonly #loops: { broken: boolean; continued: boolean }[] = [];
 
   /** Whether the statement being checked can run; a `break` after a `return` does not end its loop. */
   #reachable = true;
@@ -324,9 +324,9 @@ class TypeChecker {
       }
       case "whileStatement": {
         yield* compileChild(this.#conditionTask(statement.condition, scope));
-        this.#loops.push(false);
+        this.#loops.push({ broken: false, continued: false });
         yield* compileChild(this.#blockTask(statement.body, scope));
-        const broken = this.#loops.pop()!;
+        const { broken } = this.#loops.pop()!;
         const condition = unwrap(statement.condition);
         // `while true` without a `break` never ends normally.
         return broken || !(condition.kind === "booleanLiteral" && condition.value);
@@ -346,12 +346,15 @@ class TypeChecker {
             statement.count,
             "A repeat count is a whole number (integer)",
           );
-        this.#loops.push(false);
+        this.#loops.push({ broken: false, continued: false });
         const repeats = yield* compileChild(this.#blockTask(statement.body, scope));
-        const repeatBroken = this.#loops.pop()!;
-        // A loop that certainly runs once ends normally only when its body or a `break` does.
+        const repeatExits = this.#loops.pop()!;
+        // A loop that certainly runs ends normally only when an iteration can end: normally, by `continue`, or by
+        // `break`.
         const times = staticNumber(statement.count);
-        return times === undefined || times < 1 || repeats || repeatBroken;
+        return (
+          times === undefined || times < 1 || repeats || repeatExits.broken || repeatExits.continued
+        );
       }
       case "forStatement": {
         const iterable = yield* compileChild(this.#expressionTask(statement.iterable, scope));
@@ -370,17 +373,28 @@ class TypeChecker {
             type: element === undefined ? UNKNOWN_TYPE : copyType(element),
           },
         });
-        this.#loops.push(false);
+        this.#loops.push({ broken: false, continued: false });
         const iterates = yield* compileChild(
           this.#statementsTask(statement.body.statements, loopScope),
         );
-        const forBroken = this.#loops.pop()!;
-        return !isNonEmptyLiteral(statement.iterable) || iterates || forBroken;
+        const forExits = this.#loops.pop()!;
+        return (
+          !isNonEmptyLiteral(statement.iterable) ||
+          iterates ||
+          forExits.broken ||
+          forExits.continued
+        );
       }
-      case "breakStatement":
-        if (this.#reachable && this.#loops.length > 0) this.#loops[this.#loops.length - 1] = true;
+      case "breakStatement": {
+        const loop = this.#loops.at(-1);
+        if (this.#reachable && loop !== undefined) loop.broken = true;
         return false;
-      case "continueStatement":
+      }
+      case "continueStatement": {
+        const loop = this.#loops.at(-1);
+        if (this.#reachable && loop !== undefined) loop.continued = true;
+        return false;
+      }
       case "exitStatement":
         return false;
       case "returnStatement":
@@ -445,7 +459,10 @@ class TypeChecker {
         if (value.kind === "object" && value.properties !== null && !value.properties.has(name)) {
           const assigned = yield* compileChild(this.#expressionTask(statement.value, scope));
           if (statement.operator === "=")
-            value.properties.set(name, ownType(statement.value, assigned));
+            value.properties.set(
+              name,
+              decidedSlot(ownType(statement.value, assigned), statement.value.span),
+            );
           return;
         }
         place = this.#propertyPlace(object, target.object, target.property);
@@ -633,8 +650,12 @@ class TypeChecker {
     fn.checking = true;
     const parameters = yield* compileChild(this.#parametersTask(fn));
     const scope = new Scope(this.#root);
+    // The body works on its own copies, so what it adds to an object parameter never changes the signature.
     for (const parameter of parameters)
-      scope.declare(parameter.name, { kind: "variable", variable: parameter });
+      scope.declare(parameter.name, {
+        kind: "variable",
+        variable: { name: parameter.name, type: copyType(parameter.type) },
+      });
     const context: FunctionContext = { fn, declared, returns: [], returnsNull: false };
     const outer = this.#function;
     const outerLoops = this.#loops.splice(0);
@@ -676,7 +697,7 @@ class TypeChecker {
         first = returned;
         continue;
       }
-      const joined = joinTypes(result, returned.type);
+      const joined = joinTypes([result, returned.type]);
       if (joined === undefined) {
         this.#report(
           typeCode.mixedTypes,
@@ -832,7 +853,7 @@ class TypeChecker {
         }
         // Elements of known types must share one type; an element of unknown type leaves the element type unknown.
         const known = types.filter((type) => resolved(type).kind !== "unknown");
-        let element = types.length === 0 ? openType() : joinTypes(...known);
+        let element = types.length === 0 ? openType() : joinTypes(known);
         if (element === undefined) this.#mixedLiterals.set(expression, known);
         if (element === undefined || known.length < types.length) element = UNKNOWN_TYPE;
         return { kind: expression.kind === "listLiteral" ? "list" : "set", element };
@@ -963,7 +984,7 @@ class TypeChecker {
         results.push(type);
       }
     }
-    return joinTypes(...results) ?? UNKNOWN_TYPE;
+    return joinTypes(results) ?? UNKNOWN_TYPE;
   }
 
   *#callTask(expression: CallExpression, scope: Scope): CompileTask<StaticType> {
@@ -1393,7 +1414,7 @@ class TypeChecker {
     for (const [literal, types] of this.#mixedLiterals) {
       const kind = literal.kind === "setLiteral" ? "set" : "list";
       const first = types[0]!;
-      const other = types.find((type) => joinTypes(first, type) === undefined) ?? types[1]!;
+      const other = types.find((type) => joinTypes([first, type]) === undefined) ?? types[1]!;
       this.#report(
         typeCode.mixedTypes,
         `This ${kind} mixes ${mixDescription(first, other)}. A ${kind} holds one type; keep values of different types in separate ${kind}s.`,
@@ -1592,6 +1613,15 @@ function isBorrowed(expression: Expression): boolean {
     node.kind === "propertyAccessExpression" ||
     node.kind === "indexExpression"
   );
+}
+
+/** A slot already decided by its first value at `at`, so a later mismatch can name that line. */
+function decidedSlot(type: StaticType, at: SourceSpan): StaticType {
+  if (resolved(type).kind === "union") return type;
+  const slot = openType();
+  slot.resolved = type;
+  slot.resolvedAt = at;
+  return slot;
 }
 
 /** The type a new place keeps for the value of `expression` (rules 1.2–1.4), copied when another place holds it. */

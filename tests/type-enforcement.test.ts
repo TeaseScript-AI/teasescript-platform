@@ -322,7 +322,7 @@ test("an object property keeps the type of its first value, and assignment may a
       ],
       [
         "TSV041",
-        "'door.color' holds text (string), so it cannot be set to a whole number (integer). To show it as text, write \"${5}\".",
+        "'door.color' holds text (string) since line 3, so it cannot be set to a whole number (integer). To show it as text, write \"${5}\".",
         "5",
       ],
     ],
@@ -649,4 +649,36 @@ test("an object that does not fit adds no properties, and annotated functions ru
     ),
     ["3 3"],
   );
+});
+
+test("a function result, a body, or a copy never changes the types another place keeps", () => {
+  // Joining a function's returns copies a stored object's properties instead of changing them.
+  assert.deepEqual(
+    codes(
+      "let objs = [{ a: 1 }, { b: 1 }]\nfunction f(flag) {\n    if flag {\n        return objs[0]\n    }\n    return { c: true }\n}\nlet result = f(true)\nobjs[0].c = 1",
+    ),
+    [],
+  );
+  // What a body adds to an object parameter does not change what later calls may pass.
+  assert.deepEqual(
+    codes("function f(obj = {}) {\n    obj.flag = true\n}\nf({ flag: 1 })\nf({ flag: 1 })"),
+    [],
+  );
+  // A copy of a collection that has seen null may still take null.
+  for (const empty of ["[]", "set[]"])
+    assert.deepEqual(
+      codes(`let a = ${empty}\na.add(null)\nlet b = a\nb.add(1)\nb.add(null)`),
+      [],
+      empty,
+    );
+});
+
+test("a loop that may end through continue can still reach the function's end", () => {
+  for (const loop of [
+    "repeat 1 {\n        continue\n    }",
+    "for n in [1] {\n        continue\n    }",
+  ])
+    assert.deepEqual(codes(`function f: integer {\n    ${loop}\n}\nlet a: integer = f()`), [
+      ["TSV041", "f"],
+    ]);
 });

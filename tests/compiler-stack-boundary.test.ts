@@ -197,24 +197,18 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
   });
 });
 
-test("type checking follows long function, default, and property chains with a constrained host stack", () => {
-  const functions = Array.from(
-    { length: 512 },
-    (_, index) => `function f${index} { return ${index === 511 ? "1" : `f${index + 1}()`} }`,
-  );
-  const defaults = Array.from(
-    { length: 512 },
-    (_, index) => `function f${index}(x = ${index === 511 ? "1" : `f${index + 1}()`}) { return x }`,
-  );
-  const sources = [
-    `${functions.join("\n")}\nlet result = f0()`,
-    `${defaults.join("\n")}\nlet result = f0()`,
-    `function f(obj) { obj${".x".repeat(4_096)}.p = 1 }\nexit`,
-  ];
+test("type checking follows long function, default, and property chains and wide literals with a constrained host stack", () => {
   const compilerUrl = new URL("../src/compiler.js", import.meta.url).href;
+  // The child builds the sources itself: they are larger than an environment variable may be.
   const script = `
     const { compileSource } = await import(${JSON.stringify(compilerUrl)});
-    const sources = JSON.parse(process.env.TEASESCRIPT_SOURCES);
+    const chain = (link) => Array.from({ length: 512 }, (_, index) => link(index, index === 511 ? "1" : "f" + (index + 1) + "()"));
+    const sources = [
+      chain((index, next) => "function f" + index + " { return " + next + " }").join("\\n") + "\\nlet result = f0()",
+      chain((index, next) => "function f" + index + "(x = " + next + ") { return x }").join("\\n") + "\\nlet result = f0()",
+      "function f(obj) { obj" + ".x".repeat(4096) + ".p = 1 }\\nexit",
+      "let wide = [" + "1, ".repeat(32767) + "1]\\nexit",
+    ];
     process.stdout.write(JSON.stringify(sources.map((source) => {
       const compiled = compileSource(source);
       return { codes: compiled.diagnostics.map((diagnostic) => diagnostic.code), plan: compiled.plan !== null };
@@ -223,17 +217,12 @@ test("type checking follows long function, default, and property chains with a c
   const child = spawnSync(
     process.execPath,
     ["--stack-size=256", "--input-type=module", "--eval", script],
-    {
-      encoding: "utf8",
-      timeout: 60_000,
-      maxBuffer: 256 * 1024,
-      env: { ...process.env, TEASESCRIPT_SOURCES: JSON.stringify(sources) },
-    },
+    { encoding: "utf8", timeout: 60_000, maxBuffer: 256 * 1024 },
   );
   assert.equal(child.status, 0, child.stderr);
   assert.deepEqual(
     JSON.parse(child.stdout),
-    sources.map(() => ({ codes: [], plan: true })),
+    Array.from({ length: 4 }, () => ({ codes: [], plan: true })),
   );
 });
 

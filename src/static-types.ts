@@ -316,7 +316,8 @@ function* copyTask(typeToCopy: StaticType): CompileTask<StaticType> {
   const type = resolved(typeToCopy);
   switch (type.kind) {
     case "open":
-      return openType();
+      // A copy decides its type on its own, but keeps what the original saw: a first null stays a first null.
+      return { ...openType(), sawNull: type.sawNull };
     case "list":
     case "set":
       return { kind: type.kind, element: yield* compileChild(copyTask(type.element)) };
@@ -422,10 +423,12 @@ function* containsTask(
  * makes the type optional, objects merge their properties, and an unknown value makes the result unknown. The compiler
  * never infers a union here.
  */
-export function joinTypes(...types: readonly StaticType[]): StaticType | undefined {
+export function joinTypes(types: readonly StaticType[]): StaticType | undefined {
+  // Property tables this join built; merging more objects extends them instead of copying them again.
+  const owned = new Set<PropertyTable>();
   let result: StaticType | undefined = NEVER_TYPE;
   for (const type of types) {
-    result = runCompileTask(joinTask(result, type));
+    result = runCompileTask(joinTask(result, type, owned));
     if (result === undefined) return undefined;
   }
   return result;
@@ -434,6 +437,7 @@ export function joinTypes(...types: readonly StaticType[]): StaticType | undefin
 function* joinTask(
   leftType: StaticType,
   rightType: StaticType,
+  owned: Set<PropertyTable>,
 ): CompileTask<StaticType | undefined> {
   const left = canonical(leftType);
   const right = canonical(rightType);
@@ -447,31 +451,32 @@ function* joinTask(
       ? rightValue
       : rightValue.kind === "never"
         ? leftValue
-        : yield* compileChild(joinValuesTask(leftValue, rightValue));
+        : yield* compileChild(joinValuesTask(leftValue, rightValue, owned));
   if (value === undefined) return undefined;
   return isNullable(left) || isNullable(right) ? optional(value) : value;
 }
 
-/** Property tables that a join built; joining more objects into one extends it instead of copying it again. */
-const joinedTables = new WeakSet<PropertyTable>();
-
-function* joinValuesTask(left: StaticType, right: StaticType): CompileTask<StaticType | undefined> {
+function* joinValuesTask(
+  left: StaticType,
+  right: StaticType,
+  owned: Set<PropertyTable>,
+): CompileTask<StaticType | undefined> {
   if (left.kind === "object" && right.kind === "object") {
     if (left.properties === null || right.properties === null) return ANY_OBJECT_TYPE;
-    const properties: PropertyTable = joinedTables.has(left.properties)
+    const properties: PropertyTable = owned.has(left.properties)
       ? left.properties
       : new Map(left.properties);
-    joinedTables.add(properties);
+    owned.add(properties);
     for (const [name, type] of right.properties) {
       const kept = properties.get(name);
-      const joined = kept === undefined ? type : yield* compileChild(joinTask(kept, type));
+      const joined = kept === undefined ? type : yield* compileChild(joinTask(kept, type, owned));
       if (joined === undefined) return undefined;
       properties.set(name, joined);
     }
     return { kind: "object", properties };
   }
   if ((left.kind === "list" || left.kind === "set") && right.kind === left.kind) {
-    const element = yield* compileChild(joinTask(left.element, right.element));
+    const element = yield* compileChild(joinTask(left.element, right.element, owned));
     return element === undefined ? undefined : { kind: left.kind, element };
   }
   if (includes(left, right)) return left;
