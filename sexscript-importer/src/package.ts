@@ -36,6 +36,7 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
   "randomInteger",
   "round",
   "showButton",
+  "takePhoto",
   "toBoolean",
   "toDate",
   "toDateTime",

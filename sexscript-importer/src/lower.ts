@@ -5872,6 +5872,33 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     case "getInteger":
     case "getFloat":
       return lowerSingleInput(node, call.name, call.arguments, args, context);
+    case "getImage":
+      // Legacy took a webcam picture without asking and returned its path, or null when it failed; without a webcam
+      // it opened a file chooser titled with the message. takePhoto() returns a photo reference or null (V30 §33).
+      if (args.length !== 1) {
+        return unsupportedExpression(
+          context,
+          node,
+          "SX_CALL_ARITY",
+          "getImage() must have one argument.",
+        );
+      }
+      if (!isPure(call.arguments[0]!, context)) {
+        return unsupportedExpression(
+          context,
+          node,
+          "SX_UNSUPPORTED_ARGUMENT",
+          "getImage() computes its file-chooser title with side effects; takePhoto() has no title, so compute it explicitly first.",
+        );
+      }
+      addDiagnostic(
+        context,
+        "SX_CAMERA_FALLBACK",
+        "warning",
+        "getImage() fell back to a file chooser titled with its message when no webcam worked; takePhoto() only uses the camera and returns null instead, and the Player decides how the photo is taken.",
+        node.span,
+      );
+      return { kind: "call", name: "takePhoto", positional: [], named: {} };
     default:
       if (!SEXSCRIPT_API_METHODS.has(call.name)) {
         return unsupportedExpression(

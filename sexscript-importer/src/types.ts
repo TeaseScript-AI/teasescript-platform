@@ -43,6 +43,7 @@ const SEXSCRIPT_RESULT_TYPES = new Map<string, ValueType>([
   ["getBooleans", LIST],
   ["getDataFolder", STRING],
   ["getFloat", NUMBER],
+  ["getImage", STRING | NULL],
   ["getInteger", NUMBER],
   ["getRandom", NUMBER],
   ["getSelectedValue", NUMBER],

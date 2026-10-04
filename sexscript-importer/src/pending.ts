@@ -27,6 +27,7 @@ const PENDING_CALLS = new Map<string, string>([
   ["openUrl", "openUrl()"],
   ["round", "round()"],
   ["showButton", "showButton timeout"],
+  ["takePhoto", "takePhoto()"],
   ["toBoolean", "toBoolean()"],
   ["toInteger", "toInteger()"],
   ["toNumber", "toNumber()"],
@@ -922,6 +923,8 @@ export function pendingHostFunctions(
     ["getDateTime", () => date(true)],
     ["getDate", () => date(false)],
     ["openUrl", () => null],
+    // A photo reference, then null as when the camera is unavailable or the player cancels.
+    ["takePhoto", () => next("takePhoto", ["camera/photo.jpg", null])],
     // V30 §13: ties round away from zero.
     ["round", rounded("round", (value) => Math.sign(value) * Math.round(Math.abs(value)))],
     ["floor", rounded("floor", Math.floor)],

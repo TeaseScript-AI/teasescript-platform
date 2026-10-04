@@ -30,3 +30,9 @@ let popupMessage2 = title()
 let popupStart2 = getSeconds()
 showPopup popupMessage2
 let slow = getSeconds() - popupStart2
+// getImage() took a webcam picture and returned its path, or null.
+// NOTE SX_CAMERA_FALLBACK line 16: getImage() fell back to a file chooser titled with its message when no webcam worked; takePhoto() only uses the camera and returns null instead, and the Player decides how the photo is taken.
+let photo = takePhoto()
+if photo != null {
+  showImage photo
+}
