@@ -162,8 +162,8 @@ export type IrExpression =
    */
   | { kind: "listChoice"; options: IrListChoiceOption[] }
   /**
-   * Compact single-field input whose prompt, if any, was emitted as a preceding `say`. `defaultValue` is a
-   * proposed prefill (input-defaults, #510), written `askText default value`.
+   * Compact single-field input whose prompt, if any, was emitted as a preceding `say`. `defaultValue` prefills the
+   * field, written `askText default: value` (V30 §20).
    */
   | { kind: "input"; input: "askText" | "askNumber"; defaultValue?: IrExpression }
   | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean }

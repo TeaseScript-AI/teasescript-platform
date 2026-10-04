@@ -2,8 +2,7 @@ say "Are you ready?"
 let ready = (choose yes: "Yes", no: "No") == "yes"
 say "Really?"
 let sure = (choose yes: "Yes, Mistress", no: "No") == "yes"
-// NOTE SX_INPUT_PREFILL line 3: getInteger() pre-filled its field with a default value; TeaseScript single-field input has no prefill, so the player must type it.
-let count = askInteger("How many?")
+let count = askInteger("How many?", default: 10)
 showPopup "Session starts now"
 let elapsed = showButton("Done", 30) / 1 s
 if elapsed >= 30 {

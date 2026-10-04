@@ -249,7 +249,7 @@ export function emitExpression(expression: IrExpression): string {
     case "input":
       return expression.defaultValue === undefined
         ? expression.input
-        : `${expression.input} default ${operand(expression.defaultValue, POSTFIX)}`;
+        : `${expression.input} default: ${emitExpression(expression.defaultValue)}`;
     case "choice":
     case "listChoice":
       // `choose a: x, b: y` extends over following commas, so it is parenthesized unless it is a whole

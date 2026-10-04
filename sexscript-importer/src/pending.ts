@@ -85,7 +85,6 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
       },
       sites: [],
     });
-  const prefills: Array<{ name: string; input: "askText" | "askNumber" }> = [];
   const chooseSite = (): ProposedChooseSite => {
     const names = proposedChoose();
     const number = names.sites.length + 1;
@@ -274,21 +273,10 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
             "text" in part ? part : { value: expression(part.value) },
           ),
         };
-      case "input": {
-        if (value.defaultValue === undefined) return value;
-        // A generated function per input takes the prefill as its argument, so it is evaluated before the question
-        // as legacy evaluated its arguments, and then asks; answers keep rotating per input.
-        capabilities.add(proposalCapability("input-defaults"));
-        const name = shimName(`sxProposedPrefill${prefills.length + 1}`);
-        prefills.push({ name, input: value.input });
-        return {
-          kind: "call",
-          name,
-          positional: [expression(value.defaultValue)],
-          named: {},
-          local: true,
-        };
-      }
+      case "input":
+        return value.defaultValue === undefined
+          ? value
+          : { ...value, defaultValue: expression(value.defaultValue) };
       case "literal":
       case "duration":
       case "variable":
@@ -473,16 +461,9 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
     span: null,
   }));
   const shimmed = { ...program, statements: [...turns, ...shimmedStatements] };
-  const prefillParameter = prefills.length === 0 ? "" : shimName("sxProposedDefault");
-  const prefillSource = prefills
-    .map(({ name, input }) => `\nfunction ${name}(${prefillParameter}) {\n    return ${input}\n}\n`)
-    .join("");
   return {
     program: shimmed,
-    source:
-      emitTease(shimmed) +
-      (chooseNames === null ? "" : proposedChooseSource(chooseNames)) +
-      prefillSource,
+    source: emitTease(shimmed) + (chooseNames === null ? "" : proposedChooseSource(chooseNames)),
     builtins: [...builtins].sort(),
     operations,
     capabilities,

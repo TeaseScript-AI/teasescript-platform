@@ -7,7 +7,6 @@ export const PROPOSALS = [
   "choose-lists",
   "dictionaries",
   "string-operations",
-  "input-defaults",
   "media-tags",
 ] as const;
 

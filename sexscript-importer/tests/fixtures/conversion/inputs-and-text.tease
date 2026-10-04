@@ -1,8 +1,7 @@
 say "What is your name?"
 let name = askText
-// NOTE SX_INPUT_PREFILL line 2: getFloat() pre-filled its field with a default value; TeaseScript single-field input has no prefill, so the player must type it.
 say "Your weight?"
-let weight = askNumber
+let weight = askNumber default: 0
 say "Hello ${name}, you said ${weight}."
 say "Choose a task"
 let task = choose 0: "Kneel", 1: "Wait", 2: "Count"

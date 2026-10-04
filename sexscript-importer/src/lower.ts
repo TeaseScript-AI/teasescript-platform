@@ -5835,7 +5835,8 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
 
 /**
  * Legacy single-field input shows `message` in its dialog and pre-fills `defaultValue`. TeaseScript shows the
- * question with `say` and then asks with a compact input; it has no single-field prefill.
+ * question with `say` and then asks with a compact input whose `default:` prefills the field (V30 §20); integer
+ * input keeps the message as its hint, followed by the named default (#524).
  */
 function lowerSingleInput(
   node: AstNode,
@@ -5853,45 +5854,69 @@ function lowerSingleInput(
     );
   }
   const defaultNode = argumentNodes[1];
-  if (defaultNode !== undefined && !isPure(defaultNode, context)) {
+  const prefill = defaultNode === undefined || isEmptyDefault(defaultNode) ? null : args[1]!;
+  if (name !== "getInteger" && prefill !== null && !isPure(defaultNode!, context)) {
     return unsupportedExpression(
       context,
       node,
       "SX_INPUT_PREFILL_EFFECT",
-      `${name}() computes its pre-filled value with side effects; TeaseScript input has no prefill, so keep that computation explicitly before the question.`,
+      `${name}() computes its pre-filled value with side effects, which legacy ran before showing the question; the question becomes a say before the input, so compute the value explicitly before the question.`,
     );
   }
-  const prefill =
-    defaultNode !== undefined &&
-    !isEmptyDefault(defaultNode) &&
-    context.proposals.has("input-defaults")
-      ? args[1]!
-      : null;
-  if (defaultNode !== undefined && !isEmptyDefault(defaultNode) && prefill === null) {
-    addDiagnostic(
-      context,
-      "SX_INPUT_PREFILL",
-      "warning",
-      `${name}() pre-filled its field with a default value; TeaseScript single-field input has no prefill, so the player must type it.`,
-      node.span,
-    );
-  }
+  if (prefill !== null) notePrefill(name, defaultNode!, node, context);
   if (name === "getInteger") {
     // Accepted V30 integer input; compact syntax exists only for text and number input. A null legacy
     // message kept the current text, so the field gets no message of its own.
     const message = isNullConstant(argumentNodes[0])
       ? { kind: "literal" as const, value: "" }
       : args[0]!;
-    // Positional and named arguments may not be mixed, so a prefill uses the named form throughout.
-    return prefill === null
-      ? { kind: "call", name: "askInteger", positional: [message], named: {} }
-      : { kind: "call", name: "askInteger", positional: [], named: { message, default: prefill } };
+    return {
+      kind: "call",
+      name: "askInteger",
+      positional: [message],
+      named: prefill === null ? {} : { default: prefill },
+    };
   }
   if (!pushPrompt(context, node, argumentNodes[0]!, args[0]!)) return null;
   const input = name === "getString" ? "askText" : "askNumber";
   return prefill === null
     ? { kind: "input", input }
     : { kind: "input", input, defaultValue: prefill };
+}
+
+/**
+ * A default TeaseScript rejects when the input opens: `null`, and for text input blank text (V30 §20). Legacy showed
+ * "null" or an empty field instead, so a default that may be either gets a note.
+ */
+function notePrefill(
+  name: string,
+  defaultNode: AstNode,
+  node: AstNode,
+  context: LowerContext,
+): void {
+  const type = inferType(defaultNode, context.types);
+  const text = constantValue(defaultNode);
+  const valid =
+    name === "getString"
+      ? (typeof text === "string" && text.trim() !== "") ||
+        (defaultNode.kind === "gstring" && gstringHasText(defaultNode))
+      : onlyOf(type, NUMBER);
+  if (valid) return;
+  addDiagnostic(
+    context,
+    "SX_INPUT_PREFILL",
+    "warning",
+    name === "getString"
+      ? `${name}() pre-filled its field with this value even when it was null or blank; a TeaseScript default must be non-blank text, or the input fails when it opens.`
+      : `${name}() pre-filled its field with this value even when it was null; a TeaseScript default must be a number, or the input fails when it opens.`,
+    node.span,
+  );
+}
+
+/** Whether a GString has literal text other than whitespace, so it is never blank. */
+function gstringHasText(node: AstNode): boolean {
+  const strings = Array.isArray(node.strings) ? node.strings : [];
+  return strings.some((part) => typeof part === "string" && part.trim() !== "");
 }
 
 function isEmptyDefault(node: AstNode): boolean {
