@@ -177,7 +177,7 @@ test("a timestamp moves only by exact time, and elapsed-time consumers reject ca
   assert.ok(compileErrors("let t = timer async 10 s\nt.remaining = 1 day").includes("TSV043"));
   assert.equal(
     runtimeFailure(`${DYNAMIC}let t = timer async 10 s\nt.remaining = dynamic(1 week)`),
-    "TSR062",
+    "TSR065",
   );
 });
 

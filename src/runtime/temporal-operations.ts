@@ -74,7 +74,7 @@ export function exactDurationMilliseconds(
   const parts = durationParts(value);
   if (!isExactDuration(parts))
     throw fault(
-      "TSR062",
+      "TSR065",
       `${subject} needs an exact duration such as 24 h, but ${formatDuration(parts)} has calendar days or months, which have no fixed length.`,
       span,
     );

@@ -119,7 +119,7 @@ test("wait never measures a calendar duration; doubled units and overflow are re
       `${JSON.stringify(source)}: an error must be located in ${JSON.stringify(duration)}`,
     );
   }
-  assert.equal(runtimeFailure(`${DYNAMIC}let a = dynamic(1 mo)\nwait a`), "TSR062");
+  assert.equal(runtimeFailure(`${DYNAMIC}let a = dynamic(1 mo)\nwait a`), "TSR065");
   assert.deepEqual(diagnostics("wait 10 s ms"), ["TSV033"]);
   assert.deepEqual(diagnostics("let a = 1e306 h"), ["TSC001"]);
 });
