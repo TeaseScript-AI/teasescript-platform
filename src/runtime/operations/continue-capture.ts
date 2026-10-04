@@ -61,11 +61,10 @@ export function recordContinueCapture(
     (entry) => entry.boundaryMs < boundaryMs || entry.sinceEventSequence < sinceEventSequence,
   );
   captures.push({ boundaryMs, sinceEventSequence, epochMs: wallClockMs, context });
-  current.temporalCaptures.splice(
-    0,
-    current.temporalCaptures.length,
-    ...neededCaptures(current, captures),
-  );
+  // The list may be long while catch-up is held, so it is replaced element by element rather than spread into a call.
+  const needed = neededCaptures(current, captures);
+  current.temporalCaptures.length = 0;
+  for (const capture of needed) current.temporalCaptures.push(capture);
   return pendingResult(current, [], { kind: "recorded", boundaryMs } as const);
 }
 

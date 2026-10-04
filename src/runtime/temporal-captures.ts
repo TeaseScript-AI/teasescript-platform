@@ -88,6 +88,8 @@ export function temporalCapturesProblem(
     return "Temporal captures must be a list of at least one entry.";
   let previous = -Infinity;
   let previousSequence = -Infinity;
+  // Captures recorded in one session often share a context, which is checked once.
+  const validContexts = new Set<unknown>();
   for (const capture of value) {
     if (
       typeof capture !== "object" ||
@@ -120,8 +122,11 @@ export function temporalCapturesProblem(
       return "Temporal captures must be in recording order, each later in scene time or event sequence.";
     if (epochMs !== null && (typeof epochMs !== "number" || !isValidEpochMilliseconds(epochMs)))
       return "A temporal capture clock must be null or whole epoch milliseconds in the years 0000 to 9999.";
-    const problem = temporalContextProblem(context);
-    if (problem !== null) return problem;
+    if (!validContexts.has(context)) {
+      const problem = temporalContextProblem(context);
+      if (problem !== null) return problem;
+      validContexts.add(context);
+    }
     previous = boundaryMs;
     previousSequence = sinceEventSequence;
   }
