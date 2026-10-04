@@ -40,6 +40,8 @@ export interface RuntimeResumeEquivalenceOptions {
   readonly images?: readonly ProjectImageFile[];
   /** The host's stored values when the session starts, such as values an earlier session saved. */
   readonly scriptStorage?: readonly RuntimeScriptStorageEntrySnapshot[];
+  /** How the session ends: `halted` by default, or `failed` for a scenario that ends with a runtime error. */
+  readonly ending?: "halted" | "failed";
 }
 
 /** Spacing of the simulated Player's media progress observations. */
@@ -106,10 +108,11 @@ export function assertRuntimeResumeEquivalent(
     scenario,
     mediaDurationMs,
   );
+  const ending = options.ending ?? "halted";
   assert.equal(
     uninterrupted.snapshot.status,
-    "halted",
-    `${scenario}: uninterrupted execution must halt within ${instructionGuard} instructions`,
+    ending,
+    `${scenario}: uninterrupted execution must end ${ending} within ${instructionGuard} instructions`,
   );
   assertMonotonicEventSequences(uninterrupted.events, `${scenario}: uninterrupted execution`);
 
@@ -188,8 +191,8 @@ export function assertRuntimeResumeEquivalent(
     );
     assert.equal(
       resumed.snapshot.status,
-      "halted",
-      `${context}: resumed execution must halt within ${instructionGuard} instructions`,
+      ending,
+      `${context}: resumed execution must end ${ending} within ${instructionGuard} instructions`,
     );
 
     const combinedEvents = [...accumulatedEvents, ...resumed.events];

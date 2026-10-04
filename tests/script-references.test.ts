@@ -4,6 +4,7 @@ import test from "node:test";
 import { compileProject, type ProjectSourceFile } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
+import { createCheckpoint, deserializeCheckpoint, serializeCheckpoint } from "../src/index.js";
 import { run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import { validateRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
@@ -44,12 +45,6 @@ function compiled(files: readonly ProjectSourceFile[]): InstructionPlan {
   const result = compileProject(files);
   assert.deepEqual(result.diagnostics, []);
   return result.plan!;
-}
-
-/** What a project says when it runs until it ends or fails. */
-function ran(files: readonly ProjectSourceFile[]): string[] {
-  const plan = compiled(files);
-  return outputs(run(plan, createImmediatePacingRuntimeSnapshot(plan)).events);
 }
 
 function diagnostics(files: readonly ProjectSourceFile[]): [string, string, string][] {
@@ -143,20 +138,20 @@ test("a reference saved in one session goes to its label in the next; a let skip
     "exit",
   ]);
   // The compiler cannot see that a loaded reference enters at the label, so reading `mood` fails when it runs.
-  const plan = compiled(project(reader, { "room.tease": room.replace('say "late"', "say mood") }));
-  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { scriptStorage: saved }));
-  assert.deepEqual(outputs(result.events), [
+  const skipped = project(reader, { "room.tease": room.replace('say "late"', "say mood") });
+  assert.deepEqual(said(skipped, { scriptStorage: saved, ending: "failed" }), [
     "failure TSR070: 'mood' has no value yet: this file was started at label 'late', and its 'let mood' has not run since. Give mood a value after the label, or make it a global.",
   ]);
   // From the top of a file, the message names no label.
-  assert.deepEqual(ran(project("function show { say level }\nshow()\nlet level = 1\nexit")), [
+  const early = project("function show { say level }\nshow()\nlet level = 1\nexit");
+  assert.deepEqual(said(early, { ending: "failed" }), [
     "failure TSR070: 'level' has no value yet: its 'let level' has not run. Give level a value before it is used.",
   ]);
 });
 
 test("a computed target that names no file, no label, or a file that runs nothing fails when it runs", () => {
   const others = { ...HALL, "helpers.tease": 'function greet { say "hi" }' };
-  const failure = (main: string): string[] => ran(project(main, others));
+  const failure = (main: string): string[] => said(project(main, others), { ending: "failed" });
   assert.deepEqual(failure('let room = "cellar"\ngoto script("rooms/${room}.tease")'), [
     `failure TSR069: This goto names the file 'rooms/cellar.tease', but the project has no such file. Paths start at the package root, such as "rooms/hall.tease".`,
   ]);
@@ -172,10 +167,10 @@ test("a computed target that names no file, no label, or a file that runs nothin
     ]);
   }
   // Calling such a file runs nothing and returns at once.
-  assert.deepEqual(failure('let path = "helpers.tease"\ncall script(path)\nsay "back"\nexit'), [
-    "back",
-    "exit",
-  ]);
+  assert.deepEqual(
+    said(project('let path = "helpers.tease"\ncall script(path)\nsay "back"\nexit', others)),
+    ["back", "exit"],
+  );
   // A loaded value that is not a reference is no target.
   assert.deepEqual(failure('let next = load "next"\ngoto (next)'), [
     "failure TSR058: goto needs a script reference here, made with script(...), but this is null.",
@@ -253,13 +248,48 @@ test("a script(...) with literal text is checked like a file target, and a compu
     ],
     ["TSV022", "script(...) has no parameter 'at'; its only named argument is label:."],
   ]);
-  // A button cannot return a reference.
+  // A button cannot return a reference, also through its text; with a value written before ':' it may show one.
+  const noReturn =
+    "A button cannot return a script reference. Give the buttons text or number values, and pick the script reference from the answer.";
   assert.deepEqual(check('let next = choose script("rooms/hall.tease"), "stay"\nexit'), [
-    [
-      "TSV029",
-      "A button cannot return a script reference. Give the buttons text or number values, and pick the script reference from the answer.",
-    ],
+    ["TSV029", noReturn],
   ]);
+  assert.deepEqual(check('let next = choose { text: script("rooms/hall.tease") }\nexit'), [
+    ["TSV029", noReturn],
+  ]);
+  assert.deepEqual(
+    check('let next = choose go: script("rooms/hall.tease"), stay: "Stay"\nexit'),
+    [],
+  );
+});
+
+test("a button shows a script reference only when a written value is what it returns", () => {
+  const plan = compiled(
+    project('let next = choose go: script("rooms/hall.tease"), stay: "Stay"\nexit', HALL),
+  );
+  const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
+  const action = waiting.foregroundAction;
+  assert.ok(action?.kind === "interaction" && action.ui.kind === "choice");
+  assert.deepEqual(
+    action.ui.options.map((option) => [option.text, option.value]),
+    [
+      ['script("rooms/hall.tease")', "go"],
+      ["Stay", "stay"],
+    ],
+  );
+  // A loaded reference is known only when the choice is prepared.
+  const scriptStorage = [
+    { key: "next", value: { kind: "script" as const, path: "rooms/hall.tease", label: null } },
+  ];
+  assert.deepEqual(
+    said(project('let next = load "next"\nlet answer = choose next, "stay"\nexit', HALL), {
+      scriptStorage,
+      ending: "failed",
+    }),
+    [
+      "failure TSR052: A button cannot return a script reference. Give the buttons text or number values, and pick the script reference from the answer.",
+    ],
+  );
 });
 
 test("script(...) marks the labels it may enter afresh by whether its path and label are literal text", () => {
@@ -417,6 +447,24 @@ test("restore accepts a fallback that a computed fallback resolved to, and check
       literal,
     ).errors,
     ["Runtime fallback is malformed."],
+  );
+});
+
+test("restore checks a deeply nested computed fallback target without walking it", () => {
+  // The compiler and runtime take deep expressions; the stored fallback is resolved, so restore needs no expression.
+  const depth = 6_000;
+  const path = `${"toString(".repeat(depth)}"room.tease"${")".repeat(depth)}`;
+  const plan = compiled([
+    { path: "main.tease", source: `fallback script(${path})\nwait 1\nend` },
+    { path: "room.tease", source: 'say "room"\nexit' },
+  ]);
+  const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
+  assert.deepEqual(waiting.fallback, { file: 1, target: plan.files[1]!.entryInstruction });
+  assert.deepEqual(validateRuntimeSnapshot(waiting, plan).errors, []);
+  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, waiting)));
+  assert.deepEqual(
+    outputs(run(restored.plan, restored.snapshot, {}, { instructionBudget: 100 }).events),
+    [],
   );
 });
 

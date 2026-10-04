@@ -3745,7 +3745,7 @@ class TypeChecker {
         // The list or set is checked like any other: its elements share one type (ADR 0021 rule 1.3).
         yield* compileChild(this.#expressionTask(option.expression, scope));
         for (const element of content.elements) {
-          const value = this.#choiceEntry(element, this.#typeOf(element), true);
+          const value = this.#choiceEntry(element, this.#typeOf(element), true, written === null);
           if (written === null) add(value, buttonLiteral(element));
         }
         // An empty list or set gives no buttons, so its written value is never returned.
@@ -3761,11 +3761,13 @@ class TypeChecker {
         // elements give a known result type.
         // Every element of a computed list or set gives one button, so each must be a value or a choice object.
         const accepted =
-          this.#choiceEntry(option.expression, type, false) !== UNKNOWN_TYPE &&
+          this.#choiceEntry(option.expression, type, false, written === null) !== UNKNOWN_TYPE &&
           !this.#checkElements(
             option.expression,
             type,
-            (element) => isChoiceValue(element) || resolved(element).kind === "object",
+            (element) =>
+              (written === null ? isChoiceValue(element) : isShowable(element)) ||
+              resolved(element).kind === "object",
             () =>
               this.#report(
                 typeCode.invalidInteractionChoice,
@@ -3796,7 +3798,12 @@ class TypeChecker {
       }
       if (isKnown(value)) buttons += 1;
       // The option is kept as it was evaluated: a later option may still change the place it was read from.
-      const entry = this.#choiceEntry(option.expression, this.#capture(option.expression), false);
+      const entry = this.#choiceEntry(
+        option.expression,
+        this.#capture(option.expression),
+        false,
+        written === null,
+      );
       add(written ?? entry, written === null ? buttonLiteral(option.expression) : writtenValue);
     }
     if (buttons > MAX_INTERACTION_OPTION_ENTRIES)
@@ -3839,15 +3846,16 @@ class TypeChecker {
 
   /**
    * Checks what gives one button: a value, or a choice object `{ value?, text, background? }` whose value, else its
-   * text, the button returns. Returns that value's type; a computed choice object's value is not known.
+   * text, the button returns, unless `returns` is false because the button returns the value written before `:`.
+   * Returns that value's type; a computed choice object's value is not known.
    */
-  #choiceEntry(entry: Expression, type: StaticType, inList: boolean): StaticType {
+  #choiceEntry(entry: Expression, type: StaticType, inList: boolean, returns: boolean): StaticType {
     const value = resolved(nonNullType(type));
     // A button comes from a value or a choice object; a list or set gives buttons only as a whole option.
     const accepted = (member: StaticType): boolean => {
       const kind = resolved(member).kind;
       return (
-        isChoiceValue(member) ||
+        (returns ? isChoiceValue(member) : isShowable(member)) ||
         kind === "object" ||
         (!inList && (kind === "list" || kind === "set"))
       );
@@ -3858,7 +3866,7 @@ class TypeChecker {
         inList && (member.kind === "list" || member.kind === "set")
           ? "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set."
           : isScalar(member, "script")
-            ? "A button cannot return a script reference. Give the buttons text or number values, and pick the script reference from the answer."
+            ? SCRIPT_CHOICE_MESSAGE
             : "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
         entry.span,
       ),
@@ -3877,8 +3885,22 @@ class TypeChecker {
       const propertyType = this.#typeOf(property.value);
       if (property.name.name === "text") {
         this.#checkShownText(property.value, propertyType, "the text of a choice option");
-        if (!literal.properties.some((other) => other.name.name === "value"))
+        if (!literal.properties.some((other) => other.name.name === "value")) {
           returned = propertyType;
+          // The button returns its text, so the text must be a choice value too.
+          if (returns)
+            this.#checkMembers(
+              property.value,
+              propertyType,
+              (member) => !isScalar(member, "script"),
+              () =>
+                this.#report(
+                  typeCode.invalidInteractionChoice,
+                  SCRIPT_CHOICE_MESSAGE,
+                  property.value.span,
+                ),
+            );
+        }
       } else if (property.name.name === "value") {
         this.#checkMembers(property.value, propertyType, isChoiceValue, () =>
           this.#report(
@@ -5654,6 +5676,9 @@ function describeLiterals(values: readonly PossibleValue[]): string {
 function isShowable(member: StaticType): boolean {
   return !UNSHOWABLE_KINDS.has(resolved(member).kind);
 }
+
+const SCRIPT_CHOICE_MESSAGE =
+  "A button cannot return a script reference. Give the buttons text or number values, and pick the script reference from the answer.";
 
 /** Whether a button may return a value of this member type: one that is shown, other than a script reference. */
 function isChoiceValue(member: StaticType): boolean {
