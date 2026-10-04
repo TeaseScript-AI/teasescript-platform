@@ -190,6 +190,11 @@ test("optional types keep their non-null type in operations, elements, and loops
     mismatches("let items: integer[]? = [1]\nitems.add(2.5)")[0]?.[1],
     "'items' holds integer values (integer[]), so it cannot contain a number. To allow fractions, declare it as 'let items: number[]? = ...'.",
   );
+  // An optional whole number may serve as an index or a repeat count; only a null value fails at runtime.
+  assert.deepEqual(
+    codes('let n: integer? = 0\nlet items = [1]\nsay "${items[n]}"\nrepeat n {\n    say "x"\n}'),
+    [],
+  );
 });
 
 test("number times duration is a duration, and a media cue's own handle keeps its type", () => {

@@ -340,7 +340,9 @@ class TypeChecker {
         return broken || !(condition.kind === "booleanLiteral" && condition.value);
       }
       case "repeatStatement": {
-        const count = yield* compileChild(this.#expressionTask(statement.count, scope));
+        const count = nonNullTypeForUse(
+          yield* compileChild(this.#expressionTask(statement.count, scope)),
+        );
         if (isScalar(count, "number"))
           this.#report(
             typeCode.invalidOperand,
@@ -1031,8 +1033,9 @@ class TypeChecker {
         return NULL_TYPE;
       }
     }
+    const values: StaticType[] = [];
     for (const argument of expression.arguments)
-      yield* compileChild(this.#expressionTask(argument.value, scope));
+      values.push(yield* compileChild(this.#expressionTask(argument.value, scope)));
     if (value.kind === "list" || value.kind === "set") {
       switch (method) {
         case "contains":
@@ -1041,10 +1044,16 @@ class TypeChecker {
           return value.kind === "list" ? { kind: "set", element: value.element } : UNKNOWN_TYPE;
         case "toList":
           return value.kind === "set" ? { kind: "list", element: value.element } : UNKNOWN_TYPE;
-        case "add":
-        case "remove":
+        case "removeAt":
         case "removeFirst":
         case "removeLast":
+          if (value.kind === "set") break;
+          if (method === "removeAt" && values.length === 1)
+            this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0]!.value);
+          // The removed element leaves the list, so its type is a copy for the place that keeps it.
+          return copyType(value.element);
+        case "add":
+        case "remove":
         case "clear":
           return NULL_TYPE;
       }
@@ -1192,16 +1201,17 @@ class TypeChecker {
       );
       return;
     }
-    if (isScalar(index, "number"))
+    const position = nonNullTypeForUse(index);
+    if (isScalar(position, "number"))
       this.#report(
         typeCode.invalidOperand,
-        `A list index must be a whole number (integer), but this is ${describeValue(index)}.${ROUND_FIX}.`,
+        `A list index must be a whole number (integer), but this is ${describeValue(position)}.${ROUND_FIX}.`,
         expression.span,
       );
     else
       this.#reportUnless(
-        index,
-        isScalar(index, "integer"),
+        position,
+        isScalar(position, "integer"),
         expression,
         "A list index is a whole number (integer)",
       );
