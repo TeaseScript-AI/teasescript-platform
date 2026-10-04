@@ -3755,17 +3755,33 @@ function lowerCallStatement(
     return [{ kind: "exit", span }];
   }
   if (call !== null && !call.inherited && (call.name === "push" || call.name === "leftShift")) {
-    // Groovy 2.5 List.push appends like add().
+    // `list.leftShift(value)` is `list << value`; Groovy 2.5 List.push inserts at the front, as a stack's push.
     const receiver = asNode(node.object);
     if (
       receiver !== null &&
       isKnownListExpression(receiver, context) &&
-      call.arguments.length === 1
+      call.arguments.length === 1 &&
+      (call.name === "leftShift" || receiver.kind === "variable")
     ) {
+      const parameterWrite = parameterListWrite(receiver, node, context);
+      if (parameterWrite !== null)
+        return [unsupportedStatement(context, node, "SX_PARAMETER_LIST_WRITE", parameterWrite)];
       const target = lowerExpression(receiver, context);
       const value = lowerExpression(call.arguments[0]!, context);
       if (target === null || value === null) return [];
-      noteSharedListWrite(receiver, node, context);
+      if (call.name === "push") {
+        return [
+          {
+            kind: "assign",
+            target,
+            operator: "=",
+            value: useHelper(context, "concat", [
+              { kind: "list", items: [{ kind: "list", items: [value] }, target] },
+            ]),
+            span,
+          },
+        ];
+      }
       return [
         {
           kind: "expression",
