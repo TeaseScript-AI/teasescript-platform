@@ -56,9 +56,10 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
    `and`, `or`, and `not` must be `true` or `false`; there is no truthiness. A list index is a whole number and a dict
    key is text; an object, whose properties have fixed names, is not indexed. Which properties an object has is known
    only for exact objects, so reading a property it lacks, and a choice object's missing `text`, other property, or
-   `value` or `background` that its button cannot use, are errors only for them. An exact object is a variable declared
-   with an object, list, or dict literal or with another exact value, whose name nothing in the script assigns or
-   changes, or a literal property, element, or dict value of one. Any other object may lack a property it was built
+   `value` or `background` that its button cannot use, are errors only for them, when every literal the object may be
+   has the problem. An exact value is an object, list, or dict literal, a variable declared with an exact value whose
+   name nothing in the script assigns or changes, or a property, element, or dict value of an exact value that is
+   itself a literal; an element or dict value may be any of them. Any other object may lack a property it was built
    with, or have others.
 9. A possibly null value used where its non-null type is required, such as `n + 1` with `n: integer?`, is a compile
    error whose message names the check, `if n != null { ... }` (owner decision of 2026-10-04 on #504). The check

@@ -10,6 +10,7 @@ import type {
   InteractionExpression,
   LetStatement,
   MediaParts,
+  ObjectLiteral,
   Program,
   ScalarTypeName,
   ShowButtonParts,
@@ -906,10 +907,7 @@ class TypeChecker {
       annotated: statement.typeAnnotation !== null,
     };
     if (statement.typeAnnotation === null) this.#declared.set(statement, variable);
-    const exact =
-      statement.typeAnnotation === null && !this.#effects.assigned.has(name)
-        ? this.#exactValues(initializer)
-        : undefined;
+    const exact = this.#effects.assigned.has(name) ? undefined : this.#exactValues(initializer);
     if (exact !== undefined) this.#exactLiterals.set(variable, exact);
     scope.declare(name, { kind: "variable", variable });
     this.#assigned(variable, value);
@@ -3154,7 +3152,7 @@ class TypeChecker {
     // An exact object never gets a property its literals do not write. Its type has the properties they write.
     const lacking = all.some((member) => {
       const value = resolved(member);
-      return value.kind === "object" && value.properties !== null && !value.properties.has(name);
+      return value.kind === "object" && value.properties?.has(name) !== true;
     });
     const exact = lacking ? this.#exactValues(expression.object) : undefined;
     if (
@@ -3417,31 +3415,22 @@ class TypeChecker {
                 option.expression.span,
               ),
           );
-        // The choice objects of a computed collection are checked by their known properties, and those of an exact list
-        // one by one, each by its literal.
+        // When the option is one exact list of choice objects, each element gives a button, so each is checked by its
+        // literal. The text of other computed collections' choice objects is checked by their type.
         const lists = this.#exactValues(option.expression);
-        const elements = lists?.every((list) => list.kind === "listLiteral")
-          ? lists.flatMap((list) => list.elements.map(unwrap))
-          : [];
-        if (elements.length > 0 && elements.every((element) => element.kind === "objectLiteral"))
-          for (const element of elements) {
-            const type = resolved(this.#typeOf(element));
-            if (type.kind === "object" && type.properties !== null)
-              this.#checkChoiceObject(option.expression, type.properties, written !== null, [
-                element,
-              ]);
-          }
+        const elements =
+          lists?.length === 1 && lists[0]!.kind === "listLiteral"
+            ? lists[0]!.elements.map(unwrap)
+            : [];
+        if (elements.length > 0 && elements.every(isObjectLiteral))
+          for (const element of elements)
+            this.#checkExactChoiceObjects(option.expression, [element], written !== null);
         else
           for (const part of parts)
             if (part.kind === "list" || part.kind === "set")
               for (const element of members(part.element).map(resolved))
                 if (element.kind === "object" && element.properties !== null)
-                  this.#checkChoiceObject(
-                    option.expression,
-                    element.properties,
-                    written !== null,
-                    undefined,
-                  );
+                  this.#checkChoiceText(option.expression, element.properties);
         const results = parts.map((part) => {
           const button =
             part.kind === "list" || part.kind === "set" ? resolved(part.element) : part;
@@ -3530,9 +3519,17 @@ class TypeChecker {
     if (rejected) return UNKNOWN_TYPE;
     const literal = unwrap(entry);
     if (literal.kind !== "objectLiteral") {
-      for (const member of members(nonNullType(type)).map(resolved))
-        if (member.kind === "object" && member.properties !== null)
-          this.#checkChoiceObject(entry, member.properties, written, this.#exactValues(entry));
+      const objects = members(nonNullType(type))
+        .map(resolved)
+        .filter((member) => member.kind === "object");
+      const exact = objects.length > 0 ? this.#exactValues(entry) : undefined;
+      const literals = exact?.filter(isObjectLiteral);
+      if (literals !== undefined && literals.length === exact!.length)
+        this.#checkExactChoiceObjects(entry, literals, written);
+      else
+        for (const member of objects)
+          if (member.kind === "object" && member.properties !== null)
+            this.#checkChoiceText(entry, member.properties);
       return value.kind === "object" ? UNKNOWN_TYPE : type;
     }
     let returned: StaticType = UNKNOWN_TYPE;
@@ -3557,56 +3554,74 @@ class TypeChecker {
     return returned;
   }
 
-  /**
-   * A choice object that is not written in the option, checked as the runtime checks it when the choice opens. A text
-   * that cannot be shown fails whether it is there or missing. The other checks need to know which properties the
-   * object has, so they apply only to an exact object, whose literals are `exact` (ADR 0021 rule 1.8): only value, text,
-   * and background, a text, a value a button can return, and a background.
-   */
-  #checkChoiceObject(
-    expression: Expression,
-    table: PropertyTable,
-    written: boolean,
-    exact: readonly Expression[] | undefined,
-  ): void {
+  /** A choice object's text that cannot be shown fails whether it is there or missing, so its type alone decides. */
+  #checkChoiceText(expression: Expression, table: PropertyTable): void {
     const text = table.get("text");
     if (text !== undefined) this.#checkShownText(expression, text, "the text of a choice option");
-    if (exact === undefined || !exact.every((literal) => literal.kind === "objectLiteral")) return;
-    const always = (name: string): boolean =>
-      exact.every((literal) => writesProperty(literal, name));
-    const extra = [...table.keys()].find(
-      (name) => !CHOICE_OBJECT_PROPERTIES.has(name) && always(name),
+  }
+
+  /**
+   * The choice objects that an exact value may be (ADR 0021 rule 1.8), checked as the runtime checks them when the
+   * choice opens, each by its literal: only value, text, and background, a text that can be shown, a value a button can
+   * return, and a background. A problem is reported when every one of them has it.
+   */
+  #checkExactChoiceObjects(
+    expression: Expression,
+    literals: readonly ObjectLiteral[],
+    written: boolean,
+  ): void {
+    const others = literals.map((literal) =>
+      literal.properties.find((property) => !CHOICE_OBJECT_PROPERTIES.has(property.name.name)),
     );
-    if (extra !== undefined) {
+    if (others.every((other) => other !== undefined)) {
+      const names = [...new Set(others.map((other) => `'${other!.name.name}'`))];
       this.#report(
         typeCode.invalidInteractionChoice,
-        `Choice objects support value, text, and background only, not '${extra}'.`,
+        `Choice objects support value, text, and background only, not ${names.join(" or ")}.`,
         expression.span,
       );
       return;
     }
-    if (exact.every((literal) => !writesProperty(literal, "text")))
+    const all = (name: string) =>
+      literals.map((literal) => literal.properties.find((property) => property.name.name === name));
+    const texts = all("text");
+    if (texts.every((text) => text === undefined))
       this.#report(
         typeCode.invalidInteractionChoice,
         'A choice object requires text, as in { text: "Go", value: 1 }.',
         expression.span,
       );
-    const value = table.get("value");
-    if (value !== undefined && always("value")) {
+    else if (
+      texts.every((text) => text !== undefined && fails(this.#typeOf(text.value), isShowable))
+    )
+      this.#checkShownText(
+        expression,
+        this.#typeOf(texts[0]!.value),
+        "the text of a choice option",
+      );
+    const values = all("value");
+    if (values.every((value) => value !== undefined)) {
       if (written)
         this.#report(
           typeCode.invalidInteractionChoice,
           "This choice option has two values, one before ':' and one in its value property. Keep one.",
           expression.span,
         );
-      else
-        this.#checkMembers(expression, value, isShowable, () =>
-          this.#report(typeCode.invalidInteractionChoice, CHOICE_VALUE_MESSAGE, expression.span),
-        );
+      else if (values.every((value) => fails(this.#typeOf(value!.value), isShowable)))
+        this.#report(typeCode.invalidInteractionChoice, CHOICE_VALUE_MESSAGE, expression.span);
     }
-    const background = table.get("background");
-    if (background !== undefined && always("background"))
-      this.#checkBackground(expression, background);
+    const background = (member: StaticType): boolean =>
+      isScalar(member, "string") || resolved(member).kind === "null";
+    if (
+      all("background").every(
+        (property) => property !== undefined && fails(this.#typeOf(property.value), background),
+      )
+    )
+      this.#report(
+        typeCode.invalidInteractionChoice,
+        "Expected an opaque CSS button background colour.",
+        expression.span,
+      );
   }
 
   /** `${...}` shows a value, or one element of a list; a known value it cannot show is an error. */
@@ -5316,11 +5331,20 @@ function exactParts(
   return parts.length > 0 && parts.every(isExactLiteral) ? parts : undefined;
 }
 
+/** Whether a value of this type certainly fails a test: it is known, and none of its members passes. */
+function fails(type: StaticType, accepts: (member: StaticType) => boolean): boolean {
+  const known = members(type).filter(isKnown);
+  return known.length > 0 && !known.some(accepts);
+}
+
+function isObjectLiteral(expression: Expression): expression is ObjectLiteral {
+  return expression.kind === "objectLiteral";
+}
+
 /** Whether an object literal writes a property. */
 function writesProperty(literal: Expression, name: string): boolean {
   return (
-    literal.kind === "objectLiteral" &&
-    literal.properties.some((property) => property.name.name === name)
+    isObjectLiteral(literal) && literal.properties.some((property) => property.name.name === name)
   );
 }
 

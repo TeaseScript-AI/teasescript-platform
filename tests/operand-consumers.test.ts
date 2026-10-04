@@ -52,8 +52,16 @@ test("built-ins with fixed arguments check their number and names", () => {
   assert.equal(says('let roll = randomInteger(1..=6)\nsay "${chance(50) or roll > 0}"').length, 1);
 });
 
-/** The sources that give an exact object (ADR 0021 rule 1.8): a variable, an element, and a property that keep a literal. */
-const EXACT = [SOURCES[1]!, SOURCES[3]!, SOURCES[4]!];
+/**
+ * The sources that give an exact object (ADR 0021 rule 1.8): a variable, also with a written type, an element, and a
+ * property that keep a literal.
+ */
+const EXACT = [
+  SOURCES[1]!,
+  (value: string, use: string) => `let held: object = ${value}\n${use.replaceAll("@", "held")}`,
+  SOURCES[3]!,
+  SOURCES[4]!,
+];
 
 test("a choice object that is not written in the option is checked by its known properties", () => {
   for (const [value, message] of [
@@ -78,9 +86,18 @@ test("a choice object that is not written in the option is checked by its known 
     ),
     ["TSV029"],
   );
+  // An element may be any of its list's elements: each may fail in its own way, or one alone.
+  assert.deepEqual(
+    errors(
+      'let options = [{ text: "A", x: 1 }, { text: "B", y: 1 }]\nlet answer = choose options[0]',
+    ),
+    [["TSV029", "options[0]"]],
+  );
   // A valid computed choice object, and properties that a store adds later or may not add at all, still compile.
   for (const source of [
     'let options = [{ text: "A", value: 1 }]\nlet answer = choose options',
+    'let options = [{ text: "A", value: null }, { text: "B", value: [1] }]\nlet answer = choose options[0]',
+    'let lists = [[{ text: "A" }], [{ text: "B", value: [1] }]]\nlet answer = choose lists[0]',
     'let option = { value: 1 }\ntimer async 1 s {\n    option.text = "late"\n}\nwait 2 s\nlet answer = choose option',
     'let option = { text: "A" }\nif false {\n    option.value = [1]\n}\nlet answer = choose option',
     'function pick(option = { value: 1 }) {\n    let answer = choose option\n}\npick({ text: "A", value: 1 })',
