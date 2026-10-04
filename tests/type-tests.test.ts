@@ -283,6 +283,17 @@ test("an assignment narrows the variable to the assigned value's type", () => {
     errors('let reward: integer | string = 10\nreward = "x"\nlet points = reward + 1')[0]?.[0],
     "TSV043",
   );
+  // A variable of unknown type takes a copy of the assigned value's type: each object then gets its own properties.
+  assert.deepEqual(
+    sayTexts(
+      'let given = {}\nlet loaded = load "k"\nloaded = given\nloaded.flag = 1\ngiven.flag = true\nsay loaded\nsay given',
+    ),
+    ["{ flag: 1 }", "{ flag: true }"],
+  );
+  assert.deepEqual(
+    errors('let given = { flag: true }\nlet loaded = load "k"\nloaded = given\nloaded.flag = 1'),
+    [["TSV041", "1"]],
+  );
 });
 
 test("a type test continues after 'is', and a type inside parentheses continues before '|' or '[]'", () => {

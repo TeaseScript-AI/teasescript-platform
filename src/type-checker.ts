@@ -832,7 +832,8 @@ class TypeChecker {
     this.#recordRuntimeCheck(statement, place.type, runtimePlace(target), value);
     if (statement.operator === "=") {
       yield* compileChild(this.#storeTask(place, statement.value, value));
-      if (variable !== undefined) this.#assigned(variable, value);
+      // A variable of unknown type may take the value's own type, so it gets a copy of a place it was read from.
+      if (variable !== undefined) this.#assigned(variable, this.#capture(statement.value));
       return;
     }
     const operator = statement.operator === "+=" ? "+" : "-";
