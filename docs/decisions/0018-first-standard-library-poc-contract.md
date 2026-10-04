@@ -360,7 +360,7 @@ The engine uses one discriminated foreground interaction family rather than inde
 Conceptually each active interaction contains enough JSON-safe data for:
 
 ```text
-kind: button | text | number | choice
+kind: button | text | number | temporal | choice
 stable action identity
 owning and continuation instruction positions
 scene time when it appeared, and a button's timeout when set

@@ -389,6 +389,7 @@ function submitComposer(): void {
     interaction === null ||
     (interaction.interactionKind !== "text" &&
       interaction.interactionKind !== "number" &&
+      interaction.interactionKind !== "temporal" &&
       interaction.interactionKind !== "choice")
   ) {
     setPlayerFeedback("Free chat is unavailable while no scripted text answer is active.");
@@ -529,6 +530,7 @@ function renderPlayerControls(presentation: WorkspacePlayerPresentation): void {
     interaction !== null &&
     (interaction.interactionKind === "text" ||
       interaction.interactionKind === "number" ||
+      interaction.interactionKind === "temporal" ||
       interaction.interactionKind === "choice");
   elements.composerInput.disabled =
     !current || (interaction === null && presentation.pacingGate === null);

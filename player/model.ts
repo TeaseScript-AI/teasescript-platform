@@ -72,4 +72,9 @@ export type PlayerForegroundPresentation =
       readonly prefill?: string;
       /** `askInteger`: only a whole number is an answer. */
       readonly integer?: true;
+      /**
+       * A date or time answer is typed as ISO text, because the browser's control cannot show the default; a native
+       * date control has no year 0000.
+       */
+      readonly isoText?: true;
     };

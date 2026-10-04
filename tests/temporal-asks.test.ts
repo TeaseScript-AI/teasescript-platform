@@ -111,7 +111,18 @@ test("a default answer prefills the field as ISO text and submitting it returns 
     // Clearing the field never falls back to the default.
     assert.equal(answer(session, "").outcome.kind, "invalidPayload");
     assert.equal(transcript(answer(session, prefill).session).at(-1), prefill, source);
+    assert.equal(foreground !== null && "isoText" in foreground, false, source);
   }
+  // A native date control has no year 0000, so the Player shows such a default as ISO text it can edit and submit.
+  const yearZero = start('let value = askDate default: toDate("0000-01-01")\nsay value.toISO()');
+  assert.deepEqual(playerRuntimeForeground(yearZero), {
+    kind: "ask-date",
+    accessibleName: "Answer",
+    hint: "",
+    prefill: "0000-01-01",
+    isoText: true,
+  });
+  assert.equal(transcript(answer(yearZero, "0000-01-01").session).at(-1), "0000-01-01");
 });
 
 test("a default of another kind fails at compile time or before the field opens", () => {

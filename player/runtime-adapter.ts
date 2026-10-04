@@ -186,6 +186,8 @@ export function playerRuntimeForeground(
         accessibleName,
         hint: action.ui.hint ?? "",
         ...(action.ui.prefill === undefined ? {} : { prefill: action.ui.prefill }),
+        // A native date control has no year 0000, so such a default is shown and edited as ISO text.
+        ...(action.ui.prefill?.startsWith("0000") === true ? { isoText: true as const } : {}),
       });
     case "choice":
       return Object.freeze({

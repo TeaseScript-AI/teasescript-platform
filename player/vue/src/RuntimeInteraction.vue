@@ -113,10 +113,10 @@ watch(
     const ownedFocus = !!active && !!root.value?.contains(active);
     // Default composer focus when nothing else owns it; touch-only devices would raise a keyboard.
     const unownedFocus = (!active || active === document.body) && hoverAvailable.value;
+    const composerFocused =
+      active instanceof HTMLElement && active.matches("[data-composer-input]");
     const wasEditing =
-      (active instanceof HTMLTextAreaElement ||
-        (active instanceof HTMLInputElement && active.matches("[data-composer-input]"))) &&
-      !suppressComposerRefocus;
+      (active instanceof HTMLTextAreaElement || composerFocused) && !suppressComposerRefocus;
     suppressComposerRefocus = false;
     const returnToChoice = restoreChoiceFocus;
     restoreChoiceFocus = false;
@@ -132,6 +132,8 @@ watch(
     // Progression may restore composer focus, but must not steal it from Tools/dialogs.
     if ((ownedFocus || returnToChoice || unownedFocus) && (foreground.value || pacing.value)) {
       if (wasEditing) focusInput();
+      // A date or time control and the text field replace each other; the editing focus Send kept moves to the new one.
+      else if (composerFocused && !root.value?.contains(document.activeElement)) focusInput();
       else if (unownedFocus) {
         // Default focus is not keyboard navigation, so it must not reveal a navigation outline.
         document.documentElement.dataset.playerKeyboardFocus = "false";
@@ -315,13 +317,15 @@ function submit(source: "input" | "button") {
             foreground?.kind !== 'ask-number' ? 'text' : foreground.integer ? 'numeric' : 'decimal'
           "
           :input-type="
-            foreground?.kind === 'ask-date'
-              ? 'date'
-              : foreground?.kind === 'ask-time'
-                ? 'time'
-                : foreground?.kind === 'ask-datetime'
-                  ? 'datetime-local'
-                  : 'text'
+            foreground && 'isoText' in foreground && foreground.isoText
+              ? 'text'
+              : foreground?.kind === 'ask-date'
+                ? 'date'
+                : foreground?.kind === 'ask-time'
+                  ? 'time'
+                  : foreground?.kind === 'ask-datetime'
+                    ? 'datetime-local'
+                    : 'text'
           "
           :feedback="feedback"
           @submit="submit"

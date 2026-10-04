@@ -63,7 +63,7 @@ reference adapter are implemented. The production cross-origin player/host integ
 One discriminated pending-action family must carry JSON-safe data equivalent to:
 
 ```text
-kind: button | text | number | choice
+kind: button | text | number | temporal | choice
 action identity
 owning and continuation instruction positions
 scene time when it appeared, and a button's timeout when set
