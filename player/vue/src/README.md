@@ -43,8 +43,9 @@ specification.
   separate chunk on the development server, or in a build only with the `?dev` URL opt-in. The default build mounts `PlayerApp.vue` with the
   repository demo: `demoHost.ts` supplies its source and resolves its package-relative references to the package's
   SVG files and to sounds that `generatedAudio.ts` synthesizes. With `?package=<id>`, `packageHost.ts` loads a package
-  of the playground server's development package root instead and resolves its images. `main.ts` compiles the script
-  before Start; one that does not compile shows `ScriptProblems.vue` with its diagnostics instead of Start.
+  of the playground server's development package root instead and resolves its images, audio, and video. `main.ts`
+  compiles the script before Start; one that does not compile shows `ScriptProblems.vue` with its diagnostics instead
+  of Start.
 - `PlayerToolsShell.vue` receives its tool list from the root and owns tool selection, pinning, order, resizing, retained content and dock/drawer focus.
   Its tool slot supplies content; its default slot supplies the Player. Closing a visited panel retains its content.
   Tool bodies scroll vertically; the outer carousel handles overflow between panels. Shared shadcn-vue/Reka
