@@ -938,7 +938,7 @@ test("blocking interactions resume through ordinary expression contexts and para
   assert.equal(pairDone.snapshot.status, "halted");
   assert.deepEqual(rootBinding(pairDone.snapshot, "pair"), createSerializableList(["alpha", 2.5]));
 
-  const shortCircuit = compiled("let value = false and askText");
+  const shortCircuit = compiled('let value = false and askText == "yes"');
   const shortCircuitDone = run(shortCircuit, createFreshRuntimeSnapshot(shortCircuit));
   assert.equal(shortCircuitDone.snapshot.status, "halted");
   assert.equal(shortCircuitDone.snapshot.foregroundAction, null);

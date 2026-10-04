@@ -614,12 +614,15 @@ test("string-producing keys compile and run for save, load, and delete", () => {
 });
 
 test("dynamic non-string keys fail with TSR054 and the command's message", () => {
+  // `dynamic` hides the key's type from the compiler, which rejects a known non-string key before runtime.
   for (const [command, message] of [
     ["let value = load key", loadKeyMessage],
     ["save 7 as key", keyMessage],
     ["delete key", keyMessage],
   ]) {
-    const compiled = plan(`let key = 1\n${command}`);
+    const compiled = plan(
+      `function dynamic(input) {\n  return input\n}\nlet key = dynamic(1)\n${command}`,
+    );
     const result = run(compiled, createFreshRuntimeSnapshot(compiled));
     assert.equal(result.snapshot.status, "failed", command);
     assert.equal(result.snapshot.failure?.code, "TSR054", command);
@@ -635,7 +638,10 @@ test("save rejects session handles and speaker references at the top level and n
     "speaker vera {}\nlet handle = vera",
   ]) {
     for (const value of ["handle", "{ nested: [handle] }"]) {
-      const compiled = plan(`${declaration}\nsave ${value} as "k"`);
+      // `dynamic` hides the value's type from the compiler, which rejects a known speaker or handle before runtime.
+      const compiled = plan(
+        `function dynamic(value) {\n  return value\n}\n${declaration}\nsave dynamic(${value}) as "k"`,
+      );
       let result = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
       if (declaration.includes("playAudio")) {
         assert.equal(result.snapshot.status, "waiting");
@@ -841,21 +847,27 @@ test("compact interactions parse in every storage operand position", () => {
     'timer(duration: 1 s, async: true, label: askText as mistress "Label?").state',
     'playAudio(file: askText as mistress "File?", async: true).state',
   ];
-  const positions = [
-    (value: string) => `save ${value} as "k"`,
-    (value: string) => `save [${value}] as "k"`,
-    (value: string) => `let v = load ${value}`,
-    (value: string) => `let v = load ${value} default "d"`,
-    (value: string) => `let v = load "k" default ${value}`,
-    (value: string) => `save load "k" default ${value} as "k"`,
-    (value: string) => `save load ${value} as "k"`,
-    (value: string) => `save load ${value} default "d" as "k"`,
+  // `true` marks a storage key position, where a number answer is a type error rather than a parse error.
+  const positions: readonly (readonly [(value: string) => string, boolean])[] = [
+    [(value) => `save ${value} as "k"`, false],
+    [(value) => `save [${value}] as "k"`, false],
+    [(value) => `let v = load ${value}`, true],
+    [(value) => `let v = load ${value} default "d"`, true],
+    [(value) => `let v = load "k" default ${value}`, false],
+    [(value) => `save load "k" default ${value} as "k"`, false],
+    [(value) => `save load ${value} as "k"`, true],
+    [(value) => `save load ${value} default "d" as "k"`, true],
   ];
   for (const value of values) {
-    for (const position of positions) {
+    for (const [position, key] of positions) {
       const source = position(value);
       const compiled = compileSource(prelude + source);
-      assert.deepEqual(compiled.diagnostics, [], source);
+      const numberKey = key && value.startsWith("askNumber");
+      assert.deepEqual(
+        compiled.diagnostics.map((diagnostic) => diagnostic.code),
+        numberKey ? ["TSV043"] : [],
+        source,
+      );
     }
   }
 });

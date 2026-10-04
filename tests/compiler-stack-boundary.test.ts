@@ -69,7 +69,7 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
     const compiledSet = compileSource(process.env.TEASESCRIPT_SET_SOURCE);
     const compiledObject = compileSource(process.env.TEASESCRIPT_OBJECT_SOURCE);
     const deepObject = "{ x: ".repeat(1024) + "1" + " }".repeat(1024);
-    const innerObjectCodes = ["{a:1, b:{q:1}}", "{a:{q:1}, b:2}", "{a:{q:1}.q}", "{a:{q:1} + 2}"].map((leaf) =>
+    const innerObjectCodes = ["{a:1, b:{q:1}}", "{a:{q:1}, b:2}", "{a:{q:1}.q}", "{a:{q:1}.q + 2}"].map((leaf) =>
       compileSource("let value = " + "{x:".repeat(1024) + leaf + "}".repeat(1024)).diagnostics.map((diagnostic) => diagnostic.code),
     );
     const siblingObjects = ["{ before: 2, child: " + deepObject + " }", "{ child: " + deepObject + ", after: 2 }"].map((expression) => {

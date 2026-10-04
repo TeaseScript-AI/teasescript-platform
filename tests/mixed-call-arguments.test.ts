@@ -21,7 +21,8 @@ function diagnostics(source: string): [string, string, string][] {
 
 test("positional arguments followed by named arguments fill an author function's parameters", () => {
   const result = runValidSource(
-    SHOW + ["say show(1, c: 3)", "say show(1, 2, c: 3)", "say show(1, c: 3, b: 2)"].join("\n"),
+    SHOW +
+      ['say show(1, c: "3")', 'say show(1, "2", c: "3")', 'say show(1, c: "3", b: "2")'].join("\n"),
   );
   assert.equal(result.snapshot.failure, null);
   assert.deepEqual(sayTexts(result), ["1b3", "123", "123"]);
@@ -116,7 +117,7 @@ test("argument count errors name the parameters and the fix", () => {
 });
 
 test("plan validation rejects a function call that gives one parameter two arguments", () => {
-  const plan = structuredClone(compileValidPlan(SHOW + "let shown = show(1, c: 3)"));
+  const plan = structuredClone(compileValidPlan(SHOW + 'let shown = show(1, c: "3")'));
   const call = plan.instructions.find((instruction) => instruction.kind === "callFunction");
   assert.ok(call?.kind === "callFunction" && call.arguments.length === 2);
   // EVIDENCE: fixture renames only the named argument's parameter to the one the positional argument fills.

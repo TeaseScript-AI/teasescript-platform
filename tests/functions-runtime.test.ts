@@ -391,7 +391,9 @@ test("keeps a prepared collection receiver attached through argument side effect
 test("fails an invalid prepared receiver before evaluating a user-call argument", () => {
   const source = [
     "let order = []",
-    "let scalar = 1",
+    // `dynamic` hides the receiver's type from the compiler, which rejects a known integer receiver before runtime.
+    "function dynamic(value) { return value }",
+    "let scalar = dynamic(1)",
     'function argument { order.add("argument")\nreturn 2 }',
     "scalar.add(argument())",
   ].join("\n");

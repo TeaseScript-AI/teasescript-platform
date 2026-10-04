@@ -64,7 +64,7 @@ test("instant remains an identifier when its pacing expression continues", () =>
   const compiled = plan(
     [
       "let instant = [1]",
-      'say "plus", instant + 1',
+      'say "plus", instant[0] + 1',
       'say "index", instant[0]',
       'say "property", instant.length',
     ].join("\n"),

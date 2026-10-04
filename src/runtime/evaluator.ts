@@ -7,6 +7,7 @@ import type {
 } from "../plan/model.js";
 import { escapeMarkup } from "../message-markup.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
+import { CORE_RUNTIME_BUILTINS } from "../protected-names.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
 import type { DeveloperWarningEvent, InterpreterEvent, OutputSpeaker } from "./events.js";
@@ -1002,7 +1003,7 @@ export class Evaluator {
   ): SerializableRuntimeValue {
     if (expression.callee.kind === "identifier") {
       const name = expression.callee.name;
-      const coreBuiltin = name === "random" || name === "chance" || name === "randomInteger";
+      const coreBuiltin = CORE_RUNTIME_BUILTINS.some((builtin) => builtin === name);
       const platformPrelude = name === "escapeMarkup";
       const builtin = Object.hasOwn(this.#builtins, name) ? this.#builtins[name] : undefined;
       if (!coreBuiltin && !platformPrelude && builtin === undefined) {
@@ -1028,6 +1029,11 @@ export class Evaluator {
             break;
           case "randomInteger":
             returned = this.#randomIntegerBuiltin(call);
+            break;
+          case "round":
+          case "floor":
+          case "ceil":
+            returned = this.#roundingBuiltin(name, call);
             break;
           case "escapeMarkup":
             returned = this.#escapeMarkupBuiltin(call);
@@ -1458,6 +1464,23 @@ export class Evaluator {
       throw fault("TSR041", `${subject} requires a non-empty range.`, span);
     }
     return range.start + Math.floor(this.#findRandom(span) * length);
+  }
+
+  /**
+   * `round` gives the nearest whole number, rounding a half away from zero; `floor` and `ceil` round toward negative
+   * and positive infinity (V30 §13). A zero result is always `0`, never `-0`.
+   */
+  #roundingBuiltin(name: "round" | "floor" | "ceil", call: RuntimeCapabilityCall): number {
+    this.#expectBuiltinArguments(name, call, 1);
+    const value = call.positional[0];
+    if (typeof value !== "number") throw new TypeError(`${name}(value) requires a number.`);
+    const rounded =
+      name === "floor"
+        ? Math.floor(value)
+        : name === "ceil"
+          ? Math.ceil(value)
+          : Math.sign(value) * Math.round(Math.abs(value));
+    return rounded === 0 ? 0 : rounded;
   }
 
   #escapeMarkupBuiltin(call: RuntimeCapabilityCall): string {
