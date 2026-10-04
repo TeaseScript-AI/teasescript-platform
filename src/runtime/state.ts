@@ -66,6 +66,7 @@ import {
 import {
   contextHoldsInstruction,
   rootFitsFunction,
+  runsNothing,
   serializedContext,
   serializedRootFiles,
   serializedScopes,
@@ -95,7 +96,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 43;
+export const RUNTIME_SNAPSHOT_VERSION = 44;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -3122,6 +3123,16 @@ function validateScopes(
   }
 }
 
+/** Whether an activation of a file may start at an instruction: the file's entry or one of its labels. */
+function isFileEntry(plan: InstructionPlan, file: number, entry: number): boolean {
+  const planFile = plan.files[file];
+  return (
+    planFile !== undefined &&
+    (entry === planFile.entryInstruction ||
+      planFile.labels.some((label) => label.instruction === entry))
+  );
+}
+
 /** An activation's root stands at the bottom of the stack and above each file call; no other scope is a root. */
 function validateRootPlacement(frames: unknown, callFrames: unknown, errors: string[]): void {
   if (!Array.isArray(frames) || !Array.isArray(callFrames)) return;
@@ -3156,7 +3167,11 @@ function sameTransferDestination(planned: PlanTransferDestination, stored: unkno
   );
 }
 
-/** `fallback` holds the destination of a `fallback` statement: a file's entry or label, or a glob's files. */
+/**
+ * `fallback` holds the destination of a `fallback` statement: a file's entry or label, or a glob's files. A computed
+ * `fallback` resolves when it runs, so with one in the plan it may also be any label, or the entry of a file that runs
+ * something.
+ */
 function validateFallback(
   value: unknown,
   plan: InstructionPlan | undefined,
@@ -3182,11 +3197,30 @@ function validateFallback(
         (instruction) =>
           instruction.kind === "setFallback" &&
           instruction.destination !== null &&
+          // A computed destination holds an expression, never a stored fallback.
+          !("value" in instruction.destination) &&
           sameTransferDestination(instruction.destination, value),
-      ))
+      ) &&
+      !(isPlainRecord(value) && resolvedFallbackFits(value, plan)))
   ) {
     errors.push("Runtime fallback is malformed.");
   }
+}
+
+/** Whether a fallback is one that a computed `fallback` of the plan may have resolved to. */
+function resolvedFallbackFits(value: Record<string, unknown>, plan: InstructionPlan): boolean {
+  return (
+    plan.instructions.some(
+      (instruction) =>
+        instruction.kind === "setFallback" &&
+        instruction.destination !== null &&
+        "value" in instruction.destination,
+    ) &&
+    nonNegativeSafeInteger(value.file) &&
+    nonNegativeSafeInteger(value.target) &&
+    isFileEntry(plan, value.file, value.target) &&
+    !runsNothing(plan, value.file)
+  );
 }
 
 function validateSpeakers(value: unknown, errors: string[]): Set<number> {

@@ -14,6 +14,7 @@ import type {
   SerializableSpeakerReference,
   SerializableTimerHandle,
   SerializableMediaHandle,
+  SerializableScriptReference,
 } from "./serializable-values.js";
 
 export function isList(value: SerializableRuntimeValue): value is SerializableRuntimeList {
@@ -54,6 +55,12 @@ export function isMediaHandle(value: SerializableRuntimeValue): value is Seriali
   return typeof value === "object" && value !== null && value.kind === "mediaHandle";
 }
 
+export function isScriptReference(
+  value: SerializableRuntimeValue,
+): value is SerializableScriptReference {
+  return typeof value === "object" && value !== null && value.kind === "script";
+}
+
 /** A plain-language description of a runtime value's kind for error messages, such as "a number". */
 export function describeRuntimeValue(value: SerializableRuntimeValue): string {
   if (value === null) return "null";
@@ -71,6 +78,8 @@ export function describeRuntimeValue(value: SerializableRuntimeValue): string {
       return "a media handle";
     case "datetime":
       return "a date and time";
+    case "script":
+      return "a script reference";
     default:
       return `a ${value.kind}`;
   }

@@ -478,8 +478,10 @@ function validateInstructionControlFlowRegions(
         return;
       case "transfer":
       case "setFallback":
+        // A computed destination is resolved, and checked, when it runs.
         if (
           instruction.destination !== null &&
+          !(isRecord(instruction.destination) && "value" in instruction.destination) &&
           !isFileDestination(index, instruction.destination)
         ) {
           errors.push(
@@ -1225,7 +1227,8 @@ function explicitInstructionTargets(instruction: Record<string, unknown>): reado
       return [instruction.target];
     case "transfer":
     case "setFallback":
-      if (!isRecord(instruction.destination)) return [];
+      // A computed destination names no instruction.
+      if (!isRecord(instruction.destination) || "value" in instruction.destination) return [];
       return Array.isArray(instruction.destination.pick)
         ? instruction.destination.pick.map((option: unknown) =>
             isRecord(option) ? option.target : undefined,

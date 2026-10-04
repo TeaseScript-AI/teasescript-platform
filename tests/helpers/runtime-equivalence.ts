@@ -18,6 +18,7 @@ import {
   type ProjectImageFile,
   type ProjectSourceFile,
   type RuntimeCallFrameSnapshot,
+  type RuntimeScriptStorageEntrySnapshot,
   type RuntimeSnapshot,
 } from "../../src/index.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
@@ -37,6 +38,8 @@ export interface RuntimeResumeEquivalenceOptions {
   readonly mediaDurationMs?: number;
   /** The package images that tag queries search. */
   readonly images?: readonly ProjectImageFile[];
+  /** The host's stored values when the session starts, such as values an earlier session saved. */
+  readonly scriptStorage?: readonly RuntimeScriptStorageEntrySnapshot[];
 }
 
 /** Spacing of the simulated Player's media progress observations. */
@@ -83,7 +86,11 @@ export function assertRuntimeResumeEquivalent(
   );
 
   const seed = options.seed ?? DEFAULT_EQUIVALENCE_SEED;
-  const initial = createImmediatePacingRuntimeSnapshot(plan, { seed });
+  const fresh = {
+    seed,
+    ...(options.scriptStorage === undefined ? {} : { scriptStorage: options.scriptStorage }),
+  };
+  const initial = createImmediatePacingRuntimeSnapshot(plan, fresh);
   const initialSnapshotValidation = validateRuntimeSnapshot(initial, plan);
   assert.equal(
     initialSnapshotValidation.valid,
@@ -107,7 +114,7 @@ export function assertRuntimeResumeEquivalent(
   assertMonotonicEventSequences(uninterrupted.events, `${scenario}: uninterrupted execution`);
 
   // The stepping pass starts from its own fresh snapshot, so a baseline that mutated its input cannot hide boundaries.
-  const steppingInitial = createImmediatePacingRuntimeSnapshot(plan, { seed });
+  const steppingInitial = createImmediatePacingRuntimeSnapshot(plan, fresh);
   assert.deepEqual(
     initial,
     steppingInitial,

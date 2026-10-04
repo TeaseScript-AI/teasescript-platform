@@ -307,7 +307,14 @@ export interface FallbackStatement {
 }
 
 /** Where a `goto`, `call`, or `fallback` continues: a label of this file, or a file from its top or at a label. */
-export type TransferTarget = LabelTarget | FileTarget;
+export type TransferTarget = LabelTarget | FileTarget | ScriptTarget;
+
+/** A target computed at runtime: a `script(...)` call or a grouped expression of type `script`, as in `goto (next)`. */
+export interface ScriptTarget {
+  readonly kind: "scriptTarget";
+  readonly expression: Expression;
+  readonly span: SourceSpan;
+}
 
 export interface LabelTarget {
   readonly kind: "labelTarget";
@@ -356,7 +363,8 @@ export type ScalarTypeName =
   | "time"
   | "datetime"
   | "timestamp"
-  | "duration";
+  | "duration"
+  | "script";
 
 /**
  * A type name: a scalar type, `null`, any `list`, `set`, `dict`, or `object`, or a program-control type (ADR 0021).

@@ -20,6 +20,7 @@ import type {
   TagQueryExpression,
   TagQueryStep,
   TimerParts,
+  TransferTarget,
   TypeAnnotation,
 } from "./ast.js";
 import { globMatches, MAIN_FILE_PATH } from "./project-paths.js";
@@ -119,6 +120,7 @@ import {
   STRING_TYPE,
   TIME_TYPE,
   TIMESTAMP_TYPE,
+  SCRIPT_TYPE,
   typeFromAnnotation,
   typeName,
   union,
@@ -1047,13 +1049,18 @@ class TypeChecker {
         if (this.#reachable) this.reachesExit = true;
         return false;
       case "endStatement":
+        return false;
       case "gotoStatement":
+        yield* compileChild(this.#targetTask(statement.target, "goto", scope));
         return false;
       case "callFileStatement":
+        yield* compileChild(this.#targetTask(statement.target, "call", scope));
         // The called file runs until its end, like any suspension.
         this.#suspend();
         return true;
       case "fallbackStatement":
+        if (statement.target !== null)
+          yield* compileChild(this.#targetTask(statement.target, "fallback", scope));
         return true;
       case "labelStatement":
         // A goto from anywhere in the file may arrive here, so nothing narrowed before the label still holds.
@@ -1065,6 +1072,26 @@ class TypeChecker {
       case "functionDeclaration":
         return true;
     }
+  }
+
+  /** A computed target, such as `goto (next)`, is a script reference; plain text is not a jump target (V30 §29). */
+  *#targetTask(
+    target: TransferTarget,
+    keyword: "goto" | "call" | "fallback",
+    scope: Scope,
+  ): CompileTask<void> {
+    if (target.kind !== "scriptTarget") return;
+    const type = yield* compileChild(this.#expressionTask(target.expression, scope));
+    this.#reportUnless(
+      type,
+      (member) => isScalar(member, "script"),
+      target.expression,
+      `${keyword} needs a script reference here`,
+      () =>
+        members(type).some((member) => isScalar(member, "string"))
+          ? ` Plain text is not a jump target: turn a path into one with script(...), as in ${keyword} script("rooms/hall.tease").`
+          : ` Make one with script(...), as in ${keyword} script("rooms/hall.tease").`,
+    );
   }
 
   /**
@@ -3438,6 +3465,36 @@ class TypeChecker {
             : name === "getDateTime"
               ? DATETIME_TYPE
               : TIMESTAMP_TYPE;
+      case "script": {
+        // `script(path)` or `script(path, label: name)`, both text (V30 §29).
+        const positional = expression.arguments.filter(
+          (item) => item.kind === "positionalArgument",
+        ).length;
+        if (positional !== 1)
+          this.#report(
+            typeCode.argumentCount,
+            `script(...) takes 1 argument (path), received ${positional}. Name a label with label:, as in script("rooms/hall.tease", label: "start").`,
+            expression.span,
+          );
+        for (const [index, item] of expression.arguments.entries()) {
+          if (item.kind === "namedArgument" && item.name.name !== "label")
+            this.#report(
+              typeCode.unknownNamedArgument,
+              `script(...) has no parameter '${item.name.name}'; its only named argument is label:.`,
+              item.name.span,
+            );
+          else if (item.kind === "namedArgument" || positional === 1)
+            this.#reportUnless(
+              values[index]!,
+              (member) => isScalar(member, "string"),
+              item.value,
+              item.kind === "namedArgument"
+                ? "label: takes the name of a label as text (string)"
+                : "script(...) takes the path of a file as text (string)",
+            );
+        }
+        return SCRIPT_TYPE;
+      }
       default:
         return UNKNOWN_TYPE;
     }
@@ -3708,7 +3765,7 @@ class TypeChecker {
           !this.#checkElements(
             option.expression,
             type,
-            (element) => isShowable(element) || resolved(element).kind === "object",
+            (element) => isChoiceValue(element) || resolved(element).kind === "object",
             () =>
               this.#report(
                 typeCode.invalidInteractionChoice,
@@ -3790,7 +3847,9 @@ class TypeChecker {
     const accepted = (member: StaticType): boolean => {
       const kind = resolved(member).kind;
       return (
-        isShowable(member) || kind === "object" || (!inList && (kind === "list" || kind === "set"))
+        isChoiceValue(member) ||
+        kind === "object" ||
+        (!inList && (kind === "list" || kind === "set"))
       );
     };
     const rejected = this.#checkMembers(entry, type, accepted, (member) =>
@@ -3798,7 +3857,9 @@ class TypeChecker {
         typeCode.invalidInteractionChoice,
         inList && (member.kind === "list" || member.kind === "set")
           ? "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set."
-          : "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
+          : isScalar(member, "script")
+            ? "A button cannot return a script reference. Give the buttons text or number values, and pick the script reference from the answer."
+            : "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
         entry.span,
       ),
     );
@@ -3819,7 +3880,7 @@ class TypeChecker {
         if (!literal.properties.some((other) => other.name.name === "value"))
           returned = propertyType;
       } else if (property.name.name === "value") {
-        this.#checkMembers(property.value, propertyType, isShowable, () =>
+        this.#checkMembers(property.value, propertyType, isChoiceValue, () =>
           this.#report(
             typeCode.invalidInteractionChoice,
             "A choice value must be text, a number, true, false, null, a duration, or a date or time value.",
@@ -3861,7 +3922,7 @@ class TypeChecker {
             typeCode.unshowableValue,
             member.kind === "dict"
               ? `"\${...}" cannot show a dict. Select one value with ${expressionLabel(expression) ?? "dict"}[key], or show every value with ${expressionLabel(expression) ?? "dict"}.values.join().`
-              : `"\${...}" cannot show ${describeValue(member)}. It shows text, numbers, true, false, null, durations, and date and time values, and selects one element of a list.`,
+              : `"\${...}" cannot show ${describeValue(member)}. It shows text, numbers, true, false, null, durations, date and time values, and script references, and selects one element of a list.`,
             expression.span,
           ),
       );
@@ -3869,7 +3930,7 @@ class TypeChecker {
         this.#checkElements(expression, type, isShowable, () =>
           this.#report(
             typeCode.unshowableValue,
-            "An interpolated list may contain only text, numbers, true, false, null, durations, and date and time values, because one element is shown as text.",
+            "An interpolated list may contain only text, numbers, true, false, null, durations, date and time values, and script references, because one element is shown as text.",
             expression.span,
           ),
         );
@@ -3885,7 +3946,7 @@ class TypeChecker {
       this.#checkMembers(element, this.#typeOf(element), isShowable, () =>
         this.#report(
           typeCode.unshowableValue,
-          "An interpolated list may contain only text, numbers, true, false, null, durations, and date and time values, because one element is shown as text.",
+          "An interpolated list may contain only text, numbers, true, false, null, durations, date and time values, and script references, because one element is shown as text.",
           element.span,
         ),
       );
@@ -4898,6 +4959,10 @@ function statementExpressions(statement: Statement): readonly Expression[] {
       return [statement.iterable];
     case "returnStatement":
       return statement.value === null ? [] : [statement.value];
+    case "gotoStatement":
+    case "callFileStatement":
+    case "fallbackStatement":
+      return statement.target?.kind === "scriptTarget" ? [statement.target.expression] : [];
     default:
       return [];
   }
@@ -5588,6 +5653,11 @@ function describeLiterals(values: readonly PossibleValue[]): string {
 /** Whether `${...}` and text fields show a value of this member type as text. */
 function isShowable(member: StaticType): boolean {
   return !UNSHOWABLE_KINDS.has(resolved(member).kind);
+}
+
+/** Whether a button may return a value of this member type: one that is shown, other than a script reference. */
+function isChoiceValue(member: StaticType): boolean {
+  return isShowable(member) && !isScalar(member, "script");
 }
 
 /** The result types of the built-ins that take fixed positional arguments. */

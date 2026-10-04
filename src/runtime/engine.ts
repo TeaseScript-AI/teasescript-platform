@@ -856,13 +856,13 @@ function executePlannedInstruction(
       executeGoto(instruction, snapshot, contextRootId(snapshot), events);
       return;
     case "transfer":
-      executeTransfer(instruction, snapshot, events);
+      executeTransfer(plan, instruction, snapshot, evaluator, events);
       return;
     case "end":
       executeEnd(instruction, snapshot, events);
       return;
     case "setFallback":
-      executeSetFallback(instruction, snapshot);
+      executeSetFallback(plan, instruction, snapshot, evaluator);
       return;
   }
   instruction satisfies never;

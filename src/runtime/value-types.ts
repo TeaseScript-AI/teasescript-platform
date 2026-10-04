@@ -12,6 +12,7 @@ import {
   isMediaHandle,
   isObject,
   isRange,
+  isScriptReference,
   isSet,
   isSpeakerReference,
   isTime,
@@ -157,6 +158,8 @@ function matchStep(frame: MatchFrame, fits: boolean): MatchFrame | boolean {
       return isTimerHandle(value);
     case "media":
       return isMediaHandle(value);
+    case "script":
+      return isScriptReference(value);
     case "date":
       return isDate(value);
     case "time":
@@ -186,6 +189,7 @@ const NAMED_DESCRIPTIONS: Readonly<Record<string, string>> = {
   speaker: "a speaker",
   timer: "a timer handle",
   media: "a media handle",
+  script: "a script reference",
   object: "an object",
   never: "no value",
 };
