@@ -208,7 +208,10 @@ export function staticChoiceValue(
     : known;
 }
 
-/** An arithmetic step whose known operands give a value the runtime rejects as non-finite (`TSR036`). */
+/**
+ * An arithmetic step the runtime always rejects: known operands with a non-finite result (`TSR036`), or a known zero
+ * divisor, which fails for every dividend.
+ */
 export interface VisibleOverflow {
   readonly span: SourceSpan;
   /** `zero` for a division or remainder by zero, otherwise the kind of value that grew too large. */
@@ -295,7 +298,7 @@ function knownValue(
 
 /**
  * A division or remainder by a zero number or duration the compiler can see. The runtime rejects it for every dividend:
- * a number or duration result is not finite, and any other dividend is the wrong kind.
+ * as a non-finite result where the operation is supported, and otherwise as an unsupported operation or a wrong kind.
  */
 function dividesByKnownZero(
   expression: Expression,
