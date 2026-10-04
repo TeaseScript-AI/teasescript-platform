@@ -217,6 +217,14 @@ export function languageCompletions(
     items.push(command("askTime", "Compact time input expression"));
     items.push(command("askDateTime", "Compact date and time input expression"));
     items.push(command("choose", "Compact choice expression"));
+    items.push(
+      Object.freeze({
+        label: "takePhoto",
+        kind: "command",
+        detail: "Capture a photo from the session camera; null when no camera is available",
+        insertText: "takePhoto()",
+      }),
+    );
   }
 
   const compact = compactCommandContext(lineTokens);

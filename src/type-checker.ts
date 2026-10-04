@@ -36,6 +36,7 @@ import {
   numberAnswerText,
 } from "./interaction-answers.js";
 import type { PlanImage, TypeCheckPlan } from "./plan/model.js";
+import { isTakePhotoCall } from "./capture-call.js";
 import { evaluateTagSteps, passesTagList } from "./tag-query.js";
 import { normalizeTagName } from "./tags.js";
 import { CONVERSION_RESULTS, isTemporalConversionResult } from "./conversions.js";
@@ -2993,6 +2994,11 @@ class TypeChecker {
   *#callTask(expression: CallExpression, scope: Scope): CompileTask<StaticType> {
     let callee = expression.callee;
     while (callee.kind === "parenthesizedExpression") callee = callee.expression;
+    if (isTakePhotoCall(expression)) {
+      // A capture waits for the Player like an interaction, and gives a photo reference, or null without a camera.
+      this.#suspend();
+      return optional(STRING_TYPE);
+    }
     if (callee.kind === "identifier") {
       const entry = scope.resolve(callee.name);
       if (entry?.kind === "function")

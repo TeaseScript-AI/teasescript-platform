@@ -312,3 +312,46 @@ test("an execution-pending load report is delivered after the engine ran queued 
   );
   assert.deepEqual(texts, ["timer", "after"]);
 });
+
+test("a released element is reused for the next media without keeping the previous media's listeners", () => {
+  const player = harness(
+    'playAudio "sounds/a.mp3"\nplayAudio "sounds/b.mp3"\nsay "after", instant\nexit',
+    undefined,
+    { reuse: true },
+  );
+  player.start();
+  const [element] = player.elements;
+  element!.metadata(1);
+  player.tick(1000);
+  // The first media ended; the second took over its element, which a browser may already allow to play.
+  assert.equal(player.elements.length, 1);
+  assert.equal(element!.src, "asset:sounds/b.mp3");
+  for (const type of ["loadedmetadata", "error", "seeked", "ended"])
+    assert.equal(element!.listeners.get(type)?.length, 1, type);
+  element!.metadata(1);
+  assert.deepEqual(
+    player.loads.map(([mediaId]) => mediaId),
+    [1, 2],
+  );
+  player.tick(1000);
+  assert.deepEqual(player.texts(), ["after"]);
+});
+
+test("a late play() result of a released media never pauses the element's next media", async () => {
+  const player = harness('playAudio "sounds/a.mp3"\nexit', undefined, { reuse: true });
+  player.start();
+  const [element] = player.elements;
+  element!.deferPlays = true;
+  element!.metadata(5);
+  assert.equal(element!.pendingPlays.length, 1);
+  // Another session takes over the element while the first play() is still pending.
+  player.replace(createPlayerRuntimeSession('playAudio "sounds/b.mp3"\nexit'));
+  assert.equal(element!.src, "asset:sounds/b.mp3");
+  element!.metadata(5);
+  element!.pendingPlays[0]!();
+  await settle();
+  assert.equal(element!.paused, false);
+  element!.pendingPlays[1]!();
+  await settle();
+  assert.equal(element!.paused, false);
+});

@@ -149,6 +149,8 @@ export function instructionKilledTemporaries(instruction: Instruction): Readonly
       return new Set(instruction.temporaryIds);
     case "callFunction":
       return new Set([instruction.destinationTemporary]);
+    case "capture":
+      return new Set([instruction.destinationTemporary]);
     case "interaction":
     case "startTimer":
     case "playMedia":

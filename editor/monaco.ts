@@ -131,6 +131,7 @@ export function registerTeaseScriptLanguage(): void {
         "findImages",
         "playAudio",
         "playVideo",
+        "takePhoto",
         "save",
         "load",
         "delete",

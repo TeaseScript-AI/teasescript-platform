@@ -2602,7 +2602,8 @@ Rules:
 - Persistent plain data is storable. Timer handles, media handles, and speaker references exist only in the current
   session and cannot be saved, including when nested inside lists or objects (`TSR055`). Nested `null` is allowed.
 - Saving and loading copy data: later changes to the saved variable or a loaded value do not change storage.
-- A string naming a camera, file, or media reference is stored only as a string; storage does not persist the media.
+- A string naming a camera, file, or media reference is stored only as a string; storage itself does not persist the
+  media. A photo from `takePhoto()` is kept by the Player while saved storage references it (§33).
 - Storage keys are plain strings.
 - After unwrapping parentheses, a recognizably non-string outer key expression is a compile error (`TSV038`). Other
   keys are checked at runtime and raise `TSR054` if non-string. For `load`, the diagnostic explains:
@@ -3108,6 +3109,19 @@ openUrl("https://example.com")
 `openUrl(...)` performs navigation and returns no value.
 
 How the browser internally stores or resolves references, handles permissions, or opens the URL is an engine implementation detail, not part of the language syntax.
+
+`takePhoto()` **status (Owner decisions, 2026-10-02):** `takePhoto()` captures silently from the camera stream the
+Player opened at session start ([`SECURITY.md`](../SECURITY.md)) and returns the photo's engine-managed reference. When
+no usable camera is available it returns `null`, emits a non-fatal developer warning, and the script continues. A new
+photo is session media. It becomes durable only while its reference is reachable from saved script storage (§25),
+including a reference nested inside a saved composite value; `load` in a later run then returns the same reference,
+which resolves to the same photo. Several saved values may share one photo: removing or overwriting one of them keeps
+the photo while another still references it, and once no saved value references it the photo may be reclaimed, lazily.
+Clearing a script's saved data releases photos retained only by that data. If a saved photo cannot be stored durably,
+the `save` fails like any failed persistent write (§25): the script continues with a non-fatal developer warning and the
+previous value, the photo stays usable for the current session, and no reference is persisted that would look valid
+after a reload without its photo. A string is a usable media reference only when the trusted Player media store resolves
+it; a well-formed string, including one returned by `load`, grants no access by itself.
 
 ## 34. Runtime warnings and recoverable values
 **Status:** Accepted

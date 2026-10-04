@@ -1,0 +1,354 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { CapturedMediaNotStoredError, CapturedMediaStore } from "../player/captured-media.js";
+import {
+  capturedMediaReferences,
+  capturedMediaStorage,
+  sweepCapturedMedia,
+  withCapturedMedia,
+  type CapturedMediaLocks,
+} from "../player/captured-media-persistence.js";
+import type { ScriptStorageProvider } from "../player/script-storage.js";
+import {
+  compileSource,
+  completeAction,
+  createFreshRuntimeSnapshot,
+  type RuntimeScriptStorageEntrySnapshot,
+  type RuntimeSnapshot,
+  type SerializableRuntimeValue,
+} from "../src/index.js";
+import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
+import { runUntilExit } from "./helpers/run-until-exit.js";
+
+const urls = { create: (data: Blob) => `blob:${data.size}`, revoke: () => {} };
+const png = (text: string) => new Blob([text], { type: "image/png" });
+
+// The storage track's provider stand-in: an in-memory durable view with an operation log.
+class FakeProvider implements ScriptStorageProvider {
+  readonly scope = "package";
+  readonly entries = new Map<string, SerializableRuntimeValue>();
+  readonly log: string[] = [];
+  failLoad = false;
+  async load(): Promise<readonly RuntimeScriptStorageEntrySnapshot[]> {
+    this.log.push("load");
+    if (this.failLoad) throw new Error("unreadable");
+    return [...this.entries].map(([key, value]) => ({ key, value }));
+  }
+  async write(key: string, value: SerializableRuntimeValue) {
+    this.log.push(`write ${key}`);
+    if (value === null) this.entries.delete(key);
+    else this.entries.set(key, value);
+  }
+  async clear() {
+    this.log.push("clear");
+    this.entries.clear();
+  }
+}
+
+const lease = { granted: Promise.resolve("held" as const), release: () => {} };
+const idle: CapturedMediaLocks = {
+  holdLive: () => lease,
+  whenIdle: async (_scope, work) => (await work(), true),
+};
+const busy: CapturedMediaLocks = { holdLive: () => lease, whenIdle: async () => false };
+
+test("references are found in every stored value shape, and nothing else counts", () => {
+  const value: SerializableRuntimeValue = {
+    kind: "object",
+    properties: [
+      { name: "captured-media:k:1", value: 1 },
+      { name: "shot", value: "captured-media:v:1" },
+      {
+        name: "nested",
+        value: {
+          kind: "list",
+          items: ["captured-media:l:1", { kind: "set", items: ["captured-media:s:1", "plain"] }],
+        },
+      },
+      { name: "range", value: { kind: "range", start: 1, end: 2, inclusive: true } },
+    ],
+  };
+  assert.deepEqual([...capturedMediaReferences(value)].sort(), [
+    "captured-media:k:1",
+    "captured-media:l:1",
+    "captured-media:s:1",
+    "captured-media:v:1",
+  ]);
+  assert.equal(capturedMediaReferences("images/coast.svg").size, 0);
+  assert.equal(capturedMediaReferences(null).size, 0);
+});
+
+test("a save stores its photo durably before the value is persisted", async () => {
+  const repository = new FakeMediaRepository();
+  const media = new CapturedMediaStore(repository, urls, "package");
+  const provider = new FakeProvider();
+  const photo = media.add("image", png("photo")).reference;
+  const storage = withCapturedMedia(provider, media);
+  const persistedBefore: number[] = [];
+  const write = provider.write.bind(provider);
+  provider.write = async (key, value) => {
+    persistedBefore.push(repository.size);
+    await write(key, value);
+  };
+  await storage.write("album", { kind: "list", items: [photo] });
+  assert.deepEqual(persistedBefore, [1]);
+  assert.deepEqual(provider.entries.get("album"), { kind: "list", items: [photo] });
+});
+
+test("a save whose photo cannot be stored is not persisted and keeps the previous value", async () => {
+  const repository = new FakeMediaRepository();
+  const media = new CapturedMediaStore(repository, urls, "package");
+  const provider = new FakeProvider();
+  provider.entries.set("photo", "previous");
+  const storage = withCapturedMedia(provider, media);
+  const photo = media.add("image", png("photo")).reference;
+  repository.failWrites = true;
+  await assert.rejects(storage.write("photo", photo), CapturedMediaNotStoredError);
+  assert.equal(provider.entries.get("photo"), "previous");
+  // The photo stays usable this session, and a later save can try again.
+  assert.equal(media.resolve(photo).state, "ready");
+  repository.failWrites = false;
+  await storage.write("photo", photo);
+  assert.equal(provider.entries.get("photo"), photo);
+  // Values without captured media never need durable media storage.
+  const unstored = withCapturedMedia(provider, new CapturedMediaStore(null, urls, "package"));
+  await unstored.write("score", 3);
+  assert.equal(provider.entries.get("score"), 3);
+});
+
+test("storage operations run in issue order, so a clear is never refilled by an earlier save", async () => {
+  const repository = new FakeMediaRepository();
+  const media = new CapturedMediaStore(repository, urls, "package");
+  const provider = new FakeProvider();
+  const storage = withCapturedMedia(provider, media);
+  const photo = media.add("image", png("photo")).reference;
+  const saving = storage.write("photo", photo);
+  const clearing = storage.clear();
+  await Promise.all([saving, clearing]);
+  assert.deepEqual(provider.log, ["write photo", "clear"]);
+  assert.equal(provider.entries.size, 0);
+});
+
+test("a sweep runs only when no Player is live, against a fresh read of the saved values", async () => {
+  const repository = new FakeMediaRepository();
+  const earlier = new CapturedMediaStore(repository, urls, "package");
+  const provider = new FakeProvider();
+  const storage = withCapturedMedia(provider, earlier);
+  const kept = earlier.add("image", png("kept")).reference;
+  const dropped = earlier.add("image", png("dropped")).reference;
+  await storage.write("a", kept);
+  await storage.write("b", { kind: "object", properties: [{ name: "shot", value: dropped }] });
+  // Overwriting one of two references keeps the photo; removing the last one makes it unreachable.
+  await storage.write("c", kept);
+  await storage.write("a", null);
+  await storage.write("b", null);
+  earlier.close();
+  const later = new CapturedMediaStore(repository, urls, "package");
+  assert.equal(await sweepCapturedMedia(provider, later, busy), false);
+  assert.equal(repository.size, 2);
+  provider.failLoad = true;
+  await assert.rejects(sweepCapturedMedia(provider, later, idle));
+  assert.equal(repository.size, 2);
+  provider.failLoad = false;
+  assert.equal(await sweepCapturedMedia(provider, later, idle), true);
+  assert.deepEqual(await repository.listReferences("package"), [kept]);
+  // Clearing saved data releases the rest at the next sweep.
+  await withCapturedMedia(provider, later).clear();
+  await sweepCapturedMedia(provider, later, idle);
+  assert.equal(repository.size, 0);
+});
+
+/**
+ * Runs a script like the Player: answers each `takePhoto()` from `media`, and acknowledges each persistent `save` once
+ * `storage` persisted it, or as failed when it rejected. It stops right before the script's `exit`, which clears its
+ * variables, so a test can inspect them.
+ */
+async function runWithCamera(
+  source: string,
+  media: CapturedMediaStore,
+  storage: ScriptStorageProvider,
+): Promise<RuntimeSnapshot> {
+  const compiled = compileSource(source);
+  assert.deepEqual(compiled.diagnostics, []);
+  const plan = compiled.plan!;
+  let snapshot = createFreshRuntimeSnapshot(plan, {
+    scriptStorage: await storage.load(),
+    persistentScriptStorage: true,
+  });
+  for (;;) {
+    snapshot = runUntilExit(plan, snapshot).snapshot;
+    const action = snapshot.foregroundAction;
+    if (action?.kind === "storageWrite") {
+      const outcome = await storage.write(action.key, action.value).then(
+        () => "stored" as const,
+        () => "failed" as const,
+      );
+      snapshot = completeAction(plan, snapshot, {
+        actionId: action.actionId,
+        actionKind: "storageWrite",
+        payload: { kind: outcome },
+      }).snapshot;
+      continue;
+    }
+    if (action?.kind !== "capture") return snapshot;
+    const reference = media.add("image", png("the photo")).reference;
+    snapshot = completeAction(
+      plan,
+      snapshot,
+      {
+        actionId: action.actionId,
+        actionKind: "capture",
+        payload: { kind: "captured", media: { kind: "image", reference } },
+      },
+      { capturedMedia: media },
+    ).snapshot;
+  }
+}
+
+test("a photo saved in one run is loaded and shown in a later run; a forged reference is not", async () => {
+  const repository = new FakeMediaRepository();
+  const provider = new FakeProvider();
+  const firstRun = new CapturedMediaStore(repository, urls, "package");
+  const first = await runWithCamera(
+    'let photo: string? = takePhoto()\nif photo != null {\n  save { label: "first", shot: photo } as "album"\n}\nexit',
+    firstRun,
+    withCapturedMedia(provider, firstRun),
+  );
+  assert.equal(first.foregroundAction, null);
+  firstRun.close();
+
+  const secondRun = new CapturedMediaStore(repository, urls, "package");
+  const second = await runWithCamera(
+    'let album = load "album"\nshowImage album.shot\nexit',
+    secondRun,
+    withCapturedMedia(provider, secondRun),
+  );
+  const shown = second.stageImage;
+  assert.ok(shown !== null);
+  assert.equal(secondRun.resolve(shown).state, "loading");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(secondRun.resolve(shown).state, "ready");
+  assert.equal(await (await secondRun.read(shown))?.data.text(), "the photo");
+
+  // A string of the right shape that the store never created grants nothing, also after `save` and `load`.
+  const forged = shown.replace(/:\d+$/u, ":99");
+  const third = await runWithCamera(
+    `save "${forged}" as "fake"\nshowImage load "fake"\nexit`,
+    secondRun,
+    withCapturedMedia(provider, secondRun),
+  );
+  assert.equal(third.stageImage, forged);
+  secondRun.resolve(forged);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(secondRun.resolve(forged), { state: "missing" });
+  assert.equal(repository.size, 1);
+});
+
+test("a Player prepares persistence by sweeping, then holding the live lock, before any read", async () => {
+  const repository = new FakeMediaRepository();
+  const provider = new FakeProvider();
+  const order: string[] = [];
+  let releaseWrite = () => {};
+  const write = provider.write.bind(provider);
+  provider.write = async (key, value) => {
+    await new Promise<void>((resolve) => (releaseWrite = resolve));
+    order.push("persisted");
+    await write(key, value);
+  };
+  let grant = () => {};
+  const locks: CapturedMediaLocks = {
+    holdLive: () => {
+      order.push("live lock");
+      const granted = new Promise<"held">((resolve) => (grant = () => resolve("held")));
+      return { granted, release: () => order.push("released") };
+    },
+    whenIdle: async (_scope, work) => {
+      order.push("sweep");
+      await work();
+      return true;
+    },
+  };
+  const media = new CapturedMediaStore(repository, urls, "package");
+  const storage = capturedMediaStorage(provider, media, locks);
+  const firstStart = storage.load();
+  await new Promise((resolve) => setImmediate(resolve));
+  // A Start's saved values are read only once the live lock is held.
+  assert.deepEqual(order, ["sweep", "live lock"]);
+  assert.deepEqual(provider.log, ["load"]);
+  grant();
+  assert.deepEqual(await firstStart, []);
+  // Every later Start reads fresh, so it sees the saves of an earlier run of the same Player.
+  provider.entries.set("visits", 1);
+  assert.deepEqual(await storage.load(), [{ key: "visits", value: 1 }]);
+  // Unmounting finishes an issued save before the live lock is released.
+  const saving = storage.write("photo", media.add("image", png("photo")).reference);
+  const closing = storage.close();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ["sweep", "live lock"]);
+  releaseWrite();
+  await Promise.all([saving, closing]);
+  assert.deepEqual(order, ["sweep", "live lock", "persisted", "released"]);
+  await assert.rejects(storage.write("late", 1));
+});
+
+test("without the live lock where locks exist, saved photos are not made durable", async () => {
+  const repository = new FakeMediaRepository();
+  const provider = new FakeProvider();
+  const media = new CapturedMediaStore(repository, urls, "package");
+  const failing: CapturedMediaLocks = {
+    holdLive: () => ({ granted: Promise.resolve("failed"), release: () => {} }),
+    whenIdle: async () => false,
+  };
+  const storage = capturedMediaStorage(provider, media, failing);
+  const photo = media.add("image", png("photo")).reference;
+  await assert.rejects(storage.write("photo", photo), CapturedMediaNotStoredError);
+  assert.equal(repository.size, 0);
+  assert.equal(provider.entries.size, 0);
+});
+
+test("without durable storage a stored reference is missing at once, so presentation does not retry", async () => {
+  let changes = 0;
+  const media = new CapturedMediaStore(null, urls, "package", () => changes++);
+  const reference = "captured-media:00000000-0000-4000-8000-000000000000:1";
+  assert.deepEqual(media.resolve(reference), { state: "missing" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(changes, 0);
+});
+
+test("without the live lease even an already stored photo cannot be saved again", async () => {
+  const repository = new FakeMediaRepository();
+  const earlier = new CapturedMediaStore(repository, urls, "package");
+  const photo = earlier.add("image", png("photo")).reference;
+  await earlier.promote([photo]);
+  const later = new CapturedMediaStore(repository, urls, "package");
+  assert.ok((await later.read(photo)) !== null);
+  later.disableDurable();
+  // Another Player may sweep it meanwhile, so saving it would persist a reference that dangles.
+  await assert.rejects(later.promote([photo]), CapturedMediaNotStoredError);
+});
+
+test("references are found in a stored value too wide for a spread", () => {
+  const items: SerializableRuntimeValue[] = Array.from({ length: 150_000 }, () => null);
+  items[149_999] = "captured-media:wide:1";
+  assert.deepEqual(
+    [...capturedMediaReferences({ kind: "list", items })],
+    ["captured-media:wide:1"],
+  );
+});
+
+test("a save whose photo cannot be stored fails atomically and the script keeps the previous value", async () => {
+  const repository = new FakeMediaRepository();
+  const provider = new FakeProvider();
+  provider.entries.set("photo", "previous");
+  const media = new CapturedMediaStore(repository, urls, "package");
+  repository.failWrites = true;
+  const finished = await runWithCamera(
+    'let photo = takePhoto()\nsave photo as "photo"\nlet seen = load "photo"\nexit',
+    media,
+    withCapturedMedia(provider, media),
+  );
+  assert.equal(provider.entries.get("photo"), "previous");
+  const seen = finished.frames[0]?.bindings.find((binding) => binding.name === "seen")?.value;
+  assert.equal(seen, "previous");
+});

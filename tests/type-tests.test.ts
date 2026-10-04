@@ -268,6 +268,18 @@ test("media pacing and loading, and handle writes, cancel narrowing where a hand
     assert.deepEqual(errors(`${shared}${body}\nexit`), [["TSV041", "reward"]], body);
 });
 
+test("takePhoto() gives text or null and cancels narrowing while the Player captures", () => {
+  const shared = 'let reward: integer | string = 1\ntimer async 1 {\n    reward = "changed"\n}\n';
+  assert.deepEqual(
+    errors(
+      `${shared}if reward is integer {\n    let photo = takePhoto()\n    let result: integer = reward\n}\nexit`,
+    ),
+    [["TSV041", "reward"]],
+  );
+  assert.deepEqual(errors("let photo: string? = takePhoto()\nexit"), []);
+  assert.deepEqual(errors("let photo: number = takePhoto()\nexit"), [["TSV041", "takePhoto()"]]);
+});
+
 test("a break keeps what is known where it happens, and exhaustive tests end a function", () => {
   assert.deepEqual(
     errors(

@@ -34,7 +34,7 @@ import {
 } from "../interaction-limits.js";
 import { isMessageMarkup } from "../message-markup.js";
 import type { RuntimeChatPacingGateSettlementSnapshot } from "./actions/model.js";
-import { requiredActionCompletionEvents } from "./actions/model.js";
+import { CAPTURE_UNAVAILABLE_REASONS, requiredActionCompletionEvents } from "./actions/model.js";
 import { buttonTimeoutMilliseconds } from "./actions/interaction.js";
 import { recordValidationTestWork } from "../validation-testing.js";
 import { validMediaAction } from "./media-validation.js";
@@ -235,6 +235,13 @@ function validForegroundActionKind(
       hasEventSequenceCapacity(snapshot.nextEventSequence, 2)
     );
   }
+  if (action.kind === "capture") {
+    // A pending capture may still publish an unavailable-camera warning and its completion.
+    return (
+      validCaptureAction(action, snapshot) &&
+      hasEventSequenceCapacity(snapshot.nextEventSequence, 2)
+    );
+  }
   return false;
 }
 
@@ -267,6 +274,32 @@ function validStorageWriteAction(
   );
 }
 
+function validCaptureAction(
+  action: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+): boolean {
+  return (
+    hasExactKeys(action, [
+      "kind",
+      "capture",
+      "actionId",
+      "owningInstruction",
+      "continuationInstruction",
+      "ownerCallFrameId",
+      "scopeDepth",
+      "loopDepth",
+      "destinationTemporary",
+      "createdAtMs",
+      "requestEventSequence",
+    ]) &&
+    action.capture === "photo" &&
+    positiveSafeInteger(action.destinationTemporary) &&
+    validSessionTime(action.createdAtMs) &&
+    validSessionTime(snapshot.currentSessionTimeMs) &&
+    action.createdAtMs <= snapshot.currentSessionTimeMs
+  );
+}
+
 function validRetainedSettlement(
   settlement: unknown,
   snapshot: Record<string, unknown>,
@@ -291,6 +324,7 @@ function validSettlementShapeAndKind(
       "chatPacingGate",
       "mediaPlayback",
       "storageWrite",
+      "capture",
     ]) &&
     (settlement.actionKind === "chatPacingGate" ||
       settlement.settlementKind === "completed" ||
@@ -319,6 +353,14 @@ function validSettlementIdentityAndEventSequences(
   )
     return false;
 
+  if (settlement.actionKind === "capture") {
+    return (
+      settlement.warningEventSequence === null ||
+      (positiveSafeInteger(settlement.warningEventSequence) &&
+        settlement.requestEventSequence < settlement.warningEventSequence &&
+        settlement.warningEventSequence < settlement.completionEventSequence)
+    );
+  }
   if (settlement.actionKind !== "interaction") return true;
   // A button that timed out publishes no player transcript.
   if (settlement.settlementKind === "timedOut") return settlement.transcriptEventSequence === null;
@@ -504,6 +546,9 @@ function validActiveActionEventIdentity(
   const retainedEventSequences = new Set<number>(
     [settlementRequestEventSequence, settlementCompletionEventSequence].filter(positiveSafeInteger),
   );
+  if (settlement.actionKind === "capture" && positiveSafeInteger(settlement.warningEventSequence)) {
+    retainedEventSequences.add(settlement.warningEventSequence);
+  }
   if (
     settlement.actionKind === "interaction" &&
     positiveSafeInteger(settlement.transcriptEventSequence)
@@ -898,8 +943,9 @@ export function validateInteractionResultHandoffState(
       ? plan.instructions[nextInstruction - 1]
       : undefined;
   const requiresHandoff =
-    precedingInstruction?.kind === "interaction" &&
-    precedingInstruction.destinationTemporary !== null;
+    (precedingInstruction?.kind === "interaction" &&
+      precedingInstruction.destinationTemporary !== null) ||
+    precedingInstruction?.kind === "capture";
 
   if (handoff === null) {
     if (requiresHandoff) {
@@ -912,6 +958,7 @@ export function validateInteractionResultHandoffState(
   if (
     !isPlainRecord(handoff) ||
     !hasExactKeys(handoff, [
+      "actionKind",
       "actionId",
       "owningInstruction",
       "continuationInstruction",
@@ -919,13 +966,19 @@ export function validateInteractionResultHandoffState(
       "destinationTemporary",
       "result",
     ]) ||
+    !isOneOf(handoff.actionKind, ["interaction", "capture"]) ||
     !positiveSafeInteger(handoff.actionId) ||
     !nonNegativeSafeInteger(handoff.owningInstruction) ||
     !nonNegativeSafeInteger(handoff.continuationInstruction) ||
     !positiveSafeInteger(handoff.destinationTemporary) ||
     (handoff.ownerCallFrameId !== null && !positiveSafeInteger(handoff.ownerCallFrameId)) ||
-    !isInteractionChoiceValue(handoff.result) ||
-    (typeof handoff.result === "string" && !interactionStringFits(handoff.result)) ||
+    !(handoff.actionKind === "capture"
+      ? handoff.result === null ||
+        (typeof handoff.result === "string" &&
+          handoff.result.length > 0 &&
+          interactionStringFits(handoff.result))
+      : isInteractionChoiceValue(handoff.result) &&
+        (typeof handoff.result !== "string" || interactionStringFits(handoff.result))) ||
     !positiveSafeInteger(snapshot.nextActionId) ||
     handoff.actionId >= snapshot.nextActionId ||
     snapshot.foregroundAction !== null ||
@@ -956,17 +1009,21 @@ export function validateInteractionResultHandoffState(
   }
 
   const settlement = snapshot.lastSettlement;
+  // A foreground interaction consumes the background pacing gate, so only a newer action can settle after it. A
+  // capture leaves that gate running, so the older gate may settle before the capture result is consumed.
   if (
-    !isPlainRecord(settlement) ||
-    !positiveSafeInteger(settlement.actionId) ||
-    settlement.actionId < handoff.actionId
+    handoff.actionKind === "interaction" &&
+    (!isPlainRecord(settlement) ||
+      !positiveSafeInteger(settlement.actionId) ||
+      settlement.actionId < handoff.actionId)
   ) {
     errors.push(
       "Runtime interaction result handoff requires its settlement or a newer retained settlement.",
     );
   } else if (
+    isPlainRecord(settlement) &&
     settlement.actionId === handoff.actionId &&
-    (settlement.actionKind !== "interaction" ||
+    (settlement.actionKind !== handoff.actionKind ||
       settlement.owningInstruction !== handoff.owningInstruction ||
       settlement.continuationInstruction !== handoff.continuationInstruction ||
       settlement.ownerCallFrameId !== handoff.ownerCallFrameId ||
@@ -978,6 +1035,19 @@ export function validateInteractionResultHandoffState(
 
   if (plan === undefined) return;
   const instruction = plan.instructions[handoff.owningInstruction];
+  if (handoff.actionKind === "capture") {
+    if (
+      instruction?.kind !== "capture" ||
+      handoff.owningInstruction + 1 !== handoff.continuationInstruction ||
+      instruction.destinationTemporary !== handoff.destinationTemporary ||
+      precedingInstruction !== instruction
+    ) {
+      errors.push(
+        "Runtime interaction result handoff does not match its canonical plan instruction.",
+      );
+    }
+    return;
+  }
   if (
     instruction?.kind !== "interaction" ||
     instruction.destinationTemporary === null ||
@@ -1575,6 +1645,55 @@ function choiceOptionsEqual(
   });
 }
 
+function validCaptureSettlement(
+  settlement: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+  plan: RunnablePlan | undefined,
+): boolean {
+  if (
+    !hasExactKeys(settlement, [
+      "actionId",
+      "actionKind",
+      "capture",
+      "settlementKind",
+      "owningInstruction",
+      "continuationInstruction",
+      "ownerCallFrameId",
+      "destinationTemporary",
+      "requestEventSequence",
+      "warningEventSequence",
+      "completionEventSequence",
+      "completedAtMs",
+      "result",
+      "unavailableReason",
+    ]) ||
+    settlement.capture !== "photo" ||
+    (settlement.ownerCallFrameId !== null && !positiveSafeInteger(settlement.ownerCallFrameId)) ||
+    !positiveSafeInteger(settlement.destinationTemporary) ||
+    !validSessionTime(settlement.completedAtMs) ||
+    !validSessionTime(snapshot.currentSessionTimeMs) ||
+    settlement.completedAtMs > snapshot.currentSessionTimeMs
+  )
+    return false;
+  // A captured reference has no warning; an unavailable camera has a bounded reason, a warning, and a null result.
+  const captured =
+    typeof settlement.result === "string" &&
+    settlement.result.length > 0 &&
+    interactionStringFits(settlement.result) &&
+    settlement.unavailableReason === null &&
+    settlement.warningEventSequence === null;
+  const unavailable =
+    settlement.result === null &&
+    isOneOf(settlement.unavailableReason, CAPTURE_UNAVAILABLE_REASONS) &&
+    settlement.warningEventSequence !== null;
+  if (!captured && !unavailable) return false;
+  if (plan === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return true;
+  const owner = plan.instructions[settlement.owningInstruction];
+  return (
+    owner?.kind === "capture" && owner.destinationTemporary === settlement.destinationTemporary
+  );
+}
+
 function validSettlementKindData(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
@@ -1625,6 +1744,8 @@ function validSettlementKindData(
       settlement.completedAtMs <= snapshot.currentSessionTimeMs
     );
   }
+  if (settlement.actionKind === "capture")
+    return validCaptureSettlement(settlement, snapshot, plan);
   if (settlement.actionKind === "mediaPlayback") {
     return (
       hasExactKeys(settlement, [
@@ -2048,7 +2169,9 @@ function validSettlementProvenance(
           ? "playMedia"
           : settlement.actionKind === "storageWrite"
             ? "storageWrite"
-            : "say";
+            : settlement.actionKind === "capture"
+              ? "capture"
+              : "say";
   if (plan.instructions[owningInstruction]?.kind !== expectedKind) return false;
   const definition = plan.functions.find(
     (candidate) =>
@@ -2082,12 +2205,20 @@ function validForegroundActionOwnership(
     snapshot.nextInstruction !== owningInstruction ||
     owningInstruction >= plan.instructions.length ||
     continuationInstruction !== owningInstruction + 1 ||
-    !["wait", "interaction", "say", "playMedia", "storageWrite"].includes(
+    !["wait", "interaction", "say", "playMedia", "storageWrite", "capture"].includes(
       plan.instructions[owningInstruction]?.kind ?? "",
     )
   )
     return false;
   const owner = plan.instructions[owningInstruction];
+  if (
+    (action.kind === "capture") !== (owner?.kind === "capture") ||
+    (owner?.kind === "capture" &&
+      (action.capture !== owner.capture ||
+        action.destinationTemporary !== owner.destinationTemporary))
+  ) {
+    return false;
+  }
   if (
     (action.kind === "mediaPlayback") !== (owner?.kind === "playMedia") ||
     (action.kind === "storageWrite") !== (owner?.kind === "storageWrite") ||

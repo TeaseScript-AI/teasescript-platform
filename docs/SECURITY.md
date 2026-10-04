@@ -74,9 +74,27 @@ truncate or partially mutate state.
 
 The engine, not the caller, normalizes text, parses numbers, resolves choice values/text, and derives player transcript content. Successful completion emits `playerTranscript` before `actionCompleted`; invalid or duplicate attempts emit neither event. Interaction result destinations, speaker IDs, target, ownership, options, settlement results, transcript text, and the single-use result handoff are validated against the immutable plan and current snapshot. A result is atomically committed into a prepared ordinary runtime destination. Until the first canonical consume, transfer, return, discard, or exit succeeds, the nullable handoff retains the canonical value independently of `lastSettlement`; afterward it is removed immediately. `lastSettlement` remains bounded replay data and is not a destination-liveness authority.
 
-Camera permission, long-lived stream ownership, device switching, captured-media retention, encryption, persistent
-collections, and player-visible privacy indicators require a separate accepted camera/media design. Selected direction
-and open questions are recorded in
+Browser permission is the external permission boundary for camera and microphone. First activation requests device
+access according to the browser's current permission state; the browser may later revoke access, ask again, or fail.
+Other capture use, such as the microphone, is author-controlled after the browser grants access and adds no Player-level
+permission or per-use approval. When the package or session has the camera capability, the Player acquires the selected
+or default camera immediately after the user presses Start and before ordinary TeaseScript execution begins, so any
+browser permission request happens there, and keeps the stream open for the entire running session. Direct capture such
+as `takePhoto()` only captures from that open stream: it never opens or reopens the camera, closes it afterwards, or
+otherwise reveals the capture moment, and it has no Player indicator, capture flash, per-photo message, preview, stop
+control, or per-use approval. Native camera indicators stay on while the stream is open, so they do not reveal
+individual captures. Normal session teardown, unmount, navigation, `end`, and `exit` release the Player-owned camera
+resources. For platform-brokered acquisition, the Player owns the underlying browser resources for sandbox isolation,
+revocation, and cleanup, but adds no permission prompt, camera or microphone indicator, or stop control of its own;
+native browser, OS, and device privacy indicators are sufficient. Complete revocation of package-created derivatives of
+raw resources, such as cloned tracks, relies on the sandbox teardown or lifecycle contract (ADR 0017). A captured-media
+reference grants access only when the trusted Player media store resolves it within the owning package namespace; a
+well-formed string, including one returned by `load`, is ordinary data. A recording contains exactly the sources the
+author requests; whether video includes microphone audio never depends on whether a microphone is already open. How
+brokered acquisition and capability authorization are enforced against package code that calls browser capture APIs
+directly, which needs a concrete isolation mechanism such as a separate execution realm rather than a wrapper API or
+manifest field, remains open, as do capability declaration metadata, device switching, reload and restore, failure
+recovery, simultaneous-device policy, captured-media retention, encryption, and persistent collections; see
 [`planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md`](planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md).
 
-Exact iframe sandbox flags, CSP, message schemas, capability negotiation, signing, moderation workflows, camera/media privacy policy, and time-integrity policy remain to be specified.
+Exact iframe sandbox flags, CSP, message schemas, capability negotiation, signing, moderation workflows, captured-media privacy policy, and time-integrity policy remain to be specified.

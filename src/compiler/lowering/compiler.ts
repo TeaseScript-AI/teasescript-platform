@@ -45,6 +45,7 @@ import type {
   TagQueryExpressionPlan,
 } from "../../plan/model.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
+import { isTakePhotoCall } from "../../capture-call.js";
 import { numberAnswerText } from "../../interaction-answers.js";
 import { staticChoiceValue, staticVisibleText } from "../../static-evaluation.js";
 import { durationLiteralParts, storedDuration } from "../../duration.js";
@@ -1092,6 +1093,16 @@ export class InstructionCompiler {
       if (lowered === null) throw new TypeError("Blocking media reached value lowering.");
       return lowered;
     }
+    if (isTakePhotoCall(expression)) {
+      const transientTemporary = this.#allocateTemporary();
+      this.instructions.push({
+        kind: "capture",
+        capture: "photo",
+        destinationTemporary: transientTemporary,
+        span: copySpan(expression.span),
+      });
+      return this.#consumeInteractionResult(transientTemporary, expression.span);
+    }
     if (
       expression.kind === "callExpression" &&
       expression.callee.kind === "identifier" &&
@@ -2047,9 +2058,10 @@ export class InstructionCompiler {
         continue;
       }
       if (
-        current.expression.kind === "callExpression" &&
-        current.expression.callee.kind === "identifier" &&
-        this.#functionByName.has(current.expression.callee.name)
+        isTakePhotoCall(current.expression) ||
+        (current.expression.kind === "callExpression" &&
+          current.expression.callee.kind === "identifier" &&
+          this.#functionByName.has(current.expression.callee.name))
       ) {
         this.#instructionEmissionByExpression.set(current.expression, true);
         continue;
@@ -2354,6 +2366,8 @@ function assembleExpression(
         span: copySpan(expression.span),
       };
     case "callExpression":
+      if (isTakePhotoCall(expression))
+        throw new TypeError("takePhoto() reached pure expression assembly.");
       return {
         kind: "call",
         callee: child(expression.callee),

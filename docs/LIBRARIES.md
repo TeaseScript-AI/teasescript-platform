@@ -74,9 +74,15 @@ ADR 0018 accepts the first concrete subset described below. Listing another cand
 
 ### Resumability boundary
 
-Ordinary TypeScript library code may run synchronously between engine instruction boundaries. It may calculate values, validate arguments, and call synchronous capabilities.
+Ordinary TypeScript library code may run synchronously between engine instruction boundaries. It may calculate values,
+validate arguments, and call synchronous capabilities. Inside the Player sandbox, package code may also await ephemeral
+local work, such as a camera frame, as Player-local execution detail. Such promises and capture or recording handles are
+not restored after a reload; a reconstructible TeaseScript pending interaction may be rebuilt from canonical state
+instead.
 
-Library behavior that can wait for time, input, media, a background handler, or another pending result must not keep an ordinary TypeScript call suspended. It must either:
+When TeaseScript execution waits for library behavior, for example for time, input, media, a background handler, or
+another pending result, that behavior must not rely on a suspended ordinary TypeScript call as resume state. It must
+either:
 
 - be lowered into explicit versioned serializable engine instructions; or
 - use an explicit versioned engine-managed serializable continuation.
@@ -87,7 +93,16 @@ Promises, callbacks, closures, generators, suspended JavaScript/TypeScript stack
 
 Package libraries may import only the public, capability-safe Standard Library surface.
 
-Privileged platform adapters may exist internally for player integration or capability brokering, but they are separate modules and are not transitively exported. Calling a public helper must not grant access to internal host capabilities, the parent DOM, account cookies, raw browser objects, or unrestricted networking.
+Privileged platform adapters may exist internally for player integration or capability brokering, but they are separate
+modules and are not transitively exported. Calling a public helper must not grant access to privileged adapters,
+internal host capabilities, the parent DOM, account cookies, or unrestricted networking. Inside the Player sandbox,
+capability-authorized package code may receive and use ephemeral live browser and media objects and APIs through an
+accepted capability surface, which may expose raw objects such as streams or tracks where deliberately supported, for
+arbitrary local image, video, and audio processing, including pixel- and sample-level work, recording, and custom UI.
+They never enter canonical runtime, checkpoint, or persisted state or cross the parent/Player boundary as raw objects,
+and derived pixel, image, and sample buffers stay inside the sandbox unless a later explicit validated boundary admits
+them. Player cleanup is guaranteed for resources the Player owns; complete revocation of package-created derivatives of
+raw resources, such as cloned tracks, relies on the sandbox teardown or lifecycle contract (ADR 0017).
 
 ### Deterministic version binding
 
@@ -320,7 +335,7 @@ Package libraries may not:
 - extend TeaseScript grammar or inject parser hooks;
 - access the parent DOM or account cookies;
 - place callbacks, promises, DOM objects, streams, browser handles, or mutable class instances into canonical runtime state;
-- suspend an ordinary TypeScript call across a pending-action or checkpoint boundary.
+- rely on a suspended ordinary TypeScript call as resume state across a pending-action or checkpoint boundary.
 
 ## Generated declarations and editor metadata
 

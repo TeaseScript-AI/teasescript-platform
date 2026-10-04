@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 46;
+export const INSTRUCTION_PLAN_VERSION = 47;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -140,6 +140,7 @@ export type Instruction =
   | StorageWriteInstruction
   | PlayMediaInstruction
   | InteractionInstruction
+  | CaptureInstruction
   | GotoInstruction
   | EndInstruction
   | ExitInstruction;
@@ -601,6 +602,16 @@ export interface PreparedInteractionInstruction extends InstructionBase {
 }
 
 export type InteractionInstruction = StaticInteractionInstruction | PreparedInteractionInstruction;
+
+/**
+ * `takePhoto()`: waits until the Player answers with a still from the session camera or reports it unavailable. The
+ * result is the captured image reference, or `null`; it is always handed off through `destinationTemporary`.
+ */
+export interface CaptureInstruction extends InstructionBase {
+  readonly kind: "capture";
+  readonly capture: "photo";
+  readonly destinationTemporary: number;
+}
 
 export interface ExitInstruction extends InstructionBase {
   readonly kind: "exit";

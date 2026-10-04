@@ -31,6 +31,7 @@
     "test:full-output": "npm run build && node ./tools/test-output-filter.mjs --full-output",
     "check:full-output": "npm run format:check && npm run lint && npm run lint:design && npm run test:lint:design && npm run test:lint -- --full-output && npm run knip && npm run test:build:typescript && npm run test:verification && BUILD_SOURCEMAPS=0 npm run test:full-output",
     "test:player:preview": "node tools/player-preview-checks.mjs",
+    "test:player:firefox-camera": "node tools/player-firefox-camera.mjs",
     "dev:player": "vite --config player/vue/vite.config.ts",
     "test:verification": "node --test tools/run-parallel.test.mjs",
     "test:lint:design": "node --test tools/design-lint/test.mjs"

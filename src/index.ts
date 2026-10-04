@@ -148,7 +148,11 @@ export {
   type RuntimeOperationResult,
   type RuntimeRunOptions,
 } from "./runtime/engine.js";
-export { completeAction } from "./runtime/operations/complete-action.js";
+export {
+  completeAction,
+  type ActionCompletionOptions,
+} from "./runtime/operations/complete-action.js";
+export type { CapturedMediaAdmission } from "./runtime/actions/capture.js";
 export { observeTime, type MediaProgressReport } from "./runtime/operations/observe-time.js";
 export {
   recordContinueCapture,
@@ -208,7 +212,10 @@ export {
   type SnapshotValidationResult,
 } from "./runtime/state.js";
 export type {
+  CaptureUnavailableReason,
   RuntimeActionSettlementSnapshot,
+  RuntimeCaptureActionSettlementSnapshot,
+  RuntimeCaptureActionSnapshot,
   RuntimeDelayActionSnapshot,
   RuntimeInteractionActionSnapshot,
   RuntimeMediaActionSnapshot,

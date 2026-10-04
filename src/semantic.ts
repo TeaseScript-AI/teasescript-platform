@@ -1,3 +1,4 @@
+import { isTakePhotoCall } from "./capture-call.js";
 import { normalizeOpaqueColor } from "./color.js";
 import {
   presentationPropertyDiagnostics,
@@ -435,6 +436,7 @@ class SemanticValidator {
           "askTime",
           "askDateTime",
           "choose",
+          "takePhoto",
         ].includes(name),
       ),
     );
@@ -1319,7 +1321,9 @@ class SemanticValidator {
             semanticCode.unsupportedBlockingContext,
             blockingInteraction.kind === "playMediaExpression"
               ? "Media playback is not supported in function parameter defaults."
-              : "Blocking interactions are not supported in function parameter defaults.",
+              : isTakePhotoCall(blockingInteraction)
+                ? "Camera capture is not supported in function parameter defaults."
+                : "Blocking interactions are not supported in function parameter defaults.",
             blockingInteraction.span,
           );
         }
@@ -1443,7 +1447,7 @@ class SemanticValidator {
         const binding = scope.resolve(expression.name);
         this.#recordRootAccess(expression.name, binding, expression.span);
         if (binding === undefined) {
-          if (this.#builtins.has(expression.name)) {
+          if (this.#builtins.has(expression.name) || expression.name === "takePhoto") {
             this.#report(
               semanticCode.functionValue,
               `Builtin '${expression.name}' is not a first-class runtime value.`,
@@ -1540,7 +1544,15 @@ class SemanticValidator {
         if (expression.callee.kind === "identifier") {
           const name = expression.callee.name;
           const binding = scope.resolve(name);
-          if (binding?.declaration !== undefined) {
+          if (isTakePhotoCall(expression)) {
+            if (expression.arguments.length !== 0) {
+              this.#report(
+                semanticCode.argumentCount,
+                "takePhoto() takes no arguments.",
+                expression.span,
+              );
+            }
+          } else if (binding?.declaration !== undefined) {
             // The initialization check follows the calls of this file's functions.
             if (this.#functions.get(name) === binding.declaration)
               this.#calls.push({ name, context: this.#context, statement: this.#statement! });
@@ -2357,12 +2369,18 @@ function isKnownInteger(expression: Expression): boolean {
   return value === undefined || Number.isInteger(value);
 }
 
-/** The first interaction or media playback in a parameter default, which cannot pause a default's evaluation. */
+/**
+ * The first interaction, media playback, or camera capture in a parameter default, which cannot pause a default's
+ * evaluation.
+ */
 function findFirstInteraction(
   expression: Expression,
 ): Extract<
   Expression,
-  { kind: "interactionExpression" | "showButtonExpression" | "playMediaExpression" }
+  {
+    kind:
+      "interactionExpression" | "showButtonExpression" | "playMediaExpression" | "callExpression";
+  }
 > | null {
   const work = [expression];
   while (work.length) {
@@ -2370,7 +2388,8 @@ function findFirstInteraction(
     if (
       current.kind === "interactionExpression" ||
       current.kind === "showButtonExpression" ||
-      current.kind === "playMediaExpression"
+      current.kind === "playMediaExpression" ||
+      (current.kind === "callExpression" && isTakePhotoCall(current))
     )
       return current;
     const children = expressionChildren(current);

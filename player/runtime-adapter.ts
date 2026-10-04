@@ -26,6 +26,9 @@ import {
   type StageProjection,
   type PendingActionOperationResult,
   type RuntimeInteractionActionSnapshot,
+  type CapturedMediaAdmission,
+  type CaptureUnavailableReason,
+  type RuntimeCaptureActionSnapshot,
   type RuntimeScriptStorageEntrySnapshot,
   type RuntimeSnapshot,
   type RuntimeStorageWriteActionSnapshot,
@@ -296,6 +299,50 @@ export function activePlayerRuntimePacingGate(
   const foreground = snapshot.foregroundAction;
   if (foreground?.kind === "chatPacingGate") return foreground;
   return snapshot.backgroundActions.find((action) => action.kind === "chatPacingGate") ?? null;
+}
+
+/** How the Player answers a pending `takePhoto()`. */
+export type PlayerCaptureAnswer =
+  | { readonly kind: "captured"; readonly reference: string }
+  | { readonly kind: "unavailable"; readonly reason: CaptureUnavailableReason };
+
+/** The pending `takePhoto()` the Player must answer, if any. */
+export function activePlayerRuntimeCapture(
+  snapshot: RuntimeSnapshot,
+): RuntimeCaptureActionSnapshot | null {
+  const action = snapshot.status === "waiting" ? snapshot.foregroundAction : null;
+  return action?.kind === "capture" ? action : null;
+}
+
+/**
+ * Answers a pending capture and continues on success. A captured reference is accepted only when `capturedMedia`
+ * vouches for it. On `executionPending` the host runs the session and offers the same answer again.
+ */
+export function answerPlayerRuntimeCapture(
+  session: PlayerRuntimeSession,
+  actionId: number,
+  answer: PlayerCaptureAnswer,
+  capturedMedia?: CapturedMediaAdmission,
+): PlayerRuntimeControlResult<ActionCompletionOutcome> {
+  const payload =
+    answer.kind === "captured"
+      ? { kind: "captured", media: { kind: "image", reference: answer.reference } }
+      : { kind: "unavailable", reason: answer.reason };
+  const operation = completeAction(
+    session.plan,
+    session.snapshot,
+    { actionId, actionKind: "capture", payload },
+    capturedMedia === undefined ? {} : { capturedMedia },
+  );
+  return Object.freeze({
+    session: applyOperation(
+      session,
+      operation.snapshot,
+      operation.events,
+      operation.outcome.kind === "completed",
+    ),
+    outcome: operation.outcome,
+  });
 }
 
 export function completePlayerRuntimeAction(

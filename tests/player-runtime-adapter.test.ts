@@ -19,6 +19,8 @@ import { utc } from "./helpers/temporal-fixtures.js";
 
 import {
   activatePlayerRuntimeButton,
+  activePlayerRuntimeCapture,
+  answerPlayerRuntimeCapture,
   completePlayerRuntimeStorageWrite,
   pendingPlayerRuntimeStorageWrite,
   continuePlayerRuntimeSession,
@@ -644,6 +646,42 @@ test("runtime adapter forwards media reports, projects a live seek, and restores
   assert.equal(finished.snapshot.status, "halted");
   const last = finished.transcriptEntries.at(-1);
   assert.equal(last?.kind === "message" ? last.text : undefined, "done 10 s 8 s");
+});
+
+test("the Player answers takePhoto() with a vouched reference or an unavailable camera", () => {
+  const session = createPlayerRuntimeSession(
+    "let photo = takePhoto()\nshowImage photo\nlet second = takePhoto()\nexit",
+  );
+  const pending = activePlayerRuntimeCapture(session.snapshot);
+  assert.ok(pending !== null);
+  const reference = "captured-media:session:1";
+  const unvouched = answerPlayerRuntimeCapture(session, pending.actionId, {
+    kind: "captured",
+    reference,
+  });
+  assert.equal(unvouched.outcome.kind, "invalidPayload");
+  const answered = answerPlayerRuntimeCapture(
+    session,
+    pending.actionId,
+    { kind: "captured", reference },
+    { holds: (candidate, kind) => candidate === reference && kind === "image" },
+  );
+  assert.equal(answered.outcome.kind, "completed");
+  // The session continued to the next capture and shows the photo.
+  assert.equal(playerRuntimeMedia(answered.session.snapshot).stage.image, reference);
+  const next = activePlayerRuntimeCapture(answered.session.snapshot);
+  assert.ok(next !== null && next.actionId !== pending.actionId);
+  const unavailable = answerPlayerRuntimeCapture(answered.session, next.actionId, {
+    kind: "unavailable",
+    reason: "denied",
+  });
+  assert.equal(unavailable.outcome.kind, "completed");
+  assert.equal(unavailable.session.snapshot.status, "halted");
+  assert.ok(
+    unavailable.session.events.some(
+      (event) => event.kind === "developerWarning" && event.code === "TSW015",
+    ),
+  );
 });
 
 test("runtime adapter leaves evaluated persistent writes pending until acknowledgement", () => {

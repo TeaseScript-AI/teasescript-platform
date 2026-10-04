@@ -33,7 +33,7 @@ test("language diagnostics are the canonical compilation diagnostics", () => {
   assert.deepEqual(languageDiagnostics(document), compileSource(document.text).diagnostics);
 });
 
-test("completion exposes accepted compact commands", () => {
+test("completion exposes accepted compact commands and takePhoto", () => {
   const statement = labels("");
   for (const expected of ["say", "showButton"]) assert.ok(statement.includes(expected), expected);
   const expression = labels("let answer = ");
@@ -46,6 +46,7 @@ test("completion exposes accepted compact commands", () => {
     "askDateTime",
     "choose",
     "showButton",
+    "takePhoto",
   ])
     assert.ok(expression.includes(expected), expected);
 });

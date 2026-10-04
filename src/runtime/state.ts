@@ -87,7 +87,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 40;
+export const RUNTIME_SNAPSHOT_VERSION = 41;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -248,11 +248,14 @@ export interface RuntimeCallFrameSnapshot {
 }
 
 export interface RuntimeInteractionResultHandoffSnapshot {
+  /** Which foreground action produced the result: an interaction or a capture. */
+  readonly actionKind: "interaction" | "capture";
   readonly actionId: number;
   readonly owningInstruction: number;
   readonly continuationInstruction: number;
   readonly ownerCallFrameId: number | null;
   readonly destinationTemporary: number;
+  /** A capture's result is its captured-media reference, or `null` when its camera was unavailable. */
   readonly result: InteractionChoiceValue;
 }
 
@@ -639,6 +642,7 @@ function cloneInteractionResultHandoff(
   handoff: RuntimeInteractionResultHandoffSnapshot,
 ): RuntimeInteractionResultHandoffSnapshot {
   return {
+    actionKind: handoff.actionKind,
     actionId: handoff.actionId,
     owningInstruction: handoff.owningInstruction,
     continuationInstruction: handoff.continuationInstruction,
@@ -671,7 +675,7 @@ function cloneForegroundAction<T extends RuntimeForegroundActionSnapshot>(action
 function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendingActionSnapshot {
   if (action.kind === "timer") return { ...action, timer: cloneTimer(action.timer) };
   if (action.kind === "media") return { ...action, media: cloneMedia(action.media) };
-  if (action.kind === "mediaPlayback") return { ...action };
+  if (action.kind === "mediaPlayback" || action.kind === "capture") return { ...action };
   if (action.kind === "storageWrite")
     return { ...action, value: cloneCapturedSerializableValue(action.value) };
   if (action.kind === "delay")
@@ -783,7 +787,8 @@ function cloneSettlement(
   if (
     settlement.actionKind === "chatPacingGate" ||
     settlement.actionKind === "mediaPlayback" ||
-    settlement.actionKind === "storageWrite"
+    settlement.actionKind === "storageWrite" ||
+    settlement.actionKind === "capture"
   )
     return { ...settlement };
   return {
@@ -2522,6 +2527,7 @@ function validateStatusConsistency(
         "chatPacingGate",
         "mediaPlayback",
         "storageWrite",
+        "capture",
       ]);
     if (!hasAllowedActionKind) {
       errors.push("Waiting runtime state requires one foreground action.");
@@ -2690,6 +2696,9 @@ function validateCurrentTemporaryRequirements(
   }
   if (instruction.kind === "callFunction" && present.has(instruction.destinationTemporary)) {
     errors.push("Runtime function result destination is already occupied.");
+  }
+  if (instruction.kind === "capture" && present.has(instruction.destinationTemporary)) {
+    errors.push("Runtime capture result destination is already occupied.");
   }
 }
 
