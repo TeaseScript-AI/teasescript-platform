@@ -116,7 +116,7 @@ test("goto tagged and call tagged pick one matching file with one draw, entering
     says: ["strict"],
     draws: 1,
   });
-  // Two files pass in project order, soft then strict; the draw picks one.
+  // Two files pass in path order, soft then strict; the draw picks one.
   for (const [draw, picked] of [
     [0, "soft"],
     [0.99, "strict"],
