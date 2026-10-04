@@ -163,6 +163,32 @@ export function preparePreparedReferencesForListRemoval(
   receiver: SerializableRuntimeList,
   removedIndex: number,
 ): SerializableRuntimeObject[] {
+  return preparePreparedReferencesForListChange(snapshot, receiver, (index) =>
+    index === removedIndex ? undefined : index < removedIndex ? index : index - 1,
+  );
+}
+
+/**
+ * Moves prepared references into the items of `receiver` along with their items when the list is reordered in place,
+ * as by `sort` and `shuffle`. `newIndexOf[old]` is the new index of the item at `old`.
+ */
+export function preparePreparedReferencesForListReorder(
+  snapshot: RuntimeSnapshot,
+  receiver: SerializableRuntimeList,
+  newIndexOf: readonly number[],
+): SerializableRuntimeObject[] {
+  return preparePreparedReferencesForListChange(snapshot, receiver, (index) => newIndexOf[index]);
+}
+
+/**
+ * Follows a change of `receiver`'s item indexes: a prepared reference into an item moves to the item's new index, and
+ * one into an item that leaves the list (`undefined`) keeps the value it refers to now.
+ */
+function preparePreparedReferencesForListChange(
+  snapshot: RuntimeSnapshot,
+  receiver: SerializableRuntimeList,
+  newIndex: (index: number) => number | undefined,
+): SerializableRuntimeObject[] {
   const rebased: SerializableRuntimeObject[] = [];
   for (const temporaries of allTemporaryCollections(snapshot)) {
     for (const temporary of temporaries) {
@@ -178,12 +204,13 @@ export function preparePreparedReferencesForListRemoval(
       if (pathIndex === null) continue;
       const step = descriptor.path[pathIndex];
       if (step?.kind !== "index") continue;
-      if (step.index === removedIndex) {
+      const index = newIndex(step.index);
+      if (index === undefined) {
         freezePreparedReference(snapshot, temporary.value, descriptor);
         continue;
       }
-      if (step.index < removedIndex) continue;
-      descriptor.path[pathIndex] = { kind: "index", index: step.index - 1 };
+      if (index === step.index) continue;
+      descriptor.path[pathIndex] = { kind: "index", index };
       setCapturedSerializableProperty(
         temporary.value,
         "path",

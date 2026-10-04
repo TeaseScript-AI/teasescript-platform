@@ -24,7 +24,13 @@ import {
 } from "./interaction-answers.js";
 import type { TypeCheckPlan } from "./plan/model.js";
 import { CONVERSION_RESULTS } from "./conversions.js";
-import { builtinCallProblems, memberProblems, type OperationProblem } from "./operation-checks.js";
+import {
+  builtinCallProblems,
+  COLLECTION_METHODS,
+  collectionMethodProblems,
+  memberProblems,
+  type OperationProblem,
+} from "./operation-checks.js";
 import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
 import { staticChoiceValue, staticNumber, staticVisibleText } from "./static-evaluation.js";
 import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
@@ -1407,6 +1413,21 @@ class TypeChecker {
       );
       return STRING_TYPE;
     }
+    if ((value.kind === "list" || value.kind === "set") && COLLECTION_METHODS.has(method)) {
+      const problems = collectionMethodProblems(method, value, callee.property, expression, typeOf);
+      this.#reportProblems(problems);
+      if (method === "sort" || method === "shuffle") return NULL_TYPE;
+      // A set's union adds the argument's elements, which must be values a set can hold.
+      const argument = expression.arguments[0]?.value;
+      const other =
+        argument === undefined ? undefined : resolved(nonNullTypeForUse(typeOf(argument)));
+      const held =
+        method !== "union" ||
+        value.kind !== "set" ||
+        other?.kind !== "list" ||
+        this.#checkSetElement(argument!, other.element);
+      return this.#setOperationType(method, value, expression, problems.length === 0 && held);
+    }
     if (value.kind === "list" || value.kind === "set") {
       // A set compares only values it can hold.
       if (value.kind === "set" && (method === "contains" || method === "remove"))
@@ -1473,6 +1494,39 @@ class TypeChecker {
         callee.property.span,
       );
     return UNKNOWN_TYPE;
+  }
+
+  /**
+   * The result of `intersection`, `union`, or `difference`: a new collection of the receiver's kind. `union` holds the
+   * elements of both, so their types join as in a list literal; other operations keep the receiver's element type.
+   */
+  #setOperationType(
+    method: string,
+    receiver: StaticType & { readonly kind: "list" | "set" },
+    expression: CallExpression,
+    reportMix: boolean,
+  ): StaticType {
+    const own = copyType(receiver.element);
+    const argumentExpression = expression.arguments[0]?.value;
+    if (method !== "union" || argumentExpression === undefined)
+      return { kind: receiver.kind, element: own };
+    const argument = resolved(nonNullType(this.#typeOf(argumentExpression)));
+    if (argument.kind !== "list" && argument.kind !== "set")
+      return { kind: receiver.kind, element: UNKNOWN_TYPE };
+    const other = copyType(argument.element);
+    if (resolved(own).kind === "unknown" || resolved(other).kind === "unknown")
+      return { kind: receiver.kind, element: UNKNOWN_TYPE };
+    const element = joinTypes([own, other]);
+    if (element === undefined) {
+      if (reportMix)
+        this.#report(
+          typeCode.mixedTypes,
+          `union() would mix ${mixDescription(own, other)}. A ${receiver.kind} holds one type; keep values of different types in separate ${receiver.kind}s.`,
+          expression.span,
+        );
+      return { kind: receiver.kind, element: UNKNOWN_TYPE };
+    }
+    return { kind: receiver.kind, element };
   }
 
   /** Argument and result types of the implemented built-ins; injected host functions return unknown values. */

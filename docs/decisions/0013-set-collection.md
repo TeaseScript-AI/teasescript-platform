@@ -16,7 +16,9 @@ language's normal `==` equality for uniqueness. Sets use copy semantics like
 V30 lists and are not indexable.
 
 The supported set methods are `add(value)`, `remove(value)`, `clear()`,
-`contains(value)`, and `toList()`. Lists support `toSet()`.
+`contains(value)`, `toList()`, and, by owner decision on #542, `intersection(other)`,
+`union(other)`, and `difference(other)`, which return a new set and are defined
+with the list versions in V30 §16. Lists support `toSet()`.
 
 The supported set properties are `length`, `first`, `last`, and `random`.
 Iteration follows insertion order.
@@ -34,5 +36,4 @@ Direct assignment remains:
 score = 20
 ```
 
-No additional set literal syntax, type syntax, methods, or properties are
-accepted by this decision.
+No other set literal syntax, type syntax, methods, or properties are accepted.
