@@ -1,9 +1,11 @@
 import {
-  compileSource,
-  type Diagnostic,
+  compileProject,
+  MAIN_FILE_PATH,
   type InstructionPlan,
   type InterpreterEvent,
+  type ProjectDiagnostic,
   type ProjectImageFile,
+  type ProjectSourceFile,
   type RuntimeSnapshot,
 } from "../../src/index.js";
 import { runValidatedState, stepValidatedStateToEvent } from "../../src/runtime/engine.js";
@@ -35,6 +37,8 @@ import {
 } from "../../player/runtime-adapter.js";
 
 export interface WorkspaceDiagnostic {
+  /** The project file, or the image, the diagnostic belongs to. */
+  readonly path: string;
   readonly code: string;
   readonly message: string;
   readonly line: number;
@@ -174,17 +178,29 @@ export function restoreWorkspaceCheckpoint(
   });
 }
 
-/**
- * `wallClockMs` is the UTC time at session start, which the current-time getters read; without it they fail. `images`
- * are the package images that tag queries search.
- */
+export interface WorkspaceCompileOptions {
+  /** The UTC time at session start, which the current-time getters read; without it they fail. */
+  readonly wallClockMs?: number;
+  /** The package images that tag queries search. */
+  readonly images?: readonly ProjectImageFile[];
+}
+
+/** Compiles one source as the `main.tease` of a one-file project. */
 export function compileWorkspaceSource(
   source: string,
-  options: { readonly wallClockMs?: number; readonly images?: readonly ProjectImageFile[] } = {},
+  options: WorkspaceCompileOptions = {},
 ): WorkspaceResult {
   assertWorkspaceSource(source);
+  return compileWorkspaceProject([{ path: MAIN_FILE_PATH, source }], options);
+}
+
+/** Compiles the files of a project into one plan; the session starts at the top of `main.tease`. */
+export function compileWorkspaceProject(
+  files: readonly ProjectSourceFile[],
+  options: WorkspaceCompileOptions = {},
+): WorkspaceResult {
   const { images, ...snapshotOptions } = options;
-  const compilation = compileSource(source, images === undefined ? {} : { images });
+  const compilation = compileProject(files, images === undefined ? {} : { images });
   if (compilation.plan === null) {
     return freezeResult({
       diagnostics: diagnostics(compilation.diagnostics),
@@ -274,9 +290,10 @@ export function decodeWorkspaceSourceBytes(bytes: ArrayBuffer): string {
   return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 }
 
-function diagnostics(values: readonly Diagnostic[]): readonly WorkspaceDiagnostic[] {
+function diagnostics(values: readonly ProjectDiagnostic[]): readonly WorkspaceDiagnostic[] {
   return values.map((value) =>
     Object.freeze({
+      path: value.path,
       code: value.code,
       message: value.message,
       line: value.span.start.line + 1,
