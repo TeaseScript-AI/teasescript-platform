@@ -775,7 +775,6 @@ class SemanticValidator {
         this.#validateExpression(statement.subject, scope, null);
         validateSwitchCases(
           statement,
-          this.#expressionType(statement.subject, scope),
           (name) => scope.resolve(name)?.kind === "speaker",
           (code, message, span) => this.#report(code, message, span),
         );

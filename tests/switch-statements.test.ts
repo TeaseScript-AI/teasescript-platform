@@ -193,7 +193,7 @@ test("a switch on a pending compact interaction resumes from a checkpoint", () =
         "}",
       ],
       interactionKind: "choice",
-      payload: { kind: "selectedText", selectedText: "Leave" },
+      payload: { kind: "selectedOption", optionIndex: 1 },
       expected: ["leaving"],
     },
     {
@@ -277,6 +277,28 @@ test("reports malformed switch structure", () => {
   assert.deepEqual(
     diagnostics('if true {\n  switch 1 {\n    case 1\n    case 2 {}\n  }\n  say "inside"\n}'),
     ["TSP018 4:5"],
+  );
+});
+
+test("a function ends at a switch only when a default and every case return", () => {
+  const resultType = (cases: string) =>
+    compileSource(
+      [
+        "function grade(score) {",
+        "  switch score {",
+        "    case 0..5 { return 1 }",
+        cases,
+        "  }",
+        "}",
+        "let text: string = grade(3)",
+      ].join("\n"),
+    ).diagnostics.map((item) => item.message);
+
+  // The mismatch message names the function's result type, which is nullable only when it may end without `return`.
+  assert.match(resultType("    default { return 2 }").join(), /a whole number \(integer\)\. /);
+  assert.match(
+    resultType("    case 5..=10 { return 2 }").join(),
+    /a whole number \(integer\) or null\./,
   );
 });
 

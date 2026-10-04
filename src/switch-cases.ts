@@ -1,13 +1,16 @@
 import type { Expression, SwitchStatement } from "./ast.js";
 import { durationLiteralMilliseconds } from "./duration.js";
 import type { SourceSpan } from "./source.js";
-import { describeValue, nonNullType, type StaticType } from "./static-types.js";
+import {
+  describeValue,
+  isKnown,
+  isNumeric,
+  members,
+  resolved,
+  type StaticType,
+} from "./static-types.js";
 
-const switchCaseCode = {
-  invalidCaseValue: "TSV047",
-  overlappingCase: "TSV048",
-  impossibleCaseType: "TSV049",
-} as const;
+const switchCaseCode = { invalidCaseValue: "TSV047", overlappingCase: "TSV048" } as const;
 
 type SwitchCaseCode = (typeof switchCaseCode)[keyof typeof switchCaseCode];
 
@@ -17,7 +20,6 @@ export type SwitchCaseReport = (code: SwitchCaseCode, message: string, span: Sou
 type CaseValue =
   | {
       readonly kind: "literal";
-      readonly type: StaticType;
       /** Equal for literals that compare equal with `==`, so `2` and `2.0` collide. */
       readonly key: string;
       readonly number: number | undefined;
@@ -34,38 +36,52 @@ type CaseValue =
     };
 
 /**
- * Reports `case` values that are not literals, declared speakers, or number ranges, that can never match the switched
- * value's known type, or that repeat or overlap an earlier case value. Only the first matching case runs, so a later
- * overlap could never be selected for the shared values.
+ * Reports `case` values that are not literals, declared speakers, or number ranges, or that repeat or overlap an earlier
+ * case value. Only the first matching case runs, so a later overlap could never be selected for the shared values.
  */
 export function validateSwitchCases(
   statement: SwitchStatement,
-  subjectType: StaticType,
   isSpeaker: (name: string) => boolean,
   report: SwitchCaseReport,
 ): void {
-  const subject = describeSubject(statement.subject);
   const values: CaseValue[] = [];
   for (const switchCase of statement.cases) {
     for (const expression of switchCase.values) {
       const value = caseValue(expression, isSpeaker, report);
-      if (value === undefined) continue;
-      if (!canMatch(subjectType, value)) {
-        report(
-          switchCaseCode.impossibleCaseType,
-          value.kind === "range"
-            ? `This range case can never match: ${subject} is ${describeValue(subjectType)}, and a range ` +
-                "matches only numbers. Compare with a value instead."
-            : `This case can never match: ${subject} is ${describeValue(subjectType)}, but ${value.text} is ` +
-                `${describeValue(value.type)}. Use a case value of the same type.`,
-          value.span,
-        );
-        continue;
-      }
-      values.push(value);
+      if (value !== undefined) values.push(value);
     }
   }
   reportOverlaps(values, report);
+}
+
+/**
+ * The message for a case value whose type can never match the switched value's known type, or `undefined` when it can.
+ * `valueType` is the case value's own type; a range case matches only numbers. A value the compiler cannot know may
+ * match anything.
+ */
+export function impossibleCaseMessage(
+  subject: Expression,
+  subjectType: StaticType,
+  value: Expression,
+  valueType: StaticType,
+): string | undefined {
+  const unwrapped = unwrapParentheses(value);
+  const range = unwrapped.kind === "rangeExpression";
+  const literal = resolved(valueType);
+  const possible = members(subjectType).some((member) => {
+    if (!isKnown(member)) return true;
+    if (range) return isNumeric(member);
+    if (literal.kind === "scalar" && member.kind === "scalar")
+      return member.name === literal.name || (isNumeric(member) && isNumeric(literal));
+    return member.kind === literal.kind;
+  });
+  if (possible) return undefined;
+  const described = `${describeSubject(subject)} is ${describeValue(subjectType)}`;
+  if (range)
+    return `This range case can never match: ${described}, and a range matches only numbers. Compare with a value instead.`;
+  const text =
+    unwrapped.kind === "identifier" ? unwrapped.name : (literalValue(unwrapped)?.text ?? "it");
+  return `This case can never match: ${described}, but ${text} is ${describeValue(valueType)}. Use a case value of the same type.`;
 }
 
 function describeSubject(expression: Expression): string {
@@ -112,12 +128,7 @@ function caseValue(
   // Speakers compare by identity (V30 §37), and a declared speaker name always refers to the same speaker.
   const literal =
     unwrapped.kind === "identifier" && isSpeaker(unwrapped.name)
-      ? {
-          type: { kind: "speaker" } as const,
-          key: `speaker:${unwrapped.name}`,
-          number: undefined,
-          text: unwrapped.name,
-        }
+      ? { key: `speaker:${unwrapped.name}`, number: undefined, text: unwrapped.name }
       : literalValue(unwrapped);
   if (literal === undefined) {
     report(
@@ -138,7 +149,6 @@ function literalValue(
   if (operand.kind === "durationLiteral") {
     const milliseconds = (negative ? -1 : 1) * durationLiteralMilliseconds(operand);
     return {
-      type: { kind: "scalar", name: "duration" },
       key: `duration:${milliseconds === 0 ? 0 : milliseconds}`,
       number: undefined,
       text: `${negative ? "-" : ""}${operand.amount.raw} ${operand.unit}`,
@@ -147,7 +157,6 @@ function literalValue(
   const number = numberLiteral(expression);
   if (number !== undefined) {
     return {
-      type: { kind: "scalar", name: number.numericType },
       // `==` compares integers and numbers by value, and -0 equals 0.
       key: `number:${number.value === 0 ? 0 : number.value}`,
       number: number.value,
@@ -161,36 +170,27 @@ function literalValue(
         if (part.kind !== "stringText") return undefined;
         value += part.value;
       }
-      return {
-        type: { kind: "scalar", name: "string" },
-        key: `string:${value}`,
-        number: undefined,
-        text: JSON.stringify(value),
-      };
+      return { key: `string:${value}`, number: undefined, text: JSON.stringify(value) };
     }
     case "booleanLiteral":
       return {
-        type: { kind: "scalar", name: "boolean" },
         key: `boolean:${expression.value}`,
         number: undefined,
         text: String(expression.value),
       };
     case "nullLiteral":
-      return { type: { kind: "null" }, key: "null", number: undefined, text: "null" };
+      return { key: "null", number: undefined, text: "null" };
     default:
       return undefined;
   }
 }
 
 /** A number literal with an optional sign, such as `3`, `-2.5`, or `+1`. */
-function numberLiteral(
-  expression: Expression,
-): { value: number; numericType: "integer" | "number"; text: string } | undefined {
+function numberLiteral(expression: Expression): { value: number; text: string } | undefined {
   const { negative, operand } = signed(expression);
   if (operand.kind !== "numberLiteral") return undefined;
   return {
     value: negative ? -operand.value : operand.value,
-    numericType: operand.numericType,
     text: `${negative ? "-" : ""}${operand.raw}`,
   };
 }
@@ -208,20 +208,6 @@ function signed(expression: Expression): { negative: boolean; operand: Expressio
     };
   }
   return { negative: false, operand: expression };
-}
-
-/** Whether a value of the switched type can ever equal the case value; `unknown` can match anything. */
-function canMatch(subject: StaticType, value: CaseValue): boolean {
-  if (subject.kind === "unknown") return true;
-  if (value.kind === "literal" && value.type.kind === "null")
-    return subject.kind === "null" || subject.kind === "optional";
-  const type = nonNullType(subject);
-  if (value.kind === "literal" && value.type.kind === "speaker") return type.kind === "speaker";
-  if (type.kind !== "scalar") return false;
-  if (value.kind === "range") return type.name === "integer" || type.name === "number";
-  if (value.type.kind !== "scalar") return false;
-  const numeric = (name: string): boolean => name === "integer" || name === "number";
-  return type.name === value.type.name || (numeric(type.name) && numeric(value.type.name));
 }
 
 /**

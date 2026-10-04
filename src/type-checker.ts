@@ -26,6 +26,7 @@ import type { TypeCheckPlan } from "./plan/model.js";
 import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
 import { staticChoiceValue, staticNumber, staticVisibleText } from "./static-evaluation.js";
 import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
+import { impossibleCaseMessage } from "./switch-cases.js";
 import type { SourceSpan } from "./source.js";
 import {
   arithmeticType,
@@ -100,6 +101,7 @@ const typeCode = {
   typeMismatch: "TSV041",
   invalidOperand: "TSV043",
   mixedTypes: "TSV044",
+  impossibleCase: "TSV049",
 } as const;
 
 /**
@@ -453,6 +455,25 @@ class TypeChecker {
             ? yield* compileChild(this.#statementTask(statement.elseBlock, scope))
             : yield* compileChild(this.#blockTask(statement.elseBlock, scope));
         return thenContinues || elseContinues;
+      }
+      case "switchStatement": {
+        const subject = yield* compileChild(this.#expressionTask(statement.subject, scope));
+        for (const switchCase of statement.cases)
+          for (const value of switchCase.values) {
+            const valueType = yield* compileChild(this.#expressionTask(value, scope));
+            const message = impossibleCaseMessage(statement.subject, subject, value, valueType);
+            if (message !== undefined) this.#report(typeCode.impossibleCase, message, value.span);
+          }
+        // Without a `default`, no case may match; otherwise execution continues after any block that continues.
+        let continues = statement.defaultBlock === null;
+        for (const switchCase of statement.cases)
+          if (yield* compileChild(this.#blockTask(switchCase.body, scope))) continues = true;
+        if (
+          statement.defaultBlock !== null &&
+          (yield* compileChild(this.#blockTask(statement.defaultBlock, scope)))
+        )
+          continues = true;
+        return continues;
       }
       case "whileStatement": {
         yield* compileChild(this.#conditionTask(statement.condition, scope));
