@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 45;
+export const INSTRUCTION_PLAN_VERSION = 46;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
