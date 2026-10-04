@@ -497,7 +497,7 @@ function runPackageProject(
       Object.assign(hosts, pendingHostFunctions(shim, answers, media));
     hosts[ENTER] = ([path]: readonly RuntimeValue[]) => (visits.push(String(path)), null);
     hosts[BLOCKED] = ([target]: readonly RuntimeValue[]) => ((blocked = String(target)), null);
-    hosts[START] = () => !started && (started = true);
+    hosts[START] = () => (started ? "" : ((started = true), entry));
     const result = runner(files, hosts);
     const failure = blocked === null ? result.failure : null;
     // The announcing statement moved the generated file's lines down by one.
@@ -543,14 +543,18 @@ function runPackageProject(
       (left, right) =>
         Number(targets.has(left)) - Number(targets.has(right)) || left.localeCompare(right),
     );
+  // One project serves every isolated run: its main.tease transfers to the file the host names once.
+  const isolatedProject = project.map((file) =>
+    file.path === MAIN
+      ? {
+          path: MAIN,
+          source: `let start = ${START}()\nif start != "" {\n  goto script(start)\n}\n${stub(MAIN)}`,
+        }
+      : file,
+  );
   for (const path of unreached) {
     if (report.smokeRuns.some(({ visited }) => visited.includes(path))) continue;
-    const start = `if ${START}() {\n  goto ${JSON.stringify(path)}\n}\n${stub(MAIN)}`;
-    run(
-      project.map((file) => (file.path === MAIN ? { path: MAIN, source: start } : file)),
-      path,
-      true,
-    );
+    run(isolatedProject, path, true);
   }
 }
 
