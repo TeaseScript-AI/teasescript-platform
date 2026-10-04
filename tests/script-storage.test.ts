@@ -860,6 +860,22 @@ test("load takes its fallback as ', default:', and the earlier form names the fi
   assert.deepEqual(diagnostics('let v = load "k", default:'), [
     "TSP012 27 Expected a fallback value after 'default:'.",
   ]);
+  // The fix is named after a choice key and inside interpolation too.
+  assert.equal(
+    diagnostics('let v = load choose a: "x", b: "y" default "z"')[0],
+    "TSP017 36 Write a fallback for load as 'load key, default: value', with a comma and a colon.",
+  );
+  assert.equal(
+    diagnostics('let v = "${load "k" default "x"}"')[0],
+    "TSP017 21 Write a fallback for load as 'load key, default: value', with a comma and a colon.",
+  );
+  // A missing fallback leaves the next statement intact.
+  const missing = parse('let v = load "k", default:\nlet ok = 1');
+  assert.deepEqual(
+    missing.diagnostics.map((item) => item.code),
+    ["TSP012"],
+  );
+  assert.equal(missing.program.statements.length, 2);
 });
 
 test("a ', default:' belongs to the nearest load or ask before it", () => {
@@ -881,6 +897,22 @@ test("a ', default:' belongs to the nearest load or ask before it", () => {
   const list = initializer('let v = [load "a", default: 1, 2]');
   assert.ok(list.kind === "listLiteral" && list.elements.length === 2);
   assert.ok(list.elements[0]?.kind === "loadExpression" && list.elements[0].defaultValue !== null);
+
+  // A comma on the next line continues the expression, so the line break does not change the binding.
+  const object = initializer('let v = {first: load "k"\n, default: "x"}');
+  assert.ok(object.kind === "objectLiteral" && object.properties.length === 1);
+  const grouped = initializer('let v = (load "k"\n, default: 7)');
+  assert.ok(grouped.kind === "parenthesizedExpression");
+  assert.ok(
+    grouped.expression.kind === "loadExpression" && grouped.expression.defaultValue !== null,
+  );
+
+  // A compact choice keeps `default:` as an option label; grouping gives the fallback to load.
+  const labelled = initializer('let v = load choose a: "x", b: "y", default: "z"');
+  assert.ok(labelled.kind === "loadExpression" && labelled.defaultValue === null);
+  assert.ok(labelled.key.kind === "interactionExpression" && labelled.key.options.length === 3);
+  const choiceKey = initializer('let v = load (choose a: "x", b: "y"), default: "z"');
+  assert.ok(choiceKey.kind === "loadExpression" && choiceKey.defaultValue !== null);
 });
 
 test("compact interactions parse in every storage operand position", () => {

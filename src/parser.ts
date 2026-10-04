@@ -128,7 +128,7 @@ const parserDiagnosticCode = {
 
 const MEDIA_ARGUMENTS = ["file", "async", "repeat", "startAt", "endAt", "volume"] as const;
 
-type StorageDelimiter = "as";
+type StorageDelimiter = "as" | "default";
 const NO_STORAGE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set();
 const SAVE_VALUE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set(["as"]);
 
@@ -152,8 +152,9 @@ class Parser {
   /** Inside a media cue position or a switch subject, where the following block `{` ends a compact interaction. */
   #blockEndsCompactInteraction = false;
   /**
-   * The `save` `as` that ends an enclosing storage operand. A compact interaction stops at it, and a bare interaction
-   * leaves the `as` to `save`; groupings such as parentheses start without it.
+   * The `save` `as` that ends an enclosing storage operand, and a bare `default` after a `load` key, the earlier form
+   * that `load` reports with its fix. A compact interaction stops at them, and a bare interaction leaves the `as` to
+   * `save`; groupings such as parentheses start without them.
    */
   #storageDelimiters: ReadonlySet<StorageDelimiter> = NO_STORAGE_DELIMITERS;
 
@@ -960,7 +961,11 @@ class Parser {
    */
   *#parseLoadExpression(): ParseTask<LoadExpression | null> {
     const command = this.#advance();
+    // The key ends at a bare `default`, the earlier fallback form, so that the message below names the fix.
+    const enclosing = this.#storageDelimiters;
+    this.#storageDelimiters = new Set([...enclosing, "default"]);
     const key = yield* parseChild(this.#parseOr());
+    this.#storageDelimiters = enclosing;
     if (key === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedStorageKey,
@@ -986,11 +991,14 @@ class Parser {
     } else if (defaultOffset !== null && this.#atInteractionDefault(defaultOffset)) {
       for (let skipped = 0; skipped < defaultOffset + 2; skipped += 1) this.#advance();
       defaultValue = yield* parseChild(this.#parseColonValueTask(false));
-      if (defaultValue === null)
+      if (defaultValue === null) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedExpression,
           "Expected a fallback value after 'default:'.",
         );
+        if (this.#previous().kind === TokenKind.Newline && this.#atStatementStart())
+          this.#recoveredAtStatementBoundary = true;
+      }
     }
     return Object.freeze({
       kind: "loadExpression",
@@ -2610,14 +2618,17 @@ class Parser {
   }
 
   /**
-   * The offset of the token after a `,` and any continuation newlines, or `null` without a comma. Nested interactions
-   * that end at the same token reuse one scan of the newlines.
+   * The offset of the token after a `,`, with continuation newlines on either side of it, or `null` without a comma. A
+   * line never starts with `,`, so a comma on the next line continues the expression. Nested interactions that end at
+   * the same token reuse one scan of the newlines.
    */
   #interactionDefaultAfterComma(): number | null {
     if (this.#commaLookahead?.at === this.#current) return this.#commaLookahead.offset;
-    let offset: number | null = null;
-    if (this.#check(TokenKind.Comma)) {
-      offset = 1;
+    let offset: number | null = 0;
+    while (this.#peek(offset).kind === TokenKind.Newline) offset += 1;
+    if (this.#peek(offset).kind !== TokenKind.Comma) offset = null;
+    else {
+      offset += 1;
       while (this.#peek(offset).kind === TokenKind.Newline) offset += 1;
     }
     this.#commaLookahead = { at: this.#current, offset };
@@ -2625,7 +2636,13 @@ class Parser {
   }
 
   #atStorageDelimiter(): boolean {
-    return this.#storageDelimiters.has("as") && this.#check(TokenKind.KeywordAs);
+    return (
+      (this.#storageDelimiters.has("as") && this.#check(TokenKind.KeywordAs)) ||
+      // `default:` is a contextual name, such as a choice option label, not the earlier form.
+      (this.#storageDelimiters.has("default") &&
+        this.#checkIdentifier("default") &&
+        this.#peek(1).kind !== TokenKind.Colon)
+    );
   }
 
   /**
