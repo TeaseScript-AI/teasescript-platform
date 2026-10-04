@@ -5408,14 +5408,20 @@ function lowerReturnStatement(node: AstNode, context: LowerContext): IrStatement
     context,
     "SX_DYNAMIC_SCRIPT",
     "warning",
-    'Legacy chained to the script this value names, and ended the chain when the value was null or empty or named no file; script() needs the path of a file in the package, such as "folder/name.tease", and fails at runtime for a missing one.',
+    'Legacy chained to the script this value names, and ended the chain when the value was null or empty or named no file; its ".groovy" becomes ".tease" here, and script() fails at runtime for a name that is no file of the package.',
     node.span,
   );
-  const transfer: IrStatement = {
-    kind: "goto",
-    target: { kind: "script", path: script },
-    span: node.span,
+  // A legacy script name such as "rooms/hall.groovy" names the converted file "rooms/hall.tease".
+  const path: IrExpression = {
+    kind: "methodCall",
+    target: script,
+    name: "replace",
+    arguments: [
+      { kind: "literal", value: ".groovy" },
+      { kind: "literal", value: ".tease" },
+    ],
   };
+  const transfer: IrStatement = { kind: "goto", target: { kind: "script", path }, span: node.span };
   if (!isRepeatableExpression(valueNode)) return [transfer];
   return [
     {
