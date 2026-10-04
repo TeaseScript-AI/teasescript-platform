@@ -182,7 +182,7 @@ test("removal by value and position is checkpoint and resume equivalent", () => 
 test("structural equality stops at a scalar mismatch before visiting nested values", () => {
   // Only the length of these payloads may be read; visiting an element throws.
   const unvisited = <T>(length: number): T[] =>
-    new Proxy([] as T[], {
+    new Proxy<T[]>([], {
       get: (_target, key) => {
         if (key === "length") return length;
         throw new Error(`Visited payload member ${String(key)}.`);
