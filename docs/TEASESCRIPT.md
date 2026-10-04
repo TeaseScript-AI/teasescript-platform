@@ -255,20 +255,18 @@ and `toBoolean` with `default:`, `round`, `floor`, and `ceil`, and `min` and `ma
 argument type is known, misuse is compile error `TSV043`, or `TSV020`/`TSV022` for argument counts and names; other
 values are checked when the operation runs.
 
-A separate type check (`src/type-checker.ts`) runs once names and structure are valid and enforces ADR 0021:
-variables, list and set elements, dict values, object properties, parameters, and function results keep one type,
-including types decided by a first non-null value, a first element, a parameter default, or a function's returns; an inferred `integer`
-variable, element, or property is a `number` when one of its assignments can store a non-whole number; `integer` to `number` is the only
-implicit conversion; operators, conditions, indexes, members, and command operands get values of types they
-support, and on a union every member must support them, with some known operands still rejected only at runtime until
-#552; union types, type names, and `is` type tests are available, and tests, `!= null`, and assignments narrow plain
-variables; using a possibly null value where its non-null type is required is a compile error that names the check. A
-mismatch is `TSV041`, an unsupported operand `TSV043`, returns of different types, list elements of different types, or
-a `choose` of different value types outside a declared union `TSV044`, and a provably constant type test or comparison
-warning `TSV046`. When a value the compiler cannot know, such as untyped storage, host data, or an unknown parameter, is
-stored
-in a place whose type is at least partly known, the plan carries that type and the runtime checks the value before
-storing it (`TSR058`).
+A separate type check (`src/type-checker.ts`) runs once names and structure are valid and enforces ADR 0021: variables,
+list and set elements, dict values, object properties, parameters, and function results keep one type, including types
+decided by a first non-null value, a first element, a parameter default, or a function's returns; an inferred `integer`
+variable, element, or property is a `number` when one of its assignments can store a non-whole number; `integer` to
+`number` is the only implicit conversion; operators, conditions, indexes, members, and command operands get values of
+types they support, and on a union every member must support them; union types, type names, and `is` type tests are
+available, and tests, `!= null`, and assignments narrow plain variables; using a possibly null value where its non-null
+type is required is a compile error that names the check. A mismatch is `TSV041`, an unsupported operand `TSV043`,
+returns of different types, list elements of different types, or a `choose` of different value types outside a declared
+union `TSV044`, and a provably constant type test or comparison warning `TSV046`. When a value the compiler cannot know,
+such as untyped storage, host data, or an unknown parameter, is stored in a place whose type is at least partly known,
+the plan carries that type and the runtime checks the value before storing it (`TSR058`).
 
 The wider V30 Standard Library/runtime APIs are not implemented yet.
 

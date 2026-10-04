@@ -2793,7 +2793,13 @@ class TypeChecker {
           fallback,
         );
       }
-    }
+    } else if (
+      (method === "contains" || method === "remove") &&
+      expression.arguments.length === 1 &&
+      members(nonNullType(value)).some((member) => isDict(resolved(member)))
+    )
+      // On a union with a dict, the dict takes a text key as well (ADR 0021 rule 3.5).
+      this.#checkDictKey(values[0]!, expression.arguments[0]!.value);
     // Every member of a union must have the method (ADR 0021 rule 3.5).
     const all = members(value);
     const results = all.map((member) => memberMethodType(member, method));

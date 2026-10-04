@@ -54,9 +54,10 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
 8. Operations are checked by the same principle: an operator, condition, index, member, or command operand of a known
    type that does not support it is a compile error, because it would fail at runtime. Conditions and the operands of
    `and`, `or`, and `not` must be `true` or `false`; there is no truthiness. A list index is a whole number and a dict
-   key is text; an object, whose properties have fixed names, is not indexed. The implementation does not reject every
-   such operand yet: some, such as an object element of a computed list in `${...}`, still fail only at runtime with a
-   source-located error; #552 completes the compile-time rejection.
+   key is text; an object, whose properties have fixed names, is not indexed. Reading a property, or using a choice
+   object without `text`, is an error only when no store anywhere in the script adds that property, because a store
+   later in a loop or in a timer or media block may run first. A parameter's object, and a place that takes a value the
+   compiler cannot know, may hold an object with other properties, so a property it lacks is not known to be missing.
 9. A possibly null value used where its non-null type is required, such as `n + 1` with `n: integer?`, is a compile
    error whose message names the check, `if n != null { ... }` (owner decision of 2026-10-04 on #504). The check
    narrows the value (rule 5.1). Places and operands that accept `null` themselves still take it.
