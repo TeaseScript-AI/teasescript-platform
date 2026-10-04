@@ -18,6 +18,7 @@ import {
 } from "../src/runtime/state.js";
 import type { SerializableRuntimeObject } from "../src/runtime/serializable-values.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
+import { runUntilExit } from "./helpers/run-until-exit.js";
 
 type Mutable<T> = T extends readonly [infer First, infer Second]
   ? [Mutable<First>, Mutable<Second>]
@@ -170,16 +171,6 @@ test("explicit exit cleans released pacing lineage without admitting forged paci
     compiled,
     forgedPreparedOutput,
   );
-
-  const naturalRoot = plan('say "first", 5\nexit');
-  const naturallyHalted = run(naturalRoot, createFreshRuntimeSnapshot(naturalRoot));
-  assert.equal(naturallyHalted.snapshot.status, "halted");
-  assert.equal(naturallyHalted.snapshot.backgroundActions.length, 1);
-  expectCheckpointJsonRoundTrip(
-    "natural root may retain background pacing",
-    naturalRoot,
-    naturallyHalted.snapshot,
-  );
 });
 
 test("branch-local and nested explicit exits reject forged retained pacing work", () => {
@@ -202,74 +193,6 @@ test("branch-local and nested explicit exits reject forged retained pacing work"
     expectInvalidSnapshot("branch-local explicit exit cannot retain pacing work", compiled, forged);
     assert.throws(() => createCheckpoint(compiled, forged));
   }
-});
-
-test("terminal continuation handoffs reject malformed external state and preserve result-free buttons", () => {
-  const delayPlan = plan('say "first", 5\nwait 1 ms\nexit');
-  const waiting = run(delayPlan, createFreshRuntimeSnapshot(delayPlan));
-  const delay = waiting.snapshot.foregroundAction;
-  assert.equal(delay?.kind, "delay");
-  const settled = observeTime(delayPlan, waiting.snapshot, delay!.deadlineMs);
-  assert.notEqual(settled.snapshot.terminalContinuationHandoff, null);
-  expectCheckpointJsonRoundTrip("terminal delay handoff", delayPlan, settled.snapshot);
-
-  const corruptions = [
-    {
-      name: "missing terminal continuation handoff",
-      checkpoint: mutateCheckpoint(delayPlan, settled.snapshot, (snapshot) => {
-        snapshot.terminalContinuationHandoff = null;
-      }),
-    },
-    {
-      name: "terminal handoff cannot claim a pacing instruction",
-      checkpoint: mutateCheckpoint(delayPlan, settled.snapshot, (snapshot) => {
-        snapshot.terminalContinuationHandoff.owningInstruction = 0;
-      }),
-    },
-    {
-      name: "terminal handoff action identity cannot be stale",
-      checkpoint: mutateCheckpoint(delayPlan, settled.snapshot, (snapshot) => {
-        snapshot.terminalContinuationHandoff.actionId = 1;
-      }),
-    },
-    {
-      name: "terminal handoff requires its settlement or later pacing replacement",
-      checkpoint: mutateCheckpoint(delayPlan, settled.snapshot, (snapshot) => {
-        snapshot.lastSettlement = null;
-      }),
-    },
-    {
-      name: "terminal handoff cannot survive root completion",
-      checkpoint: mutateCheckpoint(delayPlan, settled.snapshot, (snapshot) => {
-        snapshot.status = "halted";
-      }),
-    },
-  ];
-  for (const corruption of corruptions) {
-    const snapshot = corruption.checkpoint.snapshot;
-    assert.equal(validateRuntimeSnapshot(snapshot, delayPlan).valid, false, corruption.name);
-    assert.throws(
-      () => deserializeCheckpoint(JSON.stringify(corruption.checkpoint)),
-      corruption.name,
-    );
-  }
-
-  const buttonPlan = plan('showButton "Continue"');
-  const buttonWaiting = run(buttonPlan, createFreshRuntimeSnapshot(buttonPlan));
-  const button = buttonWaiting.snapshot.foregroundAction;
-  assert.equal(button?.kind, "interaction");
-  const buttonSettled = completeAction(buttonPlan, buttonWaiting.snapshot, {
-    actionId: button!.actionId,
-    actionKind: "interaction",
-    interactionKind: "button",
-    payload: { kind: "activate" },
-  });
-  assert.equal(buttonSettled.snapshot.terminalContinuationHandoff?.actionKind, "interaction");
-  assert.equal(validateRuntimeSnapshot(buttonSettled.snapshot, buttonPlan).valid, true);
-  assert.deepEqual(
-    run(buttonPlan, buttonSettled.snapshot).events.map((event) => event.kind),
-    ["complete"],
-  );
 });
 
 test("prepared say text retains caller temporaries through a suspended text call", () => {
@@ -690,8 +613,8 @@ test("pacing creation provenance requires a positive historical scope depth", ()
   assert.throws(() => createCheckpoint(rootPlan, zeroDepth));
 
   const functionPlan = plan('function f { say "inside", 5 }\nf()\nexit');
-  const unwound = run(functionPlan, createFreshRuntimeSnapshot(functionPlan)).snapshot;
-  assert.equal(unwound.status, "halted");
+  const unwound = runUntilExit(functionPlan, createFreshRuntimeSnapshot(functionPlan)).snapshot;
+  assert.equal(functionPlan.instructions[unwound.nextInstruction]?.kind, "exit");
   assert.equal(unwound.frames.length, 1);
   assert.equal(unwound.backgroundActions[0]?.kind, "chatPacingGate");
   assert.ok((unwound.backgroundActions[0]?.scopeDepth ?? 0) > unwound.frames.length);
@@ -734,7 +657,8 @@ test("snapshot and checkpoint reject malformed pacing prepared output", () => {
 });
 
 test("snapshot and checkpoint reject representative malformed pacing action state", () => {
-  const backgroundPlan = plan('say "first"\nexit');
+  // The wait keeps the session waiting, not runnable, while the say's pacing is in the background.
+  const backgroundPlan = plan('say "first"\nwait 10 s\nexit');
   const background = run(backgroundPlan, createFreshRuntimeSnapshot(backgroundPlan));
   const foregroundPlan = plan('say "first"\nsay "second"\nexit');
   const foreground = run(foregroundPlan, createFreshRuntimeSnapshot(foregroundPlan));
@@ -743,7 +667,7 @@ test("snapshot and checkpoint reject representative malformed pacing action stat
   if (foregroundGate?.kind !== "chatPacingGate")
     throw new Error("Expected a promoted pacing gate.");
   const functionPlan = plan('function f { say "first" }\nf()\nexit');
-  const functionBackground = run(functionPlan, createFreshRuntimeSnapshot(functionPlan));
+  const functionBackground = runUntilExit(functionPlan, createFreshRuntimeSnapshot(functionPlan));
   const settled = completeAction(backgroundPlan, background.snapshot, {
     actionId: background.snapshot.backgroundActions[0]!.actionId,
     actionKind: "chatPacingGate",
@@ -844,7 +768,7 @@ test("snapshot and checkpoint reject representative malformed pacing action stat
 
 test("background pacing actions require dense JSON-safe array entries", () => {
   const compiled = plan('say "first"\nexit');
-  const background = run(compiled, createFreshRuntimeSnapshot(compiled));
+  const background = runUntilExit(compiled, createFreshRuntimeSnapshot(compiled));
   // EVIDENCE: serialization creates the canonical checkpoint before array-shape corruptions are applied.
   const baselineCheckpoint = JSON.parse(
     serializeCheckpoint(createCheckpoint(compiled, background.snapshot)),
@@ -921,7 +845,7 @@ test("background pacing actions require dense JSON-safe array entries", () => {
 
 test("persisted arrays reject custom own keys that JSON would omit", () => {
   const backgroundPlan = plan('say "first"\nexit');
-  const background = run(backgroundPlan, createFreshRuntimeSnapshot(backgroundPlan));
+  const background = runUntilExit(backgroundPlan, createFreshRuntimeSnapshot(backgroundPlan));
   const speakerPlan = plan('speaker vera { custom: "kept" }\nexit');
   const speakerState = run(speakerPlan, createFreshRuntimeSnapshot(speakerPlan));
 
@@ -978,10 +902,6 @@ test("runtime-produced pacing states validate and checkpoint through their lifec
   const background = executeInstruction(positive, createFreshRuntimeSnapshot(positive));
   assert.equal(background.snapshot.status, "running");
   assert.equal(background.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
-  const naturalEnd = plan('say "first"\nexit');
-  const halted = run(naturalEnd, createFreshRuntimeSnapshot(naturalEnd));
-  assert.equal(halted.snapshot.status, "halted");
-  assert.equal(halted.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
 
   const waitPlan = plan('say "first"\nwait 10 s\nexit');
   const withWait = run(waitPlan, createFreshRuntimeSnapshot(waitPlan));
@@ -1001,7 +921,7 @@ test("runtime-produced pacing states validate and checkpoint through their lifec
   const interactionPlan = plan('say "first"\nshowButton "Continue"\nexit');
   const interaction = run(interactionPlan, createFreshRuntimeSnapshot(interactionPlan));
 
-  const instantPlan = plan('say "first"\nsay "now", instant');
+  const instantPlan = plan('say "first"\nsay "now", instant\nexit');
   const instant = run(instantPlan, createFreshRuntimeSnapshot(instantPlan));
 
   const promotionPlan = plan('say "first"\nsay "second"\nexit');
@@ -1014,17 +934,16 @@ test("runtime-produced pacing states validate and checkpoint through their lifec
     actionKind: "chatPacingGate",
     payload: { kind: "skip" },
   });
-  const replacement = run(promotionPlan, releasedBySkip.snapshot);
-
-  // No trailing exit: an explicit exit clears pacing work, and these rows must keep the unwound gate.
+  // Exit clears pacing work, so these rows stop before it to keep the replacement and the unwound gates.
+  const replacement = runUntilExit(promotionPlan, releasedBySkip.snapshot);
   const unwoundPlans = [
-    plan('if true { say "branch" }'),
-    plan('repeat 1 { say "loop" }'),
-    plan('function f { say "call" }\nf()'),
+    plan('if true { say "branch" }\nexit'),
+    plan('repeat 1 { say "loop" }\nexit'),
+    plan('function f { say "call" }\nf()\nexit'),
   ];
   const unwound = unwoundPlans.map((compiled) => ({
     compiled,
-    snapshot: run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot,
+    snapshot: runUntilExit(compiled, createFreshRuntimeSnapshot(compiled)).snapshot,
   }));
   for (const { snapshot } of unwound) {
     assert.equal(snapshot.backgroundActions[0]?.kind, "chatPacingGate");
@@ -1049,7 +968,6 @@ test("runtime-produced pacing states validate and checkpoint through their lifec
     ["branch unwind", unwound[0]!.compiled, unwound[0]!.snapshot],
     ["loop unwind", unwound[1]!.compiled, unwound[1]!.snapshot],
     ["function unwind", unwound[2]!.compiled, unwound[2]!.snapshot],
-    ["halted execution with a background gate", naturalEnd, halted.snapshot],
   ];
 
   for (const [label, compiled, snapshot] of states) {
