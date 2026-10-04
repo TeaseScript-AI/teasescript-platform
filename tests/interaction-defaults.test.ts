@@ -52,24 +52,37 @@ function answer(plan: Plan, snapshot: Snapshot) {
 
 test("a default answer prefills the field and submitting it unchanged returns the default", () => {
   const cases = [
-    { source: 'let answer = askText "Your name?", default: "Ada"', prefill: "Ada", result: "Ada" },
     {
-      source:
-        'speaker mistress { name: "Mistress" }\nlet answer = askText as mistress default: "Ada"',
+      source: 'let answer = askText "Your name?", default: "Ada"\nexit',
       prefill: "Ada",
       result: "Ada",
     },
-    { source: 'let answer = askNumber "How many?", default: 10', prefill: "10", result: 10 },
-    { source: "let answer = askNumber default: -2.5e-7", prefill: "-2.5e-7", result: -2.5e-7 },
-    { source: "let answer = askNumber default: -0", prefill: "0", result: 0 },
-    { source: "let level = 3\nlet answer = askNumber default: level", prefill: "3", result: 3 },
     {
-      source: 'let base = 4\nlet answer = askNumber "Corner time",\n    default: base * 2 + 0.5',
+      source:
+        'speaker mistress { name: "Mistress" }\nlet answer = askText as mistress default: "Ada"\nexit',
+      prefill: "Ada",
+      result: "Ada",
+    },
+    { source: 'let answer = askNumber "How many?", default: 10\nexit', prefill: "10", result: 10 },
+    {
+      source: "let answer = askNumber default: -2.5e-7\nexit",
+      prefill: "-2.5e-7",
+      result: -2.5e-7,
+    },
+    { source: "let answer = askNumber default: -0\nexit", prefill: "0", result: 0 },
+    {
+      source: "let level = 3\nlet answer = askNumber default: level\nexit",
+      prefill: "3",
+      result: 3,
+    },
+    {
+      source:
+        'let base = 4\nlet answer = askNumber "Corner time",\n    default: base * 2 + 0.5\nexit',
       prefill: "8.5",
       result: 8.5,
     },
     {
-      source: 'let name = "Ada"\nlet answer = askText "Name?", default: "${name} Lovelace"',
+      source: 'let name = "Ada"\nlet answer = askText "Name?", default: "${name} Lovelace"\nexit',
       prefill: "Ada Lovelace",
       result: "Ada Lovelace",
     },
@@ -88,7 +101,7 @@ test("a default answer prefills the field and submitting it unchanged returns th
 });
 
 test("the player may replace or clear a default answer, and a cleared field is retried", () => {
-  const plan = compileValidPlan('let answer = askText "Name?", default: "Ada"');
+  const plan = compileValidPlan('let answer = askText "Name?", default: "Ada"\nexit');
   const { snapshot } = pendingInput(plan);
   const cleared = submit(plan, snapshot, "");
   assert.equal(cleared.outcome.kind, "invalidPayload");
@@ -100,7 +113,7 @@ test("the player may replace or clear a default answer, and a cleared field is r
 
 test("a dynamic default is evaluated once after the hint and survives checkpoint restore", () => {
   const plan = compileValidPlan(
-    'let calls = 0\nfunction next {\n    calls += 1\n    return calls * 10\n}\nlet answer = askNumber "Hint ${next()}", default: next()',
+    'let calls = 0\nfunction next {\n    calls += 1\n    return calls * 10\n}\nlet answer = askNumber "Hint ${next()}", default: next()\nexit',
   );
   const { snapshot, ui } = pendingInput(plan);
   assert.deepEqual([ui.hint, ui.prefill], ["Hint 10", "20"]);
@@ -123,52 +136,52 @@ test("a dynamic default is evaluated once after the hint and survives checkpoint
 test("a default the compiler knows is wrong is a compile error that names the fix", () => {
   const cases = [
     [
-      'let count = 3\nlet answer = askText "Code?", default: count',
+      'let count = 3\nlet answer = askText "Code?", default: count\nexit',
       "TSV039",
       "The default answer of askText must be text, but 'count' holds a whole number (integer). Write it as text: 'default: \"${count}\"'.",
     ],
     [
-      'let answer = askText "Code?", default: 10',
+      'let answer = askText "Code?", default: 10\nexit',
       "TSV039",
       "The default answer of askText must be text, not a whole number (integer). Write it as text: 'default: \"10\"'.",
     ],
     [
-      "let answer = askText default: value * 2",
+      "let answer = askText default: value * 2\nexit",
       "TSV039",
       "The default answer of askText must be text. Write it as text with interpolation: 'default: \"${...}\"'.",
     ],
     [
-      'let answer = askText "Name?", default: "  "',
+      'let answer = askText "Name?", default: "  "\nexit',
       "TSV039",
       "The default answer of askText must contain a non-whitespace character. Remove 'default:' to start with an empty field.",
     ],
     [
-      "let answer = askText default: null",
+      "let answer = askText default: null\nexit",
       "TSV039",
       "The default answer of askText must be text, not null. Remove 'default:' to start with an empty field.",
     ],
     [
-      'let answer = askNumber "How many?", default: "10"',
+      'let answer = askNumber "How many?", default: "10"\nexit',
       "TSV039",
       "The default answer of askNumber must be a number, not text (string). Write it as a number: 'default: 10'.",
     ],
     [
-      'let name = "Ada"\nlet answer = askNumber default: name',
+      'let name = "Ada"\nlet answer = askNumber default: name\nexit',
       "TSV039",
       "The default answer of askNumber must be a number, but 'name' holds text (string). Use a number, such as 'default: 10'.",
     ],
     [
-      "let answer = askNumber default: 1 s + 2 s",
+      "let answer = askNumber default: 1 s + 2 s\nexit",
       "TSV039",
       "The default answer of askNumber must be a number, not a duration. Use a number, such as 'default: 10'.",
     ],
     [
-      "let limit: number? = value\nlet answer = askNumber default: limit",
+      "let limit: number? = value\nlet answer = askNumber default: limit\nexit",
       "TSV039",
       "The default answer of askNumber must be a number, but 'limit' holds a number or null. Check it first: if limit != null { ... }",
     ],
     [
-      "let answer = askNumber default: 1 == 1",
+      "let answer = askNumber default: 1 == 1\nexit",
       "TSV039",
       "The default answer of askNumber must be a number, not true or false (boolean). Use a number, such as 'default: 10'.",
     ],
@@ -195,11 +208,11 @@ test("a default the compiler knows is wrong is a compile error that names the fi
 });
 
 test("inside an object literal, default: belongs to the nearest ask unless parentheses close it", () => {
-  const grouped = compileValidPlan('let o = { name: askText "Name?", default: "Ada" }');
+  const grouped = compileValidPlan('let o = { name: askText "Name?", default: "Ada" }\nexit');
   assert.equal(pendingInput(grouped).ui.prefill, "Ada");
 
   const property = compileValidPlan(
-    'let o = { name: (askText "Name?"), default: "Ada" }\nlet answer = o.default',
+    'let o = { name: (askText "Name?"), default: "Ada" }\nlet answer = o.default\nexit',
   );
   const { snapshot, ui } = pendingInput(property);
   assert.equal("prefill" in ui, false);
@@ -212,14 +225,14 @@ test("an invalid dynamic default fails before the field opens", () => {
   const notNumber =
     "The default answer of askNumber must be a finite number. Ask without 'default:' when there is no number to offer.";
   const cases = [
-    ["let answer = askText default: value", 5, notText],
+    ["let answer = askText default: value\nexit", 5, notText],
     [
-      "let answer = askText default: value",
+      "let answer = askText default: value\nexit",
       " \n",
       "The default answer of askText must contain a non-whitespace character. Ask without 'default:' when there is no answer to offer.",
     ],
-    ["let answer = askNumber default: value", "10", notNumber],
-    ["let answer = askNumber default: value", null, notNumber],
+    ["let answer = askNumber default: value\nexit", "10", notNumber],
+    ["let answer = askNumber default: value\nexit", null, notNumber],
   ] as const;
   for (const [source, value, message] of cases) {
     const plan = compileValidPlan(source, { globals: ["value"] });
@@ -241,8 +254,8 @@ test("a computed default keeps its runtime arithmetic errors whether or not the 
   for (const hint of ['"N"', "hint"]) {
     for (const source of [
       // A variable keeps the overflow a runtime error; a visible one is a compile error.
-      `let big = 1e308\nlet answer = askNumber ${hint}, default: 1 / (big * 10)`,
-      `let big = 1e308\nlet answer = askText ${hint}, default: "\${1 / (big * 10)}"`,
+      `let big = 1e308\nlet answer = askNumber ${hint}, default: 1 / (big * 10)\nexit`,
+      `let big = 1e308\nlet answer = askText ${hint}, default: "\${1 / (big * 10)}"\nexit`,
     ]) {
       const plan = compileValidPlan(source, { globals: ["hint"] });
       const failed = run(plan, createFreshRuntimeSnapshot(plan, { globals: { hint: "N" } }));
@@ -253,14 +266,16 @@ test("a computed default keeps its runtime arithmetic errors whether or not the 
 });
 
 test("plan and checkpoint validation reject a prefill that is not a valid answer", () => {
-  const plan = structuredClone(compileValidPlan("let answer = askNumber default: 3"));
+  const plan = structuredClone(compileValidPlan("let answer = askNumber default: 3\nexit"));
   const interaction = plan.instructions.find((instruction) => instruction.kind === "interaction");
   assert.ok(interaction?.kind === "interaction" && "ui" in interaction);
   // EVIDENCE: fixture replaces only the static number prefill with text that is not a number.
   (interaction.ui as { prefill: string }).prefill = "three";
   assert.equal(validateInstructionPlan(plan).valid, false);
 
-  const valid = compileValidPlan("let answer = askText default: value", { globals: ["value"] });
+  const valid = compileValidPlan("let answer = askText default: value\nexit", {
+    globals: ["value"],
+  });
   const { snapshot } = pendingInput(valid, { value: "Ada" });
   const tampered = structuredClone(snapshot);
   assert.ok(tampered.foregroundAction?.kind === "interaction");
@@ -270,7 +285,10 @@ test("plan and checkpoint validation reject a prefill that is not a valid answer
 });
 
 test("a retained settlement keeps the prefill its field presented", () => {
-  for (const source of ["let answer = askText default: value", "let answer = askText value"]) {
+  for (const source of [
+    "let answer = askText default: value\nexit",
+    "let answer = askText value\nexit",
+  ]) {
     const plan = compileValidPlan(source, { globals: ["value"] });
     const { snapshot } = pendingInput(plan, { value: "Ada" });
     const done = run(plan, submit(plan, snapshot, "Grace").snapshot).snapshot;
@@ -288,7 +306,9 @@ test("a retained settlement keeps the prefill its field presented", () => {
 });
 
 test("the Player composer receives the default answer, also after a restore", () => {
-  const session = createPlayerRuntimeSession('let answer = askNumber "How many?", default: 12');
+  const session = createPlayerRuntimeSession(
+    'let answer = askNumber "How many?", default: 12\nexit',
+  );
   const expected = {
     kind: "ask-number",
     accessibleName: "Number",
@@ -300,7 +320,7 @@ test("the Player composer receives the default answer, also after a restore", ()
     playerRuntimeForeground(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session))),
     expected,
   );
-  const withoutDefault = createPlayerRuntimeSession('let answer = askText "Name?"');
+  const withoutDefault = createPlayerRuntimeSession('let answer = askText "Name?"\nexit');
   assert.equal(
     playerRuntimeForeground(withoutDefault)?.kind === "ask-text" &&
       "prefill" in playerRuntimeForeground(withoutDefault)!,

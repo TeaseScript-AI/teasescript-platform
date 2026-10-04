@@ -90,7 +90,7 @@ test("each typed place rejects a value of another type that the compiler cannot 
       "pick(base)",
     ],
   ] as const) {
-    assert.deepEqual(failure(PICK + statements), ["TSR058", message, span], statements);
+    assert.deepEqual(failure(`${PICK}${statements}\nexit`), ["TSR058", message, span], statements);
   }
 });
 
@@ -121,7 +121,11 @@ test("a value with unknown parts is checked part by part", () => {
       "'best' holds a whole number (integer) or null, so it cannot take a number.",
     ],
   ] as const) {
-    assert.deepEqual(failure(PICK + statements)?.slice(0, 2), ["TSR058", message], statements);
+    assert.deepEqual(
+      failure(`${PICK}${statements}\nexit`)?.slice(0, 2),
+      ["TSR058", message],
+      statements,
+    );
   }
 });
 
@@ -144,6 +148,7 @@ test("values that fit their place pass the runtime check unchanged", () => {
         "function shout(times = 1) {\n    return times\n}",
         "let shouted = shout(pick(3))",
         'say "${count} ${ratio} ${none.length} ${maybe} ${best} ${shouted}"',
+        "exit",
       ].join("\n"),
   );
   assert.equal(result.snapshot.failure, null);
@@ -175,6 +180,7 @@ test("checked programs resume equivalently from a checkpoint at every instructio
       "door.locked = slow(false)",
       "let total = shout() + shout(slow(4)) + rank(false)",
       'say "${count} ${items[0]} ${items[1]} ${door.locked} ${total}"',
+      "exit",
     ].join("\n"),
   );
 });
@@ -224,6 +230,7 @@ test("plan validation rejects malformed type checks at their paths", () => {
         "items.add(pick(2))",
         'let door = { locked: true, name: "x" }',
         "door = pick(door)",
+        "exit",
       ].join("\n"),
   );
   type Mutable = Record<string, unknown>;

@@ -1,6 +1,7 @@
 import type {
   ForStatement,
   FunctionParameter,
+  GlobalStatement,
   LetStatement,
   ScalarTypeName,
   TypeAnnotation,
@@ -86,8 +87,11 @@ function scalar(name: ScalarTypeName): StaticType {
  */
 export type Origin = Declaration | PartOrigin;
 
-/** The declaration of a variable without a type annotation: `let`, a parameter with a default, or a loop variable. */
-export type Declaration = LetStatement | FunctionParameter | ForStatement;
+/**
+ * The declaration of a variable without a type annotation: `let`, `global`, a parameter with a default, or a loop
+ * variable.
+ */
+export type Declaration = LetStatement | GlobalStatement | FunctionParameter | ForStatement;
 
 /**
  * An element or property inside a variable without a type annotation, which a number may derive from: the variable and

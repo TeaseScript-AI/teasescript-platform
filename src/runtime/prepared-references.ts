@@ -18,7 +18,7 @@ import {
   type SerializableRuntimeObject,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
-import type { RuntimeSnapshot, RuntimeTemporarySnapshot } from "./state.js";
+import type { RuntimeBindingSnapshot, RuntimeSnapshot, RuntimeTemporarySnapshot } from "./state.js";
 import { isDict, isList, isObject, isSet, isSpeakerReference } from "./value-predicates.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
@@ -28,7 +28,21 @@ export type PreparedReferenceStep =
   | { readonly kind: "index"; readonly index: number }
   | { readonly kind: "key"; readonly key: string };
 
+/** The scope ID by which a prepared reference names the session's globals as its root. */
+export const GLOBAL_SCOPE_ID = -1;
+
+/** The bindings of a scope frame, or with {@link GLOBAL_SCOPE_ID} the session's globals. */
+export function scopeBindings(
+  snapshot: RuntimeSnapshot,
+  scopeId: number,
+): readonly RuntimeBindingSnapshot[] | undefined {
+  return scopeId === GLOBAL_SCOPE_ID
+    ? snapshot.globals
+    : snapshot.frames.find((candidate) => candidate.id === scopeId)?.bindings;
+}
+
 export interface PreparedReferenceDescriptor {
+  /** The scope frame of the root binding, {@link GLOBAL_SCOPE_ID} for a global, or `null` for a captured root. */
   readonly rootFrameId: number | null;
   readonly rootName: string | null;
   readonly path: PreparedReferenceStep[];
@@ -393,8 +407,9 @@ function preparedReferenceRoot(
   descriptor: PreparedReferenceDescriptor,
 ): { readonly found: boolean; readonly value: SerializableRuntimeValue } {
   if (!descriptor.detached && descriptor.rootFrameId !== null && descriptor.rootName !== null) {
-    const frame = snapshot.frames.find((candidate) => candidate.id === descriptor.rootFrameId);
-    const binding = frame?.bindings.find((candidate) => candidate.name === descriptor.rootName);
+    const binding = scopeBindings(snapshot, descriptor.rootFrameId)?.find(
+      (candidate) => candidate.name === descriptor.rootName,
+    );
     return binding === undefined
       ? { found: false, value: null }
       : { found: true, value: binding.value };

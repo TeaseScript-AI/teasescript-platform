@@ -318,7 +318,7 @@ async function constrainedChoicesScenario(cdp) {
     (_, index) =>
       `c${index}: "Option ${index + 1}: select this alternative for the next part of the story"`,
   ).join(", ");
-  await replaceSourceAndRun(cdp, `let answer = choose ${options}`);
+  await replaceSourceAndRun(cdp, `let answer = choose ${options}\nexit`);
   await waitFor(cdp, `document.querySelector('.choice-select option:nth-child(13)') !== null`);
   assertEqual(
     await value(cdp, visible(".choice-buttons")),
@@ -343,7 +343,7 @@ async function constrainedChoicesScenario(cdp) {
 async function replacedCheckpointScenario(cdp) {
   await replaceSourceAndRun(
     cdp,
-    'say "First", instant\nshowButton "A"\nsay "Second", instant\nshowButton "B"',
+    'say "First", instant\nshowButton "A"\nsay "Second", instant\nshowButton "B"\nexit',
   );
   await waitFor(cdp, `document.querySelector('#interaction-controls button')?.textContent === 'A'`);
   await click(cdp, "#save-checkpoint");

@@ -411,8 +411,9 @@ export function skipPlayerRuntimePacing(
 }
 
 /**
- * Records the wall clock and the player's zone and presentation when a restored session continues. They apply from the
- * session's observed time on; call it before the scene clock resumes.
+ * Records the wall clock and the player's zone and presentation when a restored session continues, then runs it as
+ * Start does, so a ready session resumes without waiting for an observation. The capture applies from the session's
+ * observed time on; call it before the scene clock resumes.
  */
 export function continuePlayerRuntimeSession(
   session: PlayerRuntimeSession,
@@ -420,7 +421,12 @@ export function continuePlayerRuntimeSession(
 ): PlayerRuntimeControlResult<ContinueCaptureOutcome> {
   const operation = recordContinueCapture(session.plan, session.snapshot, capture);
   return Object.freeze({
-    session: applyOperation(session, operation.snapshot, operation.events, false),
+    session: applyOperation(
+      session,
+      operation.snapshot,
+      operation.events,
+      operation.outcome.kind === "recorded",
+    ),
     outcome: operation.outcome,
   });
 }

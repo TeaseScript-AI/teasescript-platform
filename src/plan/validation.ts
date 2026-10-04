@@ -9,12 +9,19 @@ import {
   MAX_INTERACTION_OPTION_ENTRIES,
 } from "../interaction-limits.js";
 import { recordValidationTestWork } from "../validation-testing.js";
-import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "../project-paths.js";
-import { INSTRUCTION_PLAN_FORMAT, INSTRUCTION_PLAN_VERSION } from "./model.js";
+import {
+  compareProjectPaths,
+  MAIN_FILE_PATH,
+  packageAssetPathProblem,
+  packagePathProblem,
+} from "../project-paths.js";
+import { normalizeTagName } from "../tags.js";
+import { INSTRUCTION_PLAN_FORMAT, INSTRUCTION_PLAN_VERSION, type Instruction } from "./model.js";
 import {
   type PlanFileBoundaries,
   analyzeInstructionStream,
   collectFunctionIds,
+  validateLabelPositions,
   expressionMayReferenceTemporary,
 } from "./instruction-stream-analyses.js";
 import {
@@ -63,6 +70,7 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
   }
   // After the revision checks, so another revision's fields report that revision as unsupported first.
   rejectUnknownFields(value, PLAN_FIELDS, "$", errors);
+  validatePlanImages(value.images, errors);
   const temporaryCount = nonNegativeSafeInteger(value.temporaryCount) ? value.temporaryCount : -1;
   if (temporaryCount < 0) {
     errors.push(
@@ -76,7 +84,7 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
   if (!Array.isArray(value.instructions)) {
     errors.push(planError("TSC002", "Instructions must be an array.", "$.instructions"));
   } else {
-    const files = validatePlanFiles(value.files, value.instructions.length, errors);
+    const files = validatePlanFiles(value.files, value.instructions, errors);
     const functionIds = collectFunctionIds(value.functions);
     for (let index = 0; index < value.instructions.length; index += 1) {
       validateInstruction(
@@ -89,12 +97,216 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
         errors,
       );
     }
+    validateStartupPrefix(
+      value.instructions,
+      files,
+      Array.isArray(value.files) ? value.files.length : 0,
+      errors,
+    );
     analyzeInstructionStream(value.instructions, value.functions, files, errors);
+    if (errors.length === 0 && files !== null) {
+      // EVIDENCE: validation: every instruction passed its shape check above, with no error.
+      validateLabelPositions(value.instructions as readonly Instruction[], files, errors);
+    }
   }
   return Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
 }
 
-const PLAN_FIELDS = ["format", "version", "files", "temporaryCount", "functions", "instructions"];
+/**
+ * The start values of globals and speakers lead the root region of `main.tease`, which sets them up once, in order,
+ * before the story runs (ADR 0022 §6). Each sets up another name, refers to the file whose source it comes from, and
+ * uses only literals, the globals set up before it, operators, and `load`; no control flow leads back into them.
+ */
+function validateStartupPrefix(
+  instructions: readonly unknown[],
+  files: readonly PlanFileBoundaries[] | null,
+  fileCount: number,
+  errors: PlanValidationError[],
+): void {
+  let prefixEnd = 0;
+  while (isStartupDeclaration(instructions[prefixEnd])) prefixEnd += 1;
+  // The first position of each name in the prefix, so a start value can tell the globals set up after it.
+  const positions = new Map<unknown, number>();
+  for (let index = prefixEnd - 1; index >= 0; index -= 1) {
+    const instruction = instructions[index];
+    if (isRecord(instruction)) positions.set(instruction.name, index);
+  }
+  // A label stands after the startup, so a goto never leads into it.
+  for (const label of files?.[0]?.labelInstructions ?? [])
+    if (label < prefixEnd)
+      errors.push(
+        planError(
+          "TSC002",
+          "A label cannot stand in the start of main.tease, which sets up the globals once.",
+          "$.files[0].labels",
+        ),
+      );
+  const names = new Set<string>();
+  instructions.forEach((instruction, index) => {
+    const path = `$.instructions[${index}]`;
+    if (!isRecord(instruction)) return;
+    const targets =
+      typeof instruction.kind === "string" ? CONTROL_TARGETS.get(instruction.kind) : [];
+    for (const field of targets ?? [])
+      if (typeof instruction[field] === "number" && instruction[field] < prefixEnd)
+        errors.push(
+          planError(
+            "TSC002",
+            "Control flow cannot lead back into the start of main.tease, which sets up the globals once.",
+            `${path}.${field}`,
+          ),
+        );
+    if (!isStartupDeclaration(instruction)) return;
+    if (index >= prefixEnd || (files !== null && index >= files[0]!.rootEndInstruction))
+      errors.push(
+        planError(
+          "TSC002",
+          "Globals and speakers are set up only at the start of main.tease.",
+          path,
+        ),
+      );
+    if (!nonNegativeSafeInteger(instruction.file) || instruction.file >= fileCount)
+      errors.push(
+        planError("TSC002", "The source file of a start value is invalid.", `${path}.file`),
+      );
+    if (typeof instruction.name === "string") {
+      if (names.has(instruction.name))
+        errors.push(planError("TSC002", "Each global and speaker is set up once.", `${path}.name`));
+      names.add(instruction.name);
+    }
+    // A speaker's properties may read the speaker itself, which is set up before them.
+    const firstLater = instruction.kind === "declareSpeaker" ? index + 1 : index;
+    const values =
+      instruction.kind === "declareGlobal"
+        ? [{ value: instruction.value, path: `${path}.value` }]
+        : Array.isArray(instruction.properties)
+          ? instruction.properties.map((property: unknown, propertyIndex) => ({
+              value: isRecord(property) ? property.value : undefined,
+              path: `${path}.properties[${propertyIndex}].value`,
+            }))
+          : [];
+    for (const { value, path: valuePath } of values)
+      if (!startValueAccepted(value, positions, firstLater))
+        errors.push(
+          planError(
+            "TSC002",
+            "A start value uses only literals, globals set up before it, operators, and load.",
+            valuePath,
+          ),
+        );
+  });
+}
+
+function isStartupDeclaration(instruction: unknown): instruction is Record<string, unknown> {
+  return (
+    isRecord(instruction) &&
+    (instruction.kind === "declareGlobal" || instruction.kind === "declareSpeaker")
+  );
+}
+
+/** The fields of each instruction kind that name an instruction where execution continues. */
+const CONTROL_TARGETS: ReadonlyMap<string, readonly string[]> = new Map([
+  ["goto", ["target"]],
+  ["jump", ["target"]],
+  ["jumpIfFalse", ["target"]],
+  ["loopStart", ["target", "continueTarget"]],
+  ["loopControl", ["target"]],
+  ["prepareParameterDefault", ["target"]],
+  ["callFunction", ["returnInstruction"]],
+]);
+
+/**
+ * Whether a start value stays in the accepted family: no call, which could run a host effect or change a value, nor a
+ * tag query, which reads like one, no temporary or prepared reference, which only instructions after it can produce, and no global set up later. The
+ * expression's own shape is validated separately; here every nested record is visited, and the only records that use
+ * these kinds are expressions.
+ */
+function startValueAccepted(
+  value: unknown,
+  positions: ReadonlyMap<unknown, number>,
+  firstLater: number,
+): boolean {
+  const work = [value];
+  while (work.length > 0) {
+    const node = work.pop();
+    if (Array.isArray(node)) {
+      for (const item of node) work.push(item);
+      continue;
+    }
+    if (!isRecord(node)) continue;
+    if (
+      node.kind === "call" ||
+      node.kind === "tagQuery" ||
+      node.kind === "temporary" ||
+      node.kind === "preparedReference"
+    )
+      return false;
+    if (node.kind === "identifier" && (positions.get(node.name) ?? -1) >= firstLater) return false;
+    for (const nested of Object.values(node)) work.push(nested);
+  }
+  return true;
+}
+
+const PLAN_FIELDS = [
+  "format",
+  "version",
+  "files",
+  "images",
+  "temporaryCount",
+  "functions",
+  "instructions",
+];
+
+/** The image catalog: unique package paths in order, each with canonical tags in name order (ADR 0023). */
+function validatePlanImages(value: unknown, errors: PlanValidationError[]): void {
+  if (!Array.isArray(value)) {
+    errors.push(planError("TSC002", "Plan images must be an array.", "$.images"));
+    return;
+  }
+  let previousPath: string | null = null;
+  for (let index = 0; index < value.length; index += 1) {
+    const image: unknown = value[index];
+    const path = `$.images[${index}]`;
+    if (!isRecord(image) || !hasExactKeys(image, ["path", "tags"])) {
+      errors.push(planError("TSC002", "A plan image has a path and tags.", path));
+      continue;
+    }
+    if (typeof image.path !== "string" || packageAssetPathProblem(image.path) !== null) {
+      errors.push(planError("TSC002", "A plan image path is a package path.", `${path}.path`));
+    } else if (previousPath !== null && !(previousPath < image.path)) {
+      errors.push(planError("TSC002", "Plan images are unique and in path order.", `${path}.path`));
+    } else {
+      previousPath = image.path;
+    }
+    if (!Array.isArray(image.tags)) {
+      errors.push(planError("TSC002", "Image tags must be an array.", `${path}.tags`));
+      continue;
+    }
+    let previousName: string | null = null;
+    for (let tagIndex = 0; tagIndex < image.tags.length; tagIndex += 1) {
+      const tag: unknown = image.tags[tagIndex];
+      const tagPath = `${path}.tags[${tagIndex}]`;
+      if (
+        !isRecord(tag) ||
+        !hasExactKeys(tag, ["name", "value"]) ||
+        typeof tag.name !== "string" ||
+        normalizeTagName(tag.name) !== tag.name ||
+        (previousName !== null && !(previousName < tag.name)) ||
+        !(tag.value === null || (typeof tag.value === "number" && Number.isFinite(tag.value)))
+      ) {
+        errors.push(
+          planError(
+            "TSC002",
+            "An image tag has a canonical name, unique and in name order, and a finite number or null.",
+            tagPath,
+          ),
+        );
+        continue;
+      }
+      previousName = tag.name;
+    }
+  }
+}
 
 const PROPERTY_FIELDS = ["name", "value", "span"];
 
@@ -104,17 +316,74 @@ const FILE_FIELDS = [
   "startInstruction",
   "rootEndInstruction",
   "endInstruction",
+  "labels",
 ];
+
+const LABEL_FIELDS = ["name", "instruction"];
 
 /**
  * Checks the file table: `main.tease` first, the other package paths in order, and blocks that cover the instruction
  * stream one after another. Returns the boundaries for the stream analyses, or `null` when they are unusable.
  */
+/** Label names are unique in their file and stand in source order inside its root region. */
+function validatePlanLabels(
+  value: unknown,
+  start: number,
+  rootEnd: number,
+  path: string,
+  errors: PlanValidationError[],
+): ReadonlySet<number> {
+  const instructions = new Set<number>();
+  if (!Array.isArray(value)) {
+    errors.push(planError("TSC002", "Plan file labels must be an array.", path));
+    return instructions;
+  }
+  const names = new Set<string>();
+  let previous = start;
+  value.forEach((label: unknown, index) => {
+    const labelPath = `${path}[${index}]`;
+    if (!isRecord(label)) {
+      errors.push(planError("TSC002", "Plan label must be an object.", labelPath));
+      return;
+    }
+    rejectUnknownFields(label, LABEL_FIELDS, labelPath, errors);
+    if (typeof label.name !== "string" || !IDENTIFIER.test(label.name) || names.has(label.name)) {
+      errors.push(
+        planError("TSC002", "Plan label names must be unique identifiers.", `${labelPath}.name`),
+      );
+    } else {
+      names.add(label.name);
+    }
+    const instruction = label.instruction;
+    if (
+      typeof instruction !== "number" ||
+      !Number.isSafeInteger(instruction) ||
+      instruction < previous ||
+      instruction >= rootEnd
+    ) {
+      errors.push(
+        planError(
+          "TSC002",
+          "Plan labels stand in source order inside their file's root region.",
+          `${labelPath}.instruction`,
+        ),
+      );
+      return;
+    }
+    previous = instruction;
+    instructions.add(previous);
+  });
+  return instructions;
+}
+
+const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+
 function validatePlanFiles(
   value: unknown,
-  instructionCount: number,
+  instructions: readonly unknown[],
   errors: PlanValidationError[],
 ): PlanFileBoundaries[] | null {
+  const instructionCount = instructions.length;
   if (!Array.isArray(value) || value.length === 0) {
     errors.push(planError("TSC002", "Plan files must be a non-empty array.", "$.files"));
     return null;
@@ -153,14 +422,29 @@ function validatePlanFiles(
       !validInstructionBoundary(rootEnd, instructionCount) ||
       !validInstructionBoundary(end, instructionCount) ||
       start !== expectedStart ||
-      rootEnd < start ||
+      rootEnd <= start ||
       end < rootEnd
     ) {
       errors.push(planError("TSC002", "Plan file instruction range is impossible.", path));
       expectedStart = -1;
       return;
     }
-    boundaries.push({ startInstruction: start, rootEndInstruction: rootEnd, endInstruction: end });
+    const closing = instructions[rootEnd - 1];
+    if (!isRecord(closing) || closing.kind !== "end") {
+      errors.push(
+        planError(
+          "TSC002",
+          "A file's root region must close with an end.",
+          `${path}.rootEndInstruction`,
+        ),
+      );
+    }
+    boundaries.push({
+      startInstruction: start,
+      rootEndInstruction: rootEnd,
+      endInstruction: end,
+      labelInstructions: validatePlanLabels(file.labels, start, rootEnd, `${path}.labels`, errors),
+    });
     expectedStart = end;
   });
   if (expectedStart !== instructionCount) {
@@ -176,12 +460,14 @@ function validatePlanFiles(
 
 /** Fields of instruction kinds whose case in validateInstruction does not already require exact keys. */
 const INSTRUCTION_FIELDS = fieldsByKind([
-  ["declareSpeaker", "name", "properties"],
-  ["setDeclaredSpeakerProperty", "speaker", "name", "value"],
+  ["declareGlobal", "name", "value", "typeCheck", "file"],
+  ["declareSpeaker", "name", "properties", "file"],
   ["setDefaultSpeaker", "name"],
   ["enterScope"],
   ["leaveScope"],
   ["exit"],
+  ["end"],
+  ["goto", "target"],
   ["declareBinding", "name", "value", "typeCheck"],
   ["prepareReference", "expression", "destinationTemporary"],
   ["validateAssignmentTarget", "target"],
@@ -246,6 +532,7 @@ const EXPRESSION_FIELDS = fieldsByKind([
   ["typeTest", "value", "type", "negated"],
   ["binary", "operator", "left", "right"],
   ["range", "start", "end", "inclusive"],
+  ["tagQuery", "catalog", "select", "operands", "steps"],
 ]);
 
 function fieldsByKind(
@@ -278,10 +565,10 @@ function validateInstruction(
       requireString(value.name, `${path}.name`, errors);
       validateProperties(value.properties, `${path}.properties`, errors, temporaryCount);
       return;
-    case "setDeclaredSpeakerProperty":
-      requireString(value.speaker, `${path}.speaker`, errors);
+    case "declareGlobal":
       requireString(value.name, `${path}.name`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      validateOptionalTypeCheck(value, path, errors);
       return;
     case "setDefaultSpeaker":
       requireString(value.name, `${path}.name`, errors);
@@ -289,6 +576,12 @@ function validateInstruction(
     case "enterScope":
     case "leaveScope":
     case "exit":
+    case "end":
+      return;
+    case "goto":
+      if (!validInstructionBoundary(value.target, instructionCount)) {
+        errors.push(planError("TSC002", "Goto target is outside the plan.", `${path}.target`));
+      }
       return;
     case "declareBinding":
       requireString(value.name, `${path}.name`, errors);
@@ -1647,6 +1940,30 @@ function validateExpressionNode(
       pending.push({ value: value.end, path: `${path}.end`, assignmentTarget: false });
       pending.push({ value: value.start, path: `${path}.start`, assignmentTarget: false });
       return;
+    case "tagQuery": {
+      if (value.catalog !== "images" || !isOneOf(value.select, ["random", "list"])) {
+        errors.push(planError("TSC002", "A tag query searches images for one or a list.", path));
+      }
+      const operandCount = validateTagQuerySteps(value.steps, `${path}.steps`, errors);
+      if (!Array.isArray(value.operands) || value.operands.length !== operandCount) {
+        errors.push(
+          planError(
+            "TSC002",
+            "A tag query has one operand for each comparison and tag list.",
+            `${path}.operands`,
+          ),
+        );
+        return;
+      }
+      for (let index = value.operands.length - 1; index >= 0; index -= 1) {
+        pending.push({
+          value: value.operands[index],
+          path: `${path}.operands[${index}]`,
+          assignmentTarget: false,
+        });
+      }
+      return;
+    }
     case "storageLoad":
       if (!hasExactKeys(value, ["kind", "key", "default", "span"])) {
         errors.push(planError("TSC002", "Storage-load expression has an invalid shape.", path));
@@ -1659,6 +1976,75 @@ function validateExpressionNode(
     default:
       errors.push(planError("TSC002", `Unknown expression kind '${value.kind}'.`, `${path}.kind`));
   }
+}
+
+const TAG_COMPARISON_OPERATORS = ["==", "!=", "<", "<=", ">", ">="];
+
+/**
+ * Checks that tag query steps form one complete postfix expression, or none. Returns the number of operands the steps
+ * read, or -1 when the steps are invalid.
+ */
+function validateTagQuerySteps(
+  value: unknown,
+  path: string,
+  errors: PlanValidationError[],
+): number {
+  if (!Array.isArray(value)) {
+    errors.push(planError("TSC002", "Tag query steps must be an array.", path));
+    return -1;
+  }
+  let depth = 0;
+  let operands = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const step: unknown = value[index];
+    const stepPath = `${path}[${index}]`;
+    let valid = isRecord(step);
+    if (isRecord(step)) {
+      switch (step.kind) {
+        case "tag":
+          valid = hasExactKeys(step, ["kind", "name"]) && isCanonicalTagName(step.name);
+          depth += 1;
+          break;
+        case "tagCompare":
+          valid =
+            hasExactKeys(step, ["kind", "name", "operator"]) &&
+            isCanonicalTagName(step.name) &&
+            isOneOf(step.operator, TAG_COMPARISON_OPERATORS);
+          depth += 1;
+          operands += 1;
+          break;
+        case "tagList":
+          valid =
+            hasExactKeys(step, ["kind", "option"]) && isOneOf(step.option, ["all", "none", "any"]);
+          depth += 1;
+          operands += 1;
+          break;
+        case "not":
+          valid = hasExactKeys(step, ["kind"]) && depth >= 1;
+          break;
+        case "and":
+        case "or":
+          valid = hasExactKeys(step, ["kind"]) && depth >= 2;
+          depth -= 1;
+          break;
+        default:
+          valid = false;
+      }
+    }
+    if (!valid) {
+      errors.push(planError("TSC002", "Invalid tag query step.", stepPath));
+      return -1;
+    }
+  }
+  if (value.length > 0 && depth !== 1) {
+    errors.push(planError("TSC002", "Tag query steps must form one predicate.", path));
+    return -1;
+  }
+  return operands;
+}
+
+function isCanonicalTagName(value: unknown): boolean {
+  return typeof value === "string" && normalizeTagName(value) === value;
 }
 
 function validatePreparedAssignmentTarget(

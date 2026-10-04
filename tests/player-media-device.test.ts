@@ -21,7 +21,7 @@ import { harness } from "./helpers/player-media.js";
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 test("device loads resolved audio once, plays it, and completes blocking playback from measured progress", async () => {
-  const player = harness('playAudio "sounds/bell.mp3"\nsay "after", instant');
+  const player = harness('playAudio "sounds/bell.mp3"\nsay "after", instant\nexit');
   player.start();
   const [element] = player.elements;
   assert.equal(element?.src, "asset:sounds/bell.mp3");
@@ -44,13 +44,13 @@ test("device loads resolved audio once, plays it, and completes blocking playbac
 
 test("video and unavailable sources are reported as failed so the script continues", () => {
   // Scoped to the current Player, which cannot play video yet; replace this row when video playback lands.
-  const video = harness('playVideo "videos/intro.mp4"\nsay "after video", instant');
+  const video = harness('playVideo "videos/intro.mp4"\nsay "after video", instant\nexit');
   video.start();
   assert.deepEqual(video.loads, [[1, { kind: "failed", message: VIDEO_UNSUPPORTED_MESSAGE }]]);
   assert.deepEqual(video.texts(), ["after video"]);
 
   const missing = harness(
-    'playAudio "https://example.com/a.mp3"\nsay "after", instant',
+    'playAudio "https://example.com/a.mp3"\nsay "after", instant\nexit',
     () => null,
   );
   missing.start();
@@ -60,7 +60,7 @@ test("video and unavailable sources are reported as failed so the script continu
 
 test("device repeats the requested range and stops audible output at the projected end", () => {
   const player = harness(
-    'playAudio(file: "music.mp3", startAt: 1 s, endAt: 2 s, repeat: 3 times, volume: 0.5)\nsay "done", instant',
+    'playAudio(file: "music.mp3", startAt: 1 s, endAt: 2 s, repeat: 3 times, volume: 0.5)\nsay "done", instant\nexit',
   );
   player.start();
   const [element] = player.elements;
@@ -88,6 +88,7 @@ test("pause, resume and a cue seek reposition the element for each new segment",
       "wait 1",
       "music.resume()",
       "wait 10",
+      "exit",
     ].join("\n"),
   );
   player.start();
@@ -104,7 +105,7 @@ test("pause, resume and a cue seek reposition the element for each new segment",
 });
 
 test("refused playback reports no progress until a deliberate retry succeeds", async () => {
-  const player = harness('playAudio "bell.mp3"\nsay "after", instant');
+  const player = harness('playAudio "bell.mp3"\nsay "after", instant\nexit');
   player.start();
   const [element] = player.elements;
   element!.refuse = true;
@@ -130,6 +131,7 @@ test("restore reconnects a fresh element at the saved playhead without reloading
     "}",
     "wait 10",
     'say "done", instant',
+    "exit",
   ].join("\n");
   const original = harness(source);
   original.start();
@@ -162,6 +164,7 @@ test("a stall reports unchanged progress, so a nearby cue waits for actual playb
       "  }",
       "}",
       "wait 30",
+      "exit",
     ].join("\n"),
   );
   player.start();
@@ -175,7 +178,7 @@ test("a stall reports unchanged progress, so a nearby cue waits for actual playb
 });
 
 test("an element error after loading stalls progress instead of inventing playback or a second load report", () => {
-  const player = harness('let music = playAudio async "music.mp3"\nwait 30');
+  const player = harness('let music = playAudio async "music.mp3"\nwait 30\nexit');
   player.start();
   const [element] = player.elements;
   element!.metadata(10);
@@ -190,7 +193,7 @@ test("an element error after loading stalls progress instead of inventing playba
 });
 
 test("a media error clears the refused-playback state it can no longer retry", async () => {
-  const player = harness('let music = playAudio async "music.mp3"\nwait 30');
+  const player = harness('let music = playAudio async "music.mp3"\nwait 30\nexit');
   player.start();
   const [element] = player.elements;
   element!.refuse = true;
@@ -203,7 +206,7 @@ test("a media error clears the refused-playback state it can no longer retry", a
 
 test("a retry never plays audio the script has paused", async () => {
   const player = harness(
-    'let music = playAudio async "music.mp3"\nwait 0.1\nmusic.pause()\nwait 10',
+    'let music = playAudio async "music.mp3"\nwait 0.1\nmusic.pause()\nwait 10\nexit',
   );
   player.start();
   const [element] = player.elements;
@@ -270,7 +273,9 @@ function queued(initial: PlayerRuntimeSession) {
 
 test("a load report applies at the current scene time, not the last observation", async () => {
   const host = queued(
-    createPlayerRuntimeSession('playAudio async "bell.mp3"\nwait 50 ms\nsay "after", instant'),
+    createPlayerRuntimeSession(
+      'playAudio async "bell.mp3"\nwait 50 ms\nsay "after", instant\nexit',
+    ),
   );
   host.at(75);
   host.queue.add(1, { kind: "loaded", durationMs: 1000 });
@@ -284,7 +289,7 @@ test("a load report applies at the current scene time, not the last observation"
 
 test("an execution-pending load report is delivered after the engine ran queued work", async () => {
   const source =
-    'timer async 1 s {\n  say "timer", instant\n}\nplayVideo "intro.mp4"\nsay "after", instant';
+    'timer async 1 s {\n  say "timer", instant\n}\nplayVideo "intro.mp4"\nsay "after", instant\nexit';
   const started = createPlayerRuntimeSession(source);
   // A canonical checkpoint whose timer expiry is queued but has not run yet.
   const observed = observeTime(started.plan, started.snapshot, 2000);
@@ -310,7 +315,7 @@ test("an execution-pending load report is delivered after the engine ran queued 
 
 test("a released element is reused for the next media without keeping the previous media's listeners", () => {
   const player = harness(
-    'playAudio "sounds/a.mp3"\nplayAudio "sounds/b.mp3"\nsay "after", instant',
+    'playAudio "sounds/a.mp3"\nplayAudio "sounds/b.mp3"\nsay "after", instant\nexit',
     undefined,
     { reuse: true },
   );
@@ -333,14 +338,14 @@ test("a released element is reused for the next media without keeping the previo
 });
 
 test("a late play() result of a released media never pauses the element's next media", async () => {
-  const player = harness('playAudio "sounds/a.mp3"', undefined, { reuse: true });
+  const player = harness('playAudio "sounds/a.mp3"\nexit', undefined, { reuse: true });
   player.start();
   const [element] = player.elements;
   element!.deferPlays = true;
   element!.metadata(5);
   assert.equal(element!.pendingPlays.length, 1);
   // Another session takes over the element while the first play() is still pending.
-  player.replace(createPlayerRuntimeSession('playAudio "sounds/b.mp3"'));
+  player.replace(createPlayerRuntimeSession('playAudio "sounds/b.mp3"\nexit'));
   assert.equal(element!.src, "asset:sounds/b.mp3");
   element!.metadata(5);
   element!.pendingPlays[0]!();

@@ -52,7 +52,7 @@ try {
   if (result.code !== 0) throw new Error(`Chromium exited with ${result.code}: ${result.stderr}`);
   checkEditorDom(result.stdout);
   console.log(
-    "editor-browser-smoke: PASS built Vue/Monaco editor starts with only the local preview reachable (no CDN)",
+    "editor-browser-smoke: PASS built Vue/Monaco editor and its file overview start with only the local preview reachable (no CDN)",
   );
 } finally {
   if (preview.exitCode === null && preview.signalCode === null) {
@@ -73,6 +73,13 @@ function checkEditorDom(dom) {
   }
   if (!dom.includes('class="monaco-editor', readyTag.index + readyTag[0].length)) {
     throw new Error("Monaco did not render an editor inside the ready container.");
+  }
+  // The file overview compiles the sample project in the browser and shows what the file headers describe.
+  if ((dom.match(/<li[^>]*\sdata-file-path="/g) ?? []).length < 2) {
+    throw new Error("The file overview does not list the sample project's files.");
+  }
+  if (!dom.includes('class="file-description"')) {
+    throw new Error("The file overview shows no description from a file header.");
   }
 }
 

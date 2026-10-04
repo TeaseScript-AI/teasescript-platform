@@ -111,7 +111,7 @@ test("each diagnostic names its file, and an error in any file leaves no plan", 
 
 test("the session starts in main.tease and never runs into the next file", () => {
   const plan = compiledPlan([
-    { path: "main.tease", source: 'say "main"' },
+    { path: "main.tease", source: 'say "main"\nexit' },
     { path: "after.tease", source: 'say "after"\nexit' },
   ]);
   const finished = run(plan, createImmediatePacingRuntimeSnapshot(plan));
@@ -329,9 +329,10 @@ test("a host stack failure while the finished plan is validated is still TSC007"
     }
     return original(value);
   };
+  const source = "let value = 1\nexit";
   let result: ReturnType<typeof compileSource>;
   try {
-    result = compileSource("let value = 1");
+    result = compileSource(source);
   } finally {
     Object.keys = original;
   }
@@ -342,6 +343,6 @@ test("a host stack failure while the finished plan is validated is still TSC007"
       diagnostic.span.start.offset,
       diagnostic.span.end.offset,
     ]),
-    [["TSC007", 0, 13]],
+    [["TSC007", 0, source.length]],
   );
 });

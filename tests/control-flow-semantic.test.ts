@@ -13,7 +13,7 @@ test("rejects break and continue outside loops", () => {
 
 test("accepts loop control in nested loops", () => {
   const result = compileSource(
-    ["repeat 2 {", "  while true {", "    break", "  }", "  continue", "}"].join("\n"),
+    ["repeat 2 {", "  while true {", "    break", "  }", "  continue", "}", "exit"].join("\n"),
   );
 
   assert.deepEqual(result.diagnostics, []);

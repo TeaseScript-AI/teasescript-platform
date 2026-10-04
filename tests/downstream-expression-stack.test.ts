@@ -115,7 +115,7 @@ test("expression continuations preserve short circuit, references, RNG, and user
     texts.join(),
   );
   // The random target is drawn exactly once, whatever value the seeded generator produces.
-  const oneDraw = compileValidPlan("random()");
+  const oneDraw = compileValidPlan("random()\nexit");
   assert.deepEqual(
     result.finalSnapshot.rng,
     run(oneDraw, createFreshRuntimeSnapshot(oneDraw, { seed: 42 })).snapshot.rng,

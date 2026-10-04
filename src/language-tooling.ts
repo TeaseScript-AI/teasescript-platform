@@ -1,3 +1,4 @@
+import { sessionDeclarations } from "./project-globals.js";
 import type {
   Expression,
   InteractionExpression,
@@ -8,10 +9,16 @@ import type {
   Statement,
   TimerParts,
 } from "./ast.js";
-import { compileSource } from "./compiler.js";
-import { mediaHandlerBlocks, mediaOperands, showButtonOptions } from "./expression-children.js";
+import { compileProject, compileSource } from "./compiler.js";
+import {
+  mediaHandlerBlocks,
+  mediaOperands,
+  showButtonOptions,
+  tagQueryOperands,
+} from "./expression-children.js";
 import type { Diagnostic } from "./diagnostics.js";
 import { lex } from "./lexer.js";
+import { compareProjectPaths } from "./project-paths.js";
 import { TEASESCRIPT_PROTECTED_NAMES } from "./protected-names.js";
 import {
   createSourcePosition,
@@ -19,6 +26,7 @@ import {
   type SourcePosition,
   type SourceSpan,
 } from "./source.js";
+import type { ScriptHeader } from "./script-header.js";
 import { TokenKind, type Token } from "./token.js";
 
 export interface LanguageDocument {
@@ -29,6 +37,20 @@ export interface LanguageDocument {
 export type LanguagePosition = SourcePosition;
 export type LanguageRange = SourceSpan;
 export type LanguageDiagnostic = Diagnostic;
+
+/** One file of a project, by its path relative to the package root. */
+export interface LanguageProjectFile {
+  readonly path: string;
+  readonly text: string;
+}
+
+/** What an editor's overview of many files shows about one of them. */
+export interface LanguageFileOverview {
+  readonly path: string;
+  /** The file's `---` header, with its title, author, description, and tags; `null` when it has none. */
+  readonly header: ScriptHeader | null;
+  readonly diagnostics: readonly LanguageDiagnostic[];
+}
 
 export type LanguageCompletionKind = "keyword" | "command" | "speaker" | "modifier" | "value";
 
@@ -138,6 +160,33 @@ export function languagePositionAt(document: LanguageDocument, offset: number): 
 
 export function languageDiagnostics(document: LanguageDocument): readonly LanguageDiagnostic[] {
   return compileSource(document.text).diagnostics;
+}
+
+/** Compiles the files as one project and describes each: `main.tease` first, then the others by path. */
+export function languageProjectOverview(
+  files: readonly LanguageProjectFile[],
+): readonly LanguageFileOverview[] {
+  const result = compileProject(files.map(({ path, text }) => ({ path, source: text })));
+  const headers = new Map(result.files.map((file) => [file.path, file.header]));
+  const diagnostics = new Map<string, LanguageDiagnostic[]>();
+  for (const { path, ...diagnostic } of result.diagnostics) {
+    const list = diagnostics.get(path) ?? [];
+    list.push(Object.freeze(diagnostic));
+    diagnostics.set(path, list);
+  }
+  // A project diagnostic may name a path without a file, such as a missing main.tease.
+  const paths = [...new Set([...files.map((file) => file.path), ...diagnostics.keys()])].sort(
+    compareProjectPaths,
+  );
+  return Object.freeze(
+    paths.map((path) =>
+      Object.freeze({
+        path,
+        header: headers.get(path) ?? null,
+        diagnostics: Object.freeze(diagnostics.get(path) ?? []),
+      }),
+    ),
+  );
 }
 
 export function languageCompletions(
@@ -416,10 +465,12 @@ const protectedNames: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_NAMES)
 
 /** Declared speaker names; a protected name such as `set` is an invalid declaration, not a suggestion. */
 function declaredSpeakers(source: string): readonly string[] {
-  const speakers = compileSource(source).program.statements.flatMap((statement) =>
-    statement.kind === "speakerDeclaration" && !protectedNames.has(statement.name.name)
-      ? [statement.name.name]
-      : [],
+  // A speaker belongs to the whole script wherever it is declared.
+  const speakers = sessionDeclarations([compileSource(source).program]).flatMap(
+    ({ declaration }) =>
+      declaration.kind === "speakerDeclaration" && !protectedNames.has(declaration.name.name)
+        ? [declaration.name.name]
+        : [],
   );
   return Object.freeze([...new Set(speakers)]);
 }
@@ -669,6 +720,11 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
     case "letStatement":
       children.push({ kind: "expression", node: statement.initializer });
       return;
+    case "globalStatement":
+      if (statement.assignment !== null)
+        children.push({ kind: "expression", node: statement.assignment.value });
+      children.push({ kind: "expression", node: statement.initial });
+      return;
     case "assignmentStatement":
       children.push({ kind: "expression", node: statement.target });
       children.push({ kind: "expression", node: statement.value });
@@ -744,6 +800,9 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
     case "speakerSetterStatement":
     case "waitStatement":
     case "exitStatement":
+    case "endStatement":
+    case "labelStatement":
+    case "gotoStatement":
     case "breakStatement":
     case "continueStatement":
       return;
@@ -846,6 +905,10 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
       children.push({ kind: "expression", node: expression.key });
       if (expression.defaultValue !== null)
         children.push({ kind: "expression", node: expression.defaultValue });
+      return;
+    case "tagQueryExpression":
+      for (const operand of tagQueryOperands(expression))
+        children.push({ kind: "expression", node: operand });
       return;
     case "identifier":
     case "booleanLiteral":

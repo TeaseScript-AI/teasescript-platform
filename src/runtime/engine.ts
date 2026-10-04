@@ -11,7 +11,7 @@ import {
   type InteractionUiPayload,
   type PlanSourceLocation,
   type PreparedInteractionUiPayload,
-  mainRootEnd,
+  instructionSourcePath,
   mainSourceSpan,
 } from "../plan/model.js";
 import { parseMessageMarkup, type MessageMarkup } from "../message-markup.js";
@@ -44,6 +44,8 @@ import {
   takeSequence,
 } from "./operations/support.js";
 import type { RuntimeOperationResult } from "./operations/model.js";
+import { executeEnd, executeGoto } from "./operations/transfers.js";
+import { detachPreparedReferencesForMutation } from "./prepared-references.js";
 export type {
   ActionCompletionOutcome,
   PendingActionOperationResult,
@@ -53,7 +55,6 @@ export type {
 export { RuntimeDataError } from "./operations/support.js";
 import type {
   ActionRequestedEvent,
-  CompleteEvent,
   ExitEvent,
   InterpreterEvent,
   OutputSpeaker,
@@ -152,7 +153,7 @@ export function executeInstruction(
   capabilities: RuntimeCapabilities = {},
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, inputSnapshot);
-  const context = new RuntimeExecutionContext(captured.snapshot, capabilities);
+  const context = new RuntimeExecutionContext(captured.snapshot, capabilities, captured.plan);
   const instructionsExecuted = executeCapturedInstruction(
     captured.plan,
     captured.snapshot,
@@ -196,27 +197,9 @@ function executeInstructionBoundary(
     return 1;
   }
   if (snapshot.status === "waiting") return 0;
-  if (snapshot.nextInstruction === mainRootEnd(plan) && snapshot.callFrames.length === 0) {
-    // A settled terminal action's commit window closes here; expiry blocks queued before the end still run first.
-    if (snapshot.terminalContinuationHandoff !== null && snapshot.pendingTimerHandlers.length > 0) {
-      snapshot.terminalContinuationHandoff = null;
-      return 1;
-    }
-    stopAllTimersForSessionEnd(snapshot);
-    stopAllMediaForSessionEnd(snapshot);
-    const completeEventAndFutureCompletions = requiredEventSequencesForRootCompletion(snapshot);
-    assertEventSequenceCapacity(snapshot, completeEventAndFutureCompletions);
-    snapshot.terminalContinuationHandoff = null;
-    snapshot.status = "halted";
-    context.events.push(createCompleteEvent(snapshot, rootCompletionSpan(plan)));
-    return 1;
-  }
   const instructionIndex = snapshot.nextInstruction;
-  const instruction = plan.instructions[instructionIndex];
-  if (instruction === undefined) {
-    snapshot.status = "halted";
-    return 0;
-  }
+  // Every region of a validated plan ends in a transfer, so execution never runs past one.
+  const instruction = plan.instructions[instructionIndex]!;
 
   snapshot.status = "running";
   const evaluator = context.evaluator();
@@ -225,25 +208,14 @@ function executeInstructionBoundary(
     if (snapshot.interactionResultHandoff?.continuationInstruction === instructionIndex) {
       snapshot.interactionResultHandoff = null;
     }
-    if (
-      snapshot.status === "running" &&
-      snapshot.callFrames.length === 0 &&
-      snapshot.nextInstruction === mainRootEnd(plan) &&
-      // Blocks queued before the script ends still run first, also behind a terminal commit window.
-      !timerHandlerDispatchable(snapshot) &&
-      !(snapshot.terminalContinuationHandoff !== null && snapshot.pendingTimerHandlers.length > 0)
-    ) {
-      stopAllTimersForSessionEnd(snapshot);
-      stopAllMediaForSessionEnd(snapshot);
-      snapshot.terminalContinuationHandoff = null;
-      snapshot.status = "halted";
-      const completeEventAndFutureCompletions = requiredEventSequencesForRootCompletion(snapshot);
-      assertEventSequenceCapacity(snapshot, completeEventAndFutureCompletions);
-      context.events.push(createCompleteEvent(snapshot, rootCompletionSpan(plan)));
-    }
   } catch (error) {
     if (!(error instanceof RuntimeFault)) throw error;
-    failSnapshot(snapshot, error.toInfo(), context.events);
+    failSnapshot(
+      snapshot,
+      error.toInfo(),
+      instructionSourcePath(plan, instructionIndex),
+      context.events,
+    );
   } finally {
     snapshot.contextualSpeaker = null;
   }
@@ -268,7 +240,7 @@ export function stepValidatedStateToEvent(
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
   const budget = instructionBudget(options.instructionBudget);
-  const context = new RuntimeExecutionContext(snapshot, capabilities);
+  const context = new RuntimeExecutionContext(snapshot, capabilities, plan);
   let instructionsExecuted = 0;
   while (executionRunnable(snapshot) && context.events.length === 0) {
     if (instructionsExecuted >= budget) {
@@ -298,7 +270,7 @@ export function runValidatedState(
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
   const budget = instructionBudget(options.instructionBudget);
-  const context = new RuntimeExecutionContext(snapshot, capabilities);
+  const context = new RuntimeExecutionContext(snapshot, capabilities, plan);
   let instructionsExecuted = 0;
   while (executionRunnable(snapshot)) {
     if (instructionsExecuted >= budget) {
@@ -318,12 +290,26 @@ function executePlannedInstruction(
   events: InterpreterEvent[],
 ): void {
   switch (instruction.kind) {
+    case "declareGlobal": {
+      if (evaluator.binding(instruction.name) !== undefined) {
+        throw fault("TSR001", `Global '${instruction.name}' is already set up.`, instruction.span);
+      }
+      const value = evaluator.evaluateStartValue(instruction.value);
+      if (instruction.typeCheck !== undefined)
+        assertValueType(value, instruction.typeCheck, instruction.value.span);
+      snapshot.globals.push({
+        name: instruction.name,
+        value: cloneCapturedSerializableValue(value),
+      });
+      advance(snapshot);
+      return;
+    }
     case "declareSpeaker": {
       executeSpeakerAtomically(snapshot, evaluator, events, (stagedSnapshot, stagedEvaluator) => {
-        if (findBinding(stagedSnapshot, instruction.name) !== undefined) {
+        if (stagedEvaluator.binding(instruction.name) !== undefined) {
           throw fault(
             "TSR001",
-            `Speaker '${instruction.name}' is already visible in this scope.`,
+            `Speaker '${instruction.name}' is already set up.`,
             instruction.span,
           );
         }
@@ -335,7 +321,7 @@ function executePlannedInstruction(
         };
         stagedSnapshot.nextSpeakerId += 1;
         stagedSnapshot.speakers.push(speaker);
-        currentFrame(stagedSnapshot).bindings.push({
+        stagedSnapshot.globals.push({
           name: instruction.name,
           value: { kind: "speakerReference", speakerId: speaker.id, identifier: instruction.name },
         });
@@ -345,7 +331,7 @@ function executePlannedInstruction(
             throw fault("TSR007", `Duplicate speaker property '${property.name}'.`, property.span);
           }
           const propertyValue = cloneCapturedSerializableValue(
-            stagedEvaluator.evaluate(property.value),
+            stagedEvaluator.evaluateStartValue(property.value),
           );
           if (property.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
             throw fault(
@@ -356,32 +342,6 @@ function executePlannedInstruction(
           }
           speaker.properties.push({ name: property.name, value: propertyValue });
         }
-        advance(stagedSnapshot);
-      });
-      return;
-    }
-    case "setDeclaredSpeakerProperty": {
-      executeSpeakerAtomically(snapshot, evaluator, events, (stagedSnapshot, stagedEvaluator) => {
-        const speaker = stagedEvaluator.speakerByName(instruction.speaker, instruction.span);
-        if (speaker.properties.some((property) => property.name === instruction.name)) {
-          throw fault(
-            "TSR007",
-            `Duplicate speaker property '${instruction.name}'.`,
-            instruction.span,
-          );
-        }
-        stagedSnapshot.contextualSpeaker = speaker.id;
-        const propertyValue = cloneCapturedSerializableValue(
-          stagedEvaluator.evaluate(instruction.value),
-        );
-        if (instruction.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
-          throw fault(
-            "TSR050",
-            "Speaker property 'defaultSaySkippable' must be a boolean.",
-            instruction.span,
-          );
-        }
-        speaker.properties.push({ name: instruction.name, value: propertyValue });
         advance(stagedSnapshot);
       });
       return;
@@ -406,7 +366,9 @@ function executePlannedInstruction(
       advance(snapshot);
       return;
     case "declareBinding": {
-      if (findBinding(snapshot, instruction.name) !== undefined) {
+      // A goto back to an earlier label runs a top-level `let` again, which sets its existing variable anew.
+      const rerun = rerunsTopLevelDeclaration(snapshot, instruction.name);
+      if (!rerun && evaluator.binding(instruction.name) !== undefined) {
         throw fault(
           "TSR001",
           `Variable '${instruction.name}' is already visible in this scope.`,
@@ -416,10 +378,22 @@ function executePlannedInstruction(
       const value = evaluator.evaluate(instruction.value);
       if (instruction.typeCheck !== undefined)
         assertValueType(value, instruction.typeCheck, instruction.value.span);
-      currentFrame(snapshot).bindings.push({
-        name: instruction.name,
-        value: cloneCapturedSerializableValue(value),
-      });
+      if (rerun) {
+        const binding = snapshot.frames[0]!.bindings.find(
+          (item) => item.name === instruction.name,
+        )!;
+        detachPreparedReferencesForMutation(snapshot, {
+          rootFrameId: snapshot.frames[0]!.id,
+          rootName: instruction.name,
+          path: [],
+        });
+        binding.value = cloneCapturedSerializableValue(value);
+      } else {
+        currentFrame(snapshot).bindings.push({
+          name: instruction.name,
+          value: cloneCapturedSerializableValue(value),
+        });
+      }
       advance(snapshot);
       return;
     }
@@ -843,7 +817,6 @@ function executePlannedInstruction(
           releasedPreparedOutputInstruction: null,
         });
       }
-      snapshot.terminalContinuationHandoff = null;
       snapshot.defaultSpeaker = null;
       snapshot.contextualSpeaker = null;
       snapshot.frames.splice(1);
@@ -872,6 +845,18 @@ function executePlannedInstruction(
     case "playMedia":
       startMedia(plan, instruction, snapshot, evaluator, events);
       return;
+    case "goto":
+      // A global function of another file jumps to a label of its own file, which the session cannot enter yet.
+      if (instruction.target >= plan.files[0]!.rootEndInstruction)
+        throw fault(
+          "TSR068",
+          "This goto leads to a label of another file than main.tease, which a session cannot enter until files can go to each other.",
+          instruction.span,
+        );
+      executeGoto(instruction, snapshot, events);
+      return;
+    case "end":
+      return executeEnd(instruction);
   }
   instruction satisfies never;
 }
@@ -1189,7 +1174,7 @@ function bindSuppliedParameter(
     throw fault("TSR048", "Function parameter metadata is inconsistent.", instruction.span);
   }
   if (argument.supplied) {
-    declareFunctionBinding(snapshot, parameter.name, argument.value, instruction.span);
+    declareFunctionBinding(plan, snapshot, parameter.name, argument.value, instruction.span);
   }
   frame.parameterState.parameterIndex += 1;
   advance(snapshot);
@@ -1267,7 +1252,7 @@ function bindDefaultParameter(
   const value = evaluator.evaluate(instruction.value);
   if (instruction.typeCheck !== undefined)
     assertValueType(value, instruction.typeCheck, instruction.value.span);
-  declareFunctionBinding(snapshot, parameter.name, value, instruction.span);
+  declareFunctionBinding(plan, snapshot, parameter.name, value, instruction.span);
   frame.parameterState.parameterIndex += 1;
   advance(snapshot);
 }
@@ -1347,12 +1332,13 @@ function functionDefinition(
 }
 
 function declareFunctionBinding(
+  plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   name: string,
   value: SerializableRuntimeValue,
   span: SourceSpan,
 ): void {
-  if (findBinding(snapshot, name) !== undefined) {
+  if (findBinding(snapshot, plan, name) !== undefined) {
     throw fault("TSR001", `Parameter '${name}' duplicates a visible binding.`, span);
   }
   currentFrame(snapshot).bindings.push({ name, value: cloneCapturedSerializableValue(value) });
@@ -1651,6 +1637,15 @@ function currentFrame(snapshot: RuntimeSnapshot) {
   return snapshot.frames.at(-1)!;
 }
 
+/** Whether top-level code declares a name that the file's root scope already has, as after a goto back. */
+function rerunsTopLevelDeclaration(snapshot: RuntimeSnapshot, name: string): boolean {
+  return (
+    snapshot.frames.length === 1 &&
+    snapshot.callFrames.length === 0 &&
+    snapshot.frames[0]!.bindings.some((binding) => binding.name === name)
+  );
+}
+
 function advance(snapshot: RuntimeSnapshot): void {
   snapshot.nextInstruction += 1;
 }
@@ -1673,27 +1668,8 @@ function executeSayAtomically(
   const stagedEvaluator = evaluator.forSnapshot(stagedSnapshot, stagedEvents);
 
   executeSay(plan, instruction, stagedSnapshot, stagedEvaluator, stagedEvents);
-  validateTerminalCompletionCapacityAfterSay(plan, stagedSnapshot, instruction.span);
   Object.assign(snapshot, stagedSnapshot);
   events.push(...stagedEvents);
-}
-
-/**
- * A terminal say and root completion are one public instruction result. Check
- * the complete event and later action completions before committing the say.
- */
-function validateTerminalCompletionCapacityAfterSay(
-  plan: InstructionPlan,
-  snapshot: RuntimeSnapshot,
-  span: SourceSpan,
-): void {
-  if (
-    snapshot.status !== "running" ||
-    snapshot.callFrames.length !== 0 ||
-    snapshot.nextInstruction !== mainRootEnd(plan)
-  )
-    return;
-  assertEventSequenceCapacity(snapshot, requiredEventSequencesForRootCompletion(snapshot), span);
 }
 
 /**
@@ -2008,40 +1984,30 @@ function requiredEventSequencesForNewDelay(snapshot: RuntimeSnapshot): number {
   return delayRequestAndCompletion + backgroundPacingCompletion;
 }
 
-function requiredEventSequencesForRootCompletion(snapshot: RuntimeSnapshot): number {
-  const rootCompleteEvent = 1;
-  return rootCompleteEvent + requiredFutureActionCompletionEvents(snapshot);
-}
-
-/** Completion is attributed to the script's last root instruction, however execution reached the end. */
-function rootCompletionSpan(plan: InstructionPlan): SourceSpan {
-  return plan.instructions[mainRootEnd(plan) - 1]?.span ?? mainSourceSpan(plan);
-}
-
-function createCompleteEvent(snapshot: RuntimeSnapshot, span: SourceSpan): CompleteEvent {
-  return Object.freeze({
-    kind: "complete",
-    sequence: takeSequence(snapshot),
-    span: copySpan(span),
-  });
-}
-
+/** Fails the session; `path` is the project file whose source the failure's span is in. */
 function failSnapshot(
   snapshot: RuntimeSnapshot,
   failure: RuntimeErrorInfo,
+  path: string,
   events: InterpreterEvent[],
 ): void {
   const failureSequence = takeSequence(snapshot);
   snapshot.status = "failed";
   // A failed session is terminal; no foreground action stays pending.
   snapshot.foregroundAction = null;
-  snapshot.failure = { code: failure.code, message: failure.message, span: copySpan(failure.span) };
+  snapshot.failure = {
+    code: failure.code,
+    message: failure.message,
+    path,
+    span: copySpan(failure.span),
+  };
   events.push(
     Object.freeze({
       kind: "runtimeFailure",
       sequence: failureSequence,
       code: failure.code,
       message: failure.message,
+      path,
       span: copySpan(failure.span),
     } satisfies RuntimeFailureEvent),
   );
@@ -2056,6 +2022,7 @@ function failForBudget(
   failSnapshot(
     snapshot,
     { code: "TSR037", message: "Runtime instruction budget exceeded.", span: copySpan(span) },
+    instructionSourcePath(plan, snapshot.nextInstruction),
     events,
   );
 }

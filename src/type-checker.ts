@@ -6,6 +6,7 @@ import type {
   Expression,
   FunctionDeclaration,
   FunctionParameter,
+  GlobalStatement,
   Identifier,
   InteractionExpression,
   LetStatement,
@@ -13,8 +14,11 @@ import type {
   Program,
   ScalarTypeName,
   ShowButtonParts,
+  SpeakerDeclaration,
   SwitchTypeTest,
   Statement,
+  TagQueryExpression,
+  TagQueryStep,
   TimerParts,
   TypeAnnotation,
 } from "./ast.js";
@@ -31,8 +35,10 @@ import {
   isValidInteractionPrefill,
   numberAnswerText,
 } from "./interaction-answers.js";
-import type { TypeCheckPlan } from "./plan/model.js";
+import type { PlanImage, TypeCheckPlan } from "./plan/model.js";
 import { isTakePhotoCall } from "./capture-call.js";
+import { evaluateTagSteps, passesTagList } from "./tag-query.js";
+import { normalizeTagName } from "./tags.js";
 import { CONVERSION_RESULTS, isTemporalConversionResult } from "./conversions.js";
 import {
   builtinCallProblems,
@@ -133,24 +139,40 @@ import {
   type StaticType,
 } from "./static-types.js";
 import { typePlan } from "./type-plans.js";
+import { sessionDeclarations } from "./project-globals.js";
 
 export interface TypeCheckOptions {
   readonly globals?: readonly string[];
   readonly builtins?: readonly string[];
+  /** The package images that tag queries search, when the compilation was given them. */
+  readonly imageCatalog?: readonly PlanImage[];
 }
 
 export interface TypeCheckResult {
-  readonly diagnostics: readonly Diagnostic[];
+  /** The diagnostics of each file, in project order. */
+  readonly diagnostics: readonly (readonly Diagnostic[])[];
   /** The runtime checks of values the compiler cannot know, by the source of the instruction that stores them. */
   readonly runtimeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>;
+  /** Whether a file of the project has an `exit` that execution can reach; a project needs one (ADR 0022). */
+  readonly reachesExit: boolean;
+  /** Which statements run, for the checks that follow this flow. */
+  readonly flow: StatementFlow;
+}
+
+/** The statements that never run, and the top-level statements that run and after which execution continues. */
+export interface StatementFlow {
+  readonly unreachable: ReadonlySet<Statement>;
+  readonly continuing: ReadonlySet<Statement>;
 }
 
 /**
- * Where a value is stored in a place of known type: a `let` or assignment, a list or set `add` call, the default of a
- * dict `get` call, an argument of an author function, a parameter default, or a `return`.
+ * Where a value is stored in a place of known type: a `let` or assignment, the start value of a `global`, a list or
+ * set `add` call, the default of a dict `get` call, an argument of an author function, a parameter default, or a
+ * `return`.
  */
 export type RuntimeCheckSite =
   | LetStatement
+  | GlobalStatement
   | AssignmentStatement
   | CallExpression
   | CallArgument
@@ -169,25 +191,39 @@ const typeCode = {
   invalidOperand: "TSV043",
   mixedTypes: "TSV044",
   impossibleCase: "TSV049",
+  emptyTagQuery: "TST002",
+  randomStartValue: "TSV055",
 } as const;
 
 /**
  * Checks that every variable, list or set element, object property, function parameter, and function result keeps one
  * type, and that operations receive values they support (ADR 0021). It runs after name validation succeeded, so every
- * name resolves; a value it cannot know has the type `unknown` and is never rejected.
+ * name resolves; a value it cannot know has the type `unknown` and is never rejected. The files of a project, in
+ * project order, are checked together, because globals, global functions, and speakers belong to all of them.
+ * `onFile` hears of each file whose source the check enters.
  */
-export function checkTypes(program: Program, options: TypeCheckOptions = {}): TypeCheckResult {
+export function checkTypes(
+  files: readonly { readonly path: string; readonly program: Program }[],
+  options: TypeCheckOptions = {},
+  onFile: (file: number) => void = () => {},
+): TypeCheckResult {
+  const programs = files.map((file) => file.program);
+  const lines = lineNamer(files);
   // An integer variable is a number when one of its assignments can store a non-whole number, also an assignment
   // after its uses (rule 1.2). A check that finds a new one starts again with that variable declared as a number, so
   // the last check, which finds none, sees every variable with its final type and alone reports.
   const widened: Widened = new Map();
   for (;;) {
-    const checker = new TypeChecker(options, widened);
-    checker.check(program);
+    const checker = new TypeChecker(options, widened, programs.length, onFile, lines);
+    checker.check(programs);
     if (!checker.widenedMore)
       return Object.freeze({
-        diagnostics: Object.freeze([...checker.diagnostics]),
+        diagnostics: Object.freeze(
+          checker.fileDiagnostics.map((diagnostics) => Object.freeze([...diagnostics])),
+        ),
         runtimeChecks: checker.runtimeChecks(),
+        reachesExit: checker.reachesExit,
+        flow: Object.freeze({ unreachable: checker.unreachable, continuing: checker.continuing }),
       });
     checker.widenFollowers();
   }
@@ -288,6 +324,10 @@ class Scope {
 /** A function's parameter types and result type, both computed once, when first needed. */
 interface FunctionType {
   readonly declaration: FunctionDeclaration;
+  /** The file the function is written in. */
+  readonly file: number;
+  /** The names its parameters and body see: those of its file, or for a global function the project's alone. */
+  readonly scope: Scope;
   /** The parameter types the declaration and defaults give. */
   parameters: readonly Variable[] | null;
   /**
@@ -303,6 +343,8 @@ interface FunctionType {
    */
   readonly pending: {
     readonly call: CallExpression;
+    /** The file the call is written in. */
+    readonly file: number;
     readonly values: readonly StaticType[];
     readonly literals: ReadonlyMap<Expression, readonly StaticType[]>;
   }[];
@@ -339,24 +381,42 @@ interface Place {
 }
 
 class TypeChecker {
-  readonly diagnostics: Diagnostic[] = [];
+  /** The diagnostics of each file of the project. */
+  readonly fileDiagnostics: Diagnostic[][];
+
+  /** The file whose source is being checked. */
+  #file = 0;
 
   readonly #builtins: ReadonlySet<string>;
 
-  readonly #root = new Scope(null);
+  /** The tags of each package image, by name; `null` when the compilation was not given the images. */
+  readonly #imageTags: readonly ReadonlyMap<string, number | null>[] | null;
 
-  readonly #functions: FunctionType[] = [];
+  /** The project's names: host globals, globals, speakers, and global functions. */
+  readonly #project = new Scope(null);
+
+  /** The top-level names of the file being checked, under the project's names. */
+  #root = new Scope(this.#project);
+
+  /** The scope the code being checked starts under: its file's names, or the project's alone (see `FunctionType`). */
+  #outer = this.#root;
+
   /**
-   * The names of the script's top-level `let` variables and speakers, which function bodies may use before they are
-   * declared.
+   * The names of the file's top-level `let` variables, which function bodies may use before they are declared.
    */
-  readonly #scriptVariables = new Set<string>();
+  #scriptVariables = new Set<string>();
   /** Whether the script's top-level statements are checked, so every script variable has its type. */
   #scriptChecked = false;
   /** The names each function's parameters and body mention, found when first needed. */
   readonly #namesUsed = new Map<FunctionType, ReadonlySet<string>>();
 
-  readonly #handlers: { readonly block: Block; readonly selfHandle: string | null }[] = [];
+  /** Timer and media blocks to check after their file's functions, with the scope and file they belong to. */
+  readonly #handlers: {
+    readonly block: Block;
+    readonly selfHandle: string | null;
+    readonly scope: Scope;
+    readonly file: number;
+  }[] = [];
 
   #function: FunctionContext | null = null;
 
@@ -374,11 +434,25 @@ class TypeChecker {
   /** The narrowed types at the current point of the checked code. */
   #flow = new Flow();
 
-  /** What functions, blocks, and loops may change, collected before checking. */
+  /** What functions, blocks, and loops may change, collected before checking: for the file, and for every loop. */
   #effects: ProgramEffects = { shared: new Set(), loops: new Map() };
+
+  /** The globals that a function or a timer or media block of any file assigns. */
+  #sharedGlobals: ReadonlySet<string> = new Set();
 
   /** Whether the statement being checked can run; a `break` after a `return` does not end its loop. */
   #reachable = true;
+
+  /** Whether a reachable `exit` was checked. */
+  reachesExit = false;
+
+  /** The statements that never run, by the flow this check follows. */
+  readonly unreachable = new Set<Statement>();
+
+  /** The top-level statements that run and after which execution continues. */
+  readonly continuing = new Set<Statement>();
+
+  #rootStatements: readonly Statement[] | null = null;
 
   /**
    * List and set literals whose elements mix types, with those types. A literal stored in a place of a declared element
@@ -435,8 +509,19 @@ class TypeChecker {
   /** One origin for each element or property inside a variable, so equal parts are one origin. */
   readonly #parts = new Map<Declaration, Map<string, PartOrigin>>();
 
-  public constructor(options: TypeCheckOptions, widened: Widened) {
+  public constructor(
+    options: TypeCheckOptions,
+    widened: Widened,
+    files: number,
+    private readonly onFile: (file: number) => void,
+    private readonly lines: LineNamer,
+  ) {
+    this.fileDiagnostics = Array.from({ length: files }, () => []);
     this.#widened = widened;
+    this.#imageTags =
+      options.imageCatalog?.map(
+        (image) => new Map(image.tags.map((tag) => [tag.name, tag.value])),
+      ) ?? null;
     this.#builtins = new Set([
       ...CORE_RUNTIME_BUILTINS,
       ...PLATFORM_STANDARD_LIBRARY_PRELUDE,
@@ -444,52 +529,195 @@ class TypeChecker {
     ]);
     // Host globals have no static type and cannot be assigned, but a test may narrow them.
     for (const name of options.globals ?? [])
-      this.#root.declare(name, {
+      this.#project.declare(name, {
         kind: "variable",
         variable: { name, type: UNKNOWN_TYPE, shared: false },
       });
   }
 
-  public check(program: Program): void {
-    for (const statement of program.statements)
-      if (statement.kind === "letStatement" || statement.kind === "speakerDeclaration")
-        this.#scriptVariables.add(statement.name.name);
-    this.#effects = programEffects(program);
-    for (const statement of program.statements) {
-      if (statement.kind !== "functionDeclaration") continue;
-      const fn: FunctionType = {
-        declaration: statement,
-        parameters: null,
-        accepted: null,
-        result: null,
-        checking: false,
-        pending: [],
-      };
-      this.#functions.push(fn);
-      this.#root.declare(statement.name.name, { kind: "function", fn });
+  /** The diagnostics of the file being checked. */
+  get diagnostics(): Diagnostic[] {
+    return this.fileDiagnostics[this.#file]!;
+  }
+
+  /** `line 3`, or for a line of another file `line 3 of helpers.tease`. */
+  readonly #line: (span: SourceSpan) => string = (span) => this.lines(span, this.#file);
+
+  /** How a message names a line and the declaration a fix suggests. */
+  readonly #text: PlaceText = { line: this.#line, keyword: (name) => this.#keyword(name) };
+
+  /** The keyword that declares a variable of this name: `global` for a global, otherwise `let`. */
+  #keyword(name: string | null): "global" | "let" {
+    return name !== null && this.#project.resolve(name)?.kind === "variable" ? "global" : "let";
+  }
+
+  /** Continues in the source of `file`, returning the file to come back to. */
+  #enterFile(file: number): number {
+    const previous = this.#file;
+    this.#file = file;
+    this.onFile(file);
+    return previous;
+  }
+
+  /**
+   * Checks the project: the start values of globals and speakers in the order a session sets them up, then each file,
+   * `main.tease` first, as a single script (rule 6).
+   */
+  public check(programs: readonly Program[]): void {
+    const effects = programs.map(programEffects);
+    const loops = new Map(effects.flatMap((fileEffects) => [...fileEffects.loops]));
+    const sharedGlobals = new Set<string>();
+    for (const fileEffects of effects)
+      for (const name of fileEffects.shared) sharedGlobals.add(name);
+    this.#sharedGlobals = sharedGlobals;
+    const functionsByFile = programs.map(() => new Map<FunctionDeclaration, FunctionType>());
+    for (const [file, program] of programs.entries())
+      for (const statement of program.statements)
+        if (statement.kind === "functionDeclaration" && statement.global)
+          functionsByFile[file]!.set(
+            statement,
+            this.#declareFunction(statement, file, this.#project),
+          );
+    this.#effects = { shared: new Set(), loops };
+    // Start values run one after another with nothing between them, so what one stores is known to the next.
+    this.#flow = new Flow();
+    for (const { file, declaration } of sessionDeclarations(programs)) {
+      this.#enterFile(file);
+      runCompileTask(this.#startValueTask(declaration));
+      this.#reportMixedLiterals();
     }
-    runCompileTask(
-      this.#statementsTask(
-        program.statements.filter((statement) => statement.kind !== "functionDeclaration"),
-        this.#root,
-      ),
+    // main.tease runs right after the start values, so it starts with what they stored; other files start afresh.
+    const startupFlow = this.#flow;
+    for (const [file, program] of programs.entries()) {
+      this.#enterFile(file);
+      this.#effects = { shared: effects[file]!.shared, loops };
+      this.#root = new Scope(this.#project);
+      this.#outer = this.#root;
+      this.#scriptVariables = new Set(
+        program.statements.flatMap((statement) =>
+          statement.kind === "letStatement" ? [statement.name.name] : [],
+        ),
+      );
+      this.#scriptChecked = false;
+      this.#flow = file === 0 ? startupFlow : new Flow();
+      const functions = functionsByFile[file]!;
+      for (const statement of program.statements)
+        if (statement.kind === "functionDeclaration" && !statement.global)
+          functions.set(statement, this.#declareFunction(statement, file, this.#root));
+      const rootStatements = program.statements.filter(
+        (statement) => statement.kind !== "functionDeclaration",
+      );
+      this.#rootStatements = rootStatements;
+      const continues = runCompileTask(this.#statementsTask(rootStatements, this.#root));
+      // A file of declarations only runs nothing on its own, so it has no way to its end.
+      if (continues && rootStatements.some(runsOnItsOwn)) {
+        const last = rootStatements.at(-1)!;
+        const call = last.kind === "expressionStatement" ? unwrapGrouping(last.expression) : null;
+        // A call counts as returning, also of a function that always exits.
+        this.#report(
+          "TSV052",
+          call?.kind === "callExpression" && call.callee.kind === "identifier"
+            ? `This path reaches the end of the file after ${call.callee.name}(). Even if ${call.callee.name} ends the session, add exit (or end) here so the ending is explicit.`
+            : "The script can run past the end of this file. Add exit where the session should finish, or end to return to the file that called this one.",
+          last.span,
+        );
+      }
+      // Every script variable has its type now, so every function body is checked, also one that waited for one.
+      this.#scriptChecked = true;
+      for (const statement of program.statements)
+        if (statement.kind === "functionDeclaration")
+          runCompileTask(this.#functionResultTask(functions.get(statement)!));
+      for (let index = 0; index < this.#handlers.length; index += 1) {
+        const handler = this.#handlers[index]!;
+        this.#enterFile(handler.file);
+        const scope = new Scope(handler.scope);
+        if (handler.selfHandle !== null)
+          scope.declare(handler.selfHandle, {
+            kind: "variable",
+            variable: { name: handler.selfHandle, type: { kind: "media" }, shared: false },
+          });
+        this.#function = null;
+        this.#outer = handler.scope;
+        // A block does not inherit narrowed facts from the code around it (rule 5.5).
+        this.#flow = new Flow();
+        runCompileTask(this.#statementsTask(handler.block.statements, scope));
+      }
+      this.#handlers.length = 0;
+    }
+  }
+
+  #declareFunction(declaration: FunctionDeclaration, file: number, scope: Scope): FunctionType {
+    const fn: FunctionType = {
+      declaration,
+      file,
+      scope,
+      parameters: null,
+      accepted: null,
+      result: null,
+      checking: false,
+      pending: [],
+    };
+    scope.declare(declaration.name.name, { kind: "function", fn });
+    return fn;
+  }
+
+  /**
+   * Checks the start value of a global or the properties of a speaker. It is set up before the story runs, so it uses
+   * only the project's names (ADR 0022 §6); its type is the global's type by the `let` rules.
+   */
+  *#startValueTask(declaration: GlobalStatement | SpeakerDeclaration): CompileTask<void> {
+    this.#function = null;
+    this.#outer = this.#project;
+    this.#reachable = true;
+    if (declaration.kind === "globalStatement") {
+      yield* compileChild(this.#letTask(declaration, this.#project));
+      this.#rejectRandomSelection(declaration.initial);
+      return;
+    }
+    this.#project.declare(declaration.name.name, { kind: "speaker" });
+    for (const property of declaration.properties) {
+      const type = yield* compileChild(this.#expressionTask(property.value, this.#project));
+      this.#checkSpeakerProperty(property.name.name, property.value, type);
+      this.#rejectRandomSelection(property.value);
+    }
+  }
+
+  /**
+   * Reports a start value that would select a random element: a list shown in `${...}`, or `.random`. A start value is
+   * set up before the story runs and uses no random numbers (ADR 0022 §6); the runtime rejects a value of unknown type.
+   */
+  #rejectRandomSelection(value: Expression): void {
+    const work = [value];
+    while (work.length > 0) {
+      const expression = work.pop()!;
+      if (
+        expression.kind === "propertyAccessExpression" &&
+        expression.property.name === "random" &&
+        this.#mayBe(expression.object, isListOrSet)
+      )
+        this.#report(
+          typeCode.randomStartValue,
+          "A start value cannot select a random element with '.random': it is set up at the start of the session, before the story runs. Pick the element in the story instead.",
+          expression.span,
+        );
+      if (expression.kind === "stringLiteral")
+        for (const part of expression.parts)
+          if (part.kind === "stringInterpolation" && this.#mayBe(part.expression, isList))
+            this.#report(
+              typeCode.randomStartValue,
+              "A start value cannot show a list in '${...}', which selects a random element: it is set up at the start of the session, before the story runs. Show one element, as in '${items[0]}'.",
+              part.expression.span,
+            );
+      for (const child of expressionChildren(expression)) work.push(child);
+    }
+  }
+
+  /** Whether a checked expression is known to possibly hold a value of a kind. */
+  #mayBe(expression: Expression, kind: (type: StaticType) => boolean): boolean {
+    const type = this.#types.get(expression);
+    return (
+      type !== undefined && members(nonNullType(type)).some((member) => kind(resolved(member)))
     );
-    // Every script variable has its type now, so every function body is checked, also one that waited for one.
-    this.#scriptChecked = true;
-    for (const fn of this.#functions) runCompileTask(this.#functionResultTask(fn));
-    for (let index = 0; index < this.#handlers.length; index += 1) {
-      const handler = this.#handlers[index]!;
-      const scope = new Scope(this.#root);
-      if (handler.selfHandle !== null)
-        scope.declare(handler.selfHandle, {
-          kind: "variable",
-          variable: { name: handler.selfHandle, type: { kind: "media" }, shared: false },
-        });
-      this.#function = null;
-      // A block does not inherit narrowed facts from the code around it (rule 5.5).
-      this.#flow = new Flow();
-      runCompileTask(this.#statementsTask(handler.block.statements, scope));
-    }
   }
 
   /**
@@ -512,8 +740,13 @@ class TypeChecker {
     let continues = true;
     const reachable = this.#reachable;
     for (const statement of statements) {
+      // A goto can reach a label even when the statements before it never continue.
+      if (statement.kind === "labelStatement") continues = true;
       this.#reachable = reachable && continues;
+      if (!this.#reachable) this.unreachable.add(statement);
       if (!(yield* compileChild(this.#statementTask(statement, scope)))) continues = false;
+      else if (this.#reachable && statements === this.#rootStatements)
+        this.continuing.add(statement);
     }
     this.#reachable = reachable;
     return continues;
@@ -542,11 +775,12 @@ class TypeChecker {
         yield* compileChild(this.#expressionTask(statement.expression, scope));
         return true;
       case "speakerDeclaration":
-        scope.declare(statement.name.name, { kind: "speaker" });
-        for (const property of statement.properties) {
-          const type = yield* compileChild(this.#expressionTask(property.value, scope));
-          this.#checkSpeakerProperty(property.name.name, property.value, type);
-        }
+        // Its properties are start values, checked before the files.
+        return true;
+      case "globalStatement":
+        // The start value is checked before the files; with `default:`, the declaration assigns where it stands.
+        if (statement.assignment !== null)
+          yield* compileChild(this.#assignmentTask(statement.assignment, scope));
         return true;
       case "speakerSetterStatement":
         return true;
@@ -759,9 +993,11 @@ class TypeChecker {
             statement.count,
             "A repeat count is a whole number (integer)",
           );
-        const ends = yield* compileChild(this.#loopBodyTask(statement.body, scope, null));
-        // A loop that certainly runs once ends normally only when its body or a `break` does.
         const times = staticNumber(statement.count);
+        const ends = yield* compileChild(
+          this.#loopBodyTask(statement.body, scope, null, times === undefined || times >= 1),
+        );
+        // A loop that certainly runs once ends normally only when its body or a `break` does.
         return times === undefined || times < 1 || ends;
       }
       case "forStatement": {
@@ -784,7 +1020,9 @@ class TypeChecker {
           declaration: statement,
         };
         this.#declared.set(statement, variable);
-        const ends = yield* compileChild(this.#loopBodyTask(statement.body, scope, variable));
+        const ends = yield* compileChild(
+          this.#loopBodyTask(statement.body, scope, variable, !isEmptyLiteral(statement.iterable)),
+        );
         return !isNonEmptyLiteral(statement.iterable) || ends;
       }
       case "breakStatement": {
@@ -798,7 +1036,15 @@ class TypeChecker {
         return false;
       }
       case "exitStatement":
+        if (this.#reachable) this.reachesExit = true;
         return false;
+      case "endStatement":
+      case "gotoStatement":
+        return false;
+      case "labelStatement":
+        // A goto from anywhere in the file may arrive here, so nothing narrowed before the label still holds.
+        this.#flow = new Flow();
+        return true;
       case "returnStatement":
         yield* compileChild(this.#returnTask(statement, scope));
         return false;
@@ -814,6 +1060,8 @@ class TypeChecker {
   *#pathTask(block: Block | Statement, scope: Scope, reached: boolean): CompileTask<boolean> {
     const reachable = this.#reachable;
     if (!reached) this.#reachable = false;
+    // An `else if` is a statement outside any statement list; the flow records it like one.
+    if (block.kind !== "block" && !this.#reachable) this.unreachable.add(block);
     const continues =
       block.kind === "block"
         ? yield* compileChild(this.#blockTask(block, scope))
@@ -824,9 +1072,17 @@ class TypeChecker {
 
   /**
    * The body of a `repeat` or `for` loop, which may run any number of times, including none. Returns whether the body
-   * can end normally or leave through a `break`.
+   * can end normally or leave through a `break`. A body that certainly runs no time is checked, but nothing in it can
+   * be reached.
    */
-  *#loopBodyTask(body: Block, scope: Scope, variable: Variable | null): CompileTask<boolean> {
+  *#loopBodyTask(
+    body: Block,
+    scope: Scope,
+    variable: Variable | null,
+    reached: boolean,
+  ): CompileTask<boolean> {
+    const reachable = this.#reachable;
+    if (!reached) this.#reachable = false;
     this.#widen(body);
     const start = this.#flow.mark();
     const loopScope = new Scope(scope);
@@ -837,6 +1093,7 @@ class TypeChecker {
     this.#flow.restore(start);
     // The body may also run no time at all.
     this.#flow.apply(this.#flow.join([new Map(), ...breaks]));
+    this.#reachable = reachable;
     return continues || continued || breaks.length > 0;
   }
 
@@ -853,25 +1110,28 @@ class TypeChecker {
       );
   }
 
-  *#letTask(statement: LetStatement, scope: Scope): CompileTask<void> {
+  /** A `let`, or the start value of a `global`, which declares the global in the project's names. */
+  *#letTask(statement: LetStatement | GlobalStatement, scope: Scope): CompileTask<void> {
     const name = statement.name.name;
-    const initializer = unwrap(statement.initializer);
+    const keyword = statement.kind === "letStatement" ? "let" : "global";
+    const written = statement.kind === "letStatement" ? statement.initializer : statement.initial;
+    const initializer = unwrap(written);
     if (statement.typeAnnotation === null) this.#declaredBy.set(initializer, name);
     const value =
       initializer.kind === "playMediaExpression"
         ? yield* compileChild(this.#mediaTask(initializer, scope, name))
-        : yield* compileChild(this.#expressionTask(statement.initializer, scope));
+        : yield* compileChild(this.#expressionTask(written, scope));
     let type: StaticType;
     if (statement.typeAnnotation === null) {
-      type = this.#newPlaceType(statement.initializer, value);
+      type = this.#newPlaceType(written, value);
       // A number this variable holds derives from the variable itself, which follows what its first value derives
       // from (rule 1.2).
-      this.#follow({ root: statement, path: [] }, value, statement.initializer.span);
+      this.#follow({ root: statement, path: [] }, value, written.span);
       type = this.#ownType(statement, type);
       this.#reportMixedChoice(
-        statement.initializer,
-        (written) =>
-          `to keep both, declare a union type, as in 'let ${name}: ${written} = choose ...'`,
+        written,
+        (type) =>
+          `to keep both, declare a union type, as in '${keyword} ${name}: ${type} = choose ...'`,
       );
     } else {
       type = this.#annotationType(statement.typeAnnotation);
@@ -880,22 +1140,21 @@ class TypeChecker {
         label: name,
         subject: `'${name}' is declared as ${typeName(type)}`,
         verb: "start as",
-        fix: (rejected, expression) => typeFix(name, type, rejected, expression),
+        fix: (rejected, expression) => typeFix(name, type, rejected, expression, keyword),
       };
-      const checked = checkedValue(statement.initializer);
+      const checked = checkedValue(written);
       yield* compileChild(
-        this.#storeTask(
-          place,
-          checked,
-          checked === statement.initializer ? value : this.#typeOf(checked),
-        ),
+        this.#storeTask(place, checked, checked === written ? value : this.#typeOf(checked)),
       );
       this.#recordRuntimeCheck(statement, type, `'${name}'`, value);
     }
     const variable: Variable = {
       name,
       type,
-      shared: scope === this.#root && this.#effects.shared.has(name),
+      shared:
+        statement.kind === "globalStatement"
+          ? this.#sharedGlobals.has(name)
+          : scope === this.#root && this.#effects.shared.has(name),
       declaration: statement.typeAnnotation === null ? statement : undefined,
       annotated: statement.typeAnnotation !== null,
     };
@@ -946,7 +1205,7 @@ class TypeChecker {
       const entry = scope.resolve(target.name);
       if (entry?.kind === "variable") {
         variable = entry.variable;
-        place = variablePlace(variable);
+        place = variablePlace(variable, this.#text);
       }
     } else {
       if (
@@ -998,6 +1257,7 @@ class TypeChecker {
             { kind, element: store },
             label,
             isNullable(object),
+            this.#text,
             this.#inferredCollection(target.object, scope),
             lists.length === 1 ? this.#pathOf(target.object, scope) : undefined,
           );
@@ -1166,6 +1426,7 @@ class TypeChecker {
         kept,
         place.label,
         isNullable(place.type),
+        this.#text,
         place.inferred !== undefined,
         place.widening,
       );
@@ -1187,7 +1448,7 @@ class TypeChecker {
         const before = this.diagnostics.length;
         yield* compileChild(
           this.#storeTask(
-            nestedPropertyPlace(known, place, property.name.name),
+            nestedPropertyPlace(known, place, property.name.name, this.#text),
             property.value,
             type,
             decides,
@@ -1208,7 +1469,7 @@ class TypeChecker {
           place.verb === "take" && place.label !== null
             ? `to keep both, declare the parameter as '${place.label}: ${written}'`
             : place.inferred === "variable" && place.label !== null
-              ? `to keep both, declare it as 'let ${place.label}: ${written} = ...'`
+              ? `to keep both, declare it as '${this.#keyword(place.label)} ${place.label}: ${written} = ...'`
               : ONE_TYPE_FIX,
         );
       // Widening again repeats earlier work unless settling can add parts (only an undecided, union, collection, or
@@ -1390,7 +1651,7 @@ class TypeChecker {
       if ("root" in origin) continue;
       const at = this.#widenedAt(origin, []);
       if (at !== undefined)
-        return ` '${declarationName(origin)}' is a number because line ${at.start.line + 1} can store a non-whole number in it.`;
+        return ` '${declarationName(origin)}' is a number because ${this.#line(at)} can store a non-whole number in it.`;
     }
     return "";
   }
@@ -1446,7 +1707,7 @@ class TypeChecker {
       isCollection(member)
         ? [
             {
-              ...elementPlace(member, label, nullable, inferred, owner),
+              ...elementPlace(member, label, nullable, this.#text, inferred, owner),
               ...(verb === undefined ? {} : { verb }),
             },
           ]
@@ -1592,7 +1853,7 @@ class TypeChecker {
       all.length === 1 && all[0]!.kind === "object"
         ? this.#pathOf(objectExpression, scope)
         : undefined;
-    return propertyPlace(type, label, `'${label}'`, extendPath(owner, name));
+    return propertyPlace(type, label, `'${label}'`, this.#text, extendPath(owner, name));
   }
 
   *#returnTask(
@@ -1676,6 +1937,8 @@ class TypeChecker {
 
   /** Whether a function's parameters or body name a script variable that is not declared yet. */
   #usesLaterVariable(fn: FunctionType): boolean {
+    // A global function sees no script variables.
+    if (fn.declaration.global) return false;
     let names = this.#namesUsed.get(fn);
     if (names === undefined) {
       names = namesIn(fn.declaration);
@@ -1706,7 +1969,10 @@ class TypeChecker {
     const outerLiterals = this.#mixedLiterals;
     this.#mixedLiterals = new Map();
     const parameters = yield* compileChild(this.#parametersTask(fn));
-    const scope = new Scope(this.#root);
+    const outerFile = this.#enterFile(fn.file);
+    const outerScope = this.#outer;
+    this.#outer = fn.scope;
+    const scope = new Scope(fn.scope);
     // The body works on its own copies, so checking an argument never changes what the body assumes.
     const accepted: Variable[] = parameters.map((parameter) => ({
       ...parameter,
@@ -1731,12 +1997,15 @@ class TypeChecker {
     this.#function = outer;
     this.#reachable = outerReachable;
     this.#flow = outerFlow;
+    this.#outer = outerScope;
     this.#loops.push(...outerLoops);
-    for (const { call, values, literals } of fn.pending.splice(0)) {
+    for (const { call, values, literals, file } of fn.pending.splice(0)) {
       this.#mixedLiterals = new Map(literals);
+      this.#enterFile(file);
       yield* compileChild(this.#argumentsTask(fn, call, values));
       this.#reportMixedLiterals();
     }
+    this.#enterFile(fn.file);
     this.#mixedLiterals = outerLiterals;
     if (continues) context.returnsNull = true;
     fn.result = declared ?? this.#inferredResult(context);
@@ -1752,6 +2021,7 @@ class TypeChecker {
         declaration.name.span,
       );
     fn.checking = false;
+    this.#enterFile(outerFile);
     return fn.result;
   }
 
@@ -1787,9 +2057,10 @@ class TypeChecker {
     if (fn.parameters !== null) return fn.parameters;
     const parameters: Variable[] = [];
     fn.parameters = parameters;
-    const scope = new Scope(this.#root);
+    const scope = new Scope(fn.scope);
     const outerFlow = this.#flow;
     this.#flow = new Flow();
+    const outerFile = this.#enterFile(fn.file);
     for (const parameter of fn.declaration.parameters) {
       const name = parameter.name.name;
       let type: StaticType = UNKNOWN_TYPE;
@@ -1841,6 +2112,7 @@ class TypeChecker {
     }
     this.#reportMixedLiterals();
     this.#flow = outerFlow;
+    this.#enterFile(outerFile);
     return parameters;
   }
 
@@ -1863,7 +2135,12 @@ class TypeChecker {
     // The body is checked before the arguments, so they must fit the parameters as the body uses them.
     const result = copyType(yield* compileChild(this.#functionResultTask(fn)));
     if (fn.result === null)
-      fn.pending.push({ call: expression, values, literals: this.#takeMixedLiterals(expression) });
+      fn.pending.push({
+        call: expression,
+        file: this.#file,
+        values,
+        literals: this.#takeMixedLiterals(expression),
+      });
     else yield* compileChild(this.#argumentsTask(fn, expression, values));
     // The function may assign shared variables or wait, so their narrowing ends here (rule 5.5).
     this.#suspend();
@@ -2127,7 +2404,63 @@ class TypeChecker {
       }
       case "typeTestExpression":
         return yield* compileChild(this.#valueOfConditionTask(expression, scope));
+      case "tagQueryExpression":
+        for (const step of expression.steps) {
+          if (step.kind === "tagCompare") {
+            const type = yield* compileChild(this.#expressionTask(step.bound, scope));
+            this.#reportUnless(
+              type,
+              isNumeric,
+              step.bound,
+              "A tag's number is compared with a number",
+            );
+          } else if (step.kind === "tagList") {
+            const type = yield* compileChild(this.#expressionTask(step.value, scope));
+            this.#reportUnless(
+              type,
+              (member) =>
+                (member.kind === "list" || member.kind === "set") &&
+                (!isKnown(member.element) || isScalar(member.element, "string")),
+              step.value,
+              `'${step.option}:' takes a list of tag names`,
+            );
+          }
+        }
+        this.#checkTagQueryCanMatch(expression);
+        return expression.select === "list" ? { kind: "list", element: STRING_TYPE } : STRING_TYPE;
     }
+  }
+
+  /**
+   * A pick from the given images that no image can match by its tag tests and literal tag lists alone is an error
+   * (ADR 0023). Comparisons and other values count as possibly true: this check does no value reasoning.
+   */
+  #checkTagQueryCanMatch(query: TagQueryExpression): void {
+    if (query.select !== "random" || this.#imageTags === null) return;
+    // Each literal tag list is read once for all images.
+    const lists = new Map<TagQueryStep, readonly string[] | null>();
+    for (const step of query.steps) {
+      if (step.kind === "tagList") lists.set(step, literalTagNames(step.value));
+    }
+    const test = (step: TagQueryStep, tags: ReadonlyMap<string, number | null>) => {
+      if (step.kind === "tag") return tags.has(step.name);
+      if (step.kind !== "tagList") return null;
+      const names = lists.get(step)!;
+      return names === null ? null : passesTagList(step.option, names, tags);
+    };
+    if (
+      this.#imageTags.some(
+        (tags) => evaluateTagSteps(query.steps, (step) => test(step, tags)) !== false,
+      )
+    )
+      return;
+    this.#report(
+      typeCode.emptyTagQuery,
+      this.#imageTags.length === 0
+        ? "The package has no images to pick from."
+        : "No image in the package has these tags.",
+      query.span,
+    );
   }
 
   /** The value of a test or logical expression used as a value: the flows of both outcomes join afterwards. */
@@ -2929,7 +3262,7 @@ class TypeChecker {
         const fix =
           property !== undefined
             ? `give '${property.name}' one type in every element`
-            : `to keep both, declare a union type, as in 'let ${name}: ${written} = ...'`;
+            : `to keep both, declare a union type, as in '${this.#keyword(name)} ${name}: ${written} = ...'`;
         this.#report(
           typeCode.mixedTypes,
           `union() would mix ${mixDescription(own, other)}. A ${receiver.kind} holds one type; ${fix}.`,
@@ -3831,7 +4164,13 @@ class TypeChecker {
         yield* compileChild(this.#expressionTask(timer.label, scope)),
         "a timer label",
       );
-    if (timer.handler !== null) this.#handlers.push({ block: timer.handler, selfHandle: null });
+    if (timer.handler !== null)
+      this.#handlers.push({
+        block: timer.handler,
+        selfHandle: null,
+        scope: this.#outer,
+        file: this.#file,
+      });
   }
 
   *#mediaTask(media: MediaParts, scope: Scope, selfHandle: string | null): CompileTask<StaticType> {
@@ -3868,7 +4207,12 @@ class TypeChecker {
       } else yield* compileChild(this.#timeTask(operand, false, scope));
     }
     for (const block of mediaHandlerBlocks(media))
-      this.#handlers.push({ block, selfHandle: media.async ? selfHandle : null });
+      this.#handlers.push({
+        block,
+        selfHandle: media.async ? selfHandle : null,
+        scope: this.#outer,
+        file: this.#file,
+      });
     this.#suspend();
     return media.async ? { kind: "media" } : UNKNOWN_TYPE;
   }
@@ -4006,7 +4350,7 @@ class TypeChecker {
       const fix =
         property !== undefined
           ? `give '${property.name}' one type in every element`
-          : `to keep both, declare a union type, as in '${name === undefined ? `let values: ${written}` : `let ${name}: ${written}`} = ...'`;
+          : `to keep both, declare a union type, as in '${name === undefined ? `let values: ${written}` : `${this.#keyword(name)} ${name}: ${written}`} = ...'`;
       this.#report(
         typeCode.mixedTypes,
         `This ${kind} mixes ${mixDescription(first, other)}. A ${kind} holds one type; ${fix}.`,
@@ -4426,9 +4770,14 @@ function rootName(expression: Expression): string | null {
   return node.kind === "identifier" ? node.name : null;
 }
 
-/** The statements of the blocks that run as part of a statement: branches and loop bodies, not handler blocks. */
+/**
+ * The statements of the blocks that run as part of a statement: branches and loop bodies, not handler blocks. A
+ * `global` with `default:` assigns where it stands.
+ */
 function nestedStatements(statement: Statement): readonly Statement[] {
   switch (statement.kind) {
+    case "globalStatement":
+      return statement.assignment === null ? [] : [statement.assignment];
     case "ifStatement":
       return [
         ...statement.thenBlock.statements,
@@ -4555,7 +4904,7 @@ function checkedValue(expression: Expression): Expression {
     : expression;
 }
 
-function variablePlace(variable: Variable): Place {
+function variablePlace(variable: Variable, text: PlaceText): Place {
   const name = variable.name;
   const type = variable.type;
   return {
@@ -4564,9 +4913,9 @@ function variablePlace(variable: Variable): Place {
       variable.declaration === undefined ? undefined : { root: variable.declaration, path: [] },
     inferred: variable.declaration === undefined ? undefined : "variable",
     label: name,
-    subject: `'${name}' holds ${describeValue(type)}${decidedAt(type)}`,
+    subject: `'${name}' holds ${describeValue(type)}${decidedAt(type, text.line)}`,
     verb: "be set to",
-    fix: (rejected, expression) => typeFix(name, type, rejected, expression),
+    fix: (rejected, expression) => typeFix(name, type, rejected, expression, text.keyword(name)),
   };
 }
 
@@ -4574,6 +4923,7 @@ function elementPlace(
   collection: CollectionType,
   name: string | null,
   nullable: boolean,
+  text: PlaceText,
   inferred = false,
   owner?: PlacePath,
 ): Place {
@@ -4588,28 +4938,35 @@ function elementPlace(
     subject:
       element.kind === "open"
         ? `${subject} holds a ${collection.kind}`
-        : `${subject} holds ${typeName(element).replaceAll(" | ", " or ")} values (${typeName(collection)})${decidedAt(collection.element)}`,
+        : `${subject} holds ${typeName(element).replaceAll(" | ", " or ")} values (${typeName(collection)})${decidedAt(collection.element, text.line)}`,
     verb: "contain",
-    fix: (value) => elementFix(name, collection, value, nullable),
+    fix: (value) => elementFix(name, collection, value, nullable, text.keyword(name)),
   };
 }
 
 /** The place of a property inside a stored object literal, named after the place that keeps the object. */
-function nestedPropertyPlace(type: StaticType, owner: Place, name: string): Place {
+function nestedPropertyPlace(type: StaticType, owner: Place, name: string, text: PlaceText): Place {
   const widening = extendPath(owner.widening, name);
   if (owner.label !== null)
-    return propertyPlace(type, `${owner.label}.${name}`, `'${owner.label}.${name}'`, widening);
+    return propertyPlace(
+      type,
+      `${owner.label}.${name}`,
+      `'${owner.label}.${name}'`,
+      text,
+      widening,
+    );
   const subject =
     owner.elementOf === undefined || owner.elementOf === null
       ? `Property '${name}'`
       : `Property '${name}' of the elements of '${owner.elementOf}'`;
-  return propertyPlace(type, null, subject, widening);
+  return propertyPlace(type, null, subject, text, widening);
 }
 
 function propertyPlace(
   type: StaticType,
   label: string | null,
   name: string,
+  text: PlaceText,
   widening?: PlacePath,
 ): Place {
   return {
@@ -4618,7 +4975,7 @@ function propertyPlace(
     // No type can be written for a property.
     inferred: "part",
     label,
-    subject: `${name} holds ${describeValue(type)}${decidedAt(type)}`,
+    subject: `${name} holds ${describeValue(type)}${decidedAt(type, text.line)}`,
     verb: "be set to",
     fix: (value, expression) => {
       const conversion = conversionFix(type, value, expression);
@@ -4643,10 +5000,46 @@ function elementLabel(collection: string | null, kind: "list" | "set" | "dict"):
   return collection === null ? `${part} of this ${kind}` : `${part} of '${collection}'`;
 }
 
-/** `' from line 3'` when the first value stored decided the type, so the message names both places. */
-function decidedAt(type: StaticType): string {
+/** `' since line 3'` when the first value stored decided the type, so the message names both places. */
+function decidedAt(type: StaticType, line: (span: SourceSpan) => string): string {
   const slot = findDecidedSlot(type);
-  return slot === null ? "" : ` since line ${slot.start.line + 1}`;
+  return slot === null ? "" : ` since ${line(slot)}`;
+}
+
+/** How a message names a line of the sources, and the keyword that declares a variable of a name. */
+interface PlaceText {
+  readonly line: (span: SourceSpan) => string;
+  readonly keyword: (name: string | null) => "global" | "let";
+}
+
+/** Names a line of a project's sources as seen from file `from` (see `TypeChecker.#line`). */
+type LineNamer = (span: SourceSpan, from: number) => string;
+
+function lineNamer(
+  files: readonly { readonly path: string; readonly program: Program }[],
+): LineNamer {
+  const spanFiles = new WeakMap<object, number>();
+  // One file needs no names; otherwise each span of a source tells its file.
+  if (files.length > 1)
+    files.forEach(({ program }, file) => {
+      const pending: unknown[] = [program];
+      while (pending.length > 0) {
+        const node = pending.pop();
+        if (typeof node !== "object" || node === null) continue;
+        if (Array.isArray(node)) {
+          for (const item of node) pending.push(item);
+          continue;
+        }
+        if ("span" in node && typeof node.span === "object" && node.span !== null)
+          spanFiles.set(node.span, file);
+        for (const [key, value] of Object.entries(node)) if (key !== "span") pending.push(value);
+      }
+    });
+  return (span, from) => {
+    const file = spanFiles.get(span);
+    const line = `line ${span.start.line + 1}`;
+    return file === undefined || file === from ? line : `${line} of ${files[file]!.path}`;
+  };
 }
 
 function findDecidedSlot(type: StaticType): SourceSpan | null {
@@ -5220,6 +5613,17 @@ function decidedSlot(type: StaticType, at: SourceSpan): StaticType {
 }
 
 /** A literal list, set, dict, or range that certainly has an element, so a loop over it runs at least once. */
+/** A literal or constant range with nothing to go through. */
+function isEmptyLiteral(expression: Expression): boolean {
+  const node = unwrap(expression);
+  if (node.kind === "listLiteral" || node.kind === "setLiteral") return node.elements.length === 0;
+  if (node.kind === "dictLiteral") return node.entries.length === 0;
+  if (node.kind !== "rangeExpression") return false;
+  const start = staticNumber(node.start);
+  const end = staticNumber(node.end);
+  return start !== undefined && end !== undefined && (node.inclusive ? end < start : end <= start);
+}
+
 function isNonEmptyLiteral(expression: Expression): boolean {
   const node = unwrap(expression);
   if (node.kind === "listLiteral" || node.kind === "setLiteral") return node.elements.length > 0;
@@ -5411,20 +5815,21 @@ function typeFix(
   target: StaticType,
   value: StaticType,
   expression: Expression | null,
+  keyword: "global" | "let" = "let",
 ): string {
   const nullable = isNullable(target);
   const kept = resolved(nonNullType(target));
   if (resolved(value).kind === "null" && !nullable)
     return isAnnotatable(target)
-      ? ` To allow null, declare it as 'let ${name}: ${typeName(target)}? = ...'.`
+      ? ` To allow null, declare it as '${keyword} ${name}: ${typeName(target)}? = ...'.`
       : " Use a separate variable for null.";
   if (isScalar(kept, "integer") && isScalar(value, "number"))
-    return `${ROUND_FIX}, or declare it as 'let ${name}: number${nullable ? "?" : ""} = ...'.`;
+    return `${ROUND_FIX}, or declare it as '${keyword} ${name}: number${nullable ? "?" : ""} = ...'.`;
   const conversion = conversionFix(target, value, expression);
   if (conversion !== undefined) return conversion;
   const both = union([target, value]);
   return isAnnotatable(both)
-    ? ` To allow both, declare it as 'let ${name}: ${typeName(both)} = ...'.`
+    ? ` To allow both, declare it as '${keyword} ${name}: ${typeName(both)} = ...'.`
     : " Use a separate variable for a value of another type.";
 }
 
@@ -5488,14 +5893,15 @@ function elementFix(
   collection: CollectionType,
   value: StaticType,
   nullable: boolean,
+  keyword: "global" | "let",
 ): string {
   if (variable !== null && isScalar(collection.element, "integer") && isScalar(value, "number"))
-    return ` To allow fractions, declare it as 'let ${variable}: ${typeName({ kind: collection.kind, element: NUMBER_TYPE })}${nullable ? "?" : ""} = ...'.`;
+    return ` To allow fractions, declare it as '${keyword} ${variable}: ${typeName({ kind: collection.kind, element: NUMBER_TYPE })}${nullable ? "?" : ""} = ...'.`;
   if (isScalar(collection.element, "duration") && isNumeric(value))
     return " Give the number a unit, such as '5 s'.";
   const both: StaticType = { kind: collection.kind, element: union([collection.element, value]) };
   if (variable !== null && isAnnotatable(both))
-    return ` To allow both, declare it as 'let ${variable}: ${typeName(both)}${nullable ? "?" : ""} = ...'.`;
+    return ` To allow both, declare it as '${keyword} ${variable}: ${typeName(both)}${nullable ? "?" : ""} = ...'.`;
   return ` Use a separate ${collection.kind} for values of another type.`;
 }
 
@@ -5556,4 +5962,39 @@ const TEMPORAL_CONVERSION_NAMES = {
 
 function scalarType(name: ScalarTypeName): StaticType {
   return { kind: "scalar", name };
+}
+
+/**
+ * Whether a top-level statement runs something on its own. A speaker or a `global` without `default:` only declares,
+ * like a function, so a file of declarations needs no ending.
+ */
+function runsOnItsOwn(statement: Statement): boolean {
+  return !(
+    statement.kind === "speakerDeclaration" ||
+    (statement.kind === "globalStatement" && statement.assignment === null)
+  );
+}
+
+function unwrapGrouping(expression: Expression): Expression {
+  while (expression.kind === "parenthesizedExpression") expression = expression.expression;
+  return expression;
+}
+
+/** The tag names of a list literal of quoted names, or `null` for anything else, which only runtime knows. */
+function literalTagNames(value: Expression): readonly string[] | null {
+  if (value.kind !== "listLiteral") return null;
+  const names: string[] = [];
+  for (const element of value.elements) {
+    if (
+      element.kind !== "stringLiteral" ||
+      element.parts.some((part) => part.kind !== "stringText")
+    )
+      return null;
+    const name = normalizeTagName(
+      element.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join(""),
+    );
+    if (name === null) return null;
+    names.push(name);
+  }
+  return names;
 }

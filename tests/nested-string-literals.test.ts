@@ -84,7 +84,7 @@ test("evaluates nested interpolation in deterministic source order", () => {
     nextValue += 1;
     return nextValue;
   };
-  const source = 'say "A${"B ${next()} ${"C ${next()}"}"}"';
+  const source = 'say "A${"B ${next()} ${"C ${next()}"}"}"\nexit';
   const compiled = compileSource(source, { builtins: ["next"] });
   assert.deepEqual(compiled.diagnostics, []);
   assert.notEqual(compiled.plan, null);

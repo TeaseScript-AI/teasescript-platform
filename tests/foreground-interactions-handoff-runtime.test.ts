@@ -25,6 +25,7 @@ import type { InterpreterEvent } from "../src/runtime/events.js";
 import type { RuntimeDelayActionSettlementSnapshot } from "../src/runtime/actions/model.js";
 import { type RuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+import { runUntilExit } from "./helpers/run-until-exit.js";
 
 function interactionPlan(
   interactionKind: InteractionInstruction["interactionKind"],
@@ -90,7 +91,7 @@ test("result interaction destinations are produced only by the interaction and a
   const span = base.instructions[0]!.span;
   const occupiedPlan: InstructionPlan = {
     ...base,
-    files: [{ ...base.files[0]!, rootEndInstruction: 4, endInstruction: 4 }],
+    files: [{ ...base.files[0]!, rootEndInstruction: 5, endInstruction: 5 }],
     instructions: [
       {
         kind: "storeTemporary",
@@ -102,6 +103,7 @@ test("result interaction destinations are produced only by the interaction and a
       base.instructions[0]!,
       { kind: "clearTemporary", temporaryId: 1, span },
       base.instructions[1]!,
+      base.instructions[2]!,
     ],
   };
   assert.deepEqual(
@@ -1325,7 +1327,7 @@ test("handoff shapes that would reach invalid runtime states are rejected", () =
   assert.equal(validateInstructionPlan(injected.plan).valid, true);
   // Compiler-produced instructions are valid on their own, so rows using them are invalid only
   // through their local handoff position.
-  const bases = compileSource('wait 1\nsay "x", instant');
+  const bases = compileSource('wait 1\nsay "x", instant\nexit');
   assert.deepEqual(bases.diagnostics, []);
   const [validWait, validSay] = bases.plan!.instructions;
   assert.ok(validWait?.kind === "wait" && validSay?.kind === "say");
@@ -1477,14 +1479,15 @@ test("ownership contexts resume from pending and committed boundaries", () => {
       action.ownerCallFrameId,
       `${row.id}: handoff owner`,
     );
+    // Exit clears the call frames, so the state the calls leave behind is observed before it.
     const final = assertInteractionResumeEquivalent(
       plan,
       completed,
-      run,
+      runUntilExit,
       `${row.id}: committed`,
     ).uninterrupted;
     assert.equal(final.snapshot.interactionResultHandoff, null, `${row.id}: final handoff`);
-    assert.equal(final.snapshot.status, "halted", `${row.id}: final status`);
+    assert.equal(plan.instructions[final.snapshot.nextInstruction]?.kind, "exit", row.id);
     assert.equal(final.snapshot.callFrames.length, 0, `${row.id}: final frames`);
     assert.deepEqual(
       final.events.filter((event) => event.kind === "say").map((event) => event.text),

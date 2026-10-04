@@ -103,7 +103,9 @@ test("parses positional, named, and positional-then-named arguments and rejects 
 
   assert.deepEqual(
     result.program.statements.map((statement) =>
-      statement.kind === "expressionStatement" ? statement.expression.argumentStyle : null,
+      statement.kind === "expressionStatement" && statement.expression.kind === "callExpression"
+        ? statement.expression.argumentStyle
+        : null,
     ),
     ["positional", "named", "mixed", "mixed"],
   );
@@ -460,6 +462,7 @@ function propertyPositionNames(statement: Statement | undefined): readonly strin
       }
       return statement.initializer.kind;
     case "expressionStatement":
+      if (statement.expression.kind !== "callExpression") return statement.expression.kind;
       return statement.expression.arguments.map((argument) =>
         argument.kind === "namedArgument" ? argument.name.name : argument.kind,
       );

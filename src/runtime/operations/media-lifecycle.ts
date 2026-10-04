@@ -19,7 +19,6 @@ import {
   type RuntimeMediaSnapshot,
 } from "../media.js";
 import type { RuntimeSnapshot } from "../state.js";
-import { terminalContinuationHandoffFor } from "./terminal-continuation.js";
 import { assertEventSequenceCapacity, copySpan, takeSequence } from "./support.js";
 
 export type MediaWaitOutcome = RuntimeMediaPlaybackSettlementSnapshot["outcome"];
@@ -237,7 +236,6 @@ export function releaseMediaWait(
     const settlement = mediaWaitSettlement(snapshot, foreground, outcomeFor(foreground));
     snapshot.foregroundAction = null;
     snapshot.lastSettlement = settlement;
-    snapshot.terminalContinuationHandoff = terminalContinuationHandoffFor(plan, foreground);
     snapshot.status = "running";
     snapshot.nextInstruction = foreground.continuationInstruction;
     pushWaitCompletion(events, span, settlement);

@@ -43,6 +43,19 @@ Binding to `0.0.0.0` exposes this development server to every network that can r
 
 The page offers fixed repository examples for core behavior, control flow, active-loop checkpoints, and functions. Saved checkpoints are namespaced by example and checkpoint format version.
 
+To try image tags (#572) with your own images, point the server at a package folder; it is read again on each page
+load:
+
+```shell
+PLAYGROUND_PACKAGE=/path/to/package npm run playground
+```
+
+Each JPEG, PNG, WebP, GIF, TIFF, or SVG file below it becomes a package image, by its path relative to the folder,
+tagged with the XMP keywords of its sidecar named after the whole file (`room.jpg.xmp`) or else of its embedded XMP.
+Compilation then searches these images for `showImage tagged` and `findImages`, and a Stage image panel shows the
+picked image. This temporary development folder serves every image in it to anyone who can reach the server; Laravel
+stores uploaded images and their tags later.
+
 Fresh playground runs use the fixed unsigned seed `0x6d2b79f5` (`1831565813`) with the versioned `xorshift32-v1` runtime RNG. It is deterministic and serializable, not cryptographically secure and not a permanent syntax guarantee.
 
 The POC uses pinned development dependencies for the TypeScript compiler, agent codemods, and Node.js types.

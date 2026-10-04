@@ -26,6 +26,13 @@ export {
 } from "./interaction-limits.js";
 export { lex, type LexResult } from "./lexer.js";
 export { parse, type ParseResult } from "./parser.js";
+export type { ScriptHeader } from "./script-header.js";
+export { normalizeTagName, type Tag } from "./tags.js";
+export {
+  readImageXmpKeywords,
+  readXmpPacketKeywords,
+  type XmpKeywordsResult,
+} from "./xmp-keywords.js";
 export {
   CORE_RUNTIME_BUILTINS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
@@ -38,6 +45,7 @@ export {
   type ProjectFileCompilation,
   type ProjectSourceFile,
 } from "./compiler.js";
+export type { ProjectImageFile } from "./image-catalog.js";
 export { MAIN_FILE_PATH } from "./project-paths.js";
 export {
   INSTRUCTION_PLAN_FORMAT,
@@ -89,14 +97,17 @@ export {
   languageDiagnostics,
   languageHover,
   languagePositionAt,
+  languageProjectOverview,
   languageSignatureHelp,
   type LanguageCompletionItem,
   type LanguageContextHelp,
   type LanguageDiagnostic,
   type LanguageDocument,
+  type LanguageFileOverview,
   type LanguageFormatResult,
   type LanguageHover,
   type LanguagePosition,
+  type LanguageProjectFile,
   type LanguageRange,
   type LanguageSignatureHelp,
   type LanguageTextEdit,
@@ -116,7 +127,6 @@ export type {
   ActionRequestedEvent,
   PlayerTranscriptEvent,
   ExitEvent,
-  CompleteEvent,
   DeveloperWarningEvent,
   InterpreterEvent,
   OutputSpeaker,

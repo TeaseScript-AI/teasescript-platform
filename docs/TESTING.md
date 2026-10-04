@@ -614,7 +614,7 @@ The repository does not use an arbitrary mandatory line-coverage threshold such 
 
 Performance benchmarks are separate from correctness tests. [`planning/RELEASE-ROADMAP.md`](planning/RELEASE-ROADMAP.md) tracks the Beta outcome **Establish a runtime performance baseline and optimization plan**.
 
-Performance workloads should measure long-running runtime-state growth as well as instruction throughput. This includes growth in runtime-managed identities, snapshots, checkpoints, cloning, validation, and serialization costs. Repeated scoped speaker creation is a representative workload, but measurements and reachability/lifetime analysis must precede any reclamation or garbage-collection rule.
+Performance workloads should measure long-running runtime-state growth as well as instruction throughput. This includes growth in runtime-managed identities, snapshots, checkpoints, cloning, validation, and serialization costs. Repeated timer or media creation is a representative workload, but measurements and reachability/lifetime analysis must precede any reclamation or garbage-collection rule.
 
 ### Scaling diagnostics
 

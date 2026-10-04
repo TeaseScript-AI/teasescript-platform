@@ -32,6 +32,7 @@ const TEASESCRIPT_GRAMMAR_KEYWORDS = Object.freeze([
   "exit",
   "fallback",
   "global",
+  "tagged",
   "save",
   "load",
   "delete",
@@ -118,6 +119,7 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "loadFromScript",
   "getScriptMetadata",
   "getPlayerHistory",
+  "findImages",
 ] as const);
 
 export const CORE_RUNTIME_BUILTINS = Object.freeze([

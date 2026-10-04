@@ -75,7 +75,7 @@ function observe(current: Session, atMs: number): Session {
   return runSession(current);
 }
 
-/** Records a Continue without running, as the Player does before its scene clock resumes. */
+/** Records a Continue capture without running; the Player runs the session right after it. */
 function continueAt(
   current: Session,
   wallClockMs: number,
@@ -140,6 +140,7 @@ test("the getters read the captured wall clock through the captured zone as scen
           "wait 90 s",
           "say getTime().toISO()",
           "say getDate().weekday",
+          "exit",
         ].join("\n"),
       ),
     ),
@@ -157,6 +158,7 @@ test("the getters read the captured wall clock through the captured zone as scen
           "wait 1 s",
           "say getTimestamp().toISO()",
           "say getTime().toISO()",
+          "exit",
         ].join("\n"),
         { wallClockMs: utc("2026-10-25T00:59:59") },
       ),
@@ -173,7 +175,9 @@ test("the getters read the captured wall clock through the captured zone as scen
 
 test("a late observation gives the same events and state as observing every deadline on time", () => {
   const plain = runSession(
-    session("wait 1 s\nsay getTimestamp().toISO()\nwait 1.0004 s\nsay getTimestamp().toISO()"),
+    session(
+      "wait 1 s\nsay getTimestamp().toISO()\nwait 1.0004 s\nsay getTimestamp().toISO()\nexit",
+    ),
   );
   const onTime = observe(observe(copy(plain), 1_000), 2_000.4);
   const late = observe(copy(plain), 2_000.4);
@@ -194,6 +198,7 @@ test("a late observation gives the same events and state as observing every dead
           "}",
           "wait 200 ms",
           "say getTimestamp().toISO()",
+          "exit",
         ].join("\n"),
       ),
     ),
@@ -209,7 +214,7 @@ test("a late observation gives the same events and state as observing every dead
 
 test("a Continue capture applies from the saved observed time; saved catch-up keeps the earlier one", () => {
   const saved = runSession(
-    session("wait 1 s\nsay getTimestamp().toISO()\nwait 10 s\nsay getTimestamp().toISO()"),
+    session("wait 1 s\nsay getTimestamp().toISO()\nwait 10 s\nsay getTimestamp().toISO()\nexit"),
   );
   // The session was saved after observing 5 s, with the 1 s wait due but its continuation not yet run.
   apply(saved, observeTime(saved.plan, saved.snapshot, 5_000));
@@ -218,7 +223,7 @@ test("a Continue capture applies from the saved observed time; saved catch-up ke
   assert.deepEqual(says(resumed), ["2026-10-04T16:00:01Z", "2026-10-05T09:00:06Z"]);
 
   // Due exactly at the boundary: execution from the boundary on uses the new capture.
-  const atBoundary = runSession(session("wait 1 s\nsay getTimestamp().toISO()"));
+  const atBoundary = runSession(session("wait 1 s\nsay getTimestamp().toISO()\nexit"));
   apply(atBoundary, observeTime(atBoundary.plan, atBoundary.snapshot, 1_000));
   continueAt(atBoundary, utc("2026-10-05T09:00:00"));
   assert.deepEqual(says(runSession(atBoundary)), ["2026-10-05T09:00:00Z"]);
@@ -234,6 +239,7 @@ test("Continues recorded before catch-up each apply from their own boundary", ()
         "say getTimestamp().toISO()",
         "wait 5 s",
         "say getTimestamp().toISO()",
+        "exit",
       ].join("\n"),
     ),
   );
@@ -263,6 +269,7 @@ test("Continues recorded before catch-up each apply from their own boundary", ()
         "timer async 110 ms { say getTimestamp().toISO() }",
         "wait 200 ms",
         "say getTimestamp().toISO()",
+        "exit",
       ].join("\n"),
       { persistentScriptStorage: true },
     ),
@@ -293,7 +300,9 @@ test("Continues recorded before catch-up each apply from their own boundary", ()
 });
 
 test("an open choice keeps the capture it was shown with through Continues, interrupts, and compaction", () => {
-  const shown = session('let day = choose [toDate("2026-10-04"), toDate("2026-10-05")]\nsay day');
+  const shown = session(
+    'let day = choose [toDate("2026-10-04"), toDate("2026-10-05")]\nsay day\nexit',
+  );
   // Continues at one boundary with nothing in between replace each other.
   continueAt(continueAt(shown, START + 10_000), START + 20_000);
   assert.equal(shown.snapshot.temporalCaptures.length, 1);
@@ -316,6 +325,7 @@ test("an open choice keeps the capture it was shown with through Continues, inte
         'let day = choose [toDate("2026-10-04")]',
         "say day",
         "say getTimestamp().toISO()",
+        "exit",
       ].join("\n"),
     ),
   );
@@ -345,7 +355,9 @@ function savedData(current: Session) {
 }
 
 test("a checkpoint rejects captures out of recording order and an open choice without its capture", () => {
-  const saved = runSession(session('wait 1 s\nlet day = choose [toDate("2026-10-04")]\nsay day'));
+  const saved = runSession(
+    session('wait 1 s\nlet day = choose [toDate("2026-10-04")]\nsay day\nexit'),
+  );
   observe(saved, 1_000);
   apply(saved, observeTime(saved.plan, saved.snapshot, 1_500));
   continueAt(saved, START + 10_000, NEUTRAL);
@@ -372,7 +384,7 @@ test("a checkpoint rejects captures out of recording order and an open choice wi
   }
 
   // A choice shown before a Continue at the same boundary cannot be validated with the later capture alone.
-  const relabeled = runSession(session('let day = choose [toDate("2026-10-04")]\nsay day'));
+  const relabeled = runSession(session('let day = choose [toDate("2026-10-04")]\nsay day\nexit'));
   continueAt(relabeled, START + 10_000, NEUTRAL);
   const data = savedData(relabeled);
   data.snapshot.temporalCaptures.shift();
@@ -405,14 +417,14 @@ test("a checkpoint rejects captures out of recording order and an open choice wi
 });
 
 test("without a clock the getters fail, and a Continue capture is checked before it is recorded", () => {
-  const noClock = runSession(session("say getDate()", { wallClockMs: null }));
+  const noClock = runSession(session("say getDate()\nexit", { wallClockMs: null }));
   assert.equal(noClock.snapshot.failure?.code, "TSR064");
   const failed = recordContinueCapture(noClock.plan, noClock.snapshot, { wallClockMs: START });
   assert.equal(failed.outcome.kind, "invalidCapture");
   assert.deepEqual(failed.snapshot, noClock.snapshot);
   assert.deepEqual(failed.events, []);
 
-  const waiting = runSession(session("wait 1 s"));
+  const waiting = runSession(session("wait 1 s\nexit"));
   for (const capture of [
     null,
     {},

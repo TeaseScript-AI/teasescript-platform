@@ -45,6 +45,7 @@ This table is generated from the current section order.
 - [38. Keywords and protected built-ins](#38-keywords-and-protected-built-ins)
 - [39. Rejected and reserved syntax](#39-rejected-and-reserved-syntax)
 - [40. Dictionaries](#40-dictionaries)
+- [41. Headers and tags](#41-headers-and-tags)
 - [Remaining open decisions](#remaining-open-decisions)
 
 ## Status legend
@@ -853,6 +854,30 @@ Rules:
 - A parameter without an annotation or a default has an unknown type. Its arguments are not checked, because a
   parameter's type is never inferred from its call sites.
 
+### Global functions
+
+A function belongs to its file ([§29](#29-script-files-and-paths)); `global function` declares one that every file of a
+package can call, without an import ([ADR 0022](../decisions/0022-multi-file-scripts.md)):
+
+```text
+// helpers.tease
+global function punish(count) {
+    say "That is ${count} more."
+}
+
+// chapter1.tease
+punish(3)
+```
+
+- A global function may use only globals, its parameters, and its own locals, not the top-level `let` variables of its
+  file, and may call only other global functions and built-ins. Using a name of its file is a compile error whose fix is
+  to make that name a global, or to pass it as a parameter.
+- Interactions, timers, media, `goto`, `call`, `end`, `exit`, and recursion work in it as in any function. A bare label
+  in it means a label of the file where it is written, like `goto "helpers.tease" start`: the goto enters that file
+  afresh, so a variable of the file used after the label needs its `let` after the label too ([§26](#26-labels-and-goto)).
+  This holds even when nothing calls the function, until it is computed which global functions can be reached.
+- Its name is unique in the package, like that of a global ([§12](#global-variables)).
+
 ## 12. Variable declarations
 **Status:** Accepted
 
@@ -925,7 +950,10 @@ picks.add("three")    // compile error
 - An empty list or set takes its element type from the first element added or assigned. In a list or set literal,
   integers and numbers together are numbers, and `null` elements make the element type optional.
 - "First" follows checking order: top-level statements in source order, then function bodies that were not yet
-  needed, then timer and media blocks. The message for a later contradiction names the line of the first value.
+  needed, then timer and media blocks. The start values of globals and speakers come before all of this, in the order a
+  session sets them up. A package checks its files in turn, `main.tease` first and then the others by path; a global
+  function's body is checked where a call first needs its result, otherwise after its own file. The message for a later
+  contradiction names the line of the first value, and its file when that is another one.
 - A value whose type the compiler cannot know, such as untyped storage, host data, or a parameter of unknown type,
   decides nothing and is not rejected at compile time.
 
@@ -942,15 +970,34 @@ global answer: string? = null
 
 Rules:
 
-- A global may be declared anywhere in any file, including inside `if`, loops, and functions.
-- It is visible in all files. Its name is unique in the project, and no other name may shadow it.
-- Declarations are collected at compile time. Globals are initialized once at session start, before the story runs,
-  whether or not the surrounding block ever runs: `main.tease` first, then the other files in path order, each in
-  source order. Reaching the declaration later does nothing.
+- A global may be declared anywhere in any file, including inside `if`, loops, functions, and timer and media blocks.
+- It is visible in all files. Its name is unique in the project, also among global functions and speakers, and no other
+  name may shadow it: a `let`, parameter, regular function, or host-provided global of the same name anywhere is a
+  compile error.
+- Declarations are collected at compile time. Globals and speakers ([§37](#37-dynamic-speaker-terms)) are initialized
+  once at session start, before the story runs, whether or not the surrounding block ever runs: `main.tease` first, then
+  the other files in path order, each in source order. Reaching the declaration later does nothing.
 - An initializer may use literals, earlier globals, side-effect-free operators, and `load … , default:`. It may not use
-  local values, interactions, calls, or random numbers, or read a global initialized after it.
+  local values, interactions, calls, or random numbers, including the element that `.random` or a list in `${...}`
+  selects, or read a global initialized after it. These rules also hold inside a `load` default.
 - Types follow the `let` rules above, across all files. Values are checkpointed and live for the session; `save` and
   `load` keep a value beyond it.
+
+A value that exists only later, such as a local variable, needs a start value with `default:`:
+
+```text
+function practice {
+    let localCount = askInteger "How many did you do?"
+    global attempts = localCount, default: 0
+}
+```
+
+`attempts` holds `0` from the start of the session, in every file. Each time the declaration runs, it assigns
+`localCount`. The `default:` value follows the initializer rules. Like every `, default:`, it belongs to the nearest
+construct before it that takes one ([§25](#25-persistent-storage-and-keys)), so
+`global level = load "level", default: 1` gives the default to `load`. Without `default:`, an initializer that uses a
+local value is a compile error that names the global, explains that it needs a value from the start of the session,
+and shows both fixes: `, default: 0`, or `global attempts = 0` and a later `attempts = localCount`.
 
 ## 13. Explicit types
 **Status:** Accepted
@@ -1198,7 +1245,8 @@ Rules:
 - A nested block may not redeclare a name visible from an outer scope.
 - A nested block may modify a visible outer variable.
 - Separate sibling blocks may declare the same local name.
-- Top-level variables belong to their file. A global ([§12](#global-variables)) is visible in all files.
+- Top-level variables and functions belong to their file. A global ([§12](#global-variables)), a global function
+  ([§11](#global-functions)), and a speaker ([§37](#37-dynamic-speaker-terms)) are visible in all files.
 
 ```text
 if firstCondition {
@@ -2124,6 +2172,7 @@ image and audio integration is tracked in #446, and browser video playback is pl
 showImage "images/room.jpg"
 hideImage
 showImage photo            // a file reference string, or null
+showImage tagged "bedroom" // a random package image with these tags, see §41
 ```
 
 `showImage` sets the persistent Stage image; it stays until the next `showImage` or `hideImage`. `hideImage` takes no
@@ -2600,6 +2649,9 @@ Rules:
   defines `goto` to another file.
 - Unknown labels and duplicate labels in one file are compile errors.
 - A `goto` discards the current function, loop, and block continuations.
+- A `goto` back to an earlier label runs the top-level `let`s after it again, which set their variables anew. A variable
+  of the file may be used after a label only when every way to the label has run its `let`; otherwise it is a compile
+  error.
 - A `goto` triggered by an event aborts the current execution path and does not return.
 
 ## 27. Timers
@@ -2688,7 +2740,8 @@ of the wrong type are rejected.
 - Every timer stops on `exit` and when the session ends.
 - On `goto`, `end`, and `call` transfers, non-persistent timers are removed and persistent timers remain active.
 
-The current runtime stores `persist` but it has no effect: `goto`, `end`, and `call` are not implemented.
+`goto` within a file applies these rules; `call`, an `end` that returns to a caller, and transfers to other files are
+not implemented yet.
 
 ### Expiry blocks
 
@@ -2705,8 +2758,8 @@ is inert while the block runs, so there are never two active story paths:
 - if the block uses `exit`, the session halts and the interrupted action and source instruction are discarded:
   an interrupted `let answer = askText ...` completes nothing and binds no value.
 
-Future `goto` or `end` transfers must also discard the interrupted action and instruction; those commands are not
-implemented in the current runtime.
+A `goto` from the block, also from a function that the block calls, discards the interrupted action and instruction
+in the same way.
 
 Blocks run one at a time in due order. A block may itself wait; later expiries queue behind it.
 
@@ -2815,7 +2868,8 @@ Cleanup:
 **Status:** Accepted ([ADR 0022](../decisions/0022-multi-file-scripts.md))
 
 A package consists of one or more `.tease` files. The fixed entry file is `main.tease`; a session starts at its top.
-Paths are relative to the package root and separate folders with `/`.
+Paths are relative to the package root and separate folders with `/`. A file may start with a header that describes
+and tags it ([§41](#41-headers-and-tags)).
 
 Go to another file, from its top or at a label:
 
@@ -2900,8 +2954,11 @@ Behavior:
   fallback is never implicit.
 - `fallback` may run any number of times, anywhere, including inside `if`; the latest one executed wins. It is session
   state and is checkpointed. `fallback none` clears it again.
-- A reachable end of a file without `end`, `exit`, or a transfer is a compile error in every file. Branches that all
-  end or transfer need nothing after them:
+- A reachable end of a file without `end`, `exit`, or a transfer is a compile error in every file. A file of
+  declarations only (functions, global functions, speakers, and globals without `default:`) runs nothing on its own
+  and needs no ending; a `goto` into such a file is a compile error. A call
+  counts as returning, also of a function that always ends the session, so `exit` or `end` still follows it. Branches
+  that all end or transfer need nothing after them:
 
 ```text
 if passed {
@@ -3359,6 +3416,13 @@ speaker mistressVera
 ```
 
 This does not redeclare the speaker. The parser distinguishes `speaker identifier { ... }` from `speaker identifier` through the following token. The default speaker is session state: it survives `goto`, `end`, and `call`, remains active until changed again, and is cleared by `exit`.
+
+A speaker is global ([ADR 0022](../decisions/0022-multi-file-scripts.md)): declared anywhere in any file of a package,
+also inside a block or function, it is known in every file. Its name is unique in the package like that of a global
+([§12](#global-variables)). The session sets it up at its start, together with the globals and in their order, so its
+property values follow the initializer rules of globals: literals, earlier globals and speakers, side-effect-free
+operators, and `load … , default:`. A property may also read the speaker's own earlier properties through `speaker`. To
+use a value that exists only later, assign the property then, as in `mistressVera.alias = chosenName`.
 
 ### Names, titles, and presentation
 
@@ -4037,13 +4101,14 @@ end
 exit
 fallback
 global
+tagged
 save
 load
 delete
 is
 ```
 
-The same keyword may have more than one grammar form when the next token makes the form unambiguous. For example, `speaker identifier { ... }` declares a speaker, while `speaker identifier` sets the default speaker. A parser distinguishes these forms through normal lookahead; this is not an implementation problem.
+The same keyword may have more than one grammar form when the next token makes the form unambiguous. For example, `speaker identifier { ... }` declares a speaker, while `speaker identifier` sets the default speaker, and `global function` declares a global function, while `global identifier = ...` declares a global. A parser distinguishes these forms through normal lookahead; this is not an implementation problem.
 
 Modifier and block words such as `async`, `visible`, `mystery`, `hidden`, `times`, and the media cue words `at`,
 `beforeEnd`, and `finish` are contextual: they have their special meaning only in the positions documented in
@@ -4285,6 +4350,85 @@ for name in toys { ... }                // the keys
 - **Type tests:** `is dict` and `is T dict` test the value; `is T dict` checks every value.
 
 Deferred: keys other than text, merging dicts, a two-variable `for`, and sorted dicts.
+
+## 41. Headers and tags
+**Status:** Accepted ([ADR 0023](../decisions/0023-tags-for-scripts-and-images.md))
+
+### File header
+
+A file may start with a header between two `---` lines:
+
+```text
+---
+title: "Strict punishment"
+author: "Mistress X"
+description: "Corner time with lines, for after a failed task."
+tags: "chastity", punishment: 4
+keywords: "chastity", "femdom", "long session"
+---
+say "Your punishment begins."
+exit
+```
+
+- Only blank lines and comments may precede the opening `---`, and each `---` stands alone on its line. A `---` line
+  inside a block string is text. A header later in the file is an error.
+- Each field is one `name: value` line. As after any `:` or comma, a value may continue on the next line
+  ([§1](#1-statement-termination)). Every field is optional; an unknown or repeated field is an error.
+- `title`, `author`, and `description` are text in quotes, single-line or block strings, without interpolation. They
+  are shown on the website and in an editor overview of many files.
+- `tags` lists the file's tags for selection, separated by commas: a plain tag in quotes, `"chastity"`, or a tag with a
+  number without quotes, `punishment: 4` (not `"punishment: 4"`).
+- `keywords` lists text in quotes for the future website catalog search. Only the keywords of `main.tease` are used,
+  and they never affect selection.
+- The header is metadata, not YAML: indentation has no meaning, and it runs no code and reads no variables.
+
+### Tags
+
+- A tag name has lowercase ASCII letters `a`–`z`, digits, and hyphens, such as `corner-time`. Surrounding spaces are
+  removed and uppercase letters lowered, so `"Punishment"` is `punishment`.
+- A tag may carry a number: `punishment: 4`. The number is finite, may be negative or a decimal, and uses the forms of
+  [§3](#numeric-literal-forms) with an optional sign. A tag with a number also counts as present.
+- A tag listed more than once counts once, with a warning; a number wins over its absence. Two different numbers for
+  one tag are an error.
+
+### Tagged selection
+
+```text
+showImage tagged "bedroom", "punishment"                     // comma = and
+showImage tagged "punishment" > 3 and not "public"
+showImage tagged ("bedroom" or "bathroom") and not "outdoor"
+showImage tagged "bedroom", none: ["outdoor"]
+let photos = findImages(where: "bedroom" and "punishment" >= minimum)
+if photos.length > 0 { showImage photos.random }
+```
+
+- After `tagged` and in the `where:` argument, a quoted tag name tests whether a candidate has the tag. A quoted name
+  followed by `==`, `!=`, `<`, `<=`, `>`, or `>=` compares the tag's number with an ordinary expression, so
+  `"punishment" > minimum` reads the variable `minimum`. A tag without a number makes every comparison false, also
+  `!=`. `and`, `or`, `not`, and parentheses work as in conditions ([§5](#5-logical-and-comparison-operators)).
+- A tag name in a query is written out in full, without `${...}` or a number: query `"punishment" == 4`, not
+  `"punishment: 4"`.
+- In `tagged`, commas join complete predicates with `and`. The options `all:`, `none:`, and `any:` follow them, each at
+  most once, with a list of tag names that a candidate must have all of, none of, or at least one of; an empty list
+  passes every candidate. They join with `and` too, and take computed names: `findImages(all: wanted)`.
+- `findImages` takes the same parts as named arguments `where:`, `all:`, `none:`, and `any:`, and returns the paths of
+  all matching images in path order, as a `string[]`, which may be empty. Without arguments it returns every image.
+- Comparison bounds and tag lists are evaluated once, in written order, before any candidate is matched. Matching draws
+  no random number. `showImage tagged` draws once from the session random generator, and restoring a checkpoint never
+  draws again.
+- When the compilation is given the package images, a `showImage tagged` whose tag tests and literal tag lists match
+  none of them is a compile error; comparisons and computed lists are not evaluated for this. Any other pick that finds
+  no image is a runtime error.
+
+### Image tags
+
+- An image's tags are its XMP keywords ([ADR 0023](../decisions/0023-tags-for-scripts-and-images.md)), from its sidecar
+  named after the whole file, such as `room.jpg.xmp`, when it has one, and otherwise embedded in the image. A keyword is
+  a tag name, or a name and a number such as `punishment: 4`, with the rules of [Tags](#tags). Another keyword is
+  ignored with a warning. A repeated tag counts once without a warning, because photo tools often keep `punishment`
+  beside `punishment: 4`; two different numbers for one tag are an error.
+- The catalog that tag queries search is generated from the images when the project compiles. It is part of the plan,
+  so a checkpoint keeps it and a restored session searches the same images.
 
 ## Remaining open decisions
 The accepted core syntax is consolidated in this document. Remaining work is primarily detailed API payloads and engine/account behavior.

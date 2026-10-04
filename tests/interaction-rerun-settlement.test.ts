@@ -45,30 +45,30 @@ const SCENARIOS = [
   {
     name: "a choice with written values in a loop",
     source:
-      'for pair in [["Low", "High"], ["Plug", "Clamps"]] {\n    let pick = choose 0: pair[0], 1: pair[1]\n    say "Picked ${pick}"\n}',
+      'for pair in [["Low", "High"], ["Plug", "Clamps"]] {\n    let pick = choose 0: pair[0], 1: pair[1]\n    say "Picked ${pick}"\n}\nexit',
     said: ["Picked 1", "Picked 1"],
   },
   {
     name: "a choice in a function called twice",
     source:
-      'function ask(first, second) {\n    return choose first, second\n}\nlet x = ask("A", "B")\nlet y = ask("C", "D")\nsay "${x} ${y}"',
+      'function ask(first, second) {\n    return choose first, second\n}\nlet x = ask("A", "B")\nlet y = ask("C", "D")\nsay "${x} ${y}"\nexit',
     said: ["B D"],
   },
   {
     name: "a choice from lists of different lengths in a loop",
     source:
-      'for options in [["Low", "High"], ["Plug", "Clamps", "Rope"]] {\n    let pick = choose options\n    say "Picked ${pick}"\n}',
+      'for options in [["Low", "High"], ["Plug", "Clamps", "Rope"]] {\n    let pick = choose options\n    say "Picked ${pick}"\n}\nexit',
     said: ["Picked High", "Picked Clamps"],
   },
   {
     name: "a computed button label in a loop",
-    source: 'for word in ["Go", "Run"] {\n    showButton word\n}\nsay "done"',
+    source: 'for word in ["Go", "Run"] {\n    showButton word\n}\nsay "done"\nexit',
     said: ["done"],
   },
   {
     name: "a computed default answer in a loop",
     source:
-      'for minutes in [10, 20] {\n    let answer = askNumber "Minutes?", default: minutes * 2\n    say "Answered ${answer}"\n}',
+      'for minutes in [10, 20] {\n    let answer = askNumber "Minutes?", default: minutes * 2\n    say "Answered ${answer}"\n}\nexit',
     said: ["Answered 20", "Answered 40"],
   },
 ] as const;
@@ -127,7 +127,7 @@ test("a forged retained choice is still rejected right after the second completi
 
 test("a forged retained choice is rejected until cleanup clears the presented options", () => {
   const plan = compileValidPlan(
-    'let x = "Alpha"\nlet y = "Beta"\nlet pick = choose first: x, second: y\nsay pick, instant',
+    'let x = "Alpha"\nlet y = "Beta"\nlet pick = choose first: x, second: y\nsay pick, instant\nexit',
   );
   const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
   const action = pending.foregroundAction;
@@ -150,7 +150,7 @@ test("a forged retained choice is rejected until cleanup clears the presented op
 
 test("a valid plan that refills a button label and jumps back to its continuation keeps running", () => {
   const compiled = compileSource(
-    'let word = "Go"\nshowButton word\nword = "Run"\nsay "end", instant',
+    'let word = "Go"\nshowButton word\nword = "Run"\nsay "end", instant\nexit',
   );
   const plan = structuredClone(compiled.plan!);
   const continuation =
@@ -200,7 +200,7 @@ test("a valid plan that refills a button label and jumps back to its continuatio
 
 test("a valid plan that overwrites the button label right after the settlement keeps running", () => {
   const compiled = compileSource(
-    'let word = "Go"\nshowButton word\nword = "Run"\nsay "end", instant',
+    'let word = "Go"\nshowButton word\nword = "Run"\nsay "end", instant\nexit',
   );
   const plan = structuredClone(compiled.plan!);
   const owning = plan.instructions.findIndex((instruction) => instruction.kind === "interaction");
@@ -236,7 +236,7 @@ test("a valid plan that overwrites the button label right after the settlement k
 
 test("a forged button transcript is rejected at its first completion even when the plan jumps back later", () => {
   const compiled = compileSource(
-    'let word = "Go"\nshowButton word\nword = "Run"\nsay "end", instant',
+    'let word = "Go"\nshowButton word\nword = "Run"\nsay "end", instant\nexit',
   );
   const plan = structuredClone(compiled.plan!);
   const continuation =

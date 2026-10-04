@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { compileSource } from "../src/index.js";
 import { parse } from "../src/parser.js";
 
 test("reports a missing speaker identifier and parses the next statement", () => {
@@ -98,6 +99,21 @@ test("does not duplicate lexer diagnostics for an unterminated interpolation", (
   assert.deepEqual(statementKinds(result), ["exitStatement"]);
 });
 
+test("an error inside an interpolation where a value is required is reported only once", () => {
+  for (const [source, expected] of [
+    ['let value = "${1 < 2 < 3}"\nexit', ["TSP020", "error", [21, 0, 21, 22, 0, 22]]],
+    // The failed inner expression reported its own error: no generic TSP009 inside the string either.
+    ['let value = "${1 +}"\nexit', ["TSP012", "error", [18, 0, 18, 18, 0, 18]]],
+    // Nothing reported the failed expression, so the interpolation does.
+    ['let value = "${)}"\nexit', ["TSP009", "error", [15, 0, 15, 16, 0, 16]]],
+  ] as const) {
+    const compilation = compileSource(source);
+    assert.deepEqual(compactDiagnostics(compilation), [expected], source);
+    assert.equal(compilation.plan, null, source);
+    assert.deepEqual(statementKinds(parse(source)), ["exitStatement"], source);
+  }
+});
+
 test("accepts physical continuation lines inside block-string interpolation", () => {
   const source = ['say """', "  ${", "    1 + 2", "  }", '"""', "exit"].join("\n");
   const result = parse(source);
@@ -115,7 +131,7 @@ test("rejects an invalid statement shape and recovers at the next CRLF line", ()
 });
 
 function compactDiagnostics(
-  result: ReturnType<typeof parse>,
+  result: Pick<ReturnType<typeof parse>, "diagnostics">,
 ): Array<[string, string, [number, number, number, number, number, number]]> {
   return result.diagnostics.map((diagnostic) => [
     diagnostic.code,

@@ -215,10 +215,10 @@ test("plan validation accepts deep and broad plan data without a generic depth o
 
 test("repeated stepping and checkpoint entries reuse the validated immutable plan", () => {
   const statementCount = 64;
-  const source = Array.from(
-    { length: statementCount },
-    (_, index) => `say "Line ${index}", instant`,
-  ).join("\n");
+  const source = [
+    ...Array.from({ length: statementCount }, (_, index) => `say "Line ${index}", instant`),
+    "exit",
+  ].join("\n");
   const plan = compiledPlan(source);
   const uninterrupted = run(plan, createFreshRuntimeSnapshot(plan));
   // validateInstructionPlan always captures its input, so this measures one whole-plan capture.
@@ -326,7 +326,10 @@ test("checkpoint entries return deeply frozen plans detached from the caller", (
 
 test("ordinary source compiles beyond the removed generic capture threshold", () => {
   const count = 5_000;
-  const source = Array.from({ length: count }, (_, index) => `say "Line ${index}"`).join("\n");
+  const source = [
+    ...Array.from({ length: count }, (_, index) => `say "Line ${index}"`),
+    "exit",
+  ].join("\n");
   const compiled = compileSource(source);
 
   assert.deepEqual(compiled.diagnostics, []);

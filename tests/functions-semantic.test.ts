@@ -17,6 +17,7 @@ test("collects top-level functions before validating calls and mutual recursion"
       "  if input == 0 { return 0 }",
       "  return first(input - 1)",
       "}",
+      "exit",
     ].join("\n"),
   );
 
@@ -103,6 +104,7 @@ test("function scopes access globals but keep parameters and locals isolated", (
       "  total = total + local",
       "}",
       "add(2)",
+      "exit",
     ].join("\n"),
   );
   assert.deepEqual(valid.diagnostics, []);
@@ -144,7 +146,7 @@ test("rejects representative protected names across function, parameter and loca
 
 test("allows timer spellings that are not TeaseScript syntax as ordinary identifiers", () => {
   for (const name of ["mysteryTimer", "startTimer", "stopTimer"]) {
-    const result = compileSource(`let ${name} = 1`);
+    const result = compileSource(`let ${name} = 1\nexit`);
     assert.deepEqual(result.diagnostics, []);
     assert.notEqual(result.plan, null);
   }
@@ -152,7 +154,7 @@ test("allows timer spellings that are not TeaseScript syntax as ordinary identif
 
 test("a call to a protected name is rejected with located diagnostics or never fails as an unknown built-in", () => {
   for (const name of TEASESCRIPT_PROTECTED_NAMES) {
-    const source = `${name}()`;
+    const source = `${name}()\nexit`;
     const result = compileSource(source);
     if (result.plan === null) {
       assert.ok(result.diagnostics.length > 0, source);
@@ -173,7 +175,9 @@ test("a call to a protected name is rejected with located diagnostics or never f
 });
 
 test("long unary defaults preserve validation without native semantic recursion", () => {
-  const valid = compileSource(`function stable(value = ${"-".repeat(5_000)}1) { return value }`);
+  const valid = compileSource(
+    `function stable(value = ${"-".repeat(5_000)}1) { return value }\nexit`,
+  );
   assert.deepEqual(valid.diagnostics, []);
 
   const invalid = compileSource(

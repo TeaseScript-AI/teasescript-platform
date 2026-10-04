@@ -53,6 +53,7 @@ test("a dict literal takes written, quoted, and computed keys in source order, a
         'let first = "x"',
         'let again = "x"',
         "say dict{ [first]: 1, z: 2, [again]: 3 }",
+        "exit",
       ].join("\n"),
     ),
     [
@@ -77,6 +78,7 @@ test("a dict literal takes written, quoted, and computed keys in source order, a
         "}",
         'let table = dict{ [key("a")]: value(1), [key("b")]: value(2) }',
         "say table",
+        "exit",
       ].join("\n"),
     ),
     ["key a", "value 1", "key b", "value 2", 'dict{ "a": 1, "b": 2 }'],
@@ -108,6 +110,7 @@ test("reads, writes, and dict methods keep insertion order, and get gives the de
         'counts["spank"] = counts.get("spank", default: 0) + 1',
         'counts["spank"] += 2',
         "say counts",
+        "exit",
       ].join("\n"),
     ),
     [
@@ -131,22 +134,22 @@ test("reads, writes, and dict methods keep insertion order, and get gives the de
 test("a missing key, a key that is not text, and ${dict} fail with the fix", () => {
   const toys = 'let toys = dict{ collar: "leather" }\nlet name = "cuffs"\n';
   const missing = 'Dictionary has no key "cuffs". Check toys.contains(name) first.';
-  assert.deepEqual(failure(`${toys}say toys[name]`), ["TSR061", missing]);
-  assert.deepEqual(failure(`${toys}let old = toys.remove(name)`), ["TSR061", missing]);
-  assert.deepEqual(failure('let counts = dict{ a: 1 }\ncounts["b"] += 1'), [
+  assert.deepEqual(failure(`${toys}say toys[name]\nexit`), ["TSR061", missing]);
+  assert.deepEqual(failure(`${toys}let old = toys.remove(name)\nexit`), ["TSR061", missing]);
+  assert.deepEqual(failure('let counts = dict{ a: 1 }\ncounts["b"] += 1\nexit'), [
     "TSR061",
     'Dictionary has no key "b". Check counts.contains("b") first.',
   ]);
-  assert.deepEqual(failure(`${DYNAMIC}${toys}say toys[dynamic(5)]`), [
+  assert.deepEqual(failure(`${DYNAMIC}${toys}say toys[dynamic(5)]\nexit`), [
     "TSR062",
     'A dict key is text (string), but this is a whole number (integer). Write a number key as text, as in "${id}".',
   ]);
-  assert.deepEqual(failure(`${DYNAMIC}${toys}say "\${dynamic(toys)}"`), [
+  assert.deepEqual(failure(`${DYNAMIC}${toys}say "\${dynamic(toys)}"\nexit`), [
     "TSR021",
     '"${...}" cannot show a dict. Select one value with dict[key], or show every value with dict.values.join().',
   ]);
   // The compiler reports what it can see.
-  assert.deepEqual(diagnostics(`${toys}let id = 5\nsay toys[id]\nsay "\${toys}"`), [
+  assert.deepEqual(diagnostics(`${toys}let id = 5\nsay toys[id]\nsay "\${toys}"\nexit`), [
     [
       "TSV043",
       'A dict key is text (string), but this is a whole number (integer). Write a number key as text, as in "${id}".',
@@ -158,7 +161,7 @@ test("a missing key, a key that is not text, and ${dict} fail with the fix", () 
       "toys",
     ],
   ]);
-  assert.deepEqual(diagnostics('say dict{ a: 1 }["b"]\nsay dict{ a: 1 }.remove("b")'), [
+  assert.deepEqual(diagnostics('say dict{ a: 1 }["b"]\nsay dict{ a: 1 }.remove("b")\nexit'), [
     ["TSV043", 'Dictionary has no key "b".', '"b"'],
     ["TSV043", 'Dictionary has no key "b".', '"b"'],
   ]);
@@ -177,11 +180,12 @@ test("a loop goes through the keys as they were when it started", () => {
         "    }",
         "}",
         "say toys",
+        "exit",
       ].join("\n"),
     ),
     ["a", "b", "c", 'dict{ "a": 1, "c": 3, "aa": 0, "bb": 0, "cc": 0 }'],
   );
-  assert.deepEqual(codes("for key in dict{ a: 1 } {\n    let n: integer = key\n}"), [
+  assert.deepEqual(codes("for key in dict{ a: 1 } {\n    let n: integer = key\n}\nexit"), [
     ["TSV041", "key"],
   ]);
 });
@@ -213,6 +217,7 @@ test("dicts compare by keys and values in any order and are copied like other va
         "}",
         'say change(a)["x"]',
         'say a["x"]',
+        "exit",
       ].join("\n"),
     ),
     [
@@ -237,16 +242,20 @@ test("typed storage keeps a dict and its entry order, and a typed load checks ev
         'let toys: string dict = load "toys"',
         "say toys",
         'say toys == dict{ collar: "leather", cuffs: "wrist" }',
+        "exit",
       ].join("\n"),
     ),
     ['dict{ "cuffs": "wrist", "collar": "leather" }', "true"],
   );
-  assert.deepEqual(failure('save dict{ a: "x" } as "k"\nlet counts: integer dict = load "k"'), [
-    "TSR058",
-    `'counts' holds a dict (integer dict), so it cannot take a dict with text (string) at ["a"].`,
-  ]);
   assert.deepEqual(
-    failure(`${DYNAMIC}let counts: integer dict = dict{}\ncounts["a"] = dynamic("x")`),
+    failure('save dict{ a: "x" } as "k"\nlet counts: integer dict = load "k"\nexit'),
+    [
+      "TSR058",
+      `'counts' holds a dict (integer dict), so it cannot take a dict with text (string) at ["a"].`,
+    ],
+  );
+  assert.deepEqual(
+    failure(`${DYNAMIC}let counts: integer dict = dict{}\ncounts["a"] = dynamic("x")\nexit`),
     [
       "TSR058",
       "A value of 'counts' holds a whole number (integer), so it cannot take text (string).",
@@ -275,6 +284,7 @@ test("execution resumed from a checkpoint at every step, also inside a call that
       "}",
       "say table",
       'say table.get("z", default: { n: -1 })',
+      "exit",
     ].join("\n"),
   );
 });
@@ -290,6 +300,7 @@ test("a checkpoint keeps dicts and prepared dict keys, and rejects malformed one
       "}",
       'table["b"].n = pause()',
       "say table",
+      "exit",
     ].join("\n"),
   );
   const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan));
@@ -355,42 +366,45 @@ test("a checkpoint keeps dicts and prepared dict keys, and rejects malformed one
 });
 
 test("a dict holds one value type, keyed by text, and its methods take the forms they document", () => {
-  assert.deepEqual(diagnostics('let mixed = dict{ a: 1, b: "x" }'), [
+  assert.deepEqual(diagnostics('let mixed = dict{ a: 1, b: "x" }\nexit'), [
     [
       "TSV044",
       "This dict mixes a whole number (integer) and text (string). A dict holds one type; to keep both, declare a union type, as in 'let mixed: (integer | string) dict = ...'.",
       'dict{ a: 1, b: "x" }',
     ],
   ]);
-  assert.deepEqual(says('let either: (integer | string) dict = dict{ a: 1, b: "x" }\nsay either'), [
-    'dict{ "a": 1, "b": "x" }',
-  ]);
-  assert.deepEqual(codes('let c = dict{ a: 1 }\nc["b"] = "x"'), [["TSV041", '"x"']]);
+  assert.deepEqual(
+    says('let either: (integer | string) dict = dict{ a: 1, b: "x" }\nsay either\nexit'),
+    ['dict{ "a": 1, "b": "x" }'],
+  );
+  assert.deepEqual(codes('let c = dict{ a: 1 }\nc["b"] = "x"\nexit'), [["TSV041", '"x"']]);
   // An unannotated dict widens to numbers; a declared one stays strict.
-  assert.deepEqual(says('let w = dict{ a: 1 }\nw["b"] = 2.5\nsay w'), ['dict{ "a": 1, "b": 2.5 }']);
-  assert.deepEqual(codes('let w = dict{ a: 1 }\nw["b"] = 2.5\nlet n: integer = w["a"]'), [
+  assert.deepEqual(says('let w = dict{ a: 1 }\nw["b"] = 2.5\nsay w\nexit'), [
+    'dict{ "a": 1, "b": 2.5 }',
+  ]);
+  assert.deepEqual(codes('let w = dict{ a: 1 }\nw["b"] = 2.5\nlet n: integer = w["a"]\nexit'), [
     ["TSV041", 'w["a"]'],
   ]);
-  assert.deepEqual(codes('let s: integer dict = dict{}\ns["a"] = 2.5'), [["TSV041", "2.5"]]);
+  assert.deepEqual(codes('let s: integer dict = dict{}\ns["a"] = 2.5\nexit'), [["TSV041", "2.5"]]);
 
   // The default of get must be a value the dict can hold, and it decides an undecided value type.
-  assert.deepEqual(diagnostics('let c = dict{ a: 1 }\nsay c.get("a", default: "x")'), [
+  assert.deepEqual(diagnostics('let c = dict{ a: 1 }\nsay c.get("a", default: "x")\nexit'), [
     [
       "TSV041",
       "'c' holds integer values (integer dict), so it cannot default to text (string). To allow both, declare it as 'let c: (integer | string) dict = ...'.",
       '"x"',
     ],
   ]);
-  assert.deepEqual(codes('let e = dict{}\nsay e.get("a", default: 0)\ne["b"] = "x"'), [
+  assert.deepEqual(codes('let e = dict{}\nsay e.get("a", default: 0)\ne["b"] = "x"\nexit'), [
     ["TSV041", '"x"'],
   ]);
-  assert.deepEqual(says('let n = dict{ a: 1 }\nsay n.get("x", default: 0.5)\nsay n'), [
+  assert.deepEqual(says('let n = dict{ a: 1 }\nsay n.get("x", default: 0.5)\nsay n\nexit'), [
     "0.5",
     'dict{ "a": 1 }',
   ]);
   // A default the compiler cannot know is checked when the script runs, also where nothing stores the result.
   assert.deepEqual(
-    failure(`${DYNAMIC}let c: integer dict = dict{}\nsay c.get("z", default: dynamic("x"))`),
+    failure(`${DYNAMIC}let c: integer dict = dict{}\nsay c.get("z", default: dynamic("x"))\nexit`),
     ["TSR058", "A value of 'c' holds a whole number (integer), so it cannot take text (string)."],
   );
   // The result is a copy of the default: what decides one does not decide the other.
@@ -404,13 +418,14 @@ test("a dict holds one value type, keyed by text, and its methods take the forms
         'backup.add("text")',
         "say copy",
         "say backup",
+        "exit",
       ].join("\n"),
     ),
     ["[1]", '["text"]'],
   );
   assert.deepEqual(
     diagnostics(
-      'let c = dict{ a: 1 }\nsay c.get("a")\nsay c.get("a", fallback: 0)\nsay c.contains()\nc.clear(1)',
+      'let c = dict{ a: 1 }\nsay c.get("a")\nsay c.get("a", fallback: 0)\nsay c.contains()\nc.clear(1)\nexit',
     ),
     [
       [
@@ -434,7 +449,9 @@ test("a dict holds one value type, keyed by text, and its methods take the forms
     ["TSV007", '"${"a"}"'],
   ]);
   assert.deepEqual(
-    diagnostics('let toys = dict{ collar: "x" }\ntoys.add("y")\nsay toys.first\ntoys.collar = "y"'),
+    diagnostics(
+      'let toys = dict{ collar: "x" }\ntoys.add("y")\nsay toys.first\ntoys.collar = "y"\nexit',
+    ),
     [
       [
         "TSV043",
@@ -453,14 +470,14 @@ test("a dict holds one value type, keyed by text, and its methods take the forms
       ],
     ],
   );
-  assert.deepEqual(codes('function f(maybe: string dict?) {\n    say maybe["a"]\n}'), [
+  assert.deepEqual(codes('function f(maybe: string dict?) {\n    say maybe["a"]\n}\nexit'), [
     ["TSV043", "maybe"],
   ]);
 });
 
 test("objects keep fixed properties, and dicts are not choices", () => {
   assert.deepEqual(
-    diagnostics('let door = { name: "x" }\nlet k = "name"\nsay door[k]\nsay door["name"]'),
+    diagnostics('let door = { name: "x" }\nlet k = "name"\nsay door[k]\nsay door["name"]\nexit'),
     [
       ["TSV043", "Objects have fixed properties. Use a dict to look up by name.", "k"],
       [
@@ -470,7 +487,7 @@ test("objects keep fixed properties, and dicts are not choices", () => {
       ],
     ],
   );
-  assert.deepEqual(codes('let pick = choose dict{ a: "x" }'), [["TSV029", 'dict{ a: "x" }']]);
+  assert.deepEqual(codes('let pick = choose dict{ a: "x" }\nexit'), [["TSV029", 'dict{ a: "x" }']]);
   assert.deepEqual(codes("let dict = 1"), [["TSV001", "dict"]]);
 });
 
@@ -493,13 +510,14 @@ test("is dict and is T dict test the values, and typed parameters take dicts", (
         "    return sum",
         "}",
         "say total(dict{ a: 1, b: 2 })",
+        "exit",
       ].join("\n"),
     ),
     ["true", "true", "false", "false", "true", "3"],
   );
   assert.deepEqual(
     codes(
-      'function total(points: integer dict): integer {\n    return points.length\n}\nsay total(dict{ a: "x" })',
+      'function total(points: integer dict): integer {\n    return points.length\n}\nsay total(dict{ a: "x" })\nexit',
     ),
     [["TSV041", '"x"']],
   );

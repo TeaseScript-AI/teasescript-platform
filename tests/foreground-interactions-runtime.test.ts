@@ -706,13 +706,9 @@ test("pending interaction speaker provenance is bound to the instructed speaker"
     assert.ok(speaker !== undefined, identifier);
     return speaker.id;
   };
-  // Returns the innermost visible speaker-reference binding with this name.
+  // Returns the speaker-reference global with this name; speakers are globals of the session.
   const speakerBinding = (snapshot: Mutable<RuntimeSnapshot>, name: string) => {
-    const binding = snapshot.frames
-      .slice()
-      .reverse()
-      .flatMap((frame) => frame.bindings)
-      .find((candidate) => candidate.name === name);
+    const binding = snapshot.globals.find((candidate) => candidate.name === name);
     assert.ok(
       binding !== undefined &&
         typeof binding.value === "object" &&
@@ -751,16 +747,15 @@ test("pending interaction speaker provenance is bound to the instructed speaker"
     corrupted(pending, (copy) => {
       speakerBinding(copy, "alice").speakerId = bob;
     }),
+    // A speaker's global always refers to that speaker, even when the action moves along.
+    corrupted(pending, (copy, action) => {
+      speakerBinding(copy, "alice").speakerId = bob;
+      action.speakerId = bob;
+    }),
   ];
   for (const hostile of rejectedExplicit) {
     assert.equal(validateRuntimeSnapshot(hostile, speakerPlan).valid, false);
   }
-  // A coherent binding change moves the instructed speaker with it.
-  const bindingResolved = corrupted(pending, (copy, action) => {
-    speakerBinding(copy, "alice").speakerId = bob;
-    action.speakerId = bob;
-  });
-  assert.equal(validateRuntimeSnapshot(bindingResolved, speakerPlan).valid, true);
 
   const defaultSpeakerPlan = compiledPlan(
     'speaker alice {}\nspeaker bob {}\nspeaker alice\nshowButton "Continue"\nexit',
@@ -777,16 +772,10 @@ test("pending interaction speaker provenance is bound to the instructed speaker"
   assert.equal(validateRuntimeSnapshot(wrongDefault, defaultSpeakerPlan).valid, false);
 
   const removeAliceBinding = (copy: Mutable<RuntimeSnapshot>) => {
-    const frame = copy.frames.find((candidate) =>
-      candidate.bindings.some((binding) => binding.name === "alice"),
-    );
-    assert.ok(frame);
-    frame.bindings = frame.bindings.filter((binding) => binding.name !== "alice");
+    copy.globals = copy.globals.filter((binding) => binding.name !== "alice");
   };
   const replaceAliceBinding = (copy: Mutable<RuntimeSnapshot>, value: unknown) => {
-    const binding = copy.frames
-      .flatMap((frame) => frame.bindings)
-      .find((candidate) => candidate.name === "alice");
+    const binding = copy.globals.find((candidate) => candidate.name === "alice");
     assert.ok(binding);
     // EVIDENCE: fixture stores malformed external binding data excluded by the canonical snapshot type.
     (binding as { value: unknown }).value = value;
@@ -806,7 +795,7 @@ test("pending interaction speaker provenance is bound to the instructed speaker"
     );
   }
 
-  // A function-scoped explicit speaker resolves through the active frame's visible binding.
+  // An explicit speaker in a function resolves through the speaker's global.
   const scopedPlan = compiledPlan(
     'speaker alice {}\nfunction prompt { showButton as alice "Continue" }\nprompt()\nexit',
   );
@@ -1064,18 +1053,13 @@ test("a foreground action keeps identities distinct from the retained settlement
   }
 });
 
-test("terminal button completion remains inspectable and continuation runs only on later entry", () => {
-  const withExit = interactionPlan("button", {
+test("a completed button before exit remains inspectable and exit runs only on a later entry", () => {
+  const plan = interactionPlan("button", {
     kind: "button",
     buttonLabel: "Done",
     accessibleName: defaults.button,
   });
-  const plan = {
-    ...withExit,
-    files: [{ ...withExit.files[0]!, rootEndInstruction: 1, endInstruction: 1 }],
-    instructions: withExit.instructions.slice(0, 1),
-  };
-  assert.equal(validateInstructionPlan(plan).valid, true);
+  assert.equal(plan.instructions[1]?.kind, "exit");
   const pending = waiting(plan);
   const completionRequest = {
     actionId: pending.snapshot.foregroundAction!.actionId,
@@ -1098,7 +1082,7 @@ test("terminal button completion remains inspectable and continuation runs only 
   assert.equal(validateRuntimeSnapshot(resumed.snapshot, plan).valid, true);
   assert.deepEqual(
     resumed.events.map((event) => event.kind),
-    ["complete"],
+    ["exit"],
   );
 });
 
@@ -1115,7 +1099,14 @@ test("result-bearing interactions require an in-region continuation", () => {
       files: [{ ...root.files[0]!, rootEndInstruction: 1, endInstruction: 1 }],
       instructions: root.instructions.slice(0, 1),
     };
-    assert.equal(validateInstructionPlan(terminalRoot).valid, false, kind);
+    // The cut also leaves the root region without its closing end, which is a separate error.
+    assert.deepEqual(
+      validateInstructionPlan(terminalRoot)
+        .errors.filter((error) => error.path === "$.instructions[0]")
+        .map((error) => error.message),
+      ["Result-bearing interaction requires a local in-region result handoff."],
+      kind,
+    );
     assert.throws(() => run(terminalRoot, createFreshRuntimeSnapshot(terminalRoot)), kind);
   }
 });

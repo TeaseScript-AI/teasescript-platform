@@ -22,7 +22,7 @@ test("fresh global initialization preserves imported value kinds in binding orde
 
   const snapshot = createFreshRuntimeSnapshot(compiled.plan!, { globals });
 
-  assert.deepEqual(snapshot.frames[0]?.bindings, [
+  assert.deepEqual(snapshot.globals, [
     { name: "title", value: "Session" },
     { name: "count", value: 3 },
     { name: "enabled", value: false },
