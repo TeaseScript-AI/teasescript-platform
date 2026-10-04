@@ -1,0 +1,49 @@
+function sexscriptLegacyCount(items, value) {
+  let matches = 0
+  for item in items {
+    if item == value {
+      matches += 1
+    }
+  }
+  return matches
+}
+function sexscriptLegacyListMin(items) {
+  if items.length == 0 {
+    return null
+  }
+  let best = items.first
+  for item in items {
+    if item < best {
+      best = item
+    }
+  }
+  return best
+}
+// Parameters are not proven to be lists or text; methods with one meaning on both convert as they are.
+function hasWord(words, word) {
+  return words.contains(word)
+}
+function describe(items) {
+  // NOTE SX_LIST_JOIN line 3: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+  return items.join(", ")
+}
+function zeros(scores) {
+  return sexscriptLegacyCount(scores, 0)
+}
+function lowest(scores) {
+  return sexscriptLegacyListMin(scores)
+}
+function colon(line) {
+  // NOTE SX_INDEX_OF_RECEIVER line 6: Groovy indexOf() found a text in text or an element in a list; this receiver is not proven to be text, and if it holds a list, indexOf() stops the script, since TeaseScript lists have no indexOf.
+  return line.indexOf(":")
+}
+let tags = ["red", "blue"]
+say "Red: ${hasWord(tags, "red")}, in text: ${hasWord("a red door", "red")}"
+say "Tags: ${describe(tags)}"
+say "Zeros: ${zeros([0, 3, 0])}, lowest: ${lowest([4, 2, 9])}"
+say "Colon at ${colon("key: value")}"
+let answer = load "answer"
+if answer != null and answer.contains("yes") {
+  say "Agreed"
+}
+exit
