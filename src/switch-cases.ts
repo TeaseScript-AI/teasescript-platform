@@ -134,6 +134,26 @@ function caseValue(
 function literalValue(
   expression: Expression,
 ): Omit<Extract<CaseValue, { kind: "literal" }>, "kind" | "span"> | undefined {
+  const { negative, operand } = signed(expression);
+  if (operand.kind === "durationLiteral") {
+    const milliseconds = (negative ? -1 : 1) * durationLiteralMilliseconds(operand);
+    return {
+      type: { kind: "scalar", name: "duration" },
+      key: `duration:${milliseconds === 0 ? 0 : milliseconds}`,
+      number: undefined,
+      text: `${negative ? "-" : ""}${operand.amount.raw} ${operand.unit}`,
+    };
+  }
+  const number = numberLiteral(expression);
+  if (number !== undefined) {
+    return {
+      type: { kind: "scalar", name: number.numericType },
+      // `==` compares integers and numbers by value, and -0 equals 0.
+      key: `number:${number.value === 0 ? 0 : number.value}`,
+      number: number.value,
+      text: number.text,
+    };
+  }
   switch (expression.kind) {
     case "stringLiteral": {
       let value = "";
@@ -157,26 +177,8 @@ function literalValue(
       };
     case "nullLiteral":
       return { type: { kind: "null" }, key: "null", number: undefined, text: "null" };
-    case "durationLiteral": {
-      const milliseconds = durationLiteralMilliseconds(expression);
-      return {
-        type: { kind: "scalar", name: "duration" },
-        key: `duration:${milliseconds}`,
-        number: undefined,
-        text: `${expression.amount.raw} ${expression.unit}`,
-      };
-    }
-    default: {
-      const number = numberLiteral(expression);
-      if (number === undefined) return undefined;
-      return {
-        type: { kind: "scalar", name: number.numericType },
-        // `==` compares integers and numbers by value, and -0 equals 0.
-        key: `number:${number.value === 0 ? 0 : number.value}`,
-        number: number.value,
-        text: number.text,
-      };
-    }
+    default:
+      return undefined;
   }
 }
 
@@ -184,21 +186,28 @@ function literalValue(
 function numberLiteral(
   expression: Expression,
 ): { value: number; numericType: "integer" | "number"; text: string } | undefined {
+  const { negative, operand } = signed(expression);
+  if (operand.kind !== "numberLiteral") return undefined;
+  return {
+    value: negative ? -operand.value : operand.value,
+    numericType: operand.numericType,
+    text: `${negative ? "-" : ""}${operand.raw}`,
+  };
+}
+
+/** The expression without one leading `+` or `-`, as in `-2.5` or `-500 ms`. */
+function signed(expression: Expression): { negative: boolean; operand: Expression } {
   expression = unwrapParentheses(expression);
   if (
     expression.kind === "unaryExpression" &&
     (expression.operator === "-" || expression.operator === "+")
   ) {
-    const operand = unwrapParentheses(expression.operand);
-    if (operand.kind !== "numberLiteral") return undefined;
     return {
-      value: expression.operator === "-" ? -operand.value : operand.value,
-      numericType: operand.numericType,
-      text: `${expression.operator === "-" ? "-" : ""}${operand.raw}`,
+      negative: expression.operator === "-",
+      operand: unwrapParentheses(expression.operand),
     };
   }
-  if (expression.kind !== "numberLiteral") return undefined;
-  return { value: expression.value, numericType: expression.numericType, text: expression.raw };
+  return { negative: false, operand: expression };
 }
 
 /** Whether a value of the switched type can ever equal the case value; `unknown` can match anything. */

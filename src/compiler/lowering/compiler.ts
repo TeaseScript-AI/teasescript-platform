@@ -581,7 +581,7 @@ export class InstructionCompiler {
     }
   }
 
-  /** `subject == value` for each literal and `start <= subject < end` (`<=` when inclusive) for each range, or-ed. */
+  /** `subject == value` for each literal and `subject in range` for each range, or-ed. */
   #caseCondition(
     switchCase: SwitchCase,
     subjectTemporary: number,
@@ -605,21 +605,9 @@ export class InstructionCompiler {
       }
       return {
         kind: "binary",
-        operator: "and",
-        left: {
-          kind: "binary",
-          operator: ">=",
-          left: subject(),
-          right: this.#lowerExpression(value.start).plan,
-          span: copySpan(expression.span),
-        },
-        right: {
-          kind: "binary",
-          operator: value.inclusive ? "<=" : "<",
-          left: subject(),
-          right: this.#lowerExpression(value.end).plan,
-          span: copySpan(expression.span),
-        },
+        operator: "in",
+        left: subject(),
+        right: this.#lowerExpression(value).plan,
         span: copySpan(expression.span),
       };
     });

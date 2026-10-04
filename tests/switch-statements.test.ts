@@ -9,6 +9,7 @@ import {
 } from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
+import { validateInstructionPlan } from "../src/plan/validation.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
@@ -54,13 +55,21 @@ test("matches literal kinds by == and declared speakers by identity", () => {
     'switch who { case vera { say "vera" } case guest { say "guest" } }',
     "let pause = 5 s",
     'switch pause { case 5000 ms { say "five seconds" } }',
+    'switch -1 s { case -1000 ms { say "minus one second" } }',
     "let reply: string? = null",
     'switch reply { case null { say "no reply" } case "yes" { say "yes" } }',
     'switch 2.0 { case 2 { say "two" } }',
     'switch true { case false { say "off" } case true { say "on" } }',
   ].join("\n");
 
-  assert.deepEqual(says(source), ["guest", "five seconds", "no reply", "two", "on"]);
+  assert.deepEqual(says(source), [
+    "guest",
+    "five seconds",
+    "minus one second",
+    "no reply",
+    "two",
+    "on",
+  ]);
 });
 
 test("matches a number range by its bounds, including numbers that are not whole", () => {
@@ -86,6 +95,25 @@ test("matches a number range by its bounds, including numbers that are not whole
     "high",
     "out",
   ]);
+});
+
+test("a range case never matches a value that is not a number, whatever the case order", () => {
+  const source = [
+    "let missing: number? = null",
+    'switch missing { case 0..4 { say "low" } case null { say "none" } }',
+    "function describe(value) {",
+    "  switch value {",
+    '    case 0..=4 { say "low" }',
+    '    case "four" { say "word" }',
+    '    default { say "other" }',
+    "  }",
+    "}",
+    'describe("four")',
+    "describe(true)",
+    "describe(4 s)",
+  ].join("\n");
+
+  assert.deepEqual(says(source), ["none", "word", "other", "other"]);
 });
 
 test("evaluates the switched expression once and never falls through", () => {
@@ -155,35 +183,76 @@ test("case blocks resume after a checkpoint and keep return, break, and continue
   }
 });
 
-test("a switch on a pending choice resumes from a checkpoint", () => {
-  const plan = compileValidPlan(
-    [
-      'switch choose "Stay", "Leave" {',
-      '  case "Stay" { say "staying" }',
-      '  case "Leave" { say "leaving" }',
-      "}",
-    ].join("\n"),
-  );
-  const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan));
-  const restored = deserializeCheckpoint(
-    serializeCheckpoint(createCheckpoint(plan, pending.snapshot)),
-  );
-  const action = restored.snapshot.foregroundAction;
-  assert.ok(action !== null && action.kind === "interaction");
-  const answered = completeAction(restored.plan, restored.snapshot, {
-    actionId: action.actionId,
-    actionKind: "interaction",
-    interactionKind: "choice",
-    payload: { kind: "selectedText", selectedText: "Leave" },
-  });
-  const finished = run(restored.plan, answered.snapshot);
+test("a switch on a pending compact interaction resumes from a checkpoint", () => {
+  const scenarios = [
+    {
+      source: [
+        'switch choose "Stay", "Leave" {',
+        '  case "Stay" { say "staying" }',
+        '  case "Leave" { say "leaving" }',
+        "}",
+      ],
+      interactionKind: "choice",
+      payload: { kind: "selectedText", selectedText: "Leave" },
+      expected: ["leaving"],
+    },
+    {
+      source: ["switch askNumber {", '  case 0..3 { say "few" }', '  default { say "many" }', "}"],
+      interactionKind: "number",
+      payload: { kind: "submittedText", submittedText: "2.5" },
+      expected: ["few"],
+    },
+  ] as const;
+  for (const { source, interactionKind, payload, expected } of scenarios) {
+    const plan = compileValidPlan(source.join("\n"));
+    const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+    const restored = deserializeCheckpoint(
+      serializeCheckpoint(createCheckpoint(plan, pending.snapshot)),
+    );
+    const action = restored.snapshot.foregroundAction;
+    assert.ok(action !== null && action.kind === "interaction");
+    const answered = completeAction(restored.plan, restored.snapshot, {
+      actionId: action.actionId,
+      actionKind: "interaction",
+      interactionKind,
+      payload,
+    });
+    const finished = run(restored.plan, answered.snapshot);
 
-  assert.equal(finished.snapshot.status, "halted");
-  assert.deepEqual(sayTexts(finished), ["leaving"]);
+    assert.equal(finished.snapshot.status, "halted");
+    assert.deepEqual(sayTexts(finished), expected);
+  }
+});
+
+test("a range test in an external plan fails with a structured fault unless its right operand is a range", () => {
+  const plan = compileValidPlan('switch 2 { case 1..3 { say "in" } }');
+  const conditional = plan.instructions.find((instruction) => instruction.kind === "jumpIfFalse");
+  assert.ok(
+    conditional?.kind === "jumpIfFalse" &&
+      conditional.condition.kind === "binary" &&
+      conditional.condition.operator === "in",
+  );
+  assert.equal(validateInstructionPlan(plan).valid, true);
+  const malformed = structuredClone(plan);
+  const malformedConditional = malformed.instructions[plan.instructions.indexOf(conditional)];
+  assert.ok(
+    malformedConditional?.kind === "jumpIfFalse" &&
+      malformedConditional.condition.kind === "binary",
+  );
+  // EVIDENCE: fixture: the guard above exposes the readonly operand of this deep clone for malformed-plan input.
+  (malformedConditional.condition as { right: unknown }).right = {
+    kind: "literal",
+    value: 3,
+    span: malformedConditional.condition.span,
+  };
+  assert.equal(validateInstructionPlan(malformed).valid, true);
+  const result = run(malformed, createImmediatePacingRuntimeSnapshot(malformed));
+
+  assert.equal(result.snapshot.status, "failed");
+  assert.equal(result.snapshot.failure?.code, "TSR035");
 });
 
 test("reports malformed switch structure", () => {
-  assert.deepEqual(diagnostics("switch 1 { }"), ["TSP038 1:1"]);
   assert.deepEqual(diagnostics("switch 1 {\n  default {}\n  case 1 {}\n}"), ["TSP038 3:3"]);
   assert.deepEqual(diagnostics("switch 1 {\n  case 1 {}\n  default {}\n  default {}\n}"), [
     "TSP038 4:3",
@@ -191,7 +260,11 @@ test("reports malformed switch structure", () => {
   assert.deepEqual(diagnostics('switch 1 {\n  say "hi"\n  case 1 {}\n}'), ["TSP038 2:3"]);
   assert.deepEqual(diagnostics("switch {\n  case 1 {}\n}"), ["TSP012 1:8"]);
   assert.deepEqual(diagnostics("switch 1 {\n  case {}\n  case 2 {}\n}"), ["TSP012 2:8"]);
-  assert.ok(diagnostics("switch 1 {\n  case 1\n}").includes("TSP018 3:1"));
+  // A clause without a block keeps the rest of the switch and its enclosing block intact.
+  assert.deepEqual(
+    diagnostics('if true {\n  switch 1 {\n    case 1\n    case 2 {}\n  }\n  say "inside"\n}'),
+    ["TSP018 4:5"],
+  );
 });
 
 test("rejects case values that are not literals, speakers, or number ranges", () => {
@@ -233,7 +306,7 @@ test("rejects repeated and overlapping case values on the later value", () => {
     "    case 5..8 {}",
     "    case 7..=9 {}",
     "    case vera, vera {}",
-    "    case 1 s, 1000 ms {}",
+    "    case -1 s, -1000 ms {}",
     "  }",
     "}",
   ].join("\n");
@@ -246,7 +319,7 @@ test("rejects repeated and overlapping case values on the later value", () => {
     "TSV048 9:10",
     "TSV048 11:10",
     "TSV048 12:16",
-    "TSV048 13:15",
+    "TSV048 13:16",
   ]);
   const message = compileSource(source).diagnostics.find((item) => item.span.start.line === 6);
   assert.equal(
@@ -264,7 +337,7 @@ test("rejects case values whose type can never match the switched value's known 
     '  case "3" {}',
     "  case null {}",
     "  case vera {}",
-    "  case 3.5 {}",
+    "  case 3.0 {}",
     "}",
     "switch mood {",
     "  case 1..5 {}",
