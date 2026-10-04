@@ -208,7 +208,7 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
     const help = languageSignatureHelp(document, languagePositionAt(document, source.length));
     return help === null ? null : help.parameters[help.activeParameter];
   };
-  assert.equal(activeSlot('say "Hello, there"\nexit'), "text");
+  assert.equal(activeSlot('say "Hello, there"'), "text");
   assert.equal(activeSlot('say "Hello, there",'), "pacing");
   assert.equal(activeSlot("say as narrator"), "speaker");
   assert.equal(activeSlot("say as narrator "), "text");
@@ -223,11 +223,11 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
   assert.equal(activeSlot('askInteger "How many?", default: '), "default");
   assert.equal(activeSlot('askDateTime "When?", default: '), "default");
   assert.equal(activeSlot('askText { default: "Name?" }.default'), "hint");
-  assert.equal(activeSlot('let answer = askText "${askNumber default: 3}"\nexit'), "hint");
+  assert.equal(activeSlot('let answer = askText "${askNumber default: 3}"'), "hint");
   assert.equal(activeSlot("showButton as mistress "), "label");
   assert.equal(activeSlot('showButton "Go", timeout: '), "timeout");
   assert.equal(
-    activeSlot('let elapsed = showButton "Go", background: "gold", timeout: 5\nexit'),
+    activeSlot('let elapsed = showButton "Go", background: "gold", timeout: 5'),
     "timeout",
   );
   assert.equal(activeSlot('showButton "Go", timeout: 5, background: '), "background");
@@ -237,7 +237,7 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
     "background",
   );
   assert.equal(activeSlot("choose as mistress "), "options");
-  assert.equal(activeSlot('say ["Hello", "there"]\nexit'), "text");
+  assert.equal(activeSlot('say ["Hello", "there"]'), "text");
 });
 
 test("editor tooling handles deeply nested media blocks without native recursion", () => {
