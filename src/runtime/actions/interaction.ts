@@ -56,6 +56,23 @@ export function resolveInteractionCompletion(
     }
     return { ok: true, result: normalized, transcriptText: normalized };
   }
+  // `askInteger` accepts only whole-number notation within the safe integer range.
+  if (action.ui.kind === "number" && action.ui.integer === true) {
+    if (
+      payload.kind !== "submittedText" ||
+      typeof payload.submittedText !== "string" ||
+      !completionStringFits(payload.submittedText)
+    )
+      return {
+        ok: false,
+        message: "Number completion requires text within the shared UTF-8 byte limit.",
+      };
+    const submitted = payload.submittedText.trim();
+    const parsed = Number(submitted);
+    return isIntegerAnswerText(submitted) && Number.isSafeInteger(parsed)
+      ? { ok: true, result: Object.is(parsed, -0) ? 0 : parsed, transcriptText: submitted }
+      : { ok: false, message: "That is wrong. I asked for a whole number." };
+  }
   if (action.interactionKind === "number") {
     if (
       payload.kind !== "submittedText" ||
@@ -69,13 +86,6 @@ export function resolveInteractionCompletion(
       };
     }
     const submitted = payload.submittedText.trim();
-    // `askInteger` accepts only whole-number notation within the safe integer range.
-    if (action.ui.kind === "number" && action.ui.integer === true) {
-      const parsed = Number(submitted);
-      return isIntegerAnswerText(submitted) && Number.isSafeInteger(parsed)
-        ? { ok: true, result: Object.is(parsed, -0) ? 0 : parsed, transcriptText: submitted }
-        : { ok: false, message: "That is wrong. I asked for a whole number." };
-    }
     if (!isNumberAnswerText(submitted)) {
       return {
         ok: false,

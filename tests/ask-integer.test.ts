@@ -14,7 +14,13 @@ import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { createCheckpoint, deserializeCheckpoint } from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
-import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
+import { completeAction } from "../src/runtime/operations/complete-action.js";
+import { observeTime } from "../src/runtime/operations/observe-time.js";
+import {
+  createFreshRuntimeSnapshot,
+  validateRuntimeSnapshot,
+  type RuntimeSnapshot,
+} from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 
 function binding(session: PlayerRuntimeSession, name: string) {
@@ -55,7 +61,18 @@ test("askInteger returns a whole number as an integer and shows it as the player
 
 test("askInteger asks again for anything but a whole number", () => {
   const session = createPlayerRuntimeSession('let count = askInteger "How many?"');
-  for (const text of ["2.5", "2.0", "1e3", "ten", "", "   ", "1 2", "9007199254740992", "0x10"]) {
+  for (const text of [
+    "2.5",
+    "2.0",
+    "1e3",
+    "ten",
+    "",
+    "   ",
+    "1 2",
+    "7\n8",
+    "9007199254740992",
+    "0x10",
+  ]) {
     const rejected = answer(session, text);
     assert.equal(rejected.outcome.kind, "invalidPayload", JSON.stringify(text));
     assert.equal(
@@ -86,6 +103,7 @@ test("a default that is not a whole number fails at compile time or before the f
     { source: "let count = askInteger default: 2.0", fix: "round(...)" },
     { source: "let n = 1\nn = 1.5\nlet count = askInteger default: n", fix: "line 2" },
     { source: 'let count = askInteger default: "10"', fix: "'default: 10'" },
+    { source: "let count = askInteger default: 9007199254740992", fix: "remove 'default:'" },
   ]) {
     const diagnostics = compileSource(source).diagnostics;
     assert.equal(diagnostics[0]?.code, "TSV039", source);
@@ -118,6 +136,46 @@ function rejects(plan: InstructionPlan, snapshot: unknown): boolean {
   assert.throws(() => deserializeCheckpoint(JSON.stringify({ ...checkpoint, snapshot })));
   return !validateRuntimeSnapshot(snapshot, plan).valid;
 }
+
+/** The snapshot with `replay` as its retained settlement and `result` in the handoff and its destination. */
+function withHandoffResult(snapshot: RuntimeSnapshot, replay: unknown, result: number) {
+  const handoff = snapshot.interactionResultHandoff!;
+  return {
+    ...snapshot,
+    lastSettlement: replay,
+    interactionResultHandoff: { ...handoff, result },
+    temporaries: snapshot.temporaries.map((temporary) =>
+      temporary.id === handoff.destinationTemporary ? { ...temporary, value: result } : temporary,
+    ),
+  };
+}
+
+test("a handed-off askInteger result must be a safe whole number", () => {
+  // A newer pacing settlement, left by an expiry block's message, is the retained replay record, so only the handoff
+  // and its destination carry the answer.
+  for (const ask of [
+    'let count = askInteger "How many?"',
+    'let level = 7\nlet count = askInteger "How many?", default: level',
+  ]) {
+    const plan = compileValidPlan(`timer async 1 { say "handler", 2 }\n${ask}\nsay count, instant`);
+    let snapshot = run(plan, createFreshRuntimeSnapshot(plan)).snapshot;
+    snapshot = run(plan, observeTime(plan, snapshot, 1_000).snapshot).snapshot;
+    const replay = snapshot.lastSettlement;
+    const action = snapshot.foregroundAction;
+    assert.ok(action?.kind === "interaction" && replay?.actionKind === "chatPacingGate");
+    snapshot = completeAction(plan, snapshot, {
+      actionId: action.actionId,
+      actionKind: "interaction",
+      interactionKind: "number",
+      payload: { kind: "submittedText", submittedText: "7" },
+    }).snapshot;
+    for (const result of [7, 2.5, 2 ** 60]) {
+      const changed = withHandoffResult(snapshot, replay, result);
+      if (result === 7) assert.equal(validateRuntimeSnapshot(changed, plan).valid, true, ask);
+      else assert.ok(rejects(plan, changed), `${ask}: ${result}`);
+    }
+  }
+});
 
 test("plan and snapshot validation keep the whole-number rule", () => {
   const session = createPlayerRuntimeSession("let count = askInteger default: 10");

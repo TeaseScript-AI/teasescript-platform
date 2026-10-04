@@ -1135,11 +1135,14 @@ function validInteractionResultForInstruction(
     return options?.some((option) => serializableEquals(option.value, result)) === true;
   }
   if (instruction.expectedResult === "number") {
+    // An `askInteger` result is a safe whole number.
+    const ui = "preparedUi" in instruction ? instruction.preparedUi : instruction.ui;
     return (
       instruction.interactionKind === "number" &&
       typeof result === "number" &&
       Number.isFinite(result) &&
-      !Object.is(result, -0)
+      !Object.is(result, -0) &&
+      (ui.kind !== "number" || ui.integer !== true || Number.isSafeInteger(result))
     );
   }
   return (

@@ -1811,6 +1811,12 @@ class TypeChecker {
           `The default answer of askInteger must be a whole number (integer)${holds}.${resolved(type).kind === "null" ? EMPTY_FIELD_FIX : " Use a whole number, such as 'default: 10'."}`,
           expression.span,
         );
+      else if (!Number.isSafeInteger(staticNumber(expression) ?? 0))
+        this.#report(
+          typeCode.invalidInteractionDefault,
+          `The default answer of askInteger must be a whole number from ${-Number.MAX_SAFE_INTEGER} through ${Number.MAX_SAFE_INTEGER}. Use a smaller number, or remove 'default:'.`,
+          expression.span,
+        );
       return;
     }
     if (kind === "number") {

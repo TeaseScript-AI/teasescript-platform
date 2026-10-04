@@ -75,7 +75,7 @@ The accepted boundary does not itself change accepted V30 forms such as `wait 2`
 
 ADR 0018 selects direct Standard Library names with no import and no first-POC opt-out or shadowing.
 
-The current compiler implements the four compact interaction forms in this section through explicit versioned
+The current compiler implements the compact interaction forms in this section through explicit versioned
 interaction instructions and the canonical resumable runtime. The broader parenthesized V30 APIs and their advanced
 parameters remain deferred; this slice does not treat compact syntax as a runtime library call. A parenthesized
 interaction-call spelling is never interpreted as compact syntax; until those APIs are implemented, the parser reports
@@ -98,12 +98,12 @@ let minutes = askNumber default: 10
 let count = askInteger "How many?", default: 3
 ```
 
-For `askText` and `askNumber`, the optional string is Standard UI field text or a hint. It is not automatically spoken
+For `askText`, `askNumber`, and `askInteger`, the optional string is Standard UI field text or a hint. It is not automatically spoken
 into the transcript. The normal question is a preceding `say`. An optional `default:` answer prefills the field; the
 player still submits it, and a cleared field does not fall back to it. See
 [default answers](specifications/accepted-syntaxes-v30.md#default-answers).
 
-All four basic interactions are mandatory and blocking, with no cancellation result. `askText` returns `string`;
+All basic interactions are mandatory and blocking, with no cancellation result. `askText` returns `string`;
 `askNumber` returns `number`; `askInteger` returns `integer` and accepts only whole numbers. `showButton` used as a value returns the elapsed waiting time as a `duration`, and an
 optional `timeout:` ends the wait without a chat message; see
 [blocking button](specifications/accepted-syntaxes-v30.md#21-blocking-button).
