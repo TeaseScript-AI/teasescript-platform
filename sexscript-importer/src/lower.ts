@@ -184,6 +184,11 @@ interface LowerContext {
   writeTargets: Set<AstNode>;
   proposals: ReadonlySet<ProposalId>;
   accepted: ReadonlySet<AcceptedForm>;
+  /**
+   * `items -= item` and `items = items - item` inside `for (item in items)`: the loop's element leaves the collection it
+   * iterates, so `items` is a list even where nothing else proves it, such as a parameter (elementRemovals).
+   */
+  elementRemovals: ReadonlySet<AstNode>;
   /** Null without the package's images. */
   media: readonly MediaFile[] | null;
   /**
@@ -796,6 +801,7 @@ export function lowerParsedFile(
     writeTargets: new Set(),
     proposals: options.proposals ?? new Set(),
     accepted: options.accepted ?? new Set(),
+    elementRemovals: new Set(),
     media: options.media ?? null,
     checksUndefinedVariables: options.packageFunctions !== undefined,
   };
@@ -862,6 +868,7 @@ export function lowerParsedFile(
     context.integerVariables = integerVariables(body, context.bindings);
     context.mapUses =
       options.mapUses ?? mapUsesOf([{ body, types: context.types, keys: context.bindings }]);
+    context.elementRemovals = elementRemovals(body);
     // A lookup reads the type of the dict's values, as an index reads a list's element type.
     const listElements = new Map(context.types.listElements ?? []);
     for (const [key, type] of context.mapUses.dictionaryValues) {
@@ -1238,6 +1245,7 @@ function lowerHelperMethod(
     writeTargets: new Set(),
     proposals: baseContext.proposals,
     accepted: baseContext.accepted,
+    elementRemovals: elementRemovals(body),
     media: baseContext.media,
     checksUndefinedVariables: baseContext.checksUndefinedVariables,
     currentFunction: {
@@ -3566,14 +3574,16 @@ function lowerAssignment(
       ),
     ];
   }
+  const removesElement = context.elementRemovals.has(node);
   if (
     operator === "-=" &&
     variableTarget !== null &&
-    isListType(inferType(targetNode, context.types))
+    (removesElement || isListType(inferType(targetNode, context.types)))
   ) {
     const difference = lowerListDifference(
       { kind: "binary", span: node.span, operator: "-", left: targetNode, right },
       context,
+      removesElement,
     );
     return difference === null
       ? []
@@ -6024,6 +6034,7 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     return { kind: "binary", operator: operator === "&&" ? "and" : "or", left, right };
   }
   if (operator === "+") return lowerPlus(node, context);
+  if (context.elementRemovals.has(node)) return lowerListDifference(node, context, true);
   if (operator === "-" && isListType(inferType(asNode(node.left), context.types)))
     return lowerListDifference(node, context);
   if (operator === "in") return lowerMembership(node, context);
@@ -6824,16 +6835,43 @@ function lowerPlus(node: AstNode, context: LowerContext): IrExpression | null {
 }
 
 /**
+ * The removals of a loop's element from the collection it iterates, `for (item in items) { items -= item }` or
+ * `items = items - item` (LowerContext.elementRemovals).
+ */
+function elementRemovals(body: AstNode): Set<AstNode> {
+  const removals = new Set<AstNode>();
+  walkAst(body, (loop) => {
+    const collection = loop.kind === "for" ? variableName(loop.collection) : null;
+    const element = typeof loop.variable === "string" ? loop.variable : null;
+    if (collection === null || element === null || element === "forLoopDummyParameter") return;
+    walkAst(loop.body, (node) => {
+      if (node.kind !== "binary" || variableName(node.right) !== element) return;
+      if (
+        (node.operator === "-=" || node.operator === "-") &&
+        variableName(node.left) === collection
+      )
+        removals.add(node);
+    });
+  });
+  return removals;
+}
+
+/**
  * Groovy `list - value` and `list - otherList` drop every element equal to the value or to an element of the other
  * list, as `difference` does (V30 §16); `difference` also keeps each remaining element once.
  */
-function lowerListDifference(node: AstNode, context: LowerContext): IrExpression | null {
+function lowerListDifference(
+  node: AstNode,
+  context: LowerContext,
+  /** The right side is an element of the list, such as the element of a loop over it. */
+  element = false,
+): IrExpression | null {
   const leftNode = asNode(node.left);
   const rightNode = asNode(node.right);
   if (leftNode === null || rightNode === null) return null;
   const rightType = inferType(rightNode, context.types);
-  const removesList = isListType(rightType);
-  if (!removesList && !onlyOf(rightType, NUMBER | STRING | BOOLEAN | NULL)) {
+  const removesList = !element && isListType(rightType);
+  if (!element && !removesList && !onlyOf(rightType, NUMBER | STRING | BOOLEAN | NULL)) {
     return unsupportedExpression(
       context,
       node,
