@@ -244,6 +244,20 @@ test("a write that may break a narrowed collection, and an impossible test outco
     ).snapshot.failure?.code,
     "TSR058",
   );
+  // A store the narrowed type does not cover is checked against the declared type and ends the element fact, while a
+  // test that excluded null still holds.
+  assert.deepEqual(
+    errors(
+      "let p: number[] = [1.5]\nif p is integer[] {\n    p.add(1.5)\n    let k: integer = p.last\n}",
+    ),
+    [["TSV041", "p.last"]],
+  );
+  assert.deepEqual(
+    errors(
+      "function f(items: integer[]?) {\n    if items != null {\n        items.add(2)\n        items[0] += 1\n        say items.first\n    }\n}",
+    ),
+    [],
+  );
   for (const body of [
     "while true {\n        if x is string {\n            break\n        }\n        return 1\n    }",
     "if x is string or true {\n        return 1\n    }",

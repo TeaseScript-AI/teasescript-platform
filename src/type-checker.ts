@@ -762,6 +762,11 @@ class TypeChecker {
         place = variablePlace(variable);
       }
     } else {
+      if (
+        unwrap(target.object).kind !== "identifier" ||
+        (target.kind === "indexExpression" && statement.operator !== "=")
+      )
+        this.#relaxNarrowedRoot(target.object, scope);
       const object = yield* compileChild(this.#expressionTask(target.object, scope));
       if (target.kind === "indexExpression") {
         const index = yield* compileChild(this.#expressionTask(target.index, scope));
@@ -1088,8 +1093,9 @@ class TypeChecker {
   }
 
   /**
-   * The collection type an element store checks. A narrowed variable whose declared type allows any element, such as
-   * `list` or a value of unknown type, keeps that freedom; storing an element of another type ends its narrowing.
+   * The collection type an element store checks. A narrowed variable keeps its narrowed type for an element that
+   * certainly fits it; any other element relaxes the narrowing (see {@link #relaxNarrowing}) and is checked against the
+   * variable's type then, such as its declared `number[]` or `list`.
    */
   #elementReceiver(
     expression: Expression,
@@ -1100,20 +1106,34 @@ class TypeChecker {
     const node = unwrap(expression);
     const entry = node.kind === "identifier" ? scope.resolve(node.name) : undefined;
     if (entry?.kind !== "variable" || this.#flow.get(entry.variable) === undefined) return current;
-    const declared = entry.variable.type;
-    const anyElement = members(nonNullType(declared)).every((member) => {
-      const value = resolved(member);
-      return (
-        value.kind === "unknown" ||
-        ((value.kind === "list" || value.kind === "set") &&
-          resolved(value.element).kind === "unknown")
-      );
-    });
-    if (!anyElement) return current;
     // The fact stays only when the stored value certainly keeps it; a value of unknown type may not.
-    if (!coversType(elementStoreType(current) ?? UNKNOWN_TYPE, element))
-      this.#flow.set(entry.variable, undefined);
-    return declared;
+    if (coversType(elementStoreType(current) ?? UNKNOWN_TYPE, element)) return current;
+    this.#relaxNarrowing(entry.variable);
+    return this.#currentType(entry.variable);
+  }
+
+  /**
+   * Keeps of what is known about a narrowed variable only which of its declared members it may hold, such as that it is
+   * not null, and forgets what a store may change, such as the type of its elements.
+   */
+  #relaxNarrowing(variable: Variable): void {
+    const fact = this.#flow.get(variable);
+    if (fact === undefined) return;
+    const all = members(variable.type);
+    const kept = all.filter((member) => narrowTo(member, fact).kind !== "never");
+    this.#flow.set(variable, kept.length === all.length ? undefined : union(kept));
+  }
+
+  /**
+   * Before a store into a part of a narrowed variable that its narrowed type cannot follow, such as an element of an
+   * element or a compound assignment to an element, the narrowing of the variable is relaxed.
+   */
+  #relaxNarrowedRoot(expression: Expression, scope: Scope): void {
+    let node = unwrap(expression);
+    while (node.kind === "propertyAccessExpression" || node.kind === "indexExpression")
+      node = unwrap(node.object);
+    const entry = node.kind === "identifier" ? scope.resolve(node.name) : undefined;
+    if (entry?.kind === "variable") this.#relaxNarrowing(entry.variable);
   }
 
   /**
@@ -1900,8 +1920,10 @@ class TypeChecker {
         yield* compileChild(this.#expressionTask(argument.value, scope));
       return UNKNOWN_TYPE;
     }
-    const receiver = yield* compileChild(this.#expressionTask(callee.object, scope));
     const method = callee.property.name;
+    if (method === "add" && unwrap(callee.object).kind !== "identifier")
+      this.#relaxNarrowedRoot(callee.object, scope);
+    const receiver = yield* compileChild(this.#expressionTask(callee.object, scope));
     const value = resolved(receiver);
     // Pausing, resuming, or stopping media first waits for the previous message's pacing.
     if (["pause", "resume", "stop"].includes(method) && mayBe(receiver, "media")) this.#suspend();
