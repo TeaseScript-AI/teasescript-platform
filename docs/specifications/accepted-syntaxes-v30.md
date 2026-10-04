@@ -2898,7 +2898,7 @@ Behavior:
 - Reaching `end` with no caller continues at the fallback destination when one is set, and is an error otherwise. The
   fallback is never implicit.
 - `fallback` may run any number of times, anywhere, including inside `if`; the latest one executed wins. It is session
-  state and is checkpointed. Whether a fallback can be cleared again is not yet decided.
+  state and is checkpointed. `fallback none` clears it again.
 - A reachable end of a file without `end`, `exit`, or a transfer is a compile error in every file. Branches that all
   end or transfer need nothing after them:
 
@@ -4320,6 +4320,4 @@ Other open API and runtime decisions:
 - define exact current-state fields, detailed edge-event fields, duration-session fields, and reconnect/abandoned-session finalization rules;
 - define the standard and script-owned hygiene-pause APIs;
 - decide the technical fallback when a speaker has no `displayName` and all of `title`, `firstName`, and `lastName` are empty;
-- define the initial string-method library and future speaker-specific LLM context fields;
-- decide whether a `fallback` destination can be cleared again
-  ([ADR 0022](../decisions/0022-multi-file-scripts.md)).
+- define the initial string-method library and future speaker-specific LLM context fields.

@@ -66,7 +66,7 @@ goto script("rooms/${room}.tease", label: "start")
    ```
 
    It may run any number of times, anywhere, including inside `if`; the latest one executed wins. It is session state
-   and is checkpointed, not metadata. Whether a fallback can be cleared again is not yet decided.
+   and is checkpointed, not metadata. `fallback none` clears it again.
 
 ### 5. Transfers
 
