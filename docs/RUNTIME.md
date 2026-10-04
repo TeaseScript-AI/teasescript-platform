@@ -830,9 +830,9 @@ state. Without a context a session uses UTC and locale-neutral text such as `202
 Each capture records a context, the UTC wall clock (or `null` when the host supplied none), its boundary scene time,
 and the session's next event sequence when it was recorded. Session start records the first capture at
 `initialSessionTimeMs`. When the player continues a restored session, the host calls
-`recordContinueCapture(plan, snapshot, { wallClockMs, temporalContext? })` before the scene clock resumes; this
-recorded input takes effect at the saved `observedSessionTimeMs`, and a new context may be omitted to keep the earlier
-one. Restore itself records nothing.
+`recordContinueCapture(plan, snapshot, { wallClockMs, temporalContext? })`, which executes nothing, and then runs the
+session before the scene clock resumes; this recorded input takes effect at the saved `observedSessionTimeMs`, and a
+new context may be omitted to keep the earlier one. Restore itself records nothing.
 
 - Execution at scene time `t` uses the last capture whose boundary is not later than `t`, so saved catch-up before the
   boundary keeps the earlier capture and execution from the boundary on uses the new one.
