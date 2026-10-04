@@ -16,7 +16,7 @@ export const NEAR_VALID_SOURCE_FAMILIES = [
   "loop-control",
   "semantic-name",
   "function-arguments",
-  "set-elements",
+  "dict-keys",
 ] as const;
 
 export interface ValidSourceCase {
@@ -69,8 +69,8 @@ export function createNearValidSourceCase(seed: number, index: number): NearVali
       return unknownNameCase(choices, family);
     case "function-arguments":
       return duplicateParameterCase(choices, family);
-    case "set-elements":
-      return compositeSetElementCase(choices, family);
+    case "dict-keys":
+      return duplicateDictKeyCase(choices, family);
   }
 }
 
@@ -106,6 +106,8 @@ function collectionsSource(choices: SourceChoices): ValidSourceCase {
       `copy[0] = ${replacement}`,
       `let record = { label: "${label}", values: set[${setValues}] }`,
       'for item in record.values { say "${record.label}:${item}" }',
+      `let groups = set[source, [${first}, ${second}], copy]`,
+      "say groups.length",
       "say source[0]",
     ],
   );
@@ -224,16 +226,14 @@ function duplicateParameterCase(
   );
 }
 
-function compositeSetElementCase(
-  choices: SourceChoices,
-  family: "set-elements",
-): NearValidSourceCase {
-  const value = choices.integer(1, 9);
+function duplicateDictKeyCase(choices: SourceChoices, family: "dict-keys"): NearValidSourceCase {
+  const key = choices.pick(["collar", "cuffs", "rope"] as const);
+  const quoted = choices.pick([false, true] as const);
   return nearValid(
     family,
-    `composite-list-value=${value}`,
-    `let values = set[[${value}]]`,
-    "TSV006",
+    `duplicate-key=${key} quoted=${quoted}`,
+    `let values = dict{ ${key}: 1, ${quoted ? `"${key}"` : key}: 2 }`,
+    "TSV007",
   );
 }
 

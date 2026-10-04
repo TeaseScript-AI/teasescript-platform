@@ -3,11 +3,7 @@ import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
-import {
-  serializableEquals,
-  type SerializableRuntimeDuration,
-  type SerializableRuntimeValue,
-} from "./serializable-values.js";
+import { valueKey, type SerializableRuntimeValue } from "./serializable-values.js";
 import { compareTemporal } from "./temporal-operations.js";
 import { describeRuntimeValue, isDuration, isTemporal } from "./value-predicates.js";
 
@@ -128,36 +124,21 @@ export function setOperationItems(
   return items;
 }
 
-/**
- * Values for membership tests by `==`. Text, numbers, booleans, `null`, and durations are looked up directly, so the set
- * operations stay linear for them; objects, lists, and other values compare structurally with each kept one.
- */
+/** Values for membership tests by `==`, which use canonical keys instead of pairwise comparisons. */
 class ValueIndex {
-  readonly #scalars = new Set<string | number | boolean | null>();
-  readonly #durations = new Set<string>();
-  readonly #others: SerializableRuntimeValue[] = [];
+  readonly #keys = new Set<string>();
 
   constructor(values: readonly SerializableRuntimeValue[]) {
     for (const value of values) this.add(value);
   }
 
   add(value: SerializableRuntimeValue): void {
-    if (value === null || typeof value !== "object") this.#scalars.add(value);
-    else if (isDuration(value)) this.#durations.add(durationKey(value));
-    else this.#others.push(value);
+    this.#keys.add(valueKey(value));
   }
 
   has(value: SerializableRuntimeValue): boolean {
-    if (value === null || typeof value !== "object") return this.#scalars.has(value);
-    if (isDuration(value)) return this.#durations.has(durationKey(value));
-    return this.#others.some((other) => serializableEquals(other, value));
+    return this.#keys.has(valueKey(value));
   }
-}
-
-/** Equal for two durations exactly when `==` holds: the same months, days, and milliseconds. */
-function durationKey(value: SerializableRuntimeDuration): string {
-  const parts = durationParts(value);
-  return `${parts.months}:${parts.days}:${parts.milliseconds === 0 ? 0 : parts.milliseconds}`;
 }
 
 /** A text for a set operation's argument that is neither a list nor a set. */

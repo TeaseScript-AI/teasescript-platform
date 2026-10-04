@@ -95,7 +95,6 @@ const semanticCode = {
   unknownAssignment: "TSV003",
   invalidAssignment: "TSV004",
   unknownSpeaker: "TSV005",
-  invalidSetElement: "TSV006",
   duplicateProperty: "TSV007",
   invalidLoopControl: "TSV008",
   chainedRange: "TSV009",
@@ -1463,15 +1462,8 @@ class SemanticValidator {
       }
       return;
     }
-    for (const element of root.elements) {
+    for (const element of root.elements)
       yield* compileChild(this.#validateExpressionTask(element, scope, contextualSpeaker));
-      if (root.kind === "setLiteral" && isDefinitelyComposite(element, scope))
-        this.#report(
-          semanticCode.invalidSetElement,
-          "Sets may contain only string, boolean, integer, number, duration, date, time, datetime, timestamp, or null values.",
-          element.span,
-        );
-    }
   }
 
   /**
@@ -1843,24 +1835,6 @@ function isDefinitelyNonIterable(expression: Expression): boolean {
     expression.kind === "interactionExpression" ||
     expression.kind === "showButtonExpression"
   );
-}
-
-function isSpeakerIdentifier(expression: Expression, scope: SemanticScope): boolean {
-  expression = unwrapParentheses(expression);
-  return expression.kind === "identifier" && scope.resolve(expression.name)?.kind === "speaker";
-}
-
-function isDefinitelyComposite(expression: Expression, scope: SemanticScope): boolean {
-  expression = unwrapParentheses(expression);
-  if (
-    expression.kind === "listLiteral" ||
-    expression.kind === "objectLiteral" ||
-    expression.kind === "setLiteral" ||
-    expression.kind === "dictLiteral"
-  ) {
-    return true;
-  }
-  return isSpeakerIdentifier(expression, scope);
 }
 
 function visitExpression(

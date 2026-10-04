@@ -183,9 +183,9 @@ test("misuse the compiler can see is a compile error", () => {
     ],
     [
       "let tags = set[1]\nsay tags.union([{ n: 1 }])",
-      "TSV006",
-      "A set holds only text, numbers, true or false, durations, date and time values, or null, so it cannot hold an object.",
-      "[{ n: 1 }]",
+      "TSV044",
+      "union() would mix a whole number (integer) and an object. A set holds one type; to keep both, declare a union type, as in 'let tags: (integer | object) set = ...'.",
+      "tags.union([{ n: 1 }])",
     ],
     [
       'let items = [1]\nsay items.union(["x"])',
@@ -222,9 +222,5 @@ test("values the compiler cannot know are checked at runtime", () => {
   assert.deepEqual(failure(`${DYNAMIC}let items = [1]\nsay items.union(dynamic(5))`), [
     "TSR060",
     "union() needs a list or a set, not a number.",
-  ]);
-  assert.deepEqual(failure(`${DYNAMIC}let tags = set[1]\nsay tags.union(dynamic([[1]]))`), [
-    "TSR032",
-    "Sets may contain only string, boolean, integer, number, duration, date, time, datetime, timestamp, or null values.",
   ]);
 });

@@ -62,15 +62,6 @@ test("accepts nested lexical access and sibling-local reuse", () => {
   assert.notEqual(result.plan, null);
 });
 
-test("detects definitely invalid set elements without full type checking", () => {
-  const result = compileSource("let values = set[[1], { value: 2 }, set[3]]");
-
-  assert.deepEqual(
-    result.semanticDiagnostics.map((item) => item.code),
-    ["TSV006", "TSV006", "TSV006"],
-  );
-});
-
 test("keeps parser and semantic diagnostics distinct", () => {
   const parserFailure = compileSource("let = 1");
   assert.ok(parserFailure.parserDiagnostics.length > 0);
