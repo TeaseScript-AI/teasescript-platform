@@ -1056,8 +1056,8 @@ show them, and runtime errors otherwise:
 
 ```text
 let minutes = min(20, 5 + punishments)
-let wait = max(1 minute, remaining)
-let level = max(1, min(level, 10))
+let pause = max(1 minute, remaining)
+let boundedLevel = max(1, min(level, 10))
 ```
 
 ## 14. Scope

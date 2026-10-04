@@ -1709,15 +1709,17 @@ export class Evaluator {
         span,
       );
     }
-    const pick = name === "min" ? Math.min : Math.max;
-    if (numbers)
-      // EVIDENCE: invariant: every argument was checked to be a number above.
-      return withoutNegativeZero(pick(...(positional as readonly number[])));
-    // EVIDENCE: invariant: every argument was checked to be a duration above.
-    const milliseconds = (positional as readonly SerializableRuntimeDuration[]).map(
-      (value) => value.milliseconds,
-    );
-    return { kind: "duration", milliseconds: withoutNegativeZero(pick(...milliseconds)) };
+    // A loop, not a spread into Math.min/Math.max, so a call with very many arguments cannot overflow the native stack.
+    const value = (item: SerializableRuntimeValue): number =>
+      typeof item === "number" ? item : isDuration(item) ? item.milliseconds : Number.NaN;
+    let best = value(positional[0]!);
+    for (const item of positional) {
+      const candidate = value(item);
+      if (name === "min" ? candidate < best : candidate > best) best = candidate;
+    }
+    return numbers
+      ? withoutNegativeZero(best)
+      : { kind: "duration", milliseconds: withoutNegativeZero(best) };
   }
 
   #roundingBuiltin(
