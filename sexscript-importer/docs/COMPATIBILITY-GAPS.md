@@ -523,6 +523,27 @@ Smoke runs that go further surface problems the static gates do not:
   Groovy compared a missing setting as null, which TeaseScript comparisons reject, and `main` now also rejects a missing
   setting stored in a Groovy `int` when it is read.
 
+### Large-corpus ranking (corpus2)
+
+The 289-package corpus ([`CORPUS-INVENTORY.md`](CORPUS-INVENTORY.md#large-corpus-corpus2), 2026-10-04) changes the
+ranking above. Of its 8,512 root errors, about 4,770 (142 packages) are legacy baggage: the old online service
+(`send`/`receive*`, 2,000 sites in 33 packages), in-memory image composition shown with `setImage(bytes, 0)` (Java
+`BufferedImage`, `ImageIO`, `drawImage`; 30–40 packages), files (`new File` in 70 packages), HTTP, OS processes, and
+`try`/`catch` around them. About 2,740 (131 packages) are importer work, led by list and text methods on receivers not
+proven to be lists or text (about 1,500, such as `contains`, `add`, `count`, `join`), `<<` on such receivers (226 in 24
+packages), list methods without a direct form (`add(index, value)`, `collect()`, `pop`), menus from computed option
+lists (117), typed and empty `for` loops (93), and `list - value` with an unproven value (75). About 490 (64 packages)
+need workarounds, mostly regular expressions in `replaceAll` (239) and `String.format` (104); about 370 (36 packages)
+are legacy bugs, such as 144 calls of functions no file defines. File transfers remain the largest pending blocker (190
+otherwise clean scripts), then `global function` (118), `askBooleans()` (33), `openUrl()` (15), and `showPopup` (14).
+
+Patterns the four-package corpus did not show: null-start numbers read in functions block about 20 otherwise clean
+scripts (`TSV043`, `TSV039`; the empty-list decision covers only lists); function parameters have no type, so
+`list -= value` on a parameter stays numeric and a variable widened by `parameter / 30` stays an integer for the
+compiler (smoke failures `TSR027`, `TSR058`); `for (c in text)` iterated characters (`split("")`); an empty computed
+`getString` default fails `askText` (`TSR052`); `isInteger()`, `isNumber()`, and `isFloat()` text checks (8, 6, and 3
+packages) have no direct form.
+
 ## Open importer work
 
 Found while evaluating the proposals, besides the importer work listed above; none needs a language decision:
