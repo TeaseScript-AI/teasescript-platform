@@ -168,7 +168,10 @@ export function languageProjectOverview(
     list.push(Object.freeze(diagnostic));
     diagnostics.set(path, list);
   }
-  const paths = [...new Set(files.map((file) => file.path))].sort(compareProjectPaths);
+  // A project diagnostic may name a path without a file, such as a missing main.tease.
+  const paths = [...new Set([...files.map((file) => file.path), ...diagnostics.keys()])].sort(
+    compareProjectPaths,
+  );
   return Object.freeze(
     paths.map((path) =>
       Object.freeze({

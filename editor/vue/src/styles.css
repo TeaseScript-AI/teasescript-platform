@@ -8,6 +8,7 @@ h1 { font-size: 28px; margin: 4px 0; }
 .subtle { color: #647084; margin: 0; }
 .status { color: #647084; font-size: 13px; }
 .workspace { display: grid; gap: 16px; grid-template-columns: minmax(200px, 260px) 1fr; margin: 0 auto; max-width: 1100px; }
+.files { min-width: 0; overflow-wrap: anywhere; }
 .files ul { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
 .files button { background: white; border: 1px solid #d8deea; border-radius: 10px; color: inherit; cursor: pointer; display: grid; font: inherit; gap: 3px; padding: 10px 12px; text-align: left; width: 100%; }
 .files button:hover { border-color: #aab5cc; }

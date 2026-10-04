@@ -103,6 +103,16 @@ test("tag names are normalized, and a tag may carry any finite number", () => {
   ]);
 });
 
+test("a valued tag name may start with a digit, even where it looks like a number", () => {
+  assert.deepEqual(header("---\ntags: 1easy: 4, 2e-test: 3, 3d: 1\n---\nexit")!.tags, [
+    { name: "1easy", value: 4 },
+    { name: "2e-test", value: 3 },
+    { name: "3d", value: 1 },
+  ]);
+  // A malformed number as a value is still the lexer's error.
+  assert.equal(compileSource("---\ntags: easy: 1e\n---\nexit").diagnostics[0]!.code, "TSL006");
+});
+
 test("a repeated tag is merged with a warning; two different numbers are an error", () => {
   const repeated = compileSource('---\ntags: "punishment", punishment: 4, "Punishment"\n---\nexit');
   assert.deepEqual(repeated.header!.tags, [{ name: "punishment", value: 4 }]);
@@ -115,7 +125,7 @@ test("a repeated tag is merged with a warning; two different numbers are an erro
   );
   assert.notEqual(repeated.plan, null);
 
-  assert.deepEqual(codes("---\ntags: punishment: 4, punishment: 5\n---\nexit"), [
+  assert.deepEqual(codes("---\ntags: punishment: 4, punishment: 5, punishment: 6\n---\nexit"), [
     ["TSH012", "error", 1],
   ]);
 });
@@ -154,6 +164,15 @@ test("malformed header lines are reported one per line, and the script below sti
     ["TSH003", "error", 6],
     ["TSH003", "error", 7],
   ]);
+  assert.deepEqual(codes('---\ntitle: "${a} and ${b}"\n---\nexit'), [["TSH007", "error", 1]]);
+
+  // An unterminated interpolation still ends at its string, so the header closes and the script stays.
+  const unterminated = compileSource('---\ntitle: "${name"\n---\nsay "after"\nexit');
+  assert.deepEqual(
+    unterminated.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSL005", "TSH007"],
+  );
+  assert.equal(unterminated.program.statements.length, 2);
 });
 
 test("each malformed tag explains the accepted spelling", () => {
@@ -207,6 +226,24 @@ test("a header must be closed and must come first", () => {
     "A header between --- lines must come first in the file, before any code.",
   );
   assert.deepEqual(codes('---\n---\nsay "x"\n---\nexit'), [["TSH002", "error", 3]]);
+  assert.deepEqual(codes('if true {\n---\ntitle: "Hall"\n---\n}\nexit'), [["TSH002", "error", 1]]);
+});
+
+test("a --- line inside a continued expression stays three minus signs", () => {
+  for (const source of [
+    "let x = (\n---\n1\n)\nsay x\nexit",
+    "let x =\n---\n1\nsay x\nexit",
+    'say """${\n---\n1\n}"""\nexit',
+  ]) {
+    const plan = compileSource(source).plan;
+    assert.notEqual(plan, null, source);
+    const finished = run(plan!, createImmediatePacingRuntimeSnapshot(plan!));
+    assert.deepEqual(
+      finished.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+      ["-1"],
+      source,
+    );
+  }
 });
 
 test("each project file has its own header", () => {

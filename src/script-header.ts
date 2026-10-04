@@ -1,4 +1,5 @@
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
+import type { LexResult } from "./lexer.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
 import { addTag, normalizeTagName, type Tag } from "./tags.js";
 import { TokenKind, type Token } from "./token.js";
@@ -18,8 +19,9 @@ export interface ScriptHeader {
 
 export interface HeaderReadResult {
   readonly header: ScriptHeader | null;
-  /** The tokens after the header, without misplaced header blocks. */
+  /** The tokens after the header. */
   readonly programTokens: readonly Token[];
+  /** The lexer's diagnostics, then the header's. */
   readonly diagnostics: readonly Diagnostic[];
 }
 
@@ -50,27 +52,58 @@ const TAG_NAME_RULE = "use lowercase letters a–z, digits, and hyphens";
 
 /**
  * Reads the optional header at the start of a file's tokens: a `---` line, one `field: value` line per field with
- * TeaseScript literals, and a closing `---` line. Only blank lines and comments may precede it. A `---` block later
- * in the file is reported and left out of the program.
+ * TeaseScript literals, and a closing `---` line. Only blank lines and comments may precede it.
  */
-export function readScriptHeader(tokens: readonly Token[]): HeaderReadResult {
-  return new HeaderReader(tokens).read();
+export function readScriptHeader(lexed: LexResult): HeaderReadResult {
+  return new HeaderReader(lexed.tokens).read(lexed.diagnostics);
+}
+
+/**
+ * A `---` block where a statement starts, after the header's place: its diagnostic, and the token index after its
+ * closing `---` line, or after the opening line when none follows. `null` when no `---` line starts at `index`.
+ */
+export function readMisplacedHeader(
+  tokens: readonly Token[],
+  index: number,
+): { readonly next: number; readonly diagnostic: Diagnostic } | null {
+  if (!isDelimiterLine(tokens, index)) return null;
+  let closing = index + 3;
+  while (closing < tokens.length && !isDelimiterLine(tokens, closing)) closing += 1;
+  return {
+    next: closing < tokens.length ? closing + 3 : index + 3,
+    diagnostic: createDiagnostic(
+      DiagnosticSeverity.Error,
+      headerDiagnosticCode.misplacedHeader,
+      "A header between --- lines must come first in the file, before any code.",
+      spanOf(tokens[index]!, tokens[index + 2]!),
+    ),
+  };
 }
 
 class HeaderReader {
   readonly #diagnostics: Diagnostic[] = [];
+  /** The source ranges of valid unquoted tag names, such as `1easy`, that the lexer may have read as a number. */
+  readonly #unquotedNames: { readonly start: number; readonly end: number }[] = [];
   #index = 0;
 
   public constructor(private readonly tokens: readonly Token[]) {}
 
-  public read(): HeaderReadResult {
+  public read(lexerDiagnostics: readonly Diagnostic[]): HeaderReadResult {
     this.#skipNewlines();
     const header = this.#isDelimiterLine(this.#index) ? this.#readHeader() : null;
-    const programStart = header === null ? 0 : this.#index;
+    const programTokens =
+      header === null ? this.tokens : Object.freeze(this.tokens.slice(this.#index));
+    // A digit-first name such as `1easy` or `2e-test` starts like a malformed exponent; as a tag name it is valid.
+    const lexer = lexerDiagnostics.filter(
+      ({ span }) =>
+        !this.#unquotedNames.some(
+          (name) => span.start.offset >= name.start && span.end.offset <= name.end,
+        ),
+    );
     return Object.freeze({
       header,
-      programTokens: this.#withoutMisplacedHeaders(programStart),
-      diagnostics: Object.freeze([...this.#diagnostics]),
+      programTokens,
+      diagnostics: Object.freeze([...lexer, ...this.#diagnostics]),
     });
   }
 
@@ -222,8 +255,7 @@ class HeaderReader {
           text.span,
         );
       }
-      this.#addTag(tags, { name, value: null }, text.span);
-      return true;
+      return this.#addTag(tags, { name, value: null }, text.span);
     }
 
     // An unquoted name is the source text up to the `:`, such as `corner-time`, which the lexer splits into tokens.
@@ -260,12 +292,16 @@ class HeaderReader {
         nameSpan,
       );
     }
+    this.#unquotedNames.push({ start: nameSpan.start.offset, end: nameSpan.end.offset });
     this.#index += 1;
     this.#skipNewlines();
     const value = this.#readNumber();
     if (value === null) return false;
-    this.#addTag(tags, { name, value: value.value }, createSourceSpan(nameSpan.start, value.end));
-    return true;
+    return this.#addTag(
+      tags,
+      { name, value: value.value },
+      createSourceSpan(nameSpan.start, value.end),
+    );
   }
 
   /** A number with an optional sign, as in `punishment: -1.5`. */
@@ -335,39 +371,47 @@ class HeaderReader {
     this.#index += 1;
     let text = "";
     let valid = true;
+    // Strings inside an interpolation nest; an unterminated interpolation has no end token, so the string's own end
+    // still closes it.
+    let strings = 1;
+    let interpolations = 0;
     for (;;) {
       const token = this.#peek();
       if (token.kind === TokenKind.EndOfFile) return null; // The lexer reports the unterminated string.
       this.#index += 1;
-      if (token.kind === TokenKind.StringEnd) {
+      if (token.kind === TokenKind.StringStart) strings += 1;
+      if (token.kind === TokenKind.StringEnd && --strings === 0) {
         return valid ? { text, span: spanOf(start, token) } : null;
       }
-      if (token.kind === TokenKind.StringText) {
+      if (token.kind === TokenKind.InterpolationEnd)
+        interpolations = Math.max(0, interpolations - 1);
+      if (token.kind === TokenKind.StringText && strings === 1 && interpolations === 0) {
         text += token.value;
-      } else if (token.kind === TokenKind.InterpolationStart) {
-        this.#report(
-          headerDiagnosticCode.interpolation,
-          "A header is written as it is shown; it cannot use ${…}.",
-          token.span,
-        );
+      }
+      if (token.kind === TokenKind.InterpolationStart) {
+        interpolations += 1;
+        if (valid) {
+          this.#report(
+            headerDiagnosticCode.interpolation,
+            "A header is written as it is shown; it cannot use ${…}.",
+            token.span,
+          );
+        }
         valid = false;
-        this.#skipInterpolation();
       }
     }
   }
 
-  #skipInterpolation(): void {
-    let depth = 1;
-    while (depth > 0 && this.#peek().kind !== TokenKind.EndOfFile) {
-      const kind = this.#peek().kind;
-      if (kind === TokenKind.InterpolationStart) depth += 1;
-      if (kind === TokenKind.InterpolationEnd) depth -= 1;
-      this.#index += 1;
-    }
-  }
-
-  #addTag(tags: Map<string, Tag>, tag: Tag, span: SourceSpan): void {
+  /** Adds a tag; `false` after reporting two different numbers for it. */
+  #addTag(tags: Map<string, Tag>, tag: Tag, span: SourceSpan): boolean {
     const outcome = addTag(tags, tag);
+    if (outcome === "conflict") {
+      return this.#fail(
+        headerDiagnosticCode.conflictingTagValue,
+        `The tag '${tag.name}' has two different numbers.`,
+        span,
+      );
+    }
     if (outcome === "repeated") {
       this.#report(
         headerDiagnosticCode.repeatedTag,
@@ -375,52 +419,12 @@ class HeaderReader {
         span,
         DiagnosticSeverity.Warning,
       );
-    } else if (outcome === "conflict") {
-      this.#report(
-        headerDiagnosticCode.conflictingTagValue,
-        `The tag '${tag.name}' has two different numbers.`,
-        span,
-      );
     }
+    return true;
   }
 
-  /** The program tokens from `start`, each later `---` block left out with a diagnostic. */
-  #withoutMisplacedHeaders(start: number): readonly Token[] {
-    let kept: Token[] | null = null;
-    let index = start;
-    while (index < this.tokens.length) {
-      if (!this.#isDelimiterLine(index)) {
-        kept?.push(this.tokens[index]!);
-        index += 1;
-        continue;
-      }
-      kept ??= this.tokens.slice(start, index);
-      this.#report(
-        headerDiagnosticCode.misplacedHeader,
-        "A header between --- lines must come first in the file, before any code.",
-        spanOf(this.tokens[index]!, this.tokens[index + 2]!),
-      );
-      let closing = index + 3;
-      while (closing < this.tokens.length && !this.#isDelimiterLine(closing)) closing += 1;
-      index = closing < this.tokens.length ? closing + 3 : index + 3;
-    }
-    if (kept !== null) return Object.freeze(kept);
-    return start === 0 ? this.tokens : Object.freeze(this.tokens.slice(start));
-  }
-
-  /** Whether a standalone `---` line starts at `index`. */
   #isDelimiterLine(index: number): boolean {
-    const tokens = this.tokens;
-    if (index > 0 && tokens[index - 1]!.kind !== TokenKind.Newline) return false;
-    for (let offset = 0; offset < 3; offset += 1) {
-      const token = tokens[index + offset];
-      if (token?.kind !== TokenKind.Minus) return false;
-      if (offset > 0 && tokens[index + offset - 1]!.span.end.offset !== token.span.start.offset) {
-        return false;
-      }
-    }
-    const after = tokens[index + 3]?.kind;
-    return after === TokenKind.Newline || after === TokenKind.EndOfFile;
+    return isDelimiterLine(this.tokens, index);
   }
 
   /** Whether the next token can start a value: not the end of the line, the file, or the header. */
@@ -460,6 +464,20 @@ class HeaderReader {
   ): void {
     this.#diagnostics.push(createDiagnostic(severity, code, message, span));
   }
+}
+
+/** Whether a standalone `---` line starts at `index`. */
+function isDelimiterLine(tokens: readonly Token[], index: number): boolean {
+  if (index > 0 && tokens[index - 1]!.kind !== TokenKind.Newline) return false;
+  for (let offset = 0; offset < 3; offset += 1) {
+    const token = tokens[index + offset];
+    if (token?.kind !== TokenKind.Minus) return false;
+    if (offset > 0 && tokens[index + offset - 1]!.span.end.offset !== token.span.start.offset) {
+      return false;
+    }
+  }
+  const after = tokens[index + 3]?.kind;
+  return after === TokenKind.Newline || after === TokenKind.EndOfFile;
 }
 
 function isNameEnd(kind: Token["kind"]): boolean {

@@ -56,8 +56,35 @@ test("each project file gets its own markers and header, and edits replace stale
     { name: "intensity", value: 2 },
   ]);
 
+  // Every model is watched, not only the first.
+  main.text = '---\ntitle: "Late evening"\n---\nexit';
+  main.emitChange();
+  assert.deepEqual(
+    publications[2]!.map((file) => [file.path, file.header?.title ?? null]),
+    [
+      ["main.tease", "Late evening"],
+      ["rooms/hall.tease", null],
+    ],
+  );
+
   subscription.dispose();
   main.emitChange();
   hall.emitChange();
-  assert.equal(publications.length, 2);
+  assert.equal(publications.length, 3);
+});
+
+test("a project diagnostic without its own file still gets a row", () => {
+  let files: readonly ProjectFileView[] = [];
+  watchProjectDiagnostics(
+    [{ path: "rooms/hall.tease", model: new FakeModel("exit") }],
+    { Error: 8, Warning: 4 },
+    (published) => (files = published),
+  ).dispose();
+  assert.deepEqual(
+    files.map((file) => [file.path, file.markers.map((marker) => marker.code)]),
+    [
+      ["main.tease", ["TSC009"]],
+      ["rooms/hall.tease", []],
+    ],
+  );
 });
