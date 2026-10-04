@@ -1,5 +1,16 @@
 import assert from "node:assert/strict";
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { request, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -65,6 +76,70 @@ test("the development image folder offers its images with their XMP keywords, an
   );
   const finished = executeValidatedWorkspaceSnapshot(compiled.plan!, compiled.snapshot!, "run");
   assert.ok(["rooms/bath.png", "rooms/bedroom.jpg"].includes(finished.snapshot!.stageImage!));
+});
+
+test("the catalog follows edits that keep a file's size and time, and skips what it cannot read", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "teasescript-images-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  await copyFile(join(fixtures, "no-xmp.png"), join(root, "room.png"));
+  const sidecar = join(root, "room.png.xmp");
+  const original = await readFile(join(fixtures, "keywords.jpg.xmp"), "utf8");
+  await writeFile(sidecar, original);
+  // A whole-second time, which the file system stores exactly, as an editor that preserves timestamps restores it.
+  const time = 1_700_000_000;
+  await utimes(sidecar, time, time);
+  const server = await listening(createPlaygroundServer({ imagesRoot: root }));
+  context.after(() => new Promise((resolve) => server.close(resolve)));
+  const catalog = async () =>
+    JSON.parse((await get(server, "/dev-images/catalog.json")).body.toString("utf8"));
+  assert.deepEqual((await catalog()).images, [{ path: "room.png", keywords }]);
+
+  // The same length and modification time; only the change time and content differ.
+  const before = await stat(sidecar);
+  await writeFile(sidecar, original.replace("bedroom", "kitchen"));
+  await utimes(sidecar, time, time);
+  const after = await stat(sidecar);
+  assert.deepEqual([after.size, after.mtimeMs], [before.size, before.mtimeMs]);
+  assert.deepEqual((await catalog()).images, [
+    { path: "room.png", keywords: ["kitchen", ...keywords.slice(1)] },
+  ]);
+
+  // A file the server may not read is reported, and the others stay available. (Root reads every file.)
+  if (process.getuid?.() !== 0) {
+    await copyFile(join(fixtures, "no-xmp.jpg"), join(root, "locked.jpg"));
+    await chmod(join(root, "locked.jpg"), 0o000);
+    const listed = await catalog();
+    assert.deepEqual(
+      listed.images.map((image: { path: string }) => image.path),
+      ["room.png"],
+    );
+    assert.deepEqual(listed.problems, [
+      { path: "locked.jpg", message: "Skipped: it cannot be read (EACCES)." },
+    ]);
+  }
+
+  const missing = await listening(createPlaygroundServer({ imagesRoot: join(root, "absent") }));
+  context.after(() => new Promise((resolve) => missing.close(resolve)));
+  const response = await get(missing, "/dev-images/catalog.json");
+  assert.equal(response.status, 200);
+  assert.deepEqual(JSON.parse(response.body.toString("utf8")), {
+    images: [],
+    problems: [{ path: ".", message: "The folder cannot be read (ENOENT)." }],
+  });
+});
+
+test("the image folder serves only what its catalog lists: no hidden files or links", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "teasescript-images-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, ".private"));
+  await copyFile(join(fixtures, "keywords.jpg"), join(root, "room.jpg"));
+  await copyFile(join(fixtures, "keywords.jpg"), join(root, ".private/hidden.jpg"));
+  await symlink(join(root, "room.jpg"), join(root, "inside-link.jpg"));
+  const server = await listening(createPlaygroundServer({ imagesRoot: root }));
+  context.after(() => new Promise((resolve) => server.close(resolve)));
+  assert.equal((await get(server, "/dev-images/files/room.jpg")).status, 200);
+  assert.equal((await get(server, "/dev-images/files/.private/hidden.jpg")).status, 404);
+  assert.equal((await get(server, "/dev-images/files/inside-link.jpg")).status, 404);
 });
 
 test("without a development image folder, the image routes are absent", async (context) => {

@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { extname, resolve, sep } from "node:path";
+import { extname, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { PLAYGROUND_EXAMPLES } from "./examples.js";
 import { IMAGE_FOLDER_EXTENSIONS, ImageFolder } from "./image-folder.js";
@@ -146,6 +146,14 @@ async function serveRequest(
     ]);
     if (!isInside(canonicalRoot, canonicalPath)) {
       sendText(response, 400, "Rejected unsafe request path.\n", method === "HEAD");
+      return;
+    }
+    // The image folder serves exactly what its catalog lists, which leaves out links.
+    if (
+      target.linksAllowed === false &&
+      canonicalPath !== resolve(canonicalRoot, relative(target.root, target.path))
+    ) {
+      sendText(response, 404, "Not found.\n", method === "HEAD");
       return;
     }
     const information = await stat(canonicalPath);
@@ -330,6 +338,8 @@ async function hasUnexpectedBody(request: IncomingMessage): Promise<boolean> {
 interface StaticTarget {
   readonly root: string;
   readonly path: string;
+  /** Whether the path may pass through a link, as long as it stays inside the root. */
+  readonly linksAllowed?: false;
 }
 
 function resolveTarget(pathname: string, roots: StaticRoots): StaticTarget | null {
@@ -357,9 +367,13 @@ function resolveTarget(pathname: string, roots: StaticRoots): StaticTarget | nul
   }
   if (pathname.startsWith("/dev-images/files/") && roots.imageFolder !== null) {
     const relativePath = pathname.slice("/dev-images/files/".length);
-    return IMAGE_FOLDER_EXTENSIONS.has(extname(relativePath).toLowerCase())
-      ? resolveInside(roots.imageFolder.root, relativePath)
-      : null;
+    if (
+      !IMAGE_FOLDER_EXTENSIONS.has(extname(relativePath).toLowerCase()) ||
+      relativePath.split("/").some((segment) => segment.startsWith("."))
+    )
+      return null;
+    const target = resolveInside(roots.imageFolder.root, relativePath);
+    return target === null ? null : { ...target, linksAllowed: false };
   }
   if (pathname.startsWith("/examples/")) {
     const relativePath = pathname.slice("/examples/".length);
