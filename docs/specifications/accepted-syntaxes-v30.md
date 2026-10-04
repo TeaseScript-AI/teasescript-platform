@@ -1565,6 +1565,25 @@ Rules:
   `null`, or a duration.
 - Options with and without a written value may be mixed.
 - When all values have the same type, the result has that type; integers and numbers together are numbers.
+- Values of different types, such as text and numbers, give a union ([§13](#13-explicit-types)). Only a place declared
+  with a union type keeps such a result; storing it where its type would be inferred, as in an unannotated `let`, is a
+  compile error that names the union to declare:
+
+  ```text
+  let rounds: integer | string = choose "None", [5, 10]   // "None", 5, or 10
+  let other = choose "None", [5, 10]                      // compile error: declare 'let other: string | integer'
+  ```
+
+- When the source shows every button's value, the result is known to be one of them until the variable is assigned
+  again or a call or suspension may change it ([ADR 0021](../decisions/0021-static-types.md) rule 5.5), and comparing
+  it with a value that no button returns, also as a literal `case` value ([§32](#32-switch-statements)), is a compiler
+  warning:
+
+  ```text
+  let answer = choose "spank", "lines"
+  if answer == "Open" { ... }   // warning: 'answer' is always "spank" or "lines" here
+  ```
+
 - The elements of a list option are values or choice objects, not lists or sets.
 - A choice object has `text`, and optionally `value` and `background`. It has no `value` property when a value is
   written before its option's `:`, also as an element of a list or set option.
@@ -1573,9 +1592,6 @@ Rules:
 - Buttons may repeat a value or a text: `choose win: "Open a door", lose: "Open a door", lose: "Open a door"` shows
   three buttons. A selected button is identified by its position, so each returns its own value.
 - `choose` does not return a result object.
-- Planned with union types (#504): mixing number and text results in one `choose` is allowed only into an explicitly
-  union-typed variable, and comparing a choice result with a value no option has is a compiler warning. Until then, one
-  `choose` may not mix identifier and numeric values before `:`.
 
 ## 20. Input functions
 **Status:** Accepted

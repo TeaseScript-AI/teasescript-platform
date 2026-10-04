@@ -514,3 +514,249 @@ test("a computed list of choice objects returns their values, and a literal opti
       source,
     );
 });
+
+test("a choice that returns text and numbers needs a place declared with a union type", () => {
+  // #511 C2: a declared union keeps every button's value, with its type.
+  const source = 'let rounds: integer | string = choose "None", [5, 10]\nsay [rounds]';
+  for (const [index, said] of [
+    [0, '["None"]'],
+    [1, "[5]"],
+  ] as const) {
+    const { plan, pending } = start(source);
+    assert.deepEqual(sayTexts(select(plan, pending.snapshot, index).finished), [said]);
+  }
+  assert.deepEqual(
+    compileSource(
+      'function take(value: integer | string) {\n    say "x"\n}\ntake(choose "None", 5)',
+    ).diagnostics,
+    [],
+  );
+  // Without a declared union, the message names the annotation to write.
+  const message = (source: string) =>
+    compileSource(source).diagnostics.map((d) => [d.code, d.message]);
+  assert.deepEqual(message('let rounds = choose "None", [5, 10]'), [
+    [
+      "TSV044",
+      "This choose returns text (string) or a whole number (integer). A place keeps one type; to keep both, declare a union type, as in 'let rounds: string | integer = choose ...'.",
+    ],
+  ]);
+  assert.deepEqual(message('function pick {\n    return choose "None", 5\n}'), [
+    [
+      "TSV044",
+      "This choose returns text (string) or a whole number (integer). A place keeps one type; to keep both, declare the result type, as in 'function pick(...): string | integer'.",
+    ],
+  ]);
+  assert.deepEqual(message('function take(value) {\n    say "x"\n}\ntake(choose "None", 5)'), [
+    [
+      "TSV044",
+      "This choose returns text (string) or a whole number (integer). A place keeps one type; to keep both, declare the parameter as 'value: string | integer'.",
+    ],
+  ]);
+  assert.deepEqual(
+    compileSource('let rounds = 5\nrounds = choose "None", 5').diagnostics.map((d) => d.code),
+    ["TSV041"],
+  );
+  // A property has no declared type, and an option that already holds a union mixes its result as well.
+  const spans = (source: string) =>
+    compileSource(source).diagnostics.map((d) => [
+      d.code,
+      source.slice(d.span.start.offset, d.span.end.offset),
+    ]);
+  assert.deepEqual(spans('let box = { answer: choose "a", 1 }'), [["TSV044", 'choose "a", 1']]);
+  const choices = 'let choices: (string | integer)[] = ["a", 1]\n';
+  assert.deepEqual(spans(`${choices}let answer = choose choices`), [["TSV044", "choose choices"]]);
+  assert.deepEqual(spans(`${choices}let answer: string | integer = choose choices`), []);
+  // A copy of a value of a union type keeps the plain union, not the button values.
+  const answer = 'let answer: string | integer = choose "a", 1\n';
+  assert.deepEqual(spans(`${answer}let copy = answer\ncopy = "z"`), []);
+  assert.deepEqual(spans(`${answer}let copies = [answer]\ncopies.add("z")`), []);
+  // Values of one union type join, whatever values each may be.
+  assert.deepEqual(
+    spans(`${answer}let other: string | integer = choose "b", 2\nlet both = [answer, other]`),
+    [],
+  );
+  // A place whose type is not written needs a written union, also when it already holds a union, and options of
+  // unknown type do not hide the known ones.
+  assert.deepEqual(message(`${answer}let copied = answer\ncopied = choose "b", 2`), [
+    [
+      "TSV044",
+      "This choose returns text (string) or a whole number (integer). A place keeps one type; to keep both, declare it as 'let copied: string | integer = ...'.",
+    ],
+  ]);
+  // A parameter without a type, also where a test narrowed it, a value of unknown type, and a property of an `object`
+  // have no written type either; the caller's declared union does not declare the parameter.
+  const values = 'let values: (string | integer)[] = ["old"]\n';
+  for (const source of [
+    `function probe(p) {\n    if p is (string | integer)[] {\n        p.add(choose "new", 2)\n    }\n}\n${values}probe(values)`,
+    `function probe(p) {\n    if p is (string | integer)[][] {\n        p.first.add(choose "new", 2)\n    }\n}`,
+    `function probe(p) {\n    p.add(choose "new", 2)\n}\n${values}probe(values)`,
+    `function probe(p) {\n    p[0] = choose "new", 2\n}`,
+    `function probe(p) {\n    p.answer = choose "new", 2\n}`,
+    `${values}let box: object = { values: values }\nbox.values.add(choose "new", 2)`,
+    'function probe(p: speaker | object) {\n    p.firstName = choose "new", 2\n}',
+  ])
+    assert.deepEqual(spans(source), [["TSV044", 'choose "new", 2']], source);
+  // A function called before the speaker it stores into is declared is checked once the speaker is, so the store goes to
+  // a speaker, which shows the value as text.
+  const early =
+    'function change(active = false) {\n    if active {\n        voice.firstName = choose "new", 2\n    }\n}\nchange()\nspeaker voice { firstName: "Old" }\nchange(true)\nsay voice.firstName';
+  assert.deepEqual(spans(early), []);
+  for (const [index, said] of [
+    [0, "new"],
+    [1, "2"],
+  ] as const) {
+    const { plan, pending } = start(early);
+    assert.deepEqual(sayTexts(select(plan, pending.snapshot, index).finished), [said]);
+  }
+  // A speaker shows its text property as text.
+  assert.deepEqual(
+    spans(
+      'function probe(p: speaker | object) {\n    if p is speaker {\n        p.firstName = choose "new", 2\n    }\n}',
+    ),
+    [],
+  );
+  assert.deepEqual(
+    spans(
+      `function probe(p: (string | integer)[]) {\n    p.add(choose "new", 2)\n}\n${values}probe(values)`,
+    ),
+    [],
+  );
+  for (const options of ['v, "a", 1', '"a", v, 1', '"a", 1, v'])
+    assert.deepEqual(
+      message(`function pick(v) {\n    let answer = choose ${options}\n}`),
+      [
+        [
+          "TSV044",
+          "This choose returns text (string) or a whole number (integer). A place keeps one type; to keep both, declare a union type, as in 'let answer: string | integer = choose ...'.",
+        ],
+      ],
+      options,
+    );
+});
+
+test("comparing a choice result with a value no button returns is a warning", () => {
+  // #511 C5: the possible button values follow the variable as narrowing does, until it is assigned again.
+  const warnings = (source: string) =>
+    compileSource(source).diagnostics.map((d) => [d.severity, d.code, d.message]);
+  assert.deepEqual(
+    warnings('let answer = choose "spank", "lines"\nif answer == "Open" {\n    say "x"\n}'),
+    [
+      [
+        "warning",
+        "TSV046",
+        '\'answer\' is always "spank" or "lines" here, so this comparison is always false.',
+      ],
+    ],
+  );
+  assert.deepEqual(
+    warnings(
+      'let answer = choose spank: "Spanking", lines: "Lines"\nlet other = answer != "Lines"',
+    )[0],
+    [
+      "warning",
+      "TSV046",
+      '\'answer\' is always "spank" or "lines" here, so this comparison is always true.',
+    ],
+  );
+  for (const source of [
+    'let answer = choose "spank", "lines"\nif answer == "spank" {\n    say "x"\n}',
+    'let answer = choose "spank", "lines"\nanswer = "Open"\nif answer == "Open" {\n    say "x"\n}',
+    "let n = choose [5, 10]\nlet five = n == 5.0",
+    'let pets = ["pet", "toy"]\nlet pick = choose pets\nlet other = pick == "x"',
+  ])
+    assert.deepEqual(warnings(source), [], source);
+  // The possible values survive copies, returns, and `-`, and a test or a wider variable keeps them where they apply.
+  const answer = 'let answer = choose "a", "b"\n';
+  for (const source of [
+    `${answer}let copy = "init"\ncopy = answer\nlet same = copy == "z"`,
+    'function pick {\n    return choose "a", "b"\n}\nlet answer = pick()\nlet same = answer == "z"',
+    `${answer}let same = answer == null`,
+    "let n = choose 1, 2\nlet negative = -n\nlet same = negative == 1",
+    "let n = choose 1, 2\nlet same = n == 3\nn = 1.5",
+  ])
+    assert.deepEqual(
+      warnings(source).map(([severity, code]) => [severity, code]),
+      [["warning", "TSV046"]],
+      source,
+    );
+  // A test leaves only the values that can pass or fail it, and button values decide a type test as well.
+  const warned = (source: string) =>
+    compileSource(source).diagnostics.map((d) => [
+      d.code,
+      source.slice(d.span.start.offset, d.span.end.offset),
+      d.message,
+    ]);
+  assert.deepEqual(
+    warned("let n = choose 1.0, 1.5\nif n is not integer {\n    let same = n == 1.0\n}"),
+    [["TSV046", "n == 1.0", "'n' is always 1.5 here, so this comparison is always false."]],
+  );
+  assert.deepEqual(warned("let n = choose 1.0, 2.0\nlet whole = n is integer"), [
+    ["TSV046", "n is integer", "'n' is always 1 or 2 here, so this test is always true."],
+  ]);
+  // Durations compare by length, never with numbers, also inside one union, and `choose null` is null.
+  for (const source of [
+    "let d = choose 1 s, 2 s\nlet same = d == 3 s",
+    "let d = choose 1 s, 2 s\nlet same = d == 1000",
+    "let n = choose 1000, 2000\nlet same = n == 1 s",
+    "let value: duration | integer = choose 1 s, 2000\nlet same = value == 2 s",
+    'let answer = choose null\nlet same = answer == "z"',
+  ])
+    assert.deepEqual(
+      warnings(source).map(([severity, code]) => [severity, code]),
+      [["warning", "TSV046"]],
+      source,
+    );
+  assert.match(
+    warnings("let d = choose 1 s, 2 s\nlet same = d == 3 s")[0]?.[2] ?? "",
+    /1 s or 2 s/,
+  );
+  assert.deepEqual(
+    warned("let value: duration | integer = choose 1 s, 2\nlet same = value == 3 s"),
+    [
+      [
+        "TSV046",
+        "value == 3 s",
+        "'value' is always 1 s or 2 here, so this comparison is always false.",
+      ],
+    ],
+  );
+  // A literal `case` compares with `==` as well; a case that some button returns, and a range, are not warned about.
+  assert.deepEqual(
+    warned(
+      'let answer = choose "spank", "lines"\nswitch answer {\n    case "Open" {\n        say "x"\n    }\n    case "spank" {\n        say "y"\n    }\n}',
+    ),
+    [
+      [
+        "TSV046",
+        '"Open"',
+        '\'answer\' is always "spank" or "lines" here, so this case never matches.',
+      ],
+    ],
+  );
+  assert.deepEqual(
+    warned('let n = choose 1, 2\nswitch n {\n    case 1..3 {\n        say "x"\n    }\n}'),
+    [],
+  );
+  for (const source of [
+    "let d = choose 1 s, 2 s\nlet same = d == 1000 ms",
+    "let value: duration | integer = choose 1 s, 2000\nlet same = value == 1000 ms",
+    "let value: duration | integer = choose 1 s, 2000\nlet same = value == 2000",
+    'let answer = choose null\nanswer = "z"\nlet same = answer == "z"',
+    "let n = choose 1, 2\nlet negative = -n\nlet same = negative == -1",
+    'let n = choose 1.0, 1.5\nlet items = ["zero", "one"]\nif n is integer {\n    say items[n]\n}',
+  ])
+    assert.deepEqual(warnings(source), [], source);
+  assert.deepEqual(
+    warnings('let n = choose 1, 2\nlet items = ["a", "b", "c"]\nsay items[n]\nn = 1.5').map(
+      ([, code]) => code,
+    ),
+    ["TSV043"],
+  );
+  // The warning does not change what runs.
+  const plan = compileSource(
+    'let answer = choose "spank", "lines"\nsay "${answer == "Open"}"',
+  ).plan;
+  assert.ok(plan !== null);
+  const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+  assert.deepEqual(sayTexts(select(plan, pending.snapshot, 0).finished), ["false"]);
+});

@@ -43,7 +43,7 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
    values must still agree.
 6. "First" follows the order in which the compiler checks the script: top-level statements in source order, a
    function body when a call first needs its result (otherwise after the top level), then timer and media blocks. A
-   body that names a top-level variable declared after that call is checked after the top level, once the variable has
+   body that names a top-level variable or speaker declared after that call is checked after the top level, once it has
    its type; until then the call's result is the declared result type, or unknown.
 7. A value whose type the compiler cannot know, such as untyped storage, host data, or an unknown parameter, is not
    rejected at compile time. When it is stored in a place of known type, it is checked at runtime with a
@@ -97,7 +97,9 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
 3. Tests work on every value, including values whose type the compiler cannot know. The operand is evaluated once and
    the test has no side effects.
 4. A right operand that is not a type is an error that explains that `is` checks a type and `==` compares values.
-5. The compiler warns about a test that is provably always true or always false, and only then.
+5. The compiler warns about a test that is provably always true or always false, and only then. The same warning
+   covers `==` and `!=` with a value that the other side can never hold, such as a `choose` result compared with a
+   value no button returns (V30 §19).
 
 ### 5. Narrowing
 

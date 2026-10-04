@@ -1352,17 +1352,8 @@ class SemanticValidator {
       );
       return;
     }
-    const valueKinds = new Set(
-      expression.options.flatMap((option) => (option.value === null ? [] : [option.value.kind])),
-    );
-    if (valueKinds.size > 1) {
-      this.#report(
-        semanticCode.invalidInteractionChoice,
-        "Identifier and numeric choice values may not be mixed.",
-        expression.span,
-      );
-    }
-    // The type checker checks what each button shows and returns, and how many buttons a choice has.
+    // The type checker checks what each button shows and returns, and how many buttons a choice has. Values of
+    // different types, such as an identifier and a number before ':', make a union (#511 C2).
     let empty = true;
     for (const option of expression.options) {
       yield* compileChild(

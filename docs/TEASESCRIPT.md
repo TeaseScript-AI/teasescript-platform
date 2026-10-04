@@ -254,9 +254,10 @@ implicit conversion; operators, conditions, indexes, members, and command operan
 support, and on a union every member must support them, with some known operands still rejected only at runtime until
 #552; union types, type names, and `is` type tests are available, and tests, `!= null`, and assignments narrow plain
 variables; using a possibly null value where its non-null type is required is a compile error that names the check. A
-mismatch is `TSV041`, an unsupported operand `TSV043`,
-returns of different types or list elements of different types `TSV044`, and a provably constant type test warning
-`TSV046`. When a value the compiler cannot know, such as untyped storage, host data, or an unknown parameter, is stored
+mismatch is `TSV041`, an unsupported operand `TSV043`, returns of different types, list elements of different types, or
+a `choose` of different value types outside a declared union `TSV044`, and a provably constant type test or comparison
+warning `TSV046`. When a value the compiler cannot know, such as untyped storage, host data, or an unknown parameter, is
+stored
 in a place whose type is at least partly known, the plan carries that type and the runtime checks the value before
 storing it (`TSR058`).
 
