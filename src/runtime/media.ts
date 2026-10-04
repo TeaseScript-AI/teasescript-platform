@@ -529,6 +529,61 @@ export function commitMediaEvent(
   return { cueFunctionIds, finished: false };
 }
 
+/** Running media without cues in its active range, which produces nothing observable when a pass ends and repeats. */
+export function repeatsSilently(media: RuntimeMediaSnapshot): boolean {
+  return (
+    media.state === "running" &&
+    media.loaded &&
+    !media.startCuesPending &&
+    media.repeat.kind !== "once" &&
+    !media.cues.some((cue) => inRange(media, mediaCuePointMs(media, cue)))
+  );
+}
+
+/**
+ * Catch-up moves silently repeating media directly to the last pass end due before the boundary, leaving that pass end
+ * for an ordinary commit. A pass end due exactly at `limitMs` counts only when `includeLimit` says this media precedes
+ * the work there. The result equals committing every pass end in turn: each pass end's progress comes from the same
+ * anchor formula, `commitMediaEvent` commits the skipped ones' last, and the same repeat limits end both paths.
+ */
+export function skipSilentPasses(
+  media: RuntimeMediaSnapshot,
+  limitMs: number,
+  includeLimit: boolean,
+): void {
+  if (!repeatsSilently(media)) return;
+  const end = mediaEndMs(media);
+  // Pass-end progress never decreases with the pass, so committing a later pass end leaves exactly its own progress.
+  const passEndProgressMs = (passes: number): number =>
+    Math.max(media.committedProgressMs, progressTo(media, end, passes));
+  // Whether the pass after `passes` completed ones ends with playback repeating, reported by the boundary.
+  const silentAndDue = (passes: number): boolean => {
+    const progressMs = passEndProgressMs(passes);
+    if (media.repeat.kind === "count" && passes + 1 >= media.repeat.passes) return false;
+    if (progressMs >= budgetEndProgressMs(media)) return false;
+    const dueAtMs = arrivalTime(media.points, progressMs);
+    return dueAtMs !== null && (dueAtMs < limitMs || (includeLimit && dueAtMs === limitMs));
+  };
+  // Both conditions turn false at most once as passes grow, so a binary search finds the last silent due pass end in
+  // bounded steps, also where many consecutive pass ends round to the same time.
+  const first = media.passesCompleted;
+  let last = first - 1;
+  let high = Number.MAX_SAFE_INTEGER - 1;
+  while (last < high) {
+    const middle = last + Math.ceil((high - last) / 2);
+    if (silentAndDue(middle)) last = middle;
+    else high = middle - 1;
+  }
+  if (last <= first) return;
+  media.passesCompleted = last - 1;
+  commitMediaEvent(media, {
+    kind: "arrival",
+    progressMs: passEndProgressMs(last - 1),
+    positionMs: end,
+    dueAtMs: null,
+  });
+}
+
 /** Settled media never interpolates again; one sample at the finish replaces the segment's history. */
 function finishMedia(media: RuntimeMediaSnapshot, event: MediaTimelineEvent): void {
   media.state = "finished";
