@@ -881,3 +881,23 @@ test("a glob with many stars checks a near match without backtracking blowup", (
     ["TSV057"],
   );
 });
+
+test("a glob that may pick main.tease enters it again after its start values", () => {
+  const result = compileProject(
+    project(
+      [
+        "global value: integer | string = 1",
+        "global first = true",
+        "let count: integer = value",
+        "say count",
+        "if first {",
+        "    first = false",
+        '    goto "b.tease"',
+        "}",
+        "exit",
+      ].join("\n"),
+      { "b.tease": 'value = "bad"\ngoto "*.tease"' },
+    ),
+  );
+  assert.notDeepEqual(result.diagnostics, []);
+});
