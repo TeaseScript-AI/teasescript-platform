@@ -58,7 +58,8 @@ Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRAR
 - Package-local and published community-library packaging, imports, moderation, compatibility, replacement mappings,
   dependency locks, transitive resolution, cycles, capability propagation, and version conflicts.
 - Standard Library string API and signatures beyond the first POC.
-- Module metadata, selection, recursion, fallback, cooldown, and history rules.
+- Module recursion, cooldown, and history rules (ADR 0022 decides file targets and fallback; ADR 0023 decides file
+  headers and tagged selection).
 - Static treatment of contextual `speaker` access when control-flow analysis proves no explicit or default speaker is
   available.
 

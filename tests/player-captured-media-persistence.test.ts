@@ -14,12 +14,12 @@ import {
   compileSource,
   completeAction,
   createFreshRuntimeSnapshot,
-  run,
   type RuntimeScriptStorageEntrySnapshot,
   type RuntimeSnapshot,
   type SerializableRuntimeValue,
 } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
+import { runUntilExit } from "./helpers/run-until-exit.js";
 
 const urls = { create: (data: Blob) => `blob:${data.size}`, revoke: () => {} };
 const png = (text: string) => new Blob([text], { type: "image/png" });
@@ -161,7 +161,8 @@ test("a sweep runs only when no Player is live, against a fresh read of the save
 
 /**
  * Runs a script like the Player: answers each `takePhoto()` from `media`, and acknowledges each persistent `save` once
- * `storage` persisted it, or as failed when it rejected.
+ * `storage` persisted it, or as failed when it rejected. It stops right before the script's `exit`, which clears its
+ * variables, so a test can inspect them.
  */
 async function runWithCamera(
   source: string,
@@ -176,7 +177,7 @@ async function runWithCamera(
     persistentScriptStorage: true,
   });
   for (;;) {
-    snapshot = run(plan, snapshot).snapshot;
+    snapshot = runUntilExit(plan, snapshot).snapshot;
     const action = snapshot.foregroundAction;
     if (action?.kind === "storageWrite") {
       const outcome = await storage.write(action.key, action.value).then(
@@ -210,16 +211,16 @@ test("a photo saved in one run is loaded and shown in a later run; a forged refe
   const provider = new FakeProvider();
   const firstRun = new CapturedMediaStore(repository, urls, "package");
   const first = await runWithCamera(
-    'let photo: string? = takePhoto()\nif photo != null {\n  save { label: "first", shot: photo } as "album"\n}',
+    'let photo: string? = takePhoto()\nif photo != null {\n  save { label: "first", shot: photo } as "album"\n}\nexit',
     firstRun,
     withCapturedMedia(provider, firstRun),
   );
-  assert.equal(first.status, "halted");
+  assert.equal(first.foregroundAction, null);
   firstRun.close();
 
   const secondRun = new CapturedMediaStore(repository, urls, "package");
   const second = await runWithCamera(
-    'let album = load "album"\nshowImage album.shot',
+    'let album = load "album"\nshowImage album.shot\nexit',
     secondRun,
     withCapturedMedia(provider, secondRun),
   );
@@ -233,7 +234,7 @@ test("a photo saved in one run is loaded and shown in a later run; a forged refe
   // A string of the right shape that the store never created grants nothing, also after `save` and `load`.
   const forged = shown.replace(/:\d+$/u, ":99");
   const third = await runWithCamera(
-    `save "${forged}" as "fake"\nshowImage load "fake"`,
+    `save "${forged}" as "fake"\nshowImage load "fake"\nexit`,
     secondRun,
     withCapturedMedia(provider, secondRun),
   );
@@ -343,7 +344,7 @@ test("a save whose photo cannot be stored fails atomically and the script keeps 
   const media = new CapturedMediaStore(repository, urls, "package");
   repository.failWrites = true;
   const finished = await runWithCamera(
-    'let photo = takePhoto()\nsave photo as "photo"\nlet seen = load "photo"',
+    'let photo = takePhoto()\nsave photo as "photo"\nlet seen = load "photo"\nexit',
     media,
     withCapturedMedia(provider, media),
   );

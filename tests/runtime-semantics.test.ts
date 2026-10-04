@@ -24,6 +24,7 @@ test("deep-copies lists for declarations and direct assignments", () => {
       "capture(original)",
       "capture(declaredCopy)",
       "capture(assignedCopy)",
+      "exit",
     ],
     { capture: captureInto(captured) },
   );
@@ -46,6 +47,7 @@ test("recursively deep-copies nested lists", () => {
       "copy[1].add(4)",
       "capture(original)",
       "capture(copy)",
+      "exit",
     ],
     { capture: captureInto(captured) },
   );
@@ -71,6 +73,7 @@ test("list elements and object fields copy composite values when each is evaluat
       "capture(source)",
       "capture(copies)",
       "capture(record.first)",
+      "exit",
     ],
     { capture: captureInto(captured) },
   );
@@ -97,10 +100,10 @@ test("passes builtins deep copies of canonical runtime values", () => {
     nested.items[0] = 9;
     return null;
   };
-  const result = executeSource(["let original = [[1]]", "mutate(original)", "capture(original)"], {
-    capture: captureInto(captured),
-    mutate,
-  });
+  const result = executeSource(
+    ["let original = [[1]]", "mutate(original)", "capture(original)", "exit"],
+    { capture: captureInto(captured), mutate },
+  );
 
   assert.deepEqual(result.errors, []);
   assert.deepEqual(captured, [[[1]]]);
@@ -115,6 +118,7 @@ test("recursively deep-copies ordinary objects", () => {
       "copy.nested.value = 2",
       "capture(original)",
       "capture(copy)",
+      "exit",
     ],
     { capture: captureInto(captured) },
   );
@@ -133,6 +137,7 @@ test("deep-copies objects containing lists and sets", () => {
       "copy.values.add(3)",
       "capture(original)",
       "capture(copy)",
+      "exit",
     ],
     { capture: captureInto(captured) },
   );
@@ -157,6 +162,7 @@ test("copies sets independently for declaration and assignment", () => {
       "capture(original.toList())",
       "capture(declaredCopy.toList())",
       "capture(assignedCopy.toList())",
+      "exit",
     ],
     { capture: captureInto(captured) },
   );
@@ -171,6 +177,7 @@ test("uses scalar equality for set uniqueness and retains insertion order", () =
     [
       'let values: (string | boolean | number | null) set = set["a", "a", true, true, 1, 1.0, null, null, false]',
       "capture(values.toList())",
+      "exit",
     ],
     { capture: captureInto(captured) },
   );
@@ -190,7 +197,7 @@ test("errors for first, last, and random on empty lists and sets", () => {
   ] as const;
 
   for (const [literal, property, code] of cases) {
-    const source = `let values = ${literal}\nsay values.${property}`;
+    const source = `let values = ${literal}\nsay values.${property}\nexit`;
     const result = executeSource(source);
     const start = source.indexOf(`values.${property}`);
     assert.deepEqual(
@@ -209,7 +216,11 @@ test("does not advance RNG state for empty list or set random", () => {
         return 0;
       },
     };
-    const result = executeSource(`let values = ${literal}\nsay values.random`, undefined, random);
+    const result = executeSource(
+      `let values = ${literal}\nsay values.random\nexit`,
+      undefined,
+      random,
+    );
 
     assert.deepEqual(
       result.errors.map((error) => error.code),
@@ -229,6 +240,7 @@ test("uses the speaker identifier fallback and warns only once per speaker", () 
     'say "Third"',
     'say as guest "Fourth"',
     'say as mistressVera "Fifth"',
+    "exit",
   ].join("\n");
   const result = executeSource(source);
   const warningSpan = (statement: string) => {
@@ -269,6 +281,7 @@ test("keeps explicit and derived speaker display names warning-free", () => {
     "}",
     'say as explicit "Hello"',
     'say as derived "Hello"',
+    "exit",
   ]);
 
   assert.deepEqual(result.errors, []);

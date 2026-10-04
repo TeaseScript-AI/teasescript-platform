@@ -3,20 +3,32 @@ import { findNonFiniteNumericLiteralDiagnosticsInStableProgram } from "./ast-val
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { compileStableProject, type InstructionPlan } from "./compiler/compile-program.js";
 import { parse } from "./parser.js";
+import type { ScriptHeader } from "./script-header.js";
 import { validateCapturedInstructionPlan } from "./plan/validation.js";
 import { markValidatedImmutableInstructionPlan } from "./plan/validated-immutable.js";
 import { planLocationToSourceSpan } from "./plan/source-location.js";
-import type { TypeCheckPlan } from "./plan/model.js";
+import type { PlanImage, TypeCheckPlan } from "./plan/model.js";
+import { imageCatalog, type ProjectImageFile } from "./image-catalog.js";
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "./project-paths.js";
 import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
-import { validateSemantics, type SemanticValidationOptions } from "./semantic.js";
+import { validateProjectSemantics, type SemanticValidationOptions } from "./semantic.js";
 import { checkTypes, type RuntimeCheckSite } from "./type-checker.js";
 import { createSourcePosition, createSourceSpan } from "./source.js";
 
-export interface CompileOptions extends SemanticValidationOptions {}
+export interface CompileOptions extends SemanticValidationOptions {
+  /** The package images and their XMP keywords, which tag queries search; none by default. */
+  readonly images?: readonly ProjectImageFile[];
+}
+
+/** What every file of a project is checked with: the options, the built-ins, and the image catalog when given. */
+interface ProjectCheckOptions extends CompileOptions {
+  readonly imageCatalog?: readonly PlanImage[];
+}
 
 export interface CompilationResult {
   readonly program: Program;
+  /** The file's `---` header, or `null` when it has none. */
+  readonly header: ScriptHeader | null;
   readonly parserDiagnostics: readonly Diagnostic[];
   readonly semanticDiagnostics: readonly Diagnostic[];
   readonly diagnostics: readonly Diagnostic[];
@@ -52,51 +64,87 @@ export { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./prot
 
 /** Parses, validates, and compiles one source as the `main.tease` of a single-file project, without executing it. */
 export function compileSource(source: string, options: CompileOptions = {}): CompilationResult {
-  const result = compileProject([{ path: MAIN_FILE_PATH, source }], options);
+  const { result, imageDiagnostics: images } = compileProjectFiles(
+    [{ path: MAIN_FILE_PATH, source }],
+    options,
+  );
   const { path: _path, ...file } = result.files[0]!;
-  return Object.freeze({ ...file, plan: result.plan });
+  // The image catalog's diagnostics name their image; the source's own follow them, as in the project.
+  return Object.freeze({
+    ...file,
+    diagnostics:
+      images.length === 0 ? file.diagnostics : Object.freeze([...images, ...file.diagnostics]),
+    plan: result.plan,
+  });
 }
 
 /**
  * Parses, validates, and compiles every file of a project into one plan, without executing it. The session starts
- * at the top of `main.tease`. Each file has its own top-level names and functions.
+ * at the top of `main.tease`. Each file has its own top-level names and functions; globals, global functions, and
+ * speakers belong to the whole project.
  */
 export function compileProject(
   sources: readonly ProjectSourceFile[],
   options: CompileOptions = {},
 ): ProjectCompilationResult {
+  return compileProjectFiles(sources, options).result;
+}
+
+/** A project compilation, and the image catalog's share of its diagnostics. */
+function compileProjectFiles(
+  sources: readonly ProjectSourceFile[],
+  options: CompileOptions,
+): {
+  readonly result: ProjectCompilationResult;
+  readonly imageDiagnostics: readonly ProjectDiagnostic[];
+} {
   const inventory = checkProjectFiles(sources);
-  const validationOptions = {
+  const catalog = imageCatalog(options.images ?? []);
+  const validationOptions: ProjectCheckOptions = {
     ...options,
     builtins: Object.freeze([...CORE_RUNTIME_BUILTINS, ...(options.builtins ?? [])]),
+    ...(options.images === undefined ? {} : { imageCatalog: catalog.images }),
   };
-  const files = inventory.files.map(({ path, source }) =>
-    compileFile(path, source, validationOptions),
-  );
+  const files = inventory.files.map(({ path, source }) => parseFile(path, source));
   let plan: InstructionPlan | null = null;
-  if (
-    inventory.diagnostics.length === 0 &&
-    files.every((file) => file.typeChecks !== null && !hasErrors(file.result.diagnostics))
-  ) {
-    plan = lowerProject(files);
+  const checked = checkProject(files, validationOptions);
+  if (inventory.diagnostics.length === 0 && !hasErrors(catalog.diagnostics) && checked !== null) {
+    if (checked.reachesExit) {
+      plan = lowerProject(files, checked.typeChecks, catalog.images);
+    } else {
+      const main = files[0]!.result;
+      const noExit = createDiagnostic(
+        DiagnosticSeverity.Error,
+        "TSV053",
+        "The script never reaches exit, so the session has no end. Add exit where the session should finish.",
+        main.program.statements.at(-1)?.span ?? main.program.span,
+      );
+      files[0]!.result = Object.freeze({
+        ...main,
+        semanticDiagnostics: Object.freeze([...main.semanticDiagnostics, noExit]),
+        diagnostics: Object.freeze([...main.diagnostics, noExit]),
+      });
+    }
   }
   const results = files.map((file) => file.result);
-  return Object.freeze({
+  const result = Object.freeze({
     files: Object.freeze(results),
     diagnostics: Object.freeze([
       ...inventory.diagnostics,
+      ...catalog.diagnostics,
       ...results.flatMap((file) =>
         file.diagnostics.map((diagnostic) => Object.freeze({ ...diagnostic, path: file.path })),
       ),
     ]),
     plan,
   });
+  return { result, imageDiagnostics: catalog.diagnostics };
 }
 
 interface CompiledProjectFile {
   result: ProjectFileCompilation;
-  /** `null` when the file has no valid program to lower. */
-  readonly typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan> | null;
+  readonly source: string;
+  /** `null` when parsing exhausted the call stack. */
   readonly parsed: ReturnType<typeof parse> | null;
 }
 
@@ -152,73 +200,120 @@ function projectDiagnostic(path: string, message: string): ProjectDiagnostic {
   });
 }
 
-function compileFile(path: string, source: string, options: CompileOptions): CompiledProjectFile {
+function parseFile(path: string, source: string): CompiledProjectFile {
   let parsed: ReturnType<typeof parse>;
   try {
     parsed = parse(source);
   } catch (error) {
     if (!isNativeStackExhaustion(error)) throw error;
-    return { result: stackExhaustionResult(path, source, null), typeChecks: null, parsed: null };
+    return { result: stackExhaustionResult(path, source, null, null), source, parsed: null };
   }
-  try {
-    return checkParsedFile(path, parsed, options);
-  } catch (error) {
-    if (!isNativeStackExhaustion(error)) throw error;
-    return {
-      result: stackExhaustionResult(path, source, parsed.program, parsed.diagnostics),
-      typeChecks: null,
-      parsed,
-    };
-  }
-}
-
-function checkParsedFile(
-  path: string,
-  parsed: ReturnType<typeof parse>,
-  options: CompileOptions,
-): CompiledProjectFile {
   const parserDiagnostics = Object.freeze([
     ...parsed.diagnostics,
     ...findNonFiniteNumericLiteralDiagnosticsInStableProgram(parsed.program),
   ]);
-  const hasParserErrors = hasErrors(parserDiagnostics);
-  const names = hasParserErrors
-    ? Object.freeze({ diagnostics: Object.freeze([]) })
-    : validateSemantics(parsed.program, options);
-  // Types are checked once every name resolves, so a type message never repeats a name or structure error.
-  const types =
-    hasParserErrors || hasErrors(names.diagnostics) ? null : checkTypes(parsed.program, options);
-  const semanticDiagnostics = Object.freeze([...names.diagnostics, ...(types?.diagnostics ?? [])]);
   return {
     result: Object.freeze({
       path,
       program: parsed.program,
+      header: parsed.header,
       parserDiagnostics,
-      semanticDiagnostics,
-      diagnostics: Object.freeze([...parserDiagnostics, ...semanticDiagnostics]),
+      semanticDiagnostics: Object.freeze([]),
+      diagnostics: parserDiagnostics,
     }),
-    typeChecks: types?.runtimeChecks ?? null,
+    source,
     parsed,
   };
+}
+
+/**
+ * Validates the names of the files without syntax errors, then, when every file is free of errors, the types of the
+ * whole project and, by the flow of that check, the initialization of variables at labels. Returns the runtime checks
+ * the type check recorded and whether the project reaches an exit, or `null` when the project has an error.
+ */
+function checkProject(
+  files: CompiledProjectFile[],
+  options: ProjectCheckOptions,
+): {
+  readonly typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>;
+  readonly reachesExit: boolean;
+} | null {
+  let current = 0;
+  const track = (file: number): void => {
+    current = file;
+  };
+  try {
+    const names = validateProjectSemantics(
+      files.map((file) => ({ path: file.result.path, program: file.result.program })),
+      options,
+      (index) => files[index]!.parsed !== null && !hasErrors(files[index]!.result.diagnostics),
+      track,
+    );
+    names.forEach((result, index) => addSemanticDiagnostics(files[index]!, result.diagnostics));
+    if (files.some((file) => file.parsed === null || hasErrors(file.result.diagnostics)))
+      return null;
+    // Types are checked once every name resolves, so a type message never repeats a name or structure error.
+    const types = checkTypes(
+      files.map((file) => ({ path: file.result.path, program: file.result.program })),
+      options,
+      track,
+    );
+    // The initialization check at labels follows the flow of the type check.
+    types.diagnostics.forEach((diagnostics, index) =>
+      addSemanticDiagnostics(files[index]!, [
+        ...diagnostics,
+        ...names[index]!.checkInitialization(types.flow),
+      ]),
+    );
+    return files.some((file) => hasErrors(file.result.diagnostics))
+      ? null
+      : { typeChecks: types.runtimeChecks, reachesExit: types.reachesExit };
+  } catch (error) {
+    if (!isNativeStackExhaustion(error)) throw error;
+    const file = files[current]!;
+    file.result = stackExhaustionResult(
+      file.result.path,
+      file.source,
+      file.result.program,
+      file.result.header,
+      file.parsed?.diagnostics,
+    );
+    return null;
+  }
+}
+
+function addSemanticDiagnostics(
+  file: CompiledProjectFile,
+  diagnostics: readonly Diagnostic[],
+): void {
+  if (diagnostics.length === 0) return;
+  const semanticDiagnostics = Object.freeze([...file.result.semanticDiagnostics, ...diagnostics]);
+  file.result = Object.freeze({
+    ...file.result,
+    semanticDiagnostics,
+    diagnostics: Object.freeze([...file.result.parserDiagnostics, ...semanticDiagnostics]),
+  });
 }
 
 /**
  * Lowers the error-free files into one plan; a lowering diagnostic belongs to the file it arose in, and a failure of the
  * finished plan to `main.tease`.
  */
-function lowerProject(files: CompiledProjectFile[]): InstructionPlan | null {
+function lowerProject(
+  files: CompiledProjectFile[],
+  typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
+  images: readonly PlanImage[],
+): InstructionPlan | null {
   let current = files[0]!;
   let failure: ReturnType<typeof compiledPlanValidationDiagnostic>;
   try {
     const compiled = compileStableProject(
-      files.map((file) => ({
-        path: file.result.path,
-        program: file.result.program,
-        typeChecks: file.typeChecks!,
-      })),
+      files.map((file) => ({ path: file.result.path, program: file.result.program })),
+      typeChecks,
       (fileIndex) => {
         current = files[fileIndex]!;
       },
+      images,
     );
     current = files[0]!;
     failure = compiledPlanValidationDiagnostic(compiled);
@@ -230,22 +325,31 @@ function lowerProject(files: CompiledProjectFile[]): InstructionPlan | null {
       current.result.path,
       "",
       parsed.program,
+      parsed.header,
       parsed.diagnostics,
     );
     return null;
   }
   const file = files[failure.file]!;
-  file.result = Object.freeze({
-    ...file.result,
-    diagnostics: Object.freeze([...file.result.diagnostics, failure.diagnostic]),
-  });
+  file.result = withDiagnostic(file.result, failure.diagnostic);
   return null;
+}
+
+function withDiagnostic(
+  result: ProjectFileCompilation,
+  diagnostic: Diagnostic,
+): ProjectFileCompilation {
+  return Object.freeze({
+    ...result,
+    diagnostics: Object.freeze([...result.diagnostics, diagnostic]),
+  });
 }
 
 function stackExhaustionResult(
   path: string,
   source: string,
   parsedProgram: Program | null,
+  header: ScriptHeader | null,
   parserDiagnostics: readonly Diagnostic[] = [],
 ): ProjectFileCompilation {
   const sourceSpan = parsedProgram?.span ?? completeSourceSpan(source);
@@ -262,6 +366,7 @@ function stackExhaustionResult(
     program:
       parsedProgram ??
       Object.freeze({ kind: "program", statements: Object.freeze([]), span: sourceSpan }),
+    header,
     parserDiagnostics: frozenParserDiagnostics,
     semanticDiagnostics,
     diagnostics: Object.freeze([...frozenParserDiagnostics, stackDiagnostic]),

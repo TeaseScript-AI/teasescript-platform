@@ -3,6 +3,7 @@ import {
   type Diagnostic,
   type InstructionPlan,
   type InterpreterEvent,
+  type ProjectImageFile,
   type RuntimeSnapshot,
 } from "../../src/index.js";
 import { runValidatedState, stepValidatedStateToEvent } from "../../src/runtime/engine.js";
@@ -173,13 +174,17 @@ export function restoreWorkspaceCheckpoint(
   });
 }
 
-/** `wallClockMs` is the UTC time at session start, which the current-time getters read; without it they fail. */
+/**
+ * `wallClockMs` is the UTC time at session start, which the current-time getters read; without it they fail. `images`
+ * are the package images that tag queries search.
+ */
 export function compileWorkspaceSource(
   source: string,
-  options: { readonly wallClockMs?: number } = {},
+  options: { readonly wallClockMs?: number; readonly images?: readonly ProjectImageFile[] } = {},
 ): WorkspaceResult {
   assertWorkspaceSource(source);
-  const compilation = compileSource(source);
+  const { images, ...snapshotOptions } = options;
+  const compilation = compileSource(source, images === undefined ? {} : { images });
   if (compilation.plan === null) {
     return freezeResult({
       diagnostics: diagnostics(compilation.diagnostics),
@@ -190,7 +195,7 @@ export function compileWorkspaceSource(
       instructionsExecuted: 0,
     });
   }
-  const snapshot = createFreshRuntimeSnapshotWithValidatedPlan(compilation.plan, options);
+  const snapshot = createFreshRuntimeSnapshotWithValidatedPlan(compilation.plan, snapshotOptions);
   return freezeResult({
     diagnostics: diagnostics(compilation.diagnostics),
     plan: compilation.plan,

@@ -21,6 +21,7 @@ import {
 } from "../src/runtime/serializable-values.js";
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { runUntilExit } from "./helpers/run-until-exit.js";
 
 function compiled(source: string, options: Parameters<typeof compileSource>[1] = {}) {
   const plan = compileValidPlan(source, options);
@@ -248,9 +249,8 @@ test("nested compact choices report missing options once per affected invocation
 });
 
 // V30 accepts parenthesized interaction APIs (accepted-syntaxes-v30.md sections 20-21) and ADR 0018 leaves their
-// compatibility mapping to later work. Until they are implemented, the spelling must not be parsed as a compact form
-// with a grouped payload, which would silently decide that mapping. Replace the diagnostic assertions with positive
-// V30 coverage when the parenthesized APIs land.
+// compatibility mapping to later work. The spelling must not be parsed as a compact form whose payload is the
+// parenthesized text, grouped or unwrapped, which would silently decide that mapping.
 test("a parenthesized interaction spelling is never silently given compact semantics", () => {
   // The statement and expression commands each have one parenthesis check before and after `as speaker`.
   for (const source of [
@@ -261,6 +261,7 @@ test("a parenthesized interaction spelling is never silently given compact seman
   ]) {
     const parsed = parse(`${source}\nsay "recovered"`);
     const opening = source.indexOf("(");
+    const payloadEnd = source.lastIndexOf(")") + 1;
     const compactPayloads = parsed.program.statements.flatMap((statement) => {
       if (statement.kind === "showButtonStatement") return [statement.label];
       if (
@@ -273,18 +274,13 @@ test("a parenthesized interaction spelling is never silently given compact seman
     assert.equal(
       compactPayloads.some(
         (payload) =>
-          payload?.kind === "parenthesizedExpression" && payload.span.start.offset === opening,
+          payload !== undefined &&
+          payload !== null &&
+          payload.span.start.offset >= opening &&
+          payload.span.end.offset <= payloadEnd,
       ),
       false,
       source,
-    );
-    const payloadEnd = source.lastIndexOf(")") + 1;
-    assert.ok(
-      parsed.diagnostics.some(
-        ({ severity, span }) =>
-          severity === "error" && span.start.offset >= opening && span.end.offset <= payloadEnd,
-      ),
-      `${source}: an error must be located at the parenthesized payload`,
     );
     assert.equal(parsed.program.statements.at(-1)?.kind, "sayStatement", source);
   }
@@ -465,7 +461,7 @@ test("mixed written-value kinds need a union-typed place, while values and text 
   // literal for a non-finite value. Text and number values together are kept only by a declared union (#511 C2).
   const rejected = [
     {
-      source: 'let x = choose first: "A", 2: "B"',
+      source: 'let x = choose first: "A", 2: "B"\nexit',
       code: "TSV044",
       at: 'choose first: "A", 2: "B"',
     },
@@ -486,21 +482,23 @@ test("mixed written-value kinds need a union-typed place, while values and text 
     );
   }
   for (const accepted of [
-    'let x: string | integer = choose first: "A", 2: "B"',
-    'let x = choose first: "Same", second: "Same"',
-    'let x = choose back: "Back", "Spanking", [{ text: "Lines" }, { text: "Corner", value: "corner" }]',
-    'let x = choose first: "A", first: "B"',
-    'let x = choose 1: "A", 1.0: "B"',
-    'let x = choose "Same", "Same"',
-    'let x = choose back: "Return", "back"',
-    'let x = choose "A", ["B", "A"]',
-    "let x = choose 1 min, 60 s",
+    'let x: string | integer = choose first: "A", 2: "B"\nexit',
+    'let x = choose first: "Same", second: "Same"\nexit',
+    'let x = choose back: "Back", "Spanking", [{ text: "Lines" }, { text: "Corner", value: "corner" }]\nexit',
+    'let x = choose first: "A", first: "B"\nexit',
+    'let x = choose 1: "A", 1.0: "B"\nexit',
+    'let x = choose "Same", "Same"\nexit',
+    'let x = choose back: "Return", "back"\nexit',
+    'let x = choose "A", ["B", "A"]\nexit',
+    "let x = choose 1 min, 60 s\nexit",
   ])
     assert.deepEqual(compileSource(accepted).diagnostics, [], accepted);
 });
 
 test("static choice text aligns with direct and prepared interaction UI", () => {
-  const staticPlan = compiled('let result = choose "sum ${1 + 2}", "${-0}", "${true}", "${null}"');
+  const staticPlan = compiled(
+    'let result = choose "sum ${1 + 2}", "${-0}", "${true}", "${null}"\nexit',
+  );
   const staticPending = run(staticPlan, createFreshRuntimeSnapshot(staticPlan));
   assert.deepEqual(
     staticPending.snapshot.foregroundAction?.kind === "interaction"
@@ -518,7 +516,7 @@ test("static choice text aligns with direct and prepared interaction UI", () => 
     },
   );
 
-  const dynamicPlan = compiled('let value = 3\nlet result = choose "sum ${value}", "other"');
+  const dynamicPlan = compiled('let value = 3\nlet result = choose "sum ${value}", "other"\nexit');
   const dynamicPending = run(dynamicPlan, createFreshRuntimeSnapshot(dynamicPlan));
   assert.deepEqual(
     dynamicPending.snapshot.foregroundAction?.kind === "interaction"
@@ -536,20 +534,20 @@ test("static choice text aligns with direct and prepared interaction UI", () => 
 });
 
 test("interaction result domains participate in existing numeric semantic checks", () => {
-  assert.notEqual(compileSource("let values = askNumber..3").plan, null);
+  assert.notEqual(compileSource("let values = askNumber..3\nexit").plan, null);
 
   const textRange = compileSource("let values = askText..3");
   assert.equal(textRange.plan, null);
   assert.ok(textRange.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV010"));
 
   // A choice returns each button's value; an option without a written value returns itself.
-  assert.notEqual(compileSource("let values = (choose 1, 2)..3").plan, null);
-  assert.notEqual(compileSource("let values = (choose [1, 2])..3").plan, null);
-  assert.notEqual(compileSource("let values = (choose { text: 1 })..3").plan, null);
+  assert.notEqual(compileSource("let values = (choose 1, 2)..3\nexit").plan, null);
+  assert.notEqual(compileSource("let values = (choose [1, 2])..3\nexit").plan, null);
+  assert.notEqual(compileSource("let values = (choose { text: 1 })..3\nexit").plan, null);
   for (const source of [
-    'let values = (choose "a", b: "B")..3',
-    'let values = (choose { text: "A" })..3',
-    'let values = (choose [{ text: "A" }, { text: 1, value: "b" }])..3',
+    'let values = (choose "a", b: "B")..3\nexit',
+    'let values = (choose { text: "A" })..3\nexit',
+    'let values = (choose [{ text: "A" }, { text: 1, value: "b" }])..3\nexit',
   ]) {
     // The type check knows what a choice returns, so it reports the text range bound.
     const textChoice = compileSource(source);
@@ -562,7 +560,7 @@ test("interaction result domains participate in existing numeric semantic checks
 });
 
 test("prepared-plan validation rejects malformed prepared interaction shapes", () => {
-  const plan = structuredClone(compiled("showButton payload", { globals: ["payload"] }));
+  const plan = structuredClone(compiled("showButton payload\nexit", { globals: ["payload"] }));
   const interaction = plan.instructions.find((instruction) => instruction.kind === "interaction");
   assert.ok(
     interaction?.kind === "interaction" &&
@@ -574,7 +572,9 @@ test("prepared-plan validation rejects malformed prepared interaction shapes", (
     plan.temporaryCount + 1;
   assert.equal(validateInstructionPlan(plan).valid, false);
 
-  const aliased = structuredClone(compiled("let answer = askText hint", { globals: ["hint"] }));
+  const aliased = structuredClone(
+    compiled("let answer = askText hint\nexit", { globals: ["hint"] }),
+  );
   const aliasedInteraction = aliased.instructions.find(
     (instruction) => instruction.kind === "interaction",
   );
@@ -590,7 +590,9 @@ test("prepared-plan validation rejects malformed prepared interaction shapes", (
 });
 
 test("authored payloads evaluate once in source order before pending state", () => {
-  const plan = compiled("let result = choose nextText(), nextText()", { builtins: ["nextText"] });
+  const plan = compiled("let result = choose nextText(), nextText()\nexit", {
+    builtins: ["nextText"],
+  });
   const calls: string[] = [];
   const pending = run(plan, createFreshRuntimeSnapshot(plan), {
     builtins: {
@@ -627,15 +629,19 @@ test("authored payloads evaluate once in source order before pending state", () 
 test("a list in a text field is a compile error when the compiler can see it", () => {
   // `at` is the last source occurrence the diagnostic must span.
   const cases = [
-    ['let labels = ["Go"]\nshowButton labels', "a button label", "labels"],
-    ['let hints = ["Name?"]\nlet answer = askText hints', "an input hint", "hints"],
-    ['showButton ["Go", "Run"]', "a button label", '["Go", "Run"]'],
-    ['let answer = askText ["Name?"]', "an input hint", '["Name?"]'],
-    ['let answer = askNumber ["Count?"]', "an input hint", '["Count?"]'],
-    ['let answer = choose first: { text: ["A"] }', "the text of a choice option", '["A"]'],
-    ['timer(duration: 1, label: ["Beat"])', "a timer label", '["Beat"]'],
-    ['speaker coach { title: ["Coach"] }', "the speaker's title", '["Coach"]'],
-    ['speaker coach {}\ncoach.displayName = ["Coach"]', "the speaker's displayName", '["Coach"]'],
+    ['let labels = ["Go"]\nshowButton labels\nexit', "a button label", "labels"],
+    ['let hints = ["Name?"]\nlet answer = askText hints\nexit', "an input hint", "hints"],
+    ['showButton ["Go", "Run"]\nexit', "a button label", '["Go", "Run"]'],
+    ['let answer = askText ["Name?"]\nexit', "an input hint", '["Name?"]'],
+    ['let answer = askNumber ["Count?"]\nexit', "an input hint", '["Count?"]'],
+    ['let answer = choose first: { text: ["A"] }\nexit', "the text of a choice option", '["A"]'],
+    ['timer(duration: 1, label: ["Beat"])\nexit', "a timer label", '["Beat"]'],
+    ['speaker coach { title: ["Coach"] }\nexit', "the speaker's title", '["Coach"]'],
+    [
+      'speaker coach {}\ncoach.displayName = ["Coach"]\nexit',
+      "the speaker's displayName",
+      '["Coach"]',
+    ],
   ] as const;
   for (const [source, field, at] of cases) {
     const result = compileSource(source);
@@ -663,9 +669,9 @@ test("a list in a text field is a compile error when the compiler can see it", (
 
 test("a text field rejects other values it cannot show when the compiler can see them", () => {
   const cases = [
-    ["showButton { bad: 1 }", "A button label cannot be an object.", "{ bad: 1 }"],
-    ["showButton 1..2", "A button label cannot be a range.", "1..2"],
-    ["let answer = askText set[1]", "An input hint cannot be a set (integer set).", "set[1]"],
+    ["showButton { bad: 1 }\nexit", "A button label cannot be an object.", "{ bad: 1 }"],
+    ["showButton 1..2\nexit", "A button label cannot be a range.", "1..2"],
+    ["let answer = askText set[1]\nexit", "An input hint cannot be a set (integer set).", "set[1]"],
   ] as const;
   for (const [source, message, at] of cases) {
     const result = compileSource(source);
@@ -685,7 +691,7 @@ test("a text field rejects other values it cannot show when the compiler can see
 });
 
 test("dynamic interaction UI converts scalars once and selects from a list only through interpolation", () => {
-  const numberPlan = compiled("showButton 12.5");
+  const numberPlan = compiled("showButton 12.5\nexit");
   const numberPending = run(numberPlan, createFreshRuntimeSnapshot(numberPlan));
   assert.equal(
     numberPending.snapshot.foregroundAction?.kind === "interaction" &&
@@ -696,7 +702,7 @@ test("dynamic interaction UI converts scalars once and selects from a list only 
   );
 
   const listPlan = compiled(
-    'function dynamic(value) {\n  return value\n}\nlet left = [dynamic("left"), 2]\nlet right = [dynamic("right"), 3]\nlet result = choose "${left}", "${right}"',
+    'function dynamic(value) {\n  return value\n}\nlet left = [dynamic("left"), 2]\nlet right = [dynamic("right"), 3]\nlet result = choose "${left}", "${right}"\nexit',
   );
   const randomValues = [0.75, 0.75];
   let randomCalls = 0;
@@ -732,9 +738,9 @@ test("dynamic interaction UI converts scalars once and selects from a list only 
 
   // Lists the compiler cannot see fail before the action opens and without drawing from the RNG.
   for (const source of [
-    "showButton labels",
-    "let answer = askText labels",
-    "let answer = choose { text: labels }",
+    "showButton labels\nexit",
+    "let answer = askText labels\nexit",
+    "let answer = choose { text: labels }\nexit",
   ]) {
     const plan = compiled(source, { globals: ["labels"] });
     const fresh = createFreshRuntimeSnapshot(plan, {
@@ -757,7 +763,7 @@ test("dynamic interaction UI converts scalars once and selects from a list only 
 });
 
 test("static compact interactions compile long mixed unary numeric labels without native recursion", () => {
-  const source = `showButton ${"-+".repeat(12_000)}-1`;
+  const source = `showButton ${"-+".repeat(12_000)}-1\nexit`;
   const result = compileSource(source);
   assert.deepEqual(result.diagnostics, []);
   assert.ok(result.plan !== null);
@@ -772,13 +778,13 @@ test("dynamic interaction UI commits prepared text and serialized RNG only after
   const cases = [
     {
       name: "a nested list in a list option",
-      plan: compiled('let result = choose "first", options', { globals: ["options"] }),
+      plan: compiled('let result = choose "first", options\nexit', { globals: ["options"] }),
       globals: { options: createSerializableList(["a", createSerializableList(["b"])]) },
       code: "TSR052",
     },
     {
       name: "an aggregate overflow across options",
-      plan: compiled("let result = choose first, second", { globals: ["first", "second"] }),
+      plan: compiled("let result = choose first, second\nexit", { globals: ["first", "second"] }),
       globals: {
         first: "a".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES / 2),
         second: "b".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES / 2 + 1),
@@ -787,19 +793,19 @@ test("dynamic interaction UI commits prepared text and serialized RNG only after
     },
     {
       name: "only empty option lists",
-      plan: compiled("let result = choose first, second", { globals: ["first", "second"] }),
+      plan: compiled("let result = choose first, second\nexit", { globals: ["first", "second"] }),
       globals: { first: createSerializableList([]), second: createSerializableList([]) },
       code: "TSR052",
     },
     {
       name: "an oversized scalar button label",
-      plan: compiled("showButton payload", { globals: ["payload"] }),
+      plan: compiled("showButton payload\nexit", { globals: ["payload"] }),
       globals: { payload: "x".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES + 1) },
       code: "TSR052",
     },
     {
       name: "a list element with its own value under a written value",
-      plan: compiled('let result = choose "first", key: second', { globals: ["second"] }),
+      plan: compiled('let result = choose "first", key: second\nexit', { globals: ["second"] }),
       globals: {
         second: createSerializableList([
           createSerializableObject([
@@ -812,7 +818,7 @@ test("dynamic interaction UI commits prepared text and serialized RNG only after
     },
     {
       name: "a list as the text of a choice object",
-      plan: compiled('let result = choose "first", second', { globals: ["second"] }),
+      plan: compiled('let result = choose "first", second\nexit', { globals: ["second"] }),
       globals: {
         second: createSerializableObject([
           { name: "text", value: createSerializableList(["second"]) },
@@ -850,7 +856,7 @@ test("dynamic interaction UI commits prepared text and serialized RNG only after
 });
 
 test("an interpolated list selection is fixed before checkpoint restore and is never reevaluated", () => {
-  const plan = compiled('showButton "${values()}"', { builtins: ["values"] });
+  const plan = compiled('showButton "${values()}"\nexit', { builtins: ["values"] });
   let calls = 0;
   const pending = run(plan, createFreshRuntimeSnapshot(plan, { seed: 1364229357 }), {
     builtins: {
@@ -908,6 +914,7 @@ test("static compact interactions use the default speaker at the instruction bou
       "speaker first",
       'say as second "Context"',
       'showButton "Continue"',
+      "exit",
     ].join("\n"),
   );
   const pending = run(plan, createFreshRuntimeSnapshot(plan));
@@ -924,7 +931,7 @@ test("static compact interactions use the default speaker at the instruction bou
 });
 
 test("compact interactions use narrator provenance when no speaker is available", () => {
-  const plan = compiled('let answer = askText "Type here"');
+  const plan = compiled('let answer = askText "Type here"\nexit');
   const pending = run(plan, createFreshRuntimeSnapshot(plan));
   const action = pending.snapshot.foregroundAction;
   assert.ok(action !== null && action.kind === "interaction");
@@ -954,6 +961,7 @@ test("requesting speaker is captured before payload side effects change the defa
       'return "Hint"',
       "}",
       "let answer = askText changeDefault()",
+      "exit",
     ].join("\n"),
   );
   const pending = run(plan, createFreshRuntimeSnapshot(plan));
@@ -966,7 +974,7 @@ test("requesting speaker is captured before payload side effects change the defa
 });
 
 test("fixed-seed payload RNG is prepared once and restore does not reevaluate it", () => {
-  const plan = compiled('let result = choose "A ${random()}", "B ${random()}"');
+  const plan = compiled('let result = choose "A ${random()}", "B ${random()}"\nexit');
   const fresh = createFreshRuntimeSnapshot(plan, { seed: 1364229357 });
   const freshRng = structuredClone(fresh.rng);
   const pending = run(plan, fresh);
@@ -1013,7 +1021,7 @@ test("blocking interactions resume through ordinary expression contexts and para
     assert.equal(validateInstructionPlan(defaultResult.plan).valid, true);
   }
 
-  const pairPlan = compiled("let pair: (string | number)[] = [askText, askNumber]");
+  const pairPlan = compiled("let pair: (string | number)[] = [askText, askNumber]\nexit");
   const firstPending = run(pairPlan, createFreshRuntimeSnapshot(pairPlan));
   assert.equal(firstPending.snapshot.status, "waiting");
   assert.equal(
@@ -1043,14 +1051,14 @@ test("blocking interactions resume through ordinary expression contexts and para
   assert.equal(pairDone.snapshot.status, "halted");
   assert.deepEqual(rootBinding(pairDone.snapshot, "pair"), createSerializableList(["alpha", 2.5]));
 
-  const shortCircuit = compiled('let value = false and askText == "yes"');
+  const shortCircuit = compiled('let value = false and askText == "yes"\nexit');
   const shortCircuitDone = run(shortCircuit, createFreshRuntimeSnapshot(shortCircuit));
   assert.equal(shortCircuitDone.snapshot.status, "halted");
   assert.equal(shortCircuitDone.snapshot.foregroundAction, null);
 });
 
 test("interaction results resume through assignment and loop-owned source contexts", () => {
-  const assignmentPlan = compiled('let answer = "before"\nanswer = askText\nsay answer');
+  const assignmentPlan = compiled('let answer = "before"\nanswer = askText\nsay answer\nexit');
   const assignmentPending = run(assignmentPlan, createFreshRuntimeSnapshot(assignmentPlan));
   const assignmentCompleted = completePending(assignmentPlan, assignmentPending.snapshot, "text", {
     kind: "submittedText",
@@ -1069,6 +1077,7 @@ test("interaction results resume through assignment and loop-owned source contex
       "  count = count + 1",
       "}",
       "say count",
+      "exit",
     ].join("\n"),
   );
   const loopPending = run(loopPlan, createFreshRuntimeSnapshot(loopPlan));
@@ -1092,6 +1101,7 @@ test("interaction expressions preserve function-argument source order across sus
       "function middle(first, second, third) { return second }",
       'let answer = middle(mark("before"), "received ${askText}", mark("after"))',
       "say answer",
+      "exit",
     ].join("\n"),
     { builtins: ["mark"] },
   );
@@ -1127,6 +1137,7 @@ test("interaction expressions preserve function-argument source order across sus
       'function bar { say "bar", instant\nreturn "third" }',
       'function send(first, answer, third) { say "${first}:${answer}:${third}", instant\nreturn }',
       "send(foo(), askText, bar())",
+      "exit",
     ].join("\n"),
   );
   const saidTexts = (events: readonly { readonly kind: string; readonly text?: string }[]) =>
@@ -1147,7 +1158,7 @@ test("interaction expressions preserve function-argument source order across sus
 
 test("real source completes, retries invalid input, records provenance, and resumes at top level", () => {
   const plan = compiled(
-    'speaker mistress { name: "Mistress" }\nlet answer = askText as mistress "Type here"\nsay answer',
+    'speaker mistress { name: "Mistress" }\nlet answer = askText as mistress "Type here"\nsay answer\nexit',
   );
   const pending = run(plan, createFreshRuntimeSnapshot(plan));
   const action = pending.snapshot.foregroundAction;
@@ -1181,25 +1192,25 @@ test("real source completes, retries invalid input, records provenance, and resu
 test("every compact interaction survives pending checkpoint restore and source-to-runtime completion", () => {
   const scenarios = [
     {
-      source: 'showButton "Continue"',
+      source: 'showButton "Continue"\nexit',
       interactionKind: "button" as const,
       payload: { kind: "activate" as const },
       result: undefined,
     },
     {
-      source: 'let result = askText "Type here"',
+      source: 'let result = askText "Type here"\nexit',
       interactionKind: "text" as const,
       payload: { kind: "submittedText" as const, submittedText: "answer" },
       result: "answer",
     },
     {
-      source: 'let result = askNumber "Number"',
+      source: 'let result = askNumber "Number"\nexit',
       interactionKind: "number" as const,
       payload: { kind: "submittedText" as const, submittedText: "2.5" },
       result: 2.5,
     },
     {
-      source: 'let result = choose first: "One", second: "Two"',
+      source: 'let result = choose first: "One", second: "Two"\nexit',
       interactionKind: "choice" as const,
       payload: { kind: "selectedOption" as const, optionIndex: 1 },
       result: "second",
@@ -1242,7 +1253,7 @@ test("every compact interaction survives pending checkpoint restore and source-t
 });
 
 test("an authored empty hint remains distinct from an omitted hint", () => {
-  const emptyPlan = compiled('let answer = askText ""');
+  const emptyPlan = compiled('let answer = askText ""\nexit');
   const emptyPending = run(emptyPlan, createFreshRuntimeSnapshot(emptyPlan));
   const emptyAction = emptyPending.snapshot.foregroundAction;
   assert.ok(
@@ -1251,7 +1262,7 @@ test("an authored empty hint remains distinct from an omitted hint", () => {
   assert.equal(emptyAction.ui.hint, "");
   assert.deepEqual(emptyAction.ui.accessibleName, { kind: "localizedDefault", key: "answer" });
 
-  const omittedPlan = compiled("let answer = askText");
+  const omittedPlan = compiled("let answer = askText\nexit");
   const omittedPending = run(omittedPlan, createFreshRuntimeSnapshot(omittedPlan));
   const omittedAction = omittedPending.snapshot.foregroundAction;
   assert.ok(
@@ -1264,16 +1275,21 @@ test("an authored empty hint remains distinct from an omitted hint", () => {
 
 test("real source preserves button transcript and all choice result domains", () => {
   const cases = [
-    { source: 'let result = choose "A", "B"', result: "B", text: "B" },
-    { source: 'let result = choose first: "Same", second: "Same"', result: "second", text: "Same" },
+    { source: 'let result = choose "A", "B"\nexit', result: "B", text: "B" },
     {
-      source: 'let result = choose first:\n    "Same", second:\n\n    // continued\n    "Same"',
+      source: 'let result = choose first: "Same", second: "Same"\nexit',
       result: "second",
       text: "Same",
     },
-    { source: 'let result = choose 1: "One", 2: "Two"', result: 2, text: "Two" },
+    {
+      source:
+        'let result = choose first:\n    "Same", second:\n\n    // continued\n    "Same"\nexit',
+      result: "second",
+      text: "Same",
+    },
+    { source: 'let result = choose 1: "One", 2: "Two"\nexit', result: 2, text: "Two" },
     // An option without a written value returns itself, with its own type.
-    { source: "let result = choose 5, 10", result: 10, text: "10" },
+    { source: "let result = choose 5, 10\nexit", result: 10, text: "10" },
   ] as const;
   for (const scenario of cases) {
     const plan = compiled(scenario.source);
@@ -1296,7 +1312,7 @@ test("real source preserves button transcript and all choice result domains", ()
     );
   }
 
-  const buttonPlan = compiled('showButton "Continue"');
+  const buttonPlan = compiled('showButton "Continue"\nexit');
   const buttonPending = run(buttonPlan, createFreshRuntimeSnapshot(buttonPlan));
   const buttonDone = completePending(buttonPlan, buttonPending.snapshot, "button", {
     kind: "activate",
@@ -1309,7 +1325,14 @@ test("real source preserves button transcript and all choice result domains", ()
 
 test("interaction expressions resume through a direct function return", () => {
   const plan = compiled(
-    ["function prompt {", "return askText", "}", "let result = prompt()", "say result"].join("\n"),
+    [
+      "function prompt {",
+      "return askText",
+      "}",
+      "let result = prompt()",
+      "say result",
+      "exit",
+    ].join("\n"),
   );
   const pending = run(plan, createFreshRuntimeSnapshot(plan));
   assert.equal(pending.snapshot.status, "waiting");
@@ -1325,7 +1348,7 @@ test("interaction expressions resume through a direct function return", () => {
 
 test("function-owned interaction result survives checkpoint completion and explicit call-frame resume", () => {
   const plan = compiled(
-    "function prompt {\nlet value = askNumber\nreturn value\n}\nlet result = prompt()\nsay result",
+    "function prompt {\nlet value = askNumber\nreturn value\n}\nlet result = prompt()\nsay result\nexit",
   );
   const pending = run(plan, createFreshRuntimeSnapshot(plan));
   const action = pending.snapshot.foregroundAction;
@@ -1339,15 +1362,16 @@ test("function-owned interaction result survives checkpoint completion and expli
     submittedText: " 1.5e2 ",
   });
   assert.equal(validateRuntimeSnapshot(completed.snapshot, restored.plan).valid, true);
-  const done = run(restored.plan, completed.snapshot);
-  assert.equal(done.snapshot.status, "halted");
-  assert.equal(done.events.find((event) => event.kind === "say")?.text, "150");
-  assert.deepEqual(done.snapshot.temporaries, []);
-  assert.deepEqual(done.snapshot.callFrames, []);
+  // Exit clears frames and temporaries, so the state the call leaves behind is observed before it.
+  const beforeExit = runUntilExit(restored.plan, completed.snapshot);
+  assert.equal(beforeExit.events.find((event) => event.kind === "say")?.text, "150");
+  assert.deepEqual(beforeExit.snapshot.temporaries, []);
+  assert.deepEqual(beforeExit.snapshot.callFrames, []);
+  assert.equal(run(restored.plan, beforeExit.snapshot).snapshot.status, "halted");
 });
 
 test("a retained dynamic settlement validates against the UI it recorded, before and after cleanup", () => {
-  const buttonPlan = compiled("showButton label", { globals: ["label"] });
+  const buttonPlan = compiled("showButton label\nexit", { globals: ["label"] });
   const buttonPending = run(
     buttonPlan,
     createFreshRuntimeSnapshot(buttonPlan, { globals: { label: "Continue" } }),
@@ -1367,7 +1391,7 @@ test("a retained dynamic settlement validates against the UI it recorded, before
     deserializeCheckpoint(serializeCheckpoint(createCheckpoint(buttonPlan, buttonAfterCleanup))),
   );
 
-  const choicePlan = compiled("let result = choose first, second", {
+  const choicePlan = compiled("let result = choose first, second\nexit", {
     globals: ["first", "second"],
   });
   const choicePending = run(
@@ -1380,7 +1404,7 @@ test("a retained dynamic settlement validates against the UI it recorded, before
   });
   const choiceAfterCleanup = run(choicePlan, choiceCompleted.snapshot).snapshot;
   assert.equal(validateRuntimeSnapshot(choiceAfterCleanup, choicePlan).valid, true);
-  const valuedPlan = compiled("let result = choose first: firstText, second: secondText", {
+  const valuedPlan = compiled("let result = choose first: firstText, second: secondText\nexit", {
     globals: ["firstText", "secondText"],
   });
   const valuedPending = run(
@@ -1440,16 +1464,16 @@ test("oversized static compact interactions return no plan and a diagnostic at t
   ).join(", ");
   const oversizedChoice = `let result = choose ${options}`;
   // The compiler sees that the choice has too many buttons before plan validation would.
-  for (const [source, start, code] of [
+  for (const [statement, start, code] of [
     [oversizedButton, 0, "TSC006"],
     [oversizedChoice, oversizedChoice.indexOf("choose"), "TSV029"],
   ] as const) {
-    const result = compileSource(source);
+    const result = compileSource(`${statement}\nexit`);
     assert.equal(result.plan, null);
     const diagnostic = result.diagnostics.find((candidate) => candidate.code === code);
     assert.deepEqual(diagnostic?.span, {
       start: { offset: start, line: 0, column: start },
-      end: { offset: source.length, line: 0, column: source.length },
+      end: { offset: statement.length, line: 0, column: statement.length },
     });
   }
 });
@@ -1458,7 +1482,7 @@ test("representative static and dynamic root/function choices complete through c
   const cases = [
     {
       name: "static-root",
-      source: 'let result = choose first: "One", second: "Two", third: "Three"',
+      source: 'let result = choose first: "One", second: "Two", third: "Three"\nexit',
       payload: { kind: "selectedOption" as const, optionIndex: 1 },
       binding: "result",
       expected: "second",
@@ -1471,6 +1495,7 @@ test("representative static and dynamic root/function choices complete through c
         "return result",
         "}",
         "let output = prompt()",
+        "exit",
       ].join("\n"),
       payload: { kind: "selectedOption" as const, optionIndex: 1 },
       binding: "output",
@@ -1481,6 +1506,7 @@ test("representative static and dynamic root/function choices complete through c
       source: [
         'let prefix = "Option"',
         'let result = choose "${prefix} A", "${prefix} B", "${prefix} C"',
+        "exit",
       ].join("\n"),
       payload: { kind: "selectedOption" as const, optionIndex: 1 },
       binding: "result",
@@ -1494,6 +1520,7 @@ test("representative static and dynamic root/function choices complete through c
         "return result",
         "}",
         'let output = prompt("Option")',
+        "exit",
       ].join("\n"),
       payload: { kind: "selectedOption" as const, optionIndex: 1 },
       binding: "output",

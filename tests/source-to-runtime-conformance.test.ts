@@ -52,6 +52,7 @@ test("executes source output, speaker provenance, collection copies, and control
       'say "Total ${total}: ${values.first}"',
       "say source[0]",
       'say as vera "Override"',
+      "exit",
     ].join("\n"),
   );
 
@@ -80,7 +81,7 @@ test("a speaker property continued after ':' runs like the single-line property"
     'speaker vera {\n    displayName:\n        "Vera"\n}',
   ];
   for (const declaration of speakers) {
-    const plan = compiled(`${declaration}\nsay as vera "Hi"`);
+    const plan = compiled(`${declaration}\nsay as vera "Hi"\nexit`);
     const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { seed: 7 }));
     assert.equal(result.snapshot.status, "halted");
     assert.deepEqual(
@@ -106,6 +107,7 @@ test("executes explicit block newlines, dedent, escapes, and interpolation witho
       "    After\\nnext",
       '"""',
       'say "Escaped:\\t and explicit\\nnext"',
+      "exit",
     ].join("\n"),
   );
 
@@ -127,6 +129,7 @@ test("keeps contextual say skip words available as ordinary identifier expressio
       "say unskippable[0]",
       "say skippable[0], instant",
       "say as vera skippable[0]",
+      "exit",
     ].join("\n"),
   );
 
@@ -145,6 +148,7 @@ test("keeps contextual say skip words available as call expressions", () => {
       'function unskippable(value) { return "also called" }',
       'say skippable("ok"), instant',
       'say unskippable("ok"), instant',
+      "exit",
     ].join("\n"),
   );
 
@@ -163,6 +167,7 @@ test("preserves function evaluation, deterministic random output, and checkpoint
     "function add(left, right = left) { return left + right }",
     "say add(mark(2))",
     'say "${order[0]}:${randomInteger(1..=6)}"',
+    "exit",
   ].join("\n");
   const seed = 0x2468_ace1;
   const result = assertRuntimeResumeEquivalent(source, {

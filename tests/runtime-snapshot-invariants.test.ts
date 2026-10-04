@@ -43,8 +43,12 @@ test("rejects a fresh non-empty snapshot changed only to halted", () => {
 
 test("accepts and round-trips every runtime-produced halted shape", () => {
   const scenarios = [
-    { name: "normal root completion", source: 'say "done"', expectedKinds: ["say", "complete"] },
-    { name: "empty root", source: "", expectedKinds: [] },
+    {
+      name: "exit as the last statement",
+      source: 'say "done"\nexit',
+      expectedKinds: ["say", "exit"],
+    },
+    { name: "only exit", source: "exit", expectedKinds: ["exit"] },
     {
       name: "root exit",
       source: 'say "before"\nexit\nsay "after"',
@@ -52,7 +56,10 @@ test("accepts and round-trips every runtime-produced halted shape", () => {
     },
     {
       name: "function exit",
-      source: ["function stop { exit }", 'say "before"', "stop()", 'say "after"'].join("\n"),
+      // A call counts as returning, so the root still needs its own exit.
+      source: ["function stop { exit }", 'say "before"', "stop()", 'say "after"', "exit"].join(
+        "\n",
+      ),
       expectedKinds: ["say", "exit"],
     },
     {
@@ -65,6 +72,7 @@ test("accepts and round-trips every runtime-produced halted shape", () => {
         "}",
         "outer()",
         'say "unreachable root code"',
+        "exit",
       ].join("\n"),
       expectedKinds: ["exit"],
     },
@@ -159,7 +167,7 @@ test("rejects exhausted scope, speaker, and call-frame allocators before collisi
   assert.deepEqual(speakerSnapshot.speakers, []);
   assert.equal(speakerSnapshot.nextSpeakerId, MAX_SAFE);
 
-  const callPlan = plan("function value { return 1 }\nvalue()");
+  const callPlan = plan("function value { return 1 }\nvalue()\nexit");
   let callSnapshot = createFreshRuntimeSnapshot(callPlan);
   for (
     let steps = 0;
@@ -195,7 +203,7 @@ test("rejects unsafe source positions and out-of-range nested identities", () =>
     "speaker ID beyond its allocator and references",
   );
 
-  const callPlan = plan("function value(input = 1) { return input }\nvalue()");
+  const callPlan = plan("function value(input = 1) { return input }\nvalue()\nexit");
   let activeCall = createFreshRuntimeSnapshot(callPlan);
   for (let steps = 0; steps < 20 && activeCall.callFrames.length === 0; steps += 1) {
     activeCall = executeInstruction(callPlan, activeCall).snapshot;

@@ -10,12 +10,16 @@ import {
   validateSpan,
   validInstructionBoundary,
 } from "./validation-support.js";
+import type { Instruction } from "./model.js";
+import { instructionKilledTemporaries, requiredInstructionTemporaries } from "./temporary-uses.js";
 
 /** Validated instruction boundaries of one plan file. */
 export interface PlanFileBoundaries {
   readonly startInstruction: number;
   readonly rootEndInstruction: number;
   readonly endInstruction: number;
+  /** Where the file's labels stand: the only targets of a goto in the file. */
+  readonly labelInstructions: ReadonlySet<number>;
 }
 
 export function analyzeInstructionStream(
@@ -28,6 +32,103 @@ export function analyzeInstructionStream(
   validatePreparedReferenceStructure(instructions, errors);
   const validationIndex = validateFunctionDefinitions(functions, instructions, files, errors);
   validateInstructionControlFlowRegions(instructions, validationIndex, errors);
+}
+
+/**
+ * A goto leaves every block, loop, and temporary value behind, so the code from a label on may need none of them: no
+ * temporary that it reads before setting, no block that it leaves before entering, and no loop that it continues or
+ * breaks before starting. Checked backward along the root region's control flow; call only for an otherwise valid
+ * plan.
+ */
+export function validateLabelPositions(
+  instructions: readonly Instruction[],
+  files: readonly PlanFileBoundaries[],
+  errors: PlanValidationError[],
+): void {
+  files.forEach((file, fileIndex) => {
+    if (file.labelInstructions.size === 0) return;
+    const { startInstruction: start, rootEndInstruction: end } = file;
+    const length = end - start;
+    const temporaries = Array.from({ length }, () => new Set<number>());
+    const scopes = new Array<number>(length).fill(0);
+    const loops = Array.from({ length }, () => new Set<number>());
+    const inRegion = (index: number): boolean => index >= start && index < end;
+    for (let changed = true; changed;) {
+      changed = false;
+      for (let index = end - 1; index >= start; index -= 1) {
+        const instruction = instructions[index]!;
+        const successors = rootSuccessors(instruction, index).filter(inRegion);
+        const neededTemporaries = new Set<number>();
+        let neededScopes = 0;
+        const neededLoops = new Set<number>();
+        for (const successor of successors) {
+          for (const id of temporaries[successor - start]!) neededTemporaries.add(id);
+          neededScopes = Math.max(neededScopes, scopes[successor - start]!);
+          // A loop that starts here is active on the way into its body.
+          const providesLoop =
+            instruction.kind === "loopStart" && successor === index + 1 ? instruction.loopId : null;
+          for (const id of loops[successor - start]!) if (id !== providesLoop) neededLoops.add(id);
+        }
+        for (const id of instructionKilledTemporaries(instruction)) neededTemporaries.delete(id);
+        for (const id of requiredInstructionTemporaries(instruction, null))
+          neededTemporaries.add(id);
+        if (instruction.kind === "enterScope") neededScopes = Math.max(neededScopes - 1, 0);
+        // More open blocks than instructions means a cycle that leaves blocks it never entered.
+        if (instruction.kind === "leaveScope")
+          neededScopes = Math.min(neededScopes + 1, length + 1);
+        if (instruction.kind === "loopControl") neededLoops.add(instruction.loopId);
+        const slot = index - start;
+        if (
+          !sameNumbers(temporaries[slot]!, neededTemporaries) ||
+          scopes[slot] !== neededScopes ||
+          !sameNumbers(loops[slot]!, neededLoops)
+        ) {
+          temporaries[slot] = neededTemporaries;
+          scopes[slot] = neededScopes;
+          loops[slot] = neededLoops;
+          changed = true;
+        }
+      }
+    }
+    for (const label of file.labelInstructions) {
+      const slot = label - start;
+      if (temporaries[slot]!.size > 0 || scopes[slot]! > 0 || loops[slot]!.size > 0) {
+        errors.push(
+          planError(
+            "TSC002",
+            "A label must stand between statements of its file's outer scope.",
+            `$.files[${fileIndex}].labels`,
+          ),
+        );
+      }
+    }
+  });
+}
+
+/** Where execution can continue from a root instruction; transfers and endings leave the region's flow. */
+function rootSuccessors(instruction: Instruction, index: number): readonly number[] {
+  switch (instruction.kind) {
+    case "jump":
+    case "loopControl":
+      return [instruction.target];
+    case "jumpIfFalse":
+    case "loopStart":
+      return [instruction.target, index + 1];
+    case "callFunction":
+      return [instruction.returnInstruction];
+    case "exit":
+    case "end":
+    case "goto":
+    case "returnValue":
+    case "returnVoid":
+      return [];
+    default:
+      return [index + 1];
+  }
+}
+
+function sameNumbers(left: ReadonlySet<number>, right: ReadonlySet<number>): boolean {
+  return left.size === right.size && [...left].every((value) => right.has(value));
 }
 
 function validatePreparedReferenceStructure(
@@ -248,6 +349,7 @@ interface ValidatedFunctionRange {
   readonly path: string;
   readonly file: number;
   readonly id: number;
+  readonly global: boolean;
   readonly entryInstruction: number;
   readonly bodyEntryInstruction: number;
   readonly implicitReturnInstruction: number;
@@ -261,6 +363,9 @@ interface ValidatedFunctionRange {
 interface PlanValidationIndex {
   readonly owners: readonly (InstructionExecutionRegion | undefined)[];
   readonly functionsById: ReadonlyMap<number, ValidatedFunctionRange>;
+  readonly files: readonly PlanFileBoundaries[];
+  /** Gotos leave their region, so any of them that lands inside a prepared value bypasses it. */
+  readonly gotoSources: ReadonlySet<number>;
 }
 
 function createPlanValidationIndex(
@@ -295,7 +400,11 @@ function createPlanValidationIndex(
       owners[index] = region;
     }
   }
-  return { owners, functionsById };
+  const gotoSources = new Set<number>();
+  instructions.forEach((instruction, index) => {
+    if (isRecord(instruction) && instruction.kind === "goto") gotoSources.add(index);
+  });
+  return { owners, functionsById, files, gotoSources };
 }
 
 function validateInstructionControlFlowRegions(
@@ -340,6 +449,20 @@ function validateInstructionControlFlowRegions(
           region,
           errors,
         );
+        return;
+      case "goto":
+        if (
+          typeof instruction.target !== "number" ||
+          !index.files[region.file]?.labelInstructions.has(instruction.target)
+        ) {
+          errors.push(
+            planError(
+              "TSC002",
+              "A goto must continue at a label of its own file.",
+              `${instructionPath}.target`,
+            ),
+          );
+        }
         return;
       case "callFunction":
         validateInstructionRegionTarget(
@@ -713,11 +836,11 @@ function collectPreparedSayPayloadTemporaryReferences(
       collectExpressionTemporaryReferences(instruction.value, output);
       collectExpressionTemporaryReferences(instruction.pacing, output);
       return;
+    case "declareGlobal":
     case "declareBinding":
     case "assign":
     case "storeTemporary":
     case "prepareSayText":
-    case "setDeclaredSpeakerProperty":
     case "returnValue":
       collectExpressionTemporaryReferences(instruction.value, output);
       return;
@@ -804,6 +927,11 @@ function collectExpressionTemporaryReferences(value: unknown, output: Set<number
       case "storageLoad":
         pending.push(current.key, current.default);
         break;
+      case "tagQuery":
+        if (Array.isArray(current.operands)) {
+          for (const operand of current.operands) pending.push(operand);
+        }
+        break;
     }
   }
 }
@@ -862,6 +990,7 @@ function preparedSayCanBeBypassed(
 ): boolean {
   for (let target = producerIndex + 1; target <= sayIndex; target += 1) {
     for (const sourceIndex of explicitIncomingSources[target] ?? []) {
+      if (index.gotoSources.has(sourceIndex)) return true;
       if (index.owners[sourceIndex] !== region) continue;
       if (sourceIndex < producerIndex || sourceIndex >= sayIndex) return true;
     }
@@ -961,7 +1090,13 @@ function validateCanonicalInteractionResultHandoffs(
     const handoff = instructions[continuation];
     if (!isRecord(handoff)) return;
     if (handoff.kind === "clearTemporary" && handoff.temporaryId === destinationTemporary) return;
-    if (handoff.kind === "exit" || handoff.kind === "returnVoid") return;
+    if (
+      handoff.kind === "exit" ||
+      handoff.kind === "end" ||
+      handoff.kind === "goto" ||
+      handoff.kind === "returnVoid"
+    )
+      return;
 
     if (!canonicalHandoffConsumesTemporary(handoff, destinationTemporary)) {
       errors.push(
@@ -981,7 +1116,6 @@ function validateCanonicalInteractionResultHandoffs(
         "evaluate",
         "storeTemporary",
         "say",
-        "setDeclaredSpeakerProperty",
         "prepareReference",
       ])
     ) {
@@ -1060,6 +1194,8 @@ function explicitInstructionTargets(instruction: Record<string, unknown>): reado
       return [instruction.continueTarget, instruction.target];
     case "callFunction":
       return [instruction.returnInstruction];
+    case "goto":
+      return [instruction.target];
     default:
       return [];
   }
@@ -1081,11 +1217,11 @@ function canonicalHandoffConsumesTemporary(
         expressionGuaranteesTemporaryEvaluation(instruction.value, temporaryId) ||
         expressionGuaranteesTemporaryEvaluation(instruction.pacing, temporaryId)
       );
+    case "declareGlobal":
     case "declareBinding":
     case "assign":
     case "storeTemporary":
     case "prepareSayText":
-    case "setDeclaredSpeakerProperty":
     case "returnValue":
       expression = instruction.value;
       break;
@@ -1178,6 +1314,14 @@ function expressionGuaranteesTemporaryEvaluation(value: unknown, temporaryId: nu
     case "storageLoad":
       // The default runs only for an absent key.
       return expressionGuaranteesTemporaryEvaluation(value.key, temporaryId);
+    case "tagQuery":
+      // Every operand is evaluated before any image is matched.
+      return (
+        Array.isArray(value.operands) &&
+        value.operands.some((operand) =>
+          expressionGuaranteesTemporaryEvaluation(operand, temporaryId),
+        )
+      );
     default:
       return false;
   }
@@ -1192,10 +1336,7 @@ function validateInstructionRegionTarget(
 ): void {
   if (!validInstructionBoundary(value, instructionCount)) return;
   const target = value;
-  const remainsInRegion =
-    region.kind === "root"
-      ? target >= region.startInstruction && target <= region.endInstruction
-      : target >= region.startInstruction && target < region.endInstruction;
+  const remainsInRegion = target >= region.startInstruction && target < region.endInstruction;
   if (!remainsInRegion) {
     errors.push(
       planError("TSC002", "Control-flow target leaves the instruction's execution region.", path),
@@ -1206,6 +1347,7 @@ function validateInstructionRegionTarget(
 const FUNCTION_FIELDS = [
   "id",
   "handler",
+  "global",
   "selfHandle",
   "name",
   "declarationSpan",
@@ -1219,21 +1361,36 @@ const FUNCTION_FIELDS = [
 
 const PARAMETER_FIELDS = ["name", "index", "hasDefault", "declarationSpan", "defaultSpan"];
 
-/** Functions and handlers are local to their file: an instruction may only refer to its own file's regions. */
+/**
+ * Functions and handlers are local to their file, except global functions, which every file may call (ADR 0022 §3). A
+ * global function and its handlers see only the project's names, so they call only global functions, and a handler is
+ * global exactly when the code that registers it is.
+ */
 function reportForeignFunction(
   target: ValidatedFunctionRange | undefined,
   ownerRegion: InstructionExecutionRegion | undefined,
+  call: boolean,
+  index: PlanValidationIndex | null,
   instructionIndex: number,
   errors: PlanValidationError[],
 ): void {
-  if (target === undefined || ownerRegion === undefined || target.file === ownerRegion.file) return;
-  errors.push(
-    planError(
-      "TSC002",
-      "An instruction refers to a function of another file.",
-      `$.instructions[${instructionIndex}]`,
-    ),
-  );
+  if (target === undefined || ownerRegion === undefined) return;
+  const ownerGlobal =
+    ownerRegion.kind === "function" &&
+    index?.functionsById.get(ownerRegion.functionId)?.global === true;
+  const problem = call
+    ? !target.global && (ownerGlobal || target.file !== ownerRegion.file)
+      ? ownerGlobal
+        ? "A global function calls a function that is not global."
+        : "An instruction refers to a function of another file."
+      : null
+    : target.file !== ownerRegion.file
+      ? "An instruction refers to a function of another file."
+      : target.global !== ownerGlobal
+        ? "A handler is global exactly when the code that registers it is."
+        : null;
+  if (problem !== null)
+    errors.push(planError("TSC002", problem, `$.instructions[${instructionIndex}]`));
 }
 
 function validateFunctionDefinitions(
@@ -1288,6 +1445,8 @@ function validateFunctionDefinitions(
     ) {
       errors.push(planError("TSC002", "Only a media handler may bind a self-handle name.", path));
     }
+    if (typeof definition.global !== "boolean")
+      errors.push(planError("TSC002", "Function global must be a boolean.", `${path}.global`));
     validateSpan(definition.declarationSpan, `${path}.declarationSpan`, errors);
     validateSpan(definition.bodySpan, `${path}.bodySpan`, errors);
     if (typeof definition.id === "number") {
@@ -1346,6 +1505,7 @@ function validateFunctionDefinitions(
       definition,
       path,
       file,
+      global: definition.global === true,
       // EVIDENCE: validation: functionId passed the positive safe-integer check above.
       id: functionId as number,
       entryInstruction: entry,
@@ -1441,7 +1601,14 @@ function validateFunctionDefinitions(
           ? instruction.functionId
           : instruction.handlerFunctionId) as number,
       );
-      reportForeignFunction(targetRange, ownerRegion, instructionIndex, errors);
+      reportForeignFunction(
+        targetRange,
+        ownerRegion,
+        instruction.kind === "callFunction",
+        index,
+        instructionIndex,
+        errors,
+      );
       const target = targetRange?.definition;
       if (
         target !== undefined &&
@@ -1468,7 +1635,7 @@ function validateFunctionDefinitions(
       for (const id of handlerIds) {
         if (typeof id !== "number") continue;
         const targetRange = index?.functionsById.get(id);
-        reportForeignFunction(targetRange, ownerRegion, instructionIndex, errors);
+        reportForeignFunction(targetRange, ownerRegion, false, index, instructionIndex, errors);
         const target = targetRange?.definition;
         if (target !== undefined && target.handler !== "media") {
           errors.push(

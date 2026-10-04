@@ -11,6 +11,11 @@ export function packagePathProblem(path: string): string | null {
   if (!path.endsWith(TEASE_EXTENSION) || path.split("/").at(-1) === TEASE_EXTENSION) {
     return "it does not name a .tease file";
   }
+  return packageAssetPathProblem(path);
+}
+
+/** Why `path` is not a path of a package file, such as an image, or `null` when it is one; as for `.tease` files. */
+export function packageAssetPathProblem(path: string): string | null {
   for (const segment of path.split("/")) {
     if (segment === "") return "it has an empty folder name; separate folders with a single /";
     if (segment === "." || segment === "..")

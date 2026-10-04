@@ -122,7 +122,7 @@ async function checks(page, url) {
 
   // The Owner's Firefox camera: frames without a size for a while after the camera opens, and an aborted `play()`.
   let { tab, messages } = await start(1_500, { abortDetachedPlay: true });
-  await shows(tab, "Captured.");
+  await shows(tab, "Got you. That one is mine now.");
   await tab.waitForFunction(decodedPhotos);
   check(
     messages.length === 0,
@@ -134,10 +134,10 @@ async function checks(page, url) {
 
   // A new run shows the saved photo, and a new photo replaces it.
   ({ tab, messages } = await start());
-  await shows(tab, "Your previous photo.");
+  await shows(tab, "Look what I kept from last time.");
   await tab.waitForFunction(decodedPhotos);
-  await tab.locator("button", { hasText: "Take a new photo" }).click();
-  await shows(tab, "Captured.");
+  await tab.locator("button", { hasText: "Take another, Mistress" }).click();
+  await shows(tab, "Got you. That one is mine now.");
   await tab.waitForFunction(decodedPhotos);
   check(messages.length === 0, `A new run reported: ${messages.join(" | ")}`);
   const second = await savedPhoto(tab);
@@ -149,9 +149,9 @@ async function checks(page, url) {
 
   // A camera that never delivers a sized frame cannot hold the script: it continues without a photo.
   ({ tab, messages } = await start(1e9));
-  await shows(tab, "Your previous photo.");
-  await tab.locator("button", { hasText: "Take a new photo" }).click();
-  await shows(tab, "No camera; continuing without a photo.", 20_000);
+  await shows(tab, "Look what I kept from last time.");
+  await tab.locator("button", { hasText: "Take another, Mistress" }).click();
+  await shows(tab, "No camera? Then you stay unseen, for now. We go on without a photo.", 20_000);
   // Exactly the capture diagnostic: an unhandled rejection from releasing the video would add a page error.
   check(
     messages.length === 1 &&
@@ -181,8 +181,8 @@ async function checks(page, url) {
       Math.abs(Number(stageAspect) - 16 / 9) < 0.01
     );
   });
-  await tab.locator("button", { hasText: "Take photo" }).click();
-  await shows(tab, "Captured.");
+  await tab.locator("button", { hasText: "I'm ready, Mistress" }).click();
+  await shows(tab, "There you are. I'll keep that one.");
   await tab.waitForFunction(decodedPhotos);
   check(
     (await tab.locator("[data-viewfinder]").count()) === 0,

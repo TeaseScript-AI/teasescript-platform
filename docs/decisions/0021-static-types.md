@@ -46,8 +46,11 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
    values must still agree.
 6. "First" follows the order in which the compiler checks the script: top-level statements in source order, a
    function body when a call first needs its result (otherwise after the top level), then timer and media blocks. A
-   body that names a top-level variable or speaker declared after that call is checked after the top level, once it has
-   its type; until then the call's result is the declared result type, or unknown.
+   body that names a top-level variable declared after that call is checked after the top level, once it has its type;
+   until then the call's result is the declared result type, or unknown. The start values of globals and speakers
+   (ADR 0022 §6) come before all of this, in the order a session sets them up. A project checks its files one after
+   another in project order, `main.tease` first and then the others by path, each in the order above; a global
+   function's body is checked when a call in any file first needs its result, otherwise after its own file's top level.
 7. A value whose type the compiler cannot know, such as untyped storage, host data, or an unknown parameter, is not
    rejected at compile time. When it is stored in a place of known type, it is checked at runtime with a
    source-located error.

@@ -19,7 +19,11 @@ export type Statement =
   | SaveStatement
   | DeleteStatement
   | ExitStatement
+  | EndStatement
+  | LabelStatement
+  | GotoStatement
   | LetStatement
+  | GlobalStatement
   | AssignmentStatement
   | IfStatement
   | SwitchStatement
@@ -225,8 +229,64 @@ export interface LoadExpression {
   readonly span: SourceSpan;
 }
 
+/**
+ * A tag query (ADR 0023): `showImage tagged …` picks one matching image, and `findImages(…)` lists the matches. The
+ * steps are in postfix order; every bound and tag list appears in written order, which is also its evaluation order.
+ * A candidate matches when the steps yield true; without steps, every candidate matches.
+ */
+export interface TagQueryExpression {
+  readonly kind: "tagQueryExpression";
+  readonly catalog: "images";
+  readonly select: "random" | "list";
+  readonly steps: readonly TagQueryStep[];
+  readonly span: SourceSpan;
+}
+
+export type TagQueryStep =
+  /** `"bedroom"`: whether the candidate has the tag. */
+  | { readonly kind: "tag"; readonly name: string; readonly span: SourceSpan }
+  /** `"punishment" > minimum`: compares the tag's number; false when the candidate has no number for it. */
+  | {
+      readonly kind: "tagCompare";
+      readonly name: string;
+      readonly operator: TagComparisonOperator;
+      readonly bound: Expression;
+      readonly span: SourceSpan;
+    }
+  /** `all:`, `none:`, or `any:` with a list of tag names. */
+  | {
+      readonly kind: "tagList";
+      readonly option: TagListOption;
+      readonly value: Expression;
+      readonly span: SourceSpan;
+    }
+  | { readonly kind: "and" | "or" | "not" };
+
+export type TagComparisonOperator = "==" | "!=" | "<" | "<=" | ">" | ">=";
+export type TagListOption = "all" | "none" | "any";
+
 export interface ExitStatement {
   readonly kind: "exitStatement";
+  readonly span: SourceSpan;
+}
+
+/** `end`: ends the current file and returns to the file that called it (ADR 0022). */
+export interface EndStatement {
+  readonly kind: "endStatement";
+  readonly span: SourceSpan;
+}
+
+/** `label name`, a `goto` destination in its file's outer scope. */
+export interface LabelStatement {
+  readonly kind: "labelStatement";
+  readonly name: Identifier;
+  readonly span: SourceSpan;
+}
+
+/** `goto name`: continues at a label of the same file. */
+export interface GotoStatement {
+  readonly kind: "gotoStatement";
+  readonly label: Identifier;
   readonly span: SourceSpan;
 }
 
@@ -235,6 +295,21 @@ export interface LetStatement {
   readonly name: Identifier;
   readonly typeAnnotation: TypeAnnotation | null;
   readonly initializer: Expression;
+  readonly span: SourceSpan;
+}
+
+/**
+ * `global name[: Type] = value[, default: start]`, a variable of the whole project (ADR 0022 §6). It gets its
+ * session-start value before the story runs, whether or not the declaration ever runs.
+ */
+export interface GlobalStatement {
+  readonly kind: "globalStatement";
+  readonly name: Identifier;
+  readonly typeAnnotation: TypeAnnotation | null;
+  /** The session-start value: `start` with `default:`, otherwise `value`. */
+  readonly initial: Expression;
+  /** With `default:`, the assignment `name = value` that the declaration performs each time it runs. */
+  readonly assignment: AssignmentStatement | null;
   readonly span: SourceSpan;
 }
 
@@ -374,6 +449,8 @@ export interface ContinueStatement {
 
 export interface FunctionDeclaration {
   readonly kind: "functionDeclaration";
+  /** A `global function`, callable from every file of the project (ADR 0022 §3). */
+  readonly global: boolean;
   readonly name: Identifier;
   readonly parameters: readonly FunctionParameter[];
   readonly returnTypeAnnotation: TypeAnnotation | null;
@@ -397,7 +474,8 @@ export interface ReturnStatement {
 
 export interface ExpressionStatement {
   readonly kind: "expressionStatement";
-  readonly expression: CallExpression;
+  /** A call, or `findImages(…)`, which reads like one. */
+  readonly expression: CallExpression | TagQueryExpression;
   readonly span: SourceSpan;
 }
 
@@ -424,6 +502,7 @@ export type Expression =
   | TimerExpression
   | PlayMediaExpression
   | LoadExpression
+  | TagQueryExpression
   | TypeTestExpression;
 
 /** `value is T` or `value is not T`: whether the value may be stored in a place of type `T` (ADR 0021). */

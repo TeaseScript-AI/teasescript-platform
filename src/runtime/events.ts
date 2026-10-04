@@ -32,12 +32,6 @@ export interface ExitEvent {
   readonly span: SourceSpan;
 }
 
-export interface CompleteEvent {
-  readonly kind: "complete";
-  readonly sequence: number;
-  readonly span: SourceSpan;
-}
-
 export interface ActionRequestedEvent {
   readonly kind: "actionRequested";
   readonly sequence: number;
@@ -79,13 +73,14 @@ export interface RuntimeFailureEvent {
   readonly sequence: number;
   readonly code: string;
   readonly message: string;
+  /** The project file whose source {@link span} is in. */
+  readonly path: string;
   readonly span: SourceSpan;
 }
 
 export type InterpreterEvent =
   | SayEvent
   | ExitEvent
-  | CompleteEvent
   | ActionRequestedEvent
   | ActionCompletedEvent
   | PlayerTranscriptEvent

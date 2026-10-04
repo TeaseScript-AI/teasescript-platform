@@ -42,7 +42,7 @@ test("Monaco registers usable completion, hover, signature, and formatting provi
   const suggestions = completion.provideCompletionItems(model(""), position(1)).suggestions;
   assert.ok(suggestions.some((item) => item.label === "say" && item.kind === 2));
 
-  const hoverResult = hover.provideHover(model('say "Hello"'), position(2));
+  const hoverResult = hover.provideHover(model('say "Hello"\nexit'), position(2));
   assert.match(hoverResult?.contents[0]?.value ?? "", /say/u);
   assert.deepEqual(hoverResult?.range, {
     startLineNumber: 1,
@@ -58,11 +58,11 @@ test("Monaco registers usable completion, hover, signature, and formatting provi
   assert.equal(signatureResult?.value.activeParameter, 1);
   assert.equal(signatureResult?.value.signatures[0]?.parameters[1]?.label, "hint");
 
-  const source = 'say    "Hello",instant';
+  const source = 'say    "Hello",instant\nexit';
   const edits = formatting.provideDocumentFormattingEdits(model(source));
   assert.notEqual(edits.length, 0);
   const formatted = applyEdits(source, edits);
-  assert.equal(formatted, 'say "Hello", instant');
+  assert.equal(formatted, 'say "Hello", instant\nexit');
   const compiled = compileSource(formatted);
   assert.notEqual(compiled.plan, null);
   assert.deepEqual(compiled.diagnostics, []);

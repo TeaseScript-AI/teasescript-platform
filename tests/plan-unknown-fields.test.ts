@@ -13,7 +13,7 @@ import {
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 
 // Ordinary source whose compiled plan contains every instruction and expression shape the compiler emits for it,
-// plus function definitions, parameters, speaker and object properties, dict entries, template parts, positional and
+// plus function definitions, parameters, globals, speaker and object properties, dict entries, template parts, positional and
 // named builtin arguments, static and prepared interaction payloads, and runtime type checks of host values at each kind
 // of place.
 const REPRESENTATIVE_SOURCE = [
@@ -24,7 +24,7 @@ const REPRESENTATIVE_SOURCE = [
   "  return capture(2)",
   "}",
   'speaker vera { title: "Mistress" }',
-  "speaker mira { title: helper() }",
+  'global stored: integer = load "stored", default: 0',
   "speaker vera",
   "let values = [1, 2]",
   'let tags = set["a"]',
@@ -99,8 +99,8 @@ test("current-version plans reject an added field on each object shape of a comp
   );
   // The source must keep reaching the shapes whose unknown-field rejection this test protects.
   for (const kind of [
+    "declareGlobal",
     "declareSpeaker",
-    "setDeclaredSpeakerProperty",
     "setDefaultSpeaker",
     "enterScope",
     "leaveScope",
@@ -157,8 +157,13 @@ test("current-version plans reject an added field on each object shape of a comp
     assert.ok(nestedKinds.has(kind), `representative plan lacks expression ${kind}`);
   }
 
-  // One object per shape (kind plus its last two path fields) keeps the matrix small; source locations already
-  // required exact keys before this rule.
+  const loopKinds = new Set(
+    objects.flatMap(({ value }) => (value.kind === "loopStart" ? [value.loopKind] : [])),
+  );
+  assert.deepEqual([...loopKinds].sort(), ["for", "repeat", "while"]);
+
+  // One object per shape (kind, loop kind, and its last two path fields) keeps the matrix small; source locations
+  // already required exact keys before this rule.
   const shapes = new Map<string, { path: string; value: Record<string, unknown> }>();
   for (const object of objects) {
     if (/(span|Span)$/u.test(object.path)) continue;
@@ -167,7 +172,7 @@ test("current-version plans reject an added field on each object shape of a comp
       .split(".")
       .slice(-2)
       .join(".");
-    const shape = `${fields}:${String(object.value.kind)}`;
+    const shape = `${fields}:${String(object.value.kind)}:${String(object.value.loopKind)}`;
     if (!shapes.has(shape)) shapes.set(shape, object);
   }
   for (const { path, value } of shapes.values()) {
@@ -183,6 +188,20 @@ test("current-version plans reject an added field on each object shape of a comp
       `${path}: ${JSON.stringify(errors)}`,
     );
   }
+
+  // The compiler emits no group expression, but a current-version plan may contain one.
+  const grouped = objects.find((object) => object.value.kind === "literal")!;
+  const literal = { ...grouped.value };
+  for (const key of Object.keys(literal)) delete grouped.value[key];
+  Object.assign(grouped.value, { kind: "group", expression: literal, span: literal.span });
+  assert.deepEqual(validateInstructionPlan(external).errors, []);
+  grouped.value[UNKNOWN_FIELD] = 0;
+  assert.deepEqual(
+    validateInstructionPlan(external).errors.map((error) => [error.code, error.path]),
+    [["TSC002", `${grouped.path}.${UNKNOWN_FIELD}`]],
+  );
+  for (const key of Object.keys(grouped.value)) delete grouped.value[key];
+  Object.assign(grouped.value, literal);
 
   // Allowed fields are per kind: a field that another kind defines is still unknown here.
   for (const [kind, field, value] of [

@@ -323,7 +323,7 @@ async function constrainedChoicesScenario(cdp) {
     (_, index) =>
       `c${index}: "Option ${index + 1}: select this alternative for the next part of the story"`,
   ).join(", ");
-  await replaceSourceAndRun(cdp, `let answer = choose ${options}`);
+  await replaceSourceAndRun(cdp, `let answer = choose ${options}\nexit`);
   await waitFor(cdp, `document.querySelector('.choice-select option:nth-child(13)') !== null`);
   assertEqual(
     await value(cdp, visible(".choice-buttons")),
@@ -348,7 +348,7 @@ async function constrainedChoicesScenario(cdp) {
 async function replacedCheckpointScenario(cdp) {
   await replaceSourceAndRun(
     cdp,
-    'say "First", instant\nshowButton "A"\nsay "Second", instant\nshowButton "B"',
+    'say "First", instant\nshowButton "A"\nsay "Second", instant\nshowButton "B"\nexit',
   );
   await waitFor(cdp, `document.querySelector('#interaction-controls button')?.textContent === 'A'`);
   await click(cdp, "#save-checkpoint");
@@ -1055,7 +1055,7 @@ async function cameraScenario(cdp, origin) {
   const takeNewPhoto = () =>
     evaluate(
       cdp,
-      `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Take a new photo').click()`,
+      `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Take another, Mistress').click()`,
     );
   const photoColors = quadrantColors(decodedPhoto);
   const savedItem = JSON.stringify('player-storage:["development-camera","camera.photo"]');
@@ -1081,7 +1081,7 @@ async function cameraScenario(cdp, origin) {
     setting: "granted",
   });
   await start();
-  await waitFor(cdp, `document.body.innerText.includes('Captured.')`);
+  await waitFor(cdp, `document.body.innerText.includes('Got you. That one is mine now.')`);
   await waitFor(cdp, `${capturedImages} === 1`);
   assertTestCard(
     await value(cdp, photoColors),
@@ -1093,7 +1093,7 @@ async function cameraScenario(cdp, origin) {
 
   // A new run loads the saved reference and shows the same stored photo.
   await start();
-  await waitFor(cdp, `document.body.innerText.includes('Your previous photo.')`);
+  await waitFor(cdp, `document.body.innerText.includes('Look what I kept from last time.')`);
   await waitFor(
     cdp,
     `${capturedImages} === 1`,
@@ -1102,7 +1102,7 @@ async function cameraScenario(cdp, origin) {
   );
   assertTestCard(await value(cdp, photoColors), "The saved photo does not show the captured frame");
   await takeNewPhoto();
-  await waitFor(cdp, `document.body.innerText.includes('Captured.')`);
+  await waitFor(cdp, `document.body.innerText.includes('Got you. That one is mine now.')`);
   const second = await value(cdp, savedPhoto);
   assertEqual(
     second !== first && String(second).startsWith("captured-media:"),
@@ -1124,9 +1124,12 @@ async function cameraScenario(cdp, origin) {
     setting: "denied",
   });
   await start();
-  await waitFor(cdp, `document.body.innerText.includes('Your previous photo.')`);
+  await waitFor(cdp, `document.body.innerText.includes('Look what I kept from last time.')`);
   await takeNewPhoto();
-  await waitFor(cdp, `document.body.innerText.includes('No camera; continuing without a photo.')`);
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes('No camera? Then you stay unseen, for now. We go on without a photo.')`,
+  );
   assertEqual(await value(cdp, savedPhoto), second, "A denied camera replaced the saved photo");
 
   // A forged reference in saved data is ordinary text: it resolves to no photo, and the script continues.
@@ -1135,11 +1138,14 @@ async function cameraScenario(cdp, origin) {
     `localStorage.setItem(${savedItem}, JSON.stringify({ v: 1, value: 'captured-media:00000000-0000-4000-8000-000000000000:1' }))`,
   );
   await start();
-  await waitFor(cdp, `document.body.innerText.includes('Your previous photo.')`);
+  await waitFor(cdp, `document.body.innerText.includes('Look what I kept from last time.')`);
   await delay(500);
   assertEqual(await value(cdp, capturedImages), 0, "A forged reference resolved to a photo");
   await takeNewPhoto();
-  await waitFor(cdp, `document.body.innerText.includes('No camera; continuing without a photo.')`);
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes('No camera? Then you stay unseen, for now. We go on without a photo.')`,
+  );
   await cdp.call("Browser.resetPermissions");
 }
 
@@ -1200,7 +1206,7 @@ async function viewfinderScenario(cdp, origin) {
   const takePhoto = () =>
     evaluate(
       cdp,
-      `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Take photo').click()`,
+      `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === "I'm ready, Mistress").click()`,
     );
   const video = `document.querySelector('[data-viewfinder] video')`;
   const viewfinders = `document.querySelectorAll('[data-viewfinder]').length`;
@@ -1272,7 +1278,7 @@ async function viewfinderScenario(cdp, origin) {
     }
     // The script takes the photo from the same open camera; the viewfinder goes, and the photo is not mirrored.
     await takePhoto();
-    await waitFor(cdp, `document.body.innerText.includes('Captured.')`);
+    await waitFor(cdp, `document.body.innerText.includes("There you are. I'll keep that one.")`);
     assertEqual(
       await value(cdp, viewfinders),
       0,
@@ -1294,11 +1300,14 @@ async function viewfinderScenario(cdp, origin) {
   await start("floating");
   await waitFor(
     cdp,
-    `[...document.querySelectorAll('button')].some((button) => button.textContent.trim() === 'Take photo')`,
+    `[...document.querySelectorAll('button')].some((button) => button.textContent.trim() === "I'm ready, Mistress")`,
   );
   assertEqual(await value(cdp, viewfinders), 0, "A denied camera showed a viewfinder");
   await takePhoto();
-  await waitFor(cdp, `document.body.innerText.includes('No camera; continuing without a photo.')`);
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes('No camera? Then you stay unseen, for now. We go on without a photo.')`,
+  );
   await cdp.call("Browser.resetPermissions");
 }
 

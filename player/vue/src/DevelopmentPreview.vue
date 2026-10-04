@@ -15,6 +15,7 @@ import BackgroundControlsFixture from "./BackgroundControlsFixture.vue";
 import LayoutDebug from "./LayoutDebug.vue";
 import PlayerApp from "./PlayerApp.vue";
 import type { PlayerTool } from "./PlayerToolsShell.vue";
+import { resolveDemoAsset } from "./demoHost";
 import { resolveDevelopmentAsset } from "./developmentMedia";
 import { cameraScenarioSource, openingScenario, viewfinderScenarioSource } from "./runtimeScenario";
 import { stageFixtures } from "./stageFixtures";
@@ -58,7 +59,11 @@ const scenario = new URLSearchParams(window.location.search).get("scenario");
 const cameraScenario = scenario === "camera";
 const viewfinderScenario = scenario === "viewfinder";
 const player = usePlayerSession({
-  resolveAsset: resolveDevelopmentAsset,
+  // The camera scenarios speak as the repository demo's Mistress and use its images and sounds.
+  resolveAsset:
+    cameraScenario || viewfinderScenario
+      ? (path) => resolveDevelopmentAsset(path) ?? resolveDemoAsset(path)
+      : resolveDevelopmentAsset,
   capabilities: { camera: cameraScenario || viewfinderScenario },
   ...(cameraScenario && {
     scriptStorage: createLocalScriptStorage(browserStorage(), "development-camera"),
@@ -84,7 +89,7 @@ else if (viewfinderScenario) {
     () => {
       const current = player.session.value;
       const foreground = current && playerRuntimeForeground(current);
-      return foreground?.kind === "show-button" && foreground.label === "Take photo";
+      return foreground?.kind === "show-button" && foreground.label === "I'm ready, Mistress";
     },
     (shown) => player.showViewfinder(shown),
   );

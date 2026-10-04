@@ -1,4 +1,5 @@
 import type { TemporalContext } from "../temporal.js";
+import type { RunnablePlan } from "./runnable-plan.js";
 import {
   temporalCaptureShownAt,
   temporalCapturesProblem,
@@ -18,13 +19,11 @@ import { isOneOf } from "../plan/validation-support.js";
 import { isMessagePresentation } from "../message-presentation.js";
 import {
   type Instruction,
-  type InstructionPlan,
   type InteractionChoiceOption,
   type InteractionKind,
   type InteractionTemporalKind,
   type InteractionUiPayload,
   type PlanSourceLocation,
-  mainRootEnd,
 } from "../plan/model.js";
 import {
   boundedInteractionUtf8ByteLength,
@@ -109,7 +108,7 @@ function isCanonicalArrayIndexKey(key: string, length: number): boolean {
 
 export function validatePendingActionState(
   value: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
   analysis: ActionValidationAnalysis | undefined,
   errors: string[],
 ): void {
@@ -172,7 +171,7 @@ function validActiveActionCompletionCapacity(snapshot: Record<string, unknown>):
 
 function validBackgroundPacingActions(
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
 ): boolean {
   const actions = snapshot.backgroundActions;
   if (!isCanonicalJsonArray(actions)) return false;
@@ -200,7 +199,7 @@ function validBackgroundPacingActions(
 function validForegroundActionKind(
   action: unknown,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
   delayTimesAreValid: boolean,
   allowDue: boolean,
 ): boolean {
@@ -304,7 +303,7 @@ function validCaptureAction(
 function validRetainedSettlement(
   settlement: unknown,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
   analysis: ActionValidationAnalysis | undefined,
 ): boolean {
   if (!isPlainRecord(settlement)) return settlement === null;
@@ -315,7 +314,7 @@ function validRetainedSettlement(
 function validSettlementShapeAndKind(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
   analysis: ActionValidationAnalysis | undefined,
 ): boolean {
   return (
@@ -404,7 +403,7 @@ function validActiveActionIdentityCoherence(snapshot: Record<string, unknown>): 
 export function validForegroundActionState(
   action: unknown,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
   allowDue: boolean,
 ): boolean {
   const callIds = Array.isArray(snapshot.callFrames)
@@ -469,8 +468,7 @@ export function catchUpPaused(snapshot: Record<string, unknown>): boolean {
       (frame) => isPlainRecord(frame) && isPlainRecord(frame.timerInterruption),
     ) ||
     snapshot.preparedSayOutput !== null ||
-    snapshot.interactionResultHandoff !== null ||
-    snapshot.terminalContinuationHandoff !== null
+    snapshot.interactionResultHandoff !== null
   )
     return false;
   const foreground = snapshot.foregroundAction;
@@ -581,7 +579,7 @@ function validActionCreatedAfterSettlement(
 /** An async play's wait ends with its load result; a blocking play's wait ends with its media. */
 function validMediaWaitOutcome(
   settlement: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
 ): boolean {
   if (plan === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return true;
   const owner = plan.instructions[settlement.owningInstruction];
@@ -671,7 +669,7 @@ function validForegroundActionBase(
 function validPacingGateAction(
   action: unknown,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
   foreground: boolean,
 ): boolean {
   if (!isPacingGateShape(action)) return false;
@@ -747,7 +745,7 @@ function validPacingGateTiming(
 function validPacingGateCreationProvenance(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
 ): boolean {
   if (
     !positiveSafeInteger(action.scopeDepth) ||
@@ -771,6 +769,7 @@ function validPacingGateCreationProvenance(
     return false;
   const owningFunction = plan.functions.find(
     (definition) =>
+      definition !== undefined &&
       owningInstruction >= definition.entryInstruction &&
       owningInstruction < definition.endInstruction,
   );
@@ -788,7 +787,7 @@ function validPacingGateCreationProvenance(
 export function validPreparedSayOutput(
   value: unknown,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
 ): boolean {
   if (!isPreparedSayOutputShape(value)) return false;
   if (!validPreparedSayOutputDomain(value)) return false;
@@ -853,7 +852,7 @@ function validPreparedSaySpeaker(value: unknown): boolean {
 
 export function validTopLevelPreparedSayOutputRelationship(
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
 ): boolean {
   const settlement = snapshot.lastSettlement;
   if (snapshot.preparedSayOutput === null) {
@@ -890,7 +889,7 @@ export function hasPacingExecutionHistory(settlement: unknown): boolean {
 function validReleasedPacingSettlementAfterPreparedOutputConsumption(
   snapshot: Record<string, unknown>,
   settlement: unknown,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
 ): boolean {
   if (!isPlainRecord(settlement) || settlement.actionKind !== "chatPacingGate") return true;
   const releasedInstruction = settlement.releasedPreparedOutputInstruction;
@@ -908,7 +907,7 @@ function validReleasedPacingSettlementAfterPreparedOutputConsumption(
 
 export function isExplicitExitHaltState(
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
 ): boolean {
   if (
     plan === undefined ||
@@ -933,7 +932,7 @@ function activePacingActions(snapshot: Record<string, unknown>): Record<string, 
 
 export function validateInteractionResultHandoffState(
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
   analysis: ActionValidationAnalysis | undefined,
   errors: string[],
 ): void {
@@ -1099,83 +1098,6 @@ function validInteractionResultHandoffOwner(
   return ownerFunctionId !== null && activeOwner.functionId === ownerFunctionId;
 }
 
-export function validateTerminalContinuationHandoffState(
-  snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
-  errors: string[],
-): void {
-  const handoff = snapshot.terminalContinuationHandoff;
-  if (handoff === null) return;
-  if (
-    !isPlainRecord(handoff) ||
-    !hasExactKeys(handoff, [
-      "actionId",
-      "actionKind",
-      "owningInstruction",
-      "continuationInstruction",
-    ]) ||
-    !positiveSafeInteger(handoff.actionId) ||
-    (handoff.actionKind !== "delay" &&
-      handoff.actionKind !== "interaction" &&
-      handoff.actionKind !== "mediaPlayback" &&
-      handoff.actionKind !== "storageWrite") ||
-    !nonNegativeSafeInteger(handoff.owningInstruction) ||
-    !nonNegativeSafeInteger(handoff.continuationInstruction) ||
-    !positiveSafeInteger(snapshot.nextActionId) ||
-    // An expiry block may have allocated newer actions before the terminal action settled.
-    handoff.actionId >= snapshot.nextActionId ||
-    snapshot.status !== "running" ||
-    snapshot.foregroundAction !== null ||
-    snapshot.interactionResultHandoff !== null ||
-    !validTerminalContinuationHandoffSettlement(handoff, snapshot.lastSettlement)
-  ) {
-    errors.push("Runtime terminal continuation handoff is malformed.");
-    return;
-  }
-  if (plan === undefined) return;
-  const instruction = plan.instructions[handoff.owningInstruction];
-  const terminalHandoffMatchesPlan =
-    handoff.continuationInstruction === mainRootEnd(plan) &&
-    snapshot.nextInstruction === mainRootEnd(plan) &&
-    handoff.owningInstruction + 1 === handoff.continuationInstruction &&
-    ((handoff.actionKind === "delay" && instruction?.kind === "wait") ||
-      (handoff.actionKind === "storageWrite" && instruction?.kind === "storageWrite") ||
-      (handoff.actionKind === "mediaPlayback" &&
-        instruction?.kind === "playMedia" &&
-        instruction.destinationTemporary === null) ||
-      (handoff.actionKind === "interaction" &&
-        instruction?.kind === "interaction" &&
-        instruction.interactionKind === "button" &&
-        instruction.destinationTemporary === null));
-  if (!terminalHandoffMatchesPlan) {
-    errors.push(
-      "Runtime terminal continuation handoff does not match its canonical terminal instruction.",
-    );
-  }
-}
-
-function validTerminalContinuationHandoffSettlement(
-  handoff: Record<string, unknown>,
-  settlement: unknown,
-): boolean {
-  if (!positiveSafeInteger(handoff.actionId) || !isPlainRecord(settlement)) return false;
-  if (settlement.actionId === handoff.actionId) {
-    return (
-      settlement.actionKind === handoff.actionKind &&
-      settlement.owningInstruction === handoff.owningInstruction &&
-      settlement.continuationInstruction === handoff.continuationInstruction
-    );
-  }
-
-  // Only a background pacing gate can settle after a terminal delay or storage write and replace bounded replay
-  // before root completion is entered; a gate created by an expiry block may be newer than the delay.
-  return (
-    (handoff.actionKind === "delay" || handoff.actionKind === "storageWrite") &&
-    settlement.actionKind === "chatPacingGate" &&
-    positiveSafeInteger(settlement.actionId)
-  );
-}
-
 function validInteractionResultForInstruction(
   instruction: Extract<Instruction, { kind: "interaction" }>,
   result: unknown,
@@ -1314,7 +1236,7 @@ function validInteractionTiming(
 function validInteractionAction(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
   allowDue: boolean,
 ): boolean {
   if (
@@ -1398,7 +1320,7 @@ function validInteractionAction(
   }
   if (!interactionUiEqual(instruction.ui, action.ui) || action.timeoutMs !== null) return false;
   if (instruction.speaker === null) return action.speakerId === snapshot.defaultSpeaker;
-  const explicitSpeaker = visibleRuntimeBindingValue(snapshot, instruction.speaker);
+  const explicitSpeaker = speakerGlobalValue(snapshot, instruction.speaker);
   if (
     !isPlainRecord(explicitSpeaker) ||
     explicitSpeaker.kind !== "speakerReference" ||
@@ -1558,32 +1480,14 @@ function accessibleNameEqual(
     : actual.text === expected.text;
 }
 
+/** A speaker is a global of the session, so an interaction finds its speaker among the globals. */
 // oxlint-disable-next-line anti-slop/no-unknown-returns -- EVIDENCE: boundary: binding payloads remain unvalidated during snapshot lineage checks.
-function visibleRuntimeBindingValue(snapshot: Record<string, unknown>, name: string): unknown {
-  if (!Array.isArray(snapshot.frames)) return undefined;
-  const lastCall = Array.isArray(snapshot.callFrames) ? snapshot.callFrames.at(-1) : undefined;
-  const functionBase =
-    isPlainRecord(lastCall) && nonNegativeSafeInteger(lastCall.scopeBaseDepth)
-      ? lastCall.scopeBaseDepth
-      : undefined;
-  const minimum = functionBase ?? 0;
-  for (let index = snapshot.frames.length - 1; index >= minimum; index -= 1) {
-    const frame = snapshot.frames[index];
-    if (!isPlainRecord(frame) || !Array.isArray(frame.bindings)) continue;
-    const binding = frame.bindings.find(
-      (candidate) => isPlainRecord(candidate) && candidate.name === name,
-    );
-    if (isPlainRecord(binding)) return binding.value;
-  }
-  if (functionBase !== undefined) {
-    const root = snapshot.frames[0];
-    if (!isPlainRecord(root) || !Array.isArray(root.bindings)) return undefined;
-    const binding = root.bindings.find(
-      (candidate) => isPlainRecord(candidate) && candidate.name === name,
-    );
-    if (isPlainRecord(binding)) return binding.value;
-  }
-  return undefined;
+function speakerGlobalValue(snapshot: Record<string, unknown>, name: string): unknown {
+  if (!Array.isArray(snapshot.globals)) return undefined;
+  const binding = snapshot.globals.find(
+    (candidate) => isPlainRecord(candidate) && candidate.name === name,
+  );
+  return isPlainRecord(binding) ? binding.value : undefined;
 }
 
 function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean {
@@ -1744,7 +1648,7 @@ function choiceOptionsEqual(
 function validCaptureSettlement(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
 ): boolean {
   if (
     !hasExactKeys(settlement, [
@@ -1793,7 +1697,7 @@ function validCaptureSettlement(
 function validSettlementKindData(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
   analysis: ActionValidationAnalysis | undefined,
 ): boolean {
   if (settlement.actionKind === "chatPacingGate")
@@ -2106,7 +2010,7 @@ function buttonsFitWrittenValues(
 function validPacingGateSettlement(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan?: InstructionPlan,
+  plan?: RunnablePlan,
 ): boolean {
   if (
     !hasExactKeys(settlement, [
@@ -2150,7 +2054,7 @@ function pacingSettlementCanReleasePreparedOutput(
 
 function validPacingSettlementReleaseLineage(
   settlement: unknown,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
 ): settlement is Record<string, unknown> & {
   readonly releasedPreparedOutputInstruction: number | null;
 } {
@@ -2244,7 +2148,7 @@ function sameCanonicalSettlementResult(destination: unknown, result: unknown): b
 
 function validSettlementProvenance(
   settlement: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
 ): boolean {
   const owningInstruction = settlement.owningInstruction;
   const continuationInstruction = settlement.continuationInstruction;
@@ -2271,18 +2175,19 @@ function validSettlementProvenance(
   if (plan.instructions[owningInstruction]?.kind !== expectedKind) return false;
   const definition = plan.functions.find(
     (candidate) =>
+      candidate !== undefined &&
       owningInstruction >= candidate.entryInstruction &&
       owningInstruction < candidate.endInstruction,
   );
   return definition === undefined
-    ? continuationInstruction <= mainRootEnd(plan)
+    ? continuationInstruction < plan.files[0]!.rootEndInstruction
     : continuationInstruction < definition.endInstruction;
 }
 
 function validForegroundActionOwnership(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan,
+  plan: RunnablePlan,
 ): boolean {
   const owningInstruction = action.owningInstruction;
   const continuationInstruction = action.continuationInstruction;
@@ -2333,6 +2238,7 @@ function validForegroundActionOwnership(
 
   const definition = plan.functions.find(
     (candidate) =>
+      candidate !== undefined &&
       owningInstruction >= candidate.entryInstruction &&
       owningInstruction < candidate.endInstruction,
   );
@@ -2340,7 +2246,7 @@ function validForegroundActionOwnership(
   const activeFrame = callFrames.at(-1);
   if (definition === undefined) {
     return (
-      continuationInstruction <= mainRootEnd(plan) &&
+      continuationInstruction < plan.files[0]!.rootEndInstruction &&
       action.ownerCallFrameId === null &&
       callFrames.length === 0
     );

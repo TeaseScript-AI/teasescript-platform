@@ -34,5 +34,7 @@ export function expressionPlanChildren(expression: ExpressionPlan): readonly Exp
       return [expression.start, expression.end];
     case "storageLoad":
       return expression.default === null ? [expression.key] : [expression.key, expression.default];
+    case "tagQuery":
+      return expression.operands;
   }
 }

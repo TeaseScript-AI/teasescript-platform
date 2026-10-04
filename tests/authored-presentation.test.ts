@@ -67,6 +67,7 @@ say "inherited again"
 vera.prose = { background: "ivory", align: "right" }
 say prose(background: "linen") "background override"
 say "paper"
+exit
 `,
     { scenarioName: "speaker and message presentation inheritance" },
   );
@@ -100,6 +101,7 @@ function option(value) {
 }
 say prose(color: option("red"), align: option("left")) option("text"), 0
 say calls, instant
+exit
 `,
     { scenarioName: "presentation expression source order" },
   );
@@ -110,7 +112,7 @@ say calls, instant
 
 test("keeps contextual identifiers usable as ordinary say values", () => {
   const plan = compileValidPlan(
-    'let prose = "prose value"\nlet bubble = "bubble value"\nsay prose, instant\nsay bubble, instant',
+    'let prose = "prose value"\nlet bubble = "bubble value"\nsay prose, instant\nsay bubble, instant\nexit',
   );
   const result = run(plan, createFreshRuntimeSnapshot(plan));
   assert.deepEqual(
@@ -131,7 +133,7 @@ test("rejects invalid constant colours and presentation options at compile time"
   ] as const) {
     assertLocatedRejection(source, code, located);
   }
-  assert.notEqual(compileSource('say "`[color=invalid]literal[/color]`"').plan, null);
+  assert.notEqual(compileSource('say "`[color=invalid]literal[/color]`"\nexit').plan, null);
 });
 
 test("a presentation option without a value is reported instead of dropped", () => {
@@ -152,7 +154,7 @@ test("a presentation option without a value is reported instead of dropped", () 
     );
   }
   assert.notEqual(
-    compileSource('say prose(\n    background:\n        "ivory"\n) "Text"').plan,
+    compileSource('say prose(\n    background:\n        "ivory"\n) "Text"\nexit').plan,
     null,
   );
 });
@@ -170,6 +172,7 @@ vera.color = 123
 vera.bubble = { background: invalid }
 say "second", instant
 say "[color=\${invalid}]third[/color]", instant
+exit
 `);
   const result = run(plan, createFreshRuntimeSnapshot(plan));
   assert.equal(result.snapshot.status, "halted");
@@ -189,7 +192,7 @@ say "[color=\${invalid}]third[/color]", instant
 
 test("captures presentation in paced output and validates restored presentation data", () => {
   const plan = compileValidPlan(
-    'say "first"\nsay prose(background: "ivory", align: "left") "letter"',
+    'say "first"\nsay prose(background: "ivory", align: "left") "letter"\nexit',
   );
   const result = run(plan, createFreshRuntimeSnapshot(plan));
   const gate = result.snapshot.foregroundAction;
@@ -216,7 +219,7 @@ test("captures presentation in paced output and validates restored presentation 
 
 test("a user-provided colour survives an input checkpoint and invalid input uses the default", () => {
   const plan = compileValidPlan(
-    'say prose(color: askText "Colour") "The story continues.", instant',
+    'say prose(color: askText "Colour") "The story continues.", instant\nexit',
   );
   const waiting = run(plan, createFreshRuntimeSnapshot(plan));
   const action = waiting.snapshot.foregroundAction;
@@ -244,6 +247,7 @@ test("null options inherit, and malformed external resolved values are rejected"
 speaker vera { prose: { color: "red", position: "right", align: "left" } }
 speaker vera
 say prose(color: null, position: null, align: null) "x", instant
+exit
 `);
   const result = run(plan, createFreshRuntimeSnapshot(plan));
   const output = result.events.find((event) => event.kind === "say");
@@ -265,6 +269,7 @@ speaker vera {
 }
 speaker vera
 say bubble(color: ((null)), background: (null), font: (null)) "inherited"
+exit
 `,
     { scenarioName: "parenthesized null presentation inheritance" },
   );
@@ -298,7 +303,8 @@ test("CSS colour channel clamping and grammar agree for static and dynamic sourc
   for (const [input, expected] of equivalent) {
     const plan = compileValidPlan(`let dynamic = "${input}"
 say prose(color: "${input}") "static", instant
-say prose(color: dynamic) "dynamic", instant`);
+say prose(color: dynamic) "dynamic", instant
+exit`);
     const result = run(plan, createFreshRuntimeSnapshot(plan));
     assert.equal(result.snapshot.status, "halted");
     for (const event of result.events) {
@@ -335,6 +341,7 @@ say prose(color: dynamic) "variable"
 vera.color = dynamic
 say as vera "updated speaker"
 say "[color=${input}]markup[/color]"
+exit
 `,
       { scenarioName: `single colour conversion: ${input}` },
     );
@@ -396,6 +403,7 @@ speaker vera
 say prose "letter", instant
 say bubble(color: faded, background: faded) "second", instant
 say "[color=\${faded}]third[/color]", instant
+exit
 `);
   const result = run(plan, createFreshRuntimeSnapshot(plan));
   const messages = result.events.filter((event) => event.kind === "say");
@@ -438,6 +446,7 @@ say prose(position: "center", align: "right") "override"
 say prose(position: "left", align: "center") "other side"
 say "inherited again"
 say bubble "Player-owned placement"
+exit
 `);
   const presentations = result.events
     .filter((event) => event.kind === "say")
@@ -463,6 +472,7 @@ speaker vera
 let side = askText "Side"
 vera.bubble = { ${option}: side }
 say "must not be emitted", instant
+exit
 `);
     const waiting = run(plan, createFreshRuntimeSnapshot(plan));
     const action = waiting.snapshot.foregroundAction;
@@ -486,10 +496,11 @@ say "must not be emitted", instant
       );
     }
     const nullPlan = compileValidPlan(`
-let options = { ${option}: null }
+global options = { ${option}: null }
 speaker vera { bubble: options }
 speaker vera
 say "must not be emitted", instant
+exit
 `);
     const invalid = run(nullPlan, createFreshRuntimeSnapshot(nullPlan));
     assert.equal(invalid.snapshot.status, "failed");
@@ -498,7 +509,7 @@ say "must not be emitted", instant
 });
 
 test("checkpoint validation rejects authored placement on prepared bubble output", () => {
-  const plan = compileValidPlan('say "first"\nsay bubble "second"');
+  const plan = compileValidPlan('say "first"\nsay bubble "second"\nexit');
   const waiting = run(plan, createFreshRuntimeSnapshot(plan));
   const checkpointJson = serializeCheckpoint(createCheckpoint(plan, waiting.snapshot));
   assert.doesNotThrow(() => deserializeCheckpoint(checkpointJson));

@@ -20,6 +20,7 @@ import {
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { runUntilExit } from "./helpers/run-until-exit.js";
 
 const PHOTO = "captured-media:photo:1";
 // The trusted Player store vouches for exactly the photos it captured.
@@ -72,7 +73,7 @@ const kinds = (events: readonly InterpreterEvent[]) => events.map((event) => eve
 
 test("takePhoto() waits for the Player and its captured reference reaches the Stage", () => {
   const { plan, snapshot, events } = started(
-    "let photo: string? = takePhoto()\nif photo != null {\n  showImage photo\n}",
+    "let photo: string? = takePhoto()\nif photo != null {\n  showImage photo\n}\nexit",
   );
   assert.equal(snapshot.status, "waiting");
   assert.deepEqual(kinds(events), ["actionRequested"]);
@@ -80,8 +81,8 @@ test("takePhoto() waits for the Player and its captured reference reaches the St
   assert.equal(completion.outcome.kind, "completed");
   // A capture is silent: no transcript, no warning.
   assert.deepEqual(kinds(completion.events), ["actionCompleted"]);
-  const finished = run(plan, completion.snapshot);
-  assert.equal(finished.snapshot.status, "halted");
+  const finished = runUntilExit(plan, completion.snapshot);
+  assert.equal(plan.instructions[finished.snapshot.nextInstruction]?.kind, "exit");
   assert.equal(finished.snapshot.stageImage, PHOTO);
 });
 
@@ -96,21 +97,21 @@ test("an unavailable camera yields null with a developer warning and the script 
     "failed",
   ]) {
     const { plan, snapshot } = started(
-      'let photo = takePhoto()\nlet seen = photo == null\nshowImage "images/fallback.svg"',
+      'let photo = takePhoto()\nlet seen = photo == null\nshowImage "images/fallback.svg"\nexit',
     );
     const completion = unavailable(plan, snapshot, reason);
     assert.equal(completion.outcome.kind, "completed", reason);
     const warning = completion.events.find((event) => event.kind === "developerWarning");
     assert.ok(warning?.kind === "developerWarning" && warning.code === "TSW015", reason);
     assert.match(warning.message, /takePhoto\(\) returned null/u);
-    const finished = run(plan, completion.snapshot);
-    assert.equal(finished.snapshot.status, "halted", reason);
+    const finished = runUntilExit(plan, completion.snapshot);
+    assert.equal(plan.instructions[finished.snapshot.nextInstruction]?.kind, "exit", reason);
     assert.equal(binding(finished.snapshot, "seen"), true, reason);
   }
 });
 
 test("only a reference the trusted store holds becomes a captured photo", () => {
-  const { plan, snapshot } = started("let photo = takePhoto()");
+  const { plan, snapshot } = started("let photo = takePhoto()\nexit");
   const before = structuredClone(snapshot);
   const id = pendingCapture(snapshot).actionId;
   const attempts: unknown[] = [
@@ -157,7 +158,7 @@ test("only a reference the trusted store holds becomes a captured photo", () => 
 });
 
 test("a repeated completion replays its settlement instead of capturing twice", () => {
-  const { plan, snapshot } = started("let photo = takePhoto()\nlet again = takePhoto()");
+  const { plan, snapshot } = started("let photo = takePhoto()\nlet again = takePhoto()\nexit");
   const request = {
     actionId: pendingCapture(snapshot).actionId,
     actionKind: "capture",
@@ -173,7 +174,9 @@ test("a repeated completion replays its settlement instead of capturing twice", 
 });
 
 test("a pending capture survives a JSON checkpoint and completes like the original", () => {
-  const { plan, snapshot } = started('let photo = takePhoto()\nshowImage photo\nlet done = "yes"');
+  const { plan, snapshot } = started(
+    'let photo = takePhoto()\nshowImage photo\nlet done = "yes"\nexit',
+  );
   const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, snapshot)));
   assert.deepEqual(restored.snapshot, snapshot);
   const original = run(plan, captured(plan, snapshot).snapshot);
@@ -190,22 +193,22 @@ test("a pending capture survives a JSON checkpoint and completes like the origin
 
 test("captures keep source order inside expressions and as discarded statements", () => {
   const { plan, snapshot } = started(
-    "takePhoto()\nlet pair = [takePhoto(), takePhoto()]\nlet first = pair[0]\nlet second = pair[1]",
+    "takePhoto()\nlet pair = [takePhoto(), takePhoto()]\nlet first = pair[0]\nlet second = pair[1]\nexit",
   );
   let current = unavailable(plan, snapshot, "denied").snapshot;
   current = run(plan, current).snapshot;
   current = captured(plan, current).snapshot;
   current = run(plan, current).snapshot;
   current = unavailable(plan, current, "busy").snapshot;
-  const finished = run(plan, current).snapshot;
-  assert.equal(finished.status, "halted");
+  const finished = runUntilExit(plan, current).snapshot;
+  assert.equal(plan.instructions[finished.nextInstruction]?.kind, "exit");
   assert.equal(binding(finished, "first"), PHOTO);
   assert.equal(binding(finished, "second"), null);
 });
 
 test("a timer expiry block waits until a pending capture settles", () => {
   const { plan, snapshot } = started(
-    "let fired = false\ntimer async 1 {\n  fired = true\n}\nlet photo = takePhoto()\nwait 5",
+    "let fired = false\ntimer async 1 {\n  fired = true\n}\nlet photo = takePhoto()\nwait 5\nexit",
   );
   const late = observeTime(plan, snapshot, 2000);
   assert.equal(late.snapshot.foregroundAction?.kind, "capture");
@@ -227,7 +230,7 @@ test("takePhoto() is a reserved call, not a value, argument-taking call, or host
 });
 
 test("an external plan cannot call takePhoto() as an ordinary function", () => {
-  const plan = compileValidPlan('let photo = random()\nshowImage "a"');
+  const plan = compileValidPlan('let photo = random()\nshowImage "a"\nexit');
   const forged = JSON.parse(JSON.stringify(plan));
   const declare = forged.instructions.find(
     (instruction: { kind: string }) => instruction.kind === "declareBinding",
@@ -238,7 +241,7 @@ test("an external plan cannot call takePhoto() as an ordinary function", () => {
 });
 
 test("restored state rejects a tampered capture action or settlement", () => {
-  const { plan, snapshot } = started("let photo = takePhoto()");
+  const { plan, snapshot } = started("let photo = takePhoto()\nexit");
   const json = serializeCheckpoint(createCheckpoint(plan, snapshot));
   const pending = () => JSON.parse(json);
   const wrongDestination = pending();
@@ -256,7 +259,7 @@ test("restored state rejects a tampered capture action or settlement", () => {
 });
 
 test("a restored capture result must match its canonical settlement until the script consumes it", () => {
-  const { plan, snapshot } = started("let photo = takePhoto()\nshowImage photo");
+  const { plan, snapshot } = started("let photo = takePhoto()\nshowImage photo\nexit");
   const settled = unavailable(plan, snapshot, "denied").snapshot;
   assert.equal(settled.interactionResultHandoff?.result, null);
   const restored = JSON.parse(serializeCheckpoint(createCheckpoint(plan, settled)));
@@ -273,7 +276,7 @@ test("a restored capture result must match its canonical settlement until the sc
 });
 
 test("a capture reserves its events on top of what active actions still need", () => {
-  const plan = compileValidPlan("timer async 1\nlet photo = takePhoto()");
+  const plan = compileValidPlan("timer async 1\nlet photo = takePhoto()\nexit");
   let snapshot = createFreshRuntimeSnapshot(plan);
   while (plan.instructions[snapshot.nextInstruction]?.kind !== "capture")
     snapshot = executeInstruction(plan, snapshot).snapshot;
@@ -288,7 +291,7 @@ test("a capture reserves its events on top of what active actions still need", (
 
 test("an earlier pacing gate may settle after a capture before its result is consumed", () => {
   for (const answer of ["captured", "unavailable"] as const) {
-    const { plan, snapshot } = started('say "hi"\nlet photo = takePhoto()\nshowImage photo');
+    const { plan, snapshot } = started('say "hi"\nlet photo = takePhoto()\nshowImage photo\nexit');
     const gate = snapshot.backgroundActions.find((action) => action.kind === "chatPacingGate");
     assert.ok(gate !== undefined, "the message is still pacing in the background");
     const settled =
@@ -306,7 +309,7 @@ test("an earlier pacing gate may settle after a capture before its result is con
       restoreCheckpoint(createCheckpoint(plan, skipped.snapshot)).snapshot,
       skipped.snapshot,
     );
-    const finished = run(plan, skipped.snapshot).snapshot;
+    const finished = runUntilExit(plan, skipped.snapshot).snapshot;
     assert.equal(finished.stageImage, answer === "captured" ? PHOTO : null, answer);
   }
 });

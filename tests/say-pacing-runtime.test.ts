@@ -16,9 +16,10 @@ import {
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
+import { runUntilExit } from "./helpers/run-until-exit.js";
 
 test("say lowers smart, exact, and instant pacing with explicit skip policy", () => {
-  const compiled = plan('say skippable "a"\nsay unskippable "b", 1.5\nsay "c", instant');
+  const compiled = plan('say skippable "a"\nsay unskippable "b", 1.5\nsay "c", instant\nexit');
   const loweredPacing = compiled.instructions.map((instruction) => {
     if (instruction.kind !== "say") return instruction.kind;
     const pacingKind =
@@ -32,6 +33,8 @@ test("say lowers smart, exact, and instant pacing with explicit skip policy", ()
     ["skippable", "smart"],
     ["unskippable", "literal"],
     [null, "instant"],
+    "exit",
+    "end",
   ]);
 });
 
@@ -43,6 +46,7 @@ test("say lowering preserves contextual skip words as value identifiers", () => 
       "say skippable",
       "say unskippable",
       "say skippable, instant",
+      "exit",
     ].join("\n"),
   );
   const says = compiled.instructions.filter(
@@ -67,6 +71,7 @@ test("instant remains an identifier when its pacing expression continues", () =>
       'say "plus", instant[0] + 1',
       'say "index", instant[0]',
       'say "property", instant.length',
+      "exit",
     ].join("\n"),
   );
   const says = compiled.instructions.filter(
@@ -80,8 +85,8 @@ test("instant remains an identifier when its pacing expression continues", () =>
     ["binary", "index", "property"],
   );
 
-  const call = plan('function instant(value) { return value }\nsay "call", instant(2)');
-  const callResult = run(call, createFreshRuntimeSnapshot(call));
+  const call = plan('function instant(value) { return value }\nsay "call", instant(2)\nexit');
+  const callResult = runUntilExit(call, createFreshRuntimeSnapshot(call));
   const callGate = callResult.snapshot.backgroundActions[0];
   assert.equal(callGate?.kind, "chatPacingGate");
   if (callGate?.kind === "chatPacingGate") assert.equal(callGate.deadlineMs, 2_000);
@@ -101,6 +106,7 @@ test("say preparation resumes exactly once across an instruction-call pacing che
       "  return 1",
       "}",
       "say textValue(), pace()",
+      "exit",
     ].join("\n"),
   );
   const log = (snapshot: RuntimeSnapshot) =>
@@ -155,6 +161,7 @@ test("text-side calls capture explicit speaker provenance before they suspend", 
       '  return "hello"',
       "}",
       "say as vera mutate(), instant",
+      "exit",
     ].join("\n"),
   );
   const callIndex = compiled.instructions.findIndex(
@@ -244,9 +251,10 @@ test("prepared says retain contextual speaker identity across text and pacing ca
         'function textValue { return "hello" }',
         "function pace { return 1 }",
         `${scenario.speaker} ${scenario.text}, ${scenario.pacing}`,
+        "exit",
       ].join("\n"),
     );
-    const result = run(compiled, createFreshRuntimeSnapshot(compiled));
+    const result = runUntilExit(compiled, createFreshRuntimeSnapshot(compiled));
     const output = result.events.find((event) => event.kind === "say");
     assert.equal(output?.kind, "say", scenario.name);
     assert.equal(output?.text, scenario.expected, scenario.name);
@@ -271,6 +279,7 @@ test("prepared says retain contextual speaker identity across text and pacing ca
       "}",
       "function pace { return 1 }",
       'say as vera "${speaker.title} ${mutate()}", pace()',
+      "exit",
     ].join("\n"),
   );
   const result = run(mutated, createFreshRuntimeSnapshot(mutated));
@@ -296,6 +305,7 @@ test("prepared contextual speaker values survive a suspended text call checkpoin
       "}",
       "function pace { return 1 }",
       'say as vera "${speaker.title} ${textValue()}", speaker.delay + pace()',
+      "exit",
     ].join("\n"),
   );
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
@@ -319,7 +329,7 @@ test("prepared contextual speaker values survive a suspended text call checkpoin
 });
 
 test("first smart say creates a background gate and later say promotes it without a second request", () => {
-  const compiled = plan('say "first"\nsay "second"');
+  const compiled = plan('say "first"\nsay "second"\nexit');
   const fresh = createFreshRuntimeSnapshot(compiled);
   const result = run(compiled, fresh);
   assert.deepEqual(
@@ -336,7 +346,7 @@ test("first smart say creates a background gate and later say promotes it withou
 });
 
 test("pacing skip settles a promoted gate and emits its prepared output once, directly and after checkpoint restore", () => {
-  const compiled = plan('say "${["first", "first-alt"]}"\nsay "${["second", "second-alt"]}"');
+  const compiled = plan('say "${["first", "first-alt"]}"\nsay "${["second", "second-alt"]}"\nexit');
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled, { seed: 77 }));
   const gate = waiting.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
@@ -377,18 +387,18 @@ test("pacing skip settles a promoted gate and emits its prepared output once, di
 });
 
 test("instant output supersedes a background pacing gate", () => {
-  const compiled = plan('say "first"\nsay "second", instant');
+  const compiled = plan('say "first"\nsay "second", instant\nexit');
   const result = run(compiled, createFreshRuntimeSnapshot(compiled));
   assert.deepEqual(
     result.events.map((event) => event.kind),
-    ["say", "actionRequested", "actionCompleted", "say", "complete"],
+    ["say", "actionRequested", "actionCompleted", "say", "exit"],
   );
   assert.equal(result.snapshot.lastSettlement?.actionKind, "chatPacingGate");
   assert.equal(result.snapshot.lastSettlement?.settlementKind, "supersededByInstantOutput");
 });
 
 test("pacing gate survives checkpoint JSON restore and settles through observed time", () => {
-  const compiled = plan('say "first"\nsay "second"');
+  const compiled = plan('say "first"\nsay "second"\nexit');
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   const restored = deserializeCheckpoint(
     serializeCheckpoint(createCheckpoint(compiled, waiting.snapshot)),
@@ -404,14 +414,14 @@ test("pacing gate survives checkpoint JSON restore and settles through observed 
 
 test("background pacing survives scope, loop, and call unwinding through checkpoint restore", () => {
   const scenarios = [
-    'if true { say "branch" }',
-    'repeat 1 { say "loop" }',
-    'function f { say "call" }\nf()',
+    'if true { say "branch" }\nexit',
+    'repeat 1 { say "loop" }\nexit',
+    'function f { say "call" }\nf()\nexit',
   ];
 
   for (const source of scenarios) {
     const compiled = plan(source);
-    const completed = run(compiled, createFreshRuntimeSnapshot(compiled));
+    const completed = runUntilExit(compiled, createFreshRuntimeSnapshot(compiled));
     const gate = completed.snapshot.backgroundActions[0];
     assert.equal(gate?.kind, "chatPacingGate", source);
     assert.equal(validateRuntimeSnapshot(completed.snapshot, compiled).valid, true, source);
@@ -431,7 +441,7 @@ test("background pacing survives scope, loop, and call unwinding through checkpo
 });
 
 test("a pacing gate created by a returned function promotes and resumes later output", () => {
-  const compiled = plan('function f { say "first" }\nf()\nsay "${["second", "second-alt"]}"');
+  const compiled = plan('function f { say "first" }\nf()\nsay "${["second", "second-alt"]}"\nexit');
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled, { seed: 77 }));
   const gate = waiting.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
@@ -452,10 +462,10 @@ test("a pacing gate created by a returned function promotes and resumes later ou
 
 test("positive pacing control-flow paths have equivalent uninterrupted and restored results", () => {
   const scenarios = [
-    'if true { say "branch" }\nsay "after"',
-    'repeat 1 { say "loop" }\nsay "after"',
-    'function f { say "call" }\nf()\nsay "after"',
-    'function f(count) { if count == 0 { say "recursive" } else { f(count - 1) } }\nf(1)\nsay "after"',
+    'if true { say "branch" }\nsay "after"\nexit',
+    'repeat 1 { say "loop" }\nsay "after"\nexit',
+    'function f { say "call" }\nf()\nsay "after"\nexit',
+    'function f(count) { if count == 0 { say "recursive" } else { f(count - 1) } }\nf(1)\nsay "after"\nexit',
   ];
 
   for (const source of scenarios) {
@@ -482,8 +492,8 @@ test("positive pacing control-flow paths have equivalent uninterrupted and resto
 });
 
 test("pacing creation provenance rejects an impossible function owner", () => {
-  const compiled = plan('function f { say "first" }\nf()');
-  const completed = run(compiled, createFreshRuntimeSnapshot(compiled));
+  const compiled = plan('function f { say "first" }\nf()\nexit');
+  const completed = runUntilExit(compiled, createFreshRuntimeSnapshot(compiled));
   // EVIDENCE: fixture: parse a serialized completed checkpoint into the persisted action-owner shape mutated below.
   const corrupted = JSON.parse(
     serializeCheckpoint(createCheckpoint(compiled, completed.snapshot)),
@@ -497,21 +507,26 @@ test("pacing creation provenance rejects an impossible function owner", () => {
 test("smart pacing uses the final visible text and captured settings", () => {
   const cases = [
     {
-      source: 'let name = "Ada"\nsay \"Hi ${name}\"',
+      source: 'let name = "Ada"\nsay \"Hi ${name}\"\nexit',
       options: {},
       text: "Hi Ada",
       deadlineMs: 2_100,
     },
     {
-      source: 'let texts = ["short", "selected text"]\nsay "${texts}"',
+      source: 'let texts = ["short", "selected text"]\nsay "${texts}"\nexit',
       options: { seed: 77 },
       text: "short",
       deadlineMs: 1_800,
     },
-    { source: 'say "😀"', options: {}, text: "😀", deadlineMs: 1_800 },
-    { source: 'say "one\\ttwo\\nthree"', options: {}, text: "one\ttwo\nthree", deadlineMs: 2_400 },
+    { source: 'say "😀"\nexit', options: {}, text: "😀", deadlineMs: 1_800 },
     {
-      source: 'say "hello 😀"',
+      source: 'say "one\\ttwo\\nthree"\nexit',
+      options: {},
+      text: "one\ttwo\nthree",
+      deadlineMs: 2_400,
+    },
+    {
+      source: 'say "hello 😀"\nexit',
       options: { baseDelayMs: 7, delayPerWordMs: 11, delayPerCharacterMs: 13 },
       text: "hello 😀",
       deadlineMs: 98,
@@ -520,7 +535,7 @@ test("smart pacing uses the final visible text and captured settings", () => {
 
   for (const scenario of cases) {
     const compiled = plan(scenario.source);
-    const result = run(compiled, createFreshRuntimeSnapshot(compiled, scenario.options));
+    const result = runUntilExit(compiled, createFreshRuntimeSnapshot(compiled, scenario.options));
     const gate = result.snapshot.backgroundActions[0];
     assert.equal(gate?.kind, "chatPacingGate", scenario.source);
     assert.equal(gate?.deadlineMs, scenario.deadlineMs, scenario.source);
@@ -530,14 +545,14 @@ test("smart pacing uses the final visible text and captured settings", () => {
     assert.equal(sayEvent.text, scenario.text, scenario.source);
   }
 
-  const zero = plan('say "no gate"');
+  const zero = plan('say "no gate"\nexit');
   const immediate = run(
     zero,
     createFreshRuntimeSnapshot(zero, { baseDelayMs: 0, delayPerWordMs: 0, delayPerCharacterMs: 0 }),
   );
   assert.deepEqual(
     immediate.events.map((event) => event.kind),
-    ["say", "complete"],
+    ["say", "exit"],
   );
   assert.equal(immediate.snapshot.nextActionId, 1);
   assert.equal(immediate.snapshot.lastSettlement, null);
@@ -545,15 +560,15 @@ test("smart pacing uses the final visible text and captured settings", () => {
 
 test("say skip policy follows explicit, speaker, and fallback precedence", () => {
   const cases = [
-    ['speaker vera { defaultSaySkippable: false }\nsay skippable "text"', true],
-    ['speaker vera { defaultSaySkippable: true }\nsay unskippable "text"', false],
-    ['speaker vera { defaultSaySkippable: false }\nsay as vera "text"', false],
-    ['speaker vera { defaultSaySkippable: true }\nsay as vera "text"', true],
-    ['say "text"', true],
+    ['speaker vera { defaultSaySkippable: false }\nsay skippable "text"\nexit', true],
+    ['speaker vera { defaultSaySkippable: true }\nsay unskippable "text"\nexit', false],
+    ['speaker vera { defaultSaySkippable: false }\nsay as vera "text"\nexit', false],
+    ['speaker vera { defaultSaySkippable: true }\nsay as vera "text"\nexit', true],
+    ['say "text"\nexit', true],
   ] as const;
   for (const [source, expected] of cases) {
     const compiled = plan(source);
-    const result = run(compiled, createFreshRuntimeSnapshot(compiled));
+    const result = runUntilExit(compiled, createFreshRuntimeSnapshot(compiled));
     const gate = result.snapshot.backgroundActions[0];
     assert.equal(gate?.kind, "chatPacingGate", source);
     if (gate?.kind === "chatPacingGate") {
@@ -566,6 +581,7 @@ test("say skip policy follows explicit, speaker, and fallback precedence", () =>
       "speaker vera { defaultSaySkippable: false }",
       'say as vera "first"',
       'say as vera skippable "second"',
+      "exit",
     ].join("\n"),
   );
   const waiting = run(promotedPlan, createFreshRuntimeSnapshot(promotedPlan));
@@ -574,29 +590,21 @@ test("say skip policy follows explicit, speaker, and fallback precedence", () =>
   assert.equal(gate?.skippable, false);
   assert.equal(gate?.preparedOutput?.skippable, true);
   const settled = observeTime(promotedPlan, waiting.snapshot, gate!.deadlineMs);
-  const resumed = run(promotedPlan, settled.snapshot);
+  const resumed = runUntilExit(promotedPlan, settled.snapshot);
   const replacement = resumed.snapshot.backgroundActions[0];
   assert.equal(replacement?.kind, "chatPacingGate");
   if (replacement?.kind === "chatPacingGate") assert.equal(replacement.skippable, true);
 
-  // A host value hides the number from the compiler, which rejects a known non-boolean value itself (#552); the
-  // random title shows that the failed declaration commits no random draw either.
-  const invalid = plan(
-    'speaker vera {\n    title: "${random()}"\n    defaultSaySkippable: flag\n}',
-    { globals: ["flag"] },
-  );
-  const rejected = run(
-    invalid,
-    createFreshRuntimeSnapshot(invalid, { seed: 77, globals: { flag: 1 } }),
-  );
+  // A host value hides the number from the compiler, which rejects a known non-boolean value itself (#552).
+  const invalid = plan("speaker vera { defaultSaySkippable: flag }\nexit", { globals: ["flag"] });
+  const rejected = run(invalid, createFreshRuntimeSnapshot(invalid, { globals: { flag: 1 } }));
   assert.equal(rejected.snapshot.status, "failed");
   assert.equal(rejected.snapshot.speakers.length, 0);
-  // Only the host value is bound; the failed declaration commits nothing.
+  // Only the host value is a global; the failed declaration commits nothing.
   assert.deepEqual(
-    rejected.snapshot.frames[0]?.bindings.map((binding) => binding.name),
+    rejected.snapshot.globals.map((binding) => binding.name),
     ["flag"],
   );
-  assert.equal(rejected.snapshot.rng.state, 77);
 });
 
 test("invalid runtime pacing fails without committing say evaluation effects", () => {
@@ -606,6 +614,7 @@ test("invalid runtime pacing fails without committing say evaluation effects", (
       'say as vera "first"',
       "let pacing = -1",
       "say as vera random(), pacing",
+      "exit",
     ].join("\n"),
   );
   const result = run(compiled, createFreshRuntimeSnapshot(compiled, { seed: 77 }));
@@ -623,7 +632,7 @@ test("invalid runtime pacing fails without committing say evaluation effects", (
   assert.equal(result.events.filter((event) => event.kind === "developerWarning").length, 1);
 
   const noWarning = plan(
-    ["speaker ada {}", "let pacing = -1", "say as ada random(), pacing"].join("\n"),
+    ["speaker ada {}", "let pacing = -1", "say as ada random(), pacing", "exit"].join("\n"),
   );
   const noWarningResult = run(noWarning, createFreshRuntimeSnapshot(noWarning, { seed: 77 }));
   assert.equal(noWarningResult.snapshot.rng.state, 77);
@@ -634,7 +643,7 @@ test("invalid runtime pacing fails without committing say evaluation effects", (
 });
 
 test("unsupported and overflowing runtime pacing leave message evaluation uncommitted", () => {
-  const unsupported = plan("say random(), 9007199254740991");
+  const unsupported = plan("say random(), 9007199254740991\nexit");
   const unsupportedResult = run(unsupported, createFreshRuntimeSnapshot(unsupported, { seed: 77 }));
   assert.equal(unsupportedResult.snapshot.status, "failed");
   assert.equal(unsupportedResult.snapshot.rng.state, 77);
@@ -643,7 +652,7 @@ test("unsupported and overflowing runtime pacing leave message evaluation uncomm
     ["runtimeFailure"],
   );
 
-  const nonFinite = plan("let zero = 0\nsay random(), 1 / zero");
+  const nonFinite = plan("let zero = 0\nsay random(), 1 / zero\nexit");
   const nonFiniteResult = run(nonFinite, createFreshRuntimeSnapshot(nonFinite, { seed: 77 }));
   assert.equal(nonFiniteResult.snapshot.status, "failed");
   assert.equal(nonFiniteResult.snapshot.rng.state, 77);
@@ -652,7 +661,7 @@ test("unsupported and overflowing runtime pacing leave message evaluation uncomm
     ["runtimeFailure"],
   );
 
-  const overflow = plan("say random(), 1");
+  const overflow = plan("say random(), 1\nexit");
   const overflowResult = run(
     overflow,
     createFreshRuntimeSnapshot(overflow, {
@@ -669,8 +678,8 @@ test("unsupported and overflowing runtime pacing leave message evaluation uncomm
 });
 
 test("typed skip resolves an active background pacing gate without disturbing a foreground wait", () => {
-  const standalone = plan('say "first"');
-  const standaloneWaiting = run(standalone, createFreshRuntimeSnapshot(standalone));
+  const standalone = plan('say "first"\nexit');
+  const standaloneWaiting = runUntilExit(standalone, createFreshRuntimeSnapshot(standalone));
   const standaloneGate = standaloneWaiting.snapshot.backgroundActions[0];
   assert.equal(standaloneGate?.kind, "chatPacingGate");
   const standaloneSkipped = completeAction(standalone, standaloneWaiting.snapshot, {
@@ -685,7 +694,7 @@ test("typed skip resolves an active background pacing gate without disturbing a 
     ["actionCompleted"],
   );
 
-  const withWait = plan('say "first"\nwait 1 s');
+  const withWait = plan('say "first"\nwait 1 s\nexit');
   const waiting = run(withWait, createFreshRuntimeSnapshot(withWait));
   const backgroundGate = waiting.snapshot.backgroundActions[0];
   assert.equal(waiting.snapshot.foregroundAction?.kind, "delay");
@@ -705,7 +714,7 @@ test("typed skip resolves an active background pacing gate without disturbing a 
 });
 
 test("unskippable pacing rejects typed skips without mutating foreground or background state", () => {
-  const foreground = plan('say unskippable "first"\nsay "second"');
+  const foreground = plan('say unskippable "first"\nsay "second"\nexit');
   const foregroundWaiting = run(foreground, createFreshRuntimeSnapshot(foreground));
   const foregroundGate = foregroundWaiting.snapshot.foregroundAction;
   assert.equal(foregroundGate?.kind, "chatPacingGate");
@@ -717,8 +726,8 @@ test("unskippable pacing rejects typed skips without mutating foreground or back
   assert.equal(foregroundRejected.outcome.kind, "invalidPayload");
   assert.deepEqual(foregroundRejected.snapshot, foregroundWaiting.snapshot);
 
-  const background = plan('say unskippable "first"');
-  const backgroundActive = run(background, createFreshRuntimeSnapshot(background));
+  const background = plan('say unskippable "first"\nexit');
+  const backgroundActive = runUntilExit(background, createFreshRuntimeSnapshot(background));
   const backgroundGate = backgroundActive.snapshot.backgroundActions[0];
   assert.equal(backgroundGate?.kind, "chatPacingGate");
   const backgroundRejected = completeAction(background, backgroundActive.snapshot, {
@@ -764,8 +773,8 @@ test("a late observation replays the script at the delay deadline before later p
   assert.equal(exited.snapshot.backgroundActions.length, 0);
 });
 
-test("an observation while a terminal delay handoff is pending settles nothing until the script runs", () => {
-  const compiled = plan('say "first", 5\nwait 1 ms');
+test("an observation while a settled wait's continuation is pending settles nothing until the script runs", () => {
+  const compiled = plan('say "first", 5\nwait 1 ms\nexit');
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   const delay = waiting.snapshot.foregroundAction;
   const pacing = waiting.snapshot.backgroundActions[0];
@@ -790,16 +799,16 @@ test("an observation while a terminal delay handoff is pending settles nothing u
   );
   assert.deepEqual(restored.snapshot, again.snapshot);
 
-  // The script ends at the delay's deadline; the final say's pacing then completes during catch-up.
+  // The script exits at the delay's deadline, which stops the final say's pacing; scene time then catches up.
   const completed = run(restored.plan, restored.snapshot);
   assert.deepEqual(
     completed.events.map((event) =>
       event.kind === "actionCompleted" ? event.settlement.actionId : event.kind,
     ),
-    ["complete", pacing!.actionId],
+    ["exit"],
   );
   assert.equal(completed.snapshot.currentSessionTimeMs, pacing!.deadlineMs + 1);
-  assert.equal(completed.snapshot.terminalContinuationHandoff, null);
+  assert.deepEqual(completed.snapshot.backgroundActions, []);
   assert.equal(completed.snapshot.status, "halted");
   assert.equal(validateRuntimeSnapshot(completed.snapshot, restored.plan).valid, true);
 });
@@ -875,7 +884,7 @@ test("equal due pacing and delay actions settle by action ID", () => {
 });
 
 test("foreground interaction consumes background pacing before its action request", () => {
-  const compiled = plan('say "first"\nshowButton "Continue"');
+  const compiled = plan('say "first"\nshowButton "Continue"\nexit');
   const result = run(compiled, createFreshRuntimeSnapshot(compiled));
 
   assert.deepEqual(
@@ -893,23 +902,23 @@ test("foreground interaction consumes background pacing before its action reques
 });
 
 test("exact and zero pacing create only the required actions", () => {
-  const exact = plan('say "first", 0.5');
-  const exactResult = run(exact, createFreshRuntimeSnapshot(exact));
+  const exact = plan('say "first", 0.5\nexit');
+  const exactResult = runUntilExit(exact, createFreshRuntimeSnapshot(exact));
   assert.equal(exactResult.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
   assert.equal(exactResult.snapshot.backgroundActions[0]?.deadlineMs, 500);
 
-  const zero = plan('say "now", 0');
+  const zero = plan('say "now", 0\nexit');
   const zeroResult = run(zero, createFreshRuntimeSnapshot(zero));
   assert.deepEqual(
     zeroResult.events.map((event) => event.kind),
-    ["say", "complete"],
+    ["say", "exit"],
   );
   assert.equal(zeroResult.snapshot.nextActionId, 1);
   assert.equal(zeroResult.snapshot.lastSettlement, null);
 });
 
 test("a background pacing gate restores before promotion and preserves prepared output equivalence", () => {
-  const compiled = plan('say "${["first", "first-alt"]}"\nsay "${["second", "second-alt"]}"');
+  const compiled = plan('say "${["first", "first-alt"]}"\nsay "${["second", "second-alt"]}"\nexit');
   const initial = createFreshRuntimeSnapshot(compiled, { seed: 77 });
   const first = executeInstruction(compiled, initial);
   const originalGate = first.snapshot.backgroundActions[0];
@@ -1008,7 +1017,7 @@ test("pacing completion preserves active-first, replay, stale, unknown, and wait
 test("pacing capacity and action-ID failures do not partially commit transitions", () => {
   const max = Number.MAX_SAFE_INTEGER;
 
-  const initialPlan = plan("say random()");
+  const initialPlan = plan("say random()\nexit");
   const initial = createFreshRuntimeSnapshot(initialPlan, { seed: 77 });
   initial.nextEventSequence = max - 1;
   const initialFailure = run(initialPlan, initial);
@@ -1021,7 +1030,7 @@ test("pacing capacity and action-ID failures do not partially commit transitions
     ["runtimeFailure"],
   );
 
-  const supersedePlan = plan('say "first"\nsay "now", instant');
+  const supersedePlan = plan('say "first"\nsay "now", instant\nexit');
   const afterFirst = executeInstruction(supersedePlan, createFreshRuntimeSnapshot(supersedePlan));
   const supersedeInput = structuredClone(afterFirst.snapshot);
   supersedeInput.nextEventSequence = max - 1;
@@ -1032,7 +1041,7 @@ test("pacing capacity and action-ID failures do not partially commit transitions
   );
   assert.equal(JSON.stringify(supersedeInput), supersedeBefore);
 
-  const interactionPlan = plan('say "first"\nshowButton "Continue"');
+  const interactionPlan = plan('say "first"\nshowButton "Continue"\nexit');
   const beforeInteraction = executeInstruction(
     interactionPlan,
     createFreshRuntimeSnapshot(interactionPlan),
@@ -1045,7 +1054,7 @@ test("pacing capacity and action-ID failures do not partially commit transitions
   assert.equal(interactionFailure.snapshot.foregroundAction, null);
   assert.equal(interactionFailure.snapshot.lastSettlement, null);
 
-  const promotedPlan = plan('say "first"\nsay "second"');
+  const promotedPlan = plan('say "first"\nsay "second"\nexit');
   const promotedWaiting = run(promotedPlan, createFreshRuntimeSnapshot(promotedPlan));
   const promotedGate = promotedWaiting.snapshot.foregroundAction;
   assert.equal(promotedGate?.kind, "chatPacingGate");
@@ -1091,7 +1100,7 @@ test("pacing actions reserve all mandatory future event sequences", () => {
   assert.equal(rejected.snapshot.status, "failed");
   assert.equal(rejected.snapshot.backgroundActions.length, 0);
 
-  const mixedPlan = plan('say "first", 5\nwait 5 s');
+  const mixedPlan = plan('say "first", 5\nwait 5 s\nexit');
   const beforeWait = executeInstruction(mixedPlan, createFreshRuntimeSnapshot(mixedPlan));
   const mixedJustEnough = structuredClone(beforeWait.snapshot);
   mixedJustEnough.nextEventSequence = max - 3;
@@ -1145,6 +1154,7 @@ test("ordinary events preserve active pacing completion capacity", () => {
       "speaker vera {}",
       'say as ada "first", 5',
       'say as vera "second", 5',
+      "exit",
     ].join("\n"),
   );
   const secondSay = fallbackPlan.instructions
@@ -1175,7 +1185,7 @@ test("ordinary events preserve active pacing completion capacity", () => {
   );
   assert.equal(JSON.stringify(fallbackOneLess), fallbackBefore);
 
-  const failurePlan = plan('say "first", 5\nlet pacing = -1\nsay "second", pacing');
+  const failurePlan = plan('say "first", 5\nlet pacing = -1\nsay "second", pacing\nexit');
   const failingSay = failurePlan.instructions.findIndex(
     (instruction, index) => instruction.kind === "say" && index > 0,
   );
@@ -1236,22 +1246,25 @@ test("ordinary events preserve active pacing completion capacity", () => {
   assert.equal(validateRuntimeSnapshot(settled.snapshot, budgetPlan).valid, true);
 });
 
-test("terminal say transitions reserve complete and future action events atomically", () => {
+test("say transitions reserve their own and future action events atomically", () => {
   const max = Number.MAX_SAFE_INTEGER;
+  const exhausted = (error: unknown) =>
+    error instanceof RuntimeDataError && error.code === "TSR101";
 
-  const positive = plan('say "last", 5');
+  // A positive pacing gate needs the say, its request, and its future completion.
+  const positive = plan('say "last", 5\nexit');
   const positiveEnough = createFreshRuntimeSnapshot(positive);
-  positiveEnough.nextEventSequence = max - 4;
+  positiveEnough.nextEventSequence = max - 3;
   const positiveCompleted = executeInstruction(positive, positiveEnough);
   assert.deepEqual(
     positiveCompleted.events.map((event) => event.kind),
-    ["say", "actionRequested", "complete"],
+    ["say", "actionRequested"],
   );
   assert.equal(positiveCompleted.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
   assert.equal(validateRuntimeSnapshot(positiveCompleted.snapshot, positive).valid, true);
 
   const positiveOneLess = createFreshRuntimeSnapshot(positive);
-  positiveOneLess.nextEventSequence = max - 3;
+  positiveOneLess.nextEventSequence = max - 2;
   const positiveRejected = executeInstruction(positive, positiveOneLess);
   assert.equal(positiveRejected.snapshot.status, "failed");
   assert.equal(positiveRejected.snapshot.nextInstruction, 0);
@@ -1263,53 +1276,47 @@ test("terminal say transitions reserve complete and future action events atomica
   assert.equal(validateRuntimeSnapshot(positiveRejected.snapshot, positive).valid, true);
 
   for (const pacing of ["0", "instant"]) {
-    const immediate = plan(`say "last", ${pacing}`);
+    // An immediate say needs only itself; without that event no failure can be reported either.
+    const immediate = plan(`say "last", ${pacing}\nexit`);
     const enough = createFreshRuntimeSnapshot(immediate);
-    enough.nextEventSequence = max - 2;
+    enough.nextEventSequence = max - 1;
     const completed = executeInstruction(immediate, enough);
     assert.deepEqual(
       completed.events.map((event) => event.kind),
-      ["say", "complete"],
+      ["say"],
       pacing,
     );
 
     const oneLess = createFreshRuntimeSnapshot(immediate);
-    oneLess.nextEventSequence = max - 1;
-    const rejected = executeInstruction(immediate, oneLess);
-    assert.equal(rejected.snapshot.status, "failed", pacing);
-    assert.equal(rejected.snapshot.nextInstruction, 0, pacing);
-    assert.deepEqual(
-      rejected.events.map((event) => event.kind),
-      ["runtimeFailure"],
-      pacing,
-    );
-    assert.equal(validateRuntimeSnapshot(rejected.snapshot, immediate).valid, true, pacing);
+    oneLess.nextEventSequence = max;
+    const before = JSON.stringify(oneLess);
+    assert.throws(() => executeInstruction(immediate, oneLess), exhausted, pacing);
+    assert.equal(JSON.stringify(oneLess), before, pacing);
   }
 
   for (const pacing of ["0", "instant"]) {
-    const supersession = plan(`say "first", 5\nsay "last", ${pacing}`);
+    // Superseding an older gate settles it in the sequence reserved for its completion, then says.
+    const supersession = plan(`say "first", 5\nsay "last", ${pacing}\nexit`);
     const afterFirst = executeInstruction(supersession, createFreshRuntimeSnapshot(supersession));
     const enough = structuredClone(afterFirst.snapshot);
-    enough.nextEventSequence = max - 3;
+    enough.nextEventSequence = max - 2;
     const completed = executeInstruction(supersession, enough);
     assert.deepEqual(
       completed.events.map((event) => event.kind),
-      ["actionCompleted", "say", "complete"],
+      ["actionCompleted", "say"],
       pacing,
     );
     assert.equal(completed.snapshot.backgroundActions.length, 0, pacing);
+    assert.equal(validateRuntimeSnapshot(completed.snapshot, supersession).valid, true, pacing);
 
     const oneLess = structuredClone(afterFirst.snapshot);
-    oneLess.nextEventSequence = max - 2;
-    const rejected = executeInstruction(supersession, oneLess);
-    assert.equal(rejected.snapshot.status, "failed", pacing);
-    assert.equal(rejected.snapshot.nextInstruction, 1, pacing);
-    assert.equal(rejected.snapshot.backgroundActions.length, 1, pacing);
-    assert.equal(rejected.snapshot.lastSettlement, null, pacing);
-    assert.equal(validateRuntimeSnapshot(rejected.snapshot, supersession).valid, true, pacing);
+    oneLess.nextEventSequence = max - 1;
+    const before = JSON.stringify(oneLess);
+    assert.throws(() => executeInstruction(supersession, oneLess), exhausted, pacing);
+    assert.equal(JSON.stringify(oneLess), before, pacing);
   }
 
-  const prepared = plan('say "first", 5\nsay "last", 5');
+  const prepared = plan('say "first", 5\nsay "last", 5\nexit');
   const promoted = run(prepared, createFreshRuntimeSnapshot(prepared));
   const gate = promoted.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
@@ -1319,17 +1326,17 @@ test("terminal say transitions reserve complete and future action events atomica
     payload: { kind: "skip" },
   });
   const preparedEnough = structuredClone(released.snapshot);
-  preparedEnough.nextEventSequence = max - 4;
-  const preparedCompleted = run(prepared, preparedEnough);
+  preparedEnough.nextEventSequence = max - 3;
+  const preparedCompleted = executeInstruction(prepared, preparedEnough);
   assert.deepEqual(
     preparedCompleted.events.map((event) => event.kind),
-    ["say", "actionRequested", "complete"],
+    ["say", "actionRequested"],
   );
   assert.equal(preparedCompleted.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
 
   const preparedOneLess = structuredClone(released.snapshot);
-  preparedOneLess.nextEventSequence = max - 3;
-  const preparedRejected = run(prepared, preparedOneLess);
+  preparedOneLess.nextEventSequence = max - 2;
+  const preparedRejected = executeInstruction(prepared, preparedOneLess);
   assert.equal(preparedRejected.snapshot.status, "failed");
   assert.equal(preparedRejected.snapshot.preparedSayOutput?.text, "last");
   assert.equal(preparedRejected.snapshot.backgroundActions.length, 0);
@@ -1367,7 +1374,7 @@ test("speaker assignment keeps defaultSaySkippable boolean", () => {
 });
 
 test("prepared output remains canonical when replacement pacing cannot meet its deadline", () => {
-  const compiled = plan('say "first", 5\nsay "second", 5');
+  const compiled = plan('say "first", 5\nsay "second", 5\nexit');
   const promoted = run(compiled, createFreshRuntimeSnapshot(compiled));
   const gate = promoted.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
@@ -1391,7 +1398,7 @@ test("prepared output remains canonical when replacement pacing cannot meet its 
 });
 
 test("say instruction plans and public pacing failures stay at their validation boundaries", () => {
-  const base = plan('speaker vera {}\nsay as vera skippable "text", 1');
+  const base = plan('speaker vera {}\nsay as vera skippable "text", 1\nexit');
   const sayIndex = base.instructions.findIndex((instruction) => instruction.kind === "say");
   const say = `$.instructions[${sayIndex}]`;
   // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture table: each callback deliberately violates a different persisted say-instruction field before runtime validation.

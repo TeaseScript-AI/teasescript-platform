@@ -19,8 +19,9 @@ accept syntax, architecture, or implementation details.
   variables, assignments including `+=`/`-=`, speakers, output, collections, expressions, interpolated
   single-line and block strings, constrained authored `say` message markup, protected `escapeMarkup` literal insertion,
   control flow, deterministic random, rounding, and `min`/`max` built-ins, text operations and list `join`, the
-  `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, list `sort`/`shuffle` and set operations, and top-level
-  user-defined functions.
+  `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, list `sort`/`shuffle` and set operations, top-level
+  user-defined functions, labels with `goto` within a file, and explicit endings with a required `exit` (ADR 0022).
+  Projects of several `.tease` files compile into one plan; `call` and transfers between files are not implemented yet.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and
   call state, deterministic RNG state, typed sequenced events, instruction budgets, and defensive restore validation.
 - **Script storage:** `save`/`load`/`delete`, optional lazy defaults, a validated checkpointed session view, and
@@ -30,7 +31,8 @@ accept syntax, architecture, or implementation details.
   labels, opaque handles, lifecycle control, repetition, queued expiry interrupts, and scene-time checkpoint/restore;
   protected compact interactions on one typed foreground family; and ADR 0018 resumable `say` pacing, prepared
   output, typed skip settlement, and interaction/timer composition.
-- **Stage image and media:** `showImage`/`hideImage` Stage state and blocking or asynchronous `playAudio`/`playVideo`
+- **Stage image and media:** `showImage`/`hideImage` Stage state, tag queries over the compiled package image catalog
+  (`showImage tagged`, `findImages`), and blocking or asynchronous `playAudio`/`playVideo`
   with playback ranges, repetition, volume, handles, seeks, timeline cues, Player load/progress observations, and
   checkpoint restore at the language, compiler, and runtime level. The Player shows the Stage image and plays
   audio after explicit Start; browser video playback remains deferred.

@@ -42,6 +42,7 @@ test("runs the first case with a matching value, or default", () => {
     '  case 1 { say "never" }',
     "}",
     'say "after"',
+    "exit",
   ].join("\n");
 
   assert.deepEqual(says(source), ["door", "door", "bye", "nothing", "after"]);
@@ -62,6 +63,7 @@ test("matches literal kinds by == and declared speakers by identity", () => {
     'switch reply { case null { say "no reply" } case "yes" { say "yes" } }',
     'switch 2.0 { case 2 { say "two" } }',
     'switch true { case false { say "off" } case true { say "on" } }',
+    "exit",
   ].join("\n");
 
   assert.deepEqual(says(source), [
@@ -85,6 +87,7 @@ test("matches a number range by its bounds, including numbers that are not whole
     '    default { say "out" }',
     "  }",
     "}",
+    "exit",
   ].join("\n");
 
   assert.deepEqual(says(source), [
@@ -114,6 +117,7 @@ test("a range case never matches a value that is not a number, whatever the case
     'describe("four")',
     "describe(true)",
     "describe(4 s)",
+    "exit",
   ].join("\n");
 
   assert.deepEqual(says(source), ["none", "word", "other", "other"]);
@@ -136,6 +140,7 @@ test("evaluates the switched expression once and never falls through", () => {
     '  default { say "other" }',
     "}",
     "say calls",
+    "exit",
   ].join("\n");
 
   assert.deepEqual(says(source), ["one", "2"]);
@@ -158,6 +163,7 @@ test("case blocks resume after a checkpoint and keep return, break, and continue
         "say grade(3)",
         "say grade(10)",
         "say grade(11)",
+        "exit",
       ].join("\n"),
       expected: ["low", "high", "out of range"],
     },
@@ -172,17 +178,20 @@ test("case blocks resume after a checkpoint and keep return, break, and continue
         "  say n",
         "}",
         'say "done"',
+        "exit",
       ].join("\n"),
       expected: ["1", "3", "done"],
     },
   ];
   for (const { source, expected } of scenarios) {
-    const { events, finalSnapshot } = assertRuntimeResumeEquivalent(source, { seed: 3 });
+    const { events, boundaries } = assertRuntimeResumeEquivalent(source, { seed: 3 });
     assert.deepEqual(
       events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
       expected,
     );
-    assert.deepEqual(finalSnapshot.temporaries, []);
+    // The last boundary runs the exit, which clears temporaries, so the one before it shows what the switch left.
+    assert.equal(events.at(-1)?.kind, "exit");
+    assert.deepEqual(boundaries.at(-2)!.temporaries, []);
   }
 });
 
@@ -194,13 +203,20 @@ test("a switch on a pending compact interaction resumes from a checkpoint", () =
         '  case "Stay" { say "staying" }',
         '  case "Leave" { say "leaving" }',
         "}",
+        "exit",
       ],
       interactionKind: "choice",
       payload: { kind: "selectedOption", optionIndex: 1 },
       expected: ["leaving"],
     },
     {
-      source: ["switch askNumber {", '  case 0..3 { say "few" }', '  default { say "many" }', "}"],
+      source: [
+        "switch askNumber {",
+        '  case 0..3 { say "few" }',
+        '  default { say "many" }',
+        "}",
+        "exit",
+      ],
       interactionKind: "number",
       payload: { kind: "submittedText", submittedText: "2.5" },
       expected: ["few"],
@@ -228,7 +244,7 @@ test("a switch on a pending compact interaction resumes from a checkpoint", () =
 });
 
 test("a range test in an external plan fails with a structured fault unless its right operand is a range", () => {
-  const plan = compileValidPlan('switch 2 { case 1..3 { say "in" } }');
+  const plan = compileValidPlan('switch 2 { case 1..3 { say "in" } }\nexit');
   const conditional = plan.instructions.find((instruction) => instruction.kind === "jumpIfFalse");
   assert.ok(
     conditional?.kind === "jumpIfFalse" &&
@@ -257,9 +273,9 @@ test("a range test in an external plan fails with a structured fault unless its 
 
 test("the block after a switch subject or cue position ends only an ungrouped compact interaction", () => {
   for (const source of [
-    'switch askNumber "How many?" { case 1 {} }',
-    'switch (askNumber { hint: "Number" }.hint) { case 1 {} }',
-    'playAudio "a" {\n  at (askNumber { hint: "Number" }.hint) {}\n}',
+    'switch askNumber "How many?" { case 1 {} }\nexit',
+    'switch (askNumber { hint: "Number" }.hint) { case 1 {} }\nexit',
+    'playAudio "a" {\n  at (askNumber { hint: "Number" }.hint) {}\n}\nexit',
   ]) {
     assert.deepEqual(compileSource(source).diagnostics, [], source);
   }
@@ -294,6 +310,7 @@ test("a function ends at a switch only when a default and every case return", ()
         "  }",
         "}",
         "let text: string = grade(3)",
+        "exit",
       ].join("\n"),
     ).diagnostics.map((item) => item.message);
 
@@ -387,10 +404,13 @@ test("a speaker case is a speaker even in a function called before the speaker i
     "if false { greet() }",
     "speaker guest {}",
     "greet()",
+    "exit",
   ].join("\n");
 
   assert.deepEqual(says(source), ["vera"]);
-  assert.deepEqual(diagnostics("speaker vera {}\nswitch 1 { case vera {} }"), ["TSV049 2:17"]);
+  assert.deepEqual(diagnostics("speaker vera {}\nswitch 1 { case vera {} }\nexit"), [
+    "TSV049 2:17",
+  ]);
 });
 
 test("rejects case values whose type can never match the switched value's known type", () => {
@@ -408,6 +428,7 @@ test("rejects case values whose type can never match the switched value's known 
     "  case 1..5 {}",
     "  case true {}",
     "}",
+    "exit",
   ].join("\n");
 
   assert.deepEqual(diagnostics(source), [
@@ -447,6 +468,7 @@ test("type cases test the switched value's type and narrow the switched variable
     "kind(2)",
     'kind("x")',
     "kind(2.5)",
+    "exit",
   ].join("\n");
 
   assert.deepEqual(says(source), [
@@ -460,7 +482,7 @@ test("type cases test the switched value's type and narrow the switched variable
   ]);
   // `default` knows only what the cases above did not take: here text, so `+ 1` is a type error.
   const leftover = compileSource(
-    "function f(x: integer | string) {\n  switch x {\n    case is integer { }\n    default { say x + 1 }\n  }\n}",
+    "function f(x: integer | string) {\n  switch x {\n    case is integer { }\n    default { say x + 1 }\n  }\n}\nexit",
   );
   assert.deepEqual(
     leftover.diagnostics.map((item) => item.code),
@@ -478,7 +500,7 @@ test("a case that can never match is a warning that does not block the script", 
     );
   };
   const inFunction = (subject: string, cases: string) =>
-    `function f(x: ${subject}) {\n  switch x {\n${cases}\n  }\n}`;
+    `function f(x: ${subject}) {\n  switch x {\n${cases}\n  }\n}\nexit`;
 
   assert.deepEqual(warnings(inFunction("integer", "    case is string { }")), [
     "warning TSV046 3:10",
@@ -502,7 +524,7 @@ test("a type case names its fix when it is not one type", () => {
 });
 
 test("a type case block resumes after a checkpoint", () => {
-  const { events, finalSnapshot } = assertRuntimeResumeEquivalent(
+  const { events, boundaries } = assertRuntimeResumeEquivalent(
     [
       "function f(value) {",
       "  switch value {",
@@ -515,6 +537,7 @@ test("a type case block resumes after a checkpoint", () => {
       "}",
       "f(3)",
       'f("x")',
+      "exit",
     ].join("\n"),
     { seed: 3 },
   );
@@ -523,7 +546,9 @@ test("a type case block resumes after a checkpoint", () => {
     events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
     ["4", "other"],
   );
-  assert.deepEqual(finalSnapshot.temporaries, []);
+  // The last boundary runs the exit, which clears temporaries, so the one before it shows what the switch left.
+  assert.equal(events.at(-1)?.kind, "exit");
+  assert.deepEqual(boundaries.at(-2)!.temporaries, []);
 });
 
 test("value cases keep the narrowing of the cases above, and a never-matching case does not continue", () => {
@@ -537,12 +562,13 @@ test("value cases keep the narrowing of the cases above, and a never-matching ca
     "  say x.length",
     "}",
     'f("a")',
+    "exit",
   ].join("\n");
   assert.deepEqual(says(narrowed), ["1", "1"]);
 
   // `case 5` never matches after `case is integer`, so the function cannot end without a value.
   const ended = compileSource(
-    "function f(x: integer): integer {\n  switch x {\n    case is integer { return 1 }\n    case 5 { }\n  }\n}\nsay f(5)",
+    "function f(x: integer): integer {\n  switch x {\n    case is integer { return 1 }\n    case 5 { }\n  }\n}\nsay f(5)\nexit",
   );
   assert.deepEqual(
     ended.diagnostics.map((item) => `${item.severity} ${item.code}`),
@@ -552,7 +578,7 @@ test("value cases keep the narrowing of the cases above, and a never-matching ca
   // A case value of the wrong type is only that error.
   assert.deepEqual(
     compileSource(
-      'function f(x: integer): integer {\n  switch x {\n    case is integer { return 1 }\n    case "a" { }\n  }\n}',
+      'function f(x: integer): integer {\n  switch x {\n    case is integer { return 1 }\n    case "a" { }\n  }\n}\nexit',
     ).diagnostics.map((item) => item.code),
     ["TSV049"],
   );
@@ -560,7 +586,7 @@ test("value cases keep the narrowing of the cases above, and a never-matching ca
   // Like `x is T`, a type case may continue on the next line.
   assert.deepEqual(
     says(
-      'switch 1 {\n  case is\n    integer { say 1 }\n}\nswitch "a" {\n  case is not\n    integer { say 2 }\n}',
+      'switch 1 {\n  case is\n    integer { say 1 }\n}\nswitch "a" {\n  case is not\n    integer { say 2 }\n}\nexit',
     ),
     ["1", "2"],
   );
@@ -580,6 +606,7 @@ test("a case that lists null with other values takes null away from the cases af
     "punish(null)",
     "punish(0)",
     "punish(3)",
+    "exit",
   ].join("\n");
 
   assert.deepEqual(says(source), ["6 strokes."]);
@@ -594,6 +621,7 @@ test("a range case that no choice value falls in is a never-matching warning", (
       '  case 1..=2 { say "b" }',
       '  case 3..=5 { say "never" }',
       "}",
+      "exit",
     ].join("\n"),
   );
   assert.notEqual(result.plan, null);
@@ -617,7 +645,7 @@ test("a literal case that an earlier type case already takes warns, whatever the
       item.message,
     ]);
   const switchOn = (parameter: string) =>
-    `function f(${parameter}) {\n  switch x {\n    case is integer { }\n    case 5, 2.5 { }\n    case 7.0 { }\n    case "a" { }\n  }\n}`;
+    `function f(${parameter}) {\n  switch x {\n    case is integer { }\n    case 5, 2.5 { }\n    case 7.0 { }\n    case "a" { }\n  }\n}\nexit`;
   const taken = (literal: string) => [
     "warning",
     "TSV046",
@@ -631,7 +659,7 @@ test("a literal case that an earlier type case already takes warns, whatever the
   // A calendar duration has no exact length, but it is a duration, so the loop below cannot end through 'break'.
   assert.deepEqual(
     warnings(
-      "function f(x): integer {\n  while true {\n    switch x {\n      case is duration { return 1 }\n      case 1 d { break }\n      default { return 2 }\n    }\n  }\n}",
+      "function f(x): integer {\n  while true {\n    switch x {\n      case is duration { return 1 }\n      case 1 d { break }\n      default { return 2 }\n    }\n  }\n}\nexit",
     ),
     [
       [
@@ -644,7 +672,7 @@ test("a literal case that an earlier type case already takes warns, whatever the
   );
   assert.deepEqual(
     warnings(
-      'function f(x) {\n  switch x {\n    case is not string { }\n    case "a", 1 { }\n  }\n}',
+      'function f(x) {\n  switch x {\n    case is not string { }\n    case "a", 1 { }\n  }\n}\nexit',
     ),
     [
       [
