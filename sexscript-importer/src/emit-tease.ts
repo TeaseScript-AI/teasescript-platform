@@ -172,7 +172,7 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
     case "switch":
       lines.push(`${pad}switch ${emitExpression(statement.value)} {`);
       for (const item of statement.cases) {
-        lines.push(`${pad}  case ${emitExpression(item.match)} {`);
+        lines.push(`${pad}  case ${item.matches.map(emitExpression).join(", ")} {`);
         emitStatements(item.body, lines, depth + 2);
         lines.push(`${pad}  }`);
       }

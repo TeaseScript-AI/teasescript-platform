@@ -158,7 +158,7 @@ function renameStatement(
         value: expression(statement.value),
         cases: statement.cases.map((item) => ({
           ...item,
-          match: expression(item.match),
+          matches: item.matches.map(expression),
           body: block(item.body),
         })),
         default: block(statement.default),

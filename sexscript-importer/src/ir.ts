@@ -129,7 +129,8 @@ export type IrListChoiceOption =
 
 export interface IrSwitchCase {
   span: SourceSpan | null;
-  match: IrExpression;
+  /** The case's values (several per case, #528) or ranges. */
+  matches: IrExpression[];
   body: IrStatement[];
 }
 

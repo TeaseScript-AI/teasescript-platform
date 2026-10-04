@@ -114,6 +114,48 @@ test("maps Groovy inclusive ranges and removes terminal switch breaks", () => {
   );
 });
 
+test("keeps a switch whose cases overlap as an if chain, which keeps Groovy's first match", () => {
+  const switchCase = (expression: AstNode, text: string): AstNode => ({
+    kind: "case",
+    span,
+    expression,
+    body: {
+      kind: "block",
+      span,
+      statements: [statement(call("show", constant(text))), { kind: "break", span }],
+    },
+  });
+  const program = lowerParsedFile(
+    file([
+      {
+        kind: "switch",
+        span,
+        expression: variable("value"),
+        cases: [
+          switchCase(constant(2), "two"),
+          switchCase(
+            { kind: "range", span, from: constant(0), to: constant(3), inclusive: true },
+            "low",
+          ),
+        ],
+        default: { kind: "empty", span },
+      },
+    ]),
+  );
+  assert.deepEqual(program.diagnostics, []);
+  assert.equal(
+    emitTease(program),
+    [
+      "if value == 2 {",
+      '  say "two"',
+      "} else if value >= 0 and value <= 3 {",
+      '  say "low"',
+      "}",
+      "",
+    ].join("\n"),
+  );
+});
+
 test("lowers nullable legacy scalar storage reads to read-only TeaseScript load", () => {
   const source = file([
     statement({

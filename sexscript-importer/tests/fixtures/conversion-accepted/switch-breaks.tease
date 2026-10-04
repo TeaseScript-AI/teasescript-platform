@@ -46,3 +46,12 @@ let top = 3
 if (subject >= top and subject <= 1) or (subject <= top and subject >= 1) {
   say "in range"
 }
+// A list case matches any of its elements, as a case with several values.
+switch n {
+  case 0, 1 {
+    say "low"
+  }
+  case 2..=3 {
+    say "high"
+  }
+}

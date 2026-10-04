@@ -3534,7 +3534,7 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
       ];
     }
     const loweredBody = lowerStatementList(eliminateSwitchBreaks(sourceStatements), null, context);
-    cases.push({ span: caseNode.span, match, body: loweredBody });
+    cases.push({ span: caseNode.span, matches: [match], body: loweredBody });
     matchNodes.push(matchNode!);
   }
 
@@ -3558,15 +3558,26 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
       ),
     ];
   }
-  if (isAcceptedSwitch(cases)) {
-    return [{ kind: "switch", value, cases, default: defaultStatements, span: node.span }];
+  // A Groovy list case matches any of its elements, which a case with several values expresses (#528).
+  const valueCases = cases.map((switchCase, index) => {
+    const [match] = switchCase.matches;
+    const listCase =
+      match?.kind === "list" &&
+      match.items.length > 0 &&
+      onlyOf(inferType(matchNodes[index]!, context.types), LIST);
+    return listCase ? { ...switchCase, matches: match.items } : switchCase;
+  });
+  if (isAcceptedSwitch(valueCases)) {
+    return [
+      { kind: "switch", value, cases: valueCases, default: defaultStatements, span: node.span },
+    ];
   }
   // Accepted switch cases are distinct literals or ranges; other Groovy cases become an equivalent if chain when
   // their isCase meaning is known from the case value: membership for lists and literal ranges, equality for
   // scalars. Groovy evaluated the switch value once, so case expressions with effects need a temporary.
   const listCases: boolean[] = [];
   for (let index = 0; index < cases.length; index += 1) {
-    const match = cases[index]!.match;
+    const match = cases[index]!.matches[0]!;
     const type = inferType(matchNodes[index]!, context.types);
     // A Groovy range runs in either direction; bounds evaluated twice must be plain values.
     const boundsRepeatable = match.kind === "range" && [match.from, match.to].every(isPlainValue);
@@ -3607,7 +3618,7 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
     chain = [
       {
         kind: "if",
-        condition: caseMatches(subject, switchCase.match, listCases[index]!),
+        condition: caseMatches(subject, switchCase.matches[0]!, listCases[index]!),
         then: switchCase.body,
         else: chain,
         span: switchCase.span,
@@ -3627,18 +3638,42 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
       ];
 }
 
+/**
+ * Accepted switch cases are literal values or ranges (#528); a value or range that another case already covers is a
+ * compile error, so such a switch stays an if chain, which keeps Groovy's first match.
+ */
 function isAcceptedSwitch(cases: IrSwitchCase[]): boolean {
   const seen = new Set<string>();
-  for (const { match } of cases) {
-    const literal = (expression: IrExpression): boolean =>
-      expression.kind === "literal" && expression.value !== null;
+  const ranges: Array<{ low: number; high: number; inclusive: boolean }> = [];
+  const numbers: number[] = [];
+  const literal = (expression: IrExpression): boolean =>
+    expression.kind === "literal" && expression.value !== null;
+  for (const match of cases.flatMap((switchCase) => switchCase.matches)) {
     const valid =
       literal(match) || (match.kind === "range" && literal(match.from) && literal(match.to));
     const key = JSON.stringify(match);
     if (!valid || seen.has(key)) return false;
     seen.add(key);
+    if (match.kind === "literal" && typeof match.value === "number") numbers.push(match.value);
+    if (
+      match.kind === "range" &&
+      match.from.kind === "literal" &&
+      match.to.kind === "literal" &&
+      typeof match.from.value === "number" &&
+      typeof match.to.value === "number"
+    ) {
+      ranges.push({ low: match.from.value, high: match.to.value, inclusive: match.inclusive });
+    }
   }
-  return true;
+  const covers = (range: (typeof ranges)[number], value: number): boolean =>
+    value >= range.low && (range.inclusive ? value <= range.high : value < range.high);
+  return ranges.every(
+    (range, index) =>
+      !numbers.some((value) => covers(range, value)) &&
+      ranges
+        .slice(index + 1)
+        .every((other) => !covers(range, other.low) && !covers(other, range.low)),
+  );
 }
 
 /** Literals, variables, properties, and arithmetic on them: values that may be evaluated twice. */

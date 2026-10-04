@@ -555,8 +555,11 @@ function switchAsIfChain(
   statements: (items: IrStatement[]) => IrStatement[],
 ): IrStatement[] {
   const value: IrExpression = { kind: "variable", name: valueName };
-  const matches = (switchCase: IrSwitchCase): IrExpression => {
-    const match = switchCase.match;
+  const matches = (switchCase: IrSwitchCase): IrExpression =>
+    switchCase.matches
+      .map(matchesOne)
+      .reduce((left, right) => ({ kind: "binary", operator: "or", left, right }));
+  const matchesOne = (match: IrExpression): IrExpression => {
     if (match.kind !== "range")
       return { kind: "binary", operator: "==", left: value, right: expression(match) };
     return {

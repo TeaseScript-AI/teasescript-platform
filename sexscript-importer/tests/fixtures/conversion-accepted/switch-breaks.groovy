@@ -40,3 +40,8 @@ def top = 3
 switch (subject) {
 	case top..1: show("in range"); break
 }
+// A list case matches any of its elements, as a case with several values.
+switch (n) {
+	case [0, 1]: show("low"); break
+	case 2..3: show("high"); break
+}
