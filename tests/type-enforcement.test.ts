@@ -227,6 +227,24 @@ test("elements and properties of an unannotated variable widen to number like th
     ),
     [],
   );
+  // Also where the elements may be null: a whole copy or one element stays whole, but a number test keeps it widening.
+  for (const [test, copy, check] of [
+    ["integer?[]", "q = p", "let k: integer?[] = q"],
+    ["integer?[]", "r.n = p.first", "let k: integer? = r.n"],
+    ["number?[]", "q = p", "let k: integer?[] = q"],
+  ] as const)
+    assert.deepEqual(
+      codes(
+        `let p = [null, 1]\nlet q = [null]\nlet r = { n: null }\nif p is ${test} {\n    ${copy}\n}\n${check}\np.add(1.5)`,
+      ),
+      test === "number?[]"
+        ? [
+            ["TSV046", "p is number?[]"],
+            ["TSV041", "q"],
+          ]
+        : [],
+      `${test} ${copy}`,
+    );
   // A write that widens a narrowed list ends what the test knew about its elements.
   assert.deepEqual(
     codes(
