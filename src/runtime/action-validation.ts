@@ -280,7 +280,7 @@ function validStorageWriteAction(
 function validCaptureAction(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
 ): boolean {
   const owner =
     plan === undefined || !nonNegativeSafeInteger(action.owningInstruction)

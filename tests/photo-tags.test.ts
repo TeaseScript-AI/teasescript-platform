@@ -280,3 +280,22 @@ test("restore rejects capture tags or catalog entries no engine produces", () =>
   action.foregroundAction.tags = [{ name: "a", value: null }];
   assert.equal(validateRuntimeSnapshot(action, untagged.plan).valid, false);
 });
+
+test("a photo taken with tags in a called file is in the catalog after the call returns", () => {
+  const result = compileProject(
+    [
+      {
+        path: "main.tease",
+        source: 'call "camera.tease"\nlet found = findImages(where: "selfie")\nexit',
+      },
+      { path: "camera.tease", source: 'let photo = takePhoto(tags: ["selfie"])\nend' },
+    ],
+    { images },
+  );
+  assert.deepEqual(result.diagnostics, []);
+  const plan = result.plan!;
+  const waiting = run(plan, createFreshRuntimeSnapshot(plan)).snapshot;
+  assert.deepEqual(pendingCapture(waiting).tags, [{ name: "selfie", value: null }]);
+  const finished = runUntilExit(plan, captured(plan, waiting).snapshot).snapshot;
+  assert.deepEqual(binding(finished, "found"), { kind: "list", items: [PHOTO] });
+});
