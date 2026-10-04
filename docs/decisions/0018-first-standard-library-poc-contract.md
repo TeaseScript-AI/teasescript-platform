@@ -178,6 +178,23 @@ Negative zero returns `0`, and the transcript keeps the trimmed submitted text. 
 interaction whose UI only accepts whole numbers, so completion, prefill, checkpoint, and settlement rules are those of
 `askNumber`. The Player offers a numeric keyboard.
 
+### `askDate`, `askTime`, and `askDateTime`
+
+Extension for #532's typed date and time input: `askDate`, `askTime`, and `askDateTime` copy the compact `askNumber`
+forms, including `as speaker`, the hint, and `default:`, and return `date`, `time`, and `datetime`.
+
+```tease
+let day = askDate "Which day?"
+let start = askTime as mistress "What time?", default: toTime("20:00")
+```
+
+The Player shows the browser's date, time, or date-and-time control, which submits strict ISO text
+([V30 §35](../specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-timestamps)); surrounding whitespace is
+removed. A local time that the player's zone skips is a valid answer, because local values have no zone. Any other
+text is rejected with "That is wrong. I asked for a date." (a time, a date and time). The transcript shows the answer
+in the player's presentation, as `say` shows the value. A default of the asked kind prefills the control with its ISO
+text; text must be converted first, as in `default: toDate("2026-10-04")`.
+
 ### Default answers
 
 Owner-approved extension (2026-10-04, #510): `askText` and `askNumber` accept a named `default:` answer after the hint

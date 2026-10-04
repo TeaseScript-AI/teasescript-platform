@@ -3,9 +3,11 @@ import {
   isBlankTextAnswer,
   isIntegerAnswerText,
   isNumberAnswerText,
+  temporalAnswer,
 } from "../../interaction-answers.js";
 import { interactionStringFits } from "../../interaction-limits.js";
 import type { InteractionChoiceOption, InteractionChoiceValue } from "../../plan/model.js";
+import { presentDate, presentDateTime, presentTime, type TemporalContext } from "../../temporal.js";
 import { recordValidationTestWork } from "../../validation-testing.js";
 import type { RuntimeInteractionActionSnapshot } from "./model.js";
 
@@ -27,9 +29,11 @@ export type ResolvedInteraction =
   | { readonly ok: true; readonly result: InteractionChoiceValue; readonly transcriptText: string }
   | { readonly ok: false; readonly message: string };
 
+/** `context` is the player's presentation now, which shows a date or time answer in the transcript. */
 export function resolveInteractionCompletion(
   action: RuntimeInteractionActionSnapshot,
   payload: unknown,
+  context: TemporalContext,
 ): ResolvedInteraction {
   if (!isPlainRecord(payload)) {
     return { ok: false, message: "Interaction completion payload must be an object." };
@@ -99,6 +103,37 @@ export function resolveInteractionCompletion(
       return { ok: false, message: "Number completion must be finite." };
     }
     return { ok: true, result: Object.is(parsed, -0) ? 0 : parsed, transcriptText: submitted };
+  }
+  // A date or time control submits strict ISO text; the transcript shows the answer as `say` would.
+  if (action.ui.kind === "temporal") {
+    if (
+      payload.kind !== "submittedText" ||
+      typeof payload.submittedText !== "string" ||
+      !completionStringFits(payload.submittedText)
+    )
+      return {
+        ok: false,
+        message: "Date and time completion requires text within the shared UTF-8 byte limit.",
+      };
+    const answer = temporalAnswer(action.ui.temporalKind, payload.submittedText);
+    if (answer === undefined)
+      return {
+        ok: false,
+        message: `That is wrong. I asked for ${
+          action.ui.temporalKind === "date"
+            ? "a date"
+            : action.ui.temporalKind === "time"
+              ? "a time"
+              : "a date and time"
+        }.`,
+      };
+    const transcriptText =
+      answer.kind === "date"
+        ? presentDate(context.presentation, answer)
+        : answer.kind === "time"
+          ? presentTime(context.presentation, answer)
+          : presentDateTime(context.presentation, answer);
+    return { ok: true, result: answer, transcriptText };
   }
   if (action.ui.kind !== "choice") {
     return { ok: false, message: "Choice action payload is malformed." };

@@ -574,6 +574,20 @@ function renderPlayerControls(presentation: WorkspacePlayerPresentation): void {
     focusNewInteraction(interaction.actionId, elements.composerInput);
     return;
   }
+  // The Player shows a date or time control; here the ISO text it submits is typed.
+  if (interaction.ui.kind === "temporal") {
+    elements.composerInput.placeholder = interaction.ui.hint ?? "";
+    elements.composerInput.inputMode = "text";
+    elements.composerHelp.textContent = `Enter the ${
+      interaction.ui.temporalKind === "date"
+        ? "date as ISO text, such as 2026-10-04"
+        : interaction.ui.temporalKind === "time"
+          ? "time as ISO text, such as 14:30"
+          : "date and time as ISO text, such as 2026-10-04T18:00"
+    }${interaction.ui.prefill === undefined ? "" : `; the default is ${interaction.ui.prefill}`}.`;
+    focusNewInteraction(interaction.actionId, elements.composerInput);
+    return;
+  }
 
   renderChoiceControls(interaction.actionId, accessibleName, interaction.ui);
   elements.composerHelp.textContent = "Type one exact visible option or select a rendered control.";

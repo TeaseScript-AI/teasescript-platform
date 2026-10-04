@@ -180,6 +180,13 @@ export function playerRuntimeForeground(
         ...(action.ui.prefill === undefined ? {} : { prefill: action.ui.prefill }),
         ...(action.ui.integer === true ? { integer: true as const } : {}),
       });
+    case "temporal":
+      return Object.freeze({
+        kind: `ask-${action.ui.temporalKind}` as const,
+        accessibleName,
+        hint: action.ui.hint ?? "",
+        ...(action.ui.prefill === undefined ? {} : { prefill: action.ui.prefill }),
+      });
     case "choice":
       return Object.freeze({
         kind: "choose",
@@ -317,6 +324,7 @@ export function submitPlayerRuntimeComposer(
     action === null ||
     (action.interactionKind !== "text" &&
       action.interactionKind !== "number" &&
+      action.interactionKind !== "temporal" &&
       action.interactionKind !== "choice")
   ) {
     return null;

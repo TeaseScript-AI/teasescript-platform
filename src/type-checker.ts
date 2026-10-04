@@ -7,6 +7,7 @@ import type {
   FunctionDeclaration,
   FunctionParameter,
   Identifier,
+  InteractionExpression,
   LetStatement,
   MediaParts,
   Program,
@@ -3299,11 +3300,7 @@ class TypeChecker {
         const type = yield* compileChild(this.#expressionTask(expression.defaultValue, scope));
         this.#checkInteractionDefault(expression.interactionKind, expression.defaultValue, type);
       }
-      return expression.interactionKind === "number"
-        ? NUMBER_TYPE
-        : expression.interactionKind === "integer"
-          ? INTEGER_TYPE
-          : STRING_TYPE;
+      return interactionResultType(expression.interactionKind);
     }
     // `choose` returns a button's value: one written before `:`, or else what gives the button, with its type. Each
     // button's value is also kept when the source shows it, so a comparison with another value can be checked (C5).
@@ -3640,7 +3637,7 @@ class TypeChecker {
    * for askInteger. The compiler rejects a default it knows is wrong; the runtime checks the others when the field opens.
    */
   #checkInteractionDefault(
-    kind: "text" | "number" | "integer",
+    kind: Exclude<InteractionExpression["interactionKind"], "choice">,
     expression: Expression,
     type: StaticType,
   ): void {
@@ -3650,6 +3647,25 @@ class TypeChecker {
       : name === null
         ? `, not ${describeValue(type)}`
         : `, but '${name}' holds ${describeValue(type)}`;
+    if (kind === "date" || kind === "time" || kind === "datetime") {
+      // A date or time field shows its default as ISO text; text is converted first (V30 §20, §35).
+      const expected = interactionResultType(kind);
+      if (!isAssignable(expected, type))
+        this.#report(
+          typeCode.invalidInteractionDefault,
+          `The default answer of ${TEMPORAL_ASKS[kind]} must be ${describeValue(expected)}${holds}.${
+            resolved(type).kind === "null"
+              ? EMPTY_FIELD_FIX
+              : isNullable(type) && isAssignable(expected, nonNullType(type))
+                ? (checkFirstFix(expected, type, expression) ?? "")
+                : isScalar(type, "string")
+                  ? ` Convert the text with ${TEMPORAL_CONVERSION_NAMES[kind]}(...).`
+                  : ""
+          }`,
+          expression.span,
+        );
+      return;
+    }
     const expected =
       kind === "integer" ? INTEGER_TYPE : kind === "number" ? NUMBER_TYPE : STRING_TYPE;
     const fix =
@@ -5486,6 +5502,33 @@ function textResultType(member: TextMember): StaticType {
     ? { kind: "list", element: STRING_TYPE }
     : scalarType(member.result);
 }
+
+/** The type of the answer an `ask...` interaction returns. */
+function interactionResultType(
+  kind: Exclude<InteractionExpression["interactionKind"], "choice">,
+): StaticType {
+  switch (kind) {
+    case "number":
+      return NUMBER_TYPE;
+    case "integer":
+      return INTEGER_TYPE;
+    case "text":
+      return STRING_TYPE;
+    case "date":
+      return DATE_TYPE;
+    case "time":
+      return TIME_TYPE;
+    case "datetime":
+      return DATETIME_TYPE;
+  }
+}
+
+const TEMPORAL_ASKS = { date: "askDate", time: "askTime", datetime: "askDateTime" } as const;
+const TEMPORAL_CONVERSION_NAMES = {
+  date: "toDate",
+  time: "toTime",
+  datetime: "toDateTime",
+} as const;
 
 function scalarType(name: ScalarTypeName): StaticType {
   return { kind: "scalar", name };

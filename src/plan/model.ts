@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 39;
+export const INSTRUCTION_PLAN_VERSION = 40;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -412,9 +412,15 @@ export interface PlayMediaInstruction extends InstructionBase {
   readonly destinationTemporary: number | null;
 }
 
-export type InteractionKind = "button" | "text" | "number" | "choice";
-/** `choice` is the value of the selected choice option; a button used as a value yields a `duration`. */
-export type InteractionResultDomain = "none" | "string" | "number" | "choice" | "duration";
+export type InteractionKind = "button" | "text" | "number" | "choice" | "temporal";
+/**
+ * `choice` is the value of the selected choice option; a button used as a value yields a `duration`; `temporal` is the
+ * date, time, or date and time the UI asks for.
+ */
+export type InteractionResultDomain =
+  "none" | "string" | "number" | "choice" | "duration" | "temporal";
+/** What `askDate`, `askTime`, and `askDateTime` ask for (V30 §20). */
+export type InteractionTemporalKind = "date" | "time" | "datetime";
 export type InteractionAccessibleName =
   | { readonly kind: "text"; readonly text: string }
   | {
@@ -462,6 +468,14 @@ export type InteractionUiPayload =
       readonly accessibleName: InteractionAccessibleName;
     }
   | {
+      readonly kind: "temporal";
+      readonly temporalKind: InteractionTemporalKind;
+      readonly hint: string | null;
+      /** The default answer as ISO text; submitting it unchanged answers with the default. */
+      readonly prefill?: string;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
       readonly kind: "choice";
       readonly options: readonly InteractionChoiceOption[];
       readonly accessibleName: InteractionAccessibleName;
@@ -492,6 +506,14 @@ export type PreparedInteractionUiPayload =
       readonly prefillTemporary?: number;
       /** `askInteger`: only a whole number is an answer. */
       readonly integer?: true;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      readonly kind: "temporal";
+      readonly temporalKind: InteractionTemporalKind;
+      readonly hintTemporary: number | null;
+      /** Holds the evaluated default answer until the field opens, then its ISO prefill text. */
+      readonly prefillTemporary?: number;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {

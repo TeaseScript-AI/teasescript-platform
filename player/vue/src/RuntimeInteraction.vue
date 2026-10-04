@@ -18,10 +18,7 @@ import Composer from "./Composer.vue";
 import ConversationSurface from "./ConversationSurface.vue";
 import Transcript from "./Transcript.vue";
 import { usePlayerConditions } from "./usePlayerConditions";
-import type {
-  PlayerTranscriptEntryPresentation,
-  PlayerSpeakerPresentation,
-} from "../../model.js";
+import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } from "../../model.js";
 
 const props = defineProps<{
   session: PlayerRuntimeSession | null;
@@ -35,10 +32,7 @@ const props = defineProps<{
   /** The browser refused audible playback; offer a deliberate retry above the composer. */
   audioBlocked?: boolean;
 }>();
-const emit = defineEmits<{
-  "update:session": [session: PlayerRuntimeSession];
-  retryAudio: [];
-}>();
+const emit = defineEmits<{ "update:session": [session: PlayerRuntimeSession]; retryAudio: [] }>();
 const actionId = computed(() =>
   props.session ? activePlayerRuntimeInteraction(props.session.snapshot)?.actionId : undefined,
 );
@@ -55,10 +49,15 @@ const foreground = computed(() => {
   const session = props.session;
   if (!session) return null;
   const id = actionId.value;
-  if (presented?.plan === session.plan && presented.reset === props.reset && presented.actionId === id)
+  if (
+    presented?.plan === session.plan &&
+    presented.reset === props.reset &&
+    presented.actionId === id
+  )
     return presented.value;
   const value = playerRuntimeForeground(session);
-  presented = id === undefined ? null : { plan: session.plan, reset: props.reset, actionId: id, value };
+  presented =
+    id === undefined ? null : { plan: session.plan, reset: props.reset, actionId: id, value };
   return value;
 });
 const pacing = computed(() => {
@@ -114,7 +113,10 @@ watch(
     const ownedFocus = !!active && !!root.value?.contains(active);
     // Default composer focus when nothing else owns it; touch-only devices would raise a keyboard.
     const unownedFocus = (!active || active === document.body) && hoverAvailable.value;
-    const wasEditing = active instanceof HTMLTextAreaElement && !suppressComposerRefocus;
+    const wasEditing =
+      (active instanceof HTMLTextAreaElement ||
+        (active instanceof HTMLInputElement && active.matches("[data-composer-input]"))) &&
+      !suppressComposerRefocus;
     suppressComposerRefocus = false;
     const returnToChoice = restoreChoiceFocus;
     restoreChoiceFocus = false;
@@ -122,9 +124,7 @@ watch(
     // A default answer starts in the composer; the player submits it unchanged or edits it first.
     const presentedInput = foreground.value;
     draft.value =
-      presentedInput?.kind === "ask-text" || presentedInput?.kind === "ask-number"
-        ? (presentedInput.prefill ?? "")
-        : "";
+      presentedInput !== null && "prefill" in presentedInput ? (presentedInput.prefill ?? "") : "";
     clearFeedback();
     await nextTick();
     // Completion releases the disabled guard after publishing the session.
@@ -262,10 +262,7 @@ useEventListener(document, "pointerup", (event: PointerEvent) => {
 });
 
 function submit(source: "input" | "button") {
-  void complete(
-    (session) => submitPlayerRuntimeComposer(session, draft.value),
-    source === "input",
-  );
+  void complete((session) => submitPlayerRuntimeComposer(session, draft.value), source === "input");
 }
 </script>
 
@@ -300,7 +297,9 @@ function submit(source: "input" | "button") {
       <template #interaction>
         <p v-if="audioBlocked" class="audio-retry" role="status">
           <span>The browser blocked audio.</span>
-          <PlayerActionButton data-audio-retry @click="emit('retryAudio')">Enable audio</PlayerActionButton>
+          <PlayerActionButton data-audio-retry @click="emit('retryAudio')"
+            >Enable audio</PlayerActionButton
+          >
         </p>
         <Composer
           ref="composer"
@@ -314,6 +313,15 @@ function submit(source: "input" | "button") {
           :accessible-name="foreground?.accessibleName ?? 'Response'"
           :input-mode="
             foreground?.kind !== 'ask-number' ? 'text' : foreground.integer ? 'numeric' : 'decimal'
+          "
+          :input-type="
+            foreground?.kind === 'ask-date'
+              ? 'date'
+              : foreground?.kind === 'ask-time'
+                ? 'time'
+                : foreground?.kind === 'ask-datetime'
+                  ? 'datetime-local'
+                  : 'text'
           "
           :feedback="feedback"
           @submit="submit"

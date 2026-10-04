@@ -754,7 +754,7 @@ function validateInteractionInstruction(
     errors.push(planError("TSC002", "Interaction instruction contains unsupported fields.", path));
   }
   const kind = value.interactionKind;
-  if (!isOneOf(kind, ["button", "text", "number", "choice"])) {
+  if (!isOneOf(kind, ["button", "text", "number", "choice", "temporal"])) {
     errors.push(planError("TSC002", "Interaction kind is invalid.", `${path}.interactionKind`));
   }
   if (value.target !== "standardChat")
@@ -770,7 +770,9 @@ function validateInteractionInstruction(
         ? "number"
         : kind === "choice"
           ? "choice"
-          : "string";
+          : kind === "temporal"
+            ? "temporal"
+            : "string";
   if (value.expectedResult !== expected) {
     errors.push(
       planError(
@@ -829,16 +831,21 @@ function validateStaticInteractionUi(
   const uiKeys =
     kind === "button"
       ? ["kind", "buttonLabel", "accessibleName", ...("background" in ui ? ["background"] : [])]
-      : kind === "text" || kind === "number"
+      : kind === "text" || kind === "number" || kind === "temporal"
         ? [
             "kind",
             "hint",
             "accessibleName",
             ...("prefill" in ui ? ["prefill"] : []),
             ...(kind === "number" && "integer" in ui ? ["integer"] : []),
+            ...(kind === "temporal" ? ["temporalKind"] : []),
           ]
         : ["kind", "options", "accessibleName"];
-  if (!hasExactKeys(ui, uiKeys) || ("integer" in ui && ui.integer !== true)) {
+  if (
+    !hasExactKeys(ui, uiKeys) ||
+    ("integer" in ui && ui.integer !== true) ||
+    (kind === "temporal" && !isOneOf(ui.temporalKind, ["date", "time", "datetime"]))
+  ) {
     errors.push(planError("TSC002", "Interaction UI payload contains unsupported fields.", path));
   }
   let aggregate = 0;
@@ -893,12 +900,21 @@ function validateStaticInteractionUi(
     if ("background" in ui && !isNormalizedOpaqueColor(ui.background))
       errors.push(planError("TSC002", "Invalid opaque button background.", `${path}.background`));
   }
-  if (kind === "text" || kind === "number") {
+  if (kind === "text" || kind === "number" || kind === "temporal") {
     if (ui.hint !== null) countString(ui.hint, `${path}.hint`);
+    const temporalKind = ui.temporalKind;
+    const answerKind =
+      temporalKind === "date" || temporalKind === "time" || temporalKind === "datetime"
+        ? temporalKind
+        : ui.integer === true
+          ? "integer"
+          : kind === "number"
+            ? "number"
+            : "text";
     if (
       "prefill" in ui &&
       countString(ui.prefill, `${path}.prefill`) &&
-      !isValidInteractionPrefill(ui.integer === true ? "integer" : kind, ui.prefill)
+      !isValidInteractionPrefill(answerKind, ui.prefill)
     )
       errors.push(
         planError("TSC002", "Interaction prefill is not a valid answer.", `${path}.prefill`),
@@ -979,16 +995,21 @@ function validatePreparedInteractionUi(
           ...("backgroundTemporary" in ui ? ["backgroundTemporary"] : []),
           ...("timeoutTemporary" in ui ? ["timeoutTemporary"] : []),
         ]
-      : kind === "text" || kind === "number"
+      : kind === "text" || kind === "number" || kind === "temporal"
         ? [
             "kind",
             "hintTemporary",
             "accessibleName",
             ...("prefillTemporary" in ui ? ["prefillTemporary"] : []),
             ...(kind === "number" && "integer" in ui ? ["integer"] : []),
+            ...(kind === "temporal" ? ["temporalKind"] : []),
           ]
         : ["kind", "optionsTemporary", "values", "accessibleName"];
-  if (!hasExactKeys(ui, keys) || ("integer" in ui && ui.integer !== true)) {
+  if (
+    !hasExactKeys(ui, keys) ||
+    ("integer" in ui && ui.integer !== true) ||
+    (kind === "temporal" && !isOneOf(ui.temporalKind, ["date", "time", "datetime"]))
+  ) {
     errors.push(
       planError("TSC002", "Prepared interaction UI payload contains unsupported fields.", path),
     );
@@ -1063,7 +1084,7 @@ function validatePreparedInteractionUi(
     if ("timeoutTemporary" in ui) addTemporary(ui.timeoutTemporary, `${path}.timeoutTemporary`);
     return;
   }
-  if (kind === "text" || kind === "number") {
+  if (kind === "text" || kind === "number" || kind === "temporal") {
     if (ui.hintTemporary !== null) addTemporary(ui.hintTemporary, `${path}.hintTemporary`);
     if ("prefillTemporary" in ui) addTemporary(ui.prefillTemporary, `${path}.prefillTemporary`);
     return;

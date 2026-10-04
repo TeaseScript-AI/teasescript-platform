@@ -7,12 +7,13 @@ import type {
   DurationUnitPlan,
   Instruction,
   InstructionPlan,
+  InteractionTemporalKind,
   InteractionUiPayload,
   PlanSourceLocation,
   PreparedInteractionUiPayload,
 } from "../plan/model.js";
 import { parseMessageMarkup, type MessageMarkup } from "../message-markup.js";
-import { isBlankTextAnswer, numberAnswerText } from "../interaction-answers.js";
+import { isBlankTextAnswer, numberAnswerText, temporalAnswerText } from "../interaction-answers.js";
 import {
   boundedInteractionUtf8ByteLength,
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
@@ -118,6 +119,9 @@ import { executionRunnable, processDueWork } from "./operations/observe-time.js"
 import { cloneTimer } from "./timers.js";
 import { assertValueType } from "./value-types.js";
 import {
+  describeRuntimeValue,
+  isDate,
+  isDateTime,
   isDict,
   isDuration,
   isList,
@@ -126,6 +130,7 @@ import {
   isSet,
   isMediaHandle,
   isSpeakerReference,
+  isTime,
 } from "./value-predicates.js";
 import { fieldText } from "./value-text.js";
 import { expandChoiceOptions } from "./choice-options.js";
@@ -901,6 +906,21 @@ function materializeInteractionUi(
       ...(integer ? { integer: true as const } : {}),
       accessibleName: prepared.accessibleName,
     };
+  } else if (prepared.kind === "temporal") {
+    const hint = prepared.hintTemporary === null ? null : readText(prepared.hintTemporary);
+    let prefill: string | undefined;
+    if (prepared.prefillTemporary !== undefined) {
+      const temporary = read(prepared.prefillTemporary);
+      prefill = temporalPrefill(prepared.temporalKind, temporary.value, span);
+      stagedWrites.push({ temporaryId: temporary.id, value: prefill });
+    }
+    ui = {
+      kind: "temporal",
+      temporalKind: prepared.temporalKind,
+      hint,
+      ...(prefill === undefined ? {} : { prefill }),
+      accessibleName: prepared.accessibleName,
+    };
   } else {
     const source = read(prepared.optionsTemporary);
     if (!isList(source.value) || source.value.items.length !== prepared.values.length) {
@@ -971,6 +991,32 @@ function interactionPrefill(
   return value;
 }
 
+/** The ISO prefill text of a date or time default answer, which must be of the kind the field asks for. */
+function temporalPrefill(
+  kind: InteractionTemporalKind,
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+): string {
+  const answer =
+    kind === "date"
+      ? isDate(value) && value
+      : kind === "time"
+        ? isTime(value) && value
+        : isDateTime(value) && value;
+  if (answer !== false) return temporalAnswerText(answer);
+  const [command, noun, conversion] =
+    kind === "date"
+      ? ["askDate", "a date", "toDate"]
+      : kind === "time"
+        ? ["askTime", "a time", "toTime"]
+        : ["askDateTime", "a date and time", "toDateTime"];
+  throw fault(
+    "TSR052",
+    `The default answer of ${command} must be ${noun}, not ${describeRuntimeValue(value)}.${typeof value === "string" ? ` Convert the text with ${conversion}(...).` : ""}`,
+    span,
+  );
+}
+
 function commitInteractionMaterialization(
   snapshot: RuntimeSnapshot,
   stagedWrites: readonly {
@@ -993,7 +1039,7 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
   const strings: string[] = [];
   if (ui.accessibleName.kind === "text") strings.push(ui.accessibleName.text);
   if (ui.kind === "button") strings.push(ui.buttonLabel);
-  else if (ui.kind === "text" || ui.kind === "number") {
+  else if (ui.kind !== "choice") {
     if (ui.hint !== null) strings.push(ui.hint);
     if (ui.prefill !== undefined) strings.push(ui.prefill);
   } else {
@@ -1477,6 +1523,14 @@ function cloneInteractionUi(
       kind: "button",
       buttonLabel: ui.buttonLabel,
       ...(ui.background === undefined ? {} : { background: ui.background }),
+      accessibleName,
+    };
+  if (ui.kind === "temporal")
+    return {
+      kind: "temporal",
+      temporalKind: ui.temporalKind,
+      hint: ui.hint,
+      ...(ui.prefill === undefined ? {} : { prefill: ui.prefill }),
       accessibleName,
     };
   return {

@@ -139,6 +139,15 @@ const MEDIA_ARGUMENTS = ["file", "async", "repeat", "startAt", "endAt", "volume"
 type TypeContext = "statement" | "delimited" | "typeTest" | "delimitedTypeTest";
 
 type StorageDelimiter = "as" | "default";
+/** The compact interaction commands other than `choose`, and the kind of answer each asks for. */
+const INTERACTION_KINDS: ReadonlyMap<string, InteractionExpression["interactionKind"]> = new Map([
+  ["askText", "text"],
+  ["askNumber", "number"],
+  ["askInteger", "integer"],
+  ["askDate", "date"],
+  ["askTime", "time"],
+  ["askDateTime", "datetime"],
+]);
 const NO_STORAGE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set();
 const SAVE_VALUE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set(["as"]);
 
@@ -2541,6 +2550,9 @@ class Parser {
       this.#checkIdentifier("askText") ||
       this.#checkIdentifier("askNumber") ||
       this.#checkIdentifier("askInteger") ||
+      this.#checkIdentifier("askDate") ||
+      this.#checkIdentifier("askTime") ||
+      this.#checkIdentifier("askDateTime") ||
       this.#checkIdentifier("choose")
     ) {
       return yield* parseChild(this.#parseInteractionExpression());
@@ -2628,14 +2640,7 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
-    const interactionKind =
-      command.lexeme === "askText"
-        ? "text"
-        : command.lexeme === "askNumber"
-          ? "number"
-          : command.lexeme === "askInteger"
-            ? "integer"
-            : "choice";
+    const interactionKind = INTERACTION_KINDS.get(command.lexeme) ?? "choice";
     let asSpan: SourceSpan | null = null;
     let speaker: Identifier | null = null;
     if (!this.#atStorageDelimiter() && this.#match(TokenKind.KeywordAs)) {

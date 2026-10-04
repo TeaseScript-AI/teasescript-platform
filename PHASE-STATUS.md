@@ -53,8 +53,8 @@ contracts and boundaries.
 
 ## Current major exclusions and blockers
 
-- complete V30 coverage, complete static typing, measurement units,
-  typed date and time input, generalized duration ranges, and locale-aware duration presentation;
+- complete V30 coverage, complete static typing, measurement units, generalized duration ranges, and locale-aware
+  duration presentation;
 - production cross-origin Player/host integration, richer editor support, and final browser acceptance coverage;
 - pending-action capabilities beyond the implemented timer, interaction, pacing, and media families; browser video
   playback, the layered scene, camera lifecycle, and custom views;

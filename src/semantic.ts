@@ -193,7 +193,16 @@ class SemanticValidator {
   public constructor(options: SemanticValidationOptions) {
     this.#invalidConfiguredNames = Object.freeze(
       [...(options.globals ?? []), ...(options.builtins ?? [])].filter((name) =>
-        ["showButton", "askText", "askNumber", "askInteger", "choose"].includes(name),
+        [
+          "showButton",
+          "askText",
+          "askNumber",
+          "askInteger",
+          "askDate",
+          "askTime",
+          "askDateTime",
+          "choose",
+        ].includes(name),
       ),
     );
     this.#builtins = new Set([
