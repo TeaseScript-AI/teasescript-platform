@@ -1523,6 +1523,30 @@ function lowerConditionalStatement(node: AstNode, context: LowerContext): IrStat
     asNode(root.right) === deferred
   )
     return null;
+  if (
+    regexWorkaround(deferred) !== null &&
+    target !== null &&
+    variableName(target) !== null &&
+    (root.kind === "declaration" || root.operator === "=") &&
+    asNode(root.right) === deferred
+  ) {
+    return (
+      lowerRegexWorkaround(
+        root.kind === "declaration",
+        variableName(target)!,
+        deferred,
+        span,
+        context,
+      ) ?? [
+        unsupportedStatement(
+          context,
+          deferred,
+          "SX_STRING_METHOD",
+          "This regular expression could not be converted.",
+        ),
+      ]
+    );
+  }
   const conditionalForm =
     deferred.kind === "ternary" ||
     deferred.kind === "elvis" ||
@@ -1584,8 +1608,10 @@ function findDeferred(
   inputOptions = false,
 ): AstNode | null {
   if (node.kind === "closure") return null;
-  // A collection method with a closure becomes a loop before the statement (lowerCollectionAssignment).
-  if (!inputOptions && isCollectionLoop(node, context)) return node;
+  // A collection method with a closure becomes a loop before the statement (lowerCollectionAssignment), as does a
+  // regular expression with a workaround (lowerRegexWorkaround).
+  if (!inputOptions && (isCollectionLoop(node, context) || regexWorkaround(node) !== null))
+    return node;
   if ((node.kind === "ternary" || node.kind === "elvis") && dictDefault(node, context) === null)
     return node;
   if (node.kind === "binary" && (node.operator === "&&" || node.operator === "||")) {
@@ -1649,7 +1675,7 @@ function isLoopMenu(node: AstNode, context: LowerContext): boolean {
 /** Whether an expression holds a conditional expression or an input, which need a statement of their own. */
 function needsOwnStatement(node: AstNode, context: LowerContext): boolean {
   if (node.kind === "closure") return false;
-  if (isCollectionLoop(node, context)) return true;
+  if (isCollectionLoop(node, context) || regexWorkaround(node) !== null) return true;
   if ((node.kind === "ternary" || node.kind === "elvis") && dictDefault(node, context) === null)
     return true;
   const call = node.kind === "methodCall" ? legacyApiCall(node, context) : null;
@@ -1735,9 +1761,13 @@ function hoistDeferred(
     [
       loop !== null
         ? `${loop.name}Result`
-        : legacyApiCall(deferred, context)?.name === "getSelectedValue"
-          ? "selected"
-          : "conditional",
+        : regexWorkaround(deferred) === "words"
+          ? "words"
+          : regexWorkaround(deferred) === "tags"
+            ? "withoutTags"
+            : legacyApiCall(deferred, context)?.name === "getSelectedValue"
+              ? "selected"
+              : "conditional",
       deferred,
     ] as const,
   ]) {
@@ -6448,6 +6478,23 @@ function lowerObjectMethodCallExpression(
   context: LowerContext,
 ): IrExpression | null {
   const targetNode = asNode(node.object);
+  if (
+    name === "getLanguage" &&
+    argumentsNodes.length === 0 &&
+    targetNode?.kind === "methodCall" &&
+    variableName(targetNode.object) === "Locale" &&
+    constantString(targetNode.method) === "getDefault"
+  ) {
+    // The distribution only checks whether its fonts support the player's language.
+    addDiagnostic(
+      context,
+      "SX_LOCALE_WORKAROUND",
+      "warning",
+      'Workaround: TeaseScript has no query for the player\'s language yet (the localization question in COMPATIBILITY-GAPS.md), so the conversion assumes English, "en", where Groovy read the system language.',
+      node.span,
+    );
+    return { kind: "literal", value: "en" };
+  }
   const receiverName = targetNode === null ? null : variableName(targetNode);
   const helperClass =
     receiverName === null ? undefined : context.legacyHelperClasses.get(receiverName);
@@ -7338,6 +7385,167 @@ function growingListWrite(
       ],
       span,
     },
+  ];
+}
+
+/**
+ * The regular expressions of the corpus that a text loop stands in for, until TeaseScript has regular expressions (a
+ * future `.ts` text library): `split(/\s+/)`, which splits at runs of whitespace, and `replaceAll(/<[^>]*>/, "")`,
+ * which removes markup tags. Null for any other call.
+ */
+function regexWorkaround(node: AstNode): "words" | "tags" | null {
+  const call = node.kind === "methodCall" ? callParts(node) : null;
+  if (call === null || call.inherited || asNode(node.object) === null) return null;
+  const text = (argument: AstNode | undefined): string | undefined => {
+    const value = argument === undefined ? undefined : constantValue(argument);
+    return typeof value === "string" ? value : undefined;
+  };
+  if (call.name === "split" && call.arguments.length === 1 && text(call.arguments[0]) === "\\s+")
+    return "words";
+  if (
+    call.name === "replaceAll" &&
+    call.arguments.length === 2 &&
+    text(call.arguments[0]) === "<[^>]*>" &&
+    text(call.arguments[1]) === ""
+  )
+    return "tags";
+  return null;
+}
+
+/**
+ * A workaround for a regular expression (regexWorkaround) as a loop that computes `target`, with a note naming it as
+ * a workaround: the words of a text, split at spaces, tabs, and line breaks with empty parts left out, or a text
+ * without the parts from each `<` to the next `>`.
+ */
+function lowerRegexWorkaround(
+  declaration: boolean,
+  target: string,
+  node: AstNode,
+  span: SourceSpan | null,
+  context: LowerContext,
+): IrStatement[] | null {
+  const kind = regexWorkaround(node);
+  const source = lowerExpression(asNode(node.object)!, context);
+  if (kind === null || source === null) return null;
+  const text = (operation: string, args: IrExpression[], value: IrExpression): IrExpression => ({
+    kind: "methodCall",
+    target: value,
+    name: operation,
+    arguments: args,
+    pending: true,
+  });
+  const literal = (value: string | number): IrExpression => ({ kind: "literal", value });
+  const variable = (name: string): IrExpression => ({ kind: "variable", name });
+  const result = variable(target);
+  const set = (value: IrExpression): IrStatement =>
+    declaration
+      ? { kind: "let", name: target, value, span }
+      : { kind: "assign", target: result, operator: "=", value, span };
+  addDiagnostic(
+    context,
+    "SX_REGEX_WORKAROUND",
+    "warning",
+    kind === "words"
+      ? "Workaround: TeaseScript has no regular expressions yet (a future .ts text library), so a loop over the parts between spaces stands in for split(/\\s+/), with tabs and line breaks read as spaces; unlike Java, a leading space gives no empty first part."
+      : 'Workaround: TeaseScript has no regular expressions yet (a future .ts text library), so a loop that removes each part from a < to the next > stands in for replaceAll(/<[^>]*>/, "").',
+    span,
+  );
+  if (kind === "words") {
+    const part = freshName("part", context);
+    const spaced = [literal("\t"), literal("\n"), literal("\r")].reduce(
+      (value, whitespace) => text("replace", [whitespace, literal(" ")], value),
+      source,
+    );
+    return [
+      set({ kind: "list", items: [] }),
+      {
+        kind: "for",
+        variable: part,
+        collection: text("split", [literal(" ")], spaced),
+        body: [
+          {
+            kind: "if",
+            condition: { kind: "binary", operator: "!=", left: variable(part), right: literal("") },
+            then: [
+              {
+                kind: "expression",
+                expression: {
+                  kind: "methodCall",
+                  target: result,
+                  name: "add",
+                  arguments: [variable(part)],
+                },
+                span,
+              },
+            ],
+            else: [],
+            span,
+          },
+        ],
+        span,
+      },
+    ];
+  }
+  const rest = freshName("rest", context);
+  const open = freshName("open", context);
+  const close = freshName("close", context);
+  const plus = (left: IrExpression, right: IrExpression): IrExpression => ({
+    kind: "binary",
+    operator: "+",
+    left,
+    right,
+  });
+  const join = (left: IrExpression, right: IrExpression): IrExpression => ({
+    kind: "template",
+    parts: [{ value: left }, { value: right }],
+  });
+  return [
+    set(literal("")),
+    { kind: "let", name: rest, value: source, span },
+    {
+      kind: "while",
+      condition: text("contains", [literal("<")], variable(rest)),
+      body: [
+        { kind: "let", name: open, value: text("indexOf", [literal("<")], variable(rest)), span },
+        {
+          kind: "let",
+          name: close,
+          value: text(
+            "indexOf",
+            [literal(">")],
+            text("substring", [variable(open)], variable(rest)),
+          ),
+          span,
+        },
+        {
+          kind: "if",
+          condition: { kind: "binary", operator: "<", left: variable(close), right: literal(0) },
+          then: [{ kind: "break", span }],
+          else: [],
+          span,
+        },
+        {
+          kind: "assign",
+          target: result,
+          operator: "=",
+          value: join(result, text("substring", [literal(0), variable(open)], variable(rest))),
+          span,
+        },
+        {
+          kind: "assign",
+          target: variable(rest),
+          operator: "=",
+          value: text(
+            "substring",
+            [plus(plus(variable(open), variable(close)), literal(1))],
+            variable(rest),
+          ),
+          span,
+        },
+      ],
+      span,
+    },
+    { kind: "assign", target: result, operator: "=", value: join(result, variable(rest)), span },
   ];
 }
 

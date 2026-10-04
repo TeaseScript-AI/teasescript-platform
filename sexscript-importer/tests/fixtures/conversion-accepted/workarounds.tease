@@ -1,0 +1,34 @@
+// Workarounds where TeaseScript has no equivalent yet, each marked with a note: regular expressions and the
+// player's language.
+let text = " <b>Kneel</b> now <i>slave</i>"
+// NOTE SX_REGEX_WORKAROUND line 4: Workaround: TeaseScript has no regular expressions yet (a future .ts text library), so a loop that removes each part from a < to the next > stands in for replaceAll(/<[^>]*>/, "").
+let withoutTags = ""
+let rest = text
+while rest.contains("<") {
+  let open = rest.indexOf("<")
+  let close = rest.substring(open).indexOf(">")
+  if close < 0 {
+    break
+  }
+  withoutTags = "${withoutTags}${rest.substring(0, open)}"
+  rest = rest.substring(open + close + 1)
+}
+withoutTags = "${withoutTags}${rest}"
+say withoutTags.trim()
+// NOTE SX_REGEX_WORKAROUND line 5: Workaround: TeaseScript has no regular expressions yet (a future .ts text library), so a loop over the parts between spaces stands in for split(/\s+/), with tabs and line breaks read as spaces; unlike Java, a leading space gives no empty first part.
+let words = []
+for part in "a  b\tc".replace("\t", " ").replace("\n", " ").replace("\r", " ").split(" ") {
+  if part != "" {
+    words.add(part)
+  }
+}
+say "Words ${words.length}"
+// NOTE SX_LOCALE_WORKAROUND line 7: Workaround: TeaseScript has no query for the player's language yet (the localization question in COMPATIBILITY-GAPS.md), so the conversion assumes English, "en", where Groovy read the system language.
+let conditional = not ["de", "en"].contains("en")
+if conditional {
+  say "Check fonts?"
+  conditional = (choose yes: "Yes", no: "No") == "yes"
+}
+if conditional {
+  say "Fonts"
+}
