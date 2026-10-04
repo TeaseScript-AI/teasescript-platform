@@ -708,7 +708,7 @@ function assertSetElement(
   if (!isSetElement(value)) {
     throw new SerializableValueError(
       "setElement",
-      "Sets may contain only text, numbers, true or false, null, dates, times, timestamps, and durations.",
+      "Sets may contain only string, boolean, integer, number, duration, date, time, datetime, timestamp, or null values.",
     );
   }
 }

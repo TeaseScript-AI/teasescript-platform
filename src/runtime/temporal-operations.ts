@@ -292,17 +292,9 @@ export function temporalBinary(
     return order >= 0;
   }
   if (operator === "+" || operator === "-") {
-    const [moment, duration] = isDuration(right)
-      ? [left, right]
-      : operator === "+" && isDuration(left)
-        ? [right, left]
-        : [undefined, undefined];
-    if (
-      duration !== undefined &&
-      moment !== undefined &&
-      (isTimestamp(moment) || isDateTime(moment))
-    )
-      return shifted(moment, operator === "-" ? -duration.milliseconds : duration.milliseconds);
+    // A duration is added to or subtracted from the moment written first, as in `started + 1 h`.
+    if (isDuration(right) && (isTimestamp(left) || isDateTime(left)))
+      return shifted(left, operator === "-" ? -right.milliseconds : right.milliseconds);
     if (operator === "-" && isTimestamp(left) && isTimestamp(right))
       return elapsed(left.epochMilliseconds, right.epochMilliseconds);
     if (operator === "-" && isDateTime(left) && isDateTime(right))
