@@ -470,14 +470,17 @@ test("restores prepared speaker aliases before and after nested identity mutatio
 test("restores retained prepared list items across structural index shifts", () => {
   const { boundaries: observations } = assertRuntimeResumeEquivalent(
     [
-      "let direct = [0, 1, { value: 2 }]",
+      "let direct = [{ value: 0 }, { value: 1 }, { value: 2 }]",
       "speaker vera { items: [{ value: 0 }, { value: 1 }] }",
       "let alias = vera",
-      "function removeMiddle { direct.remove(1)\nreturn 8 }",
+      "function removeMiddle { direct.remove({ value: 1 })\nreturn 8 }",
       "function shiftAlias { alias.items.removeFirst()\nreturn 9 }",
+      "let positions = [{ value: 0 }, { value: 1 }, { value: 2 }]",
+      "function removePosition { positions.removeAt(0)\nreturn 6 }",
       "direct[2].value = removeMiddle()",
       "vera.items[1].value = shiftAlias()",
-      'say "${direct[1].value}:${vera.items[0].value}"',
+      "positions[2].value = removePosition()",
+      'say "${direct[1].value}:${vera.items[0].value}:${positions[1].value}"',
     ].join("\n"),
   );
 

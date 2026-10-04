@@ -64,7 +64,7 @@ test("instant remains an identifier when its pacing expression continues", () =>
   const compiled = plan(
     [
       "let instant = [1]",
-      'say "plus", instant + 1',
+      'say "plus", instant[0] + 1',
       'say "index", instant[0]',
       'say "property", instant.length',
     ].join("\n"),
@@ -336,7 +336,7 @@ test("first smart say creates a background gate and later say promotes it withou
 });
 
 test("pacing skip settles a promoted gate and emits its prepared output once, directly and after checkpoint restore", () => {
-  const compiled = plan('say ["first", "first-alt"]\nsay ["second", "second-alt"]');
+  const compiled = plan('say "${["first", "first-alt"]}"\nsay "${["second", "second-alt"]}"');
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled, { seed: 77 }));
   const gate = waiting.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
@@ -431,7 +431,7 @@ test("background pacing survives scope, loop, and call unwinding through checkpo
 });
 
 test("a pacing gate created by a returned function promotes and resumes later output", () => {
-  const compiled = plan('function f { say "first" }\nf()\nsay ["second", "second-alt"]');
+  const compiled = plan('function f { say "first" }\nf()\nsay "${["second", "second-alt"]}"');
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled, { seed: 77 }));
   const gate = waiting.snapshot.foregroundAction;
   assert.equal(gate?.kind, "chatPacingGate");
@@ -503,7 +503,7 @@ test("smart pacing uses the final visible text and captured settings", () => {
       deadlineMs: 2_100,
     },
     {
-      source: 'say ["short", "selected text"]',
+      source: 'let texts = ["short", "selected text"]\nsay "${texts}"',
       options: { seed: 77 },
       text: "short",
       deadlineMs: 1_800,
@@ -579,11 +579,23 @@ test("say skip policy follows explicit, speaker, and fallback precedence", () =>
   assert.equal(replacement?.kind, "chatPacingGate");
   if (replacement?.kind === "chatPacingGate") assert.equal(replacement.skippable, true);
 
-  const invalid = plan("speaker vera { defaultSaySkippable: random() }");
-  const rejected = run(invalid, createFreshRuntimeSnapshot(invalid, { seed: 77 }));
+  // A host value hides the number from the compiler, which rejects a known non-boolean value itself (#552); the
+  // random title shows that the failed declaration commits no random draw either.
+  const invalid = plan(
+    'speaker vera {\n    title: "${random()}"\n    defaultSaySkippable: flag\n}',
+    { globals: ["flag"] },
+  );
+  const rejected = run(
+    invalid,
+    createFreshRuntimeSnapshot(invalid, { seed: 77, globals: { flag: 1 } }),
+  );
   assert.equal(rejected.snapshot.status, "failed");
   assert.equal(rejected.snapshot.speakers.length, 0);
-  assert.equal(rejected.snapshot.frames[0]?.bindings.length, 0);
+  // Only the host value is bound; the failed declaration commits nothing.
+  assert.deepEqual(
+    rejected.snapshot.frames[0]?.bindings.map((binding) => binding.name),
+    ["flag"],
+  );
   assert.equal(rejected.snapshot.rng.state, 77);
 });
 
@@ -631,7 +643,7 @@ test("unsupported and overflowing runtime pacing leave message evaluation uncomm
     ["runtimeFailure"],
   );
 
-  const nonFinite = plan("say random(), 1 / 0");
+  const nonFinite = plan("let zero = 0\nsay random(), 1 / zero");
   const nonFiniteResult = run(nonFinite, createFreshRuntimeSnapshot(nonFinite, { seed: 77 }));
   assert.equal(nonFiniteResult.snapshot.status, "failed");
   assert.equal(nonFiniteResult.snapshot.rng.state, 77);
@@ -897,7 +909,7 @@ test("exact and zero pacing create only the required actions", () => {
 });
 
 test("a background pacing gate restores before promotion and preserves prepared output equivalence", () => {
-  const compiled = plan('say ["first", "first-alt"]\nsay ["second", "second-alt"]');
+  const compiled = plan('say "${["first", "first-alt"]}"\nsay "${["second", "second-alt"]}"');
   const initial = createFreshRuntimeSnapshot(compiled, { seed: 77 });
   const first = executeInstruction(compiled, initial);
   const originalGate = first.snapshot.backgroundActions[0];
@@ -1329,8 +1341,9 @@ test("terminal say transitions reserve complete and future action events atomica
 });
 
 test("speaker assignment keeps defaultSaySkippable boolean", () => {
+  // `dynamic` hides the text from the compiler, which rejects a known non-boolean value itself (#552).
   const assignmentPlan = plan(
-    'speaker vera { defaultSaySkippable: true }\nvera.defaultSaySkippable = "no"\nexit',
+    'function dynamic(value) { return value }\nspeaker vera { defaultSaySkippable: true }\nvera.defaultSaySkippable = dynamic("no")\nexit',
   );
   const rejected = run(assignmentPlan, createFreshRuntimeSnapshot(assignmentPlan));
   assert.equal(rejected.snapshot.status, "failed");

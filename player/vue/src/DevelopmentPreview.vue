@@ -4,7 +4,7 @@ import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue
 import { Button } from "@/components/ui/button";
 import type { CapturedMediaRepository } from "../../captured-media.js";
 import type { PlayerTimerKind } from "../../model.js";
-import { createPlayerRuntimeSession } from "../../runtime-adapter.js";
+import { createPlayerRuntimeSession, playerTemporalContext } from "../../runtime-adapter.js";
 import { createLocalScriptStorage } from "../../script-storage.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
 import BackgroundControlsFixture from "./BackgroundControlsFixture.vue";
@@ -53,15 +53,19 @@ const player = usePlayerSession({
     capturedMedia: { repository: props.capturedMediaRepository ?? null },
   }),
 });
+const startOptions = () => ({ temporalContext: playerTemporalContext(), wallClockMs: Date.now() });
 if (cameraScenario)
   void player
     .loadScriptStorage()
     .then(() =>
       player.prepare(() =>
-        createPlayerRuntimeSession(cameraScenarioSource, player.scriptStorageOptions()),
+        createPlayerRuntimeSession(cameraScenarioSource, {
+          ...player.scriptStorageOptions(),
+          ...startOptions(),
+        }),
       ),
     );
-else player.prepare(() => createPlayerRuntimeSession(openingScenario));
+else player.prepare(() => createPlayerRuntimeSession(openingScenario, startOptions()));
 </script>
 
 <template>

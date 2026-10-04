@@ -47,8 +47,8 @@ test("parses and executes prototype-sensitive declarations and properties", () =
     "  return toLocaleString + valueOf",
     "}",
     "let result = hasOwnProperty(3)",
-    "let object = { __proto__: result }",
-    "say object.__proto__",
+    "let record = { __proto__: result }",
+    "say record.__proto__",
   ].join("\n");
   const parsed = parse(source);
   const compiled = compileSource(source);

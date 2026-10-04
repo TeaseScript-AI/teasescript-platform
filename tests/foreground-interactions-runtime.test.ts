@@ -29,11 +29,13 @@ import {
 } from "../src/runtime/state.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
 
-type Mutable<T> = T extends readonly (infer Item)[]
-  ? Array<Mutable<Item>>
-  : T extends object
-    ? { -readonly [Key in keyof T]: Mutable<T[Key]> }
-    : T;
+type Mutable<T> = T extends readonly [infer First, infer Second]
+  ? [Mutable<First>, Mutable<Second>]
+  : T extends readonly (infer Item)[]
+    ? Array<Mutable<Item>>
+    : T extends object
+      ? { -readonly [Key in keyof T]: Mutable<T[Key]> }
+      : T;
 
 function interactionPlan(
   interactionKind: InteractionInstruction["interactionKind"],
@@ -53,9 +55,11 @@ function interactionPlan(
   const expectedResult =
     interactionKind === "button"
       ? "none"
-      : interactionKind === "number" || (ui.kind === "choice" && ui.labelType === "number")
+      : interactionKind === "number"
         ? "number"
-        : "string";
+        : interactionKind === "choice"
+          ? "choice"
+          : "string";
   const interaction: InteractionInstruction = {
     kind: "interaction",
     interactionKind,
@@ -85,32 +89,29 @@ const defaults = {
   choice: { kind: "localizedDefault", key: "chooseOption" },
 } as const;
 
-// One fixture per choice result domain; the labelled options share visible text on purpose.
-const choiceDomains: Record<"unlabelled" | "identifier" | "numeric", InteractionUiPayload> = {
-  unlabelled: {
+// One fixture per choice result domain; the options with written values share visible text on purpose.
+const choiceDomains: Record<"text" | "identifier" | "numeric", InteractionUiPayload> = {
+  text: {
     kind: "choice",
-    labelType: "none",
     options: [
-      { text: "Alpha", label: null },
-      { text: "Beta", label: null },
+      { text: "Alpha", value: "Alpha" },
+      { text: "Beta", value: "Beta" },
     ],
     accessibleName: defaults.choice,
   },
   identifier: {
     kind: "choice",
-    labelType: "identifier",
     options: [
-      { text: "Same", label: "first" },
-      { text: "Same", label: "second" },
+      { text: "Same", value: "first" },
+      { text: "Same", value: "second" },
     ],
     accessibleName: defaults.choice,
   },
   numeric: {
     kind: "choice",
-    labelType: "number",
     options: [
-      { text: "One", label: 1 },
-      { text: "Two", label: 2 },
+      { text: "One", value: 1 },
+      { text: "Two", value: 2 },
     ],
     accessibleName: defaults.choice,
   },
@@ -231,23 +232,23 @@ test("number accepts TeaseScript decimal/scientific text and preserves its trimm
   }
 });
 
-test("choice supports unlabelled, identifier, numeric, exact typed, and ambiguous labelled behavior", () => {
-  const unlabelled = interactionPlan("choice", choiceDomains.unlabelled);
+test("choice supports text, identifier, and numeric values, exact typed text, and ambiguous text", () => {
+  const textChoice = interactionPlan("choice", choiceDomains.text);
   assert.equal(
-    complete(unlabelled, { kind: "selectedText", selectedText: "Beta" }, "choice").snapshot
+    complete(textChoice, { kind: "selectedOption", optionIndex: 1 }, "choice").snapshot
       .temporaries[0]?.value,
     "Beta",
   );
   assert.equal(
-    complete(unlabelled, { kind: "submittedText", submittedText: "Alpha" }, "choice").snapshot
+    complete(textChoice, { kind: "submittedText", submittedText: "Alpha" }, "choice").snapshot
       .temporaries[0]?.value,
     "Alpha",
   );
 
-  const labelled = interactionPlan("choice", choiceDomains.identifier);
-  const ambiguous = waiting(labelled);
+  const identifierChoice = interactionPlan("choice", choiceDomains.identifier);
+  const ambiguous = waiting(identifierChoice);
   const before = JSON.stringify(ambiguous.snapshot);
-  const rejected = completeAction(labelled, ambiguous.snapshot, {
+  const rejected = completeAction(identifierChoice, ambiguous.snapshot, {
     actionId: ambiguous.snapshot.foregroundAction!.actionId,
     actionKind: "interaction",
     interactionKind: "choice",
@@ -255,13 +256,13 @@ test("choice supports unlabelled, identifier, numeric, exact typed, and ambiguou
   });
   assert.equal(rejected.outcome.kind, "invalidPayload");
   assert.equal(JSON.stringify(rejected.snapshot), before);
-  const selected = complete(labelled, { kind: "selectedLabel", selectedLabel: "second" }, "choice");
+  const selected = complete(identifierChoice, { kind: "selectedOption", optionIndex: 1 }, "choice");
   assert.equal(selected.snapshot.temporaries[0]?.value, "second");
   const choiceTranscript = selected.events[0]!;
   assert.equal(choiceTranscript.kind === "playerTranscript" && choiceTranscript.text, "Same");
 
   const numeric = interactionPlan("choice", choiceDomains.numeric);
-  const numericCompleted = complete(numeric, { kind: "selectedLabel", selectedLabel: 2 }, "choice");
+  const numericCompleted = complete(numeric, { kind: "selectedOption", optionIndex: 1 }, "choice");
   assert.equal(numericCompleted.snapshot.temporaries[0]?.value, 2);
   assert.equal(validateRuntimeSnapshot(numericCompleted.snapshot, numeric).valid, true);
   const numericRestored = deserializeCheckpoint(
@@ -273,14 +274,14 @@ test("choice supports unlabelled, identifier, numeric, exact typed, and ambiguou
 
 test("choice completion snapshots validate without a plan for every result domain", () => {
   const cases = [
-    interactionPlan("choice", choiceDomains.unlabelled),
+    interactionPlan("choice", choiceDomains.text),
     interactionPlan("choice", choiceDomains.identifier),
     interactionPlan("choice", choiceDomains.numeric),
   ] as const;
   const payloads = [
-    { kind: "selectedText", selectedText: "Beta" },
-    { kind: "selectedLabel", selectedLabel: "second" },
-    { kind: "selectedLabel", selectedLabel: 2 },
+    { kind: "selectedOption", optionIndex: 1 },
+    { kind: "selectedOption", optionIndex: 1 },
+    { kind: "selectedOption", optionIndex: 1 },
   ] as const;
   for (let index = 0; index < cases.length; index += 1) {
     const completed = complete(cases[index]!, payloads[index], "choice");
@@ -294,31 +295,31 @@ test("choice completion snapshots validate without a plan for every result domai
     }
   }
   const identifier = complete(cases[1], payloads[1], "choice");
-  const wrongForExactPlan: any = structuredClone(identifier.snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture changes an identifier-labelled result to the numeric domain for exact-plan validation.
+  const wrongForExactPlan: any = structuredClone(identifier.snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture changes an identifier-valued result to the numeric domain for exact-plan validation.
   wrongForExactPlan.lastSettlement.result = 1;
   wrongForExactPlan.interactionResultHandoff.result = 1;
   wrongForExactPlan.temporaries[0].value = 1;
-  assert.equal(validateRuntimeSnapshot(wrongForExactPlan).valid, true);
+  // The settlement records the presented options, which offer no value 1, so this fails even without the plan.
+  assert.equal(validateRuntimeSnapshot(wrongForExactPlan).valid, false);
   assert.equal(validateRuntimeSnapshot(wrongForExactPlan, cases[1]).valid, false);
   const wrongChoiceDestination: any = structuredClone(identifier.snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture makes the stored destination disagree with its retained choice settlement.
   wrongChoiceDestination.temporaries[0].value = "other";
   assert.equal(validateRuntimeSnapshot(wrongChoiceDestination, cases[1]).valid, false);
 });
 
-test("numeric interactions reject negative-zero labels and keep canonical zero results", () => {
+test("numeric interactions reject negative-zero values and keep canonical zero results", () => {
   const zeroChoice = interactionPlan("choice", {
     kind: "choice",
-    labelType: "number",
-    options: [{ text: "Zero", label: 0 }],
+    options: [{ text: "Zero", value: 0 }],
     accessibleName: defaults.choice,
   });
-  const negativeZeroPlan: any = structuredClone(zeroChoice); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture injects negative zero into a numeric choice label rejected by plan validation.
-  negativeZeroPlan.instructions[0].ui.options[0].label = -0;
+  const negativeZeroPlan: any = structuredClone(zeroChoice); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture injects negative zero into a numeric choice value rejected by plan validation.
+  negativeZeroPlan.instructions[0].ui.options[0].value = -0;
   assert.equal(validateInstructionPlan(negativeZeroPlan).valid, false);
 
   const pending = waiting(zeroChoice);
   const negativeZeroAction: any = structuredClone(pending.snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture injects negative zero into persisted choice UI data rejected by snapshot validation.
-  negativeZeroAction.foregroundAction.ui.options[0].label = -0;
+  negativeZeroAction.foregroundAction.ui.options[0].value = -0;
   assert.equal(validateRuntimeSnapshot(negativeZeroAction).valid, false);
   assert.equal(validateRuntimeSnapshot(negativeZeroAction, zeroChoice).valid, false);
 
@@ -329,7 +330,7 @@ test("numeric interactions reject negative-zero labels and keep canonical zero r
   });
   for (const [plan, payload, kind] of [
     [askNumber, { kind: "submittedText", submittedText: "-0" }, "number"],
-    [zeroChoice, { kind: "selectedLabel", selectedLabel: -0 }, "choice"],
+    [zeroChoice, { kind: "selectedOption", optionIndex: 0 }, "choice"],
     [zeroChoice, { kind: "submittedText", submittedText: "Zero" }, "choice"],
   ] as const) {
     const label = `${kind} ${JSON.stringify(payload)}`;
@@ -481,11 +482,10 @@ test("interaction definitions preflight each field against remaining aggregate b
 
   const options = Array.from({ length: MAX_INTERACTION_OPTION_ENTRIES }, (_, index) => ({
     text: "",
-    label: index,
+    value: index,
   }));
   const exactOptions = interactionPlan("choice", {
     kind: "choice",
-    labelType: "number",
     options,
     accessibleName: defaults.choice,
   });
@@ -502,7 +502,7 @@ test("interaction definitions preflight each field against remaining aggregate b
   const ui = overOptionsInteraction.ui;
   // EVIDENCE: fixture appends one choice beyond the accepted option-count limit.
   Object.assign(ui, {
-    options: [...ui.options, { text: "", label: MAX_INTERACTION_OPTION_ENTRIES }],
+    options: [...ui.options, { text: "", value: MAX_INTERACTION_OPTION_ENTRIES }],
   });
   assert.equal(validateInstructionPlan(overOptions).valid, false);
 
@@ -548,13 +548,14 @@ test("interaction definitions preflight each field against remaining aggregate b
   (overAggregateInteraction.ui as { hint: string }).hint += "h";
   assert.equal(validateInstructionPlan(overAggregate).valid, false);
 
+  // A value equal to its button text is counted once.
+  const longText = "a".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES - 1);
   const choiceWithinAggregate = interactionPlan("choice", {
     kind: "choice",
-    labelType: "none",
     accessibleName: defaults.choice,
     options: [
-      { text: "a".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES - 1), label: null },
-      { text: "b", label: null },
+      { text: longText, value: longText },
+      { text: "b", value: "b" },
     ],
   });
   assert.equal(validateInstructionPlan(choiceWithinAggregate).valid, true);
@@ -880,8 +881,7 @@ test("oversized authored interaction strings reject at plan and snapshot boundar
 
   const identifier = interactionPlan("choice", {
     kind: "choice",
-    labelType: "identifier",
-    options: [{ text: "Visible", label: "valid" }],
+    options: [{ text: "Visible", value: "valid" }],
     accessibleName: defaults.choice,
   });
   const hugeIdentifier = structuredClone(identifier);
@@ -892,8 +892,8 @@ test("oversized authored interaction strings reject at plan and snapshot boundar
       hugeIdentifierInteraction.ui.kind === "choice" &&
       hugeIdentifierInteraction.ui.options[0] !== undefined,
   );
-  // EVIDENCE: fixture replaces only the first choice label with an oversized identifier.
-  (hugeIdentifierInteraction.ui.options[0] as { label: string }).label = oversizedBeside("Visible");
+  // EVIDENCE: fixture replaces only the first choice value with an oversized identifier.
+  (hugeIdentifierInteraction.ui.options[0] as { value: string }).value = oversizedBeside("Visible");
   assert.equal(validateInstructionPlan(hugeIdentifier).valid, false);
 
   const pending = waiting(identifier);
@@ -904,8 +904,8 @@ test("oversized authored interaction strings reject at plan and snapshot boundar
   );
   const hostileOption = hostile.foregroundAction.ui.options[0];
   assert.ok(hostileOption !== undefined);
-  // EVIDENCE: fixture replaces only the persisted choice label with an oversized identifier.
-  (hostileOption as { label: string | number | null }).label = oversizedBeside("Visible");
+  // EVIDENCE: fixture replaces only the persisted choice value with an oversized identifier.
+  (hostileOption as { value: string | number | null }).value = oversizedBeside("Visible");
   assert.equal(validateRuntimeSnapshot(hostile).valid, false);
 });
 
@@ -943,8 +943,7 @@ test("interaction validation stops UTF-8 measurement once a field exhausts the a
   // count times the byte budget. Exact measurement counts are not a requirement.
   const base = interactionPlan("choice", {
     kind: "choice",
-    labelType: "identifier",
-    options: [{ text: "One", label: "one" }],
+    options: [{ text: "One", value: "one" }],
     accessibleName: defaults.choice,
   });
   const half = MAX_INTERACTION_AGGREGATE_UTF8_BYTES / 2;
@@ -955,12 +954,12 @@ test("interaction validation stops UTF-8 measurement once a field exhausts the a
   const laterOptions = (count: number) =>
     Array.from({ length: count }, (_, index) => ({
       text: "later ".repeat(100),
-      label: `later${index}`,
+      value: `later${index}`,
     }));
   for (const [name, exhausting] of [
-    // The text fills half the aggregate and the label exceeds the remaining half by one byte.
-    ["label after a half-budget text", { text: "a".repeat(half), label: "b".repeat(half + 1) }],
-    ["multibyte first text", { text: multibyte, label: "first" }],
+    // The text fills half the aggregate and the value exceeds the remaining half by one byte.
+    ["value after a half-budget text", { text: "a".repeat(half), value: "b".repeat(half + 1) }],
+    ["multibyte first text", { text: multibyte, value: "first" }],
   ] as const) {
     const oneLater = exhaustedMeasurementCounts(base, [exhausting, ...laterOptions(1)]);
     const manyLater = exhaustedMeasurementCounts(base, [exhausting, ...laterOptions(1_000)]);
@@ -1073,7 +1072,7 @@ test("terminal button completion remains inspectable and continuation runs only 
   });
   const plan = {
     ...withExit,
-    rootEndInstruction: 1,
+    files: [{ ...withExit.files[0]!, rootEndInstruction: 1, endInstruction: 1 }],
     instructions: withExit.instructions.slice(0, 1),
   };
   assert.equal(validateInstructionPlan(plan).valid, true);
@@ -1108,12 +1107,12 @@ test("result-bearing interactions require an in-region continuation", () => {
   for (const [kind, ui] of [
     ["text", { kind: "text", hint: null, accessibleName: defaults.text }],
     ["number", { kind: "number", hint: null, accessibleName: defaults.number }],
-    ["choice", choiceDomains.unlabelled],
+    ["choice", choiceDomains.text],
   ] as const) {
     const root = interactionPlan(kind, ui);
     const terminalRoot = {
       ...root,
-      rootEndInstruction: 1,
+      files: [{ ...root.files[0]!, rootEndInstruction: 1, endInstruction: 1 }],
       instructions: root.instructions.slice(0, 1),
     };
     assert.equal(validateInstructionPlan(terminalRoot).valid, false, kind);
@@ -1144,23 +1143,22 @@ test("hostile completion objects reject before getters, mutation, events, or RNG
 test("interaction plan and checkpoint boundaries reject malformed option domains and hostile shapes", () => {
   const base = interactionPlan("choice", {
     kind: "choice",
-    labelType: "identifier",
     options: [
-      { text: "One", label: "one" },
-      { text: "Two", label: "two" },
+      { text: "One", value: "one" },
+      { text: "Two", value: "two" },
     ],
     accessibleName: defaults.choice,
   });
-  // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture callbacks corrupt choice labels, label domain, result domain, and target with incompatible plan values.
+  // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture callbacks corrupt choice values, the UI shape, result domain, and target with incompatible plan values.
   const mutations: Array<(plan: any) => void> = [
     (plan) => {
-      plan.instructions[0].ui.options[1].label = "one";
+      delete plan.instructions[0].ui.options[1].value;
     },
     (plan) => {
-      plan.instructions[0].ui.options[1].label = 2;
+      plan.instructions[0].ui.options[1].value = ["two"];
     },
     (plan) => {
-      plan.instructions[0].ui.labelType = "number";
+      plan.instructions[0].ui.values = [];
     },
     (plan) => {
       plan.instructions[0].expectedResult = "number";
@@ -1333,8 +1331,7 @@ test("unsupported persisted interaction fields are rejected at every boundary", 
   };
   const base = interactionPlan("choice", {
     kind: "choice",
-    labelType: "identifier",
-    options: [{ text: "One", label: "one" }],
+    options: [{ text: "One", value: "one" }],
     accessibleName: defaults.choice,
   });
   // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: targets select nested interaction instruction records to receive an unsupported field.
@@ -1352,7 +1349,7 @@ test("unsupported persisted interaction fields are rejected at every boundary", 
   }
 
   const pending = waiting(base).snapshot;
-  const completed = complete(base, { kind: "selectedLabel", selectedLabel: "one" }, "choice");
+  const completed = complete(base, { kind: "selectedOption", optionIndex: 0 }, "choice");
   const delayPlan = compileSource("wait 1\nexit").plan!;
   const delayPending = run(delayPlan, createFreshRuntimeSnapshot(delayPlan)).snapshot;
   const delayCompleted = observeTime(delayPlan, delayPending, 1_000).snapshot;
@@ -1394,7 +1391,7 @@ test("unsupported persisted interaction fields are rejected at every boundary", 
         actionId: valid.foregroundAction?.actionId ?? valid.lastSettlement!.actionId,
         actionKind: "interaction",
         interactionKind: "choice",
-        payload: { kind: "selectedLabel", selectedLabel: "one" },
+        payload: { kind: "selectedOption", optionIndex: 0 },
       };
       assert.throws(
         () => completeAction(plan, hostile, request),

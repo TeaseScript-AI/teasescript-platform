@@ -103,7 +103,7 @@ test("cue words stay ordinary identifiers outside cue positions", () => {
       "  at = 3",
       "  finish()",
       "}",
-      "let async = 5",
+      'let async = "b.mp3"',
       "playAudio (async)",
     ].join("\n"),
   );

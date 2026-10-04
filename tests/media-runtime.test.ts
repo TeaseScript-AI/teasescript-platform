@@ -3,12 +3,15 @@ import test from "node:test";
 
 import {
   completeAction,
+  createCheckpoint,
   createFreshRuntimeSnapshot,
+  deserializeCheckpoint,
   executeInstruction,
   mediaPlaybackProjection,
   observeTime,
   reportMediaLoad,
   run,
+  serializeCheckpoint,
   stageProjection,
   validateRuntimeSnapshot,
   type InstructionPlan,
@@ -605,11 +608,13 @@ test("dynamic media options are validated when supplied, including null and inde
   // [source, the offending source text the failure must point at]
   const indefinite =
     'playAudio(file: "a", async: true, repeat: loop) {\n  finish {\n    say "x"\n  }\n}';
+  const hidden = "function dynamic(value) {\n    return value\n}\n";
   for (const [source, offending] of [
     [`let loop = true\n${indefinite}`, indefinite],
-    ['let v = null\nplayAudio(file: "a", volume: v)', "v"],
-    ['let s = null\nplayAudio(file: "a", startAt: s)', "s"],
-    ['let e = null\nplayAudio(file: "a", endAt: e)', "e"],
+    // A variable just set to null is known to be null, so the function hides it until the media starts.
+    [`${hidden}let v = dynamic(null)\nplayAudio(file: "a", volume: v)`, "v"],
+    [`${hidden}let s = dynamic(null)\nplayAudio(file: "a", startAt: s)`, "s"],
+    [`${hidden}let e = dynamic(null)\nplayAudio(file: "a", endAt: e)`, "e"],
   ] as const) {
     const compiled = plan(source);
     const { snapshot } = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
@@ -664,6 +669,32 @@ test("an interrupt before an async media assignment keeps a valid, resumable sta
     'timer async 0 s {\n  say "timer"\n}\nlet m = playAudio async "a.mp3"\nsay "${m.state}"\nwait 2',
     { mediaDurationMs: 1_000 },
   );
+});
+
+test("a host builtin cannot hand out the handle of media that is still loading", () => {
+  const compiled = plan('timer async 1 s {\n  host().pause()\n}\nlet m = playAudio async "a.mp3"', {
+    builtins: ["host"],
+  });
+  // The play holds media ID 1 while it waits for the load; only the host could name it before the binding.
+  const capabilities = { builtins: { host: () => ({ kind: "mediaHandle" as const, mediaId: 1 }) } };
+  let snapshot = run(
+    compiled,
+    createImmediatePacingRuntimeSnapshot(compiled),
+    capabilities,
+  ).snapshot;
+  assert.equal(snapshot.foregroundAction?.kind, "mediaPlayback");
+  snapshot = run(compiled, observeTime(compiled, snapshot, 1_000).snapshot, capabilities).snapshot;
+  assert.equal(snapshot.status, "failed");
+  assert.equal(snapshot.failure?.code, "TSR013");
+  const media = snapshot.backgroundActions.find(
+    (action): action is RuntimeMediaActionSnapshot => action.kind === "media",
+  )?.media;
+  assert.deepEqual(
+    [media?.state, media?.loaded, media?.segment, media?.points],
+    ["running", false, 0, []],
+  );
+  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, snapshot)));
+  assert.deepEqual(restored.snapshot, snapshot);
 });
 
 test("restore validation rejects malformed media state", () => {
@@ -1586,7 +1617,11 @@ test("held projections and reads at an arrival use the position the timeline com
     [
       "let saved = 0 ms",
       "timer async 2498 ms {",
-      "  saved = m.remaining",
+      // `remaining` is null while the media's length is unknown, so it is checked first.
+      "  let left = m.remaining",
+      "  if left != null {",
+      "    saved = left",
+      "  }",
       "}",
       'let m = playAudio(file: "a", async: true, startAt: 1.1 ms, endAt: 1000.3 ms, repeat: 2498 ms) {',
       "  finish {",

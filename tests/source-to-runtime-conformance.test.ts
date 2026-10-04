@@ -133,7 +133,7 @@ test("keeps contextual say skip words available as ordinary identifier expressio
   const result = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   assert.deepEqual(
     result.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["indexed", "indexed", "unindexed", "indexed", "indexed"],
+    ['["indexed"]', "indexed", "unindexed", "indexed", "indexed"],
   );
   assert.equal(result.snapshot.status, "halted");
 });

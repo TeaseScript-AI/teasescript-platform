@@ -1,19 +1,36 @@
+import { temporalCaptureAt } from "./temporal-captures.js";
+import {
+  combinedDateAndTime,
+  compareTemporal,
+  hasTemporalMethod,
+  exactDurationMilliseconds,
+  TEMPORAL_GETTERS,
+  temporalBinary,
+  temporalConverted,
+  temporalNow,
+  temporalMethod,
+  temporalProperty,
+} from "./temporal-operations.js";
 import { normalizeColor } from "../color.js";
 import type {
   AssignmentTargetPlan,
   BinaryExpressionPlan,
   ExpressionPlan,
   PlanSourceLocation,
+  TypeCheckPlan,
 } from "../plan/model.js";
 import { escapeMarkup } from "../message-markup.js";
+import { expressionPlanChildren } from "../plan/expression-children.js";
+import { CORE_RUNTIME_BUILTINS } from "../protected-names.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
 import type { DeveloperWarningEvent, InterpreterEvent, OutputSpeaker } from "./events.js";
 import { copySpan, takeSequence } from "./operations/support.js";
 import {
   detachPreparedReferencesForMutation,
-  freezePreparedReferenceListDescendants,
+  freezePreparedReferenceDescendants,
   preparePreparedReferencesForListRemoval,
+  preparePreparedReferencesForListReorder,
   preparedReferenceSpeakerPath,
   readPreparedReference,
   refreshPreparedReferenceFallbacks,
@@ -21,51 +38,91 @@ import {
   type PreparedReferenceDescriptor,
   type PreparedReferenceStep,
 } from "./prepared-references.js";
-import { nextXorShift32, type RandomSource, type XorShift32State } from "./random.js";
+import { nextXorShift32, type RandomSource } from "./random.js";
+import { isVisibleScalar, quotedText, valueNotation, visibleText } from "./value-text.js";
 import {
-  assertStoredType,
-  LOAD_KEY_MESSAGE,
-  findScriptStorageEntry,
-  storageKey,
-} from "./script-storage.js";
+  SET_OPERATIONS,
+  setOperationArgumentMessage,
+  setOperationItems,
+  sortOrder,
+} from "./collection-operations.js";
+import {
+  addDurationParts,
+  compareDurationParts,
+  divideDurationParts,
+  durationFamily,
+  durationParts,
+  durationRatio,
+  formatDuration,
+  isExactDuration,
+  negateDurationParts,
+  scaleDurationParts,
+  storedDuration,
+  type DurationParts,
+} from "../duration.js";
+import {
+  callStringMethod,
+  checkTextArguments,
+  missingMemberMessage,
+  STRING_METHODS,
+  stringLength,
+} from "./string-operations.js";
+import { LIST_JOIN, unknownTextMemberMessage } from "../text-operations.js";
+import { LOAD_KEY_MESSAGE, findScriptStorageEntry, storageKey } from "./script-storage.js";
 import {
   addSerializableSetValue,
+  clearSerializableSet,
   cloneCapturedSerializableValue,
   cloneSerializableValue,
+  containsRuntimeIdentity,
   createCapturedSerializableList,
   createCapturedSerializableSet,
+  dictProperty,
+  getSerializableDictEntry,
   getSerializableProperty,
+  removeSerializableDictEntry,
   removeSerializableSetValue,
   serializableEquals,
   serializableSetContains,
   SerializableValueError,
+  setCapturedSerializableDictValue,
   setCapturedSerializableProperty,
+  type SerializableRuntimeDict,
   type SerializableRuntimeDuration,
   type SerializableRuntimeList,
   type SerializableRuntimeObject,
   type SerializableRuntimeRange,
   type SerializableRuntimeSet,
-  type SerializableRuntimeScalar,
+  type SerializableRuntimeTemporal,
   type SerializableRuntimeValue,
   type SerializableTimerHandle,
   type SerializableMediaHandle,
 } from "./serializable-values.js";
-import type {
-  RuntimeBindingSnapshot,
-  RuntimeSnapshot,
-  RuntimeSpeakerSnapshot,
-  RuntimeTemporarySnapshot,
+import {
+  currentTemporalContext,
+  type RuntimeBindingSnapshot,
+  type RuntimeSnapshot,
+  type RuntimeSpeakerSnapshot,
+  type RuntimeTemporarySnapshot,
 } from "./state.js";
 import {
+  describeRuntimeValue,
+  isDict,
   isDuration,
   isList,
   isObject,
   isRange,
   isSet,
   isSpeakerReference,
+  isTemporal,
   isTimerHandle,
   isMediaHandle,
 } from "./value-predicates.js";
+import {
+  assertValueType,
+  describeValue as describeTypedValue,
+  matchesValueType,
+} from "./value-types.js";
 import {
   mediaEndMs,
   mediaProperty,
@@ -99,7 +156,22 @@ import {
   timerRecord,
 } from "./operations/timer-lifecycle.js";
 import { isValidSessionTime } from "./actions/delay.js";
-import { formatDuration } from "../duration.js";
+import {
+  booleanFromText,
+  CONVERSION_RESULTS,
+  describeConversionResult,
+  isConversionName,
+  isConversionResult,
+  isTemporalConversionResult,
+  numberFromText,
+  rounded,
+  MIN_MAX_BUILTINS,
+  ROUNDING_BUILTINS,
+  temporalTextProblem,
+  withoutNegativeZero,
+  type ConversionName,
+  type ConversionResult,
+} from "../conversions.js";
 
 export interface RuntimeCapabilityCall {
   readonly positional: readonly SerializableRuntimeValue[];
@@ -172,7 +244,7 @@ export class Evaluator {
       case "literal":
         return expression.value;
       case "duration":
-        return { kind: "duration", milliseconds: expression.milliseconds };
+        return storedDuration(durationParts(expression));
       case "identifier": {
         if (expression.name === "speaker" && this.snapshot.contextualSpeaker !== null) {
           const speaker = this.speakerById(this.snapshot.contextualSpeaker, expression.span);
@@ -253,8 +325,21 @@ export class Evaluator {
                     : expression.name === "last"
                       ? base.items.length - 1
                       : Math.floor(this.#findRandom(expression.span) * base.items.length);
-                frame.descriptor.path.push({ kind: "index", index });
-                frame.value = base.items[index]!;
+                if (isSet(base)) {
+                  // A set member is read as a copy: changing it must not change the set or its uniqueness.
+                  const member = cloneCapturedSerializableValue(base.items[index]!);
+                  frame.descriptor = {
+                    rootFrameId: null,
+                    rootName: null,
+                    path: [],
+                    capturedRoot: member,
+                    detached: true,
+                  };
+                  frame.value = member;
+                } else {
+                  frame.descriptor.path.push({ kind: "index", index });
+                  frame.value = base.items[index]!;
+                }
               } else {
                 frame.descriptor.path.push({ kind: "property", name: expression.name });
                 frame.value = this.#getProperty(base, expression.name, expression.span);
@@ -268,18 +353,27 @@ export class Evaluator {
               pending.pop();
               continue;
             }
-            if (isSet(frame.value))
-              throw fault("TSR004", "Sets are not indexable.", expression.span);
-            if (!isList(frame.value))
-              throw fault("TSR008", "Only lists support numeric indexing.", expression.span);
+            this.#assertIndexable(frame.value, expression.span);
             frame.epoch = this.#referenceEpoch;
             frame.stage = 2;
             pending.push(evaluationFrame(expression.index));
             continue;
           }
-          // EVIDENCE: invariant: index reference stage 1 validates and retains the list receiver.
-          const object = frame.value as SerializableRuntimeList;
           if (expression.kind !== "index") throw new TypeError("Invalid reference continuation.");
+          if (isDict(frame.value)) {
+            const key = this.#dictKey(result.value, expression.index.span);
+            frame.descriptor!.path.push({ kind: "key", key });
+            result = {
+              value: this.#dictValue(frame.value, key, expression),
+              owned: false,
+              descriptor: frame.descriptor,
+              epoch: frame.epoch,
+            };
+            pending.pop();
+            continue;
+          }
+          // EVIDENCE: invariant: index reference stage 1 validates and retains the list or dict receiver.
+          const object = frame.value as SerializableRuntimeList;
           const index = this.#index(result.value, expression.index.span);
           this.#assertIndex(object, index, expression.index.span);
           frame.descriptor!.path.push({ kind: "index", index });
@@ -380,13 +474,8 @@ export class Evaluator {
             }
             frame.stage = 1;
           } else {
-            if (expression.kind === "set") {
-              try {
-                addSerializableSetValue(frame.set!, result.value, frame.membership!);
-              } catch (error) {
-                throw this.#translateValueError(error, expression.elements[frame.index - 1]!.span);
-              }
-            } else
+            if (expression.kind === "set") addSerializableSetValue(frame.set!, result.value);
+            else
               frame.results!.push(
                 result.owned ? result.value : cloneCapturedSerializableValue(result.value),
               );
@@ -415,11 +504,40 @@ export class Evaluator {
             };
           break;
         }
+        case "dict": {
+          if (frame.stage === 1) {
+            // The key was evaluated; its value follows.
+            frame.key = this.#dictKey(result.value, expression.entries[frame.index]!.key.span);
+            frame.stage = 2;
+            pending.push(evaluationFrame(expression.entries[frame.index]!.value));
+            continue;
+          }
+          if (frame.stage === 2) {
+            // A later entry with an equal key replaces the earlier one in its position.
+            const entryValue = result.owned
+              ? result.value
+              : cloneCapturedSerializableValue(result.value);
+            const existing = getSerializableDictEntry(frame.dict!, frame.key!);
+            if (existing === undefined)
+              frame.dict!.entries.push({ key: frame.key!, value: entryValue });
+            else existing.value = entryValue;
+            frame.index += 1;
+          }
+          if (frame.index < expression.entries.length) {
+            frame.stage = 1;
+            pending.push(evaluationFrame(expression.entries[frame.index]!.key));
+            continue;
+          }
+          // Values were captured when evaluated (ADR 0014), so the literal owns them.
+          owned = true;
+          value = frame.dict!;
+          break;
+        }
         case "template":
           if (frame.stage === 1) {
             const part = expression.parts[frame.index - 1]!;
             if (part.kind === "expression")
-              frame.text += this.visibleText(result.value, part.expression.span);
+              frame.text += this.interpolationText(result.value, part.expression.span);
           }
           while (
             frame.index < expression.parts.length &&
@@ -453,13 +571,18 @@ export class Evaluator {
           }
           if (frame.stage === 1) {
             frame.value = result.value;
-            if (isSet(frame.value))
-              throw fault("TSR004", "Sets are not indexable.", expression.span);
-            if (!isList(frame.value))
-              throw fault("TSR008", "Only lists support numeric indexing.", expression.span);
+            this.#assertIndexable(frame.value, expression.span);
             frame.stage = 2;
             pending.push(evaluationFrame(expression.index));
             continue;
+          }
+          if (isDict(frame.value)) {
+            value = this.#dictValue(
+              frame.value,
+              this.#dictKey(result.value, expression.index.span),
+              expression,
+            );
+            break;
           }
           {
             const index = this.#index(result.value, expression.index.span);
@@ -468,6 +591,13 @@ export class Evaluator {
             this.#assertIndex(object, index, expression.index.span);
             value = object.items[index]!;
           }
+          break;
+        case "typeTest":
+          if (frame.stage++ === 0) {
+            pending.push(evaluationFrame(expression.value));
+            continue;
+          }
+          value = matchesValueType(result.value, expression.type) !== expression.negated;
           break;
         case "unary":
           if (frame.stage++ === 0) {
@@ -479,13 +609,10 @@ export class Evaluator {
               throw fault("TSR026", "Expected a boolean value.", expression.operand.span);
             value = !result.value;
           } else if (isDuration(result.value)) {
-            value = {
-              kind: "duration",
-              milliseconds:
-                expression.operator === "+"
-                  ? result.value.milliseconds
-                  : 0 - result.value.milliseconds,
-            };
+            const parts = durationParts(result.value);
+            value = storedDuration(
+              expression.operator === "+" ? parts : negateDurationParts(parts),
+            );
           } else {
             const number = this.#number(result.value, expression.operand.span);
             value = this.#finite(expression.operator === "+" ? number : -number, expression.span);
@@ -499,6 +626,18 @@ export class Evaluator {
           }
           if (frame.stage === 1) {
             frame.value = result.value;
+            // An operand is read when it is evaluated: copy a shared list, set, or object before a call in the right
+            // operand can change it.
+            if (
+              (expression.operator === "==" || expression.operator === "!=") &&
+              !result.owned &&
+              (isList(frame.value) ||
+                isSet(frame.value) ||
+                isObject(frame.value) ||
+                isDict(frame.value)) &&
+              mayRunCall(expression.right)
+            )
+              frame.value = cloneCapturedSerializableValue(frame.value);
             if (expression.operator === "and" || expression.operator === "or") {
               if (typeof frame.value !== "boolean")
                 throw fault("TSR026", "Expected a boolean value.", expression.left.span);
@@ -577,8 +716,6 @@ export class Evaluator {
             const key = storageKey(result.value, LOAD_KEY_MESSAGE, expression.key.span);
             const entry = findScriptStorageEntry(this.snapshot, key);
             if (entry !== undefined) {
-              if (expression.expectedType !== null)
-                assertStoredType(entry, expression.expectedType, expression.span);
               value = entry.value;
               break;
             }
@@ -665,8 +802,25 @@ export class Evaluator {
       );
     }
     if (isSet(object)) throw fault("TSR004", "Sets are not indexable.", target.span);
+    if (isDict(object)) {
+      // A new key is added at the end; an existing key keeps its position.
+      const key = this.#dictKey(this.evaluate(target.index), target.index.span);
+      if (receiverDescriptor !== null && !receiverDescriptor.detached) {
+        const mutationStep: PreparedReferenceStep = { kind: "key", key };
+        detachPreparedReferencesForMutation(this.snapshot, {
+          rootFrameId: receiverDescriptor.rootFrameId,
+          rootName: receiverDescriptor.rootName,
+          path: [...receiverDescriptor.path, mutationStep],
+          speakerPath: preparedReferenceSpeakerPath(this.snapshot, receiverDescriptor, [
+            mutationStep,
+          ]),
+        });
+      }
+      setCapturedSerializableDictValue(object, key, value);
+      return;
+    }
     if (!isList(object))
-      throw fault("TSR005", "Only lists have assignable numeric indexes.", target.span);
+      throw fault("TSR005", "Only lists and dicts have assignable indexes.", target.span);
     const index = this.#index(this.evaluate(target.index), target.index.span);
     this.#assertIndex(object, index, target.index.span);
     if (receiverDescriptor !== null && !receiverDescriptor.detached) {
@@ -707,8 +861,12 @@ export class Evaluator {
       return;
     }
     if (isSet(object)) throw fault("TSR004", "Sets are not indexable.", target.span);
+    if (isDict(object)) {
+      this.#dictKey(this.evaluate(target.index), target.index.span);
+      return;
+    }
     if (!isList(object)) {
-      throw fault("TSR005", "Only lists have assignable numeric indexes.", target.span);
+      throw fault("TSR005", "Only lists and dicts have assignable indexes.", target.span);
     }
     const index = this.#index(this.evaluate(target.index), target.index.span);
     this.#assertIndex(object, index, target.index.span);
@@ -729,12 +887,37 @@ export class Evaluator {
       }
       return;
     }
-    if (!isList(receiver) && !isSet(receiver)) {
-      throw fault("TSR016", `Unsupported method '${method}'.`, span);
+    if (typeof receiver === "string") {
+      if (!STRING_METHODS.has(method))
+        throw fault("TSR016", unknownTextMemberMessage(method, "method"), span);
+      return;
     }
-    const supported = isSet(receiver)
-      ? new Set(["add", "remove", "clear", "contains", "toList"])
-      : new Set(["add", "remove", "removeFirst", "removeLast", "clear", "contains", "toSet"]);
+    if (isTemporal(receiver)) {
+      if (!hasTemporalMethod(receiver, method))
+        throw fault("TSR016", `Unsupported method '${method}'.`, span);
+      return;
+    }
+    if (!isList(receiver) && !isSet(receiver) && !isDict(receiver)) {
+      throw fault("TSR016", missingMemberMessage(receiver, method, "method"), span);
+    }
+    const supported = isDict(receiver)
+      ? DICT_METHODS
+      : isSet(receiver)
+        ? new Set(["add", "remove", "clear", "contains", "toList", ...SET_OPERATIONS])
+        : new Set([
+            ...SET_OPERATIONS,
+            "sort",
+            "shuffle",
+            "add",
+            "remove",
+            "removeAt",
+            "removeFirst",
+            "removeLast",
+            "clear",
+            "contains",
+            "toSet",
+            "join",
+          ]);
     if (!supported.has(method)) {
       throw fault("TSR016", `Unsupported method '${method}'.`, span);
     }
@@ -781,7 +964,15 @@ export class Evaluator {
         value = this.#getProperty(value, step.name, span);
         continue;
       }
-      if (isList(value) || isSet(value)) {
+      if (step.kind === "key") {
+        const entry = isDict(value) ? getSerializableDictEntry(value, step.key) : undefined;
+        if (entry === undefined)
+          throw fault("TSR053", "Prepared reference key no longer addresses a dict entry.", span);
+        value = entry.value;
+        continue;
+      }
+      // Only a list is addressed by position; a set member is always read as a copy.
+      if (isList(value)) {
         if (step.index < 0 || step.index >= value.items.length) {
           throw fault("TSR025", `Collection index ${step.index} is outside the valid range.`, span);
         }
@@ -807,12 +998,25 @@ export class Evaluator {
     return speaker;
   }
 
+  /** A speaker's name or title as shown text, like any other shown value, or `null` when it is not set. */
+  #speakerText(speaker: RuntimeSpeakerSnapshot, name: string, span: SourceSpan): string | null {
+    const value = speaker.properties.find((property) => property.name === name)?.value;
+    if (
+      value === undefined ||
+      value === null ||
+      typeof value === "string" ||
+      !isVisibleScalar(value)
+    )
+      return optionalSpeakerString(speaker, name, span);
+    return visibleText(value, span, currentTemporalContext(this.snapshot));
+  }
+
   public outputSpeaker(
     speaker: RuntimeSpeakerSnapshot,
     span: SourceSpan,
     events: InterpreterEvent[],
   ): OutputSpeaker {
-    const explicit = optionalSpeakerString(speaker, "displayName", span);
+    const explicit = this.#speakerText(speaker, "displayName", span);
     let displayName: string;
     let fallback = false;
     if (explicit !== null) {
@@ -826,10 +1030,9 @@ export class Evaluator {
       displayName = explicit;
     } else {
       const derived = [
-        optionalSpeakerString(speaker, "title", span) ??
-          optionalSpeakerString(speaker, "shortTitle", span),
-        optionalSpeakerString(speaker, "firstName", span),
-        optionalSpeakerString(speaker, "lastName", span),
+        this.#speakerText(speaker, "title", span) ?? this.#speakerText(speaker, "shortTitle", span),
+        this.#speakerText(speaker, "firstName", span),
+        this.#speakerText(speaker, "lastName", span),
       ]
         .filter((part): part is string => part !== null && part.length > 0)
         .join(" ");
@@ -861,29 +1064,77 @@ export class Evaluator {
     });
   }
 
-  public visibleText(value: SerializableRuntimeValue, span: SourceSpan): string {
-    return this.visibleTextWithRng(value, span, this.snapshot.rng);
+  /** `${...}` text. A list selects one element with the session RNG, again at every evaluation. */
+  public interpolationText(value: SerializableRuntimeValue, span: SourceSpan): string {
+    if (isDict(value)) throw fault("TSR021", DICT_TEXT_MESSAGE, span);
+    if (!isList(value)) return visibleText(value, span, currentTemporalContext(this.snapshot));
+    if (value.items.length === 0)
+      throw fault(
+        "TSR019",
+        "An interpolated list must contain at least one element to select from.",
+        span,
+      );
+    if (!value.items.every(isVisibleScalar))
+      throw fault(
+        "TSR021",
+        "An interpolated list may contain only text, numbers, true, false, null, durations, and date and time values, because one element is shown as text.",
+        span,
+      );
+    return visibleText(
+      this.#randomItem(value.items, span),
+      span,
+      currentTemporalContext(this.snapshot),
+    );
   }
 
-  public visibleTextWithRng(
-    value: SerializableRuntimeValue,
+  /** `say` text. A value other than a scalar shows in code-like notation, escaped so that markup leaves it literal. */
+  public sayText(value: SerializableRuntimeValue, span: SourceSpan): string {
+    return isVisibleScalar(value)
+      ? visibleText(value, span, currentTemporalContext(this.snapshot))
+      : escapeMarkup(valueNotation(value, span, (handle) => this.#handleNotation(handle, span)));
+  }
+
+  /**
+   * A timer or media handle as `say` shows it, from the state the snapshot holds now: `<timer "Beat", 7 s left>`,
+   * `<timer, paused, 7 s left>`, `<media "music.mp3", playing at 12 s>`, or a settled `<timer, finished>`.
+   */
+  #handleNotation(
+    handle: SerializableTimerHandle | SerializableMediaHandle,
     span: SourceSpan,
-    rng: XorShift32State,
   ): string {
-    if (isList(value)) {
-      const selected = this.#randomItem(value.items, span, rng);
-      if (typeof selected === "string") return selected;
-      if (typeof selected === "number" && Number.isFinite(selected))
-        return String(Object.is(selected, -0) ? 0 : selected);
-      throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
+    const now = this.snapshot.currentSessionTimeMs;
+    const time = (value: SerializableRuntimeValue | undefined): string =>
+      value !== undefined && isDuration(value) ? formatDuration(value.milliseconds) : "";
+    if (isTimerHandle(handle)) {
+      const timer = this.#timer(handle, span);
+      const name = timer.label === null ? "timer" : `timer ${quotedText(timer.label)}`;
+      const left = `${time(timerProperty(timer, "remaining", now))} left`;
+      return timer.state === "running"
+        ? `<${name}, ${left}>`
+        : timer.state === "paused"
+          ? `<${name}, paused, ${left}>`
+          : `<${name}, ${timer.state}>`;
     }
-    if (typeof value === "string") return value;
-    if (typeof value === "number" && Number.isFinite(value))
-      return String(Object.is(value, -0) ? 0 : value);
-    if (typeof value === "boolean") return value ? "true" : "false";
-    if (value === null) return "null";
-    if (isDuration(value)) return formatDuration(value.milliseconds);
-    throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
+    const media = this.#media(handle, span);
+    const at = `at ${time(mediaProperty(media, "position", now))}`;
+    const state =
+      media.state === "running"
+        ? `playing ${at}`
+        : media.state === "paused"
+          ? `paused ${at}`
+          : media.state;
+    return `<media ${quotedText(media.source)}, ${state}>`;
+  }
+
+  /** One element of `list.join()`: a scalar as visible text, without selecting from nested lists. */
+  #joinedText(item: SerializableRuntimeValue, span: SourceSpan): string {
+    if (!isVisibleScalar(item))
+      throw fault(
+        "TSR021",
+        "join() can only join text, numbers, true or false, null, durations, and date and time values. Select an element or a property first.",
+        span,
+      );
+    return visibleText(item, span, currentTemporalContext(this.snapshot));
   }
 
   #binary(
@@ -897,14 +1148,25 @@ export class Evaluator {
       return right;
     }
     if (expression.operator === "==" || expression.operator === "!=") {
-      try {
-        const equal = serializableEquals(left, right);
-        return expression.operator === "==" ? equal : !equal;
-      } catch (error) {
-        if (error instanceof RuntimeFault) throw error;
-        throw this.#translateValueError(error, expression.span);
-      }
+      const equal = serializableEquals(left, right);
+      return expression.operator === "==" ? equal : !equal;
     }
+    if (expression.operator === "in") {
+      if (!isRange(right)) throw fault("TSR035", "Unsupported binary operation.", expression.span);
+      return (
+        typeof left === "number" &&
+        left >= right.start &&
+        (right.inclusive ? left <= right.end : left < right.end)
+      );
+    }
+    const temporal = temporalBinary(
+      expression.operator,
+      left,
+      right,
+      currentTemporalContext(this.snapshot),
+      expression.span,
+    );
+    if (temporal !== undefined) return temporal;
     if (isDuration(left) || isDuration(right)) return this.#durationBinary(expression, left, right);
     if (["<", "<=", ">", ">="].includes(expression.operator)) {
       if (
@@ -940,43 +1202,79 @@ export class Evaluator {
     }
   }
 
-  /** V30 §35 exact-duration arithmetic and comparison; mixing with plain numbers is explicit only. */
+  /**
+   * V30 §35 duration arithmetic and comparison; mixing with plain numbers is explicit only. Exact durations keep their
+   * elapsed arithmetic; calendar parts stay whole, and durations compare and divide only within one family.
+   */
   #durationBinary(
     expression: BinaryExpressionPlan,
     left: SerializableRuntimeValue,
     right: SerializableRuntimeValue,
   ): SerializableRuntimeValue {
-    const duration = (milliseconds: number): SerializableRuntimeDuration => ({
-      kind: "duration",
-      milliseconds: this.#finite(milliseconds, expression.span),
-    });
+    const span = expression.span;
+    const operator = expression.operator;
+    const result = (parts: DurationParts | string): SerializableRuntimeDuration => {
+      if (typeof parts === "string")
+        throw fault("TSR009", `Operator '${operator}': ${parts}.`, span);
+      // Calendar parts must stay whole numbers that a value can store, like the milliseconds' finite range.
+      if (!Number.isSafeInteger(parts.months) || !Number.isSafeInteger(parts.days))
+        throw fault(
+          "TSR036",
+          `Operator '${operator}': the result has too many calendar days or months to represent.`,
+          span,
+        );
+      return storedDuration({ ...parts, milliseconds: this.#finite(parts.milliseconds, span) });
+    };
     if (isDuration(left) && isDuration(right)) {
-      switch (expression.operator) {
+      const [a, b] = [durationParts(left), durationParts(right)];
+      const exact = isExactDuration(a) && isExactDuration(b);
+      switch (operator) {
         case "+":
-          return duration(left.milliseconds + right.milliseconds);
+          return result(addDurationParts(a, b));
         case "-":
-          return duration(left.milliseconds - right.milliseconds);
-        case "/":
-          return this.#finite(left.milliseconds / right.milliseconds, expression.span);
+          return result(addDurationParts(a, b, -1));
+        case "/": {
+          if (exact) return this.#finite(a.milliseconds / b.milliseconds, span);
+          const ratio = durationRatio(a, b);
+          if (typeof ratio === "string")
+            throw fault(
+              "TSR009",
+              `${formatDuration(a)} cannot be divided by ${formatDuration(b)}: ${ratio}.`,
+              span,
+            );
+          return this.#finite(ratio, span);
+        }
         case "<":
-          return left.milliseconds < right.milliseconds;
         case "<=":
-          return left.milliseconds <= right.milliseconds;
         case ">":
-          return left.milliseconds > right.milliseconds;
-        case ">=":
-          return left.milliseconds >= right.milliseconds;
+        case ">=": {
+          const order = compareDurationParts(a, b);
+          if (typeof order === "string")
+            throw fault(
+              "TSR009",
+              `${formatDuration(a)} and ${formatDuration(b)} cannot be compared: ${order}.`,
+              span,
+            );
+          if (operator === "<") return order < 0;
+          if (operator === "<=") return order <= 0;
+          if (operator === ">") return order > 0;
+          return order >= 0;
+        }
       }
     } else if (isDuration(left) && typeof right === "number") {
-      if (expression.operator === "*") return duration(left.milliseconds * right);
-      if (expression.operator === "/") return duration(left.milliseconds / right);
-    } else if (typeof left === "number" && isDuration(right) && expression.operator === "*") {
-      return duration(left * right.milliseconds);
+      const parts = durationParts(left);
+      if (operator === "*") return result(scaleDurationParts(parts, right));
+      if (operator === "/")
+        return isExactDuration(parts)
+          ? result({ ...parts, milliseconds: parts.milliseconds / right })
+          : result(divideDurationParts(parts, right));
+    } else if (typeof left === "number" && isDuration(right) && operator === "*") {
+      return result(scaleDurationParts(durationParts(right), left));
     }
     throw fault(
       "TSR009",
-      `Operator '${expression.operator}' is not supported for these duration operands; add durations to durations and multiply or divide durations by numbers.`,
-      expression.span,
+      `Operator '${operator}' is not supported for these duration operands; add durations to durations and multiply or divide durations by numbers.`,
+      span,
     );
   }
 
@@ -988,7 +1286,13 @@ export class Evaluator {
   ): SerializableRuntimeValue {
     if (expression.callee.kind === "identifier") {
       const name = expression.callee.name;
-      const coreBuiltin = name === "random" || name === "chance" || name === "randomInteger";
+      if (isConversionName(name))
+        return this.#conversionBuiltin(name, positional, named, expression.span);
+      if (ROUNDING_BUILTINS.has(name))
+        return this.#roundingBuiltin(name, positional, named, expression.span);
+      if (MIN_MAX_BUILTINS.has(name))
+        return this.#minMaxBuiltin(name, positional, named, expression.span);
+      const coreBuiltin = CORE_RUNTIME_BUILTINS.some((builtin) => builtin === name);
       const platformPrelude = name === "escapeMarkup";
       const builtin = Object.hasOwn(this.#builtins, name) ? this.#builtins[name] : undefined;
       if (!coreBuiltin && !platformPrelude && builtin === undefined) {
@@ -997,6 +1301,11 @@ export class Evaluator {
           `Unknown built-in function '${expression.callee.name}'.`,
           expression.callee.span,
         );
+      }
+      if (TEMPORAL_GETTERS.has(name)) {
+        const now = this.snapshot.currentSessionTimeMs;
+        const capture = temporalCaptureAt(this.snapshot.temporalCaptures, now);
+        return temporalNow(name, positional, named, capture, now, expression.span);
       }
       const call = Object.freeze({
         positional: Object.freeze(positional),
@@ -1023,8 +1332,7 @@ export class Evaluator {
         }
       } catch (error) {
         if (error instanceof SerializableValueError) {
-          const code =
-            error.code === "cyclic" ? "TSR031" : error.code === "setElement" ? "TSR032" : "TSR013";
+          const code = error.code === "cyclic" ? "TSR031" : "TSR013";
           throw fault(code, error.message, expression.span);
         }
         const message = error instanceof Error ? error.message : String(error);
@@ -1034,8 +1342,9 @@ export class Evaluator {
           expression.span,
         );
       }
+      let copied: SerializableRuntimeValue;
       try {
-        return cloneSerializableValue(returned);
+        copied = cloneSerializableValue(returned);
       } catch (error) {
         if (error instanceof SerializableValueError) {
           throw fault(
@@ -1046,12 +1355,45 @@ export class Evaluator {
         }
         throw error;
       }
+      // Handles and speaker references name records that only the runtime creates; a host cannot hand one out.
+      if (containsRuntimeIdentity(copied)) {
+        throw fault(
+          "TSR013",
+          `Built-in '${expression.callee.name}' returned an invalid value: it contains a timer handle, media handle, or speaker reference, which only the runtime creates.`,
+          expression.span,
+        );
+      }
+      return copied;
     }
     if (expression.callee.kind === "property" && isTimerHandle(receiver)) {
       return this.#callTimer(receiver, expression.callee.name, positional, named, expression.span);
     }
     if (expression.callee.kind === "property" && isMediaHandle(receiver)) {
       return this.#callMedia(receiver, expression.callee.name, positional, named, expression.span);
+    }
+    if (expression.callee.kind === "property" && typeof receiver === "string") {
+      const name = Object.keys(named)[0];
+      if (name !== undefined)
+        throw fault(
+          "TSR015",
+          `${expression.callee.name}() takes its arguments without names; remove '${name}:'.`,
+          expression.span,
+        );
+      return callStringMethod(receiver, expression.callee.name, positional, expression.span);
+    }
+    if (expression.callee.kind === "property" && isTemporal(receiver)) {
+      return temporalMethod(
+        receiver,
+        expression.callee.name,
+        positional,
+        named,
+        currentTemporalContext(this.snapshot),
+        expression.span,
+      );
+    }
+    if (expression.callee.kind === "property" && isDict(receiver)) {
+      this.#referenceEpoch++;
+      return this.#callDict(receiver, expression, positional, named);
     }
     if (expression.callee.kind === "property") {
       return this.#callCollection(
@@ -1060,6 +1402,10 @@ export class Evaluator {
         positional,
         named,
         expression.span,
+        expression.typeCheck === undefined
+          ? null
+          : // Plan validation accepts a type check only on an `add` call with one argument here.
+            { check: expression.typeCheck, span: expression.arguments[0]!.value.span },
       );
     }
     throw fault(
@@ -1069,16 +1415,18 @@ export class Evaluator {
     );
   }
 
+  /** `added` is the check of an element that `add` inserts, from the compiler (ADR 0021 rule 1.7). */
   #callCollection(
     receiver: SerializableRuntimeValue,
     name: string,
     positional: readonly SerializableRuntimeValue[],
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
+    added: { readonly check: TypeCheckPlan; readonly span: SourceSpan } | null,
   ): SerializableRuntimeValue {
     this.#referenceEpoch++;
     if (!isList(receiver) && !isSet(receiver))
-      throw fault("TSR016", `Unsupported method '${name}'.`, span);
+      throw fault("TSR016", missingMemberMessage(receiver, name, "method"), span);
     if (Object.keys(named).length !== 0)
       throw fault("TSR015", "Collection methods accept positional arguments only.", span);
     const expect = (count: number): void => {
@@ -1094,6 +1442,7 @@ export class Evaluator {
         switch (name) {
           case "add":
             expect(1);
+            if (added !== null) assertValueType(positional[0]!, added.check, added.span);
             addSerializableSetValue(receiver, positional[0]!);
             return null;
           case "remove":
@@ -1102,7 +1451,7 @@ export class Evaluator {
             return null;
           case "clear":
             expect(0);
-            receiver.items.length = 0;
+            clearSerializableSet(receiver);
             return null;
           case "contains":
             expect(1);
@@ -1110,6 +1459,24 @@ export class Evaluator {
           case "toList":
             expect(0);
             return createCapturedSerializableList(receiver.items);
+          case "intersection":
+          case "union":
+          case "difference":
+            expect(1);
+            return createCapturedSerializableSet(
+              setOperationItems(
+                name,
+                receiver.items,
+                this.#setOperationArgument(name, positional[0]!, span),
+              ),
+            );
+          case "sort":
+          case "shuffle":
+            throw fault(
+              "TSR016",
+              `A set keeps its insertion order, so it has no ${name}(). Copy it into a list with toList() first.`,
+              span,
+            );
           default:
             throw fault("TSR016", `Unsupported method '${name}'.`, span);
         }
@@ -1117,16 +1484,14 @@ export class Evaluator {
       switch (name) {
         case "add":
           expect(1);
+          if (added !== null) assertValueType(positional[0]!, added.check, added.span);
           receiver.items.push(cloneCapturedSerializableValue(positional[0]!));
           return null;
         case "remove": {
           expect(1);
-          const index = this.#findValue(receiver.items, positional[0]!, span);
-          if (index >= 0) {
-            const rebased = preparePreparedReferencesForListRemoval(this.snapshot, receiver, index);
-            receiver.items.splice(index, 1);
-            refreshPreparedReferenceFallbacks(this.snapshot, rebased);
-          } else {
+          const index = this.#findValue(receiver.items, positional[0]!);
+          if (index >= 0) this.#removeListItem(receiver, index);
+          else {
             this.#warn(
               "TSW002",
               "list.remove(value) found no matching value; the list was left unchanged.",
@@ -1135,46 +1500,125 @@ export class Evaluator {
           }
           return null;
         }
+        case "removeAt": {
+          expect(1);
+          const index = this.#index(positional[0]!, span);
+          this.#assertIndex(receiver, index, span);
+          return this.#removeListItem(receiver, index);
+        }
         case "removeFirst":
-          expect(0);
-          if (receiver.items.length > 0) {
-            const rebased = preparePreparedReferencesForListRemoval(this.snapshot, receiver, 0);
-            receiver.items.shift();
-            refreshPreparedReferenceFallbacks(this.snapshot, rebased);
-          }
-          return null;
         case "removeLast":
           expect(0);
-          if (receiver.items.length > 0) {
-            const removedIndex = receiver.items.length - 1;
-            const rebased = preparePreparedReferencesForListRemoval(
-              this.snapshot,
-              receiver,
-              removedIndex,
+          if (receiver.items.length === 0)
+            throw fault(
+              "TSR018",
+              `Cannot call ${name}() on an empty list. Check that the list's length is above 0 first.`,
+              span,
             );
-            receiver.items.pop();
-            refreshPreparedReferenceFallbacks(this.snapshot, rebased);
-          }
-          return null;
+          return this.#removeListItem(
+            receiver,
+            name === "removeFirst" ? 0 : receiver.items.length - 1,
+          );
         case "clear":
           expect(0);
           if (receiver.items.length > 0) {
-            freezePreparedReferenceListDescendants(this.snapshot, receiver);
+            freezePreparedReferenceDescendants(this.snapshot, receiver);
             receiver.items.length = 0;
           }
           return null;
         case "contains":
           expect(1);
-          return this.#findValue(receiver.items, positional[0]!, span) >= 0;
+          return this.#findValue(receiver.items, positional[0]!) >= 0;
         case "toSet":
           expect(0);
           return createCapturedSerializableSet(receiver.items);
+        case "sort":
+        case "shuffle":
+          expect(0);
+          this.#reorderList(
+            receiver,
+            name === "sort"
+              ? sortOrder(receiver.items, span)
+              : this.#shuffleOrder(receiver.items.length, span),
+          );
+          return null;
+        case "intersection":
+        case "union":
+        case "difference":
+          expect(1);
+          return createCapturedSerializableList(
+            setOperationItems(
+              name,
+              receiver.items,
+              this.#setOperationArgument(name, positional[0]!, span),
+            ),
+          );
+        case "join": {
+          checkTextArguments(LIST_JOIN, positional, span);
+          // EVIDENCE: invariant: checkTextArguments proved that a given separator is text.
+          const separator = (positional[0] as string | undefined) ?? ", ";
+          return receiver.items.map((item) => this.#joinedText(item, span)).join(separator);
+        }
         default:
           throw fault("TSR016", `Unsupported method '${name}'.`, span);
       }
     } catch (error) {
       if (error instanceof RuntimeFault) throw error;
       throw this.#translateValueError(error, span);
+    }
+  }
+
+  /** `contains`, `remove`, `clear`, and `get` of a dict, each with a text key except `clear`. */
+  #callDict(
+    receiver: SerializableRuntimeDict,
+    expression: Extract<ExpressionPlan, { kind: "call" }>,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+  ): SerializableRuntimeValue {
+    // EVIDENCE: invariant: #call dispatches here only for a property callee.
+    const callee = expression.callee as Extract<ExpressionPlan, { kind: "property" }>;
+    const name = callee.name;
+    const span = expression.span;
+    if (!DICT_METHODS.has(name)) throw fault("TSR016", `Dicts have no method '${name}'.`, span);
+    const names = Object.keys(named);
+    const expected = name === "clear" ? 0 : 1;
+    if (
+      positional.length !== expected ||
+      (name === "get" ? names.length !== 1 || names[0] !== "default" : names.length !== 0)
+    )
+      throw fault(
+        "TSR028",
+        name === "get"
+          ? "dict.get(key, default: value) takes a key and a 'default:' value."
+          : `dict.${name}(${name === "clear" ? "" : "key"}) takes ${expected === 0 ? "no arguments" : "one key"}.`,
+        span,
+      );
+    if (name === "clear") {
+      if (receiver.entries.length > 0) {
+        freezePreparedReferenceDescendants(this.snapshot, receiver);
+        receiver.entries.length = 0;
+      }
+      return null;
+    }
+    const keyPlan = expression.arguments[0]!.value;
+    const key = this.#dictKey(positional[0]!, keyPlan.span);
+    // A default the compiler could not know must be a value the dict could hold (ADR 0021 rule 1.7).
+    if (name === "get" && expression.typeCheck !== undefined)
+      assertValueType(named.default!, expression.typeCheck, expression.arguments[1]!.value.span);
+    switch (name) {
+      case "contains":
+        return getSerializableDictEntry(receiver, key) !== undefined;
+      case "get": {
+        // A stored null is a value, so only a missing entry gives the default.
+        const entry = getSerializableDictEntry(receiver, key);
+        return entry === undefined ? named.default! : entry.value;
+      }
+      default: {
+        if (getSerializableDictEntry(receiver, key) === undefined)
+          throw missingKey(key, this.#receiverLabel(callee.object), keyPlan, span);
+        freezePreparedReferenceDescendants(this.snapshot, receiver, key);
+        return removeSerializableDictEntry(receiver, key)!.value;
+      }
     }
   }
 
@@ -1233,6 +1677,7 @@ export class Evaluator {
       if (!isDuration(value)) {
         throw fault("TSR050", `Timer ${name} must be assigned a duration such as 10 s.`, span);
       }
+      exactDurationMilliseconds(value, `Timer ${name}`, span);
       if (name === "remaining") {
         if (timer.state === "running" || timer.state === "paused") {
           assertRepresentableRound(now, Math.max(0, value.milliseconds), span);
@@ -1330,6 +1775,7 @@ export class Evaluator {
     if (!isDuration(value) || !Number.isFinite(value.milliseconds)) {
       throw fault("TSR050", `Media ${name} must be assigned a duration such as 10 s.`, span);
     }
+    exactDurationMilliseconds(value, `Media ${name}`, span);
     const action = activeMediaAction(this.snapshot, handle.mediaId);
     // Playback already reached by now is committed before the seek starts a new segment.
     if (action !== undefined) drainMediaEvents(null, this.snapshot, action, this.events, span);
@@ -1399,10 +1845,10 @@ export class Evaluator {
     return value;
   }
 
-  #findRandom(span: SourceSpan, rng = this.snapshot.rng): number {
+  #findRandom(span: SourceSpan): number {
     const random =
       this.capabilities.random === undefined
-        ? nextXorShift32(rng)
+        ? nextXorShift32(this.snapshot.rng)
         : this.capabilities.random.next();
     if (!Number.isFinite(random) || random < 0 || random >= 1) {
       throw fault("TSR020", "The injected random source must return a number in [0, 1).", span);
@@ -1451,6 +1897,168 @@ export class Evaluator {
     return range.start + Math.floor(this.#findRandom(span) * length);
   }
 
+  /** `toString`, `toNumber`, `toInteger`, or `toBoolean` (V30 §13), with the optional `default:` fallback. */
+  #conversionBuiltin(
+    name: ConversionName,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
+    const extra = Object.keys(named).find((key) => key !== "default");
+    const result = CONVERSION_RESULTS.get(name)!;
+    // A date and a time combine into one date and time (V30 §35).
+    const parts = result === "datetime" && positional.length === 2;
+    if ((positional.length !== 1 && !parts) || extra !== undefined)
+      throw fault(
+        "TSR028",
+        `${name}(...) takes one value and an optional default:, such as ${name}(value, default: ...).`,
+        span,
+      );
+    const fallback = Object.hasOwn(named, "default") ? named.default : undefined;
+    if (fallback !== undefined && !isConversionResult(result, fallback))
+      throw fault(
+        "TSR058",
+        `${name}(...) needs ${describeConversionResult(result)} as its default:, not ${describeRuntimeValue(fallback)}.`,
+        span,
+      );
+    const value = positional[0]!;
+    const converted = parts
+      ? combinedDateAndTime(value, positional[1]!)
+      : this.#converted(result, value, span);
+    if (converted !== undefined) return converted;
+    if (fallback !== undefined) return fallback;
+    if (parts)
+      throw fault(
+        "TSR058",
+        `toDateTime(date, time) combines a date and a time, not ${describeRuntimeValue(value)} and ${describeRuntimeValue(positional[1]!)}.`,
+        span,
+      );
+    const shown = typeof value === "string" ? ` ${JSON.stringify(value)}` : "";
+    const reason =
+      typeof value === "string" && isTemporalConversionResult(result)
+        ? (temporalTextProblem(result, value) ?? "")
+        : "";
+    throw fault(
+      "TSR058",
+      `${name}(...) cannot convert ${describeRuntimeValue(value)}${shown} to ${describeConversionResult(result)}${reason}. Give a fallback with default: if the value may not convert.`,
+      span,
+    );
+  }
+
+  /** The converted value, or `undefined` when `value` cannot be converted. */
+  #converted(
+    result: ConversionResult,
+    value: SerializableRuntimeValue,
+    span: SourceSpan,
+  ): SerializableRuntimeValue | undefined {
+    if (isTemporalConversionResult(result)) return temporalConverted(result, value);
+    if (result === "string")
+      return isVisibleScalar(value)
+        ? visibleText(value, span, currentTemporalContext(this.snapshot))
+        : undefined;
+    if (result === "boolean")
+      return typeof value === "boolean"
+        ? value
+        : typeof value === "string"
+          ? booleanFromText(value)
+          : undefined;
+    const number =
+      typeof value === "number"
+        ? withoutNegativeZero(value)
+        : typeof value === "string"
+          ? numberFromText(value)
+          : undefined;
+    return number === undefined || result === "number"
+      ? number
+      : withoutNegativeZero(Math.trunc(number));
+  }
+
+  /** `min` or `max` of two or more values that are all numbers, all durations, or all date or time values of one kind. */
+  #minMaxBuiltin(
+    name: string,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
+    if (positional.length < 2 || Object.keys(named).length !== 0)
+      throw fault(
+        "TSR028",
+        `${name}(...) takes two or more numbers, durations, or date and time values, such as ${name}(20, total).`,
+        span,
+      );
+    const numbers = positional.every((value) => typeof value === "number");
+    const first = positional[0]!;
+    const temporals = positional.filter(
+      (value): value is SerializableRuntimeTemporal =>
+        isTemporal(value) && isTemporal(first) && value.kind === first.kind,
+    );
+    if (!numbers && !positional.every(isDuration) && temporals.length !== positional.length) {
+      const other = positional.find(
+        (value) => typeof value !== "number" && !isDuration(value) && !isTemporal(value),
+      );
+      throw fault(
+        "TSR059",
+        other === undefined
+          ? `${name}(...) needs values of one kind: all numbers, all durations, or all dates, times, datetimes, or timestamps.`
+          : `${name}(...) needs numbers, durations, or date and time values, not ${describeRuntimeValue(other)}.`,
+        span,
+      );
+    }
+    if (temporals.length === positional.length) {
+      let best = temporals[0]!;
+      for (const candidate of temporals) {
+        const order = compareTemporal(candidate, best);
+        if (name === "min" ? order < 0 : order > 0) best = candidate;
+      }
+      return cloneSerializableValue(best);
+    }
+    // A loop, not a spread into Math.min/Math.max, so a call with very many arguments cannot overflow the native stack.
+    if (numbers) {
+      const values = positional.filter((item): item is number => typeof item === "number");
+      let best = values[0]!;
+      for (const candidate of values)
+        if (name === "min" ? candidate < best : candidate > best) best = candidate;
+      return withoutNegativeZero(best);
+    }
+    // Durations order only within one family (V30 §35), also those that do not win; zero belongs to every family. The
+    // result keeps its own parts.
+    const durations = positional.filter(isDuration);
+    const families = new Set(durations.map((item) => durationFamily(durationParts(item))));
+    families.delete("zero");
+    if (families.size > 1 || families.has("mixed"))
+      throw fault(
+        "TSR059",
+        `${name}(...) compares durations of one kind only: exact time, days and weeks, or months and years.`,
+        span,
+      );
+    let best = durations[0]!;
+    for (const candidate of durations) {
+      const order = compareDurationParts(durationParts(candidate), durationParts(best));
+      if (typeof order === "string")
+        throw fault("TSR059", `${name}(...) cannot compare these durations: ${order}.`, span);
+      if (name === "min" ? order < 0 : order > 0) best = candidate;
+    }
+    return cloneSerializableValue(best);
+  }
+
+  #roundingBuiltin(
+    name: string,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): number {
+    if (positional.length !== 1 || Object.keys(named).length !== 0)
+      throw fault("TSR028", `${name}(...) takes one number, such as ${name}(2.5).`, span);
+    const value = positional[0];
+    if (typeof value !== "number")
+      throw fault(
+        "TSR059",
+        `${name}(...) needs a number, not ${describeRuntimeValue(value!)}.${typeof value === "string" ? " Convert text with toNumber(...) first." : ""}`,
+        span,
+      );
+    return rounded(name, value);
+  }
+
   #escapeMarkupBuiltin(call: RuntimeCapabilityCall): string {
     this.#expectBuiltinArguments("escapeMarkup", call, 1);
     const text = call.positional[0];
@@ -1468,17 +2076,51 @@ export class Evaluator {
     }
   }
 
-  #findValue(
-    items: readonly SerializableRuntimeValue[],
-    value: SerializableRuntimeValue,
+  /** Removes one list element, rebasing or freezing prepared references into the list, and returns it. */
+  /** The items of a set operation's argument, which may be a list or a set whatever the receiver is. */
+  #setOperationArgument(
+    name: string,
+    argument: SerializableRuntimeValue,
     span: SourceSpan,
-  ): number {
+  ): readonly SerializableRuntimeValue[] {
+    if (!isList(argument) && !isSet(argument))
+      throw fault("TSR060", setOperationArgumentMessage(name, argument), span);
+    return argument.items;
+  }
+
+  /**
+   * A uniform random order of `length` items as their old indexes (Fisher–Yates), drawing `length - 1` numbers from the
+   * session RNG, or none for fewer than two items, so replay and checkpoint resume reproduce it.
+   */
+  #shuffleOrder(length: number, span: SourceSpan): number[] {
+    const order = Array.from({ length }, (_, index) => index);
+    for (let index = length - 1; index > 0; index -= 1) {
+      const other = Math.floor(this.#findRandom(span) * (index + 1));
+      [order[index], order[other]] = [order[other]!, order[index]!];
+    }
+    return order;
+  }
+
+  /** Puts the items in `order` (old indexes), moving prepared references into items along with them. */
+  #reorderList(list: SerializableRuntimeList, order: readonly number[]): void {
+    const newIndexOf: number[] = [];
+    for (const [index, old] of order.entries()) newIndexOf[old] = index;
+    const rebased = preparePreparedReferencesForListReorder(this.snapshot, list, newIndexOf);
+    const items = order.map((old) => list.items[old]!);
+    for (const [index, item] of items.entries()) list.items[index] = item;
+    refreshPreparedReferenceFallbacks(this.snapshot, rebased);
+  }
+
+  #removeListItem(list: SerializableRuntimeList, index: number): SerializableRuntimeValue {
+    const rebased = preparePreparedReferencesForListRemoval(this.snapshot, list, index);
+    const removed = list.items.splice(index, 1)[0]!;
+    refreshPreparedReferenceFallbacks(this.snapshot, rebased);
+    return removed;
+  }
+
+  #findValue(items: readonly SerializableRuntimeValue[], value: SerializableRuntimeValue): number {
     for (let index = 0; index < items.length; index += 1) {
-      try {
-        if (serializableEquals(items[index]!, value)) return index;
-      } catch (error) {
-        throw this.#translateValueError(error, span);
-      }
+      if (serializableEquals(items[index]!, value)) return index;
     }
     return -1;
   }
@@ -1486,11 +2128,10 @@ export class Evaluator {
   #randomItem(
     items: readonly SerializableRuntimeValue[],
     span: SourceSpan,
-    rng = this.snapshot.rng,
   ): SerializableRuntimeValue {
     if (items.length === 0)
       throw fault("TSR019", "Cannot select '.random' from an empty collection.", span);
-    return items[Math.floor(this.#findRandom(span, rng) * items.length)]!;
+    return items[Math.floor(this.#findRandom(span) * items.length)]!;
   }
 
   #getProperty(
@@ -1503,6 +2144,20 @@ export class Evaluator {
       return this.#getSpeakerProperty(this.speakerById(value.speakerId, span), name, span);
     }
     if (isList(value) || isSet(value)) return this.#getCollectionProperty(value, name, span);
+    if (typeof value === "string") {
+      if (name === "length") return stringLength(value);
+      throw fault("TSR017", unknownTextMemberMessage(name, "property"), span);
+    }
+    if (isDict(value)) {
+      const property = dictProperty(value, name);
+      if (property === undefined)
+        throw fault(
+          "TSR017",
+          `Dicts have no property '${name}'; use length, keys, or values, or read a value as dict[key].`,
+          span,
+        );
+      return property;
+    }
     if (isMediaHandle(value)) {
       const property = mediaProperty(
         this.#media(value, span),
@@ -1511,6 +2166,31 @@ export class Evaluator {
       );
       if (property === undefined)
         throw fault("TSR017", `Media handles have no property '${name}'.`, span);
+      return property;
+    }
+    if (isDuration(value)) {
+      const parts = durationParts(value);
+      const family = durationFamily(parts);
+      if (name === "days" && (family === "days" || family === "zero")) return parts.days;
+      if (name === "months" && (family === "months" || family === "zero")) return parts.months;
+      throw fault(
+        "TSR017",
+        name === "days" || name === "months"
+          ? `Only a duration of whole ${name === "days" ? "days or weeks" : "months or years"} has .${name}, but this is ${formatDuration(parts)}.`
+          : `Durations have no property '${name}'.`,
+        span,
+      );
+    }
+    if (isTemporal(value)) {
+      const property = temporalProperty(value, name);
+      if (property === undefined)
+        throw fault(
+          "TSR017",
+          value.kind === "timestamp"
+            ? `Timestamps have no property '${name}'; convert with toDateTime() to read local fields.`
+            : `This ${value.kind} has no property '${name}'.`,
+          span,
+        );
       return property;
     }
     if (isTimerHandle(value)) {
@@ -1523,7 +2203,56 @@ export class Evaluator {
         throw fault("TSR017", `Timer handles have no property '${name}'.`, span);
       return property;
     }
-    throw fault("TSR017", `Value has no property '${name}'.`, span);
+    throw fault("TSR017", missingMemberMessage(value, name, "property"), span);
+  }
+
+  /** Only lists and dicts are indexed. */
+  #assertIndexable(value: SerializableRuntimeValue, span: SourceSpan): void {
+    if (isSet(value)) throw fault("TSR004", "Sets are not indexable.", span);
+    if (!isList(value) && !isDict(value))
+      throw fault("TSR008", "Only lists and dicts can be indexed.", span);
+  }
+
+  #dictKey(value: SerializableRuntimeValue, span: SourceSpan): string {
+    if (typeof value !== "string")
+      throw fault(
+        "TSR062",
+        `A dict key is text (string), but this is ${describeTypedValue(value)}.${typeof value === "number" ? ' Write a number key as text, as in "${id}".' : ""}`,
+        span,
+      );
+    return value;
+  }
+
+  /** The value of `dict[key]`; a missing key is an error that names the check. */
+  #dictValue(
+    dict: SerializableRuntimeDict,
+    key: string,
+    expression: Extract<ExpressionPlan, { kind: "index" }>,
+  ): SerializableRuntimeValue {
+    const entry = getSerializableDictEntry(dict, key);
+    if (entry === undefined)
+      throw missingKey(
+        key,
+        this.#receiverLabel(expression.object),
+        expression.index,
+        expression.span,
+      );
+    return entry.value;
+  }
+
+  /** How the source spells a dict receiver, also one prepared before the rest of its statement, or `null`. */
+  #receiverLabel(plan: ExpressionPlan): string | null {
+    if (plan.kind !== "preparedReference") return planLabel(plan);
+    const descriptor = readPreparedReference(
+      readTemporary(this.snapshot.temporaries, plan.temporaryId, plan.span),
+      plan.span,
+    );
+    const names: string[] = [];
+    for (const step of descriptor.path) {
+      if (step.kind !== "property") return null;
+      names.push(step.name);
+    }
+    return descriptor.rootName === null ? null : [descriptor.rootName, ...names].join(".");
   }
 
   #index(value: SerializableRuntimeValue, span: SourceSpan): number {
@@ -1550,12 +2279,51 @@ export class Evaluator {
 
   #translateValueError(error: unknown, span: SourceSpan): RuntimeFault {
     if (error instanceof SerializableValueError) {
-      const code =
-        error.code === "setElement" ? "TSR032" : error.code === "equality" ? "TSR029" : "TSR031";
-      return fault(code, error.message, span);
+      return fault("TSR031", error.message, span);
     }
     throw error;
   }
+}
+
+const DICT_METHODS: ReadonlySet<string> = new Set(["contains", "remove", "clear", "get"]);
+
+const DICT_TEXT_MESSAGE =
+  '"${...}" cannot show a dict. Select one value with dict[key], or show every value with dict.values.join().';
+
+/**
+ * The error for a key a dict does not have, with the check that avoids it, such as `Check toys.contains(name) first.`
+ * The key is named as the source spells it where the plan still shows it, and otherwise by its text.
+ */
+function missingKey(
+  key: string,
+  owner: string | null,
+  keyPlan: ExpressionPlan,
+  span: SourceSpan,
+): RuntimeFault {
+  const check = `contains(${planLabel(keyPlan) ?? quotedText(key)})`;
+  return fault(
+    "TSR061",
+    `Dictionary has no key ${quotedText(key)}. Check ${owner === null ? `it with ${check}` : `${owner}.${check}`} first.`,
+    span,
+  );
+}
+
+/** The source spelling of a variable, property path, or text literal plan, or `null` for anything else. */
+function planLabel(plan: ExpressionPlan): string | null {
+  const names: string[] = [];
+  let current = plan;
+  for (;;) {
+    if (current.kind === "group") current = current.expression;
+    else if (current.kind === "property") {
+      names.push(current.name);
+      current = current.object;
+    } else break;
+  }
+  if (current.kind === "literal" && typeof current.value === "string" && names.length === 0)
+    return quotedText(current.value);
+  if (current.kind !== "identifier") return null;
+  names.push(current.name);
+  return names.reverse().join(".");
 }
 
 /** A running round must end at a supported session time strictly after a positive remaining time starts. */
@@ -1585,6 +2353,12 @@ function optionalSpeakerString(
 ): string | null {
   const value = speaker.properties.find((property) => property.name === name)?.value;
   if (value === undefined || value === null) return null;
+  if (isList(value) && name !== "font" && name !== "avatar")
+    throw fault(
+      "TSR030",
+      `A list cannot be the speaker's ${name}. Select one element with "\${list}" or list.random.`,
+      span,
+    );
   if (typeof value !== "string")
     throw fault("TSR030", `Speaker property '${name}' must be a string for output.`, span);
   return value;
@@ -1622,15 +2396,47 @@ function findBindingLocation(
   const minimum = functionBase ?? 0;
   for (let index = snapshot.frames.length - 1; index >= minimum; index -= 1) {
     const frame = snapshot.frames[index]!;
-    const binding = frame.bindings.find((item) => item.name === name);
+    const binding = frameBinding(frame.bindings, name);
     if (binding !== undefined) return { frame, binding };
   }
   if (functionBase !== undefined) {
     const frame = snapshot.frames[0]!;
-    const binding = frame.bindings.find((item) => item.name === name);
+    const binding = frameBinding(frame.bindings, name);
     return binding === undefined ? undefined : { frame, binding };
   }
   return undefined;
+}
+
+/** Frames up to this size are scanned; larger frames are looked up through a name index. */
+const INDEXED_FRAME_MIN_BINDINGS = 16;
+
+/**
+ * Name indexes of large frames, keyed by the frame's bindings array. A frame's bindings are only ever appended and
+ * their names never change, so an index extends itself when its frame has grown. A captured or staged snapshot has
+ * new arrays and builds its own index. The index is derived data: it finds the same first binding as a scan.
+ */
+const frameBindingIndexes = new WeakMap<
+  readonly RuntimeBindingSnapshot[],
+  { indexed: number; readonly byName: Map<string, RuntimeBindingSnapshot> }
+>();
+
+function frameBinding(
+  bindings: readonly RuntimeBindingSnapshot[],
+  name: string,
+): RuntimeBindingSnapshot | undefined {
+  if (bindings.length <= INDEXED_FRAME_MIN_BINDINGS) {
+    return bindings.find((item) => item.name === name);
+  }
+  let index = frameBindingIndexes.get(bindings);
+  if (index === undefined) {
+    index = { indexed: 0, byName: new Map() };
+    frameBindingIndexes.set(bindings, index);
+  }
+  for (; index.indexed < bindings.length; index.indexed += 1) {
+    const binding = bindings[index.indexed]!;
+    if (!index.byName.has(binding.name)) index.byName.set(binding.name, binding);
+  }
+  return index.byName.get(name);
 }
 
 function readTemporary(
@@ -1681,10 +2487,39 @@ interface EvaluationFrame {
   epoch: number;
   text: string;
   set: SerializableRuntimeSet | null;
-  membership: Set<SerializableRuntimeScalar> | null;
+  /** A dict literal's entries so far, and the key of the entry whose value is being evaluated. */
+  dict: SerializableRuntimeDict | null;
+  key: string | null;
   positional: SerializableRuntimeValue[] | null;
   named: Record<string, SerializableRuntimeValue> | null;
 }
+const callingExpressions = new WeakMap<ExpressionPlan, boolean>();
+
+/** Whether evaluating an expression can run a call. Results are cached per plan node, so nested checks stay linear. */
+function mayRunCall(expression: ExpressionPlan): boolean {
+  // A node is decided after its children, which are pushed above it.
+  const work: { expression: ExpressionPlan; children: readonly ExpressionPlan[] | null }[] = [
+    { expression, children: null },
+  ];
+  while (work.length > 0) {
+    const current = work.pop()!;
+    if (callingExpressions.has(current.expression)) continue;
+    if (current.expression.kind === "call") {
+      callingExpressions.set(current.expression, true);
+    } else if (current.children !== null) {
+      callingExpressions.set(
+        current.expression,
+        current.children.some((child) => callingExpressions.get(child) === true),
+      );
+    } else {
+      const children = expressionPlanChildren(current.expression);
+      work.push({ expression: current.expression, children });
+      for (const child of children) work.push({ expression: child, children: null });
+    }
+  }
+  return callingExpressions.get(expression)!;
+}
+
 function evaluationFrame(expression: ExpressionPlan, reference = false): EvaluationFrame {
   return {
     expression,
@@ -1697,7 +2532,8 @@ function evaluationFrame(expression: ExpressionPlan, reference = false): Evaluat
     epoch: 0,
     text: "",
     set: expression.kind === "set" ? createCapturedSerializableSet([]) : null,
-    membership: expression.kind === "set" ? new Set() : null,
+    dict: expression.kind === "dict" ? { kind: "dict", entries: [] } : null,
+    key: null,
     positional: expression.kind === "call" ? [] : null,
     named: expression.kind === "call" ? Object.create(null) : null,
   };

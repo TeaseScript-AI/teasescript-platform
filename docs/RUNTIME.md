@@ -63,13 +63,14 @@ reference adapter are implemented. The production cross-origin player/host integ
 One discriminated pending-action family must carry JSON-safe data equivalent to:
 
 ```text
-kind: button | text | number | choice
+kind: button | text | number | temporal | choice
 action identity
 owning and continuation instruction positions
+scene time when it appeared, and a button's timeout when set
 result destination when applicable
 expected result type
 validated Standard UI payload
-choice labels and visible values when applicable
+choice values and visible texts when applicable
 target
 optional requesting speaker identity
 accessible-name data or localized default key
@@ -79,14 +80,14 @@ The engine owns action identity, active state, completion validation, transcript
 
 The selected interactions expose no player cancellation result. Timer interrupts may suspend them, and handler `exit`
 discards the interrupted instruction without producing a result; see [Timers and scene time](#timers-and-scene-time).
-Wrong-kind, whitespace-only required text, non-finite-number, unknown-label, unknown-visible-choice, ambiguous-choice,
+Wrong-kind, whitespace-only required text, non-finite-number, unknown-option, unknown-visible-choice, ambiguous-choice,
 and over-limit completions leave the same action active without mutating its result, transcript, event sequence, RNG, or
 continuation.
 
-The compact compiler fully lowers these forms into the versioned plan. Static control text is embedded directly in the interaction instruction. Dynamic control text first captures the requesting speaker, evaluates payload expressions in source order, and stores one prepared UI value; dynamic `choose` batches all option expressions into one prepared list rather than emitting one interaction-preparation instruction per option. The runtime materializes and validates that prepared UI atomically before publishing the pending action. No Standard Library lookup or suspended JavaScript/TypeScript call survives the compile boundary.
+The compact compiler fully lowers these forms into the versioned plan. Static control text is embedded directly in the interaction instruction. Dynamic control text first captures the requesting speaker, evaluates payload expressions in source order, and stores one prepared UI value; dynamic `choose` batches all option values into one prepared list, next to the value written before each option's `:` (or `null`) in the plan, rather than emitting one interaction-preparation instruction per option. The runtime materializes and validates that prepared UI atomically before publishing the pending action: it expands each list or set option into one button per element, in order, gives every button its value (the written value, a choice object's `value`, or else the option itself), and rejects a choice without buttons or with more buttons than the option-count limit. Buttons may share a value. No Standard Library lookup or suspended JavaScript/TypeScript call survives the compile boundary.
 
-Result-bearing text, number, and choice instructions require the destination temporary to be absent when the interaction
-is requested. Successful completion atomically writes the typed result into that prepared ordinary runtime temporary,
+Result-bearing text, number, choice, and valued button instructions require the destination temporary to be absent
+when the interaction is requested. Successful completion atomically writes the typed result into that prepared ordinary runtime temporary,
 records one nullable single-use `interactionResultHandoff` authority, and advances to the next instruction without
 executing it. The handoff contains only the completed action identity, owning and continuation positions, owner call
 frame, destination temporary, and canonical result. Snapshot validation checks it independently of the bounded
@@ -107,11 +108,19 @@ Completion semantics are:
 
 - `askText` normalizes `CRLF` and standalone `CR` to `LF`, otherwise preserves submitted text, rejects whitespace-only input, returns `string`, and uses the same normalized text in the player transcript;
 - `askNumber` accepts one line of text, trims surrounding whitespace, parses accepted TeaseScript decimal/scientific forms, requires a finite result, canonicalizes negative zero to numeric `0`, returns `number`, and preserves the trimmed submitted text in the transcript;
-- an unlabelled `choose` returns visible text;
-- a labelled `choose` accepts one exact stored identifier or numeric label and returns `string` or `number` respectively;
-- `showButton` has no useful first-slice return value or timeout.
+- `askInteger` is a `number` interaction whose UI carries `integer: true`: it accepts one line with only an optional sign and digits within the safe integer range, rejects anything else with "That is wrong. I asked for a whole number.", and requires a whole-number prefill;
+- `askDate`, `askTime`, and `askDateTime` are a `temporal` interaction whose UI carries `temporalKind` (`date`, `time`, or `datetime`): the answer is trimmed strict ISO text ([V30 §35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-timestamps)), a local time that the player's zone skips is valid, and anything else is rejected with "That is wrong. I asked for a date." (a time, a date and time). The result is the `date`, `time`, or `datetime` value; the transcript shows it in the presentation in force at completion, as `say` would, and a default answer prefills its ISO text;
+- `choose` returns the value of the selected button: a value written before `:` (an identifier is a `string`, a
+  numeric literal a number), a choice object's `value` (or its `text` when it has none), or otherwise the option
+  itself with its own type, which may be text, a number, a boolean, `null`, or a duration;
+- `showButton` used as a value returns the scene time since the button appeared as a `duration`; used as a statement
+  it has no result. Its optional timeout, converted to milliseconds when the button appears, must be finite and
+  positive with a representable deadline at `appeared + timeout`; otherwise the instruction fails with `TSR050` before
+  the button appears. Reaching the deadline is a time settlement, below: the settlement kind is `timedOut`, it
+  publishes `actionCompleted` without a `playerTranscript` event, and its result is exactly the timeout. A click that
+  arrives later returns `alreadySettled` with that settlement.
 
-A labelled rendered choice control supplies its selected label to the engine; an unlabelled control supplies its selected visible text. The engine derives the canonical transcript text from the active action. A rendered control never supplies a replacement canonical transcript string.
+A rendered choice control supplies the position of its button (`{ kind: "selectedOption", optionIndex }`), because several buttons may return the same value. The engine derives the returned value and the canonical transcript text from the active action. A rendered control never supplies a replacement canonical transcript string.
 
 The current runtime keeps three independent interaction resource axes: completion/result/transcript string bytes,
 aggregate UTF-8 bytes for one retained interaction definition, and option count. Authored/materialized UI fields have no
@@ -119,18 +128,22 @@ independent per-field byte ceiling; each preflights against the remaining defini
 their provisional Owner POC reassessment route live in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md); they are not accepted
 capacity or source targets. Bounded validation rejects impossible UTF-16 lengths before encoding and encodes no further
 field once the applicable byte budget fails, so encoding work stays bounded by the byte budget rather than by the total
-string size. The text-completion limit applies to the raw host string before CRLF/CR-to-LF normalization, which cannot
-increase its UTF-8 size. Over-limit data is rejected without truncation, clamping, or partial state mutation.
+string size. A choice value that is text other than its button text counts toward the definition aggregate as well. The
+text-completion limit applies to the raw host string before CRLF/CR-to-LF normalization, which cannot increase its
+UTF-8 size. Over-limit data is rejected without truncation, clamping, or partial state mutation.
 
-Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `WhiteSpace` and `LineTerminator` classification represented by the engine's Unicode-aware regular expression. The identifier-choice label grammar is the current ASCII TeaseScript identifier form. Choice duplicate detection and completion matching use bounded native sets or one linear option pass.
+Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `WhiteSpace` and `LineTerminator` classification represented by the engine's Unicode-aware regular expression. The grammar of an identifier choice value is the current ASCII TeaseScript identifier form. Choice completion matching uses one linear option pass.
 
 Successful completion emits the canonical `playerTranscript` event first and `actionCompleted` second. Both receive
 monotonic sequences, and the bounded settlement retains both sequences, the canonical result, transcript text,
-destination temporary, and owning call-frame identity for duplicate replay. The separate single-use handoff, not that
-settlement, is the persisted authority for the still-unconsumed destination. Prepared dynamic UI is checked against its
-preparation temporaries while those temporaries remain; after canonical cleanup, snapshot validation does not
-reconstruct or authenticate the historical dynamic-UI evaluation, consistent with the general snapshot-history rule
-below. Delay creation preflights its request plus future completion sequence; interaction creation preflights its
+destination temporary, owning call-frame identity, and the UI the player answered, for duplicate replay. The separate
+single-use handoff, not that settlement, is the persisted authority for the still-unconsumed destination. A pending
+action's prepared dynamic UI is checked against its preparation temporaries; for `choose`, the captured option values are
+expanded again and must give the same buttons. A retained settlement is checked against
+its recorded UI and the plan instead, because cleanup clears those temporaries and a later run of the same instruction
+prepares them anew; for `choose` options that all have written values, the buttons must return those values in
+written order. Snapshot validation does not authenticate the historical dynamic-UI evaluation itself: a recorded
+UI and transcript edited together consistently are accepted, in line with the general snapshot-history rule below. Delay creation preflights its request plus future completion sequence; interaction creation preflights its
 request plus future transcript and completion sequences. Interaction completion rechecks both required sequences and
 validates the complete destination mutation before publishing any write, handoff, settlement, event, or continuation
 change. Continuation execution remains eligible only through a later normal runtime entry.
@@ -141,7 +154,7 @@ The Standard Player application uses one fixed composer. During a foreground int
 
 Choice buttons may occupy one or two rows. The Player application may render the same choice group as a dropdown when
 viewport, text, font, zoom, accessibility, or other layout constraints make buttons impractical. Button-versus-dropdown
-presentation is not canonical runtime/checkpoint state and does not change labels, visible text, completion validation,
+presentation is not canonical runtime/checkpoint state and does not change values, visible text, completion validation,
 transcript output, or return values. Exact unambiguous visible option text may activate `choose`. The one-option
 `showButton` completes through its rendered control or composer submission of its exact, non-empty visible label;
 other text and Space with the empty focused composer do not activate it.
@@ -186,8 +199,8 @@ delayMs =
 ```
 
 The measured value is the visible text from the final message-markup representation after expression evaluation,
-interpolation, string escaping, deterministic list selection, block-string newline normalization/dedent, and one shared
-message-markup parse. Formatting delimiters and block markers do not count. Words are maximal non-whitespace sequences;
+interpolation, string escaping, deterministic list selection, list, set, and object notation, block-string newline
+normalization/dedent, and one shared message-markup parse. Formatting delimiters and block markers do not count. Words are maximal non-whitespace sequences;
 visible characters are Unicode code points. The authored markup grammar and flattening rules are defined in
 [`specifications/message-markup.md`](specifications/message-markup.md).
 
@@ -546,7 +559,7 @@ accumulated elapsed time. A finished or stopped record moves to `settledTimers` 
 (`{ kind: "timerHandle", timerId }`) stays readable; `nextTimerId` allocates handle IDs.
 
 `observeTime` processes due work globally by `(scene time, phase, action ID)`: foreground and suspended delays, pacing
-gates, timer rounds, and media timeline events (see [Stage image and media playback](#stage-image-and-media-playback)).
+gates, the timeout of the presented button, timer rounds, and media timeline events (see [Stage image and media playback](#stage-image-and-media-playback)).
 A round that expires naturally ends at its deadline and a repeating timer starts its next round there, drawing a
 repeating range from the session RNG; `remaining` reaching zero ends the round at the current scene time, as does
 pausing a round that is already due while its expiry waits behind a running block. An expired round with an expiry block
@@ -564,8 +577,9 @@ An observation records `observedSessionTimeMs`; `currentSessionTimeMs` is the sc
 Due work settles one deadline at a time, advancing scene time to each. Whenever the script or an expiry block can
 execute, catch-up pauses with scene time at the moment that work became due: the script continues after a `wait` or
 pacing gate at its deadline, a block starts at its expiry's deadline, and catch-up continues toward the observed time
-once execution waits or ends. Every settlement records the scene time at which it happened: a time-driven settlement
-records its deadline, and a pacing gate that is skipped, consumed, or superseded records the current scene time. A
+once execution waits or ends. Every delay, pacing-gate, timer, and media settlement records the scene time at which it
+happened: a time-driven settlement records its deadline, and a pacing gate that is skipped, consumed, or superseded
+records the current scene time. A
 late observation therefore gives the same output, events, and snapshot as observing every deadline on time: a block
 can `stop()` a later timer before it expires, and a timer it starts orders by its own deadline.
 
@@ -587,7 +601,9 @@ instruction budget, so extreme catch-up of handler-bearing rounds can exhaust it
 
 The suspended foreground action is inert: a completion for it returns `suspendedAction` without mutation. A suspended
 delay settles in due-work order and publishes `actionCompleted`, without replacing `lastSettlement`; its continuation
-runs once when the block returns. A normal return restores the interrupted action with its original identity;
+runs once when the block returns. A suspended button's timeout does not settle while the block runs; when the block
+returns after the deadline, the restored button times out at once, at the current scene time, with the timeout as its
+result. A normal return restores the interrupted action with its original identity;
 returning to an interaction first consumes a pacing gate created by the block. `stop()` on an active timer cancels its
 unstarted queued blocks; on a finished or stopped timer it is a silent no-op. `exit` inside a block halts the session
 and discards the interrupted action. `exit` and script end stop every timer and drop queued blocks. A failed session
@@ -703,16 +719,22 @@ open decision in [`OPEN-DECISIONS.md`](OPEN-DECISIONS.md).
 
 ### Normal source route
 
-`compileSource(source, options)` is the normal source compilation route. It:
+`compileProject(files, options)` is the normal source compilation route for a package of `.tease` files, and
+`compileSource(source, options)` compiles one source as the `main.tease` of a one-file project. The file list must name
+`main.tease` once and give every file a unique package-root path that separates folders with `/` and names a `.tease`
+file; other paths are `TSC009` diagnostics. For each file, the compiler:
 
 1. parses source text into a `Program`;
 2. runs AST-level validation for parsed non-finite numeric literals;
 3. runs semantic validation when parsing and finite-literal checking produced no errors;
 4. includes the core runtime built-ins plus configured global and builtin names in validation;
-5. lowers the program only when no error diagnostics remain;
+5. lowers the program only when no error diagnostics remain in any file;
 6. completely validates and deeply freezes an instruction plan before returning it.
 
-The result separates parser and semantic diagnostics and returns `plan: null` when compilation fails. Runtime entry
+Each file has its own top-level names and functions. The plan holds all files: `main.tease` first, then the others by
+path, each a block of its root region followed by its functions and handlers, and a session starts at the top of
+`main.tease`. The result separates parser and semantic diagnostics per file, gives every project diagnostic the path of
+its file, and returns `plan: null` when compilation fails. Runtime entry
 points reuse the identity of a returned validated immutable plan. Other plan data remains subject to the complete
 `validateInstructionPlan(...)` boundary, which accepts only the fields that the current plan version defines for each
 plan object and rejects any other field as malformed `TSC002` data. The plan schema evolves through a new plan version
@@ -770,7 +792,8 @@ The current boundaries are:
 - only explicitly registered own builtin names are callable; inherited JavaScript prototype names do not create capabilities;
 - core built-ins retain precedence over injected capabilities with the same names;
 - low-level named builtin arguments use an immutable prototype-free record and duplicate detection uses own properties;
-- values entering globals or returning from builtins are copied and validated as serializable runtime values;
+- values entering globals or returning from builtins are copied and validated as serializable runtime values, and may
+  not contain timer handles, media handles, or speaker references, which only the runtime creates;
 - invalid builtin return values become structured runtime failures, including `TSR013` for invalid values;
 - normally declared TeaseScript speakers remain runtime-managed state and continue to use stable serialized speaker IDs.
 
@@ -783,6 +806,47 @@ any separately justified capability/interaction boundary. Raw DOM exceptions, br
 mutable host objects do not enter the snapshot.
 
 Under ADR 0017, Standard Library and package-library wrappers may call documented typed capabilities, but they do not bypass these boundaries or become alternate owners of canonical action state.
+
+## Date and time context
+
+Date and time values ([§35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-timestamps)) need the
+player's time zone, presentation, and wall clock, but the engine reads no clock and no host time-zone or locale data.
+A fresh session takes them as data in `FreshRuntimeOptions.temporalContext` and `wallClockMs`, and records them in
+`RuntimeSnapshot.temporalCaptures`, so restore and replay compute the same times and text on every host. A context
+holds:
+
+- `zone`: the IANA name, the offset at the start of 1970, and the offset transitions up to 2100, each located to the
+  second. Converting a moment outside 1970 through 2099 fails with `TSR063` instead of guessing the rules.
+- `presentation`: templates for numeric dates, times, and both, with and without seconds, using the placeholders
+  `{year}`, `{month}`, `{day}`, `{hour}`, `{minute}`, `{second}`, and `{dayPeriod}`; whether day, month, and hour are
+  padded; the hour cycle (`h11`, `h12`, `h23`, or `h24`); and the two day-period markers. Digits are Latin and the
+  calendar Gregorian.
+
+`captureTemporalContext(timeZone, locale)` builds the context from the host's `Intl` data. Zone offsets are sampled
+daily and each change located by bisection, so two changes less than a day apart that cancel each other out are not
+seen. Fresh-session creation rejects a malformed context with `RangeError`; restore validates it like other snapshot
+state. Without a context a session uses UTC and locale-neutral text such as `2026-10-04 18:30`.
+
+Each capture records a context, the UTC wall clock (or `null` when the host supplied none), its boundary scene time,
+and the session's next event sequence when it was recorded. Session start records the first capture at
+`initialSessionTimeMs`. When the player continues a restored session, the host calls
+`recordContinueCapture(plan, snapshot, { wallClockMs, temporalContext? })` before the scene clock resumes; this
+recorded input takes effect at the saved `observedSessionTimeMs`, and a new context may be omitted to keep the earlier
+one. Restore itself records nothing.
+
+- Execution at scene time `t` uses the last capture whose boundary is not later than `t`, so saved catch-up before the
+  boundary keeps the earlier capture and execution from the boundary on uses the new one.
+- `getTimestamp()` is the capture's wall clock plus the scene time since its boundary, rounded to whole milliseconds; it
+  never goes backwards within one capture. `getDate()`, `getTime()`, and `getDateTime()` read that moment through the
+  capture's zone. Without a clock they fail with `TSR064`.
+- Interaction buttons keep the presentation they were shown with: validation derives them again with the capture in
+  force at the interaction's `createdAtMs` among those recorded before its request event, and rejects a snapshot that
+  no longer has that capture.
+- A capture replaces the previous one only when nothing happened in between. Recording a capture drops captures no
+  open interaction, current execution, or saved catch-up can use any more.
+
+The Player resolves the host's account setting, else the browser's zone and language, and then reads `Date.now()`,
+when Start creates a session and again at Continue.
 
 ## Script storage
 
@@ -849,12 +913,26 @@ technical playground has no camera and answers a pending capture as `unconfigure
 
 ## Visible text boundary
 
-Ordinary scalar visible-text conversion accepts strings, finite numbers, booleans, `null`, and elapsed duration values.
-Duration formatting is defined in specification
-[§35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-unix-time). When the value is a list, the
-runtime selects exactly one item and then accepts only a string or finite number. Selected booleans, `null`, objects,
-sets, ranges, and nested collections fail with structured runtime error `TSR021`; the runtime does not recursively
-select or stringify them.
+Ordinary scalar visible-text conversion accepts strings, finite numbers, booleans, `null`, durations, and date and time
+values. Duration formatting and date and time presentation are defined in specification
+[§35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-timestamps): dates and times use the session's
+captured presentation, and a timestamp shows its local date and time in the captured zone (see
+[Date and time context](#date-and-time-context)). Prepared output is never formatted again after restore. List text
+follows
+[§16](specifications/accepted-syntaxes-v30.md#lists-in-text):
+
+- `${...}` interpolation checks that every element is a scalar visible-text value, then selects exactly one element
+  with the session RNG. An empty list fails with `TSR019` and any other element with `TSR021`, both before any RNG
+  draw. A dict fails with `TSR021`, which names the fix ([§40](specifications/accepted-syntaxes-v30.md#40-dictionaries)).
+- `say` shows any other value in code-like notation, written iteratively so that deep nesting does not recurse
+  natively. A timer or media handle shows the state the snapshot holds when `say` evaluates its value, so the text is
+  deterministic and the same after checkpoint resume. The engine escapes the notation with `escapeMarkup`, so the
+  ordinary markup parse leaves it literal.
+- Button labels, input hints, and the `text` of a choice object reject a list with `TSR021`, timer labels with
+  `TSR050`, and speaker names and titles with `TSR030`; a list the compiler can see there is compile error `TSV040`,
+  and another value they cannot show `TSV042`. Materializing an interaction draws no RNG.
+- `list.join(...)` and `toString(...)` apply the scalar conversion to each element or to the value, without selecting
+  from lists; another element fails `join` with `TSR021`, and another value fails `toString` with `TSR058`.
 
 The earlier proposal for automatic chat pacing at 17 visible characters per second is superseded. ADR 0018 defines the
 accepted deterministic first-POC smart-autoplay and pacing-action contract. The current engine/compiler and playground
@@ -931,9 +1009,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 26 | Camera capture: the `capture` instruction for `takePhoto()`, and rejection of an unlowered `takePhoto` call. Revision 25: script storage: `storageLoad` expressions with lazy defaults and direct typed-initializer checks, and `storageWrite` instructions (`save`; `delete` when the value is `null`). Revision 24: message preparation accepts authored position and alignment only for prose. Media instructions `pacingBarrier`, `showImage`, and `playMedia`; handler regions carry `handler` (`timer` or `media`) and `selfHandle`. Revision 21 added the timer instructions. |
-| Runtime snapshot | 27 | Foreground `capture` actions and their replayable settlements, and capture results in the canonical result handoff, which records its `actionKind`. Revision 26: the validated, key-sorted `scriptStorage` session view, `scriptStoragePersistent`, and foreground `storageWrite` actions and settlements. Revision 25: captured bubble presentations require null position and alignment; placement is Player-owned. Media state: `stageImage`, background `media` actions, `settledMedia`, `nextMediaId`, foreground `mediaPlayback` waits and settlements, media cue invocations and interrupt frames, barrier-promoted pacing gates, and media handles. Revision 22 added timer state. |
-| Checkpoint | 35 | Updated the self-contained bundle for the capture plan and snapshot contracts. Revision 34: updated the self-contained bundle for the script-storage plan and snapshot contracts. Revision 33: prose-only authored placement, bubble presentation validation, and the media plan and snapshot contracts. |
+| Instruction plan | 44 | Camera capture: the `capture` instruction for `takePhoto()`, and rejection of an unlowered `takePhoto` call. Revision 43: Projects (#570): a plan lists its `files`, each with a path, source span, and a block of a root region followed by its functions and handlers; this table replaces the plan-level `sourceSpan` and `rootEndInstruction`, and an instruction may only refer to functions of its own file. Revision 42: Any set member (owner decision on #568): a set literal, set `add`, and `toSet` take any value a list takes, so a plan that failed with `TSR032` now runs. Revision 41: Durations as set members (owner-accepted 2026-10-04): static set and choice values may hold durations. Revision 40: Date and time input: an interaction may be `temporal`, with UI, static or prepared, that carries `temporalKind` (`date`, `time`, or `datetime`) and an optional ISO `prefill`, and the `temporal` result domain. Revision 39: Calendar durations: a duration literal plan may carry whole `months` and `days`, present only when they are not zero. Revision 38: Dicts: a `dict` expression carries ordered entries, each a key and a value expression, a type may be `dict` with a value type, and a dict `get` call may check its `default:`. Revision 37: Date and time values: static choice values may be dates, times, datetimes, and timestamps, and types include `timestamp`. Revision 36: Type tests: a `typeTest` expression (`value is T` or `value is not T`) carries a recursive type and is evaluated with the matcher of the runtime type checks. A type may be `never`, which no value fits, so a list of it holds only the empty list. Revision 35: the `min` and `max` built-ins. Revision 34: the list methods `sort` and `shuffle`, and `intersection`, `union`, and `difference` on lists and sets. Revision 33: text operations (`length` and text methods), list `join`, and the conversion and rounding built-ins. Revision 32: `askInteger`: number interaction UI, static or prepared, may carry `integer: true`. Revision 31: the binary operator `in`, a number-in-range test that `switch` range cases compile to. Revision 30: runtime type checks: `declareBinding`, `assign`, `bindDefaultParameter`, and `returnValue` instructions, function-call arguments, and list or set `add` calls may carry a `typeCheck` with a recursive type and the receiving place, checked for values the compiler cannot know; `storageLoad` no longer carries its own expected type. Revision 29: `showButton` timeout and elapsed time: a button used as a value has the `duration` result domain and a destination, and a prepared button may carry a `timeoutTemporary`. Revision 28: list text and choices: `say` shows any value, with lists, sets, and objects in literal notation, only `${...}` interpolation selects a list element, and text fields reject lists; a prepared `choose` keeps its evaluated options and the value written before each `:` (or `null`), static choice UI carries typed values, and choice results use the `choice` domain. Revision 27: structural `==` for objects, lists, sets, and ranges (previously `TSR029`); the list method `removeAt`; `removeAt`, `removeFirst`, and `removeLast` return the removed element, and `removeFirst`/`removeLast` on an empty list fail (previously no-ops). Revision 26: text and number interaction UI may carry a `prefill` default answer, or its `prefillTemporary` when computed. Revision 25: script storage: `storageLoad` expressions with lazy defaults and direct typed-initializer checks, and `storageWrite` instructions (`save`; `delete` when the value is `null`). Revision 24: message preparation accepts authored position and alignment only for prose. Media instructions `pacingBarrier`, `showImage`, and `playMedia`; handler regions carry `handler` (`timer` or `media`) and `selfHandle`. Revision 21 added the timer instructions. |
+| Runtime snapshot | 39 | Foreground `capture` actions and their replayable settlements, and capture results in the canonical result handoff, which records its `actionKind`. Revision 38: Any set member (owner decision on #568): a set may hold any value a list may hold, unique by structural `==`; a prepared reference no longer steps into a set by position, because a set member is read as a copy. Revision 37: Durations as set members (owner-accepted 2026-10-04): a set may hold durations, keyed by their months, days, and milliseconds. Revision 36: Temporal interaction UI, active or recorded in a settlement, carries `temporalKind` and an optional ISO prefill; a temporal settlement result is a date, time, or datetime of that kind. Revision 35: Calendar durations: a duration value may carry whole `months` and `days`, present only when they are not zero. Revision 34: Date and time captures: `temporalContext` became `temporalCaptures`, each with a boundary scene time, an event sequence, an optional wall clock, and a context, recorded at start and by `recordContinueCapture`. Revision 33: Dicts: a runtime value may be a `dict` of ordered `{ key, value }` entries with unique text keys, and a prepared reference path may step through a dict `key`. Revision 32: Date and time values: runtime values, set members, and choice values may be dates, times, datetimes, and timestamps; the session records its captured `temporalContext`. Revision 31: Number interaction UI, active or recorded in a settlement, may carry `integer: true`, which requires a whole-number answer and prefill. Revision 30: interaction actions record `createdAtMs` and a button's `timeoutMs`; an interaction settlement may be `timedOut`, without transcript sequence or text, and a button result is a non-negative elapsed duration. Revision 29: choice actions and settlements carry each button's typed value, a choice result may be any choice value including `null` or a duration, and a choice control completes by button position. Revision 28: text and number interaction UI, active or recorded in a settlement, may carry a validated `prefill`. Revision 27: an interaction settlement records the `ui` the player answered, and validates against it instead of the prepared temporaries, which a later run of the same instruction may fill anew. Revision 26: the validated, key-sorted `scriptStorage` session view, `scriptStoragePersistent`, and foreground `storageWrite` actions and settlements. Revision 25: captured bubble presentations require null position and alignment; placement is Player-owned. Media state: `stageImage`, background `media` actions, `settledMedia`, `nextMediaId`, foreground `mediaPlayback` waits and settlements, media cue invocations and interrupt frames, barrier-promoted pacing gates, and media handles. Revision 22 added timer state. |
+| Checkpoint | 55 | Updated the self-contained bundle for the capture plan and snapshot contracts. Revision 54: the project plan contract. Revision 53: the any-set-member plan and snapshot contracts. Revision 52: the duration set-member plan and snapshot contracts. Revision 51: the date and time input plan and snapshot contracts. Revision 50: the calendar duration plan and snapshot contracts. Revision 49: the date and time capture snapshot contract. Revision 48: the dict plan and snapshot contracts. Revision 47: the date and time plan and snapshot contracts. Revision 46: the type-test plan contract. Revision 45: the `min` and `max` plan contract. Revision 44: the list-sort and set-operation plan contract. Revision 43: the text-operation and built-in plan contract. Revision 42: the `askInteger` plan and snapshot contracts. Revision 41: the `in` plan operator. Revision 40: the runtime-type-check plan contract. Revision 39: the `showButton` timeout plan and snapshot contracts. Revision 38: the list-text and choice plan and snapshot contracts. Revision 37: the structural-equality and list-removal plan contract. Revision 36: interaction prefills. Revision 35: the recorded interaction settlement UI. Revision 34: the script-storage plan and snapshot contracts. Revision 33: prose-only authored placement, bubble presentation validation, and the media plan and snapshot contracts. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 

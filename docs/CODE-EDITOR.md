@@ -65,9 +65,9 @@ official forms is parser/compiler-owned.
 The first implementation should provide:
 
 - completion and hover documentation for the automatically available Standard Library names;
-- signature guidance for optional `as speaker`, input hints, labelled and unlabelled choices, identifier and numeric labels, `skippable`, `unskippable`, exact seconds, `0`, and `instant`;
+- signature guidance for optional `as speaker`, input hints, choice options with and without written values and list options, identifier and numeric values, `skippable`, `unskippable`, exact seconds, `0`, and `instant`;
 - diagnostics for attempts to shadow selected Standard Library names;
-- diagnostics for mixed labelled and unlabelled choices, mixed label types, duplicate labels, and duplicate unlabelled visible text;
+- diagnostics for mixed identifier and numeric values (until union types, #504) and choices without buttons;
 - diagnostics for negative, non-finite, unsupported-magnitude, or overflowing explicit pacing values;
 - documentation that input text is a Standard UI hint rather than an automatic speaker transcript message;
 - documentation of exact text/number normalization, simple return types, and mandatory interactions with no player cancellation result (timer expiry blocks may still discard an interrupted interaction; see [`RUNTIME.md`](RUNTIME.md#timers-and-scene-time));
@@ -81,4 +81,4 @@ The editor may preview the Player application's dynamic choice presentation, but
 
 Editor metadata must not imply that the first POC supports imports, package manifests, Standard Library replacement, or checkpoint migration.
 
-Completion follows accepted TeaseScript syntax, not the completeness of the current implementation slice. Accepted syntax may therefore appear before its implementation slice is complete, such as the accepted V30 `showButton` timeout/elapsed-time return; implementation status must not be encoded as a negative completion requirement. Completion, hover, and help text must not claim that an unimplemented capability already executes. The advanced detailed-result option, typing-indicator options, accessibility override field, and LLM interpretation options are not yet accepted syntax; concrete limit values and exact choice-layout thresholds remain deferred.
+Completion follows accepted TeaseScript syntax, not the completeness of the current implementation slice. Accepted syntax may therefore appear before its implementation slice is complete; implementation status must not be encoded as a negative completion requirement. Completion, hover, and help text must not claim that an unimplemented capability already executes. The advanced detailed-result option, typing-indicator options, accessibility override field, and LLM interpretation options are not yet accepted syntax; concrete limit values and exact choice-layout thresholds remain deferred.

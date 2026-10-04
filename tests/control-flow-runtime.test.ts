@@ -50,6 +50,31 @@ test("supports nested loops, repeat, break, continue, and lexical variables", ()
   assert.equal(result.snapshot.frames.length, 1);
 });
 
+test("resolves variables in many-binding frames as they grow, from functions, and after resume", () => {
+  const result = assertRuntimeResumeEquivalent(
+    [
+      "let first = 1",
+      ...Array.from({ length: 40 }, (_, index) => `let unrelated${index} = ${index}`),
+      "say first + unrelated39",
+      // Declared after the root frame was already read.
+      "let late = 2",
+      "late += first",
+      "function sumLocals {",
+      ...Array.from({ length: 20 }, (_, index) => `  let local${index} = ${index}`),
+      "  return local19 + late",
+      "}",
+      "say sumLocals()",
+      "say sumLocals()",
+      "say late",
+    ].join("\n"),
+    { scenarioName: "many-binding frames" },
+  );
+  assert.deepEqual(
+    result.events.filter((event) => event.kind === "say").map((event) => event.text),
+    ["40", "22", "22", "3"],
+  );
+});
+
 test("executes while and else-if deterministically", () => {
   const result = runSource(
     [

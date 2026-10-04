@@ -184,8 +184,10 @@ choice
 
 The engine owns action identity, continuation, result destination, expected type, allowed values, completion validation, canonical transcript-result derivation, events, checkpoint/restore, and bounded duplicate settlement behavior. The Standard Library/compiler own author-facing defaults, compact syntax, Standard UI payload, localized feedback, and accessibility defaults.
 
-The interactions are mandatory and expose no cancellation result. `askText`, `askNumber`, and `choose` never return
-`null`; `showButton` has no useful first-slice return value. Invalid input keeps the same action active.
+The interactions are mandatory and expose no cancellation result. `askText` and `askNumber` never return `null`, and
+`choose` returns `null` only as the value of a selected option; `showButton` used as a value returns its elapsed
+waiting time ([V30 §21](specifications/accepted-syntaxes-v30.md#21-blocking-button)). Invalid input keeps the same
+action active.
 Timer interrupts and handler-exit cleanup follow [`RUNTIME.md`](RUNTIME.md#timers-and-scene-time).
 
 Interaction definitions and completions remain subject to justified platform guards; ADR 0018 defines no separate
@@ -197,12 +199,16 @@ over-limit data without truncation or partial state mutation.
 `askText` normalizes line endings to `LF`, otherwise preserves submitted text exactly, rejects whitespace-only input, returns `string`, and uses that same normalized text in the player transcript.
 
 `askNumber` trims surrounding whitespace, parses the accepted TeaseScript decimal/scientific forms on one line, returns a finite `number`, canonicalizes negative zero to `0`, and preserves the trimmed submitted number text in the transcript. It adds no first-POC range parameters.
+`askInteger` is its whole-number counterpart ([ADR 0018](decisions/0018-first-standard-library-poc-contract.md#askinteger)).
+`askDate`, `askTime`, and `askDateTime` return date and time values from the Player's controls
+([ADR 0018](decisions/0018-first-standard-library-poc-contract.md#askdate-asktime-and-askdatetime)).
 
-`choose` returns visible text for unlabelled options. Labelled choices retain identifier and numeric labels from V30 capability. Identifier labels return `string`; numeric labels return `number`; one choice may not mix label types. Duplicate unlabelled visible text is invalid; labelled options may repeat visible text when their labels are unique.
+`choose` returns the value of the selected button; an option without a value written before its `:` returns itself, with its own type. List options, choice objects, and repeated values follow [V30 §19](specifications/accepted-syntaxes-v30.md#19-choices). Identifier values return `string`; numeric values return their `integer` or `number`; until union types (#504), one choice may not mix those value kinds.
 
-A labelled button or dropdown control supplies its label to the engine; an unlabelled control supplies its visible text. The engine validates the selection and derives the canonical visible player-transcript text from the stored action. Manually typed choice input uses exact unambiguous visible-text matching.
+A button or dropdown control supplies its position to the engine. The engine validates the selection and derives the returned value and the canonical visible player-transcript text from the stored action. Manually typed choice input uses exact unambiguous visible-text matching.
 
-`showButton` presents one button, blocks until activation, derives the player transcript from its stored visible label, and then completes. V30 timeout and elapsed-time behavior remains later work.
+`showButton` presents one button, blocks until activation or its optional timeout, derives the player transcript from
+its stored visible label when activated, and then completes; a reached timeout adds no transcript.
 
 All four helpers support `as speaker` provenance. The speaker identifies who requested the answer. It does not automatically emit the control text as a speaker message.
 
@@ -273,7 +279,6 @@ The first POC does not settle:
 - advanced parenthesized call forms;
 - detailed result objects with elapsed time or metadata;
 - the option name that selects a detailed return type;
-- `showButton` timeout and elapsed return;
 - custom compact `choose` field hints;
 - any justified platform guards that later prove necessary;
 - exact dynamic choice-layout breakpoints;

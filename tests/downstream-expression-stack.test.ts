@@ -17,6 +17,8 @@ test("downstream expression frames traverse each public stage and resume on a co
     for(const depth of [256,1024]) {
       const families = [
         ['binary', 'let result='+Array(depth).fill('1').join('+')+'\\nexit', depth],
+        // A prepared say makes plan validation index every later payload.
+        ['binary after prepared say', 'function value {return 1}\\nsay value(), instant\\nlet result='+Array(depth).fill('1').join('+')+'\\nexit', depth],
         ['property', 'let x='+'{a:'.repeat(depth)+'1'+'}'.repeat(depth)+'\\nlet result=x'+'.a'.repeat(depth)+'\\nexit',1],
         ['index', 'let x='+'['.repeat(depth)+'1'+']'.repeat(depth)+'\\nlet result=x'+'[0]'.repeat(depth)+'\\nexit',1],
         ['property assignment', 'let x='+'{a:'.repeat(depth)+'1'+'}'.repeat(depth)+'\\nx'+'.a'.repeat(depth)+'=9\\nlet result=x'+'.a'.repeat(depth)+'\\nexit',9],
@@ -38,7 +40,7 @@ test("downstream expression frames traverse each public stage and resume on a co
           stage='fresh snapshot';const initial=createFreshRuntimeSnapshot(plan,{seed:42});
           stage='runtime';const whole=run(plan,initial,{}, {instructionBudget:20000});assert.equal(whole.snapshot.status,'halted');
           assert.equal(whole.snapshot.frames[0].bindings.find(binding=>binding.name==='result').value,expected);
-          stage='partial execution';const partial={snapshot:initial,events:[]};for(let step=0;step<Math.max(1,Math.min(5,Math.floor(plan.rootEndInstruction/2)));step++){const next=executeInstruction(plan,partial.snapshot);partial.snapshot=next.snapshot;partial.events.push(...next.events);}
+          stage='partial execution';const partial={snapshot:initial,events:[]};for(let step=0;step<Math.max(1,Math.min(5,Math.floor(plan.files[0].rootEndInstruction/2)));step++){const next=executeInstruction(plan,partial.snapshot);partial.snapshot=next.snapshot;partial.events.push(...next.events);}
           stage='checkpoint JSON capture/restore';const restored=deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan,partial.snapshot)));
           stage='resume';const resumed=run(restored.plan,restored.snapshot,{}, {instructionBudget:20000});
           assert.equal(resumed.snapshot.status,'halted');
@@ -92,10 +94,10 @@ test("expression continuations preserve short circuit, references, RNG, and user
       "values.random.value[0] = mark(7)",
       "let skipped = false and mark(true)",
       "let kept = true or mark(false)",
-      'let output = [mark(1), {nested: mark(2) + mark(3)}, "x${mark(4)}"]',
+      'let output = [mark(1), {nested: mark(2) + mark(3)}, {text: "x${mark(4)}"}]',
       "for item in order { say item }",
       "say output[1].nested",
-      "say output[2]",
+      "say output[2].text",
       "say values[0].value[0]",
       "say values[1].value[0]",
       "exit",

@@ -4,9 +4,14 @@ import { createCapturedArray } from "./external-data-capture.js";
 import { DURATION_UNIT_MILLISECONDS } from "./duration.js";
 import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
 
-const UNIT_MILLISECONDS: ReadonlyMap<string, number> = new Map(
-  Object.entries(DURATION_UNIT_MILLISECONDS),
-);
+/** How much one unit counts in its own part: milliseconds for exact units, days or months for calendar units. */
+const UNIT_MILLISECONDS: ReadonlyMap<string, number> = new Map([
+  ...Object.entries(DURATION_UNIT_MILLISECONDS),
+  ["d", 1],
+  ["w", 7],
+  ["mo", 1],
+  ["y", 12],
+]);
 
 const FALLBACK_SPAN = createSourceSpan(
   createSourcePosition(0, 0, 0),
@@ -64,7 +69,7 @@ export function findNonFiniteNumericLiteralDiagnosticsInStableProgram(
         createDiagnostic(
           DiagnosticSeverity.Error,
           "TSC001",
-          "Duration literal must evaluate to a finite number of milliseconds.",
+          "Duration literal must evaluate to a finite number of milliseconds, days, or months.",
           isSourceSpan(node.span) ? node.span : FALLBACK_SPAN,
         ),
       );

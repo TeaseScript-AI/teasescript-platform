@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { Expression, Statement } from "../src/ast.js";
+import type { Expression, Statement, TypeAnnotation } from "../src/ast.js";
 import { parse } from "../src/parser.js";
 
 test("parses and normalizes all accepted milestone numeric literals", () => {
@@ -96,14 +96,16 @@ test("parses left-associated property, index, and call postfix operations", () =
   ]);
 });
 
-test("parses positional and named arguments and rejects mixing", () => {
-  const result = parse(["moveTo(10, 20)", "moveTo(x: 10, y: 20)", "moveTo(10, y: 20)"].join("\n"));
+test("parses positional, named, and positional-then-named arguments and rejects positional after named", () => {
+  const result = parse(
+    ["moveTo(10, 20)", "moveTo(x: 10, y: 20)", "moveTo(10, y: 20)", "moveTo(x: 10, 20)"].join("\n"),
+  );
 
   assert.deepEqual(
     result.program.statements.map((statement) =>
       statement.kind === "expressionStatement" ? statement.expression.argumentStyle : null,
     ),
-    ["positional", "named", "named"],
+    ["positional", "named", "mixed", "mixed"],
   );
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => diagnostic.code),
@@ -136,6 +138,7 @@ test("accepts every keyword as a property name in unambiguous property positions
     "continue",
     "function",
     "return",
+    "is",
   ];
 
   for (const keyword of keywords) {
@@ -165,35 +168,136 @@ test("parses list, object, and set literals", () => {
   }
 });
 
-test("preserves scalar, list, optional, and set type annotations", () => {
+test("parses dict literals with written, quoted, and computed keys, and reports a malformed entry", () => {
   const result = parse(
-    [
-      "let score: number = 10",
-      "let names: string[] = []",
-      "let alias: string? = null",
-      "let values: integer set = set[]",
-    ].join("\n"),
+    'let toys = dict{ collar: 1, "soft cuffs": 2, [key]: 3, in: 4 }\nlet none = dict{}',
   );
+  assert.deepEqual(result.diagnostics, []);
+  const initializer = initializerFromResult(result);
+  assert.ok(initializer.kind === "dictLiteral");
+  // A written name is the key's own text, like quoted text; a computed key is any expression.
+  assert.deepEqual(
+    initializer.entries.map(({ key, value }) => [
+      key.kind === "stringLiteral"
+        ? key.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join("")
+        : key.kind,
+      value.kind === "numberLiteral" ? value.value : null,
+    ]),
+    [
+      ["collar", 1],
+      ["soft cuffs", 2],
+      ["identifier", 3],
+      ["in", 4],
+    ],
+  );
+  for (const [source, code, message] of [
+    ["let d = dict{ a: 1, }", "TSP004", "Expected a dict entry after ','."],
+    ["let d = dict{ a 1 }", "TSP005", "Expected ':' after the dict key."],
+    [
+      "let d = dict{ 1: 2 }",
+      "TSP004",
+      "Expected a dict key: a name, quoted text, or [expression].",
+    ],
+    ["let d = dict{ [a: 1 }", "TSP017", "Expected ']' after the computed dict key."],
+  ] as const) {
+    const diagnostics = parse(source).diagnostics;
+    assert.deepEqual(
+      diagnostics.slice(0, 1).map((diagnostic) => [diagnostic.code, diagnostic.message]),
+      [[code, message]],
+      source,
+    );
+  }
+});
+
+test("parses type names, unions, grouping, and postfix list, set, dict, and optional types in source order", () => {
+  const types = [
+    "number",
+    "string[]",
+    "string?",
+    "integer set",
+    "integer dict?",
+    "(integer | string) dict",
+    "integer[] dict",
+    "integer dict[]",
+    "integer | string[]",
+    "(integer | string)[]",
+    "integer? set",
+    "integer set?",
+    "integer?[]",
+    "integer[]?",
+    "integer[][]",
+    "list | set | dict | object | null",
+    "range | speaker | timer | media",
+    "(integer |\n    string)?",
+  ];
+  const result = parse(types.map((type, index) => `let v${index}: ${type} = null`).join("\n"));
 
   assert.deepEqual(result.diagnostics, []);
   assert.deepEqual(
-    result.program.statements.map((statement) => {
-      const annotation = statement.kind === "letStatement" ? statement.typeAnnotation : null;
-      return annotation === null
-        ? null
-        : {
-            name: annotation.name,
-            collection: annotation.collection,
-            optional: annotation.optional,
-          };
-    }),
+    result.program.statements.map((statement) =>
+      statement.kind === "letStatement" && statement.typeAnnotation !== null
+        ? writtenType(statement.typeAnnotation)
+        : null,
+    ),
     [
-      typeShape("number", null, false),
-      typeShape("string", "list", false),
-      typeShape("string", null, true),
-      typeShape("integer", "set", false),
+      "number",
+      "string[]",
+      "string?",
+      "integer set",
+      "integer dict?",
+      "(integer | string) dict",
+      "integer[] dict",
+      "integer dict[]",
+      "(integer | string[])",
+      "(integer | string)[]",
+      "integer? set",
+      "integer set?",
+      "integer?[]",
+      "integer[]?",
+      "integer[][]",
+      "(list | set | dict | object | null)",
+      "(range | speaker | timer | media)",
+      "(integer | string)?",
     ],
   );
+  const signature = parse(
+    "function f(p: (integer | string)[] = []): integer | null {\n    return null\n}",
+  );
+  assert.deepEqual(signature.diagnostics, []);
+  const declaration = signature.program.statements[0];
+  assert.ok(declaration?.kind === "functionDeclaration");
+  assert.deepEqual(
+    [declaration.parameters[0]?.typeAnnotation, declaration.returnTypeAnnotation].map((type) =>
+      type === null || type === undefined ? null : writtenType(type),
+    ),
+    ["(integer | string)[]", "(integer | null)"],
+  );
+});
+
+test("reports a missing or unknown type part at its location", () => {
+  for (const [source, code, message] of [
+    [
+      "let x: foo = 1",
+      "TSP021",
+      "'foo' is not a type. Use a type such as string, integer, number, boolean, duration, or a list type such as string[].",
+    ],
+    ["let x: (integer = 1", "TSP017", "Expected ')' after the grouped type."],
+    ["let x: integer[ = 1", "TSP017", "Expected ']' in the list type."],
+    [
+      "let x: integer | = 1",
+      "TSP021",
+      "Expected a type such as string, integer, number, boolean, duration, or a list type such as string[].",
+    ],
+  ] as const) {
+    const diagnostic = parse(source).diagnostics[0];
+    assert.deepEqual([diagnostic?.code, diagnostic?.message], [code, message], source);
+  }
+});
+
+test("deeply grouped types parse without native recursion", () => {
+  const depth = 20_000;
+  const result = parse(`let x: ${"(".repeat(depth)}integer${")".repeat(depth)}[] = []`);
+  assert.deepEqual(result.diagnostics, []);
 });
 
 test("parses direct, property, and index assignments", () => {
@@ -292,8 +396,22 @@ function initializerFromResult(result: ReturnType<typeof parse>): Expression {
   return statement.initializer;
 }
 
-function typeShape(name: string, collection: "list" | "set" | null, optional: boolean) {
-  return { name, collection, optional };
+/** A written form of a parsed type in which parentheses show every union. */
+function writtenType(type: TypeAnnotation): string {
+  switch (type.kind) {
+    case "namedType":
+      return type.name;
+    case "listType":
+      return `${writtenType(type.element)}[]`;
+    case "setType":
+      return `${writtenType(type.element)} set`;
+    case "dictType":
+      return `${writtenType(type.element)} dict`;
+    case "optionalType":
+      return `${writtenType(type.value)}?`;
+    case "unionType":
+      return `(${type.members.map(writtenType).join(" | ")})`;
+  }
 }
 
 type ExpressionShape = string | number | boolean | readonly ExpressionShape[];

@@ -1,16 +1,21 @@
 import {
+  captureTemporalContext,
   compileSource,
   completeAction,
   createCheckpoint,
   createFreshRuntimeSnapshot,
+  DEFAULT_TEMPORAL_CONTEXT,
   deserializeCheckpoint,
+  interactionDeadlineMs,
   mediaPlaybackProjection,
   observeTime,
+  recordContinueCapture,
   reportMediaLoad,
   stageProjection,
   run,
   serializeCheckpoint,
   type ActionCompletionOutcome,
+  type ContinueCaptureOutcome,
   type InstructionPlan,
   type InteractionAccessibleName,
   type InterpreterEvent,
@@ -27,9 +32,11 @@ import {
   type RuntimeScriptStorageEntrySnapshot,
   type RuntimeSnapshot,
   type RuntimeStorageWriteActionSnapshot,
+  type TemporalContext,
   type TimeObservationOutcome,
 } from "../src/index.js";
 import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
+import { runValidatedState } from "../src/runtime/engine.js";
 import type {
   PlayerForegroundPresentation,
   PlayerTimerPresentation,
@@ -64,6 +71,33 @@ export interface PlayerRuntimeSessionOptions {
    * through `completePlayerRuntimeStorageWrite`; otherwise storage is session-local.
    */
   readonly persistentScriptStorage?: boolean;
+  /** The player's zone and date and time presentation, captured when the session starts. */
+  readonly temporalContext?: TemporalContext;
+  /** The UTC wall clock when the session starts, in epoch milliseconds. */
+  readonly wallClockMs?: number;
+}
+
+/**
+ * Captures the player's time zone and date and time presentation for a new session: the account settings when the host
+ * has them, else the browser's. A setting this browser cannot use falls back to the browser's own, and then to UTC and
+ * locale-neutral text.
+ */
+export function playerTemporalContext(
+  account: { readonly timeZone?: string; readonly locale?: string } = {},
+): TemporalContext {
+  const browser = Intl.DateTimeFormat().resolvedOptions();
+  const locale = globalThis.navigator?.language ?? browser.locale;
+  for (const [timeZone, language] of [
+    [account.timeZone ?? browser.timeZone, account.locale ?? locale],
+    [browser.timeZone, locale],
+  ] as const) {
+    try {
+      return captureTemporalContext(timeZone, language);
+    } catch (error) {
+      if (!(error instanceof RangeError)) throw error;
+    }
+  }
+  return DEFAULT_TEMPORAL_CONTEXT;
 }
 
 /** Runtime checkpoint plus an in-memory presentation cache; only checkpointJson is canonical save data. */
@@ -89,6 +123,8 @@ export function createPlayerRuntimeSession(
   const snapshot = createFreshRuntimeSnapshot(compilation.plan, {
     ...(options.scriptStorage === undefined ? {} : { scriptStorage: options.scriptStorage }),
     persistentScriptStorage: options.persistentScriptStorage ?? false,
+    ...(options.temporalContext === undefined ? {} : { temporalContext: options.temporalContext }),
+    ...(options.wallClockMs === undefined ? {} : { wallClockMs: options.wallClockMs }),
   });
   const operation = run(compilation.plan, snapshot);
   return applyOperation(
@@ -137,12 +173,24 @@ export function playerRuntimeForeground(
         kind: "ask-text",
         accessibleName,
         hint: action.ui.hint ?? "Type your response…",
+        ...(action.ui.prefill === undefined ? {} : { prefill: action.ui.prefill }),
       });
     case "number":
       return Object.freeze({
         kind: "ask-number",
         accessibleName,
         hint: action.ui.hint ?? "Type your response…",
+        ...(action.ui.prefill === undefined ? {} : { prefill: action.ui.prefill }),
+        ...(action.ui.integer === true ? { integer: true as const } : {}),
+      });
+    case "temporal":
+      return Object.freeze({
+        kind: `ask-${action.ui.temporalKind}` as const,
+        accessibleName,
+        hint: action.ui.hint ?? "",
+        ...(action.ui.prefill === undefined ? {} : { prefill: action.ui.prefill }),
+        // A native date control has no year 0000, so such a default is shown and edited as ISO text.
+        ...(action.ui.prefill?.startsWith("0000") === true ? { isoText: true as const } : {}),
       });
     case "choice":
       return Object.freeze({
@@ -225,6 +273,10 @@ export function playerRuntimeDeadlines(snapshot: RuntimeSnapshot): readonly numb
       deadlines.push(action.timer.deadlineMs);
     }
   }
+  // A button with a timeout times out only while it is presented; a suspended one waits for its block to return.
+  const button = activePlayerRuntimeInteraction(snapshot);
+  const buttonDeadlineMs = button === null ? null : interactionDeadlineMs(button);
+  if (buttonDeadlineMs !== null) deadlines.push(buttonDeadlineMs);
   return deadlines;
 }
 
@@ -321,6 +373,7 @@ export function submitPlayerRuntimeComposer(
     action === null ||
     (action.interactionKind !== "text" &&
       action.interactionKind !== "number" &&
+      action.interactionKind !== "temporal" &&
       action.interactionKind !== "choice")
   ) {
     return null;
@@ -345,13 +398,8 @@ export function selectPlayerRuntimeChoice(
   const optionIndex = action.ui.options.findIndex(
     (_option, index) => choiceOptionId(action.actionId, index) === optionId,
   );
-  const option = action.ui.options[optionIndex];
-  if (option === undefined) return null;
-  const payload =
-    option.label === null
-      ? { kind: "selectedText", selectedText: option.text }
-      : { kind: "selectedLabel", selectedLabel: option.label };
-  return completePlayerAction(session, action, payload);
+  if (optionIndex === -1) return null;
+  return completePlayerAction(session, action, { kind: "selectedOption", optionIndex });
 }
 
 export function skipPlayerRuntimePacing(
@@ -360,6 +408,21 @@ export function skipPlayerRuntimePacing(
   const action = playerRuntimePacingGate(session);
   if (action === null) return null;
   return completePlayerAction(session, action, { kind: "skip" });
+}
+
+/**
+ * Records the wall clock and the player's zone and presentation when a restored session continues. They apply from the
+ * session's observed time on; call it before the scene clock resumes.
+ */
+export function continuePlayerRuntimeSession(
+  session: PlayerRuntimeSession,
+  capture: { readonly wallClockMs: number; readonly temporalContext: TemporalContext },
+): PlayerRuntimeControlResult<ContinueCaptureOutcome> {
+  const operation = recordContinueCapture(session.plan, session.snapshot, capture);
+  return Object.freeze({
+    session: applyOperation(session, operation.snapshot, operation.events, false),
+    outcome: operation.outcome,
+  });
 }
 
 /**
@@ -472,7 +535,9 @@ function applyOperation(
 ): PlayerRuntimeSession {
   const next = appendRuntimeEvents({ ...session, snapshot }, events);
   if (!continueRun) return Object.freeze(next);
-  const continuation = run(next.plan, next.snapshot);
+  // The operation just captured and validated this snapshot against the session's plan, and nothing has published it,
+  // so the continuation runs on it without a second capture. It returns at once when nothing is runnable.
+  const continuation = runValidatedState(next.plan, next.snapshot);
   return appendRuntimeEvents({ ...next, snapshot: continuation.snapshot }, continuation.events);
 }
 
@@ -504,6 +569,7 @@ function appendRuntimeEvents(
     if (
       event.kind === "actionCompleted" &&
       event.settlement.actionKind === "interaction" &&
+      event.settlement.transcriptEventSequence !== null &&
       (event.settlement.interactionKind === "choice" ||
         event.settlement.interactionKind === "button")
     ) {

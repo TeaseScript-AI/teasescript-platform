@@ -13,12 +13,14 @@ accept syntax, architecture, or implementation details.
 
 ## Implemented capability groups
 
-- **Source pipeline:** lexer, parser, immutable AST, source spans, diagnostics, semantic validation, and compilation
-  for the implemented TeaseScript subset.
-- **Language foundation:** values including elapsed durations, variables, assignments including `+=`/`-=`, speakers,
-  output, collections, expressions, interpolated
+- **Source pipeline:** lexer, parser, immutable AST, source spans, diagnostics, semantic validation, type checking,
+  and compilation for the implemented TeaseScript subset.
+- **Language foundation:** values including elapsed durations and date, time, datetime, and timestamp values,
+  variables, assignments including `+=`/`-=`, speakers, output, collections, expressions, interpolated
   single-line and block strings, constrained authored `say` message markup, protected `escapeMarkup` literal insertion,
-  control flow, deterministic random built-ins, and top-level user-defined functions.
+  control flow, deterministic random, rounding, and `min`/`max` built-ins, text operations and list `join`, the
+  `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, list `sort`/`shuffle` and set operations, and top-level
+  user-defined functions.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and
   call state, deterministic RNG state, typed sequenced events, instruction budgets, and defensive restore validation.
 - **Script storage:** `save`/`load`/`delete`, optional lazy defaults, a validated checkpointed session view, and
@@ -55,8 +57,8 @@ contracts and boundaries.
 
 ## Current major exclusions and blockers
 
-- complete V30 coverage, complete static typing, measurement units, date/time values, calendar durations,
-  generalized duration ranges, and locale-aware duration presentation;
+- complete V30 coverage, complete static typing, measurement units, generalized duration ranges, and locale-aware
+  duration presentation;
 - production cross-origin Player/host integration, richer editor support, and final browser acceptance coverage;
 - pending-action capabilities beyond the implemented timer, interaction, pacing, and media families; browser video
   playback, the layered scene, camera capture beyond `takePhoto()`, and custom views;

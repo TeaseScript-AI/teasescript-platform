@@ -256,18 +256,18 @@ test("checkpoint classification uses structured producer failures", () => {
       replace: () => ({
         kind: "literal",
         value: Number.POSITIVE_INFINITY,
-        span: compiled.sourceSpan,
+        span: compiled.files[0]!.sourceSpan,
       }),
       path: `${elementPath}.value`,
     },
     {
       name: "non-JSON-safe value",
-      replace: () => ({ kind: "literal", value: undefined, span: compiled.sourceSpan }),
+      replace: () => ({ kind: "literal", value: undefined, span: compiled.files[0]!.sourceSpan }),
       path: `${elementPath}.value`,
     },
     {
       name: "non-plain object",
-      replace: () => ({ kind: "literal", value: new Date(0), span: compiled.sourceSpan }),
+      replace: () => ({ kind: "literal", value: new Date(0), span: compiled.files[0]!.sourceSpan }),
       path: `${elementPath}.value`,
     },
   ]) {

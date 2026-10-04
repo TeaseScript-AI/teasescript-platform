@@ -1,9 +1,10 @@
-import type { PlanSourceLocation, StorageTypePlan } from "../plan/model.js";
+import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import {
   cloneCapturedSerializableValue,
+  containsRuntimeIdentity,
   validateCapturedSerializableValue,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
@@ -85,34 +86,10 @@ export function assertPersistable(
   value: SerializableRuntimeValue,
   span: SourceSpan | PlanSourceLocation,
 ): void {
-  if (!isPersistable(value)) {
+  if (containsRuntimeIdentity(value)) {
     throw fault(
       "TSR055",
       "save cannot store a timer handle, media handle, or speaker reference; they exist only in the current session.",
-      span,
-    );
-  }
-}
-
-/** Rejects a stored value that does not match the declared type of a direct `let x: T = load ...`. */
-export function assertStoredType(
-  entry: RuntimeScriptStorageEntrySnapshot,
-  type: StorageTypePlan,
-  span: SourceSpan | PlanSourceLocation,
-): void {
-  const value = entry.value;
-  const matches =
-    type.collection === null
-      ? matchesScalarType(value, type.name)
-      : typeof value === "object" &&
-        value !== null &&
-        value.kind === type.collection &&
-        value.items.every((item) => matchesScalarType(item, type.name));
-  if (!matches) {
-    const suffix = type.collection === "list" ? "[]" : type.collection === "set" ? " set" : "";
-    throw fault(
-      "TSR056",
-      `Stored value for ${JSON.stringify(entry.key)} does not match the declared type ${type.name}${suffix}.`,
       span,
     );
   }
@@ -157,7 +134,7 @@ export function validateScriptStorageEntries(
     // EVIDENCE: validation: validateCapturedSerializableValue accepted this stored value above.
     const valid = stored as SerializableRuntimeValue;
     if (valid === null) return `${entryPath}.value must not be null; an absent key has no entry.`;
-    if (!isPersistable(valid)) {
+    if (containsRuntimeIdentity(valid)) {
       return `${entryPath}.value contains a timer handle, media handle, or speaker reference.`;
     }
   }
@@ -171,55 +148,6 @@ export function cloneScriptStorage(
     key: entry.key,
     value: cloneCapturedSerializableValue(entry.value),
   }));
-}
-
-function matchesScalarType(
-  value: SerializableRuntimeValue,
-  name: StorageTypePlan["name"],
-): boolean {
-  switch (name) {
-    case "string":
-      return typeof value === "string";
-    case "boolean":
-      return typeof value === "boolean";
-    case "number":
-      return typeof value === "number";
-    case "integer":
-      return typeof value === "number" && Number.isInteger(value);
-    case "duration":
-      return typeof value === "object" && value !== null && value.kind === "duration";
-    case "date":
-    case "time":
-    case "datetime":
-      // These types have no runtime representation yet, so no stored value can match them.
-      return false;
-  }
-}
-
-/** Plain data without session-only values; lists and objects are checked iteratively at every depth. */
-function isPersistable(value: SerializableRuntimeValue): boolean {
-  const work: SerializableRuntimeValue[] = [value];
-  while (work.length > 0) {
-    const current = work.pop()!;
-    if (typeof current !== "object" || current === null) continue;
-    switch (current.kind) {
-      case "timerHandle":
-      case "mediaHandle":
-      case "speakerReference":
-        return false;
-      case "list":
-        for (const item of current.items) work.push(item);
-        break;
-      case "object":
-        for (const property of current.properties) work.push(property.value);
-        break;
-      case "set":
-      case "range":
-      case "duration":
-        break;
-    }
-  }
-  return true;
 }
 
 function fault(code: string, message: string, span: SourceSpan | PlanSourceLocation): RuntimeFault {

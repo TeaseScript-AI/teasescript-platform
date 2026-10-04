@@ -1,0 +1,34 @@
+/** The fixed entry file of every project (ADR 0022). */
+export const MAIN_FILE_PATH = "main.tease";
+
+const TEASE_EXTENSION = ".tease";
+
+/**
+ * Why `path` is not a package path, or `null` when it is one: a path relative to the package root that separates
+ * folders with `/` and names a `.tease` file. `*` is reserved for globs.
+ */
+export function packagePathProblem(path: string): string | null {
+  if (!path.endsWith(TEASE_EXTENSION) || path.split("/").at(-1) === TEASE_EXTENSION) {
+    return "it does not name a .tease file";
+  }
+  for (const segment of path.split("/")) {
+    if (segment === "") return "it has an empty folder name; separate folders with a single /";
+    if (segment === "." || segment === "..")
+      return "paths start at the package root and use no . or ..";
+  }
+  if (path.includes("\\")) return "folders are separated with /, not \\";
+  if (path.includes("*")) return "* is only allowed in a glob";
+  for (let index = 0; index < path.length; index += 1) {
+    const code = path.charCodeAt(index);
+    if (code < 0x20 || code === 0x7f) return "it contains a control character";
+  }
+  return null;
+}
+
+/** Orders project files: `main.tease` first, then the other paths by UTF-16 code unit. */
+export function compareProjectPaths(left: string, right: string): number {
+  if (left === right) return 0;
+  if (left === MAIN_FILE_PATH) return -1;
+  if (right === MAIN_FILE_PATH) return 1;
+  return left < right ? -1 : 1;
+}

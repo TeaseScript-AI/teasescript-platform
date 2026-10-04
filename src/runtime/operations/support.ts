@@ -1,4 +1,5 @@
 import type { InstructionPlan, PlanSourceLocation } from "../../plan/model.js";
+import { cloneInteractionChoiceValue } from "../../choice-values.js";
 import { captureOrReuseInstructionPlan } from "../../plan/capture.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";
 import { planLocationToSourceSpan } from "../../plan/source-location.js";
@@ -11,6 +12,7 @@ import {
 } from "../serializable-values.js";
 import {
   captureRuntimeSnapshotWithValidatedPlan,
+  cloneInteractionUi,
   type RuntimeSnapshot,
   type RuntimeTemporarySnapshot,
 } from "../state.js";
@@ -90,7 +92,7 @@ export function cloneSettlement(
     actionId: settlement.actionId,
     actionKind: "interaction",
     interactionKind: settlement.interactionKind,
-    settlementKind: "completed",
+    settlementKind: settlement.settlementKind,
     owningInstruction: settlement.owningInstruction,
     continuationInstruction: settlement.continuationInstruction,
     ownerCallFrameId: settlement.ownerCallFrameId,
@@ -98,8 +100,9 @@ export function cloneSettlement(
     requestEventSequence: settlement.requestEventSequence,
     transcriptEventSequence: settlement.transcriptEventSequence,
     completionEventSequence: settlement.completionEventSequence,
-    result: settlement.result,
+    result: cloneInteractionChoiceValue(settlement.result),
     transcriptText: settlement.transcriptText,
+    ui: cloneInteractionUi(settlement.ui),
   };
 }
 

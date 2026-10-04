@@ -33,7 +33,7 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
   const source = flatChain(1_024);
   const nestedSource = `let value = ${"(".repeat(1_024)}1${")".repeat(1_024)}`;
   const collectionSource = `let value = ${"[".repeat(1_024)}1${"]".repeat(1_024)}\nexit`;
-  const setSource = `let value = ${"set[".repeat(1_024)}1${"]".repeat(1_024)}`;
+  const setSource = `let value = ${"set[".repeat(1_024)}1${"]".repeat(1_024)}\nexit`;
   const objectSource = `let value = ${"{ value: ".repeat(1_024)}1${" }".repeat(1_024)}\nexit`;
   const blockSource = `${"if true {".repeat(1_024)}exit${"}".repeat(1_024)}`;
   const compilerUrl = new URL("../src/compiler.js", import.meta.url).href;
@@ -69,7 +69,7 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
     const compiledSet = compileSource(process.env.TEASESCRIPT_SET_SOURCE);
     const compiledObject = compileSource(process.env.TEASESCRIPT_OBJECT_SOURCE);
     const deepObject = "{ x: ".repeat(1024) + "1" + " }".repeat(1024);
-    const innerObjectCodes = ["{a:1, b:{q:1}}", "{a:{q:1}, b:2}", "{a:{q:1}.q}", "{a:{q:1} + 2}"].map((leaf) =>
+    const innerObjectCodes = ["{a:1, b:{q:1}}", "{a:{q:1}, b:2}", "{a:{q:1}.q}", "{a:{q:1}.q + 2}"].map((leaf) =>
       compileSource("let value = " + "{x:".repeat(1024) + leaf + "}".repeat(1024)).diagnostics.map((diagnostic) => diagnostic.code),
     );
     const siblingObjects = ["{ before: 2, child: " + deepObject + " }", "{ child: " + deepObject + ", after: 2 }"].map((expression) => {
@@ -106,6 +106,15 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
     });
     const objectRuntime = run(compiledObject.plan, createFreshRuntimeSnapshot(compiledObject.plan));
     const restoredObject = restoreCheckpoint(createCheckpoint(compiledObject.plan, objectRuntime.snapshot));
+    // Sets nest like lists: a member is keyed, copied, validated, and restored without native recursion.
+    const setRuntime = run(compiledSet.plan, createFreshRuntimeSnapshot(compiledSet.plan));
+    const restoredSet = restoreCheckpoint(createCheckpoint(compiledSet.plan, setRuntime.snapshot));
+    let setValue = restoredSet.snapshot.frames[0]?.bindings[0]?.value;
+    let setDepth = 0;
+    while (setValue?.kind === "set") {
+      setDepth += 1;
+      setValue = setValue.items[0];
+    }
     let objectValue = restoredObject.snapshot.frames[0]?.bindings[0]?.value;
     let objectDepth = 0;
     while (objectValue?.kind === "object") {
@@ -131,8 +140,10 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
       collectionCodes: compiledCollection.diagnostics.map((diagnostic) => diagnostic.code),
       collectionRuntimeStatus: runtimeResult.snapshot.status,
       collectionDepth,
-      setDistinctCodes: [...new Set(compiledSet.diagnostics.map((diagnostic) => diagnostic.code))],
-      setStarts: compiledSet.diagnostics.map((diagnostic) => diagnostic.span.start.offset).sort((left, right) => left - right),
+      setCodes: compiledSet.diagnostics.map((diagnostic) => diagnostic.code),
+      setRuntimeStatus: setRuntime.snapshot.status,
+      setDepth,
+      setLeaf: setValue,
       blockCodes: compiledBlock.diagnostics.map((diagnostic) => diagnostic.code),
       blockProgramStatements: compiledBlock.program.statements.length,
       blockSpan: [compiledBlock.program.span.start.offset, compiledBlock.program.span.end.offset],
@@ -187,14 +198,45 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
     collectionCodes: [],
     collectionRuntimeStatus: "halted",
     collectionDepth: 1_024,
-    setDistinctCodes: ["TSV006"],
-    // Every set except the outermost is an invalid set element; "let value = " is 12 characters.
-    setStarts: Array.from({ length: 1_023 }, (_, index) => 12 + 4 * (index + 1)),
+    setCodes: [],
+    setRuntimeStatus: "halted",
+    setDepth: 1_024,
+    setLeaf: 1,
     blockCodes: [],
     blockProgramStatements: 1,
     blockSpan: [0, blockSource.length],
     blockRuntimeStatus: "halted",
   });
+});
+
+test("type checking follows long function, default, and property chains, wide literals, and wide unions with a constrained host stack", () => {
+  const compilerUrl = new URL("../src/compiler.js", import.meta.url).href;
+  // The child builds the sources itself: they are larger than an environment variable may be.
+  const script = `
+    const { compileSource } = await import(${JSON.stringify(compilerUrl)});
+    const chain = (link) => Array.from({ length: 512 }, (_, index) => link(index, index === 511 ? "1" : "f" + (index + 1) + "()"));
+    const sources = [
+      chain((index, next) => "function f" + index + " { return " + next + " }").join("\\n") + "\\nlet result = f0()",
+      chain((index, next) => "function f" + index + "(x = " + next + ") { return x }").join("\\n") + "\\nlet result = f0()",
+      "function f(obj) { obj" + ".x".repeat(4096) + ".p = 1 }\\nexit",
+      "let wide = [" + "1, ".repeat(32767) + "1]\\nexit",
+      'let passed = (load "v") is ' + Array.from({ length: 65536 }, (_, index) => (index % 2 === 0 ? "integer" : "string")).join(" | "),
+    ];
+    process.stdout.write(JSON.stringify(sources.map((source) => {
+      const compiled = compileSource(source);
+      return { codes: compiled.diagnostics.map((diagnostic) => diagnostic.code), plan: compiled.plan !== null };
+    })));
+  `;
+  const child = spawnSync(
+    process.execPath,
+    ["--stack-size=256", "--input-type=module", "--eval", script],
+    { encoding: "utf8", timeout: 60_000, maxBuffer: 256 * 1024 },
+  );
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(
+    JSON.parse(child.stdout),
+    Array.from({ length: 5 }, () => ({ codes: [], plan: true })),
+  );
 });
 
 test("compiler containment recognizes native stack failures without relying on a failure depth", () => {

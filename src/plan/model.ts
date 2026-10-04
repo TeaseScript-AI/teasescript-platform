@@ -1,5 +1,8 @@
+import type { StoredDuration } from "../duration.js";
+import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
+
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 26;
+export const INSTRUCTION_PLAN_VERSION = 44;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -20,11 +23,25 @@ export interface PlanSourceLocation {
 export interface InstructionPlan {
   readonly format: typeof INSTRUCTION_PLAN_FORMAT;
   readonly version: typeof INSTRUCTION_PLAN_VERSION;
-  readonly sourceSpan: PlanSourceLocation;
-  readonly rootEndInstruction: number;
+  /** `main.tease` first, then the other files in path order; their blocks follow each other in the same order. */
+  readonly files: readonly PlanFile[];
   readonly temporaryCount: number;
   readonly functions: readonly CompiledFunctionDefinition[];
   readonly instructions: readonly Instruction[];
+}
+
+/**
+ * One `.tease` file of the project: a contiguous block of instructions holding its root region, then its functions
+ * and handlers. Locations inside the block are offsets in this file's source.
+ */
+export interface PlanFile {
+  /** Path relative to the package root, with `/` between folders. */
+  readonly path: string;
+  readonly sourceSpan: PlanSourceLocation;
+  readonly startInstruction: number;
+  /** End of the root region; the file's functions and handlers follow up to {@link endInstruction}. */
+  readonly rootEndInstruction: number;
+  readonly endInstruction: number;
 }
 
 export interface CompiledFunctionParameter {
@@ -130,12 +147,15 @@ export interface DeclareBindingInstruction extends InstructionBase {
   readonly kind: "declareBinding";
   readonly name: string;
   readonly value: ExpressionPlan;
+  readonly typeCheck?: TypeCheckPlan;
 }
 
 export interface AssignInstruction extends InstructionBase {
   readonly kind: "assign";
   readonly target: AssignmentTargetPlan;
+  /** For `+=` and `-=`, the computed result, which is also what {@link typeCheck} checks. */
   readonly value: ExpressionPlan;
+  readonly typeCheck?: TypeCheckPlan;
 }
 
 export interface ValidateAssignmentTargetInstruction extends InstructionBase {
@@ -253,6 +273,8 @@ export interface CallArgumentPlan {
   readonly parameterName: string;
   readonly value: ExpressionPlan;
   readonly span: PlanSourceLocation;
+  /** Checked after every argument of the call is evaluated, before the function is entered. */
+  readonly typeCheck?: TypeCheckPlan;
 }
 
 export interface CallFunctionInstruction extends InstructionBase {
@@ -285,6 +307,7 @@ export interface PrepareParameterDefaultInstruction extends FunctionParameterIns
 export interface BindDefaultParameterInstruction extends FunctionParameterInstructionBase {
   readonly kind: "bindDefaultParameter";
   readonly value: ExpressionPlan;
+  readonly typeCheck?: TypeCheckPlan;
 }
 
 export interface EnterFunctionBodyInstruction extends InstructionBase {
@@ -295,6 +318,7 @@ export interface EnterFunctionBodyInstruction extends InstructionBase {
 export interface ReturnValueInstruction extends InstructionBase {
   readonly kind: "returnValue";
   readonly value: ExpressionPlan;
+  readonly typeCheck?: TypeCheckPlan;
 }
 
 export interface ReturnVoidInstruction extends InstructionBase {
@@ -403,18 +427,38 @@ export interface PlayMediaInstruction extends InstructionBase {
   readonly destinationTemporary: number | null;
 }
 
-export type InteractionKind = "button" | "text" | "number" | "choice";
-export type InteractionResultDomain = "none" | "string" | "number";
+export type InteractionKind = "button" | "text" | "number" | "choice" | "temporal";
+/**
+ * `choice` is the value of the selected choice option; a button used as a value yields a `duration`; `temporal` is the
+ * date, time, or date and time the UI asks for.
+ */
+export type InteractionResultDomain =
+  "none" | "string" | "number" | "choice" | "duration" | "temporal";
+/** What `askDate`, `askTime`, and `askDateTime` ask for (V30 §20). */
+export type InteractionTemporalKind = "date" | "time" | "datetime";
 export type InteractionAccessibleName =
   | { readonly kind: "text"; readonly text: string }
   | {
       readonly kind: "localizedDefault";
       readonly key: "answer" | "number" | "chooseOption" | "continue";
     };
-export type InteractionChoiceOption =
-  | { readonly text: string; readonly background?: string; readonly label: null }
-  | { readonly text: string; readonly background?: string; readonly label: string }
-  | { readonly text: string; readonly background?: string; readonly label: number };
+/** A value a choice option can show and return: a scalar, a duration, or a date or time value. */
+export type InteractionChoiceValue =
+  | string
+  | number
+  | boolean
+  | null
+  | StoredDuration
+  | ({ readonly kind: "date" } & DateFields)
+  | ({ readonly kind: "time" } & TimeFields)
+  | ({ readonly kind: "datetime" } & DateTimeFields)
+  | { readonly kind: "timestamp"; readonly epochMilliseconds: number };
+/** One button. `value` is what `choose` returns for it; `text` is what the button shows. */
+export interface InteractionChoiceOption {
+  readonly text: string;
+  readonly value: InteractionChoiceValue;
+  readonly background?: string;
+}
 export type InteractionUiPayload =
   | {
       readonly kind: "button";
@@ -425,44 +469,74 @@ export type InteractionUiPayload =
   | {
       readonly kind: "text";
       readonly hint: string | null;
+      /** Answer text that prefills the field; submitting it unchanged answers with the default. */
+      readonly prefill?: string;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {
       readonly kind: "number";
       readonly hint: string | null;
+      /** Answer text that prefills the field; submitting it unchanged answers with the default. */
+      readonly prefill?: string;
+      /** `askInteger`: only a whole number is an answer. */
+      readonly integer?: true;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      readonly kind: "temporal";
+      readonly temporalKind: InteractionTemporalKind;
+      readonly hint: string | null;
+      /** The default answer as ISO text; submitting it unchanged answers with the default. */
+      readonly prefill?: string;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {
       readonly kind: "choice";
-      readonly labelType: "none" | "identifier" | "number";
       readonly options: readonly InteractionChoiceOption[];
       readonly accessibleName: InteractionAccessibleName;
     };
 
-export type PreparedInteractionChoiceLabel = string | number;
+/** An authored choice value before `:`: an identifier is a string, a numeric literal a number. */
+export type PreparedInteractionChoiceValue = string | number;
 export type PreparedInteractionUiPayload =
   | {
       readonly kind: "button";
       readonly buttonLabelTemporary: number;
       readonly backgroundTemporary?: number;
+      /** Holds the evaluated timeout until the button appears; the action keeps it as `timeoutMs`. */
+      readonly timeoutTemporary?: number;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {
       readonly kind: "text";
       readonly hintTemporary: number | null;
+      /** Holds the evaluated default answer until the field opens, then its prefill text. */
+      readonly prefillTemporary?: number;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {
       readonly kind: "number";
       readonly hintTemporary: number | null;
+      /** Holds the evaluated default answer until the field opens, then its prefill text. */
+      readonly prefillTemporary?: number;
+      /** `askInteger`: only a whole number is an answer. */
+      readonly integer?: true;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      readonly kind: "temporal";
+      readonly temporalKind: InteractionTemporalKind;
+      readonly hintTemporary: number | null;
+      /** Holds the evaluated default answer until the field opens, then its ISO prefill text. */
+      readonly prefillTemporary?: number;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {
       readonly kind: "choice";
-      readonly labelType: "none" | "identifier" | "number";
+      /** A list holding the value of each authored option, in source order. */
       readonly optionsTemporary: number;
-      readonly optionCount: number;
-      readonly labels: readonly PreparedInteractionChoiceLabel[] | null;
+      /** The authored value of each option, or `null`. Its length is the authored option count. */
+      readonly values: readonly (PreparedInteractionChoiceValue | null)[];
       readonly accessibleName: InteractionAccessibleName;
     };
 
@@ -520,6 +594,7 @@ export type ExpressionPlan =
   | ListExpressionPlan
   | ObjectExpressionPlan
   | SetExpressionPlan
+  | DictExpressionPlan
   | GroupExpressionPlan
   | TemplateExpressionPlan
   | PropertyExpressionPlan
@@ -530,7 +605,8 @@ export type ExpressionPlan =
   | RangeExpressionPlan
   | TemporaryExpressionPlan
   | PreparedReferenceExpressionPlan
-  | StorageLoadExpressionPlan;
+  | StorageLoadExpressionPlan
+  | TypeTestExpressionPlan;
 
 interface ExpressionPlanBase {
   readonly span: PlanSourceLocation;
@@ -541,10 +617,15 @@ export interface LiteralExpressionPlan extends ExpressionPlanBase {
   readonly value: string | number | boolean | null;
 }
 
-/** An exact elapsed-duration literal, already converted to milliseconds. */
+/**
+ * A duration literal, already normalized: exact milliseconds, and whole calendar `months` and `days`, present only when
+ * they are not zero.
+ */
 export interface DurationExpressionPlan extends ExpressionPlanBase {
   readonly kind: "duration";
   readonly milliseconds: number;
+  readonly months?: number;
+  readonly days?: number;
 }
 
 export interface IdentifierExpressionPlan extends ExpressionPlanBase {
@@ -557,19 +638,53 @@ export interface TemporaryExpressionPlan extends ExpressionPlanBase {
   readonly temporaryId: number;
 }
 
-/** `load <key> [default <value>]`: the default is evaluated only when the key is absent. */
+/** `load <key>[, default: <value>]`: the default is evaluated only when the key is absent. */
 export interface StorageLoadExpressionPlan extends ExpressionPlanBase {
   readonly kind: "storageLoad";
   readonly key: ExpressionPlan;
   readonly default: ExpressionPlan | null;
-  /** The declared type of a direct `let x: T = load ...`; a stored value must match it. */
-  readonly expectedType: StorageTypePlan | null;
 }
 
-export interface StorageTypePlan {
-  readonly name:
-    "string" | "boolean" | "integer" | "number" | "date" | "time" | "datetime" | "duration";
-  readonly collection: "list" | "set" | null;
+/**
+ * A check that a value the compiler cannot know fits the type of the place that receives it (ADR 0021 rule 1.7). It
+ * runs after the value is evaluated and before it is stored, and fails with `TSR058`.
+ */
+export interface TypeCheckPlan {
+  readonly type: TypePlan;
+  /** The receiving place as the message names it, such as `'count'` or `an element of 'items'`. */
+  readonly place: string;
+}
+
+/**
+ * The checked part of a type. A list, set, or dict with a `null` element accepts any elements or values, and an object
+ * checks only the listed properties that the value has; the parts the compiler does not know are left out.
+ */
+export type TypePlan =
+  | { readonly kind: TypePlanName }
+  | { readonly kind: "list" | "set" | "dict"; readonly element: TypePlan | null }
+  | { readonly kind: "object"; readonly properties: readonly TypePropertyPlan[] }
+  | { readonly kind: "union"; readonly members: readonly TypePlan[] };
+
+export type TypePlanName =
+  | "string"
+  | "boolean"
+  | "integer"
+  | "number"
+  | "duration"
+  | "date"
+  | "time"
+  | "datetime"
+  | "timestamp"
+  | "never"
+  | "null"
+  | "range"
+  | "speaker"
+  | "timer"
+  | "media";
+
+export interface TypePropertyPlan {
+  readonly name: string;
+  readonly type: TypePlan;
 }
 
 export interface PreparedReferenceExpressionPlan extends ExpressionPlanBase {
@@ -590,6 +705,18 @@ export interface ObjectExpressionPlan extends ExpressionPlanBase {
 export interface SetExpressionPlan extends ExpressionPlanBase {
   readonly kind: "set";
   readonly elements: readonly ExpressionPlan[];
+}
+
+/** `dict{ ... }`: each entry's key, which must be text, is evaluated before its value, in source order. */
+export interface DictExpressionPlan extends ExpressionPlanBase {
+  readonly kind: "dict";
+  readonly entries: readonly DictEntryPlan[];
+}
+
+export interface DictEntryPlan {
+  readonly key: ExpressionPlan;
+  readonly value: ExpressionPlan;
+  readonly span: PlanSourceLocation;
 }
 
 export interface GroupExpressionPlan extends ExpressionPlanBase {
@@ -639,6 +766,16 @@ export interface CallExpressionPlan extends ExpressionPlanBase {
   readonly kind: "call";
   readonly callee: ExpressionPlan;
   readonly arguments: readonly ArgumentPlan[];
+  /** For a list or set `add`, the check of the added element; for a dict `get`, the check of its `default:`. */
+  readonly typeCheck?: TypeCheckPlan;
+}
+
+/** `value is T` or `value is not T`: whether the value fits the type, by the matcher of the runtime type checks. */
+export interface TypeTestExpressionPlan extends ExpressionPlanBase {
+  readonly kind: "typeTest";
+  readonly value: ExpressionPlan;
+  readonly type: TypePlan;
+  readonly negated: boolean;
 }
 
 export interface UnaryExpressionPlan extends ExpressionPlanBase {
@@ -647,10 +784,11 @@ export interface UnaryExpressionPlan extends ExpressionPlanBase {
   readonly operand: ExpressionPlan;
 }
 
+/** `in` tests whether the left value is a number within the right range; only `switch` range cases compile to it. */
 export interface BinaryExpressionPlan extends ExpressionPlanBase {
   readonly kind: "binary";
   readonly operator:
-    "*" | "/" | "%" | "+" | "-" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "and" | "or";
+    "*" | "/" | "%" | "+" | "-" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "and" | "or" | "in";
   readonly left: ExpressionPlan;
   readonly right: ExpressionPlan;
 }
@@ -660,4 +798,14 @@ export interface RangeExpressionPlan extends ExpressionPlanBase {
   readonly start: ExpressionPlan;
   readonly end: ExpressionPlan;
   readonly inclusive: boolean;
+}
+
+/** End of the root region of `main.tease`, where a session that reaches it without `exit` completes. */
+export function mainRootEnd(plan: InstructionPlan): number {
+  return plan.files[0]!.rootEndInstruction;
+}
+
+/** The span of `main.tease`: the location of a plan-level fact that belongs to no single instruction. */
+export function mainSourceSpan(plan: InstructionPlan): PlanSourceLocation {
+  return plan.files[0]!.sourceSpan;
 }

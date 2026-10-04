@@ -433,13 +433,13 @@ choices, so larger explicit-seed campaigns explore additional meaningful source
 strings. This is not a grammar framework or an arbitrary-token fuzzer.
 
 - Valid source templates cover literals, unary/binary expressions, ranges and
-  templates; variables, lexical scope, lists, objects, scalar sets and `for`;
-  conditions, `repeat`, `while`, `break` and `continue`; defaults, named calls
-  and bounded recursion; speaker output and `say as`; and deterministic random
-  built-ins.
+  templates; variables, lexical scope, lists, objects, sets of text and of
+  lists, and `for`; conditions, `repeat`, `while`, `break` and `continue`;
+  defaults, named calls and bounded recursion; speaker output and `say as`; and
+  deterministic random built-ins.
 - Near-valid templates apply one targeted current diagnostic mutation: a missing
   declaration identifier or template expression, out-of-loop `break`, unknown
-  name, duplicate function parameter, or composite set element.
+  name, duplicate function parameter, or duplicate dict key.
 
 Every valid case is at most 512 source characters, uses nesting at most three,
 collections and loop/recursion counts at most four, and runs with a 200
@@ -507,10 +507,10 @@ Timed actions must use an injected fake clock or equivalent deterministic time s
 
 ADR 0016 defines the shared contract; action-specific tests remain required for each later API and UI behavior.
 
-The implemented ADR 0018 interaction slice covers button, text, number, unlabelled choice, identifier-labelled choice,
-and numeric-labelled choice through both direct validated plans and real compact source. Tests cover exact parser spans
+The implemented ADR 0018 interaction slice covers button, text, number, and choice with options without a written value,
+with identifier and numeric values, and list options through both direct validated plans and real compact source. Tests cover exact parser spans
 and recovery, V30 comma-newline continuation and enclosing-delimiter composition for compact `choose`, protected prelude
-names, choice domains and duplicates, requesting-speaker capture, prepared UI provenance while preparation state exists,
+names, choice domains and repeated values, requesting-speaker capture, prepared UI provenance while preparation state exists,
 intrinsic post-cleanup settlement checks, source-order evaluation, sequential blocking expressions, function arguments,
 root/function checkpoint resume, typed completion, transcript behavior, located diagnostics for compiled interaction
 data that plan validation rejects, and atomic rejection. The single-use handoff tests cover one row per accepted handoff

@@ -9,20 +9,24 @@ import { copySpan } from "./operations/support.js";
 import {
   createCapturedSerializableList,
   createCapturedSerializableObject,
+  dictProperty,
+  getSerializableDictEntry,
   getSerializableProperty,
   setCapturedSerializableProperty,
+  type SerializableRuntimeDict,
   type SerializableRuntimeList,
   type SerializableRuntimeObject,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
 import type { RuntimeSnapshot, RuntimeTemporarySnapshot } from "./state.js";
-import { isList, isObject, isSet, isSpeakerReference } from "./value-predicates.js";
+import { isDict, isList, isObject, isSet, isSpeakerReference } from "./value-predicates.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
 export type PreparedReferenceStep =
   | { readonly kind: "property"; readonly name: string }
-  | { readonly kind: "index"; readonly index: number };
+  | { readonly kind: "index"; readonly index: number }
+  | { readonly kind: "key"; readonly key: string };
 
 export interface PreparedReferenceDescriptor {
   readonly rootFrameId: number | null;
@@ -73,10 +77,15 @@ function serializePreparedReferencePath(
             { name: "kind", value: "property" },
             { name: "name", value: step.name },
           ])
-        : createCapturedSerializableObject([
-            { name: "kind", value: "index" },
-            { name: "index", value: step.index },
-          ]),
+        : step.kind === "key"
+          ? createCapturedSerializableObject([
+              { name: "kind", value: "key" },
+              { name: "key", value: step.key },
+            ])
+          : createCapturedSerializableObject([
+              { name: "kind", value: "index" },
+              { name: "index", value: step.index },
+            ]),
     ),
   );
 }
@@ -118,6 +127,14 @@ export function readPreparedReference(
         throw fault("TSR053", "Prepared reference property path is malformed.", span);
       }
       path.push({ kind, name });
+      continue;
+    }
+    if (kind === "key") {
+      const key = getSerializableProperty(item, "key");
+      if (typeof key !== "string") {
+        throw fault("TSR053", "Prepared reference key path is malformed.", span);
+      }
+      path.push({ kind, key });
       continue;
     }
     if (kind === "index") {
@@ -163,6 +180,32 @@ export function preparePreparedReferencesForListRemoval(
   receiver: SerializableRuntimeList,
   removedIndex: number,
 ): SerializableRuntimeObject[] {
+  return preparePreparedReferencesForListChange(snapshot, receiver, (index) =>
+    index === removedIndex ? undefined : index < removedIndex ? index : index - 1,
+  );
+}
+
+/**
+ * Moves prepared references into the items of `receiver` along with their items when the list is reordered in place,
+ * as by `sort` and `shuffle`. `newIndexOf[old]` is the new index of the item at `old`.
+ */
+export function preparePreparedReferencesForListReorder(
+  snapshot: RuntimeSnapshot,
+  receiver: SerializableRuntimeList,
+  newIndexOf: readonly number[],
+): SerializableRuntimeObject[] {
+  return preparePreparedReferencesForListChange(snapshot, receiver, (index) => newIndexOf[index]);
+}
+
+/**
+ * Follows a change of `receiver`'s item indexes: a prepared reference into an item moves to the item's new index, and
+ * one into an item that leaves the list (`undefined`) keeps the value it refers to now.
+ */
+function preparePreparedReferencesForListChange(
+  snapshot: RuntimeSnapshot,
+  receiver: SerializableRuntimeList,
+  newIndex: (index: number) => number | undefined,
+): SerializableRuntimeObject[] {
   const rebased: SerializableRuntimeObject[] = [];
   for (const temporaries of allTemporaryCollections(snapshot)) {
     for (const temporary of temporaries) {
@@ -174,16 +217,17 @@ export function preparePreparedReferencesForListRemoval(
         continue;
       }
       if (descriptor.detached) continue;
-      const pathIndex = preparedReferenceListIndexPosition(snapshot, descriptor, receiver);
+      const pathIndex = preparedReferenceStepPosition(snapshot, descriptor, receiver);
       if (pathIndex === null) continue;
       const step = descriptor.path[pathIndex];
       if (step?.kind !== "index") continue;
-      if (step.index === removedIndex) {
+      const index = newIndex(step.index);
+      if (index === undefined) {
         freezePreparedReference(snapshot, temporary.value, descriptor);
         continue;
       }
-      if (step.index < removedIndex) continue;
-      descriptor.path[pathIndex] = { kind: "index", index: step.index - 1 };
+      if (index === step.index) continue;
+      descriptor.path[pathIndex] = { kind: "index", index };
       setCapturedSerializableProperty(
         temporary.value,
         "path",
@@ -216,9 +260,14 @@ export function refreshPreparedReferenceFallbacks(
   }
 }
 
-export function freezePreparedReferenceListDescendants(
+/**
+ * Freezes the prepared references into the elements of a list or the entries of a dict that a mutation removes: every
+ * one of them, or for a dict `key`, only those through that key.
+ */
+export function freezePreparedReferenceDescendants(
   snapshot: RuntimeSnapshot,
-  receiver: SerializableRuntimeList,
+  receiver: SerializableRuntimeList | SerializableRuntimeDict,
+  key?: string,
 ): void {
   for (const temporaries of allTemporaryCollections(snapshot)) {
     for (const temporary of temporaries) {
@@ -229,28 +278,28 @@ export function freezePreparedReferenceListDescendants(
       } catch {
         continue;
       }
-      if (
-        descriptor.detached ||
-        preparedReferenceListIndexPosition(snapshot, descriptor, receiver) === null
-      ) {
-        continue;
-      }
+      if (descriptor.detached) continue;
+      const position = preparedReferenceStepPosition(snapshot, descriptor, receiver);
+      if (position === null) continue;
+      const step = descriptor.path[position]!;
+      if (key !== undefined && (step.kind !== "key" || step.key !== key)) continue;
       freezePreparedReference(snapshot, temporary.value, descriptor);
     }
   }
 }
 
-function preparedReferenceListIndexPosition(
+/** The position of the element or entry step by which a reference leaves `receiver`, or `null` when it does not. */
+function preparedReferenceStepPosition(
   snapshot: RuntimeSnapshot,
   descriptor: PreparedReferenceDescriptor,
-  receiver: SerializableRuntimeList,
+  receiver: SerializableRuntimeList | SerializableRuntimeDict,
 ): number | null {
   const root = preparedReferenceRoot(snapshot, descriptor);
   if (!root.found) return null;
   let current = root.value;
   for (let index = 0; index < descriptor.path.length; index += 1) {
     const step = descriptor.path[index]!;
-    if (current === receiver) return step.kind === "index" ? index : null;
+    if (current === receiver) return step.kind === "index" || step.kind === "key" ? index : null;
     const next = resolvePreparedReferenceStep(snapshot, current, step);
     if (!next.found) return null;
     current = next.value;
@@ -359,10 +408,16 @@ function resolvePreparedReferenceStep(
   step: PreparedReferenceStep,
 ): { readonly found: boolean; readonly value: SerializableRuntimeValue } {
   if (step.kind === "index") {
-    if ((!isList(value) && !isSet(value)) || step.index < 0 || step.index >= value.items.length) {
+    if (!isList(value) || step.index < 0 || step.index >= value.items.length) {
       return { found: false, value: null };
     }
     return { found: true, value: value.items[step.index]! };
+  }
+  if (step.kind === "key") {
+    const entry = isDict(value) ? getSerializableDictEntry(value, step.key) : undefined;
+    return entry === undefined
+      ? { found: false, value: null }
+      : { found: true, value: entry.value };
   }
   if (isObject(value)) {
     const property = getSerializableProperty(value, step.name);
@@ -386,6 +441,10 @@ function resolvePreparedReferenceStep(
   if ((isList(value) || isSet(value)) && step.name === "length") {
     return { found: true, value: value.items.length };
   }
+  if (isDict(value)) {
+    const derived = dictProperty(value, step.name);
+    return derived === undefined ? { found: false, value: null } : { found: true, value: derived };
+  }
   return { found: false, value: null };
 }
 
@@ -396,12 +455,14 @@ function pathStartsWith(
   if (prefix.length > path.length) return false;
   return prefix.every((step, index) => {
     const candidate = path[index];
-    return (
-      candidate?.kind === step.kind &&
-      (step.kind === "property"
-        ? candidate.kind === "property" && candidate.name === step.name
-        : candidate.kind === "index" && candidate.index === step.index)
-    );
+    switch (step.kind) {
+      case "property":
+        return candidate?.kind === "property" && candidate.name === step.name;
+      case "index":
+        return candidate?.kind === "index" && candidate.index === step.index;
+      case "key":
+        return candidate?.kind === "key" && candidate.key === step.key;
+    }
   });
 }
 

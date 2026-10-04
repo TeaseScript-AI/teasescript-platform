@@ -100,7 +100,7 @@ test("contains no non-JSON-safe values and rejects them when supplied", () => {
 });
 
 test("compiler-produced plans remain deeply frozen", () => {
-  const compiled = plan("let value = { nested: [1, { deeper: 2 }] }\nexit");
+  const compiled = plan("let value = { nested: [{ deeper: 1 }, { deeper: 2 }] }\nexit");
   // Freezing skips already-frozen nodes, so one shallow-frozen node could hide mutable children.
   const unfrozen: string[] = [];
   const visit = (value: unknown, path: string): void => {

@@ -227,7 +227,7 @@ test("takePhoto() is a reserved call, not a value, argument-taking call, or host
 });
 
 test("an external plan cannot call takePhoto() as an ordinary function", () => {
-  const plan = compileValidPlan('let photo = random(1, 2)\nshowImage "a"');
+  const plan = compileValidPlan('let photo = random()\nshowImage "a"');
   const forged = JSON.parse(JSON.stringify(plan));
   const declare = forged.instructions.find(
     (instruction: { kind: string }) => instruction.kind === "declareBinding",

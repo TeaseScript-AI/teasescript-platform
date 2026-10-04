@@ -39,7 +39,14 @@ test("runs escapeMarkup through the protected Platform Standard Library prelude"
 
   const protectedName = compileSource('let escapeMarkup = "shadow"');
   assert.ok(protectedName.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV001"));
-  const wrongType = compileValidPlan("say escapeMarkup(1), instant");
+  assert.deepEqual(
+    compileSource("say escapeMarkup(1), instant").diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSV043"],
+  );
+  // `dynamic` hides the argument's type from the compiler, so the runtime check rejects it.
+  const wrongType = compileValidPlan(
+    "function dynamic(value) { return value }\nsay escapeMarkup(dynamic(1)), instant",
+  );
   const failed = run(wrongType, createFreshRuntimeSnapshot(wrongType));
   assert.equal(failed.snapshot.status, "failed");
   assert.ok(failed.events.some((event) => event.kind === "runtimeFailure"));

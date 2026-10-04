@@ -1855,13 +1855,14 @@ async function markupLinkChecks(page) {
     'showButton "Done"',
   ].join("\n");
   await page.route("**/src/runtimeScenario.ts*", (route) => {
-    const original = new URL(route.request().url());
-    if (original.searchParams.has("original")) return route.continue();
-    original.searchParams.set("original", "");
+    // Plain string handling: the run-code sandbox that executes this check has no URL global.
+    const url = route.request().url();
+    if (/[?&]original(?:[=&]|$)/.test(url)) return route.continue();
+    const original = `${url}${url.includes("?") ? "&" : "?"}original=`;
     // Only the opening scenario is replaced; the module's other exports stay available.
     return route.fulfill({
       contentType: "text/javascript",
-      body: `export * from ${JSON.stringify(original.href)};\nexport const openingScenario = ${JSON.stringify(source)};`,
+      body: `export * from ${JSON.stringify(original)};\nexport const openingScenario = ${JSON.stringify(source)};`,
     });
   });
   await page

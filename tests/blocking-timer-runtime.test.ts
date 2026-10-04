@@ -331,14 +331,16 @@ test("accepted duration forms without an implementation are never read as anothe
 });
 
 test("invalid dynamic timer durations fail deterministically before any action", () => {
-  // The subject is the rejected duration or range operand of the timer or wait.
+  // The subject is the rejected duration or range operand of the timer or wait. `dynamic` hides a value's type from
+  // the compiler, which rejects a known text or range duration before runtime.
+  const dynamic = "function dynamic(value) {\n  return value\n}\n";
   const cases: ReadonlyArray<readonly [source: string, code: string, subject: string]> = [
-    ['let d = "soon"\ntimer d', "TSR050", "d"],
+    [`${dynamic}let d = dynamic("soon")\ntimer d`, "TSR050", "d"],
     ["let d = -1\ntimer d", "TSR050", "d"],
     ["let a = 3\ntimer a..a", "TSR041", "a..a"],
     ["let a = 0.5\ntimer a..3", "TSR045", "a..3"],
     ["let a = -3\ntimer a..3", "TSR050", "a..3"],
-    ["let d = 1..3\nwait d", "TSR050", "d"],
+    [`${dynamic}let d = dynamic(1..3)\nwait d`, "TSR050", "d"],
   ];
   for (const [source, code, subject] of cases) {
     for (const seed of SEEDS) {

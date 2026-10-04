@@ -158,53 +158,105 @@ Completion rules:
 - the function returns `number`;
 - the player-authored transcript preserves the trimmed submitted number text rather than reformatting it with JavaScript number-to-string conversion.
 
-The first POC adds no minimum, maximum, integer-only, or other domain-range parameters. Authors perform domain validation explicitly after completion.
+The first POC adds no minimum, maximum, or other domain-range parameters. Authors perform domain validation explicitly
+after completion; `askInteger` below is the whole-number counterpart.
+
+### `askInteger`
+
+Owner-approved extension (2026-10-04, #539): `askInteger` copies the compact `askNumber` forms, including `as speaker`,
+the hint, and `default:`, and returns `integer`.
+
+```tease
+let count = askInteger "How many repetitions?"
+let count = askInteger as mistress "How many?", default: 10
+```
+
+An answer is whole-number notation only: an optional sign, then digits, with surrounding whitespace removed and within
+the safe integer range. `2.5`, `2.0`, and `1e3` are rejected like any other invalid answer, with the
+[V30 message](../specifications/accepted-syntaxes-v30.md#20-input-functions) "That is wrong. I asked for a whole number.".
+Negative zero returns `0`, and the transcript keeps the trimmed submitted text. The engine runs it as a `number`
+interaction whose UI only accepts whole numbers, so completion, prefill, checkpoint, and settlement rules are those of
+`askNumber`. The Player offers a numeric keyboard.
+
+### `askDate`, `askTime`, and `askDateTime`
+
+Owner-approved extension (2026-10-04, #532): `askDate`, `askTime`, and `askDateTime` copy the compact `askNumber`
+forms, including `as speaker`, the hint, and `default:`, and return `date`, `time`, and `datetime`.
+
+```tease
+let day = askDate "Which day?"
+let start = askTime as mistress "What time?", default: toTime("20:00")
+```
+
+The Player shows the browser's date, time, or date-and-time control, which submits strict ISO text
+([V30 §35](../specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-timestamps)); surrounding whitespace is
+removed. A local time that the player's zone skips is a valid answer, because local values have no zone. Any other
+text is rejected with "That is wrong. I asked for a date." (a time, a date and time). The transcript shows the answer
+in the player's presentation, as `say` shows the value. A default of the asked kind prefills the control with its ISO
+text; text must be converted first, as in `default: toDate("2026-10-04")`.
+
+### Default answers
+
+Owner-approved extension (2026-10-04, #510): `askText` and `askNumber` accept a named `default:` answer after the hint
+or instead of it. It follows the general
+[default-answer rules](../specifications/accepted-syntaxes-v30.md#default-answers): an editable prefill that the player
+still submits, never a fallback for a cleared field.
+
+```tease
+let name = askText "Your name?", default: "Ada"
+let minutes = askNumber as mistress "Corner time?", default: cornerBase + playerLevel
+let name = askText default: player.name
+```
+
+The default is evaluated once, after the hint. Its prefill text is captured with the active interaction and survives
+checkpoint save/restore without re-evaluating author expressions. An `askNumber` default prefills the shortest number
+text that reads back as the same number, such as `2.5e-7`, with `-0` shown as `0`, so submitting it unchanged returns
+that number.
+
+Inside an object literal or call arguments, `default:` binds to the nearest compact ask:
+`{ answer: askText "Name?", default: "Ada" }` prefills the field. Write `{ answer: (askText "Name?"), default: "Ada" }`
+for an object property named `default`.
 
 ### `choose`
 
 `choose` is the author-facing TeaseScript construct. `choice` is the noun used for the internal interaction/action kind and for an individual choice group.
 
-Unlabelled compact choices return visible text:
+Each option shows one button, or one per element when the option is a list or a set, and `choose` returns the selected
+button's value. A value may be written before an option's `:`; an option without one returns itself, with its own type:
 
 ```tease
 let result = choose "Bratty", "Very submissive"
 let result = choose as mistress "Bratty", "Very submissive"
-```
-
-Labelled compact choices return the authored label:
-
-```tease
 let result = choose bratty: "Bratty", submissive: "Very submissive"
 let result = choose as mistress first: "Mystery", second: "Mystery"
 let result = choose 1: "Open the door", 2: "Walk away"
+let result = choose back: "Back", offenses, "Corner"
 ```
 
-Rules:
+[V30 §19](../specifications/accepted-syntaxes-v30.md#19-choices) defines options, values, list options, and choice
+objects (owner decisions on #511). Interaction rules:
 
 - all compact options belong to one statement;
 - options are comma-separated;
-- labelled and unlabelled options may not be mixed;
-- identifier labels and finite numeric-literal labels are supported to preserve accepted V30 capability;
-- one labelled `choose` uses one label type: identifier labels and numeric labels may not be mixed;
-- identifier labels return `string`; numeric labels return `number`;
-- labels must be unique;
-- numeric-label uniqueness is based on numeric value, so `1` and `1.0` are duplicates;
-- labelled choices may repeat visible text because selecting a rendered control supplies one exact label;
-- unlabelled choices may not repeat visible text because that text is both the typed match and return value;
+- identifiers and finite numeric literals are supported as values before `:` to preserve accepted V30 capability;
+- until union types (#504) allow mixed results in an explicitly union-typed variable, one `choose` uses one kind of
+  value before `:`: identifiers and numeric literals may not be mixed;
+- buttons may repeat values and visible text because selecting a rendered control identifies one button;
 - manually submitted text uses exact visible-text matching without trimming, case folding, locale matching, or Unicode normalization;
-- when repeated visible text makes manual submission ambiguous in a labelled choice, the typed attempt is invalid and the player must select a rendered control;
+- when repeated visible text makes manual submission ambiguous, the typed attempt is invalid and the player must select a rendered control;
 - fuzzy or natural-language matching is not part of deterministic completion.
 
-A labelled button or dropdown selection submits the selected label to the engine. An unlabelled control submits the selected visible text. The engine validates it against the active action, derives the canonical visible text from the stored choice option, writes that visible text as the player-authored transcript message, and returns the label or visible text to the script. The Player application does not supply an independent canonical transcript string.
+A button or dropdown selection submits the selected button's position to the engine. The engine validates it against the active action, derives the canonical visible text from the stored choice option, writes that visible text as the player-authored transcript message, and returns that button's value to the script. The Player application does not supply an independent canonical transcript string.
 
-This compact syntax supersedes the V30 split between labelled `{...}` and unlabelled `[...]` choice bodies. The question itself is normally a preceding `say`; compact `choose` has no prompt argument.
+This compact syntax supersedes the V30 split between `{...}` choice bodies with values and `[...]` choice bodies without. The question itself is normally a preceding `say`; compact `choose` has no prompt argument.
 
 ### Authored button backgrounds
 
 Owner-approved extension (2026-09-21): each choice may use `{ text: expression, background: colour }` instead of
-its ordinary text expression. `text` is required; `background` is optional. Labelled and unlabelled forms retain their
-existing selection, typed-match, return-value and transcript semantics. Object properties and options evaluate in
-source order. A computed object follows the same shape; unknown properties are rejected.
+its ordinary text expression. `text` is required; `background` is optional. Options with and without a value before `:`
+retain their existing selection, typed-match, return-value and transcript semantics. Object properties and options
+evaluate in source order. A computed object follows the same shape; unknown properties are rejected. Since #511 the
+object may also carry `value` ([V30 §19](../specifications/accepted-syntaxes-v30.md#19-choices)).
 
 ```tease
 let result = choose coast: { text: "Stay by the water", background: "seagreen" },
@@ -223,10 +275,11 @@ and survives checkpoint save/restore without re-evaluating author expressions.
 ```tease
 showButton "Continue"
 showButton as mistress "Ready"
+let elapsed = showButton "Continue", timeout: 30 s
 ```
 
-The first POC form displays one blocking button and has no useful script return value, timeout, or cancellation path. It
-is the one-option form of the same Standard foreground-control vocabulary as `choose`. The Player activates it by
+The form displays one blocking button and has no cancellation path. It is the one-option form of the same Standard
+foreground-control vocabulary as `choose`. The Player activates it by
 clicking/tapping the rendered button or submitting its exact non-empty stored visible text in the composer. Other text,
 Space in the empty focused composer, and a click/tap on unrelated blank Player space do not activate `showButton`.
 Typed matching does not trim, fold case, or normalize Unicode.
@@ -234,7 +287,16 @@ Typed matching does not trim, fold case, or normalize Unicode.
 The engine derives the canonical player-authored transcript text from the stored button label; the Player application
 does not provide replacement transcript text.
 
-Accepted V30 timeout and elapsed-time behavior is not rejected. It is deferred to a later advanced `showButton` extension and is not part of the first implementation slice.
+Owner-approved extension (2026-10-04, #531): a named `timeout:` sets the
+[V30 timeout](../specifications/accepted-syntaxes-v30.md#21-blocking-button), and `showButton` used as a value returns
+the elapsed waiting time as a `duration`; as a statement its result is ignored. `background:` and `timeout:` follow
+the button text in either order, at most once each, and evaluate in source order. As for `default:`, they bind to the
+nearest `showButton` inside an object literal or call arguments. The timeout is evaluated once, before the button
+appears; the button captures its start and timeout in scene time, and checkpoint save/restore re-evaluates nothing.
+
+Reaching the timeout is normal completion, not cancellation: the button disappears without a player transcript
+message, and the result equals the timeout. A timer interrupt that suspends the button keeps it inert; when the
+timeout passes meanwhile, the button times out as soon as the interrupt returns.
 
 ### `say`
 
@@ -298,13 +360,14 @@ The engine uses one discriminated foreground interaction family rather than inde
 Conceptually each active interaction contains enough JSON-safe data for:
 
 ```text
-kind: button | text | number | choice
+kind: button | text | number | temporal | choice
 stable action identity
 owning and continuation instruction positions
+scene time when it appeared, and a button's timeout when set
 result destination when applicable
 expected result type
 validated Standard UI payload
-allowed choice labels and visible text when applicable
+allowed choice values and visible text when applicable
 output target
 optional requesting speaker identity
 accessible-name data or localized default key
@@ -323,13 +386,9 @@ choose through typed input:
     actionId
     submittedText
 
-labelled choose control:
+choose control:
     actionId
-    selectedLabel
-
-unlabelled choose control:
-    actionId
-    selectedText
+    selected option position
 
 showButton:
     actionId
@@ -337,7 +396,7 @@ showButton:
 
 Exact cross-origin property names remain a host-protocol decision. The semantic payload above is fixed.
 
-A completion with a wrong action ID, wrong kind, invalid type, non-finite number, whitespace-only required text, unknown label, unknown visible value, ambiguous typed choice, or over-limit payload does not mutate the action or continuation. The same interaction remains active and Standard UI provides localized validation feedback.
+A completion with a wrong action ID, wrong kind, invalid type, non-finite number, whitespace-only required text, unknown option position, unknown visible value, ambiguous typed choice, or over-limit payload does not mutate the action or continuation. The same interaction remains active and Standard UI provides localized validation feedback.
 
 Retries are built into the interaction contract. An ordinary author does not need to write a retry loop merely because the player submitted invalid input.
 
@@ -345,11 +404,12 @@ Retries are built into the interaction contract. An ordinary author does not nee
 
 `askText`, `askNumber`, `choose`, and `showButton` expose no public cancellation result:
 
-- they never complete with `null`;
+- they never complete with `null` as a cancellation result (`choose` returns `null` only as the value of a selected
+  option);
 - closing or hiding a control does not complete it;
 - invalid input does not complete it;
 - package exit or fatal runtime/player failure is cleanup or failure, not an author-visible cancelled value;
-- a future `showButton` timeout is normal timeout completion, not cancellation.
+- a `showButton` timeout is normal timeout completion, not cancellation.
 
 Timer interrupts may suspend an interaction. Normal handler return restores it; handler `exit` discards the
 interrupted action and source instruction without synthesizing a result or binding. See specification
@@ -376,16 +436,16 @@ During a foreground interaction:
 
 The Player application dynamically chooses how a `choose` interaction is presented. Buttons may occupy one or two rows. When the available viewport, text lengths, font metrics, zoom, accessibility settings, or other layout constraints make that presentation impractical, the same choices may render as a dropdown. Exact breakpoints and measurement rules remain a Player UI decision.
 
-Button-versus-dropdown presentation is not canonical runtime or checkpoint state. Restoring the same action on another viewport may select another presentation while preserving the same labels, visible texts, completion validation, transcript output, and return value.
+Button-versus-dropdown presentation is not canonical runtime or checkpoint state. Restoring the same action on another viewport may select another presentation while preserving the same values, visible texts, completion validation, transcript output, and return value.
 
 Valid `askText` and `askNumber` submissions are represented as player-authored transcript messages using their normalization rules while the engine stores the typed return value.
 
 For `choose`, selecting a button or dropdown entry:
 
-1. supplies the exact stored label for a labelled choice or exact stored text for an unlabelled choice;
+1. supplies the position of the selected button;
 2. lets the engine derive and append the exact visible option text as the player's transcript message;
 3. completes the pending action for that option;
-4. returns its label or visible text to the script.
+4. returns its value to the script.
 
 Typing an exact unambiguous visible choice has the same completion effect.
 
@@ -649,7 +709,7 @@ The exact advanced author-override field is deferred. A later custom UI library 
 
 The deterministic first POC does not depend on an LLM. A later optional adapter may receive bounded structured context and propose:
 
-- one currently allowed choice label or visible option;
+- one currently allowed choice value or visible option;
 - one finite number;
 - or `needsClarification`.
 
@@ -661,14 +721,15 @@ This ADR accepts these scoped post-V30 changes:
 
 - add compact `as speaker` forms for `askText`, `askNumber`, `choose`, and `showButton`;
 - add compact command-expression forms for `askText` and `askNumber`;
-- replace the V30 labelled-body versus unlabelled-list `choose` split with one comma-separated compact form;
-- retain identifier and numeric labels from accepted V30 capability;
+- replace the V30 split between `choose` bodies with values and lists without them by one comma-separated compact form;
+- retain identifier and numeric values before `:` from accepted V30 capability;
 - extend `say` with `skippable`, `unskippable`, exact seconds, `0`, and `instant`;
-- define field text as Standard UI hint/label data rather than automatic transcript output.
+- define field text as Standard UI hint/label data rather than automatic transcript output;
+- express the V30 `showButton` timeout and elapsed-time return through the compact `timeout:` option and value form.
 
-The broader parenthesized V30 input APIs are not rejected merely because the first POC implements compact forms first. Their advanced options and compatibility mapping remain later work.
-
-V30 `showButton` timeout and elapsed-time return remain accepted future capability but are outside this first implementation slice.
+The broader parenthesized V30 input APIs, including the parenthesized `showButton` forms, are not rejected merely
+because the first POC implements compact forms first. Their advanced options and compatibility mapping remain later
+work.
 
 ## Follow-up implementation boundaries
 
@@ -688,7 +749,6 @@ The implementation issues must inspect the then-current plan/snapshot versions a
 
 This ADR intentionally defers:
 
-- `showButton` timeout and elapsed-time return;
 - detailed result objects containing elapsed time or metadata, and the option name that selects such a return type;
 - advanced parenthesized call forms and richer input/choice options;
 - custom input hints for compact `choose`;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, useId } from "vue";
+import { computed, nextTick, ref, useId, watch } from "vue";
 import { useTextareaAutosize } from "@vueuse/core";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,9 @@ const props = withDefaults(
     submitting?: boolean;
     placeholder?: string;
     accessibleName?: string;
-    inputMode?: "text" | "decimal";
+    inputMode?: "text" | "decimal" | "numeric";
+    /** A date or time answer uses the browser's own control, whose value is ISO text. */
+    inputType?: "text" | "date" | "time" | "datetime-local";
     feedback?: string;
     /** A skippable pacing gate is waiting; Space in the empty input settles it. */
     pacing?: boolean;
@@ -23,6 +25,7 @@ const props = withDefaults(
     placeholder: "Type your response…",
     accessibleName: "Response",
     inputMode: "text",
+    inputType: "text",
     feedback: "",
     pacing: false,
   },
@@ -35,16 +38,18 @@ const emit = defineEmits<{
 }>();
 
 const textarea = ref<InstanceType<typeof Textarea> | null>(null);
-const input = computed(() => {
+const picker = ref<HTMLInputElement | null>(null);
+const textareaElement = computed(() => {
   const element = textarea.value?.$el;
   return element instanceof HTMLTextAreaElement ? element : undefined;
 });
+const input = computed(() => picker.value ?? textareaElement.value);
 const value = computed({
   get: () => props.modelValue,
   set: (text: string) => emit("update:modelValue", text),
 });
 const feedbackId = useId();
-useTextareaAutosize({ element: input, input: value });
+useTextareaAutosize({ element: textareaElement, input: value });
 const conditions = usePlayerConditions();
 const suppressSoftwareKeyboard = ref(false);
 const effectiveInputMode = computed(() =>
@@ -73,6 +78,10 @@ function handleKeydown(event: KeyboardEvent): void {
   }
 }
 
+function updateFromPicker(event: Event): void {
+  if (event.target instanceof HTMLInputElement) value.value = event.target.value;
+}
+
 function preserveEditingFocus(event: PointerEvent): void {
   if (document.activeElement !== input.value || event.pointerType === "mouse") return;
   // Android may leave the textarea focused after its software keyboard closes.
@@ -86,6 +95,22 @@ function preserveEditingFocus(event: PointerEvent): void {
 // Mouse focus moves on mousedown, which pointerdown cancellation does not prevent.
 function keepMouseEditingFocus(event: MouseEvent): void {
   if (document.activeElement === input.value) event.preventDefault();
+}
+
+// A date or time control and the text field replace each other; the field removed while focused blurs, and its
+// keyboard state carries over to the replacement instead of being released.
+let replacingField = false;
+watch(
+  () => props.inputType === "text",
+  () => {
+    replacingField = true;
+    void nextTick(() => (replacingField = false));
+  },
+  { flush: "pre" },
+);
+
+function releaseOnBlur(): void {
+  if (!replacingField) allowSoftwareKeyboard();
 }
 
 function allowSoftwareKeyboard(): void {
@@ -110,7 +135,28 @@ defineExpose({ focusInput });
         data-runtime-composer
         @submit.prevent="emit('submit', 'button')"
       >
+        <div v-if="inputType !== 'text'" class="composer-picker-field">
+          <span v-if="placeholder" class="composer-hint" aria-hidden="true">{{ placeholder }}</span>
+          <input
+            ref="picker"
+            data-composer-input
+            :type="inputType"
+            :step="inputType === 'date' ? undefined : 1"
+            :value="modelValue"
+            :aria-label="placeholder ? `${accessibleName}: ${placeholder}` : accessibleName"
+            :aria-invalid="feedback ? true : undefined"
+            :aria-describedby="feedback ? feedbackId : undefined"
+            :inputmode="effectiveInputMode"
+            :disabled="disabled"
+            class="composer-input composer-picker"
+            @input="updateFromPicker"
+            @keydown="handleKeydown"
+            @pointerdown="allowSoftwareKeyboard"
+            @blur="releaseOnBlur"
+          />
+        </div>
         <Textarea
+          v-else
           ref="textarea"
           data-composer-input
           rows="1"
@@ -126,7 +172,7 @@ defineExpose({ focusInput });
           @update:model-value="value = String($event)"
           @keydown="handleKeydown"
           @pointerdown="allowSoftwareKeyboard"
-          @blur="allowSoftwareKeyboard"
+          @blur="releaseOnBlur"
         />
         <Button
           type="submit"
@@ -164,7 +210,9 @@ defineExpose({ focusInput });
   padding-inline: 8px 4px;
   background: var(--surface-component);
 }
-:global(:root[data-player-keyboard-focus="true"] [data-composer-shell]:has(textarea:focus)) {
+:global(
+  :root[data-player-keyboard-focus="true"] [data-composer-shell]:has([data-composer-input]:focus)
+) {
   outline: 2px solid var(--focus-ring);
   outline-offset: var(--player-focus-offset);
 }
@@ -194,6 +242,26 @@ defineExpose({ focusInput });
   line-height: calc(1em + var(--player-reading-line-gap, 8px));
   scrollbar-width: thin;
   scrollbar-color: var(--border-strong) transparent;
+}
+.composer-picker-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-inline-size: 0;
+}
+.composer-hint {
+  padding-inline-start: 12px;
+  color: var(--text-muted);
+}
+.composer-form .composer-picker {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  overflow: visible;
+  color-scheme: light;
+}
+:global(:root[data-player-theme="dark"] .composer-picker) {
+  color-scheme: dark;
 }
 .composer-form .composer-input:focus-visible {
   outline: none;

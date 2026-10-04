@@ -63,5 +63,18 @@ export type PlayerForegroundPresentation =
       readonly accessibleName: string;
       readonly options: readonly PlayerForegroundOptionPresentation[];
     }
-  | { readonly kind: "ask-text"; readonly accessibleName: string; readonly hint: string }
-  | { readonly kind: "ask-number"; readonly accessibleName: string; readonly hint: string };
+  | {
+      /** `ask-date`, `ask-time`, and `ask-datetime` use the browser's date and time controls, which submit ISO text. */
+      readonly kind: "ask-text" | "ask-number" | "ask-date" | "ask-time" | "ask-datetime";
+      readonly accessibleName: string;
+      readonly hint: string;
+      /** The default answer that initially fills the composer. */
+      readonly prefill?: string;
+      /** `askInteger`: only a whole number is an answer. */
+      readonly integer?: true;
+      /**
+       * A date or time answer is typed as ISO text, because the browser's control cannot show the default; a native
+       * date control has no year 0000.
+       */
+      readonly isoText?: true;
+    };

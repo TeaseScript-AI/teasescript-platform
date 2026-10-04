@@ -1,4 +1,4 @@
-import type { InstructionPlan, PlanSourceLocation } from "../../plan/model.js";
+import { type InstructionPlan, type PlanSourceLocation, mainSourceSpan } from "../../plan/model.js";
 import type { SourceSpan } from "../../source.js";
 import type {
   RuntimeActionSettlementSnapshot,
@@ -54,7 +54,7 @@ function activeStageVideo(snapshot: RuntimeSnapshot): RuntimeMediaActionSnapshot
 }
 
 export function mediaSpan(plan: InstructionPlan, owningInstruction: number): SourceSpan {
-  return copySpan(plan.instructions[owningInstruction]?.span ?? plan.sourceSpan);
+  return copySpan(plan.instructions[owningInstruction]?.span ?? mainSourceSpan(plan));
 }
 
 export function emitDeveloperWarning(

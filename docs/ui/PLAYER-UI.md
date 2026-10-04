@@ -380,7 +380,10 @@ platform Debugger remains future work described in [DEBUGGER.md](../DEBUGGER.md)
 The Player does not run a script on page load. Before the first runtime entry of a new session, it shows an explicit
 Start control; after a page load that restores an existing session, it shows an explicit Continue control before
 execution resumes. The player's activation of that control is the user activation that later audible media playback
-relies on, so scripts may play audio from their first statement without a separate unlock step.
+relies on, so scripts may play audio from their first statement without a separate unlock step. Start and Continue
+also record the wall clock and the player's time zone and numeric date and time presentation, resolved again at each:
+the account setting when the host supplies one, else the browser's. They are session data
+([Date and time context](../RUNTIME.md#date-and-time-context)).
 
 If the browser still refuses required audible playback, the Player surfaces a deliberate activation/retry control. It
 does not silently substitute muted playback or report the audio as played: refused audio reports no progress, so its
@@ -614,13 +617,22 @@ Standard keyboard behavior is:
 
 ### Foreground interaction presentation
 
-`askText` and `askNumber` use the composer as their active answer field. `choose` and `showButton` keep the composer
-enabled rather than visually disabling it:
+`askText`, `askNumber`, and `askInteger` use the composer as their active answer field; `askInteger` asks for a numeric
+keyboard. `askDate`, `askTime`, and `askDateTime` replace the composer's text field with the browser's date, time, or
+date-and-time control, which submits ISO text, and show the hint beside it. These native controls cover the years 0001
+through 9999; a default in year 0000, which they cannot show, is offered as editable ISO text in the text field. When
+Send moves to an interaction whose field is of the other kind, the editing focus and the keyboard's state move to the
+new field. A default answer starts as the composer text,
+which the player submits unchanged or edits first; a cleared composer stays empty. After a checkpoint restore the
+composer shows the default again, and unsent edits are not kept. `choose` and `showButton` keep the composer enabled
+rather than visually disabling it:
 
 - `choose`: selecting a rendered control or typing one exact unambiguous visible option completes the same choice;
 - `showButton`: clicking the rendered button or submitting its exact non-empty visible label in the composer activates
   the same action; other text and Space while the empty composer owns focus do not activate it;
 - a primary click on unrelated/blank Player space does **not** activate `showButton`;
+- a `showButton` timeout removes the button without a transcript message; the Player observes time at the timeout
+  so the button disappears on schedule;
 - while any mandatory foreground interaction is active, other composer text does not advance ordinary canonical script
   execution. In the deterministic first POC it is an invalid attempt and the same interaction remains active with the
   accepted validation/retry behavior. A future LLM clarification/interpretation layer may consume non-matching text
@@ -866,7 +878,8 @@ view/tool/stage capability inside the accepted sandbox.
 ## Accessibility invariants
 
 Higher-authority ADR 0018 requires a programmatic accessible name for every Standard UI text field, number field, choice
-group, and button. The Player preserves that requirement regardless of visible hint text or authored styling.
+group, and button. The Player preserves that requirement regardless of visible hint text or authored styling: a button's
+visible label is its accessible name, and the localized default names it only when the label is blank.
 
 Additional maintained presentation invariants:
 

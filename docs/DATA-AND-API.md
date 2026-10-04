@@ -15,9 +15,10 @@ The source-oriented layer includes:
 - `lex(...)`;
 - `parse(...)`;
 - `validateSemantics(...)`;
-- `compileSource(...)`.
+- `compileProject(...)` and `compileSource(...)`.
 
-`compileSource(...)` is the normal combined route from source text to diagnostics and a compiled instruction plan. It
+`compileProject(...)` is the normal combined route from the `.tease` files of a package to diagnostics and one compiled
+instruction plan; `compileSource(...)` does the same for a single source as `main.tease`. It
 returns no plan when parser, finite-literal, semantic, lowering, or compiled-plan validation errors remain. In
 particular, non-finite numeric literals are reported as exact-span `TSC001`, while recognized native host-stack
 exhaustion is reported across the complete source as `TSC007`. The latter contains an environment-specific failure; it

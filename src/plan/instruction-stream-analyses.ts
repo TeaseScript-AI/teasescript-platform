@@ -11,20 +11,22 @@ import {
   validInstructionBoundary,
 } from "./validation-support.js";
 
+/** Validated instruction boundaries of one plan file. */
+export interface PlanFileBoundaries {
+  readonly startInstruction: number;
+  readonly rootEndInstruction: number;
+  readonly endInstruction: number;
+}
+
 export function analyzeInstructionStream(
   instructions: readonly unknown[],
   functions: unknown,
-  rootEndInstruction: number | null,
+  files: readonly PlanFileBoundaries[] | null,
   errors: PlanValidationError[],
 ): void {
   validateLoopStructure(instructions, errors);
   validatePreparedReferenceStructure(instructions, errors);
-  const validationIndex = validateFunctionDefinitions(
-    functions,
-    instructions,
-    rootEndInstruction,
-    errors,
-  );
+  const validationIndex = validateFunctionDefinitions(functions, instructions, files, errors);
   validateInstructionControlFlowRegions(instructions, validationIndex, errors);
 }
 
@@ -227,9 +229,15 @@ export function collectFunctionIds(value: unknown): ReadonlySet<number> {
 }
 
 type InstructionExecutionRegion =
-  | { readonly kind: "root"; readonly startInstruction: 0; readonly endInstruction: number }
+  | {
+      readonly kind: "root";
+      readonly file: number;
+      readonly startInstruction: number;
+      readonly endInstruction: number;
+    }
   | {
       readonly kind: "function";
+      readonly file: number;
       readonly functionId: number;
       readonly startInstruction: number;
       readonly endInstruction: number;
@@ -238,6 +246,7 @@ type InstructionExecutionRegion =
 interface ValidatedFunctionRange {
   readonly definition: Record<string, unknown>;
   readonly path: string;
+  readonly file: number;
   readonly id: number;
   readonly entryInstruction: number;
   readonly bodyEntryInstruction: number;
@@ -256,21 +265,27 @@ interface PlanValidationIndex {
 
 function createPlanValidationIndex(
   instructions: readonly unknown[],
-  rootEndInstruction: number | null,
+  files: readonly PlanFileBoundaries[] | null,
   functions: readonly ValidatedFunctionRange[],
 ): PlanValidationIndex | null {
-  if (rootEndInstruction === null) return null;
+  if (files === null) return null;
   const owners: Array<InstructionExecutionRegion | undefined> = new Array(instructions.length);
-  const root: InstructionExecutionRegion = {
-    kind: "root",
-    startInstruction: 0,
-    endInstruction: rootEndInstruction,
-  };
-  for (let index = 0; index < rootEndInstruction; index += 1) owners[index] = root;
+  files.forEach((file, fileIndex) => {
+    const root: InstructionExecutionRegion = {
+      kind: "root",
+      file: fileIndex,
+      startInstruction: file.startInstruction,
+      endInstruction: file.rootEndInstruction,
+    };
+    for (let index = file.startInstruction; index < file.rootEndInstruction; index += 1) {
+      owners[index] = root;
+    }
+  });
   const functionsById = new Map<number, ValidatedFunctionRange>();
   for (const definition of functions) {
     const region: InstructionExecutionRegion = {
       kind: "function",
+      file: definition.file,
       functionId: definition.id,
       startInstruction: definition.entryInstruction,
       endInstruction: definition.endInstruction,
@@ -365,6 +380,9 @@ function validateCanonicalPreparedSays(
   const explicitIncomingSources = hasPreparedSay
     ? collectExplicitIncomingSources(instructions)
     : [];
+  const payloadReferences = hasPreparedSay
+    ? collectPayloadTemporaryReferences(instructions)
+    : new Map<number, readonly number[]>();
 
   const consumed = new Set<number>();
   instructions.forEach((instruction, instructionIndex) => {
@@ -456,6 +474,7 @@ function validateCanonicalPreparedSays(
       instructions,
       index,
       explicitIncomingSources,
+      payloadReferences,
       producers,
       consumed,
       errors,
@@ -562,6 +581,7 @@ function validatePreparedSayContextualSpeaker(
   instructions: readonly unknown[],
   index: PlanValidationIndex,
   explicitIncomingSources: readonly (readonly number[])[],
+  payloadReferences: ReadonlyMap<number, readonly number[]>,
   producers: ReadonlyMap<number, readonly number[]>,
   consumed: Set<number>,
   errors: PlanValidationError[],
@@ -616,7 +636,7 @@ function validatePreparedSayContextualSpeaker(
   }
   if (
     preparedSayContextualSpeakerIsUsedBeforeCapture(
-      instructions,
+      payloadReferences,
       index,
       region,
       producerIndex,
@@ -644,128 +664,147 @@ function validatePreparedSayContextualSpeaker(
 }
 
 function preparedSayContextualSpeakerIsUsedBeforeCapture(
-  instructions: readonly unknown[],
+  payloadReferences: ReadonlyMap<number, readonly number[]>,
   index: PlanValidationIndex,
   region: InstructionExecutionRegion,
   producerIndex: number,
   temporaryId: number,
 ): boolean {
-  for (
-    let instructionIndex = region.startInstruction;
-    instructionIndex < producerIndex;
-    instructionIndex += 1
-  ) {
-    const instruction = instructions[instructionIndex];
-    if (
-      isRecord(instruction) &&
-      index.owners[instructionIndex] === region &&
-      preparedSayPayloadMayReferenceTemporary(instruction, temporaryId)
-    )
-      return true;
+  for (const instructionIndex of payloadReferences.get(temporaryId) ?? []) {
+    if (instructionIndex >= producerIndex) return false;
+    if (index.owners[instructionIndex] === region) return true;
   }
   return false;
 }
 
-function preparedSayPayloadMayReferenceTemporary(
+/**
+ * Maps each temporary ID to the ascending instruction indices whose payload may
+ * reference it, so the capture-order check does not rescan preceding instructions.
+ */
+function collectPayloadTemporaryReferences(
+  instructions: readonly unknown[],
+): ReadonlyMap<number, readonly number[]> {
+  const references = new Map<number, number[]>();
+  const referenced = new Set<number>();
+  instructions.forEach((instruction, instructionIndex) => {
+    if (!isRecord(instruction)) return;
+    referenced.clear();
+    collectPreparedSayPayloadTemporaryReferences(instruction, referenced);
+    for (const temporaryId of referenced) {
+      const indices = references.get(temporaryId) ?? [];
+      indices.push(instructionIndex);
+      references.set(temporaryId, indices);
+    }
+  });
+  return references;
+}
+
+function collectPreparedSayPayloadTemporaryReferences(
   instruction: Record<string, unknown>,
-  temporaryId: number,
-): boolean {
-  let expression: unknown;
+  output: Set<number>,
+): void {
   switch (instruction.kind) {
     case "evaluate":
     case "prepareReference":
-      expression = instruction.expression;
-      break;
+      collectExpressionTemporaryReferences(instruction.expression, output);
+      return;
     case "say":
-      return (
-        expressionMayReferenceTemporary(instruction.presentation, temporaryId) ||
-        expressionMayReferenceTemporary(instruction.value, temporaryId) ||
-        expressionMayReferenceTemporary(instruction.pacing, temporaryId)
-      );
+      collectExpressionTemporaryReferences(instruction.presentation, output);
+      collectExpressionTemporaryReferences(instruction.value, output);
+      collectExpressionTemporaryReferences(instruction.pacing, output);
+      return;
     case "declareBinding":
     case "assign":
     case "storeTemporary":
     case "prepareSayText":
     case "setDeclaredSpeakerProperty":
     case "returnValue":
-      expression = instruction.value;
-      break;
-    default:
-      expression = undefined;
+      collectExpressionTemporaryReferences(instruction.value, output);
+      return;
   }
-  return expressionMayReferenceTemporary(expression, temporaryId);
 }
 
 export function expressionMayReferenceTemporary(value: unknown, temporaryId: number): boolean {
-  if (!isRecord(value)) return false;
-  switch (value.kind) {
-    case "temporary":
-      return value.temporaryId === temporaryId;
-    case "list":
-    case "set":
-      return (
-        Array.isArray(value.elements) &&
-        value.elements.some((item) => expressionMayReferenceTemporary(item, temporaryId))
-      );
-    case "object":
-      return (
-        Array.isArray(value.properties) &&
-        value.properties.some(
-          (property) =>
-            isRecord(property) && expressionMayReferenceTemporary(property.value, temporaryId),
-        )
-      );
-    case "group":
-      return expressionMayReferenceTemporary(value.expression, temporaryId);
-    case "template":
-      return (
-        Array.isArray(value.parts) &&
-        value.parts.some(
-          (part) =>
-            isRecord(part) &&
-            part.kind === "expression" &&
-            expressionMayReferenceTemporary(part.expression, temporaryId),
-        )
-      );
-    case "property":
-      return expressionMayReferenceTemporary(value.object, temporaryId);
-    case "index":
-      return (
-        expressionMayReferenceTemporary(value.object, temporaryId) ||
-        expressionMayReferenceTemporary(value.index, temporaryId)
-      );
-    case "call": {
-      const calleeReferences =
-        isRecord(value.callee) &&
-        value.callee.kind === "property" &&
-        expressionMayReferenceTemporary(value.callee.object, temporaryId);
-      const argumentReferences =
-        Array.isArray(value.arguments) &&
-        value.arguments.some(
-          (argument) =>
-            isRecord(argument) && expressionMayReferenceTemporary(argument.value, temporaryId),
-        );
-      return calleeReferences || argumentReferences;
+  const referenced = new Set<number>();
+  collectExpressionTemporaryReferences(value, referenced);
+  return referenced.has(temporaryId);
+}
+
+/** Uses an explicit worklist: validation reaches arbitrarily deep accepted expressions. */
+function collectExpressionTemporaryReferences(value: unknown, output: Set<number>): void {
+  const pending = [value];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!isRecord(current)) continue;
+    switch (current.kind) {
+      case "temporary":
+        if (Number.isInteger(current.temporaryId)) {
+          // EVIDENCE: validation: Number.isInteger proved the numeric temporary ID above.
+          output.add(current.temporaryId as number);
+        }
+        break;
+      case "list":
+      case "set":
+        if (Array.isArray(current.elements)) {
+          for (const item of current.elements) pending.push(item);
+        }
+        break;
+      case "object":
+        if (Array.isArray(current.properties)) {
+          for (const property of current.properties) {
+            if (isRecord(property)) pending.push(property.value);
+          }
+        }
+        break;
+      case "dict":
+        if (Array.isArray(current.entries)) {
+          for (const entry of current.entries) {
+            if (isRecord(entry)) pending.push(entry.key, entry.value);
+          }
+        }
+        break;
+      case "group":
+        pending.push(current.expression);
+        break;
+      case "template":
+        if (Array.isArray(current.parts)) {
+          for (const part of current.parts) {
+            if (isRecord(part) && part.kind === "expression") pending.push(part.expression);
+          }
+        }
+        break;
+      case "property":
+        pending.push(current.object);
+        break;
+      case "index":
+        pending.push(current.object, current.index);
+        break;
+      case "call":
+        if (isRecord(current.callee) && current.callee.kind === "property") {
+          pending.push(current.callee.object);
+        }
+        if (Array.isArray(current.arguments)) {
+          for (const argument of current.arguments) {
+            if (isRecord(argument)) pending.push(argument.value);
+          }
+        }
+        break;
+      case "unary":
+        pending.push(current.operand);
+        break;
+      case "typeTest":
+        pending.push(current.value);
+        break;
+      case "binary":
+        pending.push(current.left, current.right);
+        break;
+      case "range":
+        pending.push(current.start, current.end);
+        break;
+      case "storageLoad":
+        pending.push(current.key, current.default);
+        break;
     }
-    case "unary":
-      return expressionMayReferenceTemporary(value.operand, temporaryId);
-    case "binary":
-      return (
-        expressionMayReferenceTemporary(value.left, temporaryId) ||
-        expressionMayReferenceTemporary(value.right, temporaryId)
-      );
-    case "range":
-      return (
-        expressionMayReferenceTemporary(value.start, temporaryId) ||
-        expressionMayReferenceTemporary(value.end, temporaryId)
-      );
-    case "storageLoad":
-      return (
-        expressionMayReferenceTemporary(value.key, temporaryId) ||
-        expressionMayReferenceTemporary(value.default, temporaryId)
-      );
-    default:
-      return false;
   }
 }
 
@@ -877,10 +916,7 @@ function validateCanonicalInteractionResultHandoffs(
   instructions.forEach((instruction, instructionIndex) => {
     if (
       !isRecord(instruction) ||
-      !(
-        (instruction.kind === "interaction" && instruction.interactionKind !== "button") ||
-        instruction.kind === "capture"
-      ) ||
+      !(instruction.kind === "interaction" || instruction.kind === "capture") ||
       !Number.isSafeInteger(instruction.destinationTemporary)
     )
       return;
@@ -1079,6 +1115,16 @@ function expressionGuaranteesTemporaryEvaluation(value: unknown, temporaryId: nu
             expressionGuaranteesTemporaryEvaluation(property.value, temporaryId),
         )
       );
+    case "dict":
+      return (
+        Array.isArray(value.entries) &&
+        value.entries.some(
+          (entry) =>
+            isRecord(entry) &&
+            (expressionGuaranteesTemporaryEvaluation(entry.key, temporaryId) ||
+              expressionGuaranteesTemporaryEvaluation(entry.value, temporaryId)),
+        )
+      );
     case "group":
       return expressionGuaranteesTemporaryEvaluation(value.expression, temporaryId);
     case "template":
@@ -1114,6 +1160,8 @@ function expressionGuaranteesTemporaryEvaluation(value: unknown, temporaryId: nu
     }
     case "unary":
       return expressionGuaranteesTemporaryEvaluation(value.operand, temporaryId);
+    case "typeTest":
+      return expressionGuaranteesTemporaryEvaluation(value.value, temporaryId);
     case "binary":
       if (value.operator === "and" || value.operator === "or") {
         return expressionGuaranteesTemporaryEvaluation(value.left, temporaryId);
@@ -1171,20 +1219,46 @@ const FUNCTION_FIELDS = [
 
 const PARAMETER_FIELDS = ["name", "index", "hasDefault", "declarationSpan", "defaultSpan"];
 
+/** Functions and handlers are local to their file: an instruction may only refer to its own file's regions. */
+function reportForeignFunction(
+  target: ValidatedFunctionRange | undefined,
+  ownerRegion: InstructionExecutionRegion | undefined,
+  instructionIndex: number,
+  errors: PlanValidationError[],
+): void {
+  if (target === undefined || ownerRegion === undefined || target.file === ownerRegion.file) return;
+  errors.push(
+    planError(
+      "TSC002",
+      "An instruction refers to a function of another file.",
+      `$.instructions[${instructionIndex}]`,
+    ),
+  );
+}
+
 function validateFunctionDefinitions(
   value: unknown,
   instructions: readonly unknown[],
-  rootEndInstruction: number | null,
+  files: readonly PlanFileBoundaries[] | null,
   errors: PlanValidationError[],
 ): PlanValidationIndex | null {
   if (!Array.isArray(value)) {
     errors.push(planError("TSC002", "Function definitions must be an array.", "$.functions"));
-    return createPlanValidationIndex(instructions, rootEndInstruction, []);
+    return createPlanValidationIndex(instructions, files, []);
   }
   const ids = new Set<number>();
-  const names = new Set<string>();
   const validatedRanges: ValidatedFunctionRange[] = [];
-  let expectedEntry = rootEndInstruction;
+  // Function ranges fill each file's block after its root region, file by file; names are unique within a file.
+  let file = 0;
+  let names = new Set<string>();
+  let expectedEntry = files?.[0]?.rootEndInstruction ?? null;
+  const skipCompletedFiles = (): void => {
+    while (files !== null && file < files.length && expectedEntry === files[file]!.endInstruction) {
+      file += 1;
+      names = new Set();
+      expectedEntry = files[file]?.rootEndInstruction ?? null;
+    }
+  };
   value.forEach((definition, definitionIndex) => {
     const path = `$.functions[${definitionIndex}]`;
     if (!isRecord(definition)) {
@@ -1227,9 +1301,12 @@ function validateFunctionDefinitions(
       }
       ids.add(definition.id);
     }
+    skipCompletedFiles();
     if (typeof definition.name === "string" && definition.handler === null) {
       if (names.has(definition.name)) {
-        errors.push(planError("TSC002", "Function names must be unique.", `${path}.name`));
+        errors.push(
+          planError("TSC002", "Function names must be unique within a file.", `${path}.name`),
+        );
       }
       names.add(definition.name);
     }
@@ -1254,7 +1331,7 @@ function validateFunctionDefinitions(
       entry >= bodyEntry ||
       bodyEntry > implicitReturn ||
       implicitReturn !== end - 1 ||
-      end > instructions.length
+      end > (files?.[file]?.endInstruction ?? -1)
     ) {
       errors.push(
         planError("TSC002", "Function instruction range is overlapping or impossible.", path),
@@ -1268,6 +1345,7 @@ function validateFunctionDefinitions(
     const validatedRange: ValidatedFunctionRange = {
       definition,
       path,
+      file,
       // EVIDENCE: validation: functionId passed the positive safe-integer check above.
       id: functionId as number,
       entryInstruction: entry,
@@ -1300,7 +1378,8 @@ function validateFunctionDefinitions(
     validateFunctionPrologue(validatedRange, instructions, errors);
     expectedEntry = end;
   });
-  if (expectedEntry !== null && expectedEntry !== instructions.length) {
+  skipCompletedFiles();
+  if (files !== null && expectedEntry !== null && file < files.length) {
     errors.push(
       planError(
         "TSC002",
@@ -1310,7 +1389,7 @@ function validateFunctionDefinitions(
     );
   }
 
-  const index = createPlanValidationIndex(instructions, rootEndInstruction, validatedRanges);
+  const index = createPlanValidationIndex(instructions, files, validatedRanges);
   instructions.forEach((instruction, instructionIndex) => {
     if (!isRecord(instruction)) return;
     const ownerRegion = index?.owners[instructionIndex];
@@ -1356,12 +1435,14 @@ function validateFunctionDefinitions(
         ? instruction.functionId
         : instruction.handlerFunctionId) === "number"
     ) {
-      const target = index?.functionsById.get(
+      const targetRange = index?.functionsById.get(
         // EVIDENCE: validation: the enclosing condition established the numeric ID.
         (instruction.kind === "callFunction"
           ? instruction.functionId
           : instruction.handlerFunctionId) as number,
-      )?.definition;
+      );
+      reportForeignFunction(targetRange, ownerRegion, instructionIndex, errors);
+      const target = targetRange?.definition;
       if (
         target !== undefined &&
         target.handler !== (instruction.kind === "startTimer" ? "timer" : null)
@@ -1386,7 +1467,9 @@ function validateFunctionDefinitions(
       ];
       for (const id of handlerIds) {
         if (typeof id !== "number") continue;
-        const target = index?.functionsById.get(id)?.definition;
+        const targetRange = index?.functionsById.get(id);
+        reportForeignFunction(targetRange, ownerRegion, instructionIndex, errors);
+        const target = targetRange?.definition;
         if (target !== undefined && target.handler !== "media") {
           errors.push(
             planError(
