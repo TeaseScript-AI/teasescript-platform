@@ -156,6 +156,8 @@ class TypeChecker {
 
   #function: FunctionContext | null = null;
 
+  readonly #types = new Map<Expression, StaticType>();
+
   /** One flag per enclosing loop: whether a `break` leaves it. */
   readonly #loops: boolean[] = [];
 
@@ -385,10 +387,11 @@ class TypeChecker {
       };
       // A typed load's default must fit the variable as well; the loaded value itself is checked at runtime.
       if (initializer.kind === "loadExpression" && initializer.defaultValue !== null) {
-        const fallback = yield* compileChild(this.#expressionTask(initializer.defaultValue, scope));
-        yield* compileChild(this.#storeTask(place, initializer.defaultValue, fallback, scope));
+        yield* compileChild(
+          this.#storeTask(place, initializer.defaultValue, this.#typeOf(initializer.defaultValue)),
+        );
       } else {
-        yield* compileChild(this.#storeTask(place, statement.initializer, value, scope));
+        yield* compileChild(this.#storeTask(place, statement.initializer, value));
       }
     }
     scope.declare(name, { kind: "variable", variable: { name, type } });
@@ -415,7 +418,7 @@ class TypeChecker {
     const value = yield* compileChild(this.#expressionTask(statement.value, scope));
     if (place === undefined) return;
     if (statement.operator === "=") {
-      yield* compileChild(this.#storeTask(place, statement.value, value, scope));
+      yield* compileChild(this.#storeTask(place, statement.value, value));
       return;
     }
     const operator = statement.operator === "+=" ? "+" : "-";
@@ -444,12 +447,7 @@ class TypeChecker {
    * Stores a value in a place that keeps a type: reports a mismatch, or records what the value decides. A list, set, or
    * object literal is checked part by part, so the message points at the element or property that does not fit.
    */
-  *#storeTask(
-    place: Place,
-    expression: Expression,
-    value: StaticType,
-    scope: Scope,
-  ): CompileTask<void> {
+  *#storeTask(place: Place, expression: Expression, value: StaticType): CompileTask<void> {
     const literal = unwrap(expression);
     const kept = resolved(nonNullType(place.type));
     if (
@@ -457,16 +455,14 @@ class TypeChecker {
       (kept.kind === "set" && literal.kind === "setLiteral")
     ) {
       const elements = elementPlace(kept, place.label, isNullable(place.type));
-      for (const element of literal.elements) {
-        const type = yield* compileChild(this.#expressionTask(element, scope));
-        yield* compileChild(this.#storeTask(elements, element, type, scope));
-      }
+      for (const element of literal.elements)
+        yield* compileChild(this.#storeTask(elements, element, this.#typeOf(element)));
       return;
     }
     if (kept.kind === "object" && literal.kind === "objectLiteral" && kept.properties !== null) {
       for (const property of literal.properties) {
         const known = kept.properties.get(property.name.name);
-        const type = yield* compileChild(this.#expressionTask(property.value, scope));
+        const type = this.#typeOf(property.value);
         if (known === undefined) kept.properties.set(property.name.name, placeType(type));
         else
           yield* compileChild(
@@ -474,7 +470,6 @@ class TypeChecker {
               nestedPropertyPlace(known, place, property.name.name),
               property.value,
               type,
-              scope,
             ),
           );
       }
@@ -557,7 +552,6 @@ class TypeChecker {
           },
           statement.value,
           value,
-          scope,
         ),
       );
       return;
@@ -665,7 +659,6 @@ class TypeChecker {
               },
               parameter.defaultValue,
               value,
-              scope,
             ),
           );
         }
@@ -716,7 +709,6 @@ class TypeChecker {
           },
           argument.value,
           value,
-          scope,
         ),
       );
     }
@@ -725,8 +717,22 @@ class TypeChecker {
 
   // Expressions ------------------------------------------------------------------------------------------------------
 
-  /** The type of an expression; reports operations on values that do not support them. */
+  /**
+   * The type of an expression; reports operations on values that do not support them. Each expression is checked once,
+   * and its type is kept for the stores that later check its parts.
+   */
   *#expressionTask(expression: Expression, scope: Scope): CompileTask<StaticType> {
+    const type = yield* compileChild(this.#expressionTypeTask(expression, scope));
+    this.#types.set(expression, type);
+    return type;
+  }
+
+  /** The type of an expression that {@link #expressionTask} already checked. */
+  #typeOf(expression: Expression): StaticType {
+    return this.#types.get(expression) ?? UNKNOWN_TYPE;
+  }
+
+  *#expressionTypeTask(expression: Expression, scope: Scope): CompileTask<StaticType> {
     switch (expression.kind) {
       case "booleanLiteral":
         return BOOLEAN_TYPE;
@@ -922,7 +928,6 @@ class TypeChecker {
             elementPlace(value, expressionLabel(callee.object), isNullable(receiver)),
             argument.value,
             type,
-            scope,
           ),
         );
         return NULL_TYPE;
