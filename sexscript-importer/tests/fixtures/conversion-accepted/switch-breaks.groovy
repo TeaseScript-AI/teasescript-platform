@@ -45,3 +45,8 @@ switch (n) {
 	case [0, 1]: show("low"); break
 	case 2..3: show("high"); break
 }
+// A descending range matched in Groovy too, which a range case cannot express.
+switch (n) {
+	case 3..1: show("one to three"); break
+	case 0: show("zero"); break
+}

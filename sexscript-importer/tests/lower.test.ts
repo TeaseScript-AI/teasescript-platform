@@ -156,6 +156,36 @@ test("keeps a switch whose cases overlap as an if chain, which keeps Groovy's fi
   );
 });
 
+test("keeps a switch with an empty or text range as an if chain", () => {
+  const rangeCase = (from: string | number, to: string | number, inclusive: boolean): AstNode => ({
+    kind: "case",
+    span,
+    expression: { kind: "range", span, from: constant(from), to: constant(to), inclusive },
+    body: {
+      kind: "block",
+      span,
+      statements: [statement(call("show", constant("in"))), { kind: "break", span }],
+    },
+  });
+  for (const [from, to, inclusive] of [
+    [1, 1, false],
+    ["a", "c", true],
+  ] as const) {
+    const program = lowerParsedFile(
+      file([
+        {
+          kind: "switch",
+          span,
+          expression: variable("value"),
+          cases: [rangeCase(from, to, inclusive)],
+          default: { kind: "empty", span },
+        },
+      ]),
+    );
+    assert.doesNotMatch(emitTease(program), /^switch /mu);
+  }
+});
+
 test("lowers nullable legacy scalar storage reads to read-only TeaseScript load", () => {
   const source = file([
     statement({

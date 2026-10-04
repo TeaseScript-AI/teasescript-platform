@@ -3665,8 +3665,16 @@ function isAcceptedSwitch(cases: IrSwitchCase[]): boolean {
   const literal = (expression: IrExpression): boolean =>
     expression.kind === "literal" && expression.value !== null;
   for (const match of cases.flatMap((switchCase) => switchCase.matches)) {
-    const valid =
-      literal(match) || (match.kind === "range" && literal(match.from) && literal(match.to));
+    // A range case is an ascending, non-empty range of numbers (#528); Groovy also matched descending and text
+    // ranges, which the if chain tests.
+    const ascending =
+      match.kind === "range" &&
+      match.from.kind === "literal" &&
+      match.to.kind === "literal" &&
+      typeof match.from.value === "number" &&
+      typeof match.to.value === "number" &&
+      (match.inclusive ? match.from.value <= match.to.value : match.from.value < match.to.value);
+    const valid = literal(match) || ascending;
     const key = JSON.stringify(match);
     if (!valid || seen.has(key)) return false;
     seen.add(key);

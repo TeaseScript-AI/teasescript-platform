@@ -55,3 +55,9 @@ switch n {
     say "high"
   }
 }
+// A descending range matched in Groovy too, which a range case cannot express.
+if n <= 3 and n >= 1 {
+  say "one to three"
+} else if n == 0 {
+  say "zero"
+}
