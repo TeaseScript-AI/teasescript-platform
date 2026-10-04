@@ -11,6 +11,7 @@ import {
   parseMessageMarkup,
   run,
   serializeCheckpoint,
+  stepToEvent,
   validateRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/index.js";
@@ -88,7 +89,9 @@ test("paces, prepares, checkpoints, and emits one parsed authored message", () =
   assert.equal(output.text, gate.preparedOutput.text);
 
   const pacingPlan = compileValidPlan('say "[color=#ff3344]x[/color]"\nexit');
-  const paced = run(pacingPlan, createFreshRuntimeSnapshot(pacingPlan));
+  // Exit stops the pacing, so the gate is observed right after the say.
+  const paced = stepToEvent(pacingPlan, createFreshRuntimeSnapshot(pacingPlan));
+  assert.equal(paced.events[0]?.kind, "say");
   assert.equal(paced.snapshot.backgroundActions[0]?.kind, "chatPacingGate");
   assert.equal(paced.snapshot.backgroundActions[0]?.deadlineMs, 1_800);
 });

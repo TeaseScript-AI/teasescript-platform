@@ -30,7 +30,7 @@ test("workspace helper exposes production say pacing and returns JSON-safe data"
   assert.equal(result.status, "halted");
   assert.deepEqual(
     result.events.map((event) => event.kind),
-    ["say", "actionRequested", "complete"],
+    ["say", "actionRequested", "exit"],
   );
   const [say, requested] = result.events;
   assert.equal(say?.kind === "say" ? say.text : null, "Hello");
@@ -95,7 +95,8 @@ test("workspace helper accepts source beyond the former local byte limit", () =>
 test("workspace helper is deterministic and returns runtime instruction-budget failures", () => {
   const source = "say random(1, 10)\nexit";
   assert.deepEqual(executeWorkspaceSource(source), executeWorkspaceSource(source));
-  const result = executeWorkspaceSource("while true {} ");
+  // The exit is never taken; a script needs a reachable one.
+  const result = executeWorkspaceSource("let stop = false\nwhile true {\n  if stop { exit }\n}");
   assert.equal(result.status, "failed");
   assert.ok(
     result.events.some((event) => event.kind === "runtimeFailure" && event.code === "TSR037"),
@@ -196,7 +197,8 @@ test("a control rendered for an earlier interaction cannot answer a later one", 
 });
 
 test("workspace pacing and checkpoint controls are explicit and restore without time mutation", () => {
-  const compiled = compileWorkspaceSource('say "paced"\nexit');
+  // The long wait keeps the session running while the message's pacing gate is in the background.
+  const compiled = compileWorkspaceSource('say "paced"\nwait 2000\nexit');
   assert.ok(compiled.plan && compiled.snapshot);
   const running = executeValidatedWorkspaceSnapshot(compiled.plan, compiled.snapshot, "run");
   assert.ok(running.snapshot);
@@ -312,7 +314,8 @@ test("composer text for a choice remains engine-owned and rejects ambiguous visi
 });
 
 test("workspace controls preserve engine pacing and completion rejection outcomes", () => {
-  const unskippable = compileWorkspaceSource('say unskippable "paced"\nexit');
+  // Each long wait keeps the session running while the message's pacing gate is in the background.
+  const unskippable = compileWorkspaceSource('say unskippable "paced"\nwait 2000\nexit');
   assert.ok(unskippable.plan && unskippable.snapshot);
   const waiting = executeValidatedWorkspaceSnapshot(unskippable.plan, unskippable.snapshot, "run");
   assert.ok(waiting.snapshot);
@@ -322,7 +325,7 @@ test("workspace controls preserve engine pacing and completion rejection outcome
   assert.deepEqual(rejectedSkip.events, []);
   assert.equal(JSON.stringify(rejectedSkip.snapshot), before);
 
-  const skippable = compileWorkspaceSource('say "paced"\nexit');
+  const skippable = compileWorkspaceSource('say "paced"\nwait 2000\nexit');
   assert.ok(skippable.plan && skippable.snapshot);
   const running = executeValidatedWorkspaceSnapshot(skippable.plan, skippable.snapshot, "run");
   assert.ok(running.snapshot);
@@ -332,7 +335,7 @@ test("workspace controls preserve engine pacing and completion rejection outcome
   assert.deepEqual(duplicate.events, []);
   assert.deepEqual(duplicate.snapshot, completed.snapshot);
 
-  const text = compileWorkspaceSource("let answer = askText");
+  const text = compileWorkspaceSource("let answer = askText\nexit");
   assert.ok(text.plan && text.snapshot);
   const textWaiting = executeValidatedWorkspaceSnapshot(text.plan, text.snapshot, "run");
   assert.ok(textWaiting.snapshot);
