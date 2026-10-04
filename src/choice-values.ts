@@ -22,10 +22,3 @@ export function cloneInteractionChoiceValue(value: InteractionChoiceValue): Inte
     ? { kind: "duration", milliseconds: value.milliseconds }
     : value;
 }
-
-/** Identity of a choice value: options with the same key return the same value. */
-export function choiceValueKey(value: InteractionChoiceValue): string {
-  if (value === null) return "null";
-  if (typeof value === "object") return `duration:${value.milliseconds}`;
-  return `${typeof value}:${value}`;
-}

@@ -181,7 +181,7 @@ function finite(value: StaticScalar | undefined): { readonly value: StaticScalar
   return { value };
 }
 
-/** A choice option value known at compile time, with `-0` as `0` like a runtime label. */
+/** A choice option value known at compile time, with `-0` as `0` like a runtime choice value. */
 export function staticChoiceValue(
   expression: Expression,
 ): { readonly value: StaticScalar } | undefined {

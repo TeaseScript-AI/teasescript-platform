@@ -252,7 +252,7 @@ export interface RuntimeInteractionActionSettlementSnapshot {
   readonly requestEventSequence: number;
   readonly transcriptEventSequence: number;
   readonly completionEventSequence: number;
-  /** `null` for a button; a choice may also return `null` as an option's label. */
+  /** `null` for a button; a choice may also return `null` as an option's value. */
   readonly result: InteractionChoiceValue;
   readonly transcriptText: string;
   /** The UI the player answered, so the settlement validates against what was presented. */

@@ -146,7 +146,7 @@ The Standard Player application uses one fixed composer. During a foreground int
 
 Choice buttons may occupy one or two rows. The Player application may render the same choice group as a dropdown when
 viewport, text, font, zoom, accessibility, or other layout constraints make buttons impractical. Button-versus-dropdown
-presentation is not canonical runtime/checkpoint state and does not change labels, visible text, completion validation,
+presentation is not canonical runtime/checkpoint state and does not change values, visible text, completion validation,
 transcript output, or return values. Exact unambiguous visible option text may activate `choose`. The one-option
 `showButton` completes through its rendered control or composer submission of its exact, non-empty visible label;
 other text and Space with the empty focused composer do not activate it.

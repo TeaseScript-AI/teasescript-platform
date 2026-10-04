@@ -2422,7 +2422,7 @@ class Parser {
   #atStorageDelimiter(): boolean {
     return (
       (this.#storageDelimiters.has("as") && this.#check(TokenKind.KeywordAs)) ||
-      // `default:` is a contextual label, such as a choice option label, not the delimiter.
+      // `default:` is a contextual name, such as a choice option value, not the delimiter.
       (this.#storageDelimiters.has("default") &&
         this.#checkIdentifier("default") &&
         this.#peek(1).kind !== TokenKind.Colon)

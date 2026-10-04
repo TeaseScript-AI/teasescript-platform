@@ -266,6 +266,9 @@ test("a choice result has the type of its values, and an option without a writte
   assert.deepEqual(codes("let n = choose [5, 10, 15]\nn = 2.5"), [["TSV041", "2.5"]]);
   assert.deepEqual(codes("let n = choose 5, 10\nn = 20"), []);
   assert.deepEqual(codes("let n = choose set[5, 10]\nn = 2.5"), [["TSV041", "2.5"]]);
+  // An empty list or set gives no buttons, so its written value is never the result.
+  assert.deepEqual(codes('let n: integer = choose 1.5: [], 2: ["Only"]'), []);
+  assert.deepEqual(codes('let n: integer = choose 1.5: set[], 2: ["Only"]'), []);
   assert.deepEqual(codes("let n: string = choose 5, 10"), [["TSV041", "choose 5, 10"]]);
   assert.deepEqual(codes('let n = choose 1: "One", 2.5: "Two"\nn = 0.5'), []);
   assert.deepEqual(codes("let d = choose [1 min, 90 seconds]\nd = 5"), [["TSV041", "5"]]);

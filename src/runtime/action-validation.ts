@@ -1,9 +1,10 @@
 import { isNormalizedOpaqueColor, normalizeOpaqueColor } from "../color.js";
 import { isValidInteractionPrefill } from "../interaction-answers.js";
-import { choiceValueKey, isInteractionChoiceValue } from "../choice-values.js";
+import { isInteractionChoiceValue } from "../choice-values.js";
 import { expandChoiceOptions } from "./choice-options.js";
 import { RuntimeFault } from "./errors.js";
 import {
+  serializableEquals,
   validateCapturedSerializableValue,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
@@ -1094,8 +1095,7 @@ function validInteractionResultForInstruction(
         : instruction.ui.kind === "choice"
           ? instruction.ui.options
           : undefined;
-    const key = choiceValueKey(result);
-    return options?.some((option) => choiceValueKey(option.value) === key) === true;
+    return options?.some((option) => serializableEquals(option.value, result)) === true;
   }
   if (instruction.expectedResult === "number") {
     return (
@@ -1477,7 +1477,7 @@ function choiceOptionsEqual(
       isPlainRecord(candidate) &&
       candidate.text === option.text &&
       isInteractionChoiceValue(candidate.value) &&
-      choiceValueKey(candidate.value) === choiceValueKey(option.value) &&
+      serializableEquals(candidate.value, option.value) &&
       candidate.background === option.background
     );
   });
@@ -1673,8 +1673,8 @@ function settlementMatchesPresentedUi(settlement: Record<string, unknown>): bool
   if (!isPlainRecord(ui)) return false;
   if (ui.kind === "button") return settlement.transcriptText === ui.buttonLabel;
   if (ui.kind !== "choice") return true;
-  if (!isInteractionChoiceValue(settlement.result)) return false;
-  const key = choiceValueKey(settlement.result);
+  const result = settlement.result;
+  if (!isInteractionChoiceValue(result)) return false;
   return (
     Array.isArray(ui.options) &&
     ui.options.some(
@@ -1682,7 +1682,7 @@ function settlementMatchesPresentedUi(settlement: Record<string, unknown>): bool
         isPlainRecord(option) &&
         option.text === settlement.transcriptText &&
         isInteractionChoiceValue(option.value) &&
-        choiceValueKey(option.value) === key,
+        serializableEquals(option.value, result),
     )
   );
 }
@@ -1724,10 +1724,8 @@ function buttonsFitWrittenValues(
   let slot = 0;
   for (const option of options) {
     if (!isPlainRecord(option) || !isInteractionChoiceValue(option.value)) return false;
-    const key = choiceValueKey(option.value);
-    // EVIDENCE: validation: the `includes(null)` check above leaves only string and number values.
-    while (slot < values.length && choiceValueKey(values[slot] as string | number) !== key)
-      slot += 1;
+    const value = option.value;
+    while (slot < values.length && !serializableEquals(values[slot]!, value)) slot += 1;
     if (slot === values.length) return false;
   }
   return true;
@@ -1854,7 +1852,7 @@ function sameCanonicalSettlementResult(destination: unknown, result: unknown): b
   return (
     isInteractionChoiceValue(destination) &&
     isInteractionChoiceValue(result) &&
-    choiceValueKey(destination) === choiceValueKey(result)
+    serializableEquals(destination, result)
   );
 }
 

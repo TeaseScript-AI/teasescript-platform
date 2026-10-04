@@ -29,7 +29,6 @@ import {
   numberAnswerText,
 } from "./interaction-answers.js";
 import { staticChoiceValue, staticNumber, staticVisibleText } from "./static-evaluation.js";
-import { choiceValueKey } from "./choice-values.js";
 import {
   ARITHMETIC_OPERATORS,
   arithmeticType,
@@ -1696,7 +1695,7 @@ class SemanticValidator {
       buttons +=
         content.kind === "listLiteral"
           ? content.elements.length
-          : new Set(content.elements.flatMap((element) => staticChoiceKeys(element))).size;
+          : new Set(content.elements.flatMap((element) => staticSetMembers(element))).size;
       for (const element of content.elements)
         this.#validateChoiceEntry(unwrapParentheses(element), option.value, scope, true);
     }
@@ -2120,10 +2119,10 @@ function findFirstInteraction(
   return null;
 }
 
-/** The identity of a set member known at compile time, as `choiceValueKey`, or none when it is not known. */
-function staticChoiceKeys(expression: Expression): string[] {
-  const known = staticChoiceValue(expression);
-  return known === undefined ? [] : [choiceValueKey(known.value)];
+/** A set member known at compile time, or none when it is not known; a set keeps one of equal scalars. */
+function staticSetMembers(expression: Expression): (string | number | boolean | null)[] {
+  const known = staticChoiceValue(expression)?.value;
+  return known === undefined || (typeof known === "object" && known !== null) ? [] : [known];
 }
 
 function unwrapParentheses(expression: Expression): Expression {

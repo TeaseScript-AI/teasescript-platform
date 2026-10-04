@@ -235,6 +235,14 @@ function* expressionTypeTask(
       // `choose` returns a button's value: one written before `:`, or else the option's own value with its type.
       const values: StaticType[] = [];
       for (const option of expression.options) {
+        let content = option.expression;
+        while (content.kind === "parenthesizedExpression") content = content.expression;
+        // An empty list or set gives no buttons, so its written value is never returned.
+        if (
+          (content.kind === "listLiteral" || content.kind === "setLiteral") &&
+          content.elements.length === 0
+        )
+          continue;
         if (option.value !== null) {
           values.push(
             scalar(option.value.kind === "identifier" ? "string" : option.value.numericType),
