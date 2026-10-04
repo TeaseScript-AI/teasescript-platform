@@ -25,6 +25,7 @@ import type {
 } from "../plan/model.js";
 import { compareTagValue, evaluateTagSteps, passesTagList } from "../tag-query.js";
 import { normalizeTagName } from "../tags.js";
+import { globMatches, isPathGlob } from "../project-paths.js";
 import { escapeMarkup } from "../message-markup.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import { CORE_RUNTIME_BUILTINS } from "../protected-names.js";
@@ -1941,14 +1942,46 @@ export class Evaluator {
         if (step.kind === "tagList") return passesTagList(step.option, lists.get(step)!, tags);
         return null;
       });
-    // The package images in path order, then the photos taken with tags in capture order.
-    const found: string[] = [];
-    for (const image of this.plan.images) if (matches(imageTags(image))) found.push(image.path);
-    for (const image of this.snapshot.capturedImages) {
-      if (matches(imageTags(image))) found.push(image.reference);
+    const found: SerializableRuntimeValue[] = [];
+    if (query.catalog === "scripts") {
+      // The files that run something, those `from:` names, in path order, each as a reference to its top.
+      const named =
+        query.from === null
+          ? null
+          : new Set(
+              isPathGlob(query.from)
+                ? globMatches(
+                    query.from,
+                    this.plan.files.map((file) => file.path),
+                  )
+                : [query.from],
+            );
+      const paths: string[] = [];
+      for (const file of this.plan.files) {
+        if (
+          file.tags !== null &&
+          (named === null || named.has(file.path)) &&
+          matches(imageTags(file))
+        )
+          paths.push(file.path);
+      }
+      // Plan files start with main.tease; picks and lists see path order, as for images.
+      paths.sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+      for (const path of paths) found.push({ kind: "script", path, label: null });
+    } else {
+      // The package images in path order, then the photos taken with tags in capture order.
+      for (const image of this.plan.images) if (matches(imageTags(image))) found.push(image.path);
+      for (const image of this.snapshot.capturedImages) {
+        if (matches(imageTags(image))) found.push(image.reference);
+      }
     }
     if (query.select === "list") return { kind: "list", items: found };
-    if (found.length === 0) throw fault("TSR082", "No image has these tags.", query.span);
+    if (found.length === 0)
+      throw fault(
+        "TSR082",
+        query.catalog === "scripts" ? "No file has these tags." : "No image has these tags.",
+        query.span,
+      );
     return found[Math.floor(this.#findRandom(query.span) * found.length)]!;
   }
 
@@ -2705,11 +2738,11 @@ const imageTagMaps = new WeakMap<object, ReadonlyMap<string, number | null>>();
 
 /** An image's tags by name, built once per catalog entry: a plan image or a photo taken with tags. */
 function imageTags(image: {
-  readonly tags: readonly PlanTag[];
+  readonly tags: readonly PlanTag[] | null;
 }): ReadonlyMap<string, number | null> {
   let tags = imageTagMaps.get(image);
   if (tags === undefined) {
-    tags = new Map(image.tags.map((tag) => [tag.name, tag.value]));
+    tags = new Map((image.tags ?? []).map((tag) => [tag.name, tag.value]));
     imageTagMaps.set(image, tags);
   }
   return tags;

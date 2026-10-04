@@ -7,6 +7,7 @@ import {
   type InstructionPlan,
   type PlanFile,
   type PlanImage,
+  type PlanTag,
   type TypeCheckPlan,
 } from "../plan/model.js";
 import { freezeInstructionPlan } from "../plan/freeze.js";
@@ -31,6 +32,8 @@ export interface StableProjectFile {
   readonly program: Program;
   /** The files each glob target may pick, from semantic validation. */
   readonly picks?: ReadonlyMap<FileTarget, readonly string[]>;
+  /** The tags of the file's header, in name order; `null` for a file of declarations only. */
+  readonly tags?: readonly PlanTag[] | null;
 }
 
 /** Lowers the AST of a single-file project, the `main.tease` of `program`. */
@@ -66,7 +69,7 @@ export function compileStableProject(
   const globalIds = new Map<string, number>();
   const files: PlanFile[] = [];
   const destinations: PendingDestination[] = [];
-  for (const [fileIndex, { path, program, picks }] of projectFiles.entries()) {
+  for (const [fileIndex, { path, program, picks, tags }] of projectFiles.entries()) {
     const declarations = program.statements.filter(
       (statement): statement is FunctionDeclaration => statement.kind === "functionDeclaration",
     );
@@ -112,6 +115,8 @@ export function compileStableProject(
       rootEndInstruction,
       endInstruction: instructions.length,
       labels: compiler.labels,
+      tags:
+        tags === null ? null : (tags ?? []).map((tag) => ({ name: tag.name, value: tag.value })),
     });
   }
   for (const { instruction, name } of project.foreignCalls) {

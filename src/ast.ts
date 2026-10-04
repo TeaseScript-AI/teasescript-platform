@@ -232,15 +232,18 @@ export interface LoadExpression {
 }
 
 /**
- * A tag query (ADR 0023): `showImage tagged …` picks one matching image, and `findImages(…)` lists the matches. The
+ * A tag query (ADR 0023): `showImage tagged …` picks one matching image and `findImages(…)` lists the matches;
+ * `goto tagged …`, `call tagged …`, and `fallback tagged …` pick one matching file and `findScripts(…)` lists them. The
  * steps are in postfix order; every bound and tag list appears in written order, which is also its evaluation order.
  * A candidate matches when the steps yield true; without steps, every candidate matches.
  */
 export interface TagQueryExpression {
   readonly kind: "tagQueryExpression";
-  readonly catalog: "images";
+  readonly catalog: "images" | "scripts";
   readonly select: "random" | "list";
   readonly steps: readonly TagQueryStep[];
+  /** A script query's `from:`, a literal path or glob that limits the candidate files; `null` for all of them. */
+  readonly from: { readonly pattern: string; readonly span: SourceSpan } | null;
   readonly span: SourceSpan;
 }
 

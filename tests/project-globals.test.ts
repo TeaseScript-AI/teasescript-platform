@@ -761,6 +761,7 @@ test("a plan sets up its globals once, with start values of the accepted kinds",
   const findImages = {
     kind: "tagQuery",
     catalog: "images",
+    from: null,
     select: "list",
     operands: [],
     steps: [],
