@@ -559,7 +559,7 @@ base activation's root is `frames[0]`.
 - A computed destination (`{ value }`) evaluates to a script reference (`{ kind: "script", path, label }`, `label`
   `null` for the file's top) each time it runs, and is resolved by path and label against the plan's files. A value
   that is not a reference fails with `TSR058`; a missing file or label, or a `goto` or fallback to a file whose root
-  region holds only its closing `end`, fails with `TSR069`. A computed `fallback` stores the resolved file and target.
+  region holds nothing after its entry but its closing `end`, fails with `TSR069`. A computed `fallback` stores the resolved file and target.
 - Reading or assigning a top-level variable of the file whose `let` has not run in the activation fails with `TSR070`,
   which names the label at the root's `entry` unless the activation started at the file's entry.
 - A function frame (`kind: "function"`) records `rootScopeId`, the root of the activation it runs for: its caller's,
