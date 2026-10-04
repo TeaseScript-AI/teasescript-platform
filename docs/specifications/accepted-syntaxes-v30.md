@@ -2932,14 +2932,14 @@ Rules:
   dicts, sets, and globals, saved with `save`, and compared with `==` by path and label. It shows as the call that makes
   it, such as `script("rooms/hall.tease", label: "start")`, has no properties or methods, and is not a `choose` value.
   A computed target, a `script(...)` call or a grouped expression such as `goto (next)`, must be a reference.
-- A `script(...)` whose path is quoted text without `${...}` is checked like a file target: a path that leaves the
-  package, a missing file, a missing label in quoted text, a glob, and a `goto` or `fallback` to a file of declarations
+- A `script(...)` whose path is literal, quoted text without `${...}`, is checked like a file target: a path that leaves
+  the package, a missing file, a missing literal label, a glob, and a `goto` or `fallback` to a file of declarations
   only are compile errors. Any other reference is checked when a transfer uses it, a computed `fallback` when the
   statement runs: a missing file or label, or a `goto` or `fallback` to a file of declarations only, is a runtime error.
 - For the check of variables after labels ([§26](#26-labels-and-goto)), the compiler reads from the source alone which
-  labels references may enter afresh: a `script(...)` with a label in quoted text enters that label of its file, or
-  with a computed path that label of every file that has it, and one with a computed label every label of its file, or
-  of every file. Reading or assigning a variable of the file whose `let` has not run in this entry into the file, as
+  labels references may enter afresh: a `script(...)` with a literal label enters that label of its file, or with a
+  computed path that label of every file that has it, and one with a computed label every label of its file, or of
+  every file. Reading or assigning a variable of the file whose `let` has not run in this entry into the file, as
   after a label that a reference from `load` entered, or in a function called before the `let`, is a runtime error.
 - Functions and labels are local to their file.
 - There is no `run` and no automatic selection of a next file; the script states every transfer.
