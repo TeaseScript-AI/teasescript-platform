@@ -1,29 +1,29 @@
 <script setup lang="ts">
 import { FlipHorizontal } from "@lucide/vue";
-import { Toggle } from "@/components/ui/toggle";
+import { Button } from "@/components/ui/button";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
 import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 
-// Switches the viewfinder between a mirror (selfie) view and the camera's own view. Photos are never mirrored.
+// Flips the viewfinder between a mirror (selfie) view and the camera's own view, as a plain push button: the picture
+// itself shows which way it is. Photos are never mirrored.
 const mirrored = defineModel<boolean>({ required: true });
 </script>
 
 <template>
   <Tooltip>
     <TooltipTrigger as-child>
-      <!-- The wrapper keeps the tooltip's state attribute off the toggle's own pressed state. -->
-      <span class="inline-flex" @pointerdown.stop>
-        <Toggle
-          v-model="mirrored"
-          data-viewfinder-mirror
-          aria-label="Mirror camera preview"
-          size="sm"
-        >
-          <FlipHorizontal />
-        </Toggle>
-      </span>
+      <Button
+        data-viewfinder-mirror
+        variant="ghost"
+        size="icon-sm"
+        aria-label="Flip camera preview"
+        @pointerdown.stop
+        @click="mirrored = !mirrored"
+      >
+        <FlipHorizontal />
+      </Button>
     </TooltipTrigger>
-    <TooltipContent>{{ mirrored ? "Show unmirrored" : "Mirror preview" }}</TooltipContent>
+    <TooltipContent>Flip preview</TooltipContent>
   </Tooltip>
 </template>
