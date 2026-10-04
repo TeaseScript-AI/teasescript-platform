@@ -28,6 +28,7 @@ test("executes positional and named function calls with returned values", () => 
       "function subtract(left, right) { return left - right }",
       "say add(2, 3)",
       "say subtract(right: 2, left: 7)",
+      "exit",
     ].join("\n"),
   );
 
@@ -46,6 +47,7 @@ test("binds defaults per invocation after all supplied parameters", () => {
       "}",
       'say describe("pet")',
       'say describe(name: "Alex", title: "puppy")',
+      "exit",
     ].join("\n"),
   );
 
@@ -59,6 +61,7 @@ test("bare and implicit returns produce null", () => {
       'function implicit { say "inside" }',
       "say bare()",
       "say implicit()",
+      "exit",
     ].join("\n"),
   );
 
@@ -78,6 +81,7 @@ test("parameters are deep copies of caller lists, objects, and sets", () => {
       '  return "${listInput[0][0]}:${objectInput.nested[0]}:${setInput.contains(3)}"',
       "}",
       "say mutate(listValue, objectValue, setValue)",
+      "exit",
     ].join("\n"),
   );
 
@@ -114,6 +118,7 @@ test("returned lists, objects, and sets are independent deep copies", () => {
       "copiedList[0][0] = 9",
       "copiedObject.nested[0] = 9",
       "copiedSet.add(3)",
+      "exit",
     ].join("\n"),
   );
 
@@ -147,6 +152,7 @@ test("speaker parameters preserve speaker identity", () => {
       "let returned = rename(vera)",
       "say returned.title",
       "say vera.title",
+      "exit",
     ].join("\n"),
   );
 
@@ -164,6 +170,7 @@ test("early return unwinds if and every loop kind", () => {
       "say fromRepeat()",
       "say fromFor()",
       "say fromWhile()",
+      "exit",
     ].join("\n"),
   );
 
@@ -179,6 +186,7 @@ test("supports nested calls in arithmetic and templates", () => {
       "function add(left, right) { return left + right }",
       "say one() + add(one(), one())",
       'say "nested:${add(one(), one())}"',
+      "exit",
     ].join("\n"),
   );
 
@@ -196,6 +204,7 @@ test("evaluates user calls used as if and while conditions, template parts, and 
       'while check("while", count < 2) { count = count + 1 }',
       'say "template:${relay("return", count)}"',
       "say calls",
+      "exit",
     ].join("\n"),
   );
 
@@ -212,6 +221,7 @@ test("preserves left-to-right call and named-argument side effects", () => {
       'say combine(mark("a"), mark("b"))',
       'say combine(right: mark("d"), left: mark("c"))',
       'say "${order[0]}${order[1]}${order[2]}${order[3]}"',
+      "exit",
     ].join("\n"),
   );
 
@@ -221,11 +231,13 @@ test("preserves left-to-right call and named-argument side effects", () => {
 test("retains earlier argument RNG progress when a later argument faults", () => {
   const seed = 0x1234_5678;
   const failing = plan(
-    ["function take(first, second) { return first }", "take(random(), randomInteger(1..1))"].join(
-      "\n",
-    ),
+    [
+      "function take(first, second) { return first }",
+      "take(random(), randomInteger(1..1))",
+      "exit",
+    ].join("\n"),
   );
-  const control = plan("random()");
+  const control = plan("random()\nexit");
   const failed = run(failing, createFreshRuntimeSnapshot(failing, { seed }));
   const advancedOnce = run(control, createFreshRuntimeSnapshot(control, { seed }));
 
@@ -247,6 +259,7 @@ test("evaluates a property-call receiver before its arguments", () => {
       'function argument { order.add("argument")\nreturn 7 }',
       "receiver().add(argument())",
       'say "${order[0]}:${order[1]}"',
+      "exit",
     ].join("\n"),
   );
 
@@ -262,6 +275,7 @@ test("evaluates assignment indexes before right-hand values", () => {
       'function valueFunction { order.add("value")\nreturn 7 }',
       "items[indexFunction()] = valueFunction()",
       'say "${order[0]}:${order[1]}:${items[0]}"',
+      "exit",
     ].join("\n"),
   );
 
@@ -270,7 +284,7 @@ test("evaluates assignment indexes before right-hand values", () => {
 
 test("evaluates observable built-ins in assignment target-before-value order", () => {
   const compiledResult = compileSource(
-    "let items = [0]\nitems[indexBuiltin()] = valueBuiltin()\nsay items[0]",
+    "let items = [0]\nitems[indexBuiltin()] = valueBuiltin()\nsay items[0]\nexit",
     { builtins: ["indexBuiltin", "valueBuiltin"] },
   );
   assert.deepEqual(compiledResult.diagnostics, []);
@@ -305,6 +319,7 @@ test("preserves ordinary built-in order before later user calls in composite exp
     'let rangeValue = markNumber(1, "range")..userNumber()',
     "let indexedValue = sourceList()[indexUser()]",
     "receiverList().add(userNumber())",
+    "exit",
   ].join("\n");
   const compiledResult = compileSource(source, {
     builtins: ["mark", "markNumber", "sourceList", "receiverList"],
@@ -369,6 +384,7 @@ test("snapshots earlier composite values before a later user call mutates their 
       "let combined = [items, mutate()]",
       "say combined[0].length",
       "say items.length",
+      "exit",
     ].join("\n"),
   );
 
@@ -382,6 +398,7 @@ test("keeps a prepared collection receiver attached through argument side effect
       "function argument { items.add(1)\nreturn 2 }",
       "items.add(argument())",
       'say "${items[0]}:${items[1]}"',
+      "exit",
     ].join("\n"),
   );
 
@@ -396,6 +413,7 @@ test("fails an invalid prepared receiver before evaluating a user-call argument"
     "let scalar = dynamic(1)",
     'function argument { order.add("argument")\nreturn 2 }',
     "scalar.add(argument())",
+    "exit",
   ].join("\n");
   const result = runSource(source);
   const method = source.indexOf("scalar.add");
@@ -415,6 +433,7 @@ test("fails an earlier ordinary expression before a later user-call side effect"
     "let order = []",
     'function later { order.add("later")\nreturn 1 }',
     "let values = [randomInteger(1..1), later()]",
+    "exit",
   ].join("\n");
   const result = runSource(source);
   const call = source.indexOf("randomInteger(1..1)");
@@ -451,6 +470,7 @@ test("does not retarget prepared assignments after nested path replacement", () 
       "say root.child.value",
       "say items[0].value",
       "say positions[0].value",
+      "exit",
     ].join("\n"),
   );
 
@@ -473,6 +493,7 @@ test("rebases prepared list descendants when earlier removals shift retained ite
       "lastItems[0].value = removeLastItem()",
       "positionItems[2].value = removeItemAt()",
       'say "${firstItems[0].value}:${middleItems[1].value}:${lastItems[0].value}:${positionItems[1].value}"',
+      "exit",
     ].join("\n"),
   );
 
@@ -487,6 +508,7 @@ test("rebases prepared list descendants through speaker aliases", () => {
       "function shiftItems { alias.items.removeFirst()\nreturn 9 }",
       "vera.items[1].value = shiftItems()",
       "say vera.items[0].value",
+      "exit",
     ].join("\n"),
   );
 
@@ -511,6 +533,7 @@ test("does not retarget prepared speaker paths through identity aliases", () => 
       "say vera.title",
       "say vera.config.value",
       "say vera.items[0].value",
+      "exit",
     ].join("\n"),
   );
 
@@ -528,6 +551,7 @@ test("functions read and assign package-global variables without leaking locals"
       "}",
       "say increase(2)",
       "say total",
+      "exit",
     ].join("\n"),
   );
 
@@ -546,6 +570,7 @@ test("supports direct and mutual recursion through explicit frames", () => {
       "  return value * factorial(value - 1)",
       "}",
       "say factorial(6)",
+      "exit",
     ].join("\n"),
   );
   assert.deepEqual(sayTexts(direct), ["720"]);
@@ -556,13 +581,14 @@ test("supports direct and mutual recursion through explicit frames", () => {
       "function odd(value) { if value == 0 { return false }\nreturn even(value - 1) }",
       "say even(8)",
       "say odd(8)",
+      "exit",
     ].join("\n"),
   );
   assert.deepEqual(sayTexts(mutual), ["true", "false"]);
 });
 
 test("fails structurally at configured call depth", () => {
-  const compiled = plan("function recurse { return recurse() }\nrecurse()");
+  const compiled = plan("function recurse { return recurse() }\nrecurse()\nexit");
   const result = run(compiled, createFreshRuntimeSnapshot(compiled, { maxCallDepth: 8 }));
 
   assert.equal(result.snapshot.status, "failed");
@@ -583,7 +609,7 @@ test("fresh and validated runtime snapshots preserve the call-depth policy domai
 });
 
 test("instruction budgets still stop recursive execution", () => {
-  const compiled = plan("function recurse { return recurse() }\nrecurse()");
+  const compiled = plan("function recurse { return recurse() }\nrecurse()\nexit");
   const result = run(compiled, createFreshRuntimeSnapshot(compiled), {}, { instructionBudget: 20 });
 
   assert.equal(result.snapshot.failure?.code, "TSR037");
@@ -596,6 +622,7 @@ test("exit inside nested calls terminates the complete execution", () => {
       "function outer { inner()\nreturn 1 }",
       "outer()",
       'say "unreachable"',
+      "exit",
     ].join("\n"),
   );
 

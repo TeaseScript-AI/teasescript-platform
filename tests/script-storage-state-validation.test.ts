@@ -156,7 +156,7 @@ test("checkpoint restore rejects non-boolean storage persistence", () => {
 });
 
 test("restore rejects a pending storage write in session-local mode", () => {
-  const compiled = plan('save 2 as "k"');
+  const compiled = plan('save 2 as "k"\nexit');
   const pending = run(
     compiled,
     createFreshRuntimeSnapshot(compiled, { persistentScriptStorage: true }),

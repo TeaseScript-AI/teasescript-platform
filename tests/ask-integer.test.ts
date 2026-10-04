@@ -42,7 +42,7 @@ test("askInteger returns a whole number as an integer and shows it as the player
     { text: "9007199254740991", value: Number.MAX_SAFE_INTEGER },
   ]) {
     let session = createPlayerRuntimeSession(
-      'let count = askInteger "How many?"\nlet doubled: integer = count * 2',
+      'let count = askInteger "How many?"\nlet doubled: integer = count * 2\nexit',
     );
     assert.deepEqual(playerRuntimeForeground(session), {
       kind: "ask-number",
@@ -60,7 +60,7 @@ test("askInteger returns a whole number as an integer and shows it as the player
 });
 
 test("askInteger asks again for anything but a whole number", () => {
-  const session = createPlayerRuntimeSession('let count = askInteger "How many?"');
+  const session = createPlayerRuntimeSession('let count = askInteger "How many?"\nexit');
   for (const text of [
     "2.5",
     "2.0",
@@ -89,9 +89,9 @@ test("askInteger asks again for anything but a whole number", () => {
 
 test("askInteger prefills a whole-number default answer", () => {
   for (const { source, prefill } of [
-    { source: "let count = askInteger default: 10", prefill: "10" },
-    { source: 'let count = askInteger "How many?", default: -3', prefill: "-3" },
-    { source: "let level = 4\nlet count = askInteger default: level * 2", prefill: "8" },
+    { source: "let count = askInteger default: 10\nexit", prefill: "10" },
+    { source: 'let count = askInteger "How many?", default: -3\nexit', prefill: "-3" },
+    { source: "let level = 4\nlet count = askInteger default: level * 2\nexit", prefill: "8" },
   ]) {
     const session = createPlayerRuntimeSession(source);
     const foreground = playerRuntimeForeground(session);
@@ -103,18 +103,18 @@ test("askInteger prefills a whole-number default answer", () => {
 
 test("a default that is not a whole number fails at compile time or before the field opens", () => {
   for (const { source, fix } of [
-    { source: "let count = askInteger default: 2.5", fix: "round(...)" },
-    { source: "let count = askInteger default: 2.0", fix: "round(...)" },
-    { source: "let n = 1\nn = 1.5\nlet count = askInteger default: n", fix: "line 2" },
-    { source: 'let count = askInteger default: "10"', fix: "'default: 10'" },
-    { source: "let count = askInteger default: 9007199254740992", fix: "remove 'default:'" },
+    { source: "let count = askInteger default: 2.5\nexit", fix: "round(...)" },
+    { source: "let count = askInteger default: 2.0\nexit", fix: "round(...)" },
+    { source: "let n = 1\nn = 1.5\nlet count = askInteger default: n\nexit", fix: "line 2" },
+    { source: 'let count = askInteger default: "10"\nexit', fix: "'default: 10'" },
+    { source: "let count = askInteger default: 9007199254740992\nexit", fix: "remove 'default:'" },
   ]) {
     const diagnostics = compileSource(source).diagnostics;
     assert.equal(diagnostics[0]?.code, "TSV039", source);
     assert.ok(diagnostics[0]?.message.includes(fix), diagnostics[0]?.message);
   }
   const plan = compileValidPlan(
-    "function half(value) {\n  return value / 2\n}\nlet count = askInteger default: half(5)",
+    "function half(value) {\n  return value / 2\n}\nlet count = askInteger default: half(5)\nexit",
   );
   const result = run(plan, createFreshRuntimeSnapshot(plan));
   assert.equal(result.snapshot.status, "failed");
@@ -125,7 +125,7 @@ test("a default that is not a whole number fails at compile time or before the f
 
 test("a checkpoint while the field is open restores the whole-number field and its default", () => {
   const session = createPlayerRuntimeSession(
-    'let base = 3\nlet count = askInteger "How many?", default: base + 1',
+    'let base = 3\nlet count = askInteger "How many?", default: base + 1\nexit',
   );
   const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
   assert.equal(validateRuntimeSnapshot(restored.snapshot, restored.plan).valid, true);
@@ -161,7 +161,9 @@ test("a handed-off askInteger result must be a safe whole number", () => {
     'let count = askInteger "How many?"',
     'let level = 7\nlet count = askInteger "How many?", default: level',
   ]) {
-    const plan = compileValidPlan(`timer async 1 { say "handler", 2 }\n${ask}\nsay count, instant`);
+    const plan = compileValidPlan(
+      `timer async 1 { say "handler", 2 }\n${ask}\nsay count, instant\nexit`,
+    );
     let snapshot = run(plan, createFreshRuntimeSnapshot(plan)).snapshot;
     snapshot = run(plan, observeTime(plan, snapshot, 1_000).snapshot).snapshot;
     const replay = snapshot.lastSettlement;
@@ -182,7 +184,7 @@ test("a handed-off askInteger result must be a safe whole number", () => {
 });
 
 test("plan and snapshot validation keep the whole-number rule", () => {
-  const session = createPlayerRuntimeSession("let count = askInteger default: 10");
+  const session = createPlayerRuntimeSession("let count = askInteger default: 10\nexit");
   const { plan, snapshot } = session;
   const action = snapshot.foregroundAction;
   assert.ok(action?.kind === "interaction" && action.ui.kind === "number");

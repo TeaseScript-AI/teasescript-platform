@@ -342,7 +342,7 @@ test("Vue host schedules no clock wake-ups while a pending write holds scene tim
   });
   await start(
     host,
-    'timer async 10 ms { say "one", instant }\ntimer async 20 ms { say "two", instant }\nsave 1 as "k"\nwait 100 ms',
+    'timer async 10 ms { say "one", instant }\ntimer async 20 ms { say "two", instant }\nsave 1 as "k"\nwait 100 ms\nexit',
   );
   now = 100;
   host.observe();
@@ -423,7 +423,7 @@ test("Vue host resolves the player's zone and presentation again at Start and at
   context.mock.method(Date, "now", () => utc("2026-10-04T16:00:00"));
   await host.loadScriptStorage();
   host.prepare(() =>
-    createPlayerRuntimeSession('let day = choose [toDate("2026-10-04")]\nsay day', {
+    createPlayerRuntimeSession('let day = choose [toDate("2026-10-04")]\nsay day\nexit', {
       ...host.scriptStorageOptions(),
       ...host.temporalCapture(),
     }),

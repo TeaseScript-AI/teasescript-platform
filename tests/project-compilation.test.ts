@@ -331,7 +331,7 @@ test("a host stack failure while the finished plan is validated is still TSC007"
   };
   let result: ReturnType<typeof compileSource>;
   try {
-    result = compileSource("let value = 1");
+    result = compileSource("let value = 1\nexit");
   } finally {
     Object.keys = original;
   }

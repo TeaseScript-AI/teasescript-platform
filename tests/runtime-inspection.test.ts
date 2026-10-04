@@ -16,7 +16,7 @@ import { compileValidPlan as compiled } from "./helpers/compile-valid-plan.js";
 
 test("runtime inspection exposes foreground interaction provenance without mutation", () => {
   const source =
-    'speaker mistress { name: "Mistress" }\nlet answer = askText as mistress "Type here"';
+    'speaker mistress { name: "Mistress" }\nlet answer = askText as mistress "Type here"\nexit';
   const ask = 'askText as mistress "Type here"';
   const plan = compiled(source);
   const pending = run(plan, createFreshRuntimeSnapshot(plan));
@@ -60,7 +60,7 @@ test("runtime inspection exposes foreground interaction provenance without mutat
 
 test("runtime inspection exposes pacing settings, deadline, skip policy, and prepared output", () => {
   const source =
-    'speaker guide { displayName: "Guide" }\nsay unskippable "hello there"\nsay as guide "one two three"';
+    'speaker guide { displayName: "Guide" }\nsay unskippable "hello there"\nsay as guide "one two three"\nexit';
   const settings = { baseDelayMs: 1000, delayPerWordMs: 200, delayPerCharacterMs: 10 };
   const plan = compiled(source);
   const pending = run(
@@ -117,7 +117,7 @@ test("runtime inspection exposes pacing settings, deadline, skip policy, and pre
 });
 
 test("runtime inspection survives checkpoint JSON restore and exposes settlement", () => {
-  const plan = compiled('let answer = askText "Type here"\nsay answer, instant');
+  const plan = compiled('let answer = askText "Type here"\nsay answer, instant\nexit');
   const pending = run(plan, createFreshRuntimeSnapshot(plan));
   const action = pending.snapshot.foregroundAction;
   assert.equal(action?.kind, "interaction");
@@ -140,7 +140,7 @@ test("runtime inspection survives checkpoint JSON restore and exposes settlement
 });
 
 test("runtime inspection rejects malformed external state without changing it", () => {
-  const plan = compiled('showButton "Continue"');
+  const plan = compiled('showButton "Continue"\nexit');
   const snapshot = run(plan, createFreshRuntimeSnapshot(plan)).snapshot;
   const malformed = { ...structuredClone(snapshot), status: "impossible" };
   const before = JSON.stringify(malformed);

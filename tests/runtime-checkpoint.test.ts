@@ -28,7 +28,7 @@ import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
 test("checkpoint accepts a large valid plan and snapshot without a shared work rejection", () => {
   const compiled = plan(
-    Array.from({ length: 3_000 }, (_value, index) => `say "${index}"`).join("\n"),
+    [...Array.from({ length: 3_000 }, (_value, index) => `say "${index}"`), "exit"].join("\n"),
   );
   const snapshot = createFreshRuntimeSnapshot(compiled);
   snapshot.frames[0]!.bindings.push(
@@ -166,7 +166,7 @@ test("keeps same-named speakers in sibling lexical scopes as distinct state", ()
 });
 
 test("an unknown root snapshot field is rejected at validation, checkpoint and restore", () => {
-  const compiled = plan('say "kept"');
+  const compiled = plan('say "kept"\nexit');
   const snapshot = createFreshRuntimeSnapshot(compiled);
   const withUnknownField = { ...structuredClone(snapshot), unknownField: "none" };
   assert.equal(validateRuntimeSnapshot(withUnknownField, compiled).valid, false);
@@ -427,7 +427,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 test("checkpoint and plan validation never coerce non-string enumerated fields to text", () => {
-  const compiled = plan('let n = 1\nwait n s\nshowButton "Go"');
+  const compiled = plan('let n = 1\nwait n s\nshowButton "Go"\nexit');
   const fresh = createFreshRuntimeSnapshot(compiled);
   const waiting = run(compiled, fresh).snapshot;
   for (const snapshot of [fresh, waiting]) {

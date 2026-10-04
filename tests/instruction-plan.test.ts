@@ -9,7 +9,7 @@ import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
 test("compiles if and else so that only the selected branch runs", () => {
   const branchSource = (condition: string) =>
-    [`if ${condition} {`, '  say "yes"', "} else {", '  say "no"', "}"].join("\n");
+    [`if ${condition} {`, '  say "yes"', "} else {", '  say "no"', "}", "exit"].join("\n");
   for (const [condition, expected] of [
     ["true", ["yes"]],
     ["false", ["no"]],
@@ -25,16 +25,16 @@ test("compiles if and else so that only the selected branch runs", () => {
 });
 
 test("preserves relevant statement and nested expression source spans", () => {
-  const source = "let total = 1 + 2";
-  const compiled = plan(source);
+  const statement = "let total = 1 + 2";
+  const compiled = plan(`${statement}\nexit`);
   const instruction = compiled.instructions[0];
 
   assert.equal(instruction?.kind, "declareBinding");
   if (instruction?.kind !== "declareBinding") return;
-  assert.deepEqual([instruction.span.so, instruction.span.eo], [0, source.length]);
+  assert.deepEqual([instruction.span.so, instruction.span.eo], [0, statement.length]);
   assert.deepEqual(
     [instruction.value.span.so, instruction.value.span.eo],
-    [source.indexOf("1"), source.length],
+    [statement.indexOf("1"), statement.length],
   );
 });
 

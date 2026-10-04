@@ -75,6 +75,7 @@ test("ISO text converts to date and time values whose fields, ISO text, and Unix
         "say ts.toSeconds()",
         "say ts.toMilliseconds()",
         'say toTimestamp("1969-12-31T23:59:59.500Z").toSeconds()',
+        "exit",
       ].join("\n"),
     ),
     [
@@ -104,14 +105,15 @@ test("text known only at runtime converts, falls back to default:, or fails with
           'say toDate(dynamic("2026-02-30"), default: toDate("2000-01-01")).toISO()',
           'let backup = toTimestamp("2000-01-01T00:00:00Z")',
           'say toTimestamp(dynamic("2026-10-04T12:30"), default: backup).toISO()',
+          "exit",
         ].join("\n"),
     ),
     ["2026-10-04", "2000-01-01", "2000-01-01T00:00:00Z"],
   );
-  const failure = failureOf(`${DYNAMIC}let day = toDate(dynamic("2026-02-30"))`);
+  const failure = failureOf(`${DYNAMIC}let day = toDate(dynamic("2026-02-30"))\nexit`);
   assert.equal(failure?.code, "TSR058");
   assert.match(failure?.message ?? "", /to a date: February 2026 has 28 days\./u);
-  const notIso = failureOf(`${DYNAMIC}let day = toTime(dynamic("2:30 PM"))`);
+  const notIso = failureOf(`${DYNAMIC}let day = toTime(dynamic("2:30 PM"))\nexit`);
   assert.equal(notIso?.code, "TSR058");
   assert.equal(
     notIso?.message,
@@ -131,6 +133,7 @@ test("say, interpolation, and format methods use the captured presentation; coll
     "say dt.formatTime()",
     'let mixed: (date | time | datetime | timestamp)[] = [d, toTime("14:30"), dt, ts]',
     "say mixed",
+    "exit",
   ].join("\n");
   assert.deepEqual(runSays(source, AMSTERDAM), [
     "4-10-2026",
@@ -150,7 +153,7 @@ test("say, interpolation, and format methods use the captured presentation; coll
 
 test("choose shows date options in the captured presentation and returns the chosen date", () => {
   const { plan, result } = start(
-    'let picked = choose [toDate("2026-10-04"), toDate("2026-10-05")]\nsay picked.toISO()',
+    'let picked = choose [toDate("2026-10-04"), toDate("2026-10-05")]\nsay picked.toISO()\nexit',
     AMSTERDAM,
   );
   const action = result.snapshot.foregroundAction;
@@ -184,12 +187,13 @@ test("ordering, equality, and set membership compare kind and value", () => {
         'say days.contains(toDate("2026-10-04"))',
         "say set[1 h, 60 min].length",
         'say [d] == [toDate("2026-10-04")]',
+        "exit",
       ].join("\n"),
     ),
     ["true", "true", "true", "true", "true", "2", "true", "1", "true"],
   );
   const failure = failureOf(
-    `${DYNAMIC}let wrong = dynamic(toDate("2026-10-04")) < dynamic(toTime("14:30"))`,
+    `${DYNAMIC}let wrong = dynamic(toDate("2026-10-04")) < dynamic(toTime("14:30"))\nexit`,
   );
   assert.equal(failure?.code, "TSR009");
 });
@@ -205,6 +209,7 @@ test("sort, min, and max order date and time values of one kind", () => {
         "say first.toISO()",
         'say max(toTimestamp("2026-10-04T12:00:00Z"), toTimestamp("2026-10-04T13:00:00+02:00")).toISO()',
         'say max(toDateTime("2026-10-04T18:00"), toDateTime("2026-10-04T18:00:00.001")).toISO()',
+        "exit",
       ].join("\n"),
     ),
     [
@@ -216,17 +221,17 @@ test("sort, min, and max order date and time values of one kind", () => {
   );
   const compileErrors = (source: string) =>
     compileSource(source).diagnostics.map((diagnostic) => diagnostic.message);
-  assert.deepEqual(compileErrors('let x = min(toDate("2026-10-04"), toTime("14:30"))'), [
+  assert.deepEqual(compileErrors('let x = min(toDate("2026-10-04"), toTime("14:30"))\nexit'), [
     "min(...) needs values of one kind, but this is a time and an earlier one is a date.",
   ]);
   assert.deepEqual(
     compileErrors(
-      'let mixed: (date | time)[] = [toDate("2026-10-04"), toTime("14:30")]\nmixed.sort()',
+      'let mixed: (date | time)[] = [toDate("2026-10-04"), toTime("14:30")]\nmixed.sort()\nexit',
     ),
     ["sort() needs elements of one kind, but this list may hold dates and times."],
   );
   const mixedSort = failureOf(
-    `${DYNAMIC}let mixed = [dynamic(toDate("2026-10-04")), dynamic(toTime("14:30"))]\nmixed.sort()`,
+    `${DYNAMIC}let mixed = [dynamic(toDate("2026-10-04")), dynamic(toTime("14:30"))]\nmixed.sort()\nexit`,
   );
   assert.equal(mixedSort?.code, "TSR060");
   assert.equal(
@@ -235,7 +240,7 @@ test("sort, min, and max order date and time values of one kind", () => {
   );
   assert.equal(
     failureOf(
-      `${DYNAMIC}let x = max(dynamic(toDate("2026-10-04")), dynamic(toDateTime("2026-10-04T18:00")))`,
+      `${DYNAMIC}let x = max(dynamic(toDate("2026-10-04")), dynamic(toDateTime("2026-10-04T18:00")))\nexit`,
     )?.code,
     "TSR059",
   );
@@ -261,6 +266,7 @@ test("exact durations move datetimes through the captured zone and timestamps by
         'say toTimestamp("2026-03-29T01:30:00Z").toDateTime().toISO()',
         // 02:30 does not exist on 29 March; it moves forward by the skipped hour.
         'say toDateTime("2026-03-29T02:30").toTimestamp().toISO()',
+        "exit",
       ].join("\n"),
       AMSTERDAM,
     ),
@@ -277,14 +283,17 @@ test("exact durations move datetimes through the captured zone and timestamps by
       "2026-03-29T01:30:00Z",
     ],
   );
-  const failure = failureOf('let x = toDateTime("2101-07-01T12:00").toTimestamp()', AMSTERDAM);
+  const failure = failureOf(
+    'let x = toDateTime("2101-07-01T12:00").toTimestamp()\nexit',
+    AMSTERDAM,
+  );
   assert.equal(failure?.code, "TSR063");
   assert.match(failure?.message ?? "", /1970 through 2099/u);
 });
 
 test("a checkpoint keeps temporal values and the captured context, and rejects malformed ones", () => {
   const plan = compileValidPlan(
-    'let d = toDate("2026-10-04")\nlet s = set[d, toDate("2026-10-05")]\nwait 1 s\nsay d\nsay s',
+    'let d = toDate("2026-10-04")\nlet s = set[d, toDate("2026-10-05")]\nwait 1 s\nsay d\nsay s\nexit',
   );
   const waiting = run(
     plan,
@@ -348,17 +357,18 @@ test("typed storage keeps date and time kinds apart from each other and from tex
         'let moment: timestamp = load "moment"',
         "say day.toISO()",
         "say moment.toISO()",
+        "exit",
       ].join("\n"),
     ),
     ["2026-10-04", "2026-10-04T12:00:00Z"],
   );
-  const failure = failureOf('save "2026-10-04" as "day"\nlet day: date = load "day"');
+  const failure = failureOf('save "2026-10-04" as "day"\nlet day: date = load "day"\nexit');
   assert.notEqual(failure, null);
   assert.match(failure?.message ?? "", /a date/u);
 });
 
 test("a fresh session rejects a malformed temporal context", () => {
-  const plan = compileValidPlan('say "ready"');
+  const plan = compileValidPlan('say "ready"\nexit');
   for (const temporalContext of [
     { zone: AMSTERDAM.zone },
     {
@@ -382,7 +392,7 @@ test("a fresh session rejects a malformed temporal context", () => {
 
 test("copies of a set hold their own date members", () => {
   const compiled = compileSource(
-    'let original = set[toDate("2026-10-04")]\nlet copy = original\ninspect(copy)\nsay original\nsay copy',
+    'let original = set[toDate("2026-10-04")]\nlet copy = original\ninspect(copy)\nsay original\nsay copy\nexit',
     { builtins: ["inspect"] },
   );
   assert.ok(compiled.plan !== null);
@@ -402,7 +412,7 @@ test("copies of a set hold their own date members", () => {
 
 test("a session keeps the context it started with, whatever the host does with its own copy", () => {
   const context = structuredClone(AMSTERDAM);
-  const plan = compileValidPlan('let d = toDate("2026-10-04")\nwait 1 s\nsay d');
+  const plan = compileValidPlan('let d = toDate("2026-10-04")\nwait 1 s\nsay d\nexit');
   const waiting = run(
     plan,
     createImmediatePacingRuntimeSnapshot(plan, { temporalContext: context }),
@@ -432,7 +442,7 @@ test("a session keeps the context it started with, whatever the host does with i
 
 test("a speaker's name may be any shown value, in the captured presentation", () => {
   const { result } = start(
-    'speaker vera { firstName: toDate("2026-10-04") }\nsay as vera "hello"',
+    'speaker vera { firstName: toDate("2026-10-04") }\nsay as vera "hello"\nexit',
     AMSTERDAM,
   );
   assert.equal(result.snapshot.failure, null, JSON.stringify(result.snapshot.failure));

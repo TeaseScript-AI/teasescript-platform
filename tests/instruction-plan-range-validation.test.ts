@@ -68,7 +68,7 @@ test("rejects unsafe persisted temporary and loop identities", () => {
   assert.equal(temporaryValidation.valid, false);
   assert.ok(hasPlanError(temporaryValidation.errors, "$.temporaryCount"));
 
-  const loopPlan = mutablePlan(compiledPlan("repeat 1 { say 1 }"));
+  const loopPlan = mutablePlan(compiledPlan("repeat 1 { say 1 }\nexit"));
   // EVIDENCE: fixture: the compiled repeat emits a loopStart whose ID is deliberately corrupted.
   const loopStart = loopPlan.instructions.find(
     (instruction) => instruction.kind === "loopStart",
@@ -92,7 +92,7 @@ test("rejects unsafe persisted temporary and loop identities", () => {
     return createFreshRuntimeSnapshot(loopPlan as unknown as InstructionPlan);
   }, TypeError);
 
-  const validLoopPlan = compiledPlan("repeat 1 { say 1 }");
+  const validLoopPlan = compiledPlan("repeat 1 { say 1 }\nexit");
   // EVIDENCE: fixture: parse the serialized checkpoint into a mutable copy for identity/range corruption.
   const checkpoint = JSON.parse(
     JSON.stringify(createCheckpoint(validLoopPlan, createFreshRuntimeSnapshot(validLoopPlan))),
@@ -218,7 +218,7 @@ test("public runtime and checkpoint routes reject an extreme range before side e
 
 test("preserves compiler-generated plans across representative layouts", () => {
   const sources = [
-    "",
+    "\nexit",
     "exit",
     "function empty { }\nexit",
     "function required(value) { return value }\nrequired(1)\nexit",

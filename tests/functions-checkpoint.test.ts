@@ -31,6 +31,7 @@ test("restores every instruction boundary during defaults and nested calls", () 
       'function next(value) { count = count + 1\nreturn "${value}:${count}" }',
       'function describe(name, title = next(name)) { say "inside:${title}"\nreturn title }',
       'say describe("pet")',
+      "exit",
     ].join("\n"),
   );
 
@@ -76,6 +77,7 @@ test("restores inside function loops, after continue, and before early return", 
       "  return null",
       "}",
       "say find(4)",
+      "exit",
     ].join("\n"),
   );
 
@@ -99,6 +101,7 @@ test("restores direct and mutual recursion at every instruction boundary", () =>
       "  return value * factorial(value - 1)",
       "}",
       "say factorial(5)",
+      "exit",
     ].join("\n"),
   );
   assert.ok(direct.some((snapshot) => snapshot.callFrames.length >= 4));
@@ -108,6 +111,7 @@ test("restores direct and mutual recursion at every instruction boundary", () =>
       "function even(value) { if value == 0 { return true }\nreturn odd(value - 1) }",
       "function odd(value) { if value == 0 { return false }\nreturn even(value - 1) }",
       "say even(5)",
+      "exit",
     ].join("\n"),
   );
   assert.ok(
@@ -127,6 +131,7 @@ test("restores between nested calls, around say events, and after parameter reas
       "say first() + second()",
       "function bump(value) { value += 1\nsay value\nreturn value }",
       "say bump(1)",
+      "exit",
     ].join("\n"),
   );
 
@@ -165,6 +170,7 @@ test("preserves prepared earlier arguments through a later suspension and a susp
     "function later { wait 1 ms\nreturn random() }",
     "function combine(first, second) { wait 2 ms\nreturn first + second }",
     "combine(random(), later())",
+    "exit",
   ].join("\n");
   const { boundaries, finalSnapshot } = assertRuntimeResumeEquivalent(source, {
     seed: 0x2468_ace1,
@@ -209,6 +215,7 @@ test("validates and resumes deep suspended recursive continuations", () => {
       "  return value + sum(value - 1)",
       "}",
       "say sum(32)",
+      "exit",
     ].join("\n"),
   );
   for (const depth of [16, 32]) {
@@ -232,7 +239,7 @@ test("validates and resumes deep suspended recursive continuations", () => {
 
 test("treats unbound call-frame argument values as canonical resumable state", () => {
   const compiled = plan(
-    "function identity(value) { return value }\nsay identity({ outer: { items: [1, 2] } }).outer.items[1]",
+    "function identity(value) { return value }\nsay identity({ outer: { items: [1, 2] } }).outer.items[1]\nexit",
   );
   const snapshot = executeUntil(
     compiled,
@@ -255,7 +262,7 @@ test("treats unbound call-frame argument values as canonical resumable state", (
 });
 
 test("checkpoint creation defensively isolates the supplied plan", () => {
-  const original = mutablePlan(plan("function value { return 1 }\nsay value()"));
+  const original = mutablePlan(plan("function value { return 1 }\nsay value()\nexit"));
   const snapshot = createImmediatePacingRuntimeSnapshot(original);
   const checkpoint = createCheckpoint(original, snapshot);
   const originalName = checkpoint.plan.functions[0]!.name;
@@ -301,7 +308,7 @@ test("rejects malformed active call-frame identity and return state", () => {
 });
 
 test("rejects inconsistent argument supply and parameter bindings", () => {
-  const compiled = plan("function echo(input) { return input }\necho(1)");
+  const compiled = plan("function echo(input) { return input }\necho(1)\nexit");
   const call = compiled.instructions.find((instruction) => instruction.kind === "callFunction");
   assert.equal(call?.kind, "callFunction");
   if (call?.kind !== "callFunction") return;
@@ -341,7 +348,9 @@ test("rejects inconsistent argument supply and parameter bindings", () => {
   frame.callerTemporaries.push({ id: frame.destinationTemporary, value: null });
   assertCheckpointRejected(occupiedDestination, "TSK002");
 
-  const optional = plan("function sample(required, optional = 2) { return required }\nsample(1)");
+  const optional = plan(
+    "function sample(required, optional = 2) { return required }\nsample(1)\nexit",
+  );
   const optionalFrame = executeUntil(optional, (candidate) => candidate.callFrames.length === 1);
   const forgedSupplied = mutableCheckpoint(createCheckpoint(optional, optionalFrame));
   forgedSupplied.snapshot.callFrames[0]!.arguments[1] = {
@@ -363,7 +372,7 @@ test("rejects inconsistent argument supply and parameter bindings", () => {
 });
 
 test("rejects a missing temporary required by the next instruction", () => {
-  const compiled = plan("function value { return 1 }\nlet result = value()");
+  const compiled = plan("function value { return 1 }\nlet result = value()\nexit");
   let snapshot = createFreshRuntimeSnapshot(compiled);
   while (snapshot.callFrames.length > 0 || snapshot.temporaries.length === 0) {
     snapshot = executeInstruction(compiled, snapshot).snapshot;
@@ -385,6 +394,7 @@ test("restores between assignment-target and right-hand call evaluation", () => 
       "let randomItems = [0, 0]",
       "randomItems[randomInteger(0..=1)] = randomInteger(7..=9)",
       'say "${order[0]}:${order[1]}:${items[0]}"',
+      "exit",
     ].join("\n"),
   );
 
@@ -417,6 +427,7 @@ test("restores mixed ordinary and user-call evaluation at every instruction boun
       "target.nested[0] = retarget()",
       "target.nested.add(mark(8))",
       'say "${first.nested[0]}:${second.nested[0]}:${target.nested.length}:${order.length}"',
+      "exit",
     ].join("\n"),
   );
 
@@ -450,6 +461,7 @@ test("restores prepared speaker aliases before and after nested identity mutatio
       "vera.config.value = replaceConfig()",
       "vera.items[0].value = shiftItems()",
       'say "${vera.config.value}:${vera.items[0].value}"',
+      "exit",
     ].join("\n"),
   );
 
@@ -481,6 +493,7 @@ test("restores retained prepared list items across structural index shifts", () 
       "vera.items[1].value = shiftAlias()",
       "positions[2].value = removePosition()",
       'say "${direct[1].value}:${vera.items[0].value}:${positions[1].value}"',
+      "exit",
     ].join("\n"),
   );
 
@@ -504,6 +517,7 @@ test("rejects malformed prepared-reference state in active and suspended tempora
       "let target = { nested: [0] }",
       "function replacement { return 7 }",
       "target.nested[0] = replacement()",
+      "exit",
     ].join("\n"),
   );
 
@@ -588,7 +602,7 @@ test("rejects missing temporaries in every suspended caller continuation", () =>
       frames: "total,two",
     },
   ]) {
-    const compiled = plan([...functions, source].join("\n"));
+    const compiled = plan([...functions, source, "exit"].join("\n"));
     const snapshot = executeUntil(
       compiled,
       (candidate) => candidate.callFrames.map((frame) => frame.functionName).join(",") === frames,
@@ -610,6 +624,7 @@ test("rejects missing suspended results at multiple recursion depths", () => {
       "  return one() + recurse(depth - 1)",
       "}",
       "say recurse(4)",
+      "exit",
     ].join("\n"),
   );
   const snapshot = executeUntil(
@@ -644,6 +659,7 @@ test("rejects parameter progress that disagrees with exact default segments", ()
       "function helper { return 1 }",
       "function sample(first = helper(), second = helper()) { return first + second }",
       "say sample()",
+      "exit",
     ].join("\n"),
   );
   const snapshot = executeUntil(compiled, (candidate) => {
@@ -668,6 +684,7 @@ test("rejects corrupted outer default progress while an inner call is active", (
       "function inner { return 1 }",
       "function outer(value = inner()) { return value }",
       "say outer()",
+      "exit",
     ].join("\n"),
   );
   const snapshot = executeUntil(
@@ -681,7 +698,7 @@ test("rejects corrupted outer default progress while an inner call is active", (
 });
 
 test("rejects structurally valid non-parameter bindings during a prologue", () => {
-  const compiled = plan("function sample(value = 1) { return value }\nsay sample()");
+  const compiled = plan("function sample(value = 1) { return value }\nsay sample()\nexit");
   const snapshot = executeUntil(
     compiled,
     (candidate) => candidate.callFrames.at(-1)?.parameterState.phase === "defaults",
@@ -696,7 +713,7 @@ test("rejects structurally valid non-parameter bindings during a prologue", () =
 });
 
 test("rejects empty serialized names and impossible status combinations", () => {
-  const compiled = plan("let value = 1\nfunction read(input) { return input }\nread(value)");
+  const compiled = plan("let value = 1\nfunction read(input) { return input }\nread(value)\nexit");
   let active = createFreshRuntimeSnapshot(compiled);
   active = executeInstruction(compiled, active).snapshot;
   const bindingCheckpoint = mutableCheckpoint(createCheckpoint(compiled, active));
@@ -738,7 +755,7 @@ test("rejects cyclic runtime state without overflowing validation", () => {
 });
 
 test("cyclic builtin results become source-associated runtime failures", () => {
-  const source = "say cyclic()";
+  const source = "say cyclic()\nexit";
   const call = "cyclic()";
   const compiledResult = compileSource(source, { builtins: ["cyclic"] });
   assert.deepEqual(compiledResult.diagnostics, []);
@@ -774,7 +791,7 @@ function recursiveSnapshot(depth: number): {
   readonly plan: InstructionPlan;
   readonly snapshot: RuntimeSnapshot;
 } {
-  const compiled = plan("function recurse { return recurse() }\nrecurse()");
+  const compiled = plan("function recurse { return recurse() }\nrecurse()\nexit");
   let snapshot = createFreshRuntimeSnapshot(compiled, { maxCallDepth: 16 });
   while (snapshot.callFrames.length < depth) {
     snapshot = executeInstruction(compiled, snapshot).snapshot;
