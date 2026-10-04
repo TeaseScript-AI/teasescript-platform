@@ -374,9 +374,10 @@ converts text or booleans: `"a" + "b"` is a compile error, and text is joined wi
 `"${first}${second}"`.
 
 A calculation whose result is too large to represent, or that divides by zero, has no result. When the compiler can
-see every operand of that step, as in `1e308 * 10`, `1 / 0`, or `1e300 s * 1e10`, it is a compile error that names the
-step, anywhere in an expression. A step with an operand that is known only when the script runs is checked then, and
-fails with a runtime error.
+see every operand of that step, as in `1e308 * 10` or `1e300 s * 1e10`, it is a compile error that names the step,
+anywhere in an expression. A division or remainder by a zero the compiler can see, such as `x / 0` or `x % (2 - 2)`,
+fails for every `x`, so it is a compile error even when `x` is known only when the script runs. Any other step with an
+operand that is known only then is checked when it runs, and fails with a runtime error.
 
 ### Randomness
 

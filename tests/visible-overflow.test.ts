@@ -42,6 +42,22 @@ test("a visible division by zero is a compile error that names the fix", () => {
   }
 });
 
+test("a division by a zero the compiler can see fails at compile time whatever the dividend", () => {
+  for (const [source, at] of [
+    ["let x = 5\nsay x / 0", "2:5"],
+    ["let x = 5\nsay x % 0", "2:5"],
+    ["let x = 5\nsay x / (2 - 2)", "2:5"],
+    ["let x = 5\nsay x / -0", "2:5"],
+    ["let d = 5 s\nsay d / 0 ms", "2:5"],
+    ["function f(x) { return x / 0 }", "1:24"],
+  ] as const) {
+    assert.deepEqual(diagnostics(source), [`TSV050 ${at}`], source);
+  }
+  // A computed divisor is known only at runtime, where the same division fails.
+  const computed = runValidSource("let x = 5\nlet zero = 2 - 2\nsay x / zero");
+  assert.equal(computed.snapshot.failure?.code, "TSR036");
+});
+
 test("only the overflowing step is reported, once", () => {
   assert.deepEqual(diagnostics("say (1e308 * 10) * 2 + 1"), ["TSV050 1:6"]);
   // Checks of a known wait, timer, or repeat value leave an overflow to the overflow error.

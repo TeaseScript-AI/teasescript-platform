@@ -218,7 +218,8 @@ export interface VisibleOverflow {
 const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "%"]);
 
 /**
- * Every arithmetic step in the program whose operands are known and finite but whose result is not, in source order.
+ * Every arithmetic step in the program whose operands are known and finite but whose result is not, and every division
+ * or remainder by a known zero, in source order.
  * Known values are computed once per expression from its operands, so the walk is linear in the program size; a
  * reported step is unknown to the steps around it, so one overflow is reported once.
  */
@@ -244,11 +245,16 @@ export function findVisibleOverflows(program: Program): readonly VisibleOverflow
     }
     // EVIDENCE: invariant: the parser builds every AST object with a string `kind`; other kinds have no known value.
     const expression = node as Expression;
+    // A known zero divisor fails for every dividend, so the dividend need not be known.
+    if (dividesByKnownZero(expression, known)) {
+      found.push({ span: expression.span, cause: "zero" });
+      continue;
+    }
     const value = knownValue(expression, known);
     if (value === undefined) continue;
-    const overflow = nonFiniteCause(expression, value, known);
-    if (overflow === undefined) known.set(expression, value);
-    else found.push({ span: expression.span, cause: overflow });
+    if (finite(value) !== undefined) known.set(expression, value);
+    else
+      found.push({ span: expression.span, cause: isStaticDuration(value) ? "duration" : "number" });
   }
   return found.sort((left, right) => left.span.start.offset - right.span.start.offset);
 }
@@ -287,18 +293,16 @@ function knownValue(
   }
 }
 
-function nonFiniteCause(
+/**
+ * A division or remainder by a zero number or duration the compiler can see. The runtime rejects it for every dividend:
+ * a number or duration result is not finite, and any other dividend is the wrong kind.
+ */
+function dividesByKnownZero(
   expression: Expression,
-  value: StaticScalar,
   known: ReadonlyMap<Expression, StaticScalar>,
-): VisibleOverflow["cause"] | undefined {
-  if (finite(value) !== undefined) return undefined;
-  if (
-    expression.kind === "binaryExpression" &&
-    (expression.operator === "/" || expression.operator === "%")
-  ) {
-    const divisor = known.get(expression.right);
-    if (divisor === 0 || (isStaticDuration(divisor) && divisor.milliseconds === 0)) return "zero";
-  }
-  return isStaticDuration(value) ? "duration" : "number";
+): boolean {
+  if (expression.kind !== "binaryExpression") return false;
+  if (expression.operator !== "/" && expression.operator !== "%") return false;
+  const divisor = known.get(expression.right);
+  return divisor === 0 || (isStaticDuration(divisor) && divisor.milliseconds === 0);
 }
