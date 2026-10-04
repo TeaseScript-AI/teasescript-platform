@@ -131,6 +131,16 @@ function validateStartupPrefix(
     const instruction = instructions[index];
     if (isRecord(instruction)) positions.set(instruction.name, index);
   }
+  // A label stands after the startup, so a goto never leads into it.
+  for (const label of files?.[0]?.labelInstructions ?? [])
+    if (label < prefixEnd)
+      errors.push(
+        planError(
+          "TSC002",
+          "A label cannot stand in the start of main.tease, which sets up the globals once.",
+          "$.files[0].labels",
+        ),
+      );
   const names = new Set<string>();
   instructions.forEach((instruction, index) => {
     const path = `$.instructions[${index}]`;
@@ -196,6 +206,7 @@ function isStartupDeclaration(instruction: unknown): instruction is Record<strin
 
 /** The fields of each instruction kind that name an instruction where execution continues. */
 const CONTROL_TARGETS: ReadonlyMap<string, readonly string[]> = new Map([
+  ["goto", ["target"]],
   ["jump", ["target"]],
   ["jumpIfFalse", ["target"]],
   ["loopStart", ["target", "continueTarget"]],

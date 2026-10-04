@@ -120,6 +120,7 @@ test("globals and speakers are set up before the story: main.tease first, then b
         "  global second = first + 1",
         "}",
         'timer async 1 { global fromHandler = "h" }',
+        "end",
       ].join("\n"),
     },
   ]);
@@ -441,10 +442,48 @@ test("speakers are global: declared anywhere in any file and known in every file
         '  speaker vera { displayName: "Vera"\n    firstName: "Vera" }',
         "}",
         'speaker cashier { displayName: "${shop} cashier" }',
+        "end",
       ].join("\n"),
     },
   ]);
   assert.deepEqual(said(runToEnd(plan).events), ["Vera: Hello", "Corner cashier: Ask Vera"]);
+
+  // A global is not a variable of its file: it has its value before any goto, unlike a skipped let.
+  assert.deepEqual(
+    diagnostics([
+      {
+        path: "main.tease",
+        source: 'goto later\nlet n = 1\nglobal g = 1\nlabel later\nsay "${g}"\nexit',
+      },
+    ]),
+    [],
+  );
+  assert.deepEqual(
+    diagnostics([
+      { path: "main.tease", source: 'goto later\nlet n = 1\nlabel later\nsay "${n}"\nexit' },
+    ]),
+    [["main.tease", "TSV054", 4]],
+  );
+
+  // A file of declarations only runs nothing, so it needs no ending; a global with default: assigns where it stands.
+  const main = { path: "main.tease", source: 'say "${shop}"\nexit' };
+  assert.deepEqual(
+    diagnostics([
+      main,
+      {
+        path: "shop.tease",
+        source: 'global shop = "Corner"\nspeaker clerk { }\nglobal function greet { }',
+      },
+    ]),
+    [],
+  );
+  assert.deepEqual(
+    diagnostics([
+      main,
+      { path: "shop.tease", source: 'global shop = "Corner"\nglobal sign = shop, default: ""' },
+    ]),
+    [["shop.tease", "TSV052", 2]],
+  );
 
   // Two speakers of one name are an error at both places, also in sibling blocks.
   assert.deepEqual(
@@ -672,6 +711,28 @@ test("a plan sets up its globals once, with start values of the accepted kinds",
     instruction.properties![0]!.value = { kind: "identifier", name: "vera", span };
   });
   assert.deepEqual(validateInstructionPlan(self).errors, []);
+
+  // A label and a goto of main.tease stand after the startup.
+  const labelled = compiledPlan([
+    { path: "main.tease", source: "global g = 1\nlabel again\nif false { goto again }\nexit" },
+  ]);
+  const goto = labelled.instructions.findIndex((instruction) => instruction.kind === "goto");
+  const back = externalPlan(labelled);
+  back.instructions[goto] = { ...back.instructions[goto]!, target: 0 };
+  assert.ok(
+    rejected(back).includes(
+      `$.instructions[${goto}].target Control flow cannot lead back into the start of main.tease, which sets up the globals once.`,
+    ),
+  );
+  const early = externalPlan(labelled);
+  // EVIDENCE: fixture: the JSON copy of a compiled plan keeps its file table with each file's labels.
+  const files = early.files as { labels: { instruction: number }[] }[];
+  files[0]!.labels[0]!.instruction = 0;
+  assert.ok(
+    rejected(early).includes(
+      "$.files[0].labels A label cannot stand in the start of main.tease, which sets up the globals once.",
+    ),
+  );
 });
 
 test("snapshot validation requires exactly the globals set up so far, unshadowed", () => {
@@ -762,7 +823,7 @@ test("a call of another file's function that is not global cannot be restored", 
   // Nor can a session that failed in main.tease claim to stand in another file's code.
   const failing = compiledPlan([
     { path: "main.tease", source: "let x = [1][2]\nexit" },
-    { path: "lib.tease", source: "let y = 2\nlet z = 3\nfunction local { wait 1 }" },
+    { path: "lib.tease", source: "let y = 2\nlet z = 3\nend\nfunction local { wait 1 }" },
   ]);
   const failed = run(failing, createFreshRuntimeSnapshot(failing)).snapshot;
   assert.equal(validateRuntimeSnapshot(failed, failing).valid, true);
