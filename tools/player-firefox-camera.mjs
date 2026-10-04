@@ -52,8 +52,13 @@ async function checks(page, url) {
         )?.value ?? null,
     );
   // `video` replaces the Player's camera constraints, for example to get a wide camera; `layout` selects the
-  // development preview's viewfinder presentation.
-  async function start(unsizedMilliseconds, scenario = url, video = undefined, layout = undefined) {
+  // development preview's viewfinder presentation. `abortDetachedPlay` reproduces the Owner's Firefox with a real
+  // camera: `play()` on a video element outside the document rejects with an AbortError at once, although the element
+  // then plays.
+  async function start(
+    unsizedMilliseconds,
+    { scenario = url, video = undefined, layout = undefined, abortDetachedPlay = false } = {},
+  ) {
     const tab = await context.newPage();
     const messages = [];
     tab.on(
@@ -66,6 +71,21 @@ async function checks(page, url) {
         (layout) => localStorage.setItem("player-viewfinder-layout", layout),
         layout,
       );
+    if (abortDetachedPlay)
+      await tab.addInitScript(() => {
+        const play = HTMLMediaElement.prototype.play;
+        HTMLMediaElement.prototype.play = function () {
+          const playing = play.call(this);
+          if (this.isConnected) return playing;
+          playing.catch(() => {});
+          return Promise.reject(
+            new DOMException(
+              "The fetching process for the media resource was aborted by the user agent at the user's request.",
+              "AbortError",
+            ),
+          );
+        };
+      });
     if (unsizedMilliseconds !== undefined) {
       // A real Firefox camera reports the video playable before its first frame has a size.
       await tab.addInitScript(
@@ -100,11 +120,14 @@ async function checks(page, url) {
     if (!value) throw new Error(message);
   };
 
-  // The Owner's failure: frames without a size for a while after the camera opens.
-  let { tab, messages } = await start(1_500);
+  // The Owner's Firefox camera: frames without a size for a while after the camera opens, and an aborted `play()`.
+  let { tab, messages } = await start(1_500, { abortDetachedPlay: true });
   await shows(tab, "Captured.");
   await tab.waitForFunction(decodedPhotos);
-  check(messages.length === 0, `A late-sized first frame reported: ${messages.join(" | ")}`);
+  check(
+    messages.length === 0,
+    `A late-sized first frame or an aborted play() reported: ${messages.join(" | ")}`,
+  );
   const first = await savedPhoto(tab);
   check(String(first).startsWith("captured-media:"), `The photo was not saved: ${first}`);
   await tab.close();
@@ -139,12 +162,11 @@ async function checks(page, url) {
   await tab.close();
   // The viewfinder plays the same camera, also when its first frames have no size yet, and the photo follows. Leading
   // the Stage, its frame and the Stage adopt the wide camera's aspect once the frames have a size.
-  ({ tab, messages } = await start(
-    1_500,
-    url.replace("scenario=camera", "scenario=viewfinder"),
-    { width: 1280, height: 720 },
-    "stage",
-  ));
+  ({ tab, messages } = await start(1_500, {
+    scenario: url.replace("scenario=camera", "scenario=viewfinder"),
+    video: { width: 1280, height: 720 },
+    layout: "stage",
+  }));
   await tab.waitForFunction(() => {
     const video = document.querySelector("[data-viewfinder] video");
     const frame = document.querySelector("[data-viewfinder]")?.getBoundingClientRect();
@@ -168,7 +190,7 @@ async function checks(page, url) {
   );
   check(messages.length === 0, `The viewfinder run reported: ${messages.join(" | ")}`);
   await tab.close();
-  return "PASS a late-sized first frame, the saved photo in a new run, a camera without frames, and the viewfinder";
+  return "PASS a late-sized first frame with an aborted play(), the saved photo in a new run, a camera without frames, and the viewfinder";
 }
 
 let passed = false;
