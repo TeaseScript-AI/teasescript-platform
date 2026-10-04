@@ -68,34 +68,23 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
     return candidate;
   };
   let switchCount = 0;
-  // Generated functions standing in for proposed constructs, by the name the copy calls them with.
-  const generated: { choose: ProposedChooseNames | null } = { choose: null };
-  const proposedChoose = (): ProposedChooseNames =>
+  // Generated functions standing in for constructs the compiler lacks, by the name the copy calls them with.
+  const generated: { choose: ListChooseNames | null } = { choose: null };
+  const listChoose = (): ListChooseNames =>
     (generated.choose ??= {
-      textOptions: shimName("sxProposedTextOptions"),
-      collect: shimName("sxProposedCollect"),
+      textOptions: shimName(`${SHIM_PREFIX}TextOptions`),
+      collect: shimName(`${SHIM_PREFIX}Collect`),
       locals: {
-        texts: shimName("sxProposedTexts"),
-        list: shimName("sxProposedList"),
-        text: shimName("sxProposedText"),
-        parts: shimName("sxProposedParts"),
-        part: shimName("sxProposedPart"),
-        option: shimName("sxProposedOption"),
-        pick: shimName("sxProposedPick"),
+        texts: shimName(`${SHIM_PREFIX}Texts`),
+        list: shimName(`${SHIM_PREFIX}List`),
+        text: shimName(`${SHIM_PREFIX}Text`),
+        parts: shimName(`${SHIM_PREFIX}Parts`),
+        part: shimName(`${SHIM_PREFIX}Part`),
+        option: shimName(`${SHIM_PREFIX}Option`),
+        pick: shimName(`${SHIM_PREFIX}Pick`),
       },
       sites: [],
     });
-  const chooseSite = (): ProposedChooseSite => {
-    const names = proposedChoose();
-    const number = names.sites.length + 1;
-    const site: ProposedChooseSite = {
-      choose: shimName(`sxProposedChoose${number}`),
-      show: [shimName(`sxProposedShow${number}A`), shimName(`sxProposedShow${number}B`)],
-      turn: shimName(`sxProposedTurn${number}`),
-    };
-    names.sites.push(site);
-    return site;
-  };
   const call = (
     capability: string,
     name: string,
@@ -211,9 +200,11 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
       case "choice":
         return { ...value, options: value.options.map(expression) };
       case "listChoice": {
-        capabilities.add(proposalCapability("choose-lists"));
-        const names = proposedChoose();
-        const site = chooseSite();
+        capabilities.add("choose list options");
+        const names = listChoose();
+        // One function per choose, so the smoke run rotates the answers of each legacy menu separately.
+        const site = shimName(`${SHIM_PREFIX}Choose${names.sites.length + 1}`);
+        names.sites.push(site);
         const textOptions = (list: IrExpression): IrExpression => ({
           kind: "call",
           name: names.textOptions,
@@ -221,7 +212,7 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
           named: {},
           local: true,
         });
-        // Each part is a list of `{ label, text }` options; unlabelled texts get their text as label.
+        // Each part is a list of `{ value, text }` choice objects; a text without a value is its own value.
         const parts: IrExpression[] = [];
         let texts: IrExpression[] = [];
         const flushTexts = (): void => {
@@ -233,7 +224,7 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
             flushTexts();
             const list = expression(option.list);
             parts.push(option.records ? list : textOptions(list));
-          } else if (option.label === null) {
+          } else if (option.value === null) {
             texts.push(expression(option.text));
           } else {
             flushTexts();
@@ -243,7 +234,7 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
                 {
                   kind: "object",
                   properties: [
-                    { name: "label", value: { kind: "literal", value: option.label } },
+                    { name: "value", value: { kind: "literal", value: option.value } },
                     { name: "text", value: expression(option.text) },
                   ],
                 },
@@ -254,7 +245,7 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         flushTexts();
         return {
           kind: "call",
-          name: site.choose,
+          name: site,
           positional: [{ kind: "list", items: parts }],
           named: {},
           local: true,
@@ -452,62 +443,42 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
     }
   };
 
-  const shimmedStatements = statements(program.statements);
+  const shimmed = { ...program, statements: statements(program.statements) };
   const chooseNames = generated.choose;
-  const turns: IrStatement[] = (chooseNames?.sites ?? []).map((site) => ({
-    kind: "let",
-    name: site.turn,
-    value: { kind: "literal", value: 0 },
-    span: null,
-  }));
-  const shimmed = { ...program, statements: [...turns, ...shimmedStatements] };
   return {
     program: shimmed,
-    source: emitTease(shimmed) + (chooseNames === null ? "" : proposedChooseSource(chooseNames)),
+    source: emitTease(shimmed) + (chooseNames === null ? "" : listChooseSource(chooseNames)),
     builtins: [...builtins].sort(),
     operations,
     capabilities,
   };
 }
 
-interface ProposedChooseNames {
+interface ListChooseNames {
   textOptions: string;
   collect: string;
   /** Local variable names of the generated functions, unique in the program. */
   locals: Record<"texts" | "list" | "text" | "parts" | "part" | "option" | "pick", string>;
-  sites: ProposedChooseSite[];
+  /** One function name per `choose` of the program. */
+  sites: string[];
 }
 
-/** One proposed `choose` of the program, so the smoke run rotates answers per legacy menu. */
-interface ProposedChooseSite {
-  choose: string;
-  /** Two identical functions that show the options; consecutive calls alternate between them. */
-  show: [string, string];
-  /** Global that selects the next of the two. */
-  turn: string;
-}
-
-/** Largest number of options the stand-in for a proposed `choose` supports; more fail the smoke run. */
-const PROPOSED_CHOOSE_LIMIT = 40;
+/** Largest number of buttons the stand-in for a list `choose` supports; more fail the smoke run. */
+const LIST_CHOOSE_LIMIT = 40;
 
 /**
- * Stand-ins for a proposed `choose` in current TeaseScript: the options are collected at runtime, and a compact
- * `choose` with numeric labels per option count shows them, so the interaction stays real. The chosen option's
- * label is the result.
- *
- * Consecutive calls alternate between two copies of the showing function. The runtime revalidates the retained
- * settlement of the last choice against the option texts its instruction currently holds, so one `choose` reached
- * again with other texts makes the next completion fail with TSR101 (a runtime defect, also for accepted
- * `choose` options computed in a loop); with two copies the last choice's instruction is not the one being reused.
+ * Stand-ins for a `choose` with list options (PR #515) in current TeaseScript: the choice objects are collected at
+ * runtime, and a compact `choose` with numeric labels per option count shows them, so the interaction stays real.
+ * The chosen object's value is the result.
  */
-function proposedChooseSource(names: ProposedChooseNames): string {
+function listChooseSource(names: ListChooseNames): string {
   const { texts, list, text, parts, part, option, pick } = names.locals;
   const lines = [
     "",
     `function ${names.textOptions}(${texts}) {`,
     `    let ${list} = []`,
     `    for ${text} in ${texts} {`,
-    `        ${list}.add({ label: ${text}, text: ${text} })`,
+    `        ${list}.add({ value: ${text}, text: ${text} })`,
     "    }",
     `    return ${list}`,
     "}",
@@ -523,37 +494,24 @@ function proposedChooseSource(names: ProposedChooseNames): string {
     "}",
   ];
   for (const site of names.sites) {
-    lines.push(
-      "",
-      `function ${site.choose}(${parts}) {`,
-      `    let ${list} = ${names.collect}(${parts})`,
-      `    ${site.turn} = 1 - ${site.turn}`,
-      `    if ${site.turn} == 1 {`,
-      `        return ${site.show[0]}(${list})`,
-      "    }",
-      `    return ${site.show[1]}(${list})`,
-      "}",
-    );
-    for (const show of site.show) {
-      lines.push("", `function ${show}(${list}) {`);
-      for (let count = 1; count <= PROPOSED_CHOOSE_LIMIT; count += 1) {
-        const options = Array.from(
-          { length: count },
-          (_, index) => `${index}: ${list}[${index}].text`,
-        ).join(", ");
-        lines.push(
-          `    if ${list}.length == ${count} {`,
-          `        let ${pick} = choose ${options}`,
-          `        return ${list}[${pick}].label`,
-          "    }",
-        );
-      }
+    lines.push("", `function ${site}(${parts}) {`, `    let ${list} = ${names.collect}(${parts})`);
+    for (let count = 1; count <= LIST_CHOOSE_LIMIT; count += 1) {
+      const options = Array.from(
+        { length: count },
+        (_, index) => `${index}: ${list}[${index}].text`,
+      ).join(", ");
       lines.push(
-        "    // No options, or more than the stand-in supports: the invalid index fails the run.",
-        `    return ${list}[${list}.length].label`,
-        "}",
+        `    if ${list}.length == ${count} {`,
+        `        let ${pick} = choose ${options}`,
+        `        return ${list}[${pick}].value`,
+        "    }",
       );
     }
+    lines.push(
+      "    // No options, or more than the stand-in supports: the invalid index fails the run.",
+      `    return ${list}[${list}.length].value`,
+      "}",
+    );
   }
   return `${lines.join("\n")}\n`;
 }

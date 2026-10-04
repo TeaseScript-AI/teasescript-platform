@@ -724,7 +724,7 @@ export function expressionType(
       for (const option of value.options) {
         if (option.kind === "option") {
           values.push(
-            option.label !== null ? scalar("integer") : choiceEntryType(type(option.text)),
+            option.value !== null ? scalar("integer") : choiceEntryType(type(option.text)),
           );
           continue;
         }

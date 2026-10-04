@@ -6002,15 +6002,13 @@ function lowerSelectedValue(
   if (message === null) return null;
   const optionsNode = args[1]!;
   if (optionsNode.kind !== "list") {
-    if (context.proposals.has("choose-lists")) {
-      const proposed = proposedSelectedValue(node, args[0]!, message, optionsNode, context);
-      if (proposed !== undefined) return proposed;
-    }
+    const listChoice = runtimeListSelectedValue(node, args[0]!, message, optionsNode, context);
+    if (listChoice !== undefined) return listChoice;
     return unsupportedExpression(
       context,
       node,
       "SX_DYNAMIC_CHOICE_OPTIONS",
-      "getSelectedValue() options come from a runtime list; TeaseScript choose needs its options written out in the source.",
+      "getSelectedValue() options come from a runtime list in a shape the importer does not convert: choose can take written options followed by one list, but this list is built inside a larger expression or is not proven to be a list. Build the option list in its own statement.",
     );
   }
   const options: IrExpression[] = [];
@@ -6032,12 +6030,12 @@ function lowerSelectedValue(
 }
 
 /**
- * getSelectedValue() over a runtime list as a proposed `choose` (choose-lists): written options before one runtime
- * list keep their zero-based index as numeric label and the list's elements get the following ones, so the result
- * stays the legacy index. A `collect` that builds the list becomes a loop before the statement. Returns undefined
- * when the options do not have that shape.
+ * getSelectedValue() over a runtime list as a `choose` with a list option (V30 §19, PR #515): written options before
+ * one runtime list keep their zero-based index as numeric value and the list's elements become choice objects with
+ * the following ones, so the result stays the legacy index. A `collect` that builds the list becomes a loop before
+ * the statement. Returns undefined when the options do not have that shape.
  */
-function proposedSelectedValue(
+function runtimeListSelectedValue(
   node: AstNode,
   messageNode: AstNode,
   message: IrExpression,
@@ -6071,7 +6069,7 @@ function proposedSelectedValue(
   for (const [index, item] of writtenItems.entries()) {
     const text = lowerExpression(item, context);
     if (text === null) return null;
-    options.push({ kind: "option", label: index, text });
+    options.push({ kind: "option", value: index, text });
   }
   context.prelude.push(...loop);
   if (!pushPrompt(context, node, messageNode, message)) return null;

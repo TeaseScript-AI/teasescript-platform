@@ -354,7 +354,7 @@ function emitChoice(expression: Extract<IrExpression, { kind: "choice" | "listCh
     const options = expression.options.map((option) => {
       if (option.kind === "list") return emitExpression(option.list);
       const text = emitExpression(option.text);
-      return option.label === null ? text : `${option.label}: ${text}`;
+      return option.value === null ? text : `${option.value}: ${text}`;
     });
     return `choose ${options.join(", ")}`;
   }

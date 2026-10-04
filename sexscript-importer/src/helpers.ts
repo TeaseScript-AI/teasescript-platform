@@ -408,8 +408,8 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
       ),
   },
   menuOptions: {
-    // Options of a proposed `choose` (choose-lists) labelled with consecutive numbers from `first`, as the
-    // zero-based index that legacy getSelectedValue() returns.
+    // Choice objects whose values are consecutive numbers from `first`, as the zero-based index that legacy
+    // getSelectedValue() returns.
     name: "sexscriptLegacyMenuOptions",
     build: () =>
       fn(
@@ -417,16 +417,16 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ["texts", "first"],
         [
           letS("options", { kind: "list", items: [] }),
-          letS("label", v("first")),
+          letS("position", v("first")),
           forS("text", v("texts"), [
             add("options", {
               kind: "object",
               properties: [
-                { name: "label", value: v("label") },
+                { name: "value", value: v("position") },
                 { name: "text", value: v("text") },
               ],
             }),
-            set(v("label"), lit(1), "+="),
+            set(v("position"), lit(1), "+="),
           ]),
           ret(v("options")),
         ],

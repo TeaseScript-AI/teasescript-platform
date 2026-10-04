@@ -119,11 +119,12 @@ export type IrStatement =
   | (IrBase & { kind: "blank" });
 
 /**
- * One entry of a proposed `choose`: a written option, or a list whose elements are texts (each its own label) or,
- * with `records`, `{ label, text }` objects.
+ * One option of a `choose` with list options (V30 §19, PR #515): a written option, with its numeric value or
+ * without one (the button text is the value), or a list whose elements are texts or, with `records`,
+ * `{ value, text }` choice objects.
  */
 export type IrListChoiceOption =
-  | { kind: "option"; label: number | null; text: IrExpression }
+  | { kind: "option"; value: number | null; text: IrExpression }
   | { kind: "list"; list: IrExpression; records: boolean };
 
 export interface IrSwitchCase {
@@ -157,8 +158,8 @@ export type IrExpression =
    */
   | { kind: "choice"; options: IrExpression[]; labels?: string[] }
   /**
-   * Proposed `choose`, not accepted TeaseScript (PROPOSED-LANGUAGE-CHANGES.md C1–C3): options may mix written
-   * labels with unlabelled ones (whose label is their text), and a list option contributes one option per element.
+   * `choose` whose options may mix written values with options without one, and whose list options give one button
+   * per element (V30 §19 as accepted in PR #515, not implemented on main yet).
    */
   | { kind: "listChoice"; options: IrListChoiceOption[] }
   /**

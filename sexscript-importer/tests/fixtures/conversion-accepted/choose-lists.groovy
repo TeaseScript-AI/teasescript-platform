@@ -18,3 +18,11 @@ def again = 0
 while (again == 0) {
 	again = getSelectedValue("Again?", ["Back"] + levels)
 }
+
+// The same menu reached again with other option texts.
+def options = ["Low", "High"]
+for (round in 1..2) {
+	def picked = getSelectedValue("Pick one", options)
+	show("Picked " + options[picked])
+	options = ["Plug", "Clamps"]
+}

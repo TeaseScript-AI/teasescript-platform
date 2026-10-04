@@ -1,11 +1,11 @@
 function sexscriptLegacyMenuOptions(texts, first) {
-  let options = []
-  let labelValue = first
+  let optionsValue = []
+  let position = first
   for text in texts {
-    options.add({ label: labelValue, text: text })
-    labelValue += 1
+    optionsValue.add({ value: position, text: text })
+    position += 1
   }
-  return options
+  return optionsValue
 }
 // Menus built from runtime lists: written options keep their index, list elements follow.
 let offenses = ["Being late", "Being rude"]
@@ -33,4 +33,13 @@ let again = 0
 while again == 0 {
   say "Again?"
   again = choose 0: "Back", sexscriptLegacyMenuOptions(levels, 1)
+}
+
+// The same menu reached again with other option texts.
+let options = ["Low", "High"]
+for round in 1..=2 {
+  say "Pick one"
+  let picked = choose sexscriptLegacyMenuOptions(options, 0)
+  say "Picked ${options[picked]}"
+  options = ["Plug", "Clamps"]
 }
