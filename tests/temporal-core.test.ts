@@ -317,14 +317,27 @@ test("the host captures zone transitions and locale settings that reproduce its 
   assert.deepEqual(captureZoneRules("UTC").transitions, []);
   assert.throws(() => captureZoneRules("Mars/Olympus_Mons"), RangeError);
 
-  const evening = dateTime("2026-10-04T18:30");
-  // Node 24.18 ships ICU 78, whose Dutch numeric date and time are joined by a comma.
-  assert.equal(presentDateTime(capturePresentationSettings("nl-NL"), evening), "4-10-2026, 18:30");
-  assert.equal(
-    presentDateTime(capturePresentationSettings("en-US"), evening),
-    "10/4/2026, 6:30 PM",
-  );
-  assert.equal(presentDateTime(capturePresentationSettings("en-GB"), evening), "04/10/2026, 18:30");
-  assert.equal(presentDateTime(capturePresentationSettings("de-DE"), evening), "4.10.2026, 18:30");
+  // The oracle is the host's own Intl output for the same moments, so the check survives locale-data updates.
+  for (const locale of ["nl-NL", "en-US", "en-GB", "de-DE", "fr-FR", "ja-JP", "ko-KR", "sv-SE"]) {
+    const settings = capturePresentationSettings(locale);
+    for (const text of ["2026-10-04T18:30", "2033-01-05T09:05", "2026-12-24T00:00:07"]) {
+      const local = dateTime(text);
+      const withSeconds = local.second !== 0;
+      const host = new Intl.DateTimeFormat(locale, {
+        timeZone: "UTC",
+        numberingSystem: "latn",
+        calendar: "gregory",
+        year: "numeric",
+        month: "numeric",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        ...(withSeconds ? { second: "2-digit" } : {}),
+      })
+        .format(Date.parse(`${text}Z`))
+        .replace(/[\u00a0\u202f]/gu, " ");
+      assert.equal(presentDateTime(settings, local), host, `${locale} ${text}`);
+    }
+  }
   assert.throws(() => capturePresentationSettings("not a locale"), RangeError);
 });
