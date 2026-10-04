@@ -834,13 +834,17 @@ export function captureRuntimeSnapshotWithValidatedPlan(
   const captured = classified.validation.valid ? (snapshotCapture.value as RuntimeSnapshot) : null;
   return Object.freeze({
     validation: classified.validation,
-    // The captured context is a fresh copy; a frozen one can be shared by every later snapshot clone.
-    snapshot:
-      captured === null
-        ? null
-        : { ...captured, temporalContext: frozenTemporalContext(captured.temporalContext) },
+    snapshot: captured === null ? null : withFrozenTemporalContext(captured),
     failureKind: classified.failureKind,
   });
+}
+
+/**
+ * A validated snapshot whose temporal context is deeply frozen. A captured or parsed context is a fresh copy; a frozen
+ * one is shared by every later snapshot clone instead of copying its zone transitions.
+ */
+export function withFrozenTemporalContext(snapshot: RuntimeSnapshot): RuntimeSnapshot {
+  return { ...snapshot, temporalContext: frozenTemporalContext(snapshot.temporalContext) };
 }
 
 export function validateRuntimeSnapshot(

@@ -6,6 +6,7 @@ import { validateCapturedInstructionPlan } from "../plan/validation.js";
 import {
   captureRuntimeSnapshotWithValidatedPlan,
   classifyCapturedRuntimeSnapshot,
+  withFrozenTemporalContext,
   type RuntimeSnapshotValidationFailureKind,
   type RuntimeSnapshot,
 } from "./state.js";
@@ -224,7 +225,7 @@ function restoreParsedCheckpoint(value: unknown): RuntimeCheckpoint {
     version: CHECKPOINT_VERSION,
     plan,
     // EVIDENCE: validation: classified snapshot validation accepted this snapshot against the validated plan above.
-    snapshot: envelope.snapshot as RuntimeSnapshot,
+    snapshot: withFrozenTemporalContext(envelope.snapshot as RuntimeSnapshot),
   });
 }
 

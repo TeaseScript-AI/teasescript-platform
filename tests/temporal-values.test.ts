@@ -5,6 +5,7 @@ import type { InstructionPlan } from "../src/plan/model.js";
 import {
   createCheckpoint,
   deserializeCheckpoint,
+  restoreCheckpoint,
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
@@ -385,6 +386,21 @@ test("a session keeps the context it started with, whatever the host does with i
   );
   assert.deepEqual(finish(plan, waiting.snapshot), ["4-10-2026"]);
   assert.deepEqual(finish(plan, restored.snapshot), ["4-10-2026"]);
+  // Every restore path gives a deeply frozen context, which no later operation can change.
+  const json = serializeCheckpoint(createCheckpoint(plan, waiting.snapshot));
+  for (const { temporalContext: restoredContext } of [
+    restoreCheckpoint(JSON.parse(json)).snapshot,
+    deserializeCheckpoint(json).snapshot,
+  ])
+    for (const part of [
+      restoredContext,
+      restoredContext.zone,
+      restoredContext.zone.transitions,
+      restoredContext.zone.transitions[0],
+      restoredContext.presentation,
+      restoredContext.presentation.dayPeriods,
+    ])
+      assert.ok(Object.isFrozen(part));
 });
 
 test("a speaker's name may be any shown value, in the captured presentation", () => {
