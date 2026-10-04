@@ -4,13 +4,17 @@ import { effectScope, nextTick, type Ref } from "vue";
 import { createServer } from "vite";
 
 import {
+  createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
   pendingPlayerRuntimeStorageWrite,
   playerRuntimePacingGate,
+  restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
+import { DEFAULT_TEMPORAL_CONTEXT, type TemporalContext } from "../src/temporal.js";
+import { AMSTERDAM, utc } from "./helpers/temporal-fixtures.js";
 
 // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.
 interface StorageHost {
@@ -22,10 +26,15 @@ interface StorageHost {
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   prepare(create: () => PlayerRuntimeSession): void;
+  prepareRestore(restored: PlayerRuntimeSession): void;
   activate(): void;
   update(session: PlayerRuntimeSession): void;
+  temporalCapture(): { temporalContext: TemporalContext; wallClockMs: number };
 }
-let usePlayerSession: (options: { scriptStorage: ScriptStorageProvider }) => StorageHost;
+let usePlayerSession: (options: {
+  scriptStorage: ScriptStorageProvider;
+  temporalContext?: () => TemporalContext;
+}) => StorageHost;
 
 before(async () => {
   const server = await createServer({
@@ -58,7 +67,11 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function createHost(context: TestContext, provider: ScriptStorageProvider) {
+function createHost(
+  context: TestContext,
+  provider: ScriptStorageProvider,
+  temporalContext?: () => TemporalContext,
+) {
   // Event targets are the only browser surface these storage-only scripts use; no media elements are created.
   for (const name of ["document", "window"]) {
     const previous = Object.getOwnPropertyDescriptor(globalThis, name);
@@ -70,7 +83,12 @@ function createHost(context: TestContext, provider: ScriptStorageProvider) {
   }
   context.mock.timers.enable({ apis: ["setTimeout"] });
   const scope = effectScope();
-  const host = scope.run(() => usePlayerSession({ scriptStorage: provider }));
+  const host = scope.run(() =>
+    usePlayerSession({
+      scriptStorage: provider,
+      ...(temporalContext === undefined ? {} : { temporalContext }),
+    }),
+  );
   assert.ok(host);
   context.after(() => scope.stop());
   return { host, scope };
@@ -384,3 +402,51 @@ for (const [name, source, expected] of [
     );
   });
 }
+
+test("Vue host resolves the player's zone and presentation again at Start and at Continue", async (context) => {
+  let account = AMSTERDAM;
+  let resolved = 0;
+  const { host } = createHost(
+    context,
+    { scope: "test", load: async () => [], write: async () => {}, clear: async () => {} },
+    () => {
+      resolved++;
+      return account;
+    },
+  );
+  context.mock.method(Date, "now", () => utc("2026-10-04T16:00:00"));
+  await host.loadScriptStorage();
+  host.prepare(() =>
+    createPlayerRuntimeSession('let day = choose [toDate("2026-10-04")]\nsay day', {
+      ...host.scriptStorageOptions(),
+      ...host.temporalCapture(),
+    }),
+  );
+  host.activate();
+  const started = host.session.value;
+  assert.ok(started);
+  assert.equal(started.snapshot.temporalCaptures[0]?.context.zone.name, "Europe/Amsterdam");
+
+  // The account setting changed before the player continued the saved session.
+  account = DEFAULT_TEMPORAL_CONTEXT;
+  context.mock.method(Date, "now", () => utc("2026-10-05T09:00:00"));
+  host.prepareRestore(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(started)));
+  host.activate();
+  const continued = host.session.value?.snapshot;
+  assert.ok(continued);
+  assert.equal(resolved, 2);
+  assert.deepEqual(
+    continued.temporalCaptures.map((capture) => [capture.context.zone.name, capture.epochMs]),
+    [
+      ["Europe/Amsterdam", utc("2026-10-04T16:00:00")],
+      ["UTC", utc("2026-10-05T09:00:00")],
+    ],
+  );
+  // The choice keeps the buttons it was shown with.
+  const choice = continued.foregroundAction;
+  assert.ok(choice?.kind === "interaction" && choice.ui.kind === "choice");
+  assert.deepEqual(
+    choice.ui.options.map((option) => option.text),
+    ["4-10-2026"],
+  );
+});
