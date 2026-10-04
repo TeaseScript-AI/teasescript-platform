@@ -118,6 +118,15 @@ test("an unannotated integer variable is a number when one of its assignments ca
         copy("v"),
       );
   }
+  // A variable's first value counts as well: a chain of variables each starting as the next one widens at once.
+  const firsts = names.slice(1).map((name, index) => `let first_${names[index]} = ${name}`);
+  const fromFirsts = names.slice(1).map((_, index) => `${names[index]} = first_${names[index]}`);
+  assert.deepEqual(
+    codes(
+      `${declarations}\n${firsts.join("\n")}\n${fromFirsts.reverse().join("\n")}\nv1999 = 0.5\nlet k: integer = v0`,
+    ),
+    [["TSV041", "v0"]],
+  );
   // What a number derives from never makes types differ: numbers from different variables share one element type, and
   // messages name the plain type.
   assert.deepEqual(

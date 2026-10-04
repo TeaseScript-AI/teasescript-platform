@@ -457,6 +457,7 @@ class TypeChecker {
         );
         const loopScope = new Scope(scope);
         const loopType = element === undefined ? UNKNOWN_TYPE : copyType(element);
+        this.#followFirst(statement, loopType, statement.iterable.span);
         loopScope.declare(statement.variable.name, {
           kind: "variable",
           variable: {
@@ -511,7 +512,9 @@ class TypeChecker {
     if (statement.typeAnnotation === null) {
       type = this.#newPlaceType(statement.initializer, value);
       if (this.#widened.has(statement)) type = widenedType(type);
-      // A number this variable holds derives from the variable itself (rule 1.2).
+      // A number this variable holds derives from the variable itself, which follows what its first value derives
+      // from (rule 1.2).
+      this.#followFirst(statement, value, statement.initializer.span);
       type = ownOrigins(type, statement);
       if (initializer.kind === "listLiteral" || initializer.kind === "setLiteral")
         this.#declaredBy.set(initializer, name);
@@ -694,13 +697,21 @@ class TypeChecker {
    * type), so it widens together with them.
    */
   #follow(place: Place, value: StaticType, expression: Expression): void {
-    if (place.declaration === undefined || !isScalar(nonNullType(value), "integer")) return;
+    if (place.declaration !== undefined)
+      this.#followFirst(place.declaration, value, expression.span);
+  }
+
+  /**
+   * Records that a variable without a type annotation takes an integer value that derives from other variables, as its
+   * first value or by a later store, so it widens together with them; its own type keeps only itself as its origin.
+   */
+  #followFirst(declaration: Declaration, value: StaticType, at: SourceSpan): void {
+    if (!isScalar(nonNullType(value), "integer")) return;
     for (const origin of originsOf(value)) {
-      const source = origin;
-      if (source === place.declaration) continue;
-      const followers = this.#followers.get(source) ?? [];
-      followers.push({ declaration: place.declaration, at: expression.span });
-      this.#followers.set(source, followers);
+      if (origin === declaration) continue;
+      const followers = this.#followers.get(origin) ?? [];
+      followers.push({ declaration, at });
+      this.#followers.set(origin, followers);
     }
   }
 
@@ -887,6 +898,7 @@ class TypeChecker {
         if (parameter.typeAnnotation === null) {
           type = decidedType(placeType(value));
           if (this.#widened.has(parameter)) type = widenedType(type);
+          this.#followFirst(parameter, value, parameter.defaultValue.span);
           type = ownOrigins(type, parameter);
         } else {
           const declared = type;
