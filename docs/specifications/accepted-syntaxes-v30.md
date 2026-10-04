@@ -906,9 +906,9 @@ picks.add("three")    // compile error
 - A variable that starts as `null` takes the type of its first non-null value and may still hold `null`. The compiler
   infers no other combination of types.
 - A variable without a type whose type is `integer` is a `number` when any of its assignments can store a non-whole
-  number, wherever that assignment is. A declared `integer` stays strict, list or set elements and object properties
-  keep the type of their first value, and an integer-only use of such a variable, such as a list index, `removeAt`, or
-  a repeat count, is a compile error that names the assignment:
+  number, wherever that assignment is. The elements and properties inside such a variable widen by the same rule. A
+  declared type, such as `integer`, `integer[]`, or `integer set`, stays strict, and an integer-only use of a widened
+  value, such as a list index, `removeAt`, or a repeat count, is a compile error:
 
   ```text
   let speed = 1
@@ -917,6 +917,8 @@ picks.add("three")    // compile error
   count += 1            // count stays an integer
   let i = 0
   i = i / 2             // i is a number, so items[i] is a compile error
+  let prices = [1, 2]
+  prices.add(2.5)       // prices is a number[]
   ```
 
 - An empty list or set takes its element type from the first element added or assigned. In a list or set literal,
@@ -1041,7 +1043,8 @@ let level: integer = saved   // valid: saved is an integer here
 `integer` to `number` is the only implicit type conversion: an integer may be stored where a number is expected, and
 arithmetic on an integer and a number gives a number. Literal spelling decides the numeric type: `2` is an `integer`,
 while `2.0`, `.5`, and `1e3` are `number` values. A variable without a type that one of its assignments gives a
-non-whole number is a `number` ([§12](#12-variable-declarations)); a declared `integer` is not widened.
+non-whole number is a `number`, and so are its elements and properties ([§12](#12-variable-declarations)); a declared
+type is not widened.
 
 ```text
 let ratio: number = 3                 // valid
@@ -1194,8 +1197,9 @@ say door.name
 door.locked = false
 ```
 
-A property keeps the type of its first value, like a variable ([§12](#12-variable-declarations)), but an `integer`
-property does not become a `number`. Assignment may add a property, which then keeps its type:
+A property keeps the type of its first value, like a variable ([§12](#12-variable-declarations)); an `integer`
+property becomes a `number` when one of its assignments can store a non-whole number. Assignment may add a property,
+which then keeps its type:
 
 ```text
 door.locked = "yes"    // compile error: locked holds true or false (boolean)
