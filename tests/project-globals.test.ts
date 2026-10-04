@@ -274,6 +274,36 @@ test("globals follow the let type rules with one type environment for all files"
       "A list index must be a whole number (integer), but this is a number. 'speed' is a number because line 2 of b.tease can store a non-whole number in it. Round it with floor(...), round(...), or ceil(...).",
     ],
   );
+  // A start value narrows like a let: the start values after it and main.tease's top level know what it stored, until
+  // a call may change it. A suggested declaration keeps the global a global.
+  assert.deepEqual(
+    said(
+      runToEnd(
+        compiledPlan([
+          {
+            path: "main.tease",
+            source:
+              'global reward: integer | string = 1\nglobal next = reward + 1\nsay "${reward + 1} ${next}"\nexit',
+          },
+        ]),
+      ).events,
+    ),
+    ["2 2"],
+  );
+  assert.deepEqual(
+    diagnostics([
+      {
+        path: "main.tease",
+        source: 'global reward: integer | string = 1\nchange()\nsay "${reward + 1}"\nexit',
+      },
+      { path: "b.tease", source: 'global function change {\n  reward = "high"\n}' },
+    ]),
+    [["main.tease", "TSV043", 3]],
+  );
+  assert.deepEqual(messages([{ path: "main.tease", source: "global x = 1\nx = null\nexit" }]), [
+    "'x' holds a whole number (integer), so it cannot be set to null. To allow null, declare it as 'global x: integer? = ...'.",
+  ]);
+
   // A declared type is checked at runtime for a value the compiler cannot know.
   const typed = compiledPlan([
     { path: "main.tease", source: 'global level: integer = load "level", default: 1\nexit' },

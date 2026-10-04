@@ -542,6 +542,14 @@ class TypeChecker {
   /** `line 3`, or for a line of another file `line 3 of helpers.tease`. */
   readonly #line: (span: SourceSpan) => string = (span) => this.lines(span, this.#file);
 
+  /** How a message names a line and the declaration a fix suggests. */
+  readonly #text: PlaceText = { line: this.#line, keyword: (name) => this.#keyword(name) };
+
+  /** The keyword that declares a variable of this name: `global` for a global, otherwise `let`. */
+  #keyword(name: string | null): "global" | "let" {
+    return name !== null && this.#project.resolve(name)?.kind === "variable" ? "global" : "let";
+  }
+
   /** Continues in the source of `file`, returning the file to come back to. */
   #enterFile(file: number): number {
     const previous = this.#file;
@@ -577,6 +585,8 @@ class TypeChecker {
       runCompileTask(this.#startValueTask(declaration));
       this.#reportMixedLiterals();
     }
+    // main.tease runs right after the start values, so it starts with what they stored; other files start afresh.
+    const startupFlow = this.#flow;
     for (const [file, program] of programs.entries()) {
       this.#enterFile(file);
       this.#effects = { shared: effects[file]!.shared, loops };
@@ -588,7 +598,7 @@ class TypeChecker {
         ),
       );
       this.#scriptChecked = false;
-      this.#flow = new Flow();
+      this.#flow = file === 0 ? startupFlow : new Flow();
       const functions = functionsByFile[file]!;
       for (const statement of program.statements)
         if (statement.kind === "functionDeclaration" && !statement.global)
@@ -1129,7 +1139,7 @@ class TypeChecker {
         label: name,
         subject: `'${name}' is declared as ${typeName(type)}`,
         verb: "start as",
-        fix: (rejected, expression) => typeFix(name, type, rejected, expression),
+        fix: (rejected, expression) => typeFix(name, type, rejected, expression, keyword),
       };
       const checked = checkedValue(written);
       yield* compileChild(
@@ -1194,7 +1204,7 @@ class TypeChecker {
       const entry = scope.resolve(target.name);
       if (entry?.kind === "variable") {
         variable = entry.variable;
-        place = variablePlace(variable, this.#line);
+        place = variablePlace(variable, this.#text);
       }
     } else {
       if (
@@ -1246,7 +1256,7 @@ class TypeChecker {
             { kind, element: store },
             label,
             isNullable(object),
-            this.#line,
+            this.#text,
             this.#inferredCollection(target.object, scope),
             lists.length === 1 ? this.#pathOf(target.object, scope) : undefined,
           );
@@ -1415,7 +1425,7 @@ class TypeChecker {
         kept,
         place.label,
         isNullable(place.type),
-        this.#line,
+        this.#text,
         place.inferred !== undefined,
         place.widening,
       );
@@ -1437,7 +1447,7 @@ class TypeChecker {
         const before = this.diagnostics.length;
         yield* compileChild(
           this.#storeTask(
-            nestedPropertyPlace(known, place, property.name.name, this.#line),
+            nestedPropertyPlace(known, place, property.name.name, this.#text),
             property.value,
             type,
             decides,
@@ -1458,7 +1468,7 @@ class TypeChecker {
           place.verb === "take" && place.label !== null
             ? `to keep both, declare the parameter as '${place.label}: ${written}'`
             : place.inferred === "variable" && place.label !== null
-              ? `to keep both, declare it as 'let ${place.label}: ${written} = ...'`
+              ? `to keep both, declare it as '${this.#keyword(place.label)} ${place.label}: ${written} = ...'`
               : ONE_TYPE_FIX,
         );
       // Widening again repeats earlier work unless settling can add parts (only an undecided, union, collection, or
@@ -1696,7 +1706,7 @@ class TypeChecker {
       isCollection(member)
         ? [
             {
-              ...elementPlace(member, label, nullable, this.#line, inferred, owner),
+              ...elementPlace(member, label, nullable, this.#text, inferred, owner),
               ...(verb === undefined ? {} : { verb }),
             },
           ]
@@ -1842,7 +1852,7 @@ class TypeChecker {
       all.length === 1 && all[0]!.kind === "object"
         ? this.#pathOf(objectExpression, scope)
         : undefined;
-    return propertyPlace(type, label, `'${label}'`, this.#line, extendPath(owner, name));
+    return propertyPlace(type, label, `'${label}'`, this.#text, extendPath(owner, name));
   }
 
   *#returnTask(
@@ -3246,7 +3256,7 @@ class TypeChecker {
         const fix =
           property !== undefined
             ? `give '${property.name}' one type in every element`
-            : `to keep both, declare a union type, as in 'let ${name}: ${written} = ...'`;
+            : `to keep both, declare a union type, as in '${this.#keyword(name)} ${name}: ${written} = ...'`;
         this.#report(
           typeCode.mixedTypes,
           `union() would mix ${mixDescription(own, other)}. A ${receiver.kind} holds one type; ${fix}.`,
@@ -4334,7 +4344,7 @@ class TypeChecker {
       const fix =
         property !== undefined
           ? `give '${property.name}' one type in every element`
-          : `to keep both, declare a union type, as in '${name === undefined ? `let values: ${written}` : `let ${name}: ${written}`} = ...'`;
+          : `to keep both, declare a union type, as in '${name === undefined ? `let values: ${written}` : `${this.#keyword(name)} ${name}: ${written}`} = ...'`;
       this.#report(
         typeCode.mixedTypes,
         `This ${kind} mixes ${mixDescription(first, other)}. A ${kind} holds one type; ${fix}.`,
@@ -4888,7 +4898,7 @@ function checkedValue(expression: Expression): Expression {
     : expression;
 }
 
-function variablePlace(variable: Variable, line: (span: SourceSpan) => string): Place {
+function variablePlace(variable: Variable, text: PlaceText): Place {
   const name = variable.name;
   const type = variable.type;
   return {
@@ -4897,9 +4907,9 @@ function variablePlace(variable: Variable, line: (span: SourceSpan) => string): 
       variable.declaration === undefined ? undefined : { root: variable.declaration, path: [] },
     inferred: variable.declaration === undefined ? undefined : "variable",
     label: name,
-    subject: `'${name}' holds ${describeValue(type)}${decidedAt(type, line)}`,
+    subject: `'${name}' holds ${describeValue(type)}${decidedAt(type, text.line)}`,
     verb: "be set to",
-    fix: (rejected, expression) => typeFix(name, type, rejected, expression),
+    fix: (rejected, expression) => typeFix(name, type, rejected, expression, text.keyword(name)),
   };
 }
 
@@ -4907,7 +4917,7 @@ function elementPlace(
   collection: CollectionType,
   name: string | null,
   nullable: boolean,
-  line: (span: SourceSpan) => string,
+  text: PlaceText,
   inferred = false,
   owner?: PlacePath,
 ): Place {
@@ -4922,40 +4932,35 @@ function elementPlace(
     subject:
       element.kind === "open"
         ? `${subject} holds a ${collection.kind}`
-        : `${subject} holds ${typeName(element).replaceAll(" | ", " or ")} values (${typeName(collection)})${decidedAt(collection.element, line)}`,
+        : `${subject} holds ${typeName(element).replaceAll(" | ", " or ")} values (${typeName(collection)})${decidedAt(collection.element, text.line)}`,
     verb: "contain",
-    fix: (value) => elementFix(name, collection, value, nullable),
+    fix: (value) => elementFix(name, collection, value, nullable, text.keyword(name)),
   };
 }
 
 /** The place of a property inside a stored object literal, named after the place that keeps the object. */
-function nestedPropertyPlace(
-  type: StaticType,
-  owner: Place,
-  name: string,
-  line: (span: SourceSpan) => string,
-): Place {
+function nestedPropertyPlace(type: StaticType, owner: Place, name: string, text: PlaceText): Place {
   const widening = extendPath(owner.widening, name);
   if (owner.label !== null)
     return propertyPlace(
       type,
       `${owner.label}.${name}`,
       `'${owner.label}.${name}'`,
-      line,
+      text,
       widening,
     );
   const subject =
     owner.elementOf === undefined || owner.elementOf === null
       ? `Property '${name}'`
       : `Property '${name}' of the elements of '${owner.elementOf}'`;
-  return propertyPlace(type, null, subject, line, widening);
+  return propertyPlace(type, null, subject, text, widening);
 }
 
 function propertyPlace(
   type: StaticType,
   label: string | null,
   name: string,
-  line: (span: SourceSpan) => string,
+  text: PlaceText,
   widening?: PlacePath,
 ): Place {
   return {
@@ -4964,7 +4969,7 @@ function propertyPlace(
     // No type can be written for a property.
     inferred: "part",
     label,
-    subject: `${name} holds ${describeValue(type)}${decidedAt(type, line)}`,
+    subject: `${name} holds ${describeValue(type)}${decidedAt(type, text.line)}`,
     verb: "be set to",
     fix: (value, expression) => {
       const conversion = conversionFix(type, value, expression);
@@ -4993,6 +4998,12 @@ function elementLabel(collection: string | null, kind: "list" | "set" | "dict"):
 function decidedAt(type: StaticType, line: (span: SourceSpan) => string): string {
   const slot = findDecidedSlot(type);
   return slot === null ? "" : ` since ${line(slot)}`;
+}
+
+/** How a message names a line of the sources, and the keyword that declares a variable of a name. */
+interface PlaceText {
+  readonly line: (span: SourceSpan) => string;
+  readonly keyword: (name: string | null) => "global" | "let";
 }
 
 /** Names a line of a project's sources as seen from file `from` (see `TypeChecker.#line`). */
@@ -5798,20 +5809,21 @@ function typeFix(
   target: StaticType,
   value: StaticType,
   expression: Expression | null,
+  keyword: "global" | "let" = "let",
 ): string {
   const nullable = isNullable(target);
   const kept = resolved(nonNullType(target));
   if (resolved(value).kind === "null" && !nullable)
     return isAnnotatable(target)
-      ? ` To allow null, declare it as 'let ${name}: ${typeName(target)}? = ...'.`
+      ? ` To allow null, declare it as '${keyword} ${name}: ${typeName(target)}? = ...'.`
       : " Use a separate variable for null.";
   if (isScalar(kept, "integer") && isScalar(value, "number"))
-    return `${ROUND_FIX}, or declare it as 'let ${name}: number${nullable ? "?" : ""} = ...'.`;
+    return `${ROUND_FIX}, or declare it as '${keyword} ${name}: number${nullable ? "?" : ""} = ...'.`;
   const conversion = conversionFix(target, value, expression);
   if (conversion !== undefined) return conversion;
   const both = union([target, value]);
   return isAnnotatable(both)
-    ? ` To allow both, declare it as 'let ${name}: ${typeName(both)} = ...'.`
+    ? ` To allow both, declare it as '${keyword} ${name}: ${typeName(both)} = ...'.`
     : " Use a separate variable for a value of another type.";
 }
 
@@ -5875,14 +5887,15 @@ function elementFix(
   collection: CollectionType,
   value: StaticType,
   nullable: boolean,
+  keyword: "global" | "let",
 ): string {
   if (variable !== null && isScalar(collection.element, "integer") && isScalar(value, "number"))
-    return ` To allow fractions, declare it as 'let ${variable}: ${typeName({ kind: collection.kind, element: NUMBER_TYPE })}${nullable ? "?" : ""} = ...'.`;
+    return ` To allow fractions, declare it as '${keyword} ${variable}: ${typeName({ kind: collection.kind, element: NUMBER_TYPE })}${nullable ? "?" : ""} = ...'.`;
   if (isScalar(collection.element, "duration") && isNumeric(value))
     return " Give the number a unit, such as '5 s'.";
   const both: StaticType = { kind: collection.kind, element: union([collection.element, value]) };
   if (variable !== null && isAnnotatable(both))
-    return ` To allow both, declare it as 'let ${variable}: ${typeName(both)}${nullable ? "?" : ""} = ...'.`;
+    return ` To allow both, declare it as '${keyword} ${variable}: ${typeName(both)}${nullable ? "?" : ""} = ...'.`;
   return ` Use a separate ${collection.kind} for values of another type.`;
 }
 
