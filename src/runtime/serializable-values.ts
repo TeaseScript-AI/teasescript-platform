@@ -229,6 +229,36 @@ export function cloneCapturedSerializableValue(
   return root;
 }
 
+/**
+ * Whether a value holds a timer handle, media handle, or speaker reference: identities the runtime allocates for the
+ * current session, which host data and stored values cannot carry. Lists and objects are checked iteratively at every
+ * depth.
+ */
+export function containsRuntimeIdentity(value: SerializableRuntimeValue): boolean {
+  const work: SerializableRuntimeValue[] = [value];
+  while (work.length > 0) {
+    const current = work.pop()!;
+    if (typeof current !== "object" || current === null) continue;
+    switch (current.kind) {
+      case "timerHandle":
+      case "mediaHandle":
+      case "speakerReference":
+        return true;
+      case "list":
+        for (const item of current.items) work.push(item);
+        break;
+      case "object":
+        for (const property of current.properties) work.push(property.value);
+        break;
+      case "set":
+      case "range":
+      case "duration":
+        break;
+    }
+  }
+  return false;
+}
+
 function cloneSerializableNode(value: SerializableRuntimeValue): SerializableRuntimeValue {
   if (isScalar(value)) return value;
   switch (value.kind) {

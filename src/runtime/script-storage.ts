@@ -4,6 +4,7 @@ import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import {
   cloneCapturedSerializableValue,
+  containsRuntimeIdentity,
   validateCapturedSerializableValue,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
@@ -85,7 +86,7 @@ export function assertPersistable(
   value: SerializableRuntimeValue,
   span: SourceSpan | PlanSourceLocation,
 ): void {
-  if (!isPersistable(value)) {
+  if (containsRuntimeIdentity(value)) {
     throw fault(
       "TSR055",
       "save cannot store a timer handle, media handle, or speaker reference; they exist only in the current session.",
@@ -157,7 +158,7 @@ export function validateScriptStorageEntries(
     // EVIDENCE: validation: validateCapturedSerializableValue accepted this stored value above.
     const valid = stored as SerializableRuntimeValue;
     if (valid === null) return `${entryPath}.value must not be null; an absent key has no entry.`;
-    if (!isPersistable(valid)) {
+    if (containsRuntimeIdentity(valid)) {
       return `${entryPath}.value contains a timer handle, media handle, or speaker reference.`;
     }
   }
@@ -194,32 +195,6 @@ function matchesScalarType(
       // These types have no runtime representation yet, so no stored value can match them.
       return false;
   }
-}
-
-/** Plain data without session-only values; lists and objects are checked iteratively at every depth. */
-function isPersistable(value: SerializableRuntimeValue): boolean {
-  const work: SerializableRuntimeValue[] = [value];
-  while (work.length > 0) {
-    const current = work.pop()!;
-    if (typeof current !== "object" || current === null) continue;
-    switch (current.kind) {
-      case "timerHandle":
-      case "mediaHandle":
-      case "speakerReference":
-        return false;
-      case "list":
-        for (const item of current.items) work.push(item);
-        break;
-      case "object":
-        for (const property of current.properties) work.push(property.value);
-        break;
-      case "set":
-      case "range":
-      case "duration":
-        break;
-    }
-  }
-  return true;
 }
 
 function fault(code: string, message: string, span: SourceSpan | PlanSourceLocation): RuntimeFault {
