@@ -18,7 +18,8 @@ accept syntax, architecture, or implementation details.
 - **Language foundation:** values including elapsed durations, variables, assignments including `+=`/`-=`, speakers,
   output, collections, expressions, interpolated
   single-line and block strings, constrained authored `say` message markup, protected `escapeMarkup` literal insertion,
-  control flow, deterministic random and rounding built-ins, and top-level user-defined functions.
+  control flow, deterministic random and rounding built-ins, text operations and list `join`, the
+  `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, and top-level user-defined functions.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and
   call state, deterministic RNG state, typed sequenced events, instruction budgets, and defensive restore validation.
 - **Script storage:** `save`/`load`/`delete`, optional lazy defaults, a validated checkpointed session view, and

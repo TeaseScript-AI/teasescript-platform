@@ -27,6 +27,14 @@ import {
 import { nextXorShift32, type RandomSource } from "./random.js";
 import { isVisibleScalar, quotedText, valueNotation, visibleText } from "./value-text.js";
 import { formatDuration } from "../duration.js";
+import {
+  callStringMethod,
+  checkTextArguments,
+  missingMemberMessage,
+  STRING_METHODS,
+  stringLength,
+} from "./string-operations.js";
+import { LIST_JOIN, unknownTextMemberMessage } from "../text-operations.js";
 import { LOAD_KEY_MESSAGE, findScriptStorageEntry, storageKey } from "./script-storage.js";
 import {
   addSerializableSetValue,
@@ -58,6 +66,7 @@ import type {
   RuntimeTemporarySnapshot,
 } from "./state.js";
 import {
+  describeRuntimeValue,
   isDuration,
   isList,
   isObject,
@@ -101,6 +110,19 @@ import {
   timerRecord,
 } from "./operations/timer-lifecycle.js";
 import { isValidSessionTime } from "./actions/delay.js";
+import {
+  booleanFromText,
+  CONVERSION_RESULTS,
+  describeConversionResult,
+  isConversionName,
+  isConversionResult,
+  numberFromText,
+  rounded,
+  ROUNDING_BUILTINS,
+  withoutNegativeZero,
+  type ConversionName,
+  type ConversionResult,
+} from "../conversions.js";
 
 export interface RuntimeCapabilityCall {
   readonly positional: readonly SerializableRuntimeValue[];
@@ -737,8 +759,13 @@ export class Evaluator {
       }
       return;
     }
+    if (typeof receiver === "string") {
+      if (!STRING_METHODS.has(method))
+        throw fault("TSR016", unknownTextMemberMessage(method, "method"), span);
+      return;
+    }
     if (!isList(receiver) && !isSet(receiver)) {
-      throw fault("TSR016", `Unsupported method '${method}'.`, span);
+      throw fault("TSR016", missingMemberMessage(receiver, method, "method"), span);
     }
     const supported = isSet(receiver)
       ? new Set(["add", "remove", "clear", "contains", "toList"])
@@ -751,6 +778,7 @@ export class Evaluator {
           "clear",
           "contains",
           "toSet",
+          "join",
         ]);
     if (!supported.has(method)) {
       throw fault("TSR016", `Unsupported method '${method}'.`, span);
@@ -935,6 +963,17 @@ export class Evaluator {
     return `<media ${quotedText(media.source)}, ${state}>`;
   }
 
+  /** One element of `list.join()`: a scalar as visible text, without selecting from nested lists. */
+  #joinedText(item: SerializableRuntimeValue, span: SourceSpan): string {
+    if (!isVisibleScalar(item))
+      throw fault(
+        "TSR021",
+        "join() can only join text, numbers, true or false, null, and durations. Select an element or a property first.",
+        span,
+      );
+    return visibleText(item, span);
+  }
+
   #binary(
     expression: BinaryExpressionPlan,
     left: SerializableRuntimeValue,
@@ -1040,6 +1079,10 @@ export class Evaluator {
   ): SerializableRuntimeValue {
     if (expression.callee.kind === "identifier") {
       const name = expression.callee.name;
+      if (isConversionName(name))
+        return this.#conversionBuiltin(name, positional, named, expression.span);
+      if (ROUNDING_BUILTINS.has(name))
+        return this.#roundingBuiltin(name, positional, named, expression.span);
       const coreBuiltin = CORE_RUNTIME_BUILTINS.some((builtin) => builtin === name);
       const platformPrelude = name === "escapeMarkup";
       const builtin = Object.hasOwn(this.#builtins, name) ? this.#builtins[name] : undefined;
@@ -1066,11 +1109,6 @@ export class Evaluator {
             break;
           case "randomInteger":
             returned = this.#randomIntegerBuiltin(call);
-            break;
-          case "round":
-          case "floor":
-          case "ceil":
-            returned = this.#roundingBuiltin(name, call);
             break;
           case "escapeMarkup":
             returned = this.#escapeMarkupBuiltin(call);
@@ -1120,6 +1158,16 @@ export class Evaluator {
     if (expression.callee.kind === "property" && isMediaHandle(receiver)) {
       return this.#callMedia(receiver, expression.callee.name, positional, named, expression.span);
     }
+    if (expression.callee.kind === "property" && typeof receiver === "string") {
+      const name = Object.keys(named)[0];
+      if (name !== undefined)
+        throw fault(
+          "TSR015",
+          `${expression.callee.name}() takes its arguments without names; remove '${name}:'.`,
+          expression.span,
+        );
+      return callStringMethod(receiver, expression.callee.name, positional, expression.span);
+    }
     if (expression.callee.kind === "property") {
       return this.#callCollection(
         receiver!,
@@ -1151,7 +1199,7 @@ export class Evaluator {
   ): SerializableRuntimeValue {
     this.#referenceEpoch++;
     if (!isList(receiver) && !isSet(receiver))
-      throw fault("TSR016", `Unsupported method '${name}'.`, span);
+      throw fault("TSR016", missingMemberMessage(receiver, name, "method"), span);
     if (Object.keys(named).length !== 0)
       throw fault("TSR015", "Collection methods accept positional arguments only.", span);
     const expect = (count: number): void => {
@@ -1239,6 +1287,12 @@ export class Evaluator {
         case "toSet":
           expect(0);
           return createCapturedSerializableSet(receiver.items);
+        case "join": {
+          checkTextArguments(LIST_JOIN, positional, span);
+          // EVIDENCE: invariant: checkTextArguments proved that a given separator is text.
+          const separator = (positional[0] as string | undefined) ?? ", ";
+          return receiver.items.map((item) => this.#joinedText(item, span)).join(separator);
+        }
         default:
           throw fault("TSR016", `Unsupported method '${name}'.`, span);
       }
@@ -1521,21 +1575,80 @@ export class Evaluator {
     return range.start + Math.floor(this.#findRandom(span) * length);
   }
 
-  /**
-   * `round` gives the nearest whole number, rounding a half away from zero; `floor` and `ceil` round toward negative
-   * and positive infinity (V30 §13). A zero result is always `0`, never `-0`.
-   */
-  #roundingBuiltin(name: "round" | "floor" | "ceil", call: RuntimeCapabilityCall): number {
-    this.#expectBuiltinArguments(name, call, 1);
-    const value = call.positional[0];
-    if (typeof value !== "number") throw new TypeError(`${name}(value) requires a number.`);
-    const rounded =
-      name === "floor"
-        ? Math.floor(value)
-        : name === "ceil"
-          ? Math.ceil(value)
-          : Math.sign(value) * Math.round(Math.abs(value));
-    return rounded === 0 ? 0 : rounded;
+  /** `toString`, `toNumber`, `toInteger`, or `toBoolean` (V30 §13), with the optional `default:` fallback. */
+  #conversionBuiltin(
+    name: ConversionName,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
+    const extra = Object.keys(named).find((key) => key !== "default");
+    if (positional.length !== 1 || extra !== undefined)
+      throw fault(
+        "TSR028",
+        `${name}(...) takes one value and an optional default:, such as ${name}(value, default: ...).`,
+        span,
+      );
+    const result = CONVERSION_RESULTS.get(name)!;
+    const fallback = Object.hasOwn(named, "default") ? named.default : undefined;
+    if (fallback !== undefined && !isConversionResult(result, fallback))
+      throw fault(
+        "TSR058",
+        `${name}(...) needs ${describeConversionResult(result)} as its default:, not ${describeRuntimeValue(fallback)}.`,
+        span,
+      );
+    const value = positional[0]!;
+    const converted = this.#converted(result, value, span);
+    if (converted !== undefined) return converted;
+    if (fallback !== undefined) return fallback;
+    const shown = typeof value === "string" ? ` ${JSON.stringify(value)}` : "";
+    throw fault(
+      "TSR058",
+      `${name}(...) cannot convert ${describeRuntimeValue(value)}${shown} to ${describeConversionResult(result)}. Give a fallback with default: if the value may not convert.`,
+      span,
+    );
+  }
+
+  /** The converted value, or `undefined` when `value` cannot be converted. */
+  #converted(
+    result: ConversionResult,
+    value: SerializableRuntimeValue,
+    span: SourceSpan,
+  ): SerializableRuntimeValue | undefined {
+    if (result === "string") return isVisibleScalar(value) ? visibleText(value, span) : undefined;
+    if (result === "boolean")
+      return typeof value === "boolean"
+        ? value
+        : typeof value === "string"
+          ? booleanFromText(value)
+          : undefined;
+    const number =
+      typeof value === "number"
+        ? withoutNegativeZero(value)
+        : typeof value === "string"
+          ? numberFromText(value)
+          : undefined;
+    return number === undefined || result === "number"
+      ? number
+      : withoutNegativeZero(Math.trunc(number));
+  }
+
+  #roundingBuiltin(
+    name: string,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): number {
+    if (positional.length !== 1 || Object.keys(named).length !== 0)
+      throw fault("TSR028", `${name}(...) takes one number, such as ${name}(2.5).`, span);
+    const value = positional[0];
+    if (typeof value !== "number")
+      throw fault(
+        "TSR059",
+        `${name}(...) needs a number, not ${describeRuntimeValue(value!)}.${typeof value === "string" ? " Convert text with toNumber(...) first." : ""}`,
+        span,
+      );
+    return rounded(name, value);
   }
 
   #escapeMarkupBuiltin(call: RuntimeCapabilityCall): string {
@@ -1589,6 +1702,10 @@ export class Evaluator {
       return this.#getSpeakerProperty(this.speakerById(value.speakerId, span), name, span);
     }
     if (isList(value) || isSet(value)) return this.#getCollectionProperty(value, name, span);
+    if (typeof value === "string") {
+      if (name === "length") return stringLength(value);
+      throw fault("TSR017", unknownTextMemberMessage(name, "property"), span);
+    }
     if (isMediaHandle(value)) {
       const property = mediaProperty(
         this.#media(value, span),
@@ -1609,7 +1726,7 @@ export class Evaluator {
         throw fault("TSR017", `Timer handles have no property '${name}'.`, span);
       return property;
     }
-    throw fault("TSR017", `Value has no property '${name}'.`, span);
+    throw fault("TSR017", missingMemberMessage(value, name, "property"), span);
   }
 
   #index(value: SerializableRuntimeValue, span: SourceSpan): number {

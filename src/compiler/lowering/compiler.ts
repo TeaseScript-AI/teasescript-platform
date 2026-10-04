@@ -415,10 +415,11 @@ export class InstructionCompiler {
       }
       case "expressionStatement": {
         const call = unwrapParentheses(statement.expression);
+        const method = call.kind === "callExpression" ? unwrapParentheses(call.callee) : call;
         if (
           call.kind === "callExpression" &&
-          call.callee.kind === "propertyAccessExpression" &&
-          MEDIA_CONTROL_METHODS.has(call.callee.property.name)
+          method.kind === "propertyAccessExpression" &&
+          MEDIA_CONTROL_METHODS.has(method.property.name)
         ) {
           this.#barrierCall = call;
         }
@@ -1105,31 +1106,33 @@ export class InstructionCompiler {
       }
       case "callExpression": {
         let callee: LoweredExpression;
-        if (expression.callee.kind === "propertyAccessExpression") {
-          let receiver = yield* compileChild(this.#lowerExpressionTask(expression.callee.object));
+        // Grouping a method does not detach it from its receiver: `(text.trim)()` calls `text.trim()`.
+        const method = unwrapParentheses(expression.callee);
+        if (method.kind === "propertyAccessExpression") {
+          let receiver = yield* compileChild(this.#lowerExpressionTask(method.object));
           if (expression === this.#barrierCall) {
             this.#barrierCall = null;
             // The receiver is evaluated once; the barrier and the call then use that value.
             if (receiver.plan.kind !== "temporary" && receiver.plan.kind !== "preparedReference") {
-              receiver = this.#prepareReferenceExpression(receiver, expression.callee.object.span);
+              receiver = this.#prepareReferenceExpression(receiver, method.object.span);
             }
             this.#emitPacingBarrier(receiver.plan, expression.span);
           }
           if (expression.arguments.some((argument) => this.#containsUserCall(argument.value))) {
-            receiver = this.#prepareReferenceExpression(receiver, expression.callee.object.span);
+            receiver = this.#prepareReferenceExpression(receiver, method.object.span);
             this.instructions.push({
               kind: "validateCallReceiver",
               receiver: receiver.plan,
-              method: expression.callee.property.name,
-              span: copySpan(expression.callee.span),
+              method: method.property.name,
+              span: copySpan(method.span),
             });
           }
           callee = {
             plan: {
               kind: "property",
               object: receiver.plan,
-              name: expression.callee.property.name,
-              span: copySpan(expression.callee.span),
+              name: method.property.name,
+              span: copySpan(method.span),
             },
             temporaryIds: receiver.temporaryIds,
           };

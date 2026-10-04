@@ -240,6 +240,11 @@ The current function subset includes:
 - lexical function scope with package-global access;
 - deep-copy ordinary arguments/returns and speaker-reference identity preservation.
 
+Implemented value operations include the V30 §8 text operations, list `join`, the §13 conversions `toString`,
+`toNumber`, `toInteger`, and `toBoolean` with `default:`, and `round`, `floor`, and `ceil`. When the receiver or
+argument type is known, misuse is compile error `TSV043`, or `TSV020`/`TSV022` for argument counts and names; other
+values are checked when the operation runs.
+
 A separate type check (`src/type-checker.ts`) runs once names and structure are valid and enforces the ADR 0021 type
 rules that do not need new syntax: variables, list and set elements, object properties, parameters, and function results
 keep one type, including types decided by a first non-null value, a first element, a parameter default, or a function's

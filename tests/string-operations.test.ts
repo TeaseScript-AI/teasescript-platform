@@ -1,0 +1,473 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { compileSource } from "../src/compiler.js";
+import { run } from "../src/runtime/engine.js";
+import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
+import { runValidSource } from "./helpers/run-valid-source.js";
+import { sayTexts } from "./helpers/runtime-events.js";
+
+function said(source: string): string[] {
+  const result = runValidSource(source);
+  assert.equal(result.snapshot.failure, null, source);
+  return sayTexts(result);
+}
+
+/** Runs `source` with host globals, whose values the compiler cannot know. */
+function runWithGlobals(source: string, globals: Record<string, string | number | boolean | null>) {
+  const plan = compileValidPlan(source, { globals: Object.keys(globals) });
+  return run(plan, createImmediatePacingRuntimeSnapshot(plan, { globals }));
+}
+
+function diagnostics(source: string): [string, string, string][] {
+  return compileSource(source).diagnostics.map((diagnostic) => [
+    diagnostic.code,
+    diagnostic.message,
+    source.slice(diagnostic.span.start.offset, diagnostic.span.end.offset),
+  ]);
+}
+
+test("text operations return new values and leave the original unchanged", () => {
+  assert.deepEqual(
+    said(
+      [
+        'let name = "  ada lovelace  "',
+        "let clean = name.trim()",
+        'say "[${clean}] [${name}]"',
+        'say "${clean.uppercaseFirst()}|${clean.uppercase()}|${"MiXeD".lowercase()}"',
+        'say "[${name.trimStart()}] [${name.trimEnd()}]"',
+        'say "${clean.contains("love")} ${clean.contains("Love")} ${clean.startsWith("ada")} ${clean.endsWith("ace")}"',
+        'say "${clean.indexOf("l")} ${clean.indexOf("z")} ${clean.substring(4)} ${clean.substring(0, 3)}"',
+        'say clean.replace("a", "A")',
+        'say "${"".uppercaseFirst().length} ${"".trim().length}"',
+        'say "${clean.lastIndexOf("a")} ${clean.lastIndexOf("z")} ${"ab".repeat(3)}|${"ab".repeat(0)}|"',
+        'say "${"7".padStart(3, "0")} ${"7".padEnd(3, "-")} ${"long".padStart(2, "0")} ${"ab".padStart(7, "xyz")}"',
+      ].join("\n"),
+    ),
+    [
+      "[ada lovelace] [  ada lovelace  ]",
+      "Ada lovelace|ADA LOVELACE|mixed",
+      "[ada lovelace  ] [  ada lovelace]",
+      "true false true true",
+      "4 -1 lovelace ada",
+      "AdA lovelAce",
+      "0 0",
+      "9 -1 ababab||",
+      "007 7-- long xyzxyab",
+    ],
+  );
+});
+
+test("lengths and positions count code points", () => {
+  assert.deepEqual(
+    said(
+      [
+        'let text = "a😀b"',
+        'say "${text.length} ${text.indexOf("b")} ${text.substring(1, 2)} ${text.substring(2)}"',
+        'say text.split("").join("|")',
+        'say "${"😀a😀".lastIndexOf("😀")} ${text.lastIndexOf("")} ${"x".padStart(4, "😀a")} ${"x".padEnd(3, "😀a").length}"',
+        'say "😀".repeat(2).length',
+      ].join("\n"),
+    ),
+    ["3 2 😀 b", "a|😀|b", "2 3 😀a😀x 3", "2"],
+  );
+});
+
+test("case conversion is locale independent", () => {
+  assert.deepEqual(
+    said('say "Straße".uppercase()\nsay "TITLE".lowercase()\nsay "ß".uppercaseFirst()'),
+    ["STRASSE", "title", "SS"],
+  );
+});
+
+test("split keeps empty parts, replace is literal, and list join converts scalars", () => {
+  assert.deepEqual(
+    said(
+      [
+        'let parts = "a,b,,c,".split(",")',
+        'say "${parts.length} ${parts.join("+")}"',
+        'say "a.b.a".replace("a", "$&")',
+        'say "${["red", "blue"].join()} | ${[2, -0].join()} | ${[true, false].join()} | ${[90 seconds].join()}"',
+        'say [].join("-")',
+        "let maybe: string[]? = null",
+        "let name: string? = null",
+        'say "${[maybe].join()} | ${[name, "a"].join()}"',
+      ].join("\n"),
+    ),
+    ["5 a+b++c+", "$&.b.$&", "red, blue | 2, 0 | true, false | 1 min 30 s", "", "null | null, a"],
+  );
+});
+
+test("positions stay on code points for combining marks, expanding case, and lone surrogates", () => {
+  assert.deepEqual(
+    said(
+      [
+        'let accent = "cafe\u0301!"',
+        'say "${accent.length} ${accent.substring(4, 5).length} ${accent.substring(5)} ${"abc".substring(3, 3).length}"',
+        'say "${"İ".lowercase().length} ${"ﬀ".uppercase()}"',
+      ].join("\n"),
+    ),
+    ["6 1 ! 0", "2 FF"],
+  );
+
+  // A lone high surrogate before a lone low one joins into one code point, so padding needs another round.
+  const result = runWithGlobals(
+    [
+      'say "${emoji.indexOf(low)} ${emoji.lastIndexOf(low)} ${emoji.contains(low)} ${emoji.endsWith(low)} ${emoji.split(low).length} ${emoji.replace(low, "x")} ${low.contains(low)}"',
+      'say "${high.padEnd(3, low).length} ${"x".padStart(5, "${low}${high}").length}"',
+    ].join("\n"),
+    { emoji: "a😀", low: "\udE00", high: "\ud800" },
+  );
+  assert.equal(result.snapshot.failure, null);
+  assert.deepEqual(sayTexts(result), ["-1 -1 false false 1 a😀 true", "3 5"]);
+});
+
+test("misuse the compiler can see is a compile error that names the fix", () => {
+  const cases: [string, string, string, string][] = [
+    ['let t = "abc"\nsay t.size', "TSV043", "Text has no property 'size'. Use length.", "size"],
+    [
+      'let t = "abc"\nsay t.toUpperCase()',
+      "TSV043",
+      "Text has no method 'toUpperCase'. Use uppercase().",
+      "toUpperCase",
+    ],
+    ['let t = "abc"\nsay t.nope()', "TSV043", "Text has no method 'nope'.", "nope"],
+    [
+      'let t = "abc"\nsay t.length()',
+      "TSV043",
+      "length is a property, not a method; write .length without parentheses.",
+      "length",
+    ],
+    [
+      'let t = "abc"\nsay t.trim',
+      "TSV043",
+      "trim is a method; write trim() with parentheses.",
+      "trim",
+    ],
+    [
+      "let count = 5\nsay count.uppercase()",
+      "TSV043",
+      "A whole number (integer) has no method 'uppercase'. Text operations need text; convert the value first with toString(...).",
+      "uppercase",
+    ],
+    [
+      "let ok = true\nsay ok.size",
+      "TSV043",
+      "True or false (boolean) has no property 'size'.",
+      "size",
+    ],
+    [
+      'let t = "abc"\nsay t.contains(1)',
+      "TSV043",
+      "contains() needs text (string) for 'part', not a whole number (integer). Convert it with toString(...).",
+      "1",
+    ],
+    [
+      'let items = ["a"]\nsay items.join(true)',
+      "TSV043",
+      "join() needs text (string) for 'separator', not true or false (boolean). Convert it with toString(...).",
+      "true",
+    ],
+    [
+      'let items = ["a"]\nsay items.join',
+      "TSV043",
+      "join is a method; write .join() with parentheses.",
+      "join",
+    ],
+    [
+      'let t = "abc"\nsay t.repeat(1.5)',
+      "TSV043",
+      "repeat() needs a whole number (integer) for 'count', not a number. Convert it with toInteger(...), which drops the fraction.",
+      "1.5",
+    ],
+    [
+      'let t = "abc"\nsay t.substring("1")',
+      "TSV043",
+      "substring() needs a whole number (integer) for 'start', not text (string). Convert it with toInteger(...).",
+      '"1"',
+    ],
+    [
+      'let t = "abc"\nsay t.repeat(-2)',
+      "TSV043",
+      "repeat() needs 'count' to be 0 or more, not -2.",
+      "-2",
+    ],
+    [
+      'let t = "abc"\nsay t.padEnd(-1, " ")',
+      "TSV043",
+      "padEnd() needs 'length' to be 0 or more, not -1.",
+      "-1",
+    ],
+    [
+      'let t = "abc"\nsay t.substring(-1)',
+      "TSV043",
+      "substring() needs 'start' to be 0 or more, not -1.",
+      "-1",
+    ],
+    [
+      'say "abc".substring(1, 4)',
+      "TSV043",
+      "substring() needs 'end' from 0 through 3 (the length of the text), not 4.",
+      "4",
+    ],
+    [
+      'say "abc".substring(2, 1)',
+      "TSV043",
+      "substring() needs 'end' not before 'start'; 1 is before 2.",
+      "1",
+    ],
+    [
+      'let t = "abc"\nsay t.replace("", "x")',
+      "TSV043",
+      "replace() needs non-empty text for 'search'.",
+      '""',
+    ],
+    [
+      'let t = "abc"\nsay t.padStart(5, "")',
+      "TSV043",
+      "padStart() needs non-empty text for 'fill'.",
+      '""',
+    ],
+    [
+      'let t = "abc"\nsay t.padStart(5)',
+      "TSV020",
+      "padStart() takes 2 arguments (length, fill), received 1.",
+      "t.padStart(5)",
+    ],
+    [
+      'let t = "abc"\nsay t.trim(1)',
+      "TSV020",
+      "trim() takes no arguments, received 1.",
+      "t.trim(1)",
+    ],
+    [
+      'let t = "abc"\nsay t.substring()',
+      "TSV020",
+      "substring() takes 1 to 2 arguments (start, end), received 0.",
+      "t.substring()",
+    ],
+    [
+      'let t = "abc"\nsay t.padStart(length: 5, fill: "0")',
+      "TSV022",
+      "padStart() takes its arguments without names; remove 'length:'.",
+      "length",
+    ],
+    [
+      "function shout(value) { return value.repeat(-1) }",
+      "TSV043",
+      "repeat() needs 'count' to be 0 or more, not -1.",
+      "-1",
+    ],
+    [
+      "function shout(value) { return value.trim(1) }",
+      "TSV020",
+      "trim() takes no arguments, received 1.",
+      "value.trim(1)",
+    ],
+    [
+      'let t = "abc"\nt.length = 0',
+      "TSV043",
+      "Text cannot be changed, so 'length' cannot be assigned. Assign a new text to the variable instead.",
+      "t",
+    ],
+    [
+      "say [[1], [2]].join()",
+      "TSV043",
+      "join() can only join text, numbers, true or false, null, and durations, not a list (integer[]). Select an element or a property first.",
+      "[1]",
+    ],
+  ];
+  for (const [source, code, message, text] of cases)
+    assert.deepEqual(diagnostics(source), [[code, message, text]], source);
+  // `contains` also belongs to lists and sets, which may contain any value, so only its shape is checked.
+  assert.deepEqual(diagnostics("function has(value) { return value.contains(1) }"), []);
+  assert.deepEqual(diagnostics("function has(value) { return value.contains(1, 2) }"), [
+    ["TSV020", "contains() takes 1 argument (part), received 2.", "value.contains(1, 2)"],
+  ]);
+});
+
+test("values the compiler cannot know are checked at runtime, with messages that name the fix", () => {
+  const cases: [string, Record<string, string | number | boolean | null>, string, string][] = [
+    [
+      "say text.substring(at)",
+      { text: "abc", at: 4 },
+      "TSR025",
+      "substring() needs 'start' from 0 through 3 (the length of the text), not 4.",
+    ],
+    [
+      "say text.substring(at)",
+      { text: "abc", at: -1 },
+      "TSR025",
+      "substring() needs 'start' to be 0 or more, not -1.",
+    ],
+    [
+      "say text.substring(2, at)",
+      { text: "abc", at: 1 },
+      "TSR025",
+      "substring() needs 'end' not before 'start'; 1 is before 2.",
+    ],
+    [
+      "say text.substring(at)",
+      { text: "abc", at: 0.5 },
+      "TSR024",
+      "substring() needs a whole number (integer) for 'start', not a number. Convert it with toInteger(...), which drops the fraction.",
+    ],
+    [
+      'say text.replace(part, "x")',
+      { text: "abc", part: "" },
+      "TSR057",
+      "replace() needs non-empty text for 'search'.",
+    ],
+    [
+      "say text.contains(part)",
+      { text: "abc", part: 1 },
+      "TSR057",
+      "contains() needs text (string) for 'part', not a number. Convert it with toString(...).",
+    ],
+    [
+      "say text.repeat(times)",
+      { text: "abc", times: -1 },
+      "TSR057",
+      "repeat() needs 'count' to be 0 or more, not -1.",
+    ],
+    [
+      "say text.repeat(times)",
+      { text: "abc", times: 1.5 },
+      "TSR057",
+      "repeat() needs a whole number (integer) for 'count', not a number. Convert it with toInteger(...), which drops the fraction.",
+    ],
+    [
+      "say text.padStart(size, fill)",
+      { text: "abc", size: 5, fill: "" },
+      "TSR057",
+      "padStart() needs non-empty text for 'fill'.",
+    ],
+    [
+      'say text.padEnd(size, "-")',
+      { text: "abc", size: "5" },
+      "TSR057",
+      "padEnd() needs a whole number (integer) for 'length', not text (string). Convert it with toInteger(...).",
+    ],
+    [
+      "say [text].join(separator)",
+      { text: "a", separator: null },
+      "TSR057",
+      "join() needs text (string) for 'separator', not null.",
+    ],
+    [
+      "say value.trim()",
+      { value: 5 },
+      "TSR016",
+      "A number has no method 'trim'. Text operations need text; convert the value first with toString(...).",
+    ],
+    [
+      "say value.length",
+      { value: null },
+      "TSR017",
+      "The value null has no property 'length'. Check that it is not null first.",
+    ],
+    ["say value.nope()", { value: "abc" }, "TSR016", "Text has no method 'nope'."],
+    ["say value.size", { value: "abc" }, "TSR017", "Text has no property 'size'. Use length."],
+  ];
+  for (const [source, globals, code, message] of cases) {
+    const result = runWithGlobals(source, globals);
+    assert.deepEqual(
+      [result.snapshot.failure?.code, result.snapshot.failure?.message],
+      [code, message],
+      `${source} ${JSON.stringify(globals)}`,
+    );
+    const call = source.replace(/^say /u, "");
+    assert.deepEqual(
+      [result.snapshot.failure?.span.start.offset, result.snapshot.failure?.span.end.offset],
+      [4, 4 + call.length],
+      source,
+    );
+  }
+  const nested = runValidSource(
+    'function dynamic(value) { return value }\nsay dynamic([["a"]]).join()',
+  );
+  assert.deepEqual(
+    [nested.snapshot.failure?.code, nested.snapshot.failure?.message],
+    [
+      "TSR021",
+      "join() can only join text, numbers, true or false, null, and durations. Select an element or a property first.",
+    ],
+  );
+});
+
+test("text operations have static result types", () => {
+  assert.deepEqual(
+    diagnostics(
+      [
+        'let t = "a,b"',
+        "let size: integer = t.length",
+        'let at: integer = t.indexOf("b") + t.lastIndexOf("a")',
+        'let found: boolean = t.contains("a") and t.startsWith("a") and t.endsWith("b")',
+        'let parts: string[] = t.split(",")',
+        'let joined: string = "${parts.join(" ")}${t.trim()}${t.repeat(2)}${t.padStart(5, "0")}"',
+      ].join("\n"),
+    ),
+    [],
+  );
+  assert.deepEqual(diagnostics('let t = "a"\nlet at: string = t.indexOf("a")'), [
+    [
+      "TSV041",
+      "'at' is declared as string, so it cannot start as a whole number (integer). To show it as text, write \"${value}\".",
+      't.indexOf("a")',
+    ],
+  ]);
+});
+
+test("object properties named like text operations keep working", () => {
+  assert.deepEqual(said('let box = { length: 3, trim: "no" }\nsay "${box.length} ${box.trim}"'), [
+    "3 no",
+  ]);
+});
+
+test("a grouped method call keeps its receiver and argument order", () => {
+  const source = [
+    'let text = "old"',
+    "function replaceText {",
+    '    text = "new"',
+    '    return "old"',
+    "}",
+    'say ("  a  ".trim)()',
+    "say (text.contains)(replaceText())",
+  ].join("\n");
+  assert.deepEqual(said(source), ["a", "true"]);
+});
+
+test("receivers are checked before user-call arguments run", () => {
+  const source = [
+    "let calls = 0",
+    "function part {",
+    "    calls += 1",
+    '    return "b"',
+    "}",
+    'say "${"abc".contains(part())} ${calls}"',
+    "say n.contains(part())",
+  ].join("\n");
+  const result = runWithGlobals(source, { n: 5 });
+  assert.deepEqual(sayTexts(result), ["true 1"]);
+  assert.equal(result.snapshot.failure?.code, "TSR016");
+  assert.equal(
+    result.snapshot.frames[0]?.bindings.find((binding) => binding.name === "calls")?.value,
+    1,
+  );
+});
+
+test("text operations are checkpoint and resume equivalent", () => {
+  assertRuntimeResumeEquivalent(
+    [
+      'let words = "one two three".split(" ")',
+      "let shouted = []",
+      "for word in words {",
+      "    shouted.add(word.uppercaseFirst())",
+      "}",
+      'say shouted.join(" ")',
+      'say "${words.join("").length}"',
+    ].join("\n"),
+  );
+});

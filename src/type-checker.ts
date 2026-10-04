@@ -23,11 +23,14 @@ import {
   numberAnswerText,
 } from "./interaction-answers.js";
 import type { TypeCheckPlan } from "./plan/model.js";
+import { CONVERSION_RESULTS } from "./conversions.js";
+import { builtinCallProblems, memberProblems, type OperationProblem } from "./operation-checks.js";
 import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
 import { staticChoiceValue, staticNumber, staticVisibleText } from "./static-evaluation.js";
 import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
 import { impossibleCaseMessage } from "./switch-cases.js";
 import type { SourceSpan } from "./source.js";
+import { TEXT_MEMBERS, type TextMember } from "./text-operations.js";
 import {
   arithmeticType,
   BOOLEAN_TYPE,
@@ -94,6 +97,8 @@ export type RuntimeCheckSite =
 
 const typeCode = {
   invalidSetElement: "TSV006",
+  argumentCount: "TSV020",
+  unknownNamedArgument: "TSV022",
   invalidInteractionChoice: "TSV029",
   invalidInteractionDefault: "TSV039",
   listInText: "TSV040",
@@ -819,7 +824,9 @@ class TypeChecker {
     if (["scalar", "list", "set", "range", "null"].includes(value.kind)) {
       this.#report(
         typeCode.invalidOperand,
-        `Only objects, speakers, and timer and media handles have properties to assign, but this is ${describeValue(value)}.`,
+        isScalar(value, "string")
+          ? `Text cannot be changed, so '${name}' cannot be assigned. Assign a new text to the variable instead.`
+          : `Only objects, speakers, and timer and media handles have properties to assign, but this is ${describeValue(value)}.`,
         objectExpression.span,
       );
       return undefined;
@@ -1383,6 +1390,13 @@ class TypeChecker {
     const values: StaticType[] = [];
     for (const argument of expression.arguments)
       values.push(yield* compileChild(this.#expressionTask(argument.value, scope)));
+    const typeOf = (argument: Expression): StaticType => this.#typeOf(argument);
+    if (value.kind === "list" && method === "join") {
+      this.#reportProblems(
+        memberProblems(callee.object, receiver, callee.property, expression, typeOf),
+      );
+      return STRING_TYPE;
+    }
     if (value.kind === "list" || value.kind === "set") {
       // A set compares only values it can hold.
       if (value.kind === "set" && (method === "contains" || method === "remove"))
@@ -1434,7 +1448,15 @@ class TypeChecker {
         );
       return NULL_TYPE;
     }
-    if (value.kind !== "unknown" && value.kind !== "open" && value.kind !== "never")
+    // Text operations (V30 §8), members of other values that have none, and text-only methods on unknown receivers.
+    if (["scalar", "null", "range", "unknown", "open"].includes(value.kind)) {
+      this.#reportProblems(
+        memberProblems(callee.object, receiver, callee.property, expression, typeOf),
+      );
+      const member = isScalar(value, "string") ? TEXT_MEMBERS.get(method) : undefined;
+      return member?.parameters ? textResultType(member) : UNKNOWN_TYPE;
+    }
+    if (value.kind !== "never")
       this.#report(
         typeCode.invalidOperand,
         `${capitalize(describeValue(value))} has no method '${method}'.`,
@@ -1476,14 +1498,14 @@ class TypeChecker {
       case "round":
       case "floor":
       case "ceil":
-        if (argument !== undefined && value !== undefined)
-          this.#reportUnless(
-            value,
-            isNumeric(value),
-            argument.value,
-            `${name}(...) takes a number`,
-          );
+        this.#reportProblems(builtinCallProblems(name, expression, (item) => this.#typeOf(item)));
         return INTEGER_TYPE;
+      case "toString":
+      case "toNumber":
+      case "toInteger":
+      case "toBoolean":
+        this.#reportProblems(builtinCallProblems(name, expression, (item) => this.#typeOf(item)));
+        return scalarType(CONVERSION_RESULTS.get(name)!);
       case "escapeMarkup":
         if (argument !== undefined && value !== undefined)
           this.#reportUnless(
@@ -1510,6 +1532,14 @@ class TypeChecker {
         if (name === "length") return INTEGER_TYPE;
         if (name === "first" || name === "last" || name === "random")
           return placeRead(value.element);
+        if (name === "join" && value.kind === "list") {
+          this.#reportProblems(
+            memberProblems(expression.object, object, expression.property, null, (item) =>
+              this.#typeOf(item),
+            ),
+          );
+          return UNKNOWN_TYPE;
+        }
         this.#report(
           typeCode.invalidOperand,
           `${value.kind === "list" ? "Lists" : "Sets"} have no property '${name}'; use length, first, last, or random.`,
@@ -1534,12 +1564,12 @@ class TypeChecker {
       case "scalar":
       case "range":
       case "null":
-        this.#report(
-          typeCode.invalidOperand,
-          `${capitalize(describeValue(value))} has no property '${name}'.`,
-          expression.property.span,
+        this.#reportProblems(
+          memberProblems(expression.object, object, expression.property, null, (item) =>
+            this.#typeOf(item),
+          ),
         );
-        return UNKNOWN_TYPE;
+        return isScalar(value, "string") && name === "length" ? INTEGER_TYPE : UNKNOWN_TYPE;
       default:
         return UNKNOWN_TYPE;
     }
@@ -2034,6 +2064,11 @@ class TypeChecker {
     this.#mixedLiterals.clear();
   }
 
+  #reportProblems(problems: readonly OperationProblem[]): void {
+    for (const problem of problems)
+      this.#report(typeCode[problem.kind], problem.message, problem.span);
+  }
+
   #report(code: string, message: string, span: SourceSpan): void {
     this.diagnostics.push(createDiagnostic(DiagnosticSeverity.Error, code, message, span));
   }
@@ -2485,4 +2520,15 @@ function conditionFix(value: StaticType, expression: Expression): string {
   if (kind === "list" || kind === "set")
     return ` Check its length instead, such as '${label}.length > 0'.`;
   return "";
+}
+
+/** The result type of a text member: a new value, so a `string[]` from `split` decides nothing elsewhere. */
+function textResultType(member: TextMember): StaticType {
+  return member.result === "string[]"
+    ? { kind: "list", element: STRING_TYPE }
+    : scalarType(member.result);
+}
+
+function scalarType(name: "string" | "integer" | "number" | "boolean"): StaticType {
+  return { kind: "scalar", name };
 }
