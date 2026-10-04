@@ -14,8 +14,9 @@ and its diagnostic count; selecting a file opens it.
 The standalone playground is a local technical workspace, not the production editor. It uses an accessible native
 textarea for ordinary `.tease` source, diagnostics, instruction-plan/runtime/event inspection, stepping, reset, and
 validated checkpoint save/restore. Its Player panel provides the first Standard interaction and chat-pacing control POC
-through the DOM-free workspace controller. It deliberately has no Monaco integration, package authoring,
-library-aware completion, or cross-origin production-player shell.
+through the DOM-free workspace controller. With a development image folder (see the repository `README.md`), it
+compiles with that folder's tagged images and shows the Stage image. It deliberately has no Monaco integration,
+package authoring, library-aware completion, or cross-origin production-player shell.
 
 The technical workspace/controller implementation lives at `playground/workspace/controller.ts`; browser and server
 entrypoints use that controller directly. Player rendering remains in the browser presentation layer and does not create

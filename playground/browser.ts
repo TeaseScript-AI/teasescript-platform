@@ -2,6 +2,7 @@ import {
   CheckpointError,
   type InstructionPlan,
   type InterpreterEvent,
+  type ProjectImageFile,
   type RuntimeSnapshot,
 } from "../src/index.js";
 import {
@@ -47,6 +48,10 @@ const elements = {
   eventLog: requiredElement("event-log"),
   instructionPlan: requiredElement("instruction-plan"),
   runtimeState: requiredElement("runtime-state"),
+  stagePanel: requiredElement("stage-panel"),
+  stageImage: requiredImage("stage-image"),
+  stagePath: requiredElement("stage-path"),
+  imageCatalogStatus: requiredElement("image-catalog-status"),
   actionStatus: requiredElement("action-status"),
   loadedExampleName: requiredElement("loaded-example-name"),
   sourceRevision: requiredElement("source-revision"),
@@ -67,6 +72,8 @@ const elements = {
 
 let sourceRevision = 0;
 let compiledRevision: number | null = null;
+/** The server's development image folder (#572), or `undefined` when it offers none. */
+let images: readonly ProjectImageFile[] | undefined;
 let plan: InstructionPlan | null = null;
 let snapshot: RuntimeSnapshot | null = null;
 let eventLog: InterpreterEvent[] = [];
@@ -136,7 +143,61 @@ new ResizeObserver(() => {
   updateChoicePresentation();
 }).observe(elements.sourcePanel);
 new ResizeObserver(updateChoicePresentation).observe(elements.playerPanel);
-void loadInitialSource();
+void loadImageFolder().then(loadInitialSource);
+
+/** Offers the server's development image folder to tag queries and the Stage preview when it has one. */
+async function loadImageFolder(): Promise<void> {
+  try {
+    const response = await fetch("/dev-images/catalog.json", { cache: "no-store" });
+    if (!response.ok) return;
+    const catalog = imageFolderCatalog(await response.json());
+    if (catalog === null) {
+      elements.stagePanel.hidden = false;
+      elements.imageCatalogStatus.textContent = "The server's image folder catalog is malformed.";
+      return;
+    }
+    images = catalog.images;
+    elements.stagePanel.hidden = false;
+    elements.imageCatalogStatus.textContent = [
+      `${catalog.images.length} images from the server's development folder.`,
+      ...catalog.problems.map((problem) => `${problem.path}: ${problem.message}`),
+    ].join("\n");
+  } catch {
+    // Without the folder, tag queries search no images.
+  }
+}
+
+/** The catalog the server sent, or `null` when it does not have the expected shape. */
+function imageFolderCatalog(
+  value: unknown,
+): {
+  readonly images: readonly ProjectImageFile[];
+  readonly problems: readonly { readonly path: string; readonly message: string }[];
+} | null {
+  if (!isRecord(value)) return null;
+  const { images: listed, problems } = value;
+  if (!Array.isArray(listed) || !Array.isArray(problems)) return null;
+  const parsedImages: ProjectImageFile[] = [];
+  for (const image of listed) {
+    if (!isRecord(image)) return null;
+    const { path, keywords } = image;
+    if (typeof path !== "string" || !Array.isArray(keywords)) return null;
+    if (!keywords.every((keyword) => typeof keyword === "string")) return null;
+    parsedImages.push({ path, keywords });
+  }
+  const parsedProblems: { path: string; message: string }[] = [];
+  for (const problem of problems) {
+    if (!isRecord(problem)) return null;
+    const { path, message } = problem;
+    if (typeof path !== "string" || typeof message !== "string") return null;
+    parsedProblems.push({ path, message });
+  }
+  return { images: parsedImages, problems: parsedProblems };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
 
 async function loadInitialSource(): Promise<void> {
   const draft = safeStorageGet(DRAFT_KEY);
@@ -196,7 +257,10 @@ function sourceEdited(saveDraft = true): void {
 
 function compileAndReset(): void {
   try {
-    const result = compileWorkspaceSource(elements.source.value, { wallClockMs: Date.now() });
+    const result = compileWorkspaceSource(elements.source.value, {
+      wallClockMs: Date.now(),
+      ...(images === undefined ? {} : { images }),
+    });
     compiledRevision = result.plan === null ? null : sourceRevision;
     applyResult(result, true);
     setActionStatus(
@@ -741,6 +805,7 @@ function renderTranscriptEvent(event: InterpreterEvent): void {
 function renderState(): void {
   elements.instructionPlan.textContent = prettyJson(plan);
   elements.runtimeState.textContent = prettyJson(snapshot);
+  renderStageImage(snapshot?.stageImage ?? null);
   elements.eventLog.textContent = prettyJson(eventLog);
   elements.instructionPosition.textContent =
     plan === null || snapshot === null
@@ -758,6 +823,19 @@ function renderState(): void {
   elements.saveCheckpoint.disabled = !current;
   elements.restoreCheckpoint.disabled = !current;
   renderPlayerControls(currentPlayerPresentation());
+}
+
+function renderStageImage(path: string | null): void {
+  if (elements.stagePanel.hidden) return;
+  elements.stagePath.textContent = path ?? "No Stage image.";
+  const known = path !== null && images?.some((image) => image.path === path) === true;
+  elements.stageImage.hidden = !known;
+  if (known) {
+    const url = `/dev-images/files/${path.split("/").map(encodeURIComponent).join("/")}`;
+    if (elements.stageImage.getAttribute("src") !== url) elements.stageImage.src = url;
+  } else {
+    elements.stageImage.removeAttribute("src");
+  }
 }
 
 function renderSourceLines(): void {
@@ -834,6 +912,14 @@ function requiredForm(id: string): HTMLFormElement {
   const element = requiredElement(id);
   if (!(element instanceof HTMLFormElement)) {
     throw new Error(`Playground element #${id} is not a form.`);
+  }
+  return element;
+}
+
+function requiredImage(id: string): HTMLImageElement {
+  const element = requiredElement(id);
+  if (!(element instanceof HTMLImageElement)) {
+    throw new Error(`Playground element #${id} is not an image.`);
   }
   return element;
 }

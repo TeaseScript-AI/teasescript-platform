@@ -123,6 +123,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .source-panel { align-self: start; }
 
 .diagnostics-panel { margin-top: 1rem; }
+.stage-panel { margin-top: 1rem; }
+.stage-panel img:not([hidden]) { display: block; max-height: 24rem; max-width: 100%; object-fit: contain; }
+.stage-panel pre { white-space: pre-wrap; }
 
 pre {
   max-height: 31rem;

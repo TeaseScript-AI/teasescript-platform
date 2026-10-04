@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { PLAYGROUND_EXAMPLES } from "./examples.js";
+import { IMAGE_FOLDER_EXTENSIONS, ImageFolder } from "./image-folder.js";
 import {
   compileWorkspaceSource,
   executeWorkspaceSource,
@@ -12,6 +13,11 @@ import {
 
 export interface PlaygroundServerOptions {
   readonly projectRoot?: string;
+  /**
+   * A development image folder (#572): its images and their XMP tags are offered at `/dev-images/catalog.json` and
+   * `/dev-images/files/<path>`. Without it, both routes are absent.
+   */
+  readonly imagesRoot?: string;
 }
 
 export interface StartPlaygroundServerOptions extends PlaygroundServerOptions {
@@ -24,6 +30,8 @@ export function createPlaygroundServer(options: PlaygroundServerOptions = {}): S
   const playgroundRoot = resolve(projectRoot, "playground");
   const distRoot = resolve(projectRoot, "dist");
   const examplesRoot = resolve(projectRoot, "examples");
+  const imageFolder =
+    options.imagesRoot === undefined ? null : new ImageFolder(resolve(options.imagesRoot));
   const workspace: AutomationWorkspace = {
     source: "",
     sourceRevision: 0,
@@ -35,7 +43,7 @@ export function createPlaygroundServer(options: PlaygroundServerOptions = {}): S
   return createServer((request, response) => {
     void serveRequest(
       request,
-      { projectRoot, playgroundRoot, distRoot, examplesRoot },
+      { projectRoot, playgroundRoot, distRoot, examplesRoot, imageFolder },
       workspace,
       response,
     ).catch(() => {
@@ -55,7 +63,11 @@ export async function startPlaygroundServer(
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     throw new RangeError("PORT must be an integer from 1 through 65535.");
   }
-  const server = createPlaygroundServer(options);
+  const imagesRoot = options.imagesRoot ?? process.env.PLAYGROUND_IMAGES;
+  const server = createPlaygroundServer({
+    ...options,
+    ...(imagesRoot === undefined || imagesRoot === "" ? {} : { imagesRoot }),
+  });
   await new Promise<void>((resolveListen, reject) => {
     server.once("error", reject);
     server.listen(port, host, () => {
@@ -65,6 +77,9 @@ export async function startPlaygroundServer(
   });
   const printableHost = host.includes(":") ? `[${host}]` : host;
   process.stdout.write(`TeaseScript playground: http://${printableHost}:${port}/\n`);
+  if (imagesRoot !== undefined && imagesRoot !== "") {
+    process.stdout.write(`Development images: ${resolve(imagesRoot)}\n`);
+  }
   return server;
 }
 
@@ -73,6 +88,7 @@ interface StaticRoots {
   readonly playgroundRoot: string;
   readonly distRoot: string;
   readonly examplesRoot: string;
+  readonly imageFolder: ImageFolder | null;
 }
 
 interface AutomationWorkspace {
@@ -111,6 +127,10 @@ async function serveRequest(
   }
   if (unsafePath(pathname)) {
     sendText(response, 400, "Rejected unsafe request path.\n", method === "HEAD");
+    return;
+  }
+  if (pathname === "/dev-images/catalog.json" && roots.imageFolder !== null) {
+    sendJson(response, 200, await roots.imageFolder.scan());
     return;
   }
 
@@ -335,6 +355,12 @@ function resolveTarget(pathname: string, roots: StaticRoots): StaticTarget | nul
   if (pathname.startsWith("/dist/")) {
     return resolveInside(roots.distRoot, pathname.slice("/dist/".length));
   }
+  if (pathname.startsWith("/dev-images/files/") && roots.imageFolder !== null) {
+    const relativePath = pathname.slice("/dev-images/files/".length);
+    return IMAGE_FOLDER_EXTENSIONS.has(extname(relativePath).toLowerCase())
+      ? resolveInside(roots.imageFolder.root, relativePath)
+      : null;
+  }
   if (pathname.startsWith("/examples/")) {
     const relativePath = pathname.slice("/examples/".length);
     const allowed = Object.values(PLAYGROUND_EXAMPLES).some(
@@ -364,7 +390,7 @@ function unsafePath(pathname: string): boolean {
 }
 
 function contentType(path: string): string {
-  switch (extname(path)) {
+  switch (extname(path).toLowerCase()) {
     case ".html":
       return "text/html; charset=utf-8";
     case ".css":
@@ -378,6 +404,13 @@ function contentType(path: string): string {
       return "image/png";
     case ".webp":
       return "image/webp";
+    case ".gif":
+      return "image/gif";
+    case ".tif":
+    case ".tiff":
+      return "image/tiff";
+    case ".svg":
+      return "image/svg+xml";
     case ".json":
     case ".map":
       return "application/json; charset=utf-8";
