@@ -5,10 +5,7 @@
 // Language: EN
 // Tags: training
 
-let visits = load "training.visits"
-if visits == null {
-  visits = 0
-}
+let visits = load "training.visits", default: 0
 save visits + 1 as "training.visits"
 let title = load "training.title"
 if title == null or title == "" {

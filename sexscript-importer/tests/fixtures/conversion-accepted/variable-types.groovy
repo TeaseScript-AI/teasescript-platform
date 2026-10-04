@@ -22,6 +22,10 @@ int whole = fraction()
 whole = fraction() + 1
 save("x.count", 4)
 int stored = loadInteger("x.count")
+// Another storage read may hold a fraction, which Groovy truncated.
+save("x.ratio", 2.5)
+int ratio = loadFloat("x.ratio")
+show("Ratio ${ratio}")
 // A variable that starts as null keeps the type of its first value.
 def later = null
 later = 1

@@ -92,7 +92,10 @@ export type IrStatement =
       name: string;
       value: IrExpression;
       type?: string;
+      /** A Groovy integer variable (`int`, `long`, ...), which stores whole numbers. */
       integer?: true;
+      /** The Groovy value may be text, which an integer variable stored as a character code. */
+      maybeText?: true;
       /**
        * The annotation the current compiler needs where the accepted rules need none or another one: an integer that
        * later holds fractions widens by itself (#504 option B, #526), and a numeric `choose` is an integer (#515).
@@ -105,6 +108,8 @@ export type IrStatement =
       target: IrExpression;
       operator: "=" | "+=" | "-=";
       value: IrExpression;
+      /** The Groovy value may be text (see the `let` statement). */
+      maybeText?: true;
     })
   | (IrBase & { kind: "expression"; expression: IrExpression })
   | (IrBase & { kind: "if"; condition: IrExpression; then: IrStatement[]; else: IrStatement[] })
@@ -173,6 +178,7 @@ export type IrExpression =
    * accepted in PR #518); `dict` marks a member of a dict (#536).
    */
   | { kind: "property"; target: IrExpression; name: string; pending?: true; dict?: true }
+  /** A dict `get` has the key and the default as its arguments: `dict.get(key, default: value)` (#536). */
   | {
       kind: "methodCall";
       target: IrExpression;
@@ -181,8 +187,18 @@ export type IrExpression =
       pending?: true;
       dict?: true;
     }
-  /** `load key` returns null for a missing key; `defaultValue` replaces that null without writing storage. */
-  | { kind: "load"; key: IrExpression; defaultValue?: IrExpression }
+  /**
+   * `load key` returns null for a missing key; `defaultValue` replaces that null without writing storage, written
+   * `load key, default: value` (#541), or with `mainDefault` in the form main implements until #541 lands. `integer`
+   * marks a legacy `loadInteger()`, which read a whole number.
+   */
+  | {
+      kind: "load";
+      key: IrExpression;
+      defaultValue?: IrExpression;
+      integer?: true;
+      mainDefault?: true;
+    }
   /**
    * Compact `choose`. Without `labels`, numeric labels return the zero-based option index; with `labels`, each
    * option gets the identifier label that `choose` returns.

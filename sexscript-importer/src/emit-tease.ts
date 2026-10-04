@@ -243,12 +243,18 @@ export function emitExpression(expression: IrExpression): string {
       return `${operand(expression.target, POSTFIX)}[${emitExpression(expression.index)}]`;
     case "property":
       return `${operand(expression.target, POSTFIX)}.${expression.name}`;
-    case "methodCall":
-      return `${operand(expression.target, POSTFIX)}.${expression.name}(${expression.arguments.map(emitExpression).join(", ")})`;
+    case "methodCall": {
+      const args = expression.arguments.map(emitExpression);
+      // A dict read with a default (#536).
+      if (expression.dict === true && expression.name === "get" && args.length === 2)
+        return `${operand(expression.target, POSTFIX)}.get(${args[0]}, default: ${args[1]})`;
+      return `${operand(expression.target, POSTFIX)}.${expression.name}(${args.join(", ")})`;
+    }
     case "load":
+      // A read with a default is parenthesized unless it is a whole statement value (see emitValue).
       return expression.defaultValue === undefined
         ? `load ${operand(expression.key, POSTFIX)}`
-        : `load ${operand(expression.key, POSTFIX)} default ${operand(expression.defaultValue, POSTFIX)}`;
+        : `(${emitLoadDefault(expression)})`;
     case "input":
       return expression.defaultValue === undefined
         ? expression.input
@@ -346,7 +352,7 @@ function precedence(expression: IrExpression): number {
       return POSTFIX;
     // `load` and a prefilled input extend to the end of their operands, so they are parenthesized as operands.
     case "load":
-      return 0;
+      return expression.defaultValue === undefined ? 0 : PRIMARY;
     case "input":
       return expression.defaultValue === undefined ? PRIMARY : 0;
     default:
@@ -377,9 +383,19 @@ function emitButton(label: IrExpression, timeout: IrExpression | null): string {
 /** A complete statement value, where a compact choice or button needs no parentheses. */
 function emitValue(expression: IrExpression): string {
   if (expression.kind === "button") return emitButton(expression.label, expression.timeout);
+  if (expression.kind === "load" && expression.defaultValue !== undefined)
+    return emitLoadDefault(expression);
   return expression.kind === "choice" || expression.kind === "listChoice"
     ? emitChoice(expression)
     : emitExpression(expression);
+}
+
+/** `load key, default: value` (#541), or the form main still implements, `load key default value`. */
+function emitLoadDefault(expression: Extract<IrExpression, { kind: "load" }>): string {
+  const key = operand(expression.key, POSTFIX);
+  return expression.mainDefault === true
+    ? `load ${key} default ${operand(expression.defaultValue!, POSTFIX)}`
+    : `load ${key}, default: ${emitExpression(expression.defaultValue!)}`;
 }
 
 function operand(expression: IrExpression, minimum: number): string {

@@ -156,7 +156,7 @@ test("keeps a switch whose cases overlap as an if chain, which keeps Groovy's fi
   );
 });
 
-test("keeps a switch with an empty or text range as an if chain", () => {
+test("keeps a switch with an empty range as an if chain and reports a text range", () => {
   const rangeCase = (from: string | number, to: string | number, inclusive: boolean): AstNode => ({
     kind: "case",
     span,
@@ -167,11 +167,8 @@ test("keeps a switch with an empty or text range as an if chain", () => {
       statements: [statement(call("show", constant("in"))), { kind: "break", span }],
     },
   });
-  for (const [from, to, inclusive] of [
-    [1, 1, false],
-    ["a", "c", true],
-  ] as const) {
-    const program = lowerParsedFile(
+  const lower = (from: string | number, to: string | number, inclusive: boolean) =>
+    lowerParsedFile(
       file([
         {
           kind: "switch",
@@ -182,7 +179,18 @@ test("keeps a switch with an empty or text range as an if chain", () => {
         },
       ]),
     );
-    assert.doesNotMatch(emitTease(program), /^switch /mu);
+  const empty = lower(1, 1, false);
+  assert.deepEqual(empty.diagnostics, []);
+  assert.doesNotMatch(emitTease(empty), /^switch /mu);
+  // Groovy's "a".."c" holds "a", "b", and "c", not "ba"; "c".."a" holds the same texts.
+  for (const [from, to] of [
+    ["a", "c"],
+    ["c", "a"],
+  ] as const) {
+    assert.deepEqual(
+      lower(from, to, true).diagnostics.map((diagnostic) => diagnostic.code),
+      ["SX_SWITCH_CASE_MATCH"],
+    );
   }
 });
 
@@ -1225,10 +1233,14 @@ test("turns a lookup with a text key into a dict lookup (#536)", () => {
       }),
     ]),
   );
-  assert.deepEqual(program.diagnostics, []);
-  assert.equal(
+  // Groovy read the missing key as null; the dict lookup stops the script, which a note says.
+  assert.deepEqual(
+    program.diagnostics.map((diagnostic) => diagnostic.code),
+    ["SX_DICT_MISSING_KEY"],
+  );
+  assert.match(
     emitTease(program),
-    'let registry = dict{}\nlet key = "collar"\nlet found = registry[key]\n',
+    /^let registry = dict\{\}\nlet key = "collar"\n\/\/ NOTE SX_DICT_MISSING_KEY .*\nlet found = registry\[key\]\n$/u,
   );
 });
 

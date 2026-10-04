@@ -12,8 +12,9 @@ def month = date[Calendar.MONTH] + 1
 def hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
 def dow = Calendar.getInstance().get(Calendar.DAY_OF_WEEK)
 def dayOfYear = Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
+def sameDay = date[Calendar.DAY_OF_YEAR]
 def days = Math.round(n / 2)
 if (hour > 22) System.exit(0)
 // Java date patterns: the ISO date is a machine format, other patterns are shown in the player's local form.
 def stamp = new Date().format("yyyy-MM-dd")
-show("Status of " + stamp + " at " + new Date().format("HH:mm") + ", day " + dayOfYear)
+show("Status of " + stamp + " at " + new Date().format("HH:mm") + ", day " + dayOfYear + " " + sameDay)

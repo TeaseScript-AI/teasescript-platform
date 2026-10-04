@@ -57,6 +57,7 @@ const SEXSCRIPT_RESULT_TYPES = new Map<string, ValueType>([
   ["loadMap", OBJECT | NULL],
   ["loadString", STRING | NULL],
   ["showButton", NUMBER],
+  ["showPopup", NUMBER],
 ]);
 
 const OBJECT_METHOD_RESULT_TYPES = new Map<string, ValueType>([
@@ -157,6 +158,9 @@ export function inferType(node: AstNode | null, environment: TypeEnvironment): V
       const property = constantString(node.property);
       return property === "size" || property === "length" ? NUMBER : UNKNOWN;
     }
+    // A placeholder for a value that adds no type, such as a lookup of the dict whose values are being inferred.
+    case "noValue":
+      return 0;
     default:
       return UNKNOWN;
   }
@@ -279,13 +283,61 @@ export function inferVariableTypes(
   };
 }
 
+/**
+ * Element types of variables that only list literals are assigned to, including elements added later (`add`, `<<`,
+ * `addAll`, `+=`, index writes). A variable assigned another variable shares its list, as Groovy lists are shared by
+ * reference, so both get the elements of either.
+ */
 function inferListElements(body: AstNode, environment: TypeEnvironment): Map<string, ValueType> {
   const elements = new Map<string, ValueType>();
+  const added = new Map<string, ValueType>();
   const unknown = new Set<string>();
+  const aliases: Array<[string, string]> = [];
+  // `target += source` and `target.addAll(source)` copy the elements of a list variable one way.
+  const appends: Array<[string, string]> = [];
+  const add = (name: string | null, type: ValueType): void => {
+    if (name !== null) added.set(name, (added.get(name) ?? 0) | type);
+  };
+  const itemsType = (list: AstNode): ValueType =>
+    (Array.isArray(list.items) ? list.items : []).reduce(
+      (type: ValueType, item) => type | (isAstNode(item) ? inferType(item, environment) : UNKNOWN),
+      0,
+    );
+  const appendList = (name: string | null, list: AstNode): void => {
+    const source = variableName(list);
+    if (list.kind === "list") add(name, itemsType(list));
+    else if (source !== null && name !== null) appends.push([name, source]);
+    else add(name, UNKNOWN);
+  };
   walkAst(body, (node) => {
+    if (node.kind === "methodCall") {
+      const name = variableName(node.object);
+      const method = constantString(node.method);
+      const args = asNode(node.arguments);
+      const items = Array.isArray(args?.items) ? args.items.filter(isAstNode) : [];
+      const last = items.at(-1);
+      if ((method === "add" || method === "push" || method === "leftShift") && last !== undefined)
+        add(name, inferType(last, environment));
+      if (method === "addAll" && last !== undefined) appendList(name, last);
+      return;
+    }
+    if (node.kind === "binary" && (node.operator === "<<" || node.operator === "+=")) {
+      const right = asNode(node.right);
+      if (right === null) return;
+      if (node.operator === "<<") add(variableName(node.left), inferType(right, environment));
+      else if ((inferType(right, environment) & LIST) !== 0)
+        appendList(variableName(node.left), right);
+      else add(variableName(node.left), inferType(right, environment));
+      return;
+    }
     if (node.kind !== "declaration" && !(node.kind === "binary" && node.operator === "=")) return;
-    const name = variableName(node.left);
+    const left = asNode(node.left);
     const value = asNode(node.right);
+    if (left?.kind === "binary" && left.operator === "[" && value !== null) {
+      add(variableName(left.left), inferType(value, environment));
+      return;
+    }
+    const name = variableName(left);
     if (name === null || value === null) return;
     if (
       value.kind === "unsupportedExpression" ||
@@ -300,16 +352,42 @@ function inferListElements(body: AstNode, environment: TypeEnvironment): Map<str
       elements.set(name, (elements.get(name) ?? 0) | element | (primitive ? 0 : NULL));
       return;
     }
+    const source = variableName(value);
+    if (source !== null) {
+      aliases.push([name, source]);
+      return;
+    }
     if (value.kind !== "list") {
       unknown.add(name);
       return;
     }
-    let type = elements.get(name) ?? 0;
-    for (const item of Array.isArray(value.items) ? value.items : []) {
-      type |= isAstNode(item) ? inferType(item, environment) : UNKNOWN;
-    }
-    elements.set(name, type);
+    elements.set(name, (elements.get(name) ?? 0) | itemsType(value));
   });
+  for (const [name, type] of added) {
+    // Only a list variable gains the elements; a `+=` on a number or text adds nothing.
+    if (elements.has(name)) elements.set(name, elements.get(name)! | type);
+  }
+  const flows = [
+    ...aliases.flatMap(([target, source]): Array<[string, string]> => [
+      [target, source],
+      [source, target],
+    ]),
+    ...appends,
+  ];
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [target, source] of flows) {
+      if (!elements.has(source) && !unknown.has(source)) continue;
+      const merged = unknown.has(source)
+        ? undefined
+        : (elements.get(target) ?? 0) | elements.get(source)!;
+      if (merged === undefined ? !unknown.has(target) : merged !== elements.get(target)) {
+        if (merged === undefined) unknown.add(target);
+        else elements.set(target, merged);
+        changed = true;
+      }
+    }
+  }
   for (const name of unknown) elements.delete(name);
   return elements;
 }

@@ -39,6 +39,9 @@ const TEMPORAL_GETTERS = new Set(["getDate", "getTime", "getDateTime", "getTimes
 
 /** Capability name of the accepted dict (#536), which main does not implement yet. */
 const DICT = "dict (#536)";
+/** The property of the object that stands in for a dict in smoke runs, and the prefix of its entry names. */
+const DICT_PROPERTY = "dict (#536)";
+const DICT_KEY_PREFIX = "key ";
 
 /** Calls that only a proposed language change defines, by the proposal (see proposals.ts). */
 const PROPOSED_CALLS = new Map<string, ProposalId>([["countImages", "media-tags"]]);
@@ -112,12 +115,14 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
   const expression = (value: IrExpression): IrExpression => {
     switch (value.kind) {
       case "load":
+        if (value.defaultValue === undefined) return { ...value, key: expression(value.key) };
+        // `load key, default: value` (#541); main implements `load key default value`.
+        capabilities.add("load default: (#541)");
         return {
           ...value,
           key: expression(value.key),
-          ...(value.defaultValue === undefined
-            ? {}
-            : { defaultValue: expression(value.defaultValue) }),
+          defaultValue: expression(value.defaultValue),
+          mainDefault: true,
         };
       case "call": {
         const proposal = PROPOSED_CALLS.get(value.name);
@@ -212,7 +217,12 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
           return call(operation, operation, value.arguments.map(expression));
         }
         if (value.dict === true) {
-          return call(DICT, `dict.${value.name}()`, [
+          // `get(key, default: value)` is apart from the `[key]` read, which is `dict.get`.
+          const operation =
+            value.name === "get" && value.arguments.length === 2
+              ? "dict.get(default:)"
+              : `dict.${value.name}()`;
+          return call(DICT, operation, [
             expression(value.target),
             ...value.arguments.map(expression),
           ]);
@@ -695,24 +705,44 @@ export function pendingHostFunctions(
     const fields: unknown = value;
     return isRecord(fields) ? fields : null;
   };
-  // Proposed dictionaries: objects with runtime keys. Keys are text; Groovy map keys of other types become text.
   const entries = (operation: string, value: RuntimeValue | undefined) => {
     const object = composite(value);
     if (object === null || !Array.isArray(object.properties)) {
-      throw new Error(`${operation} needs a dictionary.`);
+      throw new Error(`${operation} needs an object.`);
     }
     return object.properties.filter(isRecord);
   };
-  const keyText = (key: RuntimeValue | undefined): string => {
-    if (typeof key !== "string" && typeof key !== "number" && typeof key !== "boolean") {
-      throw new Error("A dictionary key must be text, a number, or a boolean.");
-    }
-    if (String(key) === "") throw new Error("A dictionary key must not be empty.");
-    return String(key);
+  // A dict (#536) is an object with one property, DICT_PROPERTY, whose object has a property per entry, named with
+  // DICT_KEY_PREFIX before the key so that the empty text is a key too. It never equals an object, two dicts compare
+  // without regard to order, and keys are text only.
+  const dictEntries = (operation: string, value: RuntimeValue | undefined) => {
+    const [wrapper] = entries(operation, value);
+    const table = wrapper?.name === DICT_PROPERTY ? composite(runtimeValue(wrapper.value)) : null;
+    if (table === null || !Array.isArray(table.properties))
+      throw new Error(`${operation} needs a dict.`);
+    return table.properties
+      .filter(isRecord)
+      .map((property) => ({
+        name: String(property.name).slice(DICT_KEY_PREFIX.length),
+        value: runtimeValue(property.value),
+      }));
   };
-  const dictionary = (properties: Array<Record<string, unknown>>): RuntimeValue => {
-    const object = { kind: "object", properties };
-    return object;
+  const keyText = (key: RuntimeValue | undefined): string => {
+    if (typeof key !== "string") throw new Error("A dict key must be text (#536).");
+    return key;
+  };
+  const dictionary = (
+    properties: ReadonlyArray<{ name: string; value: RuntimeValue }>,
+  ): RuntimeValue => {
+    const table = {
+      kind: "object",
+      properties: properties.map(({ name, value }) => ({
+        name: `${DICT_KEY_PREFIX}${name}`,
+        value,
+      })),
+    };
+    const dict = { kind: "object", properties: [{ name: DICT_PROPERTY, value: table }] };
+    return dict;
   };
   const listItems = (value: RuntimeValue | undefined): unknown[] | null => {
     const object = composite(value);
@@ -746,54 +776,66 @@ export function pendingHostFunctions(
       "dict.get",
       ([target, key]) => {
         const name = keyText(key);
-        const entry = entries("[key]", target).find((property) => property.name === name);
+        const entry = dictEntries("[key]", target).find((property) => property.name === name);
         if (entry === undefined) throw new Error(`Dictionary has no key ${JSON.stringify(name)}.`);
-        return runtimeValue(entry.value);
+        return entry.value;
+      },
+    ],
+    [
+      "dict.get(default:)",
+      ([target, key, fallback]) => {
+        const name = keyText(key);
+        if (fallback === undefined || fallback === null)
+          throw new Error("get() needs a default that is not null (#536).");
+        const entry = dictEntries("get()", target).find((property) => property.name === name);
+        return entry === undefined ? fallback : entry.value;
       },
     ],
     [
       "dict.set",
       ([target, key, value]) => {
         const name = keyText(key);
-        const properties = entries("[key] =", target);
+        const stored = value ?? null;
+        const properties = dictEntries("[key] =", target);
         const replaced = properties.some((property) => property.name === name);
         return dictionary(
           replaced
-            ? properties.map((property) => (property.name === name ? { name, value } : property))
-            : [...properties, { name, value }],
+            ? properties.map((property) =>
+                property.name === name ? { name, value: stored } : property,
+              )
+            : [...properties, { name, value: stored }],
         );
       },
     ],
     [
       "dict.contains()",
       ([target, key]) =>
-        entries("contains()", target).some((property) => property.name === keyText(key)),
+        dictEntries("contains()", target).some((property) => property.name === keyText(key)),
     ],
     [
       "dict.keys",
-      ([target]) => items(entries("keys", target).map((property) => runtimeValue(property.name))),
+      ([target]) => items(dictEntries("keys", target).map((property) => property.name)),
     ],
     [
       "dict.values",
-      ([target]) =>
-        items(entries("values", target).map((property) => runtimeValue(property.value))),
+      ([target]) => items(dictEntries("values", target).map((property) => property.value)),
     ],
-    ["dict.length", ([target]) => entries("length", target).length],
+    ["dict.length", ([target]) => dictEntries("length", target).length],
     [
       "dict.remove()",
       ([target, key]) => {
         const name = keyText(key);
-        const properties = entries("remove()", target);
+        const properties = dictEntries("remove()", target);
         if (!properties.some((property) => property.name === name))
           throw new Error(`Dictionary has no key ${JSON.stringify(name)}.`);
         return dictionary(properties.filter((property) => property.name !== name));
       },
     ],
-    ["dict.clear()", ([target]) => (entries("clear()", target), dictionary([]))],
+    ["dict.clear()", ([target]) => (dictEntries("clear()", target), dictionary([]))],
     [
       "dict.literal",
       ([pairs]) => {
-        const properties: Array<Record<string, unknown>> = [];
+        const properties: Array<{ name: string; value: RuntimeValue }> = [];
         for (const pair of listItems(pairs) ?? []) {
           const [key, value] = listItems(runtimeValue(pair)) ?? [];
           const name = keyText(runtimeValue(key));
@@ -812,7 +854,7 @@ export function pendingHostFunctions(
         if (typeof value === "string") return [...value].length;
         const elements = listItems(value);
         // A value of unknown type may also be a dict, which counts its entries.
-        if (elements === null) return entries("length", value).length;
+        if (elements === null) return dictEntries("length", value).length;
         return elements.length;
       },
     ],
@@ -905,6 +947,8 @@ export function pendingHostFunctions(
             : typeof timeout?.milliseconds === "number"
               ? timeout.milliseconds
               : 30_000;
+        // A timeout must be positive (#531).
+        if (limit <= 0) throw new Error("showButton needs a positive timeout.");
         const milliseconds = next("showButton", [Math.min(1000, limit), limit]);
         const elapsed = { kind: "duration", milliseconds };
         return elapsed;
@@ -915,10 +959,21 @@ export function pendingHostFunctions(
     ["askBooleans", (_, named) => named.defaults ?? emptyList],
     ["getTimestamp().toSeconds()", () => Math.floor((epochMs + state.clock.nowMs) / 1000)],
     ["getTimestamp().toMilliseconds()", () => epochMs + state.clock.nowMs],
-    // A date from strict ISO text, with the fields the getDate() stand-in has.
+    // A date from strict ISO text, or the date of a datetime (#532), with the fields the getDate() stand-in has.
     [
       "toDate",
       ([text]) => {
+        const datetime =
+          typeof text === "object" && text !== null ? entries("toDate()", text) : null;
+        if (datetime !== null) {
+          const value = {
+            kind: "object",
+            properties: datetime.filter((property) =>
+              ["year", "month", "day", "weekday", "weekdayNumber"].includes(String(property.name)),
+            ),
+          };
+          return value;
+        }
         const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(typeof text === "string" ? text : "");
         if (match === null) throw new Error(`toDate() cannot convert ${JSON.stringify(text)}.`);
         const fields: Array<[string, RuntimeValue]> = [

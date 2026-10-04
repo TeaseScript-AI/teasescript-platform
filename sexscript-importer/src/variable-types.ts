@@ -49,6 +49,11 @@ export interface VariableTypeResult {
   statements: IrStatement[];
   /** Variables, or for a loop variable single assignments, that keep values of two types. */
   conflicts: TypeConflict[];
+  /**
+   * Truncated statements (as rewritten) whose value of unknown type Groovy may have held as text, which an integer
+   * variable stored as its character code, where `toInteger()` reads the number the text spells.
+   */
+  textIntegers: IrStatement[];
   /** Declarations that gained a `number` or optional type annotation. */
   annotated: number;
   /** Values truncated with `toInteger` because Groovy declared the variable with an integer type. */
@@ -119,6 +124,8 @@ interface Rounds {
   /** Statements whose stored number truncates to an integer. */
   truncations: Set<IrStatement>;
   integerLoads: Set<IrStatement>;
+  /** Truncations of a value of unknown type that Groovy may have held as text. */
+  textIntegers: Set<IrStatement>;
   indexes: Set<IrExpression>;
 }
 
@@ -134,6 +141,7 @@ function runRounds(
     appends: new Map(),
     truncations: new Set(),
     integerLoads: new Set(),
+    textIntegers: new Set(),
     indexes: new Set(),
   };
   let results = new Map(knownResults);
@@ -144,6 +152,7 @@ function runRounds(
     rounds.indexes = analysis.indexes;
     for (const statement of analysis.truncations) rounds.truncations.add(statement);
     for (const statement of analysis.integerLoads) rounds.integerLoads.add(statement);
+    rounds.textIntegers = analysis.textIntegers;
     const next = new Map([...knownResults, ...analysis.results]);
     const resultsChanged =
       next.size !== results.size ||
@@ -162,7 +171,7 @@ export function enforceVariableTypes(
   const accepted = runRounds(statements, knownResults, "accepted");
   // The current compiler needs annotations that the accepted rules make unnecessary.
   const compiler = runRounds(statements, knownResults, "main");
-  const { bindings, appends, truncations, integerLoads, indexes } = accepted;
+  const { bindings, appends, truncations, integerLoads, textIntegers, indexes } = accepted;
   const conflicts = accepted.conflicts;
   // A repair that needs a type no annotation can write, such as an optional object, becomes a conflict too.
   const conflicting = new Set(conflicts.map((conflict) => conflict.binding));
@@ -198,6 +207,7 @@ export function enforceVariableTypes(
   const result: VariableTypeResult = {
     statements: [],
     conflicts: [],
+    textIntegers: [],
     annotated: 0,
     truncated: 0,
     compilerAnnotated: 0,
@@ -262,7 +272,9 @@ export function enforceVariableTypes(
             result.compilerAnnotated += 1;
             next = { ...next, compilerType: compilerWritten };
           }
-          return withIntegerIndexes(next, indexes);
+          const rewritten = withIntegerIndexes(next, indexes);
+          if (textIntegers.has(statement)) result.textIntegers.push(rewritten);
+          return rewritten;
         }
         case "assign": {
           const appendsList = appends.get(statement);
@@ -278,8 +290,14 @@ export function enforceVariableTypes(
             };
           }
           if (!truncations.has(statement)) return withIntegerIndexes(statement, indexes);
-          if (statement.operator === "=")
-            return withIntegerIndexes({ ...statement, value: truncate(statement.value) }, indexes);
+          if (statement.operator === "=") {
+            const rewritten = withIntegerIndexes(
+              { ...statement, value: truncate(statement.value) },
+              indexes,
+            );
+            if (textIntegers.has(statement)) result.textIntegers.push(rewritten);
+            return rewritten;
+          }
           return {
             ...statement,
             operator: "=",
@@ -352,6 +370,7 @@ interface Analysis {
   truncations: Set<IrStatement>;
   /** Integer declarations initialized from storage, declared `: integer` so the stored value is checked. */
   integerLoads: Set<IrStatement>;
+  textIntegers: Set<IrStatement>;
   /** List indexes, and `removeAt` calls, whose position may hold a fraction. */
   indexes: Set<IrExpression>;
   /** `list += value` statements, and whether the value is a list whose elements are appended. */
@@ -370,6 +389,7 @@ function analyse(
     results: new Map(),
     truncations: new Set(),
     integerLoads: new Set(),
+    textIntegers: new Set(),
     indexes: new Set(),
     appends: new Map(),
   };
@@ -472,9 +492,23 @@ function analyse(
         const fixed = item.type === undefined ? undefined : parseAnnotation(item.type);
         const declared = binding(item, item.name, item, fixed);
         let initial = typeOf(item.value, scope);
+        if (declared.integer && isText(initial)) {
+          conflict(
+            declared,
+            item,
+            `Groovy stored a one-character text in the int '${item.name}' as its character code ("3" became 51) and failed for longer text; convert the value explicitly`,
+            true,
+            "SX_INTEGER_FROM_TEXT",
+          );
+          return;
+        }
         if (declared.integer && needsInteger(initial)) {
-          // Groovy stores a whole number in an integer variable; a read from storage is declared and checked.
-          if (item.value.kind === "load" && fixed === undefined) analysis.integerLoads.add(item);
+          if (item.maybeText === true && nonNull(initial).kind === "unknown")
+            analysis.textIntegers.add(item);
+          // Groovy stores a whole number in an integer variable; a `loadInteger()` read is declared and checked, and
+          // other reads may hold a fraction that Groovy truncated.
+          if (item.value.kind === "load" && item.value.integer === true && fixed === undefined)
+            analysis.integerLoads.add(item);
           else analysis.truncations.add(item);
           initial = scalar("integer");
         }
@@ -495,8 +529,20 @@ function analyse(
         if (target === undefined) return;
         const type = bindingType(target);
         if (item.operator === "=") {
+          if (target.integer && isText(value)) {
+            conflict(
+              target,
+              item,
+              `Groovy stored a one-character text in the int '${target.name}' as its character code ("3" became 51) and failed for longer text; convert the value explicitly`,
+              true,
+              "SX_INTEGER_FROM_TEXT",
+            );
+            return;
+          }
           if (target.integer && needsInteger(value)) {
             analysis.truncations.add(item);
+            if (item.maybeText === true && nonNull(value).kind === "unknown")
+              analysis.textIntegers.add(item);
             return store(target, scalar("integer"), item);
           }
           const list = type === undefined ? undefined : nonNull(type);
@@ -693,6 +739,11 @@ function resultType(returns: readonly TeaseType[]): TeaseType {
   return values.length < returns.length || values.some((type) => type.kind === "optional")
     ? { kind: "optional", value: shared }
     : shared;
+}
+
+function isText(type: TeaseType): boolean {
+  const value = nonNull(type);
+  return value.kind === "scalar" && value.name === "string";
 }
 
 function isNumber(type: TeaseType): boolean {
@@ -966,7 +1017,13 @@ export function expressionType(
       return UNKNOWN;
     }
     case "methodCall": {
-      if (value.dict === true) return value.name === "contains" ? scalar("boolean") : UNKNOWN;
+      if (value.dict === true) {
+        if (value.name === "contains") return scalar("boolean");
+        // `get(key, default: value)` reads a value of the default's type (#536).
+        return value.name === "get" && value.arguments.length === 2
+          ? type(value.arguments[1]!)
+          : UNKNOWN;
+      }
       const target = nonNull(type(value.target));
       if (target.kind === "list") {
         if (["removeAt", "removeFirst", "removeLast"].includes(value.name)) return target.element;
@@ -980,7 +1037,8 @@ export function expressionType(
       return UNKNOWN;
     }
     case "load":
-      return UNKNOWN;
+      // A read with a default has the default's type (#541).
+      return value.defaultValue === undefined ? UNKNOWN : type(value.defaultValue);
     case "choice":
       // PR #515 makes numeric choice values integers; `main` still types them as numbers.
       if (value.labels !== undefined) return scalar("string");

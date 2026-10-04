@@ -119,6 +119,56 @@ function registerFixtures(
   }
 }
 
+// The smoke-run stand-ins behave like the accepted capabilities they replace, so a run does not pass where the real
+// implementation would fail: a dict never equals an object and takes only text keys, the empty text included (#536),
+// a button timeout must be positive (#531), and toDate() takes the date of a datetime (#532).
+test(
+  "pending stand-ins keep the accepted dict, button timeout, and toDate behavior",
+  { skip: "reason" in runnerResult ? runnerResult.reason : false },
+  () => {
+    if (!("runner" in runnerResult)) return;
+    const operations = new Map([
+      ["sxLiteral", "dict.literal"],
+      ["sxGet", "dict.get"],
+      ["sxButton", "showButton"],
+      ["sxToDate", "toDate"],
+      ["sxNow", "getDateTime"],
+    ]);
+    const builtins = pendingHostFunctions({
+      program: { sourceName: "stand-ins.tease", metadata: null, statements: [], diagnostics: [] },
+      source: "",
+      builtins: [...operations.keys()],
+      operations,
+      capabilities: new Set(),
+    });
+    const run = (source: string) => runnerResult.runner(source, builtins).status;
+    // `[1][5]` fails, so the run halts only when no check fails.
+    assert.equal(
+      run(
+        [
+          'let entries = sxLiteral([["a", 1], ["b", 2]])',
+          "if entries == { a: 1, b: 2 } {",
+          "  let unreachable = [1][5]",
+          "}",
+          'if entries != sxLiteral([["b", 2], ["a", 1]]) {',
+          "  let unreachable = [1][5]",
+          "}",
+          'if sxGet(sxLiteral([["", 3]]), "") != 3 {',
+          "  let unreachable = [1][5]",
+          "}",
+          "if sxToDate(sxNow()).day != sxNow().day {",
+          "  let unreachable = [1][5]",
+          "}",
+          "",
+        ].join("\n"),
+      ),
+      "halted",
+    );
+    assert.equal(run('let value = sxGet(sxLiteral([["1", 3]]), 1)\n'), "failed");
+    assert.equal(run('let elapsed = sxButton("Go", 0)\n'), "failed");
+  },
+);
+
 // Lone CR line endings cannot live in a committed fixture without tripping whitespace checks.
 test(
   "keeps lone-CR legacy line endings aligned with comments",
@@ -208,9 +258,10 @@ test(
   },
 );
 
-// A dict has one value type, and only a map held in a variable converts to one (#536).
+// A dict has one value type, also for property writes and list elements, only a map held in a variable converts to
+// one, and a dict never equals an object (#536).
 test(
-  "reports dicts with mixed values and runtime keys on maps not held in a variable",
+  "reports dicts with mixed values, runtime keys on maps not held in a variable, and dict-object comparisons",
   { skip: parserUnavailable },
   async () => {
     const directory = mkdtempSync(path.join(tmpdir(), "sexscript-dict-"));
@@ -225,6 +276,15 @@ test(
           'params["name"] = "Ada"',
           "def holder = [inner: 1]",
           "holder.inner[key] = 1",
+          "def scores = [:]",
+          "scores[key] = 1",
+          'scores.bonus = "text"',
+          'def lists = [a: [1], b: ["two"]]',
+          'show("${lists[key]}")',
+          "def made = { -> return [level: 3] }",
+          "def counts = [:]",
+          "counts[key] = 1",
+          'if (counts == made()) show("Same")',
           "",
         ].join("\n"),
       );
@@ -238,6 +298,16 @@ test(
           { code: "SX_UNSUPPORTED_DECLARATION_VALUE", line: 1 },
           { code: "SX_DYNAMIC_MAP_ACCESS", line: 6 },
           { code: "SX_UNSUPPORTED_ASSIGNMENT_TARGET", line: 6 },
+          // A property write stores text in a dict of numbers.
+          { code: "SX_DICT_VALUE_TYPE", line: 7 },
+          { code: "SX_UNSUPPORTED_DECLARATION_VALUE", line: 7 },
+          // Lists of numbers and lists of text are values of two types.
+          { code: "SX_DICT_VALUE_TYPE", line: 10 },
+          { code: "SX_UNSUPPORTED_DECLARATION_VALUE", line: 10 },
+          { code: "SX_COLLECTION_TEXT", line: 11 },
+          { code: "SX_UNSUPPORTED_ARGUMENT", line: 11 },
+          { code: "SX_DICT_EQUALITY", line: 15 },
+          { code: "SX_UNSUPPORTED_IF", line: 15 },
         ],
       );
     } finally {
@@ -272,6 +342,12 @@ test(
           'def answer = getString("Settings?", [level: 2])',
           'showButton("Too late", -1)',
           'show([[1, 2], [3, 4]].join("|"))',
+          'def xs = ["a"]',
+          "def ys = xs",
+          "xs.add([1, 2])",
+          'show(ys.join(", "))',
+          'def digit = "3"',
+          "int code = digit",
           "",
         ].join("\n"),
       );
@@ -291,8 +367,11 @@ test(
       assert.match(output, /^\/\/ TODO SX_INPUT_PREFILL_VALUE line 13: /mu);
       // A negative button timeout failed in legacy and is rejected by TeaseScript.
       assert.match(output, /^\/\/ TODO SX_BUTTON_TIMEOUT line 14: /mu);
-      // join() of nested lists printed them in Groovy and fails in TeaseScript.
+      // join() of nested lists printed them in Groovy and fails in TeaseScript, also through an alias.
       assert.match(output, /^\/\/ TODO SX_LIST_JOIN line 15: /mu);
+      assert.match(output, /^\/\/ TODO SX_LIST_JOIN line 19: /mu);
+      // Groovy stored a one-character text in an int as its character code.
+      assert.match(output, /^\/\/ TODO SX_INTEGER_FROM_TEXT line 21: /mu);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

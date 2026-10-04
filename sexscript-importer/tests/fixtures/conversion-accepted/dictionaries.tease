@@ -12,6 +12,7 @@ if not owned.contains(chosen) {
 owned[GAG] = 2
 // NOTE SX_SHARED_MAP_WRITE line 9: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
 owned["plug"] = 3
+// NOTE SX_DICT_MISSING_KEY line 10: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
 say "You wear the ${toyNames[chosen]}"
 for name in owned.keys {
   say "${name}: ${owned[name]}"
@@ -52,12 +53,70 @@ let tier = 2
 // NOTE SX_DICT_KEY_TEXT line 27: Groovy kept this key's type, so 1 and "1" were different keys; dict keys are text (#536).
 // NOTE SX_DICT_KEY_TEXT line 27: Groovy kept this key's type, so 1 and "1" were different keys; dict keys are text (#536).
 say "Tier ${dict{ "1": "low", "2": "high" }["${tier}"]}"
+// A lookup whose key is not proven present gets a note; a tested, written, or looped-over key needs none.
+let stock = dict{ rope: 1 }
+let wanted = "tape"
+// NOTE SX_SHARED_MAP_WRITE line 31: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+if not stock.contains(wanted) {
+  stock[wanted] = 0
+}
+say "Wanted ${stock[wanted]}, rope ${stock["rope"]}"
+if not stock.contains("cuffs") {
+  say "No cuffs"
+}
+function countOf(item) {
+  // NOTE SX_DICT_MISSING_KEY line 34: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+  return stock[item]
+}
+say "Rope count ${countOf("rope")}"
+// Values that may be null: a null test reads the value only for a present key.
+let moods = dict{ calm: null, tense: "yes" }
+let mood = "calm"
+if not moods.contains(mood) or moods[mood] == null {
+  say "No mood"
+}
+if moods.contains(mood) and moods[mood] != null {
+  say "Mood set"
+}
+// Fallbacks for a missing key read with a default (#536).
+let counts = dict{}
+let toy = "rope"
+// NOTE SX_SHARED_MAP_WRITE line 44: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+counts[toy] = counts.get(toy, default: 0) + 1
+let times = counts.get(toy, default: 5)
+let labels = dict{ rope: "Rope" }
+// NOTE SX_DICT_DEFAULT line 47: Groovy also used the fallback for a stored null, or with ?: for a stored false, 0, or empty value; get(key, default:) uses it only for a missing key (#536).
+let labelValue = labels.get(toy, default: "Unknown")
+let level = counts.get(toy, default: 1)
+say "Counted ${counts[toy]}, ${times}, ${labelValue}, level ${level}"
+// A map compared with a dict is a dict too, since a dict never equals an object.
+let expected = dict{ rope: 1, tape: 0 }
+if stock == expected {
+  say "Stock as expected"
+}
+if stock == dict{ tape: 0, rope: 1 } {
+  say "Stock as written"
+}
+// A number key and a text key that Groovy kept apart become the same text key, with a note.
+let table = dict{ "1": "one" }
+// NOTE SX_DICT_KEY_TEXT line 57: Groovy kept this key's type, so 1 and "1" were different keys; dict keys are text (#536).
+say "Text key ${table["1"]}, number key ${table["1"]}"
+// A closure's own map is a variable apart from a script map of the same name.
+function tally {
+  let seenValue = dict{}
+  let item = "rope"
+  // NOTE SX_SHARED_MAP_WRITE line 62: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+  seenValue[item] = true
+  return seenValue.length
+}
+let seen = { name: "outer" }
+say "Seen ${tally()}, ${seen.name}"
 // A map with fixed names is an object: fields set later are declared, and clear() empties them.
 let session = { mood: "calm", aborted: null }
-// NOTE SX_SHARED_MAP_WRITE line 30: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+// NOTE SX_SHARED_MAP_WRITE line 69: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
 session.aborted = false
-// NOTE SX_SHARED_MAP_WRITE line 31: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+// NOTE SX_SHARED_MAP_WRITE line 70: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
 session = { mood: null, aborted: null }
-// NOTE SX_SHARED_MAP_WRITE line 32: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+// NOTE SX_SHARED_MAP_WRITE line 71: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
 session.mood = "tense"
 say "Mood ${session.mood}, aborted ${session.aborted}"

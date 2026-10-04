@@ -21,13 +21,14 @@ let month = dateValue.month
 let hour = getDateTime().hour
 let dow = getDateTime().weekdayNumber % 7 + 1
 let dayOfYear = (getDate() - toDate("${getDate().year}-01-01")).days + 1
-// NOTE SX_ROUNDING_TIES line 15: Java Math.round() rounds .5 toward positive infinity (-1.5 becomes -1); TeaseScript round() rounds ties away from zero (-1.5 becomes -2, V30 §13).
+let sameDay = (toDate(dateValue) - toDate("${toDate(dateValue).year}-01-01")).days + 1
+// NOTE SX_ROUNDING_TIES line 16: Java Math.round() rounds .5 toward positive infinity (-1.5 becomes -1); TeaseScript round() rounds ties away from zero (-1.5 becomes -2, V30 §13).
 let days = round(n / 2)
-// NOTE SX_SYSTEM_EXIT line 16: System.exit() closed the legacy application; TeaseScript exit ends the session but leaves the Player open.
+// NOTE SX_SYSTEM_EXIT line 17: System.exit() closed the legacy application; TeaseScript exit ends the session but leaves the Player open.
 if hour > 22 {
   exit
 }
 // Java date patterns: the ISO date is a machine format, other patterns are shown in the player's local form.
 let stamp = getDate().toISO()
-// NOTE SX_DATE_FORMAT line 19: Java formatted the current time with the pattern "HH:mm"; formatTime() shows the player's local form instead (#532).
-say "Status of ${stamp} at ${getTime().formatTime()}, day ${dayOfYear}"
+// NOTE SX_DATE_FORMAT line 20: Java formatted the current time with the pattern "HH:mm"; formatTime() shows the player's local form instead (#532).
+say "Status of ${stamp} at ${getTime().formatTime()}, day ${dayOfYear} ${sameDay}"

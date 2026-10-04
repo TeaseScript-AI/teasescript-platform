@@ -86,10 +86,7 @@ export function lowerPackage(
   const mapUses = files.map((_, index) => packageMapUses(groups[index]!));
   const lowered = files.map((file, index) =>
     lowerParsedFile(file, {
-      dictionaries: mapUses[index]!.dictionaries,
-      recordFields: mapUses[index]!.recordFields,
-      dictionaryValues: mapUses[index]!.dictionaryValues,
-      numberKeyedDictionaries: mapUses[index]!.numberKeyedDictionaries,
+      mapUses: mapUses[index]!,
       helperRegistry,
       mixinModules,
       packageFunctions: packageFunctionNames(groups[index]!),
