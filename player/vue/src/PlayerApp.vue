@@ -12,6 +12,7 @@ import PlayerToolsShell, { type PlayerTool } from "./PlayerToolsShell.vue";
 import PlayerTopBar from "./PlayerTopBar.vue";
 import { playerRuntimeMedia } from "../../runtime-adapter.js";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
+import ScriptProblems, { type ScriptFailure } from "./ScriptProblems.vue";
 import SessionActivation from "./SessionActivation.vue";
 import Stage from "./Stage.vue";
 import StageRightRail from "./StageRightRail.vue";
@@ -31,8 +32,10 @@ const props = withDefaults(
     title?: string;
     media?: { src: string; alt: string } | undefined;
     tools?: readonly PlayerTool[];
+    /** Why the script cannot start; shown instead of Start. */
+    failure?: ScriptFailure | null;
   }>(),
-  { title: "", tools: () => [] },
+  { title: "", tools: () => [], failure: null },
 );
 const themeIntent = defineModel<PlayerThemeIntent>("themeIntent", {
   default: () => defaultPlayerThemeIntents.light,
@@ -174,7 +177,8 @@ async function toggleFullscreen() {
           <Stage ref="stage" :media="stageMedia" @media-aspect="mediaAspect = $event" />
         </template>
         <template #overlay>
-          <SessionActivation :activation="player.activation.value" @activate="player.activate" />
+          <ScriptProblems v-if="failure" :failure="failure" />
+          <SessionActivation v-else :activation="player.activation.value" @activate="player.activate" />
         </template>
         <template #right-rail>
           <!-- Runtime timers are runtime-owned content; the preview may add fixtures around them. -->

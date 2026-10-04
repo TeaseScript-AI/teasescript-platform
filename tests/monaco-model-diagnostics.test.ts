@@ -88,3 +88,20 @@ test("a project diagnostic without its own file still gets a row", () => {
     ],
   );
 });
+
+test("tag queries search the package images the project is watched with", () => {
+  const models = [{ path: "main.tease", model: new FakeModel('showImage tagged "garden"\nexit') }];
+  const codes = (images?: readonly { path: string; keywords: readonly string[] }[]) => {
+    let files: readonly ProjectFileView[] = [];
+    watchProjectDiagnostics(
+      models,
+      { Error: 8, Warning: 4 },
+      (published) => (files = published),
+      images === undefined ? {} : { images },
+    ).dispose();
+    return files.flatMap((file) => file.markers.map((marker) => marker.code));
+  };
+  assert.deepEqual(codes(), []);
+  assert.deepEqual(codes([{ path: "hall.png", keywords: ["hall"] }]), ["TST002"]);
+  assert.deepEqual(codes([{ path: "garden.png", keywords: ["garden"] }]), []);
+});
