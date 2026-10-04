@@ -1366,10 +1366,13 @@ class TypeChecker {
       return UNKNOWN_TYPE;
     }
     const receiver = yield* compileChild(this.#expressionTask(callee.object, scope));
-    // The receiver as it was evaluated, before the arguments run, for the member checks.
-    const receiverAtCall = copyType(receiver);
     const method = callee.property.name;
     const value = resolved(nonNullTypeForUse(receiver));
+    // The receiver as it was evaluated, before the arguments run, for the member checks. Only they use it, so other
+    // methods, such as repeated `add` calls on a growing list, do not copy their receiver.
+    const memberChecked =
+      MEMBER_CHECKED_KINDS.has(value.kind) || (value.kind === "list" && method === "join");
+    const receiverAtCall = memberChecked ? copyType(receiver) : receiver;
     if ((value.kind === "list" || value.kind === "set") && method === "add") {
       const argument = expression.arguments[0];
       if (argument !== undefined && expression.arguments.length === 1) {
@@ -1456,7 +1459,7 @@ class TypeChecker {
       return NULL_TYPE;
     }
     // Text operations (V30 §8), members of other values that have none, and text-only methods on unknown receivers.
-    if (["scalar", "null", "range", "unknown", "open"].includes(value.kind)) {
+    if (MEMBER_CHECKED_KINDS.has(value.kind)) {
       this.#reportProblems(
         memberProblems(callee.object, receiverAtCall, callee.property, expression, typeOf),
       );
@@ -2532,6 +2535,15 @@ function conditionFix(value: StaticType, expression: Expression): string {
     return ` Check its length instead, such as '${label}.length > 0'.`;
   return "";
 }
+
+/** Receivers whose members `memberProblems` checks: text, values without members, and values the compiler cannot know. */
+const MEMBER_CHECKED_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
+  "scalar",
+  "null",
+  "range",
+  "unknown",
+  "open",
+]);
 
 /** The result type of a text member: a new value, so a `string[]` from `split` decides nothing elsewhere. */
 function textResultType(member: TextMember): StaticType {
