@@ -773,8 +773,6 @@ async function spaceSkipCheck(cdp) {
   );
 }
 
-// A press on empty Stage space that is held past the current message's pacing deadline must not skip the next
-// message's pacing on release (the gesture belongs to the message presented at press time).
 /** A presented `showButton` is exposed to assistive technology under its visible label. */
 async function buttonNameCheck(cdp, label) {
   const document = await cdp.call("DOM.getDocument", { depth: 0 });
@@ -792,6 +790,8 @@ async function buttonNameCheck(cdp, label) {
   );
 }
 
+// A press on empty Stage space that is held past the current message's pacing deadline must not skip the next
+// message's pacing on release (the gesture belongs to the message presented at press time).
 async function staleSkipGestureCheck(cdp) {
   const point = async (selector) =>
     value(
