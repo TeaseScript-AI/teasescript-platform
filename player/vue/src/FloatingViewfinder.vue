@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useResizeObserver } from "@vueuse/core";
-import { MoveDiagonal2 } from "@lucide/vue";
 import Viewfinder from "./Viewfinder.vue";
+import ViewfinderMirrorButton from "./ViewfinderMirrorButton.vue";
 
-// DEMO: the viewfinder as a floating window over the Player, like a mini player. Like the browsers' own
-// picture-in-picture windows it has no grip: the user drags the window itself, or focuses it and uses the arrow keys,
-// and resizes it from its corner. With a mouse, its resize control shows while it is hovered or focused. Its place lasts while the Player is mounted, also while
-// the viewfinder is hidden; it is presentation only.
+// DEMO: the viewfinder as a floating window over the Player, like a mini player. A slim title bar shows that it is a
+// window. The user drags it anywhere, resizes it from any edge or corner like a desktop window, keeping the camera's
+// aspect, or focuses it and moves it with the arrow keys and resizes it with + and -. Its place lasts while the Player
+// is mounted, also while the viewfinder is hidden; it is presentation only.
 export interface FloatingPlace {
   readonly x: number;
   readonly y: number;
@@ -15,10 +15,25 @@ export interface FloatingPlace {
 }
 defineProps<{ track: MediaStreamTrack }>();
 const place = defineModel<FloatingPlace | null>("place", { default: null });
+const mirrored = defineModel<boolean>("mirrored", { default: true });
 
 const EDGE = 8;
 const MIN_WIDTH = 140;
 const STEP = 16;
+/** The title bar's height in pixels, part of the window's height. */
+const BAR = 24;
+// The edge or corner a resize drags: which way it moves the left/right and top/bottom side, or 0 where it keeps it.
+const HANDLES = [
+  { name: "n", x: 0, y: -1 },
+  { name: "s", x: 0, y: 1 },
+  { name: "w", x: -1, y: 0 },
+  { name: "e", x: 1, y: 0 },
+  { name: "nw", x: -1, y: -1 },
+  { name: "ne", x: 1, y: -1 },
+  { name: "sw", x: -1, y: 1 },
+  { name: "se", x: 1, y: 1 },
+] as const;
+type Handle = (typeof HANDLES)[number];
 const root = ref<HTMLElement | null>(null);
 const bounds = ref({ width: 0, height: 0 });
 const ratio = ref(4 / 3);
@@ -37,21 +52,52 @@ onMounted(() => {
   bounds.value = { width: parent.clientWidth, height: parent.clientHeight };
   // First shown below the title, at a size that leaves the conversation readable.
   place.value = clamp(
-    place.value ?? { x: EDGE * 2, y: 64, width: Math.min(Math.max(parent.clientWidth * 0.26, 200), 360) },
+    place.value ?? {
+      x: EDGE * 2,
+      y: 64,
+      width: Math.min(Math.max(parent.clientWidth * 0.26, 200), 360),
+    },
   );
 });
 
+const heightOf = (width: number) => width / ratio.value + BAR;
+/** The widest window whose height fits in `height`. */
+const widthFitting = (height: number) => Math.max(0, (height - BAR) * ratio.value);
 function clamp({ x, y, width }: FloatingPlace): FloatingPlace {
   const { width: maxWidth, height: maxHeight } = bounds.value;
-  // The available space wins over the preferred minimum, so the corner stays reachable in a small Player.
-  const largest = Math.max(0, Math.min(maxWidth - 2 * EDGE, (maxHeight - 2 * EDGE) * ratio.value));
+  // The available space wins over the preferred minimum, so the window stays inside a small Player.
+  const largest = Math.max(0, Math.min(maxWidth - 2 * EDGE, widthFitting(maxHeight - 2 * EDGE)));
   const clampedWidth = Math.min(Math.max(width, Math.min(MIN_WIDTH, largest)), largest);
-  const height = clampedWidth / ratio.value;
   return {
     width: clampedWidth,
     x: Math.min(Math.max(x, EDGE), Math.max(EDGE, maxWidth - clampedWidth - EDGE)),
-    y: Math.min(Math.max(y, EDGE), Math.max(EDGE, maxHeight - height - EDGE)),
+    y: Math.min(Math.max(y, EDGE), Math.max(EDGE, maxHeight - heightOf(clampedWidth) - EDGE)),
   };
+}
+/**
+ * The window resized from `handle` by a pointer movement. The sides opposite the dragged ones stay where they are; an
+ * edge keeps the window's top or left side. A corner follows the movement along the window's diagonal.
+ */
+function resized(start: FloatingPlace, handle: Handle, dx: number, dy: number): FloatingPlace {
+  const r = ratio.value;
+  const grown =
+    handle.x !== 0 && handle.y !== 0
+      ? (handle.x * dx + (handle.y * dy) / r) / (1 + 1 / r ** 2)
+      : handle.x !== 0
+        ? handle.x * dx
+        : handle.y * dy * r;
+  const startHeight = heightOf(start.width);
+  // The kept sides limit the size: the window grows only into the space beyond its moving sides.
+  const room = Math.min(
+    handle.x < 0 ? start.x + start.width - EDGE : bounds.value.width - EDGE - start.x,
+    widthFitting(handle.y < 0 ? start.y + startHeight - EDGE : bounds.value.height - EDGE - start.y),
+  );
+  const width = Math.min(Math.max(start.width + grown, Math.min(MIN_WIDTH, room)), room);
+  return clamp({
+    width,
+    x: handle.x < 0 ? start.x + start.width - width : start.x,
+    y: handle.y < 0 ? start.y + startHeight - heightOf(width) : start.y,
+  });
 }
 const style = computed(() =>
   place.value
@@ -59,10 +105,10 @@ const style = computed(() =>
     : { visibility: "hidden" as const },
 );
 
-// One pointer drag moves the window or, from the corner, resizes it with the camera's aspect. Further pointers, such as
-// a second finger, are ignored until it ends.
+// One pointer drag moves the window or, from an edge or corner, resizes it with the camera's aspect. Further pointers,
+// such as a second finger, are ignored until it ends.
 let dragging = false;
-function drag(event: PointerEvent, mode: "move" | "resize") {
+function drag(event: PointerEvent, handle: Handle | null) {
   const start = place.value;
   if (!start || event.button !== 0 || dragging) return;
   event.preventDefault();
@@ -76,13 +122,10 @@ function drag(event: PointerEvent, mode: "move" | "resize") {
     if (next.pointerId !== pointer) return;
     const dx = next.clientX - origin.x;
     const dy = next.clientY - origin.y;
-    // A corner drag resizes by the movement along the window's diagonal, so it grows and shrinks.
-    const grown = (dx + dy / ratio.value) / (1 + 1 / ratio.value ** 2);
-    place.value = clamp(
-      mode === "move"
-        ? { ...start, x: start.x + dx, y: start.y + dy }
-        : { ...start, width: start.width + grown },
-    );
+    place.value =
+      handle === null
+        ? clamp({ ...start, x: start.x + dx, y: start.y + dy })
+        : resized(start, handle, dx, dy);
   };
   const ended = (next: PointerEvent) => {
     if (next.pointerId !== pointer) return;
@@ -97,21 +140,21 @@ function drag(event: PointerEvent, mode: "move" | "resize") {
   target.addEventListener("pointercancel", ended);
   target.addEventListener("lostpointercapture", ended);
 }
-function keyboard(event: KeyboardEvent, mode: "move" | "resize") {
+function keyboard(event: KeyboardEvent) {
   const current = place.value;
+  // Keys on a control inside the window belong to that control.
+  if (!current || event.target !== event.currentTarget) return;
   const direction = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[
     event.key
   ];
-  // Arrow keys on a control inside the window belong to that control.
-  if (!current || !direction || (mode === "move" && event.target !== event.currentTarget)) return;
+  const growth = { "+": 1, "=": 1, "-": -1 }[event.key];
+  if (!direction && !growth) return;
   event.preventDefault();
-  const [dx, dy] = direction as [number, number];
   const step = event.shiftKey ? STEP * 4 : STEP;
-  place.value = clamp(
-    mode === "move"
-      ? { ...current, x: current.x + dx * step, y: current.y + dy * step }
-      : { ...current, width: current.width + (dx + dy) * step },
-  );
+  if (direction) {
+    const [dx, dy] = direction as [number, number];
+    place.value = clamp({ ...current, x: current.x + dx * step, y: current.y + dy * step });
+  } else place.value = clamp({ ...current, width: current.width + growth! * step });
 }
 function measured(next: number) {
   ratio.value = next;
@@ -127,27 +170,25 @@ function measured(next: number) {
     role="group"
     aria-label="Camera preview window"
     tabindex="0"
-    title="Drag to move; arrow keys move it too"
+    title="Drag to move, drag an edge to resize; arrow keys move it, + and - resize it"
     :style="style"
-    @pointerdown="drag($event, 'move')"
-    @keydown="keyboard($event, 'move')"
+    @pointerdown="drag($event, null)"
+    @keydown="keyboard"
   >
-    <Viewfinder
-      :track="track"
-      class="floating-viewfinder-frame"
-      @aspect="measured"
-    >
-      <button
-        type="button"
-        class="floating-viewfinder-resize"
-        aria-label="Resize camera preview"
-        title="Drag to resize; arrow keys resize it too"
-        @pointerdown="drag($event, 'resize')"
-        @keydown="keyboard($event, 'resize')"
-      >
-        <MoveDiagonal2 aria-hidden="true" class="size-3.5" />
-      </button>
-    </Viewfinder>
+    <div class="floating-viewfinder-window">
+      <div class="floating-viewfinder-bar" :style="{ height: `${BAR}px` }">
+        <ViewfinderMirrorButton v-model="mirrored" />
+      </div>
+      <Viewfinder :track="track" :mirrored="mirrored" :framed="false" @aspect="measured" />
+    </div>
+    <span
+      v-for="handle in HANDLES"
+      :key="handle.name"
+      class="floating-viewfinder-handle"
+      :data-handle="handle.name"
+      aria-hidden="true"
+      @pointerdown="drag($event, handle)"
+    />
   </div>
 </template>
 
@@ -161,30 +202,35 @@ function measured(next: number) {
 }
 .floating-viewfinder:active { cursor: grabbing; }
 .floating-viewfinder:focus-visible { outline: none; }
-.floating-viewfinder:focus-visible .floating-viewfinder-frame {
+.floating-viewfinder:focus-visible .floating-viewfinder-window {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
-.floating-viewfinder-frame { width: 100%; box-shadow: 0 8px 28px var(--media-shadow); }
-.floating-viewfinder-resize {
-  position: absolute;
-  right: 6px;
-  bottom: 6px;
-  display: grid;
-  place-items: center;
+.floating-viewfinder-window {
+  overflow: hidden;
   border: 1px solid var(--media-border);
-  color: var(--media-text);
+  border-radius: 12px;
   background: var(--media-surface);
-  box-shadow: 0 1px 3px var(--media-shadow);
-  width: 26px;
-  height: 26px;
-  border-radius: 9999px;
-  backdrop-filter: blur(3px);
-  cursor: nwse-resize;
+  box-shadow: 0 8px 28px var(--media-shadow);
+  /* Firefox does not clip a transformed video to these rounded corners, so the video takes the lower ones itself. */
+  --viewfinder-video-radius: 0 0 11px 11px;
 }
-/* Touch has no hover, so there the control stays. */
-@media (hover: hover) and (pointer: fine) {
-  .floating-viewfinder-resize { transition: opacity 150ms; }
-  .floating-viewfinder:not(:hover, :focus-within) .floating-viewfinder-resize { opacity: 0; }
+.floating-viewfinder-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-inline: 4px;
+  border-bottom: 1px solid var(--media-border);
+  backdrop-filter: blur(6px);
 }
+/* Invisible bands over the window's edges and corners, like a desktop window's resize borders; corners lie on top. */
+.floating-viewfinder-handle { position: absolute; }
+[data-handle="n"] { top: -4px; left: 10px; right: 10px; height: 8px; cursor: ns-resize; }
+[data-handle="s"] { bottom: -4px; left: 10px; right: 10px; height: 8px; cursor: ns-resize; }
+[data-handle="w"] { left: -4px; top: 10px; bottom: 10px; width: 8px; cursor: ew-resize; }
+[data-handle="e"] { right: -4px; top: 10px; bottom: 10px; width: 8px; cursor: ew-resize; }
+[data-handle="nw"] { top: -4px; left: -4px; width: 14px; height: 14px; cursor: nwse-resize; }
+[data-handle="ne"] { top: -4px; right: -4px; width: 14px; height: 14px; cursor: nesw-resize; }
+[data-handle="sw"] { bottom: -4px; left: -4px; width: 14px; height: 14px; cursor: nesw-resize; }
+[data-handle="se"] { bottom: -4px; right: -4px; width: 14px; height: 14px; cursor: nwse-resize; }
 </style>

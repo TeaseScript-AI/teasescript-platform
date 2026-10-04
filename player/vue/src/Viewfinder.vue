@@ -2,9 +2,13 @@
 import { onBeforeUnmount, ref, watch } from "vue";
 
 // A live, local preview of the session camera. It never captures: the script takes photos through `takePhoto()`.
-// Mirrored like a selfie view, so moving left moves the image left; photos themselves stay unmirrored. The default
-// slot holds content over the preview, such as a small reference image or window controls.
-const props = defineProps<{ track: MediaStreamTrack }>();
+// Mirrored like a selfie view by default, so moving left moves the image left; photos themselves stay unmirrored. The
+// default slot holds content over the preview, such as a small reference image or controls. Unframed, it fills a frame
+// its parent draws, such as a window.
+const props = withDefaults(
+  defineProps<{ track: MediaStreamTrack; mirrored?: boolean; framed?: boolean }>(),
+  { mirrored: true, framed: true },
+);
 const emit = defineEmits<{ aspect: [ratio: number] }>();
 const video = ref<HTMLVideoElement | null>(null);
 // The camera's aspect ratio once a frame has a size; webcams commonly deliver 4:3. A browser may play frames before
@@ -37,11 +41,17 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <figure class="viewfinder" data-viewfinder :style="{ '--viewfinder-ratio': ratio }">
+  <figure
+    class="viewfinder"
+    :class="{ 'viewfinder-framed': framed }"
+    data-viewfinder
+    :style="{ '--viewfinder-ratio': ratio }"
+  >
     <!-- The browser's own picture-in-picture toggle stays off: the Player's viewfinder is the only one. -->
     <video
       ref="video"
       class="viewfinder-video"
+      :class="{ 'viewfinder-mirrored': mirrored }"
       muted
       autoplay
       playsinline
@@ -63,19 +73,23 @@ onBeforeUnmount(() => {
   margin: 0;
   aspect-ratio: var(--viewfinder-ratio);
   overflow: hidden;
+  background: var(--media-surface);
+}
+.viewfinder-framed {
   --viewfinder-radius: 12px;
   border: 1px solid var(--media-border);
   border-radius: var(--viewfinder-radius);
-  background: var(--media-surface);
   box-shadow: 0 2px 10px var(--media-shadow);
+  /* Firefox does not clip a transformed video to its container's rounded corners; inside the 1px border. */
+  --viewfinder-video-radius: calc(var(--viewfinder-radius) - 1px);
 }
 .viewfinder-video {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
-  transform: scaleX(-1);
-  /* Firefox does not clip a transformed video to its container's rounded corners; inside the 1px border. */
-  border-radius: calc(var(--viewfinder-radius) - 1px);
+  /* An unframed preview takes the corners of its parent's frame. */
+  border-radius: var(--viewfinder-video-radius, 0);
 }
+.viewfinder-mirrored { transform: scaleX(-1); }
 </style>

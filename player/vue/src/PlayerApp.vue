@@ -39,6 +39,8 @@ const props = withDefaults(
 );
 // The floating viewfinder keeps the place the user gave it while the Player is mounted.
 const floatingPlace = ref<FloatingPlace | null>(null);
+// Whether the viewfinder mirrors the camera, shared by its presentations while the Player is mounted.
+const viewfinderMirrored = ref(true);
 const themeIntent = defineModel<PlayerThemeIntent>("themeIntent", {
   default: () => defaultPlayerThemeIntents.light,
 });
@@ -179,6 +181,7 @@ async function toggleFullscreen() {
           <Stage
             ref="stage"
             :media="stageMedia"
+            v-model:viewfinder-mirrored="viewfinderMirrored"
             :viewfinder="viewfinderLayout === 'stage' ? player.viewfinder.value : null"
             @media-aspect="mediaAspect = $event"
           />
@@ -187,6 +190,7 @@ async function toggleFullscreen() {
           <FloatingViewfinder
             v-if="viewfinderLayout === 'floating' && player.viewfinder.value"
             v-model:place="floatingPlace"
+            v-model:mirrored="viewfinderMirrored"
             :track="player.viewfinder.value"
           />
           <SessionActivation :activation="player.activation.value" @activate="player.activate" />

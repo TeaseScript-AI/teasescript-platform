@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { watch } from "vue";
 import Viewfinder from "./Viewfinder.vue";
+import ViewfinderMirrorButton from "./ViewfinderMirrorButton.vue";
 const props = defineProps<{
   media: { src: string; alt: string } | undefined;
   /** The session camera's track while the viewfinder is shown; it leads, and the Stage image becomes its reference. */
   viewfinder?: MediaStreamTrack | null;
 }>();
 const emit = defineEmits<{ mediaAspect: [ratio: number] }>();
+const viewfinderMirrored = defineModel<boolean>("viewfinderMirrored", { default: true });
 // Only a new source needs measuring again; an equal source keeps its loaded image and aspect. A leading viewfinder
 // keeps the camera's aspect while its reference image changes.
 watch(
@@ -32,10 +34,12 @@ function mediaLoaded(event: Event) {
       <Viewfinder
         v-if="viewfinder"
         :track="viewfinder"
+        :mirrored="viewfinderMirrored"
         class="stage-viewfinder"
         @aspect="emit('mediaAspect', $event)"
       >
         <img v-if="media" :src="media.src" :alt="media.alt" class="stage-viewfinder-reference" />
+        <ViewfinderMirrorButton v-model="viewfinderMirrored" class="stage-viewfinder-mirror" />
       </Viewfinder>
       <img v-else-if="media" :src="media.src" :alt="media.alt" class="stage-media" @load="mediaLoaded" />
     </div>
@@ -59,6 +63,10 @@ function mediaLoaded(event: Event) {
 .stage-viewfinder {
   position: absolute; inset: 0; margin: auto;
   width: min(100%, 100cqh * var(--viewfinder-ratio)); max-height: 100%;
+}
+.stage-viewfinder-mirror {
+  position: absolute; top: 10px; right: 10px;
+  border-color: var(--media-border); background: var(--media-surface); backdrop-filter: blur(3px);
 }
 .stage-viewfinder-reference {
   position: absolute; left: 10px; bottom: 10px;
