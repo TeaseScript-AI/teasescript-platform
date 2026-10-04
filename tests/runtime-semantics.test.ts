@@ -65,12 +65,12 @@ test("list elements and object fields copy composite values when each is evaluat
   const result = executeSource(
     [
       "let source = [1]",
-      "let list = [source, source.add(2)]",
-      "let object = { first: source, second: source.add(3) }",
+      "let copies = [source, source.add(2)]",
+      "let record = { first: source, second: source.add(3) }",
       "source.add(4)",
       "capture(source)",
-      "capture(list)",
-      "capture(object.first)",
+      "capture(copies)",
+      "capture(record.first)",
     ],
     { capture: captureInto(captured) },
   );
@@ -202,13 +202,15 @@ test("set literals reject each value before evaluating the next element", () => 
 });
 
 test("rejects composite values through set add, contains, and list toSet", () => {
+  // `dynamic` hides each value's type; a known composite value is a compile error (TSV006).
+  const dynamic = "function dynamic(value) { return value }\n";
   for (const source of [
-    "let values = set[]\nvalues.add([1])",
-    "let values = set[1]\nlet found = values.contains([1])",
-    "let source = [{ value: 1 }]\nlet values = source.toSet()",
-    "let source = [set[1]]\nlet values = source.toSet()",
+    "let values = set[]\nvalues.add(dynamic([1]))",
+    "let values = set[1]\nlet found = values.contains(dynamic([1]))",
+    "let source = dynamic([{ value: 1 }])\nlet values = source.toSet()",
+    "let source = dynamic([set[1]])\nlet values = source.toSet()",
   ]) {
-    const result = executeSource(source);
+    const result = executeSource(dynamic + source);
     assert.deepEqual(
       result.errors.map((error) => error.code),
       ["TSR032"],
@@ -220,7 +222,7 @@ test("uses scalar equality for set uniqueness and retains insertion order", () =
   const captured: unknown[] = [];
   const result = executeSource(
     [
-      'let values = set["a", "a", true, true, 1, 1.0, null, null, false]',
+      'let values: (string | boolean | number | null) set = set["a", "a", true, true, 1, 1.0, null, null, false]',
       "capture(values.toList())",
     ],
     { capture: captureInto(captured) },

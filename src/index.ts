@@ -200,6 +200,7 @@ export type {
   RuntimeStorageWriteActionSnapshot,
   RuntimeStorageWriteSettlementSnapshot,
 } from "./runtime/actions/model.js";
+export { interactionDeadlineMs } from "./runtime/actions/model.js";
 export {
   DEFAULT_PLAYGROUND_SEED,
   createXorShift32State,
@@ -268,6 +269,9 @@ export type {
   ScalarTypeName,
   SayStatement,
   ShowButtonStatement,
+  SwitchCase,
+  SwitchStatement,
+  SwitchTypeTest,
   WaitStatement,
   TimerStatement,
   ShowImageStatement,
@@ -290,6 +294,11 @@ export type {
   StringPart,
   StringText,
   TypeAnnotation,
+  TypeName,
+  NamedType,
+  CollectionType,
+  OptionalType,
+  UnionType,
   UnaryExpression,
   WhileStatement,
 } from "./ast.js";

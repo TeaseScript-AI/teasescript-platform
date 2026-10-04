@@ -22,6 +22,7 @@ export type Statement =
   | LetStatement
   | AssignmentStatement
   | IfStatement
+  | SwitchStatement
   | RepeatStatement
   | ForStatement
   | WhileStatement
@@ -67,14 +68,29 @@ export interface SayStatement {
   readonly span: SourceSpan;
 }
 
-export interface ShowButtonStatement {
-  readonly kind: "showButtonStatement";
+/**
+ * Shared data of `showButton [as speaker] label [, background: colour] [, timeout: duration]`. The options may appear
+ * in either order and evaluate in source order.
+ */
+export interface ShowButtonParts {
   readonly commandSpan: SourceSpan;
   readonly asSpan: SourceSpan | null;
   readonly speaker: Identifier | null;
   readonly label: Expression;
   readonly background: Expression | null;
+  /** A number of seconds or an elapsed duration after which the button disappears. */
+  readonly timeout: Expression | null;
   readonly span: SourceSpan;
+}
+
+/** A button whose elapsed-time result is ignored. */
+export interface ShowButtonStatement extends ShowButtonParts {
+  readonly kind: "showButtonStatement";
+}
+
+/** A button used as a value; it evaluates to the elapsed waiting time as a `duration`. */
+export interface ShowButtonExpression extends ShowButtonParts {
+  readonly kind: "showButtonExpression";
 }
 
 /** A compiler-owned blocking delay. A missing unit means seconds. */
@@ -201,7 +217,7 @@ export interface DeleteStatement {
   readonly span: SourceSpan;
 }
 
-/** `load <key> [default <value>]`: the stored value, else the default (evaluated only then), else `null`. */
+/** `load <key>[, default: <value>]`: the stored value, else the default (evaluated only then), else `null`. */
 export interface LoadExpression {
   readonly kind: "loadExpression";
   readonly key: Expression;
@@ -225,11 +241,36 @@ export interface LetStatement {
 export type ScalarTypeName =
   "string" | "boolean" | "integer" | "number" | "date" | "time" | "datetime" | "duration";
 
-export interface TypeAnnotation {
-  readonly kind: "typeAnnotation";
-  readonly name: ScalarTypeName;
-  readonly collection: "list" | "set" | null;
-  readonly optional: boolean;
+/** A type name: a scalar type, `null`, any `list`, `set`, or `object`, or a program-control type (ADR 0021). */
+export type TypeName =
+  ScalarTypeName | "null" | "list" | "set" | "object" | "range" | "speaker" | "timer" | "media";
+
+/** A written type: a name, `T[]`, `T set`, `T?`, or a union `A | B`. Parentheses only group. */
+export type TypeAnnotation = NamedType | CollectionType | OptionalType | UnionType;
+
+export interface NamedType {
+  readonly kind: "namedType";
+  readonly name: TypeName;
+  readonly span: SourceSpan;
+}
+
+/** `T[]` or `T set`. */
+export interface CollectionType {
+  readonly kind: "listType" | "setType";
+  readonly element: TypeAnnotation;
+  readonly span: SourceSpan;
+}
+
+/** `T?`, which means `T | null`. */
+export interface OptionalType {
+  readonly kind: "optionalType";
+  readonly value: TypeAnnotation;
+  readonly span: SourceSpan;
+}
+
+export interface UnionType {
+  readonly kind: "unionType";
+  readonly members: readonly TypeAnnotation[];
   readonly span: SourceSpan;
 }
 
@@ -249,6 +290,34 @@ export interface IfStatement {
   readonly condition: Expression;
   readonly thenBlock: Block;
   readonly elseBlock: Block | IfStatement | null;
+  readonly span: SourceSpan;
+}
+
+export interface SwitchStatement {
+  readonly kind: "switchStatement";
+  readonly subject: Expression;
+  readonly cases: readonly SwitchCase[];
+  readonly defaultBlock: Block | null;
+  readonly span: SourceSpan;
+}
+
+/**
+ * One `case`: either its literal values and number ranges, any of which selects the block, or one type test, as in
+ * `case is integer`, with no values.
+ */
+export interface SwitchCase {
+  readonly kind: "switchCase";
+  readonly values: readonly Expression[];
+  readonly typeTest: SwitchTypeTest | null;
+  readonly body: Block;
+  readonly span: SourceSpan;
+}
+
+/** `is T` or `is not T` after `case`, testing the switched value like `value is T`. */
+export interface SwitchTypeTest {
+  readonly kind: "switchTypeTest";
+  readonly type: TypeAnnotation;
+  readonly negated: boolean;
   readonly span: SourceSpan;
 }
 
@@ -331,13 +400,24 @@ export type Expression =
   | BinaryExpression
   | RangeExpression
   | InteractionExpression
+  | ShowButtonExpression
   | TimerExpression
   | PlayMediaExpression
-  | LoadExpression;
+  | LoadExpression
+  | TypeTestExpression;
+
+/** `value is T` or `value is not T`: whether the value may be stored in a place of type `T` (ADR 0021). */
+export interface TypeTestExpression {
+  readonly kind: "typeTestExpression";
+  readonly value: Expression;
+  readonly type: TypeAnnotation;
+  readonly negated: boolean;
+  readonly span: SourceSpan;
+}
 
 export interface InteractionExpression {
   readonly kind: "interactionExpression";
-  readonly interactionKind: "text" | "number" | "choice";
+  readonly interactionKind: "text" | "number" | "integer" | "choice";
   readonly commandSpan: SourceSpan;
   readonly asSpan: SourceSpan | null;
   readonly speaker: Identifier | null;

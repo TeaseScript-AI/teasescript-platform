@@ -1,4 +1,4 @@
-import type { Block, Expression, MediaParts } from "./ast.js";
+import type { Block, Expression, MediaParts, ShowButtonParts } from "./ast.js";
 export function expressionChildren(expression: Expression): readonly Expression[] {
   switch (expression.kind) {
     case "booleanLiteral":
@@ -12,6 +12,7 @@ export function expressionChildren(expression: Expression): readonly Expression[
       );
     case "identifier":
     case "interactionExpression":
+    case "showButtonExpression":
       return [];
     case "parenthesizedExpression":
       return [expression.expression];
@@ -34,6 +35,8 @@ export function expressionChildren(expression: Expression): readonly Expression[
       return [expression.start, expression.end];
     case "playMediaExpression":
       return mediaOperands(expression);
+    case "typeTestExpression":
+      return [expression.value];
     case "loadExpression":
       return expression.defaultValue === null
         ? [expression.key]
@@ -76,4 +79,19 @@ export function mediaHandlerBlocks(parts: MediaParts): readonly Block[] {
   return parts.handlers.kind === "compact"
     ? [parts.handlers.body]
     : parts.handlers.cues.map((cue) => cue.body);
+}
+
+/** The `background:` and `timeout:` options of a `showButton` in source evaluation order. */
+export function showButtonOptions(
+  parts: ShowButtonParts,
+): readonly { readonly name: "background" | "timeout"; readonly value: Expression }[] {
+  const options = [
+    ...(parts.background === null
+      ? []
+      : [{ name: "background" as const, value: parts.background }]),
+    ...(parts.timeout === null ? [] : [{ name: "timeout" as const, value: parts.timeout }]),
+  ];
+  return options.sort(
+    (left, right) => left.value.span.start.offset - right.value.span.start.offset,
+  );
 }

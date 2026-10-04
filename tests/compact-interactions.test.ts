@@ -460,13 +460,13 @@ test("interaction speaker references use the existing precise unknown-speaker di
   }
 });
 
-test("choice diagnostics reject mixed written-value kinds, while values and text may repeat", () => {
+test("mixed written-value kinds need a union-typed place, while values and text may repeat", () => {
   // `at` is the last source occurrence the diagnostic must span: the whole choice for mixed value kinds and the
-  // literal for a non-finite value.
+  // literal for a non-finite value. Text and number values together are kept only by a declared union (#511 C2).
   const rejected = [
     {
       source: 'let x = choose first: "A", 2: "B"',
-      code: "TSV029",
+      code: "TSV044",
       at: 'choose first: "A", 2: "B"',
     },
     { source: 'let x = choose 1e999: "A"', code: "TSC001", at: "1e999" },
@@ -486,8 +486,9 @@ test("choice diagnostics reject mixed written-value kinds, while values and text
     );
   }
   for (const accepted of [
+    'let x: string | integer = choose first: "A", 2: "B"',
     'let x = choose first: "Same", second: "Same"',
-    'let x = choose back: "Back", "Spanking", ["Lines", { text: "Corner", value: "corner" }]',
+    'let x = choose back: "Back", "Spanking", [{ text: "Lines" }, { text: "Corner", value: "corner" }]',
     'let x = choose first: "A", first: "B"',
     'let x = choose 1: "A", 1.0: "B"',
     'let x = choose "Same", "Same"',
@@ -550,10 +551,11 @@ test("interaction result domains participate in existing numeric semantic checks
     'let values = (choose { text: "A" })..3',
     'let values = (choose [{ text: "A" }, { text: 1, value: "b" }])..3',
   ]) {
+    // The type check knows what a choice returns, so it reports the text range bound.
     const textChoice = compileSource(source);
     assert.equal(textChoice.plan, null, source);
     assert.ok(
-      textChoice.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV010"),
+      textChoice.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV043"),
       source,
     );
   }
@@ -694,7 +696,7 @@ test("dynamic interaction UI converts scalars once and selects from a list only 
   );
 
   const listPlan = compiled(
-    'let left = ["left", 2]\nlet right = ["right", 3]\nlet result = choose "${left}", "${right}"',
+    'function dynamic(value) {\n  return value\n}\nlet left = [dynamic("left"), 2]\nlet right = [dynamic("right"), 3]\nlet result = choose "${left}", "${right}"',
   );
   const randomValues = [0.75, 0.75];
   let randomCalls = 0;
@@ -1011,7 +1013,7 @@ test("blocking interactions resume through ordinary expression contexts and para
     assert.equal(validateInstructionPlan(defaultResult.plan).valid, true);
   }
 
-  const pairPlan = compiled("let pair = [askText, askNumber]");
+  const pairPlan = compiled("let pair: (string | number)[] = [askText, askNumber]");
   const firstPending = run(pairPlan, createFreshRuntimeSnapshot(pairPlan));
   assert.equal(firstPending.snapshot.status, "waiting");
   assert.equal(
@@ -1041,7 +1043,7 @@ test("blocking interactions resume through ordinary expression contexts and para
   assert.equal(pairDone.snapshot.status, "halted");
   assert.deepEqual(rootBinding(pairDone.snapshot, "pair"), createSerializableList(["alpha", 2.5]));
 
-  const shortCircuit = compiled("let value = false and askText");
+  const shortCircuit = compiled('let value = false and askText == "yes"');
   const shortCircuitDone = run(shortCircuit, createFreshRuntimeSnapshot(shortCircuit));
   assert.equal(shortCircuitDone.snapshot.status, "halted");
   assert.equal(shortCircuitDone.snapshot.foregroundAction, null);

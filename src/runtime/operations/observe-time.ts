@@ -4,12 +4,14 @@ import {
   type RuntimeCallFrameSnapshot,
   type RuntimeSnapshot,
 } from "../state.js";
-import type {
-  RuntimeActionSettlementSnapshot,
-  RuntimeChatPacingGateActionSnapshot,
-  RuntimeDelayActionSnapshot,
-  RuntimeTimerActionSnapshot,
-  RuntimeMediaActionSnapshot,
+import {
+  interactionDeadlineMs,
+  type RuntimeActionSettlementSnapshot,
+  type RuntimeChatPacingGateActionSnapshot,
+  type RuntimeDelayActionSnapshot,
+  type RuntimeInteractionActionSnapshot,
+  type RuntimeTimerActionSnapshot,
+  type RuntimeMediaActionSnapshot,
 } from "../actions/model.js";
 import type { ActionCompletedEvent, InterpreterEvent } from "../events.js";
 import { isValidSessionTime } from "../actions/delay.js";
@@ -30,6 +32,7 @@ import {
   timerSpan,
 } from "./timer-lifecycle.js";
 import { terminalContinuationHandoffFor } from "./terminal-continuation.js";
+import { timeOutButton } from "./complete-action.js";
 import { captureExecutableData, copySpan, pendingResult, takeSequence } from "./support.js";
 
 /** One Player sample of media playback: the active playback time of `segment` so far. */
@@ -133,6 +136,8 @@ export function processDueWork(
       applyMediaEvent(plan, current, due.action, due.event, events, span);
     } else if (due.kind === "suspended") {
       settleSuspendedDelay(plan, current, due.frame, due.action, events);
+    } else if (due.action.kind === "interaction") {
+      timeOutButton(plan, current, due.action, events);
     } else if (
       due.action.kind === "chatPacingGate" &&
       current.backgroundActions.includes(due.action)
@@ -153,7 +158,10 @@ export function executionRunnable(snapshot: RuntimeSnapshot): boolean {
 type DueWork =
   | {
       readonly kind: "action";
-      readonly action: RuntimeDelayActionSnapshot | RuntimeChatPacingGateActionSnapshot;
+      readonly action:
+        | RuntimeDelayActionSnapshot
+        | RuntimeChatPacingGateActionSnapshot
+        | RuntimeInteractionActionSnapshot;
       readonly deadlineMs: number;
       readonly actionId: number;
     }
@@ -198,7 +206,8 @@ function precedes(
 /**
  * The earliest timed work due by the observed time, by `(deadline, phase, action ID)`. A due foreground delay waits
  * while an expiry block that became due earlier is queued: the block interrupts that delay first, and the delay then
- * settles as suspended work.
+ * settles as suspended work. A button with a timeout likewise waits behind such a block; while suspended it stays
+ * inert and times out once the block returns.
  */
 function nextDueWork(snapshot: RuntimeSnapshot): DueWork | null {
   let earliest: DueWork | null = null;
@@ -239,14 +248,25 @@ function timedWork(snapshot: RuntimeSnapshot): DueWork[] {
   const candidates: DueWork[] = [];
   const foreground = snapshot.foregroundAction;
   const handlerRunning = snapshot.callFrames.some((frame) => frame.timerInterruption !== null);
+  const noQueuedBlockFirst = handlerRunning || snapshot.pendingTimerHandlers.length === 0;
   if (
     foreground?.kind === "chatPacingGate" ||
-    (foreground?.kind === "delay" && (handlerRunning || snapshot.pendingTimerHandlers.length === 0))
+    (foreground?.kind === "delay" && noQueuedBlockFirst)
   ) {
     candidates.push({
       kind: "action",
       action: foreground,
       deadlineMs: foreground.deadlineMs,
+      actionId: foreground.actionId,
+    });
+  }
+  const buttonDeadlineMs =
+    foreground?.kind === "interaction" ? interactionDeadlineMs(foreground) : null;
+  if (foreground?.kind === "interaction" && buttonDeadlineMs !== null && noQueuedBlockFirst) {
+    candidates.push({
+      kind: "action",
+      action: foreground,
+      deadlineMs: buttonDeadlineMs,
       actionId: foreground.actionId,
     });
   }

@@ -534,6 +534,7 @@ async function demoScenario(cdp, origin) {
   let spaceSkipChecked = false;
   let smartFollowChecked = false;
   let staleGestureChecked = false;
+  let buttonNameChecked = false;
   const timers = new Map();
   const texts = new Set();
   const avatars = {};
@@ -617,6 +618,10 @@ async function demoScenario(cdp, origin) {
       await staleSkipGestureCheck(cdp);
     } else if (state.buttons.length === 1) {
       finished = state.buttons[0] === "Finish";
+      if (!buttonNameChecked) {
+        buttonNameChecked = true;
+        await buttonNameCheck(cdp, state.buttons[0]);
+      }
       await physicalClick(cdp, "[data-foreground-controls] button");
     } else if (state.placeholder === "What you call her") {
       await evaluate(cdp, `document.querySelector('[data-composer-input]').focus()`);
@@ -639,6 +644,7 @@ async function demoScenario(cdp, origin) {
   assertEqual(inputOwnershipChecked && spaceSkipChecked, true, "The pacing input checks ran");
   assertEqual(smartFollowChecked, true, "The smart follow check ran");
   assertEqual(staleGestureChecked, true, "The stale skip gesture check ran");
+  assertEqual(buttonNameChecked, true, "The button name check ran");
   assertEqual(stageSources.length, 2, "Stage images shown before hideImage");
   if (!stageSources.every((source) => source.startsWith("data:image/svg+xml"))) {
     throw new Error(`The Stage did not show the demo's package images: ${stageSources.join(", ")}`);
@@ -764,6 +770,23 @@ async function spaceSkipCheck(cdp) {
     `${messageCount} > ${gate}`,
     1_000,
     "Space in the empty composer did not skip pacing",
+  );
+}
+
+/** A presented `showButton` is exposed to assistive technology under its visible label. */
+async function buttonNameCheck(cdp, label) {
+  const document = await cdp.call("DOM.getDocument", { depth: 0 });
+  const query = await cdp.call("Accessibility.queryAXTree", {
+    nodeId: document.result.root.nodeId,
+    accessibleName: label,
+    role: "button",
+  });
+  if (query.error !== undefined)
+    throw new Error(`Accessibility query failed: ${query.error.message}`);
+  assertEqual(
+    query.result.nodes.length,
+    1,
+    `The ${JSON.stringify(label)} button is named by its label`,
   );
 }
 

@@ -107,7 +107,7 @@ test("removal fails at runtime for an invalid index or an empty list", () => {
     ],
     ["let items = []\nitems.removeAt(0)", "TSR025", "List index 0 is outside the valid range."],
     [
-      'let items = ["a"]\nlet index = 1 / 2\nitems.removeAt(index)',
+      'function dynamic(value) {\n    return value\n}\nlet items = ["a"]\nitems.removeAt(dynamic(1 / 2))',
       "TSR024",
       "A list index must be an integer.",
     ],
@@ -126,7 +126,11 @@ test("removal fails at runtime for an invalid index or an empty list", () => {
       "TSR028",
       "Expected 1 positional argument(s), received 0.",
     ],
-    ["let items = set[1]\nitems.removeAt(0)", "TSR016", "Unsupported method 'removeAt'."],
+    [
+      "function dynamic(value) {\n    return value\n}\nlet items = dynamic(set[1])\nitems.removeAt(0)",
+      "TSR016",
+      "Unsupported method 'removeAt'.",
+    ],
   ] as const;
   for (const [source, code, message] of cases) {
     const failure = runValidSource(source).snapshot.failure;
@@ -137,21 +141,34 @@ test("removal fails at runtime for an invalid index or an empty list", () => {
 test("the compiler reports a list index it can see is invalid", () => {
   const negative =
     "TSV045 A list index cannot be negative. The first element is at index 0, and the last at length - 1.";
-  const fractional = "TSV045 A list index must be a whole number, such as 0 for the first element.";
+  const fractional =
+    "TSV043 A list index must be a whole number (integer), but this is a number. Round it with floor(...), round(...), or ceil(...).";
+  const text = "TSV043 A list index is a whole number (integer), but this is text (string).";
+  const boolean =
+    "TSV043 A list index is a whole number (integer), but this is true or false (boolean).";
   const cases = [
     ["items.removeAt(-1)", negative],
     ["items.removeAt(0.5)", fractional],
-    ['items.removeAt("0")', fractional],
+    ['items.removeAt("0")', text],
     ["say items[-1]", negative],
     ["say items[1 / 2]", fractional],
     ["items[-(1)] = 2", negative],
-    ['let index: string = "0"\nitems.removeAt(index)', fractional],
-    ["let flag = true\nsay items[flag]", fractional],
-    ['let name = "a"\nitems[name] = 2', fractional],
-    ["items.removeAt(1 < 2)", fractional],
-    ["items.removeAt(1.0)", null],
-    ["let index: number = 0\nsay items[index]", null],
-    ["let index: integer? = null\nitems.removeAt(index)", null],
+    ['let index: string = "0"\nitems.removeAt(index)', text],
+    ["let flag = true\nsay items[flag]", boolean],
+    ['let name = "a"\nitems[name] = 2', text],
+    ["items.removeAt(1 < 2)", boolean],
+    ["items.removeAt(1.0)", fractional],
+    ["let index: number = 0\nsay items[index]", fractional],
+    ["let s = set[1]\ns.removeAt(0)", "TSV043 Sets have no method 'removeAt'."],
+    // A possibly null index is checked first (owner decision on #504 Q1).
+    [
+      "function remove(index: integer?) {\n    items.removeAt(index)\n}",
+      "TSV043 'index' may be null. Check it first: if index != null { ... }",
+    ],
+    [
+      "function remove(index: integer?) {\n    if index != null {\n        items.removeAt(index)\n    }\n}",
+      null,
+    ],
   ] as const;
   for (const [statement, expected] of cases) {
     const diagnostics = compileSource(`let items = [1]\n${statement}`).diagnostics;

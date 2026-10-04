@@ -8,6 +8,7 @@ import { markValidatedImmutableInstructionPlan } from "./plan/validated-immutabl
 import { planLocationToSourceSpan } from "./plan/source-location.js";
 import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
 import { validateSemantics, type SemanticValidationOptions } from "./semantic.js";
+import { checkTypes } from "./type-checker.js";
 import { createSourcePosition, createSourceSpan } from "./source.js";
 
 export interface CompileOptions extends SemanticValidationOptions {}
@@ -49,16 +50,25 @@ function compileParsedSource(
     ...findNonFiniteNumericLiteralDiagnosticsInStableProgram(parsed.program),
   ]);
   const hasParserErrors = hasErrors(parserDiagnostics);
-  const semantic = hasParserErrors
+  const validationOptions = {
+    ...options,
+    builtins: Object.freeze([...CORE_RUNTIME_BUILTINS, ...(options.builtins ?? [])]),
+  };
+  const names = hasParserErrors
     ? Object.freeze({ diagnostics: Object.freeze([]) })
-    : validateSemantics(parsed.program, {
-        ...options,
-        builtins: Object.freeze([...CORE_RUNTIME_BUILTINS, ...(options.builtins ?? [])]),
-      });
+    : validateSemantics(parsed.program, validationOptions);
+  // Types are checked once every name resolves, so a type message never repeats a name or structure error.
+  const types =
+    hasParserErrors || hasErrors(names.diagnostics)
+      ? null
+      : checkTypes(parsed.program, validationOptions);
+  const semantic = Object.freeze({
+    diagnostics: Object.freeze([...names.diagnostics, ...(types?.diagnostics ?? [])]),
+  });
   let plan: InstructionPlan | null = null;
   const loweringDiagnostics: Diagnostic[] = [];
   if (!hasParserErrors && !hasErrors(semantic.diagnostics)) {
-    const compiled = compileStableProgram(parsed.program);
+    const compiled = compileStableProgram(parsed.program, types?.runtimeChecks);
     const diagnostic = compiledPlanValidationDiagnostic(compiled);
     if (diagnostic === null) {
       plan = markValidatedImmutableInstructionPlan(compiled);

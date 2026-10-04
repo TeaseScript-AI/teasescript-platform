@@ -89,6 +89,7 @@ import type {
   RuntimeStorageWriteActionSnapshot,
 } from "./actions/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
+import { buttonTimeoutMilliseconds } from "./actions/interaction.js";
 import {
   calculatePacingDeadlineMs,
   calculateSmartPacingDurationMs,
@@ -111,6 +112,7 @@ import {
 import { cloneMedia, type RuntimeMediaRepeatSnapshot } from "./media.js";
 import { executionRunnable, processDueWork } from "./operations/observe-time.js";
 import { cloneTimer } from "./timers.js";
+import { assertValueType } from "./value-types.js";
 import {
   isDuration,
   isList,
@@ -398,9 +400,12 @@ function executePlannedInstruction(
           instruction.span,
         );
       }
+      const value = evaluator.evaluate(instruction.value);
+      if (instruction.typeCheck !== undefined)
+        assertValueType(value, instruction.typeCheck, instruction.value.span);
       currentFrame(snapshot).bindings.push({
         name: instruction.name,
-        value: cloneCapturedSerializableValue(evaluator.evaluate(instruction.value)),
+        value: cloneCapturedSerializableValue(value),
       });
       advance(snapshot);
       return;
@@ -417,10 +422,14 @@ function executePlannedInstruction(
       evaluator.validateAssignmentTarget(instruction.target);
       advance(snapshot);
       return;
-    case "assign":
-      evaluator.assign(instruction.target, evaluator.evaluate(instruction.value));
+    case "assign": {
+      const value = evaluator.evaluate(instruction.value);
+      if (instruction.typeCheck !== undefined)
+        assertValueType(value, instruction.typeCheck, instruction.value.span);
+      evaluator.assign(instruction.target, value);
       advance(snapshot);
       return;
+    }
     case "validateCallReceiver":
       evaluator.validateCallReceiver(
         evaluator.evaluate(instruction.receiver),
@@ -572,15 +581,13 @@ function executePlannedInstruction(
     case "enterFunctionBody":
       enterFunctionBody(plan, instruction.functionId, snapshot, instruction.span);
       return;
-    case "returnValue":
-      returnFromFunction(
-        plan,
-        snapshot,
-        evaluator.evaluate(instruction.value),
-        instruction.span,
-        events,
-      );
+    case "returnValue": {
+      const value = evaluator.evaluate(instruction.value);
+      if (instruction.typeCheck !== undefined)
+        assertValueType(value, instruction.typeCheck, instruction.value.span);
+      returnFromFunction(plan, snapshot, value, instruction.span, events);
       return;
+    }
     case "returnVoid":
       returnFromFunction(plan, snapshot, null, instruction.span, events);
       return;
@@ -693,6 +700,20 @@ function executePlannedInstruction(
       const materialized = prepared
         ? materializeInteractionUi(instruction.preparedUi, snapshot.temporaries, instruction.span)
         : { ui: instruction.ui, stagedWrites: [] as const };
+      const timeoutMs =
+        prepared &&
+        instruction.preparedUi.kind === "button" &&
+        instruction.preparedUi.timeoutTemporary !== undefined
+          ? buttonTimeoutMs(
+              readTemporary(
+                snapshot.temporaries,
+                instruction.preparedUi.timeoutTemporary,
+                instruction.span,
+              ),
+              snapshot,
+              instruction.span,
+            )
+          : null;
       const backgroundGate = snapshot.backgroundActions.find(
         (action): action is RuntimeChatPacingGateActionSnapshot => action.kind === "chatPacingGate",
       );
@@ -720,6 +741,8 @@ function executePlannedInstruction(
         target: instruction.target,
         speakerId: speaker?.id ?? null,
         ui: cloneInteractionUi(materialized.ui),
+        createdAtMs: snapshot.currentSessionTimeMs,
+        timeoutMs,
         requestEventSequence: sequence,
       });
       commitInteractionMaterialization(snapshot, materialized.stagedWrites);
@@ -854,15 +877,17 @@ function materializeInteractionUi(
   } else if (prepared.kind === "text" || prepared.kind === "number") {
     const hint = prepared.hintTemporary === null ? null : readText(prepared.hintTemporary);
     let prefill: string | undefined;
+    const integer = prepared.kind === "number" && prepared.integer === true;
     if (prepared.prefillTemporary !== undefined) {
       const temporary = read(prepared.prefillTemporary);
-      prefill = interactionPrefill(prepared.kind, temporary.value, span);
+      prefill = interactionPrefill(integer ? "integer" : prepared.kind, temporary.value, span);
       stagedWrites.push({ temporaryId: temporary.id, value: prefill });
     }
     ui = {
       kind: prepared.kind,
       hint,
       ...(prefill === undefined ? {} : { prefill }),
+      ...(integer ? { integer: true as const } : {}),
       accessibleName: prepared.accessibleName,
     };
   } else {
@@ -897,10 +922,20 @@ function materializeInteractionUi(
 
 /** The prefill text of a default answer, which must be an answer the field accepts. */
 function interactionPrefill(
-  kind: "text" | "number",
+  kind: "text" | "number" | "integer",
   value: SerializableRuntimeValue,
   span: SourceSpan,
 ): string {
+  if (kind === "integer") {
+    // A non-whole default is an error, never rounded.
+    if (typeof value !== "number" || !Number.isSafeInteger(value))
+      throw fault(
+        "TSR052",
+        "The default answer of askInteger must be a whole number. Round it with floor(...), round(...), or ceil(...), or ask without 'default:'.",
+        span,
+      );
+    return numberAnswerText(value);
+  }
   if (kind === "number") {
     if (typeof value !== "number" || !Number.isFinite(value))
       throw fault(
@@ -986,6 +1021,14 @@ function enterFunction(
       cloneCapturedSerializableValue(evaluator.evaluate(argument.value)),
     ]),
   );
+  // Parameters are bound only after every argument is evaluated, so the arguments are checked then too.
+  for (const argument of instruction.arguments)
+    if (argument.typeCheck !== undefined)
+      assertValueType(
+        supplied.get(argument.parameterName)!,
+        argument.typeCheck,
+        argument.value.span,
+      );
   if (snapshot.callFrames.length >= snapshot.maxCallDepth) {
     throw fault(
       "TSR047",
@@ -1116,12 +1159,10 @@ function bindDefaultParameter(
   if (parameter === undefined || !parameter.hasDefault) {
     throw fault("TSR048", "Default-parameter metadata is inconsistent.", instruction.span);
   }
-  declareFunctionBinding(
-    snapshot,
-    parameter.name,
-    evaluator.evaluate(instruction.value),
-    instruction.span,
-  );
+  const value = evaluator.evaluate(instruction.value);
+  if (instruction.typeCheck !== undefined)
+    assertValueType(value, instruction.typeCheck, instruction.value.span);
+  declareFunctionBinding(snapshot, parameter.name, value, instruction.span);
   frame.parameterState.parameterIndex += 1;
   advance(snapshot);
 }
@@ -1427,6 +1468,7 @@ function cloneInteractionUi(
     kind: ui.kind,
     hint: ui.hint,
     ...(ui.prefill === undefined ? {} : { prefill: ui.prefill }),
+    ...(ui.kind === "number" && ui.integer === true ? { integer: true as const } : {}),
     accessibleName,
   };
 }
@@ -1448,8 +1490,38 @@ function cloneInteractionAction(
     target: action.target,
     speakerId: action.speakerId,
     ui: cloneInteractionUi(action.ui),
+    createdAtMs: action.createdAtMs,
+    timeoutMs: action.timeoutMs,
     requestEventSequence: action.requestEventSequence,
   };
+}
+
+/**
+ * A `showButton` timeout in milliseconds: a number of seconds or an elapsed duration greater than zero whose deadline
+ * is a representable later scene time.
+ */
+function buttonTimeoutMs(
+  value: SerializableRuntimeValue,
+  snapshot: RuntimeSnapshot,
+  span: SourceSpan,
+): number {
+  const timeoutMs = buttonTimeoutMilliseconds(value);
+  if (timeoutMs === null) {
+    throw fault(
+      "TSR050",
+      "The showButton timeout must be a number of seconds or a duration greater than zero, such as 'timeout: 5' or 'timeout: 500 ms'.",
+      span,
+    );
+  }
+  const deadlineMs = snapshot.currentSessionTimeMs + timeoutMs;
+  if (!isValidSessionTime(deadlineMs) || deadlineMs <= snapshot.currentSessionTimeMs) {
+    throw fault(
+      "TSR050",
+      "The showButton timeout is outside the supported session-time range.",
+      span,
+    );
+  }
+  return timeoutMs;
 }
 
 function currentCallFrameId(snapshot: RuntimeSnapshot): number | null {

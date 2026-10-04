@@ -10,16 +10,24 @@ export function isNumberAnswerText(text: string): boolean {
   return /^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?$/u.test(text);
 }
 
+/** The whole-number form of a trimmed `askInteger` answer: an optional sign, then digits. */
+export function isIntegerAnswerText(text: string): boolean {
+  return /^[+-]?\d+$/u.test(text);
+}
+
 /** The text that prefills `askNumber` for a finite default number; submitting it returns the same number. */
 export function numberAnswerText(value: number): string {
   return String(Object.is(value, -0) ? 0 : value);
 }
 
 /** Whether prefill text is an answer the field accepts unchanged. */
-export function isValidInteractionPrefill(kind: "text" | "number", prefill: string): boolean {
-  return kind === "text"
-    ? !isBlankTextAnswer(prefill)
-    : !/[\r\n\u2028\u2029]/u.test(prefill) &&
-        isNumberAnswerText(prefill.trim()) &&
-        Number.isFinite(Number(prefill));
+export function isValidInteractionPrefill(
+  kind: "text" | "number" | "integer",
+  prefill: string,
+): boolean {
+  if (kind === "text") return !isBlankTextAnswer(prefill);
+  if (/[\r\n\u2028\u2029]/u.test(prefill)) return false;
+  return kind === "integer"
+    ? isIntegerAnswerText(prefill.trim()) && Number.isSafeInteger(Number(prefill))
+    : isNumberAnswerText(prefill.trim()) && Number.isFinite(Number(prefill));
 }

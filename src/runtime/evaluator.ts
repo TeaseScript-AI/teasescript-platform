@@ -4,9 +4,11 @@ import type {
   BinaryExpressionPlan,
   ExpressionPlan,
   PlanSourceLocation,
+  TypeCheckPlan,
 } from "../plan/model.js";
 import { escapeMarkup } from "../message-markup.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
+import { CORE_RUNTIME_BUILTINS } from "../protected-names.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
 import type { DeveloperWarningEvent, InterpreterEvent, OutputSpeaker } from "./events.js";
@@ -15,6 +17,7 @@ import {
   detachPreparedReferencesForMutation,
   freezePreparedReferenceListDescendants,
   preparePreparedReferencesForListRemoval,
+  preparePreparedReferencesForListReorder,
   preparedReferenceSpeakerPath,
   readPreparedReference,
   refreshPreparedReferenceFallbacks,
@@ -24,17 +27,27 @@ import {
 } from "./prepared-references.js";
 import { nextXorShift32, type RandomSource } from "./random.js";
 import { isVisibleScalar, quotedText, valueNotation, visibleText } from "./value-text.js";
+import {
+  SET_OPERATIONS,
+  setOperationArgumentMessage,
+  setOperationItems,
+  sortOrder,
+} from "./collection-operations.js";
 import { formatDuration } from "../duration.js";
 import {
-  assertStoredType,
-  LOAD_KEY_MESSAGE,
-  findScriptStorageEntry,
-  storageKey,
-} from "./script-storage.js";
+  callStringMethod,
+  checkTextArguments,
+  missingMemberMessage,
+  STRING_METHODS,
+  stringLength,
+} from "./string-operations.js";
+import { LIST_JOIN, unknownTextMemberMessage } from "../text-operations.js";
+import { LOAD_KEY_MESSAGE, findScriptStorageEntry, storageKey } from "./script-storage.js";
 import {
   addSerializableSetValue,
   cloneCapturedSerializableValue,
   cloneSerializableValue,
+  containsRuntimeIdentity,
   createCapturedSerializableList,
   createCapturedSerializableSet,
   getSerializableProperty,
@@ -60,6 +73,7 @@ import type {
   RuntimeTemporarySnapshot,
 } from "./state.js";
 import {
+  describeRuntimeValue,
   isDuration,
   isList,
   isObject,
@@ -69,6 +83,7 @@ import {
   isTimerHandle,
   isMediaHandle,
 } from "./value-predicates.js";
+import { assertValueType, matchesValueType } from "./value-types.js";
 import {
   mediaEndMs,
   mediaProperty,
@@ -102,6 +117,20 @@ import {
   timerRecord,
 } from "./operations/timer-lifecycle.js";
 import { isValidSessionTime } from "./actions/delay.js";
+import {
+  booleanFromText,
+  CONVERSION_RESULTS,
+  describeConversionResult,
+  isConversionName,
+  isConversionResult,
+  numberFromText,
+  rounded,
+  MIN_MAX_BUILTINS,
+  ROUNDING_BUILTINS,
+  withoutNegativeZero,
+  type ConversionName,
+  type ConversionResult,
+} from "../conversions.js";
 
 export interface RuntimeCapabilityCall {
   readonly positional: readonly SerializableRuntimeValue[];
@@ -471,6 +500,13 @@ export class Evaluator {
             value = object.items[index]!;
           }
           break;
+        case "typeTest":
+          if (frame.stage++ === 0) {
+            pending.push(evaluationFrame(expression.value));
+            continue;
+          }
+          value = matchesValueType(result.value, expression.type) !== expression.negated;
+          break;
         case "unary":
           if (frame.stage++ === 0) {
             pending.push(evaluationFrame(expression.operand));
@@ -588,8 +624,6 @@ export class Evaluator {
             const key = storageKey(result.value, LOAD_KEY_MESSAGE, expression.key.span);
             const entry = findScriptStorageEntry(this.snapshot, key);
             if (entry !== undefined) {
-              if (expression.expectedType !== null)
-                assertStoredType(entry, expression.expectedType, expression.span);
               value = entry.value;
               break;
             }
@@ -740,12 +774,20 @@ export class Evaluator {
       }
       return;
     }
+    if (typeof receiver === "string") {
+      if (!STRING_METHODS.has(method))
+        throw fault("TSR016", unknownTextMemberMessage(method, "method"), span);
+      return;
+    }
     if (!isList(receiver) && !isSet(receiver)) {
-      throw fault("TSR016", `Unsupported method '${method}'.`, span);
+      throw fault("TSR016", missingMemberMessage(receiver, method, "method"), span);
     }
     const supported = isSet(receiver)
-      ? new Set(["add", "remove", "clear", "contains", "toList"])
+      ? new Set(["add", "remove", "clear", "contains", "toList", ...SET_OPERATIONS])
       : new Set([
+          ...SET_OPERATIONS,
+          "sort",
+          "shuffle",
           "add",
           "remove",
           "removeAt",
@@ -754,6 +796,7 @@ export class Evaluator {
           "clear",
           "contains",
           "toSet",
+          "join",
         ]);
     if (!supported.has(method)) {
       throw fault("TSR016", `Unsupported method '${method}'.`, span);
@@ -938,6 +981,17 @@ export class Evaluator {
     return `<media ${quotedText(media.source)}, ${state}>`;
   }
 
+  /** One element of `list.join()`: a scalar as visible text, without selecting from nested lists. */
+  #joinedText(item: SerializableRuntimeValue, span: SourceSpan): string {
+    if (!isVisibleScalar(item))
+      throw fault(
+        "TSR021",
+        "join() can only join text, numbers, true or false, null, and durations. Select an element or a property first.",
+        span,
+      );
+    return visibleText(item, span);
+  }
+
   #binary(
     expression: BinaryExpressionPlan,
     left: SerializableRuntimeValue,
@@ -951,6 +1005,14 @@ export class Evaluator {
     if (expression.operator === "==" || expression.operator === "!=") {
       const equal = serializableEquals(left, right);
       return expression.operator === "==" ? equal : !equal;
+    }
+    if (expression.operator === "in") {
+      if (!isRange(right)) throw fault("TSR035", "Unsupported binary operation.", expression.span);
+      return (
+        typeof left === "number" &&
+        left >= right.start &&
+        (right.inclusive ? left <= right.end : left < right.end)
+      );
     }
     if (isDuration(left) || isDuration(right)) return this.#durationBinary(expression, left, right);
     if (["<", "<=", ">", ">="].includes(expression.operator)) {
@@ -1035,7 +1097,13 @@ export class Evaluator {
   ): SerializableRuntimeValue {
     if (expression.callee.kind === "identifier") {
       const name = expression.callee.name;
-      const coreBuiltin = name === "random" || name === "chance" || name === "randomInteger";
+      if (isConversionName(name))
+        return this.#conversionBuiltin(name, positional, named, expression.span);
+      if (ROUNDING_BUILTINS.has(name))
+        return this.#roundingBuiltin(name, positional, named, expression.span);
+      if (MIN_MAX_BUILTINS.has(name))
+        return this.#minMaxBuiltin(name, positional, named, expression.span);
+      const coreBuiltin = CORE_RUNTIME_BUILTINS.some((builtin) => builtin === name);
       const platformPrelude = name === "escapeMarkup";
       const builtin = Object.hasOwn(this.#builtins, name) ? this.#builtins[name] : undefined;
       if (!coreBuiltin && !platformPrelude && builtin === undefined) {
@@ -1081,8 +1149,9 @@ export class Evaluator {
           expression.span,
         );
       }
+      let copied: SerializableRuntimeValue;
       try {
-        return cloneSerializableValue(returned);
+        copied = cloneSerializableValue(returned);
       } catch (error) {
         if (error instanceof SerializableValueError) {
           throw fault(
@@ -1093,12 +1162,31 @@ export class Evaluator {
         }
         throw error;
       }
+      // Handles and speaker references name records that only the runtime creates; a host cannot hand one out.
+      if (containsRuntimeIdentity(copied)) {
+        throw fault(
+          "TSR013",
+          `Built-in '${expression.callee.name}' returned an invalid value: it contains a timer handle, media handle, or speaker reference, which only the runtime creates.`,
+          expression.span,
+        );
+      }
+      return copied;
     }
     if (expression.callee.kind === "property" && isTimerHandle(receiver)) {
       return this.#callTimer(receiver, expression.callee.name, positional, named, expression.span);
     }
     if (expression.callee.kind === "property" && isMediaHandle(receiver)) {
       return this.#callMedia(receiver, expression.callee.name, positional, named, expression.span);
+    }
+    if (expression.callee.kind === "property" && typeof receiver === "string") {
+      const name = Object.keys(named)[0];
+      if (name !== undefined)
+        throw fault(
+          "TSR015",
+          `${expression.callee.name}() takes its arguments without names; remove '${name}:'.`,
+          expression.span,
+        );
+      return callStringMethod(receiver, expression.callee.name, positional, expression.span);
     }
     if (expression.callee.kind === "property") {
       return this.#callCollection(
@@ -1107,6 +1195,10 @@ export class Evaluator {
         positional,
         named,
         expression.span,
+        expression.typeCheck === undefined
+          ? null
+          : // Plan validation accepts a type check only on an `add` call with one argument.
+            { check: expression.typeCheck, span: expression.arguments[0]!.value.span },
       );
     }
     throw fault(
@@ -1116,16 +1208,18 @@ export class Evaluator {
     );
   }
 
+  /** `added` is the check of an element that `add` inserts, from the compiler (ADR 0021 rule 1.7). */
   #callCollection(
     receiver: SerializableRuntimeValue,
     name: string,
     positional: readonly SerializableRuntimeValue[],
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
+    added: { readonly check: TypeCheckPlan; readonly span: SourceSpan } | null,
   ): SerializableRuntimeValue {
     this.#referenceEpoch++;
     if (!isList(receiver) && !isSet(receiver))
-      throw fault("TSR016", `Unsupported method '${name}'.`, span);
+      throw fault("TSR016", missingMemberMessage(receiver, name, "method"), span);
     if (Object.keys(named).length !== 0)
       throw fault("TSR015", "Collection methods accept positional arguments only.", span);
     const expect = (count: number): void => {
@@ -1141,6 +1235,7 @@ export class Evaluator {
         switch (name) {
           case "add":
             expect(1);
+            if (added !== null) assertValueType(positional[0]!, added.check, added.span);
             addSerializableSetValue(receiver, positional[0]!);
             return null;
           case "remove":
@@ -1157,6 +1252,24 @@ export class Evaluator {
           case "toList":
             expect(0);
             return createCapturedSerializableList(receiver.items);
+          case "intersection":
+          case "union":
+          case "difference":
+            expect(1);
+            return createCapturedSerializableSet(
+              setOperationItems(
+                name,
+                receiver.items,
+                this.#setOperationArgument(name, positional[0]!, span),
+              ),
+            );
+          case "sort":
+          case "shuffle":
+            throw fault(
+              "TSR016",
+              `A set keeps its insertion order, so it has no ${name}(). Copy it into a list with toList() first.`,
+              span,
+            );
           default:
             throw fault("TSR016", `Unsupported method '${name}'.`, span);
         }
@@ -1164,6 +1277,7 @@ export class Evaluator {
       switch (name) {
         case "add":
           expect(1);
+          if (added !== null) assertValueType(positional[0]!, added.check, added.span);
           receiver.items.push(cloneCapturedSerializableValue(positional[0]!));
           return null;
         case "remove": {
@@ -1211,6 +1325,33 @@ export class Evaluator {
         case "toSet":
           expect(0);
           return createCapturedSerializableSet(receiver.items);
+        case "sort":
+        case "shuffle":
+          expect(0);
+          this.#reorderList(
+            receiver,
+            name === "sort"
+              ? sortOrder(receiver.items, span)
+              : this.#shuffleOrder(receiver.items.length, span),
+          );
+          return null;
+        case "intersection":
+        case "union":
+        case "difference":
+          expect(1);
+          return createCapturedSerializableList(
+            setOperationItems(
+              name,
+              receiver.items,
+              this.#setOperationArgument(name, positional[0]!, span),
+            ),
+          );
+        case "join": {
+          checkTextArguments(LIST_JOIN, positional, span);
+          // EVIDENCE: invariant: checkTextArguments proved that a given separator is text.
+          const separator = (positional[0] as string | undefined) ?? ", ";
+          return receiver.items.map((item) => this.#joinedText(item, span)).join(separator);
+        }
         default:
           throw fault("TSR016", `Unsupported method '${name}'.`, span);
       }
@@ -1493,6 +1634,119 @@ export class Evaluator {
     return range.start + Math.floor(this.#findRandom(span) * length);
   }
 
+  /** `toString`, `toNumber`, `toInteger`, or `toBoolean` (V30 §13), with the optional `default:` fallback. */
+  #conversionBuiltin(
+    name: ConversionName,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
+    const extra = Object.keys(named).find((key) => key !== "default");
+    if (positional.length !== 1 || extra !== undefined)
+      throw fault(
+        "TSR028",
+        `${name}(...) takes one value and an optional default:, such as ${name}(value, default: ...).`,
+        span,
+      );
+    const result = CONVERSION_RESULTS.get(name)!;
+    const fallback = Object.hasOwn(named, "default") ? named.default : undefined;
+    if (fallback !== undefined && !isConversionResult(result, fallback))
+      throw fault(
+        "TSR058",
+        `${name}(...) needs ${describeConversionResult(result)} as its default:, not ${describeRuntimeValue(fallback)}.`,
+        span,
+      );
+    const value = positional[0]!;
+    const converted = this.#converted(result, value, span);
+    if (converted !== undefined) return converted;
+    if (fallback !== undefined) return fallback;
+    const shown = typeof value === "string" ? ` ${JSON.stringify(value)}` : "";
+    throw fault(
+      "TSR058",
+      `${name}(...) cannot convert ${describeRuntimeValue(value)}${shown} to ${describeConversionResult(result)}. Give a fallback with default: if the value may not convert.`,
+      span,
+    );
+  }
+
+  /** The converted value, or `undefined` when `value` cannot be converted. */
+  #converted(
+    result: ConversionResult,
+    value: SerializableRuntimeValue,
+    span: SourceSpan,
+  ): SerializableRuntimeValue | undefined {
+    if (result === "string") return isVisibleScalar(value) ? visibleText(value, span) : undefined;
+    if (result === "boolean")
+      return typeof value === "boolean"
+        ? value
+        : typeof value === "string"
+          ? booleanFromText(value)
+          : undefined;
+    const number =
+      typeof value === "number"
+        ? withoutNegativeZero(value)
+        : typeof value === "string"
+          ? numberFromText(value)
+          : undefined;
+    return number === undefined || result === "number"
+      ? number
+      : withoutNegativeZero(Math.trunc(number));
+  }
+
+  /** `min` or `max` of two or more values that are all numbers or all durations. */
+  #minMaxBuiltin(
+    name: string,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
+    if (positional.length < 2 || Object.keys(named).length !== 0)
+      throw fault(
+        "TSR028",
+        `${name}(...) takes two or more numbers or durations, such as ${name}(20, total).`,
+        span,
+      );
+    const numbers = positional.every((value) => typeof value === "number");
+    if (!numbers && !positional.every(isDuration)) {
+      const other = positional.find((value) => typeof value !== "number" && !isDuration(value));
+      throw fault(
+        "TSR059",
+        other === undefined
+          ? `${name}(...) needs all numbers or all durations, not a mix of both.`
+          : `${name}(...) needs numbers or durations, not ${describeRuntimeValue(other)}.`,
+        span,
+      );
+    }
+    // A loop, not a spread into Math.min/Math.max, so a call with very many arguments cannot overflow the native stack.
+    const value = (item: SerializableRuntimeValue): number =>
+      typeof item === "number" ? item : isDuration(item) ? item.milliseconds : Number.NaN;
+    let best = value(positional[0]!);
+    for (const item of positional) {
+      const candidate = value(item);
+      if (name === "min" ? candidate < best : candidate > best) best = candidate;
+    }
+    return numbers
+      ? withoutNegativeZero(best)
+      : { kind: "duration", milliseconds: withoutNegativeZero(best) };
+  }
+
+  #roundingBuiltin(
+    name: string,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): number {
+    if (positional.length !== 1 || Object.keys(named).length !== 0)
+      throw fault("TSR028", `${name}(...) takes one number, such as ${name}(2.5).`, span);
+    const value = positional[0];
+    if (typeof value !== "number")
+      throw fault(
+        "TSR059",
+        `${name}(...) needs a number, not ${describeRuntimeValue(value!)}.${typeof value === "string" ? " Convert text with toNumber(...) first." : ""}`,
+        span,
+      );
+    return rounded(name, value);
+  }
+
   #escapeMarkupBuiltin(call: RuntimeCapabilityCall): string {
     this.#expectBuiltinArguments("escapeMarkup", call, 1);
     const text = call.positional[0];
@@ -1511,6 +1765,40 @@ export class Evaluator {
   }
 
   /** Removes one list element, rebasing or freezing prepared references into the list, and returns it. */
+  /** The items of a set operation's argument, which may be a list or a set whatever the receiver is. */
+  #setOperationArgument(
+    name: string,
+    argument: SerializableRuntimeValue,
+    span: SourceSpan,
+  ): readonly SerializableRuntimeValue[] {
+    if (!isList(argument) && !isSet(argument))
+      throw fault("TSR060", setOperationArgumentMessage(name, argument), span);
+    return argument.items;
+  }
+
+  /**
+   * A uniform random order of `length` items as their old indexes (Fisher–Yates), drawing `length - 1` numbers from the
+   * session RNG, or none for fewer than two items, so replay and checkpoint resume reproduce it.
+   */
+  #shuffleOrder(length: number, span: SourceSpan): number[] {
+    const order = Array.from({ length }, (_, index) => index);
+    for (let index = length - 1; index > 0; index -= 1) {
+      const other = Math.floor(this.#findRandom(span) * (index + 1));
+      [order[index], order[other]] = [order[other]!, order[index]!];
+    }
+    return order;
+  }
+
+  /** Puts the items in `order` (old indexes), moving prepared references into items along with them. */
+  #reorderList(list: SerializableRuntimeList, order: readonly number[]): void {
+    const newIndexOf: number[] = [];
+    for (const [index, old] of order.entries()) newIndexOf[old] = index;
+    const rebased = preparePreparedReferencesForListReorder(this.snapshot, list, newIndexOf);
+    const items = order.map((old) => list.items[old]!);
+    for (const [index, item] of items.entries()) list.items[index] = item;
+    refreshPreparedReferenceFallbacks(this.snapshot, rebased);
+  }
+
   #removeListItem(list: SerializableRuntimeList, index: number): SerializableRuntimeValue {
     const rebased = preparePreparedReferencesForListRemoval(this.snapshot, list, index);
     const removed = list.items.splice(index, 1)[0]!;
@@ -1544,6 +1832,10 @@ export class Evaluator {
       return this.#getSpeakerProperty(this.speakerById(value.speakerId, span), name, span);
     }
     if (isList(value) || isSet(value)) return this.#getCollectionProperty(value, name, span);
+    if (typeof value === "string") {
+      if (name === "length") return stringLength(value);
+      throw fault("TSR017", unknownTextMemberMessage(name, "property"), span);
+    }
     if (isMediaHandle(value)) {
       const property = mediaProperty(
         this.#media(value, span),
@@ -1564,7 +1856,7 @@ export class Evaluator {
         throw fault("TSR017", `Timer handles have no property '${name}'.`, span);
       return property;
     }
-    throw fault("TSR017", `Value has no property '${name}'.`, span);
+    throw fault("TSR017", missingMemberMessage(value, name, "property"), span);
   }
 
   #index(value: SerializableRuntimeValue, span: SourceSpan): number {

@@ -614,7 +614,8 @@ Standard keyboard behavior is:
 
 ### Foreground interaction presentation
 
-`askText` and `askNumber` use the composer as their active answer field. A default answer starts as the composer text,
+`askText`, `askNumber`, and `askInteger` use the composer as their active answer field; `askInteger` asks for a numeric
+keyboard. A default answer starts as the composer text,
 which the player submits unchanged or edits first; a cleared composer stays empty. After a checkpoint restore the
 composer shows the default again, and unsent edits are not kept. `choose` and `showButton` keep the composer enabled
 rather than visually disabling it:
@@ -623,6 +624,8 @@ rather than visually disabling it:
 - `showButton`: clicking the rendered button or submitting its exact non-empty visible label in the composer activates
   the same action; other text and Space while the empty composer owns focus do not activate it;
 - a primary click on unrelated/blank Player space does **not** activate `showButton`;
+- a `showButton` timeout removes the button without a transcript message; the Player observes time at the timeout
+  so the button disappears on schedule;
 - while any mandatory foreground interaction is active, other composer text does not advance ordinary canonical script
   execution. In the deterministic first POC it is an invalid attempt and the same interaction remains active with the
   accepted validation/retry behavior. A future LLM clarification/interpretation layer may consume non-matching text
@@ -868,7 +871,8 @@ view/tool/stage capability inside the accepted sandbox.
 ## Accessibility invariants
 
 Higher-authority ADR 0018 requires a programmatic accessible name for every Standard UI text field, number field, choice
-group, and button. The Player preserves that requirement regardless of visible hint text or authored styling.
+group, and button. The Player preserves that requirement regardless of visible hint text or authored styling: a button's
+visible label is its accessible name, and the localized default names it only when the label is blank.
 
 Additional maintained presentation invariants:
 

@@ -749,6 +749,8 @@ export function expressionMayReferenceTemporary(value: unknown, temporaryId: num
     }
     case "unary":
       return expressionMayReferenceTemporary(value.operand, temporaryId);
+    case "typeTest":
+      return expressionMayReferenceTemporary(value.value, temporaryId);
     case "binary":
       return (
         expressionMayReferenceTemporary(value.left, temporaryId) ||
@@ -878,7 +880,6 @@ function validateCanonicalInteractionResultHandoffs(
     if (
       !isRecord(instruction) ||
       instruction.kind !== "interaction" ||
-      instruction.interactionKind === "button" ||
       !Number.isSafeInteger(instruction.destinationTemporary)
     )
       return;
@@ -1111,6 +1112,8 @@ function expressionGuaranteesTemporaryEvaluation(value: unknown, temporaryId: nu
     }
     case "unary":
       return expressionGuaranteesTemporaryEvaluation(value.operand, temporaryId);
+    case "typeTest":
+      return expressionGuaranteesTemporaryEvaluation(value.value, temporaryId);
     case "binary":
       if (value.operator === "and" || value.operator === "or") {
         return expressionGuaranteesTemporaryEvaluation(value.left, temporaryId);

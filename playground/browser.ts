@@ -551,7 +551,8 @@ function renderPlayerControls(presentation: WorkspacePlayerPresentation): void {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = interaction.ui.buttonLabel;
-    button.setAttribute("aria-label", accessibleName);
+    // The visible label names the button; the localized default only stands in for a blank label.
+    if (interaction.ui.buttonLabel.trim() === "") button.setAttribute("aria-label", accessibleName);
     const actionId = interaction.actionId;
     button.addEventListener("click", () => activateButton(actionId));
     elements.interactionControls.append(button);
@@ -564,7 +565,8 @@ function renderPlayerControls(presentation: WorkspacePlayerPresentation): void {
   elements.composerInput.setAttribute("aria-label", accessibleName);
   if (interaction.ui.kind === "text" || interaction.ui.kind === "number") {
     elements.composerInput.placeholder = interaction.ui.hint ?? "";
-    elements.composerInput.inputMode = interaction.ui.kind === "number" ? "decimal" : "text";
+    elements.composerInput.inputMode =
+      interaction.ui.kind !== "number" ? "text" : interaction.ui.integer ? "numeric" : "decimal";
     elements.composerHelp.textContent =
       interaction.ui.kind === "number"
         ? "Enter the scripted number answer. Engine validation is shown above."

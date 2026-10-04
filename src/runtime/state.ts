@@ -39,6 +39,7 @@ import {
 } from "./random.js";
 import {
   cloneCapturedSerializableValue,
+  containsRuntimeIdentity,
   validateCapturedSerializableValue,
   type SerializableRuntimeProperty,
   type SerializableRuntimeList,
@@ -67,7 +68,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 29;
+export const RUNTIME_SNAPSHOT_VERSION = 31;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -396,11 +397,14 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     if (name.length === 0) throw new TypeError("Global binding names must not be empty.");
     const failure = validateCapturedSerializableValue(value, `globals.${name}`);
     if (failure !== null) throw new TypeError(failure);
-    bindings.push({
-      name,
-      // EVIDENCE: validation: validateCapturedSerializableValue accepted this captured global value above.
-      value: value as SerializableRuntimeValue,
-    });
+    // EVIDENCE: validation: validateCapturedSerializableValue accepted this captured global value above.
+    const valid = value as SerializableRuntimeValue;
+    if (containsRuntimeIdentity(valid)) {
+      throw new TypeError(
+        `globals.${name} contains a timer handle, media handle, or speaker reference, which only the runtime creates.`,
+      );
+    }
+    bindings.push({ name, value: valid });
   }
   return {
     format: RUNTIME_SNAPSHOT_FORMAT,
@@ -674,6 +678,8 @@ function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendin
     target: action.target,
     speakerId: action.speakerId,
     ui: cloneInteractionUi(action.ui),
+    createdAtMs: action.createdAtMs,
+    timeoutMs: action.timeoutMs,
     requestEventSequence: action.requestEventSequence,
   };
 }
@@ -704,6 +710,7 @@ export function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPaylo
     kind: ui.kind,
     hint: ui.hint,
     ...(ui.prefill === undefined ? {} : { prefill: ui.prefill }),
+    ...(ui.kind === "number" && ui.integer === true ? { integer: true as const } : {}),
     accessibleName,
   };
 }
@@ -733,7 +740,7 @@ function cloneSettlement(
     actionId: settlement.actionId,
     actionKind: "interaction",
     interactionKind: settlement.interactionKind,
-    settlementKind: "completed",
+    settlementKind: settlement.settlementKind,
     owningInstruction: settlement.owningInstruction,
     continuationInstruction: settlement.continuationInstruction,
     ownerCallFrameId: settlement.ownerCallFrameId,

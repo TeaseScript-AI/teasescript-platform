@@ -163,6 +163,11 @@ test("a default the compiler knows is wrong is a compile error that names the fi
       "The default answer of askNumber must be a number, not a duration. Use a number, such as 'default: 10'.",
     ],
     [
+      "let limit: number? = value\nlet answer = askNumber default: limit",
+      "TSV039",
+      "The default answer of askNumber must be a number, but 'limit' holds a number or null. Check it first: if limit != null { ... }",
+    ],
+    [
       "let answer = askNumber default: 1 == 1",
       "TSV039",
       "The default answer of askNumber must be a number, not true or false (boolean). Use a number, such as 'default: 10'.",
@@ -214,7 +219,7 @@ test("an invalid dynamic default fails before the field opens", () => {
       "The default answer of askText must contain a non-whitespace character. Ask without 'default:' when there is no answer to offer.",
     ],
     ["let answer = askNumber default: value", "10", notNumber],
-    ["let limit: number? = value\nlet answer = askNumber default: limit", null, notNumber],
+    ["let answer = askNumber default: value", null, notNumber],
   ] as const;
   for (const [source, value, message] of cases) {
     const plan = compileValidPlan(source, { globals: ["value"] });
@@ -235,8 +240,9 @@ test("an invalid dynamic default fails before the field opens", () => {
 test("a computed default keeps its runtime arithmetic errors whether or not the hint is constant", () => {
   for (const hint of ['"N"', "hint"]) {
     for (const source of [
-      `let answer = askNumber ${hint}, default: 1 / (1e308 * 10)`,
-      `let answer = askText ${hint}, default: "\${1 / (1e308 * 10)}"`,
+      // A variable keeps the overflow a runtime error; a visible one is a compile error.
+      `let big = 1e308\nlet answer = askNumber ${hint}, default: 1 / (big * 10)`,
+      `let big = 1e308\nlet answer = askText ${hint}, default: "\${1 / (big * 10)}"`,
     ]) {
       const plan = compileValidPlan(source, { globals: ["hint"] });
       const failed = run(plan, createFreshRuntimeSnapshot(plan, { globals: { hint: "N" } }));

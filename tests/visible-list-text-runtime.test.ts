@@ -9,10 +9,14 @@ import { sayTexts } from "./helpers/runtime-events.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 test("interpolation selects one list element at every evaluation", () => {
+  // `dynamic` hides the text's type, so one list may offer text and a number.
+  const dynamic = "function dynamic(value) {\n  return value\n}\n";
   const template = runSource(
-    ['let values = ["left", 2]', 'say "Value: ${values}"', 'say "${values} and ${values}"'].join(
-      "\n",
-    ),
+    `${dynamic}${[
+      'let values = [dynamic("left"), 2]',
+      'say "Value: ${values}"',
+      'say "${values} and ${values}"',
+    ].join("\n")}`,
     [0, 0.75, 0],
   );
   assert.equal(template.result.snapshot.failure, null);
@@ -21,7 +25,7 @@ test("interpolation selects one list element at every evaluation", () => {
 
   // Any element that `${...}` shows on its own may be selected.
   const scalars = runSource(
-    'let values = [true, null, 90 seconds]\nsay "${values}, ${values}, ${values}"',
+    `${dynamic}let values = [dynamic(true), null, 90 seconds]\nsay "\${values}, \${values}, \${values}"`,
     [0, 0.5, 0.9],
   );
   assert.equal(scalars.result.snapshot.failure, null);
@@ -31,7 +35,7 @@ test("interpolation selects one list element at every evaluation", () => {
 test("say shows lists, sets, and objects in code-like notation without message markup", () => {
   const cases = [
     ['say ["pet", "puppy"]', '["pet", "puppy"]'],
-    ["say [2.5, true, null]", "[2.5, true, null]"],
+    ["say [2.5, 3, null]", "[2.5, 3, null]"],
     ['say [["a"], ["b"]]', '[["a"], ["b"]]'],
     ['say [{ name: "Bo", age: 3 }]', '[{ name: "Bo", age: 3 }]'],
     ['say { name: "Bo" }', '{ name: "Bo" }'],
@@ -69,12 +73,12 @@ test("say notation survives prepared pacing and checkpoint resume", () => {
     "function pause {",
     "    return 0",
     "}",
-    'say ["**a**", { b: [1] }], pause()',
+    'say [{ a: "**a**", b: [1] }], pause()',
   ].join("\n");
   const equivalent = assertRuntimeResumeEquivalent(source);
   assert.deepEqual(
     equivalent.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ['["**a**", { b: [1] }]'],
+    ['[{ a: "**a**", b: [1] }]'],
   );
 });
 
@@ -82,9 +86,13 @@ test("say shows ranges and speakers as code-like notation", () => {
   const cases = [
     ["say 1..5", "1..5"],
     ["say 1..=5", "1..=5"],
-    ["say [-2..3, { r: 0..=1 }]", "[-2..3, { r: 0..=1 }]"],
+    ["say [-2..3, 0..=1]", "[-2..3, 0..=1]"],
+    ["say { r: 0..=1 }", "{ r: 0..=1 }"],
     ["speaker mistress {}\nsay mistress", "<speaker mistress>"],
-    ["speaker vera {}\nsay [vera, 1]", "[<speaker vera>, 1]"],
+    [
+      "speaker vera {}\nspeaker mistress {}\nsay [vera, mistress]",
+      "[<speaker vera>, <speaker mistress>]",
+    ],
   ] as const;
   for (const [source, text] of cases) {
     const execution = runSource(source, []);
@@ -145,11 +153,13 @@ test("say shows a media handle with its current state, also after checkpoint res
 });
 
 test("interpolation checks the whole list before selecting, so the outcome does not depend on the seed", () => {
+  // `dynamic` hides the text's type, so one list may hold text and another value.
+  const dynamic = "function dynamic(value) {\n  return value\n}\n";
   const cases = [
-    ['let values = ["ok", { value: 1 }]\nsay "${values}"', "TSR021"],
-    ['let values = ["ok", ["nested"]]\nsay "${values}"', "TSR021"],
-    ['let values = ["ok", set[1]]\nsay "${values}"', "TSR021"],
-    ['let values = ["ok", 1..2]\nsay "${values}"', "TSR021"],
+    [`${dynamic}let values = [dynamic("ok"), { value: 1 }]\nsay "\${values}"`, "TSR021"],
+    [`${dynamic}let values = [dynamic("ok"), ["nested"]]\nsay "\${values}"`, "TSR021"],
+    [`${dynamic}let values = [dynamic("ok"), set[1]]\nsay "\${values}"`, "TSR021"],
+    [`${dynamic}let values = [dynamic("ok"), 1..2]\nsay "\${values}"`, "TSR021"],
     ['let values = []\nsay "${values}"', "TSR019"],
   ] as const;
   for (const [source, code] of cases) {
@@ -170,7 +180,7 @@ test("interpolation checks the whole list before selecting, so the outcome does 
 test("interpolated values the compiler can see are checked when compiling", () => {
   const cases = [
     [
-      'say "${["ok", {}]}"',
+      'say "${[{}]}"',
       "{}",
       "An interpolated list may contain only text, numbers, true, false, null, and durations, because one element is shown as text.",
     ],

@@ -91,7 +91,7 @@ export function cloneSettlement(
     actionId: settlement.actionId,
     actionKind: "interaction",
     interactionKind: settlement.interactionKind,
-    settlementKind: "completed",
+    settlementKind: settlement.settlementKind,
     owningInstruction: settlement.owningInstruction,
     continuationInstruction: settlement.continuationInstruction,
     ownerCallFrameId: settlement.ownerCallFrameId,

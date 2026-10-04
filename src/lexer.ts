@@ -32,6 +32,7 @@ const keywordKinds: ReadonlyMap<string, TokenKind> = new Map([
   ["continue", TokenKind.KeywordContinue],
   ["function", TokenKind.KeywordFunction],
   ["return", TokenKind.KeywordReturn],
+  ["is", TokenKind.KeywordIs],
 ]);
 
 const diagnosticCodes = {
@@ -408,8 +409,8 @@ class Lexer {
     const previousKind = previous?.kind;
     if (
       previousKind === TokenKind.Identifier &&
-      // `load` and its `default` take an operand, such as `"${load "k" default "none"}"`; a member such as
-      // `obj.load` does not.
+      // `load` takes an operand, such as `"${load "k", default: "none"}"`, and so does the bare `default` of the
+      // earlier form, lexed so that `load` can name the fix; a member such as `obj.load` does not.
       (((previous?.lexeme === "load" || previous?.lexeme === "default") &&
         this.#tokens[index - 1]?.kind !== TokenKind.Dot) ||
         isInteractionCommand(previous?.lexeme) ||
@@ -438,6 +439,7 @@ class Lexer {
       case TokenKind.GreaterEqual:
       case TokenKind.RangeExclusive:
       case TokenKind.RangeInclusive:
+      case TokenKind.KeywordIs:
       case TokenKind.KeywordNot:
       case TokenKind.KeywordAnd:
       case TokenKind.KeywordOr:
@@ -604,7 +606,13 @@ class Lexer {
 }
 
 function isInteractionCommand(value: string | undefined): boolean {
-  return value === "askText" || value === "askNumber" || value === "choose";
+  return (
+    value === "showButton" ||
+    value === "askText" ||
+    value === "askNumber" ||
+    value === "askInteger" ||
+    value === "choose"
+  );
 }
 
 interface StringScanTextPart {
@@ -758,6 +766,7 @@ const singleCharacterKinds: Readonly<Record<string, TokenKind>> = {
   ",": TokenKind.Comma,
   ".": TokenKind.Dot,
   "?": TokenKind.Question,
+  "|": TokenKind.Pipe,
   "*": TokenKind.Star,
   "/": TokenKind.Slash,
   "%": TokenKind.Percent,

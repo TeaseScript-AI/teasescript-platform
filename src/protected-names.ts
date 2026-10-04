@@ -34,6 +34,7 @@ const TEASESCRIPT_GRAMMAR_KEYWORDS = Object.freeze([
   "save",
   "load",
   "delete",
+  "is",
 ] as const);
 
 const TEASESCRIPT_PROTECTED_TYPE_NAMES = Object.freeze([
@@ -45,6 +46,10 @@ const TEASESCRIPT_PROTECTED_TYPE_NAMES = Object.freeze([
   "time",
   "datetime",
   "duration",
+  "list",
+  "object",
+  "range",
+  "media",
 ] as const);
 
 const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
@@ -52,6 +57,11 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "random",
   "randomInteger",
   "chance",
+  "round",
+  "floor",
+  "ceil",
+  "min",
+  "max",
   "toString",
   "toNumber",
   "toInteger",
@@ -105,7 +115,20 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "getPlayerHistory",
 ] as const);
 
-export const CORE_RUNTIME_BUILTINS = Object.freeze(["random", "chance", "randomInteger"] as const);
+export const CORE_RUNTIME_BUILTINS = Object.freeze([
+  "random",
+  "chance",
+  "randomInteger",
+  "toString",
+  "toNumber",
+  "toInteger",
+  "toBoolean",
+  "round",
+  "floor",
+  "ceil",
+  "min",
+  "max",
+] as const);
 
 /** Temporary direct-call bridge for implemented Platform Standard Library helpers. */
 export const PLATFORM_STANDARD_LIBRARY_PRELUDE = Object.freeze(["escapeMarkup"] as const);

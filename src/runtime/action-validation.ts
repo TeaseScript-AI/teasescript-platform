@@ -1,5 +1,5 @@
 import { isNormalizedOpaqueColor, normalizeOpaqueColor } from "../color.js";
-import { isValidInteractionPrefill } from "../interaction-answers.js";
+import { isIntegerAnswerText, isValidInteractionPrefill } from "../interaction-answers.js";
 import { isInteractionChoiceValue } from "../choice-values.js";
 import { expandChoiceOptions } from "./choice-options.js";
 import { RuntimeFault } from "./errors.js";
@@ -27,6 +27,7 @@ import {
 import { isMessageMarkup } from "../message-markup.js";
 import type { RuntimeChatPacingGateSettlementSnapshot } from "./actions/model.js";
 import { requiredActionCompletionEvents } from "./actions/model.js";
+import { buttonTimeoutMilliseconds } from "./actions/interaction.js";
 import { recordValidationTestWork } from "../validation-testing.js";
 import { validMediaAction } from "./media-validation.js";
 import { validTimerAction } from "./timer-validation.js";
@@ -192,6 +193,7 @@ function validForegroundActionKind(
   snapshot: Record<string, unknown>,
   plan: InstructionPlan | undefined,
   delayTimesAreValid: boolean,
+  allowDue: boolean,
 ): boolean {
   if (!isPlainRecord(action)) return false;
   if (action.kind === "delay") {
@@ -203,7 +205,7 @@ function validForegroundActionKind(
   }
   if (action.kind === "interaction") {
     return (
-      validInteractionAction(action, snapshot, plan) &&
+      validInteractionAction(action, snapshot, plan, allowDue) &&
       hasEventSequenceCapacity(snapshot.nextEventSequence, 2)
     );
   }
@@ -282,7 +284,11 @@ function validSettlementShapeAndKind(
       "mediaPlayback",
       "storageWrite",
     ]) &&
-    (settlement.actionKind === "chatPacingGate" || settlement.settlementKind === "completed") &&
+    (settlement.actionKind === "chatPacingGate" ||
+      settlement.settlementKind === "completed" ||
+      (settlement.actionKind === "interaction" &&
+        settlement.interactionKind === "button" &&
+        settlement.settlementKind === "timedOut")) &&
     positiveSafeInteger(settlement.actionId) &&
     validSettlementProvenance(settlement, plan) &&
     validSettlementKindData(settlement, snapshot, plan, analysis)
@@ -306,6 +312,8 @@ function validSettlementIdentityAndEventSequences(
     return false;
 
   if (settlement.actionKind !== "interaction") return true;
+  // A button that timed out publishes no player transcript.
+  if (settlement.settlementKind === "timedOut") return settlement.transcriptEventSequence === null;
   return (
     positiveSafeInteger(settlement.transcriptEventSequence) &&
     settlement.requestEventSequence < settlement.transcriptEventSequence &&
@@ -380,7 +388,7 @@ export function validForegroundActionState(
       (allowDue && action.deadlineMs === currentSessionTimeMs));
   return (
     validForegroundActionBase(action, snapshot, callIds) &&
-    validForegroundActionKind(action, snapshot, plan, delayTimesAreValid) &&
+    validForegroundActionKind(action, snapshot, plan, delayTimesAreValid, allowDue) &&
     (plan === undefined ||
       (isPlainRecord(action) && validForegroundActionOwnership(action, snapshot, plan)))
   );
@@ -968,7 +976,14 @@ export function validateInteractionResultHandoffState(
     handoff.owningInstruction + 1 !== handoff.continuationInstruction ||
     instruction.destinationTemporary !== handoff.destinationTemporary ||
     precedingInstruction !== instruction ||
-    !validInteractionResultForInstruction(instruction, handoff.result, snapshot)
+    !validInteractionResultForInstruction(
+      instruction,
+      handoff.result,
+      snapshot,
+      isPlainRecord(settlement) &&
+        settlement.actionId === handoff.actionId &&
+        settlement.settlementKind === "timedOut",
+    )
   ) {
     errors.push(
       "Runtime interaction result handoff does not match its canonical plan instruction.",
@@ -1086,7 +1101,29 @@ function validInteractionResultForInstruction(
   instruction: Extract<Instruction, { kind: "interaction" }>,
   result: unknown,
   snapshot: Record<string, unknown>,
+  timedOut: boolean,
 ): boolean {
+  if (instruction.expectedResult === "duration") {
+    // Elapsed time ends no later than now. Until the handoff is consumed, the prepared timeout still bounds it, and a
+    // timed-out button returns exactly its timeout.
+    if (
+      !validElapsedResult(result) ||
+      !validSessionTime(snapshot.currentSessionTimeMs) ||
+      result.milliseconds > snapshot.currentSessionTimeMs
+    )
+      return false;
+    const prepared = "preparedUi" in instruction ? instruction.preparedUi : null;
+    if (prepared?.kind !== "button" || prepared.timeoutTemporary === undefined) return !timedOut;
+    const timeoutMs = Array.isArray(snapshot.temporaries)
+      ? buttonTimeoutMilliseconds(
+          runtimeTemporaryValue(snapshot.temporaries, prepared.timeoutTemporary),
+        )
+      : null;
+    return (
+      timeoutMs !== null &&
+      (timedOut ? result.milliseconds === timeoutMs : result.milliseconds <= timeoutMs)
+    );
+  }
   if (instruction.interactionKind === "choice") {
     if (instruction.expectedResult !== "choice" || !isInteractionChoiceValue(result)) return false;
     const options =
@@ -1098,11 +1135,14 @@ function validInteractionResultForInstruction(
     return options?.some((option) => serializableEquals(option.value, result)) === true;
   }
   if (instruction.expectedResult === "number") {
+    // An `askInteger` result is a safe whole number.
+    const ui = "preparedUi" in instruction ? instruction.preparedUi : instruction.ui;
     return (
       instruction.interactionKind === "number" &&
       typeof result === "number" &&
       Number.isFinite(result) &&
-      !Object.is(result, -0)
+      !Object.is(result, -0) &&
+      (ui.kind !== "number" || ui.integer !== true || Number.isSafeInteger(result))
     );
   }
   return (
@@ -1140,10 +1180,43 @@ function preparedChoiceOptions(
   }
 }
 
+/**
+ * An interaction appeared at a scene time no later than now. Only a button has a timeout, and its deadline is a
+ * representable later scene time. A pending button is not overdue unless catch-up is paused for execution that runs
+ * first, such as a queued expiry block or one that suspends it.
+ */
+function validInteractionTiming(
+  action: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+  allowDue: boolean,
+): boolean {
+  if (
+    !validSessionTime(action.createdAtMs) ||
+    !validSessionTime(snapshot.currentSessionTimeMs) ||
+    action.createdAtMs > snapshot.currentSessionTimeMs
+  )
+    return false;
+  if (action.timeoutMs === null) return true;
+  if (
+    action.interactionKind !== "button" ||
+    typeof action.timeoutMs !== "number" ||
+    !(action.timeoutMs > 0) ||
+    !Number.isFinite(action.timeoutMs)
+  )
+    return false;
+  const deadlineMs = action.createdAtMs + action.timeoutMs;
+  return (
+    validSessionTime(deadlineMs) &&
+    deadlineMs > action.createdAtMs &&
+    (allowDue || deadlineMs > snapshot.currentSessionTimeMs)
+  );
+}
+
 function validInteractionAction(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
   plan: InstructionPlan | undefined,
+  allowDue: boolean,
 ): boolean {
   if (
     !hasExactKeys(action, [
@@ -1160,18 +1233,23 @@ function validInteractionAction(
       "target",
       "speakerId",
       "ui",
+      "createdAtMs",
+      "timeoutMs",
       "requestEventSequence",
     ])
   )
     return false;
   if (
     !isOneOf(action.interactionKind, ["button", "text", "number", "choice"]) ||
-    action.target !== "standardChat"
+    action.target !== "standardChat" ||
+    !validInteractionTiming(action, snapshot, allowDue)
   )
     return false;
   const expected =
     action.interactionKind === "button"
-      ? "none"
+      ? action.destinationTemporary === null
+        ? "none"
+        : "duration"
       : action.interactionKind === "number"
         ? "number"
         : action.interactionKind === "choice"
@@ -1189,9 +1267,9 @@ function validInteractionAction(
   )
     return false;
   if (
-    action.interactionKind === "button"
-      ? action.destinationTemporary !== null
-      : !positiveSafeInteger(action.destinationTemporary)
+    action.destinationTemporary !== null
+      ? !positiveSafeInteger(action.destinationTemporary)
+      : action.interactionKind !== "button"
   )
     return false;
   if (
@@ -1224,7 +1302,7 @@ function validInteractionAction(
   if ("preparedUi" in instruction) {
     return validPreparedInteractionAction(instruction, action, snapshot, speakers);
   }
-  if (!interactionUiEqual(instruction.ui, action.ui)) return false;
+  if (!interactionUiEqual(instruction.ui, action.ui) || action.timeoutMs !== null) return false;
   if (instruction.speaker === null) return action.speakerId === snapshot.defaultSpeaker;
   const explicitSpeaker = visibleRuntimeBindingValue(snapshot, instruction.speaker);
   if (
@@ -1263,8 +1341,21 @@ function validPreparedInteractionAction(
     )
       return false;
   }
+  // The action keeps the timeout its prepared temporary held when the button appeared.
+  const prepared = instruction.preparedUi;
+  const timeoutMs =
+    prepared.kind === "button" && prepared.timeoutTemporary !== undefined
+      ? buttonTimeoutMilliseconds(
+          runtimeTemporaryValue(snapshot.temporaries, prepared.timeoutTemporary),
+        )
+      : null;
+  if (
+    (prepared.kind === "button" && prepared.timeoutTemporary !== undefined && timeoutMs === null) ||
+    action.timeoutMs !== timeoutMs
+  )
+    return false;
   return preparedInteractionUiMatchesAction(
-    instruction.preparedUi,
+    prepared,
     action.ui,
     snapshot.temporaries,
     instruction.span,
@@ -1309,7 +1400,11 @@ function preparedInteractionUiMatchesAction(
       prepared.prefillTemporary === undefined
         ? undefined
         : runtimeTemporaryValue(temporaries, prepared.prefillTemporary);
-    return hint === actual.hint && prefill === actual.prefill;
+    return (
+      hint === actual.hint &&
+      prefill === actual.prefill &&
+      actual.integer === (prepared.kind === "number" ? prepared.integer : undefined)
+    );
   }
   const options = preparedChoiceOptions(prepared, temporaries, span);
   return options !== undefined && choiceOptionsEqual(options, actual.options);
@@ -1363,9 +1458,16 @@ function validInteractionUiShape(
     kind === "button"
       ? ["kind", "buttonLabel", "accessibleName", ...("background" in value ? ["background"] : [])]
       : kind === "text" || kind === "number"
-        ? ["kind", "hint", "accessibleName", ...("prefill" in value ? ["prefill"] : [])]
+        ? [
+            "kind",
+            "hint",
+            "accessibleName",
+            ...("prefill" in value ? ["prefill"] : []),
+            ...(kind === "number" && "integer" in value ? ["integer"] : []),
+          ]
         : ["kind", "options", "accessibleName"];
-  if (!hasExactKeys(value, expectedUiKeys)) return false;
+  if (!hasExactKeys(value, expectedUiKeys) || ("integer" in value && value.integer !== true))
+    return false;
   let aggregate = 0;
   let measurementExhausted = false;
   const count = (text: unknown): text is string => {
@@ -1418,7 +1520,8 @@ function validInteractionUiShape(
     return (
       (value.hint === null || count(value.hint)) &&
       (!("prefill" in value) ||
-        (count(value.prefill) && isValidInteractionPrefill(kind, value.prefill))) &&
+        (count(value.prefill) &&
+          isValidInteractionPrefill(value.integer === true ? "integer" : kind, value.prefill))) &&
       !measurementExhausted
     );
   }
@@ -1460,7 +1563,11 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
   if (expected.kind === "button")
     return actual.buttonLabel === expected.buttonLabel && actual.background === expected.background;
   if (expected.kind === "text" || expected.kind === "number")
-    return actual.hint === expected.hint && actual.prefill === expected.prefill;
+    return (
+      actual.hint === expected.hint &&
+      actual.prefill === expected.prefill &&
+      actual.integer === (expected.kind === "number" ? expected.integer : undefined)
+    );
   if (expected.kind !== "choice") return false;
   return choiceOptionsEqual(expected.options, actual.options);
 }
@@ -1576,15 +1683,20 @@ function validSettlementKindData(
     ])
   )
     return false;
+  const timedOut = settlement.settlementKind === "timedOut";
   if (
     !isOneOf(settlement.interactionKind, ["button", "text", "number", "choice"]) ||
-    typeof settlement.transcriptText !== "string" ||
-    !interactionStringFits(settlement.transcriptText) ||
     !positiveSafeInteger(settlement.requestEventSequence) ||
-    !positiveSafeInteger(settlement.transcriptEventSequence) ||
     !positiveSafeInteger(settlement.completionEventSequence) ||
-    settlement.requestEventSequence >= settlement.transcriptEventSequence ||
-    settlement.transcriptEventSequence >= settlement.completionEventSequence
+    (timedOut
+      ? settlement.transcriptText !== null ||
+        settlement.transcriptEventSequence !== null ||
+        settlement.requestEventSequence >= settlement.completionEventSequence
+      : typeof settlement.transcriptText !== "string" ||
+        !interactionStringFits(settlement.transcriptText) ||
+        !positiveSafeInteger(settlement.transcriptEventSequence) ||
+        settlement.requestEventSequence >= settlement.transcriptEventSequence ||
+        settlement.transcriptEventSequence >= settlement.completionEventSequence)
   )
     return false;
   const interactionKind = settlement.interactionKind;
@@ -1596,7 +1708,11 @@ function validSettlementKindData(
     return false;
   let resultValid: boolean;
   if (settlement.interactionKind === "button") {
-    resultValid = settlement.result === null;
+    resultValid =
+      settlement.destinationTemporary === null
+        ? settlement.result === null
+        : validElapsedResult(settlement.result) &&
+          !(timedOut && settlement.result.milliseconds === 0);
   } else if (settlement.interactionKind === "text") {
     resultValid =
       typeof settlement.result === "string" && settlement.result === settlement.transcriptText;
@@ -1613,10 +1729,11 @@ function validSettlementKindData(
   }
   if (!resultValid) return false;
 
-  const resultBearing = settlement.interactionKind !== "button";
-  if (resultBearing) {
-    if (!positiveSafeInteger(settlement.destinationTemporary)) return false;
-  } else if (settlement.destinationTemporary !== null) return false;
+  if (
+    (settlement.interactionKind !== "button" || settlement.destinationTemporary !== null) &&
+    !positiveSafeInteger(settlement.destinationTemporary)
+  )
+    return false;
   if (
     settlement.ownerCallFrameId !== null &&
     (!positiveSafeInteger(settlement.ownerCallFrameId) ||
@@ -1626,7 +1743,8 @@ function validSettlementKindData(
     return false;
   if (
     settlement.interactionKind === "text" &&
-    (settlement.result !== settlement.transcriptText ||
+    (typeof settlement.transcriptText !== "string" ||
+      settlement.result !== settlement.transcriptText ||
       settlement.transcriptText.includes("\r") ||
       !interactionStringHasNonWhitespace(settlement.transcriptText))
   )
@@ -1634,12 +1752,20 @@ function validSettlementKindData(
   if (settlement.interactionKind === "number") {
     if (
       typeof settlement.result !== "number" ||
+      typeof settlement.transcriptText !== "string" ||
       /[\r\n\u2028\u2029]/u.test(settlement.transcriptText) ||
       !/^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?$/u.test(settlement.transcriptText)
     )
       return false;
     const parsed = Number(settlement.transcriptText);
     if (!Number.isFinite(parsed) || (Object.is(parsed, -0) ? 0 : parsed) !== settlement.result)
+      return false;
+    // An `askInteger` answer is whole-number notation within the safe integer range.
+    if (
+      isPlainRecord(settlement.ui) &&
+      settlement.ui.integer === true &&
+      (!isIntegerAnswerText(settlement.transcriptText) || !Number.isSafeInteger(parsed))
+    )
       return false;
   }
 
@@ -1653,6 +1779,16 @@ function validSettlementKindData(
   if (
     settlement.destinationTemporary !== instruction.destinationTemporary ||
     !validInteractionSettlementOwner(settlement, snapshot, analysis)
+  )
+    return false;
+  // Only a button written with a timeout can time out.
+  if (
+    timedOut &&
+    !(
+      "preparedUi" in instruction &&
+      instruction.preparedUi.kind === "button" &&
+      instruction.preparedUi.timeoutTemporary !== undefined
+    )
   )
     return false;
   return "preparedUi" in instruction
@@ -1671,7 +1807,11 @@ function isInteractionKind(value: unknown): value is "button" | "text" | "number
 function settlementMatchesPresentedUi(settlement: Record<string, unknown>): boolean {
   const ui = settlement.ui;
   if (!isPlainRecord(ui)) return false;
-  if (ui.kind === "button") return settlement.transcriptText === ui.buttonLabel;
+  if (ui.kind === "button")
+    return (
+      settlement.transcriptText ===
+      (settlement.settlementKind === "timedOut" ? null : ui.buttonLabel)
+    );
   if (ui.kind !== "choice") return true;
   const result = settlement.result;
   if (!isInteractionChoiceValue(result)) return false;
@@ -1706,7 +1846,8 @@ function preparedUiFitsPresentedUi(
   if (prepared.kind === "text" || prepared.kind === "number")
     return (
       (ui.hint === null) === (prepared.hintTemporary === null) &&
-      "prefill" in ui === (prepared.prefillTemporary !== undefined)
+      "prefill" in ui === (prepared.prefillTemporary !== undefined) &&
+      ui.integer === (prepared.kind === "number" ? prepared.integer : undefined)
     );
   return Array.isArray(ui.options) && buttonsFitWrittenValues(prepared.values, ui.options);
 }
@@ -1838,6 +1979,20 @@ function validSettlementChronology(
     validSessionTime(snapshot.currentSessionTimeMs) &&
     settlement.completedAtMs === settlement.deadlineMs &&
     settlement.completedAtMs <= snapshot.currentSessionTimeMs
+  );
+}
+
+/** A button's elapsed waiting time: a finite, non-negative duration. */
+function validElapsedResult(
+  value: unknown,
+): value is { readonly kind: "duration"; readonly milliseconds: number } {
+  return (
+    isPlainRecord(value) &&
+    hasExactKeys(value, ["kind", "milliseconds"]) &&
+    value.kind === "duration" &&
+    typeof value.milliseconds === "number" &&
+    value.milliseconds >= 0 &&
+    Number.isFinite(value.milliseconds)
   );
 }
 

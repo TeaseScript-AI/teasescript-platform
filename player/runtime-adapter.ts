@@ -4,6 +4,7 @@ import {
   createCheckpoint,
   createFreshRuntimeSnapshot,
   deserializeCheckpoint,
+  interactionDeadlineMs,
   mediaPlaybackProjection,
   observeTime,
   reportMediaLoad,
@@ -142,6 +143,7 @@ export function playerRuntimeForeground(
         accessibleName,
         hint: action.ui.hint ?? "Type your response…",
         ...(action.ui.prefill === undefined ? {} : { prefill: action.ui.prefill }),
+        ...(action.ui.integer === true ? { integer: true as const } : {}),
       });
     case "choice":
       return Object.freeze({
@@ -224,6 +226,10 @@ export function playerRuntimeDeadlines(snapshot: RuntimeSnapshot): readonly numb
       deadlines.push(action.timer.deadlineMs);
     }
   }
+  // A button with a timeout times out only while it is presented; a suspended one waits for its block to return.
+  const button = activePlayerRuntimeInteraction(snapshot);
+  const buttonDeadlineMs = button === null ? null : interactionDeadlineMs(button);
+  if (buttonDeadlineMs !== null) deadlines.push(buttonDeadlineMs);
   return deadlines;
 }
 
@@ -454,6 +460,7 @@ function appendRuntimeEvents(
     if (
       event.kind === "actionCompleted" &&
       event.settlement.actionKind === "interaction" &&
+      event.settlement.transcriptEventSequence !== null &&
       (event.settlement.interactionKind === "choice" ||
         event.settlement.interactionKind === "button")
     ) {

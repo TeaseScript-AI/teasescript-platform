@@ -43,7 +43,16 @@ export interface RuntimeInteractionActionSnapshot {
   readonly target: "standardChat";
   readonly speakerId: number | null;
   readonly ui: InteractionUiPayload;
+  /** Scene time when the interaction appeared; a button's elapsed time counts from here. */
+  readonly createdAtMs: number;
+  /** A button's timeout; it times out at `createdAtMs + timeoutMs`. Always `null` for other interactions. */
+  readonly timeoutMs: number | null;
   readonly requestEventSequence: number;
+}
+
+/** The scene time at which a button with a timeout times out, or `null`. */
+export function interactionDeadlineMs(action: RuntimeInteractionActionSnapshot): number | null {
+  return action.timeoutMs === null ? null : action.createdAtMs + action.timeoutMs;
 }
 
 export interface RuntimePreparedSayOutputSnapshot {
@@ -240,21 +249,28 @@ export interface RuntimeDelayActionSettlementSnapshot {
   readonly completedAtMs: number;
 }
 
+/**
+ * A completed interaction, or a button that reached its timeout. A timeout publishes no player transcript, so its
+ * transcript sequence and text are `null`.
+ */
 export interface RuntimeInteractionActionSettlementSnapshot {
   readonly actionId: number;
   readonly actionKind: "interaction";
   readonly interactionKind: "button" | "text" | "number" | "choice";
-  readonly settlementKind: "completed";
+  readonly settlementKind: "completed" | "timedOut";
   readonly owningInstruction: number;
   readonly continuationInstruction: number;
   readonly ownerCallFrameId: number | null;
   readonly destinationTemporary: number | null;
   readonly requestEventSequence: number;
-  readonly transcriptEventSequence: number;
+  readonly transcriptEventSequence: number | null;
   readonly completionEventSequence: number;
-  /** `null` for a button; a choice may also return `null` as an option's value. */
+  /**
+   * `null` for a button used as a statement; a choice may also return `null` as an option's value, and a button used
+   * as a value records its elapsed waiting time.
+   */
   readonly result: InteractionChoiceValue;
-  readonly transcriptText: string;
+  readonly transcriptText: string | null;
   /** The UI the player answered, so the settlement validates against what was presented. */
   readonly ui: InteractionUiPayload;
 }

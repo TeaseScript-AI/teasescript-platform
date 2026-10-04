@@ -12,6 +12,7 @@ Accepted post-V30 additions:
 - ADR 0016 defines the shared resumable pending-action contract and selects blocking `wait` as its first implementation slice.
 - ADR 0017 defines the accepted boundary between official syntax, the public Standard Library, package libraries, privileged platform adapters, and deterministic engine primitives.
 - ADR 0018 defines the accepted first Standard Library POC contract for `showButton`, `askText`, `askNumber`, `choose`, and `say` smart autoplay.
+- ADR 0021 defines static types: enforcement, implicit conversions, union types, type tests, and narrowing.
 - `specifications/message-markup.md` defines the accepted constrained presentation markup for authored Standard-chat
   `say` output and the `escapeMarkup()` literal-insertion helper.
 
@@ -74,7 +75,7 @@ The accepted boundary does not itself change accepted V30 forms such as `wait 2`
 
 ADR 0018 selects direct Standard Library names with no import and no first-POC opt-out or shadowing.
 
-The current compiler implements the four compact interaction forms in this section through explicit versioned
+The current compiler implements the compact interaction forms in this section through explicit versioned
 interaction instructions and the canonical resumable runtime. The broader parenthesized V30 APIs and their advanced
 parameters remain deferred; this slice does not treat compact syntax as a runtime library call. A parenthesized
 interaction-call spelling is never interpreted as compact syntax; until those APIs are implemented, the parser reports
@@ -85,6 +86,7 @@ it with focused diagnostic `TSP032`. An `as speaker` clause placed after the pay
 ```tease
 showButton "Continue"
 showButton as mistress "Ready"
+let elapsed = showButton "Continue", timeout: 30 s
 
 let text = askText
 let text = askText as mistress "Type your answer"
@@ -93,15 +95,18 @@ let name = askText "Your name?", default: "Ada"
 let amount = askNumber
 let amount = askNumber as mistress "Enter a number"
 let minutes = askNumber default: 10
+let count = askInteger "How many?", default: 3
 ```
 
-For `askText` and `askNumber`, the optional string is Standard UI field text or a hint. It is not automatically spoken
+For `askText`, `askNumber`, and `askInteger`, the optional string is Standard UI field text or a hint. It is not automatically spoken
 into the transcript. The normal question is a preceding `say`. An optional `default:` answer prefills the field; the
 player still submits it, and a cleared field does not fall back to it. See
 [default answers](specifications/accepted-syntaxes-v30.md#default-answers).
 
-All four basic interactions are mandatory and blocking, with no cancellation result. `askText` returns `string`;
-`askNumber` returns `number`; the first `showButton` slice has no useful script return value and no timeout.
+All basic interactions are mandatory and blocking, with no cancellation result. `askText` returns `string`;
+`askNumber` returns `number`; `askInteger` returns `integer` and accepts only whole numbers. `showButton` used as a value returns the elapsed waiting time as a `duration`, and an
+optional `timeout:` ends the wait without a chat message; see
+[blocking button](specifications/accepted-syntaxes-v30.md#21-blocking-button).
 Timer interrupts may suspend an interaction; handler `exit` discards its instruction without producing a result
 or binding. See [timer semantics](specifications/accepted-syntaxes-v30.md#27-timers).
 
@@ -196,16 +201,15 @@ Over-limit data is rejected deterministically without truncation or partial stat
 
 ### First-POC source compatibility boundary
 
-The broader parenthesized V30 input functions are not rejected merely because compact forms are implemented first. Their advanced options require a later compatibility and API decision.
-
-V30 `showButton` timeout and elapsed-time return remain accepted future capability but are not included in the first POC slice.
+The broader parenthesized V30 input functions and `showButton` forms are not rejected merely because compact forms are implemented first. Their advanced options require a later compatibility and API decision.
 
 The exact syntax for detailed result objects, advanced accessibility overrides, a speaker-aware typing indicator, custom `choose` field hints, any justified platform guards that later prove necessary, and constrained LLM answer interpretation remains deferred.
 
 ## Currently implemented language subset
 
 The repository includes core values, variables, assignments including `+=`/`-=`, speakers, output, collections,
-expressions, comments, ranges, deterministic random built-ins, conditionals, loops, and loop control.
+expressions, comments, ranges, deterministic random built-ins, the `round`, `floor`, and `ceil` built-ins, conditionals
+including `switch`, loops, and loop control.
 
 Implemented script storage includes `save`, `load` with an optional lazy default, and `delete`, with a checkpointed
 session view and host-acknowledged atomic writes. Accepted semantics and current type-checking limits are defined in
@@ -236,14 +240,28 @@ The current function subset includes:
 - lexical function scope with package-global access;
 - deep-copy ordinary arguments/returns and speaker-reference identity preservation.
 
-The compiler enforces that a variable keeps its declared or inferred type (V30 §12) wherever both types are known:
-`let`, assignment, `+=`/`-=`, list and set elements (`add`, index assignment), and loop variables. An `integer` value may
-be stored where a `number` is expected; every other mismatch is compile error `TSV041`. Values the compiler cannot know,
-such as untyped storage, host data, and function results, are not yet checked at runtime.
+Implemented value operations include the V30 §8 text operations, list `join`, `sort`, and `shuffle`, the
+`intersection`, `union`, and `difference` of lists and sets, the §13 conversions `toString`, `toNumber`, `toInteger`,
+and `toBoolean` with `default:`, `round`, `floor`, and `ceil`, and `min` and `max`. When the receiver or
+argument type is known, misuse is compile error `TSV043`, or `TSV020`/`TSV022` for argument counts and names; other
+values are checked when the operation runs.
 
-Complete static typing and the wider V30 Standard Library/runtime APIs are not implemented yet. Until function-signature
-types are checked, a typed function signature parses but does not compile, so its declared types are never silently
-ignored.
+A separate type check (`src/type-checker.ts`) runs once names and structure are valid and enforces ADR 0021:
+variables, list and set elements, object properties, parameters, and function results keep one type, including types
+decided by a first non-null value, a first element, a parameter default, or a function's returns; an inferred `integer`
+variable is a `number` when one of its assignments can store a non-whole number; `integer` to `number` is the only
+implicit conversion; operators, conditions, indexes, members, and command operands get values of types they
+support, and on a union every member must support them, with some known operands still rejected only at runtime until
+#552; union types, type names, and `is` type tests are available, and tests, `!= null`, and assignments narrow plain
+variables; using a possibly null value where its non-null type is required is a compile error that names the check. A
+mismatch is `TSV041`, an unsupported operand `TSV043`, returns of different types, list elements of different types, or
+a `choose` of different value types outside a declared union `TSV044`, and a provably constant type test or comparison
+warning `TSV046`. When a value the compiler cannot know, such as untyped storage, host data, or an unknown parameter, is
+stored
+in a place whose type is at least partly known, the plan carries that type and the runtime checks the value before
+storing it (`TSR058`).
+
+The wider V30 Standard Library/runtime APIs are not implemented yet.
 
 The current source/compiler implements authored presentation options and the ADR 0018 `say` pacing and skip forms while
 preserving existing `say`/

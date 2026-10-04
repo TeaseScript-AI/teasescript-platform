@@ -158,7 +158,25 @@ Completion rules:
 - the function returns `number`;
 - the player-authored transcript preserves the trimmed submitted number text rather than reformatting it with JavaScript number-to-string conversion.
 
-The first POC adds no minimum, maximum, integer-only, or other domain-range parameters. Authors perform domain validation explicitly after completion.
+The first POC adds no minimum, maximum, or other domain-range parameters. Authors perform domain validation explicitly
+after completion; `askInteger` below is the whole-number counterpart.
+
+### `askInteger`
+
+Owner-approved extension (2026-10-04, #539): `askInteger` copies the compact `askNumber` forms, including `as speaker`,
+the hint, and `default:`, and returns `integer`.
+
+```tease
+let count = askInteger "How many repetitions?"
+let count = askInteger as mistress "How many?", default: 10
+```
+
+An answer is whole-number notation only: an optional sign, then digits, with surrounding whitespace removed and within
+the safe integer range. `2.5`, `2.0`, and `1e3` are rejected like any other invalid answer, with the
+[V30 message](../specifications/accepted-syntaxes-v30.md#20-input-functions) "That is wrong. I asked for a whole number.".
+Negative zero returns `0`, and the transcript keeps the trimmed submitted text. The engine runs it as a `number`
+interaction whose UI only accepts whole numbers, so completion, prefill, checkpoint, and settlement rules are those of
+`askNumber`. The Player offers a numeric keyboard.
 
 ### Default answers
 
@@ -240,10 +258,11 @@ and survives checkpoint save/restore without re-evaluating author expressions.
 ```tease
 showButton "Continue"
 showButton as mistress "Ready"
+let elapsed = showButton "Continue", timeout: 30 s
 ```
 
-The first POC form displays one blocking button and has no useful script return value, timeout, or cancellation path. It
-is the one-option form of the same Standard foreground-control vocabulary as `choose`. The Player activates it by
+The form displays one blocking button and has no cancellation path. It is the one-option form of the same Standard
+foreground-control vocabulary as `choose`. The Player activates it by
 clicking/tapping the rendered button or submitting its exact non-empty stored visible text in the composer. Other text,
 Space in the empty focused composer, and a click/tap on unrelated blank Player space do not activate `showButton`.
 Typed matching does not trim, fold case, or normalize Unicode.
@@ -251,7 +270,16 @@ Typed matching does not trim, fold case, or normalize Unicode.
 The engine derives the canonical player-authored transcript text from the stored button label; the Player application
 does not provide replacement transcript text.
 
-Accepted V30 timeout and elapsed-time behavior is not rejected. It is deferred to a later advanced `showButton` extension and is not part of the first implementation slice.
+Owner-approved extension (2026-10-04, #531): a named `timeout:` sets the
+[V30 timeout](../specifications/accepted-syntaxes-v30.md#21-blocking-button), and `showButton` used as a value returns
+the elapsed waiting time as a `duration`; as a statement its result is ignored. `background:` and `timeout:` follow
+the button text in either order, at most once each, and evaluate in source order. As for `default:`, they bind to the
+nearest `showButton` inside an object literal or call arguments. The timeout is evaluated once, before the button
+appears; the button captures its start and timeout in scene time, and checkpoint save/restore re-evaluates nothing.
+
+Reaching the timeout is normal completion, not cancellation: the button disappears without a player transcript
+message, and the result equals the timeout. A timer interrupt that suspends the button keeps it inert; when the
+timeout passes meanwhile, the button times out as soon as the interrupt returns.
 
 ### `say`
 
@@ -318,6 +346,7 @@ Conceptually each active interaction contains enough JSON-safe data for:
 kind: button | text | number | choice
 stable action identity
 owning and continuation instruction positions
+scene time when it appeared, and a button's timeout when set
 result destination when applicable
 expected result type
 validated Standard UI payload
@@ -363,7 +392,7 @@ Retries are built into the interaction contract. An ordinary author does not nee
 - closing or hiding a control does not complete it;
 - invalid input does not complete it;
 - package exit or fatal runtime/player failure is cleanup or failure, not an author-visible cancelled value;
-- a future `showButton` timeout is normal timeout completion, not cancellation.
+- a `showButton` timeout is normal timeout completion, not cancellation.
 
 Timer interrupts may suspend an interaction. Normal handler return restores it; handler `exit` discards the
 interrupted action and source instruction without synthesizing a result or binding. See specification
@@ -678,11 +707,12 @@ This ADR accepts these scoped post-V30 changes:
 - replace the V30 split between `choose` bodies with values and lists without them by one comma-separated compact form;
 - retain identifier and numeric values before `:` from accepted V30 capability;
 - extend `say` with `skippable`, `unskippable`, exact seconds, `0`, and `instant`;
-- define field text as Standard UI hint/label data rather than automatic transcript output.
+- define field text as Standard UI hint/label data rather than automatic transcript output;
+- express the V30 `showButton` timeout and elapsed-time return through the compact `timeout:` option and value form.
 
-The broader parenthesized V30 input APIs are not rejected merely because the first POC implements compact forms first. Their advanced options and compatibility mapping remain later work.
-
-V30 `showButton` timeout and elapsed-time return remain accepted future capability but are outside this first implementation slice.
+The broader parenthesized V30 input APIs, including the parenthesized `showButton` forms, are not rejected merely
+because the first POC implements compact forms first. Their advanced options and compatibility mapping remain later
+work.
 
 ## Follow-up implementation boundaries
 
@@ -702,7 +732,6 @@ The implementation issues must inspect the then-current plan/snapshot versions a
 
 This ADR intentionally defers:
 
-- `showButton` timeout and elapsed-time return;
 - detailed result objects containing elapsed time or metadata, and the option name that selects such a return type;
 - advanced parenthesized call forms and richer input/choice options;
 - custom input hints for compact `choose`;

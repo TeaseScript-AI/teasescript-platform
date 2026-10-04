@@ -8,6 +8,7 @@ import {
   type RuntimeBuiltinFunction,
   type RuntimeCapabilityCall,
 } from "../src/runtime/engine.js";
+import type { SerializableRuntimeValue } from "../src/runtime/serializable-values.js";
 import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 
@@ -53,6 +54,36 @@ test("keeps core builtin precedence over injected names", () => {
   assert.equal(result.snapshot.failure, null);
   assert.equal(injectedCalls, 0);
   assert.equal(randomCalls, 1);
+});
+
+test("host values cannot carry handles or speaker references, which only the runtime creates", () => {
+  const compiled = compile("let value = host()", ["host"]);
+  const identities: readonly SerializableRuntimeValue[] = [
+    { kind: "timerHandle", timerId: 1 },
+    { kind: "mediaHandle", mediaId: 1 },
+    {
+      kind: "list",
+      items: [
+        {
+          kind: "object",
+          properties: [
+            { name: "who", value: { kind: "speakerReference", speakerId: 1, identifier: "anna" } },
+          ],
+        },
+      ],
+    },
+  ];
+  for (const value of identities) {
+    const result = run(compiled, createFreshRuntimeSnapshot(compiled), {
+      builtins: { host: () => value },
+    });
+    assert.equal(result.snapshot.status, "failed");
+    assert.equal(result.snapshot.failure?.code, "TSR013");
+    assert.throws(
+      () => createFreshRuntimeSnapshot(compiled, { globals: { given: value } }),
+      /only the runtime creates/,
+    );
+  }
 });
 
 test("exposes prototype-sensitive named arguments as own immutable keys", () => {
