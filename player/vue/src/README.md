@@ -22,7 +22,8 @@ specification.
   restoring a session rebases the clock so no gap is consumed; see
   [timers and scene time](../../../docs/RUNTIME.md#timers-and-scene-time). The host prepares a new session for
   the explicit Start control (`SessionActivation.vue`) and creates it only on that click; a restored session waits for
-  Continue. The host also owns the framework-independent `player/media-device.ts`: it reconciles the session's media
+  Continue. Start and Continue record the wall clock and the player's zone and presentation, which the host-supplied
+  `temporalContext` resolves (the browser's by default). The host also owns the framework-independent `player/media-device.ts`: it reconciles the session's media
   projection onto `Audio` elements, reports loading through the adapter, and contributes measured progress to every
   clock observation, which runs every 100 ms while media loads or plays. Authored media references resolve only through
   the host-supplied `resolveAsset`. `PlayerApp.vue` derives the Stage image from runtime state and provides the same

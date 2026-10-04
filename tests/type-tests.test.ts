@@ -477,6 +477,60 @@ test("is checks a type, and a provably constant test is a warning", () => {
   assert.notEqual(compileSource("let n = 5\nlet a = n is number").plan, null);
 });
 
+test("a comparison with a value the other side can never hold is a warning, like a constant test", () => {
+  assert.deepEqual(
+    diagnostics(
+      'let s = "a"\nlet a = s != null\nlet n: integer = 5\nlet b = n == null\nlet c = s == n',
+    ),
+    [
+      [
+        "warning",
+        "TSV046",
+        "'s' holds text (string), never null, so this comparison is always true.",
+        "s != null",
+      ],
+      [
+        "warning",
+        "TSV046",
+        "'n' holds a whole number (integer), never null, so this comparison is always false.",
+        "n == null",
+      ],
+      [
+        "warning",
+        "TSV046",
+        "'s' holds text (string), never a whole number (integer), so this comparison is always false.",
+        "s == n",
+      ],
+    ],
+  );
+  // A list is a list before its element type is decided.
+  assert.deepEqual(diagnostics("let items = []\nlet empty = items == null"), [
+    [
+      "warning",
+      "TSV046",
+      "'items' holds a list, never null, so this comparison is always false.",
+      "items == null",
+    ],
+  ]);
+  // Values that may be equal stay silent: whole and other numbers, two possibly null values, two lists that may both
+  // be empty, and a value the compiler cannot know.
+  assert.deepEqual(
+    diagnostics(
+      [
+        "function f(i: integer, r: number, p: integer?, q: string?, l: integer[], m: string[]) {",
+        "  let a = i == r",
+        "  let b = p == q",
+        "  let c = l == m",
+        "  let d = p != null",
+        "}",
+        'let u = load "u"',
+        "let e = u == 5",
+      ].join("\n"),
+    ),
+    [],
+  );
+});
+
 /** The first plan object of `kind`, with its validator path such as `$.instructions[2].value`. */
 function findKind(
   value: unknown,

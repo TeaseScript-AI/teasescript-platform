@@ -1,4 +1,17 @@
 import { isOneOf } from "../plan/validation-support.js";
+import {
+  DEFAULT_TEMPORAL_CONTEXT,
+  frozenTemporalContext,
+  isValidEpochMilliseconds,
+  temporalContextProblem,
+  type TemporalContext,
+} from "../temporal.js";
+import {
+  frozenTemporalCaptures,
+  temporalCaptureAt,
+  temporalCapturesProblem,
+  type RuntimeTemporalCapture,
+} from "./temporal-captures.js";
 import type {
   RuntimeActionSettlementSnapshot,
   RuntimeDelayActionSnapshot,
@@ -68,7 +81,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 31;
+export const RUNTIME_SNAPSHOT_VERSION = 36;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -97,6 +110,7 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "currentSessionTimeMs",
   "observedSessionTimeMs",
   "chatPacingSettings",
+  "temporalCaptures",
   "foregroundAction",
   "backgroundActions",
   "nextActionId",
@@ -277,6 +291,11 @@ export interface RuntimeSnapshot {
    */
   observedSessionTimeMs: number;
   readonly chatPacingSettings: ChatPacingSettings;
+  /**
+   * The player's zone, date and time presentation, and wall clock: captured when the session started and again at each
+   * Continue, each in force from its boundary scene time.
+   */
+  readonly temporalCaptures: RuntimeTemporalCapture[];
   foregroundAction: RuntimeForegroundActionSnapshot | null;
   readonly backgroundActions: RuntimePendingActionSnapshot[];
   nextActionId: number;
@@ -323,6 +342,16 @@ export interface FreshRuntimeOptions {
   readonly baseDelayMs?: number;
   readonly delayPerWordMs?: number;
   readonly delayPerCharacterMs?: number;
+  /**
+   * The player's zone rules and numeric presentation, as `captureTemporalContext` returns them. Without one the
+   * session uses UTC and locale-neutral text such as `2026-10-04 18:30`.
+   */
+  readonly temporalContext?: TemporalContext;
+  /**
+   * The UTC wall clock in whole epoch milliseconds when the session starts, at `initialSessionTimeMs`. Without one the
+   * current-time getters fail.
+   */
+  readonly wallClockMs?: number;
 }
 
 export interface SnapshotValidationResult {
@@ -366,6 +395,19 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
   const maxCallDepthValue = capturedOptions.maxCallDepth;
   const initialSessionTimeMs = capturedOptions.initialSessionTimeMs ?? 0;
   const chatPacingSettings = captureChatPacingSettings(capturedOptions);
+  let temporalContext = DEFAULT_TEMPORAL_CONTEXT;
+  if (capturedOptions.temporalContext !== undefined) {
+    const problem = temporalContextProblem(capturedOptions.temporalContext);
+    if (problem !== null) throw new RangeError(`temporalContext is malformed: ${problem}`);
+    // EVIDENCE: validation: temporalContextProblem accepted the captured option.
+    temporalContext = frozenTemporalContext(capturedOptions.temporalContext as TemporalContext);
+  }
+  const wallClockMs = capturedOptions.wallClockMs ?? null;
+  if (
+    wallClockMs !== null &&
+    (typeof wallClockMs !== "number" || !isValidEpochMilliseconds(wallClockMs))
+  )
+    throw new RangeError("wallClockMs must be whole epoch milliseconds in the years 0000 to 9999.");
   if (!validSessionTime(initialSessionTimeMs)) {
     throw new RangeError(
       `initialSessionTimeMs must be a finite number from 0 through ${MAX_RUNTIME_SESSION_TIME_MS}.`,
@@ -432,6 +474,14 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     currentSessionTimeMs: initialSessionTimeMs,
     observedSessionTimeMs: initialSessionTimeMs,
     chatPacingSettings,
+    temporalCaptures: [
+      {
+        boundaryMs: initialSessionTimeMs,
+        sinceEventSequence: 0,
+        epochMs: wallClockMs,
+        context: temporalContext,
+      },
+    ],
     foregroundAction: null,
     backgroundActions: [],
     nextActionId: 1,
@@ -531,6 +581,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     currentSessionTimeMs: snapshot.currentSessionTimeMs,
     observedSessionTimeMs: snapshot.observedSessionTimeMs,
     chatPacingSettings: cloneChatPacingSettings(snapshot.chatPacingSettings),
+    temporalCaptures: frozenTemporalCaptures(snapshot.temporalCaptures),
     foregroundAction:
       snapshot.foregroundAction === null ? null : cloneForegroundAction(snapshot.foregroundAction),
     backgroundActions: snapshot.backgroundActions.map(clonePendingAction),
@@ -706,6 +757,14 @@ export function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPaylo
       ...(ui.background === undefined ? {} : { background: ui.background }),
       accessibleName,
     };
+  if (ui.kind === "temporal")
+    return {
+      kind: "temporal",
+      temporalKind: ui.temporalKind,
+      hint: ui.hint,
+      ...(ui.prefill === undefined ? {} : { prefill: ui.prefill }),
+      accessibleName,
+    };
   return {
     kind: ui.kind,
     hint: ui.hint,
@@ -807,12 +866,26 @@ export function captureRuntimeSnapshotWithValidatedPlan(
   }
 
   const classified = classifyCapturedRuntimeSnapshot(snapshotCapture.value, plan);
+  // EVIDENCE: validation: the preceding snapshot validation accepts this captured graph before it is returned.
+  const captured = classified.validation.valid ? (snapshotCapture.value as RuntimeSnapshot) : null;
   return Object.freeze({
     validation: classified.validation,
-    // EVIDENCE: validation: the preceding snapshot validation accepts this captured graph before it is returned.
-    snapshot: classified.validation.valid ? (snapshotCapture.value as RuntimeSnapshot) : null,
+    snapshot: captured === null ? null : withFrozenTemporalCaptures(captured),
     failureKind: classified.failureKind,
   });
+}
+
+/**
+ * A validated snapshot whose temporal contexts are deeply frozen. A captured or parsed context is a fresh copy; a
+ * frozen one is shared by every later snapshot clone instead of copying its zone transitions.
+ */
+export function withFrozenTemporalCaptures(snapshot: RuntimeSnapshot): RuntimeSnapshot {
+  return { ...snapshot, temporalCaptures: frozenTemporalCaptures(snapshot.temporalCaptures) };
+}
+
+/** The zone and presentation in force at the scene time where execution stands. */
+export function currentTemporalContext(snapshot: RuntimeSnapshot): TemporalContext {
+  return temporalCaptureAt(snapshot.temporalCaptures, snapshot.currentSessionTimeMs).context;
 }
 
 export function validateRuntimeSnapshot(
@@ -858,6 +931,14 @@ function validateCapturedRuntimeSnapshotDetails(
   if (!validChatPacingSettings(value.chatPacingSettings)) {
     errors.push("Runtime chatPacingSettings is malformed.");
   }
+  const temporalProblem = temporalCapturesProblem(
+    value.temporalCaptures,
+    typeof value.currentSessionTimeMs === "number" ? value.currentSessionTimeMs : Number.NaN,
+    typeof value.observedSessionTimeMs === "number" ? value.observedSessionTimeMs : Number.NaN,
+    typeof value.nextEventSequence === "number" ? value.nextEventSequence : Number.NaN,
+  );
+  if (temporalProblem !== null)
+    errors.push(`Runtime temporalCaptures is malformed: ${temporalProblem}`);
   const analysis = plan === undefined ? undefined : createSnapshotValidationAnalysis(plan);
   const instructionLimit = plan?.instructions.length;
   if (
@@ -1198,7 +1279,8 @@ function validateTemporaries(
 
 type PreparedReferencePathStep =
   | { readonly kind: "property"; readonly name: string }
-  | { readonly kind: "index"; readonly index: number };
+  | { readonly kind: "index"; readonly index: number }
+  | { readonly kind: "key"; readonly key: string };
 
 const preparedReferencePropertyNames = Object.freeze([
   "marker",
@@ -1517,6 +1599,17 @@ function serializedObjectPropertyMap(value: unknown): ReadonlyMap<string, unknow
   return output;
 }
 
+function serializedDictEntryMap(value: unknown): ReadonlyMap<string, unknown> | null {
+  if (!isPlainRecord(value) || value.kind !== "dict" || !Array.isArray(value.entries)) return null;
+  const output = new Map<string, unknown>();
+  for (const entry of value.entries) {
+    if (!isPlainRecord(entry) || typeof entry.key !== "string" || output.has(entry.key))
+      return null;
+    output.set(entry.key, entry.value);
+  }
+  return output;
+}
+
 function parsePreparedReferencePath(value: unknown): readonly PreparedReferencePathStep[] | null {
   if (!isPlainRecord(value) || value.kind !== "list" || !Array.isArray(value.items)) {
     return null;
@@ -1530,6 +1623,12 @@ function parsePreparedReferencePath(value: unknown): readonly PreparedReferenceP
       const name = properties.get("name");
       if (typeof name !== "string" || name.length === 0) return null;
       output.push({ kind, name });
+      continue;
+    }
+    if (kind === "key" && properties.size === 2 && properties.has("key")) {
+      const key = properties.get("key");
+      if (typeof key !== "string") return null;
+      output.push({ kind, key });
       continue;
     }
     if (kind === "index" && properties.size === 2 && properties.has("index")) {
@@ -1580,6 +1679,12 @@ function preparedReferencePathResolves(
       current = current.items[step.index];
       continue;
     }
+    if (step.kind === "key") {
+      const entries = serializedDictEntryMap(current);
+      if (entries === null || !entries.has(step.key)) return false;
+      current = entries.get(step.key);
+      continue;
+    }
 
     if (isPlainRecord(current) && current.kind === "object") {
       const properties = serializedObjectPropertyMap(current);
@@ -1594,6 +1699,16 @@ function preparedReferencePathResolves(
     ) {
       if (step.name !== "length") return false;
       current = current.items.length;
+      continue;
+    }
+    if (isPlainRecord(current) && current.kind === "dict" && Array.isArray(current.entries)) {
+      const entries = serializedDictEntryMap(current);
+      if (entries === null) return false;
+      // `keys` and `values` read new lists derived from the entries.
+      if (step.name === "length") current = entries.size;
+      else if (step.name === "keys") current = { kind: "list", items: [...entries.keys()] };
+      else if (step.name === "values") current = { kind: "list", items: [...entries.values()] };
+      else return false;
       continue;
     }
     if (
@@ -2762,10 +2877,7 @@ function requiredInstructionTemporaries(
           output.add(instruction.preparedUi.buttonLabelTemporary);
           if (instruction.preparedUi.backgroundTemporary !== undefined)
             output.add(instruction.preparedUi.backgroundTemporary);
-        } else if (
-          instruction.preparedUi.kind === "text" ||
-          instruction.preparedUi.kind === "number"
-        ) {
+        } else if (instruction.preparedUi.kind !== "choice") {
           if (instruction.preparedUi.hintTemporary !== null)
             output.add(instruction.preparedUi.hintTemporary);
           if (instruction.preparedUi.prefillTemporary !== undefined)
@@ -2978,6 +3090,11 @@ function collectSpeakerReferenceIds(
       for (let index = current.properties.length - 1; index >= 0; index -= 1) {
         const property = current.properties[index];
         if (isPlainRecord(property)) work.push(property.value);
+      }
+    } else if (current.kind === "dict" && Array.isArray(current.entries)) {
+      for (let index = current.entries.length - 1; index >= 0; index -= 1) {
+        const entry = current.entries[index];
+        if (isPlainRecord(entry)) work.push(entry.value);
       }
     }
   }

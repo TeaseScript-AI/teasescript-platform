@@ -4,6 +4,9 @@ import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import type { SerializableRuntimeValue } from "./serializable-values.js";
 import {
+  isDate,
+  isDateTime,
+  isDict,
   isDuration,
   isList,
   isMediaHandle,
@@ -11,7 +14,9 @@ import {
   isRange,
   isSet,
   isSpeakerReference,
+  isTime,
   isTimerHandle,
+  isTimestamp,
 } from "./value-predicates.js";
 
 /**
@@ -58,9 +63,9 @@ interface MatchFrame {
 
 /**
  * The part of `value` that does not fit `type`, or `null` when it fits (ADR 0021 rule 4.2): `integer` is a whole
- * number, `number` includes integers, a collection type checks every element, so an empty collection fits, and an
- * object type checks each listed property that the value has. A part that fits no member of a union is reported at
- * the union. The test has no side effects, and deep values are checked without native recursion.
+ * number, `number` includes integers, a collection type checks every element or dict value, so an empty collection
+ * fits, and an object type checks each listed property that the value has. A part that fits no member of a union is
+ * reported at the union. The test has no side effects, and deep values are checked without native recursion.
  */
 function findTypeMismatch(value: SerializableRuntimeValue, type: TypePlan): TypeMismatch | null {
   const frames: MatchFrame[] = [matchFrame(value, type, "")];
@@ -112,6 +117,12 @@ function matchStep(frame: MatchFrame, fits: boolean): MatchFrame | boolean {
       const index = frame.next++;
       return matchFrame(items[index]!, type.element, `[${index}]`);
     }
+    case "dict": {
+      if (!isDict(value) || (frame.next > 0 && !fits)) return false;
+      if (type.element === null || frame.next === value.entries.length) return true;
+      const entry = value.entries[frame.next++]!;
+      return matchFrame(entry.value, type.element, `[${JSON.stringify(entry.key)}]`);
+    }
     case "object": {
       if (!isObject(value)) return false;
       if (frame.next > 0 && !fits) return false;
@@ -147,10 +158,13 @@ function matchStep(frame: MatchFrame, fits: boolean): MatchFrame | boolean {
     case "media":
       return isMediaHandle(value);
     case "date":
+      return isDate(value);
     case "time":
+      return isTime(value);
     case "datetime":
-      // These types have no runtime values yet.
-      return false;
+      return isDateTime(value);
+    case "timestamp":
+      return isTimestamp(value);
     case "never":
       // No value fits, so a list of it is only ever empty, as for an element both list types share.
       return false;
@@ -166,6 +180,7 @@ const NAMED_DESCRIPTIONS: Readonly<Record<string, string>> = {
   date: "a date",
   time: "a time",
   datetime: "a date and time",
+  timestamp: "a timestamp",
   null: "null",
   range: "a range",
   speaker: "a speaker",
@@ -185,7 +200,7 @@ function describeType(type: TypePlan): string {
     if (current.kind === "union") {
       for (let index = current.members.length - 1; index >= 0; index -= 1)
         pending.push(current.members[index]!);
-    } else if (current.kind === "list" || current.kind === "set") {
+    } else if (current.kind === "list" || current.kind === "set" || current.kind === "dict") {
       descriptions.push(
         current.element === null ? `a ${current.kind}` : `a ${current.kind} (${typeName(current)})`,
       );
@@ -216,18 +231,23 @@ function typeName(type: TypePlan): string {
 
 function typeParts(type: TypePlan): readonly TypePlan[] {
   if (type.kind === "union") return type.members;
-  if ((type.kind === "list" || type.kind === "set") && type.element !== null) return [type.element];
+  if (
+    (type.kind === "list" || type.kind === "set" || type.kind === "dict") &&
+    type.element !== null
+  )
+    return [type.element];
   return [];
 }
 
 function joinTypeName(type: TypePlan, names: readonly string[]): string {
   switch (type.kind) {
     case "list":
-    case "set": {
+    case "set":
+    case "dict": {
       const element = names[0];
       if (element === undefined) return type.kind;
       const written = element.includes(" | ") ? `(${element})` : element;
-      return type.kind === "list" ? `${written}[]` : `${written} set`;
+      return type.kind === "list" ? `${written}[]` : `${written} ${type.kind}`;
     }
     case "union": {
       const nonNull = names.filter((_, index) => type.members[index]!.kind !== "null");
@@ -239,7 +259,7 @@ function joinTypeName(type: TypePlan, names: readonly string[]): string {
 }
 
 /** A plain-language description of a runtime value's kind, in the compiler's wording. */
-function describeValue(value: SerializableRuntimeValue): string {
+export function describeValue(value: SerializableRuntimeValue): string {
   if (value === null) return "null";
   if (typeof value === "string") return "text (string)";
   if (typeof value === "boolean") return "true or false (boolean)";
@@ -250,6 +270,8 @@ function describeValue(value: SerializableRuntimeValue): string {
       return "a list";
     case "set":
       return "a set";
+    case "dict":
+      return "a dict";
     case "speakerReference":
       return "a speaker";
     case "timerHandle":

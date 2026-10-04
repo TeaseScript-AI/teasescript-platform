@@ -1,5 +1,10 @@
 import type { Expression, SwitchStatement } from "./ast.js";
-import { durationLiteralMilliseconds } from "./duration.js";
+import {
+  durationLiteralParts,
+  durationParts,
+  negateDurationParts,
+  storedDuration,
+} from "./duration.js";
 import type { SourceSpan } from "./source.js";
 import {
   describeValue,
@@ -153,11 +158,16 @@ function literalValue(
 ): Omit<Extract<CaseValue, { kind: "literal" }>, "kind" | "span"> | undefined {
   const { negative, operand } = signed(expression);
   if (operand.kind === "durationLiteral") {
-    const milliseconds = (negative ? -1 : 1) * durationLiteralMilliseconds(operand);
+    const text = `${negative ? "-" : ""}${operand.amount.raw} ${operand.unit}`;
+    const literal = durationLiteralParts(operand);
+    // A calendar amount that is not whole is reported where the literal is typed.
+    if (typeof literal === "string") return { key: `duration:${text}`, number: undefined, text };
+    // `==` compares durations by their parts, so `1 d` and `24 h` are different cases.
+    const parts = durationParts(storedDuration(negative ? negateDurationParts(literal) : literal));
     return {
-      key: `duration:${milliseconds === 0 ? 0 : milliseconds}`,
+      key: `duration:${parts.months}:${parts.days}:${parts.milliseconds}`,
       number: undefined,
-      text: `${negative ? "-" : ""}${operand.amount.raw} ${operand.unit}`,
+      text,
     };
   }
   const number = numberLiteral(expression);
@@ -189,6 +199,24 @@ function literalValue(
     default:
       return undefined;
   }
+}
+
+/** A literal case value as written, such as `5.0` or `"open"`, or `undefined` for another value. */
+export function caseValueText(expression: Expression): string | undefined {
+  return literalValue(unwrapParentheses(expression))?.text;
+}
+
+/** The bounds of a range case with a number literal on each side, such as `1..=5`, or `undefined` for another value. */
+export function literalRange(
+  expression: Expression,
+): { readonly start: number; readonly end: number; readonly inclusive: boolean } | undefined {
+  const range = unwrapParentheses(expression);
+  if (range.kind !== "rangeExpression") return undefined;
+  const start = numberLiteral(range.start);
+  const end = numberLiteral(range.end);
+  return start === undefined || end === undefined
+    ? undefined
+    : { start: start.value, end: end.value, inclusive: range.inclusive };
 }
 
 /** A number literal with an optional sign, such as `3`, `-2.5`, or `+1`. */

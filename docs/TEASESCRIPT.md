@@ -96,15 +96,20 @@ let amount = askNumber
 let amount = askNumber as mistress "Enter a number"
 let minutes = askNumber default: 10
 let count = askInteger "How many?", default: 3
+
+let day = askDate "Which day?"
+let start = askTime as mistress "What time?", default: toTime("20:00")
+let moment = askDateTime "When are you free?"
 ```
 
-For `askText`, `askNumber`, and `askInteger`, the optional string is Standard UI field text or a hint. It is not automatically spoken
+For `askText`, `askNumber`, `askInteger`, and the date and time asks, the optional string is Standard UI field text or a hint. It is not automatically spoken
 into the transcript. The normal question is a preceding `say`. An optional `default:` answer prefills the field; the
 player still submits it, and a cleared field does not fall back to it. See
 [default answers](specifications/accepted-syntaxes-v30.md#default-answers).
 
 All basic interactions are mandatory and blocking, with no cancellation result. `askText` returns `string`;
-`askNumber` returns `number`; `askInteger` returns `integer` and accepts only whole numbers. `showButton` used as a value returns the elapsed waiting time as a `duration`, and an
+`askNumber` returns `number`; `askInteger` returns `integer` and accepts only whole numbers; `askDate`, `askTime`, and
+`askDateTime` return `date`, `time`, and `datetime` from the Player's date and time controls. `showButton` used as a value returns the elapsed waiting time as a `duration`, and an
 optional `timeout:` ends the wait without a chat message; see
 [blocking button](specifications/accepted-syntaxes-v30.md#21-blocking-button).
 Timer interrupts may suspend an interaction; handler `exit` discards its instruction without producing a result
@@ -207,9 +212,10 @@ The exact syntax for detailed result objects, advanced accessibility overrides, 
 
 ## Currently implemented language subset
 
-The repository includes core values, variables, assignments including `+=`/`-=`, speakers, output, collections,
-expressions, comments, ranges, deterministic random built-ins, the `round`, `floor`, and `ceil` built-ins, conditionals
-including `switch`, loops, and loop control.
+The repository includes core values, variables, assignments including `+=`/`-=`, speakers, output, collections
+including dicts ([§40](specifications/accepted-syntaxes-v30.md#40-dictionaries)), expressions, comments, ranges,
+deterministic random built-ins, the `round`, `floor`, and `ceil` built-ins, conditionals including `switch`, loops, and
+loop control.
 
 Implemented script storage includes `save`, `load` with an optional lazy default, and `delete`, with a checkpointed
 session view and host-acknowledged atomic writes. Accepted semantics and current type-checking limits are defined in
@@ -217,11 +223,12 @@ specification [§25](specifications/accepted-syntaxes-v30.md#25-persistent-stora
 in [Runtime](RUNTIME.md#script-storage). The Player keeps script storage in browser local storage
 ([data boundary](DATA-AND-API.md#script-storage-in-the-browser)).
 
-Implemented timing includes exact elapsed duration literals/values, cross-unit comparisons, blocking `wait`/`timer`,
-and asynchronous timers with display, labels, handles, lifecycle control, repetition, expiry interrupts, and
-checkpoint restore. Accepted forms and current limits are defined in specification
+Implemented timing includes exact and calendar duration literals/values, cross-unit comparisons, date, time, datetime,
+and timestamp values with strict ISO conversion and the player's numeric presentation, blocking `wait`/`timer`, and
+asynchronous timers with display, labels, handles, lifecycle control, repetition, expiry interrupts, and checkpoint
+restore. Accepted forms and current limits are defined in specification
 [§27](specifications/accepted-syntaxes-v30.md#27-timers) and
-[§35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-unix-time).
+[§35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-timestamps).
 
 Implemented media includes the persistent Stage image (`showImage`, `hideImage`), blocking and asynchronous
 `playAudio`/`playVideo` with playback ranges, repetition, volume, handles, seeks, timeline cues, the self-handle binding,
@@ -247,9 +254,9 @@ argument type is known, misuse is compile error `TSV043`, or `TSV020`/`TSV022` f
 values are checked when the operation runs.
 
 A separate type check (`src/type-checker.ts`) runs once names and structure are valid and enforces ADR 0021:
-variables, list and set elements, object properties, parameters, and function results keep one type, including types
-decided by a first non-null value, a first element, a parameter default, or a function's returns; an inferred `integer`
-variable is a `number` when one of its assignments can store a non-whole number; `integer` to `number` is the only
+variables, list and set elements, dict values, object properties, parameters, and function results keep one type,
+including types decided by a first non-null value, a first element, a parameter default, or a function's returns; an inferred `integer`
+variable, element, or property is a `number` when one of its assignments can store a non-whole number; `integer` to `number` is the only
 implicit conversion; operators, conditions, indexes, members, and command operands get values of types they
 support, and on a union every member must support them, with some known operands still rejected only at runtime until
 #552; union types, type names, and `is` type tests are available, and tests, `!= null`, and assignments narrow plain

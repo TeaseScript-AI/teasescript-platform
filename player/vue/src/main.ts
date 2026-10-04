@@ -21,13 +21,15 @@ const app = developmentPreview
           scriptStorage: createLocalScriptStorage(browserStorage(), demoStorageScope),
         });
         // Stored values are read before Start, so Start runs within the player's activation.
-        void player
-          .loadScriptStorage()
-          .then(() =>
-            player.prepare(() =>
-              createPlayerRuntimeSession(demoSource, player.scriptStorageOptions()),
-            ),
-          );
+        void player.loadScriptStorage().then(() =>
+          player.prepare(() =>
+            createPlayerRuntimeSession(demoSource, {
+              ...player.scriptStorageOptions(),
+              // Captured at Start: the session keeps this zone, presentation, and clock until a Continue.
+              ...player.temporalCapture(),
+            }),
+          ),
+        );
         return () => h(PlayerApp, { player });
       },
     });

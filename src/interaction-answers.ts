@@ -1,5 +1,17 @@
 /** Answer rules shared by default answers, plan and checkpoint validation, and interaction completion. */
 
+import {
+  formatIsoDate,
+  formatIsoDateTime,
+  formatIsoTime,
+  parseIsoDate,
+  parseIsoDateTime,
+  parseIsoTime,
+  type DateFields,
+  type DateTimeFields,
+  type TimeFields,
+} from "./temporal.js";
+
 /** Whether text is blank, which `askText` rejects as an answer. */
 export function isBlankTextAnswer(text: string): boolean {
   return /^\s*$/u.test(text);
@@ -22,12 +34,56 @@ export function numberAnswerText(value: number): string {
 
 /** Whether prefill text is an answer the field accepts unchanged. */
 export function isValidInteractionPrefill(
-  kind: "text" | "number" | "integer",
+  kind: "text" | "number" | "integer" | TemporalAnswerKind,
   prefill: string,
 ): boolean {
   if (kind === "text") return !isBlankTextAnswer(prefill);
+  if (kind === "date" || kind === "time" || kind === "datetime")
+    return temporalAnswer(kind, prefill) !== undefined;
   if (/[\r\n\u2028\u2029]/u.test(prefill)) return false;
   return kind === "integer"
     ? isIntegerAnswerText(prefill.trim()) && Number.isSafeInteger(Number(prefill))
     : isNumberAnswerText(prefill.trim()) && Number.isFinite(Number(prefill));
+}
+
+/** What `askDate`, `askTime`, and `askDateTime` ask for. */
+export type TemporalAnswerKind = "date" | "time" | "datetime";
+
+export type TemporalAnswer =
+  | ({ readonly kind: "date" } & DateFields)
+  | ({ readonly kind: "time" } & TimeFields)
+  | ({ readonly kind: "datetime" } & DateTimeFields);
+
+/**
+ * The value of a trimmed date or time answer in strict ISO form (V30 §35), or `undefined`. A local time inside a gap in
+ * the player's zone is a valid answer: local values have no zone.
+ */
+export function temporalAnswer(kind: TemporalAnswerKind, text: string): TemporalAnswer | undefined {
+  const trimmed = text.trim();
+  switch (kind) {
+    case "date": {
+      const parsed = parseIsoDate(trimmed);
+      return parsed.ok ? { kind, ...parsed.value } : undefined;
+    }
+    case "time": {
+      const parsed = parseIsoTime(trimmed);
+      return parsed.ok ? { kind, ...parsed.value } : undefined;
+    }
+    case "datetime": {
+      const parsed = parseIsoDateTime(trimmed);
+      return parsed.ok ? { kind, ...parsed.value } : undefined;
+    }
+  }
+}
+
+/** The ISO text that prefills a date or time field for a default answer; submitting it returns the same value. */
+export function temporalAnswerText(value: TemporalAnswer): string {
+  switch (value.kind) {
+    case "date":
+      return formatIsoDate(value);
+    case "time":
+      return formatIsoTime(value);
+    case "datetime":
+      return formatIsoDateTime(value);
+  }
 }

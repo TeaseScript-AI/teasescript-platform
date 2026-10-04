@@ -3,6 +3,8 @@ import { tryOnScopeDispose, useIntervalFn } from "@vueuse/core";
 import { MediaDevice, MediaLoadQueue } from "../../media-device.js";
 import {
   completePlayerRuntimeStorageWrite,
+  continuePlayerRuntimeSession,
+  playerTemporalContext,
   pendingPlayerRuntimeStorageWrite,
   playerRuntimeMedia,
   reportPlayerRuntimeMediaLoad,
@@ -10,7 +12,7 @@ import {
   type PlayerRuntimeSessionOptions,
 } from "../../runtime-adapter.js";
 import type { ScriptStorageProvider } from "../../script-storage.js";
-import type { RuntimeScriptStorageEntrySnapshot } from "../../../src/index.js";
+import type { RuntimeScriptStorageEntrySnapshot, TemporalContext } from "../../../src/index.js";
 import { useRuntimeSceneClock } from "./useRuntimeSceneClock";
 
 // Media progress is sampled this often while media loads or plays; cues fire at this resolution.
@@ -28,6 +30,11 @@ export interface PlayerSessionOptions {
    * Without it, saves last only for the session.
    */
   scriptStorage?: ScriptStorageProvider;
+  /**
+   * The player's time zone and date and time presentation as they are now: the account settings, else the browser's,
+   * which is the default. Start and Continue resolve it again, so a changed setting applies from that point on.
+   */
+  temporalContext?: () => TemporalContext;
 }
 
 type Activation = {
@@ -40,6 +47,7 @@ type Activation = {
 // browser time onto the session's scene time, and plays the session's media on browser elements.
 export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const resolveAsset = options.resolveAsset ?? (() => null);
+  const resolveTemporalContext = options.temporalContext ?? (() => playerTemporalContext());
   const session = shallowRef<PlayerRuntimeSession | null>(null);
   // A new session remounts the transcript and resets interaction-local state.
   const generation = ref(0);
@@ -201,9 +209,23 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   function prepare(create: () => PlayerRuntimeSession) {
     activation.value = { kind: "start", begin: create };
   }
-  /** Shows the explicit Continue control for a restored session; its execution, time and media resume only then. */
+  /**
+   * What Start and Continue record about the player now: the zone and presentation, then the wall clock, sampled last so
+   * that resolving the zone does not age it.
+   */
+  function temporalCapture(): { temporalContext: TemporalContext; wallClockMs: number } {
+    const temporalContext = resolveTemporalContext();
+    return { temporalContext, wallClockMs: Date.now() };
+  }
+  /**
+   * Shows the explicit Continue control for a restored session; its execution, time and media resume only then.
+   * Continue records the wall clock and the player's zone and presentation as they are now.
+   */
   function prepareRestore(restored: PlayerRuntimeSession) {
-    activation.value = { kind: "continue", begin: () => restored };
+    activation.value = {
+      kind: "continue",
+      begin: () => continuePlayerRuntimeSession(restored, temporalCapture()).session,
+    };
   }
   /** Runs the prepared Start or Continue; call it from the activating click. */
   function activate() {
@@ -238,6 +260,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     prepare,
     prepareRestore,
     activate,
+    /** The capture a new session records at Start; Continue records its own. */
+    temporalCapture,
   };
 }
 

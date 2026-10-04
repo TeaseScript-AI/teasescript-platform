@@ -1,14 +1,25 @@
 import { isNumberAnswerText } from "./interaction-answers.js";
+import {
+  parseIsoDate,
+  parseIsoDateTime,
+  parseIsoTime,
+  parseIsoTimestamp,
+  type TemporalResult,
+} from "./temporal.js";
 
 /**
- * The V30 §13 conversion and rounding built-ins. The text rules are shared by the compiler, which rejects provably
- * invalid constant text, and the runtime.
+ * The V30 §13 conversion and rounding built-ins, including the §35 date and time conversions. The text rules are shared
+ * by the compiler, which rejects provably invalid constant text, and the runtime.
  */
 export const CONVERSION_RESULTS = new Map([
   ["toString", "string"],
   ["toNumber", "number"],
   ["toInteger", "integer"],
   ["toBoolean", "boolean"],
+  ["toDate", "date"],
+  ["toTime", "time"],
+  ["toDateTime", "datetime"],
+  ["toTimestamp", "timestamp"],
 ] as const);
 
 export type ConversionName =
@@ -20,7 +31,68 @@ export function isConversionName(name: string): name is ConversionName {
   return CONVERSION_NAMES.has(name);
 }
 
-export type ConversionResult = "string" | "number" | "integer" | "boolean";
+export type ConversionResult =
+  typeof CONVERSION_RESULTS extends ReadonlyMap<string, infer V> ? V : never;
+
+export type TemporalConversionResult = "date" | "time" | "datetime" | "timestamp";
+
+/** What each date and time conversion converts besides text, and the ISO text it reads (V30 §35). */
+export const TEMPORAL_CONVERSIONS: Readonly<
+  Record<
+    TemporalConversionResult,
+    {
+      readonly from: readonly TemporalConversionResult[];
+      readonly converts: string;
+      readonly text: string;
+      readonly parse: (text: string) => TemporalResult<unknown>;
+    }
+  >
+> = {
+  date: {
+    from: ["date", "datetime"],
+    converts: "text, a date, or a date and time",
+    text: 'ISO date text such as "2026-10-04"',
+    parse: parseIsoDate,
+  },
+  time: {
+    from: ["time", "datetime"],
+    converts: "text, a time, or a date and time",
+    text: 'ISO time text such as "14:30"',
+    parse: parseIsoTime,
+  },
+  datetime: {
+    from: ["datetime"],
+    converts: "text, a date and time, or a date and a time",
+    text: 'local ISO date and time text without an offset, such as "2026-10-04T18:00"',
+    parse: parseIsoDateTime,
+  },
+  timestamp: {
+    from: ["timestamp"],
+    converts: "text or a timestamp",
+    text: 'ISO timestamp text with Z or an offset, such as "2026-10-04T12:30:00Z"',
+    parse: parseIsoTimestamp,
+  },
+};
+
+export function isTemporalConversionResult(
+  result: ConversionResult,
+): result is TemporalConversionResult {
+  return Object.hasOwn(TEMPORAL_CONVERSIONS, result);
+}
+
+/**
+ * Why `text` does not convert to a date or time value, as the end of a sentence (`: February 2026 has 28 days` or
+ * `; the text must be ISO date text such as ...`), or `undefined` when it converts.
+ */
+export function temporalTextProblem(
+  result: TemporalConversionResult,
+  text: string,
+): string | undefined {
+  const conversion = TEMPORAL_CONVERSIONS[result];
+  const parsed = conversion.parse(text);
+  if (parsed.ok) return undefined;
+  return parsed.reason === null ? `; the text must be ${conversion.text}` : `: ${parsed.reason}`;
+}
 
 /** A plain-language description of a conversion result, such as "a whole number (integer)". */
 export function describeConversionResult(result: ConversionResult): string {
@@ -33,11 +105,21 @@ export function describeConversionResult(result: ConversionResult): string {
       return "a whole number (integer)";
     case "boolean":
       return "true or false (boolean)";
+    case "date":
+      return "a date";
+    case "time":
+      return "a time";
+    case "datetime":
+      return "a date and time";
+    case "timestamp":
+      return "a timestamp";
   }
 }
 
 /** Whether `value` is already a result of the conversion, as a `default:` fallback must be. */
 export function isConversionResult(result: ConversionResult, value: unknown): boolean {
+  if (isTemporalConversionResult(result))
+    return typeof value === "object" && value !== null && "kind" in value && value.kind === result;
   return result === "integer" ? Number.isInteger(value) : typeof value === result;
 }
 

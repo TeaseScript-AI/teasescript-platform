@@ -33,11 +33,19 @@ export type StaticType =
        */
       readonly origins?: Origins;
     }
-  | { readonly kind: "list" | "set"; readonly element: StaticType }
+  /** A list, a set, or a dict, whose element is the type of the dict's values; dict keys are always text. */
+  | { readonly kind: "list" | "set" | "dict"; readonly element: StaticType }
   | { readonly kind: "object"; readonly properties: PropertyTable | null }
   | { readonly kind: "union"; readonly members: readonly StaticType[] }
   | { readonly kind: "range" | "timer" | "media" | "speaker" }
   | OpenType;
+
+/** A list, set, or dict type. */
+export type CollectionType = Extract<StaticType, { kind: "list" | "set" | "dict" }>;
+
+export function isCollection(type: StaticType): type is CollectionType {
+  return type.kind === "list" || type.kind === "set" || type.kind === "dict";
+}
 
 /** A type decided by the first value stored in its place; `resolved` stays `null` until then. */
 export interface OpenType {
@@ -73,10 +81,22 @@ function scalar(name: ScalarTypeName): StaticType {
 }
 
 /**
- * The declaration of a variable without a type annotation, which a number may derive from (ADR 0021 rule 1.2): `let`, a
- * parameter with a default, or a loop variable.
+ * What a number may derive from (ADR 0021 rule 1.2): a variable without a type annotation, or an element or property
+ * inside one.
  */
-export type Origin = LetStatement | FunctionParameter | ForStatement;
+export type Origin = Declaration | PartOrigin;
+
+/** The declaration of a variable without a type annotation: `let`, a parameter with a default, or a loop variable. */
+export type Declaration = LetStatement | FunctionParameter | ForStatement;
+
+/**
+ * An element or property inside a variable without a type annotation, which a number may derive from: the variable and
+ * the steps to the part, each a property name or `[]` for the elements of a list or set.
+ */
+export interface PartOrigin {
+  readonly root: Declaration;
+  readonly path: readonly string[];
+}
 
 /**
  * What a number derives from: origins that merge without copying, so a long sum stays cheap, and that keep every
@@ -205,13 +225,18 @@ export function possibleValues(type: StaticType): readonly PossibleValue[] | und
   return possible;
 }
 
-/** Whether a value of this type may be equal (`==`) to `other`: false only when its possible values exclude it. */
-export function mayEqual(type: StaticType, other: PossibleValue): boolean {
+/**
+ * Whether a value of this type may be equal (`==`) to one of `others`: false only when its possible values exclude
+ * them all. Possible values are finite literals, so set membership agrees with `===`.
+ */
+export function mayEqualAny(type: StaticType, others: readonly PossibleValue[]): boolean {
+  if (others.length === 0) return false;
   const possible = possibleValues(type);
-  return (
-    possible === undefined ||
-    possible.some(({ value, duration }) => value === other.value && duration === other.duration)
-  );
+  if (possible === undefined) return true;
+  const values = new Set<ScalarValue | null>();
+  const durations = new Set<ScalarValue | null>();
+  for (const { value, duration } of possible) (duration ? durations : values).add(value);
+  return others.some(({ value, duration }) => (duration ? durations : values).has(value));
 }
 
 function isSubset(inner: readonly ScalarValue[], outer: readonly ScalarValue[]): boolean {
@@ -254,6 +279,10 @@ export const BOOLEAN_TYPE = scalar("boolean");
 export const INTEGER_TYPE = scalar("integer");
 export const NUMBER_TYPE = scalar("number");
 export const DURATION_TYPE = scalar("duration");
+export const DATE_TYPE = scalar("date");
+export const TIME_TYPE = scalar("time");
+export const DATETIME_TYPE = scalar("datetime");
+export const TIMESTAMP_TYPE = scalar("timestamp");
 
 export function openType(): OpenType {
   return { kind: "open", resolved: null, resolvedAt: null, sawNull: false };
@@ -302,8 +331,10 @@ function* writtenTypeTask(annotation: TypeAnnotation): CompileTask<StaticType> {
       return namedType(annotation.name);
     case "listType":
     case "setType":
+    case "dictType":
       return {
-        kind: annotation.kind === "listType" ? "list" : "set",
+        kind:
+          annotation.kind === "listType" ? "list" : annotation.kind === "setType" ? "set" : "dict",
         element: yield* compileChild(annotationTask(annotation.element)),
       };
     case "optionalType":
@@ -323,6 +354,7 @@ function namedType(name: TypeName): StaticType {
       return NULL_TYPE;
     case "list":
     case "set":
+    case "dict":
       return { kind: name, element: UNKNOWN_TYPE };
     case "object":
       return ANY_OBJECT_TYPE;
@@ -489,6 +521,7 @@ function* includesTask(outerType: StaticType, innerType: StaticType): CompileTas
       );
     case "list":
     case "set":
+    case "dict":
       return (
         inner.kind === outer.kind &&
         (yield* compileChild(includesTask(outer.element, inner.element)))
@@ -530,6 +563,7 @@ function* assignableTask(targetType: StaticType, sourceType: StaticType): Compil
   switch (target.kind) {
     case "list":
     case "set":
+    case "dict":
       return (
         source.kind === target.kind &&
         (yield* compileChild(assignableTask(target.element, source.element)))
@@ -611,12 +645,12 @@ function* settleTask(
     }
     for (const member of target.members) {
       const kind = resolved(member).kind;
-      if ((kind === "object" || kind === "list" || kind === "set") && kind === source.kind)
+      if ((kind === "object" || isCollection(resolved(member))) && kind === source.kind)
         yield* compileChild(settleTask(resolved(member), source, at));
     }
     return;
   }
-  if ((target.kind === "list" || target.kind === "set") && source.kind === target.kind) {
+  if (isCollection(target) && source.kind === target.kind) {
     yield* compileChild(settleTask(target.element, source.element, at));
     return;
   }
@@ -646,6 +680,7 @@ function* copyTask(typeToCopy: StaticType): CompileTask<StaticType> {
       return { ...openType(), sawNull: type.sawNull };
     case "list":
     case "set":
+    case "dict":
       return { kind: type.kind, element: yield* compileChild(copyTask(type.element)) };
     case "object": {
       if (type.properties === null) return type;
@@ -656,7 +691,8 @@ function* copyTask(typeToCopy: StaticType): CompileTask<StaticType> {
     }
     case "union": {
       // A union whose members can no longer change needs no copy of its own.
-      if (settledForms.get(type) === type) return type;
+      if (settledForms.get(type) === type && !type.members.some((member) => isCollection(member)))
+        return type;
       const copied: StaticType[] = [];
       for (const member of type.members) copied.push(yield* compileChild(copyTask(member)));
       return { kind: "union", members: copied };
@@ -681,7 +717,8 @@ function* plainTask(typeToClean: StaticType): CompileTask<StaticType> {
         ? scalar(type.name)
         : { kind: "scalar", name: type.name, origins: type.origins };
     case "list":
-    case "set": {
+    case "set":
+    case "dict": {
       const element = resolved(type.element);
       const plain = yield* compileChild(plainTask(element));
       return plain === element ? type : { kind: type.kind, element: plain };
@@ -722,7 +759,7 @@ function* placeTask(typeToPlace: StaticType, copy = true): CompileTask<StaticTyp
   const type = resolved(typeToPlace);
   if (type.kind === "null") return optional(openType());
   if (type.kind === "never") return openType();
-  if (type.kind === "list" || type.kind === "set")
+  if (isCollection(type))
     return { kind: type.kind, element: yield* compileChild(placeTask(type.element, copy)) };
   // A place keeps the plain type: values a `choose` restricts it to are not a type of their own.
   const plain = yield* compileChild(plainTask(type));
@@ -741,6 +778,157 @@ export function widenedType(type: StaticType): StaticType {
   return union(value.members.map(widenedType));
 }
 
+/**
+ * Widens the integer type at `path` inside a place's own type (ADR 0021 rule 1.2), where each step is a property name or
+ * `[]` for the elements of a list or set. A decided slot on the way is changed in place; the returned type replaces
+ * `type` in its parent.
+ */
+export function widenPath(type: StaticType, path: readonly string[]): StaticType {
+  return runCompileTask(widenPathTask(type, path, 0));
+}
+
+function* widenPathTask(
+  type: StaticType,
+  path: readonly string[],
+  step: number,
+): CompileTask<StaticType> {
+  if (type.kind === "open") {
+    if (type.resolved === null) {
+      if (step === path.length) type.widens = true;
+    } else type.resolved = yield* compileChild(widenPathTask(type.resolved, path, step));
+    return type;
+  }
+  if (type.kind === "union") {
+    const widened: StaticType[] = [];
+    for (const member of type.members)
+      widened.push(yield* compileChild(widenPathTask(member, path, step)));
+    return union(widened);
+  }
+  if (step === path.length)
+    return isScalar(type, "integer")
+      ? withOrigins(NUMBER_TYPE, type.kind === "scalar" ? type.origins : undefined)
+      : type;
+  const name = path[step]!;
+  if (name === "[]" && isCollection(type)) {
+    // EVIDENCE: invariant: a place's own collection type belongs to that place alone; values read from it are copied.
+    (type as { element: StaticType }).element = yield* compileChild(
+      widenPathTask(type.element, path, step + 1),
+    );
+  } else if (type.kind === "object" && type.properties !== null) {
+    const kept = type.properties.get(name);
+    if (kept !== undefined)
+      type.properties.set(name, yield* compileChild(widenPathTask(kept, path, step + 1)));
+  }
+  return type;
+}
+
+/**
+ * The paths in `target` where it keeps an integer and `source` holds a number, through elements and shared properties:
+ * the parts of a place that storing a value of `source` would widen (ADR 0021 rule 1.2).
+ */
+export function numberPaths(target: StaticType, source: StaticType): string[][] {
+  const paths: string[][] = [];
+  runCompileTask(numberPathsTask(target, source, [], paths));
+  return paths;
+}
+
+function* numberPathsTask(
+  targetType: StaticType,
+  sourceType: StaticType,
+  path: readonly string[],
+  paths: string[][],
+): CompileTask<void> {
+  const target = resolved(nonNullType(targetType));
+  const source = resolved(nonNullType(sourceType));
+  if (isScalar(target, "integer") && isScalar(source, "number")) {
+    paths.push([...path]);
+    return;
+  }
+  if (isCollection(target) && source.kind === target.kind)
+    yield* compileChild(numberPathsTask(target.element, source.element, [...path, "[]"], paths));
+  if (target.kind === "object" && source.kind === "object") {
+    if (target.properties === null || source.properties === null) return;
+    for (const [name, value] of source.properties) {
+      const kept = target.properties.get(name);
+      if (kept !== undefined)
+        yield* compileChild(numberPathsTask(kept, value, [...path, name], paths));
+    }
+  }
+}
+
+/** The integers inside a value, through elements and properties, each with its path and what it derives from. */
+export function integerParts(
+  type: StaticType,
+): { readonly path: readonly string[]; readonly origins: Iterable<Origin> }[] {
+  const parts: { readonly path: readonly string[]; readonly origins: Iterable<Origin> }[] = [];
+  runCompileTask(integerPartsTask(type, [], parts));
+  return parts;
+}
+
+function* integerPartsTask(
+  typeToSearch: StaticType,
+  path: readonly string[],
+  parts: { readonly path: readonly string[]; readonly origins: Iterable<Origin> }[],
+): CompileTask<void> {
+  const type = resolved(nonNullType(typeToSearch));
+  if (isScalar(type, "integer")) {
+    const origins = scalarOrigins(type);
+    if (origins !== undefined) parts.push({ path, origins });
+    return;
+  }
+  if (isCollection(type))
+    yield* compileChild(integerPartsTask(type.element, [...path, "[]"], parts));
+  else if (type.kind === "object" && type.properties !== null)
+    for (const [name, value] of type.properties)
+      yield* compileChild(integerPartsTask(value, [...path, name], parts));
+}
+
+/**
+ * Gives every number inside a place's own type, in its elements and properties, the part it is as an origin as well,
+ * besides what it was built from, so a value read from that part derives from it (ADR 0021 rule 1.2). A slot that a
+ * later value decides takes the part too.
+ */
+export function ownPartOrigins(
+  type: StaticType,
+  origin: (path: readonly string[]) => Origin,
+  at: readonly string[] = [],
+): void {
+  runCompileTask(ownPartOriginsTask(type, origin, at));
+}
+
+function* ownPartOriginsTask(
+  type: StaticType,
+  origin: (path: readonly string[]) => Origin,
+  path: readonly string[],
+): CompileTask<StaticType> {
+  if (type.kind === "open") {
+    if (type.resolved === null) {
+      if (path.length > 0) type.origins = Origins.of(origin(path));
+    } else type.resolved = yield* compileChild(ownPartOriginsTask(type.resolved, origin, path));
+    return type;
+  }
+  if (type.kind === "union") {
+    const parts: StaticType[] = [];
+    for (const member of type.members)
+      parts.push(yield* compileChild(ownPartOriginsTask(member, origin, path)));
+    return parts.every((part, index) => part === type.members[index]) ? type : union(parts);
+  }
+  if (type.kind === "scalar")
+    return path.length === 0 ? type : withOrigins(type, Origins.of(origin(path)));
+  if (isCollection(type)) {
+    // EVIDENCE: invariant: a place's own collection type belongs to that place alone; values read from it are copied.
+    (type as { element: StaticType }).element = yield* compileChild(
+      ownPartOriginsTask(type.element, origin, [...path, "[]"]),
+    );
+  } else if (type.kind === "object" && type.properties !== null)
+    for (const [name, value] of type.properties)
+      type.properties.set(
+        name,
+        yield* compileChild(ownPartOriginsTask(value, origin, [...path, name])),
+      );
+  return type;
+}
+
 /** The type with every undecided part unknown, for a place that no later value may decide, such as a parameter. */
 export function decidedType(type: StaticType): StaticType {
   return runCompileTask(decidedTask(type));
@@ -753,6 +941,7 @@ function* decidedTask(typeToDecide: StaticType): CompileTask<StaticType> {
       return UNKNOWN_TYPE;
     case "list":
     case "set":
+    case "dict":
       return { kind: type.kind, element: yield* compileChild(decidedTask(type.element)) };
     case "union": {
       const decided: StaticType[] = [];
@@ -782,14 +971,13 @@ function* containsTask(
 ): CompileTask<boolean> {
   const type = resolved(typeToSearch);
   if (test(type)) return true;
-  const parts =
-    type.kind === "list" || type.kind === "set"
-      ? [type.element]
-      : type.kind === "union"
-        ? type.members
-        : type.kind === "object" && type.properties !== null
-          ? [...type.properties.values()]
-          : [];
+  const parts = isCollection(type)
+    ? [type.element]
+    : type.kind === "union"
+      ? type.members
+      : type.kind === "object" && type.properties !== null
+        ? [...type.properties.values()]
+        : [];
   for (const part of parts) if (yield* compileChild(containsTask(part, test))) return true;
   return false;
 }
@@ -892,7 +1080,7 @@ function* joinValuesTask(
     }
     return { kind: "object", properties };
   }
-  if ((left.kind === "list" || left.kind === "set") && right.kind === left.kind) {
+  if (isCollection(left) && right.kind === left.kind) {
     const element = yield* compileChild(joinTask(left.element, right.element, owned, changes));
     return element === undefined ? undefined : { kind: left.kind, element };
   }
@@ -957,7 +1145,7 @@ function* memberIntersectionTask(left: StaticType, right: StaticType): CompileTa
   if (right.kind === "unknown" || right.kind === "open") return left;
   if (includes(right, left)) return yield* compileChild(guardedTask(left, right));
   if (includes(left, right)) return right;
-  if ((left.kind === "list" || left.kind === "set") && right.kind === left.kind) {
+  if (isCollection(left) && right.kind === left.kind) {
     // An empty collection passes a test of any element type, so collections always share at least that one.
     const element = yield* compileChild(intersectionTask(left.element, right.element));
     return { kind: left.kind, element };
@@ -987,7 +1175,7 @@ function* guardedTask(value: StaticType, test: StaticType): CompileTask<StaticTy
   }
   if (kept.kind === "scalar")
     return isScalar(passed, "integer") ? replacedOrigins(kept, undefined) : value;
-  if ((kept.kind === "list" || kept.kind === "set") && passed.kind === kept.kind) {
+  if (isCollection(kept) && passed.kind === kept.kind) {
     const element = yield* compileChild(guardedTask(kept.element, passed.element));
     return element === kept.element ? value : { kind: kept.kind, element };
   }
@@ -1078,13 +1266,17 @@ export function assignedType(declared: StaticType, value: StaticType): StaticTyp
   return narrowed.kind === "never" ? kept : narrowed;
 }
 
-/** The type of a list or set element, of a loop variable over an iterable, or `undefined` for other types. */
-export function elementType(type: StaticType): StaticType | undefined {
+/**
+ * The type of a list or set element or a dict value, or of a loop variable over an iterable, which goes through the
+ * keys of a dict, or `undefined` for other types.
+ */
+export function elementType(type: StaticType, iteration = false): StaticType | undefined {
   const elements: StaticType[] = [];
   for (const member of members(nonNullType(type))) {
     const value = resolved(member);
-    if (value.kind === "list" || value.kind === "set") elements.push(value.element);
-    else if (value.kind === "range") elements.push(INTEGER_TYPE);
+    if (iteration && value.kind === "dict") elements.push(STRING_TYPE);
+    else if (isCollection(value)) elements.push(value.element);
+    else if (iteration && value.kind === "range") elements.push(INTEGER_TYPE);
     else if (value.kind === "unknown") elements.push(UNKNOWN_TYPE);
     else return undefined;
   }
@@ -1092,15 +1284,16 @@ export function elementType(type: StaticType): StaticType | undefined {
 }
 
 /**
- * The type an element stored in a list or set of `type` must have: for a union of collections, what every member's
- * elements share, because the compiler does not know which member holds the collection. `undefined` for other types.
+ * The type an element stored in a list or set, or a value stored in a dict, of `type` must have: for a union of
+ * collections, what every member's elements share, because the compiler does not know which member holds the
+ * collection. `undefined` for other types.
  */
 export function elementStoreType(type: StaticType): StaticType | undefined {
   let shared: StaticType | undefined;
   for (const member of members(nonNullType(type))) {
     const value = resolved(member);
     if (value.kind === "unknown") return UNKNOWN_TYPE;
-    if (value.kind !== "list" && value.kind !== "set") return undefined;
+    if (!isCollection(value)) return undefined;
     shared = shared === undefined ? value.element : narrowTo(shared, value.element);
   }
   return shared;
@@ -1141,12 +1334,13 @@ function* typeNameTask(typeToName: StaticType): CompileTask<string> {
     case "scalar":
       return type.name;
     case "list":
-    case "set": {
+    case "set":
+    case "dict": {
       const element = canonical(type.element);
       if (!isKnown(element)) return type.kind;
       const name = yield* compileChild(typeNameTask(element));
       const written = name.includes(" | ") ? `(${name})` : name;
-      return type.kind === "list" ? `${written}[]` : `${written} set`;
+      return type.kind === "list" ? `${written}[]` : `${written} ${type.kind}`;
     }
     case "object":
       return "object";
@@ -1174,6 +1368,7 @@ const SCALAR_DESCRIPTIONS: Readonly<Record<ScalarTypeName, string>> = {
   date: "a date",
   time: "a time",
   datetime: "a date and time",
+  timestamp: "a timestamp",
 };
 
 /** A plain-language description of a value of `type` for diagnostics. */
@@ -1183,7 +1378,8 @@ export function describeValue(type: StaticType): string {
     case "scalar":
       return SCALAR_DESCRIPTIONS[value.name];
     case "list":
-    case "set": {
+    case "set":
+    case "dict": {
       const name = typeName(value);
       return name === value.kind ? `a ${value.kind}` : `a ${value.kind} (${name})`;
     }
@@ -1209,7 +1405,8 @@ export function describeValue(type: StaticType): string {
 
 /**
  * The result type of arithmetic on known operand types, or `undefined` when the operator does not support them.
- * Integer arithmetic stays integer except `/`, which always gives a number (ADR 0021 rule 2.2).
+ * Integer arithmetic stays integer except `/`, which always gives a number (ADR 0021 rule 2.2). A duration is added to
+ * a timestamp or a date and time after it, not before it.
  */
 export function arithmeticType(
   operator: string,
@@ -1237,5 +1434,11 @@ export function arithmeticType(
   if (left.name === "duration" && numeric(right.name) && (operator === "*" || operator === "/"))
     return DURATION_TYPE;
   if (numeric(left.name) && right.name === "duration" && operator === "*") return DURATION_TYPE;
+  // A date, timestamp, or local date and time moves by a duration, and two of one kind differ by one (V30 §35).
+  if (left.name === "timestamp" || left.name === "datetime" || left.name === "date") {
+    if (right.name === "duration" && (operator === "+" || operator === "-"))
+      return scalar(left.name);
+    if (right.name === left.name && operator === "-") return DURATION_TYPE;
+  }
   return undefined;
 }

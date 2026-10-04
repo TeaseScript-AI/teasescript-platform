@@ -1,16 +1,19 @@
+import { exactDurationMilliseconds } from "./temporal-operations.js";
 import { resolveMessagePresentation } from "./message-presentation.js";
 import type { MessagePresentation } from "../message-presentation.js";
+import type { TemporalContext } from "../temporal.js";
 import type {
   DelayDisplay,
   DurationUnitPlan,
   Instruction,
   InstructionPlan,
+  InteractionTemporalKind,
   InteractionUiPayload,
   PlanSourceLocation,
   PreparedInteractionUiPayload,
 } from "../plan/model.js";
 import { parseMessageMarkup, type MessageMarkup } from "../message-markup.js";
-import { isBlankTextAnswer, numberAnswerText } from "../interaction-answers.js";
+import { isBlankTextAnswer, numberAnswerText, temporalAnswerText } from "../interaction-answers.js";
 import {
   boundedInteractionUtf8ByteLength,
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
@@ -63,6 +66,7 @@ import {
 } from "./script-storage.js";
 import {
   cloneCapturedSerializableValue,
+  createCapturedSerializableList,
   createCapturedSerializableObject,
   getSerializableProperty,
   type SerializableRuntimeList,
@@ -78,6 +82,7 @@ import {
   type RuntimeLoopFrameSnapshot,
   type RuntimeCallFrameSnapshot,
   type RuntimeTemporarySnapshot,
+  currentTemporalContext,
 } from "./state.js";
 import type {
   RuntimeChatPacingGateActionSnapshot,
@@ -114,6 +119,10 @@ import { executionRunnable, processDueWork } from "./operations/observe-time.js"
 import { cloneTimer } from "./timers.js";
 import { assertValueType } from "./value-types.js";
 import {
+  describeRuntimeValue,
+  isDate,
+  isDateTime,
+  isDict,
   isDuration,
   isList,
   isObject,
@@ -121,6 +130,7 @@ import {
   isSet,
   isMediaHandle,
   isSpeakerReference,
+  isTime,
 } from "./value-predicates.js";
 import { fieldText } from "./value-text.js";
 import { expandChoiceOptions } from "./choice-options.js";
@@ -698,7 +708,12 @@ function executePlannedInstruction(
             ? null
             : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span);
       const materialized = prepared
-        ? materializeInteractionUi(instruction.preparedUi, snapshot.temporaries, instruction.span)
+        ? materializeInteractionUi(
+            instruction.preparedUi,
+            snapshot.temporaries,
+            currentTemporalContext(snapshot),
+            instruction.span,
+          )
         : { ui: instruction.ui, stagedWrites: [] as const };
       const timeoutMs =
         prepared &&
@@ -838,6 +853,7 @@ interface MaterializedInteractionUi {
 function materializeInteractionUi(
   prepared: PreparedInteractionUiPayload,
   temporaries: RuntimeTemporarySnapshot[],
+  temporalContext: TemporalContext,
   span: SourceSpan,
 ): MaterializedInteractionUi {
   const stagedWrites: Array<{
@@ -852,7 +868,7 @@ function materializeInteractionUi(
   };
   const readText = (temporaryId: number): string => {
     const temporary = read(temporaryId);
-    const text = fieldText(temporary.value, span);
+    const text = fieldText(temporary.value, span, temporalContext);
     stagedWrites.push({ temporaryId: temporary.id, value: text });
     return text;
   };
@@ -890,6 +906,21 @@ function materializeInteractionUi(
       ...(integer ? { integer: true as const } : {}),
       accessibleName: prepared.accessibleName,
     };
+  } else if (prepared.kind === "temporal") {
+    const hint = prepared.hintTemporary === null ? null : readText(prepared.hintTemporary);
+    let prefill: string | undefined;
+    if (prepared.prefillTemporary !== undefined) {
+      const temporary = read(prepared.prefillTemporary);
+      prefill = temporalPrefill(prepared.temporalKind, temporary.value, span);
+      stagedWrites.push({ temporaryId: temporary.id, value: prefill });
+    }
+    ui = {
+      kind: "temporal",
+      temporalKind: prepared.temporalKind,
+      hint,
+      ...(prefill === undefined ? {} : { prefill }),
+      accessibleName: prepared.accessibleName,
+    };
   } else {
     const source = read(prepared.optionsTemporary);
     if (!isList(source.value) || source.value.items.length !== prepared.values.length) {
@@ -901,7 +932,7 @@ function materializeInteractionUi(
     }
     ui = {
       kind: "choice",
-      options: expandChoiceOptions(source.value.items, prepared.values, span),
+      options: expandChoiceOptions(source.value.items, prepared.values, temporalContext, span),
       accessibleName: prepared.accessibleName,
     };
   }
@@ -960,6 +991,32 @@ function interactionPrefill(
   return value;
 }
 
+/** The ISO prefill text of a date or time default answer, which must be of the kind the field asks for. */
+function temporalPrefill(
+  kind: InteractionTemporalKind,
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+): string {
+  const answer =
+    kind === "date"
+      ? isDate(value) && value
+      : kind === "time"
+        ? isTime(value) && value
+        : isDateTime(value) && value;
+  if (answer !== false) return temporalAnswerText(answer);
+  const [command, noun, conversion] =
+    kind === "date"
+      ? ["askDate", "a date", "toDate"]
+      : kind === "time"
+        ? ["askTime", "a time", "toTime"]
+        : ["askDateTime", "a date and time", "toDateTime"];
+  throw fault(
+    "TSR052",
+    `The default answer of ${command} must be ${noun}, not ${describeRuntimeValue(value)}.${typeof value === "string" ? ` Convert the text with ${conversion}(...).` : ""}`,
+    span,
+  );
+}
+
 function commitInteractionMaterialization(
   snapshot: RuntimeSnapshot,
   stagedWrites: readonly {
@@ -982,7 +1039,7 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
   const strings: string[] = [];
   if (ui.accessibleName.kind === "text") strings.push(ui.accessibleName.text);
   if (ui.kind === "button") strings.push(ui.buttonLabel);
-  else if (ui.kind === "text" || ui.kind === "number") {
+  else if (ui.kind !== "choice") {
     if (ui.hint !== null) strings.push(ui.hint);
     if (ui.prefill !== undefined) strings.push(ui.prefill);
   } else {
@@ -1292,11 +1349,15 @@ function executeLoopStart(
         callFrameId: currentCallFrameId(snapshot),
       };
     } else {
-      const source = evaluator.evaluate(instruction.expression);
+      const evaluated = evaluator.evaluate(instruction.expression);
+      // A loop over a dict goes through its keys as they are when the loop starts.
+      const source = isDict(evaluated)
+        ? createCapturedSerializableList(evaluated.entries.map((entry) => entry.key))
+        : evaluated;
       if (!isList(source) && !isSet(source) && !isRange(source)) {
         throw fault(
           "TSR044",
-          "for requires a list, set, or range source.",
+          "for requires a list, set, dict, or range source.",
           instruction.expression.span,
         );
       }
@@ -1464,6 +1525,14 @@ function cloneInteractionUi(
       ...(ui.background === undefined ? {} : { background: ui.background }),
       accessibleName,
     };
+  if (ui.kind === "temporal")
+    return {
+      kind: "temporal",
+      temporalKind: ui.temporalKind,
+      hint: ui.hint,
+      ...(ui.prefill === undefined ? {} : { prefill: ui.prefill }),
+      accessibleName,
+    };
   return {
     kind: ui.kind,
     hint: ui.hint,
@@ -1505,6 +1574,8 @@ function buttonTimeoutMs(
   snapshot: RuntimeSnapshot,
   span: SourceSpan,
 ): number {
+  // A calendar duration has no fixed length (V30 §35).
+  if (isDuration(value)) exactDurationMilliseconds(value, "A showButton timeout", span);
   const timeoutMs = buttonTimeoutMilliseconds(value);
   if (timeoutMs === null) {
     throw fault(
@@ -1966,7 +2037,10 @@ export function timerDurationMs(
     range === null || range.start < 0
       ? value
       : evaluator.randomIntegerInRange(range, span, "timer");
-  const amount = isDuration(drawn) && unit === null ? drawn.milliseconds : drawn;
+  const amount =
+    isDuration(drawn) && unit === null
+      ? exactDurationMilliseconds(drawn, command === "timer" ? "A timer" : "wait", span)
+      : drawn;
   if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0) {
     throw fault(
       "TSR050",
@@ -2239,7 +2313,7 @@ function mediaMilliseconds(
   span: SourceSpan,
 ): number {
   const milliseconds = isDuration(value)
-    ? value.milliseconds
+    ? exactDurationMilliseconds(value, subject, span)
     : typeof value === "number"
       ? value * 1_000
       : Number.NaN;
@@ -2271,8 +2345,10 @@ function mediaRepeat(
   }
   if (value === true) return { kind: "indefinite" };
   if (value === false) return { kind: "once" };
-  if (isDuration(value) && Number.isFinite(value.milliseconds) && value.milliseconds > 0) {
-    return { kind: "budget", milliseconds: value.milliseconds };
+  if (isDuration(value)) {
+    // A calendar duration has no fixed length (V30 §35), whatever its exact part.
+    const milliseconds = exactDurationMilliseconds(value, "A repeat budget", repeat.value.span);
+    if (Number.isFinite(milliseconds) && milliseconds > 0) return { kind: "budget", milliseconds };
   }
   throw fault(
     "TSR050",

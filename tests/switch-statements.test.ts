@@ -494,16 +494,6 @@ test("a case that can never match is a warning that does not block the script", 
     warnings(inFunction("integer | string", "    case is integer { }\n    case 5 { }")),
     ["warning TSV046 4:10"],
   );
-  assert.equal(
-    compileSource(inFunction("integer | string", "    case is integer { }\n    case 5 { }"))
-      .diagnostics[0]?.message,
-    "'x' holds text (string) here, after the cases above, so this case never matches.",
-  );
-  // A value the compiler cannot know keeps every case possible.
-  assert.deepEqual(
-    warnings("function f(x) {\n  switch x {\n    case is integer { }\n    case 5 { }\n  }\n}"),
-    [],
-  );
 });
 
 test("a type case names its fix when it is not one type", () => {
@@ -573,5 +563,96 @@ test("value cases keep the narrowing of the cases above, and a never-matching ca
       'switch 1 {\n  case is\n    integer { say 1 }\n}\nswitch "a" {\n  case is not\n    integer { say 2 }\n}',
     ),
     ["1", "2"],
+  );
+});
+
+test("a case that lists null with other values takes null away from the cases after it", () => {
+  const source = [
+    "function punish(count: integer?) {",
+    "  switch count {",
+    "    case null, 0 { return }",
+    "    default {",
+    "      let strokes: integer = count * 2",
+    '      say "${strokes} strokes."',
+    "    }",
+    "  }",
+    "}",
+    "punish(null)",
+    "punish(0)",
+    "punish(3)",
+  ].join("\n");
+
+  assert.deepEqual(says(source), ["6 strokes."]);
+});
+
+test("a range case that no choice value falls in is a never-matching warning", () => {
+  const result = compileSource(
+    [
+      'let pick = choose 0: "Toilet", 1: "Sleep", 2: "Break"',
+      "switch pick {",
+      '  case 0 { say "a" }',
+      '  case 1..=2 { say "b" }',
+      '  case 3..=5 { say "never" }',
+      "}",
+    ].join("\n"),
+  );
+  assert.notEqual(result.plan, null);
+  assert.deepEqual(
+    result.diagnostics.map((item) => [
+      item.severity,
+      item.code,
+      item.span.start.line + 1,
+      item.message,
+    ]),
+    [["warning", "TSV046", 5, "'pick' is always 0, 1 or 2 here, so this case never matches."]],
+  );
+});
+
+test("a literal case that an earlier type case already takes warns, whatever the switched value's type", () => {
+  const warnings = (source: string) =>
+    compileSource(source).diagnostics.map((item) => [
+      item.severity,
+      item.code,
+      source.slice(item.span.start.offset, item.span.end.offset),
+      item.message,
+    ]);
+  const switchOn = (parameter: string) =>
+    `function f(${parameter}) {\n  switch x {\n    case is integer { }\n    case 5, 2.5 { }\n    case 7.0 { }\n    case "a" { }\n  }\n}`;
+  const taken = (literal: string) => [
+    "warning",
+    "TSV046",
+    literal,
+    `'case is integer' on line 3 already takes ${literal}, so this case never matches.`,
+  ];
+
+  // An untyped value or a number can still be 2.5 or text, but never a whole number after `case is integer`.
+  assert.deepEqual(warnings(switchOn("x")), [taken("5"), taken("7.0")]);
+  assert.deepEqual(warnings(switchOn("x: number | string")), [taken("5"), taken("7.0")]);
+  // A calendar duration has no exact length, but it is a duration, so the loop below cannot end through 'break'.
+  assert.deepEqual(
+    warnings(
+      "function f(x): integer {\n  while true {\n    switch x {\n      case is duration { return 1 }\n      case 1 d { break }\n      default { return 2 }\n    }\n  }\n}",
+    ),
+    [
+      [
+        "warning",
+        "TSV046",
+        "1 d",
+        "'case is duration' on line 4 already takes 1 d, so this case never matches.",
+      ],
+    ],
+  );
+  assert.deepEqual(
+    warnings(
+      'function f(x) {\n  switch x {\n    case is not string { }\n    case "a", 1 { }\n  }\n}',
+    ),
+    [
+      [
+        "warning",
+        "TSV046",
+        "1",
+        "'case is not string' on line 3 already takes 1, so this case never matches.",
+      ],
+    ],
   );
 });

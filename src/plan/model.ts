@@ -1,5 +1,8 @@
+import type { StoredDuration } from "../duration.js";
+import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
+
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 36;
+export const INSTRUCTION_PLAN_VERSION = 40;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -409,18 +412,32 @@ export interface PlayMediaInstruction extends InstructionBase {
   readonly destinationTemporary: number | null;
 }
 
-export type InteractionKind = "button" | "text" | "number" | "choice";
-/** `choice` is the value of the selected choice option; a button used as a value yields a `duration`. */
-export type InteractionResultDomain = "none" | "string" | "number" | "choice" | "duration";
+export type InteractionKind = "button" | "text" | "number" | "choice" | "temporal";
+/**
+ * `choice` is the value of the selected choice option; a button used as a value yields a `duration`; `temporal` is the
+ * date, time, or date and time the UI asks for.
+ */
+export type InteractionResultDomain =
+  "none" | "string" | "number" | "choice" | "duration" | "temporal";
+/** What `askDate`, `askTime`, and `askDateTime` ask for (V30 §20). */
+export type InteractionTemporalKind = "date" | "time" | "datetime";
 export type InteractionAccessibleName =
   | { readonly kind: "text"; readonly text: string }
   | {
       readonly kind: "localizedDefault";
       readonly key: "answer" | "number" | "chooseOption" | "continue";
     };
-/** A value a choice option can show and return: text, a finite number, a boolean, `null`, or a duration. */
+/** A value a choice option can show and return: a scalar, a duration, or a date or time value. */
 export type InteractionChoiceValue =
-  string | number | boolean | null | { readonly kind: "duration"; readonly milliseconds: number };
+  | string
+  | number
+  | boolean
+  | null
+  | StoredDuration
+  | ({ readonly kind: "date" } & DateFields)
+  | ({ readonly kind: "time" } & TimeFields)
+  | ({ readonly kind: "datetime" } & DateTimeFields)
+  | { readonly kind: "timestamp"; readonly epochMilliseconds: number };
 /** One button. `value` is what `choose` returns for it; `text` is what the button shows. */
 export interface InteractionChoiceOption {
   readonly text: string;
@@ -448,6 +465,14 @@ export type InteractionUiPayload =
       readonly prefill?: string;
       /** `askInteger`: only a whole number is an answer. */
       readonly integer?: true;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      readonly kind: "temporal";
+      readonly temporalKind: InteractionTemporalKind;
+      readonly hint: string | null;
+      /** The default answer as ISO text; submitting it unchanged answers with the default. */
+      readonly prefill?: string;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {
@@ -481,6 +506,14 @@ export type PreparedInteractionUiPayload =
       readonly prefillTemporary?: number;
       /** `askInteger`: only a whole number is an answer. */
       readonly integer?: true;
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      readonly kind: "temporal";
+      readonly temporalKind: InteractionTemporalKind;
+      readonly hintTemporary: number | null;
+      /** Holds the evaluated default answer until the field opens, then its ISO prefill text. */
+      readonly prefillTemporary?: number;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {
@@ -536,6 +569,7 @@ export type ExpressionPlan =
   | ListExpressionPlan
   | ObjectExpressionPlan
   | SetExpressionPlan
+  | DictExpressionPlan
   | GroupExpressionPlan
   | TemplateExpressionPlan
   | PropertyExpressionPlan
@@ -558,10 +592,15 @@ export interface LiteralExpressionPlan extends ExpressionPlanBase {
   readonly value: string | number | boolean | null;
 }
 
-/** An exact elapsed-duration literal, already converted to milliseconds. */
+/**
+ * A duration literal, already normalized: exact milliseconds, and whole calendar `months` and `days`, present only when
+ * they are not zero.
+ */
 export interface DurationExpressionPlan extends ExpressionPlanBase {
   readonly kind: "duration";
   readonly milliseconds: number;
+  readonly months?: number;
+  readonly days?: number;
 }
 
 export interface IdentifierExpressionPlan extends ExpressionPlanBase {
@@ -592,12 +631,12 @@ export interface TypeCheckPlan {
 }
 
 /**
- * The checked part of a type. A list or set with a `null` element accepts any elements, and an object checks only the
- * listed properties that the value has; the parts the compiler does not know are left out.
+ * The checked part of a type. A list, set, or dict with a `null` element accepts any elements or values, and an object
+ * checks only the listed properties that the value has; the parts the compiler does not know are left out.
  */
 export type TypePlan =
   | { readonly kind: TypePlanName }
-  | { readonly kind: "list" | "set"; readonly element: TypePlan | null }
+  | { readonly kind: "list" | "set" | "dict"; readonly element: TypePlan | null }
   | { readonly kind: "object"; readonly properties: readonly TypePropertyPlan[] }
   | { readonly kind: "union"; readonly members: readonly TypePlan[] };
 
@@ -610,6 +649,7 @@ export type TypePlanName =
   | "date"
   | "time"
   | "datetime"
+  | "timestamp"
   | "never"
   | "null"
   | "range"
@@ -640,6 +680,18 @@ export interface ObjectExpressionPlan extends ExpressionPlanBase {
 export interface SetExpressionPlan extends ExpressionPlanBase {
   readonly kind: "set";
   readonly elements: readonly ExpressionPlan[];
+}
+
+/** `dict{ ... }`: each entry's key, which must be text, is evaluated before its value, in source order. */
+export interface DictExpressionPlan extends ExpressionPlanBase {
+  readonly kind: "dict";
+  readonly entries: readonly DictEntryPlan[];
+}
+
+export interface DictEntryPlan {
+  readonly key: ExpressionPlan;
+  readonly value: ExpressionPlan;
+  readonly span: PlanSourceLocation;
 }
 
 export interface GroupExpressionPlan extends ExpressionPlanBase {
@@ -689,7 +741,7 @@ export interface CallExpressionPlan extends ExpressionPlanBase {
   readonly kind: "call";
   readonly callee: ExpressionPlan;
   readonly arguments: readonly ArgumentPlan[];
-  /** For a list or set `add`, the check of the added element. */
+  /** For a list or set `add`, the check of the added element; for a dict `get`, the check of its `default:`. */
   readonly typeCheck?: TypeCheckPlan;
 }
 

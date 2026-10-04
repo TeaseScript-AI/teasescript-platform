@@ -91,9 +91,9 @@ export function submitWorkspaceComposer(
   snapshot: RuntimeSnapshot,
   submittedText: string,
 ): WorkspaceControlResult {
-  const action = activeInteraction(snapshot, "text", "number", "choice");
+  const action = activeInteraction(snapshot, "text", "number", "temporal", "choice");
   if (action === null)
-    return localRejection(snapshot, "No active text, number, or choice interaction.");
+    return localRejection(snapshot, "No active text, number, date or time, or choice interaction.");
   const payload = { kind: "submittedText", submittedText };
   return completeWorkspaceAction(plan, snapshot, action, payload);
 }
@@ -172,7 +172,11 @@ export function restoreWorkspaceCheckpoint(
   });
 }
 
-export function compileWorkspaceSource(source: string): WorkspaceResult {
+/** `wallClockMs` is the UTC time at session start, which the current-time getters read; without it they fail. */
+export function compileWorkspaceSource(
+  source: string,
+  options: { readonly wallClockMs?: number } = {},
+): WorkspaceResult {
   assertWorkspaceSource(source);
   const compilation = compileSource(source);
   if (compilation.plan === null) {
@@ -185,7 +189,7 @@ export function compileWorkspaceSource(source: string): WorkspaceResult {
       instructionsExecuted: 0,
     });
   }
-  const snapshot = createFreshRuntimeSnapshotWithValidatedPlan(compilation.plan);
+  const snapshot = createFreshRuntimeSnapshotWithValidatedPlan(compilation.plan, options);
   return freezeResult({
     diagnostics: diagnostics(compilation.diagnostics),
     plan: compilation.plan,

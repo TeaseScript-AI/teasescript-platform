@@ -1,4 +1,13 @@
+import { isStoredDurationRecord, type StoredDuration } from "../duration.js";
 import { captureExternalData, type ExternalDataFailure } from "../external-data-capture.js";
+import {
+  isValidDate,
+  isValidEpochMilliseconds,
+  isValidTime,
+  type DateFields,
+  type DateTimeFields,
+  type TimeFields,
+} from "../temporal.js";
 
 export type SerializableRuntimeScalar = string | number | boolean | null;
 
@@ -14,8 +23,22 @@ export interface SerializableRuntimeObject {
 
 export interface SerializableRuntimeSet {
   readonly kind: "set";
-  readonly items: SerializableRuntimeScalar[];
+  readonly items: SerializableSetElement[];
 }
+
+/** A lookup table from text keys to values, in insertion order; a replaced entry keeps its position. */
+export interface SerializableRuntimeDict {
+  readonly kind: "dict";
+  readonly entries: SerializableRuntimeDictEntry[];
+}
+
+export interface SerializableRuntimeDictEntry {
+  readonly key: string;
+  value: SerializableRuntimeValue;
+}
+
+/** A value a set can hold: a scalar or a date or time value. Membership compares kind and value. */
+export type SerializableSetElement = SerializableRuntimeScalar | SerializableRuntimeTemporal;
 
 export interface SerializableSpeakerReference {
   readonly kind: "speakerReference";
@@ -30,11 +53,35 @@ export interface SerializableRuntimeRange {
   readonly inclusive: boolean;
 }
 
-/** An exact elapsed duration. Calendar units are not represented. */
-export interface SerializableRuntimeDuration {
-  readonly kind: "duration";
-  readonly milliseconds: number;
+/** A duration: exact milliseconds, and whole calendar `months` and `days` present only when they are not zero. */
+export type SerializableRuntimeDuration = StoredDuration;
+
+/** A local calendar date without a zone (V30 §35). */
+export interface SerializableRuntimeDate extends DateFields {
+  readonly kind: "date";
 }
+
+/** A local clock time without a zone. */
+export interface SerializableRuntimeTime extends TimeFields {
+  readonly kind: "time";
+}
+
+/** A local date and clock time without a zone; it follows the player's zone. */
+export interface SerializableRuntimeDateTime extends DateTimeFields {
+  readonly kind: "datetime";
+}
+
+/** A fixed moment, in whole milliseconds since 1970-01-01T00:00:00Z. */
+export interface SerializableRuntimeTimestamp {
+  readonly kind: "timestamp";
+  readonly epochMilliseconds: number;
+}
+
+export type SerializableRuntimeTemporal =
+  | SerializableRuntimeDate
+  | SerializableRuntimeTime
+  | SerializableRuntimeDateTime
+  | SerializableRuntimeTimestamp;
 
 /** An opaque script handle for one asynchronous timer record. */
 export interface SerializableTimerHandle {
@@ -58,8 +105,10 @@ export type SerializableRuntimeValue =
   | SerializableRuntimeList
   | SerializableRuntimeObject
   | SerializableRuntimeSet
+  | SerializableRuntimeDict
   | SerializableRuntimeRange
   | SerializableRuntimeDuration
+  | SerializableRuntimeTemporal
   | SerializableTimerHandle
   | SerializableMediaHandle
   | SerializableSpeakerReference;
@@ -125,41 +174,20 @@ export function createSerializableSet(
     throw new SerializableValueError("invalid", "Serializable set items must be an array.");
   }
 
-  const seen = new Set<SerializableRuntimeScalar>();
-  const capturedItems: SerializableRuntimeScalar[] = [];
-  for (let index = 0; index < capture.value.length; index += 1) {
-    const item = capture.value[index];
-    if (!isScalar(item)) {
-      throw new SerializableValueError(
-        "setElement",
-        "Sets may contain only string, boolean, integer, number, or null values.",
-      );
-    }
-    if (seen.has(item)) continue;
-    seen.add(item);
-    capturedItems.push(item);
-  }
-  return { kind: "set", items: capturedItems };
+  const failure = validateSerializableValueInternal({ kind: "list", items: capture.value }, "$");
+  if (failure !== null) throw new SerializableValueError("invalid", failure);
+  // EVIDENCE: validation: the captured items were just validated as runtime values.
+  return createCapturedSerializableSet(capture.value as SerializableRuntimeValue[]);
 }
 
 /** Creates a set from engine-owned, already validated values. */
 export function createCapturedSerializableSet(
   items: readonly SerializableRuntimeValue[],
 ): SerializableRuntimeSet {
-  const seen = new Set<SerializableRuntimeScalar>();
-  const capturedItems: SerializableRuntimeScalar[] = [];
-  for (const item of items) {
-    if (!isScalar(item)) {
-      throw new SerializableValueError(
-        "setElement",
-        "Sets may contain only string, boolean, integer, number, or null values.",
-      );
-    }
-    if (seen.has(item)) continue;
-    seen.add(item);
-    capturedItems.push(item);
-  }
-  return { kind: "set", items: capturedItems };
+  const set: SerializableRuntimeSet = { kind: "set", items: [] };
+  const membership = new Set<string>();
+  for (const item of items) addSerializableSetValue(set, item, membership);
+  return set;
 }
 
 export function cloneSerializableValue(value: SerializableRuntimeValue): SerializableRuntimeValue {
@@ -179,60 +207,65 @@ export function cloneCapturedSerializableValue(
 ): SerializableRuntimeValue {
   if (isScalar(value)) return value;
   const root = cloneSerializableNode(value);
-  if (value.kind !== "list" && value.kind !== "object") return root;
+  if (!isComposite(value)) return root;
 
-  type CompositeValue = SerializableRuntimeList | SerializableRuntimeObject;
   const work: Array<readonly [CompositeValue, CompositeValue]> = [
     [
       value,
-      // EVIDENCE: validation: the non-scalar root clone preserves the list/object kind of the source.
+      // EVIDENCE: validation: the non-scalar root clone preserves the composite kind of the source.
       root as CompositeValue,
     ],
   ];
+  // Each nested value is cloned into its slot; a nested composite is queued to fill its own slots.
+  const cloneInto = (nested: SerializableRuntimeValue): SerializableRuntimeValue => {
+    const cloned = cloneSerializableNode(nested);
+    if (isComposite(nested)) {
+      // EVIDENCE: validation: cloneSerializableNode preserves the composite kind checked on nested.
+      work.push([nested, cloned as CompositeValue]);
+    }
+    return cloned;
+  };
   while (work.length > 0) {
     const [source, target] = work.pop()!;
     if (source.kind === "list") {
       // EVIDENCE: validation: work pairs each list source with its newly allocated list clone.
       const targetItems = (target as SerializableRuntimeList).items;
-      for (let index = 0; index < source.items.length; index += 1) {
-        const nested = source.items[index]!;
-        const cloned = cloneSerializableNode(nested);
-        targetItems[index] = cloned;
-        if (
-          typeof nested === "object" &&
-          nested !== null &&
-          (nested.kind === "list" || nested.kind === "object")
-        ) {
-          // EVIDENCE: validation: cloneSerializableNode preserves the composite kind checked on nested.
-          work.push([nested, cloned as CompositeValue]);
-        }
+      for (let index = 0; index < source.items.length; index += 1)
+        targetItems[index] = cloneInto(source.items[index]!);
+    } else if (source.kind === "dict") {
+      // EVIDENCE: validation: work pairs each dict source with its newly allocated dict clone.
+      const targetEntries = (target as SerializableRuntimeDict).entries;
+      for (let index = 0; index < source.entries.length; index += 1) {
+        const entry = source.entries[index]!;
+        targetEntries[index] = { key: entry.key, value: cloneInto(entry.value) };
       }
-      continue;
-    }
-    // EVIDENCE: validation: the remaining composite source and its paired clone are objects.
-    const targetProperties = (target as SerializableRuntimeObject).properties;
-    for (let index = 0; index < source.properties.length; index += 1) {
-      const property = source.properties[index]!;
-      const cloned = cloneSerializableNode(property.value);
-      targetProperties[index] = { name: property.name, value: cloned };
-      const nested = property.value;
-      if (
-        typeof nested === "object" &&
-        nested !== null &&
-        (nested.kind === "list" || nested.kind === "object")
-      ) {
-        // EVIDENCE: validation: cloneSerializableNode preserves the composite kind checked on nested.
-        work.push([nested, cloned as CompositeValue]);
+    } else {
+      // EVIDENCE: validation: the remaining composite source and its paired clone are objects.
+      const targetProperties = (target as SerializableRuntimeObject).properties;
+      for (let index = 0; index < source.properties.length; index += 1) {
+        const property = source.properties[index]!;
+        targetProperties[index] = { name: property.name, value: cloneInto(property.value) };
       }
     }
   }
   return root;
 }
 
+/** A value that holds other values of any kind, which a copy copies in turn. */
+type CompositeValue = SerializableRuntimeList | SerializableRuntimeObject | SerializableRuntimeDict;
+
+function isComposite(value: SerializableRuntimeValue): value is CompositeValue {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value.kind === "list" || value.kind === "object" || value.kind === "dict")
+  );
+}
+
 /**
  * Whether a value holds a timer handle, media handle, or speaker reference: identities the runtime allocates for the
- * current session, which host data and stored values cannot carry. Lists and objects are checked iteratively at every
- * depth.
+ * current session, which host data and stored values cannot carry. Lists, objects, and dicts are checked iteratively
+ * at every depth.
  */
 export function containsRuntimeIdentity(value: SerializableRuntimeValue): boolean {
   const work: SerializableRuntimeValue[] = [value];
@@ -250,6 +283,9 @@ export function containsRuntimeIdentity(value: SerializableRuntimeValue): boolea
       case "object":
         for (const property of current.properties) work.push(property.value);
         break;
+      case "dict":
+        for (const entry of current.entries) work.push(entry.value);
+        break;
       case "set":
       case "range":
       case "duration":
@@ -266,15 +302,27 @@ function cloneSerializableNode(value: SerializableRuntimeValue): SerializableRun
       return { ...value };
     case "speakerReference":
     case "duration":
+    case "date":
+    case "time":
+    case "datetime":
+    case "timestamp":
     case "timerHandle":
     case "mediaHandle":
       return { ...value };
     case "set":
-      return { kind: "set", items: [...value.items] };
+      // Date and time members and durations are records of their own; each copy gets new ones.
+      return {
+        kind: "set",
+        items: value.items.map((item) =>
+          item !== null && typeof item === "object" ? { ...item } : item,
+        ),
+      };
     case "list":
       return { kind: "list", items: new Array(value.items.length) };
     case "object":
       return { kind: "object", properties: new Array(value.properties.length) };
+    case "dict":
+      return { kind: "dict", entries: new Array(value.entries.length) };
   }
 }
 
@@ -297,16 +345,70 @@ export function setCapturedSerializableProperty(
   else existing.value = copied;
 }
 
+/** The entry of a dict key, or `undefined` when the dict has no such key. */
+export function getSerializableDictEntry(
+  dict: SerializableRuntimeDict,
+  key: string,
+): SerializableRuntimeDictEntry | undefined {
+  return dict.entries.find((entry) => entry.key === key);
+}
+
+/**
+ * Stores an independent copy of an engine-owned value under a key: a new key is added at the end, and a replaced entry
+ * keeps its position.
+ */
+export function setCapturedSerializableDictValue(
+  dict: SerializableRuntimeDict,
+  key: string,
+  value: SerializableRuntimeValue,
+): void {
+  const existing = getSerializableDictEntry(dict, key);
+  const copied = cloneCapturedSerializableValue(value);
+  if (existing === undefined) dict.entries.push({ key, value: copied });
+  else existing.value = copied;
+}
+
+/**
+ * A dict's `length`, or a new list of its `keys` or of copies of its `values` in entry order, or `undefined` for
+ * another name.
+ */
+export function dictProperty(
+  dict: SerializableRuntimeDict,
+  name: string,
+): SerializableRuntimeValue | undefined {
+  switch (name) {
+    case "length":
+      return dict.entries.length;
+    case "keys":
+      return { kind: "list", items: dict.entries.map((entry) => entry.key) };
+    case "values":
+      return createCapturedSerializableList(dict.entries.map((entry) => entry.value));
+    default:
+      return undefined;
+  }
+}
+
+/** Removes a key and returns its entry, or `undefined` when the dict has no such key. */
+export function removeSerializableDictEntry(
+  dict: SerializableRuntimeDict,
+  key: string,
+): SerializableRuntimeDictEntry | undefined {
+  const index = dict.entries.findIndex((entry) => entry.key === key);
+  return index < 0 ? undefined : dict.entries.splice(index, 1)[0];
+}
+
+/** Adds an engine-owned value; `membership` holds the set's member keys when a caller adds many values. */
 export function addSerializableSetValue(
   set: SerializableRuntimeSet,
   value: SerializableRuntimeValue,
-  membership?: Set<SerializableRuntimeScalar>,
+  membership?: Set<string>,
 ): boolean {
-  assertSerializableScalar(value);
-  const seen = membership ?? new Set(set.items);
-  if (seen.has(value)) return false;
-  seen.add(value);
-  set.items.push(value);
+  assertSetElement(value);
+  const seen = membership ?? new Set(set.items.map(setMemberKey));
+  const key = setMemberKey(value);
+  if (seen.has(key)) return false;
+  seen.add(key);
+  set.items.push(value !== null && typeof value === "object" ? { ...value } : value);
   return true;
 }
 
@@ -314,8 +416,9 @@ export function removeSerializableSetValue(
   set: SerializableRuntimeSet,
   value: SerializableRuntimeValue,
 ): boolean {
-  assertSerializableScalar(value);
-  const index = set.items.findIndex((item) => item === value);
+  assertSetElement(value);
+  const key = setMemberKey(value);
+  const index = set.items.findIndex((item) => setMemberKey(item) === key);
   if (index < 0) return false;
   set.items.splice(index, 1);
   return true;
@@ -325,13 +428,43 @@ export function serializableSetContains(
   set: SerializableRuntimeSet,
   value: SerializableRuntimeValue,
 ): boolean {
-  assertSerializableScalar(value);
-  return new Set(set.items).has(value);
+  assertSetElement(value);
+  const key = setMemberKey(value);
+  return set.items.some((item) => setMemberKey(item) === key);
+}
+
+/** Whether a value can be a set member. */
+export function isSetElement(value: SerializableRuntimeValue): value is SerializableSetElement {
+  return value === null || typeof value !== "object" || isSetElementKind(value.kind);
+}
+
+/** The kinds of non-scalar values a set holds. */
+function isSetElementKind(kind: unknown): boolean {
+  return kind === "date" || kind === "time" || kind === "datetime" || kind === "timestamp";
+}
+
+/** A text that is equal for two set members exactly when they are the same kind and `==` value. */
+function setMemberKey(value: SerializableSetElement): string {
+  if (value === null) return "null";
+  if (typeof value === "string") return `s${value}`;
+  if (typeof value === "number") return `n${value === 0 ? 0 : value}`;
+  if (typeof value === "boolean") return `b${value}`;
+  switch (value.kind) {
+    case "date":
+      return `d${value.year}-${value.month}-${value.day}`;
+    case "time":
+      return `t${value.hour}:${value.minute}:${value.second}.${value.millisecond}`;
+    case "datetime":
+      return `D${value.year}-${value.month}-${value.day}T${value.hour}:${value.minute}:${value.second}.${value.millisecond}`;
+    case "timestamp":
+      return `T${value.epochMilliseconds}`;
+  }
 }
 
 /**
- * Structural equality. Objects compare property names and values regardless of property order, lists compare elements
- * in order, and sets compare members regardless of insertion order. Handles and speaker references compare identity.
+ * Structural equality. Objects compare property names and values regardless of property order, dicts compare keys and
+ * values regardless of entry order, lists compare elements in order, and sets compare members regardless of insertion
+ * order. Handles and speaker references compare identity.
  * Scalar children are compared as soon as their container is visited, before any nested list, object, or set, and
  * nested values use an explicit stack, so deep values never exhaust the native call stack.
  */
@@ -344,12 +477,18 @@ export function serializableEquals(
   while (pending.length > 0) {
     const next = pending.pop()!;
     if (next.kind === "set") {
-      const members = new Set(next.right.items);
-      if (!next.left.items.every((item) => members.has(item))) return false;
+      const members = new Set(next.right.items.map(setMemberKey));
+      if (!next.left.items.every((item) => members.has(setMemberKey(item)))) return false;
     } else if (next.kind === "list") {
       for (let index = 0; index < next.left.items.length; index += 1) {
         if (!equalsOrDefer(next.left.items[index]!, next.right.items[index]!, pending))
           return false;
+      }
+    } else if (next.kind === "dict") {
+      const rightValues = new Map(next.right.entries.map((entry) => [entry.key, entry.value]));
+      for (const entry of next.left.entries) {
+        if (!rightValues.has(entry.key)) return false;
+        if (!equalsOrDefer(entry.value, rightValues.get(entry.key)!, pending)) return false;
       }
     } else {
       const rightValues = new Map(
@@ -379,11 +518,16 @@ type DeferredComparison =
       readonly kind: "set";
       readonly left: SerializableRuntimeSet;
       readonly right: SerializableRuntimeSet;
+    }
+  | {
+      readonly kind: "dict";
+      readonly left: SerializableRuntimeDict;
+      readonly right: SerializableRuntimeDict;
     };
 
 /**
- * Compares two values without descending: a pair of lists or sets of equal length or objects with equal property
- * counts is queued in `pending`, and everything else is decided now.
+ * Compares two values without descending: a pair of lists, sets, or dicts of equal length or objects with equal
+ * property counts is queued in `pending`, and everything else is decided now.
  */
 function equalsOrDefer(
   left: SerializableRuntimeValue,
@@ -406,6 +550,10 @@ function equalsOrDefer(
       if (right.kind !== "set" || right.items.length !== left.items.length) return false;
       pending.push({ kind: "set", left, right });
       return true;
+    case "dict":
+      if (right.kind !== "dict" || right.entries.length !== left.entries.length) return false;
+      pending.push({ kind: "dict", left, right });
+      return true;
     case "range":
       return (
         right.kind === "range" &&
@@ -414,7 +562,17 @@ function equalsOrDefer(
         right.inclusive === left.inclusive
       );
     case "duration":
-      return right.kind === "duration" && right.milliseconds === left.milliseconds;
+      return (
+        right.kind === "duration" &&
+        right.milliseconds === left.milliseconds &&
+        (right.months ?? 0) === (left.months ?? 0) &&
+        (right.days ?? 0) === (left.days ?? 0)
+      );
+    case "date":
+    case "time":
+    case "datetime":
+    case "timestamp":
+      return right.kind === left.kind && setMemberKey(right) === setMemberKey(left);
     case "timerHandle":
       return right.kind === "timerHandle" && right.timerId === left.timerId;
     case "mediaHandle":
@@ -477,6 +635,13 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
         readonly names: Set<string>;
         readonly path: ValuePath | null;
       }
+    | {
+        readonly kind: "dict";
+        readonly entries: readonly unknown[];
+        readonly index: number;
+        readonly keys: Set<string>;
+        readonly path: ValuePath | null;
+      }
     | { readonly kind: "leave"; readonly value: object };
 
   const active = new Set<object>();
@@ -507,6 +672,23 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
         value: item.values[item.index],
         path: nestedPath(item.path, `.items[${item.index}]`),
       });
+      continue;
+    }
+    if (item.kind === "dict") {
+      if (item.index >= item.entries.length) continue;
+      const entry = item.entries[item.index];
+      const entryPath = nestedPath(item.path, `.entries[${item.index}]`);
+      if (
+        !isPlainRecord(entry) ||
+        !hasOnlyKeys(entry, ["key", "value"]) ||
+        typeof entry.key !== "string"
+      ) {
+        return `${formatPath(entryPath)} is malformed.`;
+      }
+      if (item.keys.has(entry.key)) return `${formatPath(entryPath)}.key is duplicated.`;
+      item.keys.add(entry.key);
+      work.push({ ...item, index: item.index + 1 });
+      work.push({ kind: "value", value: entry.value, path: nestedPath(entryPath, ".value") });
       continue;
     }
     if (item.kind === "object") {
@@ -552,13 +734,9 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
         return `${path()} contains a malformed speaker reference.`;
       continue;
     }
-    if (current.kind === "duration") {
-      if (
-        !hasOnlyKeys(current, ["kind", "milliseconds"]) ||
-        typeof current.milliseconds !== "number" ||
-        !Number.isFinite(current.milliseconds)
-      )
-        return `${path()} contains a malformed duration.`;
+    if (current.kind === "duration" || TEMPORAL_KEYS.has(current.kind)) {
+      const problem = setElementObjectProblem(current);
+      if (problem !== null) return `${path()} contains ${problem}.`;
       continue;
     }
     if (current.kind === "timerHandle") {
@@ -596,12 +774,22 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
     if (current.kind === "set") {
       if (!hasOnlyKeys(current, ["kind", "items"])) return `${path()} contains a malformed set.`;
       if (!Array.isArray(current.items)) return `${path()}.items must be an array.`;
-      const seen = new Set<SerializableRuntimeScalar>();
+      const seen = new Set<string>();
       for (let index = 0; index < current.items.length; index += 1) {
-        const nested = current.items[index];
-        if (!isScalar(nested)) return `${path()}.items[${index}] is not a scalar.`;
-        if (seen.has(nested)) return `${path()}.items contains a duplicate scalar.`;
-        seen.add(nested);
+        const nested: unknown = current.items[index];
+        if (typeof nested === "number" && !Number.isFinite(nested))
+          return `${path()}.items[${index}] must be a finite number.`;
+        if (!isScalar(nested)) {
+          const problem =
+            isPlainRecord(nested) && isSetElementKind(nested.kind)
+              ? setElementObjectProblem(nested)
+              : "a value of another kind";
+          if (problem !== null) return `${path()}.items[${index}] is not a set member: ${problem}.`;
+        }
+        // EVIDENCE: validation: the member is a finite scalar or passed setElementObjectProblem above.
+        const key = setMemberKey(nested as SerializableSetElement);
+        if (seen.has(key)) return `${path()}.items contains a duplicate member.`;
+        seen.add(key);
       }
       continue;
     }
@@ -611,6 +799,20 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
       active.add(current);
       work.push({ kind: "leave", value: current });
       work.push({ kind: "list", values: current.items, index: 0, path: item.path });
+      continue;
+    }
+    if (current.kind === "dict") {
+      if (!hasOnlyKeys(current, ["kind", "entries"])) return `${path()} contains a malformed dict.`;
+      if (!Array.isArray(current.entries)) return `${path()}.entries must be an array.`;
+      active.add(current);
+      work.push({ kind: "leave", value: current });
+      work.push({
+        kind: "dict",
+        entries: current.entries,
+        index: 0,
+        keys: new Set(),
+        path: item.path,
+      });
       continue;
     }
     if (current.kind === "object") {
@@ -634,15 +836,57 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
   return null;
 }
 
-function assertSerializableScalar(
+function assertSetElement(
   value: SerializableRuntimeValue,
-): asserts value is SerializableRuntimeScalar {
-  if (value !== null && typeof value === "object") {
+): asserts value is SerializableSetElement {
+  if (!isSetElement(value)) {
     throw new SerializableValueError(
       "setElement",
-      "Sets may contain only string, boolean, integer, number, or null values.",
+      "Sets may contain only string, boolean, integer, number, date, time, datetime, timestamp, or null values.",
     );
   }
+}
+
+const TEMPORAL_KEYS: ReadonlyMap<string, readonly string[]> = new Map([
+  ["date", ["kind", "year", "month", "day"]],
+  ["time", ["kind", "hour", "minute", "second", "millisecond"]],
+  ["datetime", ["kind", "year", "month", "day", "hour", "minute", "second", "millisecond"]],
+  ["timestamp", ["kind", "epochMilliseconds"]],
+]);
+
+/**
+ * Why a duration, date, time, datetime, or timestamp record is malformed, as a phrase such as "a malformed date", or
+ * `null` when it is valid. Other kinds are reported as not set members.
+ */
+function setElementObjectProblem(value: Record<string, unknown>): string | null {
+  if (value.kind === "duration")
+    return isStoredDurationRecord(value) ? null : "a malformed duration";
+  const keys = typeof value.kind === "string" ? TEMPORAL_KEYS.get(value.kind) : undefined;
+  if (keys === undefined)
+    return typeof value.kind === "string" ? `a ${value.kind} value` : "a value without a kind";
+  if (
+    !hasOnlyKeys(value, keys) ||
+    keys.some((key) => key !== "kind" && typeof value[key] !== "number")
+  )
+    return `a malformed ${value.kind}`;
+  // Every field other than kind was just checked to be a number.
+  const field = (key: string): number => Number(value[key]);
+  const date = { year: field("year"), month: field("month"), day: field("day") };
+  const time = {
+    hour: field("hour"),
+    minute: field("minute"),
+    second: field("second"),
+    millisecond: field("millisecond"),
+  };
+  const valid =
+    value.kind === "date"
+      ? isValidDate(date)
+      : value.kind === "time"
+        ? isValidTime(time)
+        : value.kind === "datetime"
+          ? isValidDate(date) && isValidTime(time)
+          : isValidEpochMilliseconds(field("epochMilliseconds"));
+  return valid ? null : `a malformed ${value.kind}`;
 }
 
 function serializableCaptureError(failure: ExternalDataFailure): SerializableValueError {

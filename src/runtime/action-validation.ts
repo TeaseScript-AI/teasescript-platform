@@ -1,3 +1,9 @@
+import type { TemporalContext } from "../temporal.js";
+import {
+  temporalCaptureShownAt,
+  temporalCapturesProblem,
+  type RuntimeTemporalCapture,
+} from "./temporal-captures.js";
 import { isNormalizedOpaqueColor, normalizeOpaqueColor } from "../color.js";
 import { isIntegerAnswerText, isValidInteractionPrefill } from "../interaction-answers.js";
 import { isInteractionChoiceValue } from "../choice-values.js";
@@ -14,6 +20,8 @@ import type {
   Instruction,
   InstructionPlan,
   InteractionChoiceOption,
+  InteractionKind,
+  InteractionTemporalKind,
   InteractionUiPayload,
   PlanSourceLocation,
 } from "../plan/model.js";
@@ -1128,7 +1136,12 @@ function validInteractionResultForInstruction(
     if (instruction.expectedResult !== "choice" || !isInteractionChoiceValue(result)) return false;
     const options =
       "preparedUi" in instruction
-        ? preparedChoiceOptions(instruction.preparedUi, snapshot.temporaries, instruction.span)
+        ? preparedChoiceOptions(
+            instruction.preparedUi,
+            snapshot.temporaries,
+            snapshotTemporalContextAt(snapshot, snapshot.currentSessionTimeMs),
+            instruction.span,
+          )
         : instruction.ui.kind === "choice"
           ? instruction.ui.options
           : undefined;
@@ -1145,6 +1158,14 @@ function validInteractionResultForInstruction(
       (ui.kind !== "number" || ui.integer !== true || Number.isSafeInteger(result))
     );
   }
+  if (instruction.expectedResult === "temporal") {
+    const ui = "preparedUi" in instruction ? instruction.preparedUi : instruction.ui;
+    return (
+      instruction.interactionKind === "temporal" &&
+      ui.kind === "temporal" &&
+      isTemporalAnswer(result, ui.temporalKind)
+    );
+  }
   return (
     instruction.expectedResult === "string" &&
     instruction.interactionKind === "text" &&
@@ -1159,9 +1180,11 @@ function validInteractionResultForInstruction(
 function preparedChoiceOptions(
   prepared: import("../plan/model.js").PreparedInteractionUiPayload,
   temporaries: unknown,
+  context: TemporalContext | undefined,
   span: PlanSourceLocation,
 ): readonly InteractionChoiceOption[] | undefined {
-  if (prepared.kind !== "choice" || !Array.isArray(temporaries)) return undefined;
+  if (prepared.kind !== "choice" || !Array.isArray(temporaries) || context === undefined)
+    return undefined;
   const raw = runtimeTemporaryValue(temporaries, prepared.optionsTemporary);
   if (
     validateCapturedSerializableValue(raw) !== null ||
@@ -1173,7 +1196,12 @@ function preparedChoiceOptions(
     return undefined;
   try {
     // EVIDENCE: validation: validateCapturedSerializableValue accepted the captured list and its items above.
-    return expandChoiceOptions(raw.items as SerializableRuntimeValue[], prepared.values, span);
+    return expandChoiceOptions(
+      raw.items as SerializableRuntimeValue[],
+      prepared.values,
+      context,
+      span,
+    );
   } catch (error) {
     if (error instanceof RuntimeFault) return undefined;
     throw error;
@@ -1240,7 +1268,7 @@ function validInteractionAction(
   )
     return false;
   if (
-    !isOneOf(action.interactionKind, ["button", "text", "number", "choice"]) ||
+    !isInteractionKind(action.interactionKind) ||
     action.target !== "standardChat" ||
     !validInteractionTiming(action, snapshot, allowDue)
   )
@@ -1254,7 +1282,9 @@ function validInteractionAction(
         ? "number"
         : action.interactionKind === "choice"
           ? "choice"
-          : "string";
+          : action.interactionKind === "temporal"
+            ? "temporal"
+            : "string";
   if (
     action.expectedResult !== expected ||
     (action.speakerId !== null && !positiveSafeInteger(action.speakerId))
@@ -1280,14 +1310,7 @@ function validInteractionAction(
     )
   )
     return false;
-  // EVIDENCE: validation: the preceding discriminator check restricts interactionKind to the four UI variants.
-  if (
-    !validInteractionUiShape(
-      action.interactionKind as "button" | "text" | "number" | "choice",
-      action.ui,
-    )
-  )
-    return false;
+  if (!validInteractionUiShape(action.interactionKind, action.ui)) return false;
   if (plan === undefined || !nonNegativeSafeInteger(action.owningInstruction)) return true;
   const instruction = plan.instructions[action.owningInstruction];
   if (
@@ -1358,8 +1381,36 @@ function validPreparedInteractionAction(
     prepared,
     action.ui,
     snapshot.temporaries,
+    // The buttons were shown with the context in force when the interaction opened, also after a later Continue.
+    snapshotTemporalContextAt(snapshot, action.createdAtMs, action.requestEventSequence),
     instruction.span,
   );
+}
+
+/** The snapshot's temporal context at a scene time when its captures are valid: choice texts are derived from it. */
+function snapshotTemporalContextAt(
+  snapshot: Record<string, unknown>,
+  atMs: unknown,
+  eventSequence: unknown = Infinity,
+): TemporalContext | undefined {
+  if (
+    typeof atMs !== "number" ||
+    typeof eventSequence !== "number" ||
+    typeof snapshot.currentSessionTimeMs !== "number" ||
+    typeof snapshot.observedSessionTimeMs !== "number" ||
+    typeof snapshot.nextEventSequence !== "number" ||
+    temporalCapturesProblem(
+      snapshot.temporalCaptures,
+      snapshot.currentSessionTimeMs,
+      snapshot.observedSessionTimeMs,
+      snapshot.nextEventSequence,
+    ) !== null
+  )
+    return undefined;
+  // EVIDENCE: validation: temporalCapturesProblem accepted the snapshot's captures.
+  const captures = snapshot.temporalCaptures as RuntimeTemporalCapture[];
+  // Without a capture recorded before the request, the shown texts cannot be derived again, so they do not validate.
+  return temporalCaptureShownAt(captures, atMs, eventSequence)?.context;
 }
 
 // oxlint-disable-next-line anti-slop/no-unknown-returns -- EVIDENCE: boundary: a temporary payload remains unvalidated while snapshot consistency is checked.
@@ -1374,6 +1425,7 @@ function preparedInteractionUiMatchesAction(
   prepared: import("../plan/model.js").PreparedInteractionUiPayload,
   actual: unknown,
   temporaries: readonly unknown[],
+  context: TemporalContext | undefined,
   span: PlanSourceLocation,
 ): boolean {
   if (
@@ -1406,7 +1458,22 @@ function preparedInteractionUiMatchesAction(
       actual.integer === (prepared.kind === "number" ? prepared.integer : undefined)
     );
   }
-  const options = preparedChoiceOptions(prepared, temporaries, span);
+  if (prepared.kind === "temporal") {
+    const hint =
+      prepared.hintTemporary === null
+        ? null
+        : runtimeTemporaryValue(temporaries, prepared.hintTemporary);
+    const prefill =
+      prepared.prefillTemporary === undefined
+        ? undefined
+        : runtimeTemporaryValue(temporaries, prepared.prefillTemporary);
+    return (
+      actual.temporalKind === prepared.temporalKind &&
+      hint === actual.hint &&
+      prefill === actual.prefill
+    );
+  }
+  const options = preparedChoiceOptions(prepared, temporaries, context, span);
   return options !== undefined && choiceOptionsEqual(options, actual.options);
 }
 
@@ -1448,25 +1515,27 @@ function visibleRuntimeBindingValue(snapshot: Record<string, unknown>, name: str
   return undefined;
 }
 
-function validInteractionUiShape(
-  kind: "button" | "text" | "number" | "choice",
-  value: unknown,
-): boolean {
+function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean {
   if (!isPlainRecord(value) || value.kind !== kind || !isPlainRecord(value.accessibleName))
     return false;
   const expectedUiKeys =
     kind === "button"
       ? ["kind", "buttonLabel", "accessibleName", ...("background" in value ? ["background"] : [])]
-      : kind === "text" || kind === "number"
+      : kind === "text" || kind === "number" || kind === "temporal"
         ? [
             "kind",
             "hint",
             "accessibleName",
             ...("prefill" in value ? ["prefill"] : []),
             ...(kind === "number" && "integer" in value ? ["integer"] : []),
+            ...(kind === "temporal" ? ["temporalKind"] : []),
           ]
         : ["kind", "options", "accessibleName"];
-  if (!hasExactKeys(value, expectedUiKeys) || ("integer" in value && value.integer !== true))
+  if (
+    !hasExactKeys(value, expectedUiKeys) ||
+    ("integer" in value && value.integer !== true) ||
+    (kind === "temporal" && !isTemporalAnswerKind(value.temporalKind))
+  )
     return false;
   let aggregate = 0;
   let measurementExhausted = false;
@@ -1516,12 +1585,18 @@ function validInteractionUiShape(
       (!("background" in value) || isNormalizedOpaqueColor(value.background))
     );
   }
-  if (kind === "text" || kind === "number") {
+  if (kind === "text" || kind === "number" || kind === "temporal") {
+    const answerKind = isTemporalAnswerKind(value.temporalKind)
+      ? value.temporalKind
+      : value.integer === true
+        ? "integer"
+        : kind === "number"
+          ? "number"
+          : "text";
     return (
       (value.hint === null || count(value.hint)) &&
       (!("prefill" in value) ||
-        (count(value.prefill) &&
-          isValidInteractionPrefill(value.integer === true ? "integer" : kind, value.prefill))) &&
+        (count(value.prefill) && isValidInteractionPrefill(answerKind, value.prefill))) &&
       !measurementExhausted
     );
   }
@@ -1568,7 +1643,12 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
       actual.prefill === expected.prefill &&
       actual.integer === (expected.kind === "number" ? expected.integer : undefined)
     );
-  if (expected.kind !== "choice") return false;
+  if (expected.kind === "temporal")
+    return (
+      actual.temporalKind === expected.temporalKind &&
+      actual.hint === expected.hint &&
+      actual.prefill === expected.prefill
+    );
   return choiceOptionsEqual(expected.options, actual.options);
 }
 
@@ -1685,7 +1765,7 @@ function validSettlementKindData(
     return false;
   const timedOut = settlement.settlementKind === "timedOut";
   if (
-    !isOneOf(settlement.interactionKind, ["button", "text", "number", "choice"]) ||
+    !isInteractionKind(settlement.interactionKind) ||
     !positiveSafeInteger(settlement.requestEventSequence) ||
     !positiveSafeInteger(settlement.completionEventSequence) ||
     (timedOut
@@ -1721,6 +1801,15 @@ function validSettlementKindData(
       typeof settlement.result === "number" &&
       Number.isFinite(settlement.result) &&
       !Object.is(settlement.result, -0);
+  } else if (settlement.interactionKind === "temporal") {
+    // The transcript shows the answer in the presentation in force then, which is not derived again here.
+    resultValid =
+      isPlainRecord(settlement.ui) &&
+      isTemporalAnswerKind(settlement.ui.temporalKind) &&
+      isTemporalAnswer(settlement.result, settlement.ui.temporalKind) &&
+      typeof settlement.transcriptText === "string" &&
+      !/[\r\n\u2028\u2029]/u.test(settlement.transcriptText) &&
+      interactionStringHasNonWhitespace(settlement.transcriptText);
   } else {
     // The recorded UI offered the result; `settlementMatchesPresentedUi` checked that above.
     resultValid =
@@ -1796,8 +1885,22 @@ function validSettlementKindData(
     : interactionUiEqual(instruction.ui, settlement.ui);
 }
 
-function isInteractionKind(value: unknown): value is "button" | "text" | "number" | "choice" {
-  return isOneOf(value, ["button", "text", "number", "choice"]);
+function isInteractionKind(value: unknown): value is InteractionKind {
+  return isOneOf(value, ["button", "text", "number", "choice", "temporal"]);
+}
+
+function isTemporalAnswerKind(value: unknown): value is InteractionTemporalKind {
+  return isOneOf(value, ["date", "time", "datetime"]);
+}
+
+/** Whether `value` is a valid date, time, or date and time of `kind`, as a date or time field returns. */
+function isTemporalAnswer(value: unknown, kind: InteractionTemporalKind): boolean {
+  return (
+    isInteractionChoiceValue(value) &&
+    typeof value === "object" &&
+    value !== null &&
+    value.kind === kind
+  );
 }
 
 /**
@@ -1848,6 +1951,12 @@ function preparedUiFitsPresentedUi(
       (ui.hint === null) === (prepared.hintTemporary === null) &&
       "prefill" in ui === (prepared.prefillTemporary !== undefined) &&
       ui.integer === (prepared.kind === "number" ? prepared.integer : undefined)
+    );
+  if (prepared.kind === "temporal")
+    return (
+      ui.temporalKind === prepared.temporalKind &&
+      (ui.hint === null) === (prepared.hintTemporary === null) &&
+      "prefill" in ui === (prepared.prefillTemporary !== undefined)
     );
   return Array.isArray(ui.options) && buttonsFitWrittenValues(prepared.values, ui.options);
 }

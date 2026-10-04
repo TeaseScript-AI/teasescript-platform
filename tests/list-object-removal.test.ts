@@ -22,15 +22,18 @@ test("objects, lists, sets, and ranges compare by value", () => {
     ["[[1], []] == [[1], []]", "true"],
     ["set[1, 2] == set[2, 1]", "true"],
     ["set[1, 2] == set[1]", "false"],
-    ["[1] == set[1]", "false"],
-    ["{ a: 1 } == [1]", "false"],
+    ["dynamic([1]) == set[1]", "false"],
+    ["dynamic({ a: 1 }) == [1]", "false"],
     ["1..3 == 1..3", "true"],
     ["1..3 == 1..=3", "false"],
     ["{ wait: 1 s } == { wait: 1000 ms }", "true"],
-    ['{ a: 1 } == "{ a: 1 }"', "false"],
+    ['dynamic({ a: 1 }) == "{ a: 1 }"', "false"],
   ] as const;
   for (const [expression, expected] of cases) {
-    const result = runValidSource(`say "\${${expression}}"`);
+    // Known values of different kinds are never equal, which the compiler warns about (ADR 0021 rule 4.5).
+    const result = runValidSource(
+      `function dynamic(value) {\n  return value\n}\nsay "\${${expression}}"`,
+    );
     assert.equal(result.snapshot.failure, null, expression);
     assert.deepEqual(sayTexts(result), [expected], expression);
   }

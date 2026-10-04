@@ -21,6 +21,7 @@ import {
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
+  playerTemporalContext,
   playerRuntimeDeadlines,
   playerRuntimeForeground,
   playerRuntimeMedia,
@@ -276,8 +277,11 @@ test("runtime adapter routes pacing skip and explicit time through canonical ope
   assert.equal(rejected?.outcome.kind, "invalidPayload");
   assert.deepEqual(rejected?.session.snapshot, beforeRejectedSkip);
 
+  const beforeObservation = structuredClone(session.snapshot);
   const observed = observePlayerRuntimeTime(session, firstGate!.deadlineMs);
   assert.equal(observed.outcome.kind, "observed");
+  // The observation continues execution on a new snapshot; the published one stays as it was.
+  assert.deepEqual(session.snapshot, beforeObservation);
   session = observed.session;
   assert.deepEqual(
     session.transcriptEntries.map((entry) => entry.text),
@@ -725,4 +729,33 @@ test("runtime adapter leaves writes reached after interaction and time observati
   assert.equal(pendingPlayerRuntimeStorageWrite(session.snapshot), null);
   assert.deepEqual(session.snapshot.scriptStorage, [{ key: "observed", value: 3 }]);
   assert.equal(session.transcriptEntries.at(-1)?.text, "deleted");
+});
+
+test("a session records the account's zone and presentation, falling back to the browser's", () => {
+  const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const account = playerTemporalContext({ timeZone: "Asia/Tokyo", locale: "en-US" });
+  assert.equal(account.zone.name, "Asia/Tokyo");
+  assert.equal(account.presentation.hourCycle, "h12");
+  // A zone this browser does not know falls back to the browser's own zone and language.
+  assert.equal(playerTemporalContext({ timeZone: "Mars/Olympus_Mons" }).zone.name, browserZone);
+
+  const session = createPlayerRuntimeSession('say toDateTime("2026-10-04T18:30")', {
+    temporalContext: account,
+  });
+  assert.deepEqual(session.snapshot.temporalCaptures[0]?.context, account);
+  assert.equal(
+    session.events.find((event) => event.kind === "say")?.text,
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "UTC",
+      numberingSystem: "latn",
+      calendar: "gregory",
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    })
+      .format(Date.UTC(2026, 9, 4, 18, 30))
+      .replace(/[\u00a0\u202f]/gu, " "),
+  );
 });

@@ -143,6 +143,18 @@ test("conversions the compiler can prove invalid and misused arguments are compi
       "[1, 2]",
     ],
     [
+      "let rounds = [[1, 2], [3]]\nsay toString(rounds)",
+      "TSV043",
+      "toString(...) cannot convert a list (integer[][]), and .join() cannot combine its elements, which hold a list (integer[]). Show the whole list with say, or select a value inside it that toString(...) converts.",
+      "rounds",
+    ],
+    [
+      "say toString(dict{ a: { n: 1 } })",
+      "TSV043",
+      "toString(...) cannot convert a dict (object dict), and .values.join() cannot combine its values, which hold an object. Show the whole dict with say, or select a value inside it that toString(...) converts.",
+      "dict{ a: { n: 1 } }",
+    ],
+    [
       "say toString(set[1, 2])",
       "TSV043",
       "toString(...) cannot convert a set (integer set); use .toList().join() to combine its elements as text.",
@@ -151,7 +163,7 @@ test("conversions the compiler can prove invalid and misused arguments are compi
     [
       "say toString(1..3)",
       "TSV043",
-      "toString(...) converts text, numbers, true or false, null, and durations, not a range.",
+      "toString(...) converts text, numbers, true or false, null, durations, and date and time values, not a range.",
       "1..3",
     ],
     [

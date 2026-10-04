@@ -134,6 +134,11 @@ export {
 export { completeAction } from "./runtime/operations/complete-action.js";
 export { observeTime, type MediaProgressReport } from "./runtime/operations/observe-time.js";
 export {
+  recordContinueCapture,
+  type ContinueCaptureOutcome,
+} from "./runtime/operations/continue-capture.js";
+export type { RuntimeTemporalCapture } from "./runtime/temporal-captures.js";
+export {
   reportMediaLoad,
   type MediaLoadReport,
   type MediaReportOutcome,
@@ -219,10 +224,23 @@ export {
   type SerializableRuntimeProperty,
   type SerializableRuntimeScalar,
   type SerializableRuntimeSet,
+  type SerializableRuntimeDict,
+  type SerializableRuntimeDictEntry,
   type SerializableRuntimeValue,
   type SerializableSpeakerReference,
   type SerializableMediaHandle,
+  type SerializableRuntimeDate,
+  type SerializableRuntimeDateTime,
+  type SerializableRuntimeTime,
+  type SerializableRuntimeTimestamp,
 } from "./runtime/serializable-values.js";
+export {
+  DEFAULT_TEMPORAL_CONTEXT,
+  type PresentationSettings,
+  type TemporalContext,
+  type ZoneRules,
+} from "./temporal.js";
+export { captureTemporalContext } from "./temporal-capture.js";
 export {
   combineSourceSpans,
   createSourcePosition,
@@ -284,6 +302,8 @@ export type {
   PlayMediaExpression,
   PlayMediaStatement,
   SetLiteral,
+  DictEntry,
+  DictLiteral,
   SpeakerDeclaration,
   SpeakerProperty,
   SpeakerSetterStatement,

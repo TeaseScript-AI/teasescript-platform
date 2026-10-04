@@ -154,7 +154,7 @@ test("misuse the compiler can see is a compile error", () => {
     [
       "let flags = [true, false]\nflags.sort()",
       "TSV043",
-      "sort() sorts numbers, text, or durations, not true or false (boolean).",
+      "sort() sorts numbers, text, durations, or date and time values, not true or false (boolean).",
       "sort",
     ],
     [
@@ -184,20 +184,26 @@ test("misuse the compiler can see is a compile error", () => {
     [
       "let tags = set[1]\nsay tags.union([{ n: 1 }])",
       "TSV006",
-      "A set holds only text, numbers, true or false, or null, so it cannot hold an object.",
+      "A set holds only text, numbers, true or false, date and time values, or null, so it cannot hold an object.",
       "[{ n: 1 }]",
     ],
     [
       "let tags = set[]\nsay tags.union([1 s])",
       "TSV006",
-      "A set holds only text, numbers, true or false, or null, so it cannot hold a duration.",
+      "A set holds only text, numbers, true or false, date and time values, or null, so it cannot hold a duration.",
       "[1 s]",
     ],
     [
       'let items = [1]\nsay items.union(["x"])',
       "TSV044",
-      "union() would mix a whole number (integer) and text (string). A list holds one type; keep values of different types in separate lists.",
+      "union() would mix a whole number (integer) and text (string). A list holds one type; to keep both, declare a union type, as in 'let items: (integer | string)[] = ...'.",
       'items.union(["x"])',
+    ],
+    [
+      'say set[1].union(set["x"])',
+      "TSV044",
+      "union() would mix a whole number (integer) and text (string). A set holds one type; to keep both, declare a union type, as in 'let values: (integer | string) set = ...'.",
+      'set[1].union(set["x"])',
     ],
   ];
   for (const [source, code, message, text] of cases)
@@ -217,7 +223,7 @@ test("values the compiler cannot know are checked at runtime", () => {
   ]);
   assert.deepEqual(failure(`${DYNAMIC}let items = dynamic([true])\nitems.sort()`), [
     "TSR060",
-    "sort() sorts numbers, text, or durations, not true or false (boolean).",
+    "sort() sorts numbers, text, durations, or date and time values, not true or false (boolean).",
   ]);
   assert.deepEqual(failure(`${DYNAMIC}let items = [1]\nsay items.union(dynamic(5))`), [
     "TSR060",
@@ -225,6 +231,6 @@ test("values the compiler cannot know are checked at runtime", () => {
   ]);
   assert.deepEqual(failure(`${DYNAMIC}let tags = set[1]\nsay tags.union(dynamic([[1]]))`), [
     "TSR032",
-    "Sets may contain only string, boolean, integer, number, or null values.",
+    "Sets may contain only string, boolean, integer, number, date, time, datetime, timestamp, or null values.",
   ]);
 });

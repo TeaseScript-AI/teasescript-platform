@@ -4,14 +4,19 @@ import {
   CONVERSION_RESULTS,
   describeConversionResult,
   isConversionName,
+  isTemporalConversionResult,
   numberFromText,
   MIN_MAX_BUILTINS,
   ROUNDING_BUILTINS,
+  TEMPORAL_CONVERSIONS,
+  temporalTextProblem,
   type ConversionResult,
 } from "./conversions.js";
 import type { SourceSpan } from "./source.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
 import {
+  DATE_TYPE,
+  DATETIME_TYPE,
   describeValue,
   DURATION_TYPE,
   INTEGER_TYPE,
@@ -23,6 +28,8 @@ import {
   NUMBER_TYPE,
   resolved,
   STRING_TYPE,
+  TIME_TYPE,
+  TIMESTAMP_TYPE,
   type StaticType,
 } from "./static-types.js";
 import {
@@ -92,7 +99,7 @@ export function memberProblems(
     if (element !== undefined)
       problems.push({
         kind: "invalidOperand",
-        message: `join() can only join text, numbers, true or false, null, and durations, not ${describeValue(element.type)}. Select an element or a property first.`,
+        message: `join() can only join text, numbers, true or false, null, durations, and date and time values, not ${describeValue(element.type)}. Select an element or a property first.`,
         span: element.expression.span,
       });
     return problems;
@@ -204,7 +211,7 @@ function unshowableElement(
   while (receiver.kind === "parenthesizedExpression") receiver = receiver.expression;
   if (receiver.kind !== "listLiteral") return undefined;
   for (const expression of receiver.elements) {
-    // An element that may be text, a number, true or false, a duration, or null may be shown; `join` checks its value.
+    // An element that may be text, a number, true or false, a duration, a date or time value, or null may be shown; `join` checks its value.
     const type = typeOf(expression);
     const showable = members(type).some(
       (member) => !isKnown(member) || ["scalar", "null"].includes(resolved(member).kind),
@@ -219,9 +226,10 @@ function capitalized(text: string): string {
 }
 
 /**
- * Compile-time problems with a call of a conversion (`toString`, `toNumber`, `toInteger`, `toBoolean`) or rounding
- * built-in (`round`, `floor`, `ceil`): its arguments, a value of a known type it cannot convert, constant text that
- * cannot convert (V30 §13), and a `default:` of another type than the result. Other callees give no problems.
+ * Compile-time problems with a call of a conversion (`toString`, `toNumber`, `toInteger`, `toBoolean`, and the date and
+ * time conversions) or rounding built-in (`round`, `floor`, `ceil`): its arguments, a value of a known type it cannot
+ * convert, constant text that cannot convert (V30 §13, §35), and a `default:` of another type than the result. Other
+ * callees give no problems.
  */
 export function builtinCallProblems(
   name: string,
@@ -247,22 +255,27 @@ export function builtinCallProblems(
         span: argument.name.span,
       });
   }
-  if (positional.length !== 1)
+  // A date and a time combine into one date and time (V30 §35).
+  const parts = result === "datetime" && positional.length === 2;
+  if (positional.length !== 1 && !parts)
     problems.push({
       kind: "argumentCount",
-      message: `${name}(...) takes 1 argument (value), received ${positional.length}.`,
+      message: `${name}(...) takes 1 argument (value)${result === "datetime" ? " or 2 (date, time)" : ""}, received ${positional.length}.`,
       span: call.span,
     });
   if (problems.length > 0) return problems;
-  const value = positional[0]!;
-  const type = typeOf(value);
-  const message =
-    result === undefined
-      ? isAssignable(NUMBER_TYPE, type)
-        ? undefined
-        : `${name}(...) needs a number, not ${describeValue(forUse(type))}.${isScalar(forUse(type), "string") ? " Convert text with toNumber(...) first." : ""}`
-      : conversionProblem(name, result, value, type);
-  if (message !== undefined) problems.push({ kind: "invalidOperand", message, span: value.span });
+  if (parts) problems.push(...dateTimePartProblems(positional[0]!, positional[1]!, typeOf));
+  else {
+    const value = positional[0]!;
+    const type = typeOf(value);
+    const message =
+      result === undefined
+        ? isAssignable(NUMBER_TYPE, type)
+          ? undefined
+          : `${name}(...) needs a number, not ${describeValue(forUse(type))}.${isScalar(forUse(type), "string") ? " Convert text with toNumber(...) first." : ""}`
+        : conversionProblem(name, result, value, type);
+    if (message !== undefined) problems.push({ kind: "invalidOperand", message, span: value.span });
+  }
   if (result !== undefined && fallback !== undefined) {
     const fallbackType = typeOf(fallback);
     if (!isAssignable({ kind: "scalar", name: result }, fallbackType))
@@ -301,20 +314,21 @@ function minMaxProblems(
         span: call.span,
       },
     ];
-  let family: "numbers" | "durations" | undefined;
+  let family: StaticType | undefined;
   for (const argument of call.arguments) {
     const type = typeOf(argument.value);
     if (!isKnown(forUse(type))) continue;
+    // Numbers, durations, or date and time values of one kind (V30 §35) compare with each other.
     const kind = isAssignable(NUMBER_TYPE, type)
-      ? "numbers"
-      : isAssignable(DURATION_TYPE, type)
-        ? "durations"
-        : undefined;
+      ? NUMBER_TYPE
+      : [DURATION_TYPE, DATE_TYPE, TIME_TYPE, DATETIME_TYPE, TIMESTAMP_TYPE].find((candidate) =>
+          isAssignable(candidate, type),
+        );
     const message =
       kind === undefined
-        ? `${name}(...) needs numbers or durations, not ${describeValue(forUse(type))}.`
+        ? `${name}(...) needs numbers, durations, or date and time values, not ${describeValue(forUse(type))}.`
         : family !== undefined && kind !== family
-          ? `${name}(...) needs all numbers or all durations, but this is ${kind === "numbers" ? "a number" : "a duration"} and an earlier one is ${family === "numbers" ? "a number" : "a duration"}.`
+          ? `${name}(...) needs values of one kind, but this is ${describeValue(kind)} and an earlier one is ${describeValue(family)}.`
           : undefined;
     if (message !== undefined)
       return [{ kind: "invalidOperand", message, span: argument.value.span }];
@@ -351,9 +365,30 @@ function candidateConversionProblem(
   const text = isScalar(type, "string") ? staticVisibleText(value) : undefined;
   if (result === "string") {
     if (type.kind === "scalar" || type.kind === "null") return undefined;
+    // `.join()` combines only values that are shown as text, so a list of lists or objects needs another fix.
+    if (type.kind === "list" || type.kind === "dict") {
+      const unjoinable = members(type.element)
+        .map(resolved)
+        .find((member) => isKnown(member) && member.kind !== "scalar" && member.kind !== "null");
+      if (unjoinable !== undefined)
+        return `toString(...) cannot convert ${describeValue(type)}, and ${type.kind === "list" ? ".join() cannot combine its elements" : ".values.join() cannot combine its values"}, which hold ${describeValue(unjoinable)}. Show the whole ${type.kind} with say, or select a value inside it that toString(...) converts.`;
+    }
     return type.kind === "list" || type.kind === "set"
       ? `toString(...) cannot convert ${describeValue(type)}; use ${type.kind === "set" ? ".toList().join()" : ".join()"} to combine its elements as text.`
-      : `toString(...) converts text, numbers, true or false, null, and durations, not ${describeValue(type)}.`;
+      : type.kind === "dict"
+        ? `toString(...) cannot convert ${describeValue(type)}; use .values.join() to combine its values as text.`
+        : `toString(...) converts text, numbers, true or false, null, durations, and date and time values, not ${describeValue(type)}.`;
+  }
+  if (isTemporalConversionResult(result)) {
+    const conversion = TEMPORAL_CONVERSIONS[result];
+    if (isScalar(type, ...conversion.from)) return undefined;
+    if (isScalar(type, "string")) {
+      const problem = text === undefined ? undefined : temporalTextProblem(result, text);
+      return problem === undefined
+        ? undefined
+        : `${name}(...) cannot convert ${JSON.stringify(text)}${problem}.`;
+    }
+    return `${name}(...) converts ${conversion.converts}, not ${describeValue(type)}.${zoneMethodFix(result, type, value)}`;
   }
   if (result === "boolean") {
     if (isScalar(type, "boolean")) return undefined;
@@ -369,6 +404,63 @@ function candidateConversionProblem(
       ? undefined
       : `${name}(...) cannot convert ${JSON.stringify(text)}; the text must be a number such as 2.5 or -3.`;
   return `${name}(...) converts text and numbers, not ${describeValue(type)}.${isScalar(type, "duration") ? " Divide a duration by a unit instead, such as value / 1 s." : ""}`;
+}
+
+/** A local date and time and a timestamp convert into each other with a method, through the player's zone (V30 §35). */
+function zoneMethodFix(result: ConversionResult, type: StaticType, value: Expression): string {
+  const method =
+    result === "timestamp" && isScalar(type, "datetime")
+      ? "toTimestamp"
+      : result === "datetime" && isScalar(type, "timestamp")
+        ? "toDateTime"
+        : null;
+  return method === null
+    ? ""
+    : ` Convert it with '${expressionLabel(value) ?? "value"}.${method}()'.`;
+}
+
+/** `toDateTime(date, time)` needs a date first and a time second; a part that may be one is checked at runtime. */
+function dateTimePartProblems(
+  date: Expression,
+  time: Expression,
+  typeOf: (expression: Expression) => StaticType,
+): OperationProblem[] {
+  const problems: OperationProblem[] = [];
+  for (const [part, kind, position] of [
+    [date, "date", "first"],
+    [time, "time", "second"],
+  ] as const) {
+    const type = forUse(typeOf(part));
+    const candidates = members(type).map(resolved);
+    if (
+      candidates.length > 0 &&
+      candidates.every((candidate) => isKnown(candidate) && !isScalar(candidate, kind))
+    )
+      problems.push({
+        kind: "invalidOperand",
+        message: `toDateTime(date, time) needs a ${kind} ${position}, not ${describeValue(type)}.${isScalar(type, "string") ? ` Convert the text first with ${kind === "date" ? "toDate" : "toTime"}(...).` : ""}`,
+        span: part.span,
+      });
+  }
+  return problems;
+}
+
+/** The source spelling of a variable or property path, such as `items` or `door.keys`. */
+export function expressionLabel(expression: Expression): string | null {
+  const names: string[] = [];
+  let current = withoutParentheses(expression);
+  while (current.kind === "propertyAccessExpression") {
+    names.push(current.property.name);
+    current = withoutParentheses(current.object);
+  }
+  if (current.kind !== "identifier") return null;
+  names.push(current.name);
+  return names.reverse().join(".");
+}
+
+function withoutParentheses(expression: Expression): Expression {
+  while (expression.kind === "parenthesizedExpression") expression = expression.expression;
+  return expression;
 }
 
 /** The scalar kind of a known argument type, for choosing the conversion a message suggests. */
@@ -482,10 +574,18 @@ function sortProblem(element: StaticType): string | undefined {
         ? "text"
         : isScalar(candidate, "duration")
           ? "durations"
-          : undefined;
+          : isScalar(candidate, "date")
+            ? "dates"
+            : isScalar(candidate, "time")
+              ? "times"
+              : isScalar(candidate, "datetime")
+                ? "dates and times"
+                : isScalar(candidate, "timestamp")
+                  ? "timestamps"
+                  : undefined;
   const unsortable = candidates.find((candidate) => kindOf(candidate) === undefined);
   if (unsortable !== undefined)
-    return `sort() sorts numbers, text, or durations, not ${describeValue(unsortable)}.`;
+    return `sort() sorts numbers, text, durations, or date and time values, not ${describeValue(unsortable)}.`;
   const kinds = new Set(candidates.map(kindOf));
   return kinds.size > 1
     ? `sort() needs elements of one kind, but this list may hold ${[...kinds].join(" and ")}.`

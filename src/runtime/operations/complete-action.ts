@@ -1,6 +1,10 @@
 import type { InstructionPlan } from "../../plan/model.js";
 import { captureExternalData } from "../../external-data-capture.js";
-import { type RuntimeInteractionResultHandoffSnapshot, type RuntimeSnapshot } from "../state.js";
+import {
+  currentTemporalContext,
+  type RuntimeInteractionResultHandoffSnapshot,
+  type RuntimeSnapshot,
+} from "../state.js";
 import type {
   RuntimeActionSettlementSnapshot,
   RuntimeChatPacingGateActionSnapshot,
@@ -268,7 +272,8 @@ function completeInteraction(
       receivedInteractionKind === "button" ||
       receivedInteractionKind === "text" ||
       receivedInteractionKind === "number" ||
-      receivedInteractionKind === "choice"
+      receivedInteractionKind === "choice" ||
+      receivedInteractionKind === "temporal"
         ? `interaction:${receivedInteractionKind}`
         : "<invalid>";
     return pendingResult(current, [], {
@@ -278,7 +283,11 @@ function completeInteraction(
       receivedActionKind,
     });
   }
-  const resolved = resolveInteractionCompletion(action, request.payload);
+  const resolved = resolveInteractionCompletion(
+    action,
+    request.payload,
+    currentTemporalContext(current),
+  );
   if (!resolved.ok) {
     return pendingResult(current, [], { kind: "invalidPayload", message: resolved.message });
   }

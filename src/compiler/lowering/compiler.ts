@@ -42,7 +42,7 @@ import type {
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 import { numberAnswerText } from "../../interaction-answers.js";
 import { staticChoiceValue, staticVisibleText } from "../../static-evaluation.js";
-import { durationLiteralMilliseconds } from "../../duration.js";
+import { durationLiteralParts, storedDuration } from "../../duration.js";
 import type { RuntimeCheckSite } from "../../type-checker.js";
 import { typeFromAnnotation } from "../../static-types.js";
 import { typePlan } from "../../type-plans.js";
@@ -1084,6 +1084,26 @@ export class InstructionCompiler {
         return yield* compileChild(this.#lowerCollectionExpressionTask(expression));
       case "objectLiteral":
         return yield* compileChild(this.#lowerCollectionExpressionTask(expression));
+      case "dictLiteral": {
+        // Each key is evaluated before its value, in source order.
+        const parts = yield* compileChild(
+          this.#lowerOrderedExpressionsTask(
+            expression.entries.flatMap((entry) => [entry.key, entry.value]),
+          ),
+        );
+        return {
+          plan: {
+            kind: "dict",
+            entries: expression.entries.map((entry, index) => ({
+              key: parts[2 * index]!.plan,
+              value: parts[2 * index + 1]!.plan,
+              span: copySpan(entry.span),
+            })),
+            span: copySpan(expression.span),
+          },
+          temporaryIds: parts.flatMap((part) => part.temporaryIds),
+        };
+      }
       case "propertyAccessExpression": {
         const object = yield* compileChild(this.#lowerExpressionTask(expression.object));
         return {
@@ -1327,7 +1347,9 @@ export class InstructionCompiler {
         ? ("choice" as const)
         : expression.interactionKind === "number" || expression.interactionKind === "integer"
           ? ("number" as const)
-          : ("string" as const);
+          : expression.interactionKind === "text"
+            ? ("string" as const)
+            : ("temporal" as const);
 
     const ui = staticInteractionUi(expression);
     if (ui !== undefined) {
@@ -1380,13 +1402,21 @@ export class InstructionCompiler {
               ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
               accessibleName: { kind: "localizedDefault", key: "answer" },
             }
-          : {
-              kind: "number",
-              hintTemporary: hint?.temporaryId ?? null,
-              ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
-              ...(expression.interactionKind === "integer" ? { integer: true as const } : {}),
-              accessibleName: { kind: "localizedDefault", key: "number" },
-            };
+          : expression.interactionKind === "number" || expression.interactionKind === "integer"
+            ? {
+                kind: "number",
+                hintTemporary: hint?.temporaryId ?? null,
+                ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
+                ...(expression.interactionKind === "integer" ? { integer: true as const } : {}),
+                accessibleName: { kind: "localizedDefault", key: "number" },
+              }
+            : {
+                kind: "temporal",
+                temporalKind: expression.interactionKind,
+                hintTemporary: hint?.temporaryId ?? null,
+                ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
+                accessibleName: { kind: "localizedDefault", key: "answer" },
+              };
     } else {
       const loweredValues = yield* compileChild(
         this.#lowerInteractionPayloadsTask(values, speakerTemporary),
@@ -2040,6 +2070,9 @@ function authoredChoiceValue(
  * literals of the wrong type.
  */
 function staticInteractionPrefill(expression: InteractionExpression): string | undefined {
+  const kind = expression.interactionKind;
+  // A date or time default is a value that the field shows as ISO text when it opens.
+  if (kind === "date" || kind === "time" || kind === "datetime") return undefined;
   let literal = expression.defaultValue!;
   let negative = false;
   while (
@@ -2063,9 +2096,21 @@ function staticInteractionPrefill(expression: InteractionExpression): string | u
     : undefined;
 }
 
-/** `askInteger` runs as a `number` interaction whose UI only accepts whole numbers. */
+/**
+ * `askInteger` runs as a `number` interaction whose UI only accepts whole numbers, and `askDate`, `askTime`, and
+ * `askDateTime` as a `temporal` interaction whose UI says what it asks for.
+ */
 function planInteractionKind(expression: InteractionExpression): InteractionKind {
-  return expression.interactionKind === "integer" ? "number" : expression.interactionKind;
+  switch (expression.interactionKind) {
+    case "integer":
+      return "number";
+    case "date":
+    case "time":
+    case "datetime":
+      return "temporal";
+    default:
+      return expression.interactionKind;
+  }
 }
 
 /** The UI of an interaction whose text, values, and default answer are all known at compile time. */
@@ -2081,13 +2126,21 @@ function staticInteractionUi(expression: InteractionExpression): InteractionUiPa
           ...(prefill === null ? {} : { prefill }),
           accessibleName: { kind: "localizedDefault", key: "answer" },
         }
-      : {
-          kind: "number",
-          hint,
-          ...(prefill === null ? {} : { prefill }),
-          ...(expression.interactionKind === "integer" ? { integer: true as const } : {}),
-          accessibleName: { kind: "localizedDefault", key: "number" },
-        };
+      : expression.interactionKind === "number" || expression.interactionKind === "integer"
+        ? {
+            kind: "number",
+            hint,
+            ...(prefill === null ? {} : { prefill }),
+            ...(expression.interactionKind === "integer" ? { integer: true as const } : {}),
+            accessibleName: { kind: "localizedDefault", key: "number" },
+          }
+        : {
+            kind: "temporal",
+            temporalKind: expression.interactionKind,
+            hint,
+            ...(prefill === null ? {} : { prefill }),
+            accessibleName: { kind: "localizedDefault", key: "answer" },
+          };
   }
   const options: InteractionChoiceOption[] = [];
   for (const option of expression.options) {
@@ -2132,12 +2185,12 @@ function assembleExpression(
     case "nullLiteral":
     case "numberLiteral":
       return { kind: "literal", value: expression.value, span: copySpan(expression.span) };
-    case "durationLiteral":
-      return {
-        kind: "duration",
-        milliseconds: durationLiteralMilliseconds(expression),
-        span: copySpan(expression.span),
-      };
+    case "durationLiteral": {
+      const parts = durationLiteralParts(expression);
+      // The type checker rejects a calendar amount that is not whole before lowering.
+      if (typeof parts === "string") throw new Error(`Invalid duration literal: ${parts}.`);
+      return { ...storedDuration(parts), span: copySpan(expression.span) };
+    }
     case "stringLiteral":
       return expression.parts.some((part) => part.kind === "stringInterpolation")
         ? {
@@ -2182,6 +2235,16 @@ function assembleExpression(
           name: property.name.name,
           value: child(property.value),
           span: copySpan(property.span),
+        })),
+        span: copySpan(expression.span),
+      };
+    case "dictLiteral":
+      return {
+        kind: "dict",
+        entries: expression.entries.map((entry) => ({
+          key: child(entry.key),
+          value: child(entry.value),
+          span: copySpan(entry.span),
         })),
         span: copySpan(expression.span),
       };

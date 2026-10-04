@@ -3,30 +3,39 @@
 **Status:** Accepted
 
 Ordinary TeaseScript data uses deep value-copy semantics for variable
-declarations, direct assignments, list elements, and object fields. Scalars copy
-as values. Lists, sets, and ordinary script objects become independent recursive
-copies, including nested lists, sets, and objects. Set copies preserve insertion
-order. Mutating a copy must not mutate the original. A composite value captured
-as a list element or object field is copied at the evaluation step that produces
-it, so later evaluation in the same literal cannot change it.
+declarations, direct assignments, list elements, dict values, and object fields.
+Scalars copy as values. Lists, sets, dicts, and ordinary script objects become
+independent recursive copies, including nested lists, sets, dicts, and objects.
+Set and dict copies preserve insertion order. Mutating a copy must not mutate the
+original. A composite value captured as a list element, dict value, or object
+field is copied at the evaluation step that produces it, so later evaluation in
+the same literal cannot change it.
 
 Cyclic script values are not supported. An attempted copy of a cyclic value
 produces a structured runtime error instead of recursing indefinitely. Future
 opaque engine references are outside this decision. An implementation may use
 copy-on-write later only if observable deep-copy behavior remains unchanged.
 
-Sets contain only scalar values in the current language version:
+Sets contain only these values in the current language version:
 
 - `string`;
 - `boolean`;
 - `integer`;
 - `number`;
-- `null`.
+- `null`;
+- `date`, `time`, `datetime`, and `timestamp` (#532).
 
-Lists, objects, sets, speakers, and future opaque engine references are not
-valid set elements. Composite set elements produce a deterministic structured
-runtime error associated with the relevant source span. Set uniqueness uses
-normal scalar `==` equality and retains the first insertion order.
+Lists, objects, sets, dicts, ranges, durations, speakers, and opaque engine
+references are not valid set elements. Other set elements produce a
+deterministic structured runtime error associated with the relevant source span.
+Set uniqueness uses `==` equality, which compares kind and value, and retains
+the first insertion order.
+
+A dict (#536) maps text keys to values in insertion order; storing to an
+existing key keeps its position, and its `keys` and `values` are new lists. Two
+dicts are equal when they have the same keys with equal values, in any order,
+and a dict never equals an object. Storage and checkpoints keep a dict as its
+ordered entries, each key once.
 
 For empty lists and sets, `.first`, `.last`, and `.random` produce structured
 runtime errors and never return `null`. Empty `.random` does not consume the

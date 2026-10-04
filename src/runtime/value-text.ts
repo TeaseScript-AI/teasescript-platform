@@ -1,14 +1,26 @@
-import { formatDuration } from "../duration.js";
+import { durationParts, formatDuration } from "../duration.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
+import {
+  formatIsoDate,
+  formatIsoTime,
+  formatIsoTimestamp,
+  localFields,
+  presentDate,
+  presentDateTime,
+  presentTime,
+  type TemporalContext,
+} from "../temporal.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import type {
   SerializableMediaHandle,
+  SerializableRuntimeTemporal,
   SerializableRuntimeValue,
   SerializableTimerHandle,
 } from "./serializable-values.js";
 import {
+  isDict,
   isDuration,
   isList,
   isMediaHandle,
@@ -16,18 +28,69 @@ import {
   isRange,
   isSet,
   isSpeakerReference,
+  isTemporal,
   isTimerHandle,
 } from "./value-predicates.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
-/** Scalar visible text: strings, finite numbers, booleans, `null`, and elapsed durations. */
-export function visibleText(value: SerializableRuntimeValue, span: SourceSpan): string {
+/**
+ * Scalar visible text: strings, finite numbers, booleans, `null`, durations, and date and time values. Dates and times
+ * use the player's numeric presentation from `context`, and a timestamp shows as the local date and time it is.
+ */
+export function visibleText(
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+  context: TemporalContext,
+): string {
+  return isTemporal(value) ? temporalText(value, span, context) : plainScalarText(value, span);
+}
+
+function temporalText(
+  value: SerializableRuntimeTemporal,
+  span: SourceSpan,
+  context: TemporalContext,
+): string {
+  switch (value.kind) {
+    case "date":
+      return presentDate(context.presentation, value);
+    case "time":
+      return presentTime(context.presentation, value);
+    case "datetime":
+      return presentDateTime(context.presentation, value);
+    case "timestamp": {
+      const local = localFields(context.zone, value.epochMilliseconds);
+      if (!local.ok)
+        throw fault(
+          "TSR063",
+          `This timestamp cannot be shown as local time: ${local.reason}. Show it with toISO() instead.`,
+          span,
+        );
+      return presentDateTime(context.presentation, local.value);
+    }
+  }
+}
+
+/** The fixed notation of a date or time value inside a collection, such as `<date 2026-10-04>`. */
+function temporalNotation(value: SerializableRuntimeTemporal): string {
+  switch (value.kind) {
+    case "date":
+      return `<date ${formatIsoDate(value)}>`;
+    case "time":
+      return `<time ${formatIsoTime(value)}>`;
+    case "datetime":
+      return `<datetime ${formatIsoDate(value)} ${formatIsoTime(value)}>`;
+    case "timestamp":
+      return `<timestamp ${formatIsoTimestamp(value.epochMilliseconds)}>`;
+  }
+}
+
+function plainScalarText(value: SerializableRuntimeValue, span: SourceSpan): string {
   if (typeof value === "string") return value;
   if (isFiniteNumber(value)) return String(Object.is(value, -0) ? 0 : value);
   if (typeof value === "boolean") return value ? "true" : "false";
   if (value === null) return "null";
-  if (isDuration(value)) return formatDuration(value.milliseconds);
+  if (isDuration(value)) return formatDuration(durationParts(value));
   throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
 }
 
@@ -38,25 +101,31 @@ export function isVisibleScalar(value: SerializableRuntimeValue): boolean {
     isFiniteNumber(value) ||
     typeof value === "boolean" ||
     value === null ||
-    isDuration(value)
+    isDuration(value) ||
+    isTemporal(value)
   );
 }
 
 /** Text of a field such as a button label or an input hint. Only `${...}` selects from a list. */
-export function fieldText(value: SerializableRuntimeValue, span: SourceSpan): string {
+export function fieldText(
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+  context: TemporalContext,
+): string {
   if (isList(value))
     throw fault(
       "TSR021",
       'A list cannot be used as this text. Select one element with "${list}" or list.random.',
       span,
     );
-  return visibleText(value, span);
+  return visibleText(value, span, context);
 }
 
 /**
  * Code-like notation of any value, as `say` shows a value that is not a scalar: `["pet", 2.5, { name: "Bo" }]`,
- * `1..=5`, or `<speaker mistress>`. Nested text is quoted with the string-literal escapes, other scalars use
- * `visibleText`, and `handleNotation` describes a timer or media handle from its current state.
+ * `dict{ "collar": "leather" }`, `1..=5`, or `<speaker mistress>`. Nested text and dict keys are quoted with the
+ * string-literal escapes, other scalars use `visibleText`, and `handleNotation` describes a timer or media handle from
+ * its current state.
  */
 export function valueNotation(
   value: SerializableRuntimeValue,
@@ -97,13 +166,26 @@ export function valueNotation(
         work.push({ text: `${index > 0 ? ", " : ""}${name}: ` });
       }
       work.push({ text: "{ " });
+    } else if (isDict(current)) {
+      if (current.entries.length === 0) {
+        output.push("dict{}");
+        continue;
+      }
+      work.push({ text: " }" });
+      for (let index = current.entries.length - 1; index >= 0; index -= 1) {
+        const entry = current.entries[index]!;
+        work.push({ value: entry.value });
+        work.push({ text: `${index > 0 ? ", " : ""}${quotedText(entry.key)}: ` });
+      }
+      work.push({ text: "dict{ " });
     } else if (isRange(current))
       output.push(
-        `${visibleText(current.start, span)}${current.inclusive ? "..=" : ".."}${visibleText(current.end, span)}`,
+        `${plainScalarText(current.start, span)}${current.inclusive ? "..=" : ".."}${plainScalarText(current.end, span)}`,
       );
     else if (isSpeakerReference(current)) output.push(`<speaker ${current.identifier}>`);
     else if (isTimerHandle(current) || isMediaHandle(current)) output.push(handleNotation(current));
-    else output.push(visibleText(current, span));
+    else if (isTemporal(current)) output.push(temporalNotation(current));
+    else output.push(plainScalarText(current, span));
   }
   return output.join("");
 }

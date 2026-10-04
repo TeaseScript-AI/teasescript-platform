@@ -1,3 +1,4 @@
+import { isStoredDurationRecord } from "../duration.js";
 import { isNormalizedOpaqueColor } from "../color.js";
 import { isInteractionChoiceValue } from "../choice-values.js";
 import { isValidInteractionPrefill } from "../interaction-answers.js";
@@ -176,6 +177,7 @@ const EXPRESSION_FIELDS = fieldsByKind([
   ["list", "elements"],
   ["set", "elements"],
   ["object", "properties"],
+  ["dict", "entries"],
   ["group", "expression"],
   ["template", "parts"],
   ["property", "object", "name"],
@@ -752,7 +754,7 @@ function validateInteractionInstruction(
     errors.push(planError("TSC002", "Interaction instruction contains unsupported fields.", path));
   }
   const kind = value.interactionKind;
-  if (!isOneOf(kind, ["button", "text", "number", "choice"])) {
+  if (!isOneOf(kind, ["button", "text", "number", "choice", "temporal"])) {
     errors.push(planError("TSC002", "Interaction kind is invalid.", `${path}.interactionKind`));
   }
   if (value.target !== "standardChat")
@@ -768,7 +770,9 @@ function validateInteractionInstruction(
         ? "number"
         : kind === "choice"
           ? "choice"
-          : "string";
+          : kind === "temporal"
+            ? "temporal"
+            : "string";
   if (value.expectedResult !== expected) {
     errors.push(
       planError(
@@ -827,16 +831,21 @@ function validateStaticInteractionUi(
   const uiKeys =
     kind === "button"
       ? ["kind", "buttonLabel", "accessibleName", ...("background" in ui ? ["background"] : [])]
-      : kind === "text" || kind === "number"
+      : kind === "text" || kind === "number" || kind === "temporal"
         ? [
             "kind",
             "hint",
             "accessibleName",
             ...("prefill" in ui ? ["prefill"] : []),
             ...(kind === "number" && "integer" in ui ? ["integer"] : []),
+            ...(kind === "temporal" ? ["temporalKind"] : []),
           ]
         : ["kind", "options", "accessibleName"];
-  if (!hasExactKeys(ui, uiKeys) || ("integer" in ui && ui.integer !== true)) {
+  if (
+    !hasExactKeys(ui, uiKeys) ||
+    ("integer" in ui && ui.integer !== true) ||
+    (kind === "temporal" && !isOneOf(ui.temporalKind, ["date", "time", "datetime"]))
+  ) {
     errors.push(planError("TSC002", "Interaction UI payload contains unsupported fields.", path));
   }
   let aggregate = 0;
@@ -891,12 +900,21 @@ function validateStaticInteractionUi(
     if ("background" in ui && !isNormalizedOpaqueColor(ui.background))
       errors.push(planError("TSC002", "Invalid opaque button background.", `${path}.background`));
   }
-  if (kind === "text" || kind === "number") {
+  if (kind === "text" || kind === "number" || kind === "temporal") {
     if (ui.hint !== null) countString(ui.hint, `${path}.hint`);
+    const temporalKind = ui.temporalKind;
+    const answerKind =
+      temporalKind === "date" || temporalKind === "time" || temporalKind === "datetime"
+        ? temporalKind
+        : ui.integer === true
+          ? "integer"
+          : kind === "number"
+            ? "number"
+            : "text";
     if (
       "prefill" in ui &&
       countString(ui.prefill, `${path}.prefill`) &&
-      !isValidInteractionPrefill(ui.integer === true ? "integer" : kind, ui.prefill)
+      !isValidInteractionPrefill(answerKind, ui.prefill)
     )
       errors.push(
         planError("TSC002", "Interaction prefill is not a valid answer.", `${path}.prefill`),
@@ -977,16 +995,21 @@ function validatePreparedInteractionUi(
           ...("backgroundTemporary" in ui ? ["backgroundTemporary"] : []),
           ...("timeoutTemporary" in ui ? ["timeoutTemporary"] : []),
         ]
-      : kind === "text" || kind === "number"
+      : kind === "text" || kind === "number" || kind === "temporal"
         ? [
             "kind",
             "hintTemporary",
             "accessibleName",
             ...("prefillTemporary" in ui ? ["prefillTemporary"] : []),
             ...(kind === "number" && "integer" in ui ? ["integer"] : []),
+            ...(kind === "temporal" ? ["temporalKind"] : []),
           ]
         : ["kind", "optionsTemporary", "values", "accessibleName"];
-  if (!hasExactKeys(ui, keys) || ("integer" in ui && ui.integer !== true)) {
+  if (
+    !hasExactKeys(ui, keys) ||
+    ("integer" in ui && ui.integer !== true) ||
+    (kind === "temporal" && !isOneOf(ui.temporalKind, ["date", "time", "datetime"]))
+  ) {
     errors.push(
       planError("TSC002", "Prepared interaction UI payload contains unsupported fields.", path),
     );
@@ -1061,7 +1084,7 @@ function validatePreparedInteractionUi(
     if ("timeoutTemporary" in ui) addTemporary(ui.timeoutTemporary, `${path}.timeoutTemporary`);
     return;
   }
-  if (kind === "text" || kind === "number") {
+  if (kind === "text" || kind === "number" || kind === "temporal") {
     if (ui.hintTemporary !== null) addTemporary(ui.hintTemporary, `${path}.hintTemporary`);
     if ("prefillTemporary" in ui) addTemporary(ui.prefillTemporary, `${path}.prefillTemporary`);
     return;
@@ -1158,7 +1181,7 @@ function validateInteractionAccessibleName(
 
 type ExpressionValidationWork =
   | { value: unknown; path: string; assignmentTarget: boolean }
-  | { kind: "property"; value: unknown; path: string }
+  | { kind: "property" | "entry"; value: unknown; path: string }
   | {
       kind: "span" | "string" | "inclusive" | "parts" | "arguments" | "part" | "argument";
       value: unknown;
@@ -1208,7 +1231,9 @@ function validateExpression(
               ? "Template part must be an object."
               : current.kind === "argument"
                 ? "Argument must be an object."
-                : "Property must be an object.",
+                : current.kind === "entry"
+                  ? "Dict entry must be an object."
+                  : "Property must be an object.",
             current.path,
           ),
         );
@@ -1242,6 +1267,19 @@ function validateExpression(
         pending.push({
           value: current.value.value,
           path: `${current.path}.value`,
+          assignmentTarget: false,
+        });
+      } else if (current.kind === "entry") {
+        rejectUnknownFields(current.value, ["key", "value", "span"], current.path, errors);
+        pending.push({ kind: "span", value: current.value.span, path: `${current.path}.span` });
+        pending.push({
+          value: current.value.value,
+          path: `${current.path}.value`,
+          assignmentTarget: false,
+        });
+        pending.push({
+          value: current.value.key,
+          path: `${current.path}.key`,
           assignmentTarget: false,
         });
       } else {
@@ -1299,6 +1337,7 @@ function validateTypePlan(root: unknown, rootPath: string, errors: PlanValidatio
     switch (type.kind) {
       case "list":
       case "set":
+      case "dict":
         rejectUnknownFields(type, ["kind", "element"], typePath, errors);
         if (type.element !== null)
           pending.push({ value: type.element, path: `${typePath}.element` });
@@ -1368,6 +1407,7 @@ const TYPE_PLAN_NAMES = [
   "date",
   "time",
   "datetime",
+  "timestamp",
   "never",
   "null",
   "range",
@@ -1403,11 +1443,7 @@ function validateExpressionNode(
       }
       return;
     case "duration":
-      if (
-        !hasExactKeys(value, ["kind", "milliseconds", "span"]) ||
-        typeof value.milliseconds !== "number" ||
-        !Number.isFinite(value.milliseconds)
-      ) {
+      if (!isStoredDurationRecord(value, ["span"])) {
         errors.push(planError("TSC002", "Duration literal plan is invalid.", path));
       }
       return;
@@ -1445,6 +1481,17 @@ function validateExpressionNode(
             path: `${path}.properties[${index}]`,
           });
       return;
+    case "dict":
+      if (!Array.isArray(value.entries))
+        errors.push(planError("TSC002", "Dict entries must be an array.", `${path}.entries`));
+      else
+        for (let index = value.entries.length - 1; index >= 0; index -= 1)
+          pending.push({
+            kind: "entry",
+            value: value.entries[index],
+            path: `${path}.entries[${index}]`,
+          });
+      return;
     case "group":
       pending.push({
         value: value.expression,
@@ -1471,15 +1518,19 @@ function validateExpressionNode(
         !(
           isRecord(value.callee) &&
           value.callee.kind === "property" &&
-          value.callee.name === "add" &&
           Array.isArray(value.arguments) &&
-          value.arguments.length === 1
+          ((value.callee.name === "add" && value.arguments.length === 1) ||
+            (value.callee.name === "get" &&
+              value.arguments.length === 2 &&
+              isRecord(value.arguments[1]) &&
+              value.arguments[1].kind === "named" &&
+              value.arguments[1].name === "default"))
         )
       )
         errors.push(
           planError(
             "TSC002",
-            "Only a list or set 'add' call with one argument checks a type.",
+            "Only a list or set 'add' call with one argument, or a dict 'get' call with a 'default:', checks a type.",
             `${path}.typeCheck`,
           ),
         );

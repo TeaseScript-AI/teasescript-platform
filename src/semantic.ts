@@ -27,6 +27,7 @@ import {
 } from "./protected-names.js";
 import {
   findVisibleOverflows,
+  staticChoiceValue,
   staticNumber,
   staticQuantity,
   staticVisibleText,
@@ -38,7 +39,12 @@ import {
   mediaOperands,
   showButtonOptions,
 } from "./expression-children.js";
-import { DURATION_UNIT_MILLISECONDS, durationLiteralMilliseconds } from "./duration.js";
+import {
+  DURATION_UNIT_MILLISECONDS,
+  durationLiteralParts,
+  durationParts,
+  isExactDuration,
+} from "./duration.js";
 import { validateSwitchCases } from "./switch-cases.js";
 
 export interface SemanticValidationOptions {
@@ -187,7 +193,16 @@ class SemanticValidator {
   public constructor(options: SemanticValidationOptions) {
     this.#invalidConfiguredNames = Object.freeze(
       [...(options.globals ?? []), ...(options.builtins ?? [])].filter((name) =>
-        ["showButton", "askText", "askNumber", "askInteger", "choose"].includes(name),
+        [
+          "showButton",
+          "askText",
+          "askNumber",
+          "askInteger",
+          "askDate",
+          "askTime",
+          "askDateTime",
+          "choose",
+        ].includes(name),
       ),
     );
     this.#builtins = new Set([
@@ -426,7 +441,9 @@ class SemanticValidator {
           repeat.value.span,
         );
       } else if (kind === "durationLiteral") {
-        if (!(staticDurationMs(repeat.value)! > 0)) {
+        // A calendar duration has no fixed length; the type check reports it as such (V30 §35).
+        const milliseconds = staticDurationMs(repeat.value);
+        if (milliseconds !== undefined && !(milliseconds > 0)) {
           this.#report(
             semanticCode.invalidMedia,
             "A repeat duration must be greater than zero.",
@@ -1113,6 +1130,25 @@ class SemanticValidator {
           this.#validateCollectionExpressionTask(expression, scope, contextualSpeaker),
         );
         return;
+      case "dictLiteral": {
+        // Keys the source shows must differ; keys known only at runtime replace earlier entries instead.
+        const keys = new Set<string>();
+        for (const entry of expression.entries) {
+          yield* compileChild(this.#validateExpressionTask(entry.key, scope, contextualSpeaker));
+          const key = staticChoiceValue(entry.key)?.value;
+          if (typeof key === "string") {
+            if (keys.has(key))
+              this.#report(
+                semanticCode.duplicateProperty,
+                `Duplicate dict key ${JSON.stringify(key)}. Each key appears once; remove one of the entries.`,
+                entry.key.span,
+              );
+            keys.add(key);
+          }
+          yield* compileChild(this.#validateExpressionTask(entry.value, scope, contextualSpeaker));
+        }
+        return;
+      }
       case "propertyAccessExpression":
         yield* compileChild(
           this.#validateExpressionTask(expression.object, scope, contextualSpeaker),
@@ -1432,7 +1468,7 @@ class SemanticValidator {
       if (root.kind === "setLiteral" && isDefinitelyComposite(element, scope))
         this.#report(
           semanticCode.invalidSetElement,
-          "Sets may contain only string, boolean, integer, number, or null values.",
+          "Sets may contain only string, boolean, integer, number, date, time, datetime, timestamp, or null values.",
           element.span,
         );
     }
@@ -1613,7 +1649,13 @@ function staticDurationMs(expression: Expression): number | undefined {
     if (current.operator === "-") sign = -sign;
     current = unwrapParentheses(current.operand);
   }
-  if (current.kind === "durationLiteral") return sign * durationLiteralMilliseconds(current);
+  if (current.kind === "durationLiteral") {
+    // A calendar duration has no fixed length, so it gives no media position.
+    const parts = durationLiteralParts(current);
+    return typeof parts === "string" || !isExactDuration(parts)
+      ? undefined
+      : sign * parts.milliseconds;
+  }
   const seconds = staticNumber(expression);
   return seconds === undefined ? undefined : seconds * 1_000;
 }
@@ -1641,6 +1683,7 @@ function isDefinitelyNonDuration(expression: Expression): boolean {
     kind === "listLiteral" ||
     kind === "setLiteral" ||
     kind === "objectLiteral" ||
+    kind === "dictLiteral" ||
     kind === "rangeExpression"
   );
 }
@@ -1655,6 +1698,7 @@ function isDefinitelyNonFileReference(expression: Expression): boolean {
     kind === "listLiteral" ||
     kind === "setLiteral" ||
     kind === "objectLiteral" ||
+    kind === "dictLiteral" ||
     kind === "rangeExpression" ||
     kind === "showButtonExpression" ||
     kind === "timerExpression" ||
@@ -1673,6 +1717,7 @@ function isDefinitelyNonText(expression: Expression): boolean {
     expression.kind === "listLiteral" ||
     expression.kind === "setLiteral" ||
     expression.kind === "objectLiteral" ||
+    expression.kind === "dictLiteral" ||
     expression.kind === "rangeExpression"
   );
 }
@@ -1685,8 +1730,8 @@ function knownMilliseconds(expression: Expression, unit: DurationUnit | null): n
   const known = staticQuantity(expression);
   if (known === undefined) return undefined;
   if (typeof known === "number") return known * DURATION_UNIT_MILLISECONDS[unit ?? "s"];
-  // A duration with a trailing unit is a type error of its own.
-  return unit === null ? known.milliseconds : undefined;
+  // A duration with a trailing unit is a type error of its own, and a calendar duration has no fixed length.
+  return unit === null && isExactDuration(durationParts(known)) ? known.milliseconds : undefined;
 }
 
 /** Scene time is at most `Number.MAX_SAFE_INTEGER` milliseconds, so a known longer duration can never be reached. */
@@ -1743,6 +1788,7 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
     expression.kind === "listLiteral" ||
     expression.kind === "setLiteral" ||
     expression.kind === "objectLiteral" ||
+    expression.kind === "dictLiteral" ||
     expression.kind === "rangeExpression" ||
     expression.kind === "durationLiteral" ||
     expression.kind === "showButtonExpression" ||
@@ -1777,6 +1823,7 @@ function isDefinitelyNonString(expression: Expression): boolean {
     expression.kind === "listLiteral" ||
     expression.kind === "setLiteral" ||
     expression.kind === "objectLiteral" ||
+    expression.kind === "dictLiteral" ||
     expression.kind === "rangeExpression" ||
     expression.kind === "unaryExpression" ||
     expression.kind === "showButtonExpression" ||
@@ -1808,7 +1855,8 @@ function isDefinitelyComposite(expression: Expression, scope: SemanticScope): bo
   if (
     expression.kind === "listLiteral" ||
     expression.kind === "objectLiteral" ||
-    expression.kind === "setLiteral"
+    expression.kind === "setLiteral" ||
+    expression.kind === "dictLiteral"
   ) {
     return true;
   }

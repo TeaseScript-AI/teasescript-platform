@@ -1,9 +1,15 @@
 import type {
+  SerializableRuntimeDate,
+  SerializableRuntimeDateTime,
   SerializableRuntimeDuration,
+  SerializableRuntimeTemporal,
+  SerializableRuntimeTime,
+  SerializableRuntimeTimestamp,
   SerializableRuntimeList,
   SerializableRuntimeObject,
   SerializableRuntimeRange,
   SerializableRuntimeSet,
+  SerializableRuntimeDict,
   SerializableRuntimeValue,
   SerializableSpeakerReference,
   SerializableTimerHandle,
@@ -16,6 +22,10 @@ export function isList(value: SerializableRuntimeValue): value is SerializableRu
 
 export function isSet(value: SerializableRuntimeValue): value is SerializableRuntimeSet {
   return typeof value === "object" && value !== null && value.kind === "set";
+}
+
+export function isDict(value: SerializableRuntimeValue): value is SerializableRuntimeDict {
+  return typeof value === "object" && value !== null && value.kind === "dict";
 }
 
 export function isObject(value: SerializableRuntimeValue): value is SerializableRuntimeObject {
@@ -59,7 +69,32 @@ export function describeRuntimeValue(value: SerializableRuntimeValue): string {
       return "a timer handle";
     case "mediaHandle":
       return "a media handle";
+    case "datetime":
+      return "a date and time";
     default:
       return `a ${value.kind}`;
   }
+}
+
+export function isDate(value: SerializableRuntimeValue): value is SerializableRuntimeDate {
+  return typeof value === "object" && value !== null && value.kind === "date";
+}
+
+export function isTime(value: SerializableRuntimeValue): value is SerializableRuntimeTime {
+  return typeof value === "object" && value !== null && value.kind === "time";
+}
+
+export function isDateTime(value: SerializableRuntimeValue): value is SerializableRuntimeDateTime {
+  return typeof value === "object" && value !== null && value.kind === "datetime";
+}
+
+export function isTimestamp(
+  value: SerializableRuntimeValue,
+): value is SerializableRuntimeTimestamp {
+  return typeof value === "object" && value !== null && value.kind === "timestamp";
+}
+
+/** A date, time, datetime, or timestamp. */
+export function isTemporal(value: SerializableRuntimeValue): value is SerializableRuntimeTemporal {
+  return isDate(value) || isTime(value) || isDateTime(value) || isTimestamp(value);
 }

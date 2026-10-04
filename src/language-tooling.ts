@@ -40,7 +40,7 @@ export interface LanguageCompletionItem {
 }
 
 export interface LanguageContextHelp {
-  readonly command: "showButton" | "askText" | "askNumber" | "askInteger" | "choose" | "say";
+  readonly command: CompactCommand;
   readonly summary: string;
   readonly syntax: string;
 }
@@ -92,6 +92,24 @@ const HELP = Object.freeze({
       "Waits for a whole number: an optional sign and digits, with surrounding whitespace trimmed. Decimals, exponents, and values outside the safe integer range are rejected and asked again. Returns an integer. An optional default whole number prefills the field.",
     syntax: "askInteger [as speaker] [hint | hint, default: integer | default: integer]",
   }),
+  askDate: Object.freeze({
+    command: "askDate" as const,
+    summary:
+      "Waits for a date from the Player's date control, which submits ISO text such as 2026-10-04. Returns a date. An optional default date prefills the control.",
+    syntax: "askDate [as speaker] [hint | hint, default: date | default: date]",
+  }),
+  askTime: Object.freeze({
+    command: "askTime" as const,
+    summary:
+      "Waits for a time of day from the Player's time control, which submits ISO text such as 14:30. Returns a time. An optional default time prefills the control.",
+    syntax: "askTime [as speaker] [hint | hint, default: time | default: time]",
+  }),
+  askDateTime: Object.freeze({
+    command: "askDateTime" as const,
+    summary:
+      "Waits for a local date and time from the Player's control, which submits ISO text such as 2026-10-04T18:00. Returns a datetime; a time that the player's zone skips is still a valid local value. An optional default prefills the control.",
+    syntax: "askDateTime [as speaker] [hint | hint, default: datetime | default: datetime]",
+  }),
   choose: Object.freeze({
     command: "choose" as const,
     summary:
@@ -101,7 +119,7 @@ const HELP = Object.freeze({
   say: Object.freeze({
     command: "say" as const,
     summary:
-      "Emits visible chat text; a list, set, or object shows in literal notation without markup. Current pacing supports smart pacing by default, an exact non-negative seconds expression including 0, or instant; skip policy may be skippable or unskippable.",
+      "Emits visible chat text; a list, set, dict, or object shows in literal notation without markup. Current pacing supports smart pacing by default, an exact non-negative seconds expression including 0, or instant; skip policy may be skippable or unskippable.",
     syntax:
       "say [as speaker] [bubble(options)|prose(options)] [skippable|unskippable] text [, pacing|instant]",
   }),
@@ -146,6 +164,9 @@ export function languageCompletions(
     items.push(command("askText", "Compact text-input expression"));
     items.push(command("askNumber", "Compact numeric-input expression"));
     items.push(command("askInteger", "Compact whole-number input expression"));
+    items.push(command("askDate", "Compact date input expression"));
+    items.push(command("askTime", "Compact time input expression"));
+    items.push(command("askDateTime", "Compact date and time input expression"));
     items.push(command("choose", "Compact choice expression"));
   }
 
@@ -326,8 +347,27 @@ function isExpressionCompletionContext(
   );
 }
 
-type CompactCommand = "showButton" | "askText" | "askNumber" | "askInteger" | "choose" | "say";
+type CompactCommand =
+  | "showButton"
+  | "askText"
+  | "askNumber"
+  | "askInteger"
+  | "askDate"
+  | "askTime"
+  | "askDateTime"
+  | "choose"
+  | "say";
 type CompactStage = "afterCommand" | "afterAs" | "afterComma" | "other";
+
+const INTERACTION_COMMANDS = {
+  text: "askText",
+  number: "askNumber",
+  integer: "askInteger",
+  date: "askDate",
+  time: "askTime",
+  datetime: "askDateTime",
+  choice: "choose",
+} as const satisfies Record<string, CompactCommand>;
 
 function compactCommandContext(
   tokens: readonly Token[],
@@ -354,6 +394,9 @@ function tokenToCompactCommand(token: Token): CompactCommand | null {
     token.lexeme === "askText" ||
     token.lexeme === "askNumber" ||
     token.lexeme === "askInteger" ||
+    token.lexeme === "askDate" ||
+    token.lexeme === "askTime" ||
+    token.lexeme === "askDateTime" ||
     token.lexeme === "choose"
   ) {
     return token.lexeme;
@@ -386,14 +429,7 @@ function locateCompactCommand(
     },
     interaction(node) {
       if (!containsOffset(node.span, offset)) return;
-      const command =
-        node.interactionKind === "text"
-          ? "askText"
-          : node.interactionKind === "number"
-            ? "askNumber"
-            : node.interactionKind === "integer"
-              ? "askInteger"
-              : "choose";
+      const command = INTERACTION_COMMANDS[node.interactionKind];
       best = { command, range: node.commandSpan };
     },
     say(node) {
@@ -458,6 +494,9 @@ function signatureParameters(command: CompactCommand): readonly string[] {
     case "askText":
     case "askNumber":
     case "askInteger":
+    case "askDate":
+    case "askTime":
+    case "askDateTime":
       return Object.freeze(["speaker", "hint", "default"]);
     case "choose":
       return Object.freeze(["speaker", "options"]);
@@ -502,6 +541,9 @@ function activeParameterFor(
     command === "askText" ||
     command === "askNumber" ||
     command === "askInteger" ||
+    command === "askDate" ||
+    command === "askTime" ||
+    command === "askDateTime" ||
     command === "showButton"
   ) {
     // The last named option before the cursor is the active parameter. A delimiter that closes one opened before the
@@ -748,6 +790,12 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
     case "objectLiteral":
       for (const property of expression.properties)
         children.push({ kind: "expression", node: property.value });
+      return;
+    case "dictLiteral":
+      for (const entry of expression.entries) {
+        children.push({ kind: "expression", node: entry.key });
+        children.push({ kind: "expression", node: entry.value });
+      }
       return;
     case "propertyAccessExpression":
       children.push({ kind: "expression", node: expression.object });

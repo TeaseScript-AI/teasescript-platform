@@ -12,6 +12,8 @@ export function expressionPlanChildren(expression: ExpressionPlan): readonly Exp
       return expression.elements;
     case "object":
       return expression.properties.map((p) => p.value);
+    case "dict":
+      return expression.entries.flatMap((entry) => [entry.key, entry.value]);
     case "group":
       return [expression.expression];
     case "template":

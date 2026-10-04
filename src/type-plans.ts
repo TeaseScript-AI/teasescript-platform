@@ -37,6 +37,7 @@ function* typePlanTask(type: StaticType): CompileTask<TypePlan | null> {
       return { kind: value.name };
     case "list":
     case "set":
+    case "dict":
       return { kind: value.kind, element: yield* compileChild(typePlanTask(value.element)) };
     case "object": {
       const properties: TypePropertyPlan[] = [];

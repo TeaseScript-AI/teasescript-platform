@@ -2,6 +2,7 @@ import type { MessagePresentation } from "../../message-presentation.js";
 import type {
   DelayDisplay,
   InteractionChoiceValue,
+  InteractionKind,
   InteractionResultDomain,
   InteractionUiPayload,
 } from "../../plan/model.js";
@@ -31,7 +32,7 @@ export interface RuntimeDelayActionSnapshot {
 
 export interface RuntimeInteractionActionSnapshot {
   readonly kind: "interaction";
-  readonly interactionKind: "button" | "text" | "number" | "choice";
+  readonly interactionKind: InteractionKind;
   readonly actionId: number;
   readonly owningInstruction: number;
   readonly continuationInstruction: number;
@@ -43,7 +44,10 @@ export interface RuntimeInteractionActionSnapshot {
   readonly target: "standardChat";
   readonly speakerId: number | null;
   readonly ui: InteractionUiPayload;
-  /** Scene time when the interaction appeared; a button's elapsed time counts from here. */
+  /**
+   * Scene time when the interaction appeared; a button's elapsed time counts from here, and its buttons show the date
+   * and time presentation in force then.
+   */
   readonly createdAtMs: number;
   /** A button's timeout; it times out at `createdAtMs + timeoutMs`. Always `null` for other interactions. */
   readonly timeoutMs: number | null;
@@ -256,7 +260,7 @@ export interface RuntimeDelayActionSettlementSnapshot {
 export interface RuntimeInteractionActionSettlementSnapshot {
   readonly actionId: number;
   readonly actionKind: "interaction";
-  readonly interactionKind: "button" | "text" | "number" | "choice";
+  readonly interactionKind: InteractionKind;
   readonly settlementKind: "completed" | "timedOut";
   readonly owningInstruction: number;
   readonly continuationInstruction: number;

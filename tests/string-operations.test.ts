@@ -275,7 +275,7 @@ test("misuse the compiler can see is a compile error that names the fix", () => 
     [
       "say [[1], [2]].join()",
       "TSV043",
-      "join() can only join text, numbers, true or false, null, and durations, not a list (integer[]). Select an element or a property first.",
+      "join() can only join text, numbers, true or false, null, durations, and date and time values, not a list (integer[]). Select an element or a property first.",
       "[1]",
     ],
     ["say null.trim()", "TSV043", "Null has no method 'trim'.", "trim"],
@@ -405,7 +405,7 @@ test("values the compiler cannot know are checked at runtime, with messages that
     [nested.snapshot.failure?.code, nested.snapshot.failure?.message],
     [
       "TSR021",
-      "join() can only join text, numbers, true or false, null, and durations. Select an element or a property first.",
+      "join() can only join text, numbers, true or false, null, durations, and date and time values. Select an element or a property first.",
     ],
   );
 });
