@@ -4,10 +4,11 @@ import { useResizeObserver } from "@vueuse/core";
 import Viewfinder from "./Viewfinder.vue";
 import ViewfinderMirrorButton from "./ViewfinderMirrorButton.vue";
 
-// DEMO: the viewfinder as a floating window over the Player, like a mini player. A slim title bar shows that it is a
-// window. The user drags it anywhere, resizes it from any edge or corner like a desktop window, keeping the camera's
-// aspect, or focuses it and moves it with the arrow keys and resizes it with + and -. Its place lasts while the Player
-// is mounted, also while the viewfinder is hidden; it is presentation only.
+// The viewfinder as a floating window over the Player, like a mini player. A slim title bar shows that it is a window.
+// The user drags it anywhere, resizes it from any edge or corner like a desktop window, keeping the camera's aspect, or
+// focuses it and moves it with the arrow keys and resizes it with + and -. It floats in the whole Player shell, so
+// showing or hiding the tools sidebar never moves it: it lies over a docked sidebar and under the narrow-layout drawer.
+// Its place lasts while the Player is mounted, also while the viewfinder is hidden; it is presentation only.
 export interface FloatingPlace {
   readonly x: number;
   readonly y: number;
@@ -34,6 +35,7 @@ const HANDLES = [
   { name: "se", x: 1, y: 1 },
 ] as const;
 type Handle = (typeof HANDLES)[number];
+const anchor = ref<HTMLElement | null>(null);
 const root = ref<HTMLElement | null>(null);
 const helpId = useId();
 const bounds = ref({ width: 0, height: 0 });
@@ -49,14 +51,17 @@ useResizeObserver(
 );
 onMounted(() => {
   const parent = root.value?.parentElement;
-  if (!parent) return;
+  const area = anchor.value?.parentElement;
+  if (!parent || !area) return;
   bounds.value = { width: parent.clientWidth, height: parent.clientHeight };
-  // First shown below the title, at a size that leaves the conversation readable.
+  // First shown in the Player area beside the sidebar, below the title, at a size that leaves the conversation readable.
+  const shell = parent.getBoundingClientRect();
+  const start = area.getBoundingClientRect();
   place.value = clamp(
     place.value ?? {
-      x: EDGE * 2,
-      y: 64,
-      width: Math.min(Math.max(parent.clientWidth * 0.26, 200), 360),
+      x: start.left - shell.left + EDGE * 2,
+      y: start.top - shell.top + 64,
+      width: Math.min(Math.max(start.width * 0.26, 200), 360),
     },
   );
 });
@@ -167,39 +172,44 @@ function measured(next: number) {
 </script>
 
 <template>
-  <div
-    ref="root"
-    class="floating-viewfinder"
-    data-floating-viewfinder
-    role="group"
-    aria-label="Camera preview window"
-    :aria-describedby="helpId"
-    tabindex="0"
-    :style="style"
-    @pointerdown="drag($event, null)"
-    @keydown="keyboard"
-  >
-    <span :id="helpId" class="sr-only">
-      Drag to move, or drag an edge to resize. Arrow keys move it; plus and minus resize it.
-    </span>
-    <div class="floating-viewfinder-window">
-      <div class="floating-viewfinder-bar" :style="{ height: `${BAR}px` }">
-        <ViewfinderMirrorButton v-model="mirrored" />
+  <!-- Marks the Player area the window first appears in; the window itself floats in the whole shell. -->
+  <span ref="anchor" class="floating-viewfinder-anchor" aria-hidden="true" />
+  <Teleport to="#player-shell">
+    <div
+      ref="root"
+      class="floating-viewfinder"
+      data-floating-viewfinder
+      role="group"
+      aria-label="Camera preview window"
+      :aria-describedby="helpId"
+      tabindex="0"
+      :style="style"
+      @pointerdown="drag($event, null)"
+      @keydown="keyboard"
+    >
+      <span :id="helpId" class="sr-only">
+        Drag to move, or drag an edge to resize. Arrow keys move it; plus and minus resize it.
+      </span>
+      <div class="floating-viewfinder-window">
+        <div class="floating-viewfinder-bar" :style="{ height: `${BAR}px` }">
+          <ViewfinderMirrorButton v-model="mirrored" />
+        </div>
+        <Viewfinder :track="track" :mirrored="mirrored" @aspect="measured" />
       </div>
-      <Viewfinder :track="track" :mirrored="mirrored" :framed="false" @aspect="measured" />
+      <span
+        v-for="handle in HANDLES"
+        :key="handle.name"
+        class="floating-viewfinder-handle"
+        :data-handle="handle.name"
+        aria-hidden="true"
+        @pointerdown="drag($event, handle)"
+      />
     </div>
-    <span
-      v-for="handle in HANDLES"
-      :key="handle.name"
-      class="floating-viewfinder-handle"
-      :data-handle="handle.name"
-      aria-hidden="true"
-      @pointerdown="drag($event, handle)"
-    />
-  </div>
+  </Teleport>
 </template>
 
 <style scoped>
+.floating-viewfinder-anchor { position: absolute; left: 0; top: 0; width: 0; height: 0; }
 .floating-viewfinder {
   position: absolute;
   z-index: 15;

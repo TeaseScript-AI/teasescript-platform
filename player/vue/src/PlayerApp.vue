@@ -32,14 +32,11 @@ const props = withDefaults(
     title?: string;
     media?: { src: string; alt: string } | undefined;
     tools?: readonly PlayerTool[];
-    /** DEMO: whether the viewfinder floats over the Player as a movable window or leads the Stage. */
-    viewfinderLayout?: "floating" | "stage";
   }>(),
-  { title: "", tools: () => [], viewfinderLayout: "floating" },
+  { title: "", tools: () => [] },
 );
-// The floating viewfinder keeps the place the user gave it while the Player is mounted.
+// The viewfinder keeps the place the user gave it, and its mirroring, while the Player is mounted.
 const floatingPlace = ref<FloatingPlace | null>(null);
-// Whether the viewfinder mirrors the camera, shared by its presentations while the Player is mounted.
 const viewfinderMirrored = ref(true);
 const themeIntent = defineModel<PlayerThemeIntent>("themeIntent", {
   default: () => defaultPlayerThemeIntents.light,
@@ -178,17 +175,11 @@ async function toggleFullscreen() {
           </PlayerTopBar>
         </template>
         <template #stage>
-          <Stage
-            ref="stage"
-            :media="stageMedia"
-            v-model:viewfinder-mirrored="viewfinderMirrored"
-            :viewfinder="viewfinderLayout === 'stage' ? player.viewfinder.value : null"
-            @media-aspect="mediaAspect = $event"
-          />
+          <Stage ref="stage" :media="stageMedia" @media-aspect="mediaAspect = $event" />
         </template>
         <template #overlay>
           <FloatingViewfinder
-            v-if="viewfinderLayout === 'floating' && player.viewfinder.value"
+            v-if="player.viewfinder.value"
             v-model:place="floatingPlace"
             v-model:mirrored="viewfinderMirrored"
             :track="player.viewfinder.value"

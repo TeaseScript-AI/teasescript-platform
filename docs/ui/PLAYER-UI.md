@@ -412,12 +412,12 @@ script announces. It is off by default and is only a preview: it has no capture 
 photos with `takePhoto()`. It shows a live image at the camera's aspect ratio, without a visible label, mirrored (selfie
 view) by default; a button switches the mirroring off and on while the Player is mounted. Captured photos are never
 mirrored. Without an available camera it is not shown. No syntax requests it yet: the Player host shows and hides it,
-and every new session starts with it hidden. Its presentation is a demo under Owner evaluation in the development
-preview's Visual Lab. By default it floats over the Player as a window with a slim title bar that holds the mirror
-button. Like a desktop window, the user drags it anywhere and resizes it from any edge or corner, keeping the camera's
-aspect; focused, the arrow keys move it and + and - resize it. It keeps its place while the Player is mounted. The
-alternative leads the Stage, with the Stage image as a small reference in its lower corner and the mirror button in its
-upper corner. The Player's viewfinder is the only one: the browser's own picture-in-picture is not offered for it.
+and every new session starts with it hidden. It floats over the Player as a window with a slim title bar that holds the
+mirror button. Like a desktop window, the user drags it anywhere and resizes it from any edge or corner, keeping the
+camera's aspect; focused, the arrow keys move it and + and - resize it. It floats in the whole Player, so showing or
+hiding the tools sidebar never moves it: it lies over the docked sidebar, and the narrow layout's drawer slides over it.
+It keeps its place while the Player is mounted. The Player's viewfinder is the only one: the browser's own
+picture-in-picture is not offered for it.
 
 Media playback is script-controlled. Audio and video elements show no native browser controls, and the Player offers
 no seek, scrub, pause, or skip control of its own: playback the runtime did not command would make reported progress

@@ -1192,13 +1192,7 @@ function assertTestCard(colors, message) {
 
 async function viewfinderScenario(cdp, origin) {
   const url = `${origin}/player/?dev&scenario=viewfinder`;
-  // The development preview compares two presentations: a floating window, and one leading the Stage.
-  const start = async (layout) => {
-    await navigate(cdp, url);
-    await evaluate(
-      cdp,
-      `localStorage.setItem('player-viewfinder-layout', ${JSON.stringify(layout)})`,
-    );
+  const start = async () => {
     await navigate(cdp, url);
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
     await physicalClick(cdp, "[data-session-activation] button");
@@ -1210,15 +1204,8 @@ async function viewfinderScenario(cdp, origin) {
     );
   const video = `document.querySelector('[data-viewfinder] video')`;
   const viewfinders = `document.querySelectorAll('[data-viewfinder]').length`;
-  const stageAspect = `Number(getComputedStyle(document.querySelector('#player-shell')).getPropertyValue('--media-aspect'))`;
-  const reference = `document.querySelector('.stage-viewfinder-reference')?.getAttribute('src') ?? null`;
-  const pickStageFixture = (name) =>
-    evaluate(
-      cdp,
-      `const select = [...document.querySelectorAll('label')].find((label) => label.textContent.includes('Stage media fixture')).querySelector('select');
-      select.value = ${JSON.stringify(name)};
-      select.dispatchEvent(new Event('change'));`,
-    );
+  const place = `(() => { const box = document.querySelector('[data-floating-viewfinder]').getBoundingClientRect(); return [box.left, box.top, box.width].map(Math.round).join(); })()`;
+  const sidebarVisible = `document.querySelector('#player-shell').dataset.sidebarVisible`;
 
   await setViewport(cdp, 1440, 900);
   await cdp.call("Browser.setPermission", {
@@ -1226,70 +1213,43 @@ async function viewfinderScenario(cdp, origin) {
     permission: { name: "camera" },
     setting: "granted",
   });
-  for (const [layout, container] of [
-    ["floating", "[data-floating-viewfinder]"],
-    ["stage", ".stage-media-frame"],
-  ]) {
-    // While the script waits on its photo button, the viewfinder plays the session camera, mirrored for display only.
-    await start(layout);
-    await waitFor(
+  // While the script waits on its photo button, the viewfinder window plays the session camera, mirrored for display
+  // only.
+  await start();
+  await waitFor(
+    cdp,
+    `${video}?.videoWidth > 0 && !${video}.paused`,
+    8_000,
+    "The viewfinder did not play",
+  );
+  assertTestCard(
+    await value(cdp, quadrantColors(video)),
+    "The viewfinder does not show the camera",
+  );
+  assertEqual(
+    await value(cdp, `getComputedStyle(${video}).transform`),
+    "matrix(-1, 0, 0, 1, 0, 0)",
+    "The viewfinder is not mirrored",
+  );
+  // The window floats in the whole Player, so showing or hiding the docked sidebar does not move it.
+  const shown = await value(cdp, place);
+  for (const expected of ["false", "true"]) {
+    await evaluate(
       cdp,
-      `${video}?.videoWidth > 0 && !${video}.paused`,
-      8_000,
-      `The ${layout} viewfinder did not play`,
+      `[...document.querySelectorAll('[data-sidebar=trigger]')].find((trigger) => trigger.offsetParent !== null).click()`,
     );
-    assertEqual(
-      await value(
-        cdp,
-        `!!document.querySelector(${JSON.stringify(`${container} [data-viewfinder]`)})`,
-      ),
-      true,
-      `The viewfinder is not shown ${layout}`,
-    );
-    assertTestCard(
-      await value(cdp, quadrantColors(video)),
-      `The ${layout} viewfinder does not show the camera`,
-    );
-    assertEqual(
-      await value(cdp, `getComputedStyle(${video}).transform`),
-      "matrix(-1, 0, 0, 1, 0, 0)",
-      `The ${layout} viewfinder is not mirrored`,
-    );
-    if (layout === "stage") {
-      // The Stage follows the camera's aspect, also when the reference image is replaced meanwhile.
-      await waitFor(
-        cdp,
-        `Math.abs(${stageAspect} - 4 / 3) < 0.01`,
-        8_000,
-        "The Stage did not adopt the camera's aspect",
-      );
-      await click(cdp, '[data-launcher] button[aria-label="Visual Lab"]');
-      await waitFor(cdp, `!!document.querySelector('select')`);
-      const runtimeReference = await value(cdp, reference);
-      await pickStageFixture("Portrait");
-      await waitFor(cdp, `${reference} !== ${JSON.stringify(runtimeReference)}`);
-      assertEqual(
-        Math.abs((await value(cdp, stageAspect)) - 4 / 3) < 0.01,
-        true,
-        "Replacing the reference image changed the viewfinder's aspect",
-      );
-      // The fixture would cover the photo.
-      await pickStageFixture("Runtime");
-    }
-    // The script takes the photo from the same open camera; the viewfinder goes, and the photo is not mirrored.
-    await takePhoto();
-    await waitFor(cdp, `document.body.innerText.includes("There you are. I'll keep that one.")`);
-    assertEqual(
-      await value(cdp, viewfinders),
-      0,
-      `The ${layout} viewfinder stayed after the photo`,
-    );
-    await waitFor(cdp, `${capturedImages} === 1`);
-    assertTestCard(
-      await value(cdp, quadrantColors(decodedPhoto)),
-      `The photo after the ${layout} viewfinder does not show the camera's frame`,
-    );
+    await waitFor(cdp, `${sidebarVisible} === ${JSON.stringify(expected)}`);
+    assertEqual(await value(cdp, place), shown, "Toggling the sidebar moved the viewfinder");
   }
+  // The script takes the photo from the same open camera; the viewfinder goes, and the photo is not mirrored.
+  await takePhoto();
+  await waitFor(cdp, `document.body.innerText.includes("There you are. I'll keep that one.")`);
+  assertEqual(await value(cdp, viewfinders), 0, "The viewfinder stayed after the photo");
+  await waitFor(cdp, `${capturedImages} === 1`);
+  assertTestCard(
+    await value(cdp, quadrantColors(decodedPhoto)),
+    "The photo after the viewfinder does not show the camera's frame",
+  );
 
   // Without a camera there is no viewfinder, and the script continues without a photo.
   await cdp.call("Browser.setPermission", {
@@ -1297,7 +1257,7 @@ async function viewfinderScenario(cdp, origin) {
     permission: { name: "camera" },
     setting: "denied",
   });
-  await start("floating");
+  await start();
   await waitFor(
     cdp,
     `[...document.querySelectorAll('button')].some((button) => button.textContent.trim() === "I'm ready, Mistress")`,

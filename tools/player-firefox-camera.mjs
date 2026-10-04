@@ -51,13 +51,12 @@ async function checks(page, url) {
           localStorage.getItem('player-storage:["development-camera","camera.photo"]') ?? "null",
         )?.value ?? null,
     );
-  // `video` replaces the Player's camera constraints, for example to get a wide camera; `layout` selects the
-  // development preview's viewfinder presentation. `abortDetachedPlay` reproduces the Owner's Firefox with a real
-  // camera: `play()` on a video element outside the document rejects with an AbortError at once, although the element
-  // then plays.
+  // `video` replaces the Player's camera constraints, for example to get a wide camera. `abortDetachedPlay` reproduces
+  // the Owner's Firefox with a real camera: `play()` on a video element outside the document rejects with an AbortError
+  // at once, although the element then plays.
   async function start(
     unsizedMilliseconds,
-    { scenario = url, video = undefined, layout = undefined, abortDetachedPlay = false } = {},
+    { scenario = url, video = undefined, abortDetachedPlay = false } = {},
   ) {
     const tab = await context.newPage();
     const messages = [];
@@ -66,11 +65,6 @@ async function checks(page, url) {
       (message) => message.text().startsWith("[player]") && messages.push(message.text()),
     );
     tab.on("pageerror", (error) => messages.push(`pageerror: ${error.message}`));
-    if (layout)
-      await tab.addInitScript(
-        (layout) => localStorage.setItem("player-viewfinder-layout", layout),
-        layout,
-      );
     if (abortDetachedPlay)
       await tab.addInitScript(() => {
         const play = HTMLMediaElement.prototype.play;
@@ -160,25 +154,20 @@ async function checks(page, url) {
   );
   check((await savedPhoto(tab)) === second, "A camera without frames replaced the saved photo");
   await tab.close();
-  // The viewfinder plays the same camera, also when its first frames have no size yet, and the photo follows. Leading
-  // the Stage, its frame and the Stage adopt the wide camera's aspect once the frames have a size.
+  // The viewfinder plays the same camera, also when its first frames have no size yet, and the photo follows. Its frame
+  // adopts the wide camera's aspect once the frames have a size.
   ({ tab, messages } = await start(1_500, {
     scenario: url.replace("scenario=camera", "scenario=viewfinder"),
     video: { width: 1280, height: 720 },
-    layout: "stage",
   }));
   await tab.waitForFunction(() => {
     const video = document.querySelector("[data-viewfinder] video");
     const frame = document.querySelector("[data-viewfinder]")?.getBoundingClientRect();
-    const stageAspect = getComputedStyle(document.querySelector("#player-shell")).getPropertyValue(
-      "--media-aspect",
-    );
     return (
       video?.videoWidth === 1280 &&
       !video.paused &&
       getComputedStyle(video).transform === "matrix(-1, 0, 0, 1, 0, 0)" &&
-      Math.abs(frame.width / frame.height - 16 / 9) < 0.02 &&
-      Math.abs(Number(stageAspect) - 16 / 9) < 0.01
+      Math.abs(frame.width / frame.height - 16 / 9) < 0.02
     );
   });
   await tab.locator("button", { hasText: "I'm ready, Mistress" }).click();
