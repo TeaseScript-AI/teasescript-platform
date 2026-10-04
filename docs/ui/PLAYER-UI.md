@@ -381,8 +381,9 @@ The Player does not run a script on page load. Before the first runtime entry of
 Start control; after a page load that restores an existing session, it shows an explicit Continue control before
 execution resumes. The player's activation of that control is the user activation that later audible media playback
 relies on, so scripts may play audio from their first statement without a separate unlock step. Start and Continue
-also record the wall clock and the player's time zone and numeric date and time presentation, from the account setting
-or else the browser, as session data ([Date and time context](../RUNTIME.md#date-and-time-context)).
+also record the wall clock and the player's time zone and numeric date and time presentation, resolved again at each:
+the account setting when the host supplies one, else the browser's. They are session data
+([Date and time context](../RUNTIME.md#date-and-time-context)).
 
 If the browser still refuses required audible playback, the Player surfaces a deliberate activation/retry control. It
 does not silently substitute muted playback or report the audio as played: refused audio reports no progress, so its

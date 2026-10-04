@@ -353,10 +353,6 @@ export function skipPlayerRuntimePacing(
 }
 
 /**
- * Observes scene time and the playback progress of the running media the Player plays. Include a report for every
- * running media: an omitted report means no progress since its last one.
- */
-/**
  * Records the wall clock and the player's zone and presentation when a restored session continues. They apply from the
  * session's observed time on; call it before the scene clock resumes.
  */
@@ -371,6 +367,10 @@ export function continuePlayerRuntimeSession(
   });
 }
 
+/**
+ * Observes scene time and the playback progress of the running media the Player plays. Include a report for every
+ * running media: an omitted report means no progress since its last one.
+ */
 export function observePlayerRuntimeTime(
   session: PlayerRuntimeSession,
   currentSessionTimeMs: number,

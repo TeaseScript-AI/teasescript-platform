@@ -1,5 +1,5 @@
 import { createApp, h } from "vue";
-import { createPlayerRuntimeSession, playerTemporalContext } from "../../runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../../runtime-adapter.js";
 import { createLocalScriptStorage } from "../../script-storage.js";
 import { demoSource, demoStorageScope, resolveDemoAsset } from "./demoHost";
 import PlayerApp from "./PlayerApp.vue";
@@ -26,8 +26,7 @@ const app = developmentPreview
             createPlayerRuntimeSession(demoSource, {
               ...player.scriptStorageOptions(),
               // Captured at Start: the session keeps this zone, presentation, and clock until a Continue.
-              temporalContext: playerTemporalContext(),
-              wallClockMs: Date.now(),
+              ...player.temporalCapture(),
             }),
           ),
         );

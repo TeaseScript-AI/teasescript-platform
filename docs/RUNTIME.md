@@ -833,12 +833,13 @@ one. Restore itself records nothing.
   never goes backwards within one capture. `getDate()`, `getTime()`, and `getDateTime()` read that moment through the
   capture's zone. Without a clock they fail with `TSR064`.
 - Interaction buttons keep the presentation they were shown with: validation derives them again with the capture in
-  force at the interaction's `createdAtMs` among those recorded before its request event.
+  force at the interaction's `createdAtMs` among those recorded before its request event, and rejects a snapshot that
+  no longer has that capture.
 - A capture replaces the previous one only when nothing happened in between. Recording a capture drops captures no
   open interaction, current execution, or saved catch-up can use any more.
 
-The Player captures the account setting, else the browser's zone and language, together with `Date.now()`, when Start
-creates a session and again at Continue.
+The Player resolves the host's account setting, else the browser's zone and language, and then reads `Date.now()`,
+when Start creates a session and again at Continue.
 
 ## Script storage
 
