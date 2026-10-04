@@ -201,6 +201,11 @@ function literalValue(
   }
 }
 
+/** A literal case value as written, such as `5.0` or `"open"`, or `undefined` for another value. */
+export function caseValueText(expression: Expression): string | undefined {
+  return literalValue(unwrapParentheses(expression))?.text;
+}
+
 /** The bounds of a range case with a number literal on each side, such as `1..=5`, or `undefined` for another value. */
 export function literalRange(
   expression: Expression,

@@ -62,7 +62,7 @@ import {
   type StaticScalar,
 } from "./static-evaluation.js";
 import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
-import { impossibleCaseMessage, literalRange } from "./switch-cases.js";
+import { caseValueText, impossibleCaseMessage, literalRange } from "./switch-cases.js";
 import type { SourceSpan } from "./source.js";
 import { TEXT_MEMBERS, type TextMember } from "./text-operations.js";
 import {
@@ -629,6 +629,8 @@ class TypeChecker {
         const entry = node.kind === "identifier" ? scope.resolve(node.name) : undefined;
         const variable = entry?.kind === "variable" ? entry.variable : null;
         let remaining = subject;
+        // The type cases so far, which take a literal value of their type even when the switched type is not known.
+        const typeCases: { readonly typeTest: SwitchTypeTest; readonly test: StaticType }[] = [];
         const start = this.#flow.mark();
         const ends: FlowState[] = [];
         for (const switchCase of statement.cases) {
@@ -649,6 +651,7 @@ class TypeChecker {
             );
             remaining = switchCase.typeTest.negated ? passed : failed;
             reached = taken.kind !== "never";
+            typeCases.push({ typeTest: switchCase.typeTest, test });
           } else {
             // The block is reached when one of its values can still match what the cases above left.
             let matchable = false;
@@ -658,6 +661,19 @@ class TypeChecker {
               // A value whose type can never match is an error, and it does not reach the block either.
               if (message !== undefined) {
                 this.#report(typeCode.impossibleCase, message, value.span);
+                continue;
+              }
+              const earlier = takingTypeCase(typeCases, value, valueType);
+              if (earlier !== undefined) {
+                const { typeTest, test } = earlier;
+                this.diagnostics.push(
+                  createDiagnostic(
+                    DiagnosticSeverity.Warning,
+                    typeCode.constantTest,
+                    `'case is ${typeTest.negated ? "not " : ""}${typeName(test)}' on line ${typeTest.span.start.line + 1} already takes ${caseValueText(value) ?? "this value"}, so this case never matches.`,
+                    value.span,
+                  ),
+                );
                 continue;
               }
               const never = this.#neverMatchingCaseValue(
@@ -5014,6 +5030,29 @@ function comparedLiteral(expression: Expression): readonly PossibleValue[] | und
       ? { value: value.milliseconds, duration: true }
       : { value, duration: false },
   ];
+}
+
+/** The earlier `case is T` or `case is not T` that already takes a literal case value, if any. */
+function takingTypeCase<
+  Case extends { readonly typeTest: SwitchTypeTest; readonly test: StaticType },
+>(typeCases: readonly Case[], value: Expression, valueType: StaticType): Case | undefined {
+  if (caseValueText(value) === undefined) return undefined;
+  // Every duration literal is a duration, also a calendar one such as `1 d` that is not compared as one exact length.
+  const duration = isScalar(valueType, "duration");
+  const literal = duration ? undefined : comparedLiteral(value)?.[0];
+  if (!duration && literal === undefined) return undefined;
+  const scalar = literal?.value;
+  // Like the runtime type test: a whole number such as `5.0` is an integer.
+  const passes = (member: StaticType): boolean =>
+    member.kind === "null"
+      ? scalar === null
+      : member.kind === "scalar" &&
+        (duration
+          ? member.name === "duration"
+          : typeof scalar === "number"
+            ? member.name === "number" || (member.name === "integer" && Number.isInteger(scalar))
+            : member.name === typeof scalar);
+  return typeCases.find(({ typeTest, test }) => members(test).some(passes) !== typeTest.negated);
 }
 
 /** Literal values as an author writes them, as in `"spank" or "lines"`. */

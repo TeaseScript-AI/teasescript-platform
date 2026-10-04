@@ -494,16 +494,6 @@ test("a case that can never match is a warning that does not block the script", 
     warnings(inFunction("integer | string", "    case is integer { }\n    case 5 { }")),
     ["warning TSV046 4:10"],
   );
-  assert.equal(
-    compileSource(inFunction("integer | string", "    case is integer { }\n    case 5 { }"))
-      .diagnostics[0]?.message,
-    "'x' holds text (string) here, after the cases above, so this case never matches.",
-  );
-  // A value the compiler cannot know keeps every case possible.
-  assert.deepEqual(
-    warnings("function f(x) {\n  switch x {\n    case is integer { }\n    case 5 { }\n  }\n}"),
-    [],
-  );
 });
 
 test("a type case names its fix when it is not one type", () => {
@@ -615,5 +605,54 @@ test("a range case that no choice value falls in is a never-matching warning", (
       item.message,
     ]),
     [["warning", "TSV046", 5, "'pick' is always 0, 1 or 2 here, so this case never matches."]],
+  );
+});
+
+test("a literal case that an earlier type case already takes warns, whatever the switched value's type", () => {
+  const warnings = (source: string) =>
+    compileSource(source).diagnostics.map((item) => [
+      item.severity,
+      item.code,
+      source.slice(item.span.start.offset, item.span.end.offset),
+      item.message,
+    ]);
+  const switchOn = (parameter: string) =>
+    `function f(${parameter}) {\n  switch x {\n    case is integer { }\n    case 5, 2.5 { }\n    case 7.0 { }\n    case "a" { }\n  }\n}`;
+  const taken = (literal: string) => [
+    "warning",
+    "TSV046",
+    literal,
+    `'case is integer' on line 3 already takes ${literal}, so this case never matches.`,
+  ];
+
+  // An untyped value or a number can still be 2.5 or text, but never a whole number after `case is integer`.
+  assert.deepEqual(warnings(switchOn("x")), [taken("5"), taken("7.0")]);
+  assert.deepEqual(warnings(switchOn("x: number | string")), [taken("5"), taken("7.0")]);
+  // A calendar duration has no exact length, but it is a duration, so the loop below cannot end through 'break'.
+  assert.deepEqual(
+    warnings(
+      "function f(x): integer {\n  while true {\n    switch x {\n      case is duration { return 1 }\n      case 1 d { break }\n      default { return 2 }\n    }\n  }\n}",
+    ),
+    [
+      [
+        "warning",
+        "TSV046",
+        "1 d",
+        "'case is duration' on line 4 already takes 1 d, so this case never matches.",
+      ],
+    ],
+  );
+  assert.deepEqual(
+    warnings(
+      'function f(x) {\n  switch x {\n    case is not string { }\n    case "a", 1 { }\n  }\n}',
+    ),
+    [
+      [
+        "warning",
+        "TSV046",
+        "1",
+        "'case is not string' on line 3 already takes 1, so this case never matches.",
+      ],
+    ],
   );
 });
