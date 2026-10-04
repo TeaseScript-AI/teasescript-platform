@@ -115,6 +115,42 @@ test("an operation on a union needs every member to support it, and the message 
     diagnostics("function f(n: (integer | string)?, other) {\n    return n + other\n}"),
     [["TSV043", "'n' may be text (string). Check it first: if n is integer { ... }", "n"]],
   );
+  // A method on a union receiver takes its arguments as each member would, and the results join.
+  const either = (type: string, first: string, second: string) =>
+    `function either(flag: boolean): ${type} {\n    if flag {\n        return ${first}\n    }\n    return ${second}\n}\n`;
+  const collections = either("integer[] | integer set", "[1]", "set[1]");
+  assert.deepEqual(
+    codes(`${collections}let r: integer[] | integer set = either(true).union([2.5])`).map(
+      ([code]) => code,
+    ),
+    ["TSV041"],
+  );
+  assert.deepEqual(
+    codes(`${collections}let r = either(true).union(["x"])`).map(([code]) => code),
+    ["TSV044"],
+  );
+  assert.deepEqual(
+    codes(`${either("string | integer[]", '"a"', "[1]")}let found = either(true).contains(1)`),
+    [["TSV043", "1"]],
+  );
+  assert.deepEqual(
+    codes(`${either("integer[] | string[]", "[1]", '["a"]')}let joined = either(true).join(true)`),
+    [["TSV043", "true"]],
+  );
+  // A union argument of a set operation may be either collection.
+  for (const method of ["union", "intersection", "difference"])
+    assert.deepEqual(
+      codes(`${collections}let r: integer[] = [1].${method}(either(true))`),
+      [],
+      method,
+    );
+  // min and max need one family: a value that may be a number or a duration names the test.
+  assert.deepEqual(
+    diagnostics(
+      `${either("integer | duration", "1", "1 s")}let value = either(false)\nlet r = min(value, 2)`,
+    ),
+    [["TSV043", "'value' may be a duration. Check it first: if value is integer { ... }", "value"]],
+  );
   const flag = "let flag: boolean | integer = true\nif chance(50) {\n    flag = 1\n}\n";
   assert.deepEqual(codes(`${flag}if flag {\n    say "x"\n}`), [["TSV043", "flag"]]);
 });

@@ -2080,14 +2080,33 @@ class TypeChecker {
           `${resolved(all[0]!).kind === "timer" ? "Timer" : "Media"} ${method}() takes no arguments.`,
           callee.property.span,
         );
-      if (TEXT_MEMBERS.has(method) || method === "join") memberChecks();
-      const collection = resolved(all[0]!);
-      if (
-        all.length === 1 &&
-        COLLECTION_METHODS.has(method) &&
-        (collection.kind === "list" || collection.kind === "set")
-      )
-        return this.#collectionMethodType(method, collection, callee.property, expression);
+      const textual = TEXT_MEMBERS.has(method) || method === "join";
+      if (textual || COLLECTION_METHODS.has(method)) {
+        // Each member takes the arguments as the one receiver would (ADR 0021 rule 3.5), and the results join. A problem
+        // that several members share at one place is reported once.
+        const before = this.diagnostics.length;
+        const atCall = members(resolved(receiverAtCall));
+        const memberResults = all.map((member, index) => {
+          const kept = resolved(member);
+          if (textual) {
+            this.#reportProblems(
+              memberProblems(
+                callee.object,
+                atCall[index] ?? member,
+                callee.property,
+                expression,
+                typeOf,
+              ),
+            );
+            return results[index]!;
+          }
+          return kept.kind === "list" || kept.kind === "set"
+            ? this.#collectionMethodType(method, kept, callee.property, expression)
+            : results[index]!;
+        });
+        this.#keepFirstDiagnostics(before);
+        return memberResults.length === 1 ? memberResults[0]! : union(memberResults);
+      }
       return all.length === 1 ? results[0]! : union(results.map((result) => result!));
     }
     const failing = resolved(all.find((_, index) => results[index] === undefined)!);
@@ -2129,13 +2148,18 @@ class TypeChecker {
     if (method === "sort" || method === "shuffle") return NULL_TYPE;
     // A set's union adds the argument's elements, which must be values a set can hold.
     const argument = expression.arguments[0]?.value;
-    const other =
-      argument === undefined ? undefined : resolved(nonNullTypeForUse(typeOf(argument)));
-    const held =
-      method !== "union" ||
-      value.kind !== "set" ||
-      other?.kind !== "list" ||
-      this.#checkSetElement(argument!, other.element);
+    const lists =
+      argument === undefined || method !== "union" || value.kind !== "set"
+        ? []
+        : members(nonNullTypeForUse(typeOf(argument)))
+            .map(resolved)
+            .filter((member) => member.kind === "list");
+    let held = true;
+    for (const list of lists)
+      if (list.kind === "list" && !this.#checkSetElement(argument!, list.element)) {
+        held = false;
+        break;
+      }
     return this.#setOperationType(method, value, expression, problems.length === 0 && held);
   }
 
@@ -2153,13 +2177,17 @@ class TypeChecker {
     const argumentExpression = expression.arguments[0]?.value;
     if (method !== "union" || argumentExpression === undefined)
       return { kind: receiver.kind, element: own };
-    const argument = resolved(nonNullType(this.#typeOf(argumentExpression)));
-    if (argument.kind !== "list" && argument.kind !== "set")
-      return { kind: receiver.kind, element: UNKNOWN_TYPE };
-    const other = copyType(argument.element);
+    // A union argument adds the elements of whichever collection it is.
+    const others: StaticType[] = [];
+    for (const member of members(nonNullType(this.#typeOf(argumentExpression))).map(resolved)) {
+      if (member.kind !== "list" && member.kind !== "set")
+        return { kind: receiver.kind, element: UNKNOWN_TYPE };
+      others.push(copyType(member.element));
+    }
+    const other = union(others);
     if (resolved(own).kind === "unknown" || resolved(other).kind === "unknown")
       return { kind: receiver.kind, element: UNKNOWN_TYPE };
-    const element = joinTypes([own, other]);
+    const element = joinTypes([own, ...others]);
     if (element === undefined) {
       if (reportMix)
         this.#report(
@@ -2220,17 +2248,27 @@ class TypeChecker {
       case "min":
       case "max": {
         const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
-        // A union or a possibly null argument names the test or the check first (ADR 0021 rule 3.5, #504 Q1).
+        // An argument that may be one of several types, or null, names the test or the check first (ADR 0021 rule 3.5,
+        // #504 Q1): each of its members must be of the family the other arguments decide, numbers or durations.
         const several = problems.every((problem) => problem.kind === "invalidOperand")
           ? expression.arguments.filter((item) => members(this.#typeOf(item.value)).length > 1)
           : [];
-        if (several.length === 0) this.#reportProblems(problems);
+        const familyOf = (member: StaticType): string | undefined =>
+          isNumeric(member) ? "numbers" : isScalar(member, "duration") ? "durations" : undefined;
+        const families = expression.arguments.map((item) => [
+          ...new Set(members(nonNullType(this.#typeOf(item.value))).map(familyOf)),
+        ]);
+        const family =
+          families.find((one) => one.length === 1 && one[0] !== undefined)?.[0] ??
+          families[0]?.find((one) => one !== undefined);
+        const spans = new Set(several.map((item) => item.value.span.start.offset));
+        this.#reportProblems(problems.filter((problem) => !spans.has(problem.span.start.offset)));
         for (const item of several)
           this.#reportUnless(
             this.#typeOf(item.value),
-            (member) => isNumeric(member) || isScalar(member, "duration"),
+            (member) => familyOf(member) !== undefined && familyOf(member) === family,
             item.value,
-            `${name}(...) takes numbers or durations`,
+            `${name}(...) needs all numbers or all durations`,
           );
         // The result is an integer when every argument is one, like arithmetic on them (ADR 0021 rule 2.2).
         const numbers = values.map(nonNullTypeForUse);
@@ -2961,6 +2999,21 @@ class TypeChecker {
         `${problem.message}${problem.widened === undefined ? "" : this.#widenedNote(problem.widened)}${problem.fix ?? ""}`,
         problem.span,
       );
+  }
+
+  /**
+   * Removes diagnostics since `start` that repeat an earlier one since then with the same code and span, such as the
+   * same argument problem found for each member of a union receiver.
+   */
+  #keepFirstDiagnostics(start: number): void {
+    const seen = new Set<string>();
+    const kept = this.diagnostics.slice(start).filter((diagnostic) => {
+      const key = `${diagnostic.code} ${diagnostic.span.start.offset} ${diagnostic.span.end.offset}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    this.diagnostics.splice(start, this.diagnostics.length - start, ...kept);
   }
 
   #report(code: string, message: string, span: SourceSpan): void {

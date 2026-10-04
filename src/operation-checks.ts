@@ -455,7 +455,12 @@ export function collectionMethodProblems(
   if (reorders) return [];
   const argument = call.arguments[0]!.value;
   const type = forUse(typeOf(argument));
-  if (isKnown(type) && type.kind !== "list" && type.kind !== "set")
+  // Every member of a union argument must be a list or a set (ADR 0021 rule 3.5).
+  const collections = members(type).every((member) => {
+    const value = resolved(member);
+    return !isKnown(value) || value.kind === "list" || value.kind === "set";
+  });
+  if (!collections)
     return [
       {
         kind: "invalidOperand",
