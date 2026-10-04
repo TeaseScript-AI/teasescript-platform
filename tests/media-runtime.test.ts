@@ -1717,6 +1717,8 @@ test("a late observation across silent repeat passes equals observing every pass
     'let m = playAudio(file: "a", async: true, startAt: 0.05 ms, endAt: 6.3 ms, repeat: 777.7 ms) {\n  finish { say "done ${m.position}" }\n}\nwait 1000 ms',
     'let m = playAudio(file: "a", async: true, startAt: 2 ms, endAt: 9.3 ms, repeat: true) {\n  at 1 ms { say "never" }\n}\nm.position = 2.4 ms\nwait 500 ms\nsay "${m.elapsed} ${m.position}"',
     'let m = playAudio(file: "a", async: true, endAt: 7.5 ms, repeat: true)\nlet t = timer(duration: 97 ms, async: true, repeat: true) { say "${m.elapsed} ${m.position}" }\nwait 1000 ms',
+    // A lower action ID at a pass end's exact time runs before that pass end commits, so it reads the arrival unwrapped.
+    'timer async 100 ms { say "${m.position}" }\nlet m = playAudio(file: "a", async: true, endAt: 10 ms, repeat: true)\nwait 150 ms\nsay "${m.elapsed}"',
     'let m = playAudio(file: "a", async: true, endAt: 5.7 ms, repeat: true)\nlet n = playAudio(file: "b", async: true, endAt: 8.9 ms, repeat: 100 times)\nwait 1000 ms\nsay "${m.position} ${n.state} ${n.elapsed}"',
   ];
   for (const source of scenarios) {
@@ -1732,6 +1734,7 @@ test("a late observation across silent repeat passes equals observing every pass
     for (let nowMs = 5; nowMs <= 1_200; nowMs += 5) fine.at(nowMs, ...reports(fine, nowMs));
     const late = start();
     late.at(1_200, ...reports(late, 1_200));
+    assert.deepEqual(late.events, fine.events, source);
     assert.deepEqual(late.said(), fine.said(), source);
     assert.ok(late.said().length > 0, source);
     assert.deepEqual(late.media(1), fine.media(1), source);
